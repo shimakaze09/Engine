@@ -15,6 +15,7 @@
 #include "engine/renderer/camera.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
+#include "engine/renderer/shader_system.h"
 
 namespace engine::renderer {
 
@@ -32,6 +33,7 @@ CameraState g_activeCamera{};
 struct BackendState final {
   bool initialized = false;
   bool failed = false;
+  ShaderProgramHandle shaderHandle{};
   std::uint32_t program = 0U;
   std::int32_t mvpLocation = -1;
   std::int32_t normalMatrixLocation = -1;
@@ -68,61 +70,39 @@ bool initialize_backend() noexcept {
     return false;
   }
 
+  if (!initialize_shader_system()) {
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
+                      "failed to initialize shader system");
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
   const RenderDevice *dev = render_device();
 
-  constexpr char kVertexShaderSource[] = R"(#version 450 core
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-uniform mat4 u_mvp;
-uniform mat3 u_normalMatrix;
-out vec3 vNormal;
-
-void main() {
-  gl_Position = u_mvp * vec4(inPosition, 1.0);
-  vNormal = u_normalMatrix * inNormal;
-}
-)";
-
-  constexpr char kFragmentShaderSource[] = R"(#version 450 core
-in vec3 vNormal;
-uniform float u_time;
-uniform vec3 u_albedo;
-out vec4 outColor;
-
-void main() {
-  const vec3 lightDirection = normalize(vec3(0.4, 1.0, 0.6));
-  const float diffuse = max(dot(normalize(vNormal), lightDirection), 0.0);
-  const float pulse = 0.95 + (0.05 * sin(u_time * 0.5));
-  const vec3 albedo = u_albedo;
-  outColor = vec4(albedo * (diffuse * 0.9 + 0.1) * pulse, 1.0);
-}
-)";
-
-  const std::uint32_t vertexShader =
-      dev->create_shader(kShaderStageVertex, kVertexShaderSource);
-  const std::uint32_t fragmentShader =
-      dev->create_shader(kShaderStageFragment, kFragmentShaderSource);
-
-  if ((vertexShader == 0U) || (fragmentShader == 0U)) {
-    if (vertexShader != 0U) {
-      dev->destroy_shader(vertexShader);
-    }
-    if (fragmentShader != 0U) {
-      dev->destroy_shader(fragmentShader);
-    }
+  const ShaderProgramHandle shaderHandle = load_shader_program(
+      "assets/shaders/default.vert", "assets/shaders/default.frag");
+  if (shaderHandle == kInvalidShaderProgram) {
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
+                      "failed to load default shader program");
+    shutdown_shader_system();
+    shutdown_render_device();
     reset_backend_on_failure();
     return false;
   }
 
-  const std::uint32_t program = dev->link_program(vertexShader, fragmentShader);
-  dev->destroy_shader(vertexShader);
-  dev->destroy_shader(fragmentShader);
-
+  const std::uint32_t program = shader_gpu_program(shaderHandle);
   if (program == 0U) {
+    destroy_shader_program(shaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
     reset_backend_on_failure();
     return false;
   }
 
+  backend.shaderHandle = shaderHandle;
   backend.program = program;
   backend.mvpLocation = dev->uniform_location(program, "u_mvp");
   backend.normalMatrixLocation =
@@ -134,7 +114,9 @@ void main() {
     core::log_message(core::LogLevel::Error,
                       "renderer",
                       "failed to locate required shader uniforms");
-    dev->destroy_program(program);
+    destroy_shader_program(shaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
     reset_backend_on_failure();
     return false;
   }
@@ -148,11 +130,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     return;
   }
 
-  const RenderDevice *dev = render_device();
-  if ((backend->program != 0U) && (dev != nullptr)) {
-    dev->destroy_program(backend->program);
-    backend->program = 0U;
+  if (backend->shaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->shaderHandle);
+    backend->shaderHandle = ShaderProgramHandle{};
   }
+  backend->program = 0U;
 
   backend->mvpLocation = -1;
   backend->normalMatrixLocation = -1;
@@ -351,6 +333,7 @@ void shutdown_renderer() noexcept {
 
   if (core::make_render_context_current()) {
     destroy_backend_resources(&backend);
+    shutdown_shader_system();
     shutdown_render_device();
     core::release_render_context();
   }

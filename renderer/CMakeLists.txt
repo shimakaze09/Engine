@@ -4,6 +4,7 @@ add_library(engine_renderer STATIC
     src/command_buffer.cpp
     src/mesh_loader.cpp
     src/render_device_gl.cpp
+    src/shader_system.cpp
 )
 
 target_include_directories(engine_renderer

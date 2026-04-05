@@ -153,6 +153,7 @@ add_subdirectory(math)
 add_subdirectory(physics)
 add_subdirectory(scripting)
 add_subdirectory(renderer)
+add_subdirectory(audio)
 add_subdirectory(runtime)
 add_subdirectory(editor)
 

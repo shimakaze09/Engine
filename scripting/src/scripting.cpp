@@ -10,12 +10,14 @@ extern "C" {
 #include <cstdio>
 #include <limits>
 
+#include "engine/audio/audio.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/world.h"
+
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -554,6 +556,54 @@ int lua_engine_frame_count(lua_State *state) noexcept {
   return 1;
 }
 
+int lua_engine_load_sound(lua_State *state) noexcept {
+  const char *path = luaL_checkstring(state, 1);
+  const audio::SoundHandle handle = audio::load_sound(path);
+  lua_pushinteger(state, static_cast<lua_Integer>(handle.id));
+  return 1;
+}
+
+int lua_engine_unload_sound(lua_State *state) noexcept {
+  const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+  audio::unload_sound(audio::SoundHandle{id});
+  return 0;
+}
+
+int lua_engine_play_sound(lua_State *state) noexcept {
+  const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+  audio::PlayParams params{};
+  if (lua_gettop(state) >= 2) {
+    params.volume = static_cast<float>(luaL_optnumber(state, 2, 1.0));
+  }
+  if (lua_gettop(state) >= 3) {
+    params.pitch = static_cast<float>(luaL_optnumber(state, 3, 1.0));
+  }
+  if (lua_gettop(state) >= 4) {
+    params.loop = lua_toboolean(state, 4) != 0;
+  }
+  const bool ok = audio::play_sound(audio::SoundHandle{id}, params);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_stop_sound(lua_State *state) noexcept {
+  const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+  audio::stop_sound(audio::SoundHandle{id});
+  return 0;
+}
+
+int lua_engine_stop_all_sounds(lua_State *state) noexcept {
+  static_cast<void>(state);
+  audio::stop_all();
+  return 0;
+}
+
+int lua_engine_set_master_volume(lua_State *state) noexcept {
+  const auto vol = static_cast<float>(luaL_checknumber(state, 1));
+  audio::set_master_volume(vol);
+  return 0;
+}
+
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -643,6 +693,24 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   lua_pushcfunction(state, &lua_engine_frame_count);
   lua_setfield(state, -2, "frame_count");
+
+  lua_pushcfunction(state, &lua_engine_load_sound);
+  lua_setfield(state, -2, "load_sound");
+
+  lua_pushcfunction(state, &lua_engine_unload_sound);
+  lua_setfield(state, -2, "unload_sound");
+
+  lua_pushcfunction(state, &lua_engine_play_sound);
+  lua_setfield(state, -2, "play_sound");
+
+  lua_pushcfunction(state, &lua_engine_stop_sound);
+  lua_setfield(state, -2, "stop_sound");
+
+  lua_pushcfunction(state, &lua_engine_stop_all_sounds);
+  lua_setfield(state, -2, "stop_all_sounds");
+
+  lua_pushcfunction(state, &lua_engine_set_master_volume);
+  lua_setfield(state, -2, "set_master_volume");
 
   // Key scancode constants (values match SDL_SCANCODE_* for the SDL2 backend).
   lua_pushinteger(state, core::kKey_A);

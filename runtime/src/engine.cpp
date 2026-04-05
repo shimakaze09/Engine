@@ -20,6 +20,7 @@
 #error "SDL2 headers not found"
 #endif
 
+#include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -33,10 +34,12 @@
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
+#include "engine/renderer/shader_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+
 
 namespace engine {
 
@@ -434,6 +437,17 @@ bool bootstrap() noexcept {
     return false;
   }
 
+  if (!audio::initialize_audio()) {
+    core::log_message(
+        core::LogLevel::Error, "audio", "failed to initialize audio");
+    scripting::shutdown_scripting();
+    if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
+      bridge->shutdown();
+    }
+    core::shutdown_core();
+    return false;
+  }
+
   if (g_frameContext == nullptr) {
     g_frameContext.reset(new (std::nothrow) FrameContext());
     if (g_frameContext == nullptr) {
@@ -741,6 +755,10 @@ void run(std::uint32_t maxFrames) noexcept {
                         "assets",
                         "one or more asset transitions failed this frame");
     }
+
+    renderer::check_shader_reload();
+
+    audio::update_audio();
 
     double frameMs = 0.0;
     double utilizationPct = 0.0;
@@ -1170,6 +1188,7 @@ void shutdown() noexcept {
     bridge->shutdown();
   }
   renderer::shutdown_renderer();
+  audio::shutdown_audio();
   scripting::shutdown_scripting();
   g_frameContext.reset();
   core::shutdown_core();

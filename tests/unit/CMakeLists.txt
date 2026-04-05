@@ -225,3 +225,35 @@ add_test(
     NAME engine_unit_profiler
     COMMAND engine_unit_profiler
 )
+
+add_executable(engine_unit_shader_system
+    shader_system_test.cpp
+)
+
+target_compile_features(engine_unit_shader_system PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_shader_system
+    PRIVATE
+    engine_renderer
+)
+
+add_test(
+    NAME engine_unit_shader_system
+    COMMAND engine_unit_shader_system
+)
+
+add_executable(engine_unit_audio
+    audio_test.cpp
+)
+
+target_compile_features(engine_unit_audio PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_audio
+    PRIVATE
+    engine_audio
+)
+
+add_test(
+    NAME engine_unit_audio
+    COMMAND engine_unit_audio
+)

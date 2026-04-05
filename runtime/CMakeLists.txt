@@ -21,6 +21,7 @@ target_link_libraries(engine_runtime
     engine_physics
     engine_scripting
     engine_renderer
+    engine_audio
     ${ENGINE_SDL2_TARGET}
     OpenGL::GL
 )
