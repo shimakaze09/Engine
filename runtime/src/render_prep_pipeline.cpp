@@ -1,12 +1,15 @@
 #include "engine/runtime/render_prep_pipeline.h"
 
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/math/aabb.h"
+#include "engine/math/mat4.h"
 #include "engine/math/transform.h"
+#include "engine/math/vec4.h"
 
 namespace engine::runtime {
 
@@ -131,6 +134,43 @@ void render_prep_chunk_job(void *userData) noexcept {
     command.material.albedo = meshComponent->albedo;
     command.modelMatrix = transforms[i].matrix;
 
+    // Build instancing-ready sort key.
+    // Layout (MSB→LSB):
+    //   transparent:1 | shader:7 | texture:20 | mesh:20 | depth:16
+    const bool transparent = (command.material.opacity < 1.0F);
+    const std::uint64_t transparentBit = transparent ? (1ULL << 63U) : 0ULL;
+
+    // Shader index: 0 = PBR (only shader for now).
+    const std::uint64_t shaderBits = 0ULL;
+
+    const std::uint64_t textureBits =
+        (static_cast<std::uint64_t>(command.material.albedoTexture.id)
+         & 0xFFFFFULL)
+        << 36U;
+
+    const std::uint64_t meshBits =
+        (static_cast<std::uint64_t>(runtimeMesh.id) & 0xFFFFFULL) << 16U;
+
+    // Camera-space depth: transform Z into [0,1] range, quantize to 16 bits.
+    // Use VP * position to get clip-space w (approximation of depth).
+    const math::Vec4 clipPos =
+        math::mul(vp, math::Vec4(center.x, center.y, center.z, 1.0F));
+    const float linearDepth = (clipPos.w > 0.0F) ? clipPos.w : 0.0F;
+    // Clamp to [0, 65535] range with a max depth assumption of ~200 units.
+    const float normalizedDepth =
+        (linearDepth < 200.0F) ? (linearDepth / 200.0F) : 1.0F;
+    std::uint16_t depthQuantized =
+        static_cast<std::uint16_t>(normalizedDepth * 65535.0F);
+
+    // Opaque: front-to-back (small depth first, natural sort order).
+    // Transparent: back-to-front (invert depth so larger depth sorts first).
+    if (transparent) {
+      depthQuantized = static_cast<std::uint16_t>(65535U - depthQuantized);
+    }
+
+    command.sortKey.value = transparentBit | shaderBits | textureBits | meshBits
+                            | static_cast<std::uint64_t>(depthQuantized);
+
     if (!localBuffer.submit(command)) {
       core::log_message(core::LogLevel::Error,
                         "render_prep",
@@ -155,7 +195,7 @@ void merge_command_buffers_job(void *userData) noexcept {
       return;
     }
   }
-  jobData->merged->sort_by_entity();
+  jobData->merged->sort_by_key();
 }
 
 bool link_dependency(core::JobHandle prerequisite,

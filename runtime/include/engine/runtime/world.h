@@ -58,7 +58,7 @@ struct NameComponent final {
   char name[32] = {};
 };
 
-enum class LightType : std::uint8_t { Directional = 0 };
+enum class LightType : std::uint8_t { Directional = 0, Point = 1 };
 
 struct LightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
@@ -183,6 +183,9 @@ public:
   bool get_light_component(Entity entity,
                            LightComponent *outComponent) const noexcept;
   bool has_light_component(Entity entity) const noexcept;
+  std::size_t light_count() const noexcept;
+  const LightComponent *light_at(std::size_t index) const noexcept;
+  Entity light_entity_at(std::size_t index) const noexcept;
 
   void begin_update_phase() noexcept;
   void commit_update_phase() noexcept;

@@ -40,7 +40,6 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
-
 namespace engine {
 
 namespace {
@@ -1134,9 +1133,47 @@ void run(std::uint32_t maxFrames) noexcept {
       if ((bridge != nullptr) && (bridge->new_frame != nullptr)) {
         bridge->new_frame();
       }
+
+      // Collect lights from ECS for the PBR shader.
+      renderer::SceneLightData sceneLights{};
+      const std::size_t lightCount = world->light_count();
+      for (std::size_t li = 0U; li < lightCount; ++li) {
+        const runtime::LightComponent *lc = world->light_at(li);
+        if (lc == nullptr) {
+          continue;
+        }
+
+        if (lc->type == runtime::LightType::Directional) {
+          if (sceneLights.directionalLightCount
+              < renderer::kMaxDirectionalLights) {
+            auto &dl =
+                sceneLights
+                    .directionalLights[sceneLights.directionalLightCount];
+            dl.direction = lc->direction;
+            dl.color = lc->color;
+            dl.intensity = lc->intensity;
+            ++sceneLights.directionalLightCount;
+          }
+        } else if (lc->type == runtime::LightType::Point) {
+          if (sceneLights.pointLightCount < renderer::kMaxPointLights) {
+            const runtime::Entity lightEntity = world->light_entity_at(li);
+            const runtime::WorldTransform *wt =
+                world->get_world_transform_read_ptr(lightEntity);
+
+            auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
+            pl.position =
+                (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+            pl.color = lc->color;
+            pl.intensity = lc->intensity;
+            ++sceneLights.pointLightCount;
+          }
+        }
+      }
+
       renderer::flush_renderer(commandBuffer->view(),
                                meshRegistry.get(),
-                               static_cast<float>(simulationTimeSeconds));
+                               static_cast<float>(simulationTimeSeconds),
+                               sceneLights);
       if ((bridge != nullptr) && (bridge->render != nullptr)) {
         bridge->render(static_cast<float>(frameMs),
                        static_cast<float>(utilizationPct));

@@ -567,6 +567,75 @@ World::get_name_component_ptr(Entity entity) const noexcept {
   return m_nameComponents.get_ptr(entity);
 }
 
+bool World::add_light_component(Entity entity,
+                                const LightComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    assert(false && "add_light_component requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    assert(false && "add_light_component requires a live entity");
+    return false;
+  }
+
+  return m_lightComponents.add(entity, component);
+}
+
+bool World::remove_light_component(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    assert(false && "remove_light_component requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    assert(false && "remove_light_component requires a live entity");
+    return false;
+  }
+
+  return m_lightComponents.remove(entity);
+}
+
+bool World::get_light_component(Entity entity,
+                                LightComponent *outComponent) const noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    assert(false && "get_light_component on stale or dead entity");
+    return false;
+  }
+
+  return m_lightComponents.get(entity, outComponent);
+}
+
+bool World::has_light_component(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+
+  return m_lightComponents.contains(entity);
+}
+
+std::size_t World::light_count() const noexcept {
+  return m_lightComponents.count();
+}
+
+const LightComponent *World::light_at(std::size_t index) const noexcept {
+  if (index >= m_lightComponents.count()) {
+    return nullptr;
+  }
+  return &m_lightComponents.component_at(index);
+}
+
+Entity World::light_entity_at(std::size_t index) const noexcept {
+  if (index >= m_lightComponents.count()) {
+    return kInvalidEntity;
+  }
+  return m_lightComponents.entity_at(index);
+}
+
 bool World::get_collider_range(std::size_t startIndex,
                                std::size_t count,
                                const Entity **outEntities,

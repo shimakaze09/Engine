@@ -16,6 +16,7 @@
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
+#include "engine/renderer/texture_loader.h"
 
 namespace engine::renderer {
 
@@ -33,12 +34,38 @@ CameraState g_activeCamera{};
 struct BackendState final {
   bool initialized = false;
   bool failed = false;
-  ShaderProgramHandle shaderHandle{};
-  std::uint32_t program = 0U;
-  std::int32_t mvpLocation = -1;
-  std::int32_t normalMatrixLocation = -1;
-  std::int32_t timeLocation = -1;
-  std::int32_t albedoLocation = -1;
+
+  // Fallback shader (kept for compatibility).
+  ShaderProgramHandle defaultShaderHandle{};
+  std::uint32_t defaultProgram = 0U;
+
+  // PBR shader.
+  ShaderProgramHandle pbrShaderHandle{};
+  std::uint32_t pbrProgram = 0U;
+
+  // PBR uniform locations.
+  std::int32_t pbrModelLocation = -1;
+  std::int32_t pbrMvpLocation = -1;
+  std::int32_t pbrNormalMatrixLocation = -1;
+  std::int32_t pbrAlbedoLocation = -1;
+  std::int32_t pbrRoughnessLocation = -1;
+  std::int32_t pbrMetallicLocation = -1;
+  std::int32_t pbrTimeLocation = -1;
+  std::int32_t pbrCameraPosLocation = -1;
+  std::int32_t pbrHasAlbedoTextureLocation = -1;
+  std::int32_t pbrAlbedoMapLocation = -1;
+
+  // Directional lights.
+  std::int32_t pbrDirLightCountLocation = -1;
+  std::array<std::int32_t, kMaxDirectionalLights> pbrDirLightDir{};
+  std::array<std::int32_t, kMaxDirectionalLights> pbrDirLightColor{};
+  std::array<std::int32_t, kMaxDirectionalLights> pbrDirLightIntensity{};
+
+  // Point lights.
+  std::int32_t pbrPointLightCountLocation = -1;
+  std::array<std::int32_t, kMaxPointLights> pbrPointLightPos{};
+  std::array<std::int32_t, kMaxPointLights> pbrPointLightColor{};
+  std::array<std::int32_t, kMaxPointLights> pbrPointLightIntensity{};
 };
 
 BackendState &backend_state() noexcept {
@@ -50,6 +77,35 @@ void reset_backend_on_failure() noexcept {
   BackendState &backend = backend_state();
   backend = BackendState{};
   backend.failed = true;
+}
+
+void resolve_pbr_light_uniforms(BackendState &backend,
+                                const RenderDevice *dev) noexcept {
+  const std::uint32_t prog = backend.pbrProgram;
+
+  backend.pbrDirLightCountLocation =
+      dev->uniform_location(prog, "u_dirLightCount");
+  for (std::size_t i = 0U; i < kMaxDirectionalLights; ++i) {
+    char name[64] = {};
+    std::snprintf(name, sizeof(name), "u_dirLights[%zu].direction", i);
+    backend.pbrDirLightDir[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_dirLights[%zu].color", i);
+    backend.pbrDirLightColor[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_dirLights[%zu].intensity", i);
+    backend.pbrDirLightIntensity[i] = dev->uniform_location(prog, name);
+  }
+
+  backend.pbrPointLightCountLocation =
+      dev->uniform_location(prog, "u_pointLightCount");
+  for (std::size_t i = 0U; i < kMaxPointLights; ++i) {
+    char name[64] = {};
+    std::snprintf(name, sizeof(name), "u_pointLights[%zu].position", i);
+    backend.pbrPointLightPos[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_pointLights[%zu].color", i);
+    backend.pbrPointLightColor[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_pointLights[%zu].intensity", i);
+    backend.pbrPointLightIntensity[i] = dev->uniform_location(prog, name);
+  }
 }
 
 bool initialize_backend() noexcept {
@@ -81,9 +137,10 @@ bool initialize_backend() noexcept {
 
   const RenderDevice *dev = render_device();
 
-  const ShaderProgramHandle shaderHandle = load_shader_program(
+  // Load default fallback shader.
+  const ShaderProgramHandle defaultShaderHandle = load_shader_program(
       "assets/shaders/default.vert", "assets/shaders/default.frag");
-  if (shaderHandle == kInvalidShaderProgram) {
+  if (defaultShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error,
                       "renderer",
                       "failed to load default shader program");
@@ -93,33 +150,75 @@ bool initialize_backend() noexcept {
     return false;
   }
 
-  const std::uint32_t program = shader_gpu_program(shaderHandle);
-  if (program == 0U) {
-    destroy_shader_program(shaderHandle);
+  const std::uint32_t defaultProgram = shader_gpu_program(defaultShaderHandle);
+  if (defaultProgram == 0U) {
+    destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     shutdown_render_device();
     reset_backend_on_failure();
     return false;
   }
 
-  backend.shaderHandle = shaderHandle;
-  backend.program = program;
-  backend.mvpLocation = dev->uniform_location(program, "u_mvp");
-  backend.normalMatrixLocation =
-      dev->uniform_location(program, "u_normalMatrix");
-  backend.timeLocation = dev->uniform_location(program, "u_time");
-  backend.albedoLocation = dev->uniform_location(program, "u_albedo");
-  if ((backend.mvpLocation < 0) || (backend.normalMatrixLocation < 0)
-      || (backend.albedoLocation < 0)) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
-                      "failed to locate required shader uniforms");
-    destroy_shader_program(shaderHandle);
+  backend.defaultShaderHandle = defaultShaderHandle;
+  backend.defaultProgram = defaultProgram;
+
+  // Load PBR shader.
+  const ShaderProgramHandle pbrShaderHandle =
+      load_shader_program("assets/shaders/pbr.vert", "assets/shaders/pbr.frag");
+  if (pbrShaderHandle == kInvalidShaderProgram) {
+    core::log_message(
+        core::LogLevel::Error, "renderer", "failed to load PBR shader program");
+    destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     shutdown_render_device();
     reset_backend_on_failure();
     return false;
   }
+
+  const std::uint32_t pbrProgram = shader_gpu_program(pbrShaderHandle);
+  if (pbrProgram == 0U) {
+    destroy_shader_program(pbrShaderHandle);
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  backend.pbrShaderHandle = pbrShaderHandle;
+  backend.pbrProgram = pbrProgram;
+
+  // Resolve PBR uniform locations.
+  backend.pbrModelLocation = dev->uniform_location(pbrProgram, "u_model");
+  backend.pbrMvpLocation = dev->uniform_location(pbrProgram, "u_mvp");
+  backend.pbrNormalMatrixLocation =
+      dev->uniform_location(pbrProgram, "u_normalMatrix");
+  backend.pbrAlbedoLocation = dev->uniform_location(pbrProgram, "u_albedo");
+  backend.pbrRoughnessLocation =
+      dev->uniform_location(pbrProgram, "u_roughness");
+  backend.pbrMetallicLocation = dev->uniform_location(pbrProgram, "u_metallic");
+  backend.pbrTimeLocation = dev->uniform_location(pbrProgram, "u_time");
+  backend.pbrCameraPosLocation =
+      dev->uniform_location(pbrProgram, "u_cameraPos");
+  backend.pbrHasAlbedoTextureLocation =
+      dev->uniform_location(pbrProgram, "u_hasAlbedoTexture");
+  backend.pbrAlbedoMapLocation =
+      dev->uniform_location(pbrProgram, "u_albedoMap");
+
+  if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0)
+      || (backend.pbrAlbedoLocation < 0)) {
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
+                      "failed to locate required PBR shader uniforms");
+    destroy_shader_program(pbrShaderHandle);
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  resolve_pbr_light_uniforms(backend, dev);
 
   backend.initialized = true;
   return true;
@@ -130,16 +229,16 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     return;
   }
 
-  if (backend->shaderHandle != kInvalidShaderProgram) {
-    destroy_shader_program(backend->shaderHandle);
-    backend->shaderHandle = ShaderProgramHandle{};
+  if (backend->pbrShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->pbrShaderHandle);
+    backend->pbrShaderHandle = ShaderProgramHandle{};
   }
-  backend->program = 0U;
-
-  backend->mvpLocation = -1;
-  backend->normalMatrixLocation = -1;
-  backend->timeLocation = -1;
-  backend->albedoLocation = -1;
+  if (backend->defaultShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->defaultShaderHandle);
+    backend->defaultShaderHandle = ShaderProgramHandle{};
+  }
+  backend->pbrProgram = 0U;
+  backend->defaultProgram = 0U;
   backend->initialized = false;
 }
 
@@ -209,11 +308,11 @@ bool CommandBufferBuilder::append_from(
   return true;
 }
 
-void CommandBufferBuilder::sort_by_entity() noexcept {
+void CommandBufferBuilder::sort_by_key() noexcept {
   std::sort(m_commands.begin(),
             m_commands.begin() + static_cast<std::ptrdiff_t>(m_commandCount),
             [](const DrawCommand &lhs, const DrawCommand &rhs) {
-              return lhs.entity < rhs.entity;
+              return lhs.sortKey.value < rhs.sortKey.value;
             });
 }
 
@@ -230,7 +329,8 @@ CommandBufferView CommandBufferBuilder::view() const noexcept {
 
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry,
-                    float timeSeconds) noexcept {
+                    float timeSeconds,
+                    const SceneLightData &lights) noexcept {
   if (!initialize_backend()) {
     return;
   }
@@ -257,9 +357,11 @@ void flush_renderer(CommandBufferView commandBufferView,
     return;
   }
 
-  dev->bind_program(backend.program);
+  // Use PBR shader.
+  dev->bind_program(backend.pbrProgram);
 
   std::uint32_t boundVertexArray = 0U;
+  std::uint32_t boundAlbedoTexture = 0U;
 
   const float aspect =
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
@@ -274,8 +376,56 @@ void flush_renderer(CommandBufferView commandBufferView,
       (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
   const math::Mat4 projection = math::perspective(fov, aspect, nearP, farP);
   const math::Mat4 viewProjection = math::mul(projection, view);
-  if (backend.timeLocation >= 0) {
-    dev->set_uniform_float(backend.timeLocation, timeSeconds);
+
+  // Per-frame uniforms.
+  if (backend.pbrTimeLocation >= 0) {
+    dev->set_uniform_float(backend.pbrTimeLocation, timeSeconds);
+  }
+  if (backend.pbrCameraPosLocation >= 0) {
+    dev->set_uniform_vec3(backend.pbrCameraPosLocation,
+                          &g_activeCamera.position.x);
+  }
+
+  // Upload directional lights.
+  if (backend.pbrDirLightCountLocation >= 0) {
+    dev->set_uniform_int(
+        backend.pbrDirLightCountLocation,
+        static_cast<std::int32_t>(lights.directionalLightCount));
+  }
+  for (std::size_t i = 0U; i < lights.directionalLightCount; ++i) {
+    const auto &dl = lights.directionalLights[i];
+    if (backend.pbrDirLightDir[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
+    }
+    if (backend.pbrDirLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
+    }
+    if (backend.pbrDirLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
+    }
+  }
+
+  // Upload point lights.
+  if (backend.pbrPointLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrPointLightCountLocation,
+                         static_cast<std::int32_t>(lights.pointLightCount));
+  }
+  for (std::size_t i = 0U; i < lights.pointLightCount; ++i) {
+    const auto &pl = lights.pointLights[i];
+    if (backend.pbrPointLightPos[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
+    }
+    if (backend.pbrPointLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
+    }
+    if (backend.pbrPointLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrPointLightIntensity[i], pl.intensity);
+    }
+  }
+
+  // Set albedo map sampler to texture unit 0.
+  if (backend.pbrAlbedoMapLocation >= 0) {
+    dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
   }
 
   if ((commandBufferView.count > 0U) && (commandBufferView.data == nullptr)) {
@@ -299,17 +449,48 @@ void flush_renderer(CommandBufferView commandBufferView,
         boundVertexArray = mesh->vertexArray;
       }
 
-      if (backend.albedoLocation >= 0) {
-        dev->set_uniform_vec3(backend.albedoLocation,
+      // Material uniforms.
+      if (backend.pbrAlbedoLocation >= 0) {
+        dev->set_uniform_vec3(backend.pbrAlbedoLocation,
                               &command.material.albedo.x);
+      }
+      if (backend.pbrRoughnessLocation >= 0) {
+        dev->set_uniform_float(backend.pbrRoughnessLocation,
+                               command.material.roughness);
+      }
+      if (backend.pbrMetallicLocation >= 0) {
+        dev->set_uniform_float(backend.pbrMetallicLocation,
+                               command.material.metallic);
+      }
+
+      // Albedo texture binding with state tracking.
+      const std::uint32_t albedoGpuId =
+          texture_gpu_id(command.material.albedoTexture);
+      const bool hasAlbedoTex =
+          (command.material.albedoTexture != kInvalidTextureHandle)
+          && (albedoGpuId != 0U);
+      if (backend.pbrHasAlbedoTextureLocation >= 0) {
+        dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
+                             hasAlbedoTex ? 1 : 0);
+      }
+      if (hasAlbedoTex && (albedoGpuId != boundAlbedoTexture)) {
+        dev->bind_texture(0, albedoGpuId);
+        boundAlbedoTexture = albedoGpuId;
+      } else if (!hasAlbedoTex && (boundAlbedoTexture != 0U)) {
+        dev->bind_texture(0, 0U);
+        boundAlbedoTexture = 0U;
       }
 
       const math::Mat4 model = compute_model_matrix(command);
       const math::Mat4 mvp = compute_mvp(model, viewProjection);
       float normalMatrix[9] = {};
       extract_normal_matrix(model, normalMatrix);
-      dev->set_uniform_mat4(backend.mvpLocation, &mvp.columns[0].x);
-      dev->set_uniform_mat3(backend.normalMatrixLocation, normalMatrix);
+
+      if (backend.pbrModelLocation >= 0) {
+        dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
+      }
+      dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
+      dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
 
       if (mesh->indexCount > 0U) {
         dev->draw_elements_triangles_u32(
@@ -321,6 +502,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
   }
 
+  dev->bind_texture(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
 }
