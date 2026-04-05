@@ -4,10 +4,12 @@
 #include <cstddef>
 #include <thread>
 
+#include "engine/core/event_bus.h"
 #include "engine/core/job_system.h"
 #include "engine/core/linear_allocator.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/vfs.h"
 
 namespace engine::core {
 
@@ -51,7 +53,20 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
     return false;
   }
 
+  if (!initialize_vfs()) {
+    shutdown_logging();
+    return false;
+  }
+
+  if (!initialize_event_bus()) {
+    shutdown_vfs();
+    shutdown_logging();
+    return false;
+  }
+
   if (!initialize_platform()) {
+    shutdown_event_bus();
+    shutdown_vfs();
     shutdown_logging();
     return false;
   }
@@ -61,6 +76,8 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
       (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
   if (!initialize_job_system(workerThreads)) {
     shutdown_platform();
+    shutdown_event_bus();
+    shutdown_vfs();
     shutdown_logging();
     return false;
   }
@@ -70,6 +87,8 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
       || (g_threadFrameAllocatorCount > kMaxThreadFrameAllocators)) {
     shutdown_job_system();
     shutdown_platform();
+    shutdown_event_bus();
+    shutdown_vfs();
     shutdown_logging();
     return false;
   }
@@ -93,6 +112,8 @@ void shutdown_core() noexcept {
 
   shutdown_job_system();
   shutdown_platform();
+  shutdown_event_bus();
+  shutdown_vfs();
   shutdown_logging();
 
   g_mainFrameAllocator.reset();

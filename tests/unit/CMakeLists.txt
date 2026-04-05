@@ -161,3 +161,35 @@ add_test(
     NAME engine_unit_runtime_world
     COMMAND engine_unit_runtime_world
 )
+
+add_executable(engine_unit_vfs
+    vfs_test.cpp
+)
+
+target_compile_features(engine_unit_vfs PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_vfs
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_vfs
+    COMMAND engine_unit_vfs
+)
+
+add_executable(engine_unit_event_bus
+    event_bus_test.cpp
+)
+
+target_compile_features(engine_unit_event_bus PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_event_bus
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_event_bus
+    COMMAND engine_unit_event_bus
+)

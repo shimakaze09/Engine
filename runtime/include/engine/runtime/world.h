@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <tuple>
 #include <type_traits>
 
@@ -224,36 +225,21 @@ public:
 
   template <typename... Components, typename Fn>
   void for_each(Fn &&fn) const noexcept {
-    static_assert((sizeof...(Components) >= 1U)
-                      && (sizeof...(Components) <= 2U),
-                  "World::for_each supports one or two component types.");
+    static_assert(sizeof...(Components) >= 1U,
+                  "World::for_each requires at least one component type.");
     static_assert((is_supported_component<Components>() && ...),
                   "World::for_each component type is not supported.");
 
-    using ComponentTuple = std::tuple<Components...>;
-    if constexpr (sizeof...(Components) == 1U) {
-      using C0 = std::remove_cv_t<std::tuple_element_t<0U, ComponentTuple>>;
+    using ComponentTuple = std::tuple<std::remove_cv_t<Components>...>;
+    constexpr std::size_t N = sizeof...(Components);
+
+    if constexpr (N == 1U) {
+      using C0 = std::tuple_element_t<0U, ComponentTuple>;
       for_each_primary<C0>(
           [&fn](Entity entity, const C0 &c0) noexcept { fn(entity, c0); });
     } else {
-      using C0 = std::remove_cv_t<std::tuple_element_t<0U, ComponentTuple>>;
-      using C1 = std::remove_cv_t<std::tuple_element_t<1U, ComponentTuple>>;
-
-      if (component_count<C0>() <= component_count<C1>()) {
-        for_each_primary<C0>([&fn, this](Entity entity, const C0 &c0) noexcept {
-          const C1 *c1 = try_get_component<C1>(entity);
-          if (c1 != nullptr) {
-            fn(entity, c0, *c1);
-          }
-        });
-      } else {
-        for_each_primary<C1>([&fn, this](Entity entity, const C1 &c1) noexcept {
-          const C0 *c0 = try_get_component<C0>(entity);
-          if (c0 != nullptr) {
-            fn(entity, *c0, c1);
-          }
-        });
-      }
+      // Iterate the component set with the fewest entries, then probe the rest.
+      for_each_variadic<ComponentTuple>(fn, std::make_index_sequence<N>{});
     }
   }
 
@@ -346,6 +332,88 @@ private:
     }
 
     return nullptr;
+  }
+
+  // ---- Variadic for_each helpers ----
+
+  // Find the index (within a tuple) of the component type with lowest count.
+  template <typename Tuple, std::size_t... Is>
+  std::size_t
+  smallest_component_index(std::index_sequence<Is...>) const noexcept {
+    std::size_t minCount = (std::numeric_limits<std::size_t>::max)();
+    std::size_t minIndex = 0U;
+    const auto check = [&](std::size_t idx, std::size_t count) noexcept {
+      if (count < minCount) {
+        minCount = count;
+        minIndex = idx;
+      }
+    };
+    (check(Is, component_count<std::tuple_element_t<Is, Tuple>>()), ...);
+    return minIndex;
+  }
+
+  // Dispatch: iterate the component set at PrimaryIdx, probe the rest.
+  template <typename Tuple,
+            std::size_t PrimaryIdx,
+            typename Fn,
+            std::size_t... AllIs>
+  void for_each_with_primary(Fn &&fn,
+                             std::index_sequence<AllIs...>) const noexcept {
+    using PrimaryC = std::tuple_element_t<PrimaryIdx, Tuple>;
+    constexpr std::size_t N = std::tuple_size_v<Tuple>;
+    for_each_primary<PrimaryC>(
+        [&fn, this](Entity entity, const PrimaryC &primary) noexcept {
+          std::array<const void *, N> ptrs{};
+          ptrs[PrimaryIdx] = &primary;
+          if (try_get_rest_excluding<Tuple, PrimaryIdx>(
+                  entity, ptrs, std::make_index_sequence<N>{})) {
+            invoke_for_each<Tuple>(
+                fn, entity, ptrs, std::index_sequence<AllIs...>{});
+          }
+        });
+  }
+
+  template <typename Tuple, std::size_t PrimaryIdx, std::size_t... AllIs>
+  bool try_get_rest_excluding(
+      Entity entity,
+      std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
+      std::index_sequence<AllIs...>) const noexcept {
+    bool allPresent = true;
+    const auto probe = [&](auto IndexConstant) noexcept {
+      constexpr std::size_t I = decltype(IndexConstant)::value;
+      if constexpr (I != PrimaryIdx) {
+        if (allPresent) {
+          ptrs[I] = try_get_component<std::tuple_element_t<I, Tuple>>(entity);
+          allPresent = (ptrs[I] != nullptr);
+        }
+      }
+    };
+    (probe(std::integral_constant<std::size_t, AllIs>{}), ...);
+    return allPresent;
+  }
+
+  template <typename Tuple, typename Fn, std::size_t... Is>
+  static void invoke_for_each(
+      Fn &&fn,
+      Entity entity,
+      const std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
+      std::index_sequence<Is...>) noexcept {
+    fn(entity,
+       *static_cast<const std::tuple_element_t<Is, Tuple> *>(ptrs[Is])...);
+  }
+
+  // Entry point: picks smallest component at runtime and dispatches.
+  template <typename Tuple, typename Fn, std::size_t... Is>
+  void for_each_variadic(Fn &&fn, std::index_sequence<Is...>) const noexcept {
+    const std::size_t primaryIdx =
+        smallest_component_index<Tuple>(std::index_sequence<Is...>{});
+    const auto dispatch = [&](auto IndexConstant) noexcept {
+      constexpr std::size_t I = decltype(IndexConstant)::value;
+      if (I == primaryIdx) {
+        for_each_with_primary<Tuple, I>(fn, std::index_sequence<Is...>{});
+      }
+    };
+    (dispatch(std::integral_constant<std::size_t, Is>{}), ...);
   }
 
   template <typename Component, typename Fn>

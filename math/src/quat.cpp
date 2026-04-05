@@ -4,6 +4,13 @@
 
 #include "engine/math/vec3.h"
 
+#if defined(__SSE2__) || (defined(_MSC_VER) && defined(_M_X64))
+#define ENGINE_MATH_SSE2 1
+#include <emmintrin.h>
+#else
+#define ENGINE_MATH_SSE2 0
+#endif
+
 namespace engine::math {
 
 namespace {
@@ -20,14 +27,41 @@ float clamp(float value, float minValue, float maxValue) noexcept {
   return value;
 }
 
+#if ENGINE_MATH_SSE2
+// SSE2 horizontal sum helper (returns scalar).
+float sse2_hsum(__m128 v) noexcept {
+  __m128 shuf = _mm_shuffle_ps(v, v, _MM_SHUFFLE(2, 3, 0, 1));
+  __m128 sums = _mm_add_ps(v, shuf);
+  shuf = _mm_movehl_ps(shuf, sums);
+  sums = _mm_add_ss(sums, shuf);
+  return _mm_cvtss_f32(sums);
+}
+#endif
+
 } // namespace
 
 Quat conjugate(const Quat &value) noexcept {
+#if ENGINE_MATH_SSE2
+  // Negate x,y,z but keep w: multiply by (-1,-1,-1,+1).
+  alignas(16) static const float kSignMask[4] = {-1.0F, -1.0F, -1.0F, 1.0F};
+  __m128 q = _mm_load_ps(&value.x);
+  __m128 mask = _mm_load_ps(kSignMask);
+  Quat result;
+  _mm_store_ps(&result.x, _mm_mul_ps(q, mask));
+  return result;
+#else
   return Quat(-value.x, -value.y, -value.z, value.w);
+#endif
 }
 
 float dot(const Quat &lhs, const Quat &rhs) noexcept {
+#if ENGINE_MATH_SSE2
+  __m128 a = _mm_load_ps(&lhs.x);
+  __m128 b = _mm_load_ps(&rhs.x);
+  return sse2_hsum(_mm_mul_ps(a, b));
+#else
   return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w);
+#endif
 }
 
 Quat mul(const Quat &lhs, const Quat &rhs) noexcept {
@@ -44,8 +78,16 @@ Quat normalize(const Quat &value) noexcept {
   }
 
   const float invLen = 1.0F / std::sqrt(lenSq);
-  return Quat(value.x * invLen, value.y * invLen, value.z * invLen,
-              value.w * invLen);
+#if ENGINE_MATH_SSE2
+  __m128 q = _mm_load_ps(&value.x);
+  __m128 s = _mm_set1_ps(invLen);
+  Quat result;
+  _mm_store_ps(&result.x, _mm_mul_ps(q, s));
+  return result;
+#else
+  return Quat(
+      value.x * invLen, value.y * invLen, value.z * invLen, value.w * invLen);
+#endif
 }
 
 Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
@@ -58,9 +100,10 @@ Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
   }
 
   if (cosTheta > 0.9995F) {
-    const Quat lerpResult(
-        from.x + (end.x - from.x) * t, from.y + (end.y - from.y) * t,
-        from.z + (end.z - from.z) * t, from.w + (end.w - from.w) * t);
+    const Quat lerpResult(from.x + (end.x - from.x) * t,
+                          from.y + (end.y - from.y) * t,
+                          from.z + (end.z - from.z) * t,
+                          from.w + (end.w - from.w) * t);
     return normalize(lerpResult);
   }
 
@@ -82,11 +125,14 @@ Quat from_axis_angle(const Vec3 &axis, float radians) noexcept {
   const float halfAngle = 0.5F * radians;
   const float sinHalf = std::sin(halfAngle);
 
-  return Quat(normalizedAxis.x * sinHalf, normalizedAxis.y * sinHalf,
-              normalizedAxis.z * sinHalf, std::cos(halfAngle));
+  return Quat(normalizedAxis.x * sinHalf,
+              normalizedAxis.y * sinHalf,
+              normalizedAxis.z * sinHalf,
+              std::cos(halfAngle));
 }
 
-bool to_axis_angle(const Quat &value, Vec3 *outAxis,
+bool to_axis_angle(const Quat &value,
+                   Vec3 *outAxis,
                    float *outRadians) noexcept {
   if ((outAxis == nullptr) || (outRadians == nullptr)) {
     return false;
@@ -99,8 +145,8 @@ bool to_axis_angle(const Quat &value, Vec3 *outAxis,
   if (sinHalf <= 1.0e-6F) {
     *outAxis = Vec3(1.0F, 0.0F, 0.0F);
   } else {
-    *outAxis = Vec3(normalized.x / sinHalf, normalized.y / sinHalf,
-                    normalized.z / sinHalf);
+    *outAxis = Vec3(
+        normalized.x / sinHalf, normalized.y / sinHalf, normalized.z / sinHalf);
   }
 
   *outRadians = angle;
@@ -183,7 +229,9 @@ Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
               cy * cp * cr + sy * sp * sr);
 }
 
-bool to_euler(const Quat &q, float *outPitch, float *outYaw,
+bool to_euler(const Quat &q,
+              float *outPitch,
+              float *outYaw,
               float *outRoll) noexcept {
   if ((outPitch == nullptr) || (outYaw == nullptr) || (outRoll == nullptr)) {
     return false;

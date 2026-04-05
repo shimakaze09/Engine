@@ -1,11 +1,13 @@
 add_library(engine_core STATIC
     src/bootstrap.cpp
+    src/event_bus.cpp
     src/json.cpp
     src/job_system.cpp
     src/linear_allocator.cpp
     src/logging.cpp
     src/platform.cpp
     src/reflect.cpp
+    src/vfs.cpp
 )
 
 target_include_directories(engine_core
