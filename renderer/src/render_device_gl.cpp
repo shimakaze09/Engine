@@ -577,6 +577,10 @@ void gl_enable_depth_test() noexcept {
   g_gl.enable(GL_DEPTH_TEST);
 }
 
+void gl_disable_depth_test() noexcept {
+  g_gl.disable(GL_DEPTH_TEST);
+}
+
 void gl_set_clear_color(float r, float g, float b, float a) noexcept {
   g_gl.clearColor(r, g, b, a);
 }
@@ -849,6 +853,7 @@ bool initialize_render_device() noexcept {
   g_device.set_depth_mask = &gl_set_depth_mask;
   g_device.set_viewport = &gl_set_viewport;
   g_device.enable_depth_test = &gl_enable_depth_test;
+  g_device.disable_depth_test = &gl_disable_depth_test;
   g_device.set_clear_color = &gl_set_clear_color;
   g_device.clear_color_depth = &gl_clear_color_depth;
 

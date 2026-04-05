@@ -14,6 +14,7 @@
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/mesh_loader.h"
+#include "engine/renderer/pass_resources.h"
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/texture_loader.h"
@@ -66,6 +67,19 @@ struct BackendState final {
   std::array<std::int32_t, kMaxPointLights> pbrPointLightPos{};
   std::array<std::int32_t, kMaxPointLights> pbrPointLightColor{};
   std::array<std::int32_t, kMaxPointLights> pbrPointLightIntensity{};
+
+  // Tonemap shader.
+  ShaderProgramHandle tonemapShaderHandle{};
+  std::uint32_t tonemapProgram = 0U;
+  std::int32_t tonemapSceneColorLocation = -1;
+  std::int32_t tonemapExposureLocation = -1;
+
+  // Empty VAO for fullscreen triangle.
+  std::uint32_t emptyVao = 0U;
+
+  // Tracked drawable dimensions for pass resource resize.
+  int lastWidth = 0;
+  int lastHeight = 0;
 };
 
 BackendState &backend_state() noexcept {
@@ -220,6 +234,54 @@ bool initialize_backend() noexcept {
 
   resolve_pbr_light_uniforms(backend, dev);
 
+  // Load tonemap shader.
+  const ShaderProgramHandle tonemapShaderHandle = load_shader_program(
+      "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
+  if (tonemapShaderHandle == kInvalidShaderProgram) {
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
+                      "failed to load tonemap shader program");
+    destroy_shader_program(pbrShaderHandle);
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  const std::uint32_t tonemapProgram = shader_gpu_program(tonemapShaderHandle);
+  if (tonemapProgram == 0U) {
+    destroy_shader_program(tonemapShaderHandle);
+    destroy_shader_program(pbrShaderHandle);
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  backend.tonemapShaderHandle = tonemapShaderHandle;
+  backend.tonemapProgram = tonemapProgram;
+  backend.tonemapSceneColorLocation =
+      dev->uniform_location(tonemapProgram, "u_sceneColor");
+  backend.tonemapExposureLocation =
+      dev->uniform_location(tonemapProgram, "u_exposure");
+
+  // Empty VAO for fullscreen triangle (required by core profile).
+  backend.emptyVao = dev->create_vertex_array();
+  if (backend.emptyVao == 0U) {
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
+                      "failed to create empty VAO for fullscreen pass");
+    destroy_shader_program(tonemapShaderHandle);
+    destroy_shader_program(pbrShaderHandle);
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
   backend.initialized = true;
   return true;
 }
@@ -228,6 +290,21 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   if (backend == nullptr) {
     return;
   }
+
+  shutdown_pass_resources();
+
+  const RenderDevice *dev = render_device();
+
+  if (backend->emptyVao != 0U && dev != nullptr) {
+    dev->destroy_vertex_array(backend->emptyVao);
+    backend->emptyVao = 0U;
+  }
+
+  if (backend->tonemapShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->tonemapShaderHandle);
+    backend->tonemapShaderHandle = ShaderProgramHandle{};
+  }
+  backend->tonemapProgram = 0U;
 
   if (backend->pbrShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->pbrShaderHandle);
@@ -348,20 +425,35 @@ void flush_renderer(CommandBufferView commandBufferView,
     drawableHeight = 1;
   }
 
+  // Initialize or resize pass resources when dimensions change.
+  if (backend.lastWidth != drawableWidth
+      || backend.lastHeight != drawableHeight) {
+    if (backend.lastWidth == 0 && backend.lastHeight == 0) {
+      initialize_pass_resources(drawableWidth, drawableHeight);
+    } else {
+      resize_pass_resources(drawableWidth, drawableHeight);
+    }
+    backend.lastWidth = drawableWidth;
+    backend.lastHeight = drawableHeight;
+  }
+
+  const PassResources &passRes = get_pass_resources();
+  const std::uint32_t sceneFbo = pass_resource_framebuffer(passRes.sceneColor);
+
+  // --- Scene pass: render to HDR FBO ---
+  dev->bind_framebuffer(sceneFbo);
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
   dev->enable_depth_test();
   dev->set_clear_color(kClearRed, kClearGreen, kClearBlue, 1.0F);
   dev->clear_color_depth();
 
   if (registry == nullptr) {
+    dev->bind_framebuffer(0U);
     return;
   }
 
   // Use PBR shader.
   dev->bind_program(backend.pbrProgram);
-
-  std::uint32_t boundVertexArray = 0U;
-  std::uint32_t boundAlbedoTexture = 0U;
 
   const float aspect =
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
@@ -433,10 +525,30 @@ void flush_renderer(CommandBufferView commandBufferView,
         core::LogLevel::Error, "renderer", "draw command view is invalid");
   }
 
+  // Determine opaque / transparent partition.
+  // After sort_by_key, all opaque commands (transparent bit = 0) precede
+  // transparent ones (transparent bit = 1, MSB of the 64-bit key).
+  constexpr std::uint64_t kTransparentBit = 1ULL << 63;
+
+  std::size_t opaqueCount = 0U;
+  std::size_t totalCount = 0U;
+
   if ((commandBufferView.data != nullptr) && (commandBufferView.count > 0U)) {
-    const std::size_t drawCount =
-        static_cast<std::size_t>(commandBufferView.count);
-    for (std::size_t i = 0U; i < drawCount; ++i) {
+    totalCount = static_cast<std::size_t>(commandBufferView.count);
+    for (std::size_t i = 0U; i < totalCount; ++i) {
+      if ((commandBufferView.data[i].sortKey.value & kTransparentBit) != 0U) {
+        break;
+      }
+      opaqueCount = i + 1U;
+    }
+  }
+
+  // Helper: draw a range of draw commands.
+  auto drawRange = [&](std::size_t start, std::size_t end) {
+    std::uint32_t boundVertexArray = 0U;
+    std::uint32_t boundAlbedoTexture = 0U;
+
+    for (std::size_t i = start; i < end; ++i) {
       const DrawCommand &command = commandBufferView.data[i];
       const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
       if ((mesh == nullptr) || (mesh->vertexArray == 0U)
@@ -500,11 +612,56 @@ void flush_renderer(CommandBufferView commandBufferView,
             0, static_cast<std::int32_t>(mesh->vertexCount));
       }
     }
+  };
+
+  // Pass 1: Opaque — depth write ON, blending OFF, face culling ON.
+  dev->set_depth_mask(true);
+  dev->disable_blending();
+  dev->enable_face_culling();
+  drawRange(0U, opaqueCount);
+
+  // Pass 2: Transparent — depth write OFF, blending ON (alpha), culling OFF.
+  if (opaqueCount < totalCount) {
+    dev->set_depth_mask(false);
+    dev->enable_blending();
+    dev->set_blend_func_alpha();
+    dev->disable_face_culling();
+    drawRange(opaqueCount, totalCount);
+
+    // Restore depth/blend/cull state.
+    dev->set_depth_mask(true);
+    dev->disable_blending();
+    dev->enable_face_culling();
   }
 
   dev->bind_texture(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
+
+  // --- Tonemap pass: HDR scene → LDR back buffer ---
+  dev->bind_framebuffer(0U);
+  dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+  dev->disable_depth_test();
+
+  dev->bind_program(backend.tonemapProgram);
+
+  const std::uint32_t sceneColorTex =
+      pass_resource_gpu_texture(passRes.sceneColor);
+  dev->bind_texture(0, sceneColorTex);
+  if (backend.tonemapSceneColorLocation >= 0) {
+    dev->set_uniform_int(backend.tonemapSceneColorLocation, 0);
+  }
+  if (backend.tonemapExposureLocation >= 0) {
+    dev->set_uniform_float(backend.tonemapExposureLocation, 1.0F);
+  }
+
+  dev->bind_vertex_array(backend.emptyVao);
+  dev->draw_arrays_triangles(0, 3);
+
+  dev->bind_texture(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->enable_depth_test();
 }
 
 void shutdown_renderer() noexcept {

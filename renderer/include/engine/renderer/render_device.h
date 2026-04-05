@@ -103,6 +103,7 @@ struct RenderDevice final {
                        std::int32_t w,
                        std::int32_t h) noexcept = nullptr;
   void (*enable_depth_test)() noexcept = nullptr;
+  void (*disable_depth_test)() noexcept = nullptr;
   void (*set_clear_color)(float r,
                           float g,
                           float b,

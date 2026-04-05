@@ -3,6 +3,7 @@ add_library(engine_renderer STATIC
     src/asset_manager.cpp
     src/command_buffer.cpp
     src/mesh_loader.cpp
+    src/pass_resources.cpp
     src/render_device_gl.cpp
     src/shader_system.cpp
     src/texture_loader.cpp
