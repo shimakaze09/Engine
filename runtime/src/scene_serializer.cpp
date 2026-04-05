@@ -1,0 +1,955 @@
+#include "engine/runtime/scene_serializer.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <new>
+
+#include "engine/core/json.h"
+#include "engine/core/logging.h"
+#include "engine/core/reflect.h"
+#include "engine/math/quat.h"
+#include "engine/math/vec2.h"
+#include "engine/math/vec3.h"
+#include "engine/math/vec4.h"
+#include "engine/runtime/reflect_types.h"
+#include "engine/runtime/world.h"
+
+namespace engine::runtime {
+
+namespace {
+
+constexpr const char *kSceneLogChannel = "scene";
+constexpr const char *kVersionKey = "version";
+constexpr std::uint32_t kCurrentSceneVersion = 2U;
+constexpr const char *kEntitiesKey = "entities";
+constexpr const char *kComponentsKey = "components";
+constexpr const char *kPersistentIdKey = "persistentId";
+constexpr const char *kTransformTypeName = "engine::runtime::Transform";
+constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
+constexpr const char *kColliderTypeName = "engine::runtime::Collider";
+constexpr const char *kNameFieldKey = "name";
+constexpr const char *kMeshAssetIdKey = "meshAssetId";
+
+bool open_file_for_read(const char *path, FILE **outFile) noexcept {
+  if ((path == nullptr) || (outFile == nullptr)) {
+    return false;
+  }
+
+  *outFile = nullptr;
+#ifdef _WIN32
+  return fopen_s(outFile, path, "rb") == 0;
+#else
+  *outFile = std::fopen(path, "rb");
+  return *outFile != nullptr;
+#endif
+}
+
+bool open_file_for_write(const char *path, FILE **outFile) noexcept {
+  if ((path == nullptr) || (outFile == nullptr)) {
+    return false;
+  }
+
+  *outFile = nullptr;
+#ifdef _WIN32
+  return fopen_s(outFile, path, "wb") == 0;
+#else
+  *outFile = std::fopen(path, "wb");
+  return *outFile != nullptr;
+#endif
+}
+
+bool read_text_file(const char *path,
+                    std::unique_ptr<char[]> *outBuffer,
+                    std::size_t *outSize) noexcept {
+  if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
+    return false;
+  }
+
+  outBuffer->reset();
+  *outSize = 0U;
+
+  FILE *file = nullptr;
+  if (!open_file_for_read(path, &file) || (file == nullptr)) {
+    return false;
+  }
+
+  if (std::fseek(file, 0, SEEK_END) != 0) {
+    std::fclose(file);
+    return false;
+  }
+
+  const long fileLength = std::ftell(file);
+  if (fileLength <= 0L) {
+    std::fclose(file);
+    return false;
+  }
+
+  if (std::fseek(file, 0, SEEK_SET) != 0) {
+    std::fclose(file);
+    return false;
+  }
+
+  const std::size_t fileSize = static_cast<std::size_t>(fileLength);
+  std::unique_ptr<char[]> buffer(new (std::nothrow) char[fileSize + 1U]);
+  if (buffer == nullptr) {
+    std::fclose(file);
+    return false;
+  }
+
+  const std::size_t readCount = std::fread(buffer.get(), 1U, fileSize, file);
+  const bool hitError = std::ferror(file) != 0;
+  std::fclose(file);
+
+  if (hitError || (readCount != fileSize)) {
+    return false;
+  }
+
+  buffer[fileSize] = '\0';
+  *outSize = fileSize;
+  outBuffer->swap(buffer);
+  return true;
+}
+
+bool write_text_file(const char *path,
+                     const char *text,
+                     std::size_t size) noexcept {
+  if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+  if (!open_file_for_write(path, &file) || (file == nullptr)) {
+    return false;
+  }
+
+  const std::size_t written = std::fwrite(text, 1U, size, file);
+  std::fclose(file);
+  return written == size;
+}
+
+void write_vec2(core::JsonWriter &writer,
+                const char *key,
+                const math::Vec2 &value) noexcept {
+  writer.begin_array(key);
+  writer.write_float_value(value.x);
+  writer.write_float_value(value.y);
+  writer.end_array();
+}
+
+void write_vec3(core::JsonWriter &writer,
+                const char *key,
+                const math::Vec3 &value) noexcept {
+  writer.begin_array(key);
+  writer.write_float_value(value.x);
+  writer.write_float_value(value.y);
+  writer.write_float_value(value.z);
+  writer.end_array();
+}
+
+void write_vec4(core::JsonWriter &writer,
+                const char *key,
+                const math::Vec4 &value) noexcept {
+  writer.begin_array(key);
+  writer.write_float_value(value.x);
+  writer.write_float_value(value.y);
+  writer.write_float_value(value.z);
+  writer.write_float_value(value.w);
+  writer.end_array();
+}
+
+void write_quat(core::JsonWriter &writer,
+                const char *key,
+                const math::Quat &value) noexcept {
+  writer.begin_array(key);
+  writer.write_float_value(value.x);
+  writer.write_float_value(value.y);
+  writer.write_float_value(value.z);
+  writer.write_float_value(value.w);
+  writer.end_array();
+}
+
+bool read_float_array(const core::JsonParser &parser,
+                      const core::JsonValue &arrayValue,
+                      float *outValues,
+                      std::size_t expectedCount) noexcept {
+  if ((outValues == nullptr)
+      || (arrayValue.type != core::JsonValue::Type::Array)) {
+    return false;
+  }
+
+  if (parser.array_size(arrayValue) != expectedCount) {
+    return false;
+  }
+
+  for (std::size_t i = 0U; i < expectedCount; ++i) {
+    core::JsonValue element{};
+    if (!parser.get_array_element(arrayValue, i, &element)) {
+      return false;
+    }
+
+    if (!parser.as_float(element, &outValues[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool read_vec2(const core::JsonParser &parser,
+               const core::JsonValue &value,
+               math::Vec2 *outVec) noexcept {
+  if (outVec == nullptr) {
+    return false;
+  }
+
+  float fields[2] = {};
+  if (!read_float_array(parser, value, fields, 2U)) {
+    return false;
+  }
+
+  outVec->x = fields[0];
+  outVec->y = fields[1];
+  return true;
+}
+
+bool read_vec3(const core::JsonParser &parser,
+               const core::JsonValue &value,
+               math::Vec3 *outVec) noexcept {
+  if (outVec == nullptr) {
+    return false;
+  }
+
+  float fields[3] = {};
+  if (!read_float_array(parser, value, fields, 3U)) {
+    return false;
+  }
+
+  outVec->x = fields[0];
+  outVec->y = fields[1];
+  outVec->z = fields[2];
+  return true;
+}
+
+bool read_vec4(const core::JsonParser &parser,
+               const core::JsonValue &value,
+               math::Vec4 *outVec) noexcept {
+  if (outVec == nullptr) {
+    return false;
+  }
+
+  float fields[4] = {};
+  if (!read_float_array(parser, value, fields, 4U)) {
+    return false;
+  }
+
+  outVec->x = fields[0];
+  outVec->y = fields[1];
+  outVec->z = fields[2];
+  outVec->w = fields[3];
+  return true;
+}
+
+bool read_quat(const core::JsonParser &parser,
+               const core::JsonValue &value,
+               math::Quat *outQuat) noexcept {
+  if (outQuat == nullptr) {
+    return false;
+  }
+
+  float fields[4] = {};
+  if (!read_float_array(parser, value, fields, 4U)) {
+    return false;
+  }
+
+  outQuat->x = fields[0];
+  outQuat->y = fields[1];
+  outQuat->z = fields[2];
+  outQuat->w = fields[3];
+  return true;
+}
+
+bool write_reflected_component(core::JsonWriter &writer,
+                               const char *componentName,
+                               const core::TypeDescriptor &descriptor,
+                               const void *instance) noexcept {
+  if ((componentName == nullptr) || (instance == nullptr)) {
+    return false;
+  }
+
+  writer.write_key(componentName);
+  writer.begin_object();
+
+  for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
+    const core::TypeField &field = descriptor.fields[i];
+    if (field.name == nullptr) {
+      continue;
+    }
+
+    switch (field.kind) {
+    case core::TypeField::Kind::Float: {
+      const float *value = descriptor.field_ptr<float>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      writer.write_float(field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Uint32: {
+      const std::uint32_t *value =
+          descriptor.field_ptr<std::uint32_t>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      writer.write_uint(field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Bool: {
+      const bool *value = descriptor.field_ptr<bool>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      writer.write_bool(field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Vec2: {
+      const math::Vec2 *value =
+          descriptor.field_ptr<math::Vec2>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_vec2(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Vec3: {
+      const math::Vec3 *value =
+          descriptor.field_ptr<math::Vec3>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_vec3(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Vec4: {
+      const math::Vec4 *value =
+          descriptor.field_ptr<math::Vec4>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_vec4(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Quat: {
+      const math::Quat *value =
+          descriptor.field_ptr<math::Quat>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_quat(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Int32:
+      // Current scene components do not contain signed integer fields.
+      return false;
+    }
+
+    if (writer.failed()) {
+      return false;
+    }
+  }
+
+  writer.end_object();
+  return !writer.failed();
+}
+
+bool read_reflected_component(const core::JsonParser &parser,
+                              const core::JsonValue &componentObject,
+                              const core::TypeDescriptor &descriptor,
+                              void *instance) noexcept {
+  if ((instance == nullptr)
+      || (componentObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
+    const core::TypeField &field = descriptor.fields[i];
+    if (field.name == nullptr) {
+      continue;
+    }
+
+    core::JsonValue fieldValue{};
+    if (!parser.get_object_field(componentObject, field.name, &fieldValue)) {
+      continue;
+    }
+
+    switch (field.kind) {
+    case core::TypeField::Kind::Float: {
+      float *value = descriptor.field_ptr<float>(instance, field);
+      if ((value == nullptr) || !parser.as_float(fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Uint32: {
+      std::uint32_t *value =
+          descriptor.field_ptr<std::uint32_t>(instance, field);
+      if ((value == nullptr) || !parser.as_uint(fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Bool: {
+      bool *value = descriptor.field_ptr<bool>(instance, field);
+      if ((value == nullptr) || !parser.as_bool(fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Vec2: {
+      math::Vec2 *value = descriptor.field_ptr<math::Vec2>(instance, field);
+      if ((value == nullptr) || !read_vec2(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Vec3: {
+      math::Vec3 *value = descriptor.field_ptr<math::Vec3>(instance, field);
+      if ((value == nullptr) || !read_vec3(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Vec4: {
+      math::Vec4 *value = descriptor.field_ptr<math::Vec4>(instance, field);
+      if ((value == nullptr) || !read_vec4(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Quat: {
+      math::Quat *value = descriptor.field_ptr<math::Quat>(instance, field);
+      if ((value == nullptr) || !read_quat(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Int32:
+      // Current scene components do not contain signed integer fields.
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool read_mesh_component(const core::JsonParser &parser,
+                         const core::JsonValue &meshObject,
+                         MeshComponent *outComponent) noexcept {
+  if ((outComponent == nullptr)
+      || (meshObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  MeshComponent component{};
+
+  core::JsonValue meshIdValue{};
+  if (parser.get_object_field(meshObject, kMeshAssetIdKey, &meshIdValue)) {
+    if (!parser.as_uint(meshIdValue, &component.meshAssetId)) {
+      return false;
+    }
+  } else if (parser.get_object_field(meshObject, "meshId", &meshIdValue)) {
+    // Backward-compatible read path for scenes authored before asset IDs.
+    if (!parser.as_uint(meshIdValue, &component.meshAssetId)) {
+      return false;
+    }
+  }
+
+  core::JsonValue albedoValue{};
+  if (parser.get_object_field(meshObject, "albedo", &albedoValue)) {
+    if (!read_vec3(parser, albedoValue, &component.material.albedo)) {
+      return false;
+    }
+  }
+
+  *outComponent = component;
+  return true;
+}
+
+bool log_scene_error(const char *message) noexcept {
+  if (message != nullptr) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel, message);
+  }
+
+  return false;
+}
+
+bool deserialize_scene_entities(const core::JsonParser &parser,
+                                const core::JsonValue &entities,
+                                const core::TypeDescriptor &transformDesc,
+                                const core::TypeDescriptor &rigidBodyDesc,
+                                const core::TypeDescriptor &colliderDesc,
+                                World &targetWorld) noexcept {
+  const std::size_t entityCount = parser.array_size(entities);
+  for (std::size_t i = 0U; i < entityCount; ++i) {
+    core::JsonValue entityValue{};
+    if (!parser.get_array_element(entities, i, &entityValue)
+        || (entityValue.type != core::JsonValue::Type::Object)) {
+      return log_scene_error("entity entry must be an object");
+    }
+
+    PersistentId persistentId = kInvalidPersistentId;
+    core::JsonValue persistentIdValue{};
+    if (parser.get_object_field(
+            entityValue, kPersistentIdKey, &persistentIdValue)) {
+      if (!parser.as_uint(persistentIdValue, &persistentId)) {
+        return log_scene_error("persistentId must be a uint");
+      }
+
+      if ((persistentId != kInvalidPersistentId)
+          && (targetWorld.find_entity_by_persistent_id(persistentId)
+              != kInvalidEntity)) {
+        return log_scene_error("duplicate persistentId in scene");
+      }
+    }
+
+    const Entity entity =
+        (persistentId != kInvalidPersistentId)
+            ? targetWorld.create_entity_with_persistent_id(persistentId)
+            : targetWorld.create_entity();
+    if (entity == kInvalidEntity) {
+      return log_scene_error("failed to allocate entity while loading scene");
+    }
+
+    core::JsonValue components{};
+    if (!parser.get_object_field(entityValue, kComponentsKey, &components)) {
+      continue;
+    }
+
+    if (components.type != core::JsonValue::Type::Object) {
+      targetWorld.destroy_entity(entity);
+      return log_scene_error("components field must be an object");
+    }
+
+    core::JsonValue transformValue{};
+    if (parser.get_object_field(components, "Transform", &transformValue)) {
+      Transform transform{};
+      if (!read_reflected_component(
+              parser, transformValue, transformDesc, &transform)
+          || !targetWorld.add_transform(entity, transform)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load Transform component");
+      }
+    }
+
+    core::JsonValue rigidBodyValue{};
+    if (parser.get_object_field(components, "RigidBody", &rigidBodyValue)) {
+      RigidBody rigidBody{};
+      if (!read_reflected_component(
+              parser, rigidBodyValue, rigidBodyDesc, &rigidBody)
+          || !targetWorld.add_rigid_body(entity, rigidBody)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load RigidBody component");
+      }
+    }
+
+    core::JsonValue colliderValue{};
+    if (parser.get_object_field(components, "Collider", &colliderValue)) {
+      Collider collider{};
+      if (!read_reflected_component(
+              parser, colliderValue, colliderDesc, &collider)
+          || !targetWorld.add_collider(entity, collider)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load Collider component");
+      }
+    }
+
+    core::JsonValue meshValue{};
+    if (parser.get_object_field(components, "MeshComponent", &meshValue)) {
+      MeshComponent mesh{};
+      if (!read_mesh_component(parser, meshValue, &mesh)
+          || !targetWorld.add_mesh_component(entity, mesh)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load MeshComponent component");
+      }
+    }
+
+    core::JsonValue nameValue{};
+    if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
+      const char *nameBegin = nullptr;
+      std::size_t nameLength = 0U;
+      if (!parser.as_string(nameValue, &nameBegin, &nameLength)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to parse name component string");
+      }
+
+      NameComponent nameComponent{};
+      const std::size_t maxLength = sizeof(nameComponent.name) - 1U;
+      const std::size_t copyLength =
+          (nameLength > maxLength) ? maxLength : nameLength;
+      if ((copyLength > 0U) && (nameBegin != nullptr)) {
+        std::memcpy(nameComponent.name, nameBegin, copyLength);
+      }
+      nameComponent.name[copyLength] = '\0';
+
+      if (!targetWorld.add_name_component(entity, nameComponent)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load NameComponent");
+      }
+    }
+  }
+
+  return true;
+}
+
+bool copy_world_contents(const World &sourceWorld,
+                         World &targetWorld) noexcept {
+  for (std::uint32_t index = 1U;
+       index <= static_cast<std::uint32_t>(World::kMaxEntities);
+       ++index) {
+    const Entity sourceEntity = sourceWorld.find_entity_by_index(index);
+    if (sourceEntity == kInvalidEntity) {
+      continue;
+    }
+
+    const PersistentId persistentId = sourceWorld.persistent_id(sourceEntity);
+    const Entity targetEntity =
+        targetWorld.create_entity_with_persistent_id(persistentId);
+    if (targetEntity == kInvalidEntity) {
+      return false;
+    }
+
+    Transform transform{};
+    if (sourceWorld.get_transform(sourceEntity, &transform)
+        && !targetWorld.add_transform(targetEntity, transform)) {
+      return false;
+    }
+
+    RigidBody rigidBody{};
+    if (sourceWorld.get_rigid_body(sourceEntity, &rigidBody)
+        && !targetWorld.add_rigid_body(targetEntity, rigidBody)) {
+      return false;
+    }
+
+    Collider collider{};
+    if (sourceWorld.get_collider(sourceEntity, &collider)
+        && !targetWorld.add_collider(targetEntity, collider)) {
+      return false;
+    }
+
+    MeshComponent mesh{};
+    if (sourceWorld.get_mesh_component(sourceEntity, &mesh)
+        && !targetWorld.add_mesh_component(targetEntity, mesh)) {
+      return false;
+    }
+
+    NameComponent name{};
+    if (sourceWorld.get_name_component(sourceEntity, &name)
+        && !targetWorld.add_name_component(targetEntity, name)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool serialize_scene_to_writer(const World &world,
+                               core::JsonWriter *outWriter) noexcept {
+  if (outWriter == nullptr) {
+    return false;
+  }
+
+  if (world.current_phase() != WorldPhase::Idle) {
+    core::log_message(core::LogLevel::Warning,
+                      kSceneLogChannel,
+                      "save_scene requires world Idle phase");
+    return false;
+  }
+
+  ensure_runtime_reflection_registered();
+  const core::TypeRegistry &registry = core::global_type_registry();
+  const core::TypeDescriptor *transformDesc =
+      registry.find_type(kTransformTypeName);
+  const core::TypeDescriptor *rigidBodyDesc =
+      registry.find_type(kRigidBodyTypeName);
+  const core::TypeDescriptor *colliderDesc =
+      registry.find_type(kColliderTypeName);
+  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr)
+      || (colliderDesc == nullptr)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "missing runtime reflection descriptors");
+    return false;
+  }
+
+  core::JsonWriter &writer = *outWriter;
+  writer.reset();
+  writer.begin_object();
+  writer.write_uint(kVersionKey, kCurrentSceneVersion);
+  writer.begin_array(kEntitiesKey);
+
+  bool writeFailed = false;
+  world.for_each_alive([&](Entity entity) {
+    if (writeFailed) {
+      return;
+    }
+
+    writer.begin_object();
+    writer.write_uint(kPersistentIdKey, world.persistent_id(entity));
+    writer.write_uint("index", entity.index);
+    writer.write_uint("generation", entity.generation);
+
+    writer.write_key(kComponentsKey);
+    writer.begin_object();
+
+    Transform transform{};
+    if (world.get_transform(entity, &transform)) {
+      if (!write_reflected_component(
+              writer, "Transform", *transformDesc, &transform)) {
+        writeFailed = true;
+        return;
+      }
+    }
+
+    RigidBody rigidBody{};
+    if (world.get_rigid_body(entity, &rigidBody)
+        && !write_reflected_component(
+            writer, "RigidBody", *rigidBodyDesc, &rigidBody)) {
+      writeFailed = true;
+      return;
+    }
+
+    Collider collider{};
+    if (world.get_collider(entity, &collider)
+        && !write_reflected_component(
+            writer, "Collider", *colliderDesc, &collider)) {
+      writeFailed = true;
+      return;
+    }
+
+    MeshComponent mesh{};
+    if (world.get_mesh_component(entity, &mesh)) {
+      writer.write_key("MeshComponent");
+      writer.begin_object();
+      writer.write_uint(kMeshAssetIdKey, mesh.meshAssetId);
+      write_vec3(writer, "albedo", mesh.material.albedo);
+      writer.end_object();
+    }
+
+    NameComponent name{};
+    if (world.get_name_component(entity, &name)) {
+      writer.write_string(kNameFieldKey, name.name);
+    }
+
+    writer.end_object();
+    writer.end_object();
+    writeFailed = writer.failed();
+  });
+
+  writer.end_array();
+  writer.end_object();
+
+  if (writeFailed || !writer.ok()) {
+    core::log_message(
+        core::LogLevel::Error, kSceneLogChannel, "failed to build scene JSON");
+    return false;
+  }
+
+  return true;
+}
+
+} // namespace
+
+void reset_world(World &world) noexcept {
+  for (std::uint32_t index = 1U;
+       index <= static_cast<std::uint32_t>(World::kMaxEntities);
+       ++index) {
+    const Entity entity = world.find_entity_by_index(index);
+    if (entity != kInvalidEntity) {
+      static_cast<void>(world.destroy_entity(entity));
+    }
+  }
+}
+
+bool save_scene(const World &world, const char *path) noexcept {
+  if (path == nullptr) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "save_scene called with null path");
+    return false;
+  }
+
+  core::JsonWriter writer{};
+  if (!serialize_scene_to_writer(world, &writer)) {
+    return false;
+  }
+
+  if (!write_text_file(path, writer.result(), writer.result_size())) {
+    core::log_message(
+        core::LogLevel::Error, kSceneLogChannel, "failed to write scene file");
+    return false;
+  }
+
+  return true;
+}
+
+bool save_scene(const World &world,
+                char *buffer,
+                std::size_t capacity,
+                std::size_t *outSize) noexcept {
+  if ((buffer == nullptr) || (outSize == nullptr) || (capacity < 2U)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "save_scene called with invalid output buffer");
+    return false;
+  }
+
+  core::JsonWriter writer{};
+  if (!serialize_scene_to_writer(world, &writer)) {
+    return false;
+  }
+
+  const std::size_t resultSize = writer.result_size();
+  if ((resultSize + 1U) > capacity) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "output scene buffer capacity is too small");
+    return false;
+  }
+
+  std::memcpy(buffer, writer.result(), resultSize);
+  buffer[resultSize] = '\0';
+  *outSize = resultSize;
+  return true;
+}
+
+bool load_scene(World &world, const char *path) noexcept {
+  if (path == nullptr) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "load_scene called with null path");
+    return false;
+  }
+
+  std::size_t fileSize = 0U;
+  std::unique_ptr<char[]> fileBuffer{};
+  if (!read_text_file(path, &fileBuffer, &fileSize)) {
+    core::log_message(
+        core::LogLevel::Error, kSceneLogChannel, "failed to read scene file");
+    return false;
+  }
+
+  return load_scene(world, fileBuffer.get(), fileSize);
+}
+
+bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
+  if ((buffer == nullptr) || (size == 0U)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "load_scene called with invalid input buffer");
+    return false;
+  }
+
+  if (world.current_phase() != WorldPhase::Idle) {
+    core::log_message(core::LogLevel::Warning,
+                      kSceneLogChannel,
+                      "load_scene requires world Idle phase");
+    return false;
+  }
+
+  core::JsonParser parser{};
+  if (!parser.parse(buffer, size)) {
+    core::log_message(
+        core::LogLevel::Error, kSceneLogChannel, "malformed scene JSON");
+    return false;
+  }
+
+  const core::JsonValue *root = parser.root();
+  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "scene root must be an object");
+    return false;
+  }
+
+  std::uint32_t sceneVersion = 1U;
+  core::JsonValue versionValue{};
+  if (parser.get_object_field(*root, kVersionKey, &versionValue)) {
+    if (!parser.as_uint(versionValue, &sceneVersion)) {
+      core::log_message(core::LogLevel::Error,
+                        kSceneLogChannel,
+                        "scene version must be an unsigned integer");
+      return false;
+    }
+  }
+
+  if ((sceneVersion == 0U) || (sceneVersion > kCurrentSceneVersion)) {
+    core::log_message(
+        core::LogLevel::Error, kSceneLogChannel, "unsupported scene version");
+    return false;
+  }
+
+  core::JsonValue entities{};
+  if (!parser.get_object_field(*root, kEntitiesKey, &entities)
+      || (entities.type != core::JsonValue::Type::Array)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "scene JSON must include entities array");
+    return false;
+  }
+
+  ensure_runtime_reflection_registered();
+  const core::TypeRegistry &registry = core::global_type_registry();
+  const core::TypeDescriptor *transformDesc =
+      registry.find_type(kTransformTypeName);
+  const core::TypeDescriptor *rigidBodyDesc =
+      registry.find_type(kRigidBodyTypeName);
+  const core::TypeDescriptor *colliderDesc =
+      registry.find_type(kColliderTypeName);
+  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr)
+      || (colliderDesc == nullptr)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "missing runtime reflection descriptors");
+    return false;
+  }
+
+  std::unique_ptr<World> stagedWorld(new (std::nothrow) World());
+  if (stagedWorld == nullptr) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "failed to allocate staged world for scene load");
+    return false;
+  }
+
+  if (!deserialize_scene_entities(parser,
+                                  entities,
+                                  *transformDesc,
+                                  *rigidBodyDesc,
+                                  *colliderDesc,
+                                  *stagedWorld)) {
+    return false;
+  }
+
+  reset_world(world);
+
+  if (!copy_world_contents(*stagedWorld, world)) {
+    core::log_message(core::LogLevel::Error,
+                      kSceneLogChannel,
+                      "failed to commit loaded scene");
+    reset_world(world);
+    return false;
+  }
+
+  return true;
+}
+
+} // namespace engine::runtime
