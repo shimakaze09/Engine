@@ -2,6 +2,7 @@
 #include "engine/math/transform.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/asset_database.h"
+#include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/runtime/render_prep_pipeline.h"
@@ -169,6 +170,16 @@ bool run_render_prep_pipeline(
   engine::core::JobHandle mergeHandle{};
   const std::size_t frameThreadCount =
       static_cast<std::size_t>(engine::core::thread_count());
+  // Compute a view-projection matrix from the default camera so that frustum
+  // culling mirrors what a real frame would produce.
+  const engine::renderer::CameraState cam =
+      engine::renderer::get_active_camera();
+  constexpr float kDefaultAspect = 16.0F / 9.0F;
+  const engine::math::Mat4 vpMatrix = engine::math::mul(
+      engine::math::perspective(
+          cam.fovRadians, kDefaultAspect, cam.nearPlane, cam.farPlane),
+      engine::math::look_at(cam.position, cam.target, cam.up));
+
   if (!engine::runtime::enqueue_render_prep_pipeline(pipelineContext,
                                                      world,
                                                      commandBuffer,
@@ -179,7 +190,7 @@ bool run_render_prep_pipeline(
                                                      &frameGraphFailed,
                                                      frameThreadCount,
                                                      256U,
-                                                     engine::math::Mat4(),
+                                                     vpMatrix,
                                                      &mergeHandle)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
@@ -297,6 +308,16 @@ int main() {
     engine::scripting::shutdown_scripting();
     return fail(5);
   }
+
+  // Place the camera far enough to see the entity's entire path (x 0..14.75).
+  engine::renderer::CameraState testCamera{};
+  testCamera.position = engine::math::Vec3(7.5F, 5.0F, 40.0F);
+  testCamera.target = engine::math::Vec3(7.5F, 1.0F, 0.0F);
+  testCamera.up = engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  testCamera.fovRadians = 1.0471975512F; // 60 degrees
+  testCamera.nearPlane = 0.1F;
+  testCamera.farPlane = 200.0F;
+  engine::renderer::set_active_camera(testCamera);
 
   const std::size_t aliveBefore = world->alive_entity_count();
   engine::runtime::Entity mover = engine::runtime::kInvalidEntity;
