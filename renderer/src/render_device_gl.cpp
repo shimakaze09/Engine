@@ -47,6 +47,114 @@ namespace {
 #define GL_UNSIGNED_INT 0x1405
 #endif
 
+#ifndef GL_UNSIGNED_BYTE
+#define GL_UNSIGNED_BYTE 0x1401
+#endif
+
+#ifndef GL_FLOAT
+#define GL_FLOAT 0x1406
+#endif
+
+#ifndef GL_RED
+#define GL_RED 0x1903
+#endif
+
+#ifndef GL_TEXTURE_2D
+#define GL_TEXTURE_2D 0x0DE1
+#endif
+
+#ifndef GL_TEXTURE0
+#define GL_TEXTURE0 0x84C0
+#endif
+
+#ifndef GL_TEXTURE_WRAP_S
+#define GL_TEXTURE_WRAP_S 0x2802
+#endif
+
+#ifndef GL_TEXTURE_WRAP_T
+#define GL_TEXTURE_WRAP_T 0x2803
+#endif
+
+#ifndef GL_TEXTURE_MIN_FILTER
+#define GL_TEXTURE_MIN_FILTER 0x2801
+#endif
+
+#ifndef GL_TEXTURE_MAG_FILTER
+#define GL_TEXTURE_MAG_FILTER 0x2800
+#endif
+
+#ifndef GL_LINEAR
+#define GL_LINEAR 0x2601
+#endif
+
+#ifndef GL_LINEAR_MIPMAP_LINEAR
+#define GL_LINEAR_MIPMAP_LINEAR 0x2703
+#endif
+
+#ifndef GL_REPEAT
+#define GL_REPEAT 0x2901
+#endif
+
+#ifndef GL_RGB
+#define GL_RGB 0x1907
+#endif
+
+#ifndef GL_RGBA
+#define GL_RGBA 0x1908
+#endif
+
+#ifndef GL_RGB16F
+#define GL_RGB16F 0x881B
+#endif
+
+#ifndef GL_RGBA16F
+#define GL_RGBA16F 0x881A
+#endif
+
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER 0x8D40
+#endif
+
+#ifndef GL_COLOR_ATTACHMENT0
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#endif
+
+#ifndef GL_DEPTH_ATTACHMENT
+#define GL_DEPTH_ATTACHMENT 0x8D00
+#endif
+
+#ifndef GL_FRAMEBUFFER_COMPLETE
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#endif
+
+#ifndef GL_DEPTH_COMPONENT24
+#define GL_DEPTH_COMPONENT24 0x81A6
+#endif
+
+#ifndef GL_DEPTH_COMPONENT
+#define GL_DEPTH_COMPONENT 0x1902
+#endif
+
+#ifndef GL_BLEND
+#define GL_BLEND 0x0BE2
+#endif
+
+#ifndef GL_SRC_ALPHA
+#define GL_SRC_ALPHA 0x0302
+#endif
+
+#ifndef GL_ONE_MINUS_SRC_ALPHA
+#define GL_ONE_MINUS_SRC_ALPHA 0x0303
+#endif
+
+#ifndef GL_CULL_FACE
+#define GL_CULL_FACE 0x0B44
+#endif
+
+#ifndef GL_DEPTH_WRITEMASK
+#define GL_DEPTH_WRITEMASK 0x0B72
+#endif
+
 #ifndef GL_ARRAY_BUFFER
 #define GL_ARRAY_BUFFER 0x8892
 #endif
@@ -114,8 +222,44 @@ using GlDrawElementsProc = void(APIENTRYP)(GLenum,
                                            const void *);
 using GlViewportProc = void(APIENTRYP)(GLint, GLint, GLsizei, GLsizei);
 using GlEnableProc = void(APIENTRYP)(GLenum);
+using GlDisableProc = void(APIENTRYP)(GLenum);
 using GlClearColorProc = void(APIENTRYP)(GLfloat, GLfloat, GLfloat, GLfloat);
 using GlClearProc = void(APIENTRYP)(GLbitfield);
+
+// Uniform additional types
+using GlUniform1iProc = void(APIENTRYP)(GLint, GLint);
+using GlUniform4fvProc = void(APIENTRYP)(GLint, GLsizei, const GLfloat *);
+
+// Texture procs
+using GlGenTexturesProc = void(APIENTRYP)(GLsizei, GLuint *);
+using GlDeleteTexturesProc = void(APIENTRYP)(GLsizei, const GLuint *);
+using GlBindTextureProc = void(APIENTRYP)(GLenum, GLuint);
+using GlActiveTextureProc = void(APIENTRYP)(GLenum);
+using GlTexImage2DProc = void(APIENTRYP)(GLenum,
+                                         GLint,
+                                         GLint,
+                                         GLsizei,
+                                         GLsizei,
+                                         GLint,
+                                         GLenum,
+                                         GLenum,
+                                         const void *);
+using GlTexParameteriProc = void(APIENTRYP)(GLenum, GLenum, GLint);
+using GlGenerateMipmapProc = void(APIENTRYP)(GLenum);
+
+// Framebuffer procs
+using GlGenFramebuffersProc = void(APIENTRYP)(GLsizei, GLuint *);
+using GlDeleteFramebuffersProc = void(APIENTRYP)(GLsizei, const GLuint *);
+using GlBindFramebufferProc = void(APIENTRYP)(GLenum, GLuint);
+using GlFramebufferTexture2DProc =
+    void(APIENTRYP)(GLenum, GLenum, GLenum, GLuint, GLint);
+using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
+
+// Blend procs
+using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
+
+// Depth mask
+using GlDepthMaskProc = void(APIENTRYP)(GLboolean);
 
 // --- Consolidated GL function table ---
 
@@ -151,8 +295,35 @@ struct GlTable final {
   GlDrawElementsProc drawElements = nullptr;
   GlViewportProc viewport = nullptr;
   GlEnableProc enable = nullptr;
+  GlDisableProc disable = nullptr;
   GlClearColorProc clearColor = nullptr;
   GlClearProc clear = nullptr;
+
+  // Uniform additional
+  GlUniform1iProc uniform1i = nullptr;
+  GlUniform4fvProc uniform4fv = nullptr;
+
+  // Textures
+  GlGenTexturesProc genTextures = nullptr;
+  GlDeleteTexturesProc deleteTextures = nullptr;
+  GlBindTextureProc bindTexture = nullptr;
+  GlActiveTextureProc activeTexture = nullptr;
+  GlTexImage2DProc texImage2D = nullptr;
+  GlTexParameteriProc texParameteri = nullptr;
+  GlGenerateMipmapProc generateMipmap = nullptr;
+
+  // Framebuffers
+  GlGenFramebuffersProc genFramebuffers = nullptr;
+  GlDeleteFramebuffersProc deleteFramebuffers = nullptr;
+  GlBindFramebufferProc bindFramebuffer = nullptr;
+  GlFramebufferTexture2DProc framebufferTexture2D = nullptr;
+  GlCheckFramebufferStatusProc checkFramebufferStatus = nullptr;
+
+  // Blend
+  GlBlendFuncProc blendFunc = nullptr;
+
+  // Depth mask
+  GlDepthMaskProc depthMask = nullptr;
 };
 
 bool g_deviceInitialized = false;
@@ -197,8 +368,25 @@ bool load_all_gl_functions() noexcept {
          && load_proc(&g_gl.drawElements, "glDrawElements")
          && load_proc(&g_gl.viewport, "glViewport")
          && load_proc(&g_gl.enable, "glEnable")
+         && load_proc(&g_gl.disable, "glDisable")
          && load_proc(&g_gl.clearColor, "glClearColor")
-         && load_proc(&g_gl.clear, "glClear");
+         && load_proc(&g_gl.clear, "glClear")
+         && load_proc(&g_gl.uniform1i, "glUniform1i")
+         && load_proc(&g_gl.uniform4fv, "glUniform4fv")
+         && load_proc(&g_gl.genTextures, "glGenTextures")
+         && load_proc(&g_gl.deleteTextures, "glDeleteTextures")
+         && load_proc(&g_gl.bindTexture, "glBindTexture")
+         && load_proc(&g_gl.activeTexture, "glActiveTexture")
+         && load_proc(&g_gl.texImage2D, "glTexImage2D")
+         && load_proc(&g_gl.texParameteri, "glTexParameteri")
+         && load_proc(&g_gl.generateMipmap, "glGenerateMipmap")
+         && load_proc(&g_gl.genFramebuffers, "glGenFramebuffers")
+         && load_proc(&g_gl.deleteFramebuffers, "glDeleteFramebuffers")
+         && load_proc(&g_gl.bindFramebuffer, "glBindFramebuffer")
+         && load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D")
+         && load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus")
+         && load_proc(&g_gl.blendFunc, "glBlendFunc")
+         && load_proc(&g_gl.depthMask, "glDepthMask");
 }
 
 // --- Device function implementations ---
@@ -397,6 +585,214 @@ void gl_clear_color_depth() noexcept {
   g_gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+// --- Uniform additional ---
+
+void gl_set_uniform_int(std::int32_t loc, std::int32_t value) noexcept {
+  g_gl.uniform1i(static_cast<GLint>(loc), static_cast<GLint>(value));
+}
+
+void gl_set_uniform_vec4(std::int32_t loc, const float *value) noexcept {
+  g_gl.uniform4fv(static_cast<GLint>(loc), 1, value);
+}
+
+// --- Textures ---
+
+std::uint32_t gl_create_texture_2d(std::int32_t width,
+                                   std::int32_t height,
+                                   std::int32_t channels,
+                                   const void *data) noexcept {
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_2D, tex);
+
+  GLenum format = GL_RGBA;
+  GLint internalFormat = GL_RGBA;
+  if (channels == 1) {
+    format = GL_RED;
+    internalFormat = GL_RED;
+  } else if (channels == 3) {
+    format = GL_RGB;
+    internalFormat = GL_RGB;
+  }
+
+  g_gl.texImage2D(GL_TEXTURE_2D,
+                  0,
+                  internalFormat,
+                  static_cast<GLsizei>(width),
+                  static_cast<GLsizei>(height),
+                  0,
+                  format,
+                  GL_UNSIGNED_BYTE,
+                  data);
+
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  g_gl.texParameteri(
+      GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  g_gl.generateMipmap(GL_TEXTURE_2D);
+
+  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+std::uint32_t gl_create_texture_2d_hdr(std::int32_t width,
+                                       std::int32_t height,
+                                       std::int32_t channels,
+                                       const float *data) noexcept {
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_2D, tex);
+
+  GLenum format = GL_RGBA;
+  GLint internalFormat = GL_RGBA16F;
+  if (channels == 3) {
+    format = GL_RGB;
+    internalFormat = GL_RGB16F;
+  }
+
+  g_gl.texImage2D(GL_TEXTURE_2D,
+                  0,
+                  internalFormat,
+                  static_cast<GLsizei>(width),
+                  static_cast<GLsizei>(height),
+                  0,
+                  format,
+                  GL_FLOAT,
+                  data);
+
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+std::uint32_t gl_create_depth_texture(std::int32_t width,
+                                      std::int32_t height) noexcept {
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_2D, tex);
+  g_gl.texImage2D(GL_TEXTURE_2D,
+                  0,
+                  GL_DEPTH_COMPONENT24,
+                  static_cast<GLsizei>(width),
+                  static_cast<GLsizei>(height),
+                  0,
+                  GL_DEPTH_COMPONENT,
+                  GL_FLOAT,
+                  nullptr);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+void gl_destroy_texture(std::uint32_t id) noexcept {
+  if (id != 0U) {
+    const GLuint tex = static_cast<GLuint>(id);
+    g_gl.deleteTextures(1, &tex);
+  }
+}
+
+void gl_bind_texture(std::int32_t unit, std::uint32_t id) noexcept {
+  g_gl.activeTexture(
+      static_cast<GLenum>(GL_TEXTURE0 + static_cast<GLenum>(unit)));
+  g_gl.bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(id));
+}
+
+// --- Framebuffers ---
+
+std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
+                                    std::uint32_t depthTex) noexcept {
+  GLuint fbo = 0U;
+  g_gl.genFramebuffers(1, &fbo);
+  if (fbo == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+  if (colorTex != 0U) {
+    g_gl.framebufferTexture2D(GL_FRAMEBUFFER,
+                              GL_COLOR_ATTACHMENT0,
+                              GL_TEXTURE_2D,
+                              static_cast<GLuint>(colorTex),
+                              0);
+  }
+
+  if (depthTex != 0U) {
+    g_gl.framebufferTexture2D(GL_FRAMEBUFFER,
+                              GL_DEPTH_ATTACHMENT,
+                              GL_TEXTURE_2D,
+                              static_cast<GLuint>(depthTex),
+                              0);
+  }
+
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, 0U);
+  return static_cast<std::uint32_t>(fbo);
+}
+
+void gl_destroy_framebuffer(std::uint32_t fbo) noexcept {
+  if (fbo != 0U) {
+    const GLuint id = static_cast<GLuint>(fbo);
+    g_gl.deleteFramebuffers(1, &id);
+  }
+}
+
+void gl_bind_framebuffer(std::uint32_t fbo) noexcept {
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+}
+
+bool gl_check_framebuffer_complete() noexcept {
+  return g_gl.checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+// --- Blend ---
+
+void gl_enable_blending() noexcept {
+  g_gl.enable(GL_BLEND);
+}
+
+void gl_disable_blending() noexcept {
+  g_gl.disable(GL_BLEND);
+}
+
+void gl_set_blend_func_alpha() noexcept {
+  g_gl.blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+// --- Face culling ---
+
+void gl_enable_face_culling() noexcept {
+  g_gl.enable(GL_CULL_FACE);
+}
+
+void gl_disable_face_culling() noexcept {
+  g_gl.disable(GL_CULL_FACE);
+}
+
+// --- Depth mask ---
+
+void gl_set_depth_mask(bool write) noexcept {
+  g_gl.depthMask(write ? GL_TRUE : static_cast<GLboolean>(GL_FALSE));
+}
+
 } // namespace
 
 bool initialize_render_device() noexcept {
@@ -434,6 +830,23 @@ bool initialize_render_device() noexcept {
   g_device.vertex_attrib_float = &gl_vertex_attrib_float;
   g_device.draw_arrays_triangles = &gl_draw_arrays_triangles;
   g_device.draw_elements_triangles_u32 = &gl_draw_elements_triangles_u32;
+  g_device.set_uniform_int = &gl_set_uniform_int;
+  g_device.set_uniform_vec4 = &gl_set_uniform_vec4;
+  g_device.create_texture_2d = &gl_create_texture_2d;
+  g_device.create_texture_2d_hdr = &gl_create_texture_2d_hdr;
+  g_device.create_depth_texture = &gl_create_depth_texture;
+  g_device.destroy_texture = &gl_destroy_texture;
+  g_device.bind_texture = &gl_bind_texture;
+  g_device.create_framebuffer = &gl_create_framebuffer;
+  g_device.destroy_framebuffer = &gl_destroy_framebuffer;
+  g_device.bind_framebuffer = &gl_bind_framebuffer;
+  g_device.check_framebuffer_complete = &gl_check_framebuffer_complete;
+  g_device.enable_blending = &gl_enable_blending;
+  g_device.disable_blending = &gl_disable_blending;
+  g_device.set_blend_func_alpha = &gl_set_blend_func_alpha;
+  g_device.enable_face_culling = &gl_enable_face_culling;
+  g_device.disable_face_culling = &gl_disable_face_culling;
+  g_device.set_depth_mask = &gl_set_depth_mask;
   g_device.set_viewport = &gl_set_viewport;
   g_device.enable_depth_test = &gl_enable_depth_test;
   g_device.set_clear_color = &gl_set_clear_color;

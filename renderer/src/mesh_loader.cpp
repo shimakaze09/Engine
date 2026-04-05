@@ -16,7 +16,8 @@ namespace engine::renderer {
 
 namespace {
 
-constexpr std::size_t kVertexStrideFloats = 6U;
+constexpr std::size_t kVertexStrideV1Floats = 6U;
+constexpr std::size_t kVertexStrideV2Floats = 8U;
 constexpr std::uint32_t kMaxMeshVertexCount = 1000000U;
 constexpr std::uint32_t kMaxMeshIndexCount = 3000000U;
 
@@ -64,6 +65,7 @@ struct MeshBlob final {
   std::unique_ptr<std::uint32_t[]> indices{};
   std::size_t vertexFloatCount = 0U;
   std::size_t indexCount = 0U;
+  std::size_t strideFloats = kVertexStrideV1Floats;
 };
 
 bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
@@ -89,11 +91,20 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
     return false;
   }
 
-  if ((header.magic != core::kMeshAssetMagic)
-      || (header.version != core::kMeshAssetVersion)) {
+  if (header.magic != core::kMeshAssetMagic) {
     std::fclose(file);
     return false;
   }
+
+  const bool isV1 = (header.version == core::kMeshAssetVersion);
+  const bool isV2 = (header.version == core::kMeshAssetVersion2);
+  if (!isV1 && !isV2) {
+    std::fclose(file);
+    return false;
+  }
+
+  const std::size_t strideFloats =
+      isV2 ? kVertexStrideV2Floats : kVertexStrideV1Floats;
 
   if ((header.vertexCount == 0U) || (header.vertexCount > kMaxMeshVertexCount)
       || (header.indexCount > kMaxMeshIndexCount)) {
@@ -103,7 +114,7 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
 
   std::size_t vertexFloatCount = 0U;
   if (!checked_mul(static_cast<std::size_t>(header.vertexCount),
-                   kVertexStrideFloats,
+                   strideFloats,
                    &vertexFloatCount)) {
     std::fclose(file);
     return false;
@@ -181,6 +192,7 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   outBlob->header = header;
   outBlob->vertexFloatCount = vertexFloatCount;
   outBlob->indexCount = indexCount;
+  outBlob->strideFloats = strideFloats;
   outBlob->vertices = std::move(vertices);
   outBlob->indices = std::move(indices);
   return true;
@@ -239,8 +251,12 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   }
 
   const RenderDevice *dev = render_device();
+  const bool hasUVs = (meshBlob.header.version == core::kMeshAssetVersion2);
+  const std::int32_t stride =
+      static_cast<std::int32_t>(meshBlob.strideFloats * sizeof(float));
 
   GpuMesh mesh{};
+  mesh.hasUVs = hasUVs;
   mesh.vertexArray = dev->create_vertex_array();
   dev->bind_vertex_array(mesh.vertexArray);
 
@@ -251,18 +267,17 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
       static_cast<std::ptrdiff_t>(meshBlob.vertexFloatCount * sizeof(float)));
 
   dev->enable_vertex_attrib(0U);
-  dev->vertex_attrib_float(
-      0U,
-      3,
-      static_cast<std::int32_t>(kVertexStrideFloats * sizeof(float)),
-      nullptr);
+  dev->vertex_attrib_float(0U, 3, stride, nullptr);
 
   dev->enable_vertex_attrib(1U);
   dev->vertex_attrib_float(
-      1U,
-      3,
-      static_cast<std::int32_t>(kVertexStrideFloats * sizeof(float)),
-      reinterpret_cast<const void *>(sizeof(float) * 3U));
+      1U, 3, stride, reinterpret_cast<const void *>(sizeof(float) * 3U));
+
+  if (hasUVs) {
+    dev->enable_vertex_attrib(2U);
+    dev->vertex_attrib_float(
+        2U, 2, stride, reinterpret_cast<const void *>(sizeof(float) * 6U));
+  }
 
   if (meshBlob.indexCount > 0U) {
     mesh.indexBuffer = dev->create_buffer();

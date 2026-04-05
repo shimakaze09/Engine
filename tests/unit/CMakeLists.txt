@@ -257,3 +257,19 @@ add_test(
     NAME engine_unit_audio
     COMMAND engine_unit_audio
 )
+
+add_executable(engine_unit_texture_loader
+    texture_loader_test.cpp
+)
+
+target_compile_features(engine_unit_texture_loader PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_texture_loader
+    PRIVATE
+    engine_renderer
+)
+
+add_test(
+    NAME engine_unit_texture_loader
+    COMMAND engine_unit_texture_loader
+)

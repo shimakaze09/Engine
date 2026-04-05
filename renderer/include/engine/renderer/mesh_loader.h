@@ -14,6 +14,7 @@ struct GpuMesh final {
   std::uint32_t indexBuffer = 0U;
   std::uint32_t vertexCount = 0U;
   std::uint32_t indexCount = 0U;
+  bool hasUVs = false;
 };
 
 struct GpuMeshRegistry final {

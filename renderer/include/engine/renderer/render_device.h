@@ -58,6 +58,45 @@ struct RenderDevice final {
                                 std::int32_t count) noexcept = nullptr;
   void (*draw_elements_triangles_u32)(std::int32_t count) noexcept = nullptr;
 
+  // Uniform — additional types.
+  void (*set_uniform_int)(std::int32_t loc,
+                          std::int32_t value) noexcept = nullptr;
+  void (*set_uniform_vec4)(std::int32_t loc,
+                           const float *value) noexcept = nullptr;
+
+  // Textures.
+  std::uint32_t (*create_texture_2d)(std::int32_t width,
+                                     std::int32_t height,
+                                     std::int32_t channels,
+                                     const void *data) noexcept = nullptr;
+  std::uint32_t (*create_texture_2d_hdr)(std::int32_t width,
+                                         std::int32_t height,
+                                         std::int32_t channels,
+                                         const float *data) noexcept = nullptr;
+  std::uint32_t (*create_depth_texture)(std::int32_t width,
+                                        std::int32_t height) noexcept = nullptr;
+  void (*destroy_texture)(std::uint32_t id) noexcept = nullptr;
+  void (*bind_texture)(std::int32_t unit, std::uint32_t id) noexcept = nullptr;
+
+  // Framebuffers.
+  std::uint32_t (*create_framebuffer)(
+      std::uint32_t colorTex, std::uint32_t depthTex) noexcept = nullptr;
+  void (*destroy_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
+  void (*bind_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
+  bool (*check_framebuffer_complete)() noexcept = nullptr;
+
+  // Blend.
+  void (*enable_blending)() noexcept = nullptr;
+  void (*disable_blending)() noexcept = nullptr;
+  void (*set_blend_func_alpha)() noexcept = nullptr;
+
+  // Face culling.
+  void (*enable_face_culling)() noexcept = nullptr;
+  void (*disable_face_culling)() noexcept = nullptr;
+
+  // Depth mask.
+  void (*set_depth_mask)(bool write) noexcept = nullptr;
+
   // State.
   void (*set_viewport)(std::int32_t x,
                        std::int32_t y,

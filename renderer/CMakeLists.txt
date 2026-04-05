@@ -5,11 +5,14 @@ add_library(engine_renderer STATIC
     src/mesh_loader.cpp
     src/render_device_gl.cpp
     src/shader_system.cpp
+    src/texture_loader.cpp
 )
 
 target_include_directories(engine_renderer
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+    ${ENGINE_STB_INCLUDE_DIR}
 )
 
 target_compile_features(engine_renderer PUBLIC cxx_std_20)

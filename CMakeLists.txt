@@ -144,6 +144,14 @@ if(ENGINE_BUILD_TOOLS)
     set(ENGINE_CGLTF_INCLUDE_DIR ${cgltf_SOURCE_DIR})
 endif()
 
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG master
+)
+FetchContent_MakeAvailable(stb)
+set(ENGINE_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
+
 if(EXISTS ${CMAKE_SOURCE_DIR}/assets)
     file(COPY ${CMAKE_SOURCE_DIR}/assets DESTINATION ${CMAKE_BINARY_DIR})
 endif()

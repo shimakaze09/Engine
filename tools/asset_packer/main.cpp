@@ -13,6 +13,7 @@ namespace {
 struct PrimitiveData final {
   std::vector<float> interleavedVertices{};
   std::vector<std::uint32_t> indices{};
+  bool hasUVs = false;
 };
 
 void print_usage() {
@@ -46,6 +47,8 @@ bool extract_primitive(const cgltf_primitive *primitive,
       find_attribute_accessor(primitive, cgltf_attribute_type_position);
   const cgltf_accessor *normals =
       find_attribute_accessor(primitive, cgltf_attribute_type_normal);
+  const cgltf_accessor *texcoords =
+      find_attribute_accessor(primitive, cgltf_attribute_type_texcoord);
   if ((positions == nullptr) || (normals == nullptr)) {
     std::fprintf(stderr,
                  "error: primitive must have POSITION and NORMAL accessors\n");
@@ -64,11 +67,18 @@ bool extract_primitive(const cgltf_primitive *primitive,
     return false;
   }
 
+  const bool hasUVs = (texcoords != nullptr)
+                      && (texcoords->type == cgltf_type_vec2)
+                      && (texcoords->count == positions->count);
+  outData->hasUVs = hasUVs;
+  const std::size_t strideFloats = hasUVs ? 8U : 6U;
+
   const std::size_t vertexCount = static_cast<std::size_t>(positions->count);
-  outData->interleavedVertices.assign(vertexCount * 6U, 0.0F);
+  outData->interleavedVertices.assign(vertexCount * strideFloats, 0.0F);
 
   std::array<float, 3U> position{};
   std::array<float, 3U> normal{};
+  std::array<float, 2U> uv{};
 
   for (std::size_t i = 0U; i < vertexCount; ++i) {
     if (!cgltf_accessor_read_float(positions,
@@ -83,13 +93,23 @@ bool extract_primitive(const cgltf_primitive *primitive,
       return false;
     }
 
-    const std::size_t base = i * 6U;
+    const std::size_t base = i * strideFloats;
     outData->interleavedVertices[base + 0U] = position[0U];
     outData->interleavedVertices[base + 1U] = position[1U];
     outData->interleavedVertices[base + 2U] = position[2U];
     outData->interleavedVertices[base + 3U] = normal[0U];
     outData->interleavedVertices[base + 4U] = normal[1U];
     outData->interleavedVertices[base + 5U] = normal[2U];
+
+    if (hasUVs) {
+      if (!cgltf_accessor_read_float(
+              texcoords, static_cast<cgltf_size>(i), uv.data(), uv.size())) {
+        std::fprintf(stderr, "error: failed to decode UV attributes\n");
+        return false;
+      }
+      outData->interleavedVertices[base + 6U] = uv[0U];
+      outData->interleavedVertices[base + 7U] = uv[1U];
+    }
   }
 
   if (primitive->indices != nullptr) {
@@ -117,12 +137,14 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
     return false;
   }
 
-  if ((data.interleavedVertices.size() % 6U) != 0U) {
+  const std::size_t strideFloats = data.hasUVs ? 8U : 6U;
+  if ((data.interleavedVertices.size() % strideFloats) != 0U) {
     std::fprintf(stderr, "error: interleaved vertex buffer is invalid\n");
     return false;
   }
 
-  const std::size_t vertexCount = data.interleavedVertices.size() / 6U;
+  const std::size_t vertexCount =
+      data.interleavedVertices.size() / strideFloats;
   if (vertexCount > static_cast<std::size_t>(UINT32_MAX)
       || (data.indices.size() > static_cast<std::size_t>(UINT32_MAX))) {
     std::fprintf(stderr, "error: mesh exceeds supported format limits\n");
@@ -144,7 +166,8 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
 
   engine::core::MeshAssetHeader header{};
   header.magic = engine::core::kMeshAssetMagic;
-  header.version = engine::core::kMeshAssetVersion;
+  header.version = data.hasUVs ? engine::core::kMeshAssetVersion2
+                               : engine::core::kMeshAssetVersion;
   header.vertexCount = static_cast<std::uint32_t>(vertexCount);
   header.indexCount = static_cast<std::uint32_t>(data.indices.size());
 
@@ -207,30 +230,33 @@ bool write_metadata_file(const char *inputPath,
     return false;
   }
 
-  const std::size_t vertexCount = data.interleavedVertices.size() / 6U;
+  const std::size_t vertexCount =
+      data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
 
-  const int written =
-      std::fprintf(metadataFile,
-                   "{\n"
-                   "  \"schemaVersion\": 1,\n"
-                   "  \"source\": \"%s\",\n"
-                   "  \"output\": \"%s\",\n"
-                   "  \"assetFormat\": \"engine.mesh\",\n"
-                   "  \"assetFormatVersion\": %u,\n"
-                   "  \"vertexCount\": %zu,\n"
-                   "  \"indexCount\": %zu,\n"
-                   "  \"importSettings\": {\n"
-                   "    \"meshIndex\": 0,\n"
-                   "    \"primitiveIndex\": 0,\n"
-                   "    \"interleavedLayout\": \"position_normal\"\n"
-                   "  }\n"
-                   "}\n",
-                   inputPath,
-                   outputPath,
-                   engine::core::kMeshAssetVersion,
-                   vertexCount,
-                   indexCount);
+  const int written = std::fprintf(
+      metadataFile,
+      "{\n"
+      "  \"schemaVersion\": 1,\n"
+      "  \"source\": \"%s\",\n"
+      "  \"output\": \"%s\",\n"
+      "  \"assetFormat\": \"engine.mesh\",\n"
+      "  \"assetFormatVersion\": %u,\n"
+      "  \"vertexCount\": %zu,\n"
+      "  \"indexCount\": %zu,\n"
+      "  \"importSettings\": {\n"
+      "    \"meshIndex\": 0,\n"
+      "    \"primitiveIndex\": 0,\n"
+      "    \"interleavedLayout\": \"%s\"\n"
+      "  }\n"
+      "}\n",
+      inputPath,
+      outputPath,
+      data.hasUVs ? engine::core::kMeshAssetVersion2
+                  : engine::core::kMeshAssetVersion,
+      vertexCount,
+      indexCount,
+      data.hasUVs ? "position_normal_texcoord" : "position_normal");
 
   std::fclose(metadataFile);
   return written > 0;
@@ -288,9 +314,12 @@ int main(int argc, char **argv) {
     return 7;
   }
 
-  std::printf("packed mesh: vertices=%zu indices=%zu -> %s (+ .meta.json)\n",
-              primitiveData.interleavedVertices.size() / 6U,
-              primitiveData.indices.size(),
-              outputPath);
+  std::printf(
+      "packed mesh: vertices=%zu indices=%zu uvs=%s -> %s (+ .meta.json)\n",
+      primitiveData.interleavedVertices.size()
+          / (primitiveData.hasUVs ? 8U : 6U),
+      primitiveData.indices.size(),
+      primitiveData.hasUVs ? "yes" : "no",
+      outputPath);
   return 0;
 }
