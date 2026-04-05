@@ -3,6 +3,7 @@ add_library(engine_renderer STATIC
     src/asset_manager.cpp
     src/command_buffer.cpp
     src/mesh_loader.cpp
+    src/render_device_gl.cpp
 )
 
 target_include_directories(engine_renderer

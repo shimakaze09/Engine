@@ -30,10 +30,6 @@ bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
 SDL_GLContext g_glContext = nullptr;
 
-constexpr int kMaxScancodes = 512;
-std::array<bool, kMaxScancodes> g_keyState{};
-std::array<bool, kMaxScancodes> g_prevKeyState{};
-
 void log_sdl_error(const char *message) noexcept {
   const char *sdlError = SDL_GetError();
   if ((sdlError == nullptr) || (sdlError[0] == '\0')) {
@@ -62,9 +58,9 @@ void shutdown_platform_resources() noexcept {
 }
 
 bool initialize_platform_impl(int width,
-                               int height,
-                               const char *title,
-                               bool vsync) noexcept {
+                              int height,
+                              const char *title,
+                              bool vsync) noexcept {
   SDL_SetMainReady();
 
   if (g_window != nullptr) {
@@ -89,9 +85,12 @@ bool initialize_platform_impl(int width,
     return false;
   }
 
-  g_window =
-      SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                       width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+  g_window = SDL_CreateWindow(title,
+                              SDL_WINDOWPOS_CENTERED,
+                              SDL_WINDOWPOS_CENTERED,
+                              width,
+                              height,
+                              SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();
@@ -138,53 +137,12 @@ void shutdown_platform() noexcept {
   shutdown_platform_resources();
 }
 
-void process_input() noexcept {
-  // Capture key state BEFORE polling so is_key_pressed can diff prev vs current.
-  int numKeys = 0;
-  const Uint8 *sdlState = SDL_GetKeyboardState(&numKeys);
-  const int count = (numKeys < kMaxScancodes) ? numKeys : kMaxScancodes;
-  for (int i = 0; i < count; ++i) {
-    g_prevKeyState[static_cast<std::size_t>(i)] =
-        g_keyState[static_cast<std::size_t>(i)];
-  }
-
-  SDL_Event event{};
-  while (SDL_PollEvent(&event) != 0) {
-    if (event.type == SDL_QUIT) {
-      g_platformRunning = false;
-      continue;
-    }
-
-    if ((event.type == SDL_KEYDOWN)
-        && (event.key.keysym.sym == SDLK_ESCAPE)) {
-      g_platformRunning = false;
-    }
-  }
-
-  // Read updated state after event pump.
-  sdlState = SDL_GetKeyboardState(&numKeys);
-  for (int i = 0; i < count; ++i) {
-    g_keyState[static_cast<std::size_t>(i)] = (sdlState[i] != 0);
-  }
+bool is_platform_running() noexcept {
+  return g_platformRunning;
 }
 
-bool is_platform_running() noexcept { return g_platformRunning; }
-
-void request_platform_quit() noexcept { g_platformRunning = false; }
-
-bool is_key_down(KeyScancode scancode) noexcept {
-  if ((scancode < 0) || (scancode >= kMaxScancodes)) {
-    return false;
-  }
-  return g_keyState[static_cast<std::size_t>(scancode)];
-}
-
-bool is_key_pressed(KeyScancode scancode) noexcept {
-  if ((scancode < 0) || (scancode >= kMaxScancodes)) {
-    return false;
-  }
-  const auto idx = static_cast<std::size_t>(scancode);
-  return g_keyState[idx] && !g_prevKeyState[idx];
+void request_platform_quit() noexcept {
+  g_platformRunning = false;
 }
 
 bool make_render_context_current() noexcept {
@@ -229,9 +187,12 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   SDL_GL_GetDrawableSize(g_window, outWidth, outHeight);
 }
 
-void *get_sdl_window() noexcept { return g_window; }
+void *get_sdl_window() noexcept {
+  return g_window;
+}
 
-void *get_sdl_gl_context() noexcept { return g_glContext; }
+void *get_sdl_gl_context() noexcept {
+  return g_glContext;
+}
 
 } // namespace engine::core
-

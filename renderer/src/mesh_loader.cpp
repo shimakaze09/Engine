@@ -1,13 +1,5 @@
 #include "engine/renderer/mesh_loader.h"
 
-#if __has_include(<SDL_opengl.h>)
-#include <SDL_opengl.h>
-#elif __has_include(<SDL2/SDL_opengl.h>)
-#include <SDL2/SDL_opengl.h>
-#else
-#error "SDL OpenGL headers not found"
-#endif
-
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -18,6 +10,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/mesh_asset.h"
 #include "engine/core/platform.h"
+#include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
 
@@ -27,97 +20,6 @@ constexpr std::size_t kVertexStrideFloats = 6U;
 constexpr std::uint32_t kMaxMeshVertexCount = 1000000U;
 constexpr std::uint32_t kMaxMeshIndexCount = 3000000U;
 
-#ifndef GL_ARRAY_BUFFER
-#define GL_ARRAY_BUFFER 0x8892
-#endif
-
-#ifndef GL_ELEMENT_ARRAY_BUFFER
-#define GL_ELEMENT_ARRAY_BUFFER 0x8893
-#endif
-
-#ifndef GL_STATIC_DRAW
-#define GL_STATIC_DRAW 0x88E4
-#endif
-
-using GlGenVertexArraysProc = void(APIENTRYP)(GLsizei count, GLuint *arrays);
-using GlBindVertexArrayProc = void(APIENTRYP)(GLuint array);
-using GlDeleteVertexArraysProc = void(APIENTRYP)(GLsizei count,
-                                                 const GLuint *arrays);
-using GlGenBuffersProc = void(APIENTRYP)(GLsizei count, GLuint *buffers);
-using GlBindBufferProc = void(APIENTRYP)(GLenum target, GLuint buffer);
-using GlBufferDataProc = void(APIENTRYP)(GLenum target, std::ptrdiff_t size,
-                                         const void *data, GLenum usage);
-using GlDeleteBuffersProc = void(APIENTRYP)(GLsizei count,
-                                            const GLuint *buffers);
-using GlEnableVertexAttribArrayProc = void(APIENTRYP)(GLuint index);
-using GlVertexAttribPointerProc = void(APIENTRYP)(GLuint index, GLint size,
-                                                  GLenum type,
-                                                  GLboolean normalized,
-                                                  GLsizei stride,
-                                                  const void *pointer);
-
-struct MeshGlFunctions final {
-  bool loaded = false;
-  bool failed = false;
-  GlGenVertexArraysProc genVertexArrays = nullptr;
-  GlBindVertexArrayProc bindVertexArray = nullptr;
-  GlDeleteVertexArraysProc deleteVertexArrays = nullptr;
-  GlGenBuffersProc genBuffers = nullptr;
-  GlBindBufferProc bindBuffer = nullptr;
-  GlBufferDataProc bufferData = nullptr;
-  GlDeleteBuffersProc deleteBuffers = nullptr;
-  GlEnableVertexAttribArrayProc enableVertexAttribArray = nullptr;
-  GlVertexAttribPointerProc vertexAttribPointer = nullptr;
-};
-
-MeshGlFunctions &mesh_gl() noexcept {
-  static MeshGlFunctions gl{};
-  return gl;
-}
-
-template <typename T>
-bool load_gl_function(T *outFunction, const char *name) noexcept {
-  if ((outFunction == nullptr) || (name == nullptr)) {
-    return false;
-  }
-
-  *outFunction = reinterpret_cast<T>(core::get_gl_proc_address(name));
-  return *outFunction != nullptr;
-}
-
-bool ensure_mesh_gl_loaded() noexcept {
-  MeshGlFunctions &gl = mesh_gl();
-  if (gl.loaded) {
-    return true;
-  }
-
-  if (gl.failed) {
-    return false;
-  }
-
-  const bool ok =
-      load_gl_function(&gl.genVertexArrays, "glGenVertexArrays") &&
-      load_gl_function(&gl.bindVertexArray, "glBindVertexArray") &&
-      load_gl_function(&gl.deleteVertexArrays, "glDeleteVertexArrays") &&
-      load_gl_function(&gl.genBuffers, "glGenBuffers") &&
-      load_gl_function(&gl.bindBuffer, "glBindBuffer") &&
-      load_gl_function(&gl.bufferData, "glBufferData") &&
-      load_gl_function(&gl.deleteBuffers, "glDeleteBuffers") &&
-      load_gl_function(&gl.enableVertexAttribArray,
-                       "glEnableVertexAttribArray") &&
-      load_gl_function(&gl.vertexAttribPointer, "glVertexAttribPointer");
-
-  if (!ok) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to load mesh OpenGL functions");
-    gl.failed = true;
-    return false;
-  }
-
-  gl.loaded = true;
-  return true;
-}
-
 bool read_exact(FILE *file, void *data, std::size_t sizeBytes) noexcept {
   if ((file == nullptr) || (data == nullptr) || (sizeBytes == 0U)) {
     return false;
@@ -126,7 +28,8 @@ bool read_exact(FILE *file, void *data, std::size_t sizeBytes) noexcept {
   return std::fread(data, 1U, sizeBytes, file) == sizeBytes;
 }
 
-bool checked_mul(std::size_t lhs, std::size_t rhs,
+bool checked_mul(std::size_t lhs,
+                 std::size_t rhs,
                  std::size_t *outResult) noexcept {
   if (outResult == nullptr) {
     return false;
@@ -140,7 +43,8 @@ bool checked_mul(std::size_t lhs, std::size_t rhs,
   return true;
 }
 
-bool checked_add(std::size_t lhs, std::size_t rhs,
+bool checked_add(std::size_t lhs,
+                 std::size_t rhs,
                  std::size_t *outResult) noexcept {
   if (outResult == nullptr) {
     return false;
@@ -185,22 +89,22 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
     return false;
   }
 
-  if ((header.magic != core::kMeshAssetMagic) ||
-      (header.version != core::kMeshAssetVersion)) {
+  if ((header.magic != core::kMeshAssetMagic)
+      || (header.version != core::kMeshAssetVersion)) {
     std::fclose(file);
     return false;
   }
 
-  if ((header.vertexCount == 0U) ||
-      (header.vertexCount > kMaxMeshVertexCount) ||
-      (header.indexCount > kMaxMeshIndexCount)) {
+  if ((header.vertexCount == 0U) || (header.vertexCount > kMaxMeshVertexCount)
+      || (header.indexCount > kMaxMeshIndexCount)) {
     std::fclose(file);
     return false;
   }
 
   std::size_t vertexFloatCount = 0U;
   if (!checked_mul(static_cast<std::size_t>(header.vertexCount),
-                   kVertexStrideFloats, &vertexFloatCount)) {
+                   kVertexStrideFloats,
+                   &vertexFloatCount)) {
     std::fclose(file);
     return false;
   }
@@ -213,14 +117,15 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
 
   std::size_t indexBytes = 0U;
   if (!checked_mul(static_cast<std::size_t>(header.indexCount),
-                   sizeof(std::uint32_t), &indexBytes)) {
+                   sizeof(std::uint32_t),
+                   &indexBytes)) {
     std::fclose(file);
     return false;
   }
 
   std::size_t expectedSize = 0U;
-  if (!checked_add(sizeof(core::MeshAssetHeader), vertexBytes, &expectedSize) ||
-      !checked_add(expectedSize, indexBytes, &expectedSize)) {
+  if (!checked_add(sizeof(core::MeshAssetHeader), vertexBytes, &expectedSize)
+      || !checked_add(expectedSize, indexBytes, &expectedSize)) {
     std::fclose(file);
     return false;
   }
@@ -237,8 +142,8 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   }
 
   const std::size_t fileSize = static_cast<std::size_t>(fileSizeLong);
-  if ((fileSize != expectedSize) ||
-      (std::fseek(file, sizeof(header), SEEK_SET) != 0)) {
+  if ((fileSize != expectedSize)
+      || (std::fseek(file, sizeof(header), SEEK_SET) != 0)) {
     std::fclose(file);
     return false;
   }
@@ -281,26 +186,23 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   return true;
 }
 
-void delete_mesh_resources(MeshGlFunctions &gl, GpuMesh *mesh) noexcept {
-  if (mesh == nullptr) {
+void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
+  if ((mesh == nullptr) || (dev == nullptr)) {
     return;
   }
 
-  if ((mesh->indexBuffer != 0U) && (gl.deleteBuffers != nullptr)) {
-    const GLuint indexBuffer = mesh->indexBuffer;
-    gl.deleteBuffers(1, &indexBuffer);
+  if (mesh->indexBuffer != 0U) {
+    dev->destroy_buffer(mesh->indexBuffer);
     mesh->indexBuffer = 0U;
   }
 
-  if ((mesh->vertexBuffer != 0U) && (gl.deleteBuffers != nullptr)) {
-    const GLuint vertexBuffer = mesh->vertexBuffer;
-    gl.deleteBuffers(1, &vertexBuffer);
+  if (mesh->vertexBuffer != 0U) {
+    dev->destroy_buffer(mesh->vertexBuffer);
     mesh->vertexBuffer = 0U;
   }
 
-  if ((mesh->vertexArray != 0U) && (gl.deleteVertexArrays != nullptr)) {
-    const GLuint vertexArray = mesh->vertexArray;
-    gl.deleteVertexArrays(1, &vertexArray);
+  if (mesh->vertexArray != 0U) {
+    dev->destroy_vertex_array(mesh->vertexArray);
     mesh->vertexArray = 0U;
   }
 
@@ -319,58 +221,60 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
 
   MeshBlob meshBlob{};
   if (!load_mesh_blob(path, &meshBlob)) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to read mesh asset");
+    core::log_message(
+        core::LogLevel::Error, "renderer", "failed to read mesh asset");
     return false;
   }
 
   if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Error, "renderer",
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
                       "failed to make render context current for mesh upload");
     return false;
   }
 
-  if (!ensure_mesh_gl_loaded()) {
+  if (!initialize_render_device()) {
     core::release_render_context();
     return false;
   }
 
-  MeshGlFunctions &gl = mesh_gl();
+  const RenderDevice *dev = render_device();
 
   GpuMesh mesh{};
-  gl.genVertexArrays(1, reinterpret_cast<GLuint *>(&mesh.vertexArray));
-  gl.bindVertexArray(mesh.vertexArray);
+  mesh.vertexArray = dev->create_vertex_array();
+  dev->bind_vertex_array(mesh.vertexArray);
 
-  gl.genBuffers(1, reinterpret_cast<GLuint *>(&mesh.vertexBuffer));
-  gl.bindBuffer(GL_ARRAY_BUFFER, mesh.vertexBuffer);
-  gl.bufferData(
-      GL_ARRAY_BUFFER,
-      static_cast<std::ptrdiff_t>(meshBlob.vertexFloatCount * sizeof(float)),
-      meshBlob.vertices.get(), GL_STATIC_DRAW);
+  mesh.vertexBuffer = dev->create_buffer();
+  dev->bind_array_buffer(mesh.vertexBuffer);
+  dev->buffer_data_array(
+      meshBlob.vertices.get(),
+      static_cast<std::ptrdiff_t>(meshBlob.vertexFloatCount * sizeof(float)));
 
-  gl.enableVertexAttribArray(0U);
-  gl.vertexAttribPointer(
-      0U, 3, GL_FLOAT, GL_FALSE,
-      static_cast<GLsizei>(kVertexStrideFloats * sizeof(float)), nullptr);
+  dev->enable_vertex_attrib(0U);
+  dev->vertex_attrib_float(
+      0U,
+      3,
+      static_cast<std::int32_t>(kVertexStrideFloats * sizeof(float)),
+      nullptr);
 
-  gl.enableVertexAttribArray(1U);
-  gl.vertexAttribPointer(
-      1U, 3, GL_FLOAT, GL_FALSE,
-      static_cast<GLsizei>(kVertexStrideFloats * sizeof(float)),
+  dev->enable_vertex_attrib(1U);
+  dev->vertex_attrib_float(
+      1U,
+      3,
+      static_cast<std::int32_t>(kVertexStrideFloats * sizeof(float)),
       reinterpret_cast<const void *>(sizeof(float) * 3U));
 
   if (meshBlob.indexCount > 0U) {
-    gl.genBuffers(1, reinterpret_cast<GLuint *>(&mesh.indexBuffer));
-    gl.bindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
-    gl.bufferData(GL_ELEMENT_ARRAY_BUFFER,
-                  static_cast<std::ptrdiff_t>(meshBlob.indexCount *
-                                              sizeof(std::uint32_t)),
-                  meshBlob.indices.get(), GL_STATIC_DRAW);
+    mesh.indexBuffer = dev->create_buffer();
+    dev->bind_element_buffer(mesh.indexBuffer);
+    dev->buffer_data_element(meshBlob.indices.get(),
+                             static_cast<std::ptrdiff_t>(
+                                 meshBlob.indexCount * sizeof(std::uint32_t)));
   }
 
-  gl.bindVertexArray(0U);
-  gl.bindBuffer(GL_ARRAY_BUFFER, 0U);
-  gl.bindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_array_buffer(0U);
+  dev->bind_element_buffer(0U);
 
   mesh.vertexCount = meshBlob.header.vertexCount;
   mesh.indexCount = meshBlob.header.indexCount;
@@ -385,22 +289,23 @@ void unload_mesh(GpuMesh *mesh) noexcept {
     return;
   }
 
-  if ((mesh->vertexArray == 0U) && (mesh->vertexBuffer == 0U) &&
-      (mesh->indexBuffer == 0U)) {
+  if ((mesh->vertexArray == 0U) && (mesh->vertexBuffer == 0U)
+      && (mesh->indexBuffer == 0U)) {
     *mesh = GpuMesh{};
     return;
   }
 
   if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Warning, "renderer",
+    core::log_message(core::LogLevel::Warning,
+                      "renderer",
                       "failed to make context current for mesh unload");
     *mesh = GpuMesh{};
     return;
   }
 
-  if (ensure_mesh_gl_loaded()) {
-    MeshGlFunctions &gl = mesh_gl();
-    delete_mesh_resources(gl, mesh);
+  const RenderDevice *dev = render_device();
+  if (dev != nullptr) {
+    delete_mesh_resources(dev, mesh);
   } else {
     *mesh = GpuMesh{};
   }

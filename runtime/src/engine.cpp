@@ -21,9 +21,11 @@
 #endif
 
 #include "engine/core/bootstrap.h"
+#include "engine/core/input.h"
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/profiler.h"
 #include "engine/math/transform.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/asset_database.h"
@@ -133,10 +135,14 @@ void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
 }
 
 void process_input_events_with_editor() noexcept {
+  core::begin_input_frame();
+
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
 
   SDL_Event event{};
   while (SDL_PollEvent(&event) != 0) {
+    core::input_process_event(&event);
+
     if ((bridge != nullptr) && (bridge->process_event != nullptr)) {
       bridge->process_event(&event);
     }
@@ -172,6 +178,8 @@ void process_input_events_with_editor() noexcept {
 
     // Game-level input hooks are added in later phases.
   }
+
+  core::end_input_frame();
 }
 
 void update_chunk_job(void *userData) noexcept {

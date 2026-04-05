@@ -193,3 +193,35 @@ add_test(
     NAME engine_unit_event_bus
     COMMAND engine_unit_event_bus
 )
+
+add_executable(engine_unit_input
+    input_test.cpp
+)
+
+target_compile_features(engine_unit_input PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_input
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_input
+    COMMAND engine_unit_input
+)
+
+add_executable(engine_unit_profiler
+    profiler_test.cpp
+)
+
+target_compile_features(engine_unit_profiler PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_profiler
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_profiler
+    COMMAND engine_unit_profiler
+)

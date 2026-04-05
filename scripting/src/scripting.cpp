@@ -10,6 +10,7 @@ extern "C" {
 #include <cstdio>
 #include <limits>
 
+#include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/physics/physics.h"

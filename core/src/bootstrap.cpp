@@ -5,10 +5,12 @@
 #include <thread>
 
 #include "engine/core/event_bus.h"
+#include "engine/core/input.h"
 #include "engine/core/job_system.h"
 #include "engine/core/linear_allocator.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
 
 namespace engine::core {
@@ -71,6 +73,23 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
     return false;
   }
 
+  if (!initialize_input()) {
+    shutdown_platform();
+    shutdown_event_bus();
+    shutdown_vfs();
+    shutdown_logging();
+    return false;
+  }
+
+  if (!initialize_profiler()) {
+    shutdown_input();
+    shutdown_platform();
+    shutdown_event_bus();
+    shutdown_vfs();
+    shutdown_logging();
+    return false;
+  }
+
   const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
   const std::uint32_t workerThreads =
       (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
@@ -111,6 +130,8 @@ void shutdown_core() noexcept {
   }
 
   shutdown_job_system();
+  shutdown_profiler();
+  shutdown_input();
   shutdown_platform();
   shutdown_event_bus();
   shutdown_vfs();

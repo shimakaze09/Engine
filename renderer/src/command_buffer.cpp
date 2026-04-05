@@ -1,13 +1,5 @@
 #include "engine/renderer/command_buffer.h"
 
-#if __has_include(<SDL_opengl.h>)
-#include <SDL_opengl.h>
-#elif __has_include(<SDL2/SDL_opengl.h>)
-#include <SDL2/SDL_opengl.h>
-#else
-#error "SDL OpenGL headers not found"
-#endif
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -22,6 +14,7 @@
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/mesh_loader.h"
+#include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
 
@@ -36,286 +29,29 @@ constexpr float kClearBlue = 0.12F;
 
 CameraState g_activeCamera{};
 
-#ifndef GL_VERTEX_SHADER
-#define GL_VERTEX_SHADER 0x8B31
-#endif
-
-#ifndef GL_FRAGMENT_SHADER
-#define GL_FRAGMENT_SHADER 0x8B30
-#endif
-
-#ifndef GL_COMPILE_STATUS
-#define GL_COMPILE_STATUS 0x8B81
-#endif
-
-#ifndef GL_LINK_STATUS
-#define GL_LINK_STATUS 0x8B82
-#endif
-
-#ifndef GL_INFO_LOG_LENGTH
-#define GL_INFO_LOG_LENGTH 0x8B84
-#endif
-
-#ifndef GL_TRUE
-#define GL_TRUE 1
-#endif
-
-#ifndef GL_DEPTH_TEST
-#define GL_DEPTH_TEST 0x0B71
-#endif
-
-#ifndef GL_UNSIGNED_INT
-#define GL_UNSIGNED_INT 0x1405
-#endif
-
-using GlCreateShaderProc = GLuint(APIENTRYP)(GLenum shaderType);
-using GlShaderSourceProc = void(APIENTRYP)(GLuint shader,
-                                           GLsizei count,
-                                           const char *const *strings,
-                                           const GLint *lengths);
-using GlCompileShaderProc = void(APIENTRYP)(GLuint shader);
-using GlGetShaderivProc = void(APIENTRYP)(GLuint shader,
-                                          GLenum pname,
-                                          GLint *params);
-using GlGetShaderInfoLogProc = void(APIENTRYP)(GLuint shader,
-                                               GLsizei bufferSize,
-                                               GLsizei *length,
-                                               char *infoLog);
-using GlDeleteShaderProc = void(APIENTRYP)(GLuint shader);
-using GlCreateProgramProc = GLuint(APIENTRYP)(void);
-using GlAttachShaderProc = void(APIENTRYP)(GLuint program, GLuint shader);
-using GlLinkProgramProc = void(APIENTRYP)(GLuint program);
-using GlGetProgramivProc = void(APIENTRYP)(GLuint program,
-                                           GLenum pname,
-                                           GLint *params);
-using GlGetProgramInfoLogProc = void(APIENTRYP)(GLuint program,
-                                                GLsizei bufferSize,
-                                                GLsizei *length,
-                                                char *infoLog);
-using GlDeleteProgramProc = void(APIENTRYP)(GLuint program);
-using GlUseProgramProc = void(APIENTRYP)(GLuint program);
-using GlGetUniformLocationProc = GLint(APIENTRYP)(GLuint program,
-                                                  const char *name);
-using GlUniformMatrix4fvProc = void(APIENTRYP)(GLint location,
-                                               GLsizei count,
-                                               GLboolean transpose,
-                                               const GLfloat *value);
-using GlUniformMatrix3fvProc = void(APIENTRYP)(GLint location,
-                                               GLsizei count,
-                                               GLboolean transpose,
-                                               const GLfloat *value);
-using GlUniform1fProc = void(APIENTRYP)(GLint location, GLfloat value);
-using GlUniform3fvProc = void(APIENTRYP)(GLint location,
-                                         GLsizei count,
-                                         const GLfloat *value);
-using GlBindVertexArrayProc = void(APIENTRYP)(GLuint array);
-using GlDrawArraysProc = void(APIENTRYP)(GLenum mode,
-                                         GLint first,
-                                         GLsizei count);
-using GlDrawElementsProc = void(APIENTRYP)(GLenum mode,
-                                           GLsizei count,
-                                           GLenum type,
-                                           const void *indices);
-using GlViewportProc = void(APIENTRYP)(GLint x,
-                                       GLint y,
-                                       GLsizei width,
-                                       GLsizei height);
-using GlEnableProc = void(APIENTRYP)(GLenum cap);
-using GlClearColorProc = void(APIENTRYP)(GLfloat red,
-                                         GLfloat green,
-                                         GLfloat blue,
-                                         GLfloat alpha);
-using GlClearProc = void(APIENTRYP)(GLbitfield mask);
-
-struct GlFunctions final {
-  GlCreateShaderProc createShader = nullptr;
-  GlShaderSourceProc shaderSource = nullptr;
-  GlCompileShaderProc compileShader = nullptr;
-  GlGetShaderivProc getShaderiv = nullptr;
-  GlGetShaderInfoLogProc getShaderInfoLog = nullptr;
-  GlDeleteShaderProc deleteShader = nullptr;
-  GlCreateProgramProc createProgram = nullptr;
-  GlAttachShaderProc attachShader = nullptr;
-  GlLinkProgramProc linkProgram = nullptr;
-  GlGetProgramivProc getProgramiv = nullptr;
-  GlGetProgramInfoLogProc getProgramInfoLog = nullptr;
-  GlDeleteProgramProc deleteProgram = nullptr;
-  GlUseProgramProc useProgram = nullptr;
-  GlGetUniformLocationProc getUniformLocation = nullptr;
-  GlUniformMatrix4fvProc uniformMatrix4fv = nullptr;
-  GlUniformMatrix3fvProc uniformMatrix3fv = nullptr;
-  GlUniform1fProc uniform1f = nullptr;
-  GlUniform3fvProc uniform3fv = nullptr;
-  GlBindVertexArrayProc bindVertexArray = nullptr;
-  GlDrawArraysProc drawArrays = nullptr;
-  GlDrawElementsProc drawElements = nullptr;
-  GlViewportProc viewport = nullptr;
-  GlEnableProc enable = nullptr;
-  GlClearColorProc clearColor = nullptr;
-  GlClearProc clear = nullptr;
-};
-
-struct GlBackendState final {
+struct BackendState final {
   bool initialized = false;
   bool failed = false;
-  GLuint program = 0U;
-  GLint mvpLocation = -1;
-  GLint normalMatrixLocation = -1;
-  GLint timeLocation = -1;
-  GLint albedoLocation = -1;
-  GlFunctions gl{};
+  std::uint32_t program = 0U;
+  std::int32_t mvpLocation = -1;
+  std::int32_t normalMatrixLocation = -1;
+  std::int32_t timeLocation = -1;
+  std::int32_t albedoLocation = -1;
 };
 
-GlBackendState &backend_state() noexcept {
-  static GlBackendState state{};
+BackendState &backend_state() noexcept {
+  static BackendState state{};
   return state;
 }
 
-template <typename T>
-bool load_gl_function(T *outFunction, const char *name) noexcept {
-  if ((outFunction == nullptr) || (name == nullptr)) {
-    return false;
-  }
-
-  *outFunction = reinterpret_cast<T>(core::get_gl_proc_address(name));
-  return *outFunction != nullptr;
-}
-
-bool load_gl_functions(GlFunctions *outGl) noexcept {
-  if (outGl == nullptr) {
-    return false;
-  }
-
-  return load_gl_function(&outGl->createShader, "glCreateShader")
-         && load_gl_function(&outGl->shaderSource, "glShaderSource")
-         && load_gl_function(&outGl->compileShader, "glCompileShader")
-         && load_gl_function(&outGl->getShaderiv, "glGetShaderiv")
-         && load_gl_function(&outGl->getShaderInfoLog, "glGetShaderInfoLog")
-         && load_gl_function(&outGl->deleteShader, "glDeleteShader")
-         && load_gl_function(&outGl->createProgram, "glCreateProgram")
-         && load_gl_function(&outGl->attachShader, "glAttachShader")
-         && load_gl_function(&outGl->linkProgram, "glLinkProgram")
-         && load_gl_function(&outGl->getProgramiv, "glGetProgramiv")
-         && load_gl_function(&outGl->getProgramInfoLog, "glGetProgramInfoLog")
-         && load_gl_function(&outGl->deleteProgram, "glDeleteProgram")
-         && load_gl_function(&outGl->useProgram, "glUseProgram")
-         && load_gl_function(&outGl->getUniformLocation, "glGetUniformLocation")
-         && load_gl_function(&outGl->uniformMatrix4fv, "glUniformMatrix4fv")
-         && load_gl_function(&outGl->uniformMatrix3fv, "glUniformMatrix3fv")
-         && load_gl_function(&outGl->uniform1f, "glUniform1f")
-         && load_gl_function(&outGl->uniform3fv, "glUniform3fv")
-         && load_gl_function(&outGl->bindVertexArray, "glBindVertexArray")
-         && load_gl_function(&outGl->drawArrays, "glDrawArrays")
-         && load_gl_function(&outGl->drawElements, "glDrawElements")
-         && load_gl_function(&outGl->viewport, "glViewport")
-         && load_gl_function(&outGl->enable, "glEnable")
-         && load_gl_function(&outGl->clearColor, "glClearColor")
-         && load_gl_function(&outGl->clear, "glClear");
-}
-
-void log_shader_compile_error(const GlFunctions &gl,
-                              GLuint shader,
-                              const char *stageLabel) noexcept {
-  std::array<char, 1024U> logBuffer{};
-  GLsizei written = 0;
-  gl.getShaderInfoLog(shader,
-                      static_cast<GLsizei>(logBuffer.size()),
-                      &written,
-                      logBuffer.data());
-
-  char message[1200] = {};
-  std::snprintf(message,
-                sizeof(message),
-                "%s shader compile failed: %s",
-                stageLabel,
-                logBuffer.data());
-  core::log_message(core::LogLevel::Error, "renderer", message);
-}
-
-void log_program_link_error(const GlFunctions &gl, GLuint program) noexcept {
-  std::array<char, 1024U> logBuffer{};
-  GLsizei written = 0;
-  gl.getProgramInfoLog(program,
-                       static_cast<GLsizei>(logBuffer.size()),
-                       &written,
-                       logBuffer.data());
-
-  char message[1200] = {};
-  std::snprintf(
-      message, sizeof(message), "shader link failed: %s", logBuffer.data());
-  core::log_message(core::LogLevel::Error, "renderer", message);
-}
-
-bool compile_shader(const GlFunctions &gl,
-                    GLenum stage,
-                    const char *source,
-                    const char *stageLabel,
-                    GLuint *outShader) noexcept {
-  if ((source == nullptr) || (outShader == nullptr)) {
-    return false;
-  }
-
-  *outShader = 0U;
-  const GLuint shader = gl.createShader(stage);
-  if (shader == 0U) {
-    return false;
-  }
-
-  const char *sources[] = {source};
-  const GLint sourceLength = static_cast<GLint>(std::strlen(source));
-  gl.shaderSource(shader, 1, sources, &sourceLength);
-  gl.compileShader(shader);
-
-  GLint compiled = 0;
-  gl.getShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-  if (compiled != static_cast<GLint>(GL_TRUE)) {
-    log_shader_compile_error(gl, shader, stageLabel);
-    gl.deleteShader(shader);
-    return false;
-  }
-
-  *outShader = shader;
-  return true;
-}
-
-bool link_program(const GlFunctions &gl,
-                  GLuint vertexShader,
-                  GLuint fragmentShader,
-                  GLuint *outProgram) noexcept {
-  if (outProgram == nullptr) {
-    return false;
-  }
-
-  *outProgram = 0U;
-  const GLuint program = gl.createProgram();
-  if (program == 0U) {
-    return false;
-  }
-
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-
-  GLint linked = 0;
-  gl.getProgramiv(program, GL_LINK_STATUS, &linked);
-  if (linked != static_cast<GLint>(GL_TRUE)) {
-    log_program_link_error(gl, program);
-    gl.deleteProgram(program);
-    return false;
-  }
-
-  *outProgram = program;
-  return true;
-}
-
 void reset_backend_on_failure() noexcept {
-  GlBackendState &backend = backend_state();
-  backend = GlBackendState{};
+  BackendState &backend = backend_state();
+  backend = BackendState{};
   backend.failed = true;
 }
 
 bool initialize_backend() noexcept {
-  GlBackendState &backend = backend_state();
+  BackendState &backend = backend_state();
   if (backend.initialized) {
     return true;
   }
@@ -324,16 +60,15 @@ bool initialize_backend() noexcept {
     return false;
   }
 
-  if (!load_gl_functions(&backend.gl)) {
-    core::log_message(
-        core::LogLevel::Error, "renderer", "failed to load OpenGL functions");
+  if (!initialize_render_device()) {
+    core::log_message(core::LogLevel::Error,
+                      "renderer",
+                      "failed to initialize render device");
     reset_backend_on_failure();
     return false;
   }
 
-  GLuint vertexShader = 0U;
-  GLuint fragmentShader = 0U;
-  GLuint program = 0U;
+  const RenderDevice *dev = render_device();
 
   constexpr char kVertexShaderSource[] = R"(#version 450 core
 layout(location = 0) in vec3 inPosition;
@@ -363,44 +98,43 @@ void main() {
 }
 )";
 
-  if (!compile_shader(backend.gl,
-                      GL_VERTEX_SHADER,
-                      kVertexShaderSource,
-                      "vertex",
-                      &vertexShader)
-      || !compile_shader(backend.gl,
-                         GL_FRAGMENT_SHADER,
-                         kFragmentShaderSource,
-                         "fragment",
-                         &fragmentShader)
-      || !link_program(backend.gl, vertexShader, fragmentShader, &program)) {
+  const std::uint32_t vertexShader =
+      dev->create_shader(kShaderStageVertex, kVertexShaderSource);
+  const std::uint32_t fragmentShader =
+      dev->create_shader(kShaderStageFragment, kFragmentShaderSource);
+
+  if ((vertexShader == 0U) || (fragmentShader == 0U)) {
     if (vertexShader != 0U) {
-      backend.gl.deleteShader(vertexShader);
+      dev->destroy_shader(vertexShader);
     }
     if (fragmentShader != 0U) {
-      backend.gl.deleteShader(fragmentShader);
+      dev->destroy_shader(fragmentShader);
     }
     reset_backend_on_failure();
     return false;
   }
 
-  backend.gl.deleteShader(vertexShader);
-  backend.gl.deleteShader(fragmentShader);
+  const std::uint32_t program = dev->link_program(vertexShader, fragmentShader);
+  dev->destroy_shader(vertexShader);
+  dev->destroy_shader(fragmentShader);
+
+  if (program == 0U) {
+    reset_backend_on_failure();
+    return false;
+  }
 
   backend.program = program;
-  backend.mvpLocation = backend.gl.getUniformLocation(backend.program, "u_mvp");
+  backend.mvpLocation = dev->uniform_location(program, "u_mvp");
   backend.normalMatrixLocation =
-      backend.gl.getUniformLocation(backend.program, "u_normalMatrix");
-  backend.timeLocation =
-      backend.gl.getUniformLocation(backend.program, "u_time");
-  backend.albedoLocation =
-      backend.gl.getUniformLocation(backend.program, "u_albedo");
+      dev->uniform_location(program, "u_normalMatrix");
+  backend.timeLocation = dev->uniform_location(program, "u_time");
+  backend.albedoLocation = dev->uniform_location(program, "u_albedo");
   if ((backend.mvpLocation < 0) || (backend.normalMatrixLocation < 0)
       || (backend.albedoLocation < 0)) {
     core::log_message(core::LogLevel::Error,
                       "renderer",
                       "failed to locate required shader uniforms");
-    backend.gl.deleteProgram(backend.program);
+    dev->destroy_program(program);
     reset_backend_on_failure();
     return false;
   }
@@ -409,16 +143,14 @@ void main() {
   return true;
 }
 
-void destroy_backend_resources(GlBackendState *backend) noexcept {
+void destroy_backend_resources(BackendState *backend) noexcept {
   if (backend == nullptr) {
     return;
   }
 
-  // This function releases GL-owned resources only; callers perform the full
-  // backend state reset according to shutdown/failure flow.
-
-  if ((backend->program != 0U) && (backend->gl.deleteProgram != nullptr)) {
-    backend->gl.deleteProgram(backend->program);
+  const RenderDevice *dev = render_device();
+  if ((backend->program != 0U) && (dev != nullptr)) {
+    dev->destroy_program(backend->program);
     backend->program = 0U;
   }
 
@@ -444,8 +176,6 @@ void extract_normal_matrix(const math::Mat4 &model,
     return;
   }
 
-  // Normal matrix = transpose(inverse(M)), correct for non-uniform scale.
-  // Falls back to copying the upper-left 3x3 when M is singular.
   math::Mat4 invModel{};
   const math::Mat4 normalSource =
       math::inverse(model, &invModel) ? math::transpose(invModel) : model;
@@ -523,7 +253,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     return;
   }
 
-  GlBackendState &backend = backend_state();
+  BackendState &backend = backend_state();
+  const RenderDevice *dev = render_device();
 
   int drawableWidth = 1280;
   int drawableHeight = 720;
@@ -535,16 +266,16 @@ void flush_renderer(CommandBufferView commandBufferView,
     drawableHeight = 1;
   }
 
-  backend.gl.viewport(0, 0, drawableWidth, drawableHeight);
-  backend.gl.enable(GL_DEPTH_TEST);
-  backend.gl.clearColor(kClearRed, kClearGreen, kClearBlue, 1.0F);
-  backend.gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+  dev->enable_depth_test();
+  dev->set_clear_color(kClearRed, kClearGreen, kClearBlue, 1.0F);
+  dev->clear_color_depth();
 
   if (registry == nullptr) {
     return;
   }
 
-  backend.gl.useProgram(backend.program);
+  dev->bind_program(backend.program);
 
   std::uint32_t boundVertexArray = 0U;
 
@@ -555,16 +286,14 @@ void flush_renderer(CommandBufferView commandBufferView,
   const float fov = (g_activeCamera.fovRadians > 0.0F)
                         ? g_activeCamera.fovRadians
                         : kDefaultFovRadians;
-  const float nearP = (g_activeCamera.nearPlane > 0.0F)
-                          ? g_activeCamera.nearPlane
-                          : kNearClip;
+  const float nearP =
+      (g_activeCamera.nearPlane > 0.0F) ? g_activeCamera.nearPlane : kNearClip;
   const float farP =
       (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
-  const math::Mat4 projection =
-      math::perspective(fov, aspect, nearP, farP);
+  const math::Mat4 projection = math::perspective(fov, aspect, nearP, farP);
   const math::Mat4 viewProjection = math::mul(projection, view);
   if (backend.timeLocation >= 0) {
-    backend.gl.uniform1f(backend.timeLocation, timeSeconds);
+    dev->set_uniform_float(backend.timeLocation, timeSeconds);
   }
 
   if ((commandBufferView.count > 0U) && (commandBufferView.data == nullptr)) {
@@ -584,52 +313,49 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
 
       if (mesh->vertexArray != boundVertexArray) {
-        backend.gl.bindVertexArray(mesh->vertexArray);
+        dev->bind_vertex_array(mesh->vertexArray);
         boundVertexArray = mesh->vertexArray;
       }
 
       if (backend.albedoLocation >= 0) {
-        backend.gl.uniform3fv(
-            backend.albedoLocation, 1, &command.material.albedo.x);
+        dev->set_uniform_vec3(backend.albedoLocation,
+                              &command.material.albedo.x);
       }
 
       const math::Mat4 model = compute_model_matrix(command);
       const math::Mat4 mvp = compute_mvp(model, viewProjection);
       float normalMatrix[9] = {};
       extract_normal_matrix(model, normalMatrix);
-      backend.gl.uniformMatrix4fv(
-          backend.mvpLocation, 1, GL_FALSE, &mvp.columns[0].x);
-      backend.gl.uniformMatrix3fv(
-          backend.normalMatrixLocation, 1, GL_FALSE, normalMatrix);
+      dev->set_uniform_mat4(backend.mvpLocation, &mvp.columns[0].x);
+      dev->set_uniform_mat3(backend.normalMatrixLocation, normalMatrix);
 
       if (mesh->indexCount > 0U) {
-        backend.gl.drawElements(GL_TRIANGLES,
-                                static_cast<GLsizei>(mesh->indexCount),
-                                GL_UNSIGNED_INT,
-                                nullptr);
+        dev->draw_elements_triangles_u32(
+            static_cast<std::int32_t>(mesh->indexCount));
       } else {
-        backend.gl.drawArrays(
-            GL_TRIANGLES, 0, static_cast<GLsizei>(mesh->vertexCount));
+        dev->draw_arrays_triangles(
+            0, static_cast<std::int32_t>(mesh->vertexCount));
       }
     }
   }
 
-  backend.gl.bindVertexArray(0U);
-  backend.gl.useProgram(0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
 }
 
 void shutdown_renderer() noexcept {
-  GlBackendState &backend = backend_state();
+  BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
     return;
   }
 
   if (core::make_render_context_current()) {
     destroy_backend_resources(&backend);
+    shutdown_render_device();
     core::release_render_context();
   }
 
-  backend = GlBackendState{};
+  backend = BackendState{};
 }
 
 void set_active_camera(const CameraState &camera) noexcept {
