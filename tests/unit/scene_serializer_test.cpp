@@ -72,7 +72,7 @@ int build_source_scene(const char *path) {
 
   engine::runtime::MeshComponent thirdMesh{};
   thirdMesh.meshAssetId = 7U;
-  thirdMesh.material.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
+  thirdMesh.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
   if (!world->add_mesh_component(third, thirdMesh)) {
     return 8;
   }
@@ -146,7 +146,7 @@ int build_source_buffer(
 
   engine::runtime::MeshComponent thirdMesh{};
   thirdMesh.meshAssetId = 7U;
-  thirdMesh.material.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
+  thirdMesh.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
   if (!world->add_mesh_component(third, thirdMesh)) {
     return 38;
   }
@@ -206,8 +206,7 @@ int verify_loaded_scene(const char *path) {
     engine::runtime::MeshComponent mesh{};
     if (world->get_mesh_component(entity, &mesh)) {
       ++meshCount;
-      if ((mesh.meshAssetId == 7U)
-          && nearly_equal(mesh.material.albedo.y, 0.7F)) {
+      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F)) {
         foundMeshValue = true;
       }
     }
@@ -303,8 +302,7 @@ int verify_loaded_scene_from_buffer(
     engine::runtime::MeshComponent mesh{};
     if (world->get_mesh_component(entity, &mesh)) {
       ++meshCount;
-      if ((mesh.meshAssetId == 7U)
-          && nearly_equal(mesh.material.albedo.y, 0.7F)) {
+      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F)) {
         foundMeshValue = true;
       }
     }

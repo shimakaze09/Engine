@@ -7,6 +7,7 @@ target_include_directories(engine_scripting
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/runtime/include
     ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/physics/include
 )
 
 target_compile_features(engine_scripting PUBLIC cxx_std_20)

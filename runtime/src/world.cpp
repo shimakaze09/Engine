@@ -145,6 +145,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_colliders.remove(entity));
   static_cast<void>(m_meshComponents.remove(entity));
   static_cast<void>(m_nameComponents.remove(entity));
+  static_cast<void>(m_lightComponents.remove(entity));
 
   const std::uint32_t index = entity.index;
   erase_persistent_index(m_entityPersistentIds[index]);

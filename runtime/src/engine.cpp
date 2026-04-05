@@ -24,9 +24,11 @@
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/math/transform.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
+#include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/runtime/editor_bridge.h"
@@ -471,6 +473,9 @@ void run(std::uint32_t maxFrames) noexcept {
     bridge->set_world(world.get());
   }
 
+  // Route physics collision pairs to the Lua on_collision callback.
+  physics::set_collision_dispatch(&scripting::dispatch_physics_callbacks);
+
   bool scriptLoaded = false;
   if (file_exists(kMainScriptPath)) {
     scriptLoaded = scripting::load_script(kMainScriptPath);
@@ -558,7 +563,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
   runtime::MeshComponent meshComponent{};
   meshComponent.meshAssetId = bootstrapMeshAssetId;
-  meshComponent.material.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
+  meshComponent.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
   if (!world->add_mesh_component(entity, meshComponent)) {
     core::log_message(core::LogLevel::Error,
                       "engine",
@@ -588,7 +593,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
   runtime::MeshComponent stackedMesh{};
   stackedMesh.meshAssetId = bootstrapMeshAssetId;
-  stackedMesh.material.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
+  stackedMesh.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
   if (!world->add_mesh_component(stackedEntity, stackedMesh)) {
     core::log_message(core::LogLevel::Error,
                       "engine",
@@ -614,7 +619,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
   runtime::MeshComponent groundMesh{};
   groundMesh.meshAssetId = bootstrapMeshAssetId;
-  groundMesh.material.albedo = math::Vec3(0.5F, 0.5F, 0.5F);
+  groundMesh.albedo = math::Vec3(0.5F, 0.5F, 0.5F);
   if (!world->add_mesh_component(groundEntity, groundMesh)) {
     core::log_message(
         core::LogLevel::Error, "engine", "failed to add ground mesh component");
@@ -925,6 +930,18 @@ void run(std::uint32_t maxFrames) noexcept {
       core::JobHandle mergeHandle{};
 
       if (!graphFailed) {
+        int vpW = 1;
+        int vpH = 1;
+        core::render_drawable_size(&vpW, &vpH);
+        const float vpAspect =
+            (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH))
+                      : 1.0F;
+        const renderer::CameraState cam = renderer::get_active_camera();
+        const math::Mat4 vpMatrix = math::mul(
+            math::perspective(
+                cam.fovRadians, vpAspect, cam.nearPlane, cam.farPlane),
+            math::look_at(cam.position, cam.target, cam.up));
+
         if (!runtime::enqueue_render_prep_pipeline(
                 &frameContext->renderPrepPipeline,
                 world.get(),
@@ -936,6 +953,7 @@ void run(std::uint32_t maxFrames) noexcept {
                 &frameContext->frameGraphFailed,
                 frameThreadCount,
                 kChunkSize,
+                vpMatrix,
                 &mergeHandle)) {
           graphFailed = true;
         }
@@ -975,6 +993,11 @@ void run(std::uint32_t maxFrames) noexcept {
                           "frame graph job execution failed");
         running = false;
         continue;
+      }
+
+      // Dispatch Lua on_collision callbacks for all pairs recorded this frame.
+      if (runPhysics) {
+        physics::dispatch_collision_callbacks();
       }
 
       const auto frameGraphEnd = Clock::now();

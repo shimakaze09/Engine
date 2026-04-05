@@ -192,9 +192,8 @@ int main() {
   }
 
   if ((meshComponent.meshAssetId != kDefaultMeshAssetId)
-      || (meshComponent.material.albedo.x != 0.2F)
-      || (meshComponent.material.albedo.y != 0.8F)
-      || (meshComponent.material.albedo.z != 0.4F)) {
+      || (meshComponent.albedo.x != 0.2F) || (meshComponent.albedo.y != 0.8F)
+      || (meshComponent.albedo.z != 0.4F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 14;

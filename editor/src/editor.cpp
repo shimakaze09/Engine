@@ -543,7 +543,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   if (g_world->get_mesh_component_ptr(entity) == nullptr) {
     runtime::MeshComponent mesh{};
     mesh.meshAssetId = 0U;
-    mesh.material.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
+    mesh.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
     if (ImGui::Selectable(kMeshSectionLabel)) {
       static_cast<void>(g_world->add_mesh_component(entity, mesh));
     }
@@ -861,10 +861,10 @@ void draw_inspector_panel() noexcept {
     if (sectionOpen) {
       ImGui::Text("Mesh Asset ID: %u", mesh.meshAssetId);
       if (editable) {
-        meshModified |= ImGui::ColorEdit3("Albedo", &mesh.material.albedo.x);
+        meshModified |= ImGui::ColorEdit3("Albedo", &mesh.albedo.x);
       } else {
         ImGui::BeginDisabled();
-        static_cast<void>(ImGui::ColorEdit3("Albedo", &mesh.material.albedo.x));
+        static_cast<void>(ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
         ImGui::EndDisabled();
       }
     }

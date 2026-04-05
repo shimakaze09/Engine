@@ -475,7 +475,7 @@ bool read_mesh_component(const core::JsonParser &parser,
 
   core::JsonValue albedoValue{};
   if (parser.get_object_field(meshObject, "albedo", &albedoValue)) {
-    if (!read_vec3(parser, albedoValue, &component.material.albedo)) {
+    if (!read_vec3(parser, albedoValue, &component.albedo)) {
       return false;
     }
   }
@@ -745,7 +745,7 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_key("MeshComponent");
       writer.begin_object();
       writer.write_uint(kMeshAssetIdKey, mesh.meshAssetId);
-      write_vec3(writer, "albedo", mesh.material.albedo);
+      write_vec3(writer, "albedo", mesh.albedo);
       writer.end_object();
     }
 

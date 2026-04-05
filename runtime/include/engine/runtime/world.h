@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
@@ -10,7 +11,6 @@
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
-#include "engine/renderer/command_buffer.h"
 
 namespace engine::runtime {
 
@@ -46,18 +46,30 @@ struct RigidBody final {
   float inverseMass = 1.0F;
 };
 
+enum class ColliderShape : std::uint8_t { AABB = 0, Sphere = 1 };
+
 struct Collider final {
   math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  ColliderShape shape = ColliderShape::AABB;
 };
 
 struct NameComponent final {
   char name[32] = {};
 };
 
+enum class LightType : std::uint8_t { Directional = 0 };
+
+struct LightComponent final {
+  math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
+  math::Vec3 direction = math::Vec3(0.4F, -1.0F, 0.6F);
+  float intensity = 1.0F;
+  LightType type = LightType::Directional;
+};
+
 // Renderer-facing component; keep minimal to avoid bloating draw commands.
 struct MeshComponent final {
   std::uint32_t meshAssetId = 0U;
-  renderer::Material material{};
+  math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
 };
 
 using TransformVisitor = void (*)(Entity entity,
@@ -89,6 +101,7 @@ public:
   static constexpr std::size_t kMaxColliders = 16384U;
   static constexpr std::size_t kMaxMeshComponents = 16384U;
   static constexpr std::size_t kMaxNameComponents = 16384U;
+  static constexpr std::size_t kMaxLightComponents = 1024U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
 
@@ -162,6 +175,13 @@ public:
                           NameComponent *outComponent) const noexcept;
   NameComponent *get_name_component_ptr(Entity entity) noexcept;
   const NameComponent *get_name_component_ptr(Entity entity) const noexcept;
+
+  bool add_light_component(Entity entity,
+                           const LightComponent &component) noexcept;
+  bool remove_light_component(Entity entity) noexcept;
+  bool get_light_component(Entity entity,
+                           LightComponent *outComponent) const noexcept;
+  bool has_light_component(Entity entity) const noexcept;
 
   void begin_update_phase() noexcept;
   void commit_update_phase() noexcept;
@@ -253,13 +273,16 @@ private:
       core::SparseSet<Entity, MeshComponent, kMaxEntities, kMaxMeshComponents>;
   using NameComponentSet =
       core::SparseSet<Entity, NameComponent, kMaxEntities, kMaxNameComponents>;
+  using LightComponentSet = core::
+      SparseSet<Entity, LightComponent, kMaxEntities, kMaxLightComponents>;
 
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
     return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody>
            || std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider>
            || std::is_same_v<C, MeshComponent>
-           || std::is_same_v<C, NameComponent>;
+           || std::is_same_v<C, NameComponent>
+           || std::is_same_v<C, LightComponent>;
   }
 
   bool is_mutation_phase() const noexcept;
@@ -291,6 +314,8 @@ private:
       return m_meshComponents.count();
     } else if constexpr (std::is_same_v<C, NameComponent>) {
       return m_nameComponents.count();
+    } else if constexpr (std::is_same_v<C, LightComponent>) {
+      return m_lightComponents.count();
     } else {
       return 0U;
     }
@@ -316,6 +341,8 @@ private:
       return m_meshComponents.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, NameComponent>) {
       return m_nameComponents.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, LightComponent>) {
+      return m_lightComponents.get_ptr(entity);
     }
 
     return nullptr;
@@ -349,6 +376,10 @@ private:
     } else if constexpr (std::is_same_v<C, NameComponent>) {
       for (std::size_t i = 0U; i < m_nameComponents.count(); ++i) {
         fn(m_nameComponents.entity_at(i), m_nameComponents.component_at(i));
+      }
+    } else if constexpr (std::is_same_v<C, LightComponent>) {
+      for (std::size_t i = 0U; i < m_lightComponents.count(); ++i) {
+        fn(m_lightComponents.entity_at(i), m_lightComponents.component_at(i));
       }
     }
   }
@@ -391,6 +422,7 @@ private:
   ColliderSet m_colliders{};
   MeshComponentSet m_meshComponents{};
   NameComponentSet m_nameComponents{};
+  LightComponentSet m_lightComponents{};
 
   std::size_t m_readStateIndex = 0U;
   std::size_t m_writeStateIndex = 1U;

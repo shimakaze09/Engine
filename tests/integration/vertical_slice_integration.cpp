@@ -179,6 +179,7 @@ bool run_render_prep_pipeline(
                                                      &frameGraphFailed,
                                                      frameThreadCount,
                                                      256U,
+                                                     engine::math::Mat4(),
                                                      &mergeHandle)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();

@@ -4,10 +4,46 @@
 #include <cstddef>
 
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
+#include "engine/math/aabb.h"
+#include "engine/math/transform.h"
 
 namespace engine::runtime {
 
 namespace {
+
+struct FrustumPlane final {
+  float a;
+  float b;
+  float c;
+  float d;
+};
+
+bool aabb_outside_plane(const FrustumPlane &p,
+                        const math::Vec3 &center,
+                        const math::Vec3 &half) noexcept {
+  const float px = center.x + (p.a >= 0.0F ? half.x : -half.x);
+  const float py = center.y + (p.b >= 0.0F ? half.y : -half.y);
+  const float pz = center.z + (p.c >= 0.0F ? half.z : -half.z);
+  return (p.a * px + p.b * py + p.c * pz + p.d) < 0.0F;
+}
+
+// Gribb-Hartmann: extract 6 frustum planes from a column-major VP matrix.
+// Row j = (columns[0][j], columns[1][j], columns[2][j], columns[3][j])
+// where Vec4 x/y/z/w map to indices 0/1/2/3.
+void extract_frustum_planes(const math::Mat4 &vp,
+                            FrustumPlane planes[6]) noexcept {
+  const math::Vec4 c0 = vp.columns[0];
+  const math::Vec4 c1 = vp.columns[1];
+  const math::Vec4 c2 = vp.columns[2];
+  const math::Vec4 c3 = vp.columns[3];
+  planes[0] = {c0.w + c0.x, c1.w + c1.x, c2.w + c2.x, c3.w + c3.x}; // left
+  planes[1] = {c0.w - c0.x, c1.w - c1.x, c2.w - c2.x, c3.w - c3.x}; // right
+  planes[2] = {c0.w + c0.y, c1.w + c1.y, c2.w + c2.y, c3.w + c3.y}; // bottom
+  planes[3] = {c0.w - c0.y, c1.w - c1.y, c2.w - c2.y, c3.w - c3.y}; // top
+  planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z}; // near
+  planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z}; // far
+}
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
   if (frameGraphFailed != nullptr) {
@@ -43,10 +79,37 @@ void render_prep_chunk_job(void *userData) noexcept {
   renderer::CommandBufferBuilder &localBuffer =
       jobData->localBuffers[threadIndex];
 
+  // Use the pre-computed view-projection matrix from the pipeline context.
+  const math::Mat4 &vp = jobData->viewProjection;
+  FrustumPlane frustumPlanes[6];
+  extract_frustum_planes(vp, frustumPlanes);
+
   for (std::size_t i = 0U; i < jobData->count; ++i) {
     const MeshComponent *meshComponent =
         jobData->world->get_mesh_component_ptr(entities[i]);
     if (meshComponent == nullptr) {
+      continue;
+    }
+
+    // Derive a world-space AABB from the collider for frustum culling.
+    // Spheres use (radius, radius, radius) as conservative half-extents.
+    const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
+    const math::Vec3 center = transforms[i].position;
+    math::Vec3 half(0.5F, 0.5F, 0.5F);
+    if (collider != nullptr) {
+      if (collider->shape == ColliderShape::Sphere) {
+        const float r = collider->halfExtents.x;
+        half = math::Vec3(r, r, r);
+      } else {
+        half = collider->halfExtents;
+      }
+    }
+
+    bool culled = false;
+    for (int p = 0; (p < 6) && !culled; ++p) {
+      culled = aabb_outside_plane(frustumPlanes[p], center, half);
+    }
+    if (culled) {
       continue;
     }
 
@@ -65,7 +128,7 @@ void render_prep_chunk_job(void *userData) noexcept {
     renderer::DrawCommand command{};
     command.entity = entities[i].index;
     command.mesh = runtimeMesh;
-    command.material = meshComponent->material;
+    command.material.albedo = meshComponent->albedo;
     command.modelMatrix = transforms[i].matrix;
 
     if (!localBuffer.submit(command)) {
@@ -118,6 +181,7 @@ bool enqueue_render_prep_pipeline(
     std::atomic<bool> *frameGraphFailed,
     std::size_t frameThreadCount,
     std::size_t chunkSize,
+    const math::Mat4 &viewProjection,
     core::JobHandle *outMergeHandle) noexcept {
   if ((context == nullptr) || (world == nullptr)
       || (mergedCommandBuffer == nullptr) || (assetDatabase == nullptr)
@@ -140,9 +204,6 @@ bool enqueue_render_prep_pipeline(
   }
 
   const std::size_t transformCount = world->transform_count();
-  if (transformCount > renderer::CommandBufferBuilder::kMaxDrawCommands) {
-    return false;
-  }
 
   std::size_t renderPrepJobCursor = 0U;
   std::size_t renderPrepHandleCount = 0U;
@@ -167,6 +228,7 @@ bool enqueue_render_prep_pipeline(
     prepData.assetDatabase = assetDatabase;
     prepData.meshRegistry = meshRegistry;
     prepData.frameGraphFailed = frameGraphFailed;
+    prepData.viewProjection = viewProjection;
 
     core::Job renderPrepJob{};
     renderPrepJob.function = &render_prep_chunk_job;

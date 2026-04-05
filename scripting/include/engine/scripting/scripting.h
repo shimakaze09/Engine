@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::runtime {
@@ -27,5 +28,21 @@ bool call_script_function(const char *name) noexcept;
 // Call a named global function with one float argument, no return value.
 // Returns false if function doesn't exist or errors.
 bool call_script_function_float(const char *name, float arg) noexcept;
+
+// Dispatch Lua on_collision(entityA, entityB) for each pair in pairData.
+// pairData is an array of [entityIndexA, entityIndexB, ...] uint32 values.
+// pairCount is the number of pairs (not element count).
+// No-op if the scripting system is not initialised or on_collision is absent.
+void dispatch_physics_callbacks(const std::uint32_t *pairData,
+                                 std::size_t pairCount) noexcept;
+
+// Set the current frame index; exposed to Lua via engine.frame_count().
+void set_frame_index(std::uint32_t frameIndex) noexcept;
+
+// Begin watching a Lua script file for changes (hot-reload).
+void watch_script_file(const char *path) noexcept;
+
+// Check if the watched script file has changed; reload it if so.
+void check_script_reload() noexcept;
 
 } // namespace engine::scripting

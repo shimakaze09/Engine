@@ -12,8 +12,21 @@ extern "C" {
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/physics/physics.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/world.h"
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
 
 namespace engine::scripting {
 
@@ -25,6 +38,9 @@ std::uint32_t g_defaultMeshAssetId = 0U;
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
 float g_totalSeconds = 0.0F;
+std::uint32_t g_frameIndex = 0U;
+char g_watchedPath[512] = {};
+std::int64_t g_watchedMtime = 0;
 
 bool read_entity_index(lua_State *state,
                        int index,
@@ -372,7 +388,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
     component = *existing;
   }
 
-  component.material.albedo = albedo;
+  component.albedo = albedo;
   const bool ok = g_world->add_mesh_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -507,6 +523,36 @@ int lua_engine_set_camera_fov(lua_State *state) noexcept {
   return 0;
 }
 
+int lua_engine_set_gravity(lua_State *state) noexcept {
+  float x = 0.0F;
+  float y = 0.0F;
+  float z = 0.0F;
+  if (lua_isnumber(state, 1)) {
+    x = static_cast<float>(lua_tonumber(state, 1));
+  }
+  if (lua_isnumber(state, 2)) {
+    y = static_cast<float>(lua_tonumber(state, 2));
+  }
+  if (lua_isnumber(state, 3)) {
+    z = static_cast<float>(lua_tonumber(state, 3));
+  }
+  physics::set_gravity(x, y, z);
+  return 0;
+}
+
+int lua_engine_get_gravity(lua_State *state) noexcept {
+  const math::Vec3 g = physics::get_gravity();
+  lua_pushnumber(state, static_cast<lua_Number>(g.x));
+  lua_pushnumber(state, static_cast<lua_Number>(g.y));
+  lua_pushnumber(state, static_cast<lua_Number>(g.z));
+  return 3;
+}
+
+int lua_engine_frame_count(lua_State *state) noexcept {
+  lua_pushinteger(state, static_cast<lua_Integer>(g_frameIndex));
+  return 1;
+}
+
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -588,53 +634,108 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_set_camera_fov);
   lua_setfield(state, -2, "set_camera_fov");
 
+  lua_pushcfunction(state, &lua_engine_set_gravity);
+  lua_setfield(state, -2, "set_gravity");
+
+  lua_pushcfunction(state, &lua_engine_get_gravity);
+  lua_setfield(state, -2, "get_gravity");
+
+  lua_pushcfunction(state, &lua_engine_frame_count);
+  lua_setfield(state, -2, "frame_count");
+
   // Key scancode constants (values match SDL_SCANCODE_* for the SDL2 backend).
-  lua_pushinteger(state, core::kKey_A);      lua_setfield(state, -2, "KEY_A");
-  lua_pushinteger(state, core::kKey_B);      lua_setfield(state, -2, "KEY_B");
-  lua_pushinteger(state, core::kKey_C);      lua_setfield(state, -2, "KEY_C");
-  lua_pushinteger(state, core::kKey_D);      lua_setfield(state, -2, "KEY_D");
-  lua_pushinteger(state, core::kKey_E);      lua_setfield(state, -2, "KEY_E");
-  lua_pushinteger(state, core::kKey_F);      lua_setfield(state, -2, "KEY_F");
-  lua_pushinteger(state, core::kKey_G);      lua_setfield(state, -2, "KEY_G");
-  lua_pushinteger(state, core::kKey_H);      lua_setfield(state, -2, "KEY_H");
-  lua_pushinteger(state, core::kKey_I);      lua_setfield(state, -2, "KEY_I");
-  lua_pushinteger(state, core::kKey_J);      lua_setfield(state, -2, "KEY_J");
-  lua_pushinteger(state, core::kKey_K);      lua_setfield(state, -2, "KEY_K");
-  lua_pushinteger(state, core::kKey_L);      lua_setfield(state, -2, "KEY_L");
-  lua_pushinteger(state, core::kKey_M);      lua_setfield(state, -2, "KEY_M");
-  lua_pushinteger(state, core::kKey_N);      lua_setfield(state, -2, "KEY_N");
-  lua_pushinteger(state, core::kKey_O);      lua_setfield(state, -2, "KEY_O");
-  lua_pushinteger(state, core::kKey_P);      lua_setfield(state, -2, "KEY_P");
-  lua_pushinteger(state, core::kKey_Q);      lua_setfield(state, -2, "KEY_Q");
-  lua_pushinteger(state, core::kKey_R);      lua_setfield(state, -2, "KEY_R");
-  lua_pushinteger(state, core::kKey_S);      lua_setfield(state, -2, "KEY_S");
-  lua_pushinteger(state, core::kKey_T);      lua_setfield(state, -2, "KEY_T");
-  lua_pushinteger(state, core::kKey_U);      lua_setfield(state, -2, "KEY_U");
-  lua_pushinteger(state, core::kKey_V);      lua_setfield(state, -2, "KEY_V");
-  lua_pushinteger(state, core::kKey_W);      lua_setfield(state, -2, "KEY_W");
-  lua_pushinteger(state, core::kKey_X);      lua_setfield(state, -2, "KEY_X");
-  lua_pushinteger(state, core::kKey_Y);      lua_setfield(state, -2, "KEY_Y");
-  lua_pushinteger(state, core::kKey_Z);      lua_setfield(state, -2, "KEY_Z");
-  lua_pushinteger(state, core::kKey_0);      lua_setfield(state, -2, "KEY_0");
-  lua_pushinteger(state, core::kKey_1);      lua_setfield(state, -2, "KEY_1");
-  lua_pushinteger(state, core::kKey_2);      lua_setfield(state, -2, "KEY_2");
-  lua_pushinteger(state, core::kKey_3);      lua_setfield(state, -2, "KEY_3");
-  lua_pushinteger(state, core::kKey_4);      lua_setfield(state, -2, "KEY_4");
-  lua_pushinteger(state, core::kKey_5);      lua_setfield(state, -2, "KEY_5");
-  lua_pushinteger(state, core::kKey_6);      lua_setfield(state, -2, "KEY_6");
-  lua_pushinteger(state, core::kKey_7);      lua_setfield(state, -2, "KEY_7");
-  lua_pushinteger(state, core::kKey_8);      lua_setfield(state, -2, "KEY_8");
-  lua_pushinteger(state, core::kKey_9);      lua_setfield(state, -2, "KEY_9");
-  lua_pushinteger(state, core::kKey_Space);  lua_setfield(state, -2, "KEY_SPACE");
-  lua_pushinteger(state, core::kKey_Return); lua_setfield(state, -2, "KEY_RETURN");
-  lua_pushinteger(state, core::kKey_Escape); lua_setfield(state, -2, "KEY_ESCAPE");
-  lua_pushinteger(state, core::kKey_Up);     lua_setfield(state, -2, "KEY_UP");
-  lua_pushinteger(state, core::kKey_Down);   lua_setfield(state, -2, "KEY_DOWN");
-  lua_pushinteger(state, core::kKey_Left);   lua_setfield(state, -2, "KEY_LEFT");
-  lua_pushinteger(state, core::kKey_Right);  lua_setfield(state, -2, "KEY_RIGHT");
-  lua_pushinteger(state, core::kKey_LShift); lua_setfield(state, -2, "KEY_LSHIFT");
-  lua_pushinteger(state, core::kKey_LCtrl);  lua_setfield(state, -2, "KEY_LCTRL");
-  lua_pushinteger(state, core::kKey_LAlt);   lua_setfield(state, -2, "KEY_LALT");
+  lua_pushinteger(state, core::kKey_A);
+  lua_setfield(state, -2, "KEY_A");
+  lua_pushinteger(state, core::kKey_B);
+  lua_setfield(state, -2, "KEY_B");
+  lua_pushinteger(state, core::kKey_C);
+  lua_setfield(state, -2, "KEY_C");
+  lua_pushinteger(state, core::kKey_D);
+  lua_setfield(state, -2, "KEY_D");
+  lua_pushinteger(state, core::kKey_E);
+  lua_setfield(state, -2, "KEY_E");
+  lua_pushinteger(state, core::kKey_F);
+  lua_setfield(state, -2, "KEY_F");
+  lua_pushinteger(state, core::kKey_G);
+  lua_setfield(state, -2, "KEY_G");
+  lua_pushinteger(state, core::kKey_H);
+  lua_setfield(state, -2, "KEY_H");
+  lua_pushinteger(state, core::kKey_I);
+  lua_setfield(state, -2, "KEY_I");
+  lua_pushinteger(state, core::kKey_J);
+  lua_setfield(state, -2, "KEY_J");
+  lua_pushinteger(state, core::kKey_K);
+  lua_setfield(state, -2, "KEY_K");
+  lua_pushinteger(state, core::kKey_L);
+  lua_setfield(state, -2, "KEY_L");
+  lua_pushinteger(state, core::kKey_M);
+  lua_setfield(state, -2, "KEY_M");
+  lua_pushinteger(state, core::kKey_N);
+  lua_setfield(state, -2, "KEY_N");
+  lua_pushinteger(state, core::kKey_O);
+  lua_setfield(state, -2, "KEY_O");
+  lua_pushinteger(state, core::kKey_P);
+  lua_setfield(state, -2, "KEY_P");
+  lua_pushinteger(state, core::kKey_Q);
+  lua_setfield(state, -2, "KEY_Q");
+  lua_pushinteger(state, core::kKey_R);
+  lua_setfield(state, -2, "KEY_R");
+  lua_pushinteger(state, core::kKey_S);
+  lua_setfield(state, -2, "KEY_S");
+  lua_pushinteger(state, core::kKey_T);
+  lua_setfield(state, -2, "KEY_T");
+  lua_pushinteger(state, core::kKey_U);
+  lua_setfield(state, -2, "KEY_U");
+  lua_pushinteger(state, core::kKey_V);
+  lua_setfield(state, -2, "KEY_V");
+  lua_pushinteger(state, core::kKey_W);
+  lua_setfield(state, -2, "KEY_W");
+  lua_pushinteger(state, core::kKey_X);
+  lua_setfield(state, -2, "KEY_X");
+  lua_pushinteger(state, core::kKey_Y);
+  lua_setfield(state, -2, "KEY_Y");
+  lua_pushinteger(state, core::kKey_Z);
+  lua_setfield(state, -2, "KEY_Z");
+  lua_pushinteger(state, core::kKey_0);
+  lua_setfield(state, -2, "KEY_0");
+  lua_pushinteger(state, core::kKey_1);
+  lua_setfield(state, -2, "KEY_1");
+  lua_pushinteger(state, core::kKey_2);
+  lua_setfield(state, -2, "KEY_2");
+  lua_pushinteger(state, core::kKey_3);
+  lua_setfield(state, -2, "KEY_3");
+  lua_pushinteger(state, core::kKey_4);
+  lua_setfield(state, -2, "KEY_4");
+  lua_pushinteger(state, core::kKey_5);
+  lua_setfield(state, -2, "KEY_5");
+  lua_pushinteger(state, core::kKey_6);
+  lua_setfield(state, -2, "KEY_6");
+  lua_pushinteger(state, core::kKey_7);
+  lua_setfield(state, -2, "KEY_7");
+  lua_pushinteger(state, core::kKey_8);
+  lua_setfield(state, -2, "KEY_8");
+  lua_pushinteger(state, core::kKey_9);
+  lua_setfield(state, -2, "KEY_9");
+  lua_pushinteger(state, core::kKey_Space);
+  lua_setfield(state, -2, "KEY_SPACE");
+  lua_pushinteger(state, core::kKey_Return);
+  lua_setfield(state, -2, "KEY_RETURN");
+  lua_pushinteger(state, core::kKey_Escape);
+  lua_setfield(state, -2, "KEY_ESCAPE");
+  lua_pushinteger(state, core::kKey_Up);
+  lua_setfield(state, -2, "KEY_UP");
+  lua_pushinteger(state, core::kKey_Down);
+  lua_setfield(state, -2, "KEY_DOWN");
+  lua_pushinteger(state, core::kKey_Left);
+  lua_setfield(state, -2, "KEY_LEFT");
+  lua_pushinteger(state, core::kKey_Right);
+  lua_setfield(state, -2, "KEY_RIGHT");
+  lua_pushinteger(state, core::kKey_LShift);
+  lua_setfield(state, -2, "KEY_LSHIFT");
+  lua_pushinteger(state, core::kKey_LCtrl);
+  lua_setfield(state, -2, "KEY_LCTRL");
+  lua_pushinteger(state, core::kKey_LAlt);
+  lua_setfield(state, -2, "KEY_LALT");
 
   lua_setglobal(state, "engine");
 }
@@ -776,4 +877,80 @@ bool call_script_function_float(const char *name, float arg) noexcept {
   return true;
 }
 
+void dispatch_physics_callbacks(const std::uint32_t *pairData,
+                                std::size_t pairCount) noexcept {
+  if ((g_state == nullptr) || (pairData == nullptr) || (pairCount == 0U)) {
+    return;
+  }
+
+  lua_getglobal(g_state, "on_collision");
+  if (!lua_isfunction(g_state, -1)) {
+    lua_pop(g_state, 1);
+    return;
+  }
+  lua_pop(g_state, 1);
+
+  for (std::size_t i = 0U; i < pairCount; ++i) {
+    lua_getglobal(g_state, "on_collision");
+    if (!lua_isfunction(g_state, -1)) {
+      lua_pop(g_state, 1);
+      return;
+    }
+    lua_pushinteger(g_state, static_cast<lua_Integer>(pairData[i * 2U]));
+    lua_pushinteger(g_state, static_cast<lua_Integer>(pairData[i * 2U + 1U]));
+    if (lua_pcall(g_state, 2, 0, 0) != LUA_OK) {
+      log_lua_error("on_collision");
+    }
+  }
+}
+
+namespace {
+std::int64_t get_file_mtime(const char *path) noexcept {
+  if ((path == nullptr) || (path[0] == '\0')) {
+    return 0;
+  }
+#if defined(_WIN32)
+  WIN32_FILE_ATTRIBUTE_DATA data{};
+  if (!GetFileAttributesExA(path, GetFileExInfoStandard, &data)) {
+    return 0;
+  }
+  ULARGE_INTEGER ul{};
+  ul.LowPart = data.ftLastWriteTime.dwLowDateTime;
+  ul.HighPart = data.ftLastWriteTime.dwHighDateTime;
+  return static_cast<std::int64_t>(ul.QuadPart);
+#else
+  struct stat st{};
+  if (stat(path, &st) != 0) {
+    return 0;
+  }
+  return static_cast<std::int64_t>(st.st_mtime);
+#endif
+}
+} // anonymous namespace
+
+void set_frame_index(std::uint32_t frameIndex) noexcept {
+  g_frameIndex = frameIndex;
+}
+
+void watch_script_file(const char *path) noexcept {
+  if (path == nullptr) {
+    return;
+  }
+  strncpy_s(
+      g_watchedPath, sizeof(g_watchedPath), path, sizeof(g_watchedPath) - 1U);
+  g_watchedMtime = get_file_mtime(path);
+}
+
+void check_script_reload() noexcept {
+  if (g_watchedPath[0] == '\0') {
+    return;
+  }
+  const std::int64_t mtime = get_file_mtime(g_watchedPath);
+  if ((mtime != 0) && (mtime != g_watchedMtime)) {
+    g_watchedMtime = mtime;
+    core::log_message(
+        core::LogLevel::Info, "scripting", "hot-reloading script");
+    load_script(g_watchedPath);
+  }
+}
 } // namespace engine::scripting

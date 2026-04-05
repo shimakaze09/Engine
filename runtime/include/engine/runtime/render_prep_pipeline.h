@@ -21,6 +21,7 @@ struct RenderPrepChunkJobData final {
   const renderer::AssetDatabase *assetDatabase = nullptr;
   const renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::atomic<bool> *frameGraphFailed = nullptr;
+  math::Mat4 viewProjection{};
 };
 
 struct MergeCommandsJobData final {
@@ -52,6 +53,7 @@ bool enqueue_render_prep_pipeline(
     std::atomic<bool> *frameGraphFailed,
     std::size_t frameThreadCount,
     std::size_t chunkSize,
+    const math::Mat4 &viewProjection,
     core::JobHandle *outMergeHandle) noexcept;
 
 } // namespace engine::runtime
