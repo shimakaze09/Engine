@@ -612,53 +612,58 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 
 bool copy_world_contents(const World &sourceWorld,
                          World &targetWorld) noexcept {
-  for (std::uint32_t index = 1U;
-       index <= static_cast<std::uint32_t>(World::kMaxEntities);
-       ++index) {
-    const Entity sourceEntity = sourceWorld.find_entity_by_index(index);
-    if (sourceEntity == kInvalidEntity) {
-      continue;
+  bool success = true;
+
+  sourceWorld.for_each_alive([&](Entity sourceEntity) noexcept {
+    if (!success) {
+      return;
     }
 
     const PersistentId persistentId = sourceWorld.persistent_id(sourceEntity);
     const Entity targetEntity =
         targetWorld.create_entity_with_persistent_id(persistentId);
     if (targetEntity == kInvalidEntity) {
-      return false;
+      success = false;
+      return;
     }
 
     Transform transform{};
     if (sourceWorld.get_transform(sourceEntity, &transform)
         && !targetWorld.add_transform(targetEntity, transform)) {
-      return false;
+      success = false;
+      return;
     }
 
     RigidBody rigidBody{};
     if (sourceWorld.get_rigid_body(sourceEntity, &rigidBody)
         && !targetWorld.add_rigid_body(targetEntity, rigidBody)) {
-      return false;
+      success = false;
+      return;
     }
 
     Collider collider{};
     if (sourceWorld.get_collider(sourceEntity, &collider)
         && !targetWorld.add_collider(targetEntity, collider)) {
-      return false;
+      success = false;
+      return;
     }
 
     MeshComponent mesh{};
     if (sourceWorld.get_mesh_component(sourceEntity, &mesh)
         && !targetWorld.add_mesh_component(targetEntity, mesh)) {
-      return false;
+      success = false;
+      return;
     }
 
     NameComponent name{};
     if (sourceWorld.get_name_component(sourceEntity, &name)
         && !targetWorld.add_name_component(targetEntity, name)) {
-      return false;
+      success = false;
+      return;
     }
-  }
+  });
 
-  return true;
+  return success;
 }
 
 bool serialize_scene_to_writer(const World &world,
@@ -769,13 +774,14 @@ bool serialize_scene_to_writer(const World &world,
 } // namespace
 
 void reset_world(World &world) noexcept {
-  for (std::uint32_t index = 1U;
-       index <= static_cast<std::uint32_t>(World::kMaxEntities);
-       ++index) {
-    const Entity entity = world.find_entity_by_index(index);
-    if (entity != kInvalidEntity) {
-      static_cast<void>(world.destroy_entity(entity));
-    }
+  if (world.alive_entity_count() == 0U) {
+    return;
+  }
+  thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
+  std::size_t count = 0U;
+  world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
+  for (std::size_t i = 0U; i < count; ++i) {
+    static_cast<void>(world.destroy_entity(toDestroy[i]));
   }
 }
 

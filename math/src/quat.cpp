@@ -161,4 +161,50 @@ Quat from_mat4(const Mat4 &value) noexcept {
   return Quat((m02 + m20) * inv, (m12 + m21) * inv, s, (m10 - m01) * inv);
 }
 
+Vec3 rotate_vector(const Vec3 &v, const Quat &q) noexcept {
+  // Efficient Rodrigues: t = 2 * cross(q.xyz, v)
+  // result = v + q.w * t + cross(q.xyz, t)
+  const Vec3 qxyz(q.x, q.y, q.z);
+  const Vec3 t = mul(cross(qxyz, v), 2.0F);
+  return add(add(v, mul(t, q.w)), cross(qxyz, t));
+}
+
+Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
+  const float cy = std::cos(yawRad * 0.5F);
+  const float sy = std::sin(yawRad * 0.5F);
+  const float cp = std::cos(pitchRad * 0.5F);
+  const float sp = std::sin(pitchRad * 0.5F);
+  const float cr = std::cos(rollRad * 0.5F);
+  const float sr = std::sin(rollRad * 0.5F);
+
+  return Quat(cy * sp * cr + sy * cp * sr,
+              sy * cp * cr - cy * sp * sr,
+              cy * cp * sr - sy * sp * cr,
+              cy * cp * cr + sy * sp * sr);
+}
+
+bool to_euler(const Quat &q, float *outPitch, float *outYaw,
+              float *outRoll) noexcept {
+  if ((outPitch == nullptr) || (outYaw == nullptr) || (outRoll == nullptr)) {
+    return false;
+  }
+
+  const float sinrCosp = 2.0F * (q.w * q.x + q.y * q.z);
+  const float cosrCosp = 1.0F - 2.0F * (q.x * q.x + q.y * q.y);
+  *outRoll = std::atan2(sinrCosp, cosrCosp);
+
+  const float sinp = 2.0F * (q.w * q.y - q.z * q.x);
+  if (std::fabs(sinp) >= 1.0F) {
+    *outPitch = std::copysign(1.5707963268F, sinp);
+  } else {
+    *outPitch = std::asin(sinp);
+  }
+
+  const float sinyCosp = 2.0F * (q.w * q.z + q.x * q.y);
+  const float cosyCosp = 1.0F - 2.0F * (q.y * q.y + q.z * q.z);
+  *outYaw = std::atan2(sinyCosp, cosyCosp);
+
+  return true;
+}
+
 } // namespace engine::math

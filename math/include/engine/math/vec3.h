@@ -23,5 +23,9 @@ float length_sq(const Vec3 &value) noexcept;
 float length(const Vec3 &value) noexcept;
 Vec3 normalize(const Vec3 &value) noexcept;
 Vec3 lerp(const Vec3 &from, const Vec3 &to, float t) noexcept;
+Vec3 negate(const Vec3 &value) noexcept;
+Vec3 reflect(const Vec3 &incident, const Vec3 &normal) noexcept;
+Vec3 clamp(const Vec3 &value, float minVal, float maxVal) noexcept;
+float distance(const Vec3 &lhs, const Vec3 &rhs) noexcept;
 
 } // namespace engine::math

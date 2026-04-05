@@ -20,6 +20,7 @@
 #include "engine/core/platform.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
+#include "engine/renderer/camera.h"
 #include "engine/renderer/mesh_loader.h"
 
 namespace engine::renderer {
@@ -32,6 +33,8 @@ constexpr float kFarClip = 100.0F;
 constexpr float kClearRed = 0.06F;
 constexpr float kClearGreen = 0.08F;
 constexpr float kClearBlue = 0.12F;
+
+CameraState g_activeCamera{};
 
 #ifndef GL_VERTEX_SHADER
 #define GL_VERTEX_SHADER 0x8B31
@@ -547,12 +550,18 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   const float aspect =
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
-  const math::Vec3 eye(
-      std::sin(timeSeconds) * 3.0F, 1.5F, std::cos(timeSeconds) * 3.0F);
   const math::Mat4 view = math::look_at(
-      eye, math::Vec3(0.0F, 0.0F, 0.0F), math::Vec3(0.0F, 1.0F, 0.0F));
+      g_activeCamera.position, g_activeCamera.target, g_activeCamera.up);
+  const float fov = (g_activeCamera.fovRadians > 0.0F)
+                        ? g_activeCamera.fovRadians
+                        : kDefaultFovRadians;
+  const float nearP = (g_activeCamera.nearPlane > 0.0F)
+                          ? g_activeCamera.nearPlane
+                          : kNearClip;
+  const float farP =
+      (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
   const math::Mat4 projection =
-      math::perspective(kDefaultFovRadians, aspect, kNearClip, kFarClip);
+      math::perspective(fov, aspect, nearP, farP);
   const math::Mat4 viewProjection = math::mul(projection, view);
   if (backend.timeLocation >= 0) {
     backend.gl.uniform1f(backend.timeLocation, timeSeconds);
@@ -621,6 +630,14 @@ void shutdown_renderer() noexcept {
   }
 
   backend = GlBackendState{};
+}
+
+void set_active_camera(const CameraState &camera) noexcept {
+  g_activeCamera = camera;
+}
+
+CameraState get_active_camera() noexcept {
+  return g_activeCamera;
 }
 
 } // namespace engine::renderer

@@ -716,7 +716,10 @@ void run(std::uint32_t maxFrames) noexcept {
     bool scriptUpdateSucceeded = true;
     if (scriptLoaded && isPlaying && (updateStepCount > 0U)) {
       scriptUpdateInvoked = true;
-      scriptUpdateSucceeded = scripting::call_script_function("on_update");
+      scripting::set_frame_time(static_cast<float>(kFixedDeltaSeconds),
+                                static_cast<float>(simulationTimeSeconds));
+      scriptUpdateSucceeded = scripting::call_script_function_float(
+          "on_update", static_cast<float>(kFixedDeltaSeconds));
     }
 
     if (!renderer::update_asset_manager(

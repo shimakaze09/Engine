@@ -1,6 +1,9 @@
 add_library(engine_math STATIC
+    src/aabb.cpp
     src/mat4.cpp
     src/quat.cpp
+    src/ray.cpp
+    src/sphere.cpp
     src/transform.cpp
     src/vec2.cpp
     src/vec3.cpp

@@ -48,4 +48,24 @@ Vec3 lerp(const Vec3 &from, const Vec3 &to, float t) noexcept {
   return add(from, mul(sub(to, from), t));
 }
 
+Vec3 negate(const Vec3 &value) noexcept {
+  return Vec3(-value.x, -value.y, -value.z);
+}
+
+Vec3 reflect(const Vec3 &incident, const Vec3 &normal) noexcept {
+  const float d = 2.0F * dot(incident, normal);
+  return sub(incident, mul(normal, d));
+}
+
+Vec3 clamp(const Vec3 &value, float minVal, float maxVal) noexcept {
+  const float cx = (value.x < minVal) ? minVal : ((value.x > maxVal) ? maxVal : value.x);
+  const float cy = (value.y < minVal) ? minVal : ((value.y > maxVal) ? maxVal : value.y);
+  const float cz = (value.z < minVal) ? minVal : ((value.z > maxVal) ? maxVal : value.z);
+  return Vec3(cx, cy, cz);
+}
+
+float distance(const Vec3 &lhs, const Vec3 &rhs) noexcept {
+  return length(sub(lhs, rhs));
+}
+
 } // namespace engine::math

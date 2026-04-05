@@ -16,7 +16,9 @@
 #error "SDL2 headers not found"
 #endif
 
+#include <array>
 #include <cstdio>
+#include <cstring>
 
 #include "engine/core/logging.h"
 
@@ -28,9 +30,9 @@ bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
 SDL_GLContext g_glContext = nullptr;
 
-constexpr int kWindowWidth = 1280;
-constexpr int kWindowHeight = 720;
-constexpr char kWindowTitle[] = "engine";
+constexpr int kMaxScancodes = 512;
+std::array<bool, kMaxScancodes> g_keyState{};
+std::array<bool, kMaxScancodes> g_prevKeyState{};
 
 void log_sdl_error(const char *message) noexcept {
   const char *sdlError = SDL_GetError();
@@ -59,9 +61,10 @@ void shutdown_platform_resources() noexcept {
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
-} // namespace
-
-bool initialize_platform() noexcept {
+bool initialize_platform_impl(int width,
+                               int height,
+                               const char *title,
+                               bool vsync) noexcept {
   SDL_SetMainReady();
 
   if (g_window != nullptr) {
@@ -74,20 +77,21 @@ bool initialize_platform() noexcept {
     return false;
   }
 
-  if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                          SDL_GL_CONTEXT_PROFILE_CORE) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0) {
+  if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) != 0
+      || SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) != 0
+      || SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                             SDL_GL_CONTEXT_PROFILE_CORE)
+             != 0
+      || SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0
+      || SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0) {
     log_sdl_error("failed to configure OpenGL context attributes");
     shutdown_platform_resources();
     return false;
   }
 
-  g_window = SDL_CreateWindow(
-      kWindowTitle, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-      kWindowWidth, kWindowHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+  g_window =
+      SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                       width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();
@@ -107,13 +111,26 @@ bool initialize_platform() noexcept {
     return false;
   }
 
-  if (SDL_GL_SetSwapInterval(1) != 0) {
-    log_sdl_error("failed to enable VSync");
+  if (SDL_GL_SetSwapInterval(vsync ? 1 : 0) != 0) {
+    log_sdl_error("failed to set swap interval");
   }
 
   SDL_GL_MakeCurrent(g_window, nullptr);
   g_platformRunning = true;
   return true;
+}
+
+} // namespace
+
+bool initialize_platform() noexcept {
+  return initialize_platform_impl(1280, 720, "engine", true);
+}
+
+bool initialize_platform(const PlatformConfig &config) noexcept {
+  const int w = (config.width > 0) ? config.width : 1280;
+  const int h = (config.height > 0) ? config.height : 720;
+  const char *title = (config.title != nullptr) ? config.title : "engine";
+  return initialize_platform_impl(w, h, title, config.vsync);
 }
 
 void shutdown_platform() noexcept {
@@ -122,6 +139,15 @@ void shutdown_platform() noexcept {
 }
 
 void process_input() noexcept {
+  // Capture key state BEFORE polling so is_key_pressed can diff prev vs current.
+  int numKeys = 0;
+  const Uint8 *sdlState = SDL_GetKeyboardState(&numKeys);
+  const int count = (numKeys < kMaxScancodes) ? numKeys : kMaxScancodes;
+  for (int i = 0; i < count; ++i) {
+    g_prevKeyState[static_cast<std::size_t>(i)] =
+        g_keyState[static_cast<std::size_t>(i)];
+  }
+
   SDL_Event event{};
   while (SDL_PollEvent(&event) != 0) {
     if (event.type == SDL_QUIT) {
@@ -129,15 +155,37 @@ void process_input() noexcept {
       continue;
     }
 
-    if ((event.type == SDL_KEYDOWN) && (event.key.keysym.sym == SDLK_ESCAPE)) {
+    if ((event.type == SDL_KEYDOWN)
+        && (event.key.keysym.sym == SDLK_ESCAPE)) {
       g_platformRunning = false;
     }
+  }
+
+  // Read updated state after event pump.
+  sdlState = SDL_GetKeyboardState(&numKeys);
+  for (int i = 0; i < count; ++i) {
+    g_keyState[static_cast<std::size_t>(i)] = (sdlState[i] != 0);
   }
 }
 
 bool is_platform_running() noexcept { return g_platformRunning; }
 
 void request_platform_quit() noexcept { g_platformRunning = false; }
+
+bool is_key_down(KeyScancode scancode) noexcept {
+  if ((scancode < 0) || (scancode >= kMaxScancodes)) {
+    return false;
+  }
+  return g_keyState[static_cast<std::size_t>(scancode)];
+}
+
+bool is_key_pressed(KeyScancode scancode) noexcept {
+  if ((scancode < 0) || (scancode >= kMaxScancodes)) {
+    return false;
+  }
+  const auto idx = static_cast<std::size_t>(scancode);
+  return g_keyState[idx] && !g_prevKeyState[idx];
+}
 
 bool make_render_context_current() noexcept {
   if ((g_window == nullptr) || (g_glContext == nullptr)) {
@@ -173,8 +221,8 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   }
 
   if (g_window == nullptr) {
-    *outWidth = kWindowWidth;
-    *outHeight = kWindowHeight;
+    *outWidth = 1280;
+    *outHeight = 720;
     return;
   }
 
@@ -186,3 +234,4 @@ void *get_sdl_window() noexcept { return g_window; }
 void *get_sdl_gl_context() noexcept { return g_glContext; }
 
 } // namespace engine::core
+

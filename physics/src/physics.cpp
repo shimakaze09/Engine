@@ -9,7 +9,7 @@ namespace engine::physics {
 namespace {
 
 constexpr float kStaticInverseMass = 0.0F;
-constexpr engine::math::Vec3 kGravity(0.0F, -9.8F, 0.0F);
+engine::math::Vec3 g_gravity(0.0F, -9.8F, 0.0F);
 
 float axis_overlap(float aMin, float aMax, float bMin, float bMax) noexcept {
   const float left = std::max(aMin, bMin);
@@ -53,7 +53,7 @@ bool step_physics_range(runtime::World &world,
 
     if ((body != nullptr) && (body->inverseMass > 0.0F)) {
       const engine::math::Vec3 totalAccel =
-          engine::math::add(body->acceleration, kGravity);
+          engine::math::add(body->acceleration, g_gravity);
       body->velocity = engine::math::add(
           body->velocity, engine::math::mul(totalAccel, deltaSeconds));
       updated.position = engine::math::add(
@@ -159,8 +159,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
         pushZ = sign_or_positive(bz - az);
       }
 
-      const runtime::RigidBody *bodyA = world.get_rigid_body_ptr(entityA);
-      const runtime::RigidBody *bodyB = world.get_rigid_body_ptr(entityB);
+      runtime::RigidBody *bodyA = world.get_rigid_body_ptr(entityA);
+      runtime::RigidBody *bodyB = world.get_rigid_body_ptr(entityB);
       const float invMassA =
           (bodyA != nullptr) ? bodyA->inverseMass : kStaticInverseMass;
       const float invMassB =
@@ -187,10 +187,48 @@ bool resolve_collisions(runtime::World &world) noexcept {
       mutableB->position.x += pushX * moveB;
       mutableB->position.y += pushY * moveB;
       mutableB->position.z += pushZ * moveB;
+
+      // Velocity impulse along the collision normal.
+      constexpr float kRestitution = 0.3F;
+      const engine::math::Vec3 normal(pushX, pushY, pushZ);
+      const engine::math::Vec3 velA =
+          (bodyA != nullptr)
+              ? bodyA->velocity
+              : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+      const engine::math::Vec3 velB =
+          (bodyB != nullptr)
+              ? bodyB->velocity
+              : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+      const engine::math::Vec3 relVel =
+          engine::math::sub(velB, velA);
+      const float relVelAlongNormal =
+          engine::math::dot(relVel, normal);
+      if (relVelAlongNormal < 0.0F) {
+        const float impulseMagnitude =
+            -(1.0F + kRestitution) * relVelAlongNormal / invMassSum;
+        if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+          bodyA->velocity = engine::math::sub(
+              bodyA->velocity,
+              engine::math::mul(normal, impulseMagnitude * invMassA));
+        }
+        if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+          bodyB->velocity = engine::math::add(
+              bodyB->velocity,
+              engine::math::mul(normal, impulseMagnitude * invMassB));
+        }
+      }
     }
   }
 
   return true;
+}
+
+void set_gravity(float x, float y, float z) noexcept {
+  g_gravity = engine::math::Vec3(x, y, z);
+}
+
+engine::math::Vec3 get_gravity() noexcept {
+  return g_gravity;
 }
 
 } // namespace engine::physics
