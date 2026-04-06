@@ -83,9 +83,12 @@ struct SceneLightData final {
 };
 
 void flush_renderer(CommandBufferView commandBufferView,
-                    const GpuMeshRegistry *registry,
-                    float timeSeconds,
+                    const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept;
 void shutdown_renderer() noexcept;
+
+/// Returns the GPU texture ID of the tonemapped scene (final color).
+/// Valid after the first flush_renderer call. Returns 0 if not yet available.
+std::uint32_t get_scene_viewport_texture() noexcept;
 
 } // namespace engine::renderer

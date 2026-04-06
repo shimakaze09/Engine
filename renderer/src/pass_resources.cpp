@@ -25,6 +25,9 @@ struct PassResourceState final {
   std::uint32_t sceneDepthTexture = 0U;
   std::uint32_t sceneFbo = 0U;
 
+  std::uint32_t finalColorTexture = 0U;
+  std::uint32_t finalFbo = 0U;
+
   PassResources resources{};
 };
 
@@ -36,6 +39,14 @@ void destroy_gpu_resources() noexcept {
     return;
   }
 
+  if (g_state.finalFbo != 0U) {
+    dev->destroy_framebuffer(g_state.finalFbo);
+    g_state.finalFbo = 0U;
+  }
+  if (g_state.finalColorTexture != 0U) {
+    dev->destroy_texture(g_state.finalColorTexture);
+    g_state.finalColorTexture = 0U;
+  }
   if (g_state.sceneFbo != 0U) {
     dev->destroy_framebuffer(g_state.sceneFbo);
     g_state.sceneFbo = 0U;
@@ -59,12 +70,9 @@ bool create_gpu_resources(int width, int height) noexcept {
   // Scene color: RGBA16F (via create_texture_2d_hdr with nullptr data).
   g_state.sceneColorTexture =
       dev->create_texture_2d_hdr(static_cast<std::int32_t>(width),
-                                 static_cast<std::int32_t>(height),
-                                 4,
-                                 nullptr);
+                                 static_cast<std::int32_t>(height), 4, nullptr);
   if (g_state.sceneColorTexture == 0U) {
-    core::log_message(core::LogLevel::Error,
-                      "pass_resources",
+    core::log_message(core::LogLevel::Error, "pass_resources",
                       "failed to create scene color texture");
     return false;
   }
@@ -73,8 +81,7 @@ bool create_gpu_resources(int width, int height) noexcept {
   g_state.sceneDepthTexture = dev->create_depth_texture(
       static_cast<std::int32_t>(width), static_cast<std::int32_t>(height));
   if (g_state.sceneDepthTexture == 0U) {
-    core::log_message(core::LogLevel::Error,
-                      "pass_resources",
+    core::log_message(core::LogLevel::Error, "pass_resources",
                       "failed to create scene depth texture");
     dev->destroy_texture(g_state.sceneColorTexture);
     g_state.sceneColorTexture = 0U;
@@ -85,9 +92,40 @@ bool create_gpu_resources(int width, int height) noexcept {
   g_state.sceneFbo = dev->create_framebuffer(g_state.sceneColorTexture,
                                              g_state.sceneDepthTexture);
   if (g_state.sceneFbo == 0U) {
-    core::log_message(core::LogLevel::Error,
-                      "pass_resources",
+    core::log_message(core::LogLevel::Error, "pass_resources",
                       "failed to create scene framebuffer");
+    dev->destroy_texture(g_state.sceneDepthTexture);
+    g_state.sceneDepthTexture = 0U;
+    dev->destroy_texture(g_state.sceneColorTexture);
+    g_state.sceneColorTexture = 0U;
+    return false;
+  }
+
+  // Final color: RGBA8 LDR (tonemapped output for editor viewport).
+  g_state.finalColorTexture =
+      dev->create_texture_2d(static_cast<std::int32_t>(width),
+                             static_cast<std::int32_t>(height), 4, nullptr);
+  if (g_state.finalColorTexture == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create final color texture");
+    dev->destroy_framebuffer(g_state.sceneFbo);
+    g_state.sceneFbo = 0U;
+    dev->destroy_texture(g_state.sceneDepthTexture);
+    g_state.sceneDepthTexture = 0U;
+    dev->destroy_texture(g_state.sceneColorTexture);
+    g_state.sceneColorTexture = 0U;
+    return false;
+  }
+
+  // Final FBO (color-only, no depth).
+  g_state.finalFbo = dev->create_framebuffer(g_state.finalColorTexture, 0U);
+  if (g_state.finalFbo == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create final framebuffer");
+    dev->destroy_texture(g_state.finalColorTexture);
+    g_state.finalColorTexture = 0U;
+    dev->destroy_framebuffer(g_state.sceneFbo);
+    g_state.sceneFbo = 0U;
     dev->destroy_texture(g_state.sceneDepthTexture);
     g_state.sceneDepthTexture = 0U;
     dev->destroy_texture(g_state.sceneColorTexture);
@@ -148,16 +186,13 @@ void resize_pass_resources(int width, int height) noexcept {
 
   destroy_gpu_resources();
   if (!create_gpu_resources(width, height)) {
-    core::log_message(core::LogLevel::Error,
-                      "pass_resources",
+    core::log_message(core::LogLevel::Error, "pass_resources",
                       "failed to recreate pass resources on resize");
     g_state.initialized = false;
   }
 }
 
-const PassResources &get_pass_resources() noexcept {
-  return g_state.resources;
-}
+const PassResources &get_pass_resources() noexcept { return g_state.resources; }
 
 std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kSceneColorSlot) {
@@ -165,6 +200,9 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   }
   if (resource.id == kSceneDepthSlot) {
     return g_state.sceneDepthTexture;
+  }
+  if (resource.id == kFinalColorSlot) {
+    return g_state.finalColorTexture;
   }
   return 0U;
 }
@@ -174,9 +212,8 @@ pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
   if (colorAttachment.id == kSceneColorSlot) {
     return g_state.sceneFbo;
   }
-  // Final color = back buffer (FBO 0).
   if (colorAttachment.id == kFinalColorSlot) {
-    return 0U;
+    return g_state.finalFbo;
   }
   return 0U;
 }

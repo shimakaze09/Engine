@@ -133,16 +133,14 @@ bool initialize_backend() noexcept {
   }
 
   if (!initialize_render_device()) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize render device");
     reset_backend_on_failure();
     return false;
   }
 
   if (!initialize_shader_system()) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize shader system");
     shutdown_render_device();
     reset_backend_on_failure();
@@ -155,8 +153,7 @@ bool initialize_backend() noexcept {
   const ShaderProgramHandle defaultShaderHandle = load_shader_program(
       "assets/shaders/default.vert", "assets/shaders/default.frag");
   if (defaultShaderHandle == kInvalidShaderProgram) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load default shader program");
     shutdown_shader_system();
     shutdown_render_device();
@@ -180,8 +177,8 @@ bool initialize_backend() noexcept {
   const ShaderProgramHandle pbrShaderHandle =
       load_shader_program("assets/shaders/pbr.vert", "assets/shaders/pbr.frag");
   if (pbrShaderHandle == kInvalidShaderProgram) {
-    core::log_message(
-        core::LogLevel::Error, "renderer", "failed to load PBR shader program");
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to load PBR shader program");
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
     shutdown_render_device();
@@ -219,10 +216,9 @@ bool initialize_backend() noexcept {
   backend.pbrAlbedoMapLocation =
       dev->uniform_location(pbrProgram, "u_albedoMap");
 
-  if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0)
-      || (backend.pbrAlbedoLocation < 0)) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+  if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
+      (backend.pbrAlbedoLocation < 0)) {
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to locate required PBR shader uniforms");
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
@@ -238,8 +234,7 @@ bool initialize_backend() noexcept {
   const ShaderProgramHandle tonemapShaderHandle = load_shader_program(
       "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
   if (tonemapShaderHandle == kInvalidShaderProgram) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load tonemap shader program");
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
@@ -270,8 +265,7 @@ bool initialize_backend() noexcept {
   // Empty VAO for fullscreen triangle (required by core profile).
   backend.emptyVao = dev->create_vertex_array();
   if (backend.emptyVao == 0U) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to create empty VAO for fullscreen pass");
     destroy_shader_program(tonemapShaderHandle);
     destroy_shader_program(pbrShaderHandle);
@@ -353,9 +347,7 @@ void extract_normal_matrix(const math::Mat4 &model,
 
 } // namespace
 
-void CommandBufferBuilder::reset() noexcept {
-  m_commandCount = 0U;
-}
+void CommandBufferBuilder::reset() noexcept { m_commandCount = 0U; }
 
 bool CommandBufferBuilder::submit(const DrawCommand &command) noexcept {
   if (m_commandCount >= kMaxDrawCommands) {
@@ -377,8 +369,7 @@ bool CommandBufferBuilder::append_from(
     return false;
   }
 
-  std::memcpy(m_commands.data() + m_commandCount,
-              other.m_commands.data(),
+  std::memcpy(m_commands.data() + m_commandCount, other.m_commands.data(),
               sizeof(DrawCommand) * other.m_commandCount);
   m_commandCount += other.m_commandCount;
 
@@ -405,8 +396,7 @@ CommandBufferView CommandBufferBuilder::view() const noexcept {
 }
 
 void flush_renderer(CommandBufferView commandBufferView,
-                    const GpuMeshRegistry *registry,
-                    float timeSeconds,
+                    const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept {
   if (!initialize_backend()) {
     return;
@@ -426,8 +416,8 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   // Initialize or resize pass resources when dimensions change.
-  if (backend.lastWidth != drawableWidth
-      || backend.lastHeight != drawableHeight) {
+  if (backend.lastWidth != drawableWidth ||
+      backend.lastHeight != drawableHeight) {
     if (backend.lastWidth == 0 && backend.lastHeight == 0) {
       initialize_pass_resources(drawableWidth, drawableHeight);
     } else {
@@ -521,8 +511,8 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   if ((commandBufferView.count > 0U) && (commandBufferView.data == nullptr)) {
-    core::log_message(
-        core::LogLevel::Error, "renderer", "draw command view is invalid");
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "draw command view is invalid");
   }
 
   // Determine opaque / transparent partition.
@@ -551,8 +541,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     for (std::size_t i = start; i < end; ++i) {
       const DrawCommand &command = commandBufferView.data[i];
       const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-      if ((mesh == nullptr) || (mesh->vertexArray == 0U)
-          || (mesh->vertexCount == 0U)) {
+      if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+          (mesh->vertexCount == 0U)) {
         continue;
       }
 
@@ -579,8 +569,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       const std::uint32_t albedoGpuId =
           texture_gpu_id(command.material.albedoTexture);
       const bool hasAlbedoTex =
-          (command.material.albedoTexture != kInvalidTextureHandle)
-          && (albedoGpuId != 0U);
+          (command.material.albedoTexture != kInvalidTextureHandle) &&
+          (albedoGpuId != 0U);
       if (backend.pbrHasAlbedoTextureLocation >= 0) {
         dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
                              hasAlbedoTex ? 1 : 0);
@@ -638,8 +628,9 @@ void flush_renderer(CommandBufferView commandBufferView,
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
 
-  // --- Tonemap pass: HDR scene → LDR back buffer ---
-  dev->bind_framebuffer(0U);
+  // --- Tonemap pass: HDR scene → LDR final FBO ---
+  const std::uint32_t finalFbo = pass_resource_framebuffer(passRes.finalColor);
+  dev->bind_framebuffer(finalFbo);
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
   dev->disable_depth_test();
 
@@ -661,6 +652,12 @@ void flush_renderer(CommandBufferView commandBufferView,
   dev->bind_texture(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
+
+  // --- Prepare back buffer for editor overlay (ImGui) ---
+  dev->bind_framebuffer(0U);
+  dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+  dev->set_clear_color(0.0F, 0.0F, 0.0F, 1.0F);
+  dev->clear_color_depth();
   dev->enable_depth_test();
 }
 
@@ -684,8 +681,11 @@ void set_active_camera(const CameraState &camera) noexcept {
   g_activeCamera = camera;
 }
 
-CameraState get_active_camera() noexcept {
-  return g_activeCamera;
+CameraState get_active_camera() noexcept { return g_activeCamera; }
+
+std::uint32_t get_scene_viewport_texture() noexcept {
+  const PassResources &passRes = get_pass_resources();
+  return pass_resource_gpu_texture(passRes.finalColor);
 }
 
 } // namespace engine::renderer

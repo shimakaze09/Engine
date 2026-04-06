@@ -23,6 +23,7 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_sdl2.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 #include <array>
 #include <cstddef>
@@ -34,8 +35,10 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/reflect.h"
+#include "engine/editor/editor_camera.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -54,6 +57,7 @@ std::size_t g_playSnapshotCapacity = 0U;
 std::size_t g_playSnapshotSize = 0U;
 bool g_hasPlaySnapshot = false;
 bool g_worldRestoreFailed = false;
+EditorCamera g_editorCamera{};
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
@@ -65,14 +69,14 @@ constexpr const char *kMeshSectionLabel = "MeshComponent";
 constexpr const char *kScenePath = "assets/scene.json";
 
 bool world_is_editable() noexcept {
-  return (g_world != nullptr) && !g_worldRestoreFailed
-         && (g_playState == PlayState::Stopped)
-         && (g_world->current_phase() == runtime::WorldPhase::Idle);
+  return (g_world != nullptr) && !g_worldRestoreFailed &&
+         (g_playState == PlayState::Stopped) &&
+         (g_world->current_phase() == runtime::WorldPhase::Idle);
 }
 
 bool world_can_load_scene() noexcept {
-  return (g_world != nullptr)
-         && (g_world->current_phase() == runtime::WorldPhase::Idle);
+  return (g_world != nullptr) &&
+         (g_world->current_phase() == runtime::WorldPhase::Idle);
 }
 
 void make_default_entity_name(std::uint32_t entityIndex,
@@ -108,8 +112,8 @@ bool capture_play_snapshot() noexcept {
     }
 
     std::size_t snapshotSize = 0U;
-    if (runtime::save_scene(
-            *g_world, candidate.get(), capacity, &snapshotSize)) {
+    if (runtime::save_scene(*g_world, candidate.get(), capacity,
+                            &snapshotSize)) {
       g_playSnapshotBuffer.swap(candidate);
       g_playSnapshotCapacity = capacity;
       g_playSnapshotSize = snapshotSize;
@@ -122,8 +126,8 @@ bool capture_play_snapshot() noexcept {
     }
 
     const std::size_t doubledCapacity = capacity * 2U;
-    if ((doubledCapacity <= capacity)
-        || (doubledCapacity > core::JsonWriter::kMaxBufferBytes)) {
+    if ((doubledCapacity <= capacity) ||
+        (doubledCapacity > core::JsonWriter::kMaxBufferBytes)) {
       capacity = core::JsonWriter::kMaxBufferBytes;
     } else {
       capacity = doubledCapacity;
@@ -139,8 +143,7 @@ void start_play_mode() noexcept {
   }
 
   if (g_worldRestoreFailed) {
-    core::log_message(core::LogLevel::Warning,
-                      "editor",
+    core::log_message(core::LogLevel::Warning, "editor",
                       "play blocked: load scene to recover from restore error");
     return;
   }
@@ -151,8 +154,7 @@ void start_play_mode() noexcept {
 
   if (g_playState == PlayState::Stopped) {
     if (!capture_play_snapshot()) {
-      core::log_message(core::LogLevel::Error,
-                        "editor",
+      core::log_message(core::LogLevel::Error, "editor",
                         "failed to capture pre-play scene snapshot");
       return;
     }
@@ -179,18 +181,15 @@ void stop_play_mode() noexcept {
   bool restored = true;
 
   if (!g_hasPlaySnapshot || (g_playSnapshotSize == 0U)) {
-    core::log_message(core::LogLevel::Warning,
-                      "editor",
+    core::log_message(core::LogLevel::Warning, "editor",
                       "stop requested without pre-play snapshot");
     restored = false;
-  } else if (!runtime::load_scene(
-                 *g_world, g_playSnapshotBuffer.get(), g_playSnapshotSize)) {
-    core::log_message(core::LogLevel::Error,
-                      "editor",
+  } else if (!runtime::load_scene(*g_world, g_playSnapshotBuffer.get(),
+                                  g_playSnapshotSize)) {
+    core::log_message(core::LogLevel::Error, "editor",
                       "failed to restore pre-play scene snapshot");
     runtime::reset_world(*g_world);
-    core::log_message(core::LogLevel::Warning,
-                      "editor",
+    core::log_message(core::LogLevel::Warning, "editor",
                       "world reset to empty after restore failure");
     g_selectedEntityIndex = 0U;
     // restored stays true: world is clean and usable, just empty
@@ -210,8 +209,7 @@ void mark_modified(bool *modified, bool changed) noexcept {
   }
 }
 
-void draw_vec2_field(const char *label,
-                     math::Vec2 &value,
+void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags =
       ImGuiInputTextFlags_EnterReturnsTrue;
@@ -220,19 +218,16 @@ void draw_vec2_field(const char *label,
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::PopID();
 }
 
-void draw_vec3_field(const char *label,
-                     math::Vec3 &value,
+void draw_vec3_field(const char *label, math::Vec3 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags =
       ImGuiInputTextFlags_EnterReturnsTrue;
@@ -241,24 +236,20 @@ void draw_vec3_field(const char *label,
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(80.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##z", &value.z, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##z", &value.z, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::PopID();
 }
 
-void draw_vec4_field(const char *label,
-                     math::Vec4 &value,
+void draw_vec4_field(const char *label, math::Vec4 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags =
       ImGuiInputTextFlags_EnterReturnsTrue;
@@ -267,29 +258,24 @@ void draw_vec4_field(const char *label,
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##z", &value.z, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##z", &value.z, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##w", &value.w, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##w", &value.w, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::PopID();
 }
 
-void draw_quat_field(const char *label,
-                     math::Quat &value,
+void draw_quat_field(const char *label, math::Quat &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags =
       ImGuiInputTextFlags_EnterReturnsTrue;
@@ -298,31 +284,25 @@ void draw_quat_field(const char *label,
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##x", &value.x, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##y", &value.y, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##z", &value.z, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##z", &value.z, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(70.0F);
-  mark_modified(
-      modified,
-      ImGui::InputFloat("##w", &value.w, 0.0F, 0.0F, "%.3f", kCommitFlags));
+  mark_modified(modified, ImGui::InputFloat("##w", &value.w, 0.0F, 0.0F, "%.3f",
+                                            kCommitFlags));
   ImGui::PopID();
 }
 
-void draw_field(const core::TypeDescriptor &desc,
-                void *instance,
-                const core::TypeField &field,
-                bool *modified) noexcept {
+void draw_field(const core::TypeDescriptor &desc, void *instance,
+                const core::TypeField &field, bool *modified) noexcept {
   if ((instance == nullptr) || (field.name == nullptr)) {
     return;
   }
@@ -334,9 +314,8 @@ void draw_field(const core::TypeDescriptor &desc,
   case core::TypeField::Kind::Float: {
     float *value = desc.field_ptr<float>(instance, field);
     if (value != nullptr) {
-      mark_modified(modified,
-                    ImGui::InputFloat(
-                        field.name, value, 0.0F, 0.0F, "%.3f", kCommitFlags));
+      mark_modified(modified, ImGui::InputFloat(field.name, value, 0.0F, 0.0F,
+                                                "%.3f", kCommitFlags));
     }
     break;
   }
@@ -344,13 +323,8 @@ void draw_field(const core::TypeDescriptor &desc,
     std::int32_t *value = desc.field_ptr<std::int32_t>(instance, field);
     if (value != nullptr) {
       mark_modified(modified,
-                    ImGui::InputScalar(field.name,
-                                       ImGuiDataType_S32,
-                                       value,
-                                       nullptr,
-                                       nullptr,
-                                       "%d",
-                                       kCommitFlags));
+                    ImGui::InputScalar(field.name, ImGuiDataType_S32, value,
+                                       nullptr, nullptr, "%d", kCommitFlags));
     }
     break;
   }
@@ -358,13 +332,8 @@ void draw_field(const core::TypeDescriptor &desc,
     std::uint32_t *value = desc.field_ptr<std::uint32_t>(instance, field);
     if (value != nullptr) {
       mark_modified(modified,
-                    ImGui::InputScalar(field.name,
-                                       ImGuiDataType_U32,
-                                       value,
-                                       nullptr,
-                                       nullptr,
-                                       "%u",
-                                       kCommitFlags));
+                    ImGui::InputScalar(field.name, ImGuiDataType_U32, value,
+                                       nullptr, nullptr, "%u", kCommitFlags));
     }
     break;
   }
@@ -441,8 +410,7 @@ void draw_main_menu_bar() noexcept {
 
     if (ImGui::MenuItem("Save Scene") && canSaveScene) {
       if (!runtime::save_scene(*g_world, kScenePath)) {
-        core::log_message(core::LogLevel::Error,
-                          "editor",
+        core::log_message(core::LogLevel::Error, "editor",
                           "failed to save scene to assets/scene.json");
       }
     }
@@ -457,8 +425,7 @@ void draw_main_menu_bar() noexcept {
 
     if (ImGui::MenuItem("Load Scene") && canLoadScene) {
       if (!runtime::load_scene(*g_world, kScenePath)) {
-        core::log_message(core::LogLevel::Error,
-                          "editor",
+        core::log_message(core::LogLevel::Error, "editor",
                           "failed to load scene from assets/scene.json");
       } else {
         g_selectedEntityIndex = 0U;
@@ -511,16 +478,16 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
       continue;
     }
 
-    if ((std::strcmp(desc->name, kTransformTypeName) == 0)
-        && (g_world->get_transform_read_ptr(entity) == nullptr)) {
+    if ((std::strcmp(desc->name, kTransformTypeName) == 0) &&
+        (g_world->get_transform_read_ptr(entity) == nullptr)) {
       if (ImGui::Selectable(kTransformSectionLabel)) {
         static_cast<void>(g_world->add_transform(entity, runtime::Transform{}));
       }
       continue;
     }
 
-    if ((std::strcmp(desc->name, kRigidBodyTypeName) == 0)
-        && (g_world->get_rigid_body_ptr(entity) == nullptr)) {
+    if ((std::strcmp(desc->name, kRigidBodyTypeName) == 0) &&
+        (g_world->get_rigid_body_ptr(entity) == nullptr)) {
       runtime::RigidBody rigidBody{};
       rigidBody.inverseMass = 1.0F;
       if (ImGui::Selectable(kRigidBodySectionLabel)) {
@@ -529,8 +496,8 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
       continue;
     }
 
-    if ((std::strcmp(desc->name, kColliderTypeName) == 0)
-        && (g_world->get_collider_ptr(entity) == nullptr)) {
+    if ((std::strcmp(desc->name, kColliderTypeName) == 0) &&
+        (g_world->get_collider_ptr(entity) == nullptr)) {
       runtime::Collider collider{};
       collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
       if (ImGui::Selectable(kColliderSectionLabel)) {
@@ -567,8 +534,8 @@ void draw_toolbar() noexcept {
   ImGui::SetNextWindowViewport(viewport->ID);
 
   constexpr ImGuiWindowFlags kToolbarFlags =
-      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar
-      | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar |
+      ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
 
   if (!ImGui::Begin("##toolbar", nullptr, kToolbarFlags)) {
     ImGui::End();
@@ -633,8 +600,8 @@ void draw_entities_panel() noexcept {
     char label[160] = {};
     runtime::NameComponent name{};
     if (g_world->get_name_component(entity, &name) && (name.name[0] != '\0')) {
-      std::snprintf(
-          label, sizeof(label), "%s###entity_%u", name.name, entity.index);
+      std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
+                    entity.index);
     } else {
       std::snprintf(label, sizeof(label), "Entity [%u]", entity.index);
     }
@@ -707,8 +674,8 @@ void draw_inspector_panel() noexcept {
       ImGui::BeginDisabled();
     }
 
-    nameChanged = ImGui::InputText(
-        "Name", nameComponent.name, sizeof(nameComponent.name));
+    nameChanged = ImGui::InputText("Name", nameComponent.name,
+                                   sizeof(nameComponent.name));
     ImGui::SameLine();
     removeNamePressed = ImGui::SmallButton("-");
 
@@ -902,9 +869,110 @@ void draw_stats_panel(float frameMs, float utilizationPct) noexcept {
   ImGui::End();
 }
 
+void draw_scene_viewport_panel() noexcept {
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  const bool visible = ImGui::Begin("Scene");
+  ImGui::PopStyleVar();
+
+  if (!visible) {
+    ImGui::End();
+    return;
+  }
+
+  const std::uint32_t texId = renderer::get_scene_viewport_texture();
+  if (texId != 0U) {
+    const ImVec2 regionSize = ImGui::GetContentRegionAvail();
+    if ((regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
+      ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
+                   ImVec2(0.0F, 1.0F), ImVec2(1.0F, 0.0F));
+    }
+  } else {
+    ImGui::TextUnformatted("Waiting for renderer...");
+  }
+
+  // Camera input: only when stopped/paused and viewport is hovered.
+  if ((g_playState != PlayState::Playing) && ImGui::IsWindowHovered()) {
+    const ImGuiIO &io = ImGui::GetIO();
+    const bool altHeld = io.KeyAlt;
+    const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    const bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    const int scrollDelta =
+        (io.MouseWheel > 0.0F) ? 1 : ((io.MouseWheel < 0.0F) ? -1 : 0);
+
+    update_editor_camera(g_editorCamera, static_cast<int>(io.MouseDelta.x),
+                         static_cast<int>(io.MouseDelta.y), scrollDelta,
+                         altHeld && lmbDown, altHeld && mmbDown);
+  }
+
+  // Push editor camera when not playing.
+  if (g_playState != PlayState::Playing) {
+    renderer::set_active_camera(editor_camera_state(g_editorCamera));
+  }
+
+  ImGui::End();
+}
+
+void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
+  ImGui::DockBuilderRemoveNode(dockspaceId);
+  ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+  ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->Size);
+
+  ImGuiID center = dockspaceId;
+  ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20F,
+                                             nullptr, &center);
+  ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.25F,
+                                              nullptr, &center);
+  ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.25F,
+                                               nullptr, &center);
+
+  ImGui::DockBuilderDockWindow("Entities", left);
+  ImGui::DockBuilderDockWindow("Inspector", right);
+  ImGui::DockBuilderDockWindow("Stats", bottom);
+  ImGui::DockBuilderDockWindow("Scene", center);
+
+  ImGui::DockBuilderFinish(dockspaceId);
+}
+
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_main_menu_bar();
   draw_toolbar();
+
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  if (viewport == nullptr) {
+    return;
+  }
+
+  const float menuBarHeight = ImGui::GetFrameHeight();
+  const float toolbarHeight = ImGui::GetFrameHeightWithSpacing();
+  const float topOffset = menuBarHeight + toolbarHeight;
+
+  ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x, viewport->Pos.y + topOffset));
+  ImGui::SetNextWindowSize(
+      ImVec2(viewport->Size.x, viewport->Size.y - topOffset));
+  ImGui::SetNextWindowViewport(viewport->ID);
+
+  constexpr ImGuiWindowFlags kDockWindowFlags =
+      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+      ImGuiWindowFlags_NoBackground;
+
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::Begin("##DockSpaceHost", nullptr, kDockWindowFlags);
+  ImGui::PopStyleVar(3);
+
+  const ImGuiID dockspaceId = ImGui::GetID("EditorDockSpace");
+
+  if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
+    setup_default_dock_layout(dockspaceId);
+  }
+
+  ImGui::DockSpace(dockspaceId, ImVec2(0.0F, 0.0F), ImGuiDockNodeFlags_None);
+  ImGui::End();
+
+  draw_scene_viewport_panel();
   draw_entities_panel();
   draw_inspector_panel();
   draw_stats_panel(frameMs, utilizationPct);
@@ -1007,13 +1075,9 @@ void editor_set_world(runtime::World *world) noexcept {
   }
 }
 
-bool editor_is_playing() noexcept {
-  return g_playState == PlayState::Playing;
-}
+bool editor_is_playing() noexcept { return g_playState == PlayState::Playing; }
 
-bool editor_is_paused() noexcept {
-  return g_playState == PlayState::Paused;
-}
+bool editor_is_paused() noexcept { return g_playState == PlayState::Paused; }
 
 namespace {
 
