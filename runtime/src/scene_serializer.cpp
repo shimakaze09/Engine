@@ -61,8 +61,7 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
-bool read_text_file(const char *path,
-                    std::unique_ptr<char[]> *outBuffer,
+bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
     return false;
@@ -113,8 +112,7 @@ bool read_text_file(const char *path,
   return true;
 }
 
-bool write_text_file(const char *path,
-                     const char *text,
+bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept {
   if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
     return false;
@@ -130,8 +128,7 @@ bool write_text_file(const char *path,
   return written == size;
 }
 
-void write_vec2(core::JsonWriter &writer,
-                const char *key,
+void write_vec2(core::JsonWriter &writer, const char *key,
                 const math::Vec2 &value) noexcept {
   writer.begin_array(key);
   writer.write_float_value(value.x);
@@ -139,8 +136,7 @@ void write_vec2(core::JsonWriter &writer,
   writer.end_array();
 }
 
-void write_vec3(core::JsonWriter &writer,
-                const char *key,
+void write_vec3(core::JsonWriter &writer, const char *key,
                 const math::Vec3 &value) noexcept {
   writer.begin_array(key);
   writer.write_float_value(value.x);
@@ -149,8 +145,7 @@ void write_vec3(core::JsonWriter &writer,
   writer.end_array();
 }
 
-void write_vec4(core::JsonWriter &writer,
-                const char *key,
+void write_vec4(core::JsonWriter &writer, const char *key,
                 const math::Vec4 &value) noexcept {
   writer.begin_array(key);
   writer.write_float_value(value.x);
@@ -160,8 +155,7 @@ void write_vec4(core::JsonWriter &writer,
   writer.end_array();
 }
 
-void write_quat(core::JsonWriter &writer,
-                const char *key,
+void write_quat(core::JsonWriter &writer, const char *key,
                 const math::Quat &value) noexcept {
   writer.begin_array(key);
   writer.write_float_value(value.x);
@@ -172,11 +166,10 @@ void write_quat(core::JsonWriter &writer,
 }
 
 bool read_float_array(const core::JsonParser &parser,
-                      const core::JsonValue &arrayValue,
-                      float *outValues,
+                      const core::JsonValue &arrayValue, float *outValues,
                       std::size_t expectedCount) noexcept {
-  if ((outValues == nullptr)
-      || (arrayValue.type != core::JsonValue::Type::Array)) {
+  if ((outValues == nullptr) ||
+      (arrayValue.type != core::JsonValue::Type::Array)) {
     return false;
   }
 
@@ -198,8 +191,7 @@ bool read_float_array(const core::JsonParser &parser,
   return true;
 }
 
-bool read_vec2(const core::JsonParser &parser,
-               const core::JsonValue &value,
+bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec2 *outVec) noexcept {
   if (outVec == nullptr) {
     return false;
@@ -215,8 +207,7 @@ bool read_vec2(const core::JsonParser &parser,
   return true;
 }
 
-bool read_vec3(const core::JsonParser &parser,
-               const core::JsonValue &value,
+bool read_vec3(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec3 *outVec) noexcept {
   if (outVec == nullptr) {
     return false;
@@ -233,8 +224,7 @@ bool read_vec3(const core::JsonParser &parser,
   return true;
 }
 
-bool read_vec4(const core::JsonParser &parser,
-               const core::JsonValue &value,
+bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec4 *outVec) noexcept {
   if (outVec == nullptr) {
     return false;
@@ -252,8 +242,7 @@ bool read_vec4(const core::JsonParser &parser,
   return true;
 }
 
-bool read_quat(const core::JsonParser &parser,
-               const core::JsonValue &value,
+bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
                math::Quat *outQuat) noexcept {
   if (outQuat == nullptr) {
     return false;
@@ -375,8 +364,8 @@ bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
                               void *instance) noexcept {
-  if ((instance == nullptr)
-      || (componentObject.type != core::JsonValue::Type::Object)) {
+  if ((instance == nullptr) ||
+      (componentObject.type != core::JsonValue::Type::Object)) {
     return false;
   }
 
@@ -454,8 +443,8 @@ bool read_reflected_component(const core::JsonParser &parser,
 bool read_mesh_component(const core::JsonParser &parser,
                          const core::JsonValue &meshObject,
                          MeshComponent *outComponent) noexcept {
-  if ((outComponent == nullptr)
-      || (meshObject.type != core::JsonValue::Type::Object)) {
+  if ((outComponent == nullptr) ||
+      (meshObject.type != core::JsonValue::Type::Object)) {
     return false;
   }
 
@@ -480,6 +469,21 @@ bool read_mesh_component(const core::JsonParser &parser,
     }
   }
 
+  core::JsonValue roughnessValue{};
+  if (parser.get_object_field(meshObject, "roughness", &roughnessValue)) {
+    static_cast<void>(parser.as_float(roughnessValue, &component.roughness));
+  }
+
+  core::JsonValue metallicValue{};
+  if (parser.get_object_field(meshObject, "metallic", &metallicValue)) {
+    static_cast<void>(parser.as_float(metallicValue, &component.metallic));
+  }
+
+  core::JsonValue opacityValue{};
+  if (parser.get_object_field(meshObject, "opacity", &opacityValue)) {
+    static_cast<void>(parser.as_float(opacityValue, &component.opacity));
+  }
+
   *outComponent = component;
   return true;
 }
@@ -501,22 +505,22 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
     core::JsonValue entityValue{};
-    if (!parser.get_array_element(entities, i, &entityValue)
-        || (entityValue.type != core::JsonValue::Type::Object)) {
+    if (!parser.get_array_element(entities, i, &entityValue) ||
+        (entityValue.type != core::JsonValue::Type::Object)) {
       return log_scene_error("entity entry must be an object");
     }
 
     PersistentId persistentId = kInvalidPersistentId;
     core::JsonValue persistentIdValue{};
-    if (parser.get_object_field(
-            entityValue, kPersistentIdKey, &persistentIdValue)) {
+    if (parser.get_object_field(entityValue, kPersistentIdKey,
+                                &persistentIdValue)) {
       if (!parser.as_uint(persistentIdValue, &persistentId)) {
         return log_scene_error("persistentId must be a uint");
       }
 
-      if ((persistentId != kInvalidPersistentId)
-          && (targetWorld.find_entity_by_persistent_id(persistentId)
-              != kInvalidEntity)) {
+      if ((persistentId != kInvalidPersistentId) &&
+          (targetWorld.find_entity_by_persistent_id(persistentId) !=
+           kInvalidEntity)) {
         return log_scene_error("duplicate persistentId in scene");
       }
     }
@@ -542,9 +546,9 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue transformValue{};
     if (parser.get_object_field(components, "Transform", &transformValue)) {
       Transform transform{};
-      if (!read_reflected_component(
-              parser, transformValue, transformDesc, &transform)
-          || !targetWorld.add_transform(entity, transform)) {
+      if (!read_reflected_component(parser, transformValue, transformDesc,
+                                    &transform) ||
+          !targetWorld.add_transform(entity, transform)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load Transform component");
       }
@@ -553,9 +557,9 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue rigidBodyValue{};
     if (parser.get_object_field(components, "RigidBody", &rigidBodyValue)) {
       RigidBody rigidBody{};
-      if (!read_reflected_component(
-              parser, rigidBodyValue, rigidBodyDesc, &rigidBody)
-          || !targetWorld.add_rigid_body(entity, rigidBody)) {
+      if (!read_reflected_component(parser, rigidBodyValue, rigidBodyDesc,
+                                    &rigidBody) ||
+          !targetWorld.add_rigid_body(entity, rigidBody)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load RigidBody component");
       }
@@ -564,9 +568,9 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue colliderValue{};
     if (parser.get_object_field(components, "Collider", &colliderValue)) {
       Collider collider{};
-      if (!read_reflected_component(
-              parser, colliderValue, colliderDesc, &collider)
-          || !targetWorld.add_collider(entity, collider)) {
+      if (!read_reflected_component(parser, colliderValue, colliderDesc,
+                                    &collider) ||
+          !targetWorld.add_collider(entity, collider)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load Collider component");
       }
@@ -575,8 +579,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue meshValue{};
     if (parser.get_object_field(components, "MeshComponent", &meshValue)) {
       MeshComponent mesh{};
-      if (!read_mesh_component(parser, meshValue, &mesh)
-          || !targetWorld.add_mesh_component(entity, mesh)) {
+      if (!read_mesh_component(parser, meshValue, &mesh) ||
+          !targetWorld.add_mesh_component(entity, mesh)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load MeshComponent component");
       }
@@ -628,36 +632,36 @@ bool copy_world_contents(const World &sourceWorld,
     }
 
     Transform transform{};
-    if (sourceWorld.get_transform(sourceEntity, &transform)
-        && !targetWorld.add_transform(targetEntity, transform)) {
+    if (sourceWorld.get_transform(sourceEntity, &transform) &&
+        !targetWorld.add_transform(targetEntity, transform)) {
       success = false;
       return;
     }
 
     RigidBody rigidBody{};
-    if (sourceWorld.get_rigid_body(sourceEntity, &rigidBody)
-        && !targetWorld.add_rigid_body(targetEntity, rigidBody)) {
+    if (sourceWorld.get_rigid_body(sourceEntity, &rigidBody) &&
+        !targetWorld.add_rigid_body(targetEntity, rigidBody)) {
       success = false;
       return;
     }
 
     Collider collider{};
-    if (sourceWorld.get_collider(sourceEntity, &collider)
-        && !targetWorld.add_collider(targetEntity, collider)) {
+    if (sourceWorld.get_collider(sourceEntity, &collider) &&
+        !targetWorld.add_collider(targetEntity, collider)) {
       success = false;
       return;
     }
 
     MeshComponent mesh{};
-    if (sourceWorld.get_mesh_component(sourceEntity, &mesh)
-        && !targetWorld.add_mesh_component(targetEntity, mesh)) {
+    if (sourceWorld.get_mesh_component(sourceEntity, &mesh) &&
+        !targetWorld.add_mesh_component(targetEntity, mesh)) {
       success = false;
       return;
     }
 
     NameComponent name{};
-    if (sourceWorld.get_name_component(sourceEntity, &name)
-        && !targetWorld.add_name_component(targetEntity, name)) {
+    if (sourceWorld.get_name_component(sourceEntity, &name) &&
+        !targetWorld.add_name_component(targetEntity, name)) {
       success = false;
       return;
     }
@@ -673,8 +677,7 @@ bool serialize_scene_to_writer(const World &world,
   }
 
   if (world.current_phase() != WorldPhase::Idle) {
-    core::log_message(core::LogLevel::Warning,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Warning, kSceneLogChannel,
                       "save_scene requires world Idle phase");
     return false;
   }
@@ -687,10 +690,9 @@ bool serialize_scene_to_writer(const World &world,
       registry.find_type(kRigidBodyTypeName);
   const core::TypeDescriptor *colliderDesc =
       registry.find_type(kColliderTypeName);
-  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr)
-      || (colliderDesc == nullptr)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
+      (colliderDesc == nullptr)) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "missing runtime reflection descriptors");
     return false;
   }
@@ -717,25 +719,25 @@ bool serialize_scene_to_writer(const World &world,
 
     Transform transform{};
     if (world.get_transform(entity, &transform)) {
-      if (!write_reflected_component(
-              writer, "Transform", *transformDesc, &transform)) {
+      if (!write_reflected_component(writer, "Transform", *transformDesc,
+                                     &transform)) {
         writeFailed = true;
         return;
       }
     }
 
     RigidBody rigidBody{};
-    if (world.get_rigid_body(entity, &rigidBody)
-        && !write_reflected_component(
-            writer, "RigidBody", *rigidBodyDesc, &rigidBody)) {
+    if (world.get_rigid_body(entity, &rigidBody) &&
+        !write_reflected_component(writer, "RigidBody", *rigidBodyDesc,
+                                   &rigidBody)) {
       writeFailed = true;
       return;
     }
 
     Collider collider{};
-    if (world.get_collider(entity, &collider)
-        && !write_reflected_component(
-            writer, "Collider", *colliderDesc, &collider)) {
+    if (world.get_collider(entity, &collider) &&
+        !write_reflected_component(writer, "Collider", *colliderDesc,
+                                   &collider)) {
       writeFailed = true;
       return;
     }
@@ -746,6 +748,9 @@ bool serialize_scene_to_writer(const World &world,
       writer.begin_object();
       writer.write_uint(kMeshAssetIdKey, mesh.meshAssetId);
       write_vec3(writer, "albedo", mesh.albedo);
+      writer.write_float("roughness", mesh.roughness);
+      writer.write_float("metallic", mesh.metallic);
+      writer.write_float("opacity", mesh.opacity);
       writer.end_object();
     }
 
@@ -763,8 +768,8 @@ bool serialize_scene_to_writer(const World &world,
   writer.end_object();
 
   if (writeFailed || !writer.ok()) {
-    core::log_message(
-        core::LogLevel::Error, kSceneLogChannel, "failed to build scene JSON");
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "failed to build scene JSON");
     return false;
   }
 
@@ -787,8 +792,7 @@ void reset_world(World &world) noexcept {
 
 bool save_scene(const World &world, const char *path) noexcept {
   if (path == nullptr) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "save_scene called with null path");
     return false;
   }
@@ -799,21 +803,18 @@ bool save_scene(const World &world, const char *path) noexcept {
   }
 
   if (!write_text_file(path, writer.result(), writer.result_size())) {
-    core::log_message(
-        core::LogLevel::Error, kSceneLogChannel, "failed to write scene file");
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "failed to write scene file");
     return false;
   }
 
   return true;
 }
 
-bool save_scene(const World &world,
-                char *buffer,
-                std::size_t capacity,
+bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept {
   if ((buffer == nullptr) || (outSize == nullptr) || (capacity < 2U)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "save_scene called with invalid output buffer");
     return false;
   }
@@ -825,8 +826,7 @@ bool save_scene(const World &world,
 
   const std::size_t resultSize = writer.result_size();
   if ((resultSize + 1U) > capacity) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "output scene buffer capacity is too small");
     return false;
   }
@@ -839,8 +839,7 @@ bool save_scene(const World &world,
 
 bool load_scene(World &world, const char *path) noexcept {
   if (path == nullptr) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with null path");
     return false;
   }
@@ -848,8 +847,8 @@ bool load_scene(World &world, const char *path) noexcept {
   std::size_t fileSize = 0U;
   std::unique_ptr<char[]> fileBuffer{};
   if (!read_text_file(path, &fileBuffer, &fileSize)) {
-    core::log_message(
-        core::LogLevel::Error, kSceneLogChannel, "failed to read scene file");
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "failed to read scene file");
     return false;
   }
 
@@ -858,30 +857,27 @@ bool load_scene(World &world, const char *path) noexcept {
 
 bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   if ((buffer == nullptr) || (size == 0U)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with invalid input buffer");
     return false;
   }
 
   if (world.current_phase() != WorldPhase::Idle) {
-    core::log_message(core::LogLevel::Warning,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Warning, kSceneLogChannel,
                       "load_scene requires world Idle phase");
     return false;
   }
 
   core::JsonParser parser{};
   if (!parser.parse(buffer, size)) {
-    core::log_message(
-        core::LogLevel::Error, kSceneLogChannel, "malformed scene JSON");
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "malformed scene JSON");
     return false;
   }
 
   const core::JsonValue *root = parser.root();
   if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "scene root must be an object");
     return false;
   }
@@ -890,24 +886,22 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   core::JsonValue versionValue{};
   if (parser.get_object_field(*root, kVersionKey, &versionValue)) {
     if (!parser.as_uint(versionValue, &sceneVersion)) {
-      core::log_message(core::LogLevel::Error,
-                        kSceneLogChannel,
+      core::log_message(core::LogLevel::Error, kSceneLogChannel,
                         "scene version must be an unsigned integer");
       return false;
     }
   }
 
   if ((sceneVersion == 0U) || (sceneVersion > kCurrentSceneVersion)) {
-    core::log_message(
-        core::LogLevel::Error, kSceneLogChannel, "unsupported scene version");
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "unsupported scene version");
     return false;
   }
 
   core::JsonValue entities{};
-  if (!parser.get_object_field(*root, kEntitiesKey, &entities)
-      || (entities.type != core::JsonValue::Type::Array)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+  if (!parser.get_object_field(*root, kEntitiesKey, &entities) ||
+      (entities.type != core::JsonValue::Type::Array)) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "scene JSON must include entities array");
     return false;
   }
@@ -920,27 +914,22 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
       registry.find_type(kRigidBodyTypeName);
   const core::TypeDescriptor *colliderDesc =
       registry.find_type(kColliderTypeName);
-  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr)
-      || (colliderDesc == nullptr)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
+      (colliderDesc == nullptr)) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "missing runtime reflection descriptors");
     return false;
   }
 
   std::unique_ptr<World> stagedWorld(new (std::nothrow) World());
   if (stagedWorld == nullptr) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "failed to allocate staged world for scene load");
     return false;
   }
 
-  if (!deserialize_scene_entities(parser,
-                                  entities,
-                                  *transformDesc,
-                                  *rigidBodyDesc,
-                                  *colliderDesc,
+  if (!deserialize_scene_entities(parser, entities, *transformDesc,
+                                  *rigidBodyDesc, *colliderDesc,
                                   *stagedWorld)) {
     return false;
   }
@@ -948,8 +937,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   reset_world(world);
 
   if (!copy_world_contents(*stagedWorld, world)) {
-    core::log_message(core::LogLevel::Error,
-                      kSceneLogChannel,
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "failed to commit loaded scene");
     reset_world(world);
     return false;

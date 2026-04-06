@@ -154,23 +154,19 @@ void process_input_events_with_editor() noexcept {
       continue;
     }
 
-    if ((event.type == SDL_KEYDOWN) && (event.key.keysym.sym == SDLK_ESCAPE)) {
-      core::request_platform_quit();
-      continue;
-    }
-
     const bool keyboardEvent =
-        (event.type == SDL_KEYDOWN) || (event.type == SDL_KEYUP)
-        || (event.type == SDL_TEXTINPUT) || (event.type == SDL_TEXTEDITING);
-    const bool mouseEvent =
-        (event.type == SDL_MOUSEMOTION) || (event.type == SDL_MOUSEBUTTONDOWN)
-        || (event.type == SDL_MOUSEBUTTONUP) || (event.type == SDL_MOUSEWHEEL);
-    const bool captureKeyboard = (bridge != nullptr)
-                                 && (bridge->wants_capture_keyboard != nullptr)
-                                 && bridge->wants_capture_keyboard();
-    const bool captureMouse = (bridge != nullptr)
-                              && (bridge->wants_capture_mouse != nullptr)
-                              && bridge->wants_capture_mouse();
+        (event.type == SDL_KEYDOWN) || (event.type == SDL_KEYUP) ||
+        (event.type == SDL_TEXTINPUT) || (event.type == SDL_TEXTEDITING);
+    const bool mouseEvent = (event.type == SDL_MOUSEMOTION) ||
+                            (event.type == SDL_MOUSEBUTTONDOWN) ||
+                            (event.type == SDL_MOUSEBUTTONUP) ||
+                            (event.type == SDL_MOUSEWHEEL);
+    const bool captureKeyboard = (bridge != nullptr) &&
+                                 (bridge->wants_capture_keyboard != nullptr) &&
+                                 bridge->wants_capture_keyboard();
+    const bool captureMouse = (bridge != nullptr) &&
+                              (bridge->wants_capture_mouse != nullptr) &&
+                              bridge->wants_capture_mouse();
     const bool editorCapturesInput =
         (keyboardEvent && captureKeyboard) || (mouseEvent && captureMouse);
 
@@ -200,10 +196,8 @@ void physics_chunk_job(void *userData) noexcept {
     return;
   }
 
-  if (!physics::step_physics_range(*jobData->world,
-                                   jobData->startIndex,
-                                   jobData->count,
-                                   jobData->deltaSeconds)) {
+  if (!physics::step_physics_range(*jobData->world, jobData->startIndex,
+                                   jobData->count, jobData->deltaSeconds)) {
     mark_graph_failed(jobData->frameGraphFailed);
   }
 }
@@ -249,8 +243,8 @@ void end_frame_phase_job(void *userData) noexcept {
 
 bool link_dependency(core::JobHandle prerequisite,
                      core::JobHandle dependent) noexcept {
-  if (!core::is_valid_handle(prerequisite)
-      || !core::is_valid_handle(dependent)) {
+  if (!core::is_valid_handle(prerequisite) ||
+      !core::is_valid_handle(dependent)) {
     return false;
   }
 
@@ -261,9 +255,9 @@ core::JobHandle submit_world_phase_job(FrameContext *frameContext,
                                        runtime::World *world,
                                        std::size_t *phaseJobCursor,
                                        core::JobFunction function) noexcept {
-  if ((frameContext == nullptr) || (world == nullptr)
-      || (phaseJobCursor == nullptr)
-      || (*phaseJobCursor >= frameContext->phaseJobData.size())) {
+  if ((frameContext == nullptr) || (world == nullptr) ||
+      (phaseJobCursor == nullptr) ||
+      (*phaseJobCursor >= frameContext->phaseJobData.size())) {
     return {};
   }
 
@@ -315,17 +309,17 @@ const char *world_phase_to_string(runtime::WorldPhase phase) noexcept {
 
 bool vec3_has_motion(const math::Vec3 &value) noexcept {
   constexpr float kEpsilon = 0.0001F;
-  return (value.x > kEpsilon) || (value.x < -kEpsilon) || (value.y > kEpsilon)
-         || (value.y < -kEpsilon) || (value.z > kEpsilon)
-         || (value.z < -kEpsilon);
+  return (value.x > kEpsilon) || (value.x < -kEpsilon) ||
+         (value.y > kEpsilon) || (value.y < -kEpsilon) ||
+         (value.z > kEpsilon) || (value.z < -kEpsilon);
 }
 
 std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::RigidBody>(
       [&count](runtime::Entity, const runtime::RigidBody &rigidBody) noexcept {
-        if (vec3_has_motion(rigidBody.velocity)
-            || vec3_has_motion(rigidBody.acceleration)) {
+        if (vec3_has_motion(rigidBody.velocity) ||
+            vec3_has_motion(rigidBody.acceleration)) {
           ++count;
         }
       });
@@ -352,8 +346,8 @@ count_ready_mesh_components(const runtime::World &world,
   world.for_each<runtime::MeshComponent>(
       [&count, assets](runtime::Entity,
                        const runtime::MeshComponent &mesh) noexcept {
-        if (renderer::mesh_asset_state(assets, mesh.meshAssetId)
-            == renderer::AssetState::Ready) {
+        if (renderer::mesh_asset_state(assets, mesh.meshAssetId) ==
+            renderer::AssetState::Ready) {
           ++count;
         }
       });
@@ -406,8 +400,7 @@ bool bootstrap() noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
     if (!core::make_render_context_current()) {
-      core::log_message(core::LogLevel::Error,
-                        "editor",
+      core::log_message(core::LogLevel::Error, "editor",
                         "failed to acquire OpenGL context for editor init");
       core::shutdown_core();
       return false;
@@ -415,8 +408,7 @@ bool bootstrap() noexcept {
 
     if (!bridge->initialize(core::get_sdl_window(),
                             core::get_sdl_gl_context())) {
-      core::log_message(core::LogLevel::Error,
-                        "editor",
+      core::log_message(core::LogLevel::Error, "editor",
                         "failed to initialize editor bridge");
       core::release_render_context();
       core::shutdown_core();
@@ -427,8 +419,8 @@ bool bootstrap() noexcept {
   }
 
   if (!scripting::initialize_scripting()) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "failed to initialize scripting");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "failed to initialize scripting");
     if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
       bridge->shutdown();
     }
@@ -437,8 +429,8 @@ bool bootstrap() noexcept {
   }
 
   if (!audio::initialize_audio()) {
-    core::log_message(
-        core::LogLevel::Error, "audio", "failed to initialize audio");
+    core::log_message(core::LogLevel::Error, "audio",
+                      "failed to initialize audio");
     scripting::shutdown_scripting();
     if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
       bridge->shutdown();
@@ -450,8 +442,8 @@ bool bootstrap() noexcept {
   if (g_frameContext == nullptr) {
     g_frameContext.reset(new (std::nothrow) FrameContext());
     if (g_frameContext == nullptr) {
-      core::log_message(
-          core::LogLevel::Error, "engine", "failed to allocate frame context");
+      core::log_message(core::LogLevel::Error, "engine",
+                        "failed to allocate frame context");
       scripting::shutdown_scripting();
       if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
         bridge->shutdown();
@@ -476,11 +468,10 @@ void run(std::uint32_t maxFrames) noexcept {
   std::unique_ptr<renderer::AssetManager> assetManager(
       new (std::nothrow) renderer::AssetManager());
 
-  if ((world == nullptr) || (commandBuffer == nullptr)
-      || (meshRegistry == nullptr) || (assetDatabase == nullptr)
-      || (assetManager == nullptr)) {
-    core::log_message(core::LogLevel::Error,
-                      "engine",
+  if ((world == nullptr) || (commandBuffer == nullptr) ||
+      (meshRegistry == nullptr) || (assetDatabase == nullptr) ||
+      (assetManager == nullptr)) {
+    core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate runtime frame state");
     return;
   }
@@ -501,67 +492,102 @@ void run(std::uint32_t maxFrames) noexcept {
   if (file_exists(kMainScriptPath)) {
     scriptLoaded = scripting::load_script(kMainScriptPath);
   } else {
-    core::log_message(core::LogLevel::Warning,
-                      "scripting",
+    core::log_message(core::LogLevel::Warning, "scripting",
                       "script not found: assets/main.lua");
   }
 
   const char *bootstrapMeshPath = resolve_mesh_asset_path();
   if (bootstrapMeshPath == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to resolve mesh asset path");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to resolve mesh asset path");
     return;
   }
 
   const renderer::AssetId bootstrapMeshAssetId =
       renderer::make_asset_id_from_path(bootstrapMeshPath);
   scripting::set_default_mesh_asset_id(bootstrapMeshAssetId);
-  if ((bootstrapMeshAssetId == renderer::kInvalidAssetId)
-      || !renderer::queue_mesh_load(assetManager.get(),
-                                    assetDatabase.get(),
-                                    bootstrapMeshAssetId,
-                                    bootstrapMeshPath)
-      || !renderer::update_asset_manager(
-          assetManager.get(), assetDatabase.get(), meshRegistry.get(), 8U)
-      || (renderer::mesh_asset_state(assetDatabase.get(), bootstrapMeshAssetId)
-          != renderer::AssetState::Ready)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to load bootstrap mesh asset");
+  if ((bootstrapMeshAssetId == renderer::kInvalidAssetId) ||
+      !renderer::queue_mesh_load(assetManager.get(), assetDatabase.get(),
+                                 bootstrapMeshAssetId, bootstrapMeshPath) ||
+      !renderer::update_asset_manager(assetManager.get(), assetDatabase.get(),
+                                      meshRegistry.get(), 8U) ||
+      (renderer::mesh_asset_state(assetDatabase.get(), bootstrapMeshAssetId) !=
+       renderer::AssetState::Ready)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to load bootstrap mesh asset");
     return;
   }
 
   FrameContext *frameContext = g_frameContext.get();
   if (frameContext == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "frame context not initialized");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "frame context not initialized");
     return;
   }
 
   const std::size_t frameThreadCount = core::thread_frame_allocator_count();
-  if ((frameThreadCount == 0U)
-      || (frameThreadCount
-          > frameContext->renderPrepPipeline.localCommandBuffers.size())) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "invalid thread allocator count");
+  if ((frameThreadCount == 0U) ||
+      (frameThreadCount >
+       frameContext->renderPrepPipeline.localCommandBuffers.size())) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "invalid thread allocator count");
     return;
   }
 
   const runtime::Entity entity = world->create_entity();
   const runtime::Entity stackedEntity = world->create_entity();
   const runtime::Entity groundEntity = world->create_entity();
-  if ((entity == runtime::kInvalidEntity)
-      || (stackedEntity == runtime::kInvalidEntity)
-      || (groundEntity == runtime::kInvalidEntity)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to create bootstrap entities");
+  const runtime::Entity lightEntity = world->create_entity();
+  if ((entity == runtime::kInvalidEntity) ||
+      (stackedEntity == runtime::kInvalidEntity) ||
+      (groundEntity == runtime::kInvalidEntity) ||
+      (lightEntity == runtime::kInvalidEntity)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to create bootstrap entities");
     return;
+  }
+
+  // Assign names to default entities.
+  {
+    runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "Red Cube");
+    static_cast<void>(world->add_name_component(entity, name));
+  }
+  {
+    runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "Blue Cube");
+    static_cast<void>(world->add_name_component(stackedEntity, name));
+  }
+  {
+    runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "Ground");
+    static_cast<void>(world->add_name_component(groundEntity, name));
+  }
+  {
+    runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "Sun Light");
+    static_cast<void>(world->add_name_component(lightEntity, name));
+  }
+
+  // Add directional light.
+  {
+    runtime::Transform lightTransform{};
+    lightTransform.position = math::Vec3(0.0F, 10.0F, 0.0F);
+    static_cast<void>(world->add_transform(lightEntity, lightTransform));
+
+    runtime::LightComponent sunLight{};
+    sunLight.type = runtime::LightType::Directional;
+    sunLight.color = math::Vec3(1.0F, 0.95F, 0.9F);
+    sunLight.direction = math::Vec3(0.4F, -1.0F, 0.6F);
+    sunLight.intensity = 1.2F;
+    static_cast<void>(world->add_light_component(lightEntity, sunLight));
   }
 
   runtime::Transform transform{};
   transform.position = math::Vec3(0.0F, 1.5F, 0.0F);
   if (!world->add_transform(entity, transform)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add bootstrap transform");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add bootstrap transform");
     return;
   }
 
@@ -569,16 +595,16 @@ void run(std::uint32_t maxFrames) noexcept {
   rigidBody.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
   rigidBody.inverseMass = 1.0F;
   if (!world->add_rigid_body(entity, rigidBody)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add bootstrap rigid body");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add bootstrap rigid body");
     return;
   }
 
   runtime::Collider collider{};
   collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
   if (!world->add_collider(entity, collider)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add bootstrap collider");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add bootstrap collider");
     return;
   }
 
@@ -586,8 +612,7 @@ void run(std::uint32_t maxFrames) noexcept {
   meshComponent.meshAssetId = bootstrapMeshAssetId;
   meshComponent.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
   if (!world->add_mesh_component(entity, meshComponent)) {
-    core::log_message(core::LogLevel::Error,
-                      "engine",
+    core::log_message(core::LogLevel::Error, "engine",
                       "failed to add bootstrap mesh component");
     return;
   }
@@ -595,20 +620,20 @@ void run(std::uint32_t maxFrames) noexcept {
   runtime::Transform stackedTransform{};
   stackedTransform.position = math::Vec3(0.0F, 3.0F, 0.0F);
   if (!world->add_transform(stackedEntity, stackedTransform)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add stacked transform");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add stacked transform");
     return;
   }
 
   if (!world->add_rigid_body(stackedEntity, rigidBody)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add stacked rigid body");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add stacked rigid body");
     return;
   }
 
   if (!world->add_collider(stackedEntity, collider)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add stacked collider");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add stacked collider");
     return;
   }
 
@@ -616,8 +641,7 @@ void run(std::uint32_t maxFrames) noexcept {
   stackedMesh.meshAssetId = bootstrapMeshAssetId;
   stackedMesh.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
   if (!world->add_mesh_component(stackedEntity, stackedMesh)) {
-    core::log_message(core::LogLevel::Error,
-                      "engine",
+    core::log_message(core::LogLevel::Error, "engine",
                       "failed to add stacked mesh component");
     return;
   }
@@ -625,16 +649,16 @@ void run(std::uint32_t maxFrames) noexcept {
   runtime::Transform groundTransform{};
   groundTransform.position = math::Vec3(0.0F, -0.5F, 0.0F);
   if (!world->add_transform(groundEntity, groundTransform)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add ground transform");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add ground transform");
     return;
   }
 
   runtime::Collider groundCollider{};
   groundCollider.halfExtents = math::Vec3(5.0F, 0.5F, 5.0F);
   if (!world->add_collider(groundEntity, groundCollider)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add ground collider");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add ground collider");
     return;
   }
 
@@ -642,8 +666,8 @@ void run(std::uint32_t maxFrames) noexcept {
   groundMesh.meshAssetId = bootstrapMeshAssetId;
   groundMesh.albedo = math::Vec3(0.5F, 0.5F, 0.5F);
   if (!world->add_mesh_component(groundEntity, groundMesh)) {
-    core::log_message(
-        core::LogLevel::Error, "engine", "failed to add ground mesh component");
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to add ground mesh component");
     return;
   }
 
@@ -664,23 +688,21 @@ void run(std::uint32_t maxFrames) noexcept {
     const LoopPlayState playState = query_editor_play_state();
     bool scriptStartInvoked = false;
     bool scriptStartSucceeded = true;
-    if ((playState == LoopPlayState::Playing)
-        && (previousPlayState == LoopPlayState::Stopped) && scriptLoaded) {
+    if ((playState == LoopPlayState::Playing) &&
+        (previousPlayState == LoopPlayState::Stopped) && scriptLoaded) {
       scriptStartInvoked = true;
       scriptStartSucceeded = scripting::call_script_function("on_start");
       if (!scriptStartSucceeded) {
-        core::log_message(core::LogLevel::Warning,
-                          "scripting",
+        core::log_message(core::LogLevel::Warning, "scripting",
                           "on_start hook missing or failed");
       }
     }
 
-    if ((playState == LoopPlayState::Stopped)
-        && (previousPlayState != LoopPlayState::Stopped)) {
+    if ((playState == LoopPlayState::Stopped) &&
+        (previousPlayState != LoopPlayState::Stopped)) {
       scripting::shutdown_scripting();
       if (!scripting::initialize_scripting()) {
-        core::log_message(core::LogLevel::Error,
-                          "scripting",
+        core::log_message(core::LogLevel::Error, "scripting",
                           "failed to reinitialize scripting on stop");
         scriptLoaded = false;
       } else {
@@ -689,14 +711,12 @@ void run(std::uint32_t maxFrames) noexcept {
         if (file_exists(kMainScriptPath)) {
           scriptLoaded = scripting::load_script(kMainScriptPath);
           if (!scriptLoaded) {
-            core::log_message(core::LogLevel::Error,
-                              "scripting",
+            core::log_message(core::LogLevel::Error, "scripting",
                               "script reload on stop failed - load_script"
                               " returned false");
           }
         } else {
-          core::log_message(core::LogLevel::Warning,
-                            "scripting",
+          core::log_message(core::LogLevel::Warning, "scripting",
                             "script reload on stop failed - script file not "
                             "found: assets/main.lua");
           scriptLoaded = false;
@@ -725,8 +745,8 @@ void run(std::uint32_t maxFrames) noexcept {
         accumulator = maxAccumulator;
       }
 
-      while ((accumulator >= kFixedDeltaSeconds)
-             && (updateStepCount < kMaxUpdateStepsPerFrame)) {
+      while ((accumulator >= kFixedDeltaSeconds) &&
+             (updateStepCount < kMaxUpdateStepsPerFrame)) {
         accumulator -= kFixedDeltaSeconds;
         ++updateStepCount;
       }
@@ -748,10 +768,9 @@ void run(std::uint32_t maxFrames) noexcept {
           "on_update", static_cast<float>(kFixedDeltaSeconds));
     }
 
-    if (!renderer::update_asset_manager(
-            assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U)) {
-      core::log_message(core::LogLevel::Warning,
-                        "assets",
+    if (!renderer::update_asset_manager(assetManager.get(), assetDatabase.get(),
+                                        meshRegistry.get(), 16U)) {
+      core::log_message(core::LogLevel::Warning, "assets",
                         "one or more asset transitions failed this frame");
     }
 
@@ -765,8 +784,8 @@ void run(std::uint32_t maxFrames) noexcept {
 
     if (runFrameGraph) {
       if (!core::begin_frame_graph()) {
-        core::log_message(
-            core::LogLevel::Error, "engine", "failed to begin frame graph");
+        core::log_message(core::LogLevel::Error, "engine",
+                          "failed to begin frame graph");
         running = false;
         continue;
       }
@@ -786,17 +805,15 @@ void run(std::uint32_t maxFrames) noexcept {
 
       for (std::size_t step = 0U; step < updateStepCount; ++step) {
         core::JobHandle commitHandle =
-            submit_world_phase_job(frameContext,
-                                   world.get(),
-                                   &phaseJobCursor,
+            submit_world_phase_job(frameContext, world.get(), &phaseJobCursor,
                                    &commit_update_phase_job);
         if (!core::is_valid_handle(commitHandle)) {
           graphFailed = true;
           break;
         }
 
-        if (core::is_valid_handle(previousUpdateCommit)
-            && !link_dependency(previousUpdateCommit, commitHandle)) {
+        if (core::is_valid_handle(previousUpdateCommit) &&
+            !link_dependency(previousUpdateCommit, commitHandle)) {
           graphFailed = true;
           break;
         }
@@ -831,8 +848,8 @@ void run(std::uint32_t maxFrames) noexcept {
             break;
           }
 
-          if (core::is_valid_handle(previousUpdateCommit)
-              && !link_dependency(previousUpdateCommit, updateHandle)) {
+          if (core::is_valid_handle(previousUpdateCommit) &&
+              !link_dependency(previousUpdateCommit, updateHandle)) {
             graphFailed = true;
             break;
           }
@@ -855,8 +872,8 @@ void run(std::uint32_t maxFrames) noexcept {
           std::size_t updateHandleIndex = updateJobStart;
           for (std::size_t start = 0U; start < transformCount;
                start += kChunkSize) {
-            if ((physicsJobCursor >= frameContext->physicsJobData.size())
-                || (updateHandleIndex >= updateJobCursor)) {
+            if ((physicsJobCursor >= frameContext->physicsJobData.size()) ||
+                (updateHandleIndex >= updateJobCursor)) {
               graphFailed = true;
               break;
             }
@@ -928,16 +945,14 @@ void run(std::uint32_t maxFrames) noexcept {
       }
 
       core::JobHandle renderPrepPhaseHandle =
-          submit_world_phase_job(frameContext,
-                                 world.get(),
-                                 &phaseJobCursor,
+          submit_world_phase_job(frameContext, world.get(), &phaseJobCursor,
                                  &begin_render_prep_phase_job);
       if (!core::is_valid_handle(renderPrepPhaseHandle)) {
         graphFailed = true;
       }
 
-      if (!graphFailed && core::is_valid_handle(previousUpdateCommit)
-          && !link_dependency(previousUpdateCommit, renderPrepPhaseHandle)) {
+      if (!graphFailed && core::is_valid_handle(previousUpdateCommit) &&
+          !link_dependency(previousUpdateCommit, renderPrepPhaseHandle)) {
         graphFailed = true;
       }
 
@@ -947,8 +962,8 @@ void run(std::uint32_t maxFrames) noexcept {
         graphFailed = true;
       }
 
-      if (!graphFailed
-          && !link_dependency(renderPrepPhaseHandle, renderPhaseHandle)) {
+      if (!graphFailed &&
+          !link_dependency(renderPrepPhaseHandle, renderPhaseHandle)) {
         graphFailed = true;
       }
 
@@ -962,24 +977,17 @@ void run(std::uint32_t maxFrames) noexcept {
             (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH))
                       : 1.0F;
         const renderer::CameraState cam = renderer::get_active_camera();
-        const math::Mat4 vpMatrix = math::mul(
-            math::perspective(
-                cam.fovRadians, vpAspect, cam.nearPlane, cam.farPlane),
-            math::look_at(cam.position, cam.target, cam.up));
+        const math::Mat4 vpMatrix =
+            math::mul(math::perspective(cam.fovRadians, vpAspect, cam.nearPlane,
+                                        cam.farPlane),
+                      math::look_at(cam.position, cam.target, cam.up));
 
         if (!runtime::enqueue_render_prep_pipeline(
-                &frameContext->renderPrepPipeline,
-                world.get(),
-                commandBuffer.get(),
-                assetDatabase.get(),
-                meshRegistry.get(),
-                renderPrepPhaseHandle,
-                renderPhaseHandle,
-                &frameContext->frameGraphFailed,
-                frameThreadCount,
-                kChunkSize,
-                vpMatrix,
-                &mergeHandle)) {
+                &frameContext->renderPrepPipeline, world.get(),
+                commandBuffer.get(), assetDatabase.get(), meshRegistry.get(),
+                renderPrepPhaseHandle, renderPhaseHandle,
+                &frameContext->frameGraphFailed, frameThreadCount, kChunkSize,
+                vpMatrix, &mergeHandle)) {
           graphFailed = true;
         }
       }
@@ -995,8 +1003,8 @@ void run(std::uint32_t maxFrames) noexcept {
       }
 
       if (graphFailed) {
-        core::log_message(
-            core::LogLevel::Error, "engine", "job graph assembly failed");
+        core::log_message(core::LogLevel::Error, "engine",
+                          "job graph assembly failed");
         running = false;
         static_cast<void>(core::end_frame_graph());
         continue;
@@ -1006,15 +1014,14 @@ void run(std::uint32_t maxFrames) noexcept {
       const bool frameJobsFailed =
           frameContext->frameGraphFailed.load(std::memory_order_acquire);
       if (!core::end_frame_graph()) {
-        core::log_message(
-            core::LogLevel::Error, "engine", "failed to end frame graph");
+        core::log_message(core::LogLevel::Error, "engine",
+                          "failed to end frame graph");
         running = false;
         continue;
       }
 
       if (frameJobsFailed) {
-        core::log_message(core::LogLevel::Error,
-                          "engine",
+        core::log_message(core::LogLevel::Error, "engine",
                           "frame graph job execution failed");
         running = false;
         continue;
@@ -1032,15 +1039,15 @@ void run(std::uint32_t maxFrames) noexcept {
 
       jobStats = core::consume_job_stats();
       const auto frameNs = static_cast<double>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(frameGraphEnd
-                                                               - frameStart)
+          std::chrono::duration_cast<std::chrono::nanoseconds>(frameGraphEnd -
+                                                               frameStart)
               .count());
       const double totalCapacityNs =
           frameNs * static_cast<double>(frameThreadCount);
       utilizationPct =
           (totalCapacityNs > 0.0)
-              ? ((100.0 * static_cast<double>(jobStats.busyNanoseconds))
-                 / totalCapacityNs)
+              ? ((100.0 * static_cast<double>(jobStats.busyNanoseconds)) /
+                 totalCapacityNs)
               : 0.0;
     } else {
       frameMs =
@@ -1058,8 +1065,7 @@ void run(std::uint32_t maxFrames) noexcept {
     }
 
     core::log_frame_metrics(
-        frameIndex,
-        frameMs,
+        frameIndex, frameMs,
         core::frame_allocator_bytes_used() + threadFrameBytes,
         core::frame_allocator_allocation_count() + threadFrameAllocs);
 
@@ -1075,11 +1081,11 @@ void run(std::uint32_t maxFrames) noexcept {
         count_mesh_asset_states(assetDatabase.get());
 
     const bool shouldLogSliceDiagnostics =
-        ((frameIndex % kSliceDiagnosticsPeriodFrames) == 0U)
-        || (spawnedCount > 0U) || (destroyedCount > 0U)
-        || (scriptStartInvoked && !scriptStartSucceeded)
-        || (scriptUpdateInvoked && !scriptUpdateSucceeded)
-        || (assetCounts.failed > 0U);
+        ((frameIndex % kSliceDiagnosticsPeriodFrames) == 0U) ||
+        (spawnedCount > 0U) || (destroyedCount > 0U) ||
+        (scriptStartInvoked && !scriptStartSucceeded) ||
+        (scriptUpdateInvoked && !scriptUpdateSucceeded) ||
+        (assetCounts.failed > 0U);
     if (shouldLogSliceDiagnostics) {
       const std::size_t movingRigidBodyCount =
           count_moving_rigid_bodies(*world);
@@ -1091,8 +1097,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
       char diagnostics[640] = {};
       std::snprintf(
-          diagnostics,
-          sizeof(diagnostics),
+          diagnostics, sizeof(diagnostics),
           "frame=%u phase=%s alive=%llu spawned=%llu destroyed=%llu "
           "transforms=%llu worldTransforms=%llu movingBodies=%llu "
           "meshComponents=%llu readyMeshComponents=%llu drawCommands=%llu "
@@ -1100,8 +1105,7 @@ void run(std::uint32_t maxFrames) noexcept {
           "assetRequests=%llu scriptLoaded=%u scriptStartInvoked=%u "
           "scriptStartOk=%u scriptUpdateInvoked=%u scriptUpdateOk=%u "
           "updateSteps=%llu",
-          frameIndex,
-          world_phase_to_string(world->current_phase()),
+          frameIndex, world_phase_to_string(world->current_phase()),
           static_cast<unsigned long long>(aliveCount),
           static_cast<unsigned long long>(spawnedCount),
           static_cast<unsigned long long>(destroyedCount),
@@ -1115,18 +1119,15 @@ void run(std::uint32_t maxFrames) noexcept {
           static_cast<unsigned long long>(assetCounts.loading),
           static_cast<unsigned long long>(assetCounts.failed),
           static_cast<unsigned long long>(pendingAssetRequests),
-          scriptLoaded ? 1U : 0U,
-          scriptStartInvoked ? 1U : 0U,
-          scriptStartSucceeded ? 1U : 0U,
-          scriptUpdateInvoked ? 1U : 0U,
+          scriptLoaded ? 1U : 0U, scriptStartInvoked ? 1U : 0U,
+          scriptStartSucceeded ? 1U : 0U, scriptUpdateInvoked ? 1U : 0U,
           scriptUpdateSucceeded ? 1U : 0U,
           static_cast<unsigned long long>(updateStepCount));
       core::log_message(core::LogLevel::Info, "slice", diagnostics);
     }
 
     if (!core::make_render_context_current()) {
-      core::log_message(core::LogLevel::Error,
-                        "editor",
+      core::log_message(core::LogLevel::Error, "editor",
                         "failed to acquire OpenGL context for editor");
       running = false;
     } else {
@@ -1144,8 +1145,8 @@ void run(std::uint32_t maxFrames) noexcept {
         }
 
         if (lc->type == runtime::LightType::Directional) {
-          if (sceneLights.directionalLightCount
-              < renderer::kMaxDirectionalLights) {
+          if (sceneLights.directionalLightCount <
+              renderer::kMaxDirectionalLights) {
             auto &dl =
                 sceneLights
                     .directionalLights[sceneLights.directionalLightCount];
@@ -1170,8 +1171,7 @@ void run(std::uint32_t maxFrames) noexcept {
         }
       }
 
-      renderer::flush_renderer(commandBuffer->view(),
-                               meshRegistry.get(),
+      renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                                static_cast<float>(simulationTimeSeconds),
                                sceneLights);
       if ((bridge != nullptr) && (bridge->render != nullptr)) {
@@ -1184,8 +1184,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
     char jobMessage[192] = {};
     std::snprintf(
-        jobMessage,
-        sizeof(jobMessage),
+        jobMessage, sizeof(jobMessage),
         "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
         static_cast<unsigned long long>(jobStats.jobsExecuted),
         static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
@@ -1212,8 +1211,8 @@ void run(std::uint32_t maxFrames) noexcept {
     bridge->set_world(nullptr);
   }
 
-  renderer::shutdown_asset_manager(
-      assetManager.get(), assetDatabase.get(), meshRegistry.get());
+  renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
+                                   meshRegistry.get());
 }
 
 void shutdown() noexcept {

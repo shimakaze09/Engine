@@ -57,9 +57,7 @@ void shutdown_platform_resources() noexcept {
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
-bool initialize_platform_impl(int width,
-                              int height,
-                              const char *title,
+bool initialize_platform_impl(int width, int height, const char *title,
                               bool vsync) noexcept {
   SDL_SetMainReady();
 
@@ -73,24 +71,20 @@ bool initialize_platform_impl(int width,
     return false;
   }
 
-  if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) != 0
-      || SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) != 0
-      || SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                             SDL_GL_CONTEXT_PROFILE_CORE)
-             != 0
-      || SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0
-      || SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0) {
+  if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) != 0 ||
+      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) != 0 ||
+      SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                          SDL_GL_CONTEXT_PROFILE_CORE) != 0 ||
+      SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0 ||
+      SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0) {
     log_sdl_error("failed to configure OpenGL context attributes");
     shutdown_platform_resources();
     return false;
   }
 
-  g_window = SDL_CreateWindow(title,
-                              SDL_WINDOWPOS_CENTERED,
-                              SDL_WINDOWPOS_CENTERED,
-                              width,
-                              height,
-                              SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+  g_window = SDL_CreateWindow(
+      title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
+      SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();
@@ -137,13 +131,9 @@ void shutdown_platform() noexcept {
   shutdown_platform_resources();
 }
 
-bool is_platform_running() noexcept {
-  return g_platformRunning;
-}
+bool is_platform_running() noexcept { return g_platformRunning; }
 
-void request_platform_quit() noexcept {
-  g_platformRunning = false;
-}
+void request_platform_quit() noexcept { g_platformRunning = false; }
 
 bool make_render_context_current() noexcept {
   if ((g_window == nullptr) || (g_glContext == nullptr)) {
@@ -187,12 +177,8 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   SDL_GL_GetDrawableSize(g_window, outWidth, outHeight);
 }
 
-void *get_sdl_window() noexcept {
-  return g_window;
-}
+void *get_sdl_window() noexcept { return g_window; }
 
-void *get_sdl_gl_context() noexcept {
-  return g_glContext;
-}
+void *get_sdl_gl_context() noexcept { return g_glContext; }
 
 } // namespace engine::core

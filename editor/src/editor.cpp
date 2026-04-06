@@ -30,18 +30,24 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
+
+#include "ImGuizmo.h"
+
+#include "engine/editor/command_history.h"
 
 namespace engine::editor {
 
@@ -58,6 +64,10 @@ std::size_t g_playSnapshotSize = 0U;
 bool g_hasPlaySnapshot = false;
 bool g_worldRestoreFailed = false;
 EditorCamera g_editorCamera{};
+ImGuizmo::OPERATION g_gizmoOp = ImGuizmo::TRANSLATE;
+bool g_gizmoWasUsing = false;
+runtime::Transform g_gizmoStartTransform{};
+CommandHistory g_commandHistory{};
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
@@ -66,7 +76,9 @@ constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
 constexpr const char *kMeshSectionLabel = "MeshComponent";
+constexpr const char *kLightSectionLabel = "LightComponent";
 constexpr const char *kScenePath = "assets/scene.json";
+char g_selectedAssetPath[512] = {};
 
 bool world_is_editable() noexcept {
   return (g_world != nullptr) && !g_worldRestoreFailed &&
@@ -78,6 +90,24 @@ bool world_can_load_scene() noexcept {
   return (g_world != nullptr) &&
          (g_world->current_phase() == runtime::WorldPhase::Idle);
 }
+
+struct TransformEditCommand final : EditorCommand {
+  runtime::Entity entity{};
+  runtime::Transform oldTransform{};
+  runtime::Transform newTransform{};
+
+  void execute() noexcept override {
+    if (g_world != nullptr) {
+      static_cast<void>(g_world->add_transform(entity, newTransform));
+    }
+  }
+
+  void undo() noexcept override {
+    if (g_world != nullptr) {
+      static_cast<void>(g_world->add_transform(entity, oldTransform));
+    }
+  }
+};
 
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept {
@@ -440,6 +470,30 @@ void draw_main_menu_bar() noexcept {
     ImGui::EndMenu();
   }
 
+  if (ImGui::BeginMenu("Edit")) {
+    if (!g_commandHistory.can_undo()) {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
+      g_commandHistory.undo();
+    }
+    if (!g_commandHistory.can_undo()) {
+      ImGui::EndDisabled();
+    }
+
+    if (!g_commandHistory.can_redo()) {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z")) {
+      g_commandHistory.redo();
+    }
+    if (!g_commandHistory.can_redo()) {
+      ImGui::EndDisabled();
+    }
+
+    ImGui::EndMenu();
+  }
+
   ImGui::EndMainMenuBar();
 }
 
@@ -516,6 +570,16 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
   }
 
+  {
+    runtime::LightComponent tmpLight{};
+    if (!g_world->get_light_component(entity, &tmpLight)) {
+      if (ImGui::Selectable(kLightSectionLabel)) {
+        runtime::LightComponent newLight{};
+        static_cast<void>(g_world->add_light_component(entity, newLight));
+      }
+    }
+  }
+
   ImGui::EndCombo();
 }
 
@@ -578,6 +642,22 @@ void draw_toolbar() noexcept {
   }
   if (!canStop) {
     ImGui::EndDisabled();
+  }
+
+  ImGui::SameLine();
+  ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+  ImGui::SameLine();
+
+  if (ImGui::RadioButton("T", g_gizmoOp == ImGuizmo::TRANSLATE)) {
+    g_gizmoOp = ImGuizmo::TRANSLATE;
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("R", g_gizmoOp == ImGuizmo::ROTATE)) {
+    g_gizmoOp = ImGuizmo::ROTATE;
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("S", g_gizmoOp == ImGuizmo::SCALE)) {
+    g_gizmoOp = ImGuizmo::SCALE;
   }
 
   ImGui::End();
@@ -817,6 +897,47 @@ void draw_inspector_panel() noexcept {
     ImGui::TextUnformatted("Collider: <none>");
   }
 
+  runtime::LightComponent light{};
+  if (g_world->get_light_component(entity, &light)) {
+    ImGui::PushID("LightComponentSection");
+    const bool lightOpen = ImGui::CollapsingHeader(
+        kLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removeLightPressed =
+        draw_remove_component_button("remove", editable);
+
+    bool lightModified = false;
+    if (lightOpen) {
+      if (!editable) {
+        ImGui::BeginDisabled();
+      }
+
+      constexpr const char *kLightTypeNames[] = {"Directional", "Point"};
+      int currentType = static_cast<int>(light.type);
+      if (ImGui::Combo("Type", &currentType, kLightTypeNames, 2)) {
+        light.type = static_cast<runtime::LightType>(currentType);
+        lightModified = true;
+      }
+
+      lightModified |= ImGui::ColorEdit3("Color", &light.color.x);
+      lightModified |= ImGui::DragFloat("Intensity", &light.intensity, 0.05F,
+                                        0.0F, 100.0F, "%.2f");
+      draw_vec3_field("Direction", light.direction, &lightModified);
+
+      if (!editable) {
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removeLightPressed) {
+      static_cast<void>(g_world->remove_light_component(entity));
+    } else if (editable && lightModified) {
+      static_cast<void>(g_world->add_light_component(entity, light));
+    }
+  } else {
+    ImGui::TextUnformatted("LightComponent: <none>");
+  }
+
   runtime::MeshComponent mesh{};
   if (g_world->get_mesh_component(entity, &mesh)) {
     ImGui::PushID("MeshComponentSection");
@@ -829,9 +950,21 @@ void draw_inspector_panel() noexcept {
       ImGui::Text("Mesh Asset ID: %u", mesh.meshAssetId);
       if (editable) {
         meshModified |= ImGui::ColorEdit3("Albedo", &mesh.albedo.x);
+        meshModified |= ImGui::SliderFloat("Roughness", &mesh.roughness, 0.0F,
+                                           1.0F, "%.2f");
+        meshModified |=
+            ImGui::SliderFloat("Metallic", &mesh.metallic, 0.0F, 1.0F, "%.2f");
+        meshModified |=
+            ImGui::SliderFloat("Opacity", &mesh.opacity, 0.0F, 1.0F, "%.2f");
       } else {
         ImGui::BeginDisabled();
         static_cast<void>(ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
+        static_cast<void>(ImGui::SliderFloat("Roughness", &mesh.roughness, 0.0F,
+                                             1.0F, "%.2f"));
+        static_cast<void>(
+            ImGui::SliderFloat("Metallic", &mesh.metallic, 0.0F, 1.0F, "%.2f"));
+        static_cast<void>(
+            ImGui::SliderFloat("Opacity", &mesh.opacity, 0.0F, 1.0F, "%.2f"));
         ImGui::EndDisabled();
       }
     }
@@ -869,6 +1002,54 @@ void draw_stats_panel(float frameMs, float utilizationPct) noexcept {
   ImGui::End();
 }
 
+void draw_asset_tree(const std::filesystem::path &dir) noexcept {
+  std::error_code ec{};
+  for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
+    if (ec) {
+      break;
+    }
+
+    const std::string filename = entry.path().filename().string();
+
+    if (entry.is_directory(ec) && !ec) {
+      if (ImGui::TreeNode(filename.c_str())) {
+        draw_asset_tree(entry.path());
+        ImGui::TreePop();
+      }
+    } else if (!ec) {
+      const std::string relPath = entry.path().string();
+      const bool isSelected =
+          (std::strcmp(g_selectedAssetPath, relPath.c_str()) == 0);
+      if (ImGui::Selectable(filename.c_str(), isSelected)) {
+        std::snprintf(g_selectedAssetPath, sizeof(g_selectedAssetPath), "%s",
+                      relPath.c_str());
+      }
+    }
+  }
+}
+
+void draw_asset_browser_panel() noexcept {
+  if (!ImGui::Begin("Assets")) {
+    ImGui::End();
+    return;
+  }
+
+  const std::filesystem::path assetsDir("assets");
+  std::error_code ec{};
+  if (std::filesystem::is_directory(assetsDir, ec) && !ec) {
+    draw_asset_tree(assetsDir);
+  } else {
+    ImGui::TextUnformatted("assets/ directory not found");
+  }
+
+  if (g_selectedAssetPath[0] != '\0') {
+    ImGui::Separator();
+    ImGui::TextWrapped("Selected: %s", g_selectedAssetPath);
+  }
+
+  ImGui::End();
+}
+
 void draw_scene_viewport_panel() noexcept {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
   const bool visible = ImGui::Begin("Scene");
@@ -879,19 +1060,88 @@ void draw_scene_viewport_panel() noexcept {
     return;
   }
 
+  const ImVec2 regionSize = ImGui::GetContentRegionAvail();
+  const ImVec2 cursorScreenPos = ImGui::GetCursorScreenPos();
+
   const std::uint32_t texId = renderer::get_scene_viewport_texture();
-  if (texId != 0U) {
-    const ImVec2 regionSize = ImGui::GetContentRegionAvail();
-    if ((regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
-      ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
-                   ImVec2(0.0F, 1.0F), ImVec2(1.0F, 0.0F));
-    }
+  if ((texId != 0U) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
+    ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
+                 ImVec2(0.0F, 1.0F), ImVec2(1.0F, 0.0F));
   } else {
     ImGui::TextUnformatted("Waiting for renderer...");
   }
 
-  // Camera input: only when stopped/paused and viewport is hovered.
-  if ((g_playState != PlayState::Playing) && ImGui::IsWindowHovered()) {
+  // --- ImGuizmo gizmo rendering ---
+  const bool editable = world_is_editable();
+  const runtime::Entity selectedEntity =
+      (g_world != nullptr && g_selectedEntityIndex != 0U)
+          ? g_world->find_entity_by_index(g_selectedEntityIndex)
+          : runtime::kInvalidEntity;
+
+  const bool hasTransform =
+      (selectedEntity != runtime::kInvalidEntity) && (g_world != nullptr) &&
+      (g_world->get_transform_read_ptr(selectedEntity) != nullptr);
+
+  if (editable && hasTransform && (regionSize.x > 0.0F) &&
+      (regionSize.y > 0.0F)) {
+    const renderer::CameraState cam = editor_camera_state(g_editorCamera);
+
+    constexpr float kDefaultFov = 1.0471975512F;
+    constexpr float kNear = 0.1F;
+    constexpr float kFar = 100.0F;
+
+    const float aspect = regionSize.x / regionSize.y;
+    const math::Mat4 viewMat = math::look_at(cam.position, cam.target, cam.up);
+    const math::Mat4 projMat =
+        math::perspective(kDefaultFov, aspect, kNear, kFar);
+
+    runtime::Transform transform{};
+    g_world->get_transform(selectedEntity, &transform);
+    math::Mat4 modelMat = math::compose_trs(
+        transform.position, transform.rotation, transform.scale);
+
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetDrawlist();
+    ImGuizmo::SetRect(cursorScreenPos.x, cursorScreenPos.y, regionSize.x,
+                      regionSize.y);
+
+    const bool manipulated = ImGuizmo::Manipulate(
+        &viewMat.columns[0].x, &projMat.columns[0].x, g_gizmoOp,
+        ImGuizmo::LOCAL, &modelMat.columns[0].x);
+
+    // Track gizmo drag start/end for undo.
+    const bool gizmoUsing = ImGuizmo::IsUsing();
+    if (gizmoUsing && !g_gizmoWasUsing) {
+      g_gizmoStartTransform = transform;
+    }
+
+    if (manipulated) {
+      math::Vec3 newPos{};
+      math::Quat newRot{};
+      math::Vec3 newScale{};
+      if (math::decompose_trs(modelMat, &newPos, &newRot, &newScale)) {
+        transform.position = newPos;
+        transform.rotation = newRot;
+        transform.scale = newScale;
+        static_cast<void>(g_world->add_transform(selectedEntity, transform));
+      }
+    }
+
+    if (!gizmoUsing && g_gizmoWasUsing) {
+      auto *cmd = new (std::nothrow) TransformEditCommand();
+      if (cmd != nullptr) {
+        cmd->entity = selectedEntity;
+        cmd->oldTransform = g_gizmoStartTransform;
+        g_world->get_transform(selectedEntity, &cmd->newTransform);
+        g_commandHistory.execute(cmd);
+      }
+    }
+    g_gizmoWasUsing = gizmoUsing;
+  }
+
+  // Camera input: only when stopped/paused, viewport hovered, gizmo not active.
+  if ((g_playState != PlayState::Playing) && ImGui::IsWindowHovered() &&
+      !ImGuizmo::IsUsing()) {
     const ImGuiIO &io = ImGui::GetIO();
     const bool altHeld = io.KeyAlt;
     const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -928,6 +1178,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderDockWindow("Entities", left);
   ImGui::DockBuilderDockWindow("Inspector", right);
   ImGui::DockBuilderDockWindow("Stats", bottom);
+  ImGui::DockBuilderDockWindow("Assets", bottom);
   ImGui::DockBuilderDockWindow("Scene", center);
 
   ImGui::DockBuilderFinish(dockspaceId);
@@ -976,6 +1227,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_entities_panel();
   draw_inspector_panel();
   draw_stats_panel(frameMs, utilizationPct);
+  draw_asset_browser_panel();
 }
 
 } // namespace
@@ -1039,6 +1291,27 @@ void editor_new_frame() noexcept {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplSDL2_NewFrame();
   ImGui::NewFrame();
+  ImGuizmo::BeginFrame();
+
+  // Keyboard shortcuts.
+  const ImGuiIO &io = ImGui::GetIO();
+  if (!io.WantTextInput) {
+    if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+      g_commandHistory.undo();
+    }
+    if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+      g_commandHistory.redo();
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_W)) {
+      g_gizmoOp = ImGuizmo::TRANSLATE;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_E)) {
+      g_gizmoOp = ImGuizmo::ROTATE;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+      g_gizmoOp = ImGuizmo::SCALE;
+    }
+  }
 }
 
 void editor_render(float frameMs, float utilizationPct) noexcept {

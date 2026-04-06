@@ -71,6 +71,9 @@ struct LightComponent final {
 struct MeshComponent final {
   std::uint32_t meshAssetId = 0U;
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
+  float roughness = 0.5F;
+  float metallic = 0.0F;
+  float opacity = 1.0F;
 };
 
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,

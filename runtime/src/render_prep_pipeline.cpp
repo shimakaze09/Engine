@@ -22,8 +22,7 @@ struct FrustumPlane final {
   float d;
 };
 
-bool aabb_outside_plane(const FrustumPlane &p,
-                        const math::Vec3 &center,
+bool aabb_outside_plane(const FrustumPlane &p, const math::Vec3 &center,
                         const math::Vec3 &half) noexcept {
   const float px = center.x + (p.a >= 0.0F ? half.x : -half.x);
   const float py = center.y + (p.b >= 0.0F ? half.y : -half.y);
@@ -56,10 +55,10 @@ void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
 
 void render_prep_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<RenderPrepChunkJobData *>(userData);
-  if ((jobData == nullptr) || (jobData->world == nullptr)
-      || (jobData->localBuffers == nullptr)
-      || (jobData->assetDatabase == nullptr)
-      || (jobData->meshRegistry == nullptr)) {
+  if ((jobData == nullptr) || (jobData->world == nullptr) ||
+      (jobData->localBuffers == nullptr) ||
+      (jobData->assetDatabase == nullptr) ||
+      (jobData->meshRegistry == nullptr)) {
     return;
   }
 
@@ -132,6 +131,9 @@ void render_prep_chunk_job(void *userData) noexcept {
     command.entity = entities[i].index;
     command.mesh = runtimeMesh;
     command.material.albedo = meshComponent->albedo;
+    command.material.roughness = meshComponent->roughness;
+    command.material.metallic = meshComponent->metallic;
+    command.material.opacity = meshComponent->opacity;
     command.modelMatrix = transforms[i].matrix;
 
     // Build instancing-ready sort key.
@@ -144,8 +146,8 @@ void render_prep_chunk_job(void *userData) noexcept {
     const std::uint64_t shaderBits = 0ULL;
 
     const std::uint64_t textureBits =
-        (static_cast<std::uint64_t>(command.material.albedoTexture.id)
-         & 0xFFFFFULL)
+        (static_cast<std::uint64_t>(command.material.albedoTexture.id) &
+         0xFFFFFULL)
         << 36U;
 
     const std::uint64_t meshBits =
@@ -168,12 +170,12 @@ void render_prep_chunk_job(void *userData) noexcept {
       depthQuantized = static_cast<std::uint16_t>(65535U - depthQuantized);
     }
 
-    command.sortKey.value = transparentBit | shaderBits | textureBits | meshBits
-                            | static_cast<std::uint64_t>(depthQuantized);
+    command.sortKey.value = transparentBit | shaderBits | textureBits |
+                            meshBits |
+                            static_cast<std::uint64_t>(depthQuantized);
 
     if (!localBuffer.submit(command)) {
-      core::log_message(core::LogLevel::Error,
-                        "render_prep",
+      core::log_message(core::LogLevel::Error, "render_prep",
                         "command buffer full; entity dropped from frame");
       mark_graph_failed(jobData->frameGraphFailed);
       return;
@@ -183,8 +185,8 @@ void render_prep_chunk_job(void *userData) noexcept {
 
 void merge_command_buffers_job(void *userData) noexcept {
   auto *jobData = static_cast<MergeCommandsJobData *>(userData);
-  if ((jobData == nullptr) || (jobData->merged == nullptr)
-      || (jobData->localBuffers == nullptr)) {
+  if ((jobData == nullptr) || (jobData->merged == nullptr) ||
+      (jobData->localBuffers == nullptr)) {
     return;
   }
 
@@ -200,8 +202,8 @@ void merge_command_buffers_job(void *userData) noexcept {
 
 bool link_dependency(core::JobHandle prerequisite,
                      core::JobHandle dependent) noexcept {
-  if (!core::is_valid_handle(prerequisite)
-      || !core::is_valid_handle(dependent)) {
+  if (!core::is_valid_handle(prerequisite) ||
+      !core::is_valid_handle(dependent)) {
     return false;
   }
 
@@ -211,31 +213,27 @@ bool link_dependency(core::JobHandle prerequisite,
 } // namespace
 
 bool enqueue_render_prep_pipeline(
-    RenderPrepPipelineContext *context,
-    const World *world,
+    RenderPrepPipelineContext *context, const World *world,
     renderer::CommandBufferBuilder *mergedCommandBuffer,
     const renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
-    core::JobHandle renderPrepPhaseHandle,
-    core::JobHandle renderPhaseHandle,
-    std::atomic<bool> *frameGraphFailed,
-    std::size_t frameThreadCount,
-    std::size_t chunkSize,
-    const math::Mat4 &viewProjection,
+    core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
+    std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
+    std::size_t chunkSize, const math::Mat4 &viewProjection,
     core::JobHandle *outMergeHandle) noexcept {
-  if ((context == nullptr) || (world == nullptr)
-      || (mergedCommandBuffer == nullptr) || (assetDatabase == nullptr)
-      || (meshRegistry == nullptr) || (chunkSize == 0U)
-      || !core::is_valid_handle(renderPrepPhaseHandle)
-      || !core::is_valid_handle(renderPhaseHandle)
-      || (outMergeHandle == nullptr)) {
+  if ((context == nullptr) || (world == nullptr) ||
+      (mergedCommandBuffer == nullptr) || (assetDatabase == nullptr) ||
+      (meshRegistry == nullptr) || (chunkSize == 0U) ||
+      !core::is_valid_handle(renderPrepPhaseHandle) ||
+      !core::is_valid_handle(renderPhaseHandle) ||
+      (outMergeHandle == nullptr)) {
     return false;
   }
 
   *outMergeHandle = {};
 
-  if ((frameThreadCount == 0U)
-      || (frameThreadCount > context->localCommandBuffers.size())) {
+  if ((frameThreadCount == 0U) ||
+      (frameThreadCount > context->localCommandBuffers.size())) {
     return false;
   }
 
@@ -249,8 +247,8 @@ bool enqueue_render_prep_pipeline(
   std::size_t renderPrepHandleCount = 0U;
 
   for (std::size_t start = 0U; start < transformCount; start += chunkSize) {
-    if ((renderPrepJobCursor >= context->renderPrepJobData.size())
-        || (renderPrepHandleCount >= context->renderPrepJobHandles.size())) {
+    if ((renderPrepJobCursor >= context->renderPrepJobData.size()) ||
+        (renderPrepHandleCount >= context->renderPrepJobHandles.size())) {
       return false;
     }
 
@@ -278,8 +276,8 @@ bool enqueue_render_prep_pipeline(
       return false;
     }
 
-    if (!link_dependency(renderPrepPhaseHandle, prepHandle)
-        || !link_dependency(prepHandle, renderPhaseHandle)) {
+    if (!link_dependency(renderPrepPhaseHandle, prepHandle) ||
+        !link_dependency(prepHandle, renderPhaseHandle)) {
       return false;
     }
 
