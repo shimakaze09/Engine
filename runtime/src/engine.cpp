@@ -27,6 +27,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
+#include "engine/core/vfs.h"
 #include "engine/math/transform.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/asset_database.h"
@@ -49,7 +50,7 @@ constexpr double kFixedDeltaSeconds = 1.0 / 60.0;
 constexpr std::size_t kChunkSize = 256U;
 constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
 constexpr std::size_t kMaxChunkJobs = 1024U;
-constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame + 8U;
+constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
 constexpr const char *kMainScriptPath = "assets/main.lua";
 
@@ -217,6 +218,13 @@ void commit_update_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
     jobData->world->commit_update_phase();
+  }
+}
+
+void begin_update_step_job(void *userData) noexcept {
+  auto *jobData = static_cast<WorldPhaseJobData *>(userData);
+  if ((jobData != nullptr) && (jobData->world != nullptr)) {
+    jobData->world->begin_update_step();
   }
 }
 
@@ -396,6 +404,10 @@ bool bootstrap() noexcept {
   if (!core::initialize_core(kFrameAllocatorBytes)) {
     return false;
   }
+
+  // Mount the assets directory relative to CWD so that VFS paths like
+  // "assets/shaders/pbr.vert" resolve correctly when running from build/.
+  static_cast<void>(core::mount("assets", "assets"));
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
@@ -816,6 +828,24 @@ void run(std::uint32_t maxFrames) noexcept {
             !link_dependency(previousUpdateCommit, commitHandle)) {
           graphFailed = true;
           break;
+        }
+
+        if (step > 0U) {
+          core::JobHandle beginStepHandle =
+              submit_world_phase_job(frameContext, world.get(), &phaseJobCursor,
+                                     &begin_update_step_job);
+          if (!core::is_valid_handle(beginStepHandle)) {
+            graphFailed = true;
+            break;
+          }
+          if (!link_dependency(previousUpdateCommit, beginStepHandle)) {
+            graphFailed = true;
+            break;
+          }
+          if (!link_dependency(beginStepHandle, commitHandle)) {
+            graphFailed = true;
+            break;
+          }
         }
 
         const std::size_t transformCount = world->transform_count();

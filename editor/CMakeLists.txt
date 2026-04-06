@@ -1,4 +1,5 @@
 add_library(engine_editor STATIC
+    src/command_history.cpp
     src/editor.cpp
     src/editor_camera.cpp
 )

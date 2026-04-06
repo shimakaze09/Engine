@@ -665,6 +665,18 @@ void World::begin_update_phase() noexcept {
   m_phase = WorldPhase::Simulation;
 }
 
+void World::begin_update_step() noexcept {
+  if (m_phase != WorldPhase::Simulation) {
+    assert(false && "begin_update_step requires Simulation phase");
+    return;
+  }
+  if (m_updateSwapPending) {
+    assert(false && "begin_update_step called with pending update");
+    return;
+  }
+  m_updateSwapPending = true;
+}
+
 void World::commit_update_phase() noexcept {
   if ((m_phase != WorldPhase::Simulation) || !m_updateSwapPending) {
     assert(false && "commit_update_phase requires active Simulation phase");

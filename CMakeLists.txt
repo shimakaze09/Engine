@@ -173,6 +173,7 @@ add_subdirectory(renderer)
 add_subdirectory(audio)
 add_subdirectory(runtime)
 add_subdirectory(editor)
+add_subdirectory(app)
 
 if(ENGINE_BUILD_TOOLS)
     add_subdirectory(tools)

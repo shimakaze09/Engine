@@ -188,6 +188,7 @@ public:
   Entity light_entity_at(std::size_t index) const noexcept;
 
   void begin_update_phase() noexcept;
+  void begin_update_step() noexcept;
   void commit_update_phase() noexcept;
   void begin_transform_phase() noexcept;
   void begin_render_prep_phase() noexcept;

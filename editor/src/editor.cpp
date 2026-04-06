@@ -241,8 +241,7 @@ void mark_modified(bool *modified, bool changed) noexcept {
 
 void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
-  constexpr ImGuiInputTextFlags kCommitFlags =
-      ImGuiInputTextFlags_EnterReturnsTrue;
+  constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
 
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
@@ -259,8 +258,7 @@ void draw_vec2_field(const char *label, math::Vec2 &value,
 
 void draw_vec3_field(const char *label, math::Vec3 &value,
                      bool *modified) noexcept {
-  constexpr ImGuiInputTextFlags kCommitFlags =
-      ImGuiInputTextFlags_EnterReturnsTrue;
+  constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
 
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
@@ -281,8 +279,7 @@ void draw_vec3_field(const char *label, math::Vec3 &value,
 
 void draw_vec4_field(const char *label, math::Vec4 &value,
                      bool *modified) noexcept {
-  constexpr ImGuiInputTextFlags kCommitFlags =
-      ImGuiInputTextFlags_EnterReturnsTrue;
+  constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
 
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
@@ -307,8 +304,7 @@ void draw_vec4_field(const char *label, math::Vec4 &value,
 
 void draw_quat_field(const char *label, math::Quat &value,
                      bool *modified) noexcept {
-  constexpr ImGuiInputTextFlags kCommitFlags =
-      ImGuiInputTextFlags_EnterReturnsTrue;
+  constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
 
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
@@ -337,8 +333,7 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
     return;
   }
 
-  constexpr ImGuiInputTextFlags kCommitFlags =
-      ImGuiInputTextFlags_EnterReturnsTrue;
+  constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
 
   switch (field.kind) {
   case core::TypeField::Kind::Float: {
