@@ -73,8 +73,7 @@ struct MeshComponent final {
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
 };
 
-using TransformVisitor = void (*)(Entity entity,
-                                  const Transform &transform,
+using TransformVisitor = void (*)(Entity entity, const Transform &transform,
                                   void *userData) noexcept;
 
 enum class WorldPhase : std::uint8_t {
@@ -125,8 +124,7 @@ public:
     std::size_t visited = 0U;
     const std::uint32_t upperBound = m_nextEntityIndex;
     for (std::uint32_t index = 1U;
-         (index < upperBound) && (visited < m_aliveEntityCount);
-         ++index) {
+         (index < upperBound) && (visited < m_aliveEntityCount); ++index) {
       if (!m_entityAlive[index]) {
         continue;
       }
@@ -156,8 +154,7 @@ public:
   bool add_collider(Entity entity, const Collider &collider) noexcept;
   bool remove_collider(Entity entity) noexcept;
   bool get_collider(Entity entity, Collider *outCollider) const noexcept;
-  bool get_collider_range(std::size_t startIndex,
-                          std::size_t count,
+  bool get_collider_range(std::size_t startIndex, std::size_t count,
                           const Entity **outEntities,
                           const Collider **outColliders) const noexcept;
 
@@ -200,22 +197,17 @@ public:
   bool update_transforms(float deltaSeconds) noexcept;
   // Thread-safety contract: may be called in parallel during Update with
   // non-overlapping index ranges; the write state index is fixed per update.
-  bool update_transforms_range(std::size_t startIndex,
-                               std::size_t count,
+  bool update_transforms_range(std::size_t startIndex, std::size_t count,
                                float deltaSeconds) noexcept;
-  bool get_transform_update_range(std::size_t startIndex,
-                                  std::size_t count,
+  bool get_transform_update_range(std::size_t startIndex, std::size_t count,
                                   const Entity **outEntities,
                                   const Transform **outReadTransforms,
                                   Transform **outWriteTransforms) noexcept;
-  bool read_transform_range(std::size_t startIndex,
-                            std::size_t count,
+  bool read_transform_range(std::size_t startIndex, std::size_t count,
                             const Entity **outEntities,
                             const Transform **outTransforms) const noexcept;
   bool read_world_transform_range(
-      std::size_t startIndex,
-      std::size_t count,
-      const Entity **outEntities,
+      std::size_t startIndex, std::size_t count, const Entity **outEntities,
       const WorldTransform **outTransforms) const noexcept;
   std::size_t transform_count() const noexcept;
   std::size_t world_transform_count() const noexcept;
@@ -247,11 +239,8 @@ public:
   }
 
 private:
-  using TransformSet = core::SparseSet<Entity,
-                                       Transform,
-                                       kMaxEntities,
-                                       kMaxTransforms,
-                                       kStateBufferCount>;
+  using TransformSet = core::SparseSet<Entity, Transform, kMaxEntities,
+                                       kMaxTransforms, kStateBufferCount>;
   using WorldTransformSet =
       core::SparseSet<Entity, WorldTransform, kMaxEntities, kMaxTransforms>;
   using RigidBodySet =
@@ -262,16 +251,16 @@ private:
       core::SparseSet<Entity, MeshComponent, kMaxEntities, kMaxMeshComponents>;
   using NameComponentSet =
       core::SparseSet<Entity, NameComponent, kMaxEntities, kMaxNameComponents>;
-  using LightComponentSet = core::
-      SparseSet<Entity, LightComponent, kMaxEntities, kMaxLightComponents>;
+  using LightComponentSet = core::SparseSet<Entity, LightComponent,
+                                            kMaxEntities, kMaxLightComponents>;
 
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
-    return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody>
-           || std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider>
-           || std::is_same_v<C, MeshComponent>
-           || std::is_same_v<C, NameComponent>
-           || std::is_same_v<C, LightComponent>;
+    return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody> ||
+           std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider> ||
+           std::is_same_v<C, MeshComponent> ||
+           std::is_same_v<C, NameComponent> ||
+           std::is_same_v<C, LightComponent>;
   }
 
   bool is_mutation_phase() const noexcept;
@@ -283,8 +272,6 @@ private:
                                std::uint32_t entityIndex) noexcept;
   std::uint32_t find_persistent_index(PersistentId persistentId) const noexcept;
   void erase_persistent_index(PersistentId persistentId) noexcept;
-  static bool transform_equals(const Transform &lhs,
-                               const Transform &rhs) noexcept;
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
   bool propagate_world_transforms() noexcept;
   std::size_t query_state_index() const noexcept;
@@ -356,9 +343,7 @@ private:
   }
 
   // Dispatch: iterate the component set at PrimaryIdx, probe the rest.
-  template <typename Tuple,
-            std::size_t PrimaryIdx,
-            typename Fn,
+  template <typename Tuple, std::size_t PrimaryIdx, typename Fn,
             std::size_t... AllIs>
   void for_each_with_primary(Fn &&fn,
                              std::index_sequence<AllIs...>) const noexcept {
@@ -370,16 +355,15 @@ private:
           ptrs[PrimaryIdx] = &primary;
           if (try_get_rest_excluding<Tuple, PrimaryIdx>(
                   entity, ptrs, std::make_index_sequence<N>{})) {
-            invoke_for_each<Tuple>(
-                fn, entity, ptrs, std::index_sequence<AllIs...>{});
+            invoke_for_each<Tuple>(fn, entity, ptrs,
+                                   std::index_sequence<AllIs...>{});
           }
         });
   }
 
   template <typename Tuple, std::size_t PrimaryIdx, std::size_t... AllIs>
   bool try_get_rest_excluding(
-      Entity entity,
-      std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
+      Entity entity, std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
       std::index_sequence<AllIs...>) const noexcept {
     bool allPresent = true;
     const auto probe = [&](auto IndexConstant) noexcept {
@@ -397,8 +381,7 @@ private:
 
   template <typename Tuple, typename Fn, std::size_t... Is>
   static void invoke_for_each(
-      Fn &&fn,
-      Entity entity,
+      Fn &&fn, Entity entity,
       const std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
       std::index_sequence<Is...>) noexcept {
     fn(entity,
@@ -471,24 +454,39 @@ private:
   std::array<Entity, kMaxEntities> m_pendingDestroyEntities{};
   std::size_t m_pendingDestroyCount = 0U;
 
+  // Compact per-entity node for transform propagation.
+  // Packs tree links, per-frame flags, and cached local values into one struct
+  // so each traversal touch stays within one or two cache lines.
+  // Indexed by entity index (sparse; index 0 is the sentinel / no-parent).
+  struct TransformNode final {
+    // Cached local transform — compared each frame for dirty detection.
+    // The I/O path uses the full Transform stored in m_transforms (SparseSet).
+    math::Vec3 position{};
+    math::Quat rotation{}; // alignas(16)
+    math::Vec3 scale{1.0F, 1.0F, 1.0F};
+    // Resolved runtime tree links, rebuilt every propagation pass.
+    std::uint32_t parentIndex = 0U;
+    std::uint32_t firstChild = 0U;
+    std::uint32_t lastChild = 0U;
+    std::uint32_t nextSibling = 0U;
+    // Previous-frame parent info for cache-change detection.
+    PersistentId cachedParentId = kInvalidPersistentId;
+    std::uint32_t cachedParentIndex = 0U;
+    // Per-pass flags.
+    bool present = false;
+    bool localDirty = false;
+    bool cacheValid = false;
+    std::uint8_t traversalState = 0U;
+  };
+
   TransformSet m_transforms{};
   WorldTransformSet m_worldTransforms{};
-  std::array<std::uint32_t, kMaxEntities + 1U> m_transformParentIndex{};
-  std::array<std::uint32_t, kMaxEntities + 1U> m_transformFirstChild{};
-  std::array<std::uint32_t, kMaxEntities + 1U> m_transformLastChild{};
-  std::array<std::uint32_t, kMaxEntities + 1U> m_transformNextSibling{};
+  std::array<TransformNode, kMaxEntities + 1U> m_transformNodes{};
   std::array<std::uint32_t, kMaxEntities> m_transformActiveIndices{};
   std::size_t m_transformActiveCount = 0U;
   std::array<std::uint32_t, kMaxEntities> m_transformRoots{};
   std::array<std::uint32_t, kMaxEntities> m_transformQueueIndices{};
   std::array<bool, kMaxEntities> m_transformQueueInheritedDirty{};
-  std::array<std::uint8_t, kMaxEntities + 1U> m_transformTraversalState{};
-  std::array<bool, kMaxEntities + 1U> m_transformPresent{};
-  std::array<bool, kMaxEntities + 1U> m_transformLocalDirty{};
-  std::array<bool, kMaxEntities + 1U> m_transformCacheValid{};
-  std::array<PersistentId, kMaxEntities + 1U> m_cachedParentIds{};
-  std::array<std::uint32_t, kMaxEntities + 1U> m_cachedParentIndices{};
-  std::array<Transform, kMaxEntities + 1U> m_cachedLocalTransforms{};
   RigidBodySet m_rigidBodies{};
   ColliderSet m_colliders{};
   MeshComponentSet m_meshComponents{};

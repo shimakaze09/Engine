@@ -35,22 +35,12 @@ World::World() noexcept {
   m_aliveEntityCount = 0U;
   m_transforms.clear();
   m_worldTransforms.clear();
-  m_transformParentIndex.fill(0U);
-  m_transformFirstChild.fill(0U);
-  m_transformLastChild.fill(0U);
-  m_transformNextSibling.fill(0U);
+  m_transformNodes.fill(TransformNode{});
   m_transformActiveIndices.fill(0U);
   m_transformActiveCount = 0U;
   m_transformRoots.fill(0U);
   m_transformQueueIndices.fill(0U);
   m_transformQueueInheritedDirty.fill(false);
-  m_transformTraversalState.fill(0U);
-  m_transformPresent.fill(false);
-  m_transformLocalDirty.fill(false);
-  m_transformCacheValid.fill(false);
-  m_cachedParentIds.fill(kInvalidPersistentId);
-  m_cachedParentIndices.fill(0U);
-  m_cachedLocalTransforms.fill(Transform{});
   m_rigidBodies.clear();
   m_colliders.clear();
   m_meshComponents.clear();
@@ -68,8 +58,8 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     return kInvalidEntity;
   }
 
-  if ((persistentId != kInvalidPersistentId)
-      && (find_persistent_index(persistentId) != 0U)) {
+  if ((persistentId != kInvalidPersistentId) &&
+      (find_persistent_index(persistentId) != 0U)) {
     return kInvalidEntity;
   }
 
@@ -280,7 +270,7 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
   }
 
   const WorldTransform world = world_transform_from_local(transform);
-  m_transformCacheValid[entity.index] = false;
+  m_transformNodes[entity.index].cacheValid = false;
   return m_worldTransforms.add(entity, world);
 }
 
@@ -636,8 +626,7 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
   return m_lightComponents.entity_at(index);
 }
 
-bool World::get_collider_range(std::size_t startIndex,
-                               std::size_t count,
+bool World::get_collider_range(std::size_t startIndex, std::size_t count,
                                const Entity **outEntities,
                                const Collider **outColliders) const noexcept {
   if ((outEntities == nullptr) || (outColliders == nullptr)) {
@@ -706,8 +695,7 @@ void World::begin_transform_phase() noexcept {
   m_phase = WorldPhase::TransformPropagation;
   if (!propagate_world_transforms()) {
     core::log_message(
-        core::LogLevel::Warning,
-        "runtime",
+        core::LogLevel::Warning, "runtime",
         "transform cycle detected; using deterministic root fallback");
   }
 }
@@ -735,11 +723,10 @@ void World::begin_render_phase() noexcept {
 }
 
 void World::end_frame_phase() noexcept {
-  if ((m_phase != WorldPhase::Render)
-      && (m_phase != WorldPhase::RenderSubmission)
-      && (m_phase != WorldPhase::TransformPropagation)
-      && (m_phase != WorldPhase::Simulation)
-      && (m_phase != WorldPhase::Input)) {
+  if ((m_phase != WorldPhase::Render) &&
+      (m_phase != WorldPhase::RenderSubmission) &&
+      (m_phase != WorldPhase::TransformPropagation) &&
+      (m_phase != WorldPhase::Simulation) && (m_phase != WorldPhase::Input)) {
     assert(false && "end_frame_phase called from invalid phase");
     return;
   }
@@ -747,9 +734,7 @@ void World::end_frame_phase() noexcept {
   m_phase = WorldPhase::Input;
 }
 
-WorldPhase World::current_phase() const noexcept {
-  return m_phase;
-}
+WorldPhase World::current_phase() const noexcept { return m_phase; }
 
 void World::for_each_transform(TransformVisitor visitor,
                                void *userData) const noexcept {
@@ -759,8 +744,7 @@ void World::for_each_transform(TransformVisitor visitor,
 
   for (std::size_t i = 0U; i < m_transforms.count(); ++i) {
     visitor(m_transforms.entity_at(i),
-            m_transforms.component_at(i, m_readStateIndex),
-            userData);
+            m_transforms.component_at(i, m_readStateIndex), userData);
   }
 }
 
@@ -768,8 +752,7 @@ bool World::update_transforms(float deltaSeconds) noexcept {
   return update_transforms_range(0U, m_transforms.count(), deltaSeconds);
 }
 
-bool World::update_transforms_range(std::size_t startIndex,
-                                    std::size_t count,
+bool World::update_transforms_range(std::size_t startIndex, std::size_t count,
                                     float deltaSeconds) noexcept {
   static_cast<void>(deltaSeconds);
   if (m_phase != WorldPhase::Simulation) {
@@ -791,8 +774,8 @@ bool World::update_transforms_range(std::size_t startIndex,
   const Entity *entities = nullptr;
   const Transform *readState = nullptr;
   Transform *writeState = nullptr;
-  if (!get_transform_update_range(
-          startIndex, clampedCount, &entities, &readState, &writeState)) {
+  if (!get_transform_update_range(startIndex, clampedCount, &entities,
+                                  &readState, &writeState)) {
     return false;
   }
 
@@ -804,13 +787,11 @@ bool World::update_transforms_range(std::size_t startIndex,
 }
 
 bool World::get_transform_update_range(
-    std::size_t startIndex,
-    std::size_t count,
-    const Entity **outEntities,
+    std::size_t startIndex, std::size_t count, const Entity **outEntities,
     const Transform **outReadTransforms,
     Transform **outWriteTransforms) noexcept {
-  if ((outEntities == nullptr) || (outReadTransforms == nullptr)
-      || (outWriteTransforms == nullptr)) {
+  if ((outEntities == nullptr) || (outReadTransforms == nullptr) ||
+      (outWriteTransforms == nullptr)) {
     return false;
   }
 
@@ -831,8 +812,8 @@ bool World::get_transform_update_range(
   const Entity *entities = m_transforms.entity_data();
   const Transform *readState = m_transforms.component_data(m_readStateIndex);
   Transform *writeState = m_transforms.component_data(m_writeStateIndex);
-  if ((entities == nullptr) || (readState == nullptr)
-      || (writeState == nullptr)) {
+  if ((entities == nullptr) || (readState == nullptr) ||
+      (writeState == nullptr)) {
     return false;
   }
 
@@ -843,16 +824,14 @@ bool World::get_transform_update_range(
 }
 
 bool World::read_transform_range(
-    std::size_t startIndex,
-    std::size_t count,
-    const Entity **outEntities,
+    std::size_t startIndex, std::size_t count, const Entity **outEntities,
     const Transform **outTransforms) const noexcept {
   if ((outEntities == nullptr) || (outTransforms == nullptr)) {
     return false;
   }
 
-  if ((m_phase != WorldPhase::RenderSubmission)
-      && (m_phase != WorldPhase::Render)) {
+  if ((m_phase != WorldPhase::RenderSubmission) &&
+      (m_phase != WorldPhase::Render)) {
     return false;
   }
 
@@ -878,16 +857,14 @@ bool World::read_transform_range(
 }
 
 bool World::read_world_transform_range(
-    std::size_t startIndex,
-    std::size_t count,
-    const Entity **outEntities,
+    std::size_t startIndex, std::size_t count, const Entity **outEntities,
     const WorldTransform **outTransforms) const noexcept {
   if ((outEntities == nullptr) || (outTransforms == nullptr)) {
     return false;
   }
 
-  if ((m_phase != WorldPhase::RenderSubmission)
-      && (m_phase != WorldPhase::Render)) {
+  if ((m_phase != WorldPhase::RenderSubmission) &&
+      (m_phase != WorldPhase::Render)) {
     return false;
   }
 
@@ -961,8 +938,8 @@ bool World::is_mutation_phase() const noexcept {
 }
 
 bool World::is_valid_entity(Entity entity) const noexcept {
-  if ((entity.index == 0U)
-      || (entity.index > static_cast<std::uint32_t>(kMaxEntities))) {
+  if ((entity.index == 0U) ||
+      (entity.index > static_cast<std::uint32_t>(kMaxEntities))) {
     return false;
   }
 
@@ -975,8 +952,8 @@ bool World::is_valid_entity(Entity entity) const noexcept {
 
 bool World::insert_persistent_index(PersistentId persistentId,
                                     std::uint32_t entityIndex) noexcept {
-  if ((persistentId == kInvalidPersistentId) || (entityIndex == 0U)
-      || (entityIndex > static_cast<std::uint32_t>(kMaxEntities))) {
+  if ((persistentId == kInvalidPersistentId) || (entityIndex == 0U) ||
+      (entityIndex > static_cast<std::uint32_t>(kMaxEntities))) {
     return false;
   }
 
@@ -1081,36 +1058,13 @@ void World::erase_persistent_index(PersistentId persistentId) noexcept {
   }
 }
 
-bool World::transform_equals(const Transform &lhs,
-                             const Transform &rhs) noexcept {
-  return (lhs.position.x == rhs.position.x)
-         && (lhs.position.y == rhs.position.y)
-         && (lhs.position.z == rhs.position.z)
-         && (lhs.rotation.x == rhs.rotation.x)
-         && (lhs.rotation.y == rhs.rotation.y)
-         && (lhs.rotation.z == rhs.rotation.z)
-         && (lhs.rotation.w == rhs.rotation.w) && (lhs.scale.x == rhs.scale.x)
-         && (lhs.scale.y == rhs.scale.y) && (lhs.scale.z == rhs.scale.z)
-         && (lhs.parentId == rhs.parentId);
-}
-
 void World::reset_transform_cache(std::uint32_t entityIndex) noexcept {
-  if ((entityIndex == 0U)
-      || (entityIndex > static_cast<std::uint32_t>(kMaxEntities))) {
+  if ((entityIndex == 0U) ||
+      (entityIndex > static_cast<std::uint32_t>(kMaxEntities))) {
     return;
   }
 
-  m_transformParentIndex[entityIndex] = 0U;
-  m_transformFirstChild[entityIndex] = 0U;
-  m_transformLastChild[entityIndex] = 0U;
-  m_transformNextSibling[entityIndex] = 0U;
-  m_transformTraversalState[entityIndex] = 0U;
-  m_transformPresent[entityIndex] = false;
-  m_transformLocalDirty[entityIndex] = false;
-  m_transformCacheValid[entityIndex] = false;
-  m_cachedParentIds[entityIndex] = kInvalidPersistentId;
-  m_cachedParentIndices[entityIndex] = 0U;
-  m_cachedLocalTransforms[entityIndex] = Transform{};
+  m_transformNodes[entityIndex] = TransformNode{};
 }
 
 bool World::propagate_world_transforms() noexcept {
@@ -1119,13 +1073,14 @@ bool World::propagate_world_transforms() noexcept {
     const std::uint32_t index = m_transformActiveIndices[i];
     m_transformQueueIndices[i] = index;
 
-    m_transformParentIndex[index] = 0U;
-    m_transformFirstChild[index] = 0U;
-    m_transformLastChild[index] = 0U;
-    m_transformNextSibling[index] = 0U;
-    m_transformTraversalState[index] = 0U;
-    m_transformPresent[index] = false;
-    m_transformLocalDirty[index] = false;
+    TransformNode &node = m_transformNodes[index];
+    node.parentIndex = 0U;
+    node.firstChild = 0U;
+    node.lastChild = 0U;
+    node.nextSibling = 0U;
+    node.traversalState = 0U;
+    node.present = false;
+    node.localDirty = false;
   }
 
   m_transformActiveCount = 0U;
@@ -1145,13 +1100,14 @@ bool World::propagate_world_transforms() noexcept {
     m_transformActiveIndices[m_transformActiveCount] = index;
     ++m_transformActiveCount;
 
-    m_transformParentIndex[index] = 0U;
-    m_transformFirstChild[index] = 0U;
-    m_transformLastChild[index] = 0U;
-    m_transformNextSibling[index] = 0U;
-    m_transformTraversalState[index] = 0U;
-    m_transformPresent[index] = true;
-    m_transformLocalDirty[index] = false;
+    TransformNode &node = m_transformNodes[index];
+    node.parentIndex = 0U;
+    node.firstChild = 0U;
+    node.lastChild = 0U;
+    node.nextSibling = 0U;
+    node.traversalState = 0U;
+    node.present = true;
+    node.localDirty = false;
 
     const Transform &local =
         m_transforms.component_at(denseIndex, m_readStateIndex);
@@ -1160,8 +1116,8 @@ bool World::propagate_world_transforms() noexcept {
     if (local.parentId != kInvalidPersistentId) {
       const std::uint32_t resolvedParentIndex =
           find_persistent_index(local.parentId);
-      if ((resolvedParentIndex != 0U) && (resolvedParentIndex != index)
-          && m_entityAlive[resolvedParentIndex]) {
+      if ((resolvedParentIndex != 0U) && (resolvedParentIndex != index) &&
+          m_entityAlive[resolvedParentIndex]) {
         const Entity parentEntity{resolvedParentIndex,
                                   m_entityGenerations[resolvedParentIndex]};
         if (m_transforms.get_ptr(parentEntity, m_readStateIndex) != nullptr) {
@@ -1170,27 +1126,37 @@ bool World::propagate_world_transforms() noexcept {
       }
     }
 
-    m_transformParentIndex[index] = parentIndex;
+    node.parentIndex = parentIndex;
 
-    const bool cacheValid = m_transformCacheValid[index];
+    const bool cacheValid = node.cacheValid;
     const bool localChanged =
-        !cacheValid || !transform_equals(local, m_cachedLocalTransforms[index]);
-    const bool parentChanged = !cacheValid
-                               || (m_cachedParentIds[index] != local.parentId)
-                               || (m_cachedParentIndices[index] != parentIndex);
-    m_transformLocalDirty[index] = localChanged || parentChanged;
+        !cacheValid || (local.position.x != node.position.x) ||
+        (local.position.y != node.position.y) ||
+        (local.position.z != node.position.z) ||
+        (local.rotation.x != node.rotation.x) ||
+        (local.rotation.y != node.rotation.y) ||
+        (local.rotation.z != node.rotation.z) ||
+        (local.rotation.w != node.rotation.w) ||
+        (local.scale.x != node.scale.x) || (local.scale.y != node.scale.y) ||
+        (local.scale.z != node.scale.z);
+    const bool parentChanged = !cacheValid ||
+                               (node.cachedParentId != local.parentId) ||
+                               (node.cachedParentIndex != parentIndex);
+    node.localDirty = localChanged || parentChanged;
 
-    m_cachedLocalTransforms[index] = local;
-    m_cachedParentIds[index] = local.parentId;
-    m_cachedParentIndices[index] = parentIndex;
-    m_transformCacheValid[index] = true;
+    node.position = local.position;
+    node.rotation = local.rotation;
+    node.scale = local.scale;
+    node.cachedParentId = local.parentId;
+    node.cachedParentIndex = parentIndex;
+    node.cacheValid = true;
   }
 
   // Invalidate cache only for entities that had transforms previously but no
   // longer do, instead of scanning the full entity ID range.
   for (std::size_t i = 0U; i < previousActiveCount; ++i) {
     const std::uint32_t index = m_transformQueueIndices[i];
-    if (!m_transformPresent[index]) {
+    if (!m_transformNodes[index].present) {
       reset_transform_cache(index);
     }
   }
@@ -1198,11 +1164,11 @@ bool World::propagate_world_transforms() noexcept {
   std::size_t rootCount = 0U;
   for (std::size_t i = 0U; i < m_transformActiveCount; ++i) {
     const std::uint32_t index = m_transformActiveIndices[i];
-    if (!m_transformPresent[index]) {
+    if (!m_transformNodes[index].present) {
       continue;
     }
 
-    const std::uint32_t parentIndex = m_transformParentIndex[index];
+    const std::uint32_t parentIndex = m_transformNodes[index].parentIndex;
     if (parentIndex == 0U) {
       if (rootCount >= m_transformRoots.size()) {
         return false;
@@ -1212,32 +1178,31 @@ bool World::propagate_world_transforms() noexcept {
       continue;
     }
 
-    if (m_transformFirstChild[parentIndex] == 0U) {
-      m_transformFirstChild[parentIndex] = index;
-      m_transformLastChild[parentIndex] = index;
+    if (m_transformNodes[parentIndex].firstChild == 0U) {
+      m_transformNodes[parentIndex].firstChild = index;
+      m_transformNodes[parentIndex].lastChild = index;
       continue;
     }
 
-    const std::uint32_t lastChild = m_transformLastChild[parentIndex];
-    m_transformNextSibling[lastChild] = index;
-    m_transformLastChild[parentIndex] = index;
+    const std::uint32_t lastChild = m_transformNodes[parentIndex].lastChild;
+    m_transformNodes[lastChild].nextSibling = index;
+    m_transformNodes[parentIndex].lastChild = index;
   }
 
-  auto enqueue_node = [this](std::uint32_t entityIndex,
-                             bool inheritedDirty,
+  auto enqueue_node = [this](std::uint32_t entityIndex, bool inheritedDirty,
                              std::size_t *ioQueueTail) noexcept {
-    if ((entityIndex == 0U) || (ioQueueTail == nullptr)
-        || (*ioQueueTail >= m_transformQueueIndices.size())) {
+    if ((entityIndex == 0U) || (ioQueueTail == nullptr) ||
+        (*ioQueueTail >= m_transformQueueIndices.size())) {
       return false;
     }
 
-    if (m_transformTraversalState[entityIndex] != 0U) {
+    if (m_transformNodes[entityIndex].traversalState != 0U) {
       return true;
     }
 
     m_transformQueueIndices[*ioQueueTail] = entityIndex;
     m_transformQueueInheritedDirty[*ioQueueTail] = inheritedDirty;
-    m_transformTraversalState[entityIndex] = 1U;
+    m_transformNodes[entityIndex].traversalState = 1U;
     ++(*ioQueueTail);
     return true;
   };
@@ -1256,7 +1221,7 @@ bool World::propagate_world_transforms() noexcept {
       const bool inheritedDirty = m_transformQueueInheritedDirty[queueHead];
       ++queueHead;
 
-      m_transformTraversalState[entityIndex] = 2U;
+      m_transformNodes[entityIndex].traversalState = 2U;
 
       const Entity entity{entityIndex, m_entityGenerations[entityIndex]};
       const Transform *local = m_transforms.get_ptr(entity, m_readStateIndex);
@@ -1265,12 +1230,13 @@ bool World::propagate_world_transforms() noexcept {
       }
 
       const bool hasWorldTransform = m_worldTransforms.contains(entity);
-      const bool worldDirty = inheritedDirty
-                              || m_transformLocalDirty[entityIndex]
-                              || !hasWorldTransform;
+      const bool worldDirty = inheritedDirty ||
+                              m_transformNodes[entityIndex].localDirty ||
+                              !hasWorldTransform;
       if (worldDirty) {
         WorldTransform world = world_transform_from_local(*local);
-        const std::uint32_t parentIndex = m_transformParentIndex[entityIndex];
+        const std::uint32_t parentIndex =
+            m_transformNodes[entityIndex].parentIndex;
         if (parentIndex != 0U) {
           const Entity parent{parentIndex, m_entityGenerations[parentIndex]};
           const WorldTransform *parentWorld = m_worldTransforms.get_ptr(parent);
@@ -1278,9 +1244,9 @@ bool World::propagate_world_transforms() noexcept {
             const math::Mat4 localMatrix = math::compose_trs(
                 local->position, local->rotation, local->scale);
             world.matrix = math::mul(parentWorld->matrix, localMatrix);
-            world.position = math::Vec3(world.matrix.columns[3].x,
-                                        world.matrix.columns[3].y,
-                                        world.matrix.columns[3].z);
+            world.position =
+                math::Vec3(world.matrix.columns[3].x, world.matrix.columns[3].y,
+                           world.matrix.columns[3].z);
             world.rotation = math::normalize(
                 math::mul(parentWorld->rotation, local->rotation));
             world.scale = math::Vec3(parentWorld->scale.x * local->scale.x,
@@ -1292,9 +1258,8 @@ bool World::propagate_world_transforms() noexcept {
         static_cast<void>(m_worldTransforms.add(entity, world));
       }
 
-      for (std::uint32_t child = m_transformFirstChild[entityIndex];
-           child != 0U;
-           child = m_transformNextSibling[child]) {
+      for (std::uint32_t child = m_transformNodes[entityIndex].firstChild;
+           child != 0U; child = m_transformNodes[child].nextSibling) {
         if (!enqueue_node(child, worldDirty, &queueTail)) {
           return false;
         }
@@ -1311,13 +1276,13 @@ bool World::propagate_world_transforms() noexcept {
   bool fullyAcyclic = true;
   for (std::size_t i = 0U; i < m_transformActiveCount; ++i) {
     const std::uint32_t index = m_transformActiveIndices[i];
-    if (!m_transformPresent[index]
-        || (m_transformTraversalState[index] != 0U)) {
+    if (!m_transformNodes[index].present ||
+        (m_transformNodes[index].traversalState != 0U)) {
       continue;
     }
 
     fullyAcyclic = false;
-    m_transformParentIndex[index] = 0U;
+    m_transformNodes[index].parentIndex = 0U;
     if (!enqueue_node(index, false, &queueTail)) {
       return false;
     }
