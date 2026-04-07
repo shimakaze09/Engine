@@ -150,7 +150,7 @@ Tool behavior:
 - Writes engine mesh binary (`.mesh`)
 - Writes metadata sidecar (`.meta.json`)
 
-## Engine contributor rules (important)
+## Engine contributor rules
 
 - Use C++20 only (no compiler extensions)
 - Do not use exceptions, RTTI, `dynamic_cast`, or `typeid`
