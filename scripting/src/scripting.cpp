@@ -18,7 +18,6 @@ extern "C" {
 #include "engine/renderer/camera.h"
 #include "engine/runtime/world.h"
 
-
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -45,16 +44,15 @@ std::uint32_t g_frameIndex = 0U;
 char g_watchedPath[512] = {};
 std::int64_t g_watchedMtime = 0;
 
-bool read_entity_index(lua_State *state,
-                       int index,
+bool read_entity_index(lua_State *state, int index,
                        std::uint32_t *outIndex) noexcept {
   if ((outIndex == nullptr) || !lua_isnumber(state, index)) {
     return false;
   }
 
   const lua_Integer rawIndex = lua_tointeger(state, index);
-  if ((rawIndex <= 0)
-      || (rawIndex > static_cast<lua_Integer>(runtime::World::kMaxEntities))) {
+  if ((rawIndex <= 0) ||
+      (rawIndex > static_cast<lua_Integer>(runtime::World::kMaxEntities))) {
     return false;
   }
 
@@ -62,12 +60,11 @@ bool read_entity_index(lua_State *state,
   return true;
 }
 
-bool read_vec3_args(lua_State *state,
-                    int startIndex,
+bool read_vec3_args(lua_State *state, int startIndex,
                     math::Vec3 *outVec) noexcept {
-  if ((outVec == nullptr) || !lua_isnumber(state, startIndex)
-      || !lua_isnumber(state, startIndex + 1)
-      || !lua_isnumber(state, startIndex + 2)) {
+  if ((outVec == nullptr) || !lua_isnumber(state, startIndex) ||
+      !lua_isnumber(state, startIndex + 1) ||
+      !lua_isnumber(state, startIndex + 2)) {
     return false;
   }
 
@@ -78,8 +75,7 @@ bool read_vec3_args(lua_State *state,
   return true;
 }
 
-bool read_entity(lua_State *state,
-                 int index,
+bool read_entity(lua_State *state, int index,
                  runtime::Entity *outEntity) noexcept {
   if ((g_world == nullptr) || (outEntity == nullptr)) {
     return false;
@@ -111,8 +107,8 @@ void log_lua_error(const char *context) noexcept {
 
   char logBuffer[512] = {};
   if ((context != nullptr) && (context[0] != '\0')) {
-    std::snprintf(
-        logBuffer, sizeof(logBuffer), "lua error (%s): %s", context, message);
+    std::snprintf(logBuffer, sizeof(logBuffer), "lua error (%s): %s", context,
+                  message);
   } else {
     std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", message);
   }
@@ -215,9 +211,9 @@ int lua_engine_set_position(lua_State *state) noexcept {
   transform.position = position;
 
   const bool transformUpdated = g_world->add_transform(entity, transform);
-  const bool authoritySet = transformUpdated
-                            && g_world->set_movement_authority(
-                                entity, runtime::MovementAuthority::Script);
+  const bool authoritySet =
+      transformUpdated && g_world->set_movement_authority(
+                              entity, runtime::MovementAuthority::Script);
   const bool ok = transformUpdated && authoritySet;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -274,8 +270,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
 
   runtime::RigidBody rigidBody{};
   if (!g_world->get_rigid_body(entity, &rigidBody)) {
-    core::log_message(core::LogLevel::Warning,
-                      "scripting",
+    core::log_message(core::LogLevel::Warning, "scripting",
                       "set_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
     return 1;
@@ -290,16 +285,15 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
 int lua_engine_set_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 acceleration{};
-  if (!read_entity(state, 1, &entity)
-      || !read_vec3_args(state, 2, &acceleration)) {
+  if (!read_entity(state, 1, &entity) ||
+      !read_vec3_args(state, 2, &acceleration)) {
     lua_pushboolean(state, 0);
     return 1;
   }
 
   runtime::RigidBody rigidBody{};
   if (!g_world->get_rigid_body(entity, &rigidBody)) {
-    core::log_message(core::LogLevel::Warning,
-                      "scripting",
+    core::log_message(core::LogLevel::Warning, "scripting",
                       "set_acceleration requires an existing RigidBody");
     lua_pushboolean(state, 0);
     return 1;
@@ -316,22 +310,62 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
 int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 additionalAcceleration{};
-  if (!read_entity(state, 1, &entity)
-      || !read_vec3_args(state, 2, &additionalAcceleration)) {
+  if (!read_entity(state, 1, &entity) ||
+      !read_vec3_args(state, 2, &additionalAcceleration)) {
     lua_pushboolean(state, 0);
     return 1;
   }
 
   runtime::RigidBody rigidBody{};
   if (!g_world->get_rigid_body(entity, &rigidBody)) {
-    core::log_message(core::LogLevel::Warning,
-                      "scripting",
+    core::log_message(core::LogLevel::Warning, "scripting",
                       "set_additional_acceleration requires an existing "
                       "RigidBody");
     lua_pushboolean(state, 0);
     return 1;
   }
   rigidBody.acceleration = additionalAcceleration;
+
+  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_get_angular_velocity(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  runtime::RigidBody rigidBody{};
+  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  lua_pushnumber(state, static_cast<lua_Number>(rigidBody.angularVelocity.x));
+  lua_pushnumber(state, static_cast<lua_Number>(rigidBody.angularVelocity.y));
+  lua_pushnumber(state, static_cast<lua_Number>(rigidBody.angularVelocity.z));
+  return 3;
+}
+
+int lua_engine_set_angular_velocity(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  math::Vec3 angVel{};
+  if (!read_entity(state, 1, &entity) || !read_vec3_args(state, 2, &angVel)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  runtime::RigidBody rigidBody{};
+  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_angular_velocity requires an existing RigidBody");
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  rigidBody.angularVelocity = angVel;
 
   const bool ok = g_world->add_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
@@ -346,9 +380,9 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   }
 
   const lua_Integer meshId = lua_tointeger(state, 2);
-  if ((meshId <= 0)
-      || (meshId > static_cast<lua_Integer>(
-              std::numeric_limits<std::uint32_t>::max()))) {
+  if ((meshId <= 0) ||
+      (meshId >
+       static_cast<lua_Integer>(std::numeric_limits<std::uint32_t>::max()))) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -439,8 +473,8 @@ int lua_engine_get_name(lua_State *state) noexcept {
 int lua_engine_add_collider(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
-  if (!read_entity(state, 1, &entity)
-      || !read_vec3_args(state, 2, &halfExtents)) {
+  if (!read_entity(state, 1, &entity) ||
+      !read_vec3_args(state, 2, &halfExtents)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -450,6 +484,50 @@ int lua_engine_add_collider(lua_State *state) noexcept {
 
   const bool ok = g_world->add_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_set_restitution(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!lua_isnumber(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const float value = static_cast<float>(lua_tonumber(state, 2));
+  runtime::Collider *col = g_world->get_collider_ptr(entity);
+  if (col == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  col->restitution = value;
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_set_friction(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!lua_isnumber(state, 2) || !lua_isnumber(state, 3)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const float staticF = static_cast<float>(lua_tonumber(state, 2));
+  const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
+  runtime::Collider *col = g_world->get_collider_ptr(entity);
+  if (col == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  col->staticFriction = staticF;
+  col->dynamicFriction = dynamicF;
+  lua_pushboolean(state, 1);
   return 1;
 }
 
@@ -643,6 +721,12 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_set_additional_acceleration);
   lua_setfield(state, -2, "set_additional_acceleration");
 
+  lua_pushcfunction(state, &lua_engine_get_angular_velocity);
+  lua_setfield(state, -2, "get_angular_velocity");
+
+  lua_pushcfunction(state, &lua_engine_set_angular_velocity);
+  lua_setfield(state, -2, "set_angular_velocity");
+
   lua_pushcfunction(state, &lua_engine_set_mesh);
   lua_setfield(state, -2, "set_mesh");
 
@@ -660,6 +744,12 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   lua_pushcfunction(state, &lua_engine_add_collider);
   lua_setfield(state, -2, "add_collider");
+
+  lua_pushcfunction(state, &lua_engine_set_restitution);
+  lua_setfield(state, -2, "set_restitution");
+
+  lua_pushcfunction(state, &lua_engine_set_friction);
+  lua_setfield(state, -2, "set_friction");
 
   lua_pushcfunction(state, &lua_engine_delta_time);
   lua_setfield(state, -2, "delta_time");
@@ -818,8 +908,8 @@ bool initialize_scripting() noexcept {
 
   g_state = luaL_newstate();
   if (g_state == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "failed to create Lua state");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "failed to create Lua state");
     return false;
   }
 
@@ -852,9 +942,7 @@ void shutdown_scripting() noexcept {
   g_defaultMeshAssetId = 0U;
 }
 
-void set_scripting_world(runtime::World *world) noexcept {
-  g_world = world;
-}
+void set_scripting_world(runtime::World *world) noexcept { g_world = world; }
 
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept {
   g_defaultMeshAssetId = assetId;
@@ -867,14 +955,14 @@ void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
 
 bool load_script(const char *path) noexcept {
   if (g_state == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "scripting not initialized");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "scripting not initialized");
     return false;
   }
 
   if (path == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "script path is null");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "script path is null");
     return false;
   }
 
@@ -893,14 +981,14 @@ bool load_script(const char *path) noexcept {
 
 bool call_script_function(const char *name) noexcept {
   if (g_state == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "scripting not initialized");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "scripting not initialized");
     return false;
   }
 
   if (name == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "script function name is null");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "script function name is null");
     return false;
   }
 
@@ -920,14 +1008,14 @@ bool call_script_function(const char *name) noexcept {
 
 bool call_script_function_float(const char *name, float arg) noexcept {
   if (g_state == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "scripting not initialized");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "scripting not initialized");
     return false;
   }
 
   if (name == nullptr) {
-    core::log_message(
-        core::LogLevel::Error, "scripting", "script function name is null");
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "script function name is null");
     return false;
   }
 
@@ -1005,8 +1093,8 @@ void watch_script_file(const char *path) noexcept {
   if (path == nullptr) {
     return;
   }
-  strncpy_s(
-      g_watchedPath, sizeof(g_watchedPath), path, sizeof(g_watchedPath) - 1U);
+  strncpy_s(g_watchedPath, sizeof(g_watchedPath), path,
+            sizeof(g_watchedPath) - 1U);
   g_watchedMtime = get_file_mtime(path);
 }
 
@@ -1017,8 +1105,8 @@ void check_script_reload() noexcept {
   const std::int64_t mtime = get_file_mtime(g_watchedPath);
   if ((mtime != 0) && (mtime != g_watchedMtime)) {
     g_watchedMtime = mtime;
-    core::log_message(
-        core::LogLevel::Info, "scripting", "hot-reloading script");
+    core::log_message(core::LogLevel::Info, "scripting",
+                      "hot-reloading script");
     load_script(g_watchedPath);
   }
 }

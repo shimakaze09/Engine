@@ -44,13 +44,18 @@ struct WorldTransform final {
 struct RigidBody final {
   math::Vec3 velocity = math::Vec3(0.0F, 0.0F, 0.0F);
   math::Vec3 acceleration = math::Vec3(0.0F, 0.0F, 0.0F);
+  math::Vec3 angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
   float inverseMass = 1.0F;
+  float inverseInertia = 1.0F;
 };
 
 enum class ColliderShape : std::uint8_t { AABB = 0, Sphere = 1 };
 
 struct Collider final {
   math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  float restitution = 0.3F;
+  float staticFriction = 0.5F;
+  float dynamicFriction = 0.3F;
   ColliderShape shape = ColliderShape::AABB;
 };
 
@@ -221,6 +226,7 @@ public:
   RigidBody *get_rigid_body_ptr(Entity entity) noexcept;
   const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept;
   const Collider *get_collider_ptr(Entity entity) const noexcept;
+  Collider *get_collider_ptr(Entity entity) noexcept;
 
   template <typename... Components, typename Fn>
   void for_each(Fn &&fn) const noexcept {

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 
 namespace engine::physics {
@@ -41,39 +42,83 @@ void record_collision_pair(std::uint32_t idxA, std::uint32_t idxB) noexcept {
     }
   }
   if (g_collisionPairCount < kMaxCollisionPairs) {
-    g_collisionPairData[g_collisionPairCount * 2U]      = idxA;
+    g_collisionPairData[g_collisionPairCount * 2U] = idxA;
     g_collisionPairData[g_collisionPairCount * 2U + 1U] = idxB;
     ++g_collisionPairCount;
   }
 }
 
 void apply_velocity_impulse(runtime::RigidBody *bodyA,
-                             runtime::RigidBody *bodyB,
-                             const engine::math::Vec3 &normal,
-                             float invMassA,
-                             float invMassB,
-                             float invMassSum) noexcept {
-  constexpr float kRestitution = 0.3F;
-  const engine::math::Vec3 velA =
-      (bodyA != nullptr) ? bodyA->velocity
-                         : engine::math::Vec3(0.0F, 0.0F, 0.0F);
-  const engine::math::Vec3 velB =
-      (bodyB != nullptr) ? bodyB->velocity
-                         : engine::math::Vec3(0.0F, 0.0F, 0.0F);
-  const engine::math::Vec3 relVel     = engine::math::sub(velB, velA);
-  const float relVelAlongNormal       = engine::math::dot(relVel, normal);
+                            runtime::RigidBody *bodyB,
+                            const engine::math::Vec3 &normal, float invMassA,
+                            float invMassB, float invMassSum,
+                            const engine::math::Vec3 &contactOffsetA,
+                            const engine::math::Vec3 &contactOffsetB,
+                            float restitution, float staticFric,
+                            float dynamicFric) noexcept {
+  const engine::math::Vec3 velA = (bodyA != nullptr)
+                                      ? bodyA->velocity
+                                      : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 velB = (bodyB != nullptr)
+                                      ? bodyB->velocity
+                                      : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
+  const float relVelAlongNormal = engine::math::dot(relVel, normal);
   if (relVelAlongNormal < 0.0F) {
     const float impulseMagnitude =
-        -(1.0F + kRestitution) * relVelAlongNormal / invMassSum;
+        -(1.0F + restitution) * relVelAlongNormal / invMassSum;
+    const engine::math::Vec3 impulseVec =
+        engine::math::mul(normal, impulseMagnitude);
     if ((bodyA != nullptr) && (invMassA > 0.0F)) {
       bodyA->velocity = engine::math::sub(
           bodyA->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassA));
+      if (bodyA->inverseInertia > 0.0F) {
+        const engine::math::Vec3 angImpulse =
+            engine::math::mul(engine::math::cross(contactOffsetA, impulseVec),
+                              bodyA->inverseInertia);
+        bodyA->angularVelocity =
+            engine::math::sub(bodyA->angularVelocity, angImpulse);
+      }
     }
     if ((bodyB != nullptr) && (invMassB > 0.0F)) {
       bodyB->velocity = engine::math::add(
           bodyB->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassB));
+      if (bodyB->inverseInertia > 0.0F) {
+        const engine::math::Vec3 angImpulse =
+            engine::math::mul(engine::math::cross(contactOffsetB, impulseVec),
+                              bodyB->inverseInertia);
+        bodyB->angularVelocity =
+            engine::math::add(bodyB->angularVelocity, angImpulse);
+      }
+    }
+
+    // Tangential friction impulse.
+    const engine::math::Vec3 tangentVel =
+        engine::math::sub(relVel, engine::math::mul(normal, relVelAlongNormal));
+    const float tangentSpeedSq = engine::math::length_sq(tangentVel);
+    if (tangentSpeedSq > 1e-12F) {
+      const float tangentSpeed = std::sqrt(tangentSpeedSq);
+      const engine::math::Vec3 tangent =
+          engine::math::div(tangentVel, tangentSpeed);
+      float frictionImpulse = -tangentSpeed / invMassSum;
+      if (std::fabs(frictionImpulse) < impulseMagnitude * staticFric) {
+        // Static friction: apply exact counter-impulse.
+      } else {
+        frictionImpulse =
+            sign_or_positive(frictionImpulse) * impulseMagnitude * dynamicFric;
+      }
+      if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+        bodyA->velocity = engine::math::sub(
+            bodyA->velocity,
+            engine::math::mul(tangent, frictionImpulse * invMassA));
+      }
+      if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+        bodyB->velocity = engine::math::add(
+            bodyB->velocity,
+            engine::math::mul(tangent, frictionImpulse * invMassB));
+      }
     }
   }
 }
@@ -84,23 +129,21 @@ bool step_physics(runtime::World &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
 }
 
-bool step_physics_range(runtime::World &world,
-                        std::size_t startIndex,
-                        std::size_t count,
-                        float deltaSeconds) noexcept {
+bool step_physics_range(runtime::World &world, std::size_t startIndex,
+                        std::size_t count, float deltaSeconds) noexcept {
   const runtime::Entity *entities = nullptr;
   const runtime::Transform *readTransforms = nullptr;
   runtime::Transform *writeTransforms = nullptr;
 
-  if (!world.get_transform_update_range(
-          startIndex, count, &entities, &readTransforms, &writeTransforms)) {
+  if (!world.get_transform_update_range(startIndex, count, &entities,
+                                        &readTransforms, &writeTransforms)) {
     return false;
   }
 
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = entities[i];
-    if (world.movement_authority(entity)
-        == runtime::MovementAuthority::Script) {
+    if (world.movement_authority(entity) ==
+        runtime::MovementAuthority::Script) {
       writeTransforms[i] = readTransforms[i];
       continue;
     }
@@ -115,6 +158,21 @@ bool step_physics_range(runtime::World &world,
           body->velocity, engine::math::mul(totalAccel, deltaSeconds));
       updated.position = engine::math::add(
           updated.position, engine::math::mul(body->velocity, deltaSeconds));
+    }
+
+    // Angular velocity integration (independent of linear mass).
+    if ((body != nullptr) && (body->inverseInertia > 0.0F)) {
+      const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
+      if (angSpeedSq > 1e-12F) {
+        const float angSpeed = std::sqrt(angSpeedSq);
+        const float angle = angSpeed * deltaSeconds;
+        const engine::math::Vec3 axis =
+            engine::math::div(body->angularVelocity, angSpeed);
+        const engine::math::Quat deltaRot =
+            engine::math::from_axis_angle(axis, angle);
+        updated.rotation = engine::math::normalize(
+            engine::math::mul(deltaRot, updated.rotation));
+      }
     }
 
     writeTransforms[i] = updated;
@@ -136,12 +194,12 @@ bool resolve_collisions(runtime::World &world) noexcept {
   }
 
   // Broadphase: sort-and-sweep on the X axis.
-  thread_local static std::array<std::uint32_t,
-                                  runtime::World::kMaxColliders> sortedIdx{};
-  thread_local static std::array<float,
-                                  runtime::World::kMaxColliders> sweepMinX{};
-  thread_local static std::array<float,
-                                  runtime::World::kMaxColliders> sweepMaxX{};
+  thread_local static std::array<std::uint32_t, runtime::World::kMaxColliders>
+      sortedIdx{};
+  thread_local static std::array<float, runtime::World::kMaxColliders>
+      sweepMinX{};
+  thread_local static std::array<float, runtime::World::kMaxColliders>
+      sweepMaxX{};
 
   for (std::size_t i = 0U; i < colliderCount; ++i) {
     sortedIdx[i] = static_cast<std::uint32_t>(i);
@@ -162,10 +220,10 @@ bool resolve_collisions(runtime::World &world) noexcept {
             });
 
   for (std::size_t si = 0U; si < colliderCount; ++si) {
-    const std::uint32_t i    = sortedIdx[si];
+    const std::uint32_t i = sortedIdx[si];
     const runtime::Entity entityA = entities[i];
-    if (world.movement_authority(entityA)
-        == runtime::MovementAuthority::Script) {
+    if (world.movement_authority(entityA) ==
+        runtime::MovementAuthority::Script) {
       continue;
     }
 
@@ -189,8 +247,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
       }
 
       const runtime::Entity entityB = entities[j];
-      if (world.movement_authority(entityB)
-          == runtime::MovementAuthority::Script) {
+      if (world.movement_authority(entityB) ==
+          runtime::MovementAuthority::Script) {
         continue;
       }
 
@@ -215,22 +273,20 @@ bool resolve_collisions(runtime::World &world) noexcept {
           (bodyB != nullptr) ? bodyB->inverseMass : kStaticInverseMass;
       const float invMassSum = invMassA + invMassB;
 
-      const bool aIsAABB =
-          (colliderA.shape == runtime::ColliderShape::AABB);
-      const bool bIsAABB =
-          (colliderB.shape == runtime::ColliderShape::AABB);
+      const bool aIsAABB = (colliderA.shape == runtime::ColliderShape::AABB);
+      const bool bIsAABB = (colliderB.shape == runtime::ColliderShape::AABB);
 
       // -----------------------------------------------------------------------
       // Sphere vs Sphere
       // -----------------------------------------------------------------------
       if (!aIsAABB && !bIsAABB) {
-        const float rA    = colliderA.halfExtents.x;
-        const float rB    = colliderB.halfExtents.x;
-        const float dx    = bx - ax;
-        const float dy    = by - ay;
-        const float dz    = bz - az;
+        const float rA = colliderA.halfExtents.x;
+        const float rB = colliderB.halfExtents.x;
+        const float dx = bx - ax;
+        const float dy = by - ay;
+        const float dz = bz - az;
         const float dist2 = dx * dx + dy * dy + dz * dz;
-        const float sumR  = rA + rB;
+        const float sumR = rA + rB;
         if (dist2 >= sumR * sumR) {
           continue;
         }
@@ -242,9 +298,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
         }
 
         const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
-        const float nx   = dx / dist;
-        const float ny   = dy / dist;
-        const float nz   = dz / dist;
+        const float nx = dx / dist;
+        const float ny = dy / dist;
+        const float nz = dz / dist;
         const float overlap = sumR - dist;
         const float moveA = overlap * (invMassA / invMassSum);
         const float moveB = overlap * (invMassB / invMassSum);
@@ -261,9 +317,20 @@ bool resolve_collisions(runtime::World &world) noexcept {
         mutableB->position.y += ny * moveB;
         mutableB->position.z += nz * moveB;
 
-        apply_velocity_impulse(bodyA, bodyB,
-                               engine::math::Vec3(nx, ny, nz),
-                               invMassA, invMassB, invMassSum);
+        const engine::math::Vec3 contactNormal(nx, ny, nz);
+        const engine::math::Vec3 contactPt = engine::math::mul(
+            engine::math::add(mutableA->position, mutableB->position), 0.5F);
+        const float combinedRest =
+            std::max(colliderA.restitution, colliderB.restitution);
+        const float combinedStaticFric =
+            std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
+        const float combinedDynFric =
+            std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+        apply_velocity_impulse(
+            bodyA, bodyB, contactNormal, invMassA, invMassB, invMassSum,
+            engine::math::sub(contactPt, mutableA->position),
+            engine::math::sub(contactPt, mutableB->position), combinedRest,
+            combinedStaticFric, combinedDynFric);
         continue;
       }
 
@@ -279,8 +346,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
         const float sphY = aIsBox ? by : ay;
         const float sphZ = aIsBox ? bz : az;
         const runtime::Collider &boxCol = aIsBox ? colliderA : colliderB;
-        const float radius =
-            (aIsBox ? colliderB : colliderA).halfExtents.x;
+        const float radius = (aIsBox ? colliderB : colliderA).halfExtents.x;
 
         const float cpx = std::max(boxX - boxCol.halfExtents.x,
                                    std::min(sphX, boxX + boxCol.halfExtents.x));
@@ -289,9 +355,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
         const float cpz = std::max(boxZ - boxCol.halfExtents.z,
                                    std::min(sphZ, boxZ + boxCol.halfExtents.z));
 
-        const float dx    = sphX - cpx;
-        const float dy    = sphY - cpy;
-        const float dz    = sphZ - cpz;
+        const float dx = sphX - cpx;
+        const float dy = sphY - cpy;
+        const float dz = sphZ - cpz;
         const float dist2 = dx * dx + dy * dy + dz * dz;
         if (dist2 >= radius * radius) {
           continue;
@@ -310,7 +376,11 @@ bool resolve_collisions(runtime::World &world) noexcept {
         const float overlap = radius - dist;
 
         // Normal points from box toward sphere; flip if A is the sphere.
-        if (!aIsBox) { nx = -nx; ny = -ny; nz = -nz; }
+        if (!aIsBox) {
+          nx = -nx;
+          ny = -ny;
+          nz = -nz;
+        }
 
         const float moveA = overlap * (invMassA / invMassSum);
         const float moveB = overlap * (invMassB / invMassSum);
@@ -327,35 +397,42 @@ bool resolve_collisions(runtime::World &world) noexcept {
         mutableB->position.y += ny * moveB;
         mutableB->position.z += nz * moveB;
 
-        apply_velocity_impulse(bodyA, bodyB,
-                               engine::math::Vec3(nx, ny, nz),
-                               invMassA, invMassB, invMassSum);
+        const engine::math::Vec3 aabbSphNormal(nx, ny, nz);
+        const engine::math::Vec3 closestPt(cpx, cpy, cpz);
+        const float combinedRest =
+            std::max(colliderA.restitution, colliderB.restitution);
+        const float combinedStaticFric =
+            std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
+        const float combinedDynFric =
+            std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+        apply_velocity_impulse(
+            bodyA, bodyB, aabbSphNormal, invMassA, invMassB, invMassSum,
+            engine::math::sub(closestPt, mutableA->position),
+            engine::math::sub(closestPt, mutableB->position), combinedRest,
+            combinedStaticFric, combinedDynFric);
         continue;
       }
 
       // -----------------------------------------------------------------------
       // AABB vs AABB
       // -----------------------------------------------------------------------
-      const float overlapX = axis_overlap(ax - colliderA.halfExtents.x,
-                                          ax + colliderA.halfExtents.x,
-                                          bx - colliderB.halfExtents.x,
-                                          bx + colliderB.halfExtents.x);
+      const float overlapX = axis_overlap(
+          ax - colliderA.halfExtents.x, ax + colliderA.halfExtents.x,
+          bx - colliderB.halfExtents.x, bx + colliderB.halfExtents.x);
       if (overlapX <= 0.0F) {
         continue;
       }
 
-      const float overlapY = axis_overlap(ay - colliderA.halfExtents.y,
-                                          ay + colliderA.halfExtents.y,
-                                          by - colliderB.halfExtents.y,
-                                          by + colliderB.halfExtents.y);
+      const float overlapY = axis_overlap(
+          ay - colliderA.halfExtents.y, ay + colliderA.halfExtents.y,
+          by - colliderB.halfExtents.y, by + colliderB.halfExtents.y);
       if (overlapY <= 0.0F) {
         continue;
       }
 
-      const float overlapZ = axis_overlap(az - colliderA.halfExtents.z,
-                                          az + colliderA.halfExtents.z,
-                                          bz - colliderB.halfExtents.z,
-                                          bz + colliderB.halfExtents.z);
+      const float overlapZ = axis_overlap(
+          az - colliderA.halfExtents.z, az + colliderA.halfExtents.z,
+          bz - colliderB.halfExtents.z, bz + colliderB.halfExtents.z);
       if (overlapZ <= 0.0F) {
         continue;
       }
@@ -401,9 +478,20 @@ bool resolve_collisions(runtime::World &world) noexcept {
       mutableB->position.y += pushY * moveB;
       mutableB->position.z += pushZ * moveB;
 
-      apply_velocity_impulse(bodyA, bodyB,
-                             engine::math::Vec3(pushX, pushY, pushZ),
-                             invMassA, invMassB, invMassSum);
+      const engine::math::Vec3 aabbNormal(pushX, pushY, pushZ);
+      const engine::math::Vec3 midPt = engine::math::mul(
+          engine::math::add(mutableA->position, mutableB->position), 0.5F);
+      const float combinedRest =
+          std::max(colliderA.restitution, colliderB.restitution);
+      const float combinedStaticFric =
+          std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
+      const float combinedDynFric =
+          std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+      apply_velocity_impulse(bodyA, bodyB, aabbNormal, invMassA, invMassB,
+                             invMassSum,
+                             engine::math::sub(midPt, mutableA->position),
+                             engine::math::sub(midPt, mutableB->position),
+                             combinedRest, combinedStaticFric, combinedDynFric);
     }
   }
 
@@ -414,9 +502,7 @@ void set_gravity(float x, float y, float z) noexcept {
   g_gravity = engine::math::Vec3(x, y, z);
 }
 
-engine::math::Vec3 get_gravity() noexcept {
-  return g_gravity;
-}
+engine::math::Vec3 get_gravity() noexcept { return g_gravity; }
 
 void set_collision_dispatch(CollisionDispatchFn fn) noexcept {
   g_collisionDispatch = fn;
