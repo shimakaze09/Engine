@@ -74,6 +74,13 @@ struct LightComponent final {
   LightType type = LightType::Directional;
 };
 
+// Attaches a Lua script file to an entity.
+// The script must return a module table with optional on_start(self) and
+// on_update(self, dt) functions. Multiple entities may share the same file.
+struct ScriptComponent final {
+  char scriptPath[128] = {};
+};
+
 // Renderer-facing component; keep minimal to avoid bloating draw commands.
 struct MeshComponent final {
   std::uint32_t meshAssetId = 0U;
@@ -112,6 +119,7 @@ public:
   static constexpr std::size_t kMaxMeshComponents = 16384U;
   static constexpr std::size_t kMaxNameComponents = 16384U;
   static constexpr std::size_t kMaxLightComponents = 1024U;
+  static constexpr std::size_t kMaxScriptComponents = 16384U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
 
@@ -183,6 +191,14 @@ public:
                           NameComponent *outComponent) const noexcept;
   NameComponent *get_name_component_ptr(Entity entity) noexcept;
   const NameComponent *get_name_component_ptr(Entity entity) const noexcept;
+
+  bool add_script_component(Entity entity,
+                            const ScriptComponent &component) noexcept;
+  bool remove_script_component(Entity entity) noexcept;
+  bool get_script_component(Entity entity,
+                            ScriptComponent *outComponent) const noexcept;
+  ScriptComponent *get_script_component_ptr(Entity entity) noexcept;
+  const ScriptComponent *get_script_component_ptr(Entity entity) const noexcept;
 
   bool add_light_component(Entity entity,
                            const LightComponent &component) noexcept;
@@ -265,6 +281,9 @@ private:
       core::SparseSet<Entity, NameComponent, kMaxEntities, kMaxNameComponents>;
   using LightComponentSet = core::SparseSet<Entity, LightComponent,
                                             kMaxEntities, kMaxLightComponents>;
+  using ScriptComponentSet =
+      core::SparseSet<Entity, ScriptComponent, kMaxEntities,
+                      kMaxScriptComponents>;
 
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
@@ -272,7 +291,8 @@ private:
            std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider> ||
            std::is_same_v<C, MeshComponent> ||
            std::is_same_v<C, NameComponent> ||
-           std::is_same_v<C, LightComponent>;
+           std::is_same_v<C, LightComponent> ||
+           std::is_same_v<C, ScriptComponent>;
   }
 
   bool is_mutation_phase() const noexcept;
@@ -304,6 +324,8 @@ private:
       return m_nameComponents.count();
     } else if constexpr (std::is_same_v<C, LightComponent>) {
       return m_lightComponents.count();
+    } else if constexpr (std::is_same_v<C, ScriptComponent>) {
+      return m_scriptComponents.count();
     } else {
       return 0U;
     }
@@ -331,6 +353,8 @@ private:
       return m_nameComponents.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, LightComponent>) {
       return m_lightComponents.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, ScriptComponent>) {
+      return m_scriptComponents.get_ptr(entity);
     }
 
     return nullptr;
@@ -447,6 +471,10 @@ private:
       for (std::size_t i = 0U; i < m_lightComponents.count(); ++i) {
         fn(m_lightComponents.entity_at(i), m_lightComponents.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, ScriptComponent>) {
+      for (std::size_t i = 0U; i < m_scriptComponents.count(); ++i) {
+        fn(m_scriptComponents.entity_at(i), m_scriptComponents.component_at(i));
+      }
     }
   }
 
@@ -504,6 +532,7 @@ private:
   MeshComponentSet m_meshComponents{};
   NameComponentSet m_nameComponents{};
   LightComponentSet m_lightComponents{};
+  ScriptComponentSet m_scriptComponents{};
 
   std::size_t m_readStateIndex = 0U;
   std::size_t m_writeStateIndex = 1U;

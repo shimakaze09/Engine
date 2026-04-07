@@ -273,3 +273,19 @@ add_test(
     NAME engine_unit_texture_loader
     COMMAND engine_unit_texture_loader
 )
+
+add_executable(engine_unit_prefab
+    prefab_test.cpp
+)
+
+target_compile_features(engine_unit_prefab PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_prefab
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_prefab
+    COMMAND engine_unit_prefab
+)

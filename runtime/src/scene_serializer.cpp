@@ -609,6 +609,29 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
         return log_scene_error("failed to load NameComponent");
       }
     }
+
+    core::JsonValue scriptValue{};
+    if (parser.get_object_field(components, "ScriptComponent", &scriptValue)) {
+      const char *pathBegin = nullptr;
+      std::size_t pathLength = 0U;
+      if (!parser.as_string(scriptValue, &pathBegin, &pathLength)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to parse ScriptComponent path");
+      }
+
+      ScriptComponent scriptComp{};
+      const std::size_t maxLen = sizeof(scriptComp.scriptPath) - 1U;
+      const std::size_t copyLen = (pathLength > maxLen) ? maxLen : pathLength;
+      if ((copyLen > 0U) && (pathBegin != nullptr)) {
+        std::memcpy(scriptComp.scriptPath, pathBegin, copyLen);
+      }
+      scriptComp.scriptPath[copyLen] = '\0';
+
+      if (!targetWorld.add_script_component(entity, scriptComp)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load ScriptComponent");
+      }
+    }
   }
 
   return true;
@@ -662,6 +685,13 @@ bool copy_world_contents(const World &sourceWorld,
     NameComponent name{};
     if (sourceWorld.get_name_component(sourceEntity, &name) &&
         !targetWorld.add_name_component(targetEntity, name)) {
+      success = false;
+      return;
+    }
+
+    ScriptComponent script{};
+    if (sourceWorld.get_script_component(sourceEntity, &script) &&
+        !targetWorld.add_script_component(targetEntity, script)) {
       success = false;
       return;
     }
@@ -757,6 +787,12 @@ bool serialize_scene_to_writer(const World &world,
     NameComponent name{};
     if (world.get_name_component(entity, &name)) {
       writer.write_string(kNameFieldKey, name.name);
+    }
+
+    ScriptComponent script{};
+    if (world.get_script_component(entity, &script) &&
+        (script.scriptPath[0] != '\0')) {
+      writer.write_string("ScriptComponent", script.scriptPath);
     }
 
     writer.end_object();

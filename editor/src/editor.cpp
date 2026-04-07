@@ -77,6 +77,7 @@ constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
 constexpr const char *kMeshSectionLabel = "MeshComponent";
 constexpr const char *kLightSectionLabel = "LightComponent";
+constexpr const char *kScriptSectionLabel = "ScriptComponent";
 constexpr const char *kScenePath = "assets/scene.json";
 char g_selectedAssetPath[512] = {};
 
@@ -575,6 +576,16 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
   }
 
+  {
+    runtime::ScriptComponent tmpScript{};
+    if (!g_world->get_script_component(entity, &tmpScript)) {
+      if (ImGui::Selectable(kScriptSectionLabel)) {
+        runtime::ScriptComponent newScript{};
+        static_cast<void>(g_world->add_script_component(entity, newScript));
+      }
+    }
+  }
+
   ImGui::EndCombo();
 }
 
@@ -972,6 +983,43 @@ void draw_inspector_panel() noexcept {
     }
   } else {
     ImGui::TextUnformatted("MeshComponent: <none>");
+  }
+
+  runtime::ScriptComponent script{};
+  if (g_world->get_script_component(entity, &script)) {
+    ImGui::PushID("ScriptComponentSection");
+    const bool scriptOpen = ImGui::CollapsingHeader(
+        kScriptSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removeScriptPressed =
+        draw_remove_component_button("remove", editable);
+
+    bool scriptModified = false;
+    if (scriptOpen) {
+      if (!editable) {
+        ImGui::BeginDisabled();
+      }
+
+      // InputText needs a mutable buffer — copy into one.
+      char pathBuf[sizeof(script.scriptPath)] = {};
+      std::memcpy(pathBuf, script.scriptPath, sizeof(pathBuf));
+      if (ImGui::InputText("Script Path", pathBuf, sizeof(pathBuf))) {
+        std::memcpy(script.scriptPath, pathBuf, sizeof(pathBuf));
+        scriptModified = true;
+      }
+
+      if (!editable) {
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removeScriptPressed) {
+      static_cast<void>(g_world->remove_script_component(entity));
+    } else if (editable && scriptModified) {
+      static_cast<void>(g_world->add_script_component(entity, script));
+    }
+  } else {
+    ImGui::TextUnformatted("ScriptComponent: <none>");
   }
 
   draw_add_component_combo(entity, editable);

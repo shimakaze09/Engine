@@ -45,6 +45,7 @@ World::World() noexcept {
   m_colliders.clear();
   m_meshComponents.clear();
   m_nameComponents.clear();
+  m_scriptComponents.clear();
 }
 
 Entity World::create_entity() noexcept {
@@ -624,6 +625,66 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
     return kInvalidEntity;
   }
   return m_lightComponents.entity_at(index);
+}
+
+bool World::add_script_component(Entity entity,
+                                 const ScriptComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    assert(false && "add_script_component requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    assert(false && "add_script_component requires a live entity");
+    return false;
+  }
+
+  return m_scriptComponents.add(entity, component);
+}
+
+bool World::remove_script_component(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    assert(false && "remove_script_component requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    assert(false && "remove_script_component requires a live entity");
+    return false;
+  }
+
+  return m_scriptComponents.remove(entity);
+}
+
+bool World::get_script_component(Entity entity,
+                                 ScriptComponent *outComponent) const noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    assert(false && "get_script_component on stale or dead entity");
+    return false;
+  }
+
+  return m_scriptComponents.get(entity, outComponent);
+}
+
+ScriptComponent *World::get_script_component_ptr(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+
+  return m_scriptComponents.get_ptr(entity);
+}
+
+const ScriptComponent *
+World::get_script_component_ptr(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+
+  return m_scriptComponents.get_ptr(entity);
 }
 
 bool World::get_collider_range(std::size_t startIndex, std::size_t count,

@@ -38,6 +38,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
@@ -500,14 +501,6 @@ void run(std::uint32_t maxFrames) noexcept {
   // Route physics collision pairs to the Lua on_collision callback.
   physics::set_collision_dispatch(&scripting::dispatch_physics_callbacks);
 
-  bool scriptLoaded = false;
-  if (file_exists(kMainScriptPath)) {
-    scriptLoaded = scripting::load_script(kMainScriptPath);
-  } else {
-    core::log_message(core::LogLevel::Warning, "scripting",
-                      "script not found: assets/main.lua");
-  }
-
   const char *bootstrapMeshPath = resolve_mesh_asset_path();
   if (bootstrapMeshPath == nullptr) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -550,16 +543,18 @@ void run(std::uint32_t maxFrames) noexcept {
   const runtime::Entity stackedEntity = world->create_entity();
   const runtime::Entity groundEntity = world->create_entity();
   const runtime::Entity lightEntity = world->create_entity();
+  const runtime::Entity sceneControllerEntity = world->create_entity();
   if ((entity == runtime::kInvalidEntity) ||
       (stackedEntity == runtime::kInvalidEntity) ||
       (groundEntity == runtime::kInvalidEntity) ||
-      (lightEntity == runtime::kInvalidEntity)) {
+      (lightEntity == runtime::kInvalidEntity) ||
+      (sceneControllerEntity == runtime::kInvalidEntity)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to create bootstrap entities");
     return;
   }
 
-  // Assign names to default entities.
+  // Assign names to bootstrap entities.
   {
     runtime::NameComponent name{};
     std::snprintf(name.name, sizeof(name.name), "Red Cube");
@@ -579,6 +574,11 @@ void run(std::uint32_t maxFrames) noexcept {
     runtime::NameComponent name{};
     std::snprintf(name.name, sizeof(name.name), "Sun Light");
     static_cast<void>(world->add_name_component(lightEntity, name));
+  }
+  {
+    runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "Scene Controller");
+    static_cast<void>(world->add_name_component(sceneControllerEntity, name));
   }
 
   // Add directional light.
@@ -683,6 +683,17 @@ void run(std::uint32_t maxFrames) noexcept {
     return;
   }
 
+  // Attach the scene-setup script to the Scene Controller entity.
+  // dispatch_entity_scripts_start() will call M.on_start(self) when Play
+  // begins.
+  {
+    runtime::ScriptComponent sceneScript{};
+    std::snprintf(sceneScript.scriptPath, sizeof(sceneScript.scriptPath), "%s",
+                  kMainScriptPath);
+    static_cast<void>(
+        world->add_script_component(sceneControllerEntity, sceneScript));
+  }
+
   using Clock = std::chrono::steady_clock;
   auto previousTick = Clock::now();
   double accumulator = 0.0;
@@ -698,41 +709,21 @@ void run(std::uint32_t maxFrames) noexcept {
     process_input_events_with_editor();
 
     const LoopPlayState playState = query_editor_play_state();
-    bool scriptStartInvoked = false;
-    bool scriptStartSucceeded = true;
     if ((playState == LoopPlayState::Playing) &&
-        (previousPlayState == LoopPlayState::Stopped) && scriptLoaded) {
-      scriptStartInvoked = true;
-      scriptStartSucceeded = scripting::call_script_function("on_start");
-      if (!scriptStartSucceeded) {
-        core::log_message(core::LogLevel::Warning, "scripting",
-                          "on_start hook missing or failed");
-      }
+        (previousPlayState == LoopPlayState::Stopped)) {
+      scripting::dispatch_entity_scripts_start();
     }
 
     if ((playState == LoopPlayState::Stopped) &&
         (previousPlayState != LoopPlayState::Stopped)) {
+      scripting::clear_entity_script_modules();
       scripting::shutdown_scripting();
       if (!scripting::initialize_scripting()) {
         core::log_message(core::LogLevel::Error, "scripting",
                           "failed to reinitialize scripting on stop");
-        scriptLoaded = false;
       } else {
         scripting::set_scripting_world(world.get());
         scripting::set_default_mesh_asset_id(bootstrapMeshAssetId);
-        if (file_exists(kMainScriptPath)) {
-          scriptLoaded = scripting::load_script(kMainScriptPath);
-          if (!scriptLoaded) {
-            core::log_message(core::LogLevel::Error, "scripting",
-                              "script reload on stop failed - load_script"
-                              " returned false");
-          }
-        } else {
-          core::log_message(core::LogLevel::Warning, "scripting",
-                            "script reload on stop failed - script file not "
-                            "found: assets/main.lua");
-          scriptLoaded = false;
-        }
       }
 
       accumulator = 0.0;
@@ -770,14 +761,15 @@ void run(std::uint32_t maxFrames) noexcept {
       previousTick = frameStart;
     }
 
-    bool scriptUpdateInvoked = false;
-    bool scriptUpdateSucceeded = true;
-    if (scriptLoaded && isPlaying && (updateStepCount > 0U)) {
-      scriptUpdateInvoked = true;
+    scripting::set_frame_index(frameIndex);
+
+    if (isPlaying && (updateStepCount > 0U)) {
+      scripting::tick_timers();
+      scripting::tick_coroutines();
       scripting::set_frame_time(static_cast<float>(kFixedDeltaSeconds),
                                 static_cast<float>(simulationTimeSeconds));
-      scriptUpdateSucceeded = scripting::call_script_function_float(
-          "on_update", static_cast<float>(kFixedDeltaSeconds));
+      scripting::dispatch_entity_scripts_update(
+          static_cast<float>(kFixedDeltaSeconds));
     }
 
     if (!renderer::update_asset_manager(assetManager.get(), assetDatabase.get(),
@@ -1062,6 +1054,21 @@ void run(std::uint32_t maxFrames) noexcept {
         physics::dispatch_collision_callbacks();
       }
 
+      // Handle deferred scene operations requested from Lua.
+      if (scripting::has_pending_scene_op()) {
+        if (scripting::pending_scene_op_is_load()) {
+          const char *scenePath = scripting::get_pending_scene_path();
+          if (scenePath != nullptr) {
+            runtime::load_scene(*world, scenePath);
+          }
+        }
+        // new_scene: destroy all entities by resetting world state.
+        if (scripting::pending_scene_op_is_new()) {
+          runtime::reset_world(*world);
+        }
+        scripting::clear_pending_scene_op();
+      }
+
       const auto frameGraphEnd = Clock::now();
       frameMs =
           std::chrono::duration<double, std::milli>(frameGraphEnd - frameStart)
@@ -1113,8 +1120,6 @@ void run(std::uint32_t maxFrames) noexcept {
     const bool shouldLogSliceDiagnostics =
         ((frameIndex % kSliceDiagnosticsPeriodFrames) == 0U) ||
         (spawnedCount > 0U) || (destroyedCount > 0U) ||
-        (scriptStartInvoked && !scriptStartSucceeded) ||
-        (scriptUpdateInvoked && !scriptUpdateSucceeded) ||
         (assetCounts.failed > 0U);
     if (shouldLogSliceDiagnostics) {
       const std::size_t movingRigidBodyCount =
@@ -1132,9 +1137,7 @@ void run(std::uint32_t maxFrames) noexcept {
           "transforms=%llu worldTransforms=%llu movingBodies=%llu "
           "meshComponents=%llu readyMeshComponents=%llu drawCommands=%llu "
           "assetsReady=%llu assetsLoading=%llu assetsFailed=%llu "
-          "assetRequests=%llu scriptLoaded=%u scriptStartInvoked=%u "
-          "scriptStartOk=%u scriptUpdateInvoked=%u scriptUpdateOk=%u "
-          "updateSteps=%llu",
+          "assetRequests=%llu updateSteps=%llu",
           frameIndex, world_phase_to_string(world->current_phase()),
           static_cast<unsigned long long>(aliveCount),
           static_cast<unsigned long long>(spawnedCount),
@@ -1149,9 +1152,6 @@ void run(std::uint32_t maxFrames) noexcept {
           static_cast<unsigned long long>(assetCounts.loading),
           static_cast<unsigned long long>(assetCounts.failed),
           static_cast<unsigned long long>(pendingAssetRequests),
-          scriptLoaded ? 1U : 0U, scriptStartInvoked ? 1U : 0U,
-          scriptStartSucceeded ? 1U : 0U, scriptUpdateInvoked ? 1U : 0U,
-          scriptUpdateSucceeded ? 1U : 0U,
           static_cast<unsigned long long>(updateStepCount));
       core::log_message(core::LogLevel::Info, "slice", diagnostics);
     }

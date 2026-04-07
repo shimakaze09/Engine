@@ -40,3 +40,9 @@ static_cast<void>(desc);
 // fixed char array and is serialized/displayed manually rather than through
 // REFLECT_FIELD metadata.
 REFLECT_END()
+
+REFLECT_TYPE(engine::runtime::ScriptComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor. ScriptComponent::scriptPath
+// is a fixed char array serialized manually.
+REFLECT_END()
