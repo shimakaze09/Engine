@@ -3,6 +3,7 @@
 #include <new>
 
 #include "engine/math/quat.h"
+#include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/world.h"
 
@@ -609,6 +610,570 @@ int check_friction_slows_sliding() {
   return 0;
 }
 
+int check_raycast_hits_aabb() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 90;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity box = world->create_entity();
+  if (box == engine::runtime::kInvalidEntity) {
+    return 91;
+  }
+
+  engine::runtime::Transform t{};
+  t.position = engine::math::Vec3(5.0F, 0.0F, 0.0F);
+  if (!world->add_transform(box, t)) {
+    return 92;
+  }
+
+  engine::runtime::Collider col{};
+  col.halfExtents = engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  col.shape = engine::runtime::ColliderShape::AABB;
+  if (!world->add_collider(box, col)) {
+    return 93;
+  }
+
+  // Advance to readable state.
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::physics::RayHit hit{};
+  const bool found = engine::physics::raycast(
+      *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      engine::math::Vec3(1.0F, 0.0F, 0.0F), 100.0F, &hit);
+  if (!found) {
+    return 94;
+  }
+  // Distance should be ~4.0 (box center at 5, halfExtent 1 → near face at 4).
+  if (std::fabs(hit.distance - 4.0F) > 0.1F) {
+    return 95;
+  }
+  // Normal should be (-1, 0, 0) — the face facing the ray origin.
+  if (hit.normal.x > -0.9F) {
+    return 96;
+  }
+
+  return 0;
+}
+
+int check_raycast_hits_sphere() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 100;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity sph = world->create_entity();
+  if (sph == engine::runtime::kInvalidEntity) {
+    return 101;
+  }
+
+  engine::runtime::Transform t{};
+  t.position = engine::math::Vec3(0.0F, 0.0F, 10.0F);
+  if (!world->add_transform(sph, t)) {
+    return 102;
+  }
+
+  engine::runtime::Collider col{};
+  col.halfExtents = engine::math::Vec3(2.0F, 2.0F, 2.0F);
+  col.shape = engine::runtime::ColliderShape::Sphere;
+  if (!world->add_collider(sph, col)) {
+    return 103;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::physics::RayHit hit{};
+  const bool found = engine::physics::raycast(
+      *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      engine::math::Vec3(0.0F, 0.0F, 1.0F), 100.0F, &hit);
+  if (!found) {
+    return 104;
+  }
+  // Distance should be ~8.0 (center at z=10, radius=2 → near surface at z=8).
+  if (std::fabs(hit.distance - 8.0F) > 0.1F) {
+    return 105;
+  }
+  // Normal should point toward ray origin: (0, 0, -1).
+  if (hit.normal.z > -0.9F) {
+    return 106;
+  }
+
+  return 0;
+}
+
+int check_raycast_misses() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 110;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity box = world->create_entity();
+  if (box == engine::runtime::kInvalidEntity) {
+    return 111;
+  }
+
+  engine::runtime::Transform t{};
+  t.position = engine::math::Vec3(5.0F, 5.0F, 0.0F);
+  if (!world->add_transform(box, t)) {
+    return 112;
+  }
+
+  engine::runtime::Collider col{};
+  col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  if (!world->add_collider(box, col)) {
+    return 113;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  // Ray along X axis should miss the box at (5, 5, 0).
+  engine::physics::RayHit hit{};
+  const bool found = engine::physics::raycast(
+      *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      engine::math::Vec3(1.0F, 0.0F, 0.0F), 100.0F, &hit);
+  if (found) {
+    return 114; // should not have hit
+  }
+
+  return 0;
+}
+
+int check_raycast_returns_closest() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 120;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity near = world->create_entity();
+  const engine::runtime::Entity far = world->create_entity();
+  if ((near == engine::runtime::kInvalidEntity) ||
+      (far == engine::runtime::kInvalidEntity)) {
+    return 121;
+  }
+
+  engine::runtime::Transform tNear{};
+  tNear.position = engine::math::Vec3(3.0F, 0.0F, 0.0F);
+  engine::runtime::Transform tFar{};
+  tFar.position = engine::math::Vec3(8.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider col{};
+  col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  if (!world->add_transform(near, tNear) || !world->add_transform(far, tFar)) {
+    return 122;
+  }
+  if (!world->add_collider(near, col) || !world->add_collider(far, col)) {
+    return 123;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::physics::RayHit hit{};
+  const bool found = engine::physics::raycast(
+      *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      engine::math::Vec3(1.0F, 0.0F, 0.0F), 100.0F, &hit);
+  if (!found) {
+    return 124;
+  }
+  // Should hit the near entity (center at 3, near face at 2.5).
+  if (hit.entity.index != near.index) {
+    return 125;
+  }
+  if (std::fabs(hit.distance - 2.5F) > 0.1F) {
+    return 126;
+  }
+
+  return 0;
+}
+
+int check_distance_joint_maintains_distance() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 130;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity anchor = world->create_entity();
+  const engine::runtime::Entity ball = world->create_entity();
+  if ((anchor == engine::runtime::kInvalidEntity) ||
+      (ball == engine::runtime::kInvalidEntity)) {
+    return 131;
+  }
+
+  engine::runtime::Transform anchorT{};
+  anchorT.position = engine::math::Vec3(0.0F, 10.0F, 0.0F);
+  engine::runtime::Transform ballT{};
+  ballT.position = engine::math::Vec3(0.0F, 7.0F, 0.0F);
+
+  engine::runtime::RigidBody anchorBody{};
+  anchorBody.inverseMass = 0.0F; // static
+  engine::runtime::RigidBody ballBody{};
+  ballBody.inverseMass = 1.0F;
+
+  engine::runtime::Collider col{};
+  col.halfExtents = engine::math::Vec3(0.25F, 0.25F, 0.25F);
+
+  if (!world->add_transform(anchor, anchorT) ||
+      !world->add_transform(ball, ballT)) {
+    return 132;
+  }
+  if (!world->add_rigid_body(anchor, anchorBody) ||
+      !world->add_rigid_body(ball, ballBody)) {
+    return 133;
+  }
+  if (!world->add_collider(anchor, col) || !world->add_collider(ball, col)) {
+    return 134;
+  }
+
+  // Add a distance joint of length 3.0 (current distance).
+  engine::physics::JointDesc desc{};
+  desc.entityA = anchor;
+  desc.entityB = ball;
+  desc.type = engine::physics::JointType::Distance;
+  desc.distance = 3.0F;
+  const engine::physics::JointId jid = engine::physics::add_joint(desc);
+  if (jid == engine::physics::kInvalidJointId) {
+    return 135;
+  }
+
+  // Run several physics steps with gravity pulling the ball down.
+  for (int step = 0; step < 10; ++step) {
+    world->begin_update_phase();
+    if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+      world->end_frame_phase();
+      return 136;
+    }
+    if (!engine::physics::resolve_collisions(*world)) {
+      world->end_frame_phase();
+      return 137;
+    }
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+  }
+
+  engine::runtime::Transform outAnchor{};
+  engine::runtime::Transform outBall{};
+  if (!world->get_transform(anchor, &outAnchor) ||
+      !world->get_transform(ball, &outBall)) {
+    return 138;
+  }
+
+  const float dx = outBall.position.x - outAnchor.position.x;
+  const float dy = outBall.position.y - outAnchor.position.y;
+  const float dz = outBall.position.z - outAnchor.position.z;
+  const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+  // Distance should be approximately 3.0 despite gravity.
+  if (std::fabs(dist - 3.0F) > 0.5F) {
+    return 139; // joint failed to maintain distance
+  }
+
+  engine::physics::remove_joint(jid);
+
+  return 0;
+}
+
+int check_ccd_catches_fast_projectile() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 140;
+  }
+
+  world->end_frame_phase();
+
+  // Thin wall at x=5.
+  const engine::runtime::Entity wall = world->create_entity();
+  // Fast projectile starting at x=0, moving at 1000 units/sec.
+  const engine::runtime::Entity bullet = world->create_entity();
+  if ((wall == engine::runtime::kInvalidEntity) ||
+      (bullet == engine::runtime::kInvalidEntity)) {
+    return 141;
+  }
+
+  engine::runtime::Transform wallT{};
+  wallT.position = engine::math::Vec3(5.0F, 0.0F, 0.0F);
+  engine::runtime::Transform bulletT{};
+  bulletT.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider wallCol{};
+  wallCol.halfExtents = engine::math::Vec3(0.05F, 2.0F, 2.0F); // very thin
+
+  engine::runtime::Collider bulletCol{};
+  bulletCol.halfExtents = engine::math::Vec3(0.1F, 0.1F, 0.1F);
+
+  engine::runtime::RigidBody wallBody{};
+  wallBody.inverseMass = 0.0F; // static
+  engine::runtime::RigidBody bulletBody{};
+  bulletBody.inverseMass = 1.0F;
+  bulletBody.velocity = engine::math::Vec3(1000.0F, 0.0F, 0.0F);
+
+  if (!world->add_transform(wall, wallT) ||
+      !world->add_transform(bullet, bulletT)) {
+    return 142;
+  }
+  if (!world->add_collider(wall, wallCol) ||
+      !world->add_collider(bullet, bulletCol)) {
+    return 143;
+  }
+  if (!world->add_rigid_body(wall, wallBody) ||
+      !world->add_rigid_body(bullet, bulletBody)) {
+    return 144;
+  }
+
+  // Disable gravity so it doesn't interfere.
+  engine::physics::set_gravity(0.0F, 0.0F, 0.0F);
+
+  world->begin_update_phase();
+  if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+    engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+    world->end_frame_phase();
+    return 145;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+
+  engine::runtime::Transform outBullet{};
+  if (!world->get_transform(bullet, &outBullet)) {
+    return 146;
+  }
+
+  // Without CCD, bullet would be at x=16.67. With CCD, it should be
+  // stopped near the wall (x < 5).
+  if (outBullet.position.x > 5.0F) {
+    return 147; // bullet tunneled through wall
+  }
+
+  return 0;
+}
+
+// --- Sleep tests ---
+
+int check_body_falls_asleep() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 150;
+  }
+
+  world->end_frame_phase();
+
+  // A ball resting on a static floor should fall asleep after enough frames.
+  const engine::runtime::Entity floor = world->create_entity();
+  const engine::runtime::Entity ball = world->create_entity();
+  if ((floor == engine::runtime::kInvalidEntity) ||
+      (ball == engine::runtime::kInvalidEntity)) {
+    return 151;
+  }
+
+  engine::runtime::Transform floorT{};
+  floorT.position = engine::math::Vec3(0.0F, -1.0F, 0.0F);
+  engine::runtime::Transform ballT{};
+  ballT.position = engine::math::Vec3(0.0F, 0.5F, 0.0F);
+
+  engine::runtime::Collider floorCol{};
+  floorCol.halfExtents = engine::math::Vec3(10.0F, 1.0F, 10.0F);
+  floorCol.restitution = 0.0F;
+
+  engine::runtime::Collider ballCol{};
+  ballCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  ballCol.restitution = 0.0F;
+
+  engine::runtime::RigidBody floorBody{};
+  floorBody.inverseMass = 0.0F;
+  engine::runtime::RigidBody ballBody{};
+  ballBody.inverseMass = 1.0F;
+
+  if (!world->add_transform(floor, floorT) ||
+      !world->add_transform(ball, ballT)) {
+    return 152;
+  }
+  if (!world->add_collider(floor, floorCol) ||
+      !world->add_collider(ball, ballCol)) {
+    return 153;
+  }
+  if (!world->add_rigid_body(floor, floorBody) ||
+      !world->add_rigid_body(ball, ballBody)) {
+    return 154;
+  }
+
+  // Step enough frames for the ball to settle and sleep (~120 frames).
+  const float dt = 1.0F / 60.0F;
+  for (int frame = 0; frame < 200; ++frame) {
+    world->begin_update_phase();
+    engine::physics::step_physics(*world, dt);
+    world->commit_update_phase();
+    engine::physics::resolve_collisions(*world);
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+  }
+
+  if (!engine::physics::is_sleeping(*world, ball)) {
+    return 155; // ball should be sleeping
+  }
+
+  return 0;
+}
+
+int check_collision_wakes_body() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 160;
+  }
+
+  world->end_frame_phase();
+
+  // A manually-sleeping ball and a fast projectile that hits it. No gravity.
+  const engine::runtime::Entity ball = world->create_entity();
+  const engine::runtime::Entity projectile = world->create_entity();
+  if ((ball == engine::runtime::kInvalidEntity) ||
+      (projectile == engine::runtime::kInvalidEntity)) {
+    return 161;
+  }
+
+  engine::runtime::Transform ballT{};
+  ballT.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform projT{};
+  projT.position = engine::math::Vec3(3.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider ballCol{};
+  ballCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  engine::runtime::Collider projCol{};
+  projCol.halfExtents = engine::math::Vec3(0.2F, 0.2F, 0.2F);
+
+  engine::runtime::RigidBody ballBody{};
+  ballBody.inverseMass = 1.0F;
+  ballBody.sleeping = true; // Start sleeping.
+  engine::runtime::RigidBody projBody{};
+  projBody.inverseMass = 1.0F;
+  projBody.velocity = engine::math::Vec3(-10.0F, 0.0F, 0.0F);
+
+  if (!world->add_transform(ball, ballT) ||
+      !world->add_transform(projectile, projT)) {
+    return 162;
+  }
+  if (!world->add_collider(ball, ballCol) ||
+      !world->add_collider(projectile, projCol)) {
+    return 163;
+  }
+  if (!world->add_rigid_body(ball, ballBody) ||
+      !world->add_rigid_body(projectile, projBody)) {
+    return 164;
+  }
+
+  engine::physics::set_gravity(0.0F, 0.0F, 0.0F);
+
+  if (!engine::physics::is_sleeping(*world, ball)) {
+    engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+    return 165; // ball should start sleeping
+  }
+
+  const float dt = 1.0F / 60.0F;
+  for (int frame = 0; frame < 30; ++frame) {
+    world->begin_update_phase();
+    engine::physics::step_physics(*world, dt);
+    world->commit_update_phase();
+    engine::physics::resolve_collisions(*world);
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+  }
+
+  engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+
+  if (engine::physics::is_sleeping(*world, ball)) {
+    return 167; // ball should have been woken by collision
+  }
+
+  return 0;
+}
+
+int check_wake_body_api() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 170;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity ball = world->create_entity();
+  if (ball == engine::runtime::kInvalidEntity) {
+    return 171;
+  }
+
+  engine::runtime::Transform ballT{};
+  ballT.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider ballCol{};
+  ballCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  engine::runtime::RigidBody ballBody{};
+  ballBody.inverseMass = 1.0F;
+
+  if (!world->add_transform(ball, ballT)) {
+    return 172;
+  }
+  if (!world->add_collider(ball, ballCol)) {
+    return 173;
+  }
+  if (!world->add_rigid_body(ball, ballBody)) {
+    return 174;
+  }
+
+  // Manually set sleeping.
+  {
+    engine::runtime::RigidBody *body = world->get_rigid_body_ptr(ball);
+    if (body == nullptr) {
+      return 175;
+    }
+    body->sleeping = true;
+  }
+
+  if (!engine::physics::is_sleeping(*world, ball)) {
+    return 176; // should report sleeping
+  }
+
+  engine::physics::wake_body(*world, ball);
+
+  if (engine::physics::is_sleeping(*world, ball)) {
+    return 177; // should be awake after wake_body
+  }
+
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -653,6 +1218,51 @@ int main() {
   }
 
   result = check_friction_slows_sliding();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_hits_aabb();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_hits_sphere();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_misses();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_returns_closest();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_distance_joint_maintains_distance();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_ccd_catches_fast_projectile();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_body_falls_asleep();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_collision_wakes_body();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_wake_body_api();
   if (result != 0) {
     return result;
   }

@@ -47,6 +47,8 @@ struct RigidBody final {
   math::Vec3 angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
   float inverseMass = 1.0F;
   float inverseInertia = 1.0F;
+  std::uint8_t sleepFrameCount = 0U;
+  bool sleeping = false;
 };
 
 enum class ColliderShape : std::uint8_t { AABB = 0, Sphere = 1 };

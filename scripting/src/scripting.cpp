@@ -629,6 +629,100 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   return 3;
 }
 
+int lua_engine_raycast(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushnil(state);
+    return 1;
+  }
+  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
+      !lua_isnumber(state, 3) || !lua_isnumber(state, 4) ||
+      !lua_isnumber(state, 5) || !lua_isnumber(state, 6) ||
+      !lua_isnumber(state, 7)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  const float ox = static_cast<float>(lua_tonumber(state, 1));
+  const float oy = static_cast<float>(lua_tonumber(state, 2));
+  const float oz = static_cast<float>(lua_tonumber(state, 3));
+  const float dx = static_cast<float>(lua_tonumber(state, 4));
+  const float dy = static_cast<float>(lua_tonumber(state, 5));
+  const float dz = static_cast<float>(lua_tonumber(state, 6));
+  const float maxDist = static_cast<float>(lua_tonumber(state, 7));
+
+  physics::RayHit hit{};
+  if (!physics::raycast(*g_world, math::Vec3(ox, oy, oz),
+                        math::Vec3(dx, dy, dz), maxDist, &hit)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushinteger(state, static_cast<lua_Integer>(hit.entity.index));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.point.x));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.point.y));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.point.z));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normal.x));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normal.y));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normal.z));
+  return 8;
+}
+
+int lua_engine_add_distance_joint(lua_State *state) noexcept {
+  runtime::Entity entityA{};
+  runtime::Entity entityB{};
+  if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB)) {
+    lua_pushinteger(state, static_cast<lua_Integer>(physics::kInvalidJointId));
+    return 1;
+  }
+  const float dist = lua_isnumber(state, 3)
+                         ? static_cast<float>(lua_tonumber(state, 3))
+                         : 1.0F;
+  physics::JointDesc desc{};
+  desc.entityA = entityA;
+  desc.entityB = entityB;
+  desc.type = physics::JointType::Distance;
+  desc.distance = dist;
+  const physics::JointId id = physics::add_joint(desc);
+  lua_pushinteger(state, static_cast<lua_Integer>(id));
+  return 1;
+}
+
+int lua_engine_remove_joint(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    return 0;
+  }
+  const auto id = static_cast<physics::JointId>(lua_tointeger(state, 1));
+  physics::remove_joint(id);
+  return 0;
+}
+
+int lua_engine_wake_body(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    return 0;
+  }
+  if (!lua_isnumber(state, 1)) {
+    return 0;
+  }
+  const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
+  const runtime::Entity entity = g_world->find_entity_by_index(idx);
+  physics::wake_body(*g_world, entity);
+  return 0;
+}
+
+int lua_engine_is_sleeping(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!lua_isnumber(state, 1)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
+  const runtime::Entity entity = g_world->find_entity_by_index(idx);
+  lua_pushboolean(state, physics::is_sleeping(*g_world, entity) ? 1 : 0);
+  return 1;
+}
+
 int lua_engine_frame_count(lua_State *state) noexcept {
   lua_pushinteger(state, static_cast<lua_Integer>(g_frameIndex));
   return 1;
@@ -780,6 +874,21 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   lua_pushcfunction(state, &lua_engine_get_gravity);
   lua_setfield(state, -2, "get_gravity");
+
+  lua_pushcfunction(state, &lua_engine_raycast);
+  lua_setfield(state, -2, "raycast");
+
+  lua_pushcfunction(state, &lua_engine_add_distance_joint);
+  lua_setfield(state, -2, "add_distance_joint");
+
+  lua_pushcfunction(state, &lua_engine_remove_joint);
+  lua_setfield(state, -2, "remove_joint");
+
+  lua_pushcfunction(state, &lua_engine_wake_body);
+  lua_setfield(state, -2, "wake_body");
+
+  lua_pushcfunction(state, &lua_engine_is_sleeping);
+  lua_setfield(state, -2, "is_sleeping");
 
   lua_pushcfunction(state, &lua_engine_frame_count);
   lua_setfield(state, -2, "frame_count");

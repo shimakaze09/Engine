@@ -24,6 +24,7 @@ REFLECT_FIELD(acceleration, Vec3)
 REFLECT_FIELD(angularVelocity, Vec3)
 REFLECT_FIELD(inverseMass, Float)
 REFLECT_FIELD(inverseInertia, Float)
+REFLECT_FIELD(sleeping, Bool)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::Collider)
