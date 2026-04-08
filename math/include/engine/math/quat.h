@@ -32,6 +32,8 @@ bool to_axis_angle(const Quat &value, Vec3 *outAxis,
 Mat4 to_mat4(const Quat &value) noexcept;
 Quat from_mat4(const Mat4 &value) noexcept;
 Vec3 rotate_vector(const Vec3 &v, const Quat &q) noexcept;
+// Euler convention: pitch is rotation about +X, yaw about +Y, roll about +Z.
+// Composition order is q = qy(yaw) * qx(pitch) * qz(roll).
 Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept;
 bool to_euler(const Quat &q, float *outPitch, float *outYaw,
               float *outRoll) noexcept;

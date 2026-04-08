@@ -85,8 +85,8 @@ Quat normalize(const Quat &value) noexcept {
   _mm_store_ps(&result.x, _mm_mul_ps(q, s));
   return result;
 #else
-  return Quat(
-      value.x * invLen, value.y * invLen, value.z * invLen, value.w * invLen);
+  return Quat(value.x * invLen, value.y * invLen, value.z * invLen,
+              value.w * invLen);
 #endif
 }
 
@@ -100,10 +100,9 @@ Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
   }
 
   if (cosTheta > 0.9995F) {
-    const Quat lerpResult(from.x + (end.x - from.x) * t,
-                          from.y + (end.y - from.y) * t,
-                          from.z + (end.z - from.z) * t,
-                          from.w + (end.w - from.w) * t);
+    const Quat lerpResult(
+        from.x + (end.x - from.x) * t, from.y + (end.y - from.y) * t,
+        from.z + (end.z - from.z) * t, from.w + (end.w - from.w) * t);
     return normalize(lerpResult);
   }
 
@@ -121,18 +120,20 @@ Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
 }
 
 Quat from_axis_angle(const Vec3 &axis, float radians) noexcept {
+  const float axisLengthSq = dot(axis, axis);
+  if (axisLengthSq <= 1.0e-12F) {
+    return Quat();
+  }
+
   const Vec3 normalizedAxis = normalize(axis);
   const float halfAngle = 0.5F * radians;
   const float sinHalf = std::sin(halfAngle);
 
-  return Quat(normalizedAxis.x * sinHalf,
-              normalizedAxis.y * sinHalf,
-              normalizedAxis.z * sinHalf,
-              std::cos(halfAngle));
+  return Quat(normalizedAxis.x * sinHalf, normalizedAxis.y * sinHalf,
+              normalizedAxis.z * sinHalf, std::cos(halfAngle));
 }
 
-bool to_axis_angle(const Quat &value,
-                   Vec3 *outAxis,
+bool to_axis_angle(const Quat &value, Vec3 *outAxis,
                    float *outRadians) noexcept {
   if ((outAxis == nullptr) || (outRadians == nullptr)) {
     return false;
@@ -145,8 +146,8 @@ bool to_axis_angle(const Quat &value,
   if (sinHalf <= 1.0e-6F) {
     *outAxis = Vec3(1.0F, 0.0F, 0.0F);
   } else {
-    *outAxis = Vec3(
-        normalized.x / sinHalf, normalized.y / sinHalf, normalized.z / sinHalf);
+    *outAxis = Vec3(normalized.x / sinHalf, normalized.y / sinHalf,
+                    normalized.z / sinHalf);
   }
 
   *outRadians = angle;
@@ -223,34 +224,32 @@ Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
   const float cr = std::cos(rollRad * 0.5F);
   const float sr = std::sin(rollRad * 0.5F);
 
-  return Quat(cy * sp * cr + sy * cp * sr,
-              sy * cp * cr - cy * sp * sr,
-              cy * cp * sr - sy * sp * cr,
-              cy * cp * cr + sy * sp * sr);
+  return Quat(cy * sp * cr + sy * cp * sr, sy * cp * cr - cy * sp * sr,
+              cy * cp * sr - sy * sp * cr, cy * cp * cr + sy * sp * sr);
 }
 
-bool to_euler(const Quat &q,
-              float *outPitch,
-              float *outYaw,
+bool to_euler(const Quat &q, float *outPitch, float *outYaw,
               float *outRoll) noexcept {
   if ((outPitch == nullptr) || (outYaw == nullptr) || (outRoll == nullptr)) {
     return false;
   }
 
-  const float sinrCosp = 2.0F * (q.w * q.x + q.y * q.z);
-  const float cosrCosp = 1.0F - 2.0F * (q.x * q.x + q.y * q.y);
-  *outRoll = std::atan2(sinrCosp, cosrCosp);
+  // Keep output axes aligned with from_euler:
+  // pitch -> +X, yaw -> +Y, roll -> +Z.
+  const float sinPitchCosp = 2.0F * (q.w * q.x + q.y * q.z);
+  const float cosPitchCosp = 1.0F - 2.0F * (q.x * q.x + q.y * q.y);
+  *outPitch = std::atan2(sinPitchCosp, cosPitchCosp);
 
-  const float sinp = 2.0F * (q.w * q.y - q.z * q.x);
-  if (std::fabs(sinp) >= 1.0F) {
-    *outPitch = std::copysign(1.5707963268F, sinp);
+  const float sinYaw = 2.0F * (q.w * q.y - q.z * q.x);
+  if (std::fabs(sinYaw) >= 1.0F) {
+    *outYaw = std::copysign(1.5707963268F, sinYaw);
   } else {
-    *outPitch = std::asin(sinp);
+    *outYaw = std::asin(sinYaw);
   }
 
-  const float sinyCosp = 2.0F * (q.w * q.z + q.x * q.y);
-  const float cosyCosp = 1.0F - 2.0F * (q.y * q.y + q.z * q.z);
-  *outYaw = std::atan2(sinyCosp, cosyCosp);
+  const float sinRollCosp = 2.0F * (q.w * q.z + q.x * q.y);
+  const float cosRollCosp = 1.0F - 2.0F * (q.y * q.y + q.z * q.z);
+  *outRoll = std::atan2(sinRollCosp, cosRollCosp);
 
   return true;
 }

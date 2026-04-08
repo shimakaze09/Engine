@@ -1,5 +1,6 @@
 #include "engine/math/transform.h"
 
+#include <cassert>
 #include <cmath>
 
 #include "engine/math/vec3.h"
@@ -72,6 +73,13 @@ Mat4 look_at(const Vec3 &eye, const Vec3 &target, const Vec3 &up) noexcept {
 
 Mat4 perspective(float verticalFovRadians, float aspect, float nearZ,
                  float farZ) noexcept {
+#ifndef NDEBUG
+  assert(aspect > 0.0F);
+  assert(nearZ > 0.0F);
+  assert(farZ > nearZ);
+  assert(std::fabs(verticalFovRadians) > 1.0e-6F);
+#endif
+
   const float halfFov = 0.5F * verticalFovRadians;
   const float invTan = 1.0F / std::tan(halfFov);
   const float invDepth = 1.0F / (nearZ - farZ);
@@ -84,6 +92,12 @@ Mat4 perspective(float verticalFovRadians, float aspect, float nearZ,
 
 Mat4 ortho(float left, float right, float bottom, float top, float nearZ,
            float farZ) noexcept {
+#ifndef NDEBUG
+  assert(right > left);
+  assert(top > bottom);
+  assert(farZ > nearZ);
+#endif
+
   const float invWidth = 1.0F / (right - left);
   const float invHeight = 1.0F / (top - bottom);
   const float invDepth = 1.0F / (farZ - nearZ);

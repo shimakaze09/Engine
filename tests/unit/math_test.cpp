@@ -3,6 +3,7 @@
 
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
+#include "engine/math/sphere.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
@@ -41,6 +42,18 @@ bool check_identity(const engine::math::Mat4 &value, float epsilon) {
   }
 
   return true;
+}
+
+bool nearly_equal_angle(float a, float b, float epsilon) {
+  const float twoPi = 6.2831853072F;
+  float delta = std::fmod(a - b, twoPi);
+  if (delta > 3.1415926536F) {
+    delta -= twoPi;
+  } else if (delta < -3.1415926536F) {
+    delta += twoPi;
+  }
+
+  return std::fabs(delta) <= epsilon;
 }
 
 } // namespace
@@ -183,6 +196,63 @@ int main() {
   const engine::math::Quat fromRot = engine::math::from_mat4(rotMat);
   if (!nearly_equal_quat(fromRot, q1, 1.0e-3F)) {
     return 19;
+  }
+
+  float outPitch = 0.0F;
+  float outYaw = 0.0F;
+  float outRoll = 0.0F;
+
+  const float pitchOnly = 0.5F;
+  const engine::math::Quat qPitch =
+      engine::math::from_euler(pitchOnly, 0.0F, 0.0F);
+  if (!engine::math::to_euler(qPitch, &outPitch, &outYaw, &outRoll)) {
+    return 20;
+  }
+  if (!nearly_equal_angle(outPitch, pitchOnly, 1.0e-4F) ||
+      !nearly_equal_angle(outYaw, 0.0F, 1.0e-4F) ||
+      !nearly_equal_angle(outRoll, 0.0F, 1.0e-4F)) {
+    return 21;
+  }
+
+  const float yawOnly = 0.5F;
+  const engine::math::Quat qYaw = engine::math::from_euler(0.0F, yawOnly, 0.0F);
+  if (!engine::math::to_euler(qYaw, &outPitch, &outYaw, &outRoll)) {
+    return 22;
+  }
+  if (!nearly_equal_angle(outPitch, 0.0F, 1.0e-4F) ||
+      !nearly_equal_angle(outYaw, yawOnly, 1.0e-4F) ||
+      !nearly_equal_angle(outRoll, 0.0F, 1.0e-4F)) {
+    return 23;
+  }
+
+  const float rollOnly = 0.5F;
+  const engine::math::Quat qRoll =
+      engine::math::from_euler(0.0F, 0.0F, rollOnly);
+  if (!engine::math::to_euler(qRoll, &outPitch, &outYaw, &outRoll)) {
+    return 24;
+  }
+  if (!nearly_equal_angle(outPitch, 0.0F, 1.0e-4F) ||
+      !nearly_equal_angle(outYaw, 0.0F, 1.0e-4F) ||
+      !nearly_equal_angle(outRoll, rollOnly, 1.0e-4F)) {
+    return 25;
+  }
+
+  const engine::math::Quat invalidAxis = engine::math::from_axis_angle(
+      engine::math::Vec3(0.0F, 0.0F, 0.0F), 0.75F);
+  const engine::math::Quat identityQ{};
+  if (!nearly_equal_quat(invalidAxis, identityQ, 1.0e-4F)) {
+    return 26;
+  }
+
+  engine::math::Sphere unitSphere{};
+  unitSphere.center = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  unitSphere.radius = 1.0F;
+
+  engine::math::Ray degenerateRay{};
+  degenerateRay.origin = engine::math::Vec3(0.0F, 0.0F, -2.0F);
+  degenerateRay.direction = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  if (engine::math::ray_intersects_sphere(degenerateRay, unitSphere, nullptr)) {
+    return 27;
   }
 
   return 0;
