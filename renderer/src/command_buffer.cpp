@@ -107,6 +107,12 @@ void resolve_pbr_light_uniforms(BackendState &backend,
     backend.pbrDirLightColor[i] = dev->uniform_location(prog, name);
     std::snprintf(name, sizeof(name), "u_dirLights[%zu].intensity", i);
     backend.pbrDirLightIntensity[i] = dev->uniform_location(prog, name);
+    if ((backend.pbrDirLightDir[i] < 0) || (backend.pbrDirLightColor[i] < 0) ||
+        (backend.pbrDirLightIntensity[i] < 0)) {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "PBR shader missing directional light uniforms at "
+                        "index — lights will be invisible");
+    }
   }
 
   backend.pbrPointLightCountLocation =
@@ -119,6 +125,13 @@ void resolve_pbr_light_uniforms(BackendState &backend,
     backend.pbrPointLightColor[i] = dev->uniform_location(prog, name);
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].intensity", i);
     backend.pbrPointLightIntensity[i] = dev->uniform_location(prog, name);
+    if ((backend.pbrPointLightPos[i] < 0) ||
+        (backend.pbrPointLightColor[i] < 0) ||
+        (backend.pbrPointLightIntensity[i] < 0)) {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "PBR shader missing point light uniforms at "
+                        "index — lights will be invisible");
+    }
   }
 }
 

@@ -28,12 +28,15 @@ struct DrawKey final {
   std::uint64_t value = 0U;
 };
 
+// Field order is cache-conscious: sort key, hot per-draw identity, and
+// material are first. modelMatrix is appended last because it is only
+// read once per draw call after the mesh/material state has been set.
 struct DrawCommand final {
   DrawKey sortKey{};
   std::uint32_t entity = 0U;
   MeshHandle mesh = kInvalidMeshHandle;
-  math::Mat4 modelMatrix = math::Mat4();
   Material material{};
+  math::Mat4 modelMatrix = math::Mat4();
 };
 
 struct CommandBufferView final {

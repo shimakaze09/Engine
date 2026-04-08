@@ -9,7 +9,6 @@
 
 #include "engine/core/logging.h"
 #include "engine/core/mesh_asset.h"
-#include "engine/core/platform.h"
 #include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
@@ -29,8 +28,7 @@ bool read_exact(FILE *file, void *data, std::size_t sizeBytes) noexcept {
   return std::fread(data, 1U, sizeBytes, file) == sizeBytes;
 }
 
-bool checked_mul(std::size_t lhs,
-                 std::size_t rhs,
+bool checked_mul(std::size_t lhs, std::size_t rhs,
                  std::size_t *outResult) noexcept {
   if (outResult == nullptr) {
     return false;
@@ -44,8 +42,7 @@ bool checked_mul(std::size_t lhs,
   return true;
 }
 
-bool checked_add(std::size_t lhs,
-                 std::size_t rhs,
+bool checked_add(std::size_t lhs, std::size_t rhs,
                  std::size_t *outResult) noexcept {
   if (outResult == nullptr) {
     return false;
@@ -106,15 +103,15 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   const std::size_t strideFloats =
       isV2 ? kVertexStrideV2Floats : kVertexStrideV1Floats;
 
-  if ((header.vertexCount == 0U) || (header.vertexCount > kMaxMeshVertexCount)
-      || (header.indexCount > kMaxMeshIndexCount)) {
+  if ((header.vertexCount == 0U) ||
+      (header.vertexCount > kMaxMeshVertexCount) ||
+      (header.indexCount > kMaxMeshIndexCount)) {
     std::fclose(file);
     return false;
   }
 
   std::size_t vertexFloatCount = 0U;
-  if (!checked_mul(static_cast<std::size_t>(header.vertexCount),
-                   strideFloats,
+  if (!checked_mul(static_cast<std::size_t>(header.vertexCount), strideFloats,
                    &vertexFloatCount)) {
     std::fclose(file);
     return false;
@@ -128,15 +125,14 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
 
   std::size_t indexBytes = 0U;
   if (!checked_mul(static_cast<std::size_t>(header.indexCount),
-                   sizeof(std::uint32_t),
-                   &indexBytes)) {
+                   sizeof(std::uint32_t), &indexBytes)) {
     std::fclose(file);
     return false;
   }
 
   std::size_t expectedSize = 0U;
-  if (!checked_add(sizeof(core::MeshAssetHeader), vertexBytes, &expectedSize)
-      || !checked_add(expectedSize, indexBytes, &expectedSize)) {
+  if (!checked_add(sizeof(core::MeshAssetHeader), vertexBytes, &expectedSize) ||
+      !checked_add(expectedSize, indexBytes, &expectedSize)) {
     std::fclose(file);
     return false;
   }
@@ -153,12 +149,17 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   }
 
   const std::size_t fileSize = static_cast<std::size_t>(fileSizeLong);
-  if ((fileSize != expectedSize)
-      || (std::fseek(file, sizeof(header), SEEK_SET) != 0)) {
+  if ((fileSize != expectedSize) ||
+      (std::fseek(file, sizeof(header), SEEK_SET) != 0)) {
     std::fclose(file);
     return false;
   }
 
+  // Heap allocation here is intentional: mesh data is variable-size and may
+  // exceed the frame allocator budget (up to 32 MB for large meshes).
+  // This function is called only during asset loading transitions, never in the
+  // draw-call hot path.  maxTransitions in update_asset_manager bounds the
+  // per-frame cost.
   std::unique_ptr<float[]> vertices{};
   if (vertexFloatCount > 0U) {
     vertices.reset(new (std::nothrow) float[vertexFloatCount]);
@@ -224,6 +225,9 @@ void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
 
 } // namespace
 
+// Precondition: caller must own the GL context before calling this function.
+// Context acquisition and release are the engine loop's responsibility;
+// the renderer must not acquire or release the context internally.
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   if ((path == nullptr) || (outMesh == nullptr)) {
     return false;
@@ -233,20 +237,12 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
 
   MeshBlob meshBlob{};
   if (!load_mesh_blob(path, &meshBlob)) {
-    core::log_message(
-        core::LogLevel::Error, "renderer", "failed to read mesh asset");
-    return false;
-  }
-
-  if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
-                      "failed to make render context current for mesh upload");
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to read mesh asset");
     return false;
   }
 
   if (!initialize_render_device()) {
-    core::release_render_context();
     return false;
   }
 
@@ -270,8 +266,8 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   dev->vertex_attrib_float(0U, 3, stride, nullptr);
 
   dev->enable_vertex_attrib(1U);
-  dev->vertex_attrib_float(
-      1U, 3, stride, reinterpret_cast<const void *>(sizeof(float) * 3U));
+  dev->vertex_attrib_float(1U, 3, stride,
+                           reinterpret_cast<const void *>(sizeof(float) * 3U));
 
   if (hasUVs) {
     dev->enable_vertex_attrib(2U);
@@ -294,26 +290,17 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   mesh.vertexCount = meshBlob.header.vertexCount;
   mesh.indexCount = meshBlob.header.indexCount;
   *outMesh = mesh;
-
-  core::release_render_context();
   return true;
 }
 
+// Precondition: caller must own the GL context before calling this function.
 void unload_mesh(GpuMesh *mesh) noexcept {
   if (mesh == nullptr) {
     return;
   }
 
-  if ((mesh->vertexArray == 0U) && (mesh->vertexBuffer == 0U)
-      && (mesh->indexBuffer == 0U)) {
-    *mesh = GpuMesh{};
-    return;
-  }
-
-  if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Warning,
-                      "renderer",
-                      "failed to make context current for mesh unload");
+  if ((mesh->vertexArray == 0U) && (mesh->vertexBuffer == 0U) &&
+      (mesh->indexBuffer == 0U)) {
     *mesh = GpuMesh{};
     return;
   }
@@ -324,8 +311,6 @@ void unload_mesh(GpuMesh *mesh) noexcept {
   } else {
     *mesh = GpuMesh{};
   }
-
-  core::release_render_context();
 }
 
 std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
