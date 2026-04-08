@@ -658,7 +658,7 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
     z = static_cast<float>(lua_tonumber(state, 3));
   }
   if ((g_services != nullptr) && (g_services->set_gravity != nullptr)) {
-    g_services->set_gravity(x, y, z);
+    g_services->set_gravity(g_world, x, y, z);
   }
   return 0;
 }
@@ -668,7 +668,7 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   float y = 0.0F;
   float z = 0.0F;
   if ((g_services == nullptr) || (g_services->get_gravity == nullptr) ||
-      !g_services->get_gravity(&x, &y, &z)) {
+      !g_services->get_gravity(g_world, &x, &y, &z)) {
     lua_pushnil(state);
     return 1;
   }
@@ -738,6 +738,7 @@ int lua_engine_remove_joint(lua_State *state) noexcept {
   }
   if ((g_services != nullptr) && (g_services->remove_joint != nullptr)) {
     g_services->remove_joint(
+        g_world,
         static_cast<std::uint32_t>(lua_tointeger(state, 1)));
   }
   return 0;

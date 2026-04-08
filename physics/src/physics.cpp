@@ -19,33 +19,14 @@ namespace engine::physics {
 namespace {
 
 constexpr float kStaticInverseMass = 0.0F;
-constexpr std::size_t kMaxCollisionPairs = 1024U;
 constexpr float kDefaultCellSize = 4.0F;
 constexpr std::size_t kSpatialHashBuckets = 4096U;
 constexpr std::uint32_t kSpatialHashEmpty = 0xFFFFFFFFU;
 
-constexpr std::size_t kMaxJoints = 4096U;
 constexpr std::size_t kJointSolverIterations = 4U;
 
 constexpr float kSleepThreshold = 0.01F;
 constexpr std::uint8_t kSleepFramesRequired = 60U;
-
-struct JointSlot {
-  runtime::Entity entityA = runtime::kInvalidEntity;
-  runtime::Entity entityB = runtime::kInvalidEntity;
-  float distance = 1.0F;
-  bool active = false;
-};
-
-std::array<JointSlot, kMaxJoints> g_joints{};
-std::size_t g_jointCount = 0U;
-
-engine::math::Vec3 g_gravity(0.0F, -9.8F, 0.0F);
-
-// Packed collision pairs: [entityIndexA0, entityIndexB0, ...]
-std::array<std::uint32_t, kMaxCollisionPairs * 2U> g_collisionPairData{};
-std::size_t g_collisionPairCount = 0U;
-CollisionDispatchFn g_collisionDispatch = nullptr;
 
 float axis_overlap(float aMin, float aMax, float bMin, float bMax) noexcept {
   const float left = std::max(aMin, bMin);
@@ -57,19 +38,69 @@ float sign_or_positive(float value) noexcept {
   return (value < 0.0F) ? -1.0F : 1.0F;
 }
 
-void record_collision_pair(std::uint32_t idxA, std::uint32_t idxB) noexcept {
-  for (std::size_t k = 0U; k < g_collisionPairCount; ++k) {
-    const std::uint32_t pa = g_collisionPairData[k * 2U];
-    const std::uint32_t pb = g_collisionPairData[k * 2U + 1U];
-    if ((pa == idxA && pb == idxB) || (pa == idxB && pb == idxA)) {
-      return;
+void begin_generation(std::uint32_t *generation,
+                      std::uint32_t *stamps,
+                      std::size_t stampCount) noexcept {
+  if ((generation == nullptr) || (stamps == nullptr)) {
+    return;
+  }
+
+  ++(*generation);
+  if (*generation != 0U) {
+    return;
+  }
+
+  for (std::size_t i = 0U; i < stampCount; ++i) {
+    stamps[i] = 0U;
+  }
+  *generation = 1U;
+}
+
+std::uint64_t make_pair_key(std::uint32_t idxA, std::uint32_t idxB) noexcept {
+  const std::uint32_t lo = std::min(idxA, idxB);
+  const std::uint32_t hi = std::max(idxA, idxB);
+  return (static_cast<std::uint64_t>(lo) << 32U) |
+         static_cast<std::uint64_t>(hi);
+}
+
+bool insert_pair_key(runtime::World::PhysicsContext &ctx,
+                     std::uint64_t key) noexcept {
+  const std::uint32_t generation = ctx.pairHashGeneration;
+  const std::size_t bucketCount = ctx.pairHashStamps.size();
+    std::size_t bucket =
+      static_cast<std::size_t>((key * 11400714819323198485ULL) % bucketCount);
+
+  for (std::size_t probe = 0U; probe < bucketCount; ++probe) {
+    if (ctx.pairHashStamps[bucket] != generation) {
+      ctx.pairHashStamps[bucket] = generation;
+      ctx.pairHashKeys[bucket] = key;
+      return true;
     }
+
+    if (ctx.pairHashKeys[bucket] == key) {
+      return false;
+    }
+
+    bucket = (bucket + 1U) % bucketCount;
   }
-  if (g_collisionPairCount < kMaxCollisionPairs) {
-    g_collisionPairData[g_collisionPairCount * 2U] = idxA;
-    g_collisionPairData[g_collisionPairCount * 2U + 1U] = idxB;
-    ++g_collisionPairCount;
+
+  return false;
+}
+
+void record_collision_pair(runtime::World &world, std::uint32_t idxA,
+                           std::uint32_t idxB) noexcept {
+  runtime::World::PhysicsContext &ctx = world.physics_context();
+  if (ctx.collisionPairCount >= runtime::World::kMaxCollisionPairs) {
+    return;
   }
+
+  if (!insert_pair_key(ctx, make_pair_key(idxA, idxB))) {
+    return;
+  }
+
+  ctx.collisionPairData[ctx.collisionPairCount * 2U] = idxA;
+  ctx.collisionPairData[ctx.collisionPairCount * 2U + 1U] = idxB;
+  ++ctx.collisionPairCount;
 }
 
 void apply_velocity_impulse(runtime::RigidBody *bodyA,
@@ -157,6 +188,7 @@ bool step_physics(runtime::World &world, float deltaSeconds) noexcept {
 
 bool step_physics_range(runtime::World &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept {
+  const runtime::World::PhysicsContext &physicsCtx = world.physics_context();
   const runtime::Entity *entities = nullptr;
   const runtime::Transform *readTransforms = nullptr;
   runtime::Transform *writeTransforms = nullptr;
@@ -185,7 +217,7 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 
     if ((body != nullptr) && (body->inverseMass > 0.0F)) {
       const engine::math::Vec3 totalAccel =
-          engine::math::add(body->acceleration, g_gravity);
+          engine::math::add(body->acceleration, physicsCtx.gravity);
       body->velocity = engine::math::add(
           body->velocity, engine::math::mul(totalAccel, deltaSeconds));
 
@@ -250,6 +282,11 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 }
 
 bool resolve_collisions(runtime::World &world) noexcept {
+  runtime::World::PhysicsContext &physicsCtx = world.physics_context();
+  physicsCtx.collisionPairCount = 0U;
+  begin_generation(&physicsCtx.pairHashGeneration, physicsCtx.pairHashStamps.data(),
+                   physicsCtx.pairHashStamps.size());
+
   const std::size_t colliderCount = world.collider_count();
 
   const runtime::Entity *entities = nullptr;
@@ -349,12 +386,6 @@ bool resolve_collisions(runtime::World &world) noexcept {
       }
     }
 
-    // Deduplicate pair testing: use a visited bitset per outer collider.
-    // For each collider, query all cells it overlaps and test against
-    // neighbors.
-    thread_local static std::array<bool, runtime::World::kMaxColliders>
-        tested{};
-
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       const runtime::Entity entityA = entities[i];
       if (world.movement_authority(entityA) ==
@@ -372,11 +403,10 @@ bool resolve_collisions(runtime::World &world) noexcept {
       const float ay = posY[i];
       const float az = posZ[i];
 
-      // Clear tested flags for this collider's pass.
-      for (std::size_t k = 0U; k < colliderCount; ++k) {
-        tested[k] = false;
-      }
-      tested[i] = true; // Don't test against self.
+      begin_generation(&physicsCtx.testedGeneration,
+                       physicsCtx.testedStamps.data(),
+                       physicsCtx.testedStamps.size());
+      physicsCtx.testedStamps[i] = physicsCtx.testedGeneration;
 
       const engine::math::Vec3 &heA = colliders[i].halfExtents;
       const std::int32_t minCX = cell_coord(ax - heA.x);
@@ -395,10 +425,10 @@ bool resolve_collisions(runtime::World &world) noexcept {
               const std::uint32_t j = nodes[nodeIdx].colliderIdx;
               nodeIdx = nodes[nodeIdx].next;
 
-              if (tested[j]) {
+              if (physicsCtx.testedStamps[j] == physicsCtx.testedGeneration) {
                 continue;
               }
-              tested[j] = true;
+              physicsCtx.testedStamps[j] = physicsCtx.testedGeneration;
 
               // Only process pair (i, j) where i < j to avoid
               // double-processing.
@@ -453,7 +483,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   continue;
                 }
 
-                record_collision_pair(entityA.index, entityB.index);
+                record_collision_pair(world, entityA.index, entityB.index);
                 {
                   const float vA2 =
                       (bodyA != nullptr)
@@ -553,7 +583,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   continue;
                 }
 
-                record_collision_pair(entityA.index, entityB.index);
+                record_collision_pair(world, entityA.index, entityB.index);
                 {
                   const float vA2 =
                       (bodyA != nullptr)
@@ -650,7 +680,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 continue;
               }
 
-              record_collision_pair(entityA.index, entityB.index);
+              record_collision_pair(world, entityA.index, entityB.index);
               {
                 const float vA2 = (bodyA != nullptr)
                                       ? engine::math::length_sq(bodyA->velocity)
@@ -762,21 +792,25 @@ bool resolve_collisions(runtime::World &world) noexcept {
   return true;
 }
 
-void set_gravity(float x, float y, float z) noexcept {
-  g_gravity = engine::math::Vec3(x, y, z);
+void set_gravity(runtime::World &world, float x, float y, float z) noexcept {
+  world.physics_context().gravity = engine::math::Vec3(x, y, z);
 }
 
-engine::math::Vec3 get_gravity() noexcept { return g_gravity; }
-
-void set_collision_dispatch(CollisionDispatchFn fn) noexcept {
-  g_collisionDispatch = fn;
+engine::math::Vec3 get_gravity(const runtime::World &world) noexcept {
+  return world.physics_context().gravity;
 }
 
-void dispatch_collision_callbacks() noexcept {
-  if ((g_collisionDispatch != nullptr) && (g_collisionPairCount > 0U)) {
-    g_collisionDispatch(g_collisionPairData.data(), g_collisionPairCount);
+void set_collision_dispatch(runtime::World &world,
+                            CollisionDispatchFn fn) noexcept {
+  world.physics_context().collisionDispatch = fn;
+}
+
+void dispatch_collision_callbacks(runtime::World &world) noexcept {
+  runtime::World::PhysicsContext &ctx = world.physics_context();
+  if ((ctx.collisionDispatch != nullptr) && (ctx.collisionPairCount > 0U)) {
+    ctx.collisionDispatch(ctx.collisionPairData.data(), ctx.collisionPairCount);
   }
-  g_collisionPairCount = 0U;
+  ctx.collisionPairCount = 0U;
 }
 
 namespace {
@@ -949,16 +983,18 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
   return hitCount;
 }
 
-JointId add_distance_joint(runtime::Entity entityA, runtime::Entity entityB,
+JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
+                           runtime::Entity entityB,
                            float distance) noexcept {
-  for (std::size_t i = 0U; i < kMaxJoints; ++i) {
-    if (!g_joints[i].active) {
-      g_joints[i].entityA = entityA;
-      g_joints[i].entityB = entityB;
-      g_joints[i].distance = distance;
-      g_joints[i].active = true;
-      if (i >= g_jointCount) {
-        g_jointCount = i + 1U;
+  runtime::World::PhysicsContext &ctx = world.physics_context();
+  for (std::size_t i = 0U; i < runtime::World::kMaxPhysicsJoints; ++i) {
+    if (!ctx.joints[i].active) {
+      ctx.joints[i].entityA = entityA;
+      ctx.joints[i].entityB = entityB;
+      ctx.joints[i].distance = distance;
+      ctx.joints[i].active = true;
+      if (i >= ctx.jointCount) {
+        ctx.jointCount = i + 1U;
       }
       return static_cast<JointId>(i);
     }
@@ -966,38 +1002,42 @@ JointId add_distance_joint(runtime::Entity entityA, runtime::Entity entityB,
   return kInvalidJointId;
 }
 
-void remove_joint(JointId id) noexcept {
-  if (id >= kMaxJoints) {
+void remove_joint(runtime::World &world, JointId id) noexcept {
+  runtime::World::PhysicsContext &ctx = world.physics_context();
+  if (id >= runtime::World::kMaxPhysicsJoints) {
     return;
   }
-  g_joints[id].active = false;
+  ctx.joints[id].active = false;
   // Shrink high-water mark.
-  while ((g_jointCount > 0U) && !g_joints[g_jointCount - 1U].active) {
-    --g_jointCount;
+  while ((ctx.jointCount > 0U) && !ctx.joints[ctx.jointCount - 1U].active) {
+    --ctx.jointCount;
   }
 }
 
 void solve_joints(runtime::World &world) noexcept {
-  if (g_jointCount == 0U) {
+  runtime::World::PhysicsContext &ctx = world.physics_context();
+  if (ctx.jointCount == 0U) {
     return;
   }
 
   for (std::size_t iter = 0U; iter < kJointSolverIterations; ++iter) {
-    for (std::size_t i = 0U; i < g_jointCount; ++i) {
-      if (!g_joints[i].active) {
+    for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
+      if (!ctx.joints[i].active) {
         continue;
       }
 
       runtime::Transform *tA =
-          world.get_transform_write_ptr(g_joints[i].entityA);
+          world.get_transform_write_ptr(ctx.joints[i].entityA);
       runtime::Transform *tB =
-          world.get_transform_write_ptr(g_joints[i].entityB);
+          world.get_transform_write_ptr(ctx.joints[i].entityB);
       if ((tA == nullptr) || (tB == nullptr)) {
         continue;
       }
 
-      runtime::RigidBody *bodyA = world.get_rigid_body_ptr(g_joints[i].entityA);
-      runtime::RigidBody *bodyB = world.get_rigid_body_ptr(g_joints[i].entityB);
+      runtime::RigidBody *bodyA =
+          world.get_rigid_body_ptr(ctx.joints[i].entityA);
+      runtime::RigidBody *bodyB =
+          world.get_rigid_body_ptr(ctx.joints[i].entityB);
       const float invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
       const float invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
       const float invMassSum = invMassA + invMassB;
@@ -1010,7 +1050,7 @@ void solve_joints(runtime::World &world) noexcept {
       if (currentDist < 1e-8F) {
         continue;
       }
-      const float error = currentDist - g_joints[i].distance;
+      const float error = currentDist - ctx.joints[i].distance;
       const math::Vec3 dir = math::div(delta, currentDist);
       const math::Vec3 correction = math::mul(dir, error);
 
@@ -1042,47 +1082,3 @@ bool is_sleeping(const runtime::World &world, runtime::Entity entity) noexcept {
 }
 
 } // namespace engine::physics
-
-namespace engine::runtime {
-
-bool step_physics(World &world, float deltaSeconds) noexcept {
-  return physics::step_physics(world, deltaSeconds);
-}
-
-bool step_physics_range(World &world, std::size_t startIndex, std::size_t count,
-                        float deltaSeconds) noexcept {
-  return physics::step_physics_range(world, startIndex, count, deltaSeconds);
-}
-
-bool resolve_collisions(World &world) noexcept {
-  return physics::resolve_collisions(world);
-}
-
-bool raycast(const World &world, const math::Vec3 &origin,
-             const math::Vec3 &direction, float maxDistance,
-             PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
-  return physics::raycast(world, origin, direction, maxDistance, outHit,
-                          skipEntity);
-}
-
-physics::JointId add_distance_joint(World &world, Entity entityA,
-                                    Entity entityB, float distance) noexcept {
-  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
-      !world.is_alive(entityA) || !world.is_alive(entityB)) {
-    return physics::kInvalidJointId;
-  }
-
-  return physics::add_distance_joint(entityA, entityB, distance);
-}
-
-void remove_joint(physics::JointId id) noexcept { physics::remove_joint(id); }
-
-void wake_body(World &world, Entity entity) noexcept {
-  physics::wake_body(world, entity);
-}
-
-bool is_sleeping(const World &world, Entity entity) noexcept {
-  return physics::is_sleeping(world, entity);
-}
-
-} // namespace engine::runtime

@@ -500,7 +500,8 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   // Route physics collision pairs to the Lua on_collision callback.
-  physics::set_collision_dispatch(&scripting::dispatch_physics_callbacks);
+  runtime::set_collision_dispatch(*world,
+                                  &scripting::dispatch_physics_callbacks);
 
   const char *bootstrapMeshPath = resolve_mesh_asset_path();
   if (bootstrapMeshPath == nullptr) {
@@ -1052,7 +1053,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
       // Dispatch Lua on_collision callbacks for all pairs recorded this frame.
       if (runPhysics) {
-        physics::dispatch_collision_callbacks();
+        runtime::dispatch_collision_callbacks(*world);
       }
 
       // Handle deferred scene operations requested from Lua.

@@ -1,4 +1,6 @@
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <new>
 
@@ -9,6 +11,14 @@
 #include "engine/runtime/world.h"
 
 namespace {
+
+std::size_t g_dispatchedPairCount = 0U;
+
+void test_collision_dispatch(const std::uint32_t *pairs,
+                             std::size_t pairCount) noexcept {
+  static_cast<void>(pairs);
+  g_dispatchedPairCount = pairCount;
+}
 
 int check_gravity_step() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
@@ -892,7 +902,7 @@ int check_distance_joint_maintains_distance() {
     return 139; // joint failed to maintain distance
   }
 
-  engine::runtime::remove_joint(jid);
+  engine::runtime::remove_joint(*world, jid);
 
   return 0;
 }
@@ -946,11 +956,11 @@ int check_ccd_catches_fast_projectile() {
   }
 
   // Disable gravity so it doesn't interfere.
-  engine::physics::set_gravity(0.0F, 0.0F, 0.0F);
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
 
   world->begin_update_phase();
   if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
-    engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+    engine::runtime::set_gravity(*world, 0.0F, -9.8F, 0.0F);
     world->end_frame_phase();
     return 145;
   }
@@ -958,7 +968,7 @@ int check_ccd_catches_fast_projectile() {
   world->begin_render_prep_phase();
   world->end_frame_phase();
 
-  engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+  engine::runtime::set_gravity(*world, 0.0F, -9.8F, 0.0F);
 
   engine::runtime::Transform outBullet{};
   if (!world->get_transform(bullet, &outBullet)) {
@@ -1029,8 +1039,8 @@ int check_body_falls_asleep() {
   for (int frame = 0; frame < 200; ++frame) {
     world->begin_update_phase();
     engine::runtime::step_physics(*world, dt);
-    world->commit_update_phase();
     engine::runtime::resolve_collisions(*world);
+    world->commit_update_phase();
     world->begin_render_prep_phase();
     world->end_frame_phase();
   }
@@ -1090,10 +1100,10 @@ int check_collision_wakes_body() {
     return 164;
   }
 
-  engine::physics::set_gravity(0.0F, 0.0F, 0.0F);
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
 
   if (!engine::runtime::is_sleeping(*world, ball)) {
-    engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+    engine::runtime::set_gravity(*world, 0.0F, -9.8F, 0.0F);
     return 165; // ball should start sleeping
   }
 
@@ -1101,13 +1111,13 @@ int check_collision_wakes_body() {
   for (int frame = 0; frame < 30; ++frame) {
     world->begin_update_phase();
     engine::runtime::step_physics(*world, dt);
-    world->commit_update_phase();
     engine::runtime::resolve_collisions(*world);
+    world->commit_update_phase();
     world->begin_render_prep_phase();
     world->end_frame_phase();
   }
 
-  engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
+  engine::runtime::set_gravity(*world, 0.0F, -9.8F, 0.0F);
 
   if (engine::runtime::is_sleeping(*world, ball)) {
     return 167; // ball should have been woken by collision
@@ -1166,6 +1176,182 @@ int check_wake_body_api() {
 
   if (engine::runtime::is_sleeping(*world, ball)) {
     return 177; // should be awake after wake_body
+  }
+
+  return 0;
+}
+
+int check_bridge_phase_misuse_rejected() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 180;
+  }
+
+  world->end_frame_phase();
+  const engine::runtime::Entity a = world->create_entity();
+  const engine::runtime::Entity b = world->create_entity();
+  if ((a == engine::runtime::kInvalidEntity) ||
+      (b == engine::runtime::kInvalidEntity)) {
+    return 181;
+  }
+
+  engine::runtime::Transform t{};
+  engine::runtime::RigidBody rb{};
+  if (!world->add_transform(a, t) || !world->add_transform(b, t) ||
+      !world->add_rigid_body(a, rb) || !world->add_rigid_body(b, rb)) {
+    return 182;
+  }
+
+  if (engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
+    return 183;
+  }
+
+  world->begin_update_phase();
+  const engine::physics::JointId badJoint =
+      engine::runtime::add_distance_joint(*world, a, b, 1.0F);
+  if (badJoint != engine::physics::kInvalidJointId) {
+    world->end_frame_phase();
+    return 184;
+  }
+
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+  float gx = 0.0F;
+  float gy = 0.0F;
+  float gz = 0.0F;
+  if (!engine::runtime::get_gravity(*world, &gx, &gy, &gz)) {
+    world->end_frame_phase();
+    return 185;
+  }
+  world->end_frame_phase();
+
+  if (std::fabs(gx) > 1e-6F || std::fabs(gy + 9.8F) > 1e-6F ||
+      std::fabs(gz) > 1e-6F) {
+    return 186;
+  }
+
+  return 0;
+}
+
+int check_multi_world_physics_isolation() {
+  std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
+                                                      engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> worldB(new (std::nothrow)
+                                                      engine::runtime::World());
+  if ((worldA == nullptr) || (worldB == nullptr)) {
+    return 190;
+  }
+
+  worldA->end_frame_phase();
+  worldB->end_frame_phase();
+
+  const engine::runtime::Entity ea = worldA->create_entity();
+  const engine::runtime::Entity eb = worldB->create_entity();
+  if ((ea == engine::runtime::kInvalidEntity) ||
+      (eb == engine::runtime::kInvalidEntity)) {
+    return 191;
+  }
+
+  engine::runtime::Transform ta{};
+  ta.position = engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  engine::runtime::Transform tb{};
+  tb.position = engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  engine::runtime::RigidBody rb{};
+  rb.inverseMass = 1.0F;
+
+  if (!worldA->add_transform(ea, ta) || !worldB->add_transform(eb, tb) ||
+      !worldA->add_rigid_body(ea, rb) || !worldB->add_rigid_body(eb, rb)) {
+    return 192;
+  }
+
+  engine::runtime::set_gravity(*worldA, 0.0F, 0.0F, 0.0F);
+  engine::runtime::set_gravity(*worldB, 0.0F, -20.0F, 0.0F);
+
+  worldA->begin_update_phase();
+  worldB->begin_update_phase();
+  const bool stepA = engine::runtime::step_physics(*worldA, 1.0F / 60.0F);
+  const bool stepB = engine::runtime::step_physics(*worldB, 1.0F / 60.0F);
+  worldA->commit_update_phase();
+  worldB->commit_update_phase();
+  worldA->begin_render_prep_phase();
+  worldB->begin_render_prep_phase();
+  worldA->end_frame_phase();
+  worldB->end_frame_phase();
+  if (!stepA || !stepB) {
+    return 193;
+  }
+
+  engine::runtime::Transform outA{};
+  engine::runtime::Transform outB{};
+  if (!worldA->get_transform(ea, &outA) || !worldB->get_transform(eb, &outB)) {
+    return 194;
+  }
+
+  if (std::fabs(outA.position.y - 1.0F) > 0.001F) {
+    return 195;
+  }
+  if (!(outB.position.y < 1.0F)) {
+    return 196;
+  }
+
+  return 0;
+}
+
+int check_collision_bookkeeping_scale() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 200;
+  }
+
+  world->end_frame_phase();
+  constexpr std::size_t kBodies = 96U;
+  engine::runtime::Collider collider{};
+  collider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  for (std::size_t i = 0U; i < kBodies; ++i) {
+    const engine::runtime::Entity entity = world->create_entity();
+    if (entity == engine::runtime::kInvalidEntity) {
+      return 201;
+    }
+
+    engine::runtime::Transform t{};
+    t.position = engine::math::Vec3(static_cast<float>(i % 6U) * 0.1F,
+                                    static_cast<float>(i / 6U) * 0.1F, 0.0F);
+    if (!world->add_transform(entity, t) || !world->add_collider(entity, collider) ||
+        !world->add_rigid_body(entity, body)) {
+      return 202;
+    }
+  }
+
+  engine::runtime::set_collision_dispatch(*world, &test_collision_dispatch);
+  g_dispatchedPairCount = 0U;
+
+  const auto start = std::chrono::steady_clock::now();
+  world->begin_update_phase();
+  const bool stepped = engine::runtime::step_physics(*world, 1.0F / 60.0F);
+  const bool resolved = engine::runtime::resolve_collisions(*world);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  engine::runtime::dispatch_collision_callbacks(*world);
+  const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+
+  if (!stepped || !resolved) {
+    return 203;
+  }
+
+  const std::size_t maxUniquePairs = (kBodies * (kBodies - 1U)) / 2U;
+  if ((g_dispatchedPairCount == 0U) || (g_dispatchedPairCount > maxUniquePairs)) {
+    return 204;
+  }
+
+  if (elapsedMs > 250) {
+    return 205;
   }
 
   return 0;
@@ -1260,6 +1446,21 @@ int main() {
   }
 
   result = check_wake_body_api();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_bridge_phase_misuse_rejected();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_multi_world_physics_isolation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_collision_bookkeeping_scale();
   if (result != 0) {
     return result;
   }

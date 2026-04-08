@@ -121,6 +121,38 @@ public:
   static constexpr std::size_t kMaxScriptComponents = 16384U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
+  static constexpr std::size_t kMaxPhysicsJoints = 4096U;
+  static constexpr std::size_t kMaxCollisionPairs = 1024U;
+  static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
+  using PhysicsCollisionDispatchFn =
+      void (*)(const std::uint32_t *pairs, std::size_t pairCount) noexcept;
+
+  struct PhysicsJointSlot final {
+    Entity entityA = kInvalidEntity;
+    Entity entityB = kInvalidEntity;
+    float distance = 1.0F;
+    bool active = false;
+  };
+
+  struct PhysicsContext final {
+    math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
+    std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
+    std::size_t jointCount = 0U;
+
+    // Packed collision pairs: [entityIndexA0, entityIndexB0, ...]
+    std::array<std::uint32_t, kMaxCollisionPairs * 2U> collisionPairData{};
+    std::size_t collisionPairCount = 0U;
+    PhysicsCollisionDispatchFn collisionDispatch = nullptr;
+
+    // O(1) collision-pair dedupe via open addressing and generation stamps.
+    std::array<std::uint64_t, kCollisionPairHashBuckets> pairHashKeys{};
+    std::array<std::uint32_t, kCollisionPairHashBuckets> pairHashStamps{};
+    std::uint32_t pairHashGeneration = 1U;
+
+    // O(1) broadphase neighbor dedupe using per-collider generation stamps.
+    std::array<std::uint32_t, kMaxColliders> testedStamps{};
+    std::uint32_t testedGeneration = 1U;
+  };
 
   World() noexcept;
 
@@ -239,6 +271,9 @@ public:
   std::size_t world_transform_count() const noexcept;
   std::size_t rigid_body_count() const noexcept;
   std::size_t collider_count() const noexcept;
+
+  PhysicsContext &physics_context() noexcept;
+  const PhysicsContext &physics_context() const noexcept;
 
   RigidBody *get_rigid_body_ptr(Entity entity) noexcept;
   const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept;
@@ -532,6 +567,7 @@ private:
   NameComponentSet m_nameComponents{};
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
+  PhysicsContext m_physicsContext{};
 
   std::size_t m_readStateIndex = 0U;
   std::size_t m_writeStateIndex = 1U;

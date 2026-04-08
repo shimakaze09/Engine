@@ -20,6 +20,14 @@ bool step_physics_range(World &world, std::size_t startIndex, std::size_t count,
                         float deltaSeconds) noexcept;
 bool resolve_collisions(World &world) noexcept;
 
+void set_gravity(World &world, float x, float y, float z) noexcept;
+bool get_gravity(const World &world, float *outX, float *outY,
+                 float *outZ) noexcept;
+
+void set_collision_dispatch(World &world,
+                            physics::CollisionDispatchFn fn) noexcept;
+void dispatch_collision_callbacks(World &world) noexcept;
+
 bool raycast(const World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit,
@@ -27,7 +35,7 @@ bool raycast(const World &world, const math::Vec3 &origin,
 
 physics::JointId add_distance_joint(World &world, Entity entityA,
                                     Entity entityB, float distance) noexcept;
-void remove_joint(physics::JointId id) noexcept;
+void remove_joint(World &world, physics::JointId id) noexcept;
 
 void wake_body(World &world, Entity entity) noexcept;
 bool is_sleeping(const World &world, Entity entity) noexcept;

@@ -38,16 +38,23 @@ void scripting_set_camera_fov(float fovRadians) noexcept {
   renderer::set_active_camera(camera);
 }
 
-bool scripting_get_gravity(float *outX, float *outY, float *outZ) noexcept {
-  if ((outX == nullptr) || (outY == nullptr) || (outZ == nullptr)) {
+void scripting_set_gravity(runtime::World *world, float x, float y,
+                           float z) noexcept {
+  if (world == nullptr) {
+    return;
+  }
+
+  runtime::set_gravity(*world, x, y, z);
+}
+
+bool scripting_get_gravity(runtime::World *world, float *outX, float *outY,
+                           float *outZ) noexcept {
+  if ((world == nullptr) || (outX == nullptr) || (outY == nullptr) ||
+      (outZ == nullptr)) {
     return false;
   }
 
-  const math::Vec3 gravity = physics::get_gravity();
-  *outX = gravity.x;
-  *outY = gravity.y;
-  *outZ = gravity.z;
-  return true;
+  return runtime::get_gravity(*world, outX, outY, outZ);
 }
 
 bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
@@ -88,8 +95,12 @@ std::uint32_t scripting_add_distance_joint(runtime::World *world,
       runtime::add_distance_joint(*world, entityA, entityB, distance));
 }
 
-void scripting_remove_joint(std::uint32_t jointId) noexcept {
-  runtime::remove_joint(static_cast<physics::JointId>(jointId));
+void scripting_remove_joint(runtime::World *world,
+                            std::uint32_t jointId) noexcept {
+  if (world == nullptr) {
+    return;
+  }
+  runtime::remove_joint(*world, static_cast<physics::JointId>(jointId));
 }
 
 void scripting_wake_body(runtime::World *world,
@@ -169,7 +180,7 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_set_camera_target,
     &scripting_set_camera_up,
     &scripting_set_camera_fov,
-    &physics::set_gravity,
+    &scripting_set_gravity,
     &scripting_get_gravity,
     &scripting_raycast,
     &scripting_add_distance_joint,

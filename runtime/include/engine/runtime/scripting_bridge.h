@@ -27,8 +27,10 @@ struct RuntimeServices final {
   void (*set_camera_up)(float x, float y, float z) noexcept = nullptr;
   void (*set_camera_fov)(float fovRadians) noexcept = nullptr;
 
-  void (*set_gravity)(float x, float y, float z) noexcept = nullptr;
-  bool (*get_gravity)(float *outX, float *outY, float *outZ) noexcept = nullptr;
+  void (*set_gravity)(runtime::World *world, float x, float y,
+                      float z) noexcept = nullptr;
+  bool (*get_gravity)(runtime::World *world, float *outX, float *outY,
+                      float *outZ) noexcept = nullptr;
   bool (*raycast)(runtime::World *world, float ox, float oy, float oz, float dx,
                   float dy, float dz, float maxDistance,
                   RuntimeRaycastHit *outHit) noexcept = nullptr;
@@ -36,7 +38,8 @@ struct RuntimeServices final {
                                       std::uint32_t entityIndexA,
                                       std::uint32_t entityIndexB,
                                       float distance) noexcept = nullptr;
-  void (*remove_joint)(std::uint32_t jointId) noexcept = nullptr;
+  void (*remove_joint)(runtime::World *world,
+                       std::uint32_t jointId) noexcept = nullptr;
   void (*wake_body)(runtime::World *world,
                     std::uint32_t entityIndex) noexcept = nullptr;
   bool (*is_sleeping)(runtime::World *world,
