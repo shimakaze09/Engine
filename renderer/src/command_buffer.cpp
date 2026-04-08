@@ -26,11 +26,13 @@ namespace {
 constexpr float kDefaultFovRadians = 1.0471975512F;
 constexpr float kNearClip = 0.1F;
 constexpr float kFarClip = 100.0F;
-constexpr float kClearRed = 0.06F;
-constexpr float kClearGreen = 0.08F;
-constexpr float kClearBlue = 0.12F;
+constexpr float kClearRed = 0.18F;
+constexpr float kClearGreen = 0.28F;
+constexpr float kClearBlue = 0.60F;
 
 CameraState g_activeCamera{};
+int g_sceneViewportWidth = 0;
+int g_sceneViewportHeight = 0;
 
 struct BackendState final {
   bool initialized = false;
@@ -420,7 +422,12 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   int drawableWidth = 1280;
   int drawableHeight = 720;
-  core::render_drawable_size(&drawableWidth, &drawableHeight);
+  if ((g_sceneViewportWidth > 0) && (g_sceneViewportHeight > 0)) {
+    drawableWidth = g_sceneViewportWidth;
+    drawableHeight = g_sceneViewportHeight;
+  } else {
+    core::render_drawable_size(&drawableWidth, &drawableHeight);
+  }
   if (drawableWidth <= 0) {
     drawableWidth = 1;
   }
@@ -692,6 +699,11 @@ void shutdown_renderer() noexcept {
 
 void set_active_camera(const CameraState &camera) noexcept {
   g_activeCamera = camera;
+}
+
+void set_scene_viewport_size(int width, int height) noexcept {
+  g_sceneViewportWidth = (width > 0) ? width : 0;
+  g_sceneViewportHeight = (height > 0) ? height : 0;
 }
 
 CameraState get_active_camera() noexcept { return g_activeCamera; }

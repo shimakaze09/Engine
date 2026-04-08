@@ -90,6 +90,11 @@ void flush_renderer(CommandBufferView commandBufferView,
                     const SceneLightData &lights) noexcept;
 void shutdown_renderer() noexcept;
 
+// Optional scene viewport override from editor UI. When set to positive
+// values, flush_renderer uses this size for projection and pass resources
+// instead of the full SDL drawable size.
+void set_scene_viewport_size(int width, int height) noexcept;
+
 /// Returns the GPU texture ID of the tonemapped scene (final color).
 /// Valid after the first flush_renderer call. Returns 0 if not yet available.
 std::uint32_t get_scene_viewport_texture() noexcept;

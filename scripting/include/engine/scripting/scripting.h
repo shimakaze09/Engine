@@ -9,6 +9,14 @@ bool initialize_scripting() noexcept;
 void shutdown_scripting() noexcept;
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept;
 
+// Set AssetIds for built-in procedural shape meshes.  Any id equal to 0 means
+// that shape is unavailable and spawn_shape("name",...) will fall back to the
+// default mesh.
+void set_builtin_mesh_ids(std::uint32_t planeMesh, std::uint32_t cubeMesh,
+                          std::uint32_t sphereMesh, std::uint32_t cylinderMesh,
+                          std::uint32_t capsuleMesh,
+                          std::uint32_t pyramidMesh) noexcept;
+
 // Set the frame time exposed to Lua via engine.delta_time() /
 // engine.elapsed_time(). Call once per frame before invoking script callbacks.
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept;

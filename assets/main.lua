@@ -9,33 +9,52 @@
 -- their own scripts to them.  Per-entity BEHAVIOUR lives in separate scripts:
 --   assets/scripts/player.lua  <- handles player movement
 local M = {}
-local default_mesh_asset_id = nil
 
--- Helper: spawn a coloured physics box
-local function spawn_box(x, y, z, r, g, b)
-    local e = engine.spawn_entity()
+-- Helper: spawn a coloured cube with physics
+local function spawn_cube(x, y, z, r, g, b)
+    local e = engine.spawn_shape("cube", x, y, z, r, g, b)
     if e == nil then
         return nil
     end
-    engine.set_position(e, x, y, z)
-    engine.set_scale(e, 1.0, 1.0, 1.0)
-    engine.add_rigid_body(e, 1.0)
-    if default_mesh_asset_id ~= nil then
-        engine.set_mesh(e, default_mesh_asset_id)
+    engine.set_acceleration(e, 0.0, -9.8, 0.0)
+    return e
+end
+
+-- Helper: spawn a sphere
+local function spawn_sphere(x, y, z, r, g, b)
+    local e = engine.spawn_shape("sphere", x, y, z, r, g, b)
+    if e == nil then
+        return nil
     end
-    engine.set_albedo(e, r, g, b)
-    engine.add_collider(e, 0.5, 0.5, 0.5)
+    engine.set_acceleration(e, 0.0, -9.8, 0.0)
+    return e
+end
+
+-- Helper: spawn a cylinder
+local function spawn_cylinder(x, y, z, r, g, b)
+    local e = engine.spawn_shape("cylinder", x, y, z, r, g, b)
+    if e == nil then
+        return nil
+    end
+    engine.set_acceleration(e, 0.0, -9.8, 0.0)
+    return e
+end
+
+-- Helper: spawn a pyramid
+local function spawn_pyramid(x, y, z, r, g, b)
+    local e = engine.spawn_shape("pyramid", x, y, z, r, g, b)
+    if e == nil then
+        return nil
+    end
     engine.set_acceleration(e, 0.0, -9.8, 0.0)
     return e
 end
 
 function M.on_start(self)
     engine.log("=== Scene Controller on_start ===")
-    default_mesh_asset_id = engine.get_default_mesh_asset_id()
 
     -- Spawn the green player cube and attach a per-entity script to it.
-    -- The script (assets/scripts/player.lua) handles keyboard movement.
-    local player = spawn_box(0.0, 6.0, 0.0, 0.2, 0.8, 0.4)
+    local player = spawn_cube(0.0, 6.0, 0.0, 0.2, 0.8, 0.4)
     if player ~= nil then
         engine.set_name(player, "Player")
         engine.add_script_component(player, "assets/scripts/player.lua")
@@ -60,31 +79,31 @@ function M.on_start(self)
         end
     end)
 
-    -- Timer: spawn two plain clones after 2 seconds
+    -- Timer: spawn two clones after 2 seconds
     engine.set_timeout(function()
         engine.log("timer: spawning clones")
-        local c1 = spawn_box(-3.0, 9.0, 0.0, 0.9, 0.2, 0.2)
+        local c1 = spawn_cube(-3.0, 9.0, 0.0, 0.9, 0.2, 0.2)
         if c1 ~= nil then
             engine.set_name(c1, "CloneRed")
         end
-        local c2 = spawn_box(3.0, 9.0, 0.0, 0.2, 0.2, 0.9)
+        local c2 = spawn_sphere(3.0, 9.0, 0.0, 0.2, 0.2, 0.9)
         if c2 ~= nil then
-            engine.set_name(c2, "CloneBlue")
+            engine.set_name(c2, "CloneSphere")
         end
     end, 2.0)
 
-    -- Coroutine: drop waves of boxes from above
+    -- Coroutine: drop waves of shapes from above
     engine.start_coroutine(function()
         engine.wait(4.0)
         engine.log("coroutine wave 1")
-        for i = 0, 2 do
-            spawn_box(-4.0 + i * 4.0, 12.0, -2.0, 0.9, 0.6, 0.1)
-        end
+        spawn_cube(-4.0, 12.0, -2.0, 0.9, 0.6, 0.1)
+        spawn_sphere(0.0, 12.0, -2.0, 0.5, 0.9, 0.3)
+        spawn_cube(4.0, 12.0, -2.0, 0.9, 0.6, 0.1)
         engine.wait(3.0)
         engine.log("coroutine wave 2")
-        for i = 0, 3 do
-            spawn_box(-6.0 + i * 4.0, 15.0, 2.0, 0.6, 0.1, 0.9)
-        end
+        spawn_cylinder(-6.0, 15.0, 2.0, 0.6, 0.1, 0.9)
+        spawn_pyramid(0.0, 15.0, 2.0, 1.0, 0.8, 0.0)
+        spawn_cylinder(6.0, 15.0, 2.0, 0.6, 0.1, 0.9)
     end)
 
     engine.log("on_start done — " .. engine.get_entity_count() .. " entities")
@@ -92,7 +111,6 @@ end
 
 function M.on_update(self, dt)
     -- Per-frame coordinator logic goes here.
-    -- Each entity's own behaviour lives in its attached script.
 end
 
 return M

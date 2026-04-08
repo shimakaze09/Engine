@@ -37,6 +37,12 @@ lua_State *g_state = nullptr;
 runtime::World *g_world = nullptr;
 const RuntimeServices *g_services = nullptr;
 std::uint32_t g_defaultMeshAssetId = 0U;
+std::uint32_t g_builtinPlaneMesh = 0U;
+std::uint32_t g_builtinCubeMesh = 0U;
+std::uint32_t g_builtinSphereMesh = 0U;
+std::uint32_t g_builtinCylinderMesh = 0U;
+std::uint32_t g_builtinCapsuleMesh = 0U;
+std::uint32_t g_builtinPyramidMesh = 0U;
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
 float g_totalSeconds = 0.0F;
@@ -436,6 +442,97 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
   return 1;
 }
 
+// engine.spawn_shape(shape, x, y, z, r, g, b) → entity index or nil
+// shape: "cube" | "sphere" | "cylinder" | "capsule" | "pyramid" | "plane"
+// Spawns a physics entity with the matching mesh and appropriate collider.
+int lua_engine_spawn_shape(lua_State *state) noexcept {
+  if ((g_world == nullptr) || !lua_isstring(state, 1)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  math::Vec3 pos{};
+  math::Vec3 albedo(1.0F, 1.0F, 1.0F);
+  if (!read_vec3_args(state, 2, &pos)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  if (lua_isnumber(state, 5) && lua_isnumber(state, 6) &&
+      lua_isnumber(state, 7)) {
+    albedo.x = static_cast<float>(lua_tonumber(state, 5));
+    albedo.y = static_cast<float>(lua_tonumber(state, 6));
+    albedo.z = static_cast<float>(lua_tonumber(state, 7));
+  }
+
+  const char *shape = lua_tostring(state, 1);
+
+  std::uint32_t meshId = g_defaultMeshAssetId;
+  math::Vec3 halfExtents(0.5F, 0.5F, 0.5F);
+  runtime::ColliderShape colliderShape = runtime::ColliderShape::AABB;
+
+  if (std::strcmp(shape, "cube") == 0) {
+    meshId =
+        (g_builtinCubeMesh != 0U) ? g_builtinCubeMesh : g_defaultMeshAssetId;
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    colliderShape = runtime::ColliderShape::AABB;
+  } else if (std::strcmp(shape, "sphere") == 0) {
+    meshId = (g_builtinSphereMesh != 0U) ? g_builtinSphereMesh
+                                         : g_defaultMeshAssetId;
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F); // halfExtents.x = radius
+    colliderShape = runtime::ColliderShape::Sphere;
+  } else if (std::strcmp(shape, "cylinder") == 0) {
+    meshId = (g_builtinCylinderMesh != 0U) ? g_builtinCylinderMesh
+                                           : g_defaultMeshAssetId;
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    colliderShape = runtime::ColliderShape::AABB;
+  } else if (std::strcmp(shape, "capsule") == 0) {
+    meshId = (g_builtinCapsuleMesh != 0U) ? g_builtinCapsuleMesh
+                                          : g_defaultMeshAssetId;
+    halfExtents =
+        math::Vec3(0.5F, 1.0F, 0.5F); // x/z = radius, y = half-total-height
+    colliderShape = runtime::ColliderShape::Sphere;
+  } else if (std::strcmp(shape, "pyramid") == 0) {
+    meshId = (g_builtinPyramidMesh != 0U) ? g_builtinPyramidMesh
+                                          : g_defaultMeshAssetId;
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    colliderShape = runtime::ColliderShape::AABB;
+  } else if (std::strcmp(shape, "plane") == 0) {
+    meshId =
+        (g_builtinPlaneMesh != 0U) ? g_builtinPlaneMesh : g_defaultMeshAssetId;
+    halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
+    colliderShape = runtime::ColliderShape::AABB;
+  }
+
+  const runtime::Entity entity = g_world->create_entity();
+  if (entity == runtime::kInvalidEntity) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  runtime::Transform transform{};
+  transform.position = pos;
+  static_cast<void>(g_world->add_transform(entity, transform));
+
+  runtime::RigidBody rigidBody{};
+  rigidBody.inverseMass = 1.0F;
+  static_cast<void>(g_world->add_rigid_body(entity, rigidBody));
+
+  runtime::Collider collider{};
+  collider.halfExtents = halfExtents;
+  collider.shape = colliderShape;
+  static_cast<void>(g_world->add_collider(entity, collider));
+
+  if (meshId != 0U) {
+    runtime::MeshComponent meshComp{};
+    meshComp.meshAssetId = meshId;
+    meshComp.albedo = albedo;
+    static_cast<void>(g_world->add_mesh_component(entity, meshComp));
+  }
+
+  lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
+  return 1;
+}
+
 int lua_engine_set_albedo(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 albedo{};
@@ -738,8 +835,7 @@ int lua_engine_remove_joint(lua_State *state) noexcept {
   }
   if ((g_services != nullptr) && (g_services->remove_joint != nullptr)) {
     g_services->remove_joint(
-        g_world,
-        static_cast<std::uint32_t>(lua_tointeger(state, 1)));
+        g_world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
   }
   return 0;
 }
@@ -1843,6 +1939,9 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_get_default_mesh_asset_id);
   lua_setfield(state, -2, "get_default_mesh_asset_id");
 
+  lua_pushcfunction(state, &lua_engine_spawn_shape);
+  lua_setfield(state, -2, "spawn_shape");
+
   lua_pushcfunction(state, &lua_engine_set_albedo);
   lua_setfield(state, -2, "set_albedo");
 
@@ -2195,6 +2294,12 @@ void shutdown_scripting() noexcept {
 
   g_world = nullptr;
   g_defaultMeshAssetId = 0U;
+  g_builtinPlaneMesh = 0U;
+  g_builtinCubeMesh = 0U;
+  g_builtinSphereMesh = 0U;
+  g_builtinCylinderMesh = 0U;
+  g_builtinCapsuleMesh = 0U;
+  g_builtinPyramidMesh = 0U;
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
 }
@@ -2207,6 +2312,18 @@ void bind_runtime_services(const RuntimeServices *services) noexcept {
 
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept {
   g_defaultMeshAssetId = assetId;
+}
+
+void set_builtin_mesh_ids(std::uint32_t planeMesh, std::uint32_t cubeMesh,
+                          std::uint32_t sphereMesh, std::uint32_t cylinderMesh,
+                          std::uint32_t capsuleMesh,
+                          std::uint32_t pyramidMesh) noexcept {
+  g_builtinPlaneMesh = planeMesh;
+  g_builtinCubeMesh = cubeMesh;
+  g_builtinSphereMesh = sphereMesh;
+  g_builtinCylinderMesh = cylinderMesh;
+  g_builtinCapsuleMesh = capsuleMesh;
+  g_builtinPyramidMesh = pyramidMesh;
 }
 
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {

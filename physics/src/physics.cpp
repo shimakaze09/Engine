@@ -27,6 +27,8 @@ constexpr std::size_t kJointSolverIterations = 4U;
 
 constexpr float kSleepThreshold = 0.01F;
 constexpr std::uint8_t kSleepFramesRequired = 60U;
+constexpr float kAngularDampingPerSecond = 0.35F;
+constexpr float kMaxAngularSpeed = 12.0F;
 
 float axis_overlap(float aMin, float aMax, float bMin, float bMax) noexcept {
   const float left = std::max(aMin, bMin);
@@ -38,8 +40,7 @@ float sign_or_positive(float value) noexcept {
   return (value < 0.0F) ? -1.0F : 1.0F;
 }
 
-void begin_generation(std::uint32_t *generation,
-                      std::uint32_t *stamps,
+void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
                       std::size_t stampCount) noexcept {
   if ((generation == nullptr) || (stamps == nullptr)) {
     return;
@@ -67,7 +68,7 @@ bool insert_pair_key(runtime::World::PhysicsContext &ctx,
                      std::uint64_t key) noexcept {
   const std::uint32_t generation = ctx.pairHashGeneration;
   const std::size_t bucketCount = ctx.pairHashStamps.size();
-    std::size_t bucket =
+  std::size_t bucket =
       static_cast<std::size_t>((key * 11400714819323198485ULL) % bucketCount);
 
   for (std::size_t probe = 0U; probe < bucketCount; ++probe) {
@@ -134,6 +135,13 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
                               bodyA->inverseInertia);
         bodyA->angularVelocity =
             engine::math::sub(bodyA->angularVelocity, angImpulse);
+        const float angSpeedSq =
+            engine::math::length_sq(bodyA->angularVelocity);
+        if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
+          const float angSpeed = std::sqrt(angSpeedSq);
+          bodyA->angularVelocity = engine::math::mul(
+              bodyA->angularVelocity, kMaxAngularSpeed / angSpeed);
+        }
       }
     }
     if ((bodyB != nullptr) && (invMassB > 0.0F)) {
@@ -146,6 +154,13 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
                               bodyB->inverseInertia);
         bodyB->angularVelocity =
             engine::math::add(bodyB->angularVelocity, angImpulse);
+        const float angSpeedSq =
+            engine::math::length_sq(bodyB->angularVelocity);
+        if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
+          const float angSpeed = std::sqrt(angSpeedSq);
+          bodyB->angularVelocity = engine::math::mul(
+              bodyB->angularVelocity, kMaxAngularSpeed / angSpeed);
+        }
       }
     }
 
@@ -258,6 +273,17 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
       if (!clamped) {
         updated.position = engine::math::add(updated.position, displacement);
       }
+
+      // Light angular damping keeps contact jitter from integrating into
+      // runaway spins on resting contacts.
+      const float angularDamping =
+          std::exp(-kAngularDampingPerSecond * deltaSeconds);
+      body->angularVelocity =
+          engine::math::mul(body->angularVelocity, angularDamping);
+      const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
+      if (angSpeedSq < 1e-6F) {
+        body->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+      }
     }
 
     // Angular velocity integration (independent of linear mass).
@@ -284,7 +310,8 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 bool resolve_collisions(runtime::World &world) noexcept {
   runtime::World::PhysicsContext &physicsCtx = world.physics_context();
   physicsCtx.collisionPairCount = 0U;
-  begin_generation(&physicsCtx.pairHashGeneration, physicsCtx.pairHashStamps.data(),
+  begin_generation(&physicsCtx.pairHashGeneration,
+                   physicsCtx.pairHashStamps.data(),
                    physicsCtx.pairHashStamps.size());
 
   const std::size_t colliderCount = world.collider_count();
@@ -984,8 +1011,7 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 }
 
 JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
-                           runtime::Entity entityB,
-                           float distance) noexcept {
+                           runtime::Entity entityB, float distance) noexcept {
   runtime::World::PhysicsContext &ctx = world.physics_context();
   for (std::size_t i = 0U; i < runtime::World::kMaxPhysicsJoints; ++i) {
     if (!ctx.joints[i].active) {

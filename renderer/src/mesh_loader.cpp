@@ -294,6 +294,66 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
 }
 
 // Precondition: caller must own the GL context before calling this function.
+bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
+                              const std::uint32_t *indices,
+                              std::uint32_t indexCount, bool hasUVs,
+                              GpuMesh *outMesh) noexcept {
+  if ((outMesh == nullptr) || (vertexCount == 0U) || (vertices == nullptr)) {
+    return false;
+  }
+
+  if (!initialize_render_device()) {
+    return false;
+  }
+
+  const RenderDevice *dev = render_device();
+  const std::size_t strideFloats =
+      hasUVs ? kVertexStrideV2Floats : kVertexStrideV1Floats;
+  const std::int32_t stride =
+      static_cast<std::int32_t>(strideFloats * sizeof(float));
+
+  GpuMesh mesh{};
+  mesh.hasUVs = hasUVs;
+  mesh.vertexArray = dev->create_vertex_array();
+  dev->bind_vertex_array(mesh.vertexArray);
+
+  mesh.vertexBuffer = dev->create_buffer();
+  dev->bind_array_buffer(mesh.vertexBuffer);
+  dev->buffer_data_array(
+      vertices,
+      static_cast<std::ptrdiff_t>(vertexCount * strideFloats * sizeof(float)));
+
+  dev->enable_vertex_attrib(0U);
+  dev->vertex_attrib_float(0U, 3, stride, nullptr);
+
+  dev->enable_vertex_attrib(1U);
+  dev->vertex_attrib_float(1U, 3, stride,
+                           reinterpret_cast<const void *>(sizeof(float) * 3U));
+
+  if (hasUVs) {
+    dev->enable_vertex_attrib(2U);
+    dev->vertex_attrib_float(
+        2U, 2, stride, reinterpret_cast<const void *>(sizeof(float) * 6U));
+  }
+
+  if ((indexCount > 0U) && (indices != nullptr)) {
+    mesh.indexBuffer = dev->create_buffer();
+    dev->bind_element_buffer(mesh.indexBuffer);
+    dev->buffer_data_element(indices, static_cast<std::ptrdiff_t>(
+                                          indexCount * sizeof(std::uint32_t)));
+  }
+
+  dev->bind_vertex_array(0U);
+  dev->bind_array_buffer(0U);
+  dev->bind_element_buffer(0U);
+
+  mesh.vertexCount = vertexCount;
+  mesh.indexCount = indexCount;
+  *outMesh = mesh;
+  return true;
+}
+
+// Precondition: caller must own the GL context before calling this function.
 void unload_mesh(GpuMesh *mesh) noexcept {
   if (mesh == nullptr) {
     return;

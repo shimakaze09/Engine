@@ -32,4 +32,14 @@ const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept;
 void unload_mesh(GpuMesh *mesh) noexcept;
 
+// Direct GPU upload from in-memory vertex/index data (no file I/O).
+// Precondition: caller must own the GL context before calling this function.
+// vertices: array of floats, 6 per vertex (pos xyz, norm xyz) when !hasUVs,
+//           8 per vertex (pos xyz, norm xyz, uv xy) when hasUVs.
+// indices: may be nullptr when indexCount == 0 (drawArrays path).
+bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
+                              const std::uint32_t *indices,
+                              std::uint32_t indexCount, bool hasUVs,
+                              GpuMesh *outMesh) noexcept;
+
 } // namespace engine::renderer

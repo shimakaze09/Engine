@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -131,6 +132,414 @@ const char *resolve_mesh_asset_path() noexcept {
   }
 
   return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Procedural mesh builders
+// Vertex layout: 6 floats per vertex — (px, py, pz, nx, ny, nz).
+// All meshes use CCW winding for outward-facing normals.
+// ---------------------------------------------------------------------------
+
+// Ground plane: flat quad at y=+0.5 (entity of space), 10×10, normal upward.
+// When the ground entity sits at world y=−0.5 the visible surface falls at y=0,
+// matching the top of a (5,0.5,5) AABB collider.
+bool build_plane_mesh(renderer::GpuMesh *outMesh) noexcept {
+  // clang-format off
+  static constexpr float kVerts[] = {
+    -5.0F, 0.5F, -5.0F,  0.0F, 1.0F, 0.0F,
+    -5.0F, 0.5F,  5.0F,  0.0F, 1.0F, 0.0F,
+     5.0F, 0.5F,  5.0F,  0.0F, 1.0F, 0.0F,
+     5.0F, 0.5F, -5.0F,  0.0F, 1.0F, 0.0F,
+  };
+  static constexpr std::uint32_t kIdx[] = { 0, 1, 2,  0, 2, 3 };
+  // clang-format on
+  return renderer::build_gpu_mesh_from_data(kVerts, 4U, kIdx, 6U, false,
+                                            outMesh);
+}
+
+// Unit cube: half-extent 0.5 on all axes.  24 vertices (4 per face), 36 idx.
+bool build_cube_mesh(renderer::GpuMesh *outMesh) noexcept {
+  // clang-format off
+  static constexpr float kVerts[] = {
+    // +Y face (top), normal (0,+1,0)  — CCW from above
+    -0.5F, 0.5F, -0.5F,  0.0F, 1.0F, 0.0F,
+    -0.5F, 0.5F,  0.5F,  0.0F, 1.0F, 0.0F,
+     0.5F, 0.5F,  0.5F,  0.0F, 1.0F, 0.0F,
+     0.5F, 0.5F, -0.5F,  0.0F, 1.0F, 0.0F,
+    // -Y face (bottom), normal (0,-1,0)
+    -0.5F,-0.5F, -0.5F,  0.0F,-1.0F, 0.0F,
+     0.5F,-0.5F, -0.5F,  0.0F,-1.0F, 0.0F,
+     0.5F,-0.5F,  0.5F,  0.0F,-1.0F, 0.0F,
+    -0.5F,-0.5F,  0.5F,  0.0F,-1.0F, 0.0F,
+    // +Z face (front), normal (0,0,+1)
+    -0.5F,-0.5F,  0.5F,  0.0F, 0.0F, 1.0F,
+     0.5F,-0.5F,  0.5F,  0.0F, 0.0F, 1.0F,
+     0.5F, 0.5F,  0.5F,  0.0F, 0.0F, 1.0F,
+    -0.5F, 0.5F,  0.5F,  0.0F, 0.0F, 1.0F,
+    // -Z face (back), normal (0,0,-1)
+     0.5F,-0.5F, -0.5F,  0.0F, 0.0F,-1.0F,
+    -0.5F,-0.5F, -0.5F,  0.0F, 0.0F,-1.0F,
+    -0.5F, 0.5F, -0.5F,  0.0F, 0.0F,-1.0F,
+     0.5F, 0.5F, -0.5F,  0.0F, 0.0F,-1.0F,
+    // +X face (right), normal (+1,0,0)
+     0.5F,-0.5F,  0.5F,  1.0F, 0.0F, 0.0F,
+     0.5F,-0.5F, -0.5F,  1.0F, 0.0F, 0.0F,
+     0.5F, 0.5F, -0.5F,  1.0F, 0.0F, 0.0F,
+     0.5F, 0.5F,  0.5F,  1.0F, 0.0F, 0.0F,
+    // -X face (left), normal (-1,0,0)
+    -0.5F,-0.5F, -0.5F, -1.0F, 0.0F, 0.0F,
+    -0.5F,-0.5F,  0.5F, -1.0F, 0.0F, 0.0F,
+    -0.5F, 0.5F,  0.5F, -1.0F, 0.0F, 0.0F,
+    -0.5F, 0.5F, -0.5F, -1.0F, 0.0F, 0.0F,
+  };
+  static constexpr std::uint32_t kIdx[] = {
+     0, 1, 2,  0, 2, 3,   // +Y
+     4, 5, 6,  4, 6, 7,   // -Y
+     8, 9,10,  8,10,11,   // +Z
+    12,13,14, 12,14,15,   // -Z
+    16,17,18, 16,18,19,   // +X
+    20,21,22, 20,22,23,   // -X
+  };
+  // clang-format on
+  return renderer::build_gpu_mesh_from_data(kVerts, 24U, kIdx, 36U, false,
+                                            outMesh);
+}
+
+// UV sphere: radius 0.5, 12 stacks × 24 slices.
+// Vertices: (stacks+1)×(slices+1) = 13×25 = 325.  Indices: 12×24×6 = 1728.
+bool build_sphere_mesh(renderer::GpuMesh *outMesh) noexcept {
+  constexpr int kStacks = 12;
+  constexpr int kSlices = 24;
+  constexpr float kRadius = 0.5F;
+  constexpr int kVCount = (kStacks + 1) * (kSlices + 1);
+  constexpr int kICount = kStacks * kSlices * 6;
+
+  float verts[kVCount * 6]{};
+  std::uint32_t idx[kICount]{};
+
+  int vi = 0;
+  for (int i = 0; i <= kStacks; ++i) {
+    const float theta =
+        static_cast<float>(i) * 3.14159265359F / static_cast<float>(kStacks);
+    const float sinT = std::sin(theta);
+    const float cosT = std::cos(theta);
+    for (int j = 0; j <= kSlices; ++j) {
+      const float phi = static_cast<float>(j) * 2.0F * 3.14159265359F /
+                        static_cast<float>(kSlices);
+      const float nx = sinT * std::cos(phi);
+      const float ny = cosT;
+      const float nz = sinT * std::sin(phi);
+      verts[vi++] = nx * kRadius;
+      verts[vi++] = ny * kRadius;
+      verts[vi++] = nz * kRadius;
+      verts[vi++] = nx;
+      verts[vi++] = ny;
+      verts[vi++] = nz;
+    }
+  }
+
+  int ii = 0;
+  for (int i = 0; i < kStacks; ++i) {
+    for (int j = 0; j < kSlices; ++j) {
+      const std::uint32_t a = static_cast<std::uint32_t>(i * (kSlices + 1) + j);
+      const std::uint32_t b = a + static_cast<std::uint32_t>(kSlices + 1);
+      const std::uint32_t c = b + 1U;
+      const std::uint32_t d = a + 1U;
+      idx[ii++] = a;
+      idx[ii++] = c;
+      idx[ii++] = b;
+      idx[ii++] = a;
+      idx[ii++] = d;
+      idx[ii++] = c;
+    }
+  }
+
+  return renderer::build_gpu_mesh_from_data(
+      verts, static_cast<std::uint32_t>(kVCount), idx,
+      static_cast<std::uint32_t>(kICount), false, outMesh);
+}
+
+// Cylinder: radius 0.5, height 1.0, 24 slices.
+// Sides: 2 rings × (slices+1) verts.  Top+bottom caps: fan with centre.
+bool build_cylinder_mesh(renderer::GpuMesh *outMesh) noexcept {
+  constexpr int kSlices = 24;
+  constexpr float kRadius = 0.5F;
+  constexpr float kHalfH = 0.5F;
+  constexpr float kPI = 3.14159265359F;
+
+  // Side verts: (bottom ring) + (top ring) = 2*(slices+1)
+  // Each cap: 1 centre + slices rim = slices+1
+  // Total verts: 2*(slices+1) + 2*(slices+1)
+  constexpr int kSideVerts = 2 * (kSlices + 1);
+  constexpr int kCapVerts = kSlices + 1; // centre + rim for ONE cap
+  constexpr int kTotalVerts = kSideVerts + 2 * kCapVerts;
+  // Side indices: slices quads × 2 tris = slices*6
+  // Cap indices: slices tris × 2 caps = 2*slices*3
+  constexpr int kTotalIdx = kSlices * 6 + 2 * kSlices * 3;
+
+  float verts[kTotalVerts * 6]{};
+  std::uint32_t idx[kTotalIdx]{};
+
+  int vi = 0;
+  const auto pushV = [&](float px, float py, float pz, float nx, float ny,
+                         float nz) {
+    verts[vi++] = px;
+    verts[vi++] = py;
+    verts[vi++] = pz;
+    verts[vi++] = nx;
+    verts[vi++] = ny;
+    verts[vi++] = nz;
+  };
+
+  // --- Side verts ---
+  // Bottom ring: verts [0 .. slices]
+  for (int j = 0; j <= kSlices; ++j) {
+    const float phi =
+        static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
+    const float nx = std::cos(phi);
+    const float nz = std::sin(phi);
+    pushV(nx * kRadius, -kHalfH, nz * kRadius, nx, 0.0F, nz);
+  }
+  // Top ring: verts [slices+1 .. 2*slices+1]
+  for (int j = 0; j <= kSlices; ++j) {
+    const float phi =
+        static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
+    const float nx = std::cos(phi);
+    const float nz = std::sin(phi);
+    pushV(nx * kRadius, kHalfH, nz * kRadius, nx, 0.0F, nz);
+  }
+
+  // --- Top cap verts: centre then rim ---
+  // Top cap base index = kSideVerts
+  const std::uint32_t topBase = static_cast<std::uint32_t>(kSideVerts);
+  pushV(0.0F, kHalfH, 0.0F, 0.0F, 1.0F, 0.0F); // centre
+  for (int j = 0; j < kSlices; ++j) {
+    const float phi =
+        static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
+    pushV(std::cos(phi) * kRadius, kHalfH, std::sin(phi) * kRadius, 0.0F, 1.0F,
+          0.0F);
+  }
+
+  // --- Bottom cap verts: centre then rim ---
+  const std::uint32_t botBase = topBase + static_cast<std::uint32_t>(kCapVerts);
+  pushV(0.0F, -kHalfH, 0.0F, 0.0F, -1.0F, 0.0F); // centre
+  for (int j = 0; j < kSlices; ++j) {
+    const float phi =
+        static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
+    pushV(std::cos(phi) * kRadius, -kHalfH, std::sin(phi) * kRadius, 0.0F,
+          -1.0F, 0.0F);
+  }
+
+  int ii = 0;
+  // --- Side indices ---
+  for (int j = 0; j < kSlices; ++j) {
+    const std::uint32_t a = static_cast<std::uint32_t>(j);     // bot j
+    const std::uint32_t b = static_cast<std::uint32_t>(j + 1); // bot j+1
+    const std::uint32_t c =
+        static_cast<std::uint32_t>(kSlices + 1 + j); // top j
+    const std::uint32_t d =
+        static_cast<std::uint32_t>(kSlices + 1 + j + 1); // top j+1
+    idx[ii++] = a;
+    idx[ii++] = c;
+    idx[ii++] = b;
+    idx[ii++] = b;
+    idx[ii++] = c;
+    idx[ii++] = d;
+  }
+  // --- Top cap indices (CCW from above) ---
+  for (int j = 0; j < kSlices; ++j) {
+    const std::uint32_t centre = topBase;
+    const std::uint32_t r0 = topBase + 1U + static_cast<std::uint32_t>(j);
+    const std::uint32_t r1 =
+        topBase + 1U + static_cast<std::uint32_t>((j + 1) % kSlices);
+    idx[ii++] = centre;
+    idx[ii++] = r1;
+    idx[ii++] = r0;
+  }
+  // --- Bottom cap indices (CCW from below) ---
+  for (int j = 0; j < kSlices; ++j) {
+    const std::uint32_t centre = botBase;
+    const std::uint32_t r0 = botBase + 1U + static_cast<std::uint32_t>(j);
+    const std::uint32_t r1 =
+        botBase + 1U + static_cast<std::uint32_t>((j + 1) % kSlices);
+    idx[ii++] = centre;
+    idx[ii++] = r0;
+    idx[ii++] = r1;
+  }
+
+  return renderer::build_gpu_mesh_from_data(
+      verts, static_cast<std::uint32_t>(kTotalVerts), idx,
+      static_cast<std::uint32_t>(kTotalIdx), false, outMesh);
+}
+
+// Capsule: radius 0.5, total height 2.0 (cylinder body height 1.0 +
+// hemispheres). 8 stacks per hemisphere, 16 slices.
+bool build_capsule_mesh(renderer::GpuMesh *outMesh) noexcept {
+  constexpr int kHemiStacks = 8;
+  constexpr int kSlices = 16;
+  constexpr float kRadius = 0.5F;
+  constexpr float kHalfBodyH = 0.5F; // cylinder centre half-height
+  constexpr float kPI = 3.14159265359F;
+
+  // Total rows = kHemiStacks*2 + 1 cylinder band (just top+bottom rings)
+  //   top hemisphere: (kHemiStacks+1) rows
+  //   bottom hemisphere: (kHemiStacks+1) rows
+  //   shared equator row → -1
+  constexpr int kRows = kHemiStacks * 2 + 1; // =17 rows
+  constexpr int kVCount = kRows * (kSlices + 1);
+  constexpr int kICount = (kRows - 1) * kSlices * 6;
+
+  float verts[kVCount * 6]{};
+  std::uint32_t idx[kICount]{};
+
+  int vi = 0;
+  // Row 0 = north pole (top of capsule, y = +kRadius + kHalfBodyH)
+  // Row kHemiStacks = equator (y = +kHalfBodyH)
+  // Row kHemiStacks+1 = equator of bottom body (y = -kHalfBodyH)
+  // Row kHemiStacks*2 = south pole (y = -kRadius - kHalfBodyH)
+  for (int i = 0; i < kRows; ++i) {
+    float theta = 0.0F;
+    float yOffset = 0.0F;
+    if (i <= kHemiStacks) {
+      // Top hemisphere: theta 0 → PI/2
+      theta = static_cast<float>(i) * (kPI * 0.5F) /
+              static_cast<float>(kHemiStacks);
+      yOffset = kHalfBodyH;
+    } else {
+      // Bottom hemisphere: theta PI/2 → PI
+      theta = (kPI * 0.5F) + static_cast<float>(i - kHemiStacks) *
+                                 (kPI * 0.5F) / static_cast<float>(kHemiStacks);
+      yOffset = -kHalfBodyH;
+    }
+    const float sinT = std::sin(theta);
+    const float cosT = std::cos(theta);
+    for (int j = 0; j <= kSlices; ++j) {
+      const float phi =
+          static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
+      const float nx = sinT * std::cos(phi);
+      const float ny = cosT;
+      const float nz = sinT * std::sin(phi);
+      verts[vi++] = nx * kRadius;
+      verts[vi++] = ny * kRadius + yOffset;
+      verts[vi++] = nz * kRadius;
+      verts[vi++] = nx;
+      verts[vi++] = ny;
+      verts[vi++] = nz;
+    }
+  }
+
+  int ii = 0;
+  for (int i = 0; i < kRows - 1; ++i) {
+    for (int j = 0; j < kSlices; ++j) {
+      const std::uint32_t a = static_cast<std::uint32_t>(i * (kSlices + 1) + j);
+      const std::uint32_t b = a + static_cast<std::uint32_t>(kSlices + 1);
+      const std::uint32_t c = b + 1U;
+      const std::uint32_t d = a + 1U;
+      idx[ii++] = a;
+      idx[ii++] = c;
+      idx[ii++] = b;
+      idx[ii++] = a;
+      idx[ii++] = d;
+      idx[ii++] = c;
+    }
+  }
+
+  return renderer::build_gpu_mesh_from_data(
+      verts, static_cast<std::uint32_t>(kVCount), idx,
+      static_cast<std::uint32_t>(kICount), false, outMesh);
+}
+
+// Triangular pyramid (tetrahedron-like): equilateral base side ≈ 1 at y=0,
+// apex at y=1.  4 faces, 12 vertices (3 per face with face normals).
+bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
+  // Base vertices of equilateral triangle at y=0, circumradius ~0.577
+  constexpr float kR = 0.5774F;        // 1/sqrt(3)
+  constexpr float kPI2_3 = 2.0943951F; // 2*PI/3
+  // p0 = (R,0, 0), p1 = (R*cos(2pi/3), 0, R*sin(2pi/3)), p2 = ...
+  const float bx0 = kR, bz0 = 0.0F;
+  const float bx1 = kR * std::cos(kPI2_3), bz1 = kR * std::sin(kPI2_3);
+  const float bx2 = kR * std::cos(2.0F * kPI2_3),
+              bz2 = kR * std::sin(2.0F * kPI2_3);
+  const float apex[3] = {0.0F, 1.0F, 0.0F};
+
+  const auto cross3 = [](float ax, float ay, float az, float bxv, float byn,
+                         float bzv, float *ox, float *oy, float *oz) {
+    *ox = ay * bzv - az * byn;
+    *oy = az * bxv - ax * bzv;
+    *oz = ax * byn - ay * bxv;
+  };
+  const auto norm3 = [](float *x, float *y, float *z) {
+    const float len = std::sqrt(*x * *x + *y * *y + *z * *z);
+    if (len > 0.0F) {
+      *x /= len;
+      *y /= len;
+      *z /= len;
+    }
+  };
+
+  // 4 faces × 3 verts × 6 floats = 72, no index buffer needed
+  float verts[72]{};
+  int vi = 0;
+  const auto addFace = [&](float p0x, float p0y, float p0z, float p1x,
+                           float p1y, float p1z, float p2x, float p2y,
+                           float p2z) {
+    float nx, ny, nz;
+    cross3(p1x - p0x, p1y - p0y, p1z - p0z, p2x - p0x, p2y - p0y, p2z - p0z,
+           &nx, &ny, &nz);
+    norm3(&nx, &ny, &nz);
+    verts[vi++] = p0x;
+    verts[vi++] = p0y;
+    verts[vi++] = p0z;
+    verts[vi++] = nx;
+    verts[vi++] = ny;
+    verts[vi++] = nz;
+    verts[vi++] = p1x;
+    verts[vi++] = p1y;
+    verts[vi++] = p1z;
+    verts[vi++] = nx;
+    verts[vi++] = ny;
+    verts[vi++] = nz;
+    verts[vi++] = p2x;
+    verts[vi++] = p2y;
+    verts[vi++] = p2z;
+    verts[vi++] = nx;
+    verts[vi++] = ny;
+    verts[vi++] = nz;
+  };
+
+  // Base (CCW from below, normal downward)
+  addFace(bx0, 0.F, bz0, bx2, 0.F, bz2, bx1, 0.F, bz1);
+  // Front side
+  addFace(bx0, 0.F, bz0, bx1, 0.F, bz1, apex[0], apex[1], apex[2]);
+  // Right side
+  addFace(bx1, 0.F, bz1, bx2, 0.F, bz2, apex[0], apex[1], apex[2]);
+  // Left side
+  addFace(bx2, 0.F, bz2, bx0, 0.F, bz0, apex[0], apex[1], apex[2]);
+
+  return renderer::build_gpu_mesh_from_data(verts, 12U, nullptr, 0U, false,
+                                            outMesh);
+}
+
+// Register a procedurally-built GpuMesh into the mesh registry and asset DB.
+// Returns kInvalidAssetId on failure. Uses a fake "builtin://<name>" path so
+// the asset manager never tries to load it from disk.
+renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
+                                        renderer::AssetDatabase *database,
+                                        const renderer::GpuMesh &mesh,
+                                        const char *builtinPath) noexcept {
+  const std::uint32_t slot = renderer::register_gpu_mesh(registry, mesh);
+  if (slot == 0U) {
+    return renderer::kInvalidAssetId;
+  }
+  const renderer::MeshHandle handle{slot};
+  const renderer::AssetId id = renderer::make_asset_id_from_path(builtinPath);
+  if (id == renderer::kInvalidAssetId) {
+    return renderer::kInvalidAssetId;
+  }
+  if (!renderer::register_mesh_asset(database, id, builtinPath, handle)) {
+    return renderer::kInvalidAssetId;
+  }
+  return id;
 }
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
@@ -513,17 +922,86 @@ void run(std::uint32_t maxFrames) noexcept {
   const renderer::AssetId bootstrapMeshAssetId =
       renderer::make_asset_id_from_path(bootstrapMeshPath);
   scripting::set_default_mesh_asset_id(bootstrapMeshAssetId);
-  if ((bootstrapMeshAssetId == renderer::kInvalidAssetId) ||
-      !renderer::queue_mesh_load(assetManager.get(), assetDatabase.get(),
-                                 bootstrapMeshAssetId, bootstrapMeshPath) ||
-      !renderer::update_asset_manager(assetManager.get(), assetDatabase.get(),
-                                      meshRegistry.get(), 8U) ||
-      (renderer::mesh_asset_state(assetDatabase.get(), bootstrapMeshAssetId) !=
-       renderer::AssetState::Ready)) {
+  bool bootstrapMeshLoadOk =
+      (bootstrapMeshAssetId != renderer::kInvalidAssetId) &&
+      renderer::queue_mesh_load(assetManager.get(), assetDatabase.get(),
+                                bootstrapMeshAssetId, bootstrapMeshPath);
+  if (bootstrapMeshLoadOk) {
+    if (!core::make_render_context_current()) {
+      core::log_message(
+          core::LogLevel::Error, "engine",
+          "failed to acquire OpenGL context for bootstrap mesh upload");
+      return;
+    }
+
+    bootstrapMeshLoadOk = renderer::update_asset_manager(
+        assetManager.get(), assetDatabase.get(), meshRegistry.get(), 8U);
+    core::release_render_context();
+    bootstrapMeshLoadOk = bootstrapMeshLoadOk &&
+                          (renderer::mesh_asset_state(assetDatabase.get(),
+                                                      bootstrapMeshAssetId) ==
+                           renderer::AssetState::Ready);
+  }
+
+  if (!bootstrapMeshLoadOk) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to load bootstrap mesh asset");
     return;
   }
+
+  // --- Create procedural built-in meshes (plane, cube, sphere, cylinder,
+  // capsule, pyramid). build_gpu_mesh_from_data requires owning the GL
+  // context, so acquire it explicitly for this upload block.
+  renderer::AssetId planeMeshAssetId = renderer::kInvalidAssetId;
+  renderer::AssetId cubeMeshAssetId = renderer::kInvalidAssetId;
+  renderer::AssetId sphereMeshAssetId = renderer::kInvalidAssetId;
+  renderer::AssetId cylinderMeshAssetId = renderer::kInvalidAssetId;
+  renderer::AssetId capsuleMeshAssetId = renderer::kInvalidAssetId;
+  renderer::AssetId pyramidMeshAssetId = renderer::kInvalidAssetId;
+  if (!core::make_render_context_current()) {
+    core::log_message(
+        core::LogLevel::Warning, "engine",
+        "failed to acquire OpenGL context for procedural mesh upload");
+  } else {
+    renderer::GpuMesh m{};
+    if (build_plane_mesh(&m)) {
+      planeMeshAssetId = register_builtin_mesh(
+          meshRegistry.get(), assetDatabase.get(), m, "builtin://plane");
+    }
+    m = renderer::GpuMesh{};
+    if (build_cube_mesh(&m)) {
+      cubeMeshAssetId = register_builtin_mesh(
+          meshRegistry.get(), assetDatabase.get(), m, "builtin://cube");
+    }
+    m = renderer::GpuMesh{};
+    if (build_sphere_mesh(&m)) {
+      sphereMeshAssetId = register_builtin_mesh(
+          meshRegistry.get(), assetDatabase.get(), m, "builtin://sphere");
+    }
+    m = renderer::GpuMesh{};
+    if (build_cylinder_mesh(&m)) {
+      cylinderMeshAssetId = register_builtin_mesh(
+          meshRegistry.get(), assetDatabase.get(), m, "builtin://cylinder");
+    }
+    m = renderer::GpuMesh{};
+    if (build_capsule_mesh(&m)) {
+      capsuleMeshAssetId = register_builtin_mesh(
+          meshRegistry.get(), assetDatabase.get(), m, "builtin://capsule");
+    }
+    m = renderer::GpuMesh{};
+    if (build_pyramid_mesh(&m)) {
+      pyramidMeshAssetId = register_builtin_mesh(
+          meshRegistry.get(), assetDatabase.get(), m, "builtin://pyramid");
+    }
+    core::release_render_context();
+  }
+  // Default mesh for Lua scripts is the cube; fall back to triangle.mesh.
+  scripting::set_default_mesh_asset_id(
+      (cubeMeshAssetId != renderer::kInvalidAssetId) ? cubeMeshAssetId
+                                                     : bootstrapMeshAssetId);
+  scripting::set_builtin_mesh_ids(planeMeshAssetId, cubeMeshAssetId,
+                                  sphereMeshAssetId, cylinderMeshAssetId,
+                                  capsuleMeshAssetId, pyramidMeshAssetId);
 
   FrameContext *frameContext = g_frameContext.get();
   if (frameContext == nullptr) {
@@ -623,7 +1101,9 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   runtime::MeshComponent meshComponent{};
-  meshComponent.meshAssetId = bootstrapMeshAssetId;
+  meshComponent.meshAssetId = (cubeMeshAssetId != renderer::kInvalidAssetId)
+                                  ? cubeMeshAssetId
+                                  : bootstrapMeshAssetId;
   meshComponent.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
   if (!world->add_mesh_component(entity, meshComponent)) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -652,7 +1132,9 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   runtime::MeshComponent stackedMesh{};
-  stackedMesh.meshAssetId = bootstrapMeshAssetId;
+  stackedMesh.meshAssetId = (cubeMeshAssetId != renderer::kInvalidAssetId)
+                                ? cubeMeshAssetId
+                                : bootstrapMeshAssetId;
   stackedMesh.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
   if (!world->add_mesh_component(stackedEntity, stackedMesh)) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -677,8 +1159,10 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   runtime::MeshComponent groundMesh{};
-  groundMesh.meshAssetId = bootstrapMeshAssetId;
-  groundMesh.albedo = math::Vec3(0.5F, 0.5F, 0.5F);
+  groundMesh.meshAssetId = (planeMeshAssetId != renderer::kInvalidAssetId)
+                               ? planeMeshAssetId
+                               : bootstrapMeshAssetId;
+  groundMesh.albedo = math::Vec3(0.45F, 0.42F, 0.38F);
   if (!world->add_mesh_component(groundEntity, groundMesh)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to add ground mesh component");
@@ -725,7 +1209,13 @@ void run(std::uint32_t maxFrames) noexcept {
                           "failed to reinitialize scripting on stop");
       } else {
         runtime::bind_scripting_runtime(world.get());
-        scripting::set_default_mesh_asset_id(bootstrapMeshAssetId);
+        scripting::set_default_mesh_asset_id(
+            (cubeMeshAssetId != renderer::kInvalidAssetId)
+                ? cubeMeshAssetId
+                : bootstrapMeshAssetId);
+        scripting::set_builtin_mesh_ids(planeMeshAssetId, cubeMeshAssetId,
+                                        sphereMeshAssetId, cylinderMeshAssetId,
+                                        capsuleMeshAssetId, pyramidMeshAssetId);
       }
 
       accumulator = 0.0;
@@ -774,8 +1264,18 @@ void run(std::uint32_t maxFrames) noexcept {
           static_cast<float>(kFixedDeltaSeconds));
     }
 
-    if (!renderer::update_asset_manager(assetManager.get(), assetDatabase.get(),
-                                        meshRegistry.get(), 16U)) {
+    bool updatedAssets = true;
+    if (!core::make_render_context_current()) {
+      core::log_message(
+          core::LogLevel::Warning, "assets",
+          "skipping asset transitions: OpenGL context unavailable");
+    } else {
+      updatedAssets = renderer::update_asset_manager(
+          assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
+      core::release_render_context();
+    }
+
+    if (!updatedAssets) {
       core::log_message(core::LogLevel::Warning, "assets",
                         "one or more asset transitions failed this frame");
     }

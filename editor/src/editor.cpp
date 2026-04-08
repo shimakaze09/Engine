@@ -1106,6 +1106,9 @@ void draw_scene_viewport_panel() noexcept {
   const ImVec2 regionSize = ImGui::GetContentRegionAvail();
   const ImVec2 cursorScreenPos = ImGui::GetCursorScreenPos();
 
+  renderer::set_scene_viewport_size(static_cast<int>(regionSize.x),
+                                    static_cast<int>(regionSize.y));
+
   const std::uint32_t texId = renderer::get_scene_viewport_texture();
   if ((texId != 0U) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
     ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
