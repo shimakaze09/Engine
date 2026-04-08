@@ -1,6 +1,7 @@
 #include "engine/core/event_bus.h"
 
 #include <array>
+#include <cassert>
 #include <cstring>
 
 #include "engine/core/logging.h"
@@ -14,11 +15,17 @@ namespace {
 // ---------------------------------------------------------------------------
 constexpr std::size_t kMaxEventTypes = 64U;
 constexpr std::size_t kMaxSubscribersPerType = 16U;
+constexpr std::uint32_t kMaxEmitDepth = 64U;
 
 struct TypedSubscriber final {
   RawEventHandler handler = nullptr;
   void *userData = nullptr;
 };
+
+constexpr std::size_t kTypedSnapshotBytes =
+    sizeof(TypedSubscriber) * kMaxSubscribersPerType;
+static_assert(kTypedSnapshotBytes <= 1024U,
+              "typed emit snapshot must remain bounded");
 
 struct TypedSlot final {
   EventTypeId typeId = nullptr;
@@ -68,6 +75,11 @@ struct ChannelSubscriber final {
   void *userData = nullptr;
 };
 
+constexpr std::size_t kChannelSnapshotBytes =
+    sizeof(ChannelSubscriber) * kMaxSubscribersPerChannel;
+static_assert(kChannelSnapshotBytes <= 1024U,
+              "channel emit snapshot must remain bounded");
+
 struct ChannelSlot final {
   char name[kMaxChannelNameLength] = {};
   std::uint32_t nameHash = 0U;
@@ -77,6 +89,20 @@ struct ChannelSlot final {
 };
 
 std::array<ChannelSlot, kMaxChannels> g_channelSlots{};
+thread_local std::uint32_t g_emitDepth = 0U;
+
+struct EmitDepthScope final {
+  EmitDepthScope() noexcept {
+    assert(g_emitDepth < kMaxEmitDepth);
+    ++g_emitDepth;
+  }
+
+  ~EmitDepthScope() noexcept {
+    if (g_emitDepth > 0U) {
+      --g_emitDepth;
+    }
+  }
+};
 
 std::uint32_t fnv1a_hash(const char *str) noexcept {
   std::uint32_t hash = 2166136261U;
@@ -90,8 +116,8 @@ std::uint32_t fnv1a_hash(const char *str) noexcept {
 
 ChannelSlot *find_channel_slot(const char *name, std::uint32_t hash) noexcept {
   for (auto &slot : g_channelSlots) {
-    if (slot.active && (slot.nameHash == hash)
-        && (std::strcmp(slot.name, name) == 0)) {
+    if (slot.active && (slot.nameHash == hash) &&
+        (std::strcmp(slot.name, name) == 0)) {
       return &slot;
     }
   }
@@ -153,8 +179,7 @@ void shutdown_event_bus() noexcept {
   g_eventBusInitialized = false;
 }
 
-bool subscribe_raw(EventTypeId typeId,
-                   RawEventHandler handler,
+bool subscribe_raw(EventTypeId typeId, RawEventHandler handler,
                    void *userData) noexcept {
   if ((typeId == nullptr) || (handler == nullptr)) {
     return false;
@@ -165,8 +190,8 @@ bool subscribe_raw(EventTypeId typeId,
     return false;
   }
   if (slot->subscriberCount >= kMaxSubscribersPerType) {
-    log_message(
-        LogLevel::Error, "events", "subscriber limit reached for event type");
+    log_message(LogLevel::Error, "events",
+                "subscriber limit reached for event type");
     return false;
   }
   auto &sub = slot->subscribers[slot->subscriberCount];
@@ -176,16 +201,15 @@ bool subscribe_raw(EventTypeId typeId,
   return true;
 }
 
-bool unsubscribe_raw(EventTypeId typeId,
-                     RawEventHandler handler,
+bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
                      void *userData) noexcept {
   auto *slot = find_typed_slot(typeId);
   if (slot == nullptr) {
     return false;
   }
   for (std::size_t i = 0U; i < slot->subscriberCount; ++i) {
-    if ((slot->subscribers[i].handler == handler)
-        && (slot->subscribers[i].userData == userData)) {
+    if ((slot->subscribers[i].handler == handler) &&
+        (slot->subscribers[i].userData == userData)) {
       // Swap with last and shrink.
       slot->subscribers[i] = slot->subscribers[slot->subscriberCount - 1U];
       slot->subscribers[slot->subscriberCount - 1U] = TypedSubscriber{};
@@ -197,15 +221,28 @@ bool unsubscribe_raw(EventTypeId typeId,
 }
 
 void emit_raw(EventTypeId typeId, const void *eventData) noexcept {
+  EmitDepthScope emitDepthScope{};
+  static_cast<void>(emitDepthScope);
+
   auto *slot = find_typed_slot(typeId);
   if (slot == nullptr) {
     return;
   }
-  // Copy count to avoid issues if a handler subscribes/unsubscribes during
-  // emission.
-  const std::size_t count = slot->subscriberCount;
+  // Snapshot subscribers so subscribe/unsubscribe during emit is safe.
+  std::array<TypedSubscriber, kMaxSubscribersPerType> subscribersSnapshot{};
+  const std::size_t count =
+      (slot->subscriberCount <= subscribersSnapshot.size())
+          ? slot->subscriberCount
+          : subscribersSnapshot.size();
   for (std::size_t i = 0U; i < count; ++i) {
-    slot->subscribers[i].handler(eventData, slot->subscribers[i].userData);
+    subscribersSnapshot[i] = slot->subscribers[i];
+  }
+
+  for (std::size_t i = 0U; i < count; ++i) {
+    const TypedSubscriber &subscriber = subscribersSnapshot[i];
+    if (subscriber.handler != nullptr) {
+      subscriber.handler(eventData, subscriber.userData);
+    }
   }
 }
 
@@ -213,8 +250,7 @@ void emit_raw(EventTypeId typeId, const void *eventData) noexcept {
 // Channel Bus API
 // ---------------------------------------------------------------------------
 
-bool subscribe_channel(const char *channelName,
-                       ChannelHandler handler,
+bool subscribe_channel(const char *channelName, ChannelHandler handler,
                        void *userData) noexcept {
   if ((channelName == nullptr) || (handler == nullptr)) {
     return false;
@@ -225,8 +261,8 @@ bool subscribe_channel(const char *channelName,
     return false;
   }
   if (slot->subscriberCount >= kMaxSubscribersPerChannel) {
-    log_message(
-        LogLevel::Error, "events", "subscriber limit reached for channel");
+    log_message(LogLevel::Error, "events",
+                "subscriber limit reached for channel");
     return false;
   }
   auto &sub = slot->subscribers[slot->subscriberCount];
@@ -236,8 +272,7 @@ bool subscribe_channel(const char *channelName,
   return true;
 }
 
-bool unsubscribe_channel(const char *channelName,
-                         ChannelHandler handler,
+bool unsubscribe_channel(const char *channelName, ChannelHandler handler,
                          void *userData) noexcept {
   if (channelName == nullptr) {
     return false;
@@ -248,8 +283,8 @@ bool unsubscribe_channel(const char *channelName,
     return false;
   }
   for (std::size_t i = 0U; i < slot->subscriberCount; ++i) {
-    if ((slot->subscribers[i].handler == handler)
-        && (slot->subscribers[i].userData == userData)) {
+    if ((slot->subscribers[i].handler == handler) &&
+        (slot->subscribers[i].userData == userData)) {
       slot->subscribers[i] = slot->subscribers[slot->subscriberCount - 1U];
       slot->subscribers[slot->subscriberCount - 1U] = ChannelSubscriber{};
       --slot->subscriberCount;
@@ -259,9 +294,11 @@ bool unsubscribe_channel(const char *channelName,
   return false;
 }
 
-void emit_channel(const char *channelName,
-                  const void *data,
+void emit_channel(const char *channelName, const void *data,
                   std::size_t size) noexcept {
+  EmitDepthScope emitDepthScope{};
+  static_cast<void>(emitDepthScope);
+
   if (channelName == nullptr) {
     return;
   }
@@ -270,9 +307,21 @@ void emit_channel(const char *channelName,
   if (slot == nullptr) {
     return;
   }
-  const std::size_t count = slot->subscriberCount;
+  std::array<ChannelSubscriber, kMaxSubscribersPerChannel>
+      subscribersSnapshot{};
+  const std::size_t count =
+      (slot->subscriberCount <= subscribersSnapshot.size())
+          ? slot->subscriberCount
+          : subscribersSnapshot.size();
   for (std::size_t i = 0U; i < count; ++i) {
-    slot->subscribers[i].handler(data, size, slot->subscribers[i].userData);
+    subscribersSnapshot[i] = slot->subscribers[i];
+  }
+
+  for (std::size_t i = 0U; i < count; ++i) {
+    const ChannelSubscriber &subscriber = subscribersSnapshot[i];
+    if (subscriber.handler != nullptr) {
+      subscriber.handler(data, size, subscriber.userData);
+    }
   }
 }
 

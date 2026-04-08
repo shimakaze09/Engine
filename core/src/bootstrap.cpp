@@ -42,86 +42,136 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
     return true;
   }
 
-  if ((frameAllocatorBytes == 0U)
-      || (frameAllocatorBytes > kMaxFrameAllocatorBytes)) {
+  if ((frameAllocatorBytes == 0U) ||
+      (frameAllocatorBytes > kMaxFrameAllocatorBytes)) {
+    log_message(LogLevel::Error, "core",
+                "invalid frame allocator size for core initialization");
     return false;
   }
+
+  bool loggingInitialized = false;
+  bool vfsInitialized = false;
+  bool eventBusInitialized = false;
+  bool platformInitialized = false;
+  bool inputInitialized = false;
+  bool profilerInitialized = false;
+  bool jobSystemInitialized = false;
+  bool initializedSuccessfully = false;
+  const char *failureMessage = nullptr;
 
   g_mainFrameAllocator.init(g_mainFrameAllocatorMemory.data(),
                             frameAllocatorBytes);
   g_mainFrameAllocatorInterface = make_allocator(&g_mainFrameAllocator);
 
-  if (!initialize_logging()) {
-    return false;
+  do {
+    if (!initialize_logging()) {
+      failureMessage = "failed to initialize logging";
+      break;
+    }
+    loggingInitialized = true;
+
+    if (!initialize_vfs()) {
+      failureMessage = "failed to initialize virtual file system";
+      break;
+    }
+    vfsInitialized = true;
+
+    if (!initialize_event_bus()) {
+      failureMessage = "failed to initialize event bus";
+      break;
+    }
+    eventBusInitialized = true;
+
+    if (!initialize_platform()) {
+      failureMessage = "failed to initialize platform";
+      break;
+    }
+    platformInitialized = true;
+
+    if (!initialize_input()) {
+      failureMessage = "failed to initialize input";
+      break;
+    }
+    inputInitialized = true;
+
+    if (!initialize_profiler()) {
+      failureMessage = "failed to initialize profiler";
+      break;
+    }
+    profilerInitialized = true;
+
+    const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
+    const std::uint32_t workerThreads =
+        (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
+    if (!initialize_job_system(workerThreads)) {
+      failureMessage = "failed to initialize job system";
+      break;
+    }
+    jobSystemInitialized = true;
+
+    g_threadFrameAllocatorCount = static_cast<std::size_t>(thread_count());
+    if ((g_threadFrameAllocatorCount == 0U) ||
+        (g_threadFrameAllocatorCount > kMaxThreadFrameAllocators)) {
+      failureMessage = "thread frame allocator count is out of range";
+      break;
+    }
+
+    for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {
+      g_threadFrameAllocators[i].init(g_threadFrameAllocatorMemory[i].data(),
+                                      kThreadFrameAllocatorBytes);
+      g_threadFrameAllocatorInterfaces[i] =
+          make_allocator(&g_threadFrameAllocators[i]);
+    }
+
+    initializedSuccessfully = true;
+  } while (false);
+
+  if (initializedSuccessfully) {
+    g_coreInitialized = true;
+    log_message(LogLevel::Info, "core", "core initialized");
+    return true;
   }
 
-  if (!initialize_vfs()) {
-    shutdown_logging();
-    return false;
+  if (loggingInitialized && (failureMessage != nullptr)) {
+    log_message(LogLevel::Error, "core", failureMessage);
   }
 
-  if (!initialize_event_bus()) {
-    shutdown_vfs();
-    shutdown_logging();
-    return false;
-  }
-
-  if (!initialize_platform()) {
-    shutdown_event_bus();
-    shutdown_vfs();
-    shutdown_logging();
-    return false;
-  }
-
-  if (!initialize_input()) {
-    shutdown_platform();
-    shutdown_event_bus();
-    shutdown_vfs();
-    shutdown_logging();
-    return false;
-  }
-
-  if (!initialize_profiler()) {
-    shutdown_input();
-    shutdown_platform();
-    shutdown_event_bus();
-    shutdown_vfs();
-    shutdown_logging();
-    return false;
-  }
-
-  const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
-  const std::uint32_t workerThreads =
-      (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
-  if (!initialize_job_system(workerThreads)) {
-    shutdown_platform();
-    shutdown_event_bus();
-    shutdown_vfs();
-    shutdown_logging();
-    return false;
-  }
-
-  g_threadFrameAllocatorCount = static_cast<std::size_t>(thread_count());
-  if ((g_threadFrameAllocatorCount == 0U)
-      || (g_threadFrameAllocatorCount > kMaxThreadFrameAllocators)) {
+  if (jobSystemInitialized) {
     shutdown_job_system();
+  }
+
+  if (profilerInitialized) {
+    shutdown_profiler();
+  }
+
+  if (inputInitialized) {
+    shutdown_input();
+  }
+
+  if (platformInitialized) {
     shutdown_platform();
+  }
+
+  if (eventBusInitialized) {
     shutdown_event_bus();
+  }
+
+  if (vfsInitialized) {
     shutdown_vfs();
+  }
+
+  if (loggingInitialized) {
     shutdown_logging();
-    return false;
   }
 
-  for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {
-    g_threadFrameAllocators[i].init(g_threadFrameAllocatorMemory[i].data(),
-                                    kThreadFrameAllocatorBytes);
-    g_threadFrameAllocatorInterfaces[i] =
-        make_allocator(&g_threadFrameAllocators[i]);
+  g_mainFrameAllocator.reset();
+  for (std::size_t i = 0U; i < kMaxThreadFrameAllocators; ++i) {
+    g_threadFrameAllocators[i].reset();
+    g_threadFrameAllocatorInterfaces[i] = Allocator{};
   }
+  g_threadFrameAllocatorCount = 1U;
 
-  g_coreInitialized = true;
-  log_message(LogLevel::Info, "core", "core initialized");
-  return true;
+  return false;
 }
 
 void shutdown_core() noexcept {
@@ -145,13 +195,9 @@ void shutdown_core() noexcept {
   g_coreInitialized = false;
 }
 
-bool is_core_initialized() noexcept {
-  return g_coreInitialized;
-}
+bool is_core_initialized() noexcept { return g_coreInitialized; }
 
-Allocator frame_allocator() noexcept {
-  return g_mainFrameAllocatorInterface;
-}
+Allocator frame_allocator() noexcept { return g_mainFrameAllocatorInterface; }
 
 Allocator thread_frame_allocator(std::size_t threadIndex) noexcept {
   if (threadIndex >= g_threadFrameAllocatorCount) {
@@ -161,9 +207,7 @@ Allocator thread_frame_allocator(std::size_t threadIndex) noexcept {
   return g_threadFrameAllocatorInterfaces[threadIndex];
 }
 
-void reset_frame_allocator() noexcept {
-  g_mainFrameAllocator.reset();
-}
+void reset_frame_allocator() noexcept { g_mainFrameAllocator.reset(); }
 
 void reset_thread_frame_allocators() noexcept {
   for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {

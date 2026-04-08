@@ -51,8 +51,7 @@ void normalize_path(char *path, std::size_t length) noexcept {
 
 // Resolve virtualPath to an OS path using the longest-prefix match.
 // Returns the number of characters written (excluding null) or 0 on failure.
-std::size_t resolve(const char *virtualPath,
-                    char *outBuffer,
+std::size_t resolve(const char *virtualPath, char *outBuffer,
                     std::size_t capacity) noexcept {
   if ((virtualPath == nullptr) || (outBuffer == nullptr) || (capacity == 0U)) {
     return 0U;
@@ -79,13 +78,13 @@ std::size_t resolve(const char *virtualPath,
       continue;
     }
     // Prefix must match exactly up to its length.
-    if (std::strncmp(normalizedVirtual, entry.prefix, entry.prefixLength)
-        != 0) {
+    if (std::strncmp(normalizedVirtual, entry.prefix, entry.prefixLength) !=
+        0) {
       continue;
     }
     // After the prefix, the next char must be '/' or end of string.
-    if ((entry.prefixLength < vpLen)
-        && (normalizedVirtual[entry.prefixLength] != '/')) {
+    if ((entry.prefixLength < vpLen) &&
+        (normalizedVirtual[entry.prefixLength] != '/')) {
       continue;
     }
     if (entry.prefixLength > bestPrefixLen) {
@@ -155,8 +154,8 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
   }
   const std::size_t prefixLen = std::strlen(virtualPrefix);
   const std::size_t osLen = std::strlen(osDirectoryPath);
-  if ((prefixLen == 0U) || (prefixLen >= kMaxPrefixLength) || (osLen == 0U)
-      || (osLen >= kMaxOsPathLength)) {
+  if ((prefixLen == 0U) || (prefixLen >= kMaxPrefixLength) || (osLen == 0U) ||
+      (osLen >= kMaxOsPathLength)) {
     return false;
   }
 
@@ -209,16 +208,15 @@ bool vfs_file_exists(const char *virtualPath) noexcept {
   }
 #if defined(_WIN32)
   const DWORD attrs = GetFileAttributesA(osPath);
-  return (attrs != INVALID_FILE_ATTRIBUTES)
-         && ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0U);
+  return (attrs != INVALID_FILE_ATTRIBUTES) &&
+         ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0U);
 #else
   struct stat st{};
   return (stat(osPath, &st) == 0) && ((st.st_mode & S_IFREG) != 0);
 #endif
 }
 
-bool vfs_read_binary(const char *virtualPath,
-                     void **outData,
+bool vfs_read_binary(const char *virtualPath, void **outData,
                      std::size_t *outSize) noexcept {
   if ((outData == nullptr) || (outSize == nullptr)) {
     return false;
@@ -277,8 +275,7 @@ bool vfs_read_binary(const char *virtualPath,
   return true;
 }
 
-bool vfs_read_text(const char *virtualPath,
-                   char **outText,
+bool vfs_read_text(const char *virtualPath, char **outText,
                    std::size_t *outSize) noexcept {
   if ((outText == nullptr) || (outSize == nullptr)) {
     return false;
@@ -290,12 +287,15 @@ bool vfs_read_text(const char *virtualPath,
     return false;
   }
 
-  // Re-allocate with null terminator.
-  auto *textBuffer = new (std::nothrow) char[rawSize + 1U];
-  if (textBuffer == nullptr) {
+  // Re-allocate with null terminator using the same allocation type used by
+  // vfs_read_binary so vfs_free() always matches allocation/deallocation.
+  auto *textBufferBytes = new (std::nothrow) std::byte[rawSize + 1U];
+  if (textBufferBytes == nullptr) {
     vfs_free(rawData);
     return false;
   }
+
+  auto *textBuffer = reinterpret_cast<char *>(textBufferBytes);
 
   std::memcpy(textBuffer, rawData, rawSize);
   textBuffer[rawSize] = '\0';
@@ -306,8 +306,7 @@ bool vfs_read_text(const char *virtualPath,
   return true;
 }
 
-bool vfs_write_binary(const char *virtualPath,
-                      const void *data,
+bool vfs_write_binary(const char *virtualPath, const void *data,
                       std::size_t size) noexcept {
   if ((data == nullptr) && (size > 0U)) {
     return false;
@@ -342,8 +341,7 @@ bool vfs_write_binary(const char *virtualPath,
   return true;
 }
 
-bool vfs_write_text(const char *virtualPath,
-                    const char *text,
+bool vfs_write_text(const char *virtualPath, const char *text,
                     std::size_t size) noexcept {
   return vfs_write_binary(virtualPath, text, size);
 }
@@ -376,8 +374,7 @@ std::int64_t vfs_file_mtime(const char *virtualPath) noexcept {
 #endif
 }
 
-bool vfs_resolve_os_path(const char *virtualPath,
-                         char *outBuffer,
+bool vfs_resolve_os_path(const char *virtualPath, char *outBuffer,
                          std::size_t bufferCapacity) noexcept {
   return resolve(virtualPath, outBuffer, bufferCapacity) > 0U;
 }
