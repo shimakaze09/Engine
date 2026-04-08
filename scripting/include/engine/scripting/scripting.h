@@ -3,64 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace engine::runtime {
-class World;
-}
-
 namespace engine::scripting {
-
-struct RaycastHit final {
-  std::uint32_t entityIndex = 0U;
-  float distance = 0.0F;
-  float pointX = 0.0F;
-  float pointY = 0.0F;
-  float pointZ = 0.0F;
-  float normalX = 0.0F;
-  float normalY = 0.0F;
-  float normalZ = 0.0F;
-};
-
-struct Services final {
-  void (*set_camera_position)(float x, float y, float z) noexcept = nullptr;
-  void (*set_camera_target)(float x, float y, float z) noexcept = nullptr;
-  void (*set_camera_up)(float x, float y, float z) noexcept = nullptr;
-  void (*set_camera_fov)(float fovRadians) noexcept = nullptr;
-
-  void (*set_gravity)(float x, float y, float z) noexcept = nullptr;
-  bool (*get_gravity)(float *outX, float *outY, float *outZ) noexcept = nullptr;
-  bool (*raycast)(runtime::World *world, float ox, float oy, float oz, float dx,
-                  float dy, float dz, float maxDistance,
-                  RaycastHit *outHit) noexcept = nullptr;
-  std::uint32_t (*add_distance_joint)(runtime::World *world,
-                                      std::uint32_t entityIndexA,
-                                      std::uint32_t entityIndexB,
-                                      float distance) noexcept = nullptr;
-  void (*remove_joint)(std::uint32_t jointId) noexcept = nullptr;
-  void (*wake_body)(runtime::World *world,
-                    std::uint32_t entityIndex) noexcept = nullptr;
-  bool (*is_sleeping)(runtime::World *world,
-                      std::uint32_t entityIndex) noexcept = nullptr;
-
-  std::uint32_t (*load_sound)(const char *path) noexcept = nullptr;
-  void (*unload_sound)(std::uint32_t soundId) noexcept = nullptr;
-  bool (*play_sound)(std::uint32_t soundId, float volume, float pitch,
-                     bool loop) noexcept = nullptr;
-  void (*stop_sound)(std::uint32_t soundId) noexcept = nullptr;
-  void (*stop_all_sounds)() noexcept = nullptr;
-  void (*set_master_volume)(float volume) noexcept = nullptr;
-
-  bool (*save_scene)(const runtime::World *world,
-                     const char *path) noexcept = nullptr;
-  bool (*save_prefab)(const runtime::World *world, std::uint32_t entityIndex,
-                      const char *path) noexcept = nullptr;
-  std::uint32_t (*instantiate_prefab)(runtime::World *world,
-                                      const char *path) noexcept = nullptr;
-};
 
 bool initialize_scripting() noexcept;
 void shutdown_scripting() noexcept;
-void set_scripting_world(runtime::World *world) noexcept;
-void set_services(const Services *services) noexcept;
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept;
 
 // Set the frame time exposed to Lua via engine.delta_time() /

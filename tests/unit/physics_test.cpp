@@ -5,6 +5,7 @@
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -36,7 +37,7 @@ int check_gravity_step() {
   }
 
   world->begin_update_phase();
-  if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+  if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
     world->end_frame_phase();
     return 5;
   }
@@ -102,7 +103,7 @@ int check_overlap_resolution() {
     return 15;
   }
 
-  if (!engine::physics::resolve_collisions(*world)) {
+  if (!engine::runtime::resolve_collisions(*world)) {
     world->end_frame_phase();
     return 16;
   }
@@ -178,7 +179,7 @@ int check_static_body_immovable() {
     return 25;
   }
 
-  if (!engine::physics::resolve_collisions(*world)) {
+  if (!engine::runtime::resolve_collisions(*world)) {
     world->end_frame_phase();
     return 26;
   }
@@ -238,7 +239,7 @@ int check_angular_velocity_integration() {
   }
 
   world->begin_update_phase();
-  if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+  if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
     world->end_frame_phase();
     return 34;
   }
@@ -308,7 +309,7 @@ int check_angular_impulse_from_collision() {
     world->end_frame_phase();
     return 45;
   }
-  if (!engine::physics::resolve_collisions(*world)) {
+  if (!engine::runtime::resolve_collisions(*world)) {
     world->end_frame_phase();
     return 46;
   }
@@ -361,7 +362,7 @@ int check_zero_inverse_inertia_prevents_rotation() {
   }
 
   world->begin_update_phase();
-  if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+  if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
     world->end_frame_phase();
     return 54;
   }
@@ -436,7 +437,7 @@ int check_high_restitution_bounce() {
     world->end_frame_phase();
     return 65;
   }
-  if (!engine::physics::resolve_collisions(*world)) {
+  if (!engine::runtime::resolve_collisions(*world)) {
     world->end_frame_phase();
     return 66;
   }
@@ -510,7 +511,7 @@ int check_zero_restitution_no_bounce() {
     world->end_frame_phase();
     return 75;
   }
-  if (!engine::physics::resolve_collisions(*world)) {
+  if (!engine::runtime::resolve_collisions(*world)) {
     world->end_frame_phase();
     return 76;
   }
@@ -589,7 +590,7 @@ int check_friction_slows_sliding() {
     world->end_frame_phase();
     return 85;
   }
-  if (!engine::physics::resolve_collisions(*world)) {
+  if (!engine::runtime::resolve_collisions(*world)) {
     world->end_frame_phase();
     return 86;
   }
@@ -643,8 +644,8 @@ int check_raycast_hits_aabb() {
   world->begin_render_prep_phase();
   world->end_frame_phase();
 
-  engine::physics::RayHit hit{};
-  const bool found = engine::physics::raycast(
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
       *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
       engine::math::Vec3(1.0F, 0.0F, 0.0F), 100.0F, &hit);
   if (!found) {
@@ -694,8 +695,8 @@ int check_raycast_hits_sphere() {
   world->begin_render_prep_phase();
   world->end_frame_phase();
 
-  engine::physics::RayHit hit{};
-  const bool found = engine::physics::raycast(
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
       *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
       engine::math::Vec3(0.0F, 0.0F, 1.0F), 100.0F, &hit);
   if (!found) {
@@ -745,8 +746,8 @@ int check_raycast_misses() {
   world->end_frame_phase();
 
   // Ray along X axis should miss the box at (5, 5, 0).
-  engine::physics::RayHit hit{};
-  const bool found = engine::physics::raycast(
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
       *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
       engine::math::Vec3(1.0F, 0.0F, 0.0F), 100.0F, &hit);
   if (found) {
@@ -792,8 +793,8 @@ int check_raycast_returns_closest() {
   world->begin_render_prep_phase();
   world->end_frame_phase();
 
-  engine::physics::RayHit hit{};
-  const bool found = engine::physics::raycast(
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
       *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
       engine::math::Vec3(1.0F, 0.0F, 0.0F), 100.0F, &hit);
   if (!found) {
@@ -852,12 +853,8 @@ int check_distance_joint_maintains_distance() {
   }
 
   // Add a distance joint of length 3.0 (current distance).
-  engine::physics::JointDesc desc{};
-  desc.entityA = anchor;
-  desc.entityB = ball;
-  desc.type = engine::physics::JointType::Distance;
-  desc.distance = 3.0F;
-  const engine::physics::JointId jid = engine::physics::add_joint(desc);
+  const engine::physics::JointId jid =
+      engine::runtime::add_distance_joint(*world, anchor, ball, 3.0F);
   if (jid == engine::physics::kInvalidJointId) {
     return 135;
   }
@@ -865,11 +862,11 @@ int check_distance_joint_maintains_distance() {
   // Run several physics steps with gravity pulling the ball down.
   for (int step = 0; step < 10; ++step) {
     world->begin_update_phase();
-    if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+    if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
       world->end_frame_phase();
       return 136;
     }
-    if (!engine::physics::resolve_collisions(*world)) {
+    if (!engine::runtime::resolve_collisions(*world)) {
       world->end_frame_phase();
       return 137;
     }
@@ -895,7 +892,7 @@ int check_distance_joint_maintains_distance() {
     return 139; // joint failed to maintain distance
   }
 
-  engine::physics::remove_joint(jid);
+  engine::runtime::remove_joint(jid);
 
   return 0;
 }
@@ -952,7 +949,7 @@ int check_ccd_catches_fast_projectile() {
   engine::physics::set_gravity(0.0F, 0.0F, 0.0F);
 
   world->begin_update_phase();
-  if (!engine::physics::step_physics(*world, 1.0F / 60.0F)) {
+  if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
     engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
     world->end_frame_phase();
     return 145;
@@ -1031,14 +1028,14 @@ int check_body_falls_asleep() {
   const float dt = 1.0F / 60.0F;
   for (int frame = 0; frame < 200; ++frame) {
     world->begin_update_phase();
-    engine::physics::step_physics(*world, dt);
+    engine::runtime::step_physics(*world, dt);
     world->commit_update_phase();
-    engine::physics::resolve_collisions(*world);
+    engine::runtime::resolve_collisions(*world);
     world->begin_render_prep_phase();
     world->end_frame_phase();
   }
 
-  if (!engine::physics::is_sleeping(*world, ball)) {
+  if (!engine::runtime::is_sleeping(*world, ball)) {
     return 155; // ball should be sleeping
   }
 
@@ -1095,7 +1092,7 @@ int check_collision_wakes_body() {
 
   engine::physics::set_gravity(0.0F, 0.0F, 0.0F);
 
-  if (!engine::physics::is_sleeping(*world, ball)) {
+  if (!engine::runtime::is_sleeping(*world, ball)) {
     engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
     return 165; // ball should start sleeping
   }
@@ -1103,16 +1100,16 @@ int check_collision_wakes_body() {
   const float dt = 1.0F / 60.0F;
   for (int frame = 0; frame < 30; ++frame) {
     world->begin_update_phase();
-    engine::physics::step_physics(*world, dt);
+    engine::runtime::step_physics(*world, dt);
     world->commit_update_phase();
-    engine::physics::resolve_collisions(*world);
+    engine::runtime::resolve_collisions(*world);
     world->begin_render_prep_phase();
     world->end_frame_phase();
   }
 
   engine::physics::set_gravity(0.0F, -9.8F, 0.0F);
 
-  if (engine::physics::is_sleeping(*world, ball)) {
+  if (engine::runtime::is_sleeping(*world, ball)) {
     return 167; // ball should have been woken by collision
   }
 
@@ -1161,13 +1158,13 @@ int check_wake_body_api() {
     body->sleeping = true;
   }
 
-  if (!engine::physics::is_sleeping(*world, ball)) {
+  if (!engine::runtime::is_sleeping(*world, ball)) {
     return 176; // should report sleeping
   }
 
-  engine::physics::wake_body(*world, ball);
+  engine::runtime::wake_body(*world, ball);
 
-  if (engine::physics::is_sleeping(*world, ball)) {
+  if (engine::runtime::is_sleeping(*world, ball)) {
     return 177; // should be awake after wake_body
   }
 

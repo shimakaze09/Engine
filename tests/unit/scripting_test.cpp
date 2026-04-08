@@ -3,6 +3,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
@@ -58,7 +59,7 @@ int main() {
     return 2;
   }
 
-  engine::scripting::set_scripting_world(world.get());
+  engine::runtime::bind_scripting_runtime(world.get());
   constexpr std::uint32_t kDefaultMeshAssetId = 777U;
   engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
 

@@ -15,6 +15,7 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/math/quat.h"
+#include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
 #if defined(_WIN32)
@@ -35,7 +36,7 @@ namespace {
 
 lua_State *g_state = nullptr;
 runtime::World *g_world = nullptr;
-const Services *g_services = nullptr;
+const RuntimeServices *g_services = nullptr;
 std::uint32_t g_defaultMeshAssetId = 0U;
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
@@ -663,7 +664,7 @@ int lua_engine_raycast(lua_State *state) noexcept {
   const float dz = static_cast<float>(lua_tonumber(state, 6));
   const float maxDist = static_cast<float>(lua_tonumber(state, 7));
 
-  RaycastHit hit{};
+  RuntimeRaycastHit hit{};
   if ((g_services == nullptr) || (g_services->raycast == nullptr) ||
       !g_services->raycast(g_world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
     lua_pushnil(state);
@@ -2163,9 +2164,11 @@ void shutdown_scripting() noexcept {
   g_pendingScenePath[0] = '\0';
 }
 
-void set_scripting_world(runtime::World *world) noexcept { g_world = world; }
+void bind_runtime_world(runtime::World *world) noexcept { g_world = world; }
 
-void set_services(const Services *services) noexcept { g_services = services; }
+void bind_runtime_services(const RuntimeServices *services) noexcept {
+  g_services = services;
+}
 
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept {
   g_defaultMeshAssetId = assetId;

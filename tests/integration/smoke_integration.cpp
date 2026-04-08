@@ -1,6 +1,7 @@
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
 #include "engine/physics/physics.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
 #include <array>
@@ -48,7 +49,7 @@ void run_update_chunk(void *userData) noexcept {
 
   static_cast<void>(jobData->world->update_transforms_range(
       jobData->startIndex, jobData->count, jobData->deltaSeconds));
-  static_cast<void>(engine::physics::step_physics_range(
+  static_cast<void>(engine::runtime::step_physics_range(
       *jobData->world, jobData->startIndex, jobData->count,
       jobData->deltaSeconds));
 }

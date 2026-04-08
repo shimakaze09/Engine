@@ -11,6 +11,8 @@
 #include "engine/math/ray.h"
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
+#include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/world.h"
 
 namespace engine::physics {
 
@@ -29,7 +31,9 @@ constexpr float kSleepThreshold = 0.01F;
 constexpr std::uint8_t kSleepFramesRequired = 60U;
 
 struct JointSlot {
-  JointDesc desc{};
+  runtime::Entity entityA = runtime::kInvalidEntity;
+  runtime::Entity entityB = runtime::kInvalidEntity;
+  float distance = 1.0F;
   bool active = false;
 };
 
@@ -145,6 +149,8 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
 
 } // namespace
 
+void solve_joints(runtime::World &world) noexcept;
+
 bool step_physics(runtime::World &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
 }
@@ -199,7 +205,7 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
       bool clamped = false;
       if ((col != nullptr) && (travelDist > minHalf) && (speed > 1e-6F)) {
         const engine::math::Vec3 dir = engine::math::div(body->velocity, speed);
-        RayHit hit{};
+        runtime::PhysicsRaycastHit hit{};
         if (raycast(world, readTransforms[i].position, dir, travelDist, &hit,
                     entity)) {
           // Clamp position to just before the hit surface.
@@ -800,7 +806,8 @@ engine::math::Vec3 aabb_hit_normal(const engine::math::Vec3 &hitPoint,
 } // namespace
 
 bool raycast(const runtime::World &world, const math::Vec3 &origin,
-             const math::Vec3 &direction, float maxDistance, RayHit *outHit,
+             const math::Vec3 &direction, float maxDistance,
+             runtime::PhysicsRaycastHit *outHit,
              runtime::Entity skipEntity) noexcept {
   // Validate direction vector to prevent NaN from normalization.
   if (math::length_sq(direction) < 1e-12F) {
@@ -869,7 +876,8 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
 
 std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
-                        RayHit *outHits, std::size_t maxHits) noexcept {
+                        runtime::PhysicsRaycastHit *outHits,
+                        std::size_t maxHits) noexcept {
   // Validate direction vector to prevent NaN from normalization.
   if (math::length_sq(direction) < 1e-12F) {
     return 0U;
@@ -916,7 +924,7 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 
     if ((t >= 0.0F) && (t <= maxDistance)) {
       if (hitCount < maxHits) {
-        RayHit &rh = outHits[hitCount];
+        runtime::PhysicsRaycastHit &rh = outHits[hitCount];
         rh.entity = entities[i];
         rh.distance = t;
         rh.point = math::add(origin, math::mul(direction, t));
@@ -933,17 +941,21 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 
   // Sort hits by distance.
   std::sort(outHits, outHits + hitCount,
-            [](const RayHit &a, const RayHit &b) noexcept {
+            [](const runtime::PhysicsRaycastHit &a,
+               const runtime::PhysicsRaycastHit &b) noexcept {
               return a.distance < b.distance;
             });
 
   return hitCount;
 }
 
-JointId add_joint(const JointDesc &desc) noexcept {
+JointId add_distance_joint(runtime::Entity entityA, runtime::Entity entityB,
+                           float distance) noexcept {
   for (std::size_t i = 0U; i < kMaxJoints; ++i) {
     if (!g_joints[i].active) {
-      g_joints[i].desc = desc;
+      g_joints[i].entityA = entityA;
+      g_joints[i].entityB = entityB;
+      g_joints[i].distance = distance;
       g_joints[i].active = true;
       if (i >= g_jointCount) {
         g_jointCount = i + 1U;
@@ -975,16 +987,17 @@ void solve_joints(runtime::World &world) noexcept {
       if (!g_joints[i].active) {
         continue;
       }
-      const JointDesc &jd = g_joints[i].desc;
 
-      runtime::Transform *tA = world.get_transform_write_ptr(jd.entityA);
-      runtime::Transform *tB = world.get_transform_write_ptr(jd.entityB);
+      runtime::Transform *tA =
+          world.get_transform_write_ptr(g_joints[i].entityA);
+      runtime::Transform *tB =
+          world.get_transform_write_ptr(g_joints[i].entityB);
       if ((tA == nullptr) || (tB == nullptr)) {
         continue;
       }
 
-      runtime::RigidBody *bodyA = world.get_rigid_body_ptr(jd.entityA);
-      runtime::RigidBody *bodyB = world.get_rigid_body_ptr(jd.entityB);
+      runtime::RigidBody *bodyA = world.get_rigid_body_ptr(g_joints[i].entityA);
+      runtime::RigidBody *bodyB = world.get_rigid_body_ptr(g_joints[i].entityB);
       const float invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
       const float invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
       const float invMassSum = invMassA + invMassB;
@@ -992,21 +1005,19 @@ void solve_joints(runtime::World &world) noexcept {
         continue;
       }
 
-      if (jd.type == JointType::Distance) {
-        const math::Vec3 delta = math::sub(tB->position, tA->position);
-        const float currentDist = math::length(delta);
-        if (currentDist < 1e-8F) {
-          continue;
-        }
-        const float error = currentDist - jd.distance;
-        const math::Vec3 dir = math::div(delta, currentDist);
-        const math::Vec3 correction = math::mul(dir, error);
-
-        tA->position = math::add(tA->position,
-                                 math::mul(correction, invMassA / invMassSum));
-        tB->position = math::sub(tB->position,
-                                 math::mul(correction, invMassB / invMassSum));
+      const math::Vec3 delta = math::sub(tB->position, tA->position);
+      const float currentDist = math::length(delta);
+      if (currentDist < 1e-8F) {
+        continue;
       }
+      const float error = currentDist - g_joints[i].distance;
+      const math::Vec3 dir = math::div(delta, currentDist);
+      const math::Vec3 correction = math::mul(dir, error);
+
+      tA->position =
+          math::add(tA->position, math::mul(correction, invMassA / invMassSum));
+      tB->position =
+          math::sub(tB->position, math::mul(correction, invMassB / invMassSum));
     }
   }
 
@@ -1031,3 +1042,47 @@ bool is_sleeping(const runtime::World &world, runtime::Entity entity) noexcept {
 }
 
 } // namespace engine::physics
+
+namespace engine::runtime {
+
+bool step_physics(World &world, float deltaSeconds) noexcept {
+  return physics::step_physics(world, deltaSeconds);
+}
+
+bool step_physics_range(World &world, std::size_t startIndex, std::size_t count,
+                        float deltaSeconds) noexcept {
+  return physics::step_physics_range(world, startIndex, count, deltaSeconds);
+}
+
+bool resolve_collisions(World &world) noexcept {
+  return physics::resolve_collisions(world);
+}
+
+bool raycast(const World &world, const math::Vec3 &origin,
+             const math::Vec3 &direction, float maxDistance,
+             PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
+  return physics::raycast(world, origin, direction, maxDistance, outHit,
+                          skipEntity);
+}
+
+physics::JointId add_distance_joint(World &world, Entity entityA,
+                                    Entity entityB, float distance) noexcept {
+  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      !world.is_alive(entityA) || !world.is_alive(entityB)) {
+    return physics::kInvalidJointId;
+  }
+
+  return physics::add_distance_joint(entityA, entityB, distance);
+}
+
+void remove_joint(physics::JointId id) noexcept { physics::remove_joint(id); }
+
+void wake_body(World &world, Entity entity) noexcept {
+  physics::wake_body(world, entity);
+}
+
+bool is_sleeping(const World &world, Entity entity) noexcept {
+  return physics::is_sleeping(world, entity);
+}
+
+} // namespace engine::runtime

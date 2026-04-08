@@ -5,6 +5,7 @@ add_library(engine_runtime STATIC
     src/render_prep_pipeline.cpp
     src/reflect_types.cpp
     src/scene_serializer.cpp
+    src/scripting_bridge.cpp
     src/world.cpp
 )
 

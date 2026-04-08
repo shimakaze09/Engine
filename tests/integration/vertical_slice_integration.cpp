@@ -5,7 +5,9 @@
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
+#include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
@@ -32,10 +34,10 @@ bool nearly_equal(float lhs, float rhs) noexcept {
 bool mat4_nearly_equal(const engine::math::Mat4 &lhs,
                        const engine::math::Mat4 &rhs) noexcept {
   for (std::size_t column = 0U; column < 4U; ++column) {
-    if (!nearly_equal(lhs.columns[column].x, rhs.columns[column].x)
-        || !nearly_equal(lhs.columns[column].y, rhs.columns[column].y)
-        || !nearly_equal(lhs.columns[column].z, rhs.columns[column].z)
-        || !nearly_equal(lhs.columns[column].w, rhs.columns[column].w)) {
+    if (!nearly_equal(lhs.columns[column].x, rhs.columns[column].x) ||
+        !nearly_equal(lhs.columns[column].y, rhs.columns[column].y) ||
+        !nearly_equal(lhs.columns[column].z, rhs.columns[column].z) ||
+        !nearly_equal(lhs.columns[column].w, rhs.columns[column].w)) {
       return false;
     }
   }
@@ -70,8 +72,7 @@ bool write_script_file(const char *contents) noexcept {
   return ok;
 }
 
-bool find_entity_by_name(const engine::runtime::World &world,
-                         const char *name,
+bool find_entity_by_name(const engine::runtime::World &world, const char *name,
                          engine::runtime::Entity *outEntity) noexcept {
   if ((name == nullptr) || (outEntity == nullptr)) {
     return false;
@@ -81,8 +82,8 @@ bool find_entity_by_name(const engine::runtime::World &world,
   world.for_each<engine::runtime::NameComponent>(
       [&name, outEntity](engine::runtime::Entity entity,
                          const engine::runtime::NameComponent &component) {
-        if ((component.name[0] != '\0')
-            && (std::strcmp(component.name, name) == 0)) {
+        if ((component.name[0] != '\0') &&
+            (std::strcmp(component.name, name) == 0)) {
           *outEntity = entity;
         }
       });
@@ -126,9 +127,9 @@ bool run_render_prep_pipeline(
     engine::renderer::CommandBufferBuilder *commandBuffer,
     const engine::renderer::AssetDatabase *assetDatabase,
     const engine::renderer::GpuMeshRegistry *meshRegistry) noexcept {
-  if ((world == nullptr) || (pipelineContext == nullptr)
-      || (commandBuffer == nullptr) || (assetDatabase == nullptr)
-      || (meshRegistry == nullptr)) {
+  if ((world == nullptr) || (pipelineContext == nullptr) ||
+      (commandBuffer == nullptr) || (assetDatabase == nullptr) ||
+      (meshRegistry == nullptr)) {
     return false;
   }
 
@@ -159,9 +160,8 @@ bool run_render_prep_pipeline(
   renderPhaseJob.data = &renderPhaseData;
   const engine::core::JobHandle renderPhaseHandle =
       engine::core::submit(renderPhaseJob);
-  if (!engine::core::is_valid_handle(renderPhaseHandle)
-      || !engine::core::add_dependency(renderPrepPhaseHandle,
-                                       renderPhaseHandle)) {
+  if (!engine::core::is_valid_handle(renderPhaseHandle) ||
+      !engine::core::add_dependency(renderPrepPhaseHandle, renderPhaseHandle)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
     return false;
@@ -176,22 +176,14 @@ bool run_render_prep_pipeline(
       engine::renderer::get_active_camera();
   constexpr float kDefaultAspect = 16.0F / 9.0F;
   const engine::math::Mat4 vpMatrix = engine::math::mul(
-      engine::math::perspective(
-          cam.fovRadians, kDefaultAspect, cam.nearPlane, cam.farPlane),
+      engine::math::perspective(cam.fovRadians, kDefaultAspect, cam.nearPlane,
+                                cam.farPlane),
       engine::math::look_at(cam.position, cam.target, cam.up));
 
-  if (!engine::runtime::enqueue_render_prep_pipeline(pipelineContext,
-                                                     world,
-                                                     commandBuffer,
-                                                     assetDatabase,
-                                                     meshRegistry,
-                                                     renderPrepPhaseHandle,
-                                                     renderPhaseHandle,
-                                                     &frameGraphFailed,
-                                                     frameThreadCount,
-                                                     256U,
-                                                     vpMatrix,
-                                                     &mergeHandle)) {
+  if (!engine::runtime::enqueue_render_prep_pipeline(
+          pipelineContext, world, commandBuffer, assetDatabase, meshRegistry,
+          renderPrepPhaseHandle, renderPhaseHandle, &frameGraphFailed,
+          frameThreadCount, 256U, vpMatrix, &mergeHandle)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
     return false;
@@ -205,8 +197,8 @@ bool run_render_prep_pipeline(
   endFrameJob.data = &endFrameData;
   const engine::core::JobHandle endFrameHandle =
       engine::core::submit(endFrameJob);
-  if (!engine::core::is_valid_handle(endFrameHandle)
-      || !engine::core::add_dependency(mergeHandle, endFrameHandle)) {
+  if (!engine::core::is_valid_handle(endFrameHandle) ||
+      !engine::core::add_dependency(mergeHandle, endFrameHandle)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
     return false;
@@ -237,7 +229,7 @@ int main() {
     return fail(2);
   }
 
-  engine::scripting::set_scripting_world(world.get());
+  engine::runtime::bind_scripting_runtime(world.get());
 
   std::unique_ptr<engine::renderer::AssetDatabase> assetDatabase(
       new (std::nothrow) engine::renderer::AssetDatabase());
@@ -245,8 +237,8 @@ int main() {
       new (std::nothrow) engine::renderer::GpuMeshRegistry());
   std::unique_ptr<engine::renderer::CommandBufferBuilder> commandBuffer(
       new (std::nothrow) engine::renderer::CommandBufferBuilder());
-  if ((assetDatabase == nullptr) || (meshRegistry == nullptr)
-      || (commandBuffer == nullptr)) {
+  if ((assetDatabase == nullptr) || (meshRegistry == nullptr) ||
+      (commandBuffer == nullptr)) {
     engine::scripting::shutdown_scripting();
     return fail(3);
   }
@@ -265,11 +257,9 @@ int main() {
   const char *meshPath = "integration://vertical-slice.mesh";
   const engine::renderer::AssetId meshAssetId =
       engine::renderer::make_asset_id_from_path(meshPath);
-  if ((meshAssetId == engine::renderer::kInvalidAssetId)
-      || !engine::renderer::register_mesh_asset(
-          assetDatabase.get(),
-          meshAssetId,
-          meshPath,
+  if ((meshAssetId == engine::renderer::kInvalidAssetId) ||
+      !engine::renderer::register_mesh_asset(
+          assetDatabase.get(), meshAssetId, meshPath,
           engine::renderer::MeshHandle{meshSlot})) {
     engine::scripting::shutdown_scripting();
     return fail(5);
@@ -302,8 +292,8 @@ int main() {
       "    engine.set_position(mover, x, 1.0, 0.0)\n"
       "end\n";
 
-  if (!write_script_file(script)
-      || !engine::scripting::load_script(kTempScriptPath)) {
+  if (!write_script_file(script) ||
+      !engine::scripting::load_script(kTempScriptPath)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return fail(5);
@@ -360,8 +350,8 @@ int main() {
     }
 
     world->begin_update_phase();
-    if (!world->update_transforms(kStepSeconds)
-        || !engine::physics::step_physics(*world, kStepSeconds)) {
+    if (!world->update_transforms(kStepSeconds) ||
+        !engine::runtime::step_physics(*world, kStepSeconds)) {
       engine::core::shutdown_job_system();
       remove_script_file();
       engine::scripting::shutdown_scripting();
@@ -378,10 +368,8 @@ int main() {
       }
     }
 
-    if (!run_render_prep_pipeline(world.get(),
-                                  renderPrepPipeline.get(),
-                                  commandBuffer.get(),
-                                  assetDatabase.get(),
+    if (!run_render_prep_pipeline(world.get(), renderPrepPipeline.get(),
+                                  commandBuffer.get(), assetDatabase.get(),
                                   meshRegistry.get())) {
       engine::core::shutdown_job_system();
       remove_script_file();
@@ -417,18 +405,18 @@ int main() {
       return fail(16);
     }
 
-    if (!nearly_equal(local.position.x, expectedX)
-        || !nearly_equal(local.position.y, 1.0F)
-        || !nearly_equal(propagated->position.x, expectedX)
-        || !nearly_equal(propagated->position.y, 1.0F)) {
+    if (!nearly_equal(local.position.x, expectedX) ||
+        !nearly_equal(local.position.y, 1.0F) ||
+        !nearly_equal(propagated->position.x, expectedX) ||
+        !nearly_equal(propagated->position.y, 1.0F)) {
       engine::core::shutdown_job_system();
       remove_script_file();
       engine::scripting::shutdown_scripting();
       return fail(17);
     }
 
-    if (world->movement_authority(mover)
-        != engine::runtime::MovementAuthority::Script) {
+    if (world->movement_authority(mover) !=
+        engine::runtime::MovementAuthority::Script) {
       engine::core::shutdown_job_system();
       remove_script_file();
       engine::scripting::shutdown_scripting();
@@ -456,8 +444,8 @@ int main() {
       }
 
       foundMoverCommand = true;
-      if ((view.data[i].mesh.id != meshSlot)
-          || !mat4_nearly_equal(view.data[i].modelMatrix, propagated->matrix)) {
+      if ((view.data[i].mesh.id != meshSlot) ||
+          !mat4_nearly_equal(view.data[i].modelMatrix, propagated->matrix)) {
         engine::core::shutdown_job_system();
         remove_script_file();
         engine::scripting::shutdown_scripting();
@@ -475,10 +463,10 @@ int main() {
   }
 
   engine::runtime::Transform finalTransform{};
-  if (!world->get_transform(mover, &finalTransform)
-      || !nearly_equal(finalTransform.position.x,
-                       static_cast<float>(kFrameCount - 1U) * kStepX)
-      || !observedSpawnDelta || !observedDrawSubmission) {
+  if (!world->get_transform(mover, &finalTransform) ||
+      !nearly_equal(finalTransform.position.x,
+                    static_cast<float>(kFrameCount - 1U) * kStepX) ||
+      !observedSpawnDelta || !observedDrawSubmission) {
     engine::core::shutdown_job_system();
     remove_script_file();
     engine::scripting::shutdown_scripting();
