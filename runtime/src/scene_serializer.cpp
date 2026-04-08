@@ -979,6 +979,16 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
+  if ((world.alive_entity_count() != stagedWorld->alive_entity_count()) ||
+      (world.transform_count() != stagedWorld->transform_count()) ||
+      (world.rigid_body_count() != stagedWorld->rigid_body_count()) ||
+      (world.collider_count() != stagedWorld->collider_count())) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "scene commit invariant mismatch after copy");
+    reset_world(world);
+    return false;
+  }
+
   return true;
 }
 

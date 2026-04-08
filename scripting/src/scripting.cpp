@@ -13,7 +13,6 @@ extern "C" {
 
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
-#include "engine/core/platform.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
@@ -44,6 +43,7 @@ float g_totalSeconds = 0.0F;
 std::uint32_t g_frameIndex = 0U;
 char g_watchedPath[512] = {};
 std::int64_t g_watchedMtime = 0;
+constexpr float kMaxScriptAcceleration = 500.0F;
 
 // --- Entity script module registry ---
 struct EntityScriptModule final {
@@ -102,6 +102,16 @@ bool read_entity(lua_State *state, int index,
   }
 
   *outEntity = entity;
+  return true;
+}
+
+bool ensure_mutation_phase(lua_State *state) noexcept {
+  if ((g_world == nullptr) ||
+      (g_world->current_phase() != runtime::WorldPhase::Input)) {
+    lua_pushboolean(state, 0);
+    return false;
+  }
+
   return true;
 }
 
@@ -308,9 +318,15 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  if (!ensure_mutation_phase(state)) {
+    return 1;
+  }
+
   // set_acceleration accepts total world acceleration; convert to the
   // runtime's additive term used by physics integration.
-  rigidBody.acceleration = math::sub(acceleration, kDefaultGravity);
+  rigidBody.acceleration =
+      math::clamp(math::sub(acceleration, kDefaultGravity),
+                  -kMaxScriptAcceleration, kMaxScriptAcceleration);
 
   const bool ok = g_world->add_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
@@ -455,6 +471,12 @@ int lua_engine_set_name(lua_State *state) noexcept {
   }
 
   runtime::NameComponent component{};
+  const std::size_t nameLength = std::strlen(name);
+  constexpr std::size_t kMaxNameLength = sizeof(component.name) - 1U;
+  if (nameLength > kMaxNameLength) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_name truncated input to NameComponent capacity");
+  }
   std::snprintf(component.name, sizeof(component.name), "%s", name);
   component.name[sizeof(component.name) - 1U] = '\0';
 
@@ -507,14 +529,20 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  if (!ensure_mutation_phase(state)) {
+    return 1;
+  }
+
   const float value = static_cast<float>(lua_tonumber(state, 2));
-  runtime::Collider *col = g_world->get_collider_ptr(entity);
-  if (col == nullptr) {
+  runtime::Collider collider{};
+  if (!g_world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  col->restitution = value;
-  lua_pushboolean(state, 1);
+
+  collider.restitution = value;
+  const bool ok = g_world->add_collider(entity, collider);
+  lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
@@ -528,16 +556,22 @@ int lua_engine_set_friction(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  if (!ensure_mutation_phase(state)) {
+    return 1;
+  }
+
   const float staticF = static_cast<float>(lua_tonumber(state, 2));
   const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
-  runtime::Collider *col = g_world->get_collider_ptr(entity);
-  if (col == nullptr) {
+  runtime::Collider collider{};
+  if (!g_world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  col->staticFriction = staticF;
-  col->dynamicFriction = dynamicF;
-  lua_pushboolean(state, 1);
+
+  collider.staticFriction = staticF;
+  collider.dynamicFriction = dynamicF;
+  const bool ok = g_world->add_collider(entity, collider);
+  lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 

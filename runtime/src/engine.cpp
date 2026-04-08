@@ -26,7 +26,6 @@
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
-#include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
 #include "engine/math/transform.h"
 #include "engine/physics/physics.h"
