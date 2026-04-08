@@ -55,7 +55,8 @@ Entity World::create_entity() noexcept {
 Entity
 World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "create_entity requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "create_entity requires Input phase");
     return kInvalidEntity;
   }
 
@@ -194,7 +195,8 @@ void World::flush_deferred_destroys() noexcept {
 
 bool World::destroy_entity(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
-    assert(false && "destroy_entity requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "destroy_entity requires a live entity");
     return false;
   }
 
@@ -257,12 +259,14 @@ std::size_t World::alive_entity_count() const noexcept {
 
 bool World::add_transform(Entity entity, const Transform &transform) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_transform requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_transform requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_transform requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_transform requires a live entity");
     return false;
   }
 
@@ -277,12 +281,14 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
 
 bool World::remove_transform(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_transform requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_transform requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_transform requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_transform requires a live entity");
     return false;
   }
 
@@ -299,7 +305,8 @@ bool World::get_transform(Entity entity,
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_transform on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_transform on stale or dead entity");
     return false;
   }
 
@@ -334,12 +341,14 @@ World::get_world_transform_read_ptr(Entity entity) const noexcept {
 bool World::set_movement_authority(Entity entity,
                                    MovementAuthority authority) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "set_movement_authority requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "set_movement_authority requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "set_movement_authority requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "set_movement_authority requires a live entity");
     return false;
   }
 
@@ -357,12 +366,14 @@ MovementAuthority World::movement_authority(Entity entity) const noexcept {
 
 bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_rigid_body requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_rigid_body requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_rigid_body requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_rigid_body requires a live entity");
     return false;
   }
 
@@ -371,12 +382,14 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
 
 bool World::remove_rigid_body(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_rigid_body requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_rigid_body requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_rigid_body requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_rigid_body requires a live entity");
     return false;
   }
 
@@ -390,7 +403,8 @@ bool World::get_rigid_body(Entity entity,
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_rigid_body on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_rigid_body on stale or dead entity");
     return false;
   }
 
@@ -399,12 +413,14 @@ bool World::get_rigid_body(Entity entity,
 
 bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_collider requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_collider requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_collider requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_collider requires a live entity");
     return false;
   }
 
@@ -413,12 +429,14 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
 
 bool World::remove_collider(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_collider requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_collider requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_collider requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_collider requires a live entity");
     return false;
   }
 
@@ -431,7 +449,8 @@ bool World::get_collider(Entity entity, Collider *outCollider) const noexcept {
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_collider on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_collider on stale or dead entity");
     return false;
   }
 
@@ -441,12 +460,14 @@ bool World::get_collider(Entity entity, Collider *outCollider) const noexcept {
 bool World::add_mesh_component(Entity entity,
                                const MeshComponent &component) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_mesh_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_mesh_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_mesh_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_mesh_component requires a live entity");
     return false;
   }
 
@@ -455,12 +476,14 @@ bool World::add_mesh_component(Entity entity,
 
 bool World::remove_mesh_component(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_mesh_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_mesh_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_mesh_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_mesh_component requires a live entity");
     return false;
   }
 
@@ -474,7 +497,8 @@ bool World::get_mesh_component(Entity entity,
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_mesh_component on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_mesh_component on stale or dead entity");
     return false;
   }
 
@@ -501,12 +525,14 @@ World::get_mesh_component_ptr(Entity entity) const noexcept {
 bool World::add_name_component(Entity entity,
                                const NameComponent &component) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_name_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_name_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_name_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_name_component requires a live entity");
     return false;
   }
 
@@ -515,12 +541,14 @@ bool World::add_name_component(Entity entity,
 
 bool World::remove_name_component(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_name_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_name_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_name_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_name_component requires a live entity");
     return false;
   }
 
@@ -534,7 +562,8 @@ bool World::get_name_component(Entity entity,
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_name_component on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_name_component on stale or dead entity");
     return false;
   }
 
@@ -561,12 +590,14 @@ World::get_name_component_ptr(Entity entity) const noexcept {
 bool World::add_light_component(Entity entity,
                                 const LightComponent &component) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_light_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_light_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_light_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_light_component requires a live entity");
     return false;
   }
 
@@ -575,12 +606,14 @@ bool World::add_light_component(Entity entity,
 
 bool World::remove_light_component(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_light_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_light_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_light_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_light_component requires a live entity");
     return false;
   }
 
@@ -594,7 +627,8 @@ bool World::get_light_component(Entity entity,
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_light_component on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_light_component on stale or dead entity");
     return false;
   }
 
@@ -630,12 +664,14 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
 bool World::add_script_component(Entity entity,
                                  const ScriptComponent &component) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "add_script_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_script_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "add_script_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_script_component requires a live entity");
     return false;
   }
 
@@ -644,12 +680,14 @@ bool World::add_script_component(Entity entity,
 
 bool World::remove_script_component(Entity entity) noexcept {
   if (!is_mutation_phase()) {
-    assert(false && "remove_script_component requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_script_component requires Input phase");
     return false;
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "remove_script_component requires a live entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_script_component requires a live entity");
     return false;
   }
 
@@ -663,7 +701,8 @@ bool World::get_script_component(Entity entity,
   }
 
   if (!is_valid_entity(entity)) {
-    assert(false && "get_script_component on stale or dead entity");
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_script_component on stale or dead entity");
     return false;
   }
 
@@ -717,7 +756,8 @@ bool World::get_collider_range(std::size_t startIndex, std::size_t count,
 
 void World::begin_update_phase() noexcept {
   if (m_phase != WorldPhase::Input) {
-    assert(false && "begin_update_phase requires Input phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_update_phase requires Input phase");
     return;
   }
 
@@ -728,11 +768,13 @@ void World::begin_update_phase() noexcept {
 
 void World::begin_update_step() noexcept {
   if (m_phase != WorldPhase::Simulation) {
-    assert(false && "begin_update_step requires Simulation phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_update_step requires Simulation phase");
     return;
   }
   if (m_updateSwapPending) {
-    assert(false && "begin_update_step called with pending update");
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_update_step called with pending update");
     return;
   }
   m_updateSwapPending = true;
@@ -740,7 +782,8 @@ void World::begin_update_step() noexcept {
 
 void World::commit_update_phase() noexcept {
   if ((m_phase != WorldPhase::Simulation) || !m_updateSwapPending) {
-    assert(false && "commit_update_phase requires active Simulation phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "commit_update_phase requires active Simulation phase");
     return;
   }
 
@@ -753,7 +796,8 @@ void World::commit_update_phase() noexcept {
 
 void World::begin_transform_phase() noexcept {
   if ((m_phase != WorldPhase::Simulation) && (m_phase != WorldPhase::Input)) {
-    assert(false && "begin_transform_phase requires Input or Simulation");
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_transform_phase requires Input or Simulation");
     return;
   }
 
@@ -779,7 +823,8 @@ void World::begin_render_prep_phase() noexcept {
   }
 
   if (m_phase != WorldPhase::TransformPropagation) {
-    assert(false && "begin_render_prep_phase requires transform propagation");
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_render_prep_phase requires transform propagation");
     return;
   }
 
@@ -788,7 +833,8 @@ void World::begin_render_prep_phase() noexcept {
 
 void World::begin_render_phase() noexcept {
   if (m_phase != WorldPhase::RenderSubmission) {
-    assert(false && "begin_render_phase requires RenderSubmission phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_render_phase requires RenderSubmission phase");
     return;
   }
 
@@ -800,7 +846,8 @@ void World::end_frame_phase() noexcept {
       (m_phase != WorldPhase::RenderSubmission) &&
       (m_phase != WorldPhase::TransformPropagation) &&
       (m_phase != WorldPhase::Simulation) && (m_phase != WorldPhase::Input)) {
-    assert(false && "end_frame_phase called from invalid phase");
+    core::log_message(core::LogLevel::Error, "world",
+                      "end_frame_phase called from invalid phase");
     return;
   }
 

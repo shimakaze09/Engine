@@ -11,15 +11,10 @@ extern "C" {
 #include <cstring>
 #include <limits>
 
-#include "engine/audio/audio.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/math/quat.h"
-#include "engine/physics/physics.h"
-#include "engine/renderer/camera.h"
-#include "engine/runtime/prefab_serializer.h"
-#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
 #if defined(_WIN32)
@@ -40,6 +35,7 @@ namespace {
 
 lua_State *g_state = nullptr;
 runtime::World *g_world = nullptr;
+const Services *g_services = nullptr;
 std::uint32_t g_defaultMeshAssetId = 0U;
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
@@ -576,44 +572,40 @@ int lua_engine_is_key_pressed(lua_State *state) noexcept {
 
 int lua_engine_set_camera_position(lua_State *state) noexcept {
   math::Vec3 pos{};
-  if (!read_vec3_args(state, 1, &pos)) {
+  if (!read_vec3_args(state, 1, &pos) || (g_services == nullptr) ||
+      (g_services->set_camera_position == nullptr)) {
     return 0;
   }
-  renderer::CameraState cam = renderer::get_active_camera();
-  cam.position = pos;
-  renderer::set_active_camera(cam);
+  g_services->set_camera_position(pos.x, pos.y, pos.z);
   return 0;
 }
 
 int lua_engine_set_camera_target(lua_State *state) noexcept {
   math::Vec3 target{};
-  if (!read_vec3_args(state, 1, &target)) {
+  if (!read_vec3_args(state, 1, &target) || (g_services == nullptr) ||
+      (g_services->set_camera_target == nullptr)) {
     return 0;
   }
-  renderer::CameraState cam = renderer::get_active_camera();
-  cam.target = target;
-  renderer::set_active_camera(cam);
+  g_services->set_camera_target(target.x, target.y, target.z);
   return 0;
 }
 
 int lua_engine_set_camera_up(lua_State *state) noexcept {
   math::Vec3 up{};
-  if (!read_vec3_args(state, 1, &up)) {
+  if (!read_vec3_args(state, 1, &up) || (g_services == nullptr) ||
+      (g_services->set_camera_up == nullptr)) {
     return 0;
   }
-  renderer::CameraState cam = renderer::get_active_camera();
-  cam.up = up;
-  renderer::set_active_camera(cam);
+  g_services->set_camera_up(up.x, up.y, up.z);
   return 0;
 }
 
 int lua_engine_set_camera_fov(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
+  if (!lua_isnumber(state, 1) || (g_services == nullptr) ||
+      (g_services->set_camera_fov == nullptr)) {
     return 0;
   }
-  renderer::CameraState cam = renderer::get_active_camera();
-  cam.fovRadians = static_cast<float>(lua_tonumber(state, 1));
-  renderer::set_active_camera(cam);
+  g_services->set_camera_fov(static_cast<float>(lua_tonumber(state, 1)));
   return 0;
 }
 
@@ -630,15 +622,24 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
   if (lua_isnumber(state, 3)) {
     z = static_cast<float>(lua_tonumber(state, 3));
   }
-  physics::set_gravity(x, y, z);
+  if ((g_services != nullptr) && (g_services->set_gravity != nullptr)) {
+    g_services->set_gravity(x, y, z);
+  }
   return 0;
 }
 
 int lua_engine_get_gravity(lua_State *state) noexcept {
-  const math::Vec3 g = physics::get_gravity();
-  lua_pushnumber(state, static_cast<lua_Number>(g.x));
-  lua_pushnumber(state, static_cast<lua_Number>(g.y));
-  lua_pushnumber(state, static_cast<lua_Number>(g.z));
+  float x = 0.0F;
+  float y = 0.0F;
+  float z = 0.0F;
+  if ((g_services == nullptr) || (g_services->get_gravity == nullptr) ||
+      !g_services->get_gravity(&x, &y, &z)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushnumber(state, static_cast<lua_Number>(x));
+  lua_pushnumber(state, static_cast<lua_Number>(y));
+  lua_pushnumber(state, static_cast<lua_Number>(z));
   return 3;
 }
 
@@ -662,39 +663,36 @@ int lua_engine_raycast(lua_State *state) noexcept {
   const float dz = static_cast<float>(lua_tonumber(state, 6));
   const float maxDist = static_cast<float>(lua_tonumber(state, 7));
 
-  physics::RayHit hit{};
-  if (!physics::raycast(*g_world, math::Vec3(ox, oy, oz),
-                        math::Vec3(dx, dy, dz), maxDist, &hit)) {
+  RaycastHit hit{};
+  if ((g_services == nullptr) || (g_services->raycast == nullptr) ||
+      !g_services->raycast(g_world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(hit.entity.index));
+  lua_pushinteger(state, static_cast<lua_Integer>(hit.entityIndex));
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
-  lua_pushnumber(state, static_cast<lua_Number>(hit.point.x));
-  lua_pushnumber(state, static_cast<lua_Number>(hit.point.y));
-  lua_pushnumber(state, static_cast<lua_Number>(hit.point.z));
-  lua_pushnumber(state, static_cast<lua_Number>(hit.normal.x));
-  lua_pushnumber(state, static_cast<lua_Number>(hit.normal.y));
-  lua_pushnumber(state, static_cast<lua_Number>(hit.normal.z));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.pointZ));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normalX));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normalY));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normalZ));
   return 8;
 }
 
 int lua_engine_add_distance_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
-  if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB)) {
-    lua_pushinteger(state, static_cast<lua_Integer>(physics::kInvalidJointId));
+  if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
+      (g_services == nullptr) || (g_services->add_distance_joint == nullptr)) {
+    lua_pushinteger(state, 0);
     return 1;
   }
   const float dist = lua_isnumber(state, 3)
                          ? static_cast<float>(lua_tonumber(state, 3))
                          : 1.0F;
-  physics::JointDesc desc{};
-  desc.entityA = entityA;
-  desc.entityB = entityB;
-  desc.type = physics::JointType::Distance;
-  desc.distance = dist;
-  const physics::JointId id = physics::add_joint(desc);
+  const std::uint32_t id = g_services->add_distance_joint(
+      g_world, entityA.index, entityB.index, dist);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -703,8 +701,10 @@ int lua_engine_remove_joint(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  const auto id = static_cast<physics::JointId>(lua_tointeger(state, 1));
-  physics::remove_joint(id);
+  if ((g_services != nullptr) && (g_services->remove_joint != nullptr)) {
+    g_services->remove_joint(
+        static_cast<std::uint32_t>(lua_tointeger(state, 1)));
+  }
   return 0;
 }
 
@@ -715,9 +715,10 @@ int lua_engine_wake_body(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  const runtime::Entity entity = g_world->find_entity_by_index(idx);
-  physics::wake_body(*g_world, entity);
+  if ((g_services != nullptr) && (g_services->wake_body != nullptr)) {
+    const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
+    g_services->wake_body(g_world, idx);
+  }
   return 0;
 }
 
@@ -730,9 +731,12 @@ int lua_engine_is_sleeping(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  if ((g_services == nullptr) || (g_services->is_sleeping == nullptr)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  const runtime::Entity entity = g_world->find_entity_by_index(idx);
-  lua_pushboolean(state, physics::is_sleeping(*g_world, entity) ? 1 : 0);
+  lua_pushboolean(state, g_services->is_sleeping(g_world, idx) ? 1 : 0);
   return 1;
 }
 
@@ -743,49 +747,67 @@ int lua_engine_frame_count(lua_State *state) noexcept {
 
 int lua_engine_load_sound(lua_State *state) noexcept {
   const char *path = luaL_checkstring(state, 1);
-  const audio::SoundHandle handle = audio::load_sound(path);
-  lua_pushinteger(state, static_cast<lua_Integer>(handle.id));
+  if ((g_services == nullptr) || (g_services->load_sound == nullptr)) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
+  lua_pushinteger(state,
+                  static_cast<lua_Integer>(g_services->load_sound(path)));
   return 1;
 }
 
 int lua_engine_unload_sound(lua_State *state) noexcept {
-  const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  audio::unload_sound(audio::SoundHandle{id});
+  if ((g_services != nullptr) && (g_services->unload_sound != nullptr)) {
+    const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+    g_services->unload_sound(id);
+  }
   return 0;
 }
 
 int lua_engine_play_sound(lua_State *state) noexcept {
+  if ((g_services == nullptr) || (g_services->play_sound == nullptr)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  audio::PlayParams params{};
+  float volume = 1.0F;
+  float pitch = 1.0F;
+  bool loop = false;
   if (lua_gettop(state) >= 2) {
-    params.volume = static_cast<float>(luaL_optnumber(state, 2, 1.0));
+    volume = static_cast<float>(luaL_optnumber(state, 2, 1.0));
   }
   if (lua_gettop(state) >= 3) {
-    params.pitch = static_cast<float>(luaL_optnumber(state, 3, 1.0));
+    pitch = static_cast<float>(luaL_optnumber(state, 3, 1.0));
   }
   if (lua_gettop(state) >= 4) {
-    params.loop = lua_toboolean(state, 4) != 0;
+    loop = lua_toboolean(state, 4) != 0;
   }
-  const bool ok = audio::play_sound(audio::SoundHandle{id}, params);
+  const bool ok = g_services->play_sound(id, volume, pitch, loop);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 int lua_engine_stop_sound(lua_State *state) noexcept {
-  const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  audio::stop_sound(audio::SoundHandle{id});
+  if ((g_services != nullptr) && (g_services->stop_sound != nullptr)) {
+    const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+    g_services->stop_sound(id);
+  }
   return 0;
 }
 
 int lua_engine_stop_all_sounds(lua_State *state) noexcept {
   static_cast<void>(state);
-  audio::stop_all();
+  if ((g_services != nullptr) && (g_services->stop_all_sounds != nullptr)) {
+    g_services->stop_all_sounds();
+  }
   return 0;
 }
 
 int lua_engine_set_master_volume(lua_State *state) noexcept {
-  const auto vol = static_cast<float>(luaL_checknumber(state, 1));
-  audio::set_master_volume(vol);
+  if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
+    const auto vol = static_cast<float>(luaL_checknumber(state, 1));
+    g_services->set_master_volume(vol);
+  }
   return 0;
 }
 
@@ -1515,7 +1537,9 @@ int lua_engine_save_scene(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = runtime::save_scene(*g_world, path);
+  const bool ok = (g_services != nullptr) && (g_services->save_scene != nullptr)
+                      ? g_services->save_scene(g_world, path)
+                      : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1558,7 +1582,10 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = runtime::save_prefab(*g_world, entity, path);
+  const bool ok =
+      (g_services != nullptr) && (g_services->save_prefab != nullptr)
+          ? g_services->save_prefab(g_world, entity.index, path)
+          : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1573,12 +1600,15 @@ int lua_engine_instantiate(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Entity entity = runtime::instantiate_prefab(*g_world, path);
-  if (entity == runtime::kInvalidEntity) {
+  const std::uint32_t entityIndex =
+      ((g_services != nullptr) && (g_services->instantiate_prefab != nullptr))
+          ? g_services->instantiate_prefab(g_world, path)
+          : 0U;
+  if (entityIndex == 0U) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
+  lua_pushinteger(state, static_cast<lua_Integer>(entityIndex));
   return 1;
 }
 
@@ -2134,6 +2164,8 @@ void shutdown_scripting() noexcept {
 }
 
 void set_scripting_world(runtime::World *world) noexcept { g_world = world; }
+
+void set_services(const Services *services) noexcept { g_services = services; }
 
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept {
   g_defaultMeshAssetId = assetId;

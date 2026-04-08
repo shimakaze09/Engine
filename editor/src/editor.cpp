@@ -1362,11 +1362,6 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
     return;
   }
 
-#ifndef NDEBUG
-  while (glGetError() != GL_NO_ERROR) {
-  }
-#endif
-
   draw_editor_panels(frameMs, utilizationPct);
   ImGui::Render();
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

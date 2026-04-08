@@ -784,6 +784,10 @@ engine::math::Vec3 aabb_hit_normal(const engine::math::Vec3 &hitPoint,
   const float ax = std::fabs(dx);
   const float ay = std::fabs(dy);
   const float az = std::fabs(dz);
+  // If all deviations are zero (exact center hit), return zero normal.
+  if ((ax < 1e-6F) && (ay < 1e-6F) && (az < 1e-6F)) {
+    return engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  }
   if ((ax >= ay) && (ax >= az)) {
     return engine::math::Vec3(sign_or_positive(dx), 0.0F, 0.0F);
   }
@@ -798,6 +802,11 @@ engine::math::Vec3 aabb_hit_normal(const engine::math::Vec3 &hitPoint,
 bool raycast(const runtime::World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance, RayHit *outHit,
              runtime::Entity skipEntity) noexcept {
+  // Validate direction vector to prevent NaN from normalization.
+  if (math::length_sq(direction) < 1e-12F) {
+    return false;
+  }
+
   const std::size_t count = world.collider_count();
   if (count == 0U) {
     return false;
@@ -837,7 +846,7 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
       }
     }
 
-    if ((t >= 0.0F) && (t < bestT)) {
+    if ((t >= 0.0F) && (t <= bestT)) {
       bestT = t;
       hit = true;
       if (outHit != nullptr) {
@@ -861,6 +870,11 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
 std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         RayHit *outHits, std::size_t maxHits) noexcept {
+  // Validate direction vector to prevent NaN from normalization.
+  if (math::length_sq(direction) < 1e-12F) {
+    return 0U;
+  }
+
   if ((outHits == nullptr) || (maxHits == 0U)) {
     return 0U;
   }

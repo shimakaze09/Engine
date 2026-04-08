@@ -5,10 +5,8 @@ add_library(engine_scripting STATIC
 target_include_directories(engine_scripting
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
     ${CMAKE_SOURCE_DIR}/runtime/include
-    ${CMAKE_SOURCE_DIR}/renderer/include
-    ${CMAKE_SOURCE_DIR}/physics/include
-    ${CMAKE_SOURCE_DIR}/audio/include
 )
 
 target_compile_features(engine_scripting PUBLIC cxx_std_20)
