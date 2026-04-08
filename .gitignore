@@ -479,8 +479,7 @@ FodyWeavers.xsd
 *.sln.iml
 
 # Misc
-.github/instructions
-.github/copilot-instructions.md
+.github
 .vscode
 [Bb]uild
 
