@@ -318,6 +318,7 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 }
 
 bool resolve_collisions(runtime::World &world) noexcept {
+  const auto simToken = world.simulation_access_token();
   runtime::World::PhysicsContext &physicsCtx = world.physics_context();
   physicsCtx.collisionPairCount = 0U;
   begin_generation(&physicsCtx.pairHashGeneration,
@@ -343,7 +344,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
         posY{}, posZ{};
 
     for (std::size_t i = 0U; i < colliderCount; ++i) {
-      const runtime::Transform *t = world.get_transform_write_ptr(entities[i]);
+      const runtime::Transform *t =
+          world.get_transform_write_ptr(entities[i], simToken);
       if (t != nullptr) {
         posX[i] = t->position.x;
         posY[i] = t->position.y;
@@ -431,7 +433,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
       }
 
       const runtime::Transform *transformA =
-          world.get_transform_write_ptr(entityA);
+          world.get_transform_write_ptr(entityA, simToken);
       if (transformA == nullptr) {
         continue;
       }
@@ -480,7 +482,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
               }
 
               const runtime::Transform *transformB =
-                  world.get_transform_write_ptr(entityB);
+                  world.get_transform_write_ptr(entityB, simToken);
               if (transformB == nullptr) {
                 continue;
               }
@@ -555,9 +557,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float moveB = overlap * (invMassB / invMassSum);
 
                 runtime::Transform *mutableA =
-                    world.get_transform_write_ptr(entityA);
+                    world.get_transform_write_ptr(entityA, simToken);
                 runtime::Transform *mutableB =
-                    world.get_transform_write_ptr(entityB);
+                    world.get_transform_write_ptr(entityB, simToken);
                 if ((mutableA == nullptr) || (mutableB == nullptr)) {
                   continue;
                 }
@@ -664,9 +666,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float moveB = overlap * (invMassB / invMassSum);
 
                 runtime::Transform *mutableA =
-                    world.get_transform_write_ptr(entityA);
+                    world.get_transform_write_ptr(entityA, simToken);
                 runtime::Transform *mutableB =
-                    world.get_transform_write_ptr(entityB);
+                    world.get_transform_write_ptr(entityB, simToken);
                 if ((mutableA == nullptr) || (mutableB == nullptr)) {
                   continue;
                 }
@@ -764,9 +766,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
               const float moveB = pushAmount * (invMassB / invMassSum);
 
               runtime::Transform *mutableA =
-                  world.get_transform_write_ptr(entityA);
+                  world.get_transform_write_ptr(entityA, simToken);
               runtime::Transform *mutableB =
-                  world.get_transform_write_ptr(entityB);
+                  world.get_transform_write_ptr(entityB, simToken);
               if ((mutableA == nullptr) || (mutableB == nullptr)) {
                 continue;
               }
@@ -1051,6 +1053,7 @@ void remove_joint(runtime::World &world, JointId id) noexcept {
 }
 
 void solve_joints(runtime::World &world) noexcept {
+  const auto simToken = world.simulation_access_token();
   runtime::World::PhysicsContext &ctx = world.physics_context();
   if (ctx.jointCount == 0U) {
     return;
@@ -1063,9 +1066,9 @@ void solve_joints(runtime::World &world) noexcept {
       }
 
       runtime::Transform *tA =
-          world.get_transform_write_ptr(ctx.joints[i].entityA);
+          world.get_transform_write_ptr(ctx.joints[i].entityA, simToken);
       runtime::Transform *tB =
-          world.get_transform_write_ptr(ctx.joints[i].entityB);
+          world.get_transform_write_ptr(ctx.joints[i].entityB, simToken);
       if ((tA == nullptr) || (tB == nullptr)) {
         continue;
       }

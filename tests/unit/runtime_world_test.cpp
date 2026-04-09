@@ -23,8 +23,8 @@ int verify_persistent_id_index() {
     return 2;
   }
 
-  if (world->create_entity_with_persistent_id(1001U)
-      != engine::runtime::kInvalidEntity) {
+  if (world->create_entity_with_persistent_id(1001U) !=
+      engine::runtime::kInvalidEntity) {
     return 3;
   }
 
@@ -36,8 +36,8 @@ int verify_persistent_id_index() {
     return 5;
   }
 
-  if (world->find_entity_by_persistent_id(1001U)
-      != engine::runtime::kInvalidEntity) {
+  if (world->find_entity_by_persistent_id(1001U) !=
+      engine::runtime::kInvalidEntity) {
     return 6;
   }
 
@@ -64,9 +64,9 @@ int verify_hierarchical_transform_propagation() {
   const engine::runtime::Entity parent = world->create_entity();
   const engine::runtime::Entity child = world->create_entity();
   const engine::runtime::Entity sibling = world->create_entity();
-  if ((parent == engine::runtime::kInvalidEntity)
-      || (child == engine::runtime::kInvalidEntity)
-      || (sibling == engine::runtime::kInvalidEntity)) {
+  if ((parent == engine::runtime::kInvalidEntity) ||
+      (child == engine::runtime::kInvalidEntity) ||
+      (sibling == engine::runtime::kInvalidEntity)) {
     return 21;
   }
 
@@ -99,9 +99,9 @@ int verify_hierarchical_transform_propagation() {
     return 25;
   }
 
-  if (!nearly_equal(childWorld->position.x, 1.0F)
-      || !nearly_equal(childWorld->position.y, 2.0F)
-      || !nearly_equal(siblingWorld->position.x, 10.0F)) {
+  if (!nearly_equal(childWorld->position.x, 1.0F) ||
+      !nearly_equal(childWorld->position.y, 2.0F) ||
+      !nearly_equal(siblingWorld->position.x, 10.0F)) {
     return 26;
   }
 
@@ -109,8 +109,9 @@ int verify_hierarchical_transform_propagation() {
   world->end_frame_phase();
 
   world->begin_update_phase();
+  const auto simTokenA = world->simulation_access_token();
   engine::runtime::Transform *parentWrite =
-      world->get_transform_write_ptr(parent);
+      world->get_transform_write_ptr(parent, simTokenA);
   if (parentWrite == nullptr) {
     return 27;
   }
@@ -124,9 +125,9 @@ int verify_hierarchical_transform_propagation() {
     return 28;
   }
 
-  if (!nearly_equal(childWorld->position.x, 3.0F)
-      || !nearly_equal(childWorld->position.y, 2.0F)
-      || !nearly_equal(siblingWorld->position.x, 10.0F)) {
+  if (!nearly_equal(childWorld->position.x, 3.0F) ||
+      !nearly_equal(childWorld->position.y, 2.0F) ||
+      !nearly_equal(siblingWorld->position.x, 10.0F)) {
     return 29;
   }
 
@@ -134,8 +135,9 @@ int verify_hierarchical_transform_propagation() {
   world->end_frame_phase();
 
   world->begin_update_phase();
+  const auto simTokenB = world->simulation_access_token();
   engine::runtime::Transform *childWrite =
-      world->get_transform_write_ptr(child);
+      world->get_transform_write_ptr(child, simTokenB);
   if (childWrite == nullptr) {
     return 30;
   }
@@ -149,8 +151,8 @@ int verify_hierarchical_transform_propagation() {
     return 31;
   }
 
-  if (!nearly_equal(childWorld->position.x, 5.0F)
-      || !nearly_equal(childWorld->position.y, 2.0F)) {
+  if (!nearly_equal(childWorld->position.x, 5.0F) ||
+      !nearly_equal(childWorld->position.y, 2.0F)) {
     return 32;
   }
 
@@ -168,8 +170,8 @@ int verify_transform_cycle_is_stable() {
 
   const engine::runtime::Entity first = world->create_entity();
   const engine::runtime::Entity second = world->create_entity();
-  if ((first == engine::runtime::kInvalidEntity)
-      || (second == engine::runtime::kInvalidEntity)) {
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity)) {
     return 41;
   }
 
@@ -243,8 +245,8 @@ int verify_persistent_index_tombstones() {
   for (std::size_t i = 0U; i < kEntityCount; i += 2U) {
     const engine::runtime::PersistentId id =
         kBaseId + static_cast<std::uint32_t>(i * 17U);
-    if (world->find_entity_by_persistent_id(id)
-        != engine::runtime::kInvalidEntity) {
+    if (world->find_entity_by_persistent_id(id) !=
+        engine::runtime::kInvalidEntity) {
       return 84;
     }
   }
@@ -277,9 +279,9 @@ int verify_variadic_for_each() {
   const engine::runtime::Entity e1 = world->create_entity();
   const engine::runtime::Entity e2 = world->create_entity();
   const engine::runtime::Entity e3 = world->create_entity();
-  if ((e1 == engine::runtime::kInvalidEntity)
-      || (e2 == engine::runtime::kInvalidEntity)
-      || (e3 == engine::runtime::kInvalidEntity)) {
+  if ((e1 == engine::runtime::kInvalidEntity) ||
+      (e2 == engine::runtime::kInvalidEntity) ||
+      (e3 == engine::runtime::kInvalidEntity)) {
     return 101;
   }
 
@@ -325,11 +327,9 @@ int verify_variadic_for_each() {
   // 3-component query: only e1 has Transform + RigidBody + Collider.
   int tripleCount = 0;
   engine::runtime::Entity tripleEntity{};
-  world->for_each<engine::runtime::Transform,
-                  engine::runtime::RigidBody,
+  world->for_each<engine::runtime::Transform, engine::runtime::RigidBody,
                   engine::runtime::Collider>(
-      [&](engine::runtime::Entity entity,
-          const engine::runtime::Transform &,
+      [&](engine::runtime::Entity entity, const engine::runtime::Transform &,
           const engine::runtime::RigidBody &,
           const engine::runtime::Collider &) noexcept {
         ++tripleCount;
@@ -343,8 +343,7 @@ int verify_variadic_for_each() {
   // 2-component query: e1 and e2 have Transform + RigidBody.
   int pairCount = 0;
   world->for_each<engine::runtime::Transform, engine::runtime::RigidBody>(
-      [&](engine::runtime::Entity,
-          const engine::runtime::Transform &,
+      [&](engine::runtime::Entity, const engine::runtime::Transform &,
           const engine::runtime::RigidBody &) noexcept { ++pairCount; });
 
   if (pairCount != 2) {

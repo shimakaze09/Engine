@@ -48,6 +48,10 @@ void tick_timers() noexcept;
 // Tick all active coroutines; call once per frame before on_update.
 void tick_coroutines() noexcept;
 
+// Apply queued script-side world mutations. Call once per frame while the
+// world is in Input phase.
+void flush_deferred_mutations() noexcept;
+
 // Clear all active coroutines (called on stop/reload).
 void clear_coroutines() noexcept;
 

@@ -119,13 +119,14 @@ public:
   static constexpr std::size_t kMaxNameComponents = 16384U;
   static constexpr std::size_t kMaxLightComponents = 1024U;
   static constexpr std::size_t kMaxScriptComponents = 16384U;
+  static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
   static constexpr std::size_t kMaxPhysicsJoints = 4096U;
   static constexpr std::size_t kMaxCollisionPairs = 1024U;
   static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
-  using PhysicsCollisionDispatchFn =
-      void (*)(const std::uint32_t *pairs, std::size_t pairCount) noexcept;
+  using PhysicsCollisionDispatchFn = void (*)(const std::uint32_t *pairs,
+                                              std::size_t pairCount) noexcept;
 
   struct PhysicsJointSlot final {
     Entity entityA = kInvalidEntity;
@@ -189,7 +190,20 @@ public:
   // Read buffer is last committed state; during Idle this is the previous
   // frame.
   const Transform *get_transform_read_ptr(Entity entity) const noexcept;
-  Transform *get_transform_write_ptr(Entity entity) noexcept;
+  class SimulationAccessToken final {
+  public:
+    constexpr bool valid() const noexcept { return m_valid; }
+
+  private:
+    explicit constexpr SimulationAccessToken(bool isValid) noexcept
+        : m_valid(isValid) {}
+    bool m_valid = false;
+    friend class World;
+  };
+  SimulationAccessToken simulation_access_token() const noexcept;
+  Transform *
+  get_transform_write_ptr(Entity entity,
+                          const SimulationAccessToken &token) noexcept;
   const WorldTransform *
   get_world_transform_read_ptr(Entity entity) const noexcept;
   bool set_movement_authority(Entity entity,
@@ -222,6 +236,7 @@ public:
                           NameComponent *outComponent) const noexcept;
   NameComponent *get_name_component_ptr(Entity entity) noexcept;
   const NameComponent *get_name_component_ptr(Entity entity) const noexcept;
+  Entity find_entity_by_name(const char *name) const noexcept;
 
   bool add_script_component(Entity entity,
                             const ScriptComponent &component) noexcept;
@@ -341,6 +356,10 @@ private:
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
   bool propagate_world_transforms() noexcept;
   std::size_t query_state_index() const noexcept;
+  std::uint32_t hash_name_string(const char *name) const noexcept;
+  bool name_lookup_insert(std::uint32_t nameHash, const char *name,
+                          std::uint32_t entityIndex) noexcept;
+  void rebuild_name_lookup() noexcept;
 
   template <typename Component> std::size_t component_count() const noexcept {
     using C = std::remove_cv_t<Component>;
@@ -565,6 +584,9 @@ private:
   ColliderSet m_colliders{};
   MeshComponentSet m_meshComponents{};
   NameComponentSet m_nameComponents{};
+  std::array<std::uint32_t, kNameLookupCapacity> m_nameLookupHashes{};
+  std::array<std::uint32_t, kNameLookupCapacity> m_nameLookupEntityIndices{};
+  std::array<std::uint8_t, kNameLookupCapacity> m_nameLookupState{};
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
   PhysicsContext m_physicsContext{};

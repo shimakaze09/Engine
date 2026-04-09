@@ -6,10 +6,18 @@
 
 #include <array>
 #include <cassert>
+#include <cstring>
 
 namespace engine::runtime {
 
 namespace {
+
+constexpr std::uint32_t kNameHashOffset = 2166136261U;
+constexpr std::uint32_t kNameHashPrime = 16777619U;
+
+constexpr std::uint8_t kNameSlotEmpty = 0U;
+constexpr std::uint8_t kNameSlotOccupied = 1U;
+constexpr std::uint8_t kNameSlotTombstone = 2U;
 
 WorldTransform world_transform_from_local(const Transform &local) noexcept {
   WorldTransform world{};
@@ -44,6 +52,9 @@ World::World() noexcept {
   m_colliders.clear();
   m_meshComponents.clear();
   m_nameComponents.clear();
+  m_nameLookupHashes.fill(0U);
+  m_nameLookupEntityIndices.fill(0U);
+  m_nameLookupState.fill(kNameSlotEmpty);
   m_scriptComponents.clear();
 }
 
@@ -130,6 +141,9 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
     return false;
   }
 
+  NameComponent removedName{};
+  const bool hadName = m_nameComponents.get(entity, &removedName);
+
   static_cast<void>(m_transforms.remove(entity));
   static_cast<void>(m_worldTransforms.remove(entity));
   static_cast<void>(m_rigidBodies.remove(entity));
@@ -156,6 +170,10 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   if (m_freeEntityCount < m_freeEntityIndices.size()) {
     m_freeEntityIndices[m_freeEntityCount] = index;
     ++m_freeEntityCount;
+  }
+
+  if (hadName) {
+    rebuild_name_lookup();
   }
 
   return true;
@@ -320,8 +338,15 @@ const Transform *World::get_transform_read_ptr(Entity entity) const noexcept {
   return m_transforms.get_ptr(entity, m_readStateIndex);
 }
 
-Transform *World::get_transform_write_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity) || (m_phase != WorldPhase::Simulation)) {
+World::SimulationAccessToken World::simulation_access_token() const noexcept {
+  return SimulationAccessToken{m_phase == WorldPhase::Simulation};
+}
+
+Transform *
+World::get_transform_write_ptr(Entity entity,
+                               const SimulationAccessToken &token) noexcept {
+  if (!token.valid() || !is_valid_entity(entity) ||
+      (m_phase != WorldPhase::Simulation)) {
     return nullptr;
   }
 
@@ -535,7 +560,11 @@ bool World::add_name_component(Entity entity,
     return false;
   }
 
-  return m_nameComponents.add(entity, component);
+  const bool ok = m_nameComponents.add(entity, component);
+  if (ok) {
+    rebuild_name_lookup();
+  }
+  return ok;
 }
 
 bool World::remove_name_component(Entity entity) noexcept {
@@ -551,7 +580,11 @@ bool World::remove_name_component(Entity entity) noexcept {
     return false;
   }
 
-  return m_nameComponents.remove(entity);
+  const bool ok = m_nameComponents.remove(entity);
+  if (ok) {
+    rebuild_name_lookup();
+  }
+  return ok;
 }
 
 bool World::get_name_component(Entity entity,
@@ -584,6 +617,38 @@ World::get_name_component_ptr(Entity entity) const noexcept {
   }
 
   return m_nameComponents.get_ptr(entity);
+}
+
+Entity World::find_entity_by_name(const char *name) const noexcept {
+  if ((name == nullptr) || (name[0] == '\0')) {
+    return kInvalidEntity;
+  }
+
+  const std::uint32_t nameHash = hash_name_string(name);
+  std::size_t slot = static_cast<std::size_t>(nameHash) %
+                     static_cast<std::size_t>(kNameLookupCapacity);
+  for (std::size_t probe = 0U; probe < kNameLookupCapacity; ++probe) {
+    if (m_nameLookupState[slot] == kNameSlotEmpty) {
+      return kInvalidEntity;
+    }
+
+    if ((m_nameLookupState[slot] == kNameSlotOccupied) &&
+        (m_nameLookupHashes[slot] == nameHash)) {
+      const Entity candidate =
+          find_entity_by_index(m_nameLookupEntityIndices[slot]);
+      if (candidate != kInvalidEntity) {
+        NameComponent component{};
+        if (m_nameComponents.get(candidate, &component) &&
+            (std::strcmp(component.name, name) == 0)) {
+          return candidate;
+        }
+      }
+    }
+
+    slot = (slot + 1U) % kNameLookupCapacity;
+  }
+
+  return kInvalidEntity;
 }
 
 bool World::add_light_component(Entity entity,
@@ -1066,6 +1131,90 @@ Collider *World::get_collider_ptr(Entity entity) noexcept {
 
 std::size_t World::query_state_index() const noexcept {
   return m_readStateIndex;
+}
+
+std::uint32_t World::hash_name_string(const char *name) const noexcept {
+  std::uint32_t hash = kNameHashOffset;
+  if (name == nullptr) {
+    return hash;
+  }
+
+  for (const unsigned char *p = reinterpret_cast<const unsigned char *>(name);
+       *p != 0U; ++p) {
+    hash ^= static_cast<std::uint32_t>(*p);
+    hash *= kNameHashPrime;
+  }
+
+  return hash;
+}
+
+bool World::name_lookup_insert(std::uint32_t nameHash, const char *name,
+                               std::uint32_t entityIndex) noexcept {
+  if ((name == nullptr) || (name[0] == '\0') || (entityIndex == 0U)) {
+    return false;
+  }
+
+  std::size_t slot = static_cast<std::size_t>(nameHash) %
+                     static_cast<std::size_t>(kNameLookupCapacity);
+  std::size_t tombstone = kNameLookupCapacity;
+  for (std::size_t probe = 0U; probe < kNameLookupCapacity; ++probe) {
+    if (m_nameLookupState[slot] == kNameSlotEmpty) {
+      const std::size_t writeSlot =
+          (tombstone != kNameLookupCapacity) ? tombstone : slot;
+      m_nameLookupState[writeSlot] = kNameSlotOccupied;
+      m_nameLookupHashes[writeSlot] = nameHash;
+      m_nameLookupEntityIndices[writeSlot] = entityIndex;
+      return true;
+    }
+
+    if (m_nameLookupState[slot] == kNameSlotTombstone) {
+      if (tombstone == kNameLookupCapacity) {
+        tombstone = slot;
+      }
+    } else if (m_nameLookupHashes[slot] == nameHash) {
+      const Entity existing =
+          find_entity_by_index(m_nameLookupEntityIndices[slot]);
+      if (existing != kInvalidEntity) {
+        NameComponent existingName{};
+        if (m_nameComponents.get(existing, &existingName) &&
+            (std::strcmp(existingName.name, name) == 0)) {
+          m_nameLookupEntityIndices[slot] = entityIndex;
+          return true;
+        }
+      }
+    }
+
+    slot = (slot + 1U) % kNameLookupCapacity;
+  }
+
+  return false;
+}
+
+void World::rebuild_name_lookup() noexcept {
+  m_nameLookupHashes.fill(0U);
+  m_nameLookupEntityIndices.fill(0U);
+  m_nameLookupState.fill(kNameSlotEmpty);
+
+  const std::size_t count = m_nameComponents.count();
+  for (std::size_t i = 0U; i < count; ++i) {
+    const Entity entity = m_nameComponents.entity_at(i);
+    if (!is_valid_entity(entity)) {
+      continue;
+    }
+
+    const NameComponent &nameComponent = m_nameComponents.component_at(i);
+    if (nameComponent.name[0] == '\0') {
+      continue;
+    }
+
+    const std::uint32_t hash = hash_name_string(nameComponent.name);
+    if (!name_lookup_insert(hash, nameComponent.name, entity.index)) {
+      core::log_message(
+          core::LogLevel::Warning, "world",
+          "name lookup table overflow; name lookup may miss entries");
+      return;
+    }
+  }
 }
 
 bool World::is_mutation_phase() const noexcept {

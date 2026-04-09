@@ -1260,6 +1260,8 @@ void run(std::uint32_t maxFrames) noexcept {
           static_cast<float>(kFixedDeltaSeconds));
     }
 
+    scripting::flush_deferred_mutations();
+
     bool updatedAssets = true;
     if (!core::make_render_context_current()) {
       core::log_message(

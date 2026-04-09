@@ -60,6 +60,228 @@ constexpr std::size_t kMaxEntityScriptModules = 32U;
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
 
+enum class DeferredMutationType : std::uint8_t {
+  DestroyEntity,
+  SetTransform,
+  AddRigidBody,
+  AddCollider,
+  AddMeshComponent,
+  AddNameComponent,
+  AddLightComponent,
+  RemoveLightComponent,
+  AddScriptComponent,
+  RemoveScriptComponent,
+};
+
+struct DeferredMutation final {
+  DeferredMutationType type = DeferredMutationType::DestroyEntity;
+  runtime::Entity entity{};
+  runtime::Transform transform{};
+  runtime::RigidBody rigidBody{};
+  runtime::Collider collider{};
+  runtime::MeshComponent meshComponent{};
+  runtime::NameComponent nameComponent{};
+  runtime::LightComponent lightComponent{};
+  runtime::ScriptComponent scriptComponent{};
+  runtime::MovementAuthority movementAuthority =
+      runtime::MovementAuthority::None;
+  bool setMovementAuthority = false;
+};
+
+constexpr std::size_t kMaxDeferredMutations = 2048U;
+DeferredMutation g_deferredMutations[kMaxDeferredMutations]{};
+std::size_t g_deferredMutationCount = 0U;
+
+bool can_apply_mutations_now() noexcept {
+  return (g_world != nullptr) &&
+         (g_world->current_phase() == runtime::WorldPhase::Input);
+}
+
+bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
+  if (g_deferredMutationCount >= kMaxDeferredMutations) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "deferred mutation queue overflow");
+    return false;
+  }
+
+  g_deferredMutations[g_deferredMutationCount] = mutation;
+  ++g_deferredMutationCount;
+  return true;
+}
+
+bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->destroy_entity(entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::DestroyEntity;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_transform(runtime::Entity entity,
+                              const runtime::Transform &transform,
+                              bool setAuthority,
+                              runtime::MovementAuthority authority) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    const bool transformUpdated = g_world->add_transform(entity, transform);
+    if (!transformUpdated) {
+      return false;
+    }
+    return !setAuthority || g_world->set_movement_authority(entity, authority);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::SetTransform;
+  mutation.entity = entity;
+  mutation.transform = transform;
+  mutation.setMovementAuthority = setAuthority;
+  mutation.movementAuthority = authority;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_rigid_body(runtime::Entity entity,
+                               const runtime::RigidBody &rigidBody) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_rigid_body(entity, rigidBody);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddRigidBody;
+  mutation.entity = entity;
+  mutation.rigidBody = rigidBody;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_collider(runtime::Entity entity,
+                             const runtime::Collider &collider) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_collider(entity, collider);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddCollider;
+  mutation.entity = entity;
+  mutation.collider = collider;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_mesh_component(
+    runtime::Entity entity, const runtime::MeshComponent &component) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_mesh_component(entity, component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddMeshComponent;
+  mutation.entity = entity;
+  mutation.meshComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_name_component(
+    runtime::Entity entity, const runtime::NameComponent &component) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_name_component(entity, component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddNameComponent;
+  mutation.entity = entity;
+  mutation.nameComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_light_component(
+    runtime::Entity entity, const runtime::LightComponent &component) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_light_component(entity, component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddLightComponent;
+  mutation.entity = entity;
+  mutation.lightComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->remove_light_component(entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::RemoveLightComponent;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_script_component(
+    runtime::Entity entity,
+    const runtime::ScriptComponent &component) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_script_component(entity, component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddScriptComponent;
+  mutation.entity = entity;
+  mutation.scriptComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->remove_script_component(entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::RemoveScriptComponent;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
 bool read_entity_index(lua_State *state, int index,
                        std::uint32_t *outIndex) noexcept {
   if ((outIndex == nullptr) || !lua_isnumber(state, index)) {
@@ -111,16 +333,6 @@ bool read_entity(lua_State *state, int index,
   return true;
 }
 
-bool ensure_mutation_phase(lua_State *state) noexcept {
-  if ((g_world == nullptr) ||
-      (g_world->current_phase() != runtime::WorldPhase::Input)) {
-    lua_pushboolean(state, 0);
-    return false;
-  }
-
-  return true;
-}
-
 void log_lua_error(const char *context) noexcept {
   if (g_state == nullptr) {
     return;
@@ -160,7 +372,7 @@ int lua_engine_get_entity_count(lua_State *state) noexcept {
 }
 
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -183,7 +395,7 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  const bool ok = g_world->destroy_entity(entity);
+  const bool ok = apply_or_queue_destroy_entity(entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -236,11 +448,8 @@ int lua_engine_set_position(lua_State *state) noexcept {
   static_cast<void>(g_world->get_transform(entity, &transform));
   transform.position = position;
 
-  const bool transformUpdated = g_world->add_transform(entity, transform);
-  const bool authoritySet =
-      transformUpdated && g_world->set_movement_authority(
-                              entity, runtime::MovementAuthority::Script);
-  const bool ok = transformUpdated && authoritySet;
+  const bool ok = apply_or_queue_transform(entity, transform, true,
+                                           runtime::MovementAuthority::Script);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -281,7 +490,7 @@ int lua_engine_add_rigid_body(lua_State *state) noexcept {
     rigidBody.inverseMass = static_cast<float>(lua_tonumber(state, 2));
   }
 
-  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -303,7 +512,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   }
   rigidBody.velocity = velocity;
 
-  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -324,17 +533,13 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!ensure_mutation_phase(state)) {
-    return 1;
-  }
-
   // set_acceleration accepts total world acceleration; convert to the
   // runtime's additive term used by physics integration.
   rigidBody.acceleration =
       math::clamp(math::sub(acceleration, kDefaultGravity),
                   -kMaxScriptAcceleration, kMaxScriptAcceleration);
 
-  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -358,7 +563,7 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   }
   rigidBody.acceleration = additionalAcceleration;
 
-  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -399,7 +604,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   }
   rigidBody.angularVelocity = angVel;
 
-  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -427,7 +632,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   }
 
   component.meshAssetId = static_cast<std::uint32_t>(meshId);
-  const bool ok = g_world->add_mesh_component(entity, component);
+  const bool ok = apply_or_queue_mesh_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -446,7 +651,8 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // shape: "cube" | "sphere" | "cylinder" | "capsule" | "pyramid" | "plane"
 // Spawns a physics entity with the matching mesh and appropriate collider.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isstring(state, 1)) {
+  if ((g_world == nullptr) || !can_apply_mutations_now() ||
+      !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -550,7 +756,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
   }
 
   component.albedo = albedo;
-  const bool ok = g_world->add_mesh_component(entity, component);
+  const bool ok = apply_or_queue_mesh_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -578,7 +784,7 @@ int lua_engine_set_name(lua_State *state) noexcept {
   std::snprintf(component.name, sizeof(component.name), "%s", name);
   component.name[sizeof(component.name) - 1U] = '\0';
 
-  const bool ok = g_world->add_name_component(entity, component);
+  const bool ok = apply_or_queue_name_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -612,7 +818,7 @@ int lua_engine_add_collider(lua_State *state) noexcept {
   runtime::Collider collider{};
   collider.halfExtents = halfExtents;
 
-  const bool ok = g_world->add_collider(entity, collider);
+  const bool ok = apply_or_queue_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -627,10 +833,6 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!ensure_mutation_phase(state)) {
-    return 1;
-  }
-
   const float value = static_cast<float>(lua_tonumber(state, 2));
   runtime::Collider collider{};
   if (!g_world->get_collider(entity, &collider)) {
@@ -639,7 +841,7 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
   }
 
   collider.restitution = value;
-  const bool ok = g_world->add_collider(entity, collider);
+  const bool ok = apply_or_queue_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -654,10 +856,6 @@ int lua_engine_set_friction(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!ensure_mutation_phase(state)) {
-    return 1;
-  }
-
   const float staticF = static_cast<float>(lua_tonumber(state, 2));
   const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
   runtime::Collider collider{};
@@ -668,7 +866,7 @@ int lua_engine_set_friction(lua_State *state) noexcept {
 
   collider.staticFriction = staticF;
   collider.dynamicFriction = dynamicF;
-  const bool ok = g_world->add_collider(entity, collider);
+  const bool ok = apply_or_queue_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -879,7 +1077,15 @@ int lua_engine_frame_count(lua_State *state) noexcept {
 }
 
 int lua_engine_load_sound(lua_State *state) noexcept {
-  const char *path = luaL_checkstring(state, 1);
+  if (!lua_isstring(state, 1)) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
+  const char *path = lua_tostring(state, 1);
+  if (path == nullptr) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
   if ((g_services == nullptr) || (g_services->load_sound == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
@@ -890,8 +1096,11 @@ int lua_engine_load_sound(lua_State *state) noexcept {
 }
 
 int lua_engine_unload_sound(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    return 0;
+  }
   if ((g_services != nullptr) && (g_services->unload_sound != nullptr)) {
-    const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+    const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
     g_services->unload_sound(id);
   }
   return 0;
@@ -902,15 +1111,19 @@ int lua_engine_play_sound(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+  if (!lua_isnumber(state, 1)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
   float volume = 1.0F;
   float pitch = 1.0F;
   bool loop = false;
-  if (lua_gettop(state) >= 2) {
-    volume = static_cast<float>(luaL_optnumber(state, 2, 1.0));
+  if ((lua_gettop(state) >= 2) && lua_isnumber(state, 2)) {
+    volume = static_cast<float>(lua_tonumber(state, 2));
   }
-  if (lua_gettop(state) >= 3) {
-    pitch = static_cast<float>(luaL_optnumber(state, 3, 1.0));
+  if ((lua_gettop(state) >= 3) && lua_isnumber(state, 3)) {
+    pitch = static_cast<float>(lua_tonumber(state, 3));
   }
   if (lua_gettop(state) >= 4) {
     loop = lua_toboolean(state, 4) != 0;
@@ -921,8 +1134,11 @@ int lua_engine_play_sound(lua_State *state) noexcept {
 }
 
 int lua_engine_stop_sound(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    return 0;
+  }
   if ((g_services != nullptr) && (g_services->stop_sound != nullptr)) {
-    const auto id = static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+    const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
     g_services->stop_sound(id);
   }
   return 0;
@@ -937,8 +1153,11 @@ int lua_engine_stop_all_sounds(lua_State *state) noexcept {
 }
 
 int lua_engine_set_master_volume(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    return 0;
+  }
   if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
-    const auto vol = static_cast<float>(luaL_checknumber(state, 1));
+    const auto vol = static_cast<float>(lua_tonumber(state, 1));
     g_services->set_master_volume(vol);
   }
   return 0;
@@ -984,11 +1203,9 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   static_cast<void>(g_world->get_transform(entity, &transform));
   transform.rotation = math::Quat(qx, qy, qz, qw);
 
-  const bool transformUpdated = g_world->add_transform(entity, transform);
-  const bool authoritySet =
-      transformUpdated && g_world->set_movement_authority(
-                              entity, runtime::MovementAuthority::Script);
-  lua_pushboolean(state, (transformUpdated && authoritySet) ? 1 : 0);
+  const bool ok = apply_or_queue_transform(entity, transform, true,
+                                           runtime::MovementAuthority::Script);
+  lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
@@ -1021,11 +1238,9 @@ int lua_engine_set_scale(lua_State *state) noexcept {
   static_cast<void>(g_world->get_transform(entity, &transform));
   transform.scale = scale;
 
-  const bool transformUpdated = g_world->add_transform(entity, transform);
-  const bool authoritySet =
-      transformUpdated && g_world->set_movement_authority(
-                              entity, runtime::MovementAuthority::Script);
-  lua_pushboolean(state, (transformUpdated && authoritySet) ? 1 : 0);
+  const bool ok = apply_or_queue_transform(entity, transform, true,
+                                           runtime::MovementAuthority::Script);
+  lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
@@ -1058,7 +1273,7 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   rigidBody.inverseMass = static_cast<float>(lua_tonumber(state, 2));
-  const bool ok = g_world->add_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1090,13 +1305,13 @@ int lua_engine_set_half_extents(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  runtime::Collider *col = g_world->get_collider_ptr(entity);
-  if (col == nullptr) {
+  runtime::Collider collider{};
+  if (!g_world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  col->halfExtents = halfExtents;
-  lua_pushboolean(state, 1);
+  collider.halfExtents = halfExtents;
+  lua_pushboolean(state, apply_or_queue_collider(entity, collider) ? 1 : 0);
   return 1;
 }
 
@@ -1171,13 +1386,13 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!g_world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  mesh->roughness = static_cast<float>(lua_tonumber(state, 2));
-  lua_pushboolean(state, 1);
+  mesh.roughness = static_cast<float>(lua_tonumber(state, 2));
+  lua_pushboolean(state, apply_or_queue_mesh_component(entity, mesh) ? 1 : 0);
   return 1;
 }
 
@@ -1202,13 +1417,13 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!g_world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  mesh->metallic = static_cast<float>(lua_tonumber(state, 2));
-  lua_pushboolean(state, 1);
+  mesh.metallic = static_cast<float>(lua_tonumber(state, 2));
+  lua_pushboolean(state, apply_or_queue_mesh_component(entity, mesh) ? 1 : 0);
   return 1;
 }
 
@@ -1233,13 +1448,13 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!g_world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  mesh->opacity = static_cast<float>(lua_tonumber(state, 2));
-  lua_pushboolean(state, 1);
+  mesh.opacity = static_cast<float>(lua_tonumber(state, 2));
+  lua_pushboolean(state, apply_or_queue_mesh_component(entity, mesh) ? 1 : 0);
   return 1;
 }
 
@@ -1274,7 +1489,7 @@ int lua_engine_add_light(lua_State *state) noexcept {
   } else {
     light.type = runtime::LightType::Directional;
   }
-  const bool ok = g_world->add_light_component(entity, light);
+  const bool ok = apply_or_queue_light_component(entity, light);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1285,7 +1500,7 @@ int lua_engine_remove_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = g_world->remove_light_component(entity);
+  const bool ok = apply_or_queue_remove_light_component(entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1313,7 +1528,7 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
     return 1;
   }
   light.color = color;
-  const bool ok = g_world->add_light_component(entity, light);
+  const bool ok = apply_or_queue_light_component(entity, light);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1347,7 +1562,7 @@ int lua_engine_set_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   light.intensity = static_cast<float>(lua_tonumber(state, 2));
-  const bool ok = g_world->add_light_component(entity, light);
+  const bool ok = apply_or_queue_light_component(entity, light);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1380,7 +1595,7 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
     return 1;
   }
   light.direction = dir;
-  const bool ok = g_world->add_light_component(entity, light);
+  const bool ok = apply_or_queue_light_component(entity, light);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -1576,14 +1791,7 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
     return 1;
   }
 
-  runtime::Entity found = runtime::kInvalidEntity;
-  g_world->for_each<runtime::NameComponent>(
-      [&found, searchName](runtime::Entity e,
-                           const runtime::NameComponent &nc) noexcept {
-        if (std::strcmp(nc.name, searchName) == 0) {
-          found = e;
-        }
-      });
+  const runtime::Entity found = g_world->find_entity_by_name(searchName);
 
   if (found == runtime::kInvalidEntity) {
     lua_pushnil(state);
@@ -1594,7 +1802,7 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
 }
 
 int lua_engine_clone_entity(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -1855,7 +2063,7 @@ int lua_engine_add_script_component(lua_State *state) noexcept {
   std::memcpy(comp.scriptPath, path, copy);
   comp.scriptPath[copy] = '\0';
 
-  lua_pushboolean(state, g_world->add_script_component(entity, comp) ? 1 : 0);
+  lua_pushboolean(state, apply_or_queue_script_component(entity, comp) ? 1 : 0);
   return 1;
 }
 
@@ -1866,7 +2074,8 @@ int lua_engine_remove_script_component(lua_State *state) noexcept {
     return 1;
   }
 
-  lua_pushboolean(state, g_world->remove_script_component(entity) ? 1 : 0);
+  lua_pushboolean(state,
+                  apply_or_queue_remove_script_component(entity) ? 1 : 0);
   return 1;
 }
 
@@ -2301,6 +2510,7 @@ void shutdown_scripting() noexcept {
   g_builtinCylinderMesh = 0U;
   g_builtinCapsuleMesh = 0U;
   g_builtinPyramidMesh = 0U;
+  g_deferredMutationCount = 0U;
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
 }
@@ -2480,6 +2690,63 @@ std::int64_t get_file_mtime(const char *path) noexcept {
 
 void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
+}
+
+void flush_deferred_mutations() noexcept {
+  if ((g_world == nullptr) || (g_deferredMutationCount == 0U) ||
+      !can_apply_mutations_now()) {
+    return;
+  }
+
+  const std::size_t count = g_deferredMutationCount;
+  g_deferredMutationCount = 0U;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const DeferredMutation &mutation = g_deferredMutations[i];
+    switch (mutation.type) {
+    case DeferredMutationType::DestroyEntity:
+      static_cast<void>(g_world->destroy_entity(mutation.entity));
+      break;
+    case DeferredMutationType::SetTransform: {
+      const bool transformUpdated =
+          g_world->add_transform(mutation.entity, mutation.transform);
+      if (transformUpdated && mutation.setMovementAuthority) {
+        static_cast<void>(g_world->set_movement_authority(
+            mutation.entity, mutation.movementAuthority));
+      }
+      break;
+    }
+    case DeferredMutationType::AddRigidBody:
+      static_cast<void>(
+          g_world->add_rigid_body(mutation.entity, mutation.rigidBody));
+      break;
+    case DeferredMutationType::AddCollider:
+      static_cast<void>(
+          g_world->add_collider(mutation.entity, mutation.collider));
+      break;
+    case DeferredMutationType::AddMeshComponent:
+      static_cast<void>(
+          g_world->add_mesh_component(mutation.entity, mutation.meshComponent));
+      break;
+    case DeferredMutationType::AddNameComponent:
+      static_cast<void>(
+          g_world->add_name_component(mutation.entity, mutation.nameComponent));
+      break;
+    case DeferredMutationType::AddLightComponent:
+      static_cast<void>(g_world->add_light_component(mutation.entity,
+                                                     mutation.lightComponent));
+      break;
+    case DeferredMutationType::RemoveLightComponent:
+      static_cast<void>(g_world->remove_light_component(mutation.entity));
+      break;
+    case DeferredMutationType::AddScriptComponent:
+      static_cast<void>(g_world->add_script_component(
+          mutation.entity, mutation.scriptComponent));
+      break;
+    case DeferredMutationType::RemoveScriptComponent:
+      static_cast<void>(g_world->remove_script_component(mutation.entity));
+      break;
+    }
+  }
 }
 
 void tick_timers() noexcept {
