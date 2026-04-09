@@ -488,6 +488,50 @@ bool read_mesh_component(const core::JsonParser &parser,
   return true;
 }
 
+bool read_light_component(const core::JsonParser &parser,
+                          const core::JsonValue &lightObject,
+                          LightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (lightObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  LightComponent component{};
+
+  core::JsonValue colorValue{};
+  if (parser.get_object_field(lightObject, "color", &colorValue)) {
+    if (!read_vec3(parser, colorValue, &component.color)) {
+      return false;
+    }
+  }
+
+  core::JsonValue dirValue{};
+  if (parser.get_object_field(lightObject, "direction", &dirValue)) {
+    if (!read_vec3(parser, dirValue, &component.direction)) {
+      return false;
+    }
+  }
+
+  core::JsonValue intensityValue{};
+  if (parser.get_object_field(lightObject, "intensity", &intensityValue)) {
+    static_cast<void>(parser.as_float(intensityValue, &component.intensity));
+  }
+
+  core::JsonValue typeValue{};
+  std::uint32_t type = static_cast<std::uint32_t>(LightType::Directional);
+  if (parser.get_object_field(lightObject, "type", &typeValue)) {
+    if (!parser.as_uint(typeValue, &type)) {
+      return false;
+    }
+  }
+  component.type = (type == static_cast<std::uint32_t>(LightType::Point))
+                       ? LightType::Point
+                       : LightType::Directional;
+
+  *outComponent = component;
+  return true;
+}
+
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel, message);
@@ -586,6 +630,16 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    core::JsonValue lightValue{};
+    if (parser.get_object_field(components, "LightComponent", &lightValue)) {
+      LightComponent light{};
+      if (!read_light_component(parser, lightValue, &light) ||
+          !targetWorld.add_light_component(entity, light)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load LightComponent component");
+      }
+    }
+
     core::JsonValue nameValue{};
     if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
       const char *nameBegin = nullptr;
@@ -678,6 +732,13 @@ bool copy_world_contents(const World &sourceWorld,
     MeshComponent mesh{};
     if (sourceWorld.get_mesh_component(sourceEntity, &mesh) &&
         !targetWorld.add_mesh_component(targetEntity, mesh)) {
+      success = false;
+      return;
+    }
+
+    LightComponent light{};
+    if (sourceWorld.get_light_component(sourceEntity, &light) &&
+        !targetWorld.add_light_component(targetEntity, light)) {
       success = false;
       return;
     }
@@ -781,6 +842,17 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_float("roughness", mesh.roughness);
       writer.write_float("metallic", mesh.metallic);
       writer.write_float("opacity", mesh.opacity);
+      writer.end_object();
+    }
+
+    LightComponent light{};
+    if (world.get_light_component(entity, &light)) {
+      writer.write_key("LightComponent");
+      writer.begin_object();
+      write_vec3(writer, "color", light.color);
+      write_vec3(writer, "direction", light.direction);
+      writer.write_float("intensity", light.intensity);
+      writer.write_uint("type", static_cast<std::uint32_t>(light.type));
       writer.end_object();
     }
 

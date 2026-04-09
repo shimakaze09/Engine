@@ -27,8 +27,8 @@ constexpr std::size_t kJointSolverIterations = 4U;
 
 constexpr float kSleepThreshold = 0.01F;
 constexpr std::uint8_t kSleepFramesRequired = 60U;
-constexpr float kAngularDampingPerSecond = 0.35F;
-constexpr float kMaxAngularSpeed = 12.0F;
+constexpr float kAngularDampingPerSecond = 1.8F;
+constexpr float kMaxAngularSpeed = 3.0F;
 
 float axis_overlap(float aMin, float aMax, float bMin, float bMax) noexcept {
   const float left = std::max(aMin, bMin);
@@ -129,7 +129,9 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
       bodyA->velocity = engine::math::sub(
           bodyA->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassA));
-      if (bodyA->inverseInertia > 0.0F) {
+      // Keep static-environment contacts stable: only transfer angular
+      // impulse when both bodies are dynamic.
+      if ((bodyA->inverseInertia > 0.0F) && (invMassB > 0.0F)) {
         const engine::math::Vec3 angImpulse =
             engine::math::mul(engine::math::cross(contactOffsetA, impulseVec),
                               bodyA->inverseInertia);
@@ -148,7 +150,7 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
       bodyB->velocity = engine::math::add(
           bodyB->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassB));
-      if (bodyB->inverseInertia > 0.0F) {
+      if ((bodyB->inverseInertia > 0.0F) && (invMassA > 0.0F)) {
         const engine::math::Vec3 angImpulse =
             engine::math::mul(engine::math::cross(contactOffsetB, impulseVec),
                               bodyB->inverseInertia);
@@ -223,6 +225,9 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 
     runtime::RigidBody *body = world.get_rigid_body_ptr(entity);
     runtime::Transform updated = readTransforms[i];
+    const runtime::Collider *col = world.get_collider_ptr(entity);
+    const bool lockRotation =
+        (col != nullptr) && (col->shape == runtime::ColliderShape::AABB);
 
     // Skip sleeping bodies.
     if ((body != nullptr) && body->sleeping) {
@@ -243,7 +248,6 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 
       // CCD: if travel distance exceeds half the smallest collider extent,
       // raycast forward to prevent tunneling.
-      const runtime::Collider *col = world.get_collider_ptr(entity);
       const float minHalf =
           (col != nullptr) ? std::min({col->halfExtents.x, col->halfExtents.y,
                                        col->halfExtents.z})
@@ -284,10 +288,16 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
       if (angSpeedSq < 1e-6F) {
         body->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
       }
+
+      // AABB colliders are axis-aligned in this physics backend. Keep visual
+      // mesh rotation fixed so render and collision stay in sync.
+      if (lockRotation) {
+        body->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+      }
     }
 
     // Angular velocity integration (independent of linear mass).
-    if ((body != nullptr) && (body->inverseInertia > 0.0F)) {
+    if ((body != nullptr) && (body->inverseInertia > 0.0F) && !lockRotation) {
       const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
       if (angSpeedSq > 1e-12F) {
         const float angSpeed = std::sqrt(angSpeedSq);

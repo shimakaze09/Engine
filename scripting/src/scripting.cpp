@@ -488,13 +488,14 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0U) ? g_builtinCapsuleMesh
                                           : g_defaultMeshAssetId;
-    halfExtents =
-        math::Vec3(0.5F, 1.0F, 0.5F); // x/z = radius, y = half-total-height
-    colliderShape = runtime::ColliderShape::Sphere;
+    // Physics currently supports AABB/Sphere only; capsule uses a conservative
+    // AABB fit so the debug volume matches the rendered mesh bounds.
+    halfExtents = math::Vec3(0.5F, 1.0F, 0.5F);
+    colliderShape = runtime::ColliderShape::AABB;
   } else if (std::strcmp(shape, "pyramid") == 0) {
     meshId = (g_builtinPyramidMesh != 0U) ? g_builtinPyramidMesh
                                           : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
     colliderShape = runtime::ColliderShape::AABB;
   } else if (std::strcmp(shape, "plane") == 0) {
     meshId =

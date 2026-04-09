@@ -449,18 +449,16 @@ bool build_capsule_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kICount), false, outMesh);
 }
 
-// Triangular pyramid (tetrahedron-like): equilateral base side ≈ 1 at y=0,
-// apex at y=1.  4 faces, 12 vertices (3 per face with face normals).
+// Triangular pyramid (tetrahedron-like) centered around origin:
+// base at y=-0.5, apex at y=+0.5. 4 faces, 12 vertices.
 bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
-  // Base vertices of equilateral triangle at y=0, circumradius ~0.577
-  constexpr float kR = 0.5774F;        // 1/sqrt(3)
-  constexpr float kPI2_3 = 2.0943951F; // 2*PI/3
-  // p0 = (R,0, 0), p1 = (R*cos(2pi/3), 0, R*sin(2pi/3)), p2 = ...
-  const float bx0 = kR, bz0 = 0.0F;
-  const float bx1 = kR * std::cos(kPI2_3), bz1 = kR * std::sin(kPI2_3);
-  const float bx2 = kR * std::cos(2.0F * kPI2_3),
-              bz2 = kR * std::sin(2.0F * kPI2_3);
-  const float apex[3] = {0.0F, 1.0F, 0.0F};
+  // Equilateral base with side length ~1.0.
+  constexpr float kBaseZBack = -0.288675F; // -sqrt(3)/6
+  constexpr float kBaseZFront = 0.577350F; //  sqrt(3)/3
+  const float apex[3] = {0.0F, 0.5F, 0.0F};
+  const float b0[3] = {-0.5F, -0.5F, kBaseZBack};
+  const float b1[3] = {0.5F, -0.5F, kBaseZBack};
+  const float b2[3] = {0.0F, -0.5F, kBaseZFront};
 
   const auto cross3 = [](float ax, float ay, float az, float bxv, float byn,
                          float bzv, float *ox, float *oy, float *oz) {
@@ -507,14 +505,12 @@ bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
     verts[vi++] = nz;
   };
 
-  // Base (CCW from below, normal downward)
-  addFace(bx0, 0.F, bz0, bx2, 0.F, bz2, bx1, 0.F, bz1);
-  // Front side
-  addFace(bx0, 0.F, bz0, bx1, 0.F, bz1, apex[0], apex[1], apex[2]);
-  // Right side
-  addFace(bx1, 0.F, bz1, bx2, 0.F, bz2, apex[0], apex[1], apex[2]);
-  // Left side
-  addFace(bx2, 0.F, bz2, bx0, 0.F, bz0, apex[0], apex[1], apex[2]);
+  // Base (CCW when viewed from below, normal downward).
+  addFace(b0[0], b0[1], b0[2], b2[0], b2[1], b2[2], b1[0], b1[1], b1[2]);
+  // Sides.
+  addFace(b0[0], b0[1], b0[2], b1[0], b1[1], b1[2], apex[0], apex[1], apex[2]);
+  addFace(b1[0], b1[1], b1[2], b2[0], b2[1], b2[2], apex[0], apex[1], apex[2]);
+  addFace(b2[0], b2[1], b2[2], b0[0], b0[1], b0[2], apex[0], apex[1], apex[2]);
 
   return renderer::build_gpu_mesh_from_data(verts, 12U, nullptr, 0U, false,
                                             outMesh);

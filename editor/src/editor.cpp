@@ -40,6 +40,7 @@
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
+#include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
@@ -1093,6 +1094,93 @@ void draw_asset_browser_panel() noexcept {
   ImGui::End();
 }
 
+bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
+                             const ImVec2 &viewportOrigin,
+                             const ImVec2 &viewportSize,
+                             ImVec2 *outScreen) noexcept {
+  if ((outScreen == nullptr) || (viewportSize.x <= 0.0F) ||
+      (viewportSize.y <= 0.0F)) {
+    return false;
+  }
+
+  const math::Vec4 clip =
+      math::mul(vp, math::Vec4(worldPos.x, worldPos.y, worldPos.z, 1.0F));
+  if (clip.w <= 0.0001F) {
+    return false;
+  }
+
+  const float invW = 1.0F / clip.w;
+  const float ndcX = clip.x * invW;
+  const float ndcY = clip.y * invW;
+
+  outScreen->x = viewportOrigin.x + ((ndcX * 0.5F) + 0.5F) * viewportSize.x;
+  outScreen->y =
+      viewportOrigin.y + (1.0F - ((ndcY * 0.5F) + 0.5F)) * viewportSize.y;
+  return true;
+}
+
+void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
+                                    const math::Mat4 &viewProjection,
+                                    const ImVec2 &viewportOrigin,
+                                    const ImVec2 &viewportSize) noexcept {
+  if ((g_world == nullptr) || (selectedEntity == runtime::kInvalidEntity)) {
+    return;
+  }
+
+  const runtime::Collider *collider = g_world->get_collider_ptr(selectedEntity);
+  if (collider == nullptr) {
+    return;
+  }
+
+  const runtime::WorldTransform *worldTransform =
+      g_world->get_world_transform_read_ptr(selectedEntity);
+  if (worldTransform == nullptr) {
+    return;
+  }
+
+  math::Vec3 halfExtents = collider->halfExtents;
+  if (collider->shape == runtime::ColliderShape::Sphere) {
+    const float r = collider->halfExtents.x;
+    halfExtents = math::Vec3(r, r, r);
+  }
+
+  const math::Vec3 c = worldTransform->position;
+  const math::Vec3 corners[8] = {
+      math::Vec3(c.x - halfExtents.x, c.y - halfExtents.y, c.z - halfExtents.z),
+      math::Vec3(c.x + halfExtents.x, c.y - halfExtents.y, c.z - halfExtents.z),
+      math::Vec3(c.x + halfExtents.x, c.y + halfExtents.y, c.z - halfExtents.z),
+      math::Vec3(c.x - halfExtents.x, c.y + halfExtents.y, c.z - halfExtents.z),
+      math::Vec3(c.x - halfExtents.x, c.y - halfExtents.y, c.z + halfExtents.z),
+      math::Vec3(c.x + halfExtents.x, c.y - halfExtents.y, c.z + halfExtents.z),
+      math::Vec3(c.x + halfExtents.x, c.y + halfExtents.y, c.z + halfExtents.z),
+      math::Vec3(c.x - halfExtents.x, c.y + halfExtents.y, c.z + halfExtents.z),
+  };
+
+  ImVec2 projected[8] = {};
+  bool visible[8] = {};
+  for (int i = 0; i < 8; ++i) {
+    visible[i] =
+        project_world_to_screen(corners[i], viewProjection, viewportOrigin,
+                                viewportSize, &projected[i]);
+  }
+
+  static constexpr int kEdges[24] = {
+      0, 1, 1, 2, 2, 3, 3, 0, // back face
+      4, 5, 5, 6, 6, 7, 7, 4, // front face
+      0, 4, 1, 5, 2, 6, 3, 7  // side links
+  };
+
+  ImDrawList *drawList = ImGui::GetWindowDrawList();
+  const ImU32 color = IM_COL32(40, 255, 120, 220);
+  for (int i = 0; i < 24; i += 2) {
+    const int a = kEdges[i];
+    const int b = kEdges[i + 1];
+    if (visible[a] && visible[b]) {
+      drawList->AddLine(projected[a], projected[b], color, 2.0F);
+    }
+  }
+}
+
 void draw_scene_viewport_panel() noexcept {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
   const bool visible = ImGui::Begin("Scene");
@@ -1127,6 +1215,24 @@ void draw_scene_viewport_panel() noexcept {
   const bool hasTransform =
       (selectedEntity != runtime::kInvalidEntity) && (g_world != nullptr) &&
       (g_world->get_transform_read_ptr(selectedEntity) != nullptr);
+
+  if ((selectedEntity != runtime::kInvalidEntity) && (regionSize.x > 0.0F) &&
+      (regionSize.y > 0.0F)) {
+    const renderer::CameraState cam = (g_playState == PlayState::Playing)
+                                          ? renderer::get_active_camera()
+                                          : editor_camera_state(g_editorCamera);
+
+    constexpr float kDefaultFov = 1.0471975512F;
+    constexpr float kNear = 0.1F;
+    constexpr float kFar = 100.0F;
+    const float aspect = regionSize.x / regionSize.y;
+    const math::Mat4 viewMat = math::look_at(cam.position, cam.target, cam.up);
+    const math::Mat4 projMat =
+        math::perspective(kDefaultFov, aspect, kNear, kFar);
+    const math::Mat4 vp = math::mul(projMat, viewMat);
+    draw_selected_collider_overlay(selectedEntity, vp, cursorScreenPos,
+                                   regionSize);
+  }
 
   if (editable && hasTransform && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
