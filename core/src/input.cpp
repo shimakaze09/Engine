@@ -53,7 +53,15 @@ struct ActionBinding final {
   bool occupied = false;
 };
 
+struct AxisBinding final {
+  char name[kMaxActionNameLength + 1U] = {};
+  KeyScancode negativeKey = -1;
+  KeyScancode positiveKey = -1;
+  bool occupied = false;
+};
+
 std::array<ActionBinding, kMaxActions> g_actions{};
+std::array<AxisBinding, kMaxAxes> g_axes{};
 
 const ActionBinding *find_action(const char *name) noexcept {
   if (name == nullptr) {
@@ -61,6 +69,20 @@ const ActionBinding *find_action(const char *name) noexcept {
   }
 
   for (const auto &a : g_actions) {
+    if (a.occupied && (std::strcmp(a.name, name) == 0)) {
+      return &a;
+    }
+  }
+
+  return nullptr;
+}
+
+const AxisBinding *find_axis(const char *name) noexcept {
+  if (name == nullptr) {
+    return nullptr;
+  }
+
+  for (const auto &a : g_axes) {
     if (a.occupied && (std::strcmp(a.name, name) == 0)) {
       return &a;
     }
@@ -80,6 +102,7 @@ bool initialize_input() noexcept {
   g_prevKeyState = {};
   g_mouse = {};
   g_actions = {};
+  g_axes = {};
   g_inputInitialized = true;
   return true;
 }
@@ -90,6 +113,7 @@ void shutdown_input() noexcept {
   g_prevKeyState = {};
   g_mouse = {};
   g_actions = {};
+  g_axes = {};
 }
 
 void begin_input_frame() noexcept {
@@ -210,8 +234,7 @@ bool is_mouse_button_pressed(int button) noexcept {
   return g_mouse.buttons[idx] && !g_mouse.prevButtons[idx];
 }
 
-bool register_action(const char *name,
-                     KeyScancode key,
+bool register_action(const char *name, KeyScancode key,
                      int mouseButton) noexcept {
   if (name == nullptr) {
     return false;
@@ -279,6 +302,56 @@ bool is_action_pressed(const char *name) noexcept {
 
 float action_value(const char *name) noexcept {
   return is_action_down(name) ? 1.0F : 0.0F;
+}
+
+bool register_axis(const char *name, KeyScancode negativeKey,
+                   KeyScancode positiveKey) noexcept {
+  if (name == nullptr) {
+    return false;
+  }
+
+  const std::size_t nameLen = std::strlen(name);
+  if ((nameLen == 0U) || (nameLen > kMaxActionNameLength)) {
+    return false;
+  }
+
+  for (auto &a : g_axes) {
+    if (a.occupied && (std::strcmp(a.name, name) == 0)) {
+      a.negativeKey = negativeKey;
+      a.positiveKey = positiveKey;
+      return true;
+    }
+  }
+
+  for (auto &a : g_axes) {
+    if (!a.occupied) {
+      std::memcpy(a.name, name, nameLen + 1U);
+      a.negativeKey = negativeKey;
+      a.positiveKey = positiveKey;
+      a.occupied = true;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+float axis_value(const char *name) noexcept {
+  const AxisBinding *axis = find_axis(name);
+  if (axis == nullptr) {
+    return 0.0F;
+  }
+
+  const bool negDown =
+      (axis->negativeKey >= 0) && is_key_down(axis->negativeKey);
+  const bool posDown =
+      (axis->positiveKey >= 0) && is_key_down(axis->positiveKey);
+
+  if (negDown == posDown) {
+    return 0.0F;
+  }
+
+  return posDown ? 1.0F : -1.0F;
 }
 
 } // namespace engine::core

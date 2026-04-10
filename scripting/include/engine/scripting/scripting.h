@@ -81,6 +81,10 @@ void dispatch_entity_scripts_start() noexcept;
 // ScriptComponent. Call once per simulation step.
 void dispatch_entity_scripts_update(float dt) noexcept;
 
+// Call module.on_end(entityIndex) for every entity with a ScriptComponent.
+// Call once when Play transitions to Stopped.
+void dispatch_entity_scripts_end() noexcept;
+
 // Drop all cached entity script modules (called on Stop / reload).
 void clear_entity_script_modules() noexcept;
 

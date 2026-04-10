@@ -665,6 +665,58 @@ int main() {
     engine::scripting::clear_pending_scene_op();
   }
 
+  // =========================================================================
+  // P1-M2 lifecycle test: on_start/on_end dispatch for ScriptComponent
+  // =========================================================================
+  {
+    const char *moduleScript = "local M = {}\n"
+                               "function M.on_start(self)\n"
+                               "    engine.set_name(self, 'life_started')\n"
+                               "end\n"
+                               "function M.on_end(self)\n"
+                               "    engine.set_name(self, 'life_ended')\n"
+                               "end\n"
+                               "return M\n";
+    if (!write_script_file(moduleScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 68;
+    }
+
+    const engine::runtime::Entity scripted = world->create_entity();
+    if (scripted == engine::runtime::kInvalidEntity) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 69;
+    }
+
+    engine::runtime::ScriptComponent sc{};
+    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kTempScriptPath);
+    if (!world->add_script_component(scripted, sc)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 70;
+    }
+
+    engine::scripting::dispatch_entity_scripts_start();
+
+    engine::runtime::NameComponent nc{};
+    if (!world->get_name_component(scripted, &nc) ||
+        std::strcmp(nc.name, "life_started") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 71;
+    }
+
+    engine::scripting::dispatch_entity_scripts_end();
+    if (!world->get_name_component(scripted, &nc) ||
+        std::strcmp(nc.name, "life_ended") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 72;
+    }
+  }
+
   engine::scripting::shutdown_scripting();
   remove_script_file();
   return 0;

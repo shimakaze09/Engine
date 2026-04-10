@@ -42,13 +42,17 @@ bool is_mouse_button_pressed(int button) noexcept;
 // ----- Action Mappings -----------------------------------------------------
 
 inline constexpr std::size_t kMaxActions = 64U;
+inline constexpr std::size_t kMaxAxes = 64U;
 
-bool register_action(const char *name,
-                     KeyScancode key,
+bool register_action(const char *name, KeyScancode key,
                      int mouseButton = -1) noexcept;
 bool is_action_down(const char *name) noexcept;
 bool is_action_pressed(const char *name) noexcept;
 float action_value(const char *name) noexcept;
+
+bool register_axis(const char *name, KeyScancode negativeKey,
+                   KeyScancode positiveKey) noexcept;
+float axis_value(const char *name) noexcept;
 
 // ----- Input Events (for Event Bus subscribers) ----------------------------
 

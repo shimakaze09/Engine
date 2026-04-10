@@ -55,6 +55,8 @@ constexpr float kMaxScriptAcceleration = 500.0F;
 struct EntityScriptModule final {
   char path[128] = {};
   int registryRef = LUA_NOREF;
+  std::int64_t mtime = 0;
+  bool reloaded = false;
 };
 constexpr std::size_t kMaxEntityScriptModules = 32U;
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
@@ -91,6 +93,8 @@ struct DeferredMutation final {
 constexpr std::size_t kMaxDeferredMutations = 2048U;
 DeferredMutation g_deferredMutations[kMaxDeferredMutations]{};
 std::size_t g_deferredMutationCount = 0U;
+
+std::int64_t get_file_mtime(const char *path) noexcept;
 
 bool can_apply_mutations_now() noexcept {
   return (g_world != nullptr) && (g_services != nullptr) &&
@@ -353,15 +357,22 @@ void log_lua_error(const char *context) noexcept {
     message = "unknown lua error";
   }
 
-  char logBuffer[512] = {};
+  // Attach traceback so logs include script file and line diagnostics.
+  luaL_traceback(g_state, g_state, message, 1);
+  const char *trace = lua_tostring(g_state, -1);
+  if (trace == nullptr) {
+    trace = message;
+  }
+
+  char logBuffer[1024] = {};
   if ((context != nullptr) && (context[0] != '\0')) {
     std::snprintf(logBuffer, sizeof(logBuffer), "lua error (%s): %s", context,
-                  message);
+                  trace);
   } else {
-    std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", message);
+    std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", trace);
   }
   core::log_message(core::LogLevel::Error, "scripting", logBuffer);
-  lua_pop(g_state, 1);
+  lua_pop(g_state, 2);
 }
 
 int lua_engine_log(lua_State *state) noexcept {
@@ -920,6 +931,60 @@ int lua_engine_is_key_pressed(lua_State *state) noexcept {
   }
   const int scancode = static_cast<int>(lua_tointeger(state, 1));
   lua_pushboolean(state, core::is_key_pressed(scancode) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_register_action(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const char *name = lua_tostring(state, 1);
+  const int key = static_cast<int>(lua_tointeger(state, 2));
+  const int mouseButton =
+      lua_isnumber(state, 3) ? static_cast<int>(lua_tointeger(state, 3)) : -1;
+  const bool ok = core::register_action(name, key, mouseButton);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_register_axis(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
+      !lua_isnumber(state, 3)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const char *name = lua_tostring(state, 1);
+  const int negativeKey = static_cast<int>(lua_tointeger(state, 2));
+  const int positiveKey = static_cast<int>(lua_tointeger(state, 3));
+  const bool ok = core::register_axis(name, negativeKey, positiveKey);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_is_action_down(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushboolean(state, core::is_action_down(name) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_is_action_pressed(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushboolean(state, core::is_action_pressed(name) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_get_action_value(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushnumber(state, static_cast<lua_Number>(core::action_value(name)));
+  return 1;
+}
+
+int lua_engine_get_axis_value(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushnumber(state, static_cast<lua_Number>(core::axis_value(name)));
   return 1;
 }
 
@@ -1984,7 +2049,42 @@ int get_or_load_entity_script_module(const char *path) noexcept {
 
   for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
     if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
-      return g_entityScriptModules[i].registryRef;
+      EntityScriptModule &mod = g_entityScriptModules[i];
+      const std::int64_t currentMtime = get_file_mtime(path);
+      if ((currentMtime != 0) && (mod.mtime != 0) &&
+          (currentMtime != mod.mtime)) {
+        if (luaL_loadfile(g_state, path) != LUA_OK) {
+          log_lua_error("reload entity script");
+          return mod.registryRef;
+        }
+
+        if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
+          log_lua_error("reload entity script");
+          return mod.registryRef;
+        }
+
+        if (!lua_istable(g_state, -1)) {
+          core::log_message(core::LogLevel::Error, "scripting",
+                            "entity script must return a module table");
+          lua_pop(g_state, 1);
+          return mod.registryRef;
+        }
+
+        const int newRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
+        if (mod.registryRef != LUA_NOREF) {
+          luaL_unref(g_state, LUA_REGISTRYINDEX, mod.registryRef);
+        }
+        mod.registryRef = newRef;
+        mod.mtime = currentMtime;
+        mod.reloaded = true;
+
+        char logBuf[256] = {};
+        std::snprintf(logBuf, sizeof(logBuf), "hot-reloaded entity script: %s",
+                      path);
+        core::log_message(core::LogLevel::Info, "scripting", logBuf);
+      }
+
+      return mod.registryRef;
     }
   }
 
@@ -2019,6 +2119,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   std::memcpy(mod.path, path, copyLen);
   mod.path[copyLen] = '\0';
   mod.registryRef = ref;
+  mod.mtime = get_file_mtime(path);
+  mod.reloaded = false;
   ++g_entityScriptModuleCount;
 
   char logBuf[256] = {};
@@ -2203,6 +2305,19 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   lua_pushcfunction(state, &lua_engine_is_key_pressed);
   lua_setfield(state, -2, "is_key_pressed");
+
+  lua_pushcfunction(state, &lua_engine_register_action);
+  lua_setfield(state, -2, "register_action");
+  lua_pushcfunction(state, &lua_engine_register_axis);
+  lua_setfield(state, -2, "register_axis");
+  lua_pushcfunction(state, &lua_engine_is_action_down);
+  lua_setfield(state, -2, "is_action_down");
+  lua_pushcfunction(state, &lua_engine_is_action_pressed);
+  lua_setfield(state, -2, "is_action_pressed");
+  lua_pushcfunction(state, &lua_engine_get_action_value);
+  lua_setfield(state, -2, "action_value");
+  lua_pushcfunction(state, &lua_engine_get_axis_value);
+  lua_setfield(state, -2, "axis_value");
 
   lua_pushcfunction(state, &lua_engine_set_camera_position);
   lua_setfield(state, -2, "set_camera_position");
@@ -2910,6 +3025,28 @@ void dispatch_entity_scripts_update(float dt) noexcept {
     return;
   }
 
+  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
+    if (!g_entityScriptModules[i].reloaded) {
+      continue;
+    }
+
+    const char *reloadedPath = g_entityScriptModules[i].path;
+    const int moduleRef = g_entityScriptModules[i].registryRef;
+    g_world->for_each<runtime::ScriptComponent>(
+        [reloadedPath, moduleRef](runtime::Entity entity,
+                                  const runtime::ScriptComponent &sc) noexcept {
+          if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
+            return;
+          }
+
+          static_cast<void>(call_module_function(moduleRef, "on_reload",
+                                                 entity.index, false, 0.0F));
+          static_cast<void>(call_module_function(moduleRef, "on_start",
+                                                 entity.index, false, 0.0F));
+        });
+    g_entityScriptModules[i].reloaded = false;
+  }
+
   g_world->for_each<runtime::ScriptComponent>(
       [dt](runtime::Entity entity,
            const runtime::ScriptComponent &sc) noexcept {
@@ -2921,6 +3058,25 @@ void dispatch_entity_scripts_update(float dt) noexcept {
           return;
         }
         call_module_function(ref, "on_update", entity.index, true, dt);
+      });
+}
+
+void dispatch_entity_scripts_end() noexcept {
+  if ((g_state == nullptr) || (g_world == nullptr)) {
+    return;
+  }
+
+  g_world->for_each<runtime::ScriptComponent>(
+      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
+        if (sc.scriptPath[0] == '\0') {
+          return;
+        }
+        const int ref = get_or_load_entity_script_module(sc.scriptPath);
+        if (ref == LUA_NOREF) {
+          return;
+        }
+        static_cast<void>(
+            call_module_function(ref, "on_end", entity.index, false, 0.0F));
       });
 }
 
@@ -2936,6 +3092,8 @@ void clear_entity_script_modules() noexcept {
       g_entityScriptModules[i].registryRef = LUA_NOREF;
     }
     g_entityScriptModules[i].path[0] = '\0';
+    g_entityScriptModules[i].mtime = 0;
+    g_entityScriptModules[i].reloaded = false;
   }
   g_entityScriptModuleCount = 0U;
 }

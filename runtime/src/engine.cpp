@@ -1198,6 +1198,7 @@ void run(std::uint32_t maxFrames) noexcept {
 
     if ((playState == LoopPlayState::Stopped) &&
         (previousPlayState != LoopPlayState::Stopped)) {
+      scripting::dispatch_entity_scripts_end();
       scripting::clear_entity_script_modules();
       scripting::shutdown_scripting();
       if (!scripting::initialize_scripting()) {

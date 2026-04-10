@@ -3,6 +3,22 @@
 
 #include "engine/core/input.h"
 
+#if defined(__clang__) && !defined(__PRFCHWINTRIN_H)
+#define __PRFCHWINTRIN_H
+#endif
+
+#ifndef SDL_MAIN_HANDLED
+#define SDL_MAIN_HANDLED
+#endif
+
+#if __has_include(<SDL.h>)
+#include <SDL.h>
+#elif __has_include(<SDL2/SDL.h>)
+#include <SDL2/SDL.h>
+#else
+#error "SDL2 headers not found"
+#endif
+
 using namespace engine::core;
 
 namespace {
@@ -143,6 +159,79 @@ bool test_max_actions() noexcept {
   return true;
 }
 
+bool test_axis_register_and_rebind() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+
+  if (!register_axis("move_x", kKey_A, kKey_D)) {
+    shutdown_input();
+    return false;
+  }
+
+  if (!register_axis("move_x", kKey_Left, kKey_Right)) {
+    shutdown_input();
+    return false;
+  }
+
+  if (axis_value("move_x") != 0.0F) {
+    shutdown_input();
+    return false;
+  }
+
+  shutdown_input();
+  return true;
+}
+
+bool test_axis_value_from_key_events() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+
+  if (!register_axis("move_x", kKey_A, kKey_D)) {
+    shutdown_input();
+    return false;
+  }
+
+  SDL_Event ev{};
+
+  begin_input_frame();
+  ev.type = SDL_KEYDOWN;
+  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_D);
+  input_process_event(&ev);
+  end_input_frame();
+  if (axis_value("move_x") != 1.0F) {
+    shutdown_input();
+    return false;
+  }
+
+  begin_input_frame();
+  ev.type = SDL_KEYUP;
+  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_D);
+  input_process_event(&ev);
+  ev.type = SDL_KEYDOWN;
+  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_A);
+  input_process_event(&ev);
+  end_input_frame();
+  if (axis_value("move_x") != -1.0F) {
+    shutdown_input();
+    return false;
+  }
+
+  begin_input_frame();
+  ev.type = SDL_KEYDOWN;
+  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_D);
+  input_process_event(&ev);
+  end_input_frame();
+  if (axis_value("move_x") != 0.0F) {
+    shutdown_input();
+    return false;
+  }
+
+  shutdown_input();
+  return true;
+}
+
 bool test_bounds_check() noexcept {
   if (!initialize_input()) {
     return false;
@@ -214,6 +303,8 @@ int main() {
   run("action_register", &test_action_register);
   run("action_overwrite", &test_action_overwrite);
   run("max_actions", &test_max_actions);
+  run("axis_register_and_rebind", &test_axis_register_and_rebind);
+  run("axis_value_from_key_events", &test_axis_value_from_key_events);
   run("bounds_check", &test_bounds_check);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);
