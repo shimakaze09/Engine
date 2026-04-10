@@ -1,6 +1,7 @@
 #include "engine/renderer/asset_database.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 namespace engine::renderer {
@@ -89,8 +90,7 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
   std::uint32_t hash = kFnvOffset;
   for (const unsigned char *cursor =
            reinterpret_cast<const unsigned char *>(path);
-       *cursor != 0U;
-       ++cursor) {
+       *cursor != 0U; ++cursor) {
     const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
                                  ? static_cast<unsigned char>('/')
                                  : *cursor;
@@ -105,12 +105,48 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
   return hash;
 }
 
-bool register_mesh_asset(AssetDatabase *database,
-                         AssetId id,
+AssetId make_asset_id_from_file(const char *path) noexcept {
+  if (path == nullptr) {
+    return kInvalidAssetId;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return make_asset_id_from_path(path);
+  }
+
+  std::uint32_t hash = kFnvOffset;
+  unsigned char buffer[4096] = {};
+  while (true) {
+    const std::size_t bytesRead = std::fread(buffer, 1U, sizeof(buffer), file);
+    if (bytesRead == 0U) {
+      break;
+    }
+    for (std::size_t i = 0U; i < bytesRead; ++i) {
+      hash ^= static_cast<std::uint32_t>(buffer[i]);
+      hash *= kFnvPrime;
+    }
+  }
+
+  std::fclose(file);
+  if (hash == kInvalidAssetId) {
+    hash = 1U;
+  }
+  return hash;
+}
+
+bool register_mesh_asset(AssetDatabase *database, AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)
-      || (runtimeMesh == kInvalidMeshHandle)) {
+  if ((database == nullptr) || (id == kInvalidAssetId) ||
+      (runtimeMesh == kInvalidMeshHandle)) {
     return false;
   }
 
@@ -144,9 +180,7 @@ AssetState mesh_asset_state(const AssetDatabase *database,
   return database->meshAssets[slot].state;
 }
 
-bool set_mesh_asset_state(AssetDatabase *database,
-                          AssetId id,
-                          AssetState state,
+bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
                           MeshHandle runtimeMesh) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -294,8 +328,8 @@ std::size_t find_texture_insert_slot(const AssetDatabase *database,
   const std::size_t base = hashed_slot(id, capacity);
   for (std::size_t probe = 0U; probe < capacity; ++probe) {
     const std::size_t slot = (base + probe) % capacity;
-    if (!database->textureOccupied[slot]
-        || (database->textureAssets[slot].id == id)) {
+    if (!database->textureOccupied[slot] ||
+        (database->textureAssets[slot].id == id)) {
       return slot;
     }
   }
@@ -305,12 +339,11 @@ std::size_t find_texture_insert_slot(const AssetDatabase *database,
 
 } // namespace
 
-bool register_texture_asset(AssetDatabase *database,
-                            AssetId id,
+bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)
-      || (runtimeTexture == kInvalidTextureHandle)) {
+  if ((database == nullptr) || (id == kInvalidAssetId) ||
+      (runtimeTexture == kInvalidTextureHandle)) {
     return false;
   }
 
@@ -344,8 +377,7 @@ AssetState texture_asset_state(const AssetDatabase *database,
   return database->textureAssets[slot].state;
 }
 
-bool set_texture_asset_state(AssetDatabase *database,
-                             AssetId id,
+bool set_texture_asset_state(AssetDatabase *database, AssetId id,
                              AssetState state,
                              TextureHandle runtimeTexture) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -358,8 +390,8 @@ bool set_texture_asset_state(AssetDatabase *database,
   }
 
   TextureAssetRecord &record = database->textureAssets[slot];
-  if ((state == AssetState::Ready)
-      && (runtimeTexture == kInvalidTextureHandle)) {
+  if ((state == AssetState::Ready) &&
+      (runtimeTexture == kInvalidTextureHandle)) {
     return false;
   }
 

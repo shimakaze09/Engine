@@ -916,7 +916,7 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   const renderer::AssetId bootstrapMeshAssetId =
-      renderer::make_asset_id_from_path(bootstrapMeshPath);
+      renderer::make_asset_id_from_file(bootstrapMeshPath);
   scripting::set_default_mesh_asset_id(bootstrapMeshAssetId);
   bool bootstrapMeshLoadOk =
       (bootstrapMeshAssetId != renderer::kInvalidAssetId) &&

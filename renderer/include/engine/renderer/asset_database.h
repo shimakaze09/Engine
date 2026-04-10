@@ -43,14 +43,12 @@ struct AssetDatabase final {
 };
 
 AssetId make_asset_id_from_path(const char *path) noexcept;
-bool register_mesh_asset(AssetDatabase *database,
-                         AssetId id,
+AssetId make_asset_id_from_file(const char *path) noexcept;
+bool register_mesh_asset(AssetDatabase *database, AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept;
 AssetState mesh_asset_state(const AssetDatabase *database, AssetId id) noexcept;
-bool set_mesh_asset_state(AssetDatabase *database,
-                          AssetId id,
-                          AssetState state,
+bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
                           MeshHandle runtimeMesh) noexcept;
 bool mesh_asset_requested_resident(const AssetDatabase *database,
                                    AssetId id) noexcept;
@@ -61,14 +59,12 @@ bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 void clear_asset_database(AssetDatabase *database) noexcept;
 
 // Texture asset management.
-bool register_texture_asset(AssetDatabase *database,
-                            AssetId id,
+bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept;
 AssetState texture_asset_state(const AssetDatabase *database,
                                AssetId id) noexcept;
-bool set_texture_asset_state(AssetDatabase *database,
-                             AssetId id,
+bool set_texture_asset_state(AssetDatabase *database, AssetId id,
                              AssetState state,
                              TextureHandle runtimeTexture) noexcept;
 TextureHandle resolve_texture_asset(const AssetDatabase *database,
