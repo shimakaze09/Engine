@@ -1,0 +1,130 @@
+name: Engine CI
+
+on:
+    push:
+        branches: [main, master]
+    pull_request:
+    workflow_dispatch:
+
+jobs:
+    build-and-test:
+        name: Build and Test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Configure
+              run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+            - name: Build
+              run: cmake --build build --parallel
+
+            - name: Run all tests
+              run: ctest --test-dir build --output-on-failure
+
+    static-analysis:
+        name: Static Analysis (clang-tidy + cppcheck)
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install analysis tools
+              run: sudo apt-get update && sudo apt-get install -y clang-tidy cppcheck
+
+            - name: Configure (compile commands)
+              run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+            - name: Run clang-tidy smoke pass
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  tidy_targets=(
+                    core/src/*.cpp
+                    math/src/*.cpp
+                    physics/src/*.cpp
+                    runtime/src/*.cpp
+                    renderer/src/*.cpp
+                    scripting/src/*.cpp
+                    audio/src/*.cpp
+                    editor/src/*.cpp
+                    app/main.cpp
+                  )
+                  for f in "${tidy_targets[@]}"; do
+                    if [[ -f "$f" ]]; then
+                      clang-tidy "$f" -p build --warnings-as-errors='*'
+                    fi
+                  done
+
+            - name: Run cppcheck
+              run: |
+                  cppcheck \
+                    --std=c++20 \
+                    --enable=warning,performance,portability,style \
+                    --inline-suppr \
+                    --error-exitcode=1 \
+                    --suppress=missingIncludeSystem \
+                    core math physics runtime renderer scripting audio editor app tests
+
+    asan-ubsan:
+        name: Sanitizers (ASan + UBSan)
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Configure
+              run: >-
+                  cmake -S . -B build-asan
+                  -DCMAKE_BUILD_TYPE=Debug
+                  -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+                  -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+
+            - name: Build
+              run: cmake --build build-asan --parallel
+
+            - name: Run sanitizer gate tests
+              run: >-
+                  ctest --test-dir build-asan --output-on-failure
+                  -R '(engine_unit_determinism|engine_unit_scripting|engine_integration_ecs|engine_smoke)'
+
+    tsan:
+        name: Sanitizers (TSan)
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Configure
+              run: >-
+                  cmake -S . -B build-tsan
+                  -DCMAKE_BUILD_TYPE=Debug
+                  -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer'
+                  -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread'
+
+            - name: Build
+              run: cmake --build build-tsan --parallel
+
+            - name: Run thread determinism gate tests
+              run: >-
+                  ctest --test-dir build-tsan --output-on-failure
+                  -R '(engine_integration_thread_count_determinism|engine_integration_scheduler_stress)'
+
+    perf-regression-gates:
+        name: Performance Regression Gates
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Configure
+              run: cmake -S . -B build-perf -DCMAKE_BUILD_TYPE=Release
+
+            - name: Build
+              run: cmake --build build-perf --parallel
+
+            - name: Run performance and determinism gates
+              run: >-
+                  ctest --test-dir build-perf --output-on-failure
+                  -R '(engine_unit_ecs_stress|engine_unit_determinism|engine_integration_scheduler_stress|engine_integration_thread_count_determinism)'
