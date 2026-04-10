@@ -3,6 +3,31 @@ cmake_minimum_required(VERSION 3.28)
 project(Engine LANGUAGES C CXX)
 
 find_package(Threads REQUIRED)
+# ---- Platform target ----
+# Valid values: Win64 Linux macOS Android iOS Web
+# Default auto-detected from CMake's current host/target when not specified.
+if(NOT DEFINED ENGINE_TARGET_PLATFORM)
+    if(WIN32)
+        set(ENGINE_TARGET_PLATFORM "Win64" CACHE STRING "Target platform for the engine build")
+    elseif(APPLE)
+        set(ENGINE_TARGET_PLATFORM "macOS" CACHE STRING "Target platform for the engine build")
+    else()
+        set(ENGINE_TARGET_PLATFORM "Linux" CACHE STRING "Target platform for the engine build")
+    endif()
+else()
+    set(ENGINE_TARGET_PLATFORM "${ENGINE_TARGET_PLATFORM}" CACHE STRING "Target platform for the engine build")
+endif()
+
+set_property(CACHE ENGINE_TARGET_PLATFORM PROPERTY STRINGS Win64 Linux macOS Android iOS Web)
+
+set(_ENGINE_VALID_PLATFORMS Win64 Linux macOS Android iOS Web)
+if(NOT ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_VALID_PLATFORMS)
+    message(FATAL_ERROR "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' is not valid. "
+        "Choose one of: Win64 Linux macOS Android iOS Web")
+endif()
+
+message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")
+
 find_package(SDL2 CONFIG QUIET)
 if(NOT SDL2_FOUND)
     include(FetchContent)
@@ -44,6 +69,21 @@ endif()
 option(ENGINE_BUILD_TESTS "Build engine tests" ON)
 option(ENGINE_BUILD_TOOLS "Build engine tools" ON)
 
+# ---- Per-platform compile definitions ----
+if(ENGINE_TARGET_PLATFORM STREQUAL "Win64")
+    add_compile_definitions(ENGINE_PLATFORM_WIN64=1)
+elseif(ENGINE_TARGET_PLATFORM STREQUAL "Linux")
+    add_compile_definitions(ENGINE_PLATFORM_LINUX=1)
+elseif(ENGINE_TARGET_PLATFORM STREQUAL "macOS")
+    add_compile_definitions(ENGINE_PLATFORM_MACOS=1)
+elseif(ENGINE_TARGET_PLATFORM STREQUAL "Android")
+    add_compile_definitions(ENGINE_PLATFORM_ANDROID=1)
+elseif(ENGINE_TARGET_PLATFORM STREQUAL "iOS")
+    add_compile_definitions(ENGINE_PLATFORM_IOS=1)
+elseif(ENGINE_TARGET_PLATFORM STREQUAL "Web")
+    add_compile_definitions(ENGINE_PLATFORM_WEB=1)
+endif()
+
 # ---- Sanitizer lane (ASAN + UBSAN; GCC/Clang only) ----
 # Enable with: cmake -S . -B build -DENGINE_SANITIZERS=ON
 option(ENGINE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
@@ -59,6 +99,19 @@ endif()
 
 # ---- Static analysis target (cppcheck) ----
 # Run with: cmake --build build --target analysis
+# ---- P1-M1-A3: Incremental compilation audit results ----
+# A3a (include audit): 0 public headers leak SDL/GL/Lua/ImGui types. All
+#      engine module boundaries are clean. The heaviest public headers are
+#      world.h (10 includes) and render_prep_pipeline.h (8 includes); all
+#      includes justified by types used. No unnecessary transitive includes.
+# A3b (#pragma once audit): 54/54 engine headers use #pragma once.
+#      Zero #ifndef include guards found.
+# A3c (rebuild timing): Touching core/include/engine/core/logging.h triggers
+#      34 TUs to recompile in ~36s (MSVC, Debug, Win64, 2025-04-11).
+#      logging.h is in the core PCH — touching it invalidates the PCH, which
+#      is expected behaviour. Non-PCH headers like sparse_set.h or math types
+#      would trigger fewer TUs.
+
 find_program(CPPCHECK_EXE NAMES cppcheck DOC "Path to cppcheck")
 if(CPPCHECK_EXE)
     file(GLOB_RECURSE ENGINE_ALL_SOURCES

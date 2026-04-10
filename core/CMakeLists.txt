@@ -27,3 +27,7 @@ target_link_libraries(engine_core
     Threads::Threads
     ${ENGINE_SDL2_TARGET}
 )
+
+# Precompiled header — improves incremental rebuild time for engine_core.
+# PRIVATE so downstream consumers are not forced to use it.
+target_precompile_headers(engine_core PRIVATE src/pch.h)

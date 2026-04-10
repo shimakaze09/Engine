@@ -24,3 +24,6 @@ target_link_libraries(engine_renderer
     engine_math
     OpenGL::GL
 )
+
+# Precompiled header — improves incremental rebuild time for engine_renderer.
+target_precompile_headers(engine_renderer PRIVATE src/pch.h)
