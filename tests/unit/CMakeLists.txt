@@ -289,3 +289,70 @@ add_test(
     NAME engine_unit_prefab
     COMMAND engine_unit_prefab
 )
+
+# ---- P1-M1: Engine Production Baseline ----
+
+add_executable(engine_unit_cvar_console
+    cvar_console_test.cpp
+)
+
+target_compile_features(engine_unit_cvar_console PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_cvar_console
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_cvar_console
+    COMMAND engine_unit_cvar_console
+)
+
+add_executable(engine_unit_debug_draw
+    debug_draw_test.cpp
+)
+
+target_compile_features(engine_unit_debug_draw PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_debug_draw
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_debug_draw
+    COMMAND engine_unit_debug_draw
+)
+
+add_executable(engine_unit_ecs_stress
+    ecs_stress_test.cpp
+)
+
+target_compile_features(engine_unit_ecs_stress PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_ecs_stress
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_ecs_stress
+    COMMAND engine_unit_ecs_stress
+)
+
+add_executable(engine_unit_determinism
+    determinism_test.cpp
+)
+
+target_compile_features(engine_unit_determinism PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_determinism
+    PRIVATE
+    engine_runtime
+    engine_physics
+)
+
+add_test(
+    NAME engine_unit_determinism
+    COMMAND engine_unit_determinism
+)

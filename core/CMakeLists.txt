@@ -1,5 +1,8 @@
 add_library(engine_core STATIC
     src/bootstrap.cpp
+    src/console.cpp
+    src/cvar.cpp
+    src/debug_draw.cpp
     src/event_bus.cpp
     src/input.cpp
     src/json.cpp

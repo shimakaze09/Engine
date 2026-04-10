@@ -44,6 +44,61 @@ endif()
 option(ENGINE_BUILD_TESTS "Build engine tests" ON)
 option(ENGINE_BUILD_TOOLS "Build engine tools" ON)
 
+# ---- Sanitizer lane (ASAN + UBSAN; GCC/Clang only) ----
+# Enable with: cmake -S . -B build -DENGINE_SANITIZERS=ON
+option(ENGINE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(ENGINE_SANITIZERS)
+    if(MSVC)
+        message(WARNING "ENGINE_SANITIZERS is not supported with MSVC; option ignored.")
+    else()
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+        message(STATUS "ENGINE_SANITIZERS: ASAN + UBSAN enabled")
+    endif()
+endif()
+
+# ---- Static analysis target (cppcheck) ----
+# Run with: cmake --build build --target analysis
+find_program(CPPCHECK_EXE NAMES cppcheck DOC "Path to cppcheck")
+if(CPPCHECK_EXE)
+    file(GLOB_RECURSE ENGINE_ALL_SOURCES
+        "${CMAKE_SOURCE_DIR}/core/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/math/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/physics/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/renderer/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/audio/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/runtime/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/editor/src/*.cpp"
+        "${CMAKE_SOURCE_DIR}/scripting/src/*.cpp"
+    )
+    add_custom_target(analysis
+        COMMAND ${CPPCHECK_EXE}
+        --enable=warning,performance,portability
+        --std=c++20
+        --error-exitcode=1
+        --suppress=missingIncludeSystem
+        -I "${CMAKE_SOURCE_DIR}/core/include"
+        -I "${CMAKE_SOURCE_DIR}/math/include"
+        -I "${CMAKE_SOURCE_DIR}/physics/include"
+        -I "${CMAKE_SOURCE_DIR}/renderer/include"
+        -I "${CMAKE_SOURCE_DIR}/audio/include"
+        -I "${CMAKE_SOURCE_DIR}/runtime/include"
+        -I "${CMAKE_SOURCE_DIR}/editor/include"
+        -I "${CMAKE_SOURCE_DIR}/scripting/include"
+        ${ENGINE_ALL_SOURCES}
+        COMMENT "Running cppcheck static analysis"
+        VERBATIM
+    )
+    message(STATUS "Static analysis target 'analysis' configured (cppcheck: ${CPPCHECK_EXE})")
+else()
+    add_custom_target(analysis
+        COMMAND ${CMAKE_COMMAND} -E echo
+        "cppcheck not found; install cppcheck to enable the analysis target."
+        COMMENT "Static analysis target (cppcheck not available)"
+    )
+    message(STATUS "cppcheck not found; 'analysis' target will print a warning.")
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
     lua
