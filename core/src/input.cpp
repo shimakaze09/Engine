@@ -17,6 +17,7 @@
 #endif
 
 #include <array>
+#include <cstdint>
 #include <cstring>
 
 #include "engine/core/event_bus.h"
@@ -27,6 +28,8 @@ namespace {
 
 constexpr int kMaxScancodes = 512;
 constexpr int kMaxMouseButtons = 5;
+constexpr int kMaxGamepadButtons = 16;
+constexpr int kMaxGamepadAxes = 6;
 constexpr std::size_t kMaxActionNameLength = 63U;
 
 bool g_inputInitialized = false;
@@ -45,6 +48,14 @@ struct MouseStateInternal final {
 };
 
 MouseStateInternal g_mouse{};
+
+struct GamepadStateInternal final {
+  bool connected = false;
+  std::array<bool, kMaxGamepadButtons> buttons{};
+  std::array<std::int16_t, kMaxGamepadAxes> axes{};
+};
+
+GamepadStateInternal g_gamepad{};
 
 struct ActionBinding final {
   char name[kMaxActionNameLength + 1U] = {};
@@ -103,6 +114,7 @@ bool initialize_input() noexcept {
   g_mouse = {};
   g_actions = {};
   g_axes = {};
+  g_gamepad = {};
   g_inputInitialized = true;
   return true;
 }
@@ -114,6 +126,7 @@ void shutdown_input() noexcept {
   g_mouse = {};
   g_actions = {};
   g_axes = {};
+  g_gamepad = {};
 }
 
 void begin_input_frame() noexcept {
@@ -174,6 +187,30 @@ void input_process_event(const void *nativeEvent) noexcept {
   case SDL_MOUSEWHEEL:
     g_mouse.scrollDelta += event->wheel.y;
     break;
+  case SDL_CONTROLLERDEVICEADDED:
+    g_gamepad.connected = true;
+    break;
+  case SDL_CONTROLLERDEVICEREMOVED:
+    g_gamepad.connected = false;
+    g_gamepad.buttons = {};
+    g_gamepad.axes = {};
+    break;
+  case SDL_CONTROLLERBUTTONDOWN:
+  case SDL_CONTROLLERBUTTONUP: {
+    const int button = static_cast<int>(event->cbutton.button);
+    if ((button >= 0) && (button < kMaxGamepadButtons)) {
+      g_gamepad.buttons[static_cast<std::size_t>(button)] =
+          (event->type == SDL_CONTROLLERBUTTONDOWN);
+    }
+    break;
+  }
+  case SDL_CONTROLLERAXISMOTION: {
+    const int axis = static_cast<int>(event->caxis.axis);
+    if ((axis >= 0) && (axis < kMaxGamepadAxes)) {
+      g_gamepad.axes[static_cast<std::size_t>(axis)] = event->caxis.value;
+    }
+    break;
+  }
   default:
     break;
   }
@@ -352,6 +389,40 @@ float axis_value(const char *name) noexcept {
   }
 
   return posDown ? 1.0F : -1.0F;
+}
+
+bool is_gamepad_connected() noexcept { return g_gamepad.connected; }
+
+bool is_gamepad_button_down(int button) noexcept {
+  if ((button < 0) || (button >= kMaxGamepadButtons) || !g_gamepad.connected) {
+    return false;
+  }
+  return g_gamepad.buttons[static_cast<std::size_t>(button)];
+}
+
+float gamepad_axis_value(int axis, int deadzone) noexcept {
+  if ((axis < 0) || (axis >= kMaxGamepadAxes) || !g_gamepad.connected) {
+    return 0.0F;
+  }
+
+  const int raw =
+      static_cast<int>(g_gamepad.axes[static_cast<std::size_t>(axis)]);
+  const int absRaw = (raw < 0) ? -raw : raw;
+  const int dz = (deadzone < 0) ? 0 : deadzone;
+  if (absRaw <= dz) {
+    return 0.0F;
+  }
+
+  const float denom = 32767.0F - static_cast<float>(dz);
+  if (denom <= 0.0F) {
+    return 0.0F;
+  }
+
+  float normalized = (static_cast<float>(absRaw - dz) / denom);
+  if (normalized > 1.0F) {
+    normalized = 1.0F;
+  }
+  return (raw < 0) ? -normalized : normalized;
 }
 
 } // namespace engine::core

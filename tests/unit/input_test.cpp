@@ -232,6 +232,64 @@ bool test_axis_value_from_key_events() noexcept {
   return true;
 }
 
+bool test_gamepad_axis_deadzone() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+
+  SDL_Event ev{};
+  ev.type = SDL_CONTROLLERDEVICEADDED;
+  input_process_event(&ev);
+
+  ev.type = SDL_CONTROLLERAXISMOTION;
+  ev.caxis.axis = SDL_CONTROLLER_AXIS_LEFTX;
+  ev.caxis.value = 4000; // under default deadzone
+  input_process_event(&ev);
+  if (gamepad_axis_value(SDL_CONTROLLER_AXIS_LEFTX) != 0.0F) {
+    shutdown_input();
+    return false;
+  }
+
+  ev.caxis.value = 20000;
+  input_process_event(&ev);
+  if (gamepad_axis_value(SDL_CONTROLLER_AXIS_LEFTX) <= 0.0F) {
+    shutdown_input();
+    return false;
+  }
+
+  shutdown_input();
+  return true;
+}
+
+bool test_gamepad_button_state() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+
+  SDL_Event ev{};
+  ev.type = SDL_CONTROLLERDEVICEADDED;
+  input_process_event(&ev);
+
+  ev.type = SDL_CONTROLLERBUTTONDOWN;
+  ev.cbutton.button = SDL_CONTROLLER_BUTTON_A;
+  input_process_event(&ev);
+  if (!is_gamepad_button_down(SDL_CONTROLLER_BUTTON_A)) {
+    shutdown_input();
+    return false;
+  }
+
+  ev.type = SDL_CONTROLLERBUTTONUP;
+  ev.cbutton.button = SDL_CONTROLLER_BUTTON_A;
+  input_process_event(&ev);
+  if (is_gamepad_button_down(SDL_CONTROLLER_BUTTON_A)) {
+    shutdown_input();
+    return false;
+  }
+
+  shutdown_input();
+  return true;
+}
+
 bool test_bounds_check() noexcept {
   if (!initialize_input()) {
     return false;
@@ -305,6 +363,8 @@ int main() {
   run("max_actions", &test_max_actions);
   run("axis_register_and_rebind", &test_axis_register_and_rebind);
   run("axis_value_from_key_events", &test_axis_value_from_key_events);
+  run("gamepad_axis_deadzone", &test_gamepad_axis_deadzone);
+  run("gamepad_button_state", &test_gamepad_button_state);
   run("bounds_check", &test_bounds_check);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

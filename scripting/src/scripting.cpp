@@ -96,6 +96,45 @@ std::size_t g_deferredMutationCount = 0U;
 
 std::int64_t get_file_mtime(const char *path) noexcept;
 
+constexpr std::size_t kMaxModuleLoadDepth = 32U;
+char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
+std::size_t g_moduleLoadDepth = 0U;
+
+constexpr std::size_t kMaxProfilerEntries = 256U;
+struct ProfilerEntry final {
+  char name[96] = {};
+  std::uint32_t samples = 0U;
+  bool occupied = false;
+};
+ProfilerEntry g_profilerEntries[kMaxProfilerEntries]{};
+bool g_profilerEnabled = false;
+
+constexpr std::size_t kMaxBreakpoints = 64U;
+struct DebugBreakpoint final {
+  char file[160] = {};
+  int line = 0;
+  bool active = false;
+};
+DebugBreakpoint g_breakpoints[kMaxBreakpoints]{};
+
+constexpr std::size_t kMaxDebugWatches = 32U;
+char g_watchExprs[kMaxDebugWatches][96]{};
+std::size_t g_watchCount = 0U;
+char g_lastWatchOutput[1024] = {};
+char g_lastCallstack[2048] = {};
+char g_lastBreakpointFile[160] = {};
+int g_lastBreakpointLine = 0;
+std::uint32_t g_breakpointHitCount = 0U;
+bool g_debuggerEnabled = false;
+
+char g_gameMode[64] = "default";
+char g_gameState[64] = "startup";
+constexpr std::size_t kMaxPlayerControllers = 4U;
+std::uint32_t g_playerControllerEntities[kMaxPlayerControllers]{};
+
+void refresh_lua_hook() noexcept;
+void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept;
+
 bool can_apply_mutations_now() noexcept {
   return (g_world != nullptr) && (g_services != nullptr) &&
          (g_services->get_current_phase(g_world) == runtime::WorldPhase::Input);
@@ -345,6 +384,188 @@ bool read_entity(lua_State *state, int index,
 
   *outEntity = resolved;
   return true;
+}
+
+bool module_is_currently_loading(const char *path) noexcept {
+  if (path == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < g_moduleLoadDepth; ++i) {
+    if (std::strcmp(g_moduleLoadStack[i], path) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void profiler_record_sample(const char *name) noexcept {
+  if ((name == nullptr) || (name[0] == '\0')) {
+    name = "<anonymous>";
+  }
+
+  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
+    if (!g_profilerEntries[i].occupied) {
+      continue;
+    }
+    if (std::strcmp(g_profilerEntries[i].name, name) == 0) {
+      ++g_profilerEntries[i].samples;
+      return;
+    }
+  }
+
+  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
+    if (g_profilerEntries[i].occupied) {
+      continue;
+    }
+    std::snprintf(g_profilerEntries[i].name, sizeof(g_profilerEntries[i].name),
+                  "%s", name);
+    g_profilerEntries[i].samples = 1U;
+    g_profilerEntries[i].occupied = true;
+    return;
+  }
+}
+
+bool debugger_line_matches(const char *source, int line) noexcept {
+  if ((source == nullptr) || (line <= 0)) {
+    return false;
+  }
+
+  const char *normalizedSource = source;
+  if (normalizedSource[0] == '@') {
+    ++normalizedSource;
+  }
+
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    if (!g_breakpoints[i].active || (g_breakpoints[i].line != line)) {
+      continue;
+    }
+    const char *bp = g_breakpoints[i].file;
+    const std::size_t srcLen = std::strlen(normalizedSource);
+    const std::size_t bpLen = std::strlen(bp);
+    if ((bpLen > 0U) && (srcLen >= bpLen) &&
+        (std::strcmp(normalizedSource + (srcLen - bpLen), bp) == 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void debugger_capture_watch_values() noexcept {
+  g_lastWatchOutput[0] = '\0';
+  if ((g_state == nullptr) || (g_watchCount == 0U)) {
+    return;
+  }
+
+  lua_sethook(g_state, nullptr, 0, 0);
+
+  std::size_t writeOffset = 0U;
+  for (std::size_t i = 0U; i < g_watchCount; ++i) {
+    const char *expr = g_watchExprs[i];
+    char chunk[160] = {};
+    std::snprintf(chunk, sizeof(chunk), "return (%s)", expr);
+
+    const int loadStatus = luaL_loadstring(g_state, chunk);
+    if (loadStatus != LUA_OK) {
+      lua_pop(g_state, 1);
+      continue;
+    }
+
+    const int callStatus = lua_pcall(g_state, 0, 1, 0);
+    const char *value = "<error>";
+    char valueBuffer[128] = {};
+    if (callStatus == LUA_OK) {
+      if (lua_isnumber(g_state, -1)) {
+        std::snprintf(valueBuffer, sizeof(valueBuffer), "%g",
+                      static_cast<double>(lua_tonumber(g_state, -1)));
+        value = valueBuffer;
+      } else if (lua_isboolean(g_state, -1)) {
+        value = lua_toboolean(g_state, -1) ? "true" : "false";
+      } else if (lua_isstring(g_state, -1)) {
+        value = lua_tostring(g_state, -1);
+      } else if (lua_isnil(g_state, -1)) {
+        value = "nil";
+      } else {
+        value = luaL_typename(g_state, -1);
+      }
+      lua_pop(g_state, 1);
+    } else {
+      lua_pop(g_state, 1);
+    }
+
+    if (writeOffset < (sizeof(g_lastWatchOutput) - 1U)) {
+      const int written =
+          std::snprintf(g_lastWatchOutput + writeOffset,
+                        sizeof(g_lastWatchOutput) - writeOffset, "%s%s=%s",
+                        (writeOffset == 0U) ? "" : "; ", expr, value);
+      if (written > 0) {
+        const std::size_t delta = static_cast<std::size_t>(written);
+        writeOffset = (writeOffset + delta < sizeof(g_lastWatchOutput))
+                          ? (writeOffset + delta)
+                          : (sizeof(g_lastWatchOutput) - 1U);
+      }
+    }
+  }
+
+  refresh_lua_hook();
+}
+
+void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
+  if ((state == nullptr) || (ar == nullptr)) {
+    return;
+  }
+
+  if (g_profilerEnabled && (ar->event == LUA_HOOKCALL)) {
+    if (lua_getinfo(state, "n", ar) != 0) {
+      profiler_record_sample((ar->name != nullptr) ? ar->name : "<anonymous>");
+    }
+  }
+
+  if (g_debuggerEnabled && (ar->event == LUA_HOOKLINE)) {
+    if (lua_getinfo(state, "Sln", ar) == 0) {
+      return;
+    }
+    if (!debugger_line_matches(ar->source, ar->currentline)) {
+      return;
+    }
+
+    const char *source = (ar->source != nullptr) ? ar->source : "";
+    if (source[0] == '@') {
+      ++source;
+    }
+    std::snprintf(g_lastBreakpointFile, sizeof(g_lastBreakpointFile), "%s",
+                  source);
+    g_lastBreakpointLine = ar->currentline;
+    ++g_breakpointHitCount;
+
+    luaL_traceback(state, state, "breakpoint", 1);
+    const char *trace = lua_tostring(state, -1);
+    if (trace != nullptr) {
+      std::snprintf(g_lastCallstack, sizeof(g_lastCallstack), "%s", trace);
+    }
+    lua_pop(state, 1);
+    debugger_capture_watch_values();
+  }
+}
+
+void refresh_lua_hook() noexcept {
+  if (g_state == nullptr) {
+    return;
+  }
+
+  int mask = 0;
+  if (g_profilerEnabled) {
+    mask |= LUA_MASKCALL;
+  }
+  if (g_debuggerEnabled) {
+    mask |= LUA_MASKLINE;
+  }
+
+  if (mask == 0) {
+    lua_sethook(g_state, nullptr, 0, 0);
+    return;
+  }
+
+  lua_sethook(g_state, &scripting_debug_hook, mask, 0);
 }
 
 void log_lua_error(const char *context) noexcept {
@@ -985,6 +1206,235 @@ int lua_engine_get_action_value(lua_State *state) noexcept {
 int lua_engine_get_axis_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushnumber(state, static_cast<lua_Number>(core::axis_value(name)));
+  return 1;
+}
+
+int lua_engine_is_gamepad_connected(lua_State *state) noexcept {
+  static_cast<void>(state);
+  lua_pushboolean(state, core::is_gamepad_connected() ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const int button = static_cast<int>(lua_tointeger(state, 1));
+  lua_pushboolean(state, core::is_gamepad_button_down(button) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    lua_pushnumber(state, 0.0);
+    return 1;
+  }
+  const int axis = static_cast<int>(lua_tointeger(state, 1));
+  const int deadzone =
+      lua_isnumber(state, 2) ? static_cast<int>(lua_tointeger(state, 2)) : 8000;
+  lua_pushnumber(
+      state, static_cast<lua_Number>(core::gamepad_axis_value(axis, deadzone)));
+  return 1;
+}
+
+int lua_engine_set_game_mode(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  if (name == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_get_game_mode(lua_State *state) noexcept {
+  lua_pushstring(state, g_gameMode);
+  return 1;
+}
+
+int lua_engine_set_game_state(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  if (name == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  std::snprintf(g_gameState, sizeof(g_gameState), "%s", name);
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_get_game_state(lua_State *state) noexcept {
+  lua_pushstring(state, g_gameState);
+  return 1;
+}
+
+int lua_engine_set_player_controller(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const lua_Integer player = lua_tointeger(state, 1);
+  const lua_Integer entityIndex = lua_tointeger(state, 2);
+  if ((player < 0) ||
+      (player >= static_cast<lua_Integer>(kMaxPlayerControllers)) ||
+      (entityIndex < 0) ||
+      (entityIndex > static_cast<lua_Integer>(runtime::World::kMaxEntities))) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  g_playerControllerEntities[static_cast<std::size_t>(player)] =
+      static_cast<std::uint32_t>(entityIndex);
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_get_player_controller(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const lua_Integer player = lua_tointeger(state, 1);
+  if ((player < 0) ||
+      (player >= static_cast<lua_Integer>(kMaxPlayerControllers))) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  lua_pushinteger(
+      state, static_cast<lua_Integer>(
+                 g_playerControllerEntities[static_cast<std::size_t>(player)]));
+  return 1;
+}
+
+int lua_engine_profiler_enable(lua_State *state) noexcept {
+  g_profilerEnabled =
+      (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
+  refresh_lua_hook();
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_profiler_reset(lua_State *state) noexcept {
+  static_cast<void>(state);
+  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
+    g_profilerEntries[i] = ProfilerEntry{};
+  }
+  return 0;
+}
+
+int lua_engine_profiler_get_count(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  if (name == nullptr) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
+
+  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
+    if (!g_profilerEntries[i].occupied) {
+      continue;
+    }
+    if (std::strcmp(g_profilerEntries[i].name, name) == 0) {
+      lua_pushinteger(state,
+                      static_cast<lua_Integer>(g_profilerEntries[i].samples));
+      return 1;
+    }
+  }
+
+  lua_pushinteger(state, 0);
+  return 1;
+}
+
+int lua_engine_debugger_enable(lua_State *state) noexcept {
+  g_debuggerEnabled =
+      (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
+  refresh_lua_hook();
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept {
+  const char *file = lua_tostring(state, 1);
+  if ((file == nullptr) || !lua_isnumber(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const int line = static_cast<int>(lua_tointeger(state, 2));
+  if (line <= 0) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    if (!g_breakpoints[i].active) {
+      std::snprintf(g_breakpoints[i].file, sizeof(g_breakpoints[i].file), "%s",
+                    file);
+      g_breakpoints[i].line = line;
+      g_breakpoints[i].active = true;
+      lua_pushboolean(state, 1);
+      return 1;
+    }
+  }
+
+  lua_pushboolean(state, 0);
+  return 1;
+}
+
+int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept {
+  static_cast<void>(state);
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    g_breakpoints[i] = DebugBreakpoint{};
+  }
+  return 0;
+}
+
+int lua_engine_debugger_add_watch(lua_State *state) noexcept {
+  const char *expr = lua_tostring(state, 1);
+  if ((expr == nullptr) || (g_watchCount >= kMaxDebugWatches)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  std::snprintf(g_watchExprs[g_watchCount], sizeof(g_watchExprs[0]), "%s",
+                expr);
+  ++g_watchCount;
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_debugger_clear_watches(lua_State *state) noexcept {
+  static_cast<void>(state);
+  g_watchCount = 0U;
+  g_lastWatchOutput[0] = '\0';
+  return 0;
+}
+
+int lua_engine_debugger_last_breakpoint(lua_State *state) noexcept {
+  if (g_lastBreakpointLine <= 0) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_newtable(state);
+  lua_pushstring(state, g_lastBreakpointFile);
+  lua_setfield(state, -2, "file");
+  lua_pushinteger(state, static_cast<lua_Integer>(g_lastBreakpointLine));
+  lua_setfield(state, -2, "line");
+  lua_pushinteger(state, static_cast<lua_Integer>(g_breakpointHitCount));
+  lua_setfield(state, -2, "hits");
+  return 1;
+}
+
+int lua_engine_debugger_last_callstack(lua_State *state) noexcept {
+  lua_pushstring(state, g_lastCallstack);
+  return 1;
+}
+
+int lua_engine_debugger_last_watch_values(lua_State *state) noexcept {
+  lua_pushstring(state, g_lastWatchOutput);
   return 1;
 }
 
@@ -2047,6 +2497,14 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
+  if (module_is_currently_loading(path)) {
+    char msg[256] = {};
+    std::snprintf(msg, sizeof(msg), "circular module dependency detected: %s",
+                  path);
+    core::log_message(core::LogLevel::Error, "scripting", msg);
+    return LUA_NOREF;
+  }
+
   for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
     if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
       EntityScriptModule &mod = g_entityScriptModules[i];
@@ -2094,13 +2552,24 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
+  if (g_moduleLoadDepth >= kMaxModuleLoadDepth) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "module load stack overflow");
+    return LUA_NOREF;
+  }
+  std::snprintf(g_moduleLoadStack[g_moduleLoadDepth],
+                sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
+  ++g_moduleLoadDepth;
+
   if (luaL_loadfile(g_state, path) != LUA_OK) {
     log_lua_error("load entity script");
+    --g_moduleLoadDepth;
     return LUA_NOREF;
   }
 
   if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
     log_lua_error("exec entity script");
+    --g_moduleLoadDepth;
     return LUA_NOREF;
   }
 
@@ -2108,6 +2577,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     core::log_message(core::LogLevel::Error, "scripting",
                       "entity script must return a module table");
     lua_pop(g_state, 1);
+    --g_moduleLoadDepth;
     return LUA_NOREF;
   }
 
@@ -2126,6 +2596,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   char logBuf[256] = {};
   std::snprintf(logBuf, sizeof(logBuf), "loaded entity script: %s", path);
   core::log_message(core::LogLevel::Info, "scripting", logBuf);
+  --g_moduleLoadDepth;
   return ref;
 }
 
@@ -2318,6 +2789,50 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "action_value");
   lua_pushcfunction(state, &lua_engine_get_axis_value);
   lua_setfield(state, -2, "axis_value");
+
+  lua_pushcfunction(state, &lua_engine_is_gamepad_connected);
+  lua_setfield(state, -2, "is_gamepad_connected");
+  lua_pushcfunction(state, &lua_engine_is_gamepad_button_down);
+  lua_setfield(state, -2, "is_gamepad_button_down");
+  lua_pushcfunction(state, &lua_engine_gamepad_axis_value);
+  lua_setfield(state, -2, "gamepad_axis_value");
+
+  lua_pushcfunction(state, &lua_engine_set_game_mode);
+  lua_setfield(state, -2, "set_game_mode");
+  lua_pushcfunction(state, &lua_engine_get_game_mode);
+  lua_setfield(state, -2, "get_game_mode");
+  lua_pushcfunction(state, &lua_engine_set_game_state);
+  lua_setfield(state, -2, "set_game_state");
+  lua_pushcfunction(state, &lua_engine_get_game_state);
+  lua_setfield(state, -2, "get_game_state");
+  lua_pushcfunction(state, &lua_engine_set_player_controller);
+  lua_setfield(state, -2, "set_player_controller");
+  lua_pushcfunction(state, &lua_engine_get_player_controller);
+  lua_setfield(state, -2, "get_player_controller");
+
+  lua_pushcfunction(state, &lua_engine_profiler_enable);
+  lua_setfield(state, -2, "profiler_enable");
+  lua_pushcfunction(state, &lua_engine_profiler_reset);
+  lua_setfield(state, -2, "profiler_reset");
+  lua_pushcfunction(state, &lua_engine_profiler_get_count);
+  lua_setfield(state, -2, "profiler_get_count");
+
+  lua_pushcfunction(state, &lua_engine_debugger_enable);
+  lua_setfield(state, -2, "debugger_enable");
+  lua_pushcfunction(state, &lua_engine_debugger_add_breakpoint);
+  lua_setfield(state, -2, "debugger_add_breakpoint");
+  lua_pushcfunction(state, &lua_engine_debugger_clear_breakpoints);
+  lua_setfield(state, -2, "debugger_clear_breakpoints");
+  lua_pushcfunction(state, &lua_engine_debugger_add_watch);
+  lua_setfield(state, -2, "debugger_add_watch");
+  lua_pushcfunction(state, &lua_engine_debugger_clear_watches);
+  lua_setfield(state, -2, "debugger_clear_watches");
+  lua_pushcfunction(state, &lua_engine_debugger_last_breakpoint);
+  lua_setfield(state, -2, "debugger_last_breakpoint");
+  lua_pushcfunction(state, &lua_engine_debugger_last_callstack);
+  lua_setfield(state, -2, "debugger_last_callstack");
+  lua_pushcfunction(state, &lua_engine_debugger_last_watch_values);
+  lua_setfield(state, -2, "debugger_last_watch_values");
 
   lua_pushcfunction(state, &lua_engine_set_camera_position);
   lua_setfield(state, -2, "set_camera_position");
@@ -2612,6 +3127,7 @@ bool initialize_scripting() noexcept {
   luaL_requiref(g_state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(g_state, 1);
   register_engine_bindings(g_state);
+  refresh_lua_hook();
   return true;
 }
 
@@ -2650,6 +3166,26 @@ void shutdown_scripting() noexcept {
   g_deferredMutationCount = 0U;
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
+  g_moduleLoadDepth = 0U;
+  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
+    g_profilerEntries[i] = ProfilerEntry{};
+  }
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    g_breakpoints[i] = DebugBreakpoint{};
+  }
+  g_watchCount = 0U;
+  g_lastWatchOutput[0] = '\0';
+  g_lastCallstack[0] = '\0';
+  g_lastBreakpointFile[0] = '\0';
+  g_lastBreakpointLine = 0;
+  g_breakpointHitCount = 0U;
+  g_profilerEnabled = false;
+  g_debuggerEnabled = false;
+  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", "default");
+  std::snprintf(g_gameState, sizeof(g_gameState), "%s", "startup");
+  for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
+    g_playerControllerEntities[i] = 0U;
+  }
 }
 
 void bind_runtime_world(runtime::World *world) noexcept { g_world = world; }

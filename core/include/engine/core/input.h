@@ -54,6 +54,13 @@ bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept;
 float axis_value(const char *name) noexcept;
 
+// ----- Gamepad ------------------------------------------------------------
+
+bool is_gamepad_connected() noexcept;
+bool is_gamepad_button_down(int button) noexcept;
+// Returns normalized axis value in [-1, 1] with deadzone applied.
+float gamepad_axis_value(int axis, int deadzone = 8000) noexcept;
+
 // ----- Input Events (for Event Bus subscribers) ----------------------------
 
 struct KeyEvent final {
