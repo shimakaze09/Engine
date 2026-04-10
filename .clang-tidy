@@ -1,0 +1,12 @@
+Checks: >
+  -*,
+  bugprone-assert-side-effect,
+  bugprone-sizeof-expression,
+  bugprone-use-after-move,
+  modernize-use-nullptr,
+  performance-for-range-copy,
+  performance-inefficient-vector-operation,
+  readability-implicit-bool-conversion
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(core|math|physics|renderer|audio|runtime|editor|scripting|app|tests)/'
+FormatStyle: none

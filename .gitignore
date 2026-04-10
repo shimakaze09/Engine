@@ -479,7 +479,9 @@ FodyWeavers.xsd
 *.sln.iml
 
 # Misc
-.github
+.github/*
+!.github/workflows/
+!.github/workflows/*.yml
 .vscode
 [Bb]uild
 production_*.md

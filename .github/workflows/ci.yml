@@ -1,0 +1,314 @@
+name: Engine CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: 1
+
+jobs:
+  build-matrix:
+    name: Build ${{ matrix.os }} ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_type: Debug
+            platform: Linux
+          - os: ubuntu-latest
+            build_type: Release
+            platform: Linux
+          - os: windows-latest
+            build_type: Debug
+            platform: Win64
+          - os: windows-latest
+            build_type: Release
+            platform: Win64
+          - os: macos-latest
+            build_type: Debug
+            platform: macOS
+          - os: macos-latest
+            build_type: Release
+            platform: macOS
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/_deps
+          key: deps-${{ runner.os }}-${{ matrix.build_type }}-${{ hashFiles('CMakeLists.txt', '**/CMakeLists.txt', '**/*.cmake') }}
+          restore-keys: |
+            deps-${{ runner.os }}-${{ matrix.build_type }}-
+            deps-${{ runner.os }}-
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -DENGINE_TARGET_PLATFORM=${{ matrix.platform }} `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Configure (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -S . -B build \
+            -DENGINE_TARGET_PLATFORM=${{ matrix.platform }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cmake --build build --parallel
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+
+      - name: Test (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload compile_commands artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-commands-${{ runner.os }}-${{ matrix.build_type }}
+          path: build/compile_commands.json
+          if-no-files-found: warn
+
+  static-analysis:
+    name: Static Analysis (cppcheck + clang-tidy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck clang-tidy python3
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/_deps
+          key: deps-analysis-${{ hashFiles('CMakeLists.txt', '**/CMakeLists.txt', '**/*.cmake') }}
+          restore-keys: |
+            deps-analysis-
+            deps-Linux-
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build \
+            -DENGINE_TARGET_PLATFORM=Linux \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run cppcheck analysis target
+        run: cmake --build build --target analysis --parallel
+
+      - name: Run clang-tidy on engine sources
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+
+          roots = ["core", "math", "physics", "renderer", "audio", "runtime", "editor", "scripting", "app", "tests"]
+          files = []
+          for root in roots:
+              for path in pathlib.Path(root).rglob("*.cpp"):
+                  if "build" not in path.parts and "_deps" not in path.parts:
+                      files.append(path)
+
+          if not files:
+              print("No source files found for clang-tidy")
+              sys.exit(1)
+
+          cmd = ["clang-tidy", "-p", "build"] + [str(p) for p in files]
+          print("Running clang-tidy on", len(files), "files")
+          result = subprocess.run(cmd, check=False)
+          sys.exit(result.returncode)
+          PY
+
+      - name: Verify warnings-as-errors flags in compile commands
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          compile_db = pathlib.Path("build/compile_commands.json")
+          if not compile_db.exists():
+              print("compile_commands.json missing")
+              sys.exit(1)
+
+          data = json.loads(compile_db.read_text(encoding="utf-8"))
+          missing = []
+          for entry in data:
+              file_path = entry.get("file", "")
+              if not any(seg in file_path for seg in ["/core/", "/math/", "/physics/", "/renderer/", "/audio/", "/runtime/", "/editor/", "/scripting/", "/app/", "/tests/"]):
+                  continue
+              command = entry.get("command", "")
+              arguments = " ".join(entry.get("arguments", []))
+              joined = f"{command} {arguments}"
+              if (" -Werror" not in joined) and (" /WX" not in joined):
+                  missing.append(file_path)
+
+          if missing:
+              print("Missing warning-as-error flags in compile commands:")
+              for path in missing[:50]:
+                  print(path)
+              sys.exit(1)
+
+          print("All engine compile commands contain -Werror or /WX")
+          PY
+
+  sanitizers:
+    name: Sanitizers (ASAN+UBSAN)
+    runs-on: ubuntu-latest
+    env:
+      ASAN_OPTIONS: detect_leaks=1:suppressions=${{ github.workspace }}/sanitizer_suppressions.txt
+      UBSAN_OPTIONS: print_stacktrace=1:suppressions=${{ github.workspace }}/sanitizer_suppressions.txt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure sanitizer build
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-san \
+            -DENGINE_TARGET_PLATFORM=Linux \
+            -DENGINE_SANITIZERS=ON \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build-san --parallel
+
+      - name: Test
+        run: ctest --test-dir build-san --output-on-failure
+
+  tsan:
+    name: ThreadSanitizer
+    runs-on: ubuntu-latest
+    env:
+      TSAN_OPTIONS: suppressions=${{ github.workspace }}/sanitizer_suppressions.txt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure TSAN build
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-tsan \
+            -DENGINE_TARGET_PLATFORM=Linux \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS='-fsanitize=thread -fno-omit-frame-pointer' \
+            -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread' \
+            -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=thread'
+
+      - name: Build
+        run: cmake --build build-tsan --parallel
+
+      - name: Run thread-sensitive tests
+        run: ctest --test-dir build-tsan --output-on-failure -R 'scheduler|thread_count'
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcovr
+
+      - name: Configure coverage build
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake -S . -B build-cov \
+            -DENGINE_TARGET_PLATFORM=Linux \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS='--coverage' \
+            -DCMAKE_CXX_FLAGS='--coverage' \
+            -DCMAKE_EXE_LINKER_FLAGS='--coverage'
+
+      - name: Build
+        run: cmake --build build-cov --parallel
+
+      - name: Test
+        run: ctest --test-dir build-cov --output-on-failure
+
+      - name: Generate coverage report
+        run: |
+          gcovr --root . --json-summary --output build-cov/coverage-summary.json
+          gcovr --root . --html-details --output build-cov/coverage.html
+
+      - name: Coverage threshold gate
+        run: |
+          python3 tools/ci/check_coverage_threshold.py \
+            --summary build-cov/coverage-summary.json \
+            --min-line 40.0
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            build-cov/coverage.html
+            build-cov/coverage-summary.json
+
+  perf-gate:
+    name: Performance Regression Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DENGINE_TARGET_PLATFORM=Linux \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run benchmark regression check
+        run: |
+          python3 tools/ci/run_perf_gate.py \
+            --build-dir build \
+            --baseline tests/benchmark/perf_baseline.json \
+            --threshold 0.10

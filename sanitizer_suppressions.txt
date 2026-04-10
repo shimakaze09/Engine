@@ -1,0 +1,9 @@
+# Sanitizer suppressions for known third-party/transient findings.
+# Keep this list minimal and justify each entry.
+
+# ThreadSanitizer examples (applies when TSAN_OPTIONS=suppressions=...)
+race:SDL_
+race:lua_
+
+# AddressSanitizer interception suppressions can be added as needed.
+# interceptor_via_fun:malloc
