@@ -334,8 +334,12 @@ bool read_entity(lua_State *state, int index,
     return false;
   }
 
-  outEntity->index = validIndex;
-  outEntity->generation = 0U; // Services wrapper validates entity exists
+  const runtime::Entity resolved = g_world->find_entity_by_index(validIndex);
+  if (resolved == runtime::kInvalidEntity) {
+    return false;
+  }
+
+  *outEntity = resolved;
   return true;
 }
 
