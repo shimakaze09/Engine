@@ -5,6 +5,15 @@
 namespace engine::runtime {
 
 class World;
+struct Transform;
+struct RigidBody;
+struct Collider;
+struct MeshComponent;
+struct NameComponent;
+struct LightComponent;
+struct ScriptComponent;
+enum class MovementAuthority : std::uint8_t;
+enum class WorldPhase : std::uint8_t;
 
 } // namespace engine::runtime
 
@@ -26,6 +35,63 @@ struct RuntimeServices final {
   void (*set_camera_target)(float x, float y, float z) noexcept = nullptr;
   void (*set_camera_up)(float x, float y, float z) noexcept = nullptr;
   void (*set_camera_fov)(float fovRadians) noexcept = nullptr;
+
+  // World query operations needed by Lua bindings
+  runtime::WorldPhase (*get_current_phase)(runtime::World *world) noexcept =
+      nullptr;
+  std::uint32_t (*get_entity_index)(
+      runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
+  std::uint32_t (*get_transform_count)(runtime::World *world) noexcept =
+      nullptr;
+  std::uint32_t (*create_entity_op)(runtime::World *world) noexcept = nullptr;
+  const runtime::Transform *(*get_transform_read_ptr)(
+      runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
+  bool (*get_transform_op)(runtime::World *world, std::uint32_t entityIndex,
+                           runtime::Transform *outTransform) noexcept = nullptr;
+  bool (*get_rigid_body_op)(runtime::World *world, std::uint32_t entityIndex,
+                            runtime::RigidBody *outRigidBody) noexcept =
+      nullptr;
+  const runtime::MeshComponent *(*get_mesh_component_ptr)(
+      runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
+  bool (*get_mesh_component_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      runtime::MeshComponent *outComponent) noexcept = nullptr;
+  bool (*get_name_component_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      runtime::NameComponent *outComponent) noexcept = nullptr;
+  bool (*get_collider_op)(runtime::World *world, std::uint32_t entityIndex,
+                          runtime::Collider *outCollider) noexcept = nullptr;
+
+  // World mutation operations (called from deferred mutation queue)
+  bool (*destroy_entity_op)(runtime::World *world,
+                            std::uint32_t entityIndex) noexcept = nullptr;
+  bool (*add_transform_op)(runtime::World *world, std::uint32_t entityIndex,
+                           const runtime::Transform &transform) noexcept =
+      nullptr;
+  bool (*set_movement_authority_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      runtime::MovementAuthority authority) noexcept = nullptr;
+  bool (*add_rigid_body_op)(runtime::World *world, std::uint32_t entityIndex,
+                            const runtime::RigidBody &rigidBody) noexcept =
+      nullptr;
+  bool (*add_collider_op)(runtime::World *world, std::uint32_t entityIndex,
+                          const runtime::Collider &collider) noexcept = nullptr;
+  bool (*add_mesh_component_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      const runtime::MeshComponent &component) noexcept = nullptr;
+  bool (*add_name_component_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      const runtime::NameComponent &component) noexcept = nullptr;
+  bool (*add_light_component_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      const runtime::LightComponent &component) noexcept = nullptr;
+  bool (*remove_light_component_op)(
+      runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
+  bool (*add_script_component_op)(
+      runtime::World *world, std::uint32_t entityIndex,
+      const runtime::ScriptComponent &component) noexcept = nullptr;
+  bool (*remove_script_component_op)(
+      runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
 
   void (*set_gravity)(runtime::World *world, float x, float y,
                       float z) noexcept = nullptr;

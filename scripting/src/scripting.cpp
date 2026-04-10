@@ -93,8 +93,8 @@ DeferredMutation g_deferredMutations[kMaxDeferredMutations]{};
 std::size_t g_deferredMutationCount = 0U;
 
 bool can_apply_mutations_now() noexcept {
-  return (g_world != nullptr) &&
-         (g_world->current_phase() == runtime::WorldPhase::Input);
+  return (g_world != nullptr) && (g_services != nullptr) &&
+         (g_services->get_current_phase(g_world) == runtime::WorldPhase::Input);
 }
 
 bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
@@ -110,12 +110,12 @@ bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
 }
 
 bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->destroy_entity(entity);
+    return g_services->destroy_entity_op(g_world, entity.index);
   }
 
   DeferredMutation mutation{};
@@ -128,16 +128,18 @@ bool apply_or_queue_transform(runtime::Entity entity,
                               const runtime::Transform &transform,
                               bool setAuthority,
                               runtime::MovementAuthority authority) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    const bool transformUpdated = g_world->add_transform(entity, transform);
+    const bool transformUpdated =
+        g_services->add_transform_op(g_world, entity.index, transform);
     if (!transformUpdated) {
       return false;
     }
-    return !setAuthority || g_world->set_movement_authority(entity, authority);
+    return !setAuthority || g_services->set_movement_authority_op(
+                                g_world, entity.index, authority);
   }
 
   DeferredMutation mutation{};
@@ -151,12 +153,12 @@ bool apply_or_queue_transform(runtime::Entity entity,
 
 bool apply_or_queue_rigid_body(runtime::Entity entity,
                                const runtime::RigidBody &rigidBody) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_rigid_body(entity, rigidBody);
+    return g_services->add_rigid_body_op(g_world, entity.index, rigidBody);
   }
 
   DeferredMutation mutation{};
@@ -168,12 +170,12 @@ bool apply_or_queue_rigid_body(runtime::Entity entity,
 
 bool apply_or_queue_collider(runtime::Entity entity,
                              const runtime::Collider &collider) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_collider(entity, collider);
+    return g_services->add_collider_op(g_world, entity.index, collider);
   }
 
   DeferredMutation mutation{};
@@ -185,12 +187,12 @@ bool apply_or_queue_collider(runtime::Entity entity,
 
 bool apply_or_queue_mesh_component(
     runtime::Entity entity, const runtime::MeshComponent &component) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_mesh_component(entity, component);
+    return g_services->add_mesh_component_op(g_world, entity.index, component);
   }
 
   DeferredMutation mutation{};
@@ -202,12 +204,12 @@ bool apply_or_queue_mesh_component(
 
 bool apply_or_queue_name_component(
     runtime::Entity entity, const runtime::NameComponent &component) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_name_component(entity, component);
+    return g_services->add_name_component_op(g_world, entity.index, component);
   }
 
   DeferredMutation mutation{};
@@ -219,12 +221,12 @@ bool apply_or_queue_name_component(
 
 bool apply_or_queue_light_component(
     runtime::Entity entity, const runtime::LightComponent &component) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_light_component(entity, component);
+    return g_services->add_light_component_op(g_world, entity.index, component);
   }
 
   DeferredMutation mutation{};
@@ -235,12 +237,12 @@ bool apply_or_queue_light_component(
 }
 
 bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->remove_light_component(entity);
+    return g_services->remove_light_component_op(g_world, entity.index);
   }
 
   DeferredMutation mutation{};
@@ -252,12 +254,13 @@ bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
 bool apply_or_queue_script_component(
     runtime::Entity entity,
     const runtime::ScriptComponent &component) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_script_component(entity, component);
+    return g_services->add_script_component_op(g_world, entity.index,
+                                               component);
   }
 
   DeferredMutation mutation{};
@@ -268,12 +271,12 @@ bool apply_or_queue_script_component(
 }
 
 bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->remove_script_component(entity);
+    return g_services->remove_script_component_op(g_world, entity.index);
   }
 
   DeferredMutation mutation{};
@@ -315,7 +318,8 @@ bool read_vec3_args(lua_State *state, int startIndex,
 
 bool read_entity(lua_State *state, int index,
                  runtime::Entity *outEntity) noexcept {
-  if ((g_world == nullptr) || (outEntity == nullptr)) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (outEntity == nullptr)) {
     return false;
   }
 
@@ -324,12 +328,14 @@ bool read_entity(lua_State *state, int index,
     return false;
   }
 
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIndex);
-  if (entity == runtime::kInvalidEntity) {
+  const std::uint32_t validIndex =
+      g_services->get_entity_index(g_world, entityIndex);
+  if (validIndex == 0U) {
     return false;
   }
 
-  *outEntity = entity;
+  outEntity->index = validIndex;
+  outEntity->generation = 0U; // Services wrapper validates entity exists
   return true;
 }
 
@@ -365,26 +371,28 @@ int lua_engine_log(lua_State *state) noexcept {
 }
 
 int lua_engine_get_entity_count(lua_State *state) noexcept {
-  const std::size_t count =
-      (g_world != nullptr) ? g_world->transform_count() : 0U;
+  const std::size_t count = (g_world != nullptr && g_services != nullptr)
+                                ? g_services->get_transform_count(g_world)
+                                : 0U;
   lua_pushinteger(state, static_cast<lua_Integer>(count));
   return 1;
 }
 
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !can_apply_mutations_now()) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
 
-  // Only valid during Idle; create_entity returns kInvalidEntity otherwise.
-  const runtime::Entity entity = g_world->create_entity();
-  if (entity == runtime::kInvalidEntity) {
+  // Only valid during Input; create_entity returns 0 otherwise.
+  const std::uint32_t entityIndex = g_services->create_entity_op(g_world);
+  if (entityIndex == 0U) {
     lua_pushnil(state);
     return 1;
   }
 
-  lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
+  lua_pushinteger(state, static_cast<lua_Integer>(entityIndex));
   return 1;
 }
 
@@ -424,7 +432,13 @@ int lua_engine_get_position(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Transform *transform = g_world->get_transform_read_ptr(entity);
+  if (g_services == nullptr) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const runtime::Transform *transform =
+      g_services->get_transform_read_ptr(g_world, entity.index);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -445,7 +459,10 @@ int lua_engine_set_position(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  static_cast<void>(g_world->get_transform(entity, &transform));
+  if (g_services != nullptr) {
+    static_cast<void>(
+        g_services->get_transform_op(g_world, entity.index, &transform));
+  }
   transform.position = position;
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -797,7 +814,8 @@ int lua_engine_get_name(lua_State *state) noexcept {
   }
 
   runtime::NameComponent component{};
-  if (!g_world->get_name_component(entity, &component)) {
+  if ((g_services == nullptr) ||
+      !g_services->get_name_component_op(g_world, entity.index, &component)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2693,8 +2711,8 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
 }
 
 void flush_deferred_mutations() noexcept {
-  if ((g_world == nullptr) || (g_deferredMutationCount == 0U) ||
-      !can_apply_mutations_now()) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_deferredMutationCount == 0U) || !can_apply_mutations_now()) {
     return;
   }
 
@@ -2704,46 +2722,49 @@ void flush_deferred_mutations() noexcept {
     const DeferredMutation &mutation = g_deferredMutations[i];
     switch (mutation.type) {
     case DeferredMutationType::DestroyEntity:
-      static_cast<void>(g_world->destroy_entity(mutation.entity));
+      static_cast<void>(
+          g_services->destroy_entity_op(g_world, mutation.entity.index));
       break;
     case DeferredMutationType::SetTransform: {
-      const bool transformUpdated =
-          g_world->add_transform(mutation.entity, mutation.transform);
+      const bool transformUpdated = g_services->add_transform_op(
+          g_world, mutation.entity.index, mutation.transform);
       if (transformUpdated && mutation.setMovementAuthority) {
-        static_cast<void>(g_world->set_movement_authority(
-            mutation.entity, mutation.movementAuthority));
+        static_cast<void>(g_services->set_movement_authority_op(
+            g_world, mutation.entity.index, mutation.movementAuthority));
       }
       break;
     }
     case DeferredMutationType::AddRigidBody:
-      static_cast<void>(
-          g_world->add_rigid_body(mutation.entity, mutation.rigidBody));
+      static_cast<void>(g_services->add_rigid_body_op(
+          g_world, mutation.entity.index, mutation.rigidBody));
       break;
     case DeferredMutationType::AddCollider:
-      static_cast<void>(
-          g_world->add_collider(mutation.entity, mutation.collider));
+      static_cast<void>(g_services->add_collider_op(
+          g_world, mutation.entity.index, mutation.collider));
       break;
     case DeferredMutationType::AddMeshComponent:
-      static_cast<void>(
-          g_world->add_mesh_component(mutation.entity, mutation.meshComponent));
+      static_cast<void>(g_services->add_mesh_component_op(
+          g_world, mutation.entity.index, mutation.meshComponent));
       break;
     case DeferredMutationType::AddNameComponent:
-      static_cast<void>(
-          g_world->add_name_component(mutation.entity, mutation.nameComponent));
+      static_cast<void>(g_services->add_name_component_op(
+          g_world, mutation.entity.index, mutation.nameComponent));
       break;
     case DeferredMutationType::AddLightComponent:
-      static_cast<void>(g_world->add_light_component(mutation.entity,
-                                                     mutation.lightComponent));
+      static_cast<void>(g_services->add_light_component_op(
+          g_world, mutation.entity.index, mutation.lightComponent));
       break;
     case DeferredMutationType::RemoveLightComponent:
-      static_cast<void>(g_world->remove_light_component(mutation.entity));
+      static_cast<void>(g_services->remove_light_component_op(
+          g_world, mutation.entity.index));
       break;
     case DeferredMutationType::AddScriptComponent:
-      static_cast<void>(g_world->add_script_component(
-          mutation.entity, mutation.scriptComponent));
+      static_cast<void>(g_services->add_script_component_op(
+          g_world, mutation.entity.index, mutation.scriptComponent));
       break;
     case DeferredMutationType::RemoveScriptComponent:
-      static_cast<void>(g_world->remove_script_component(mutation.entity));
+      static_cast<void>(g_services->remove_script_component_op(
+          g_world, mutation.entity.index));
       break;
     }
   }

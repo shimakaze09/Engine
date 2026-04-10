@@ -175,11 +175,239 @@ std::uint32_t scripting_instantiate_prefab(runtime::World *world,
   return entity.index;
 }
 
+// World query operations needed by Lua bindings
+runtime::WorldPhase
+scripting_get_current_phase(runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return runtime::WorldPhase::Input;
+  }
+  return world->current_phase();
+}
+
+std::uint32_t scripting_get_entity_index(runtime::World *world,
+                                         std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return 0U;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return (entity != runtime::kInvalidEntity) ? entity.index : 0U;
+}
+
+std::uint32_t scripting_get_transform_count(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->transform_count() : 0U;
+}
+
+std::uint32_t scripting_create_entity_op(runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return 0U;
+  }
+  const runtime::Entity entity = world->create_entity();
+  return entity.index;
+}
+
+const runtime::Transform *
+scripting_get_transform_read_ptr(runtime::World *world,
+                                 std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return nullptr;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_transform_read_ptr(entity);
+}
+
+bool scripting_get_transform_op(runtime::World *world,
+                                std::uint32_t entityIndex,
+                                runtime::Transform *outTransform) noexcept {
+  if ((world == nullptr) || (outTransform == nullptr)) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_transform(entity, outTransform);
+}
+
+bool scripting_get_rigid_body_op(runtime::World *world,
+                                 std::uint32_t entityIndex,
+                                 runtime::RigidBody *outRigidBody) noexcept {
+  if ((world == nullptr) || (outRigidBody == nullptr)) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_rigid_body(entity, outRigidBody);
+}
+
+const runtime::MeshComponent *
+scripting_get_mesh_component_ptr(runtime::World *world,
+                                 std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return nullptr;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_mesh_component_ptr(entity);
+}
+
+bool scripting_get_mesh_component_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    runtime::MeshComponent *outComponent) noexcept {
+  if ((world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_mesh_component(entity, outComponent);
+}
+
+bool scripting_get_name_component_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    runtime::NameComponent *outComponent) noexcept {
+  if ((world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_name_component(entity, outComponent);
+}
+
+bool scripting_get_collider_op(runtime::World *world, std::uint32_t entityIndex,
+                               runtime::Collider *outCollider) noexcept {
+  if ((world == nullptr) || (outCollider == nullptr)) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->get_collider(entity, outCollider);
+}
+
+// World mutation operations (called from deferred mutation queue)
+bool scripting_destroy_entity_op(runtime::World *world,
+                                 std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->destroy_entity(entity);
+}
+
+bool scripting_add_transform_op(runtime::World *world,
+                                std::uint32_t entityIndex,
+                                const runtime::Transform &transform) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_transform(entity, transform);
+}
+
+bool scripting_set_movement_authority_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    runtime::MovementAuthority authority) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->set_movement_authority(entity, authority);
+}
+
+bool scripting_add_rigid_body_op(runtime::World *world,
+                                 std::uint32_t entityIndex,
+                                 const runtime::RigidBody &rigidBody) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_rigid_body(entity, rigidBody);
+}
+
+bool scripting_add_collider_op(runtime::World *world, std::uint32_t entityIndex,
+                               const runtime::Collider &collider) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_collider(entity, collider);
+}
+
+bool scripting_add_mesh_component_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    const runtime::MeshComponent &component) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_mesh_component(entity, component);
+}
+
+bool scripting_add_name_component_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    const runtime::NameComponent &component) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_name_component(entity, component);
+}
+
+bool scripting_add_light_component_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    const runtime::LightComponent &component) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_light_component(entity, component);
+}
+
+bool scripting_remove_light_component_op(runtime::World *world,
+                                         std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->remove_light_component(entity);
+}
+
+bool scripting_add_script_component_op(
+    runtime::World *world, std::uint32_t entityIndex,
+    const runtime::ScriptComponent &component) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->add_script_component(entity, component);
+}
+
+bool scripting_remove_script_component_op(runtime::World *world,
+                                          std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  return world->remove_script_component(entity);
+}
+
 const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_set_camera_position,
     &scripting_set_camera_target,
     &scripting_set_camera_up,
     &scripting_set_camera_fov,
+    &scripting_get_current_phase,
+    &scripting_get_entity_index,
+    &scripting_get_transform_count,
+    &scripting_create_entity_op,
+    &scripting_get_transform_read_ptr,
+    &scripting_get_transform_op,
+    &scripting_get_rigid_body_op,
+    &scripting_get_mesh_component_ptr,
+    &scripting_get_mesh_component_op,
+    &scripting_get_name_component_op,
+    &scripting_get_collider_op,
+    &scripting_destroy_entity_op,
+    &scripting_add_transform_op,
+    &scripting_set_movement_authority_op,
+    &scripting_add_rigid_body_op,
+    &scripting_add_collider_op,
+    &scripting_add_mesh_component_op,
+    &scripting_add_name_component_op,
+    &scripting_add_light_component_op,
+    &scripting_remove_light_component_op,
+    &scripting_add_script_component_op,
+    &scripting_remove_script_component_op,
     &scripting_set_gravity,
     &scripting_get_gravity,
     &scripting_raycast,
