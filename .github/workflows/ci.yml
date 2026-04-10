@@ -50,6 +50,22 @@ jobs:
             deps-${{ runner.os }}-${{ matrix.build_type }}-
             deps-${{ runner.os }}-
 
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libasound2-dev
+
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -105,7 +121,19 @@ jobs:
       - name: Install analysis tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cppcheck clang-tidy python3
+          sudo apt-get install -y \
+            cppcheck \
+            clang-tidy \
+            python3 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libasound2-dev
 
       - name: Cache FetchContent dependencies
         uses: actions/cache@v4
@@ -197,6 +225,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Linux sanitizer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libasound2-dev
+
       - name: Configure sanitizer build
         env:
           CC: clang
@@ -221,6 +263,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Linux TSAN dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libasound2-dev
 
       - name: Configure TSAN build
         env:
@@ -251,7 +307,17 @@ jobs:
       - name: Install coverage tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcovr
+          sudo apt-get install -y \
+            gcovr \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libasound2-dev
 
       - name: Configure coverage build
         env:
@@ -296,6 +362,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Linux perf dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libwayland-dev \
+            libasound2-dev
 
       - name: Configure
         run: |
