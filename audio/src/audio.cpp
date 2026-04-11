@@ -10,6 +10,7 @@
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
+#pragma clang diagnostic ignored "-Wunused-but-set-variable"
 #elif defined(_MSC_VER)
 #pragma warning(push, 0)
 #elif defined(__GNUC__)
