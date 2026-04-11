@@ -53,7 +53,7 @@ int main() {
     return 1;
   }
 
-  if (engine::runtime::World::kMaxEntities < kEntityCount) {
+  if constexpr (engine::runtime::World::kMaxEntities < kEntityCount) {
     std::printf("FAIL: world capacity %zu is below required %zu\n",
                 engine::runtime::World::kMaxEntities, kEntityCount);
     return 2;

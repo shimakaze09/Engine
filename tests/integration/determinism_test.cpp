@@ -138,13 +138,13 @@ int main() {
   std::printf("[determinism] hash=%llu\n",
               static_cast<unsigned long long>(hashA));
 
-  if ((kExpectedHash != 0ULL) && (hashA != kExpectedHash)) {
+  if constexpr (kExpectedHash != 0ULL) { if (hashA != kExpectedHash) {
     std::printf(
         "FAIL: cross-platform hash mismatch expected=%llu actual=%llu\n",
         static_cast<unsigned long long>(kExpectedHash),
         static_cast<unsigned long long>(hashA));
     return 3;
-  }
+  } }
 
   return 0;
 }

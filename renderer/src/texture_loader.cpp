@@ -21,6 +21,13 @@
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma clang diagnostic ignored "-Wcast-qual"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4244) // conversion from 'int' to 'short'
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -29,6 +36,10 @@
 
 #ifdef __clang__
 #pragma clang diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
 #endif
 
 namespace engine::renderer {

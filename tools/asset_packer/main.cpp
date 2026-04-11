@@ -336,8 +336,8 @@ bool extract_primitive(const cgltf_primitive *primitive,
     outData->indices.assign(indexCount, 0U);
 
     for (std::size_t i = 0U; i < indexCount; ++i) {
-      const cgltf_uint index = cgltf_accessor_read_index(
-          primitive->indices, static_cast<cgltf_size>(i));
+      const cgltf_uint index = static_cast<cgltf_uint>(cgltf_accessor_read_index(
+          primitive->indices, static_cast<cgltf_size>(i)));
       if (index >= positions->count) {
         std::fprintf(stderr, "error: index out of range\n");
         return false;
