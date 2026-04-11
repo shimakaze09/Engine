@@ -79,6 +79,16 @@ jobs:
       - name: Configure (needed for FetchContent headers)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
+      - name: Filter compile_commands.json (exclude FetchContent deps)
+        run: |
+          python3 -c "
+          import json, pathlib
+          p = pathlib.Path('build/compile_commands.json')
+          db = json.loads(p.read_text())
+          db = [e for e in db if '/_deps/' not in e['file']]
+          p.write_text(json.dumps(db, indent=2))
+          "
+
       - name: Run cppcheck
         run: cmake --build build --target analysis
 
