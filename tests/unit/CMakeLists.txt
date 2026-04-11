@@ -14,6 +14,7 @@ add_test(
     NAME engine_unit_foundation
     COMMAND engine_unit_foundation
 )
+set_tests_properties(engine_unit_foundation PROPERTIES LABELS "gpu")
 
 add_executable(engine_unit_math
     math_test.cpp

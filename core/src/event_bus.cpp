@@ -15,7 +15,7 @@ namespace {
 // ---------------------------------------------------------------------------
 constexpr std::size_t kMaxEventTypes = 64U;
 constexpr std::size_t kMaxSubscribersPerType = 16U;
-constexpr std::uint32_t kMaxEmitDepth = 64U;
+[[maybe_unused]] constexpr std::uint32_t kMaxEmitDepth = 64U;
 
 struct TypedSubscriber final {
   RawEventHandler handler = nullptr;

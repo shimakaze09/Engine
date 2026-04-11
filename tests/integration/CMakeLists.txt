@@ -13,7 +13,7 @@ add_test(
     NAME engine_integration_ecs
     COMMAND engine_integration_ecs
 )
-set_tests_properties(engine_integration_ecs PROPERTIES LABELS "integration")
+set_tests_properties(engine_integration_ecs PROPERTIES LABELS "gpu;integration")
 
 add_executable(engine_integration_vertical_slice
     vertical_slice_integration.cpp
@@ -47,7 +47,7 @@ add_test(
     NAME engine_integration_scheduler_stress
     COMMAND engine_integration_scheduler_stress
 )
-set_tests_properties(engine_integration_scheduler_stress PROPERTIES LABELS "integration")
+set_tests_properties(engine_integration_scheduler_stress PROPERTIES LABELS "gpu;integration")
 
 add_executable(engine_integration_thread_count_determinism
     thread_count_determinism.cpp

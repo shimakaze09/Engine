@@ -4,3 +4,8 @@
 leak:SDL_EGL_InitializeOffscreen
 leak:SDL_Init
 leak:SDL_VideoInit
+
+# PulseAudio internal allocations via miniaudio.  CI runners lack a sound
+# server, so miniaudio's PulseAudio backend leaks during context init.
+leak:pa_context_new_with_proplist
+leak:pa_xmalloc0
