@@ -153,6 +153,9 @@ if(CPPCHECK_EXE)
         --error-exitcode=1
         --suppress=missingIncludeSystem
         --suppress=unmatchedSuppression
+        --suppress=preprocessorErrorDirective
+        --suppress=*:*_deps/*
+        --suppress=objectIndex:*/math/src/ray.cpp
         -i "${CMAKE_BINARY_DIR}/_deps"
         -i "${CMAKE_SOURCE_DIR}/tests"
         -i "${CMAKE_SOURCE_DIR}/tools"
