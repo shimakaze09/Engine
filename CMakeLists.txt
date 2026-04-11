@@ -59,6 +59,27 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(ENGINE_DETERMINISTIC_FLOATS "Enable strict floating-point determinism flags" ON)
+set(ENGINE_MAX_ENTITIES "65536" CACHE STRING "Maximum runtime world entities (compile-time constant)")
+
+if(NOT ENGINE_MAX_ENTITIES MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "ENGINE_MAX_ENTITIES must be a positive integer, got '${ENGINE_MAX_ENTITIES}'")
+endif()
+
+add_compile_definitions(ENGINE_MAX_ENTITIES=${ENGINE_MAX_ENTITIES})
+
+if(ENGINE_DETERMINISTIC_FLOATS)
+    if(MSVC)
+        add_compile_options(/fp:strict)
+    else()
+        add_compile_options(-ffp-contract=off -fno-fast-math)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            add_compile_options(-fexcess-precision=standard)
+        endif()
+    endif()
+    message(STATUS "ENGINE_DETERMINISTIC_FLOATS: strict floating-point flags enabled")
+endif()
+
 if(MSVC)
     add_compile_options(/W4 /WX /permissive- /GR- /EHs-c-)
     add_compile_definitions(_HAS_EXCEPTIONS=0)

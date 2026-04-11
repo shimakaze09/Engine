@@ -1,6 +1,5 @@
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
-#include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 

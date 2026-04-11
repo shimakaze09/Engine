@@ -1,5 +1,4 @@
 #include "engine/core/job_system.h"
-#include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -270,7 +269,7 @@ bool run_with_worker_count(std::uint32_t workerCount, std::uint64_t *outHash,
 } // namespace
 
 int main() {
-  constexpr std::array<std::uint32_t, 3U> kWorkerConfigs = {0U, 1U, 2U};
+  constexpr std::array<std::uint32_t, 4U> kWorkerConfigs = {1U, 2U, 4U, 8U};
 
   std::uint64_t referenceHash = 0U;
   std::uint32_t maxObservedWorkers = 0U;
@@ -293,7 +292,7 @@ int main() {
     }
   }
 
-  if (maxObservedWorkers < 2U) {
+  if (maxObservedWorkers < 8U) {
     return 3;
   }
 

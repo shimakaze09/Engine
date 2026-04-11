@@ -61,3 +61,35 @@ add_test(
     NAME engine_integration_thread_count_determinism
     COMMAND engine_integration_thread_count_determinism
 )
+
+add_executable(engine_integration_determinism
+    determinism_test.cpp
+)
+
+target_compile_features(engine_integration_determinism PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_determinism
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_determinism
+    COMMAND engine_integration_determinism
+)
+
+add_executable(engine_integration_ecs_stress_50k
+    ecs_stress_50k.cpp
+)
+
+target_compile_features(engine_integration_ecs_stress_50k PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_ecs_stress_50k
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_ecs_stress_50k
+    COMMAND engine_integration_ecs_stress_50k
+)

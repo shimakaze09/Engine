@@ -14,6 +14,14 @@
 
 namespace engine::runtime {
 
+#ifndef ENGINE_MAX_ENTITIES
+#define ENGINE_MAX_ENTITIES 65536U
+#endif
+
+#ifndef ENGINE_MAX_LIGHT_COMPONENTS
+#define ENGINE_MAX_LIGHT_COMPONENTS 1024U
+#endif
+
 struct Entity final {
   std::uint32_t index = 0U;
   std::uint32_t generation = 0U;
@@ -111,14 +119,15 @@ enum class MovementAuthority : std::uint8_t {
 
 class World final {
 public:
-  static constexpr std::size_t kMaxEntities = 16384U;
-  static constexpr std::size_t kMaxTransforms = 16384U;
-  static constexpr std::size_t kMaxRigidBodies = 16384U;
-  static constexpr std::size_t kMaxColliders = 16384U;
-  static constexpr std::size_t kMaxMeshComponents = 16384U;
-  static constexpr std::size_t kMaxNameComponents = 16384U;
-  static constexpr std::size_t kMaxLightComponents = 1024U;
-  static constexpr std::size_t kMaxScriptComponents = 16384U;
+  static constexpr std::size_t kMaxEntities = ENGINE_MAX_ENTITIES;
+  static constexpr std::size_t kMaxTransforms = kMaxEntities;
+  static constexpr std::size_t kMaxRigidBodies = kMaxEntities;
+  static constexpr std::size_t kMaxColliders = kMaxEntities;
+  static constexpr std::size_t kMaxMeshComponents = kMaxEntities;
+  static constexpr std::size_t kMaxNameComponents = kMaxEntities;
+  static constexpr std::size_t kMaxLightComponents =
+      ENGINE_MAX_LIGHT_COMPONENTS;
+  static constexpr std::size_t kMaxScriptComponents = kMaxEntities;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
