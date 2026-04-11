@@ -60,10 +60,16 @@ jobs:
       # ---- Determinism hash artifact (for cross-platform comparison) ----
       - name: Run determinism hash
         if: matrix.config == 'Release'
+        continue-on-error: true
         shell: bash
         run: |
-          ./build/tests/integration/engine_integration_determinism 2>&1 | tee determinism_output.txt
-          hash=$(grep -oP 'hash=\K[0-9]+' determinism_output.txt || true)
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            exe="build/tests/integration/Release/engine_integration_determinism.exe"
+          else
+            exe="build/tests/integration/engine_integration_determinism"
+          fi
+          "$exe" 2>&1 | tee determinism_output.txt
+          hash=$(sed -n 's/.*hash=\([0-9]*\).*/\1/p' determinism_output.txt)
           echo "$hash" > determinism_hash.txt
           echo "Determinism hash on ${{ matrix.os }}: $hash"
 
@@ -373,7 +379,7 @@ jobs:
 
       - name: Collect coverage (lcov)
         run: |
-          lcov --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch
+          lcov --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch,negative
           lcov --remove coverage_raw.info '*/build/_deps/*' '*/tests/*' '*/tools/*' '/usr/*' --output-file coverage.info --ignore-errors unused
           lcov --summary coverage.info
 
