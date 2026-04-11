@@ -55,6 +55,11 @@ endif()
 
 find_package(OpenGL REQUIRED)
 
+# Silence OpenGL deprecation warnings on macOS (deprecated since 10.14 Mojave).
+if(APPLE)
+    add_compile_definitions(GL_SILENCE_DEPRECATION)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
