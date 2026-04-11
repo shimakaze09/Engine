@@ -194,7 +194,12 @@ std::uint32_t scripting_get_entity_index(runtime::World *world,
 }
 
 std::uint32_t scripting_get_transform_count(runtime::World *world) noexcept {
-  return (world != nullptr) ? world->transform_count() : 0U;
+  if (world == nullptr) {
+    return 0U;
+  }
+
+  const std::size_t count = world->transform_count();
+  return static_cast<std::uint32_t>(count);
 }
 
 std::uint32_t scripting_create_entity_op(runtime::World *world) noexcept {

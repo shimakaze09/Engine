@@ -26,6 +26,9 @@ thread_local std::uint32_t g_threadIndex = 0U;
 struct alignas(64) ThreadStats final {
   std::atomic<std::uint64_t> jobsExecuted = 0U;
   std::atomic<std::uint64_t> busyNanoseconds = 0U;
+  // Keep one stats record per cache line without compiler-inserted padding.
+  std::array<std::uint8_t, 64U - (2U * sizeof(std::atomic<std::uint64_t>))>
+      cacheLinePad{};
 };
 
 struct JobNode final {
@@ -490,9 +493,7 @@ private:
   bool validate_graph_acyclic() const noexcept {
     thread_local static std::array<std::uint32_t, kMaxJobs> indegree{};
     thread_local static std::array<std::uint32_t, kMaxJobs> queue{};
-    std::fill(indegree.begin(),
-              indegree.begin() + m_nodeCount,
-              0U);
+    std::fill(indegree.begin(), indegree.begin() + m_nodeCount, 0U);
     std::size_t activeCount = 0U;
 
     for (std::size_t i = 0U; i < m_nodeCount; ++i) {

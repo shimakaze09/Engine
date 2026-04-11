@@ -408,9 +408,9 @@ private:
       return m_lightComponents.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, ScriptComponent>) {
       return m_scriptComponents.get_ptr(entity);
+    } else {
+      return nullptr;
     }
-
-    return nullptr;
   }
 
   // ---- Variadic for_each helpers ----

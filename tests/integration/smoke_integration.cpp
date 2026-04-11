@@ -17,7 +17,9 @@ namespace {
 constexpr std::size_t kEntityCount = 10000U;
 constexpr int kUpdateSteps = 120;
 constexpr float kStepSeconds = 1.0F / 60.0F;
-constexpr auto kBudgetMs = 1000;
+// This is a correctness/integration test, not the dedicated perf gate.
+// Keep the budget loose enough for Debug CI hosts and sanitizer builds.
+constexpr auto kBudgetMs = 5000;
 constexpr std::size_t kMinChunkSize = 64U;
 constexpr std::size_t kChunkRange = 384U;
 constexpr std::size_t kMaxJobs = 512U;

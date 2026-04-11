@@ -1688,9 +1688,9 @@ void run(std::uint32_t maxFrames) noexcept {
           }
         } else if (lc->type == runtime::LightType::Point) {
           if (sceneLights.pointLightCount < renderer::kMaxPointLights) {
-            const runtime::Entity lightEntity = world->light_entity_at(li);
+            const runtime::Entity pointLightEntity = world->light_entity_at(li);
             const runtime::WorldTransform *wt =
-                world->get_world_transform_read_ptr(lightEntity);
+                world->get_world_transform_read_ptr(pointLightEntity);
 
             auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
             pl.position =

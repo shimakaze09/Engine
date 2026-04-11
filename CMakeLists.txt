@@ -202,6 +202,12 @@ if(WIN32)
     target_compile_definitions(engine_lua PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+if(MSVC)
+    target_compile_options(engine_lua PRIVATE /W0 /WX-)
+else()
+    target_compile_options(engine_lua PRIVATE -w -Wno-error)
+endif()
+
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git

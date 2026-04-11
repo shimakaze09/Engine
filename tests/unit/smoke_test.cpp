@@ -36,8 +36,9 @@ void noop_job(void *) noexcept {}
 } // namespace
 
 int main() {
-  if ((alignof(engine::math::Vec4) != 16U) ||
-      (sizeof(engine::math::Vec4) != 16U)) {
+  constexpr bool kVec4LayoutOk = (alignof(engine::math::Vec4) == 16U) &&
+                                 (sizeof(engine::math::Vec4) == 16U);
+  if constexpr (!kVec4LayoutOk) {
     return 1;
   }
 
