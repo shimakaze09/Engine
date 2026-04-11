@@ -279,7 +279,7 @@ else()
     target_compile_options(engine_imgui PRIVATE -w -Wno-error)
 endif()
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i[3-6]86")
     target_compile_definitions(engine_imgui PRIVATE __PRFCHWINTRIN_H)
 endif()
 
