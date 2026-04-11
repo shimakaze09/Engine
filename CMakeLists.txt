@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.28)
 
 project(Engine LANGUAGES C CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(Threads REQUIRED)
 # ---- Platform target ----
 # Valid values: Win64 Linux macOS Android iOS Web
@@ -143,31 +145,17 @@ endif()
 
 find_program(CPPCHECK_EXE NAMES cppcheck DOC "Path to cppcheck")
 if(CPPCHECK_EXE)
-    file(GLOB_RECURSE ENGINE_ALL_SOURCES
-        "${CMAKE_SOURCE_DIR}/core/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/math/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/physics/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/renderer/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/audio/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/runtime/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/editor/src/*.cpp"
-        "${CMAKE_SOURCE_DIR}/scripting/src/*.cpp"
-    )
     add_custom_target(analysis
         COMMAND ${CPPCHECK_EXE}
+        --project=${CMAKE_BINARY_DIR}/compile_commands.json
         --enable=warning,performance,portability
         --std=c++20
         --error-exitcode=1
         --suppress=missingIncludeSystem
-        -I "${CMAKE_SOURCE_DIR}/core/include"
-        -I "${CMAKE_SOURCE_DIR}/math/include"
-        -I "${CMAKE_SOURCE_DIR}/physics/include"
-        -I "${CMAKE_SOURCE_DIR}/renderer/include"
-        -I "${CMAKE_SOURCE_DIR}/audio/include"
-        -I "${CMAKE_SOURCE_DIR}/runtime/include"
-        -I "${CMAKE_SOURCE_DIR}/editor/include"
-        -I "${CMAKE_SOURCE_DIR}/scripting/include"
-        ${ENGINE_ALL_SOURCES}
+        --suppress=unmatchedSuppression
+        -i "${CMAKE_BINARY_DIR}/_deps"
+        -i "${CMAKE_SOURCE_DIR}/tests"
+        -i "${CMAKE_SOURCE_DIR}/tools"
         COMMENT "Running cppcheck static analysis"
         VERBATIM
     )
