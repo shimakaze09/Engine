@@ -156,6 +156,7 @@ if(CPPCHECK_EXE)
         --suppress=preprocessorErrorDirective
         --suppress=*:*_deps/*
         --suppress=objectIndex:*/math/src/ray.cpp
+        --suppress=arithOperationsOnVoidPointer:*/core/src/json.cpp
         -i "${CMAKE_BINARY_DIR}/_deps"
         -i "${CMAKE_SOURCE_DIR}/tests"
         -i "${CMAKE_SOURCE_DIR}/tools"
