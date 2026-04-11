@@ -3,10 +3,23 @@
 #include <memory>
 #include <new>
 
-
 #include "engine/renderer/asset_database.h"
 
 namespace {
+
+bool open_file_for_write(const char *path, FILE **outFile) noexcept {
+  if ((path == nullptr) || (outFile == nullptr)) {
+    return false;
+  }
+
+  *outFile = nullptr;
+#ifdef _WIN32
+  return fopen_s(outFile, path, "wb") == 0;
+#else
+  *outFile = std::fopen(path, "wb");
+  return *outFile != nullptr;
+#endif
+}
 
 bool write_temp_file(const char *path, const char *contents) {
   if ((path == nullptr) || (contents == nullptr)) {
@@ -14,14 +27,7 @@ bool write_temp_file(const char *path, const char *contents) {
   }
 
   FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
+  if (!open_file_for_write(path, &file) || (file == nullptr)) {
     return false;
   }
 

@@ -27,6 +27,20 @@ constexpr std::size_t kFrameCount = 60U;
 constexpr float kStepSeconds = 1.0F / 60.0F;
 constexpr float kStepX = 0.25F;
 
+bool open_file_for_write(const char *path, FILE **outFile) noexcept {
+  if ((path == nullptr) || (outFile == nullptr)) {
+    return false;
+  }
+
+  *outFile = nullptr;
+#ifdef _WIN32
+  return fopen_s(outFile, path, "wb") == 0;
+#else
+  *outFile = std::fopen(path, "wb");
+  return *outFile != nullptr;
+#endif
+}
+
 bool nearly_equal(float lhs, float rhs) noexcept {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
@@ -55,14 +69,7 @@ bool write_script_file(const char *contents) noexcept {
   }
 
   FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, kTempScriptPath, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(kTempScriptPath, "wb");
-#endif
-  if (file == nullptr) {
+  if (!open_file_for_write(kTempScriptPath, &file) || (file == nullptr)) {
     return false;
   }
 

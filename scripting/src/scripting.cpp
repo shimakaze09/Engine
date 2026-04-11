@@ -51,6 +51,57 @@ char g_watchedPath[512] = {};
 std::int64_t g_watchedMtime = 0;
 constexpr float kMaxScriptAcceleration = 500.0F;
 
+void copy_c_string(char *destination, std::size_t destinationSize,
+                   const char *source) noexcept {
+  if ((destination == nullptr) || (destinationSize == 0U)) {
+    return;
+  }
+
+  destination[0] = '\0';
+  if (source == nullptr) {
+    return;
+  }
+
+  const std::size_t sourceLength = std::strlen(source);
+  const std::size_t copyLength = (sourceLength < (destinationSize - 1U))
+                                     ? sourceLength
+                                     : (destinationSize - 1U);
+  if (copyLength > 0U) {
+    std::memcpy(destination, source, copyLength);
+  }
+  destination[copyLength] = '\0';
+}
+
+void copy_clone_name(char *destination, std::size_t destinationSize,
+                     const char *source) noexcept {
+  constexpr const char *kCloneSuffix = " (clone)";
+  constexpr std::size_t kCloneSuffixLength = 8U;
+
+  if ((destination == nullptr) || (destinationSize == 0U)) {
+    return;
+  }
+
+  destination[0] = '\0';
+  if (source == nullptr) {
+    return;
+  }
+
+  const std::size_t maxPrefixLength =
+      (destinationSize > (kCloneSuffixLength + 1U))
+          ? (destinationSize - kCloneSuffixLength - 1U)
+          : 0U;
+  const std::size_t sourceLength = std::strlen(source);
+  const std::size_t prefixLength =
+      (sourceLength < maxPrefixLength) ? sourceLength : maxPrefixLength;
+  if (prefixLength > 0U) {
+    std::memcpy(destination, source, prefixLength);
+  }
+  if ((prefixLength + kCloneSuffixLength) < destinationSize) {
+    std::memcpy(destination + prefixLength, kCloneSuffix, kCloneSuffixLength);
+    destination[prefixLength + kCloneSuffixLength] = '\0';
+  }
+}
+
 // --- Entity script module registry ---
 struct EntityScriptModule final {
   char path[128] = {};
@@ -2383,9 +2434,7 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
   runtime::NameComponent name{};
   if (g_world->get_name_component(source, &name)) {
     runtime::NameComponent cloneName{};
-    std::snprintf(cloneName.name, sizeof(cloneName.name), "%s (clone)",
-                  name.name);
-    cloneName.name[sizeof(cloneName.name) - 1U] = '\0';
+    copy_clone_name(cloneName.name, sizeof(cloneName.name), name.name);
     static_cast<void>(g_world->add_name_component(newEntity, cloneName));
   }
 
@@ -3520,8 +3569,7 @@ void watch_script_file(const char *path) noexcept {
   if (path == nullptr) {
     return;
   }
-  strncpy_s(g_watchedPath, sizeof(g_watchedPath), path,
-            sizeof(g_watchedPath) - 1U);
+  copy_c_string(g_watchedPath, sizeof(g_watchedPath), path);
   g_watchedMtime = get_file_mtime(path);
 }
 

@@ -11,6 +11,20 @@ namespace {
 
 constexpr const char *kTempScriptPath = "scripting_test.lua";
 
+bool open_file_for_write(const char *path, FILE **outFile) noexcept {
+  if ((path == nullptr) || (outFile == nullptr)) {
+    return false;
+  }
+
+  *outFile = nullptr;
+#ifdef _WIN32
+  return fopen_s(outFile, path, "wb") == 0;
+#else
+  *outFile = std::fopen(path, "wb");
+  return *outFile != nullptr;
+#endif
+}
+
 bool nearly_equal(float lhs, float rhs) noexcept {
   const float diff = lhs - rhs;
   return (diff < 0.0001F) && (diff > -0.0001F);
@@ -26,14 +40,7 @@ bool write_script_file(const char *contents) noexcept {
   }
 
   FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, kTempScriptPath, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(kTempScriptPath, "wb");
-#endif
-  if (file == nullptr) {
+  if (!open_file_for_write(kTempScriptPath, &file) || (file == nullptr)) {
     return false;
   }
 
@@ -740,14 +747,7 @@ int main() {
 
     {
       FILE *f = nullptr;
-#ifdef _WIN32
-      if (fopen_s(&f, "module_a.lua", "wb") != 0) {
-        f = nullptr;
-      }
-#else
-      f = std::fopen("module_a.lua", "wb");
-#endif
-      if (f == nullptr) {
+      if (!open_file_for_write("module_a.lua", &f) || (f == nullptr)) {
         engine::scripting::shutdown_scripting();
         remove_script_file();
         return 73;
@@ -764,14 +764,7 @@ int main() {
 
     {
       FILE *f = nullptr;
-#ifdef _WIN32
-      if (fopen_s(&f, "module_b.lua", "wb") != 0) {
-        f = nullptr;
-      }
-#else
-      f = std::fopen("module_b.lua", "wb");
-#endif
-      if (f == nullptr) {
+      if (!open_file_for_write("module_b.lua", &f) || (f == nullptr)) {
         engine::scripting::shutdown_scripting();
         remove_script_file();
         return 75;

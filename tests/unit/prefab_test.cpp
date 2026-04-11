@@ -57,7 +57,15 @@ int main() {
   }
 
   engine::runtime::NameComponent nameComp{};
-  strncpy_s(nameComp.name, sizeof(nameComp.name), "PrefabSource", sizeof(nameComp.name) - 1U);
+  constexpr const char *kPrefabSourceName = "PrefabSource";
+  const std::size_t nameLength = std::strlen(kPrefabSourceName);
+  const std::size_t copyLength = (nameLength < (sizeof(nameComp.name) - 1U))
+                                     ? nameLength
+                                     : (sizeof(nameComp.name) - 1U);
+  if (copyLength > 0U) {
+    std::memcpy(nameComp.name, kPrefabSourceName, copyLength);
+  }
+  nameComp.name[copyLength] = '\0';
   if (!world->add_name_component(src, nameComp)) {
     return 6;
   }

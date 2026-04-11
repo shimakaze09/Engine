@@ -15,6 +15,20 @@ constexpr const char *kOversizedIndexPath =
     "mesh_loader_oversized_indices.mesh";
 constexpr const char *kFileSizeMismatchPath = "mesh_loader_size_mismatch.mesh";
 
+bool open_file_for_write(const char *path, FILE **outFile) noexcept {
+  if ((path == nullptr) || (outFile == nullptr)) {
+    return false;
+  }
+
+  *outFile = nullptr;
+#ifdef _WIN32
+  return fopen_s(outFile, path, "wb") == 0;
+#else
+  *outFile = std::fopen(path, "wb");
+  return *outFile != nullptr;
+#endif
+}
+
 void remove_file(const char *path) noexcept {
   if (path != nullptr) {
     static_cast<void>(std::remove(path));
@@ -23,28 +37,20 @@ void remove_file(const char *path) noexcept {
 
 bool write_mesh_file(const char *path,
                      const engine::core::MeshAssetHeader &header,
-                     const void *payload,
-                     std::size_t payloadBytes) noexcept {
+                     const void *payload, std::size_t payloadBytes) noexcept {
   if (path == nullptr) {
     return false;
   }
 
   FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
+  if (!open_file_for_write(path, &file) || (file == nullptr)) {
     return false;
   }
 
   bool ok = (std::fwrite(&header, sizeof(header), 1U, file) == 1U);
   if (ok && (payloadBytes > 0U)) {
-    ok = (payload != nullptr)
-         && (std::fwrite(payload, 1U, payloadBytes, file) == payloadBytes);
+    ok = (payload != nullptr) &&
+         (std::fwrite(payload, 1U, payloadBytes, file) == payloadBytes);
   }
 
   std::fclose(file);
@@ -61,9 +67,7 @@ int check_bad_magic() {
   header.indexCount = 0U;
 
   const std::array<float, 6U> vertexData = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
-  if (!write_mesh_file(kBadMagicPath,
-                       header,
-                       vertexData.data(),
+  if (!write_mesh_file(kBadMagicPath, header, vertexData.data(),
                        vertexData.size() * sizeof(float))) {
     remove_file(kBadMagicPath);
     return 11;
@@ -86,9 +90,7 @@ int check_bad_version() {
   header.indexCount = 0U;
 
   const std::array<float, 6U> vertexData = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
-  if (!write_mesh_file(kBadVersionPath,
-                       header,
-                       vertexData.data(),
+  if (!write_mesh_file(kBadVersionPath, header, vertexData.data(),
                        vertexData.size() * sizeof(float))) {
     remove_file(kBadVersionPath);
     return 21;
@@ -153,19 +155,9 @@ int check_file_size_mismatch() {
   header.indexCount = 0U;
 
   const std::array<float, 10U> truncatedVertexData = {
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
-      0.0F,
+      0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
   };
-  if (!write_mesh_file(kFileSizeMismatchPath,
-                       header,
+  if (!write_mesh_file(kFileSizeMismatchPath, header,
                        truncatedVertexData.data(),
                        truncatedVertexData.size() * sizeof(float))) {
     remove_file(kFileSizeMismatchPath);
@@ -217,11 +209,9 @@ int check_v2_file_size_validation() {
   header.indexCount = 0U;
 
   // Only 6 floats, but v2 expects 8 per vertex — file size mismatch.
-  const std::array<float, 6U> truncatedData = {
-      0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
-  if (!write_mesh_file(kV2ValidPath,
-                       header,
-                       truncatedData.data(),
+  const std::array<float, 6U> truncatedData = {0.0F, 0.0F, 0.0F,
+                                               0.0F, 1.0F, 0.0F};
+  if (!write_mesh_file(kV2ValidPath, header, truncatedData.data(),
                        truncatedData.size() * sizeof(float))) {
     remove_file(kV2ValidPath);
     return 81;

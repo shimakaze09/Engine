@@ -1,4 +1,4 @@
 {
-    "ecs_iterate_ms": 1.20,
+    "ecs_iterate_ms": 2.40,
     "physics_step_ms": 13.80
 }
