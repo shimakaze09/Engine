@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}-${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-latest]
+        config: [Debug, Release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- Linux: install OpenGL + X11 dev headers (headless) ----
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+          -DENGINE_BUILD_TESTS=ON
+          -DENGINE_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120
+
+      - name: Upload compile_commands.json
+        if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile_commands
+          path: build/compile_commands.json
+
+  static-analysis:
+    name: cppcheck
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cppcheck
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure (needed for FetchContent headers)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Run cppcheck
+        run: cmake --build build --target analysis
+
+  werror-check:
+    name: -Werror verification
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (will fail on any warning due to -Werror)
+        run: cmake --build build --config Release --parallel
+
+  sanitizers:
+    name: ASAN+UBSAN
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure (ASAN+UBSAN)
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DENGINE_SANITIZERS=ON
+          -DENGINE_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure --timeout 180
+
+  benchmarks:
+    name: Performance benchmarks
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure (Release for benchmarks)
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DENGINE_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run ECS perf benchmark
+        run: ctest --test-dir build --build-config Release -R engine_bench_ecs_perf --output-on-failure --timeout 120
+
+      - name: Run Physics perf benchmark
+        run: ctest --test-dir build --build-config Release -R engine_bench_physics_perf --output-on-failure --timeout 120
