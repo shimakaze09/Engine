@@ -23,13 +23,15 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/cvar.h"
+#include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
 #include "engine/math/transform.h"
-#include "engine/physics/physics.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/camera.h"
@@ -812,6 +814,10 @@ bool bootstrap() noexcept {
     return false;
   }
 
+  static_cast<void>(core::cvar_register_bool(
+      "r_showStats", true,
+      "Toggle in-game stats and profiling overlays in the editor"));
+
   // Mount the assets directory relative to CWD so that VFS paths like
   // "assets/shaders/pbr.vert" resolve correctly when running from build/.
   static_cast<void>(core::mount("assets", "assets"));
@@ -1184,8 +1190,11 @@ void run(std::uint32_t maxFrames) noexcept {
   bool running = true;
   LoopPlayState previousPlayState = query_editor_play_state();
   std::size_t previousAliveCount = world->alive_entity_count();
+  core::reset_engine_stats();
 
   while (running) {
+    core::profiler_begin_frame();
+    PROFILE_SCOPE("engine_frame");
     const auto frameStart = Clock::now();
 
     process_input_events_with_editor();
@@ -1292,6 +1301,7 @@ void run(std::uint32_t maxFrames) noexcept {
         core::log_message(core::LogLevel::Error, "engine",
                           "failed to begin frame graph");
         running = false;
+        core::profiler_end_frame();
         continue;
       }
 
@@ -1530,6 +1540,7 @@ void run(std::uint32_t maxFrames) noexcept {
                           "job graph assembly failed");
         running = false;
         static_cast<void>(core::end_frame_graph());
+        core::profiler_end_frame();
         continue;
       }
 
@@ -1540,6 +1551,7 @@ void run(std::uint32_t maxFrames) noexcept {
         core::log_message(core::LogLevel::Error, "engine",
                           "failed to end frame graph");
         running = false;
+        core::profiler_end_frame();
         continue;
       }
 
@@ -1547,6 +1559,7 @@ void run(std::uint32_t maxFrames) noexcept {
         core::log_message(core::LogLevel::Error, "engine",
                           "frame graph job execution failed");
         running = false;
+        core::profiler_end_frame();
         continue;
       }
 
@@ -1657,6 +1670,8 @@ void run(std::uint32_t maxFrames) noexcept {
       core::log_message(core::LogLevel::Info, "slice", diagnostics);
     }
 
+    renderer::RendererFrameStats rendererStats{};
+
     if (!core::make_render_context_current()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to acquire OpenGL context for editor");
@@ -1705,6 +1720,7 @@ void run(std::uint32_t maxFrames) noexcept {
       renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                                static_cast<float>(simulationTimeSeconds),
                                sceneLights);
+      rendererStats = renderer::renderer_get_last_frame_stats();
       if ((bridge != nullptr) && (bridge->render != nullptr)) {
         bridge->render(static_cast<float>(frameMs),
                        static_cast<float>(utilizationPct));
@@ -1712,6 +1728,20 @@ void run(std::uint32_t maxFrames) noexcept {
       core::swap_render_buffers();
       core::release_render_context();
     }
+
+    core::EngineStats frameStats{};
+    frameStats.frameTimeMs = static_cast<float>(frameMs);
+    frameStats.fps =
+        (frameMs > 0.0) ? static_cast<float>(1000.0 / frameMs) : 0.0F;
+    frameStats.drawCalls = rendererStats.drawCalls;
+    frameStats.triCount = rendererStats.triangleCount;
+    frameStats.entityCount = aliveCount;
+    frameStats.memoryUsedMb = static_cast<float>(
+        static_cast<double>(core::process_memory_bytes()) / (1024.0 * 1024.0));
+    frameStats.gpuSceneMs = rendererStats.gpuSceneMs;
+    frameStats.gpuTonemapMs = rendererStats.gpuTonemapMs;
+    frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
+    core::set_engine_stats(frameStats);
 
     char jobMessage[192] = {};
     std::snprintf(
@@ -1736,6 +1766,8 @@ void run(std::uint32_t maxFrames) noexcept {
     if (!core::is_platform_running()) {
       running = false;
     }
+
+    core::profiler_end_frame();
   }
 
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {

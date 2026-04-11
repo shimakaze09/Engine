@@ -226,6 +226,54 @@ add_test(
     COMMAND engine_unit_profiler
 )
 
+add_executable(engine_unit_pool_allocator
+    pool_allocator_test.cpp
+)
+
+target_compile_features(engine_unit_pool_allocator PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_pool_allocator
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_pool_allocator
+    COMMAND engine_unit_pool_allocator
+)
+
+add_executable(engine_unit_engine_stats
+    engine_stats_test.cpp
+)
+
+target_compile_features(engine_unit_engine_stats PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_engine_stats
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_engine_stats
+    COMMAND engine_unit_engine_stats
+)
+
+add_executable(engine_unit_gpu_profiler
+    gpu_profiler_test.cpp
+)
+
+target_compile_features(engine_unit_gpu_profiler PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_gpu_profiler
+    PRIVATE
+    engine_renderer
+)
+
+add_test(
+    NAME engine_unit_gpu_profiler
+    COMMAND engine_unit_gpu_profiler
+)
+
 add_executable(engine_unit_shader_system
     shader_system_test.cpp
 )

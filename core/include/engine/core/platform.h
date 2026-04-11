@@ -22,5 +22,6 @@ void *get_gl_proc_address(const char *name) noexcept;
 void render_drawable_size(int *outWidth, int *outHeight) noexcept;
 void *get_sdl_window() noexcept;
 void *get_sdl_gl_context() noexcept;
+std::size_t process_memory_bytes() noexcept;
 
 } // namespace engine::core

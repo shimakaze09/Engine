@@ -66,6 +66,10 @@ bool test_scope_push_pop() noexcept {
     shutdown_profiler();
     return false;
   }
+  if (entries[0].parentIndex != 0xFFFFFFFFU) {
+    shutdown_profiler();
+    return false;
+  }
 
   shutdown_profiler();
   return true;
@@ -105,8 +109,85 @@ bool test_nested_scopes() noexcept {
     shutdown_profiler();
     return false;
   }
+  if (entries[0].parentIndex != 0xFFFFFFFFU) {
+    shutdown_profiler();
+    return false;
+  }
+  if (entries[1].parentIndex != 0U) {
+    shutdown_profiler();
+    return false;
+  }
 
   shutdown_profiler();
+  return true;
+}
+
+bool test_profile_scope_macro_alias() noexcept {
+  if (!initialize_profiler()) {
+    return false;
+  }
+
+  profiler_begin_frame();
+  {
+    PROFILE_SCOPE("macro_scope");
+    volatile int sink = 0;
+    for (int i = 0; i < 64; ++i) {
+      sink += i;
+    }
+  }
+  profiler_end_frame();
+
+  ProfileEntry entries[8] = {};
+  const std::size_t count = profiler_get_entries(entries, 8);
+  if (count != 1U) {
+    shutdown_profiler();
+    return false;
+  }
+  if (std::strcmp(entries[0].name, "macro_scope") != 0) {
+    shutdown_profiler();
+    return false;
+  }
+
+  shutdown_profiler();
+  return true;
+}
+
+bool test_flame_layout_helper() noexcept {
+  ProfileEntry entries[4] = {};
+  entries[0].name = "root_a";
+  entries[0].durationMs = 2.0F;
+  entries[0].depth = 0U;
+  entries[0].parentIndex = 0xFFFFFFFFU;
+
+  entries[1].name = "child_a1";
+  entries[1].durationMs = 1.0F;
+  entries[1].depth = 1U;
+  entries[1].parentIndex = 0U;
+
+  entries[2].name = "child_a2";
+  entries[2].durationMs = 0.5F;
+  entries[2].depth = 1U;
+  entries[2].parentIndex = 0U;
+
+  entries[3].name = "root_b";
+  entries[3].durationMs = 3.0F;
+  entries[3].depth = 0U;
+  entries[3].parentIndex = 99U; // invalid parent should be treated as root.
+
+  float starts[4] = {};
+  std::uint32_t maxDepth = 0U;
+  if (!profiler_compute_flame_starts(entries, 4U, starts, &maxDepth)) {
+    return false;
+  }
+
+  if (maxDepth != 1U) {
+    return false;
+  }
+  if ((starts[0] != 0.0F) || (starts[1] != 0.0F) || (starts[2] != 1.0F) ||
+      (starts[3] != 2.0F)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -195,6 +276,8 @@ int main() {
   run("frame_boundaries", &test_frame_boundaries);
   run("scope_push_pop", &test_scope_push_pop);
   run("nested_scopes", &test_nested_scopes);
+  run("profile_scope_macro_alias", &test_profile_scope_macro_alias);
+  run("flame_layout_helper", &test_flame_layout_helper);
   run("double_buffer", &test_double_buffer);
   run("null_out", &test_null_out);
 

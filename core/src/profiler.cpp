@@ -18,6 +18,7 @@ struct InternalEntry final {
   TimePoint start{};
   TimePoint end{};
   std::uint32_t depth = 0U;
+  std::uint32_t parentIndex = 0xFFFFFFFFU;
 };
 
 struct FrameBuffer final {
@@ -80,6 +81,10 @@ void profiler_begin_scope(const char *name) noexcept {
   entry.name = name;
   entry.start = Clock::now();
   entry.depth = static_cast<std::uint32_t>(g_scopeDepth);
+  entry.parentIndex =
+      (g_scopeDepth > 0U)
+          ? static_cast<std::uint32_t>(g_scopeStack[g_scopeDepth - 1U])
+          : 0xFFFFFFFFU;
 
   g_scopeStack[g_scopeDepth] = idx;
   ++g_scopeDepth;
@@ -102,9 +107,7 @@ ProfileScope::ProfileScope(const char *name) noexcept {
   profiler_begin_scope(name);
 }
 
-ProfileScope::~ProfileScope() noexcept {
-  profiler_end_scope();
-}
+ProfileScope::~ProfileScope() noexcept { profiler_end_scope(); }
 
 std::size_t profiler_get_entries(ProfileEntry *out,
                                  std::size_t maxEntries) noexcept {
@@ -118,6 +121,7 @@ std::size_t profiler_get_entries(ProfileEntry *out,
     const InternalEntry &src = g_readBuffer.entries[i];
     out[i].name = src.name;
     out[i].depth = src.depth;
+    out[i].parentIndex = src.parentIndex;
     const auto duration =
         std::chrono::duration<float, std::milli>(src.end - src.start);
     out[i].durationMs = duration.count();
@@ -130,6 +134,50 @@ float profiler_frame_time_ms() noexcept {
   const auto duration = std::chrono::duration<float, std::milli>(
       g_readBuffer.frameEnd - g_readBuffer.frameStart);
   return duration.count();
+}
+
+bool profiler_compute_flame_starts(const ProfileEntry *entries,
+                                   std::size_t count, float *outStartMs,
+                                   std::uint32_t *outMaxDepth) noexcept {
+  if ((entries == nullptr) || (outStartMs == nullptr)) {
+    return false;
+  }
+
+  if (count == 0U) {
+    if (outMaxDepth != nullptr) {
+      *outMaxDepth = 0U;
+    }
+    return true;
+  }
+
+  std::array<float, kMaxEntries> consumedMs{};
+  float rootCursorMs = 0.0F;
+  std::uint32_t maxDepth = 0U;
+
+  const std::size_t boundedCount = (count < kMaxEntries) ? count : kMaxEntries;
+  for (std::size_t i = 0U; i < boundedCount; ++i) {
+    const ProfileEntry &entry = entries[i];
+    if (entry.depth > maxDepth) {
+      maxDepth = entry.depth;
+    }
+
+    float thisStartMs = rootCursorMs;
+    if ((entry.parentIndex != 0xFFFFFFFFU) &&
+        (entry.parentIndex < boundedCount)) {
+      thisStartMs =
+          outStartMs[entry.parentIndex] + consumedMs[entry.parentIndex];
+      consumedMs[entry.parentIndex] += entry.durationMs;
+    } else {
+      rootCursorMs += entry.durationMs;
+    }
+
+    outStartMs[i] = thisStartMs;
+  }
+
+  if (outMaxDepth != nullptr) {
+    *outMaxDepth = maxDepth;
+  }
+  return (count <= kMaxEntries);
 }
 
 } // namespace engine::core

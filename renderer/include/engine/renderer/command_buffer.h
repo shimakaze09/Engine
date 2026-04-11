@@ -85,6 +85,13 @@ struct SceneLightData final {
   std::size_t pointLightCount = 0U;
 };
 
+struct RendererFrameStats final {
+  std::uint32_t drawCalls = 0U;
+  std::uint64_t triangleCount = 0U;
+  float gpuSceneMs = 0.0F;
+  float gpuTonemapMs = 0.0F;
+};
+
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept;
@@ -98,5 +105,6 @@ void set_scene_viewport_size(int width, int height) noexcept;
 /// Returns the GPU texture ID of the tonemapped scene (final color).
 /// Valid after the first flush_renderer call. Returns 0 if not yet available.
 std::uint32_t get_scene_viewport_texture() noexcept;
+RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer

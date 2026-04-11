@@ -16,9 +16,18 @@
 #error "SDL2 headers not found"
 #endif
 
-#include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+
+#if defined(_WIN32)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <psapi.h>
+#include <windows.h>
+
+
+#endif
 
 #include "engine/core/logging.h"
 
@@ -180,5 +189,19 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 void *get_sdl_window() noexcept { return g_window; }
 
 void *get_sdl_gl_context() noexcept { return g_glContext; }
+
+std::size_t process_memory_bytes() noexcept {
+#if defined(_WIN32)
+  PROCESS_MEMORY_COUNTERS_EX pmc{};
+  if (GetProcessMemoryInfo(GetCurrentProcess(),
+                           reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&pmc),
+                           sizeof(pmc)) == 0) {
+    return 0U;
+  }
+  return static_cast<std::size_t>(pmc.WorkingSetSize);
+#else
+  return 0U;
+#endif
+}
 
 } // namespace engine::core

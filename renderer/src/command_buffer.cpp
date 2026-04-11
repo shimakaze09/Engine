@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -13,6 +12,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
+#include "engine/renderer/gpu_profiler.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/pass_resources.h"
 #include "engine/renderer/render_device.h"
@@ -33,6 +33,7 @@ constexpr float kClearBlue = 0.60F;
 CameraState g_activeCamera{};
 int g_sceneViewportWidth = 0;
 int g_sceneViewportHeight = 0;
+RendererFrameStats g_lastFrameStats{};
 
 struct BackendState final {
   bool initialized = false;
@@ -291,6 +292,7 @@ bool initialize_backend() noexcept {
     return false;
   }
 
+  static_cast<void>(initialize_gpu_profiler());
   backend.initialized = true;
   return true;
 }
@@ -326,6 +328,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->pbrProgram = 0U;
   backend->defaultProgram = 0U;
   backend->initialized = false;
+  shutdown_gpu_profiler();
 }
 
 math::Mat4 compute_model_matrix(const DrawCommand &command) noexcept {
@@ -419,6 +422,8 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();
+  RendererFrameStats frameStats{};
+  gpu_profiler_begin_frame();
 
   int drawableWidth = 1280;
   int drawableHeight = 720;
@@ -451,6 +456,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   const std::uint32_t sceneFbo = pass_resource_framebuffer(passRes.sceneColor);
 
   // --- Scene pass: render to HDR FBO ---
+  gpu_profiler_begin_pass(GpuPassId::Scene);
   dev->bind_framebuffer(sceneFbo);
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
   dev->enable_depth_test();
@@ -615,9 +621,13 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
 
       if (mesh->indexCount > 0U) {
+        ++frameStats.drawCalls;
+        frameStats.triangleCount += (mesh->indexCount / 3U);
         dev->draw_elements_triangles_u32(
             static_cast<std::int32_t>(mesh->indexCount));
       } else {
+        ++frameStats.drawCalls;
+        frameStats.triangleCount += (mesh->vertexCount / 3U);
         dev->draw_arrays_triangles(
             0, static_cast<std::int32_t>(mesh->vertexCount));
       }
@@ -647,8 +657,10 @@ void flush_renderer(CommandBufferView commandBufferView,
   dev->bind_texture(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
+  gpu_profiler_end_pass(GpuPassId::Scene);
 
   // --- Tonemap pass: HDR scene → LDR final FBO ---
+  gpu_profiler_begin_pass(GpuPassId::Tonemap);
   const std::uint32_t finalFbo = pass_resource_framebuffer(passRes.finalColor);
   dev->bind_framebuffer(finalFbo);
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
@@ -672,6 +684,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   dev->bind_texture(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
+  gpu_profiler_end_pass(GpuPassId::Tonemap);
 
   // --- Prepare back buffer for editor overlay (ImGui) ---
   dev->bind_framebuffer(0U);
@@ -679,6 +692,10 @@ void flush_renderer(CommandBufferView commandBufferView,
   dev->set_clear_color(0.0F, 0.0F, 0.0F, 1.0F);
   dev->clear_color_depth();
   dev->enable_depth_test();
+
+  frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
+  frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
+  g_lastFrameStats = frameStats;
 }
 
 void shutdown_renderer() noexcept {
@@ -711,6 +728,10 @@ CameraState get_active_camera() noexcept { return g_activeCamera; }
 std::uint32_t get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
   return pass_resource_gpu_texture(passRes.finalColor);
+}
+
+RendererFrameStats renderer_get_last_frame_stats() noexcept {
+  return g_lastFrameStats;
 }
 
 } // namespace engine::renderer

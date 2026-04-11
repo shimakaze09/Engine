@@ -33,8 +33,11 @@
 #include <filesystem>
 #include <memory>
 
+#include "engine/core/cvar.h"
+#include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
 #include "engine/math/transform.h"
@@ -1028,20 +1031,101 @@ void draw_inspector_panel() noexcept {
   ImGui::End();
 }
 
-void draw_stats_panel(float frameMs, float utilizationPct) noexcept {
+void draw_profiler_flame_graph() noexcept {
+  std::array<core::ProfileEntry, 256U> entries{};
+  const std::size_t count =
+      core::profiler_get_entries(entries.data(), entries.size());
+  if (count == 0U) {
+    ImGui::TextUnformatted("Profiler: no samples");
+    return;
+  }
+
+  const float frameMs = core::profiler_frame_time_ms();
+  const float graphMs = (frameMs > 0.001F) ? frameMs : 0.001F;
+  const float graphWidth = ImGui::GetContentRegionAvail().x;
+  const float barHeight = 16.0F;
+  const float barSpacing = 4.0F;
+
+  std::array<float, 256U> startMs{};
+
+  ImDrawList *drawList = ImGui::GetWindowDrawList();
+  const ImVec2 graphOrigin = ImGui::GetCursorScreenPos();
+
+  std::uint32_t maxDepth = 0U;
+  static_cast<void>(core::profiler_compute_flame_starts(
+      entries.data(), count, startMs.data(), &maxDepth));
+
+  for (std::size_t i = 0U; i < count; ++i) {
+    const core::ProfileEntry &entry = entries[i];
+    const float thisStartMs = startMs[i];
+    const float x0 = graphOrigin.x + (thisStartMs / graphMs) * graphWidth;
+    const float x1 = x0 + (entry.durationMs / graphMs) * graphWidth;
+    const float y0 = graphOrigin.y +
+                     static_cast<float>(entry.depth) * (barHeight + barSpacing);
+    const float y1 = y0 + barHeight;
+    const int colorSeed =
+        static_cast<int>((i * 37U + entry.depth * 19U) % 155U);
+    const ImU32 color =
+        IM_COL32(80 + colorSeed, 180, 240 - (colorSeed / 2), 220);
+    drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color, 2.0F);
+
+    char label[96] = {};
+    const char *name = (entry.name != nullptr) ? entry.name : "<unnamed>";
+    std::snprintf(label, sizeof(label), "%s %.2fms", name,
+                  static_cast<double>(entry.durationMs));
+    drawList->AddText(ImVec2(x0 + 2.0F, y0 + 1.0F), IM_COL32(0, 0, 0, 255),
+                      label);
+  }
+
+  const float graphHeight =
+      static_cast<float>(maxDepth + 1U) * (barHeight + barSpacing);
+  ImGui::Dummy(ImVec2(graphWidth, graphHeight));
+}
+
+void draw_stats_panel(const core::EngineStats &stats) noexcept {
   if (!ImGui::Begin("Stats")) {
     ImGui::End();
     return;
   }
 
-  ImGui::Text("Frame: %.3f ms", frameMs);
-  ImGui::Text("Job Utilization: %.2f%%", utilizationPct);
+  ImGui::Text("FPS: %.1f", static_cast<double>(stats.fps));
+  ImGui::Text("Frame: %.3f ms", static_cast<double>(stats.frameTimeMs));
+  ImGui::Text("Draw Calls: %u", stats.drawCalls);
+  ImGui::Text("Triangles: %llu",
+              static_cast<unsigned long long>(stats.triCount));
+  ImGui::Text("Entities: %zu", stats.entityCount);
+  ImGui::Text("Memory: %.2f MB", static_cast<double>(stats.memoryUsedMb));
+  ImGui::Text("GPU Scene: %.3f ms", static_cast<double>(stats.gpuSceneMs));
+  ImGui::Text("GPU Tonemap: %.3f ms", static_cast<double>(stats.gpuTonemapMs));
+  ImGui::Text("Job Utilization: %.2f%%",
+              static_cast<double>(stats.jobUtilizationPct));
 
-  const std::size_t transformCount =
-      (g_world != nullptr) ? g_world->transform_count() : 0U;
-  const std::size_t entityCount = transformCount;
-  ImGui::Text("Entities: %zu", entityCount);
-  ImGui::Text("Transforms: %zu", transformCount);
+  ImGui::Separator();
+  ImGui::TextUnformatted("CPU Flame Graph");
+  draw_profiler_flame_graph();
+
+  ImGui::End();
+}
+
+void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
+  constexpr ImGuiWindowFlags kOverlayFlags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+      ImGuiWindowFlags_NoNav;
+
+  ImGui::SetNextWindowBgAlpha(0.40F);
+  ImGui::SetNextWindowPos(ImVec2(12.0F, 44.0F), ImGuiCond_Always);
+  if (!ImGui::Begin("##InGameStatsOverlay", nullptr, kOverlayFlags)) {
+    ImGui::End();
+    return;
+  }
+
+  ImGui::Text("FPS %.1f | Frame %.2f ms", static_cast<double>(stats.fps),
+              static_cast<double>(stats.frameTimeMs));
+  ImGui::Text("Draw %u | Tris %llu", stats.drawCalls,
+              static_cast<unsigned long long>(stats.triCount));
+  ImGui::Text("Entities %zu | Mem %.1f MB", stats.entityCount,
+              static_cast<double>(stats.memoryUsedMb));
 
   ImGui::End();
 }
@@ -1337,8 +1421,14 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
 }
 
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
+  static_cast<void>(frameMs);
+  static_cast<void>(utilizationPct);
+
   draw_main_menu_bar();
   draw_toolbar();
+
+  const bool showStats = core::cvar_get_bool("r_showStats", true);
+  const core::EngineStats stats = core::get_engine_stats();
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {
@@ -1378,7 +1468,10 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_scene_viewport_panel();
   draw_entities_panel();
   draw_inspector_panel();
-  draw_stats_panel(frameMs, utilizationPct);
+  if (showStats) {
+    draw_stats_panel(stats);
+    draw_in_game_stats_overlay(stats);
+  }
   draw_asset_browser_panel();
 }
 
@@ -1399,6 +1492,10 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
   ImGui::StyleColorsDark();
+
+  static_cast<void>(core::cvar_register_bool(
+      "r_showStats", true,
+      "Toggle in-game stats and profiling overlays in the editor"));
 
   if (!ImGui_ImplSDL2_InitForOpenGL(static_cast<SDL_Window *>(sdlWindow),
                                     static_cast<SDL_GLContext>(glContext))) {

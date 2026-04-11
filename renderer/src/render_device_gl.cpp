@@ -155,6 +155,18 @@ namespace {
 #define GL_DEPTH_WRITEMASK 0x0B72
 #endif
 
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT 0x8866
+#endif
+
+#ifndef GL_QUERY_RESULT_AVAILABLE
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
+
+#ifndef GL_TIMESTAMP
+#define GL_TIMESTAMP 0x8E28
+#endif
+
 #ifndef GL_ARRAY_BUFFER
 #define GL_ARRAY_BUFFER 0x8892
 #endif
@@ -170,35 +182,25 @@ namespace {
 // --- GL proc types ---
 
 using GlCreateShaderProc = GLuint(APIENTRYP)(GLenum);
-using GlShaderSourceProc = void(APIENTRYP)(GLuint,
-                                           GLsizei,
-                                           const char *const *,
+using GlShaderSourceProc = void(APIENTRYP)(GLuint, GLsizei, const char *const *,
                                            const GLint *);
 using GlCompileShaderProc = void(APIENTRYP)(GLuint);
 using GlGetShaderivProc = void(APIENTRYP)(GLuint, GLenum, GLint *);
-using GlGetShaderInfoLogProc = void(APIENTRYP)(GLuint,
-                                               GLsizei,
-                                               GLsizei *,
+using GlGetShaderInfoLogProc = void(APIENTRYP)(GLuint, GLsizei, GLsizei *,
                                                char *);
 using GlDeleteShaderProc = void(APIENTRYP)(GLuint);
 using GlCreateProgramProc = GLuint(APIENTRYP)(void);
 using GlAttachShaderProc = void(APIENTRYP)(GLuint, GLuint);
 using GlLinkProgramProc = void(APIENTRYP)(GLuint);
 using GlGetProgramivProc = void(APIENTRYP)(GLuint, GLenum, GLint *);
-using GlGetProgramInfoLogProc = void(APIENTRYP)(GLuint,
-                                                GLsizei,
-                                                GLsizei *,
+using GlGetProgramInfoLogProc = void(APIENTRYP)(GLuint, GLsizei, GLsizei *,
                                                 char *);
 using GlDeleteProgramProc = void(APIENTRYP)(GLuint);
 using GlUseProgramProc = void(APIENTRYP)(GLuint);
 using GlGetUniformLocationProc = GLint(APIENTRYP)(GLuint, const char *);
-using GlUniformMatrix4fvProc = void(APIENTRYP)(GLint,
-                                               GLsizei,
-                                               GLboolean,
+using GlUniformMatrix4fvProc = void(APIENTRYP)(GLint, GLsizei, GLboolean,
                                                const GLfloat *);
-using GlUniformMatrix3fvProc = void(APIENTRYP)(GLint,
-                                               GLsizei,
-                                               GLboolean,
+using GlUniformMatrix3fvProc = void(APIENTRYP)(GLint, GLsizei, GLboolean,
                                                const GLfloat *);
 using GlUniform1fProc = void(APIENTRYP)(GLint, GLfloat);
 using GlUniform3fvProc = void(APIENTRYP)(GLint, GLsizei, const GLfloat *);
@@ -207,18 +209,15 @@ using GlBindVertexArrayProc = void(APIENTRYP)(GLuint);
 using GlDeleteVertexArraysProc = void(APIENTRYP)(GLsizei, const GLuint *);
 using GlGenBuffersProc = void(APIENTRYP)(GLsizei, GLuint *);
 using GlBindBufferProc = void(APIENTRYP)(GLenum, GLuint);
-using GlBufferDataProc = void(APIENTRYP)(GLenum,
-                                         std::ptrdiff_t,
-                                         const void *,
+using GlBufferDataProc = void(APIENTRYP)(GLenum, std::ptrdiff_t, const void *,
                                          GLenum);
 using GlDeleteBuffersProc = void(APIENTRYP)(GLsizei, const GLuint *);
 using GlEnableVertexAttribArrayProc = void(APIENTRYP)(GLuint);
-using GlVertexAttribPointerProc =
-    void(APIENTRYP)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *);
+using GlVertexAttribPointerProc = void(APIENTRYP)(GLuint, GLint, GLenum,
+                                                  GLboolean, GLsizei,
+                                                  const void *);
 using GlDrawArraysProc = void(APIENTRYP)(GLenum, GLint, GLsizei);
-using GlDrawElementsProc = void(APIENTRYP)(GLenum,
-                                           GLsizei,
-                                           GLenum,
+using GlDrawElementsProc = void(APIENTRYP)(GLenum, GLsizei, GLenum,
                                            const void *);
 using GlViewportProc = void(APIENTRYP)(GLint, GLint, GLsizei, GLsizei);
 using GlEnableProc = void(APIENTRYP)(GLenum);
@@ -235,15 +234,8 @@ using GlGenTexturesProc = void(APIENTRYP)(GLsizei, GLuint *);
 using GlDeleteTexturesProc = void(APIENTRYP)(GLsizei, const GLuint *);
 using GlBindTextureProc = void(APIENTRYP)(GLenum, GLuint);
 using GlActiveTextureProc = void(APIENTRYP)(GLenum);
-using GlTexImage2DProc = void(APIENTRYP)(GLenum,
-                                         GLint,
-                                         GLint,
-                                         GLsizei,
-                                         GLsizei,
-                                         GLint,
-                                         GLenum,
-                                         GLenum,
-                                         const void *);
+using GlTexImage2DProc = void(APIENTRYP)(GLenum, GLint, GLint, GLsizei, GLsizei,
+                                         GLint, GLenum, GLenum, const void *);
 using GlTexParameteriProc = void(APIENTRYP)(GLenum, GLenum, GLint);
 using GlGenerateMipmapProc = void(APIENTRYP)(GLenum);
 
@@ -251,8 +243,8 @@ using GlGenerateMipmapProc = void(APIENTRYP)(GLenum);
 using GlGenFramebuffersProc = void(APIENTRYP)(GLsizei, GLuint *);
 using GlDeleteFramebuffersProc = void(APIENTRYP)(GLsizei, const GLuint *);
 using GlBindFramebufferProc = void(APIENTRYP)(GLenum, GLuint);
-using GlFramebufferTexture2DProc =
-    void(APIENTRYP)(GLenum, GLenum, GLenum, GLuint, GLint);
+using GlFramebufferTexture2DProc = void(APIENTRYP)(GLenum, GLenum, GLenum,
+                                                   GLuint, GLint);
 using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
 
 // Blend procs
@@ -260,6 +252,12 @@ using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
 
 // Depth mask
 using GlDepthMaskProc = void(APIENTRYP)(GLboolean);
+
+// GPU query procs
+using GlGenQueriesProc = void(APIENTRYP)(GLsizei, GLuint *);
+using GlDeleteQueriesProc = void(APIENTRYP)(GLsizei, const GLuint *);
+using GlQueryCounterProc = void(APIENTRYP)(GLuint, GLenum);
+using GlGetQueryObjectui64vProc = void(APIENTRYP)(GLuint, GLenum, GLuint64 *);
 
 // --- Consolidated GL function table ---
 
@@ -324,6 +322,12 @@ struct GlTable final {
 
   // Depth mask
   GlDepthMaskProc depthMask = nullptr;
+
+  // GPU queries
+  GlGenQueriesProc genQueries = nullptr;
+  GlDeleteQueriesProc deleteQueries = nullptr;
+  GlQueryCounterProc queryCounter = nullptr;
+  GlGetQueryObjectui64vProc getQueryObjectui64v = nullptr;
 };
 
 bool g_deviceInitialized = false;
@@ -336,57 +340,61 @@ template <typename T> bool load_proc(T *out, const char *name) noexcept {
 }
 
 bool load_all_gl_functions() noexcept {
-  return load_proc(&g_gl.createShader, "glCreateShader")
-         && load_proc(&g_gl.shaderSource, "glShaderSource")
-         && load_proc(&g_gl.compileShader, "glCompileShader")
-         && load_proc(&g_gl.getShaderiv, "glGetShaderiv")
-         && load_proc(&g_gl.getShaderInfoLog, "glGetShaderInfoLog")
-         && load_proc(&g_gl.deleteShader, "glDeleteShader")
-         && load_proc(&g_gl.createProgram, "glCreateProgram")
-         && load_proc(&g_gl.attachShader, "glAttachShader")
-         && load_proc(&g_gl.linkProgram, "glLinkProgram")
-         && load_proc(&g_gl.getProgramiv, "glGetProgramiv")
-         && load_proc(&g_gl.getProgramInfoLog, "glGetProgramInfoLog")
-         && load_proc(&g_gl.deleteProgram, "glDeleteProgram")
-         && load_proc(&g_gl.useProgram, "glUseProgram")
-         && load_proc(&g_gl.getUniformLocation, "glGetUniformLocation")
-         && load_proc(&g_gl.uniformMatrix4fv, "glUniformMatrix4fv")
-         && load_proc(&g_gl.uniformMatrix3fv, "glUniformMatrix3fv")
-         && load_proc(&g_gl.uniform1f, "glUniform1f")
-         && load_proc(&g_gl.uniform3fv, "glUniform3fv")
-         && load_proc(&g_gl.genVertexArrays, "glGenVertexArrays")
-         && load_proc(&g_gl.bindVertexArray, "glBindVertexArray")
-         && load_proc(&g_gl.deleteVertexArrays, "glDeleteVertexArrays")
-         && load_proc(&g_gl.genBuffers, "glGenBuffers")
-         && load_proc(&g_gl.bindBuffer, "glBindBuffer")
-         && load_proc(&g_gl.bufferData, "glBufferData")
-         && load_proc(&g_gl.deleteBuffers, "glDeleteBuffers")
-         && load_proc(&g_gl.enableVertexAttribArray,
-                      "glEnableVertexAttribArray")
-         && load_proc(&g_gl.vertexAttribPointer, "glVertexAttribPointer")
-         && load_proc(&g_gl.drawArrays, "glDrawArrays")
-         && load_proc(&g_gl.drawElements, "glDrawElements")
-         && load_proc(&g_gl.viewport, "glViewport")
-         && load_proc(&g_gl.enable, "glEnable")
-         && load_proc(&g_gl.disable, "glDisable")
-         && load_proc(&g_gl.clearColor, "glClearColor")
-         && load_proc(&g_gl.clear, "glClear")
-         && load_proc(&g_gl.uniform1i, "glUniform1i")
-         && load_proc(&g_gl.uniform4fv, "glUniform4fv")
-         && load_proc(&g_gl.genTextures, "glGenTextures")
-         && load_proc(&g_gl.deleteTextures, "glDeleteTextures")
-         && load_proc(&g_gl.bindTexture, "glBindTexture")
-         && load_proc(&g_gl.activeTexture, "glActiveTexture")
-         && load_proc(&g_gl.texImage2D, "glTexImage2D")
-         && load_proc(&g_gl.texParameteri, "glTexParameteri")
-         && load_proc(&g_gl.generateMipmap, "glGenerateMipmap")
-         && load_proc(&g_gl.genFramebuffers, "glGenFramebuffers")
-         && load_proc(&g_gl.deleteFramebuffers, "glDeleteFramebuffers")
-         && load_proc(&g_gl.bindFramebuffer, "glBindFramebuffer")
-         && load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D")
-         && load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus")
-         && load_proc(&g_gl.blendFunc, "glBlendFunc")
-         && load_proc(&g_gl.depthMask, "glDepthMask");
+  return load_proc(&g_gl.createShader, "glCreateShader") &&
+         load_proc(&g_gl.shaderSource, "glShaderSource") &&
+         load_proc(&g_gl.compileShader, "glCompileShader") &&
+         load_proc(&g_gl.getShaderiv, "glGetShaderiv") &&
+         load_proc(&g_gl.getShaderInfoLog, "glGetShaderInfoLog") &&
+         load_proc(&g_gl.deleteShader, "glDeleteShader") &&
+         load_proc(&g_gl.createProgram, "glCreateProgram") &&
+         load_proc(&g_gl.attachShader, "glAttachShader") &&
+         load_proc(&g_gl.linkProgram, "glLinkProgram") &&
+         load_proc(&g_gl.getProgramiv, "glGetProgramiv") &&
+         load_proc(&g_gl.getProgramInfoLog, "glGetProgramInfoLog") &&
+         load_proc(&g_gl.deleteProgram, "glDeleteProgram") &&
+         load_proc(&g_gl.useProgram, "glUseProgram") &&
+         load_proc(&g_gl.getUniformLocation, "glGetUniformLocation") &&
+         load_proc(&g_gl.uniformMatrix4fv, "glUniformMatrix4fv") &&
+         load_proc(&g_gl.uniformMatrix3fv, "glUniformMatrix3fv") &&
+         load_proc(&g_gl.uniform1f, "glUniform1f") &&
+         load_proc(&g_gl.uniform3fv, "glUniform3fv") &&
+         load_proc(&g_gl.genVertexArrays, "glGenVertexArrays") &&
+         load_proc(&g_gl.bindVertexArray, "glBindVertexArray") &&
+         load_proc(&g_gl.deleteVertexArrays, "glDeleteVertexArrays") &&
+         load_proc(&g_gl.genBuffers, "glGenBuffers") &&
+         load_proc(&g_gl.bindBuffer, "glBindBuffer") &&
+         load_proc(&g_gl.bufferData, "glBufferData") &&
+         load_proc(&g_gl.deleteBuffers, "glDeleteBuffers") &&
+         load_proc(&g_gl.enableVertexAttribArray,
+                   "glEnableVertexAttribArray") &&
+         load_proc(&g_gl.vertexAttribPointer, "glVertexAttribPointer") &&
+         load_proc(&g_gl.drawArrays, "glDrawArrays") &&
+         load_proc(&g_gl.drawElements, "glDrawElements") &&
+         load_proc(&g_gl.viewport, "glViewport") &&
+         load_proc(&g_gl.enable, "glEnable") &&
+         load_proc(&g_gl.disable, "glDisable") &&
+         load_proc(&g_gl.clearColor, "glClearColor") &&
+         load_proc(&g_gl.clear, "glClear") &&
+         load_proc(&g_gl.uniform1i, "glUniform1i") &&
+         load_proc(&g_gl.uniform4fv, "glUniform4fv") &&
+         load_proc(&g_gl.genTextures, "glGenTextures") &&
+         load_proc(&g_gl.deleteTextures, "glDeleteTextures") &&
+         load_proc(&g_gl.bindTexture, "glBindTexture") &&
+         load_proc(&g_gl.activeTexture, "glActiveTexture") &&
+         load_proc(&g_gl.texImage2D, "glTexImage2D") &&
+         load_proc(&g_gl.texParameteri, "glTexParameteri") &&
+         load_proc(&g_gl.generateMipmap, "glGenerateMipmap") &&
+         load_proc(&g_gl.genFramebuffers, "glGenFramebuffers") &&
+         load_proc(&g_gl.deleteFramebuffers, "glDeleteFramebuffers") &&
+         load_proc(&g_gl.bindFramebuffer, "glBindFramebuffer") &&
+         load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D") &&
+         load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus") &&
+         load_proc(&g_gl.blendFunc, "glBlendFunc") &&
+         load_proc(&g_gl.depthMask, "glDepthMask") &&
+         load_proc(&g_gl.genQueries, "glGenQueries") &&
+         load_proc(&g_gl.deleteQueries, "glDeleteQueries") &&
+         load_proc(&g_gl.queryCounter, "glQueryCounter") &&
+         load_proc(&g_gl.getQueryObjectui64v, "glGetQueryObjectui64v");
 }
 
 // --- Device function implementations ---
@@ -410,12 +418,12 @@ std::uint32_t gl_create_shader(std::uint32_t stage,
   if (compiled != static_cast<GLint>(GL_TRUE)) {
     std::array<char, 1024U> log{};
     GLsizei written = 0;
-    g_gl.getShaderInfoLog(
-        shader, static_cast<GLsizei>(log.size()), &written, log.data());
+    g_gl.getShaderInfoLog(shader, static_cast<GLsizei>(log.size()), &written,
+                          log.data());
     char msg[1200] = {};
     const char *label = (stage == kShaderStageVertex) ? "vertex" : "fragment";
-    std::snprintf(
-        msg, sizeof(msg), "%s shader compile failed: %s", label, log.data());
+    std::snprintf(msg, sizeof(msg), "%s shader compile failed: %s", label,
+                  log.data());
     core::log_message(core::LogLevel::Error, "renderer", msg);
     g_gl.deleteShader(shader);
     return 0U;
@@ -446,8 +454,8 @@ std::uint32_t gl_link_program(std::uint32_t vertShader,
   if (linked != static_cast<GLint>(GL_TRUE)) {
     std::array<char, 1024U> log{};
     GLsizei written = 0;
-    g_gl.getProgramInfoLog(
-        program, static_cast<GLsizei>(log.size()), &written, log.data());
+    g_gl.getProgramInfoLog(program, static_cast<GLsizei>(log.size()), &written,
+                           log.data());
     char msg[1200] = {};
     std::snprintf(msg, sizeof(msg), "shader link failed: %s", log.data());
     core::log_message(core::LogLevel::Error, "renderer", msg);
@@ -541,45 +549,32 @@ void gl_enable_vertex_attrib(std::uint32_t index) noexcept {
   g_gl.enableVertexAttribArray(static_cast<GLuint>(index));
 }
 
-void gl_vertex_attrib_float(std::uint32_t index,
-                            std::int32_t components,
-                            std::int32_t stride,
-                            const void *offset) noexcept {
+void gl_vertex_attrib_float(std::uint32_t index, std::int32_t components,
+                            std::int32_t stride, const void *offset) noexcept {
   g_gl.vertexAttribPointer(static_cast<GLuint>(index),
-                           static_cast<GLint>(components),
-                           GL_FLOAT,
-                           GL_FALSE,
-                           static_cast<GLsizei>(stride),
-                           offset);
+                           static_cast<GLint>(components), GL_FLOAT, GL_FALSE,
+                           static_cast<GLsizei>(stride), offset);
 }
 
 void gl_draw_arrays_triangles(std::int32_t first, std::int32_t count) noexcept {
-  g_gl.drawArrays(
-      GL_TRIANGLES, static_cast<GLint>(first), static_cast<GLsizei>(count));
+  g_gl.drawArrays(GL_TRIANGLES, static_cast<GLint>(first),
+                  static_cast<GLsizei>(count));
 }
 
 void gl_draw_elements_triangles_u32(std::int32_t count) noexcept {
-  g_gl.drawElements(
-      GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT, nullptr);
+  g_gl.drawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT,
+                    nullptr);
 }
 
-void gl_set_viewport(std::int32_t x,
-                     std::int32_t y,
-                     std::int32_t w,
+void gl_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
                      std::int32_t h) noexcept {
-  g_gl.viewport(static_cast<GLint>(x),
-                static_cast<GLint>(y),
-                static_cast<GLsizei>(w),
-                static_cast<GLsizei>(h));
+  g_gl.viewport(static_cast<GLint>(x), static_cast<GLint>(y),
+                static_cast<GLsizei>(w), static_cast<GLsizei>(h));
 }
 
-void gl_enable_depth_test() noexcept {
-  g_gl.enable(GL_DEPTH_TEST);
-}
+void gl_enable_depth_test() noexcept { g_gl.enable(GL_DEPTH_TEST); }
 
-void gl_disable_depth_test() noexcept {
-  g_gl.disable(GL_DEPTH_TEST);
-}
+void gl_disable_depth_test() noexcept { g_gl.disable(GL_DEPTH_TEST); }
 
 void gl_set_clear_color(float r, float g, float b, float a) noexcept {
   g_gl.clearColor(r, g, b, a);
@@ -601,8 +596,7 @@ void gl_set_uniform_vec4(std::int32_t loc, const float *value) noexcept {
 
 // --- Textures ---
 
-std::uint32_t gl_create_texture_2d(std::int32_t width,
-                                   std::int32_t height,
+std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
                                    std::int32_t channels,
                                    const void *data) noexcept {
   GLuint tex = 0U;
@@ -623,20 +617,14 @@ std::uint32_t gl_create_texture_2d(std::int32_t width,
     internalFormat = GL_RGB;
   }
 
-  g_gl.texImage2D(GL_TEXTURE_2D,
-                  0,
-                  internalFormat,
-                  static_cast<GLsizei>(width),
-                  static_cast<GLsizei>(height),
-                  0,
-                  format,
-                  GL_UNSIGNED_BYTE,
+  g_gl.texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
+                  static_cast<GLsizei>(height), 0, format, GL_UNSIGNED_BYTE,
                   data);
 
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  g_gl.texParameteri(
-      GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                     GL_LINEAR_MIPMAP_LINEAR);
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   g_gl.generateMipmap(GL_TEXTURE_2D);
 
@@ -644,8 +632,7 @@ std::uint32_t gl_create_texture_2d(std::int32_t width,
   return static_cast<std::uint32_t>(tex);
 }
 
-std::uint32_t gl_create_texture_2d_hdr(std::int32_t width,
-                                       std::int32_t height,
+std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
                                        std::int32_t channels,
                                        const float *data) noexcept {
   GLuint tex = 0U;
@@ -663,15 +650,8 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width,
     internalFormat = GL_RGB16F;
   }
 
-  g_gl.texImage2D(GL_TEXTURE_2D,
-                  0,
-                  internalFormat,
-                  static_cast<GLsizei>(width),
-                  static_cast<GLsizei>(height),
-                  0,
-                  format,
-                  GL_FLOAT,
-                  data);
+  g_gl.texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
+                  static_cast<GLsizei>(height), 0, format, GL_FLOAT, data);
 
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -691,15 +671,9 @@ std::uint32_t gl_create_depth_texture(std::int32_t width,
   }
 
   g_gl.bindTexture(GL_TEXTURE_2D, tex);
-  g_gl.texImage2D(GL_TEXTURE_2D,
-                  0,
-                  GL_DEPTH_COMPONENT24,
-                  static_cast<GLsizei>(width),
-                  static_cast<GLsizei>(height),
-                  0,
-                  GL_DEPTH_COMPONENT,
-                  GL_FLOAT,
-                  nullptr);
+  g_gl.texImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
+                  static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
+                  GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -733,19 +707,13 @@ std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
   g_gl.bindFramebuffer(GL_FRAMEBUFFER, fbo);
 
   if (colorTex != 0U) {
-    g_gl.framebufferTexture2D(GL_FRAMEBUFFER,
-                              GL_COLOR_ATTACHMENT0,
-                              GL_TEXTURE_2D,
-                              static_cast<GLuint>(colorTex),
-                              0);
+    g_gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                              GL_TEXTURE_2D, static_cast<GLuint>(colorTex), 0);
   }
 
   if (depthTex != 0U) {
-    g_gl.framebufferTexture2D(GL_FRAMEBUFFER,
-                              GL_DEPTH_ATTACHMENT,
-                              GL_TEXTURE_2D,
-                              static_cast<GLuint>(depthTex),
-                              0);
+    g_gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_TEXTURE_2D, static_cast<GLuint>(depthTex), 0);
   }
 
   g_gl.bindFramebuffer(GL_FRAMEBUFFER, 0U);
@@ -769,13 +737,9 @@ bool gl_check_framebuffer_complete() noexcept {
 
 // --- Blend ---
 
-void gl_enable_blending() noexcept {
-  g_gl.enable(GL_BLEND);
-}
+void gl_enable_blending() noexcept { g_gl.enable(GL_BLEND); }
 
-void gl_disable_blending() noexcept {
-  g_gl.disable(GL_BLEND);
-}
+void gl_disable_blending() noexcept { g_gl.disable(GL_BLEND); }
 
 void gl_set_blend_func_alpha() noexcept {
   g_gl.blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -783,18 +747,58 @@ void gl_set_blend_func_alpha() noexcept {
 
 // --- Face culling ---
 
-void gl_enable_face_culling() noexcept {
-  g_gl.enable(GL_CULL_FACE);
-}
+void gl_enable_face_culling() noexcept { g_gl.enable(GL_CULL_FACE); }
 
-void gl_disable_face_culling() noexcept {
-  g_gl.disable(GL_CULL_FACE);
-}
+void gl_disable_face_culling() noexcept { g_gl.disable(GL_CULL_FACE); }
 
 // --- Depth mask ---
 
 void gl_set_depth_mask(bool write) noexcept {
   g_gl.depthMask(write ? GL_TRUE : static_cast<GLboolean>(GL_FALSE));
+}
+
+std::uint32_t gl_create_query() noexcept {
+  GLuint query = 0U;
+  g_gl.genQueries(1, &query);
+  return static_cast<std::uint32_t>(query);
+}
+
+void gl_destroy_query(std::uint32_t query) noexcept {
+  if (query == 0U) {
+    return;
+  }
+
+  const GLuint id = static_cast<GLuint>(query);
+  g_gl.deleteQueries(1, &id);
+}
+
+void gl_query_counter_timestamp(std::uint32_t query) noexcept {
+  if (query == 0U) {
+    return;
+  }
+
+  g_gl.queryCounter(static_cast<GLuint>(query), GL_TIMESTAMP);
+}
+
+bool gl_query_result_available(std::uint32_t query) noexcept {
+  if (query == 0U) {
+    return false;
+  }
+
+  GLuint64 available = 0U;
+  g_gl.getQueryObjectui64v(static_cast<GLuint>(query),
+                           GL_QUERY_RESULT_AVAILABLE, &available);
+  return available != 0U;
+}
+
+std::uint64_t gl_query_result_u64(std::uint32_t query) noexcept {
+  if (query == 0U) {
+    return 0U;
+  }
+
+  GLuint64 value = 0U;
+  g_gl.getQueryObjectui64v(static_cast<GLuint>(query), GL_QUERY_RESULT, &value);
+  return static_cast<std::uint64_t>(value);
 }
 
 } // namespace
@@ -805,8 +809,7 @@ bool initialize_render_device() noexcept {
   }
 
   if (!load_all_gl_functions()) {
-    core::log_message(core::LogLevel::Error,
-                      "renderer",
+    core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load OpenGL functions for render device");
     return false;
   }
@@ -851,6 +854,11 @@ bool initialize_render_device() noexcept {
   g_device.enable_face_culling = &gl_enable_face_culling;
   g_device.disable_face_culling = &gl_disable_face_culling;
   g_device.set_depth_mask = &gl_set_depth_mask;
+  g_device.create_query = &gl_create_query;
+  g_device.destroy_query = &gl_destroy_query;
+  g_device.query_counter_timestamp = &gl_query_counter_timestamp;
+  g_device.query_result_available = &gl_query_result_available;
+  g_device.query_result_u64 = &gl_query_result_u64;
   g_device.set_viewport = &gl_set_viewport;
   g_device.enable_depth_test = &gl_enable_depth_test;
   g_device.disable_depth_test = &gl_disable_depth_test;

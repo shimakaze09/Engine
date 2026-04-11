@@ -48,8 +48,7 @@ struct RenderDevice final {
 
   // Vertex attributes.
   void (*enable_vertex_attrib)(std::uint32_t index) noexcept = nullptr;
-  void (*vertex_attrib_float)(std::uint32_t index,
-                              std::int32_t components,
+  void (*vertex_attrib_float)(std::uint32_t index, std::int32_t components,
                               std::int32_t stride,
                               const void *offset) noexcept = nullptr;
 
@@ -65,8 +64,7 @@ struct RenderDevice final {
                            const float *value) noexcept = nullptr;
 
   // Textures.
-  std::uint32_t (*create_texture_2d)(std::int32_t width,
-                                     std::int32_t height,
+  std::uint32_t (*create_texture_2d)(std::int32_t width, std::int32_t height,
                                      std::int32_t channels,
                                      const void *data) noexcept = nullptr;
   std::uint32_t (*create_texture_2d_hdr)(std::int32_t width,
@@ -97,16 +95,19 @@ struct RenderDevice final {
   // Depth mask.
   void (*set_depth_mask)(bool write) noexcept = nullptr;
 
+  // GPU timestamp queries.
+  std::uint32_t (*create_query)() noexcept = nullptr;
+  void (*destroy_query)(std::uint32_t query) noexcept = nullptr;
+  void (*query_counter_timestamp)(std::uint32_t query) noexcept = nullptr;
+  bool (*query_result_available)(std::uint32_t query) noexcept = nullptr;
+  std::uint64_t (*query_result_u64)(std::uint32_t query) noexcept = nullptr;
+
   // State.
-  void (*set_viewport)(std::int32_t x,
-                       std::int32_t y,
-                       std::int32_t w,
+  void (*set_viewport)(std::int32_t x, std::int32_t y, std::int32_t w,
                        std::int32_t h) noexcept = nullptr;
   void (*enable_depth_test)() noexcept = nullptr;
   void (*disable_depth_test)() noexcept = nullptr;
-  void (*set_clear_color)(float r,
-                          float g,
-                          float b,
+  void (*set_clear_color)(float r, float g, float b,
                           float a) noexcept = nullptr;
   void (*clear_color_depth)() noexcept = nullptr;
 };
