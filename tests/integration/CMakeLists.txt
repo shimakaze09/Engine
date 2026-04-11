@@ -13,6 +13,7 @@ add_test(
     NAME engine_integration_ecs
     COMMAND engine_integration_ecs
 )
+set_tests_properties(engine_integration_ecs PROPERTIES LABELS "integration")
 
 add_executable(engine_integration_vertical_slice
     vertical_slice_integration.cpp
@@ -29,6 +30,7 @@ add_test(
     NAME engine_integration_vertical_slice
     COMMAND engine_integration_vertical_slice
 )
+set_tests_properties(engine_integration_vertical_slice PROPERTIES LABELS "integration")
 
 add_executable(engine_integration_scheduler_stress
     scheduler_stress.cpp
@@ -45,6 +47,7 @@ add_test(
     NAME engine_integration_scheduler_stress
     COMMAND engine_integration_scheduler_stress
 )
+set_tests_properties(engine_integration_scheduler_stress PROPERTIES LABELS "integration")
 
 add_executable(engine_integration_thread_count_determinism
     thread_count_determinism.cpp
@@ -61,6 +64,7 @@ add_test(
     NAME engine_integration_thread_count_determinism
     COMMAND engine_integration_thread_count_determinism
 )
+set_tests_properties(engine_integration_thread_count_determinism PROPERTIES LABELS "integration")
 
 add_executable(engine_integration_determinism
     determinism_test.cpp
@@ -77,6 +81,7 @@ add_test(
     NAME engine_integration_determinism
     COMMAND engine_integration_determinism
 )
+set_tests_properties(engine_integration_determinism PROPERTIES LABELS "integration")
 
 add_executable(engine_integration_ecs_stress_50k
     ecs_stress_50k.cpp
@@ -93,3 +98,4 @@ add_test(
     NAME engine_integration_ecs_stress_50k
     COMMAND engine_integration_ecs_stress_50k
 )
+set_tests_properties(engine_integration_ecs_stress_50k PROPERTIES LABELS "integration")

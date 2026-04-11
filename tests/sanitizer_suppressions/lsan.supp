@@ -1,0 +1,6 @@
+# LeakSanitizer suppression list for Engine CI.
+# SDL2 internal allocations during EGL/video subsystem initialization are
+# expected and not under our control.
+leak:SDL_EGL_InitializeOffscreen
+leak:SDL_Init
+leak:SDL_VideoInit

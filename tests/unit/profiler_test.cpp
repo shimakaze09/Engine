@@ -43,7 +43,7 @@ bool test_scope_push_pop() noexcept {
     ProfileScope scope("test_scope");
     volatile int dummy = 0;
     for (int i = 0; i < 100; ++i) {
-      dummy += i;
+      dummy = dummy + i;
     }
   }
   profiler_end_frame();
@@ -132,7 +132,7 @@ bool test_profile_scope_macro_alias() noexcept {
     PROFILE_SCOPE("macro_scope");
     volatile int sink = 0;
     for (int i = 0; i < 64; ++i) {
-      sink += i;
+      sink = sink + i;
     }
   }
   profiler_end_frame();

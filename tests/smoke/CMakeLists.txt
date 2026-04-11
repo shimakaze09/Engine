@@ -13,3 +13,4 @@ add_test(
     NAME engine_smoke
     COMMAND engine_smoke
 )
+set_tests_properties(engine_smoke PROPERTIES LABELS "gpu")

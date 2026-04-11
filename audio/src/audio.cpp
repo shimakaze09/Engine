@@ -7,19 +7,27 @@
 #include "engine/core/vfs.h"
 
 // Silence warnings from miniaudio in third-party code.
-#if defined(_MSC_VER) || defined(__clang__)
-#pragma warning(push, 0)
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
+#elif defined(_MSC_VER)
+#pragma warning(push, 0)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#pragma GCC diagnostic ignored "-Wunused-result"
 #endif
 
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_GENERATION
 #include "miniaudio.h"
 
-#if defined(_MSC_VER) || defined(__clang__)
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#elif defined(_MSC_VER)
 #pragma warning(pop)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
 #endif
 
 namespace engine::audio {

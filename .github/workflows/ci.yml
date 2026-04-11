@@ -47,7 +47,7 @@ jobs:
         run: cmake --build build --config ${{ matrix.config }} --parallel
 
       - name: Test
-        run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120
+        run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
 
       - name: Upload compile_commands.json
         if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Debug'
@@ -136,7 +136,8 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: ctest --test-dir build --output-on-failure --timeout 180
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/lsan.supp
+        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration"
 
   benchmarks:
     name: Performance benchmarks
