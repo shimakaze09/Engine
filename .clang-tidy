@@ -5,8 +5,7 @@ Checks: >
   bugprone-use-after-move,
   modernize-use-nullptr,
   performance-for-range-copy,
-  performance-inefficient-vector-operation,
-  readability-implicit-bool-conversion
+  performance-inefficient-vector-operation
 WarningsAsErrors: "*"
 HeaderFilterRegex: "^(core|math|physics|renderer|audio|runtime|editor|scripting|app|tests)/"
 FormatStyle: none
