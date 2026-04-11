@@ -119,14 +119,13 @@ bool write_json(const char *path, double stepMs) noexcept {
     return false;
   }
 
-  const int wrote = std::fprintf(
-      file,
-      "{\n"
-      "  \"benchmark\": \"physics\",\n"
-      "  \"bodies\": %zu,\n"
-      "  \"physics_step_ms\": %.6f\n"
-      "}\n",
-      kBodyCount, stepMs);
+  const int wrote = std::fprintf(file,
+                                 "{\n"
+                                 "  \"benchmark\": \"physics\",\n"
+                                 "  \"bodies\": %zu,\n"
+                                 "  \"physics_step_ms\": %.6f\n"
+                                 "}\n",
+                                 kBodyCount, stepMs);
 
   std::fclose(file);
   return wrote > 0;

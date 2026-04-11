@@ -47,12 +47,14 @@ bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
   }
 
   using TransformSet = engine::core::SparseSet<BenchEntity, BenchTransform,
-                                                kEntityCount, kEntityCount>;
+                                               kEntityCount, kEntityCount>;
   using RigidBodySet = engine::core::SparseSet<BenchEntity, BenchRigidBody,
-                                                kEntityCount, kEntityCount>;
+                                               kEntityCount, kEntityCount>;
 
-  auto transforms = std::unique_ptr<TransformSet>(new (std::nothrow) TransformSet());
-  auto rigidBodies = std::unique_ptr<RigidBodySet>(new (std::nothrow) RigidBodySet());
+  auto transforms =
+      std::unique_ptr<TransformSet>(new (std::nothrow) TransformSet());
+  auto rigidBodies =
+      std::unique_ptr<RigidBodySet>(new (std::nothrow) RigidBodySet());
   if (!transforms || !rigidBodies) {
     return false;
   }
@@ -67,7 +69,8 @@ bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
     BenchRigidBody body{};
     body.velocity = engine::math::Vec3(1.0F, 0.0F, 1.0F);
 
-    if (!transforms->add(entity, transform) || !rigidBodies->add(entity, body)) {
+    if (!transforms->add(entity, transform) ||
+        !rigidBodies->add(entity, body)) {
       return false;
     }
   }
@@ -118,14 +121,13 @@ bool write_json(const char *path, double iterMs, std::size_t visited) noexcept {
     return false;
   }
 
-  const int wrote = std::fprintf(
-      file,
-      "{\n"
-      "  \"benchmark\": \"ecs\",\n"
-      "  \"entities\": %zu,\n"
-      "  \"ecs_iterate_ms\": %.6f\n"
-      "}\n",
-      visited, iterMs);
+  const int wrote = std::fprintf(file,
+                                 "{\n"
+                                 "  \"benchmark\": \"ecs\",\n"
+                                 "  \"entities\": %zu,\n"
+                                 "  \"ecs_iterate_ms\": %.6f\n"
+                                 "}\n",
+                                 visited, iterMs);
 
   std::fclose(file);
   return wrote > 0;

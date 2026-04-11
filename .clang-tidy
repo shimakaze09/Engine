@@ -7,6 +7,6 @@ Checks: >
   performance-for-range-copy,
   performance-inefficient-vector-operation,
   readability-implicit-bool-conversion
-WarningsAsErrors: ''
-HeaderFilterRegex: '^(core|math|physics|renderer|audio|runtime|editor|scripting|app|tests)/'
+WarningsAsErrors: ""
+HeaderFilterRegex: "^(core|math|physics|renderer|audio|runtime|editor|scripting|app|tests)/"
 FormatStyle: none
