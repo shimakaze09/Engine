@@ -24,6 +24,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---- Cache FetchContent dependencies ----
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ matrix.os }}-
+
       # ---- Linux: install OpenGL + X11 dev headers (headless) ----
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -49,12 +57,68 @@ jobs:
       - name: Test
         run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
 
+      # ---- Determinism hash artifact (for cross-platform comparison) ----
+      - name: Run determinism hash
+        if: matrix.config == 'Release'
+        shell: bash
+        run: |
+          ./build/tests/integration/engine_integration_determinism 2>&1 | tee determinism_output.txt
+          hash=$(grep -oP 'hash=\K[0-9]+' determinism_output.txt || true)
+          echo "$hash" > determinism_hash.txt
+          echo "Determinism hash on ${{ matrix.os }}: $hash"
+
+      - name: Upload determinism hash
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: determinism-hash-${{ matrix.os }}
+          path: determinism_hash.txt
+
       - name: Upload compile_commands.json
         if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Debug'
         uses: actions/upload-artifact@v4
         with:
           name: compile_commands
           path: build/compile_commands.json
+
+  # ---- Cross-platform determinism comparison (P1-M1-C1a) ----
+  determinism-check:
+    name: Cross-platform determinism
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all determinism hashes
+        uses: actions/download-artifact@v4
+        with:
+          pattern: determinism-hash-*
+          merge-multiple: false
+
+      - name: Compare hashes across platforms
+        shell: bash
+        run: |
+          echo "=== Cross-platform determinism check ==="
+          hashes=()
+          for dir in determinism-hash-*/; do
+            file="${dir}determinism_hash.txt"
+            if [ -f "$file" ]; then
+              h=$(cat "$file" | tr -d '[:space:]')
+              platform=$(basename "$dir" | sed 's/determinism-hash-//')
+              echo "  $platform: $h"
+              hashes+=("$h")
+            fi
+          done
+          if [ ${#hashes[@]} -lt 2 ]; then
+            echo "WARN: fewer than 2 platform hashes found, skipping comparison"
+            exit 0
+          fi
+          first="${hashes[0]}"
+          for h in "${hashes[@]}"; do
+            if [ "$h" != "$first" ]; then
+              echo "FAIL: cross-platform determinism mismatch"
+              exit 1
+            fi
+          done
+          echo "PASS: all ${#hashes[@]} platforms produced identical hash: $first"
 
   static-analysis:
     name: cppcheck
@@ -76,6 +140,13 @@ jobs:
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
+
       - name: Configure (needed for FetchContent headers)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
@@ -91,6 +162,61 @@ jobs:
 
       - name: Run cppcheck
         run: cmake --build build --target analysis
+
+  # ---- clang-tidy (P1-M1-B2b) ----
+  clang-tidy:
+    name: clang-tidy
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-tidy
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Filter compile_commands.json (engine sources only)
+        run: |
+          python3 -c "
+          import json, pathlib
+          p = pathlib.Path('build/compile_commands.json')
+          db = json.loads(p.read_text())
+          db = [e for e in db if '/_deps/' not in e['file'] and '/tests/' not in e['file'] and '/tools/' not in e['file']]
+          p.write_text(json.dumps(db, indent=2))
+          "
+
+      - name: Run clang-tidy
+        run: |
+          python3 -c "
+          import json, subprocess, sys
+          db = json.loads(open('build/compile_commands.json').read())
+          files = [e['file'] for e in db]
+          print(f'Checking {len(files)} files...')
+          result = subprocess.run(
+            ['clang-tidy', '-p', 'build', '--warnings-as-errors=*'] + files,
+            capture_output=False
+          )
+          sys.exit(result.returncode)
+          "
 
   werror-check:
     name: -Werror verification
@@ -108,6 +234,13 @@ jobs:
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
+
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -132,6 +265,13 @@ jobs:
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
+
       - name: Configure (ASAN+UBSAN)
         run: >
           cmake -S . -B build
@@ -148,6 +288,117 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/lsan.supp
         run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration"
+
+  # ---- TSAN (P1-M1-B3b) ----
+  tsan:
+    name: TSAN
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
+
+      - name: Configure (TSAN)
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_FLAGS="-fsanitize=thread"
+          -DCMAKE_CXX_FLAGS="-fsanitize=thread"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          -DENGINE_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test under TSAN
+        env:
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/tsan.supp:halt_on_error=1:second_deadlock_stack=1
+        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration"
+
+  # ---- Code coverage (P1-M1-B4a/B4b/B4c) ----
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev lcov
+
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
+
+      - name: Configure (coverage)
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_FLAGS="--coverage"
+          -DCMAKE_CXX_FLAGS="--coverage"
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+          -DENGINE_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 120 --label-exclude gpu
+
+      - name: Collect coverage (lcov)
+        run: |
+          lcov --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch
+          lcov --remove coverage_raw.info '*/build/_deps/*' '*/tests/*' '*/tools/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+          lcov --summary coverage.info
+
+      - name: Generate HTML report
+        run: genhtml coverage.info --output-directory coverage_html --title "Engine Coverage"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_html/
+
+      - name: Coverage threshold gate
+        run: |
+          LINE_PCT=$(lcov --summary coverage.info 2>&1 | grep -oP 'lines\.*:\s*\K[0-9.]+')
+          echo "Line coverage: ${LINE_PCT}%"
+          python3 -c "
+          pct = float('${LINE_PCT}')
+          threshold = 50.0
+          if pct < threshold:
+              print(f'FAIL: line coverage {pct}% is below threshold {threshold}%')
+              exit(1)
+          else:
+              print(f'PASS: line coverage {pct}% >= {threshold}% threshold')
+          "
 
   benchmarks:
     name: Performance benchmarks
@@ -167,6 +418,13 @@ jobs:
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-ubuntu-24.04-
+
       - name: Configure (Release for benchmarks)
         run: >
           cmake -S . -B build
@@ -177,7 +435,51 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       - name: Run ECS perf benchmark
-        run: ctest --test-dir build --build-config Release -R engine_bench_ecs_perf --output-on-failure --timeout 120
+        run: |
+          mkdir -p bench_results
+          ./build/tests/benchmark/engine_bench_ecs_perf --json-out bench_results/ecs.json
+          cat bench_results/ecs.json
 
       - name: Run Physics perf benchmark
-        run: ctest --test-dir build --build-config Release -R engine_bench_physics_perf --output-on-failure --timeout 120
+        run: |
+          ./build/tests/benchmark/engine_bench_physics_perf --json-out bench_results/physics.json
+          cat bench_results/physics.json
+
+      - name: Perf regression check (>10% regression = fail)
+        run: |
+          python3 -c "
+          import json, sys
+
+          baseline = json.loads(open('tests/benchmark/perf_baseline.json').read())
+          ecs = json.loads(open('bench_results/ecs.json').read())
+          phys = json.loads(open('bench_results/physics.json').read())
+
+          failed = False
+          threshold = 1.10  # 10% regression
+
+          ecs_ms = ecs['ecs_iterate_ms']
+          ecs_base = baseline['ecs_iterate_ms']
+          ecs_ratio = ecs_ms / ecs_base if ecs_base > 0 else 0
+          print(f'ECS: {ecs_ms:.3f}ms (baseline: {ecs_base:.3f}ms, ratio: {ecs_ratio:.2f}x)')
+          if ecs_ratio > threshold:
+              print(f'  FAIL: ECS regression {ecs_ratio:.2f}x > {threshold}x')
+              failed = True
+
+          phys_ms = phys['physics_step_ms']
+          phys_base = baseline['physics_step_ms']
+          phys_ratio = phys_ms / phys_base if phys_base > 0 else 0
+          print(f'Physics: {phys_ms:.3f}ms (baseline: {phys_base:.3f}ms, ratio: {phys_ratio:.2f}x)')
+          if phys_ratio > threshold:
+              print(f'  FAIL: Physics regression {phys_ratio:.2f}x > {threshold}x')
+              failed = True
+
+          if failed:
+              sys.exit(1)
+          print('PASS: no performance regressions detected')
+          "
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench_results/

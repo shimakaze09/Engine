@@ -1,0 +1,9 @@
+# ThreadSanitizer suppression list for Engine CI.
+# SDL2 internal threading is outside engine control.
+race:SDL_*
+race:libSDL*
+deadlock:SDL_*
+
+# PulseAudio internal threading (miniaudio backend, CI headless).
+race:pa_*
+race:libpulse*

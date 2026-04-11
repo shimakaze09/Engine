@@ -34,24 +34,24 @@ Everything in Phase 1 must be complete before a game can be shipped.
 #### P1-M1-B: CI Pipeline
 
 - [x] P1-M1-B1a: .github/workflows/ci.yml — build matrix (3 OS × 2 configs)
-- [ ] P1-M1-B1b: Steps: checkout → configure → build → test, cache _deps/
+- [x] P1-M1-B1b: Steps: checkout → configure → build → test, cache _deps/
 - [x] P1-M1-B1c: Build artifact upload (compile_commands.json)
 - [x] P1-M1-B2a: cppcheck CI job (fail on new warning)
-- [ ] P1-M1-B2b: clang-tidy CI job with .clang-tidy config
+- [x] P1-M1-B2b: clang-tidy CI job with .clang-tidy config
 - [x] P1-M1-B2c: -Werror / /WX verification in CI
 - [x] P1-M1-B3a: ASAN+UBSAN sanitizer CI lane
-- [ ] P1-M1-B3b: TSAN CI lane (separate from ASAN)
+- [x] P1-M1-B3b: TSAN CI lane (separate from ASAN)
 - [x] P1-M1-B3c: Sanitizer suppressions for third-party (SDL, Lua)
-- [ ] P1-M1-B4a: --coverage build in CI (gcov/llvm-cov)
-- [ ] P1-M1-B4b: Generate coverage HTML report + upload artifact
-- [ ] P1-M1-B4c: Coverage threshold gate (fail if below X%)
+- [x] P1-M1-B4a: --coverage build in CI (gcov/llvm-cov)
+- [x] P1-M1-B4b: Generate coverage HTML report + upload artifact
+- [x] P1-M1-B4c: Coverage threshold gate (fail if below X%)
 - [x] P1-M1-B5a: ECS perf benchmark (50K entities iterate time)
 - [x] P1-M1-B5b: Physics perf benchmark (1000-body step time)
-- [ ] P1-M1-B5c: CI perf regression check (>10% regression = fail)
+- [x] P1-M1-B5c: CI perf regression check (>10% regression = fail)
 
 #### P1-M1-C: Determinism and Replay
 
-- [ ] P1-M1-C1a: Cross-platform determinism test (hash final state on all CI platforms)
+- [x] P1-M1-C1a: Cross-platform determinism test (hash final state on all CI platforms)
 - [x] P1-M1-C1b: Thread-count independence (hashes match for 1–8 workers)
 - [x] P1-M1-C1c: Document FP strictness flags per platform in CMake
 - [x] P1-M1-C2a: Raise kMaxEntities to 65536 or configurable
