@@ -74,6 +74,9 @@ struct Collider final {
   float restitution = 0.3F;
   float staticFriction = 0.5F;
   float dynamicFriction = 0.3F;
+  float density = 1.0F;
+  std::uint32_t collisionLayer = 1U;
+  std::uint32_t collisionMask = 0xFFFFFFFFU;
   ColliderShape shape = ColliderShape::AABB;
 };
 
@@ -160,11 +163,42 @@ public:
   using PhysicsCollisionDispatchFn = void (*)(const std::uint32_t *pairs,
                                               std::size_t pairCount) noexcept;
 
+  enum class JointType : std::uint8_t {
+    Distance = 0,
+    Hinge = 1,
+    BallSocket = 2,
+    Slider = 3,
+    Spring = 4,
+    Fixed = 5,
+  };
+
   struct PhysicsJointSlot final {
     Entity entityA = kInvalidEntity;
     Entity entityB = kInvalidEntity;
-    float distance = 1.0F;
+    JointType type = JointType::Distance;
     bool active = false;
+    bool hasLimits = false;
+
+    // Local-space anchor offsets on each body.
+    math::Vec3 anchorA{};
+    math::Vec3 anchorB{};
+
+    // Distance / Spring rest length.
+    float distance = 1.0F;
+
+    // Hinge / Slider axis (world-space direction, normalized).
+    math::Vec3 axis = math::Vec3(0.0F, 1.0F, 0.0F);
+
+    // Angle or distance limits (hinge: radians, slider: distance).
+    float minLimit = 0.0F;
+    float maxLimit = 0.0F;
+
+    // Spring parameters.
+    float stiffness = 100.0F;
+    float damping = 1.0F;
+
+    // Warm starting: accumulated impulse from previous frame.
+    float accumulatedImpulse = 0.0F;
   };
 
   struct PhysicsContext final {

@@ -2,6 +2,7 @@
 
 #include "engine/core/logging.h"
 #include "engine/physics/collider.h"
+#include "engine/physics/constraint_solver.h"
 #include "engine/runtime/world.h"
 
 namespace engine::physics {
@@ -131,6 +132,79 @@ physics::JointId add_distance_joint(World &world, Entity entityA,
   return physics::add_distance_joint(world, entityA, entityB, distance);
 }
 
+physics::JointId add_hinge_joint(World &world, Entity entityA,
+                                 Entity entityB, const math::Vec3 &pivot,
+                                 const math::Vec3 &axis) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "add_hinge_joint")) {
+    return physics::kInvalidJointId;
+  }
+  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      !world.is_alive(entityA) || !world.is_alive(entityB)) {
+    return physics::kInvalidJointId;
+  }
+  return physics::add_hinge_joint(world, entityA, entityB, pivot, axis);
+}
+
+physics::JointId add_ball_socket_joint(World &world, Entity entityA,
+                                       Entity entityB,
+                                       const math::Vec3 &pivot) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "add_ball_socket_joint")) {
+    return physics::kInvalidJointId;
+  }
+  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      !world.is_alive(entityA) || !world.is_alive(entityB)) {
+    return physics::kInvalidJointId;
+  }
+  return physics::add_ball_socket_joint(world, entityA, entityB, pivot);
+}
+
+physics::JointId add_slider_joint(World &world, Entity entityA,
+                                  Entity entityB,
+                                  const math::Vec3 &axis) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "add_slider_joint")) {
+    return physics::kInvalidJointId;
+  }
+  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      !world.is_alive(entityA) || !world.is_alive(entityB)) {
+    return physics::kInvalidJointId;
+  }
+  return physics::add_slider_joint(world, entityA, entityB, axis);
+}
+
+physics::JointId add_spring_joint(World &world, Entity entityA,
+                                  Entity entityB, float restLength,
+                                  float stiffness, float damping) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "add_spring_joint")) {
+    return physics::kInvalidJointId;
+  }
+  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      !world.is_alive(entityA) || !world.is_alive(entityB)) {
+    return physics::kInvalidJointId;
+  }
+  return physics::add_spring_joint(world, entityA, entityB, restLength,
+                                   stiffness, damping);
+}
+
+physics::JointId add_fixed_joint(World &world, Entity entityA,
+                                 Entity entityB) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "add_fixed_joint")) {
+    return physics::kInvalidJointId;
+  }
+  if ((entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      !world.is_alive(entityA) || !world.is_alive(entityB)) {
+    return physics::kInvalidJointId;
+  }
+  return physics::add_fixed_joint(world, entityA, entityB);
+}
+
+void set_joint_limits(World &world, physics::JointId id, float minLimit,
+                      float maxLimit) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "set_joint_limits")) {
+    return;
+  }
+  physics::set_joint_limits(world, id, minLimit, maxLimit);
+}
+
 void remove_joint(World &world, physics::JointId id) noexcept {
   if (!require_phase(world, WorldPhase::Input, "remove_joint")) {
     return;
@@ -165,6 +239,48 @@ bool set_heightfield_data(Entity entity,
 
 const physics::HeightfieldData *get_heightfield_data(Entity entity) noexcept {
   return physics::get_heightfield_data_impl(entity.index);
+}
+
+// ------ Physics Queries (P1-M3-D) -------------------------------------------
+
+std::size_t raycast_all(const World &world, const math::Vec3 &origin,
+                        const math::Vec3 &direction, float maxDistance,
+                        PhysicsRaycastHit *outHits, std::size_t maxHits,
+                        std::uint32_t mask) noexcept {
+  return physics::raycast_all(world, origin, direction, maxDistance, outHits,
+                              maxHits, mask);
+}
+
+std::size_t overlap_sphere(const World &world, const math::Vec3 &center,
+                           float radius, std::uint32_t *outEntityIndices,
+                           std::size_t maxResults,
+                           std::uint32_t mask) noexcept {
+  return physics::overlap_sphere(world, center, radius, outEntityIndices,
+                                 maxResults, mask);
+}
+
+std::size_t overlap_box(const World &world, const math::Vec3 &center,
+                        const math::Vec3 &halfExtents,
+                        std::uint32_t *outEntityIndices,
+                        std::size_t maxResults,
+                        std::uint32_t mask) noexcept {
+  return physics::overlap_box(world, center, halfExtents, outEntityIndices,
+                              maxResults, mask);
+}
+
+bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,
+                  const math::Vec3 &direction, float maxDistance,
+                  physics::SweepHit *outHit, std::uint32_t mask) noexcept {
+  return physics::sweep_sphere(world, origin, radius, direction, maxDistance,
+                               outHit, mask);
+}
+
+bool sweep_box(const World &world, const math::Vec3 &center,
+               const math::Vec3 &halfExtents, const math::Vec3 &direction,
+               float maxDistance, physics::SweepHit *outHit,
+               std::uint32_t mask) noexcept {
+  return physics::sweep_box(world, center, halfExtents, direction, maxDistance,
+                            outHit, mask);
 }
 
 } // namespace engine::runtime

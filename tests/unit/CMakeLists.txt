@@ -487,3 +487,72 @@ add_test(
     NAME engine_unit_touch_input
     COMMAND engine_unit_touch_input
 )
+
+# ---- P1-M3: Physics Engine Hardening ----
+
+add_executable(engine_unit_collision_layer
+    collision_layer_test.cpp
+)
+
+target_compile_features(engine_unit_collision_layer PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_collision_layer
+    PRIVATE
+    engine_physics
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_collision_layer
+    COMMAND engine_unit_collision_layer
+)
+
+add_executable(engine_unit_joints
+    joint_test.cpp
+)
+
+target_compile_features(engine_unit_joints PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_joints
+    PRIVATE
+    engine_physics
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_joints
+    COMMAND engine_unit_joints
+)
+
+add_executable(engine_unit_manifold
+    manifold_test.cpp
+)
+
+target_compile_features(engine_unit_manifold PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_manifold
+    PRIVATE
+    engine_physics
+)
+
+add_test(
+    NAME engine_unit_manifold
+    COMMAND engine_unit_manifold
+)
+
+add_executable(engine_unit_physics_query
+    physics_query_test.cpp
+)
+
+target_compile_features(engine_unit_physics_query PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_physics_query
+    PRIVATE
+    engine_physics
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_physics_query
+    COMMAND engine_unit_physics_query
+)

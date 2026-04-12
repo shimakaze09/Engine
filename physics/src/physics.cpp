@@ -13,6 +13,7 @@
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
+#include "engine/physics/constraint_solver.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
@@ -113,8 +114,6 @@ constexpr float kStaticInverseMass = 0.0F;
 constexpr float kDefaultCellSize = 4.0F;
 constexpr std::size_t kSpatialHashBuckets = 4096U;
 constexpr std::uint32_t kSpatialHashEmpty = 0xFFFFFFFFU;
-
-constexpr std::size_t kJointSolverIterations = 4U;
 
 constexpr float kSleepThreshold = 0.01F;
 constexpr std::uint8_t kSleepFramesRequired = 60U;
@@ -592,8 +591,6 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
 
 } // namespace
 
-void solve_joints(runtime::World &world) noexcept;
-
 bool step_physics(runtime::World &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
 }
@@ -894,6 +891,14 @@ bool resolve_collisions(runtime::World &world) noexcept {
 
               const runtime::Collider &colliderA = colliders[i];
               const runtime::Collider &colliderB = colliders[j];
+
+              // Collision layer/mask filtering (P1-M3-C2b).
+              if (((colliderA.collisionLayer & colliderB.collisionMask) ==
+                   0U) ||
+                  ((colliderB.collisionLayer & colliderA.collisionMask) ==
+                   0U)) {
+                continue;
+              }
 
               runtime::RigidBody *bodyA = world.get_rigid_body_ptr(entityA);
               runtime::RigidBody *bodyB = world.get_rigid_body_ptr(entityB);
@@ -1603,7 +1608,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
     } // for i
   } // if (colliderCount >= 2U)
 
-  solve_joints(world);
+  solve_constraints(world, 1.0F / 60.0F);
 
   // Sleep check: after all collision responses and joint solving,
   // examine each rigid body. If velocity is below threshold for enough
@@ -2015,8 +2020,10 @@ JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
     if (!ctx.joints[i].active) {
       ctx.joints[i].entityA = entityA;
       ctx.joints[i].entityB = entityB;
+      ctx.joints[i].type = runtime::World::JointType::Distance;
       ctx.joints[i].distance = distance;
       ctx.joints[i].active = true;
+      ctx.joints[i].accumulatedImpulse = 0.0F;
       if (i >= ctx.jointCount) {
         ctx.jointCount = i + 1U;
       }
@@ -2036,58 +2043,6 @@ void remove_joint(runtime::World &world, JointId id) noexcept {
   while ((ctx.jointCount > 0U) && !ctx.joints[ctx.jointCount - 1U].active) {
     --ctx.jointCount;
   }
-}
-
-void solve_joints(runtime::World &world) noexcept {
-  const auto simToken = world.simulation_access_token();
-  runtime::World::PhysicsContext &ctx = world.physics_context();
-  if (ctx.jointCount == 0U) {
-    return;
-  }
-
-  for (std::size_t iter = 0U; iter < kJointSolverIterations; ++iter) {
-    for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
-      if (!ctx.joints[i].active) {
-        continue;
-      }
-
-      runtime::Transform *tA =
-          world.get_transform_write_ptr(ctx.joints[i].entityA, simToken);
-      runtime::Transform *tB =
-          world.get_transform_write_ptr(ctx.joints[i].entityB, simToken);
-      if ((tA == nullptr) || (tB == nullptr)) {
-        continue;
-      }
-
-      runtime::RigidBody *bodyA =
-          world.get_rigid_body_ptr(ctx.joints[i].entityA);
-      runtime::RigidBody *bodyB =
-          world.get_rigid_body_ptr(ctx.joints[i].entityB);
-      const float invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
-      const float invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
-      const float invMassSum = invMassA + invMassB;
-      if (invMassSum <= 0.0F) {
-        continue;
-      }
-
-      const math::Vec3 delta = math::sub(tB->position, tA->position);
-      const float currentDist = math::length(delta);
-      if (currentDist < 1e-8F) {
-        continue;
-      }
-      const float error = currentDist - ctx.joints[i].distance;
-      const math::Vec3 dir = math::div(delta, currentDist);
-      const math::Vec3 correction = math::mul(dir, error);
-
-      tA->position =
-          math::add(tA->position, math::mul(correction, invMassA / invMassSum));
-      tB->position =
-          math::sub(tB->position, math::mul(correction, invMassB / invMassSum));
-    }
-  }
-
-  // Velocity correction: derive velocity from position change is implicit
-  // since we modify write-buffer positions directly.
 }
 
 void wake_body(runtime::World &world, runtime::Entity entity) noexcept {

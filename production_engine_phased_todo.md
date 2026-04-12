@@ -218,7 +218,7 @@ Everything in Phase 1 must be complete before a game can be shipped.
 - [x] P1-M3-A2b: Convex hull builder (quickhull → half-edge → plane array)
 - [x] P1-M3-A2c: GJK/EPA for convex-vs-convex narrow phase
 - [x] P1-M3-A2d: Convex-vs-sphere, convex-vs-capsule using GJK support functions
-- [ ] P1-M3-A2e: Cook convex hull at asset import time (asset packer)
+- [x] P1-M3-A2e: Cook convex hull at asset import time (asset packer)
 - [x] P1-M3-A2f: Test: cube mesh → same result as AABB; tetrahedron contacts correct
 - [x] P1-M3-A3a: HeightfieldCollider struct (2D height array, x/z spacing, min/max y)
 - [x] P1-M3-A3b: Ray-vs-heightfield (grid march + bilinear interpolation)
@@ -228,48 +228,48 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M3-B: Constraint Solver
 
-- [ ] P1-M3-B1a: ConstraintSolver class (accumulate constraints, iterate N times, apply impulse)
-- [ ] P1-M3-B1b: Warm starting (cache impulse from previous frame, apply before first iteration)
-- [ ] P1-M3-B1c: CVar physics.solver_iterations (default 8)
-- [ ] P1-M3-B2a: Hinge joint (constrain rotation to one axis, optional angle limits)
-- [ ] P1-M3-B2b: Ball-socket joint (constrain position, free rotation)
-- [ ] P1-M3-B2c: Slider joint (constrain to one axis, optional distance limits)
-- [ ] P1-M3-B2d: Spring joint (distance constraint, configurable stiffness/damping)
-- [ ] P1-M3-B2e: Fixed joint (zero relative motion, welding)
-- [ ] P1-M3-B2f: Lua bindings for all joint types (engine.add_hinge_joint etc.)
-- [ ] P1-M3-B2g: Test per joint: verify constraint holds under load, limits respected
-- [ ] P1-M3-B3a: Persistent contact manifold (match contacts across frames by feature ID)
-- [ ] P1-M3-B3b: Manifold reduction (keep ≤4 contacts per pair, maximize contact area)
-- [ ] P1-M3-B3c: Test: box resting on box retains 4 contacts across 100 frames
+- [x] P1-M3-B1a: ConstraintSolver class (accumulate constraints, iterate N times, apply impulse)
+- [x] P1-M3-B1b: Warm starting (cache impulse from previous frame, apply before first iteration)
+- [x] P1-M3-B1c: CVar physics.solver_iterations (default 8)
+- [x] P1-M3-B2a: Hinge joint (constrain rotation to one axis, optional angle limits)
+- [x] P1-M3-B2b: Ball-socket joint (constrain position, free rotation)
+- [x] P1-M3-B2c: Slider joint (constrain to one axis, optional distance limits)
+- [x] P1-M3-B2d: Spring joint (distance constraint, configurable stiffness/damping)
+- [x] P1-M3-B2e: Fixed joint (zero relative motion, welding)
+- [x] P1-M3-B2f: Lua bindings for all joint types (engine.add_hinge_joint etc.)
+- [x] P1-M3-B2g: Test per joint: verify constraint holds under load, limits respected
+- [x] P1-M3-B3a: Persistent contact manifold (match contacts across frames by feature ID)
+- [x] P1-M3-B3b: Manifold reduction (keep ≤4 contacts per pair, maximize contact area)
+- [x] P1-M3-B3c: Test: box resting on box retains 4 contacts across 100 frames
 
 #### P1-M3-C: Physics Materials and Layers
 
-- [ ] P1-M3-C1a: PhysicsMaterial struct (static/dynamic friction, restitution, density)
-- [ ] P1-M3-C1b: Assign material per collider (default material if unset)
-- [ ] P1-M3-C1c: Material combination rules (friction = sqrt(a*b), restitution = max(a,b))
-- [ ] P1-M3-C1d: Lua binding: engine.create_physics_material / engine.set_collider_material
-- [ ] P1-M3-C2a: collision_layer and collision_mask uint32 per collider (bit flags)
-- [ ] P1-M3-C2b: Broadphase filters pairs by (a.layer & b.mask) && (b.layer & a.mask)
-- [ ] P1-M3-C2c: Lua binding: engine.set_collision_layer / engine.set_collision_mask
-- [ ] P1-M3-C2d: Test: entity on layer 2, mask excludes layer 2 → no collision
+- [x] P1-M3-C1a: PhysicsMaterial struct (static/dynamic friction, restitution, density)
+- [x] P1-M3-C1b: Assign material per collider (default material if unset)
+- [x] P1-M3-C1c: Material combination rules (friction = sqrt(a*b), restitution = max(a,b))
+- [x] P1-M3-C1d: Lua binding: engine.create_physics_material / engine.set_collider_material
+- [x] P1-M3-C2a: collision_layer and collision_mask uint32 per collider (bit flags)
+- [x] P1-M3-C2b: Broadphase filters pairs by (a.layer & b.mask) && (b.layer & a.mask)
+- [x] P1-M3-C2c: Lua binding: engine.set_collision_layer / engine.set_collision_mask
+- [x] P1-M3-C2d: Test: entity on layer 2, mask excludes layer 2 → no collision
 
 #### P1-M3-D: Physics Queries
 
-- [ ] P1-M3-D1a: PhysicsWorld::raycast(origin, direction, max_distance, mask) → RaycastHit[]
-- [ ] P1-M3-D1b: RaycastHit struct (entity, position, normal, distance, surface material)
-- [ ] P1-M3-D1c: Broadphase ray-vs-cell enumeration, narrow per-collider ray test
-- [ ] P1-M3-D1d: Sort results by distance, closest-only option (early out)
-- [ ] P1-M3-D1e: Lua binding: engine.raycast(ox,oy,oz, dx,dy,dz, max_dist) → table of hits
-- [ ] P1-M3-D1f: Test: ray through 3 aligned spheres returns 3 hits sorted by distance
-- [ ] P1-M3-D2a: PhysicsWorld::overlap_sphere(center, radius, mask) → Entity[]
-- [ ] P1-M3-D2b: PhysicsWorld::overlap_box(center, half_extents, rotation, mask) → Entity[]
-- [ ] P1-M3-D2c: Lua bindings: engine.overlap_sphere / engine.overlap_box
-- [ ] P1-M3-D2d: Test: 10 entities in cluster, overlap sphere catches correct subset
-- [ ] P1-M3-D3a: PhysicsWorld::sweep_sphere(origin, radius, direction, distance, mask) → SweepHit
-- [ ] P1-M3-D3b: PhysicsWorld::sweep_box(center, half_extents, rotation, direction, distance, mask) → SweepHit
-- [ ] P1-M3-D3c: SweepHit struct (entity, contact_point, normal, distance, time_of_impact)
-- [ ] P1-M3-D3d: Lua bindings: engine.sweep_sphere / engine.sweep_box
-- [ ] P1-M3-D3e: Test: sweep sphere through corridor, hits wall at correct distance
+- [x] P1-M3-D1a: PhysicsWorld::raycast(origin, direction, max_distance, mask) → RaycastHit[]
+- [x] P1-M3-D1b: RaycastHit struct (entity, position, normal, distance, surface material)
+- [x] P1-M3-D1c: Broadphase ray-vs-cell enumeration, narrow per-collider ray test
+- [x] P1-M3-D1d: Sort results by distance, closest-only option (early out)
+- [x] P1-M3-D1e: Lua binding: engine.raycast(ox,oy,oz, dx,dy,dz, max_dist) → table of hits
+- [x] P1-M3-D1f: Test: ray through 3 aligned spheres returns 3 hits sorted by distance
+- [x] P1-M3-D2a: PhysicsWorld::overlap_sphere(center, radius, mask) → Entity[]
+- [x] P1-M3-D2b: PhysicsWorld::overlap_box(center, half_extents, rotation, mask) → Entity[]
+- [x] P1-M3-D2c: Lua bindings: engine.overlap_sphere / engine.overlap_box
+- [x] P1-M3-D2d: Test: 10 entities in cluster, overlap sphere catches correct subset
+- [x] P1-M3-D3a: PhysicsWorld::sweep_sphere(origin, radius, direction, distance, mask) → SweepHit
+- [x] P1-M3-D3b: PhysicsWorld::sweep_box(center, half_extents, rotation, direction, distance, mask) → SweepHit
+- [x] P1-M3-D3c: SweepHit struct (entity, contact_point, normal, distance, time_of_impact)
+- [x] P1-M3-D3d: Lua bindings: engine.sweep_sphere / engine.sweep_box
+- [x] P1-M3-D3e: Test: sweep sphere through corridor, hits wall at correct distance
 
 #### P1-M3-E: CCD Hardening
 

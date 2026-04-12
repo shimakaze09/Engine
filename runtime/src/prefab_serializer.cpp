@@ -184,6 +184,9 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_float("restitution", collider.restitution);
     w.write_float("staticFriction", collider.staticFriction);
     w.write_float("dynamicFriction", collider.dynamicFriction);
+    w.write_float("density", collider.density);
+    w.write_uint("collisionLayer", collider.collisionLayer);
+    w.write_uint("collisionMask", collider.collisionMask);
     w.end_object();
   }
 
@@ -363,6 +366,15 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     }
     if (parser.get_object_field(cval, "dynamicFriction", &v)) {
       static_cast<void>(parser.as_float(v, &col.dynamicFriction));
+    }
+    if (parser.get_object_field(cval, "density", &v)) {
+      static_cast<void>(parser.as_float(v, &col.density));
+    }
+    if (parser.get_object_field(cval, "collisionLayer", &v)) {
+      static_cast<void>(parser.as_uint(v, &col.collisionLayer));
+    }
+    if (parser.get_object_field(cval, "collisionMask", &v)) {
+      static_cast<void>(parser.as_uint(v, &col.collisionMask));
     }
     static_cast<void>(world.add_collider(entity, col));
   }

@@ -4,6 +4,7 @@
 #include "engine/core/service_locator.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_query.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/prefab_serializer.h"
@@ -136,6 +137,108 @@ bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
   return true;
 }
 
+std::size_t scripting_raycast_all(runtime::World *world, float ox, float oy,
+                                  float oz, float dx, float dy, float dz,
+                                  float maxDistance,
+                                  scripting::RuntimeRaycastHit *outHits,
+                                  std::size_t maxHits,
+                                  std::uint32_t mask) noexcept {
+  if ((world == nullptr) || (outHits == nullptr) || (maxHits == 0U)) {
+    return 0U;
+  }
+  constexpr std::size_t kLocalMax = 32U;
+  const std::size_t cap = maxHits < kLocalMax ? maxHits : kLocalMax;
+  runtime::PhysicsRaycastHit hits[kLocalMax]{};
+  const std::size_t count = runtime::raycast_all(
+      *world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz), maxDistance,
+      hits, cap, mask);
+  for (std::size_t i = 0U; i < count; ++i) {
+    outHits[i].entityIndex = hits[i].entity.index;
+    outHits[i].distance = hits[i].distance;
+    outHits[i].pointX = hits[i].point.x;
+    outHits[i].pointY = hits[i].point.y;
+    outHits[i].pointZ = hits[i].point.z;
+    outHits[i].normalX = hits[i].normal.x;
+    outHits[i].normalY = hits[i].normal.y;
+    outHits[i].normalZ = hits[i].normal.z;
+  }
+  return count;
+}
+
+std::size_t scripting_overlap_sphere(runtime::World *world, float cx, float cy,
+                                     float cz, float radius,
+                                     std::uint32_t *outEntityIndices,
+                                     std::size_t maxResults,
+                                     std::uint32_t mask) noexcept {
+  if (world == nullptr) {
+    return 0U;
+  }
+  return runtime::overlap_sphere(*world, math::Vec3(cx, cy, cz), radius,
+                                 outEntityIndices, maxResults, mask);
+}
+
+std::size_t scripting_overlap_box(runtime::World *world, float cx, float cy,
+                                  float cz, float hx, float hy, float hz,
+                                  std::uint32_t *outEntityIndices,
+                                  std::size_t maxResults,
+                                  std::uint32_t mask) noexcept {
+  if (world == nullptr) {
+    return 0U;
+  }
+  return runtime::overlap_box(*world, math::Vec3(cx, cy, cz),
+                              math::Vec3(hx, hy, hz), outEntityIndices,
+                              maxResults, mask);
+}
+
+bool scripting_sweep_sphere(runtime::World *world, float ox, float oy,
+                            float oz, float radius, float dx, float dy,
+                            float dz, float maxDistance,
+                            scripting::RuntimeRaycastHit *outHit,
+                            std::uint32_t mask) noexcept {
+  if ((world == nullptr) || (outHit == nullptr)) {
+    return false;
+  }
+  physics::SweepHit sh{};
+  if (!runtime::sweep_sphere(*world, math::Vec3(ox, oy, oz), radius,
+                             math::Vec3(dx, dy, dz), maxDistance, &sh, mask)) {
+    return false;
+  }
+  outHit->entityIndex = sh.entityIndex;
+  outHit->distance = sh.distance;
+  outHit->pointX = sh.contactPoint.x;
+  outHit->pointY = sh.contactPoint.y;
+  outHit->pointZ = sh.contactPoint.z;
+  outHit->normalX = sh.normal.x;
+  outHit->normalY = sh.normal.y;
+  outHit->normalZ = sh.normal.z;
+  return true;
+}
+
+bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
+                         float hx, float hy, float hz, float dx, float dy,
+                         float dz, float maxDistance,
+                         scripting::RuntimeRaycastHit *outHit,
+                         std::uint32_t mask) noexcept {
+  if ((world == nullptr) || (outHit == nullptr)) {
+    return false;
+  }
+  physics::SweepHit sh{};
+  if (!runtime::sweep_box(*world, math::Vec3(cx, cy, cz),
+                          math::Vec3(hx, hy, hz), math::Vec3(dx, dy, dz),
+                          maxDistance, &sh, mask)) {
+    return false;
+  }
+  outHit->entityIndex = sh.entityIndex;
+  outHit->distance = sh.distance;
+  outHit->pointX = sh.contactPoint.x;
+  outHit->pointY = sh.contactPoint.y;
+  outHit->pointZ = sh.contactPoint.z;
+  outHit->normalX = sh.normal.x;
+  outHit->normalY = sh.normal.y;
+  outHit->normalZ = sh.normal.z;
+  return true;
+}
+
 std::uint32_t scripting_add_distance_joint(runtime::World *world,
                                            std::uint32_t entityIndexA,
                                            std::uint32_t entityIndexB,
@@ -156,6 +259,89 @@ void scripting_remove_joint(runtime::World *world,
     return;
   }
   runtime::remove_joint(*world, static_cast<physics::JointId>(jointId));
+}
+
+std::uint32_t scripting_add_hinge_joint(runtime::World *world,
+                                        std::uint32_t entityIndexA,
+                                        std::uint32_t entityIndexB,
+                                        float pivotX, float pivotY,
+                                        float pivotZ, float axisX, float axisY,
+                                        float axisZ) noexcept {
+  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+    return 0U;
+  }
+  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
+  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
+  const math::Vec3 pivot(pivotX, pivotY, pivotZ);
+  const math::Vec3 axis(axisX, axisY, axisZ);
+  return static_cast<std::uint32_t>(
+      runtime::add_hinge_joint(*world, entityA, entityB, pivot, axis));
+}
+
+std::uint32_t scripting_add_ball_socket_joint(runtime::World *world,
+                                              std::uint32_t entityIndexA,
+                                              std::uint32_t entityIndexB,
+                                              float pivotX, float pivotY,
+                                              float pivotZ) noexcept {
+  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+    return 0U;
+  }
+  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
+  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
+  const math::Vec3 pivot(pivotX, pivotY, pivotZ);
+  return static_cast<std::uint32_t>(
+      runtime::add_ball_socket_joint(*world, entityA, entityB, pivot));
+}
+
+std::uint32_t scripting_add_slider_joint(runtime::World *world,
+                                         std::uint32_t entityIndexA,
+                                         std::uint32_t entityIndexB,
+                                         float axisX, float axisY,
+                                         float axisZ) noexcept {
+  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+    return 0U;
+  }
+  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
+  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
+  const math::Vec3 axis(axisX, axisY, axisZ);
+  return static_cast<std::uint32_t>(
+      runtime::add_slider_joint(*world, entityA, entityB, axis));
+}
+
+std::uint32_t scripting_add_spring_joint(runtime::World *world,
+                                         std::uint32_t entityIndexA,
+                                         std::uint32_t entityIndexB,
+                                         float restLength, float stiffness,
+                                         float damping) noexcept {
+  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+    return 0U;
+  }
+  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
+  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
+  return static_cast<std::uint32_t>(
+      runtime::add_spring_joint(*world, entityA, entityB, restLength, stiffness,
+                                damping));
+}
+
+std::uint32_t scripting_add_fixed_joint(runtime::World *world,
+                                        std::uint32_t entityIndexA,
+                                        std::uint32_t entityIndexB) noexcept {
+  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+    return 0U;
+  }
+  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
+  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
+  return static_cast<std::uint32_t>(
+      runtime::add_fixed_joint(*world, entityA, entityB));
+}
+
+void scripting_set_joint_limits(runtime::World *world, std::uint32_t jointId,
+                                float minLimit, float maxLimit) noexcept {
+  if (world == nullptr) {
+    return;
+  }
+  runtime::set_joint_limits(*world, static_cast<physics::JointId>(jointId),
+                            minLimit, maxLimit);
 }
 
 void scripting_wake_body(runtime::World *world,
@@ -475,7 +661,18 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_set_gravity,
     &scripting_get_gravity,
     &scripting_raycast,
+    &scripting_raycast_all,
+    &scripting_overlap_sphere,
+    &scripting_overlap_box,
+    &scripting_sweep_sphere,
+    &scripting_sweep_box,
     &scripting_add_distance_joint,
+    &scripting_add_hinge_joint,
+    &scripting_add_ball_socket_joint,
+    &scripting_add_slider_joint,
+    &scripting_add_spring_joint,
+    &scripting_add_fixed_joint,
+    &scripting_set_joint_limits,
     &scripting_remove_joint,
     &scripting_wake_body,
     &scripting_is_sleeping,

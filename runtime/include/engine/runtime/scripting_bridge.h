@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::runtime {
@@ -115,10 +116,59 @@ struct RuntimeServices final {
   bool (*raycast)(runtime::World *world, float ox, float oy, float oz, float dx,
                   float dy, float dz, float maxDistance,
                   RuntimeRaycastHit *outHit) noexcept = nullptr;
+  std::size_t (*raycast_all)(runtime::World *world, float ox, float oy,
+                             float oz, float dx, float dy, float dz,
+                             float maxDistance, RuntimeRaycastHit *outHits,
+                             std::size_t maxHits,
+                             std::uint32_t mask) noexcept = nullptr;
+  std::size_t (*overlap_sphere)(runtime::World *world, float cx, float cy,
+                                float cz, float radius,
+                                std::uint32_t *outEntityIndices,
+                                std::size_t maxResults,
+                                std::uint32_t mask) noexcept = nullptr;
+  std::size_t (*overlap_box)(runtime::World *world, float cx, float cy,
+                             float cz, float hx, float hy, float hz,
+                             std::uint32_t *outEntityIndices,
+                             std::size_t maxResults,
+                             std::uint32_t mask) noexcept = nullptr;
+  bool (*sweep_sphere)(runtime::World *world, float ox, float oy, float oz,
+                       float radius, float dx, float dy, float dz,
+                       float maxDistance,
+                       RuntimeRaycastHit *outHit,
+                       std::uint32_t mask) noexcept = nullptr;
+  bool (*sweep_box)(runtime::World *world, float cx, float cy, float cz,
+                    float hx, float hy, float hz, float dx, float dy,
+                    float dz, float maxDistance,
+                    RuntimeRaycastHit *outHit,
+                    std::uint32_t mask) noexcept = nullptr;
   std::uint32_t (*add_distance_joint)(runtime::World *world,
                                       std::uint32_t entityIndexA,
                                       std::uint32_t entityIndexB,
                                       float distance) noexcept = nullptr;
+  std::uint32_t (*add_hinge_joint)(runtime::World *world,
+                                   std::uint32_t entityIndexA,
+                                   std::uint32_t entityIndexB, float pivotX,
+                                   float pivotY, float pivotZ, float axisX,
+                                   float axisY, float axisZ) noexcept = nullptr;
+  std::uint32_t (*add_ball_socket_joint)(runtime::World *world,
+                                         std::uint32_t entityIndexA,
+                                         std::uint32_t entityIndexB,
+                                         float pivotX, float pivotY,
+                                         float pivotZ) noexcept = nullptr;
+  std::uint32_t (*add_slider_joint)(runtime::World *world,
+                                    std::uint32_t entityIndexA,
+                                    std::uint32_t entityIndexB, float axisX,
+                                    float axisY, float axisZ) noexcept = nullptr;
+  std::uint32_t (*add_spring_joint)(runtime::World *world,
+                                    std::uint32_t entityIndexA,
+                                    std::uint32_t entityIndexB,
+                                    float restLength, float stiffness,
+                                    float damping) noexcept = nullptr;
+  std::uint32_t (*add_fixed_joint)(runtime::World *world,
+                                   std::uint32_t entityIndexA,
+                                   std::uint32_t entityIndexB) noexcept = nullptr;
+  void (*set_joint_limits)(runtime::World *world, std::uint32_t jointId,
+                           float minLimit, float maxLimit) noexcept = nullptr;
   void (*remove_joint)(runtime::World *world,
                        std::uint32_t jointId) noexcept = nullptr;
   void (*wake_body)(runtime::World *world,

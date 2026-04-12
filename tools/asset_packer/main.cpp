@@ -9,6 +9,9 @@
 #include <cgltf.h>
 
 #include "engine/core/mesh_asset.h"
+#include "engine/math/vec3.h"
+#include "engine/physics/collider.h"
+#include "engine/physics/convex_hull.h"
 
 namespace {
 
@@ -488,8 +491,101 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
                           data.hasUVs ? "position_normal_texcoord"
                                       : "position_normal");
 
-  std::fclose(metadataFile);
   return written > 0;
+}
+
+bool cook_and_write_convex_hull(const char *outputPath,
+                                const PrimitiveData &data) {
+  if (outputPath == nullptr) {
+    return false;
+  }
+
+  const std::size_t strideFloats = data.hasUVs ? 8U : 6U;
+  const std::size_t vertexCount =
+      data.interleavedVertices.size() / strideFloats;
+  if (vertexCount < 4U) {
+    std::fprintf(stderr, "warning: too few vertices (%zu) for convex hull\n",
+                 vertexCount);
+    return false;
+  }
+
+  // Extract positions from interleaved data.
+  std::vector<engine::math::Vec3> positions(vertexCount);
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    const std::size_t base = i * strideFloats;
+    positions[i] = engine::math::Vec3(data.interleavedVertices[base + 0U],
+                                      data.interleavedVertices[base + 1U],
+                                      data.interleavedVertices[base + 2U]);
+  }
+
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(positions.data(), vertexCount,
+                                          hull)) {
+    std::fprintf(stderr, "warning: convex hull build failed\n");
+    return false;
+  }
+
+  // Write hull sidecar: <output>.hull (binary).
+  char hullPath[512] = {};
+  const int pathLen =
+      std::snprintf(hullPath, sizeof(hullPath), "%s.hull", outputPath);
+  if ((pathLen <= 0) || (pathLen >= static_cast<int>(sizeof(hullPath)))) {
+    return false;
+  }
+
+  FILE *hullFile = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&hullFile, hullPath, "wb") != 0) {
+    hullFile = nullptr;
+  }
+#else
+  hullFile = std::fopen(hullPath, "wb");
+#endif
+  if (hullFile == nullptr) {
+    std::fprintf(stderr, "error: failed to open hull file: %s\n", hullPath);
+    return false;
+  }
+
+  // Header: magic (4 bytes) + planeCount (4) + vertexCount (4) + localCenter
+  // (12) + localHalfExtents (12) = 36 bytes.
+  constexpr std::uint32_t kHullMagic = 0x48554C4CU; // 'HULL'
+  const std::uint32_t planeCount32 =
+      static_cast<std::uint32_t>(hull.planeCount);
+  const std::uint32_t vertCount32 =
+      static_cast<std::uint32_t>(hull.vertexCount);
+
+  bool ok = true;
+  ok = ok && (std::fwrite(&kHullMagic, 4U, 1U, hullFile) == 1U);
+  ok = ok && (std::fwrite(&planeCount32, 4U, 1U, hullFile) == 1U);
+  ok = ok && (std::fwrite(&vertCount32, 4U, 1U, hullFile) == 1U);
+  ok = ok && (std::fwrite(&hull.localCenter, sizeof(float), 3U, hullFile) == 3U);
+  ok = ok &&
+       (std::fwrite(&hull.localHalfExtents, sizeof(float), 3U, hullFile) == 3U);
+
+  // Planes: each is (normal.x, normal.y, normal.z, distance) = 16 bytes.
+  for (std::size_t i = 0U; i < hull.planeCount && ok; ++i) {
+    ok = ok && (std::fwrite(&hull.planes[i].normal, sizeof(float), 3U,
+                            hullFile) == 3U);
+    ok = ok &&
+         (std::fwrite(&hull.planes[i].distance, sizeof(float), 1U,
+                      hullFile) == 1U);
+  }
+
+  // Vertices: each is (x, y, z) = 12 bytes.
+  for (std::size_t i = 0U; i < hull.vertexCount && ok; ++i) {
+    ok = ok && (std::fwrite(&hull.vertices[i], sizeof(float), 3U,
+                            hullFile) == 3U);
+  }
+
+  std::fclose(hullFile);
+  if (!ok) {
+    std::fprintf(stderr, "error: failed to write hull data\n");
+    return false;
+  }
+
+  std::printf("cooked convex hull: planes=%u vertices=%u -> %s\n",
+              planeCount32, vertCount32, hullPath);
+  return true;
 }
 
 } // namespace
@@ -589,6 +685,9 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");
     return 13;
   }
+
+  // Cook convex hull sidecar (best-effort; failure is non-fatal).
+  cook_and_write_convex_hull(outputPath, primitiveData);
 
   std::printf(
       "packed mesh: vertices=%zu indices=%zu uvs=%s -> %s (+ .meta.json)\n",
