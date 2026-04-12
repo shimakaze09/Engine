@@ -13,6 +13,7 @@
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
+#include "engine/physics/ccd.h"
 #include "engine/physics/constraint_solver.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/runtime/physics_bridge.h"
@@ -498,6 +499,65 @@ void resolve_contact(runtime::World &world,
                          combinedRest, combinedStaticFric, combinedDynFric);
 }
 
+// Resolve a speculative contact (E2a/E2b).
+// Bodies are NOT yet overlapping but are approaching. Apply a clamped velocity
+// impulse to prevent penetration in the next frame — no positional correction,
+// no restitution, and the impulse is clamped to zero minimum (can only push
+// apart, never pull together).
+void resolve_speculative_contact(runtime::RigidBody *bodyA,
+                                 runtime::RigidBody *bodyB,
+                                 const engine::math::Vec3 &normal,
+                                 float invMassA, float invMassB,
+                                 float invMassSum, float gap,
+                                 float deltaSeconds) noexcept {
+  if (invMassSum <= 0.0F) {
+    return;
+  }
+  if (deltaSeconds <= 0.0F) {
+    return;
+  }
+
+  const engine::math::Vec3 velA = (bodyA != nullptr)
+                                      ? bodyA->velocity
+                                      : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 velB = (bodyB != nullptr)
+                                      ? bodyB->velocity
+                                      : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
+  const float relVelAlongNormal = engine::math::dot(relVel, normal);
+
+  // Only act if bodies are approaching (relative velocity along normal < 0
+  // means B is moving toward A along the contact normal).
+  if (relVelAlongNormal >= 0.0F) {
+    return;
+  }
+
+  // The velocity that would exactly close the gap in one frame.
+  // We only need to cancel the EXCESS approach velocity beyond this.
+  const float closeVel = gap / deltaSeconds;
+
+  // Impulse to reduce approach velocity to at most what would close the gap.
+  // Clamp: never apply more impulse than needed (prevents ghost collisions).
+  const float excessVel = -relVelAlongNormal - closeVel;
+  if (excessVel <= 0.0F) {
+    return; // Approach velocity won't cause penetration.
+  }
+
+  // Clamped impulse magnitude — no restitution (speculative = conservative).
+  const float impulseMagnitude = excessVel / invMassSum;
+
+  if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+    bodyA->velocity = engine::math::sub(
+        bodyA->velocity,
+        engine::math::mul(normal, impulseMagnitude * invMassA));
+  }
+  if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+    bodyB->velocity = engine::math::add(
+        bodyB->velocity,
+        engine::math::mul(normal, impulseMagnitude * invMassB));
+  }
+}
+
 void apply_velocity_impulse(runtime::RigidBody *bodyA,
                             runtime::RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
@@ -639,33 +699,29 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 
       const engine::math::Vec3 displacement =
           engine::math::mul(body->velocity, deltaSeconds);
-      const float speed = engine::math::length(body->velocity);
-      const float travelDist = speed * deltaSeconds;
 
-      // CCD: if travel distance exceeds half the smallest collider extent,
-      // raycast forward to prevent tunneling.
-      const engine::math::Vec3 bpHe =
-          (col != nullptr) ? broadphase_half_extents(*col)
-                           : engine::math::Vec3(0.0F, 0.0F, 0.0F);
-      const float minHalf =
-          (col != nullptr) ? std::min({bpHe.x, bpHe.y, bpHe.z}) : 0.0F;
-
+      // CCD: Bilateral advancement (Erwin Coumans GDC style).
+      // If the body has a collider and is moving fast enough, sweep it
+      // forward to find the earliest time-of-impact and clamp position.
       bool clamped = false;
-      if ((col != nullptr) && (travelDist > minHalf) && (speed > 1e-6F)) {
-        const engine::math::Vec3 dir = engine::math::div(body->velocity, speed);
-        runtime::PhysicsRaycastHit hit{};
-        if (raycast(world, readTransforms[i].position, dir, travelDist, &hit,
-                    entity)) {
-          // Clamp position to just before the hit surface.
-          const float safeT = std::max(0.0F, hit.distance - minHalf);
-          updated.position = engine::math::add(readTransforms[i].position,
-                                               engine::math::mul(dir, safeT));
+      if (col != nullptr) {
+        const CcdSweepResult ccdResult = bilateral_advance_ccd(
+            world, entity, *body, *col, readTransforms[i], deltaSeconds);
+        if (ccdResult.hit) {
+          // Move to the safe position at time-of-impact.
+          const float safeToi =
+              std::max(0.0F, ccdResult.timeOfImpact - 0.01F);
+          updated.position = engine::math::add(
+              readTransforms[i].position,
+              engine::math::mul(displacement, safeToi));
 
-          // Reflect velocity off the hit normal.
-          const float vn = engine::math::dot(body->velocity, hit.normal);
+          // Reflect velocity off the contact normal.
+          const float vn =
+              engine::math::dot(body->velocity, ccdResult.contactNormal);
           if (vn < 0.0F) {
             body->velocity = engine::math::sub(
-                body->velocity, engine::math::mul(hit.normal, 2.0F * vn));
+                body->velocity,
+                engine::math::mul(ccdResult.contactNormal, 2.0F * vn));
           }
           clamped = true;
         }
@@ -806,14 +862,29 @@ bool resolve_collisions(runtime::World &world) noexcept {
     };
 
     // Insert each collider into all cells its AABB overlaps.
+    // For speculative contacts: expand AABB by velocity * dt (1/60s assumed).
+    constexpr float kSpeculativeDt = 1.0F / 60.0F;
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       const engine::math::Vec3 he = broadphase_half_extents(colliders[i]);
-      const std::int32_t minCX = cell_coord(posX[i] - he.x);
-      const std::int32_t maxCX = cell_coord(posX[i] + he.x);
-      const std::int32_t minCY = cell_coord(posY[i] - he.y);
-      const std::int32_t maxCY = cell_coord(posY[i] + he.y);
-      const std::int32_t minCZ = cell_coord(posZ[i] - he.z);
-      const std::int32_t maxCZ = cell_coord(posZ[i] + he.z);
+
+      // Expand AABB by velocity to detect speculative contacts.
+      const runtime::RigidBody *bodyI =
+          world.get_rigid_body_ptr(entities[i]);
+      float expandX = 0.0F;
+      float expandY = 0.0F;
+      float expandZ = 0.0F;
+      if ((bodyI != nullptr) && (bodyI->inverseMass > 0.0F)) {
+        expandX = std::fabs(bodyI->velocity.x) * kSpeculativeDt;
+        expandY = std::fabs(bodyI->velocity.y) * kSpeculativeDt;
+        expandZ = std::fabs(bodyI->velocity.z) * kSpeculativeDt;
+      }
+
+      const std::int32_t minCX = cell_coord(posX[i] - he.x - expandX);
+      const std::int32_t maxCX = cell_coord(posX[i] + he.x + expandX);
+      const std::int32_t minCY = cell_coord(posY[i] - he.y - expandY);
+      const std::int32_t maxCY = cell_coord(posY[i] + he.y + expandY);
+      const std::int32_t minCZ = cell_coord(posZ[i] - he.z - expandZ);
+      const std::int32_t maxCZ = cell_coord(posZ[i] + he.z + expandZ);
       for (std::int32_t cx = minCX; cx <= maxCX; ++cx) {
         for (std::int32_t cy = minCY; cy <= maxCY; ++cy) {
           for (std::int32_t cz = minCZ; cz <= maxCZ; ++cz) {
@@ -1324,6 +1395,21 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float dist2 = dx * dx + dy * dy + dz * dz;
                 const float sumR = rA + rB;
                 if (dist2 >= sumR * sumR) {
+                  // Speculative contact for spheres: if gap is small,
+                  // apply clamped impulse.
+                  const float dist =
+                      (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
+                  const float gap = dist - sumR;
+                  if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
+                    const engine::math::Vec3 specN =
+                        (dist2 > 0.0F)
+                            ? engine::math::Vec3(dx / dist, dy / dist,
+                                                 dz / dist)
+                            : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                    resolve_speculative_contact(bodyA, bodyB, specN, invMassA,
+                                                invMassB, invMassSum, gap,
+                                                kSpeculativeDt);
+                  }
                   continue;
                 }
 
@@ -1424,6 +1510,23 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float dz = sphZ - cpz;
                 const float dist2 = dx * dx + dy * dy + dz * dz;
                 if (dist2 >= radius * radius) {
+                  // Speculative contact: AABB vs Sphere.
+                  const float dist =
+                      (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
+                  const float gap = dist - radius;
+                  if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
+                    engine::math::Vec3 specN =
+                        (dist2 > 0.0F)
+                            ? engine::math::Vec3(dx / dist, dy / dist,
+                                                 dz / dist)
+                            : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                    if (!aIsBox) {
+                      specN = engine::math::mul(specN, -1.0F);
+                    }
+                    resolve_speculative_contact(bodyA, bodyB, specN, invMassA,
+                                                invMassB, invMassSum, gap,
+                                                kSpeculativeDt);
+                  }
                   continue;
                 }
 
@@ -1506,21 +1609,44 @@ bool resolve_collisions(runtime::World &world) noexcept {
               const float overlapX = axis_overlap(
                   ax - colliderA.halfExtents.x, ax + colliderA.halfExtents.x,
                   bx - colliderB.halfExtents.x, bx + colliderB.halfExtents.x);
-              if (overlapX <= 0.0F) {
-                continue;
-              }
-
               const float overlapY = axis_overlap(
                   ay - colliderA.halfExtents.y, ay + colliderA.halfExtents.y,
                   by - colliderB.halfExtents.y, by + colliderB.halfExtents.y);
-              if (overlapY <= 0.0F) {
-                continue;
-              }
-
               const float overlapZ = axis_overlap(
                   az - colliderA.halfExtents.z, az + colliderA.halfExtents.z,
                   bz - colliderB.halfExtents.z, bz + colliderB.halfExtents.z);
-              if (overlapZ <= 0.0F) {
+
+              const bool hasOverlap =
+                  (overlapX > 0.0F) && (overlapY > 0.0F) && (overlapZ > 0.0F);
+
+              // Speculative contacts (E2a): if AABB pair is NOT overlapping but
+              // the gap is small enough that approach velocity could close it in
+              // one frame, apply a speculative impulse to prevent penetration.
+              if (!hasOverlap) {
+                // Minimum overlap (most negative = largest gap on that axis).
+                const float minOverlap =
+                    std::min({overlapX, overlapY, overlapZ});
+                const float gap =
+                    -minOverlap; // positive = actual gap distance
+
+                if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
+                  // Determine the speculative contact normal (axis of smallest
+                  // gap).
+                  float specNx = 0.0F;
+                  float specNy = 0.0F;
+                  float specNz = 0.0F;
+                  if (overlapX <= overlapY && overlapX <= overlapZ) {
+                    specNx = sign_or_positive(bx - ax);
+                  } else if (overlapY <= overlapZ) {
+                    specNy = sign_or_positive(by - ay);
+                  } else {
+                    specNz = sign_or_positive(bz - az);
+                  }
+                  const engine::math::Vec3 specNormal(specNx, specNy, specNz);
+                  resolve_speculative_contact(bodyA, bodyB, specNormal,
+                                              invMassA, invMassB, invMassSum,
+                                              gap, kSpeculativeDt);
+                }
                 continue;
               }
 

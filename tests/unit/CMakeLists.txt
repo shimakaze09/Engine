@@ -556,3 +556,37 @@ add_test(
     NAME engine_unit_physics_query
     COMMAND engine_unit_physics_query
 )
+
+add_executable(engine_unit_ccd
+    ccd_test.cpp
+)
+
+target_compile_features(engine_unit_ccd PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_ccd
+    PRIVATE
+    engine_physics
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_ccd
+    COMMAND engine_unit_ccd
+)
+
+add_executable(engine_unit_speculative_contacts
+    speculative_contacts_test.cpp
+)
+
+target_compile_features(engine_unit_speculative_contacts PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_speculative_contacts
+    PRIVATE
+    engine_physics
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_speculative_contacts
+    COMMAND engine_unit_speculative_contacts
+)

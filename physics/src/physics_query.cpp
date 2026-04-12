@@ -20,42 +20,41 @@ namespace {
 bool sphere_aabb_overlap(const math::Vec3 &center, float radius,
                          const math::AABB &box) noexcept {
   // Clamp sphere center to box, compute squared distance.
-  float dx = center.x < box.min.x ? (box.min.x - center.x)
+  float dx = center.x < box.min.x   ? (box.min.x - center.x)
              : center.x > box.max.x ? (center.x - box.max.x)
-                                     : 0.0F;
-  float dy = center.y < box.min.y ? (box.min.y - center.y)
+                                    : 0.0F;
+  float dy = center.y < box.min.y   ? (box.min.y - center.y)
              : center.y > box.max.y ? (center.y - box.max.y)
-                                     : 0.0F;
-  float dz = center.z < box.min.z ? (box.min.z - center.z)
+                                    : 0.0F;
+  float dz = center.z < box.min.z   ? (box.min.z - center.z)
              : center.z > box.max.z ? (center.z - box.max.z)
-                                     : 0.0F;
+                                    : 0.0F;
   return (dx * dx + dy * dy + dz * dz) <= (radius * radius);
 }
 
 // Sphere vs sphere overlap test.
-bool sphere_sphere_overlap(const math::Vec3 &a, float ra,
-                           const math::Vec3 &b, float rb) noexcept {
+bool sphere_sphere_overlap(const math::Vec3 &a, float ra, const math::Vec3 &b,
+                           float rb) noexcept {
   const math::Vec3 d = math::sub(a, b);
   const float rSum = ra + rb;
   return math::dot(d, d) <= (rSum * rSum);
 }
 
 // Check if collision mask includes the entity's layer.
-bool passes_mask(const runtime::Collider &col,
-                 std::uint32_t mask) noexcept {
+bool passes_mask(const runtime::Collider &col, std::uint32_t mask) noexcept {
   return (col.collisionLayer & mask) != 0U;
 }
 
 // AABB of a collider at a given transform position (axis-aligned only).
 math::AABB collider_aabb(const runtime::Transform &t,
-                          const runtime::Collider &col) noexcept {
+                         const runtime::Collider &col) noexcept {
   return math::aabb_from_center_half_extents(t.position, col.halfExtents);
 }
 
 // Swept sphere vs AABB: return time of impact in [0, maxT].
 bool swept_sphere_aabb(const math::Vec3 &origin, float radius,
-                       const math::Vec3 &dir, float maxT,
-                       const math::AABB &box, float &outT) noexcept {
+                       const math::Vec3 &dir, float maxT, const math::AABB &box,
+                       float &outT) noexcept {
   // Expand the AABB by the sphere radius, then raycast.
   math::AABB expanded{};
   expanded.min = math::sub(box.min, math::Vec3(radius, radius, radius));
@@ -74,8 +73,7 @@ bool swept_sphere_aabb(const math::Vec3 &origin, float radius,
 }
 
 // Swept box vs AABB via Minkowski expansion.
-bool swept_box_aabb(const math::Vec3 &center,
-                    const math::Vec3 &halfExtents,
+bool swept_box_aabb(const math::Vec3 &center, const math::Vec3 &halfExtents,
                     const math::Vec3 &dir, float maxT,
                     const math::AABB &targetBox, float &outT) noexcept {
   // Expand target by moving box half extents.
@@ -101,12 +99,9 @@ math::Vec3 aabb_hit_normal(const math::Vec3 &hitPoint,
                            const math::Vec3 &halfExtents) noexcept {
   const math::Vec3 local = math::sub(hitPoint, boxCenter);
   const float eps = 1e-4F;
-  const float nx =
-      halfExtents.x > eps ? (local.x / halfExtents.x) : 0.0F;
-  const float ny =
-      halfExtents.y > eps ? (local.y / halfExtents.y) : 0.0F;
-  const float nz =
-      halfExtents.z > eps ? (local.z / halfExtents.z) : 0.0F;
+  const float nx = halfExtents.x > eps ? (local.x / halfExtents.x) : 0.0F;
+  const float ny = halfExtents.y > eps ? (local.y / halfExtents.y) : 0.0F;
+  const float nz = halfExtents.z > eps ? (local.z / halfExtents.z) : 0.0F;
 
   const float ax = std::fabs(nx);
   const float ay = std::fabs(ny);
@@ -128,8 +123,7 @@ math::Vec3 aabb_hit_normal(const math::Vec3 &hitPoint,
 std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         runtime::PhysicsRaycastHit *outHits,
-                        std::size_t maxHits,
-                        std::uint32_t mask) noexcept {
+                        std::size_t maxHits, std::uint32_t mask) noexcept {
   if (math::length_sq(direction) < 1e-12F) {
     return 0U;
   }
@@ -170,9 +164,8 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
         continue;
       }
     } else {
-      const math::AABB box =
-          math::aabb_from_center_half_extents(transform.position,
-                                               col.halfExtents);
+      const math::AABB box = math::aabb_from_center_half_extents(
+          transform.position, col.halfExtents);
       if (!math::ray_intersects_aabb(ray, box, &t)) {
         continue;
       }
@@ -185,11 +178,10 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
         rh.distance = t;
         rh.point = math::add(origin, math::mul(direction, t));
         if (col.shape == runtime::ColliderShape::Sphere) {
-          rh.normal =
-              math::normalize(math::sub(rh.point, transform.position));
+          rh.normal = math::normalize(math::sub(rh.point, transform.position));
         } else {
-          rh.normal = aabb_hit_normal(rh.point, transform.position,
-                                      col.halfExtents);
+          rh.normal =
+              aabb_hit_normal(rh.point, transform.position, col.halfExtents);
         }
         ++hitCount;
       }
@@ -242,8 +234,8 @@ std::size_t overlap_sphere(const runtime::World &world,
 
     bool overlaps = false;
     if (col.shape == runtime::ColliderShape::Sphere) {
-      overlaps = sphere_sphere_overlap(center, radius, t.position,
-                                       col.halfExtents.x);
+      overlaps =
+          sphere_sphere_overlap(center, radius, t.position, col.halfExtents.x);
     } else {
       const math::AABB box = collider_aabb(t, col);
       overlaps = sphere_aabb_overlap(center, radius, box);
@@ -264,8 +256,7 @@ std::size_t overlap_sphere(const runtime::World &world,
 
 std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
                         const math::Vec3 &halfExtents,
-                        std::uint32_t *outEntityIndices,
-                        std::size_t maxResults,
+                        std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask) noexcept {
   if ((outEntityIndices == nullptr) || (maxResults == 0U)) {
     return 0U;
@@ -301,8 +292,7 @@ std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
     bool overlaps = false;
     if (col.shape == runtime::ColliderShape::Sphere) {
       // Sphere vs AABB.
-      overlaps =
-          sphere_aabb_overlap(t.position, col.halfExtents.x, queryBox);
+      overlaps = sphere_aabb_overlap(t.position, col.halfExtents.x, queryBox);
     } else {
       const math::AABB box = collider_aabb(t, col);
       overlaps = math::aabb_intersects(queryBox, box);
@@ -356,8 +346,7 @@ bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
     float hitT = 0.0F;
     const math::AABB targetBox = collider_aabb(t, col);
 
-    if (!swept_sphere_aabb(origin, radius, direction, bestT, targetBox,
-                           hitT)) {
+    if (!swept_sphere_aabb(origin, radius, direction, bestT, targetBox, hitT)) {
       continue;
     }
 
@@ -368,10 +357,9 @@ bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
         outHit->entityIndex = entities[i].index;
         outHit->timeOfImpact = hitT / maxDistance;
         outHit->distance = hitT;
-        outHit->contactPoint =
-            math::add(origin, math::mul(direction, hitT));
-        outHit->normal = aabb_hit_normal(outHit->contactPoint,
-                                         t.position, col.halfExtents);
+        outHit->contactPoint = math::add(origin, math::mul(direction, hitT));
+        outHit->normal =
+            aabb_hit_normal(outHit->contactPoint, t.position, col.halfExtents);
       }
     }
   }
@@ -429,10 +417,9 @@ bool sweep_box(const runtime::World &world, const math::Vec3 &center,
         outHit->entityIndex = entities[i].index;
         outHit->timeOfImpact = hitT / maxDistance;
         outHit->distance = hitT;
-        outHit->contactPoint =
-            math::add(center, math::mul(direction, hitT));
-        outHit->normal = aabb_hit_normal(outHit->contactPoint,
-                                         t.position, col.halfExtents);
+        outHit->contactPoint = math::add(center, math::mul(direction, hitT));
+        outHit->normal =
+            aabb_hit_normal(outHit->contactPoint, t.position, col.halfExtents);
       }
     }
   }

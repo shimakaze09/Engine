@@ -33,10 +33,10 @@ float solve_ball_socket_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
   const float lambda = errorLen;
   accumulatedImpulse += lambda;
 
-  ctx.tA->position =
-      math::add(ctx.tA->position, math::mul(dir, lambda * ctx.invMassA / invMassSum));
-  ctx.tB->position =
-      math::sub(ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
+  ctx.tA->position = math::add(
+      ctx.tA->position, math::mul(dir, lambda * ctx.invMassA / invMassSum));
+  ctx.tB->position = math::sub(
+      ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
 
   return lambda;
 }

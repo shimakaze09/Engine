@@ -115,8 +115,7 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
     if (used[i]) {
       continue;
     }
-    const math::Vec3 d =
-        math::sub(em.contacts[i].pointOnA, kept[0U].pointOnA);
+    const math::Vec3 d = math::sub(em.contacts[i].pointOnA, kept[0U].pointOnA);
     const float distSq = math::dot(d, d);
     if (distSq > maxDistSq) {
       maxDistSq = distSq;
@@ -155,10 +154,8 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
     if (used[i]) {
       continue;
     }
-    const math::Vec3 e0 =
-        math::sub(em.contacts[i].pointOnA, kept[0U].pointOnA);
-    const math::Vec3 e1 =
-        math::sub(em.contacts[i].pointOnA, kept[1U].pointOnA);
+    const math::Vec3 e0 = math::sub(em.contacts[i].pointOnA, kept[0U].pointOnA);
+    const math::Vec3 e1 = math::sub(em.contacts[i].pointOnA, kept[1U].pointOnA);
     const math::Vec3 crossVec = math::cross(e0, e1);
     const float area = math::dot(crossVec, crossVec);
     if (area > maxArea2) {

@@ -1,6 +1,7 @@
 add_library(engine_physics STATIC
     src/physics.cpp
     src/convex_hull.cpp
+    src/ccd.cpp
     src/constraint_solver.cpp
     src/contact_manifold.cpp
     src/physics_query.cpp

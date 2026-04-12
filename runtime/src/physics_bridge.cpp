@@ -132,8 +132,8 @@ physics::JointId add_distance_joint(World &world, Entity entityA,
   return physics::add_distance_joint(world, entityA, entityB, distance);
 }
 
-physics::JointId add_hinge_joint(World &world, Entity entityA,
-                                 Entity entityB, const math::Vec3 &pivot,
+physics::JointId add_hinge_joint(World &world, Entity entityA, Entity entityB,
+                                 const math::Vec3 &pivot,
                                  const math::Vec3 &axis) noexcept {
   if (!require_phase(world, WorldPhase::Input, "add_hinge_joint")) {
     return physics::kInvalidJointId;
@@ -158,8 +158,7 @@ physics::JointId add_ball_socket_joint(World &world, Entity entityA,
   return physics::add_ball_socket_joint(world, entityA, entityB, pivot);
 }
 
-physics::JointId add_slider_joint(World &world, Entity entityA,
-                                  Entity entityB,
+physics::JointId add_slider_joint(World &world, Entity entityA, Entity entityB,
                                   const math::Vec3 &axis) noexcept {
   if (!require_phase(world, WorldPhase::Input, "add_slider_joint")) {
     return physics::kInvalidJointId;
@@ -171,9 +170,9 @@ physics::JointId add_slider_joint(World &world, Entity entityA,
   return physics::add_slider_joint(world, entityA, entityB, axis);
 }
 
-physics::JointId add_spring_joint(World &world, Entity entityA,
-                                  Entity entityB, float restLength,
-                                  float stiffness, float damping) noexcept {
+physics::JointId add_spring_joint(World &world, Entity entityA, Entity entityB,
+                                  float restLength, float stiffness,
+                                  float damping) noexcept {
   if (!require_phase(world, WorldPhase::Input, "add_spring_joint")) {
     return physics::kInvalidJointId;
   }
@@ -261,8 +260,7 @@ std::size_t overlap_sphere(const World &world, const math::Vec3 &center,
 
 std::size_t overlap_box(const World &world, const math::Vec3 &center,
                         const math::Vec3 &halfExtents,
-                        std::uint32_t *outEntityIndices,
-                        std::size_t maxResults,
+                        std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask) noexcept {
   return physics::overlap_box(world, center, halfExtents, outEntityIndices,
                               maxResults, mask);

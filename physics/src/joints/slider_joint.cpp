@@ -32,10 +32,12 @@ float solve_slider_joint(JointSolveContext &ctx, const math::Vec3 &axis,
   // Correct perpendicular displacement (constrain to axis).
   if (perpLen > 1e-6F) {
     const math::Vec3 perpDir = math::div(perpError, perpLen);
-    ctx.tA->position = math::add(
-        ctx.tA->position, math::mul(perpDir, perpLen * ctx.invMassA / invMassSum));
-    ctx.tB->position = math::sub(
-        ctx.tB->position, math::mul(perpDir, perpLen * ctx.invMassB / invMassSum));
+    ctx.tA->position =
+        math::add(ctx.tA->position,
+                  math::mul(perpDir, perpLen * ctx.invMassA / invMassSum));
+    ctx.tB->position =
+        math::sub(ctx.tB->position,
+                  math::mul(perpDir, perpLen * ctx.invMassB / invMassSum));
     lambda += perpLen;
   }
 

@@ -133,13 +133,11 @@ struct RuntimeServices final {
                              std::uint32_t mask) noexcept = nullptr;
   bool (*sweep_sphere)(runtime::World *world, float ox, float oy, float oz,
                        float radius, float dx, float dy, float dz,
-                       float maxDistance,
-                       RuntimeRaycastHit *outHit,
+                       float maxDistance, RuntimeRaycastHit *outHit,
                        std::uint32_t mask) noexcept = nullptr;
   bool (*sweep_box)(runtime::World *world, float cx, float cy, float cz,
-                    float hx, float hy, float hz, float dx, float dy,
-                    float dz, float maxDistance,
-                    RuntimeRaycastHit *outHit,
+                    float hx, float hy, float hz, float dx, float dy, float dz,
+                    float maxDistance, RuntimeRaycastHit *outHit,
                     std::uint32_t mask) noexcept = nullptr;
   std::uint32_t (*add_distance_joint)(runtime::World *world,
                                       std::uint32_t entityIndexA,
@@ -158,15 +156,16 @@ struct RuntimeServices final {
   std::uint32_t (*add_slider_joint)(runtime::World *world,
                                     std::uint32_t entityIndexA,
                                     std::uint32_t entityIndexB, float axisX,
-                                    float axisY, float axisZ) noexcept = nullptr;
+                                    float axisY,
+                                    float axisZ) noexcept = nullptr;
   std::uint32_t (*add_spring_joint)(runtime::World *world,
                                     std::uint32_t entityIndexA,
                                     std::uint32_t entityIndexB,
                                     float restLength, float stiffness,
                                     float damping) noexcept = nullptr;
-  std::uint32_t (*add_fixed_joint)(runtime::World *world,
-                                   std::uint32_t entityIndexA,
-                                   std::uint32_t entityIndexB) noexcept = nullptr;
+  std::uint32_t (*add_fixed_joint)(
+      runtime::World *world, std::uint32_t entityIndexA,
+      std::uint32_t entityIndexB) noexcept = nullptr;
   void (*set_joint_limits)(runtime::World *world, std::uint32_t jointId,
                            float minLimit, float maxLimit) noexcept = nullptr;
   void (*remove_joint)(runtime::World *world,

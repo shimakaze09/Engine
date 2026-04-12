@@ -40,15 +40,13 @@ std::size_t overlap_sphere(const runtime::World &world,
 
 std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
                         const math::Vec3 &halfExtents,
-                        std::uint32_t *outEntityIndices,
-                        std::size_t maxResults,
+                        std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
 // Sweep queries — move a shape along a direction and report first collision.
 bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
-                  SweepHit *outHit,
-                  std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+                  SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
 bool sweep_box(const runtime::World &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,

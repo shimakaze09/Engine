@@ -273,13 +273,13 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M3-E: CCD Hardening
 
-- [~] P1-M3-E1a: Bilateral advancement algorithm (Erwin Coumans GDC style)
-- [~] P1-M3-E1b: Sphere-vs-mesh CCD (sweep + refine)
-- [~] P1-M3-E1c: CVar physics.ccd_threshold (minimum velocity to trigger CCD)
-- [~] P1-M3-E1d: Test: fast bullet vs thin wall — no tunneling at 300 m/s
-- [ ] P1-M3-E2a: Speculative contact generation (expand AABB by velocity*dt, detect pre-penetration)
-- [ ] P1-M3-E2b: Clamp speculative impulse to prevent ghost collisions
-- [ ] P1-M3-E2c: Test: ball rolling toward wall stops without visible penetration frame
+- [x] P1-M3-E1a: Bilateral advancement algorithm (Erwin Coumans GDC style)
+- [x] P1-M3-E1b: Sphere-vs-mesh CCD (sweep + refine)
+- [x] P1-M3-E1c: CVar physics.ccd_threshold (minimum velocity to trigger CCD)
+- [x] P1-M3-E1d: Test: fast bullet vs thin wall — no tunneling at 300 m/s
+- [x] P1-M3-E2a: Speculative contact generation (expand AABB by velocity*dt, detect pre-penetration)
+- [x] P1-M3-E2b: Clamp speculative impulse to prevent ghost collisions
+- [x] P1-M3-E2c: Test: ball rolling toward wall stops without visible penetration frame
 
 ---
 

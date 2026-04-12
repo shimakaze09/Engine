@@ -35,8 +35,7 @@ Entity make_sphere(World &w, const math::Vec3 &pos, float radius,
 }
 
 // Helper: create a static box collider at a position.
-Entity make_box(World &w, const math::Vec3 &pos,
-                const math::Vec3 &halfExtents,
+Entity make_box(World &w, const math::Vec3 &pos, const math::Vec3 &halfExtents,
                 std::uint32_t layer = 1U) noexcept {
   const Entity e = w.create_entity();
   Transform t{};
@@ -64,9 +63,9 @@ int test_raycast_all_3_spheres() noexcept {
   make_sphere(*world, math::Vec3(8.0F, 0.0F, 0.0F), 0.5F);
 
   PhysicsRaycastHit hits[8]{};
-  const std::size_t count = physics::raycast_all(
-      *world, math::Vec3(0.0F, 0.0F, 0.0F), math::Vec3(1.0F, 0.0F, 0.0F),
-      20.0F, hits, 8U);
+  const std::size_t count =
+      physics::raycast_all(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                           math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, hits, 8U);
 
   if (count != 3U) {
     std::printf("FAIL raycast_all_3_spheres: count=%zu (expected 3)\n", count);
@@ -105,9 +104,9 @@ int test_raycast_all_mask() noexcept {
 
   PhysicsRaycastHit hits[8]{};
   // Mask=1U should only hit layer 1 entities.
-  const std::size_t count = physics::raycast_all(
-      *world, math::Vec3(0.0F, 0.0F, 0.0F), math::Vec3(1.0F, 0.0F, 0.0F),
-      20.0F, hits, 8U, 1U);
+  const std::size_t count =
+      physics::raycast_all(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                           math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, hits, 8U, 1U);
 
   if (count != 2U) {
     std::printf("FAIL raycast_all_mask: count=%zu (expected 2)\n", count);
@@ -152,16 +151,15 @@ int test_overlap_box() noexcept {
 
   // Place 5 boxes along X axis at x=0,2,4,6,8.
   for (int i = 0; i < 5; ++i) {
-    make_box(*world,
-             math::Vec3(static_cast<float>(i * 2), 0.0F, 0.0F),
+    make_box(*world, math::Vec3(static_cast<float>(i * 2), 0.0F, 0.0F),
              math::Vec3(0.5F, 0.5F, 0.5F));
   }
 
   // Overlap box centered at x=3, half=2.0 should catch boxes at x=2,4.
   std::uint32_t indices[16]{};
-  const std::size_t count = physics::overlap_box(
-      *world, math::Vec3(3.0F, 0.0F, 0.0F),
-      math::Vec3(2.0F, 1.0F, 1.0F), indices, 16U);
+  const std::size_t count =
+      physics::overlap_box(*world, math::Vec3(3.0F, 0.0F, 0.0F),
+                           math::Vec3(2.0F, 1.0F, 1.0F), indices, 16U);
 
   if (count < 2U) {
     std::printf("FAIL overlap_box: count=%zu (expected >= 2)\n", count);
@@ -203,14 +201,13 @@ int test_sweep_sphere_wall() noexcept {
   world->end_frame_phase();
 
   // Place a wall (box) at x=5.
-  make_box(*world, math::Vec3(5.0F, 0.0F, 0.0F),
-           math::Vec3(0.5F, 2.0F, 2.0F));
+  make_box(*world, math::Vec3(5.0F, 0.0F, 0.0F), math::Vec3(0.5F, 2.0F, 2.0F));
 
   // Sweep a sphere of radius 0.5 from origin along +X.
   physics::SweepHit hit{};
-  const bool found = physics::sweep_sphere(
-      *world, math::Vec3(0.0F, 0.0F, 0.0F), 0.5F,
-      math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit);
+  const bool found =
+      physics::sweep_sphere(*world, math::Vec3(0.0F, 0.0F, 0.0F), 0.5F,
+                            math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit);
 
   if (!found) {
     std::printf("FAIL sweep_sphere_wall: no hit\n");
@@ -235,15 +232,13 @@ int test_sweep_box_wall() noexcept {
   world->end_frame_phase();
 
   // Place a wall (box) at x=10.
-  make_box(*world, math::Vec3(10.0F, 0.0F, 0.0F),
-           math::Vec3(0.5F, 2.0F, 2.0F));
+  make_box(*world, math::Vec3(10.0F, 0.0F, 0.0F), math::Vec3(0.5F, 2.0F, 2.0F));
 
   // Sweep a box of half-extents 0.5 from origin along +X.
   physics::SweepHit hit{};
   const bool found = physics::sweep_box(
-      *world, math::Vec3(0.0F, 0.0F, 0.0F),
-      math::Vec3(0.5F, 0.5F, 0.5F), math::Vec3(1.0F, 0.0F, 0.0F), 20.0F,
-      &hit);
+      *world, math::Vec3(0.0F, 0.0F, 0.0F), math::Vec3(0.5F, 0.5F, 0.5F),
+      math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit);
 
   if (!found) {
     std::printf("FAIL sweep_box_wall: no hit\n");

@@ -30,10 +30,10 @@ float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
   if (posErrorLen > 1e-6F) {
     const math::Vec3 dir = math::div(posError, posErrorLen);
     lambda = posErrorLen;
-    ctx.tA->position = math::add(ctx.tA->position,
-                                  math::mul(dir, lambda * ctx.invMassA / invMassSum));
-    ctx.tB->position = math::sub(ctx.tB->position,
-                                  math::mul(dir, lambda * ctx.invMassB / invMassSum));
+    ctx.tA->position = math::add(
+        ctx.tA->position, math::mul(dir, lambda * ctx.invMassA / invMassSum));
+    ctx.tB->position = math::sub(
+        ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
   }
 
   // Hinge axis constraint: project the relative displacement perpendicular

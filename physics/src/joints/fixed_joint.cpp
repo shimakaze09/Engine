@@ -42,12 +42,12 @@ float solve_fixed_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
     const float relVelLen = math::length(relVel);
     if (relVelLen > 1e-6F) {
       const math::Vec3 velCorrection = math::mul(relVel, 1.0F);
-      ctx.bodyA->velocity = math::add(
-          ctx.bodyA->velocity,
-          math::mul(velCorrection, ctx.invMassA / invMassSum));
-      ctx.bodyB->velocity = math::sub(
-          ctx.bodyB->velocity,
-          math::mul(velCorrection, ctx.invMassB / invMassSum));
+      ctx.bodyA->velocity =
+          math::add(ctx.bodyA->velocity,
+                    math::mul(velCorrection, ctx.invMassA / invMassSum));
+      ctx.bodyB->velocity =
+          math::sub(ctx.bodyB->velocity,
+                    math::mul(velCorrection, ctx.invMassB / invMassSum));
     }
   }
 

@@ -191,10 +191,8 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
       continue;
     }
 
-    runtime::Transform *tA =
-        world.get_transform_write_ptr(j.entityA, simToken);
-    runtime::Transform *tB =
-        world.get_transform_write_ptr(j.entityB, simToken);
+    runtime::Transform *tA = world.get_transform_write_ptr(j.entityA, simToken);
+    runtime::Transform *tB = world.get_transform_write_ptr(j.entityB, simToken);
     if ((tA == nullptr) || (tB == nullptr)) {
       continue;
     }
@@ -216,10 +214,10 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
     }
     const math::Vec3 dir = math::div(delta, dist);
     const float warmImpulse = j.accumulatedImpulse * 0.8F; // 80% warm start
-    tA->position = math::add(tA->position,
-                              math::mul(dir, warmImpulse * invMassA / invMassSum));
-    tB->position = math::sub(tB->position,
-                              math::mul(dir, warmImpulse * invMassB / invMassSum));
+    tA->position = math::add(
+        tA->position, math::mul(dir, warmImpulse * invMassA / invMassSum));
+    tB->position = math::sub(
+        tB->position, math::mul(dir, warmImpulse * invMassB / invMassSum));
   }
 
   // Reset accumulated impulses for this frame.
@@ -255,17 +253,15 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
       solveCtx.invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
       solveCtx.invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
 
-      const auto jointType =
-          static_cast<runtime::World::JointType>(j.type);
+      const auto jointType = static_cast<runtime::World::JointType>(j.type);
 
       switch (jointType) {
       case runtime::World::JointType::Distance:
         solve_distance_joint(solveCtx, j.distance, j.accumulatedImpulse);
         break;
       case runtime::World::JointType::Hinge:
-        solve_hinge_joint(solveCtx, j.anchorA, j.anchorB, j.axis,
-                          j.hasLimits, j.minLimit, j.maxLimit,
-                          j.accumulatedImpulse);
+        solve_hinge_joint(solveCtx, j.anchorA, j.anchorB, j.axis, j.hasLimits,
+                          j.minLimit, j.maxLimit, j.accumulatedImpulse);
         break;
       case runtime::World::JointType::BallSocket:
         solve_ball_socket_joint(solveCtx, j.anchorA, j.anchorB,
@@ -280,8 +276,7 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
                            deltaSeconds, j.accumulatedImpulse);
         break;
       case runtime::World::JointType::Fixed:
-        solve_fixed_joint(solveCtx, j.anchorA, j.anchorB,
-                          j.accumulatedImpulse);
+        solve_fixed_joint(solveCtx, j.anchorA, j.anchorB, j.accumulatedImpulse);
         break;
       }
     }

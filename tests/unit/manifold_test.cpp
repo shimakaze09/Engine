@@ -14,8 +14,7 @@ int test_manifold_add_and_fill() noexcept {
 
   const math::Vec3 normal(0.0F, 1.0F, 0.0F);
 
-  for (std::uint32_t i = 0U; i < physics::ContactManifold::kMaxContacts;
-       ++i) {
+  for (std::uint32_t i = 0U; i < physics::ContactManifold::kMaxContacts; ++i) {
     const math::Vec3 pt(static_cast<float>(i) * 0.1F, 0.0F, 0.0F);
     physics::manifold_add_contact(0U, 1U, pt, pt, normal,
                                   0.01F * static_cast<float>(i + 1U), i,
@@ -47,13 +46,13 @@ int test_manifold_overflow_reduces() noexcept {
   const math::Vec3 normal(0.0F, 1.0F, 0.0F);
 
   // Add 5 contacts — should still end up with kMaxContacts.
-  for (std::uint32_t i = 0U;
-       i < physics::ContactManifold::kMaxContacts + 1U; ++i) {
+  for (std::uint32_t i = 0U; i < physics::ContactManifold::kMaxContacts + 1U;
+       ++i) {
     const math::Vec3 pt(static_cast<float>(i) * 0.2F, 0.0F,
                         static_cast<float>(i % 2U) * 0.1F);
     physics::manifold_add_contact(0U, 1U, pt, pt, normal,
-                                  0.01F * static_cast<float>(i + 1U),
-                                  100U + i, /*frameNumber=*/1U);
+                                  0.01F * static_cast<float>(i + 1U), 100U + i,
+                                  /*frameNumber=*/1U);
   }
 
   const physics::ContactManifold *m = physics::manifold_get(0U);

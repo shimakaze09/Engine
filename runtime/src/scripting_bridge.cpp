@@ -149,9 +149,9 @@ std::size_t scripting_raycast_all(runtime::World *world, float ox, float oy,
   constexpr std::size_t kLocalMax = 32U;
   const std::size_t cap = maxHits < kLocalMax ? maxHits : kLocalMax;
   runtime::PhysicsRaycastHit hits[kLocalMax]{};
-  const std::size_t count = runtime::raycast_all(
-      *world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz), maxDistance,
-      hits, cap, mask);
+  const std::size_t count = runtime::raycast_all(*world, math::Vec3(ox, oy, oz),
+                                                 math::Vec3(dx, dy, dz),
+                                                 maxDistance, hits, cap, mask);
   for (std::size_t i = 0U; i < count; ++i) {
     outHits[i].entityIndex = hits[i].entity.index;
     outHits[i].distance = hits[i].distance;
@@ -190,9 +190,9 @@ std::size_t scripting_overlap_box(runtime::World *world, float cx, float cy,
                               maxResults, mask);
 }
 
-bool scripting_sweep_sphere(runtime::World *world, float ox, float oy,
-                            float oz, float radius, float dx, float dy,
-                            float dz, float maxDistance,
+bool scripting_sweep_sphere(runtime::World *world, float ox, float oy, float oz,
+                            float radius, float dx, float dy, float dz,
+                            float maxDistance,
                             scripting::RuntimeRaycastHit *outHit,
                             std::uint32_t mask) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
@@ -318,9 +318,8 @@ std::uint32_t scripting_add_spring_joint(runtime::World *world,
   }
   const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
-  return static_cast<std::uint32_t>(
-      runtime::add_spring_joint(*world, entityA, entityB, restLength, stiffness,
-                                damping));
+  return static_cast<std::uint32_t>(runtime::add_spring_joint(
+      *world, entityA, entityB, restLength, stiffness, damping));
 }
 
 std::uint32_t scripting_add_fixed_joint(runtime::World *world,

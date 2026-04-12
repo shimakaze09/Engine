@@ -30,8 +30,7 @@ float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                         bool hasLimits, float minAngle, float maxAngle,
                         float &accumulatedImpulse) noexcept;
 
-float solve_ball_socket_joint(JointSolveContext &ctx,
-                              const math::Vec3 &anchorA,
+float solve_ball_socket_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                               const math::Vec3 &anchorB,
                               float &accumulatedImpulse) noexcept;
 

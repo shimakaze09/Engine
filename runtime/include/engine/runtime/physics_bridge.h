@@ -38,18 +38,17 @@ bool raycast(const World &world, const math::Vec3 &origin,
 
 physics::JointId add_distance_joint(World &world, Entity entityA,
                                     Entity entityB, float distance) noexcept;
-physics::JointId add_hinge_joint(World &world, Entity entityA,
-                                 Entity entityB, const math::Vec3 &pivot,
+physics::JointId add_hinge_joint(World &world, Entity entityA, Entity entityB,
+                                 const math::Vec3 &pivot,
                                  const math::Vec3 &axis) noexcept;
 physics::JointId add_ball_socket_joint(World &world, Entity entityA,
                                        Entity entityB,
                                        const math::Vec3 &pivot) noexcept;
-physics::JointId add_slider_joint(World &world, Entity entityA,
-                                  Entity entityB,
+physics::JointId add_slider_joint(World &world, Entity entityA, Entity entityB,
                                   const math::Vec3 &axis) noexcept;
-physics::JointId add_spring_joint(World &world, Entity entityA,
-                                  Entity entityB, float restLength,
-                                  float stiffness, float damping) noexcept;
+physics::JointId add_spring_joint(World &world, Entity entityA, Entity entityB,
+                                  float restLength, float stiffness,
+                                  float damping) noexcept;
 physics::JointId add_fixed_joint(World &world, Entity entityA,
                                  Entity entityB) noexcept;
 void set_joint_limits(World &world, physics::JointId id, float minLimit,
@@ -80,8 +79,7 @@ std::size_t overlap_sphere(const World &world, const math::Vec3 &center,
 
 std::size_t overlap_box(const World &world, const math::Vec3 &center,
                         const math::Vec3 &halfExtents,
-                        std::uint32_t *outEntityIndices,
-                        std::size_t maxResults,
+                        std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
 bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,

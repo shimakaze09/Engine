@@ -28,10 +28,10 @@ float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
   const math::Vec3 dir = math::div(delta, currentDist);
   const math::Vec3 correction = math::mul(dir, error);
 
-  ctx.tA->position = math::add(ctx.tA->position,
-                                math::mul(correction, ctx.invMassA / invMassSum));
-  ctx.tB->position = math::sub(ctx.tB->position,
-                                math::mul(correction, ctx.invMassB / invMassSum));
+  ctx.tA->position = math::add(
+      ctx.tA->position, math::mul(correction, ctx.invMassA / invMassSum));
+  ctx.tB->position = math::sub(
+      ctx.tB->position, math::mul(correction, ctx.invMassB / invMassSum));
 
   accumulatedImpulse += std::fabs(error);
   return std::fabs(error);
