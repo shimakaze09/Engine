@@ -758,6 +758,16 @@ bool copy_world_contents(const World &sourceWorld,
     }
   });
 
+  // Copy timer timing metadata (callbacks must be re-wired by caller).
+  if (success) {
+    TimerManager::TimerSnapshot snaps[TimerManager::kMaxTimers]{};
+    const std::size_t count =
+        sourceWorld.timer_manager().snapshot(snaps, TimerManager::kMaxTimers);
+    if (count > 0U) {
+      targetWorld.timer_manager().restore(snaps, count);
+    }
+  }
+
   return success;
 }
 
@@ -873,6 +883,28 @@ bool serialize_scene_to_writer(const World &world,
   });
 
   writer.end_array();
+
+  // Serialize active timers (timing metadata only; callbacks must be re-wired).
+  {
+    TimerManager::TimerSnapshot snaps[TimerManager::kMaxTimers]{};
+    const std::size_t timerCount =
+        world.timer_manager().snapshot(snaps, TimerManager::kMaxTimers);
+    if (timerCount > 0U) {
+      writer.begin_array("timers");
+      for (std::size_t i = 0U; i < timerCount; ++i) {
+        if (!snaps[i].active) {
+          continue;
+        }
+        writer.begin_object();
+        writer.write_float("remaining", snaps[i].remainingSeconds);
+        writer.write_float("interval", snaps[i].intervalSeconds);
+        writer.write_bool("repeat", snaps[i].repeat);
+        writer.end_object();
+      }
+      writer.end_array();
+    }
+  }
+
   writer.end_object();
 
   if (writeFailed || !writer.ok()) {
@@ -1040,6 +1072,38 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
                                   *rigidBodyDesc, *colliderDesc,
                                   *stagedWorld)) {
     return false;
+  }
+
+  // Restore timers from scene JSON (timing metadata only).
+  core::JsonValue timersArray{};
+  if (parser.get_object_field(*root, "timers", &timersArray) &&
+      (timersArray.type == core::JsonValue::Type::Array)) {
+    const std::size_t timerCount = parser.array_size(timersArray);
+    for (std::size_t i = 0U; i < timerCount; ++i) {
+      core::JsonValue timerVal{};
+      if (!parser.get_array_element(timersArray, i, &timerVal) ||
+          (timerVal.type != core::JsonValue::Type::Object)) {
+        continue;
+      }
+
+      TimerManager::TimerSnapshot snap{};
+      snap.active = true;
+
+      core::JsonValue remainVal{};
+      if (parser.get_object_field(timerVal, "remaining", &remainVal)) {
+        static_cast<void>(parser.as_float(remainVal, &snap.remainingSeconds));
+      }
+      core::JsonValue intervalVal{};
+      if (parser.get_object_field(timerVal, "interval", &intervalVal)) {
+        static_cast<void>(parser.as_float(intervalVal, &snap.intervalSeconds));
+      }
+      core::JsonValue repeatVal{};
+      if (parser.get_object_field(timerVal, "repeat", &repeatVal)) {
+        static_cast<void>(parser.as_bool(repeatVal, &snap.repeat));
+      }
+
+      static_cast<void>(stagedWorld->timer_manager().restore(&snap, 1U));
+    }
   }
 
   reset_world(world);

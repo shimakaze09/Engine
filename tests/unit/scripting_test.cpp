@@ -378,8 +378,8 @@ int main() {
       remove_script_file();
       return 44;
     }
-    // Advance to 0.15s — past the 0.1s threshold.
-    engine::scripting::set_frame_time(0.0F, 0.15F);
+    // Advance by 0.15s — past the 0.1s threshold.
+    engine::scripting::set_frame_time(0.15F, 0.15F);
     engine::scripting::tick_timers();
     bool timerFired = false;
     world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
@@ -421,7 +421,7 @@ int main() {
       return 47;
     }
     // Advance past the timer threshold; it should NOT fire.
-    engine::scripting::set_frame_time(0.0F, 0.5F);
+    engine::scripting::set_frame_time(0.5F, 0.5F);
     engine::scripting::tick_timers();
     bool cancelledFired = false;
     world->for_each_alive([&](engine::runtime::Entity ent) noexcept {

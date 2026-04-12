@@ -139,13 +139,13 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M2-D: Timer System
 
-- [ ] P1-M2-D1a: TimerManager class (per-World, fixed-capacity)
-- [ ] P1-M2-D1b: set_timeout / set_interval / cancel
-- [ ] P1-M2-D1c: Tick timers in World::update simulation phase
-- [ ] P1-M2-D1d: Serialization: save/load active timers in scene JSON
-- [ ] P1-M2-D2a: Lua engine.set_timeout / engine.set_interval / engine.cancel_timer
-- [ ] P1-M2-D2b: Timer callbacks via pcall with error handling
-- [ ] P1-M2-D2c: Test: set timeout 0.5s, advance 30 frames at 60fps, verify fires
+- [x] P1-M2-D1a: TimerManager class (per-World, fixed-capacity)
+- [x] P1-M2-D1b: set_timeout / set_interval / cancel
+- [x] P1-M2-D1c: Tick timers in World::update simulation phase
+- [x] P1-M2-D1d: Serialization: save/load active timers in scene JSON
+- [x] P1-M2-D2a: Lua engine.set_timeout / engine.set_interval / engine.cancel_timer
+- [x] P1-M2-D2b: Timer callbacks via pcall with error handling
+- [x] P1-M2-D2c: Test: set timeout 0.5s, advance 30 frames at 60fps, verify fires
 
 #### P1-M2-E: Gameplay Camera
 

@@ -7,6 +7,7 @@ add_library(engine_runtime STATIC
     src/reflect_types.cpp
     src/scene_serializer.cpp
     src/scripting_bridge.cpp
+    src/timer_manager.cpp
     src/world.cpp
 )
 

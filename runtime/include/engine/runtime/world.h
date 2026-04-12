@@ -12,6 +12,7 @@
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/runtime/game_mode.h"
+#include "engine/runtime/timer_manager.h"
 
 namespace engine::runtime {
 
@@ -280,6 +281,10 @@ public:
   // Game mode (owned by World — reset on scene load). -------------------
   GameMode &game_mode() noexcept { return m_gameMode; }
   const GameMode &game_mode() const noexcept { return m_gameMode; }
+
+  // Per-World timer manager (reset on scene load). -------------------------
+  TimerManager &timer_manager() noexcept { return m_timerManager; }
+  const TimerManager &timer_manager() const noexcept { return m_timerManager; }
 
   // Lifecycle phase helpers ------------------------------------------------
   // BeginPlay: transition Input → BeginPlay. Iterate new entities via
@@ -651,6 +656,7 @@ private:
   ScriptComponentSet m_scriptComponents{};
   PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
+  TimerManager m_timerManager{};
 
   std::size_t m_readStateIndex = 0U;
   std::size_t m_writeStateIndex = 1U;

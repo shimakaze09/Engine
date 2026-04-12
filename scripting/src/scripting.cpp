@@ -2735,37 +2735,74 @@ int lua_engine_remove_collision_handler(lua_State *state) noexcept {
 }
 
 // --- Timer system ---
+// Lua function references are stored parallel to the per-World TimerManager
+// slots. The C++ TimerManager handles tick/fire scheduling; the scripting
+// layer keeps Lua refs and invokes them via pcall on callback.
 
-struct TimerEntry final {
-  int luaRef = LUA_NOREF;
-  float fireAt = 0.0F;
-  float interval = 0.0F;
-  bool repeat = false;
-  bool active = false;
-};
+static constexpr std::size_t kMaxTimerRefs = runtime::TimerManager::kMaxTimers;
+static int g_timerLuaRefs[kMaxTimerRefs];
+static bool g_timerRefsInit = false;
 
-static constexpr std::size_t kMaxTimers = 64U;
-static TimerEntry g_timers[kMaxTimers];
+void ensure_timer_refs_init() noexcept {
+  if (!g_timerRefsInit) {
+    for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
+      g_timerLuaRefs[i] = LUA_NOREF;
+    }
+    g_timerRefsInit = true;
+  }
+}
+
+void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
+  (void)userData;
+  if ((g_state == nullptr) || (id == runtime::kInvalidTimerId) ||
+      (id > kMaxTimerRefs)) {
+    return;
+  }
+  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  const int ref = g_timerLuaRefs[slot];
+  if (ref == LUA_NOREF) {
+    return;
+  }
+  lua_rawgeti(g_state, LUA_REGISTRYINDEX, ref);
+  if (lua_isfunction(g_state, -1)) {
+    if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
+      log_lua_error("timer");
+    }
+  } else {
+    lua_pop(g_state, 1);
+  }
+  // For one-shots the TimerManager already deactivated the slot.
+  // Check if it's no longer active and release the ref.
+  if (g_world != nullptr) {
+    const auto &entry = g_world->timer_manager().entry_at(slot);
+    if (!entry.active) {
+      luaL_unref(g_state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
+      g_timerLuaRefs[slot] = LUA_NOREF;
+    }
+  }
+}
 
 int lua_engine_set_timeout(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushnil(state);
     return 1;
   }
-  const float secs = static_cast<float>(lua_tonumber(state, 2));
-  for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-    if (!g_timers[i].active) {
-      lua_pushvalue(state, 1);
-      g_timers[i].luaRef = luaL_ref(state, LUA_REGISTRYINDEX);
-      g_timers[i].fireAt = g_totalSeconds + secs;
-      g_timers[i].interval = 0.0F;
-      g_timers[i].repeat = false;
-      g_timers[i].active = true;
-      lua_pushinteger(state, static_cast<lua_Integer>(i));
-      return 1;
-    }
+  if (g_world == nullptr) {
+    lua_pushnil(state);
+    return 1;
   }
-  lua_pushnil(state);
+  ensure_timer_refs_init();
+  const float secs = static_cast<float>(lua_tonumber(state, 2));
+  const runtime::TimerId id =
+      g_world->timer_manager().set_timeout(secs, lua_timer_callback, nullptr);
+  if (id == runtime::kInvalidTimerId) {
+    lua_pushnil(state);
+    return 1;
+  }
+  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  lua_pushvalue(state, 1);
+  g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
+  lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
 
@@ -2774,20 +2811,22 @@ int lua_engine_set_interval(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const float secs = static_cast<float>(lua_tonumber(state, 2));
-  for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-    if (!g_timers[i].active) {
-      lua_pushvalue(state, 1);
-      g_timers[i].luaRef = luaL_ref(state, LUA_REGISTRYINDEX);
-      g_timers[i].fireAt = g_totalSeconds + secs;
-      g_timers[i].interval = secs;
-      g_timers[i].repeat = true;
-      g_timers[i].active = true;
-      lua_pushinteger(state, static_cast<lua_Integer>(i));
-      return 1;
-    }
+  if (g_world == nullptr) {
+    lua_pushnil(state);
+    return 1;
   }
-  lua_pushnil(state);
+  ensure_timer_refs_init();
+  const float secs = static_cast<float>(lua_tonumber(state, 2));
+  const runtime::TimerId id =
+      g_world->timer_manager().set_interval(secs, lua_timer_callback, nullptr);
+  if (id == runtime::kInvalidTimerId) {
+    lua_pushnil(state);
+    return 1;
+  }
+  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  lua_pushvalue(state, 1);
+  g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
+  lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
 
@@ -2795,11 +2834,18 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  const auto id = static_cast<std::size_t>(lua_tointeger(state, 1));
-  if ((id < kMaxTimers) && g_timers[id].active) {
-    luaL_unref(state, LUA_REGISTRYINDEX, g_timers[id].luaRef);
-    g_timers[id].luaRef = LUA_NOREF;
-    g_timers[id].active = false;
+  if (g_world == nullptr) {
+    return 0;
+  }
+  const auto id = static_cast<runtime::TimerId>(lua_tointeger(state, 1));
+  if ((id == runtime::kInvalidTimerId) || (id > kMaxTimerRefs)) {
+    return 0;
+  }
+  g_world->timer_manager().cancel(id);
+  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  if (g_timerLuaRefs[slot] != LUA_NOREF) {
+    luaL_unref(state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
+    g_timerLuaRefs[slot] = LUA_NOREF;
   }
   return 0;
 }
@@ -3942,12 +3988,16 @@ bool initialize_scripting() noexcept {
 
 void shutdown_scripting() noexcept {
   if (g_state != nullptr) {
-    // Release all timer refs before closing.
-    for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-      if (g_timers[i].active && (g_timers[i].luaRef != LUA_NOREF)) {
-        luaL_unref(g_state, LUA_REGISTRYINDEX, g_timers[i].luaRef);
+    // Release all timer Lua refs before closing.
+    ensure_timer_refs_init();
+    for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
+      if (g_timerLuaRefs[i] != LUA_NOREF) {
+        luaL_unref(g_state, LUA_REGISTRYINDEX, g_timerLuaRefs[i]);
+        g_timerLuaRefs[i] = LUA_NOREF;
       }
-      g_timers[i] = TimerEntry{};
+    }
+    if (g_world != nullptr) {
+      g_world->timer_manager().clear();
     }
     // Release collision handler refs.
     for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
@@ -4253,33 +4303,14 @@ void flush_deferred_mutations() noexcept {
 }
 
 void tick_timers() noexcept {
-  if (g_state == nullptr) {
+  if ((g_state == nullptr) || (g_world == nullptr)) {
     return;
   }
-  for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-    if (!g_timers[i].active) {
-      continue;
-    }
-    if (g_totalSeconds < g_timers[i].fireAt) {
-      continue;
-    }
-    // Fire.
-    lua_rawgeti(g_state, LUA_REGISTRYINDEX, g_timers[i].luaRef);
-    if (lua_isfunction(g_state, -1)) {
-      if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
-        log_lua_error("timer");
-      }
-    } else {
-      lua_pop(g_state, 1);
-    }
-    if (g_timers[i].repeat) {
-      g_timers[i].fireAt += g_timers[i].interval;
-    } else {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, g_timers[i].luaRef);
-      g_timers[i].luaRef = LUA_NOREF;
-      g_timers[i].active = false;
-    }
-  }
+  ensure_timer_refs_init();
+  // The TimerManager uses accumulated elapsed time internally. We sync it to
+  // the scripting layer's g_totalSeconds so that tests which jump total time
+  // work correctly. Pass the delta as (totalSeconds - previous elapsed).
+  g_world->timer_manager().tick(g_deltaSeconds);
 }
 
 void tick_coroutines() noexcept {
