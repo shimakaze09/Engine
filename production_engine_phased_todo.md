@@ -109,33 +109,33 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M2-B: Game State Architecture
 
-- [ ] P1-M2-B1a: GameMode struct (state enum, rules table, owned by World)
-- [ ] P1-M2-B1b: GameState struct (persistent cross-scene data)
-- [ ] P1-M2-B1c: PlayerController struct (input → entity action mapping)
-- [ ] P1-M2-B1d: Lua bindings: get_game_mode, get_game_state, get_player_controller
-- [ ] P1-M2-B1e: Integration test: state transitions fire callbacks
-- [ ] P1-M2-B2a: core::ServiceLocator type-erased registry
-- [ ] P1-M2-B2b: Register all singletons as services at startup
-- [ ] P1-M2-B2c: Migrate globals in scripting.cpp to ServiceLocator
-- [ ] P1-M2-B2d: Unit test: register, retrieve, overwrite, type safety
+- [x] P1-M2-B1a: GameMode struct (state enum, rules table, owned by World)
+- [x] P1-M2-B1b: GameState struct (persistent cross-scene data)
+- [x] P1-M2-B1c: PlayerController struct (input → entity action mapping)
+- [x] P1-M2-B1d: Lua bindings: get_game_mode, get_game_state, get_player_controller
+- [x] P1-M2-B1e: Integration test: state transitions fire callbacks
+- [x] P1-M2-B2a: core::ServiceLocator type-erased registry
+- [x] P1-M2-B2b: Register all singletons as services at startup
+- [x] P1-M2-B2c: Migrate globals in scripting.cpp to ServiceLocator
+- [x] P1-M2-B2d: Unit test: register, retrieve, overwrite, type safety
 
 #### P1-M2-C: Input System
 
-- [ ] P1-M2-C1a: InputAction struct (name, bound keys/buttons, callbacks)
-- [ ] P1-M2-C1b: InputAxisMapping struct (axis, scale, dead zone)
-- [ ] P1-M2-C1c: InputMapper class (JSON config, process raw → actions)
-- [ ] P1-M2-C1d: Integrate with SDL event loop in input.cpp
-- [ ] P1-M2-C1e: Unit test: bind key → simulate press → verify callback
-- [ ] P1-M2-C2a: InputMapper::rebind(action_name, new_key) runtime
-- [ ] P1-M2-C2b: InputMapper::save_bindings/load_bindings (JSON persist)
-- [ ] P1-M2-C2c: Lua engine.rebind_action / engine.save_input_config
-- [ ] P1-M2-C2d: Test: rebind → new key triggers → save/load roundtrip
-- [ ] P1-M2-C3a: TouchEvent struct (SDL_FINGER events), process touch stream
-- [ ] P1-M2-C3b: Gesture recognizers (tap, swipe, pinch, rotate)
-- [ ] P1-M2-C3c: Gestures bind to InputMapper actions
-- [ ] P1-M2-C3d: Touch-to-mouse emulation fallback
-- [ ] P1-M2-C3e: Lua engine.on_touch / engine.on_gesture
-- [ ] P1-M2-C3f: Test: simulate multi-touch → verify gesture callbacks
+- [x] P1-M2-C1a: InputAction struct (name, bound keys/buttons, callbacks)
+- [x] P1-M2-C1b: InputAxisMapping struct (axis, scale, dead zone)
+- [x] P1-M2-C1c: InputMapper class (JSON config, process raw → actions)
+- [x] P1-M2-C1d: Integrate with SDL event loop in input.cpp
+- [x] P1-M2-C1e: Unit test: bind key → simulate press → verify callback
+- [x] P1-M2-C2a: InputMapper::rebind(action_name, new_key) runtime
+- [x] P1-M2-C2b: InputMapper::save_bindings/load_bindings (JSON persist)
+- [x] P1-M2-C2c: Lua engine.rebind_action / engine.save_input_config
+- [x] P1-M2-C2d: Test: rebind → new key triggers → save/load roundtrip
+- [x] P1-M2-C3a: TouchEvent struct (SDL_FINGER events), process touch stream
+- [x] P1-M2-C3b: Gesture recognizers (tap, swipe, pinch, rotate)
+- [x] P1-M2-C3c: Gestures bind to InputMapper actions
+- [x] P1-M2-C3d: Touch-to-mouse emulation fallback
+- [x] P1-M2-C3e: Lua engine.on_touch / engine.on_gesture
+- [x] P1-M2-C3f: Test: simulate multi-touch → verify gesture callbacks
 
 #### P1-M2-D: Timer System
 
