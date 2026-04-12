@@ -156,6 +156,13 @@ jobs:
       - name: Configure (needed for FetchContent headers)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
+      - name: Generate binding code (needed by compile_commands.json)
+        run: |
+          mkdir -p build/scripting/generated
+          python3 tools/binding_generator/generate_bindings.py \
+            scripting/include/engine/scripting/bindable_api.h \
+            -o build/scripting/generated/generated_bindings.cpp
+
       - name: Filter compile_commands.json (exclude FetchContent deps)
         run: |
           python3 -c "
@@ -199,6 +206,13 @@ jobs:
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Generate binding code (needed by compile_commands.json)
+        run: |
+          mkdir -p build/scripting/generated
+          python3 tools/binding_generator/generate_bindings.py \
+            scripting/include/engine/scripting/bindable_api.h \
+            -o build/scripting/generated/generated_bindings.cpp
 
       - name: Filter compile_commands.json (engine sources only)
         run: |
