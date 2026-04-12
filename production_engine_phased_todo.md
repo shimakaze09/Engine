@@ -149,18 +149,18 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M2-E: Gameplay Camera
 
-- [ ] P1-M2-E1a: SpringArmComponent struct (POD, SparseSet)
-- [ ] P1-M2-E1b: SparseSet storage + CRUD in World
-- [ ] P1-M2-E1c: Spring arm sweep + shorten on collision + lag smooth
-- [ ] P1-M2-E1d: Reflection, serialization, Lua binding
-- [ ] P1-M2-E2a: CameraManager (priority stack of cameras)
-- [ ] P1-M2-E2b: push_camera / pop_camera with blend interpolation
-- [ ] P1-M2-E2c: Lua engine.push_camera / engine.get_active_camera
-- [ ] P1-M2-E3a: CameraShake struct (amplitude, frequency, duration, decay)
-- [ ] P1-M2-E3b: Perlin noise-based shake (offset position + rotation)
-- [ ] P1-M2-E3c: Stack multiple shakes additively
-- [ ] P1-M2-E3d: Lua engine.camera_shake(amplitude, freq, duration)
-- [ ] P1-M2-E3e: Test: shake offset ≠ 0 during duration, == 0 after
+- [x] P1-M2-E1a: SpringArmComponent struct (POD, SparseSet)
+- [x] P1-M2-E1b: SparseSet storage + CRUD in World
+- [x] P1-M2-E1c: Spring arm sweep + shorten on collision + lag smooth
+- [x] P1-M2-E1d: Reflection, serialization, Lua binding
+- [x] P1-M2-E2a: CameraManager (priority stack of cameras)
+- [x] P1-M2-E2b: push_camera / pop_camera with blend interpolation
+- [x] P1-M2-E2c: Lua engine.push_camera / engine.get_active_camera
+- [x] P1-M2-E3a: CameraShake struct (amplitude, frequency, duration, decay)
+- [x] P1-M2-E3b: Perlin noise-based shake (offset position + rotation)
+- [x] P1-M2-E3c: Stack multiple shakes additively
+- [x] P1-M2-E3d: Lua engine.camera_shake(amplitude, freq, duration)
+- [x] P1-M2-E3e: Test: shake offset ≠ 0 during duration, == 0 after
 
 #### P1-M2-F: Coroutines / Async Gameplay
 

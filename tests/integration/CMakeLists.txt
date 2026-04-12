@@ -168,3 +168,20 @@ add_test(
     COMMAND engine_integration_timer
 )
 set_tests_properties(engine_integration_timer PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_camera
+    camera_test.cpp
+)
+
+target_compile_features(engine_integration_camera PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_camera
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_camera
+    COMMAND engine_integration_camera
+)
+set_tests_properties(engine_integration_camera PROPERTIES LABELS "integration")

@@ -151,6 +151,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_meshComponents.remove(entity));
   static_cast<void>(m_nameComponents.remove(entity));
   static_cast<void>(m_lightComponents.remove(entity));
+  static_cast<void>(m_springArms.remove(entity));
 
   const std::uint32_t index = entity.index;
   erase_persistent_index(m_entityPersistentIds[index]);
@@ -792,6 +793,70 @@ World::get_script_component_ptr(Entity entity) const noexcept {
   }
 
   return m_scriptComponents.get_ptr(entity);
+}
+
+bool World::add_spring_arm(Entity entity,
+                           const SpringArmComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_spring_arm requires Input phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_spring_arm requires a live entity");
+    return false;
+  }
+  return m_springArms.add(entity, component);
+}
+
+bool World::remove_spring_arm(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_spring_arm requires Input phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_spring_arm requires a live entity");
+    return false;
+  }
+  return m_springArms.remove(entity);
+}
+
+bool World::get_spring_arm(Entity entity,
+                           SpringArmComponent *outComponent) const noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_spring_arm on stale or dead entity");
+    return false;
+  }
+  return m_springArms.get(entity, outComponent);
+}
+
+bool World::has_spring_arm(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  return m_springArms.contains(entity);
+}
+
+SpringArmComponent *World::get_spring_arm_ptr(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+  return m_springArms.get_ptr(entity);
+}
+
+const SpringArmComponent *
+World::get_spring_arm_ptr(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+  return m_springArms.get_ptr(entity);
 }
 
 bool World::get_collider_range(std::size_t startIndex, std::size_t count,

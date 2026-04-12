@@ -30,6 +30,7 @@ constexpr const char *kPersistentIdKey = "persistentId";
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
+constexpr const char *kSpringArmTypeName = "engine::runtime::SpringArmComponent";
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
@@ -545,6 +546,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::TypeDescriptor &transformDesc,
                                 const core::TypeDescriptor &rigidBodyDesc,
                                 const core::TypeDescriptor &colliderDesc,
+                                const core::TypeDescriptor &springArmDesc,
                                 World &targetWorld) noexcept {
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
@@ -686,6 +688,18 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
         return log_scene_error("failed to load ScriptComponent");
       }
     }
+
+    core::JsonValue springArmValue{};
+    if (parser.get_object_field(components, "SpringArmComponent",
+                                &springArmValue)) {
+      SpringArmComponent springArm{};
+      if (!read_reflected_component(parser, springArmValue, springArmDesc,
+                                    &springArm) ||
+          !targetWorld.add_spring_arm(entity, springArm)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load SpringArmComponent");
+      }
+    }
   }
 
   return true;
@@ -756,6 +770,13 @@ bool copy_world_contents(const World &sourceWorld,
       success = false;
       return;
     }
+
+    SpringArmComponent springArm{};
+    if (sourceWorld.get_spring_arm(sourceEntity, &springArm) &&
+        !targetWorld.add_spring_arm(targetEntity, springArm)) {
+      success = false;
+      return;
+    }
   });
 
   // Copy timer timing metadata (callbacks must be re-wired by caller).
@@ -791,8 +812,10 @@ bool serialize_scene_to_writer(const World &world,
       registry.find_type(kRigidBodyTypeName);
   const core::TypeDescriptor *colliderDesc =
       registry.find_type(kColliderTypeName);
+  const core::TypeDescriptor *springArmDesc =
+      registry.find_type(kSpringArmTypeName);
   if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
-      (colliderDesc == nullptr)) {
+      (colliderDesc == nullptr) || (springArmDesc == nullptr)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "missing runtime reflection descriptors");
     return false;
@@ -875,6 +898,14 @@ bool serialize_scene_to_writer(const World &world,
     if (world.get_script_component(entity, &script) &&
         (script.scriptPath[0] != '\0')) {
       writer.write_string("ScriptComponent", script.scriptPath);
+    }
+
+    SpringArmComponent springArm{};
+    if (world.get_spring_arm(entity, &springArm) &&
+        !write_reflected_component(writer, "SpringArmComponent",
+                                   *springArmDesc, &springArm)) {
+      writeFailed = true;
+      return;
     }
 
     writer.end_object();
@@ -1054,8 +1085,10 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
       registry.find_type(kRigidBodyTypeName);
   const core::TypeDescriptor *colliderDesc =
       registry.find_type(kColliderTypeName);
+  const core::TypeDescriptor *springArmDesc =
+      registry.find_type(kSpringArmTypeName);
   if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
-      (colliderDesc == nullptr)) {
+      (colliderDesc == nullptr) || (springArmDesc == nullptr)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "missing runtime reflection descriptors");
     return false;
@@ -1070,7 +1103,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
 
   if (!deserialize_scene_entities(parser, entities, *transformDesc,
                                   *rigidBodyDesc, *colliderDesc,
-                                  *stagedWorld)) {
+                                  *springArmDesc, *stagedWorld)) {
     return false;
   }
 

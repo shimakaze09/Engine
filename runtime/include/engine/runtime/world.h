@@ -11,6 +11,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/runtime/camera_manager.h"
 #include "engine/runtime/game_mode.h"
 #include "engine/runtime/timer_manager.h"
 
@@ -99,6 +100,17 @@ struct MeshComponent final {
   float opacity = 1.0F;
 };
 
+/// Spring arm component: drives a third-person camera boom that shortens on
+/// collision and smoothly interpolates length.
+struct SpringArmComponent final {
+  float armLength = 5.0F;       ///< Desired arm length (world units).
+  float currentLength = 5.0F;   ///< Interpolated length after collision.
+  math::Vec3 offset = math::Vec3(0.0F, 1.0F, 0.0F); ///< Pivot offset.
+  float lagSpeed = 8.0F;        ///< Smoothing interpolation rate.
+  float collisionRadius = 0.25F; ///< Sphere sweep radius.
+  bool collisionEnabled = true;
+};
+
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,
                                   void *userData) noexcept;
 
@@ -132,6 +144,7 @@ public:
   static constexpr std::size_t kMaxLightComponents =
       ENGINE_MAX_LIGHT_COMPONENTS;
   static constexpr std::size_t kMaxScriptComponents = kMaxEntities;
+  static constexpr std::size_t kMaxSpringArmComponents = 64U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -269,6 +282,15 @@ public:
   const LightComponent *light_at(std::size_t index) const noexcept;
   Entity light_entity_at(std::size_t index) const noexcept;
 
+  bool add_spring_arm(Entity entity,
+                      const SpringArmComponent &component) noexcept;
+  bool remove_spring_arm(Entity entity) noexcept;
+  bool get_spring_arm(Entity entity,
+                      SpringArmComponent *outComponent) const noexcept;
+  bool has_spring_arm(Entity entity) const noexcept;
+  SpringArmComponent *get_spring_arm_ptr(Entity entity) noexcept;
+  const SpringArmComponent *get_spring_arm_ptr(Entity entity) const noexcept;
+
   void begin_update_phase() noexcept;
   void begin_update_step() noexcept;
   void commit_update_phase() noexcept;
@@ -285,6 +307,12 @@ public:
   // Per-World timer manager (reset on scene load). -------------------------
   TimerManager &timer_manager() noexcept { return m_timerManager; }
   const TimerManager &timer_manager() const noexcept { return m_timerManager; }
+
+  // Per-World camera manager (priority stack + shake). ---------------------
+  CameraManager &camera_manager() noexcept { return m_cameraManager; }
+  const CameraManager &camera_manager() const noexcept {
+    return m_cameraManager;
+  }
 
   // Lifecycle phase helpers ------------------------------------------------
   // BeginPlay: transition Input → BeginPlay. Iterate new entities via
@@ -397,6 +425,9 @@ private:
   using ScriptComponentSet =
       core::SparseSet<Entity, ScriptComponent, kMaxEntities,
                       kMaxScriptComponents>;
+  using SpringArmSet =
+      core::SparseSet<Entity, SpringArmComponent, kMaxEntities,
+                      kMaxSpringArmComponents>;
 
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
@@ -405,7 +436,8 @@ private:
            std::is_same_v<C, MeshComponent> ||
            std::is_same_v<C, NameComponent> ||
            std::is_same_v<C, LightComponent> ||
-           std::is_same_v<C, ScriptComponent>;
+           std::is_same_v<C, ScriptComponent> ||
+           std::is_same_v<C, SpringArmComponent>;
   }
 
   bool is_mutation_phase() const noexcept;
@@ -443,6 +475,8 @@ private:
       return m_lightComponents.count();
     } else if constexpr (std::is_same_v<C, ScriptComponent>) {
       return m_scriptComponents.count();
+    } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
+      return m_springArms.count();
     } else {
       return 0U;
     }
@@ -472,6 +506,8 @@ private:
       return m_lightComponents.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, ScriptComponent>) {
       return m_scriptComponents.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
+      return m_springArms.get_ptr(entity);
     } else {
       return nullptr;
     }
@@ -592,6 +628,10 @@ private:
       for (std::size_t i = 0U; i < m_scriptComponents.count(); ++i) {
         fn(m_scriptComponents.entity_at(i), m_scriptComponents.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
+      for (std::size_t i = 0U; i < m_springArms.count(); ++i) {
+        fn(m_springArms.entity_at(i), m_springArms.component_at(i));
+      }
     }
   }
 
@@ -654,9 +694,11 @@ private:
   std::array<std::uint8_t, kNameLookupCapacity> m_nameLookupState{};
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
+  SpringArmSet m_springArms{};
   PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
   TimerManager m_timerManager{};
+  CameraManager m_cameraManager{};
 
   std::size_t m_readStateIndex = 0U;
   std::size_t m_writeStateIndex = 1U;

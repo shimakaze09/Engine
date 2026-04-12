@@ -1,4 +1,5 @@
 add_library(engine_runtime STATIC
+    src/camera_manager.cpp
     src/editor_bridge.cpp
     src/engine.cpp
     src/physics_bridge.cpp

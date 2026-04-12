@@ -46,3 +46,12 @@ static_cast<void>(desc);
 // Intentionally registers a zero-field descriptor. ScriptComponent::scriptPath
 // is a fixed char array serialized manually.
 REFLECT_END()
+
+REFLECT_TYPE(engine::runtime::SpringArmComponent)
+REFLECT_FIELD(armLength, Float)
+REFLECT_FIELD(currentLength, Float)
+REFLECT_FIELD(offset, Vec3)
+REFLECT_FIELD(lagSpeed, Float)
+REFLECT_FIELD(collisionRadius, Float)
+REFLECT_FIELD(collisionEnabled, Bool)
+REFLECT_END()
