@@ -185,3 +185,21 @@ add_test(
     COMMAND engine_integration_camera
 )
 set_tests_properties(engine_integration_camera PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_coroutine
+    coroutine_test.cpp
+)
+
+target_compile_features(engine_integration_coroutine PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_coroutine
+    PRIVATE
+    engine_runtime
+    engine_scripting
+)
+
+add_test(
+    NAME engine_integration_coroutine
+    COMMAND engine_integration_coroutine
+)
+set_tests_properties(engine_integration_coroutine PROPERTIES LABELS "integration")

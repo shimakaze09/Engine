@@ -164,13 +164,13 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M2-F: Coroutines / Async Gameplay
 
-- [ ] P1-M2-F1a: CoroutineScheduler class (list of suspended Lua coroutines)
-- [ ] P1-M2-F1b: engine.wait(seconds) — yield and resume after elapsed time
-- [ ] P1-M2-F1c: engine.wait_until(condition) — yield and resume when true
-- [ ] P1-M2-F1d: engine.wait_frames(n) — yield and resume after N frames
-- [ ] P1-M2-F1e: Tick scheduler each frame (check conditions, resume)
-- [ ] P1-M2-F1f: Error handling: pcall resume + traceback, remove faulted
-- [ ] P1-M2-F1g: Test: wait(0.5) then set flag, verify at correct frame
+- [x] P1-M2-F1a: CoroutineScheduler class (list of suspended Lua coroutines)
+- [x] P1-M2-F1b: engine.wait(seconds) — yield and resume after elapsed time
+- [x] P1-M2-F1c: engine.wait_until(condition) — yield and resume when true
+- [x] P1-M2-F1d: engine.wait_frames(n) — yield and resume after N frames
+- [x] P1-M2-F1e: Tick scheduler each frame (check conditions, resume)
+- [x] P1-M2-F1f: Error handling: pcall resume + traceback, remove faulted
+- [x] P1-M2-F1g: Test: wait(0.5) then set flag, verify at correct frame
 
 #### P1-M2-G: Script Runtime Safety
 
