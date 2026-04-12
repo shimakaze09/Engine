@@ -75,16 +75,16 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M1-E: Debug Utilities
 
-- [ ] P1-M1-E1a: Debug camera (free-fly WASD+mouse)
-- [ ] P1-M1-E1b: Toggle via debug.camera_detach CVar
-- [ ] P1-M1-E1c: Render frozen game camera frustum as wireframe
-- [ ] P1-M1-E2a: Console command: god
-- [ ] P1-M1-E2b: Console command: noclip
-- [ ] P1-M1-E2c: Console command: spawn <prefab> [x y z]
-- [ ] P1-M1-E2d: Console command: kill_all
-- [ ] P1-M1-E3a: Per-subsystem memory tags (Physics, Renderer, Audio, etc.)
-- [ ] P1-M1-E3b: Thread-safe atomic counters per tag
-- [ ] P1-M1-E3c: Memory breakdown bar chart in stats overlay
+- [x] P1-M1-E1a: Debug camera (free-fly WASD+mouse)
+- [x] P1-M1-E1b: Toggle via debug.camera_detach CVar
+- [x] P1-M1-E1c: Render frozen game camera frustum as wireframe
+- [x] P1-M1-E2a: Console command: god
+- [x] P1-M1-E2b: Console command: noclip
+- [x] P1-M1-E2c: Console command: spawn <prefab> [x y z]
+- [x] P1-M1-E2d: Console command: kill_all
+- [x] P1-M1-E3a: Per-subsystem memory tags (Physics, Renderer, Audio, etc.)
+- [x] P1-M1-E3b: Thread-safe atomic counters per tag
+- [x] P1-M1-E3c: Memory breakdown bar chart in stats overlay
 
 ---
 
@@ -94,18 +94,18 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M2-A: Actor / Component Lifecycle
 
-- [ ] P1-M2-A1a: WorldPhase::BeginPlay between entity creation and first Simulation
-- [ ] P1-M2-A1b: WorldPhase::EndPlay before entity destruction
-- [ ] P1-M2-A1c: destroy_entity defers to end of frame
-- [ ] P1-M2-A1d: Integration test: BeginPlay→Tick×3→EndPlay lifecycle
-- [ ] P1-M2-A2a: Lua on_begin_play / on_tick / on_end_play callbacks
-- [ ] P1-M2-A2b: Per-entity callback function refs in table
-- [ ] P1-M2-A2c: Error handling: pcall + traceback, faulted entity skip
-- [ ] P1-M2-A2d: Test: Lua counter in on_tick matches frame count
-- [ ] P1-M2-A3a: EntityPool class (pre-alloc, acquire, release, free list)
-- [ ] P1-M2-A3b: World::spawn_from_pool / destroy_to_pool
-- [ ] P1-M2-A3c: Lua engine.pool_create / pool_spawn / pool_release
-- [ ] P1-M2-A3d: Test: 100 spawn, 100 release, 100 re-spawn verifies handle reuse
+- [x] P1-M2-A1a: WorldPhase::BeginPlay between entity creation and first Simulation
+- [x] P1-M2-A1b: WorldPhase::EndPlay before entity destruction
+- [x] P1-M2-A1c: destroy_entity defers to end of frame
+- [x] P1-M2-A1d: Integration test: BeginPlay→Tick×3→EndPlay lifecycle
+- [x] P1-M2-A2a: Lua on_begin_play / on_tick / on_end_play callbacks
+- [x] P1-M2-A2b: Per-entity callback function refs in table
+- [x] P1-M2-A2c: Error handling: pcall + traceback, faulted entity skip
+- [x] P1-M2-A2d: Test: Lua counter in on_tick matches frame count
+- [x] P1-M2-A3a: EntityPool class (pre-alloc, acquire, release, free list)
+- [x] P1-M2-A3b: World::spawn_from_pool / destroy_to_pool
+- [x] P1-M2-A3c: Lua engine.pool_create / pool_spawn / pool_release
+- [x] P1-M2-A3d: Test: 100 spawn, 100 release, 100 re-spawn verifies handle reuse
 
 #### P1-M2-B: Game State Architecture
 
