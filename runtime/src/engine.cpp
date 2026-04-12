@@ -9,7 +9,8 @@
 #include <memory>
 #include <new>
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
+    !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
@@ -1205,6 +1206,13 @@ void run(std::uint32_t maxFrames) noexcept {
       scripting::dispatch_entity_scripts_start();
     }
 
+    // Fire BeginPlay for entities that haven't received it yet.
+    if (playState == LoopPlayState::Playing) {
+      world->begin_begin_play_phase();
+      scripting::dispatch_entity_scripts_begin_play(world.get());
+      world->end_begin_play_phase();
+    }
+
     if ((playState == LoopPlayState::Stopped) &&
         (previousPlayState != LoopPlayState::Stopped)) {
       scripting::dispatch_entity_scripts_end();
@@ -1566,6 +1574,14 @@ void run(std::uint32_t maxFrames) noexcept {
       // Dispatch Lua on_collision callbacks for all pairs recorded this frame.
       if (runPhysics) {
         runtime::dispatch_collision_callbacks(*world);
+      }
+
+      // Process EndPlay phase: fire callbacks for pending-destroy entities,
+      // then flush them. Phase: Input → EndPlay → Input.
+      if (isPlaying) {
+        world->begin_end_play_phase();
+        scripting::dispatch_entity_scripts_end_play(world.get());
+        world->end_end_play_phase();
       }
 
       // Handle deferred scene operations requested from Lua.

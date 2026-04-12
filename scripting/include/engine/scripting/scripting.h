@@ -3,6 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace engine::runtime {
+class World;
+} // namespace engine::runtime
+
 namespace engine::scripting {
 
 bool initialize_scripting() noexcept;
@@ -74,14 +78,22 @@ void check_script_reload() noexcept;
 // Multiple entities may share the same script file.
 
 // Load all unique script files referenced by ScriptComponents in the world and
-// call module.on_start(entityIndex) for each entity. Call once on Play start.
+// call module.on_begin_play(entityIndex) for each entity. Call once on Play
+// start.
 void dispatch_entity_scripts_start() noexcept;
 
-// Call module.on_update(entityIndex, dt) for every entity with a
+// Dispatch on_begin_play for entities that need it (newly created).
+// Also marks each entity's begin_play as done in the World.
+void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;
+
+// Dispatch on_end_play for entities pending deferred destruction.
+void dispatch_entity_scripts_end_play(runtime::World *world) noexcept;
+
+// Call module.on_tick(entityIndex, dt) for every entity with a
 // ScriptComponent. Call once per simulation step.
 void dispatch_entity_scripts_update(float dt) noexcept;
 
-// Call module.on_end(entityIndex) for every entity with a ScriptComponent.
+// Call module.on_end_play(entityIndex) for every entity with a ScriptComponent.
 // Call once when Play transitions to Stopped.
 void dispatch_entity_scripts_end() noexcept;
 

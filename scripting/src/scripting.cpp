@@ -8,12 +8,15 @@ extern "C" {
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
+#include "engine/core/console.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
+#include "engine/runtime/entity_pool.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -50,6 +53,11 @@ std::uint32_t g_frameIndex = 0U;
 char g_watchedPath[512] = {};
 std::int64_t g_watchedMtime = 0;
 constexpr float kMaxScriptAcceleration = 500.0F;
+
+// Entity pool storage for Lua pool_create / pool_spawn / pool_release.
+constexpr std::size_t kMaxEntityPools = 16U;
+runtime::EntityPool g_entityPools[kMaxEntityPools]{};
+std::size_t g_entityPoolCount = 0U;
 
 void copy_c_string(char *destination, std::size_t destinationSize,
                    const char *source) noexcept {
@@ -112,6 +120,11 @@ struct EntityScriptModule final {
 constexpr std::size_t kMaxEntityScriptModules = 32U;
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
+
+// Per-entity faulted tracking: if a lifecycle callback errors, skip future
+// calls for that entity to avoid cascading log spam.
+constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
+bool g_entityFaulted[kMaxFaultedEntities]{};
 
 enum class DeferredMutationType : std::uint8_t {
   DestroyEntity,
@@ -180,6 +193,8 @@ bool g_debuggerEnabled = false;
 
 char g_gameMode[64] = "default";
 char g_gameState[64] = "startup";
+bool g_godModeEnabled = false;
+bool g_noclipEnabled = false;
 constexpr std::size_t kMaxPlayerControllers = 4U;
 std::uint32_t g_playerControllerEntities[kMaxPlayerControllers]{};
 
@@ -1340,6 +1355,16 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
   g_playerControllerEntities[static_cast<std::size_t>(player)] =
       static_cast<std::uint32_t>(entityIndex);
   lua_pushboolean(state, 1);
+  return 1;
+}
+
+int lua_engine_is_god_mode(lua_State *state) noexcept {
+  lua_pushboolean(state, g_godModeEnabled ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_is_noclip(lua_State *state) noexcept {
+  lua_pushboolean(state, g_noclipEnabled ? 1 : 0);
   return 1;
 }
 
@@ -2539,6 +2564,88 @@ int lua_engine_instantiate(lua_State *state) noexcept {
   return 1;
 }
 
+// --- Entity pool Lua bindings ---
+
+// engine.pool_create(count) → pool_id or nil
+int lua_engine_pool_create(lua_State *state) noexcept {
+  if ((g_world == nullptr) || !lua_isinteger(state, 1)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const lua_Integer count = lua_tointeger(state, 1);
+  if ((count <= 0) ||
+      (static_cast<std::size_t>(count) > runtime::EntityPool::kMaxPoolSize)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  if (g_entityPoolCount >= kMaxEntityPools) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  runtime::EntityPool &pool = g_entityPools[g_entityPoolCount];
+  if (!pool.init(g_world, static_cast<std::size_t>(count))) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const std::size_t poolId = g_entityPoolCount;
+  ++g_entityPoolCount;
+  lua_pushinteger(state, static_cast<lua_Integer>(poolId));
+  return 1;
+}
+
+// engine.pool_spawn(pool_id) → entity_index or nil
+int lua_engine_pool_spawn(lua_State *state) noexcept {
+  if (!lua_isinteger(state, 1)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const lua_Integer poolId = lua_tointeger(state, 1);
+  if ((poolId < 0) || (static_cast<std::size_t>(poolId) >= g_entityPoolCount)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const runtime::Entity entity =
+      g_entityPools[static_cast<std::size_t>(poolId)].acquire();
+  if (entity == runtime::kInvalidEntity) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
+  return 1;
+}
+
+// engine.pool_release(pool_id, entity_index) → bool
+int lua_engine_pool_release(lua_State *state) noexcept {
+  if (!lua_isinteger(state, 1) || !lua_isinteger(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const lua_Integer poolId = lua_tointeger(state, 1);
+  if ((poolId < 0) || (static_cast<std::size_t>(poolId) >= g_entityPoolCount)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  runtime::Entity entity{};
+  if (!read_entity(state, 2, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const bool ok =
+      g_entityPools[static_cast<std::size_t>(poolId)].release(entity);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
 // Find an already-loaded entity script module by path, or load it fresh.
 // Returns LUA_NOREF on failure. Must be called after log_lua_error is defined.
 int get_or_load_entity_script_module(const char *path) noexcept {
@@ -2650,9 +2757,11 @@ int get_or_load_entity_script_module(const char *path) noexcept {
 }
 
 // Call module.funcName(entityIndex [, dt]) — returns false on missing/error.
+// Call a function on a module table, with optional fallback name.
+// If entityIndex > 0, marks entity as faulted on error.
 bool call_module_function(int moduleRef, const char *funcName,
-                          std::uint32_t entityIndex, bool hasDt,
-                          float dt) noexcept {
+                          const char *fallbackName, std::uint32_t entityIndex,
+                          bool hasDt, float dt) noexcept {
   if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
     return false;
   }
@@ -2665,8 +2774,18 @@ bool call_module_function(int moduleRef, const char *funcName,
 
   lua_getfield(g_state, -1, funcName);
   if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 2);
-    return false;
+    lua_pop(g_state, 1);
+    // Try fallback name if provided.
+    if (fallbackName != nullptr) {
+      lua_getfield(g_state, -1, fallbackName);
+      if (!lua_isfunction(g_state, -1)) {
+        lua_pop(g_state, 2);
+        return false;
+      }
+    } else {
+      lua_pop(g_state, 1);
+      return false;
+    }
   }
 
   // Stack: ... | table | func
@@ -2682,6 +2801,9 @@ bool call_module_function(int moduleRef, const char *funcName,
 
   if (lua_pcall(g_state, nargs, 0, 0) != LUA_OK) {
     log_lua_error(funcName);
+    if ((entityIndex > 0U) && (entityIndex < kMaxFaultedEntities)) {
+      g_entityFaulted[entityIndex] = true;
+    }
     return false;
   }
   return true;
@@ -2858,6 +2980,11 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "set_player_controller");
   lua_pushcfunction(state, &lua_engine_get_player_controller);
   lua_setfield(state, -2, "get_player_controller");
+
+  lua_pushcfunction(state, &lua_engine_is_god_mode);
+  lua_setfield(state, -2, "is_god_mode");
+  lua_pushcfunction(state, &lua_engine_is_noclip);
+  lua_setfield(state, -2, "is_noclip");
 
   lua_pushcfunction(state, &lua_engine_profiler_enable);
   lua_setfield(state, -2, "profiler_enable");
@@ -3133,6 +3260,14 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_instantiate);
   lua_setfield(state, -2, "instantiate");
 
+  // Entity pooling
+  lua_pushcfunction(state, &lua_engine_pool_create);
+  lua_setfield(state, -2, "pool_create");
+  lua_pushcfunction(state, &lua_engine_pool_spawn);
+  lua_setfield(state, -2, "pool_spawn");
+  lua_pushcfunction(state, &lua_engine_pool_release);
+  lua_setfield(state, -2, "pool_release");
+
   // Per-entity scripts (ScriptComponent)
   lua_pushcfunction(state, &lua_engine_add_script_component);
   lua_setfield(state, -2, "add_script_component");
@@ -3144,6 +3279,87 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "require");
 
   lua_setglobal(state, "engine");
+}
+
+// ---- Console cheat commands ----
+
+void cmd_god(const char *const * /*args*/, int /*argCount*/,
+             void * /*userData*/) noexcept {
+  g_godModeEnabled = !g_godModeEnabled;
+  core::console_print(g_godModeEnabled ? "God mode ON" : "God mode OFF");
+}
+
+void cmd_noclip(const char *const * /*args*/, int /*argCount*/,
+                void * /*userData*/) noexcept {
+  g_noclipEnabled = !g_noclipEnabled;
+  core::console_print(g_noclipEnabled ? "Noclip ON" : "Noclip OFF");
+}
+
+void cmd_spawn(const char *const *args, int argCount,
+               void * /*userData*/) noexcept {
+  if (argCount < 2) {
+    core::console_print("Usage: spawn <prefab> [x y z]");
+    return;
+  }
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_services->instantiate_prefab == nullptr)) {
+    core::console_print("Cannot spawn: world not ready");
+    return;
+  }
+  const std::uint32_t entityIndex =
+      g_services->instantiate_prefab(g_world, args[1]);
+  if (entityIndex == 0U) {
+    core::console_print("Spawn failed (prefab not found?)");
+    return;
+  }
+  // Optionally set position if x y z provided.
+  if ((argCount >= 5) && (g_services->add_transform_op != nullptr)) {
+    runtime::Transform t{};
+    t.position.x = static_cast<float>(std::atof(args[2]));
+    t.position.y = static_cast<float>(std::atof(args[3]));
+    t.position.z = static_cast<float>(std::atof(args[4]));
+    t.scale = {1.0F, 1.0F, 1.0F};
+    t.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
+    // Overwrite the transform that was loaded from the prefab.
+    g_services->add_transform_op(g_world, entityIndex, t);
+  }
+  char buf[64] = {};
+  std::snprintf(buf, sizeof(buf), "Spawned entity %u", entityIndex);
+  core::console_print(buf);
+}
+
+void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
+                  void * /*userData*/) noexcept {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_services->destroy_entity_op == nullptr)) {
+    core::console_print("Cannot kill_all: world not ready");
+    return;
+  }
+  std::size_t destroyed = 0U;
+  g_world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
+    // Skip player controller entities.
+    for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
+      if (g_playerControllerEntities[i] == entity.index) {
+        return;
+      }
+    }
+    g_services->destroy_entity_op(g_world, entity.index);
+    ++destroyed;
+  });
+  char buf[64] = {};
+  std::snprintf(buf, sizeof(buf), "Destroyed %zu entities", destroyed);
+  core::console_print(buf);
+}
+
+void register_debug_commands() noexcept {
+  core::console_register_command("god", cmd_god, nullptr,
+                                 "Toggle god mode (invincibility)");
+  core::console_register_command("noclip", cmd_noclip, nullptr,
+                                 "Toggle noclip (no collision)");
+  core::console_register_command("spawn", cmd_spawn, nullptr,
+                                 "Spawn a prefab: spawn <path> [x y z]");
+  core::console_register_command("kill_all", cmd_kill_all, nullptr,
+                                 "Destroy all entities except player");
 }
 
 } // namespace
@@ -3176,6 +3392,7 @@ bool initialize_scripting() noexcept {
   luaL_requiref(g_state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(g_state, 1);
   register_engine_bindings(g_state);
+  register_debug_commands();
   refresh_lua_hook();
   return true;
 }
@@ -3216,6 +3433,9 @@ void shutdown_scripting() noexcept {
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
   g_moduleLoadDepth = 0U;
+  for (std::size_t i = 0U; i < kMaxFaultedEntities; ++i) {
+    g_entityFaulted[i] = false;
+  }
   for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
     g_profilerEntries[i] = ProfilerEntry{};
   }
@@ -3230,6 +3450,12 @@ void shutdown_scripting() noexcept {
   g_breakpointHitCount = 0U;
   g_profilerEnabled = false;
   g_debuggerEnabled = false;
+  g_godModeEnabled = false;
+  g_noclipEnabled = false;
+  for (std::size_t i = 0U; i < kMaxEntityPools; ++i) {
+    g_entityPools[i] = runtime::EntityPool{};
+  }
+  g_entityPoolCount = 0U;
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", "default");
   std::snprintf(g_gameState, sizeof(g_gameState), "%s", "startup");
   for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
@@ -3596,12 +3822,61 @@ void dispatch_entity_scripts_start() noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
         }
+        if ((entity.index < kMaxFaultedEntities) &&
+            g_entityFaulted[entity.index]) {
+          return;
+        }
         const int ref = get_or_load_entity_script_module(sc.scriptPath);
         if (ref == LUA_NOREF) {
           return;
         }
-        call_module_function(ref, "on_start", entity.index, false, 0.0F);
+        call_module_function(ref, "on_begin_play", "on_start", entity.index,
+                             false, 0.0F);
       });
+}
+
+void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
+  if ((g_state == nullptr) || (world == nullptr)) {
+    return;
+  }
+
+  world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
+    world->mark_begin_play_done(entity);
+    // Only dispatch if entity has a ScriptComponent.
+    const auto *sc = world->get_script_component_ptr(entity);
+    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+      return;
+    }
+    if ((entity.index < kMaxFaultedEntities) && g_entityFaulted[entity.index]) {
+      return;
+    }
+    const int ref = get_or_load_entity_script_module(sc->scriptPath);
+    if (ref == LUA_NOREF) {
+      return;
+    }
+    call_module_function(ref, "on_begin_play", "on_start", entity.index, false,
+                         0.0F);
+  });
+}
+
+void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
+  if ((g_state == nullptr) || (world == nullptr)) {
+    return;
+  }
+
+  world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
+    const auto *sc = world->get_script_component_ptr(entity);
+    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+      return;
+    }
+    // Fire EndPlay even for faulted entities (best effort cleanup).
+    const int ref = get_or_load_entity_script_module(sc->scriptPath);
+    if (ref == LUA_NOREF) {
+      return;
+    }
+    static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
+                                           entity.index, false, 0.0F));
+  });
 }
 
 void dispatch_entity_scripts_update(float dt) noexcept {
@@ -3622,11 +3897,16 @@ void dispatch_entity_scripts_update(float dt) noexcept {
           if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
             return;
           }
+          // Clear faulted state on reload.
+          if (entity.index < kMaxFaultedEntities) {
+            g_entityFaulted[entity.index] = false;
+          }
 
-          static_cast<void>(call_module_function(moduleRef, "on_reload",
-                                                 entity.index, false, 0.0F));
-          static_cast<void>(call_module_function(moduleRef, "on_start",
-                                                 entity.index, false, 0.0F));
+          static_cast<void>(call_module_function(
+              moduleRef, "on_reload", nullptr, entity.index, false, 0.0F));
+          static_cast<void>(call_module_function(moduleRef, "on_begin_play",
+                                                 "on_start", entity.index,
+                                                 false, 0.0F));
         });
     g_entityScriptModules[i].reloaded = false;
   }
@@ -3637,11 +3917,16 @@ void dispatch_entity_scripts_update(float dt) noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
         }
+        if ((entity.index < kMaxFaultedEntities) &&
+            g_entityFaulted[entity.index]) {
+          return;
+        }
         const int ref = get_or_load_entity_script_module(sc.scriptPath);
         if (ref == LUA_NOREF) {
           return;
         }
-        call_module_function(ref, "on_update", entity.index, true, dt);
+        call_module_function(ref, "on_tick", "on_update", entity.index, true,
+                             dt);
       });
 }
 
@@ -3659,8 +3944,8 @@ void dispatch_entity_scripts_end() noexcept {
         if (ref == LUA_NOREF) {
           return;
         }
-        static_cast<void>(
-            call_module_function(ref, "on_end", entity.index, false, 0.0F));
+        static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
+                                               entity.index, false, 0.0F));
       });
 }
 

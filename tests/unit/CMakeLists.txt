@@ -405,3 +405,35 @@ add_test(
     NAME engine_unit_determinism
     COMMAND engine_unit_determinism
 )
+
+add_executable(engine_unit_mem_tracker
+    mem_tracker_test.cpp
+)
+
+target_compile_features(engine_unit_mem_tracker PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_mem_tracker
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_mem_tracker
+    COMMAND engine_unit_mem_tracker
+)
+
+add_executable(engine_unit_entity_pool
+    entity_pool_test.cpp
+)
+
+target_compile_features(engine_unit_entity_pool PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_entity_pool
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_unit_entity_pool
+    COMMAND engine_unit_entity_pool
+)

@@ -155,6 +155,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   const std::uint32_t index = entity.index;
   erase_persistent_index(m_entityPersistentIds[index]);
   m_entityAlive[index] = false;
+  m_entityBeginPlayFired[index] = false;
   m_entityPersistentIds[index] = kInvalidPersistentId;
   m_movementAuthorities[index] = MovementAuthority::None;
   reset_transform_cache(index);
@@ -217,11 +218,14 @@ bool World::destroy_entity(Entity entity) noexcept {
     return false;
   }
 
+  // During Simulation, defer so EndPlay callbacks fire before removal.
   if (m_phase == WorldPhase::Simulation) {
     return queue_deferred_destroy(entity);
   }
 
-  if (m_phase != WorldPhase::Input) {
+  // Immediate destruction is allowed during Input, BeginPlay, and EndPlay.
+  if (m_phase != WorldPhase::Input && m_phase != WorldPhase::BeginPlay &&
+      m_phase != WorldPhase::EndPlay) {
     return false;
   }
 
@@ -851,8 +855,6 @@ void World::commit_update_phase() noexcept {
     return;
   }
 
-  flush_deferred_destroys();
-
   m_readStateIndex = m_writeStateIndex;
   m_writeStateIndex = (m_readStateIndex + 1U) % kStateBufferCount;
   m_updateSwapPending = false;
@@ -866,8 +868,6 @@ void World::begin_transform_phase() noexcept {
   }
 
   if ((m_phase == WorldPhase::Simulation) && m_updateSwapPending) {
-    flush_deferred_destroys();
-
     m_readStateIndex = m_writeStateIndex;
     m_writeStateIndex = (m_readStateIndex + 1U) % kStateBufferCount;
     m_updateSwapPending = false;
@@ -915,10 +915,58 @@ void World::end_frame_phase() noexcept {
     return;
   }
 
+  flush_deferred_destroys();
   m_phase = WorldPhase::Input;
 }
 
 WorldPhase World::current_phase() const noexcept { return m_phase; }
+
+void World::begin_begin_play_phase() noexcept {
+  if (m_phase != WorldPhase::Input) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_begin_play_phase requires Input phase");
+    return;
+  }
+  m_phase = WorldPhase::BeginPlay;
+}
+
+void World::end_begin_play_phase() noexcept {
+  if (m_phase != WorldPhase::BeginPlay) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "end_begin_play_phase requires BeginPlay phase");
+    return;
+  }
+  m_phase = WorldPhase::Input;
+}
+
+void World::mark_begin_play_done(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return;
+  }
+  m_entityBeginPlayFired[entity.index] = true;
+}
+
+void World::begin_end_play_phase() noexcept {
+  if ((m_phase != WorldPhase::Render) &&
+      (m_phase != WorldPhase::RenderSubmission) &&
+      (m_phase != WorldPhase::TransformPropagation) &&
+      (m_phase != WorldPhase::Simulation) && (m_phase != WorldPhase::Input)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "begin_end_play_phase called from invalid phase");
+    return;
+  }
+  m_phase = WorldPhase::EndPlay;
+}
+
+void World::end_end_play_phase() noexcept {
+  if (m_phase != WorldPhase::EndPlay) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "end_end_play_phase requires EndPlay phase");
+    return;
+  }
+  flush_deferred_destroys();
+  m_phase = WorldPhase::Input;
+}
 
 void World::for_each_transform(TransformVisitor visitor,
                                void *userData) const noexcept {

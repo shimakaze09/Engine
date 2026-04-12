@@ -102,10 +102,12 @@ using TransformVisitor = void (*)(Entity entity, const Transform &transform,
 
 enum class WorldPhase : std::uint8_t {
   Input,
+  BeginPlay,
   Simulation,
   TransformPropagation,
   RenderSubmission,
   Render,
+  EndPlay,
   // Compatibility aliases for legacy call sites.
   Idle = Input,
   Update = Simulation,
@@ -273,6 +275,49 @@ public:
   void begin_render_phase() noexcept;
   void end_frame_phase() noexcept;
   WorldPhase current_phase() const noexcept;
+
+  // Lifecycle phase helpers ------------------------------------------------
+  // BeginPlay: transition Input → BeginPlay. Iterate new entities via
+  // for_each_needs_begin_play, then call end_begin_play_phase.
+  void begin_begin_play_phase() noexcept;
+  void end_begin_play_phase() noexcept;
+
+  // EndPlay: transition Render → EndPlay. Iterate pending-destroy entities
+  // via for_each_pending_destroy, then call end_end_play_phase which flushes.
+  void begin_end_play_phase() noexcept;
+  void end_end_play_phase() noexcept;
+
+  // Mark entity as having received its begin_play callback.
+  void mark_begin_play_done(Entity entity) noexcept;
+
+  // Iterate alive entities that have NOT yet received begin_play.
+  template <typename Fn> void for_each_needs_begin_play(Fn &&fn) noexcept {
+    if (m_aliveEntityCount == 0U) {
+      return;
+    }
+    std::size_t visited = 0U;
+    const std::uint32_t upperBound = m_nextEntityIndex;
+    for (std::uint32_t index = 1U;
+         (index < upperBound) && (visited < m_aliveEntityCount); ++index) {
+      if (!m_entityAlive[index]) {
+        continue;
+      }
+      ++visited;
+      if (!m_entityBeginPlayFired[index]) {
+        fn(Entity{index, m_entityGenerations[index]});
+      }
+    }
+  }
+
+  // Iterate entities pending deferred destruction (read-only snapshot).
+  template <typename Fn> void for_each_pending_destroy(Fn &&fn) const noexcept {
+    for (std::size_t i = 0U; i < m_pendingDestroyCount; ++i) {
+      const Entity entity = m_pendingDestroyEntities[i];
+      if (is_valid_entity(entity)) {
+        fn(entity);
+      }
+    }
+  }
 
   void for_each_transform(TransformVisitor visitor,
                           void *userData) const noexcept;
@@ -550,6 +595,7 @@ private:
   std::array<std::uint32_t, kPersistentIndexCapacity> m_persistentIndexValues{};
   std::array<std::uint8_t, kPersistentIndexCapacity> m_persistentIndexState{};
   std::array<bool, kMaxEntities + 1U> m_entityAlive{};
+  std::array<bool, kMaxEntities + 1U> m_entityBeginPlayFired{};
   std::array<std::uint32_t, kMaxEntities> m_freeEntityIndices{};
   std::size_t m_freeEntityCount = 0U;
   std::size_t m_aliveEntityCount = 0U;

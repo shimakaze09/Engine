@@ -99,3 +99,38 @@ add_test(
     COMMAND engine_integration_ecs_stress_50k
 )
 set_tests_properties(engine_integration_ecs_stress_50k PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_lifecycle
+    lifecycle_test.cpp
+)
+
+target_compile_features(engine_integration_lifecycle PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_lifecycle
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_lifecycle
+    COMMAND engine_integration_lifecycle
+)
+set_tests_properties(engine_integration_lifecycle PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_lua_lifecycle
+    lua_lifecycle_test.cpp
+)
+
+target_compile_features(engine_integration_lua_lifecycle PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_lua_lifecycle
+    PRIVATE
+    engine_runtime
+    engine_scripting
+)
+
+add_test(
+    NAME engine_integration_lua_lifecycle
+    COMMAND engine_integration_lua_lifecycle
+)
+set_tests_properties(engine_integration_lua_lifecycle PROPERTIES LABELS "integration")

@@ -1,6 +1,7 @@
 #include "engine/editor/editor.h"
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
+    !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
@@ -37,6 +38,7 @@
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
@@ -52,6 +54,7 @@
 #include "ImGuizmo.h"
 
 #include "engine/editor/command_history.h"
+#include "engine/editor/debug_camera.h"
 
 namespace engine::editor {
 
@@ -72,6 +75,9 @@ ImGuizmo::OPERATION g_gizmoOp = ImGuizmo::TRANSLATE;
 bool g_gizmoWasUsing = false;
 runtime::Transform g_gizmoStartTransform{};
 CommandHistory g_commandHistory{};
+DebugCamera g_debugCamera{};
+renderer::CameraState g_frozenCameraState{};
+bool g_debugCameraActive = false;
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
@@ -1104,6 +1110,32 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
   ImGui::TextUnformatted("CPU Flame Graph");
   draw_profiler_flame_graph();
 
+  ImGui::Separator();
+  ImGui::TextUnformatted("Memory by Subsystem");
+  {
+    std::array<core::MemTagSnapshot, core::kMemTagCount> snaps{};
+    const std::size_t count =
+        core::mem_tracker_snapshot(snaps.data(), snaps.size());
+    float maxBytes = 1.0F; // avoid division by zero
+    for (std::size_t i = 0U; i < count; ++i) {
+      const float bytes = static_cast<float>(
+          snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
+      if (bytes > maxBytes) {
+        maxBytes = bytes;
+      }
+    }
+    for (std::size_t i = 0U; i < count; ++i) {
+      const float bytes = static_cast<float>(
+          snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
+      const float mb = bytes / (1024.0F * 1024.0F);
+      char label[64]{};
+      std::snprintf(label, sizeof(label), "%.2f MB", static_cast<double>(mb));
+      ImGui::Text("%s", core::mem_tag_name(snaps[i].tag));
+      ImGui::SameLine(100.0F);
+      ImGui::ProgressBar(bytes / maxBytes, ImVec2(-1.0F, 0.0F), label);
+    }
+  }
+
   ImGui::End();
 }
 
@@ -1376,8 +1408,40 @@ void draw_scene_viewport_panel() noexcept {
   }
 
   // Camera input: only when stopped/paused, viewport hovered, gizmo not active.
-  if ((g_playState != PlayState::Playing) && ImGui::IsWindowHovered() &&
-      !ImGuizmo::IsUsing()) {
+  const bool debugDetach = core::cvar_get_bool("debug.camera_detach", false);
+  if (debugDetach && !g_debugCameraActive) {
+    // Snapshot the current camera on transition to detached mode.
+    if (g_playState == PlayState::Playing) {
+      g_frozenCameraState = renderer::get_active_camera();
+    } else {
+      g_frozenCameraState = editor_camera_state(g_editorCamera);
+    }
+    g_debugCamera.position = g_frozenCameraState.position;
+    g_debugCameraActive = true;
+  } else if (!debugDetach && g_debugCameraActive) {
+    g_debugCameraActive = false;
+  }
+
+  if (g_debugCameraActive && ImGui::IsWindowHovered()) {
+    // Free-fly debug camera with WASD + mouse
+    const ImGuiIO &io = ImGui::GetIO();
+    const bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    const float dt = io.DeltaTime;
+    update_debug_camera(
+        g_debugCamera, dt, ImGui::IsKeyDown(ImGuiKey_W),
+        ImGui::IsKeyDown(ImGuiKey_S), ImGui::IsKeyDown(ImGuiKey_A),
+        ImGui::IsKeyDown(ImGuiKey_D), ImGui::IsKeyDown(ImGuiKey_E),
+        ImGui::IsKeyDown(ImGuiKey_Q), io.KeyShift,
+        rmbDown ? static_cast<int>(io.MouseDelta.x) : 0,
+        rmbDown ? static_cast<int>(io.MouseDelta.y) : 0);
+    renderer::set_active_camera(debug_camera_state(g_debugCamera));
+
+    // Draw the frozen game camera frustum as wireframe.
+    const float aspect =
+        (regionSize.y > 0.0F) ? (regionSize.x / regionSize.y) : 1.0F;
+    draw_camera_frustum_wireframe(g_frozenCameraState, aspect);
+  } else if ((g_playState != PlayState::Playing) && ImGui::IsWindowHovered() &&
+             !ImGuizmo::IsUsing()) {
     const ImGuiIO &io = ImGui::GetIO();
     const bool altHeld = io.KeyAlt;
     const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -1390,8 +1454,8 @@ void draw_scene_viewport_panel() noexcept {
                          altHeld && lmbDown, altHeld && mmbDown);
   }
 
-  // Push editor camera when not playing.
-  if (g_playState != PlayState::Playing) {
+  // Push editor camera when not playing (and debug camera is not active).
+  if ((g_playState != PlayState::Playing) && !g_debugCameraActive) {
     renderer::set_active_camera(editor_camera_state(g_editorCamera));
   }
 
@@ -1496,6 +1560,10 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   static_cast<void>(core::cvar_register_bool(
       "r_showStats", true,
       "Toggle in-game stats and profiling overlays in the editor"));
+
+  static_cast<void>(core::cvar_register_bool(
+      "debug.camera_detach", false,
+      "Detach debug free-fly camera from game camera"));
 
   if (!ImGui_ImplSDL2_InitForOpenGL(static_cast<SDL_Window *>(sdlWindow),
                                     static_cast<SDL_GLContext>(glContext))) {

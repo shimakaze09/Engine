@@ -4,6 +4,7 @@ add_library(engine_core STATIC
     src/cvar.cpp
     src/debug_draw.cpp
     src/engine_stats.cpp
+    src/mem_tracker.cpp
     src/event_bus.cpp
     src/input.cpp
     src/json.cpp
