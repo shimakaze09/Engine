@@ -2,7 +2,7 @@
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&         \
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
@@ -229,9 +229,8 @@ void update_two_finger_gestures() noexcept {
     if ((distDelta > kPinchMinDelta) || (distDelta < -kPinchMinDelta)) {
       GestureEvent ge{};
       ge.type = GestureType::Pinch;
-      ge.pinchScale = (g_prevTwoFingerDist > 0.001F)
-                          ? (dist / g_prevTwoFingerDist)
-                          : 1.0F;
+      ge.pinchScale =
+          (g_prevTwoFingerDist > 0.001F) ? (dist / g_prevTwoFingerDist) : 1.0F;
       ge.pinchCenterX = (t1->x + t2->x) * 0.5F;
       ge.pinchCenterY = (t1->y + t2->y) * 0.5F;
       fire_gesture_callbacks(ge);

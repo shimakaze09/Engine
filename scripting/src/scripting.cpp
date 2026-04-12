@@ -1349,8 +1349,7 @@ int lua_engine_add_input_action(lua_State *state) noexcept {
       lua_pop(state, 1);
       lua_getfield(state, -1, "axis_scale");
       if (lua_isnumber(state, -1)) {
-        bindings[count].axisScale =
-            static_cast<float>(lua_tonumber(state, -1));
+        bindings[count].axisScale = static_cast<float>(lua_tonumber(state, -1));
       }
       lua_pop(state, 1);
       ++count;
@@ -1424,8 +1423,7 @@ int lua_engine_is_mapped_action_pressed(lua_State *state) noexcept {
 // engine.mapped_axis_value(name)
 int lua_engine_mapped_axis_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
-  lua_pushnumber(state,
-                 static_cast<lua_Number>(core::mapped_axis_value(name)));
+  lua_pushnumber(state, static_cast<lua_Number>(core::mapped_axis_value(name)));
   return 1;
 }
 
@@ -1501,8 +1499,7 @@ static void lua_touch_handler(const core::TouchEvent &event,
     return;
   }
   lua_newtable(g_touchLuaState);
-  lua_pushinteger(g_touchLuaState,
-                  static_cast<lua_Integer>(event.touchId));
+  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.touchId));
   lua_setfield(g_touchLuaState, -2, "id");
   lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.x));
   lua_setfield(g_touchLuaState, -2, "x");
@@ -1548,12 +1545,10 @@ static void lua_gesture_handler(const core::GestureEvent &event,
     return;
   }
   const int idx = static_cast<int>(event.type);
-  if ((idx < 0) || (idx >= 4) ||
-      (g_gestureCallbackRefs[idx] == LUA_NOREF)) {
+  if ((idx < 0) || (idx >= 4) || (g_gestureCallbackRefs[idx] == LUA_NOREF)) {
     return;
   }
-  lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX,
-              g_gestureCallbackRefs[idx]);
+  lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
   if (!lua_isfunction(g_touchLuaState, -1)) {
     lua_pop(g_touchLuaState, 1);
     return;
@@ -1565,17 +1560,13 @@ static void lua_gesture_handler(const core::GestureEvent &event,
   lua_setfield(g_touchLuaState, -2, "tap_x");
   lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.tapY));
   lua_setfield(g_touchLuaState, -2, "tap_y");
-  lua_pushinteger(g_touchLuaState,
-                  static_cast<lua_Integer>(event.tapCount));
+  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.tapCount));
   lua_setfield(g_touchLuaState, -2, "tap_count");
-  lua_pushinteger(g_touchLuaState,
-                  static_cast<lua_Integer>(event.swipeDir));
+  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.swipeDir));
   lua_setfield(g_touchLuaState, -2, "swipe_dir");
-  lua_pushnumber(g_touchLuaState,
-                 static_cast<lua_Number>(event.swipeVelocity));
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.swipeVelocity));
   lua_setfield(g_touchLuaState, -2, "swipe_velocity");
-  lua_pushnumber(g_touchLuaState,
-                 static_cast<lua_Number>(event.pinchScale));
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.pinchScale));
   lua_setfield(g_touchLuaState, -2, "pinch_scale");
   lua_pushnumber(g_touchLuaState,
                  static_cast<lua_Number>(event.rotationRadians));
@@ -1614,8 +1605,7 @@ int lua_engine_on_gesture(lua_State *state) noexcept {
   // Release old ref.
   if ((g_touchLuaState != nullptr) &&
       (g_gestureCallbackRefs[idx] != LUA_NOREF)) {
-    luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX,
-               g_gestureCallbackRefs[idx]);
+    luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
   }
   g_touchLuaState = state;
   lua_pushvalue(state, 2);
@@ -1642,8 +1632,8 @@ int lua_engine_set_game_mode(lua_State *state) noexcept {
   // Write to both legacy string and World's GameMode struct.
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
   if (g_world != nullptr) {
-    std::snprintf(g_world->game_mode().name,
-                  runtime::GameMode::kMaxNameLength, "%s", name);
+    std::snprintf(g_world->game_mode().name, runtime::GameMode::kMaxNameLength,
+                  "%s", name);
   }
   lua_pushboolean(state, 1);
   return 1;
@@ -1723,9 +1713,8 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
   }
 
   const auto idx = static_cast<std::uint8_t>(player);
-  lua_pushinteger(
-      state, static_cast<lua_Integer>(
-                 g_playerControllers.get_controlled_entity(idx)));
+  lua_pushinteger(state, static_cast<lua_Integer>(
+                             g_playerControllers.get_controlled_entity(idx)));
   return 1;
 }
 
@@ -1792,8 +1781,7 @@ int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state,
-                  g_world->game_mode().set_rule(key, value) ? 1 : 0);
+  lua_pushboolean(state, g_world->game_mode().set_rule(key, value) ? 1 : 0);
   return 1;
 }
 
@@ -1821,8 +1809,8 @@ int lua_engine_game_mode_max_players(lua_State *state) noexcept {
     const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
     g_world->game_mode().maxPlayers = n;
   }
-  lua_pushinteger(
-      state, static_cast<lua_Integer>(g_world->game_mode().maxPlayers));
+  lua_pushinteger(state,
+                  static_cast<lua_Integer>(g_world->game_mode().maxPlayers));
   return 1;
 }
 
@@ -1834,19 +1822,17 @@ int lua_engine_game_state_set_number(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state,
-                  g_persistentGameState.set_number(
-                      key, static_cast<float>(lua_tonumber(state, 2)))
-                      ? 1
-                      : 0);
+  lua_pushboolean(state, g_persistentGameState.set_number(
+                             key, static_cast<float>(lua_tonumber(state, 2)))
+                             ? 1
+                             : 0);
   return 1;
 }
 
 int lua_engine_game_state_get_number(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   lua_pushnumber(
-      state,
-      static_cast<lua_Number>(g_persistentGameState.get_number(key)));
+      state, static_cast<lua_Number>(g_persistentGameState.get_number(key)));
   return 1;
 }
 
@@ -1857,8 +1843,7 @@ int lua_engine_game_state_set_string(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state,
-                  g_persistentGameState.set_string(key, value) ? 1 : 0);
+  lua_pushboolean(state, g_persistentGameState.set_string(key, value) ? 1 : 0);
   return 1;
 }
 

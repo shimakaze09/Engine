@@ -32,8 +32,7 @@ static bool test_register_and_retrieve() noexcept {
   AudioSystem audio;
   audio.sampleRate = 48000;
 
-  check(loc.register_service<AudioSystem>(&audio),
-        "register returns true");
+  check(loc.register_service<AudioSystem>(&audio), "register returns true");
   check(loc.count() == 1U, "count is 1 after register");
   check(loc.has_service<AudioSystem>(), "has_service returns true");
 
@@ -131,16 +130,14 @@ static bool test_type_safety() noexcept {
   check(idPhysics != idRenderer, "physics != renderer TypeId");
 
   // Same type produces same id.
-  check(idAudio == engine::core::type_id<AudioSystem>(),
-        "stable audio TypeId");
+  check(idAudio == engine::core::type_id<AudioSystem>(), "stable audio TypeId");
   return true;
 }
 
 static bool test_register_null_service() noexcept {
   engine::core::ServiceLocator loc;
   // Registering a null pointer is legal (clears the pointer for that type).
-  check(loc.register_service<AudioSystem>(nullptr),
-        "register null succeeds");
+  check(loc.register_service<AudioSystem>(nullptr), "register null succeeds");
   check(loc.count() == 1U, "count is 1");
   check(loc.get_service<AudioSystem>() == nullptr,
         "get returns nullptr for null-registered");

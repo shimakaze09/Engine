@@ -66,7 +66,8 @@ bool evaluate_binding(const InputBinding &binding) noexcept {
     }
     const float raw = gamepad_axis_value(binding.code);
     const float scaled = raw * binding.axisScale;
-    return (scaled >= binding.axisThreshold) || (scaled <= -binding.axisThreshold);
+    return (scaled >= binding.axisThreshold) ||
+           (scaled <= -binding.axisThreshold);
   }
   }
   return false;
@@ -86,8 +87,7 @@ float evaluate_axis_source(const InputAxisSource &src) noexcept {
     if (!is_gamepad_connected() || (src.axisIndex < 0)) {
       return 0.0F;
     }
-    const int rawDeadZone =
-        static_cast<int>(src.deadZone * 32767.0F);
+    const int rawDeadZone = static_cast<int>(src.deadZone * 32767.0F);
     const float raw = gamepad_axis_value(src.axisIndex, rawDeadZone);
     return raw * src.scale;
   }
@@ -690,8 +690,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
       if (parser.get_object_field(actionVal, "bindings", &bindingsVal) &&
           (bindingsVal.type == JsonValue::Type::Array)) {
         const std::size_t bCount = parser.array_size(bindingsVal);
-        for (std::size_t b = 0;
-             b < bCount && b < kMaxBindingsPerAction; ++b) {
+        for (std::size_t b = 0; b < bCount && b < kMaxBindingsPerAction; ++b) {
           JsonValue bVal{};
           if (!parser.get_array_element(bindingsVal, b, &bVal) ||
               (bVal.type != JsonValue::Type::Object)) {
@@ -769,8 +768,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
       if (parser.get_object_field(axisVal, "sources", &sourcesVal) &&
           (sourcesVal.type == JsonValue::Type::Array)) {
         const std::size_t sCount = parser.array_size(sourcesVal);
-        for (std::size_t s = 0;
-             s < sCount && s < kMaxSourcesPerAxis; ++s) {
+        for (std::size_t s = 0; s < sCount && s < kMaxSourcesPerAxis; ++s) {
           JsonValue sVal{};
           if (!parser.get_array_element(sourcesVal, s, &sVal) ||
               (sVal.type != JsonValue::Type::Object)) {

@@ -4,7 +4,7 @@
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&         \
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
@@ -41,8 +41,9 @@ void action_cb(const char *name, bool pressed, void *userData) noexcept {
   }
   if (name != nullptr) {
     const std::size_t len = std::strlen(name);
-    const std::size_t copyLen =
-        (len < sizeof(state->lastName) - 1U) ? len : sizeof(state->lastName) - 1U;
+    const std::size_t copyLen = (len < sizeof(state->lastName) - 1U)
+                                    ? len
+                                    : sizeof(state->lastName) - 1U;
     std::memcpy(state->lastName, name, copyLen);
     state->lastName[copyLen] = '\0';
   }

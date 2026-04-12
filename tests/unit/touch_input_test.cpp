@@ -4,7 +4,7 @@
 #include "engine/core/input.h"
 #include "engine/core/touch_input.h"
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&         \
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif

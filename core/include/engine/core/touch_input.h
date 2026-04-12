@@ -9,7 +9,13 @@ namespace engine::core {
 // Touch Phase
 // ---------------------------------------------------------------------------
 
-enum class TouchPhase : std::uint8_t { Began, Moved, Stationary, Ended, Cancelled };
+enum class TouchPhase : std::uint8_t {
+  Began,
+  Moved,
+  Stationary,
+  Ended,
+  Cancelled
+};
 
 // ---------------------------------------------------------------------------
 // Touch Event
@@ -56,7 +62,8 @@ struct GestureEvent final {
 // Touch Callbacks
 // ---------------------------------------------------------------------------
 
-using TouchCallback = void (*)(const TouchEvent &event, void *userData) noexcept;
+using TouchCallback = void (*)(const TouchEvent &event,
+                               void *userData) noexcept;
 using GestureCallback = void (*)(const GestureEvent &event,
                                  void *userData) noexcept;
 

@@ -1,7 +1,6 @@
 add_library(engine_runtime STATIC
     src/editor_bridge.cpp
     src/engine.cpp
-    src/entity_pool.cpp
     src/physics_bridge.cpp
     src/prefab_serializer.cpp
     src/render_prep_pipeline.cpp
