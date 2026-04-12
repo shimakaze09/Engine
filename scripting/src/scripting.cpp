@@ -4794,7 +4794,17 @@ std::int64_t get_file_mtime(const char *path) noexcept {
   if (stat(path, &st) != 0) {
     return 0;
   }
+  // Use nanosecond-precision mtime when available so sub-second file writes
+  // are detected (st_mtime alone has 1-second granularity on many POSIX FS).
+#if defined(__APPLE__)
+  return static_cast<std::int64_t>(st.st_mtimespec.tv_sec) * 1000000000LL +
+         static_cast<std::int64_t>(st.st_mtimespec.tv_nsec);
+#elif defined(__linux__)
+  return static_cast<std::int64_t>(st.st_mtim.tv_sec) * 1000000000LL +
+         static_cast<std::int64_t>(st.st_mtim.tv_nsec);
+#else
   return static_cast<std::int64_t>(st.st_mtime);
+#endif
 #endif
 }
 } // anonymous namespace

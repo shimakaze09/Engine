@@ -49,7 +49,7 @@ FUNC_RE = re.compile(
 
 # Type mapping: annotation type -> (C++ type, Lua check expr, Lua push expr)
 TYPE_MAP = {
-    'int':    ('lua_Integer',  'luaL_checkinteger(L, {i})',     'lua_pushinteger(L, result)'),
+    'int':    ('int',  'static_cast<int>(luaL_checkinteger(L, {i}))',     'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
     'float':  ('float',        'static_cast<float>(luaL_checknumber(L, {i}))',
                                                                  'lua_pushnumber(L, static_cast<lua_Number>(result))'),
     'double': ('lua_Number',   'luaL_checknumber(L, {i})',      'lua_pushnumber(L, result)'),
