@@ -2,7 +2,6 @@
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
 
-
 extern "C" {
 #include "lauxlib.h"
 #include "lua.h"
@@ -2150,66 +2149,78 @@ int lua_engine_set_camera_fov(lua_State *state) noexcept {
 // Engine.push_camera(entityIndex, posX,posY,posZ, tgtX,tgtY,tgtZ, priority
 // [, blendSpeed])
 int lua_engine_push_camera(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_services->push_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   const auto entityIdx =
       static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  runtime::CameraEntry entry{};
-  entry.position.x = static_cast<float>(luaL_checknumber(state, 2));
-  entry.position.y = static_cast<float>(luaL_checknumber(state, 3));
-  entry.position.z = static_cast<float>(luaL_checknumber(state, 4));
-  entry.target.x = static_cast<float>(luaL_checknumber(state, 5));
-  entry.target.y = static_cast<float>(luaL_checknumber(state, 6));
-  entry.target.z = static_cast<float>(luaL_checknumber(state, 7));
+  const float posX = static_cast<float>(luaL_checknumber(state, 2));
+  const float posY = static_cast<float>(luaL_checknumber(state, 3));
+  const float posZ = static_cast<float>(luaL_checknumber(state, 4));
+  const float tgtX = static_cast<float>(luaL_checknumber(state, 5));
+  const float tgtY = static_cast<float>(luaL_checknumber(state, 6));
+  const float tgtZ = static_cast<float>(luaL_checknumber(state, 7));
   const float priority = static_cast<float>(luaL_checknumber(state, 8));
+  float blendSpeed = 5.0F;
   if (lua_isnumber(state, 9)) {
-    entry.blendSpeed = static_cast<float>(lua_tonumber(state, 9));
+    blendSpeed = static_cast<float>(lua_tonumber(state, 9));
   }
   const bool ok =
-      g_world->camera_manager().push_camera(entityIdx, entry, priority);
+      g_services->push_camera_op(g_world, entityIdx, posX, posY, posZ, tgtX,
+                                 tgtY, tgtZ, priority, blendSpeed);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Engine.pop_camera(entityIndex)
 int lua_engine_pop_camera(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_services->pop_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   const auto entityIdx =
       static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  const bool ok = g_world->camera_manager().pop_camera(entityIdx);
+  const bool ok = g_services->pop_camera_op(g_world, entityIdx);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Engine.get_active_camera() -> posX,posY,posZ, tgtX,tgtY,tgtZ, fov | nil
 int lua_engine_get_active_camera(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_services->get_active_camera_op == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::CameraEntry *entry = g_world->camera_manager().active_camera();
-  if (entry == nullptr) {
+  float posX = 0.0F;
+  float posY = 0.0F;
+  float posZ = 0.0F;
+  float tgtX = 0.0F;
+  float tgtY = 0.0F;
+  float tgtZ = 0.0F;
+  float fov = 0.0F;
+  if (!g_services->get_active_camera_op(g_world, &posX, &posY, &posZ, &tgtX,
+                                        &tgtY, &tgtZ, &fov)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<double>(entry->position.x));
-  lua_pushnumber(state, static_cast<double>(entry->position.y));
-  lua_pushnumber(state, static_cast<double>(entry->position.z));
-  lua_pushnumber(state, static_cast<double>(entry->target.x));
-  lua_pushnumber(state, static_cast<double>(entry->target.y));
-  lua_pushnumber(state, static_cast<double>(entry->target.z));
-  lua_pushnumber(state, static_cast<double>(entry->fovRadians));
+  lua_pushnumber(state, static_cast<double>(posX));
+  lua_pushnumber(state, static_cast<double>(posY));
+  lua_pushnumber(state, static_cast<double>(posZ));
+  lua_pushnumber(state, static_cast<double>(tgtX));
+  lua_pushnumber(state, static_cast<double>(tgtY));
+  lua_pushnumber(state, static_cast<double>(tgtZ));
+  lua_pushnumber(state, static_cast<double>(fov));
   return 7;
 }
 
 // Engine.camera_shake(amplitude, frequency, duration [, decay])
 int lua_engine_camera_shake(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if ((g_world == nullptr) || (g_services == nullptr) ||
+      (g_services->camera_shake_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2220,8 +2231,8 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
   if (lua_isnumber(state, 4)) {
     decay = static_cast<float>(lua_tonumber(state, 4));
   }
-  const bool ok = g_world->camera_manager().add_shake(amplitude, frequency,
-                                                      duration, decay);
+  const bool ok = g_services->camera_shake_op(g_world, amplitude, frequency,
+                                              duration, decay);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }

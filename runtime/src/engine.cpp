@@ -1812,6 +1812,10 @@ void run(std::uint32_t maxFrames) noexcept {
     bridge->set_world(nullptr);
   }
 
+  // Unbind scripting world pointer before the World unique_ptr is destroyed,
+  // so shutdown_scripting() does not dereference a dangling pointer.
+  scripting::bind_runtime_world(nullptr);
+
   renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
                                    meshRegistry.get());
 }

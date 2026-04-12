@@ -36,6 +36,21 @@ struct RuntimeServices final {
   void (*set_camera_up)(float x, float y, float z) noexcept = nullptr;
   void (*set_camera_fov)(float fovRadians) noexcept = nullptr;
 
+  // Camera manager operations (routed through bridge to avoid circular link)
+  bool (*push_camera_op)(runtime::World *world, std::uint32_t entityIndex,
+                         float posX, float posY, float posZ, float tgtX,
+                         float tgtY, float tgtZ, float priority,
+                         float blendSpeed) noexcept = nullptr;
+  bool (*pop_camera_op)(runtime::World *world,
+                        std::uint32_t entityIndex) noexcept = nullptr;
+  bool (*get_active_camera_op)(runtime::World *world, float *outPosX,
+                               float *outPosY, float *outPosZ, float *outTgtX,
+                               float *outTgtY, float *outTgtZ,
+                               float *outFov) noexcept = nullptr;
+  bool (*camera_shake_op)(runtime::World *world, float amplitude,
+                          float frequency, float duration,
+                          float decay) noexcept = nullptr;
+
   // World query operations needed by Lua bindings
   runtime::WorldPhase (*get_current_phase)(runtime::World *world) noexcept =
       nullptr;

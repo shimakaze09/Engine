@@ -39,6 +39,60 @@ void scripting_set_camera_fov(float fovRadians) noexcept {
   renderer::set_active_camera(camera);
 }
 
+// Camera manager bridge functions
+bool scripting_push_camera(runtime::World *world, std::uint32_t entityIndex,
+                           float posX, float posY, float posZ, float tgtX,
+                           float tgtY, float tgtZ, float priority,
+                           float blendSpeed) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  runtime::CameraEntry entry{};
+  entry.position = math::Vec3(posX, posY, posZ);
+  entry.target = math::Vec3(tgtX, tgtY, tgtZ);
+  entry.blendSpeed = blendSpeed;
+  return world->camera_manager().push_camera(entityIndex, entry, priority);
+}
+
+bool scripting_pop_camera(runtime::World *world,
+                          std::uint32_t entityIndex) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  return world->camera_manager().pop_camera(entityIndex);
+}
+
+bool scripting_get_active_camera(runtime::World *world, float *outPosX,
+                                 float *outPosY, float *outPosZ, float *outTgtX,
+                                 float *outTgtY, float *outTgtZ,
+                                 float *outFov) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::CameraEntry *entry = world->camera_manager().active_camera();
+  if (entry == nullptr) {
+    return false;
+  }
+  *outPosX = entry->position.x;
+  *outPosY = entry->position.y;
+  *outPosZ = entry->position.z;
+  *outTgtX = entry->target.x;
+  *outTgtY = entry->target.y;
+  *outTgtZ = entry->target.z;
+  *outFov = entry->fovRadians;
+  return true;
+}
+
+bool scripting_camera_shake(runtime::World *world, float amplitude,
+                            float frequency, float duration,
+                            float decay) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  return world->camera_manager().add_shake(amplitude, frequency, duration,
+                                           decay);
+}
+
 void scripting_set_gravity(runtime::World *world, float x, float y,
                            float z) noexcept {
   if (world == nullptr) {
@@ -392,6 +446,10 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_set_camera_target,
     &scripting_set_camera_up,
     &scripting_set_camera_fov,
+    &scripting_push_camera,
+    &scripting_pop_camera,
+    &scripting_get_active_camera,
+    &scripting_camera_shake,
     &scripting_get_current_phase,
     &scripting_get_entity_index,
     &scripting_get_transform_count,
