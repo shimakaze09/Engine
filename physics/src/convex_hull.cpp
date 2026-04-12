@@ -351,7 +351,6 @@ bool do_simplex_line(Simplex &s, math::Vec3 &dir) noexcept {
     // Origin is between A and B or beyond B.
     dir = math::cross(math::cross(ab, ao), ab);
   } else {
-    s.pts[0] = s.pts[0];
     s.size = 1;
     dir = ao;
   }
@@ -369,7 +368,6 @@ bool do_simplex_triangle(Simplex &s, math::Vec3 &dir) noexcept {
 
   if (math::dot(math::cross(abc, ac), ao) > 0.0F) {
     if (math::dot(ac, ao) > 0.0F) {
-      s.pts[0] = s.pts[0];
       s.pts[1] = s.pts[2];
       s.size = 2;
       dir = math::cross(math::cross(ac, ao), ac);
@@ -411,9 +409,6 @@ bool do_simplex_tetrahedron(Simplex &s, math::Vec3 &dir) noexcept {
   const math::Vec3 adb = math::cross(ad, ab);
 
   if (math::dot(abc, ao) > 0.0F) {
-    s.pts[0] = s.pts[0];
-    s.pts[1] = s.pts[1];
-    s.pts[2] = s.pts[2];
     s.size = 3;
     return do_simplex_triangle(s, dir);
   }
