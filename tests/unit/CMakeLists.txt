@@ -437,3 +437,19 @@ add_test(
     NAME engine_unit_entity_pool
     COMMAND engine_unit_entity_pool
 )
+
+add_executable(engine_unit_service_locator
+    service_locator_test.cpp
+)
+
+target_compile_features(engine_unit_service_locator PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_service_locator
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_service_locator
+    COMMAND engine_unit_service_locator
+)

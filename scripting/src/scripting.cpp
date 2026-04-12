@@ -15,8 +15,12 @@ extern "C" {
 #include "engine/core/console.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
+#include "engine/core/service_locator.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/entity_pool.h"
+#include "engine/runtime/game_mode.h"
+#include "engine/runtime/game_state.h"
+#include "engine/runtime/player_controller.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -197,6 +201,12 @@ bool g_godModeEnabled = false;
 bool g_noclipEnabled = false;
 constexpr std::size_t kMaxPlayerControllers = 4U;
 std::uint32_t g_playerControllerEntities[kMaxPlayerControllers]{};
+
+// Persistent cross-scene game state (survives World resets).
+runtime::GameState g_persistentGameState{};
+
+// Player controllers (survive brief World transitions).
+runtime::PlayerControllerArray g_playerControllers{};
 
 void refresh_lua_hook() noexcept;
 void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept;
@@ -1310,13 +1320,22 @@ int lua_engine_set_game_mode(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  // Write to both legacy string and World's GameMode struct.
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
+  if (g_world != nullptr) {
+    std::snprintf(g_world->game_mode().name,
+                  runtime::GameMode::kMaxNameLength, "%s", name);
+  }
   lua_pushboolean(state, 1);
   return 1;
 }
 
 int lua_engine_get_game_mode(lua_State *state) noexcept {
-  lua_pushstring(state, g_gameMode);
+  if (g_world != nullptr) {
+    lua_pushstring(state, g_world->game_mode().name);
+  } else {
+    lua_pushstring(state, g_gameMode);
+  }
   return 1;
 }
 
@@ -1354,6 +1373,9 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
 
   g_playerControllerEntities[static_cast<std::size_t>(player)] =
       static_cast<std::uint32_t>(entityIndex);
+  g_playerControllers.set_controlled_entity(
+      static_cast<std::uint8_t>(player),
+      static_cast<std::uint32_t>(entityIndex));
   lua_pushboolean(state, 1);
   return 1;
 }
@@ -1381,10 +1403,167 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
     return 1;
   }
 
+  const auto idx = static_cast<std::uint8_t>(player);
   lua_pushinteger(
       state, static_cast<lua_Integer>(
-                 g_playerControllerEntities[static_cast<std::size_t>(player)]));
+                 g_playerControllers.get_controlled_entity(idx)));
   return 1;
+}
+
+// --- Game Mode state transitions ---
+
+int lua_engine_game_mode_start(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state, g_world->game_mode().start() ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_game_mode_pause(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state, g_world->game_mode().pause() ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_game_mode_end(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state, g_world->game_mode().end() ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_game_mode_state(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushstring(state, "none");
+    return 1;
+  }
+  using S = runtime::GameMode::State;
+  switch (g_world->game_mode().state) {
+  case S::WaitingToStart:
+    lua_pushstring(state, "waiting_to_start");
+    break;
+  case S::InProgress:
+    lua_pushstring(state, "in_progress");
+    break;
+  case S::Paused:
+    lua_pushstring(state, "paused");
+    break;
+  case S::Ended:
+    lua_pushstring(state, "ended");
+    break;
+  }
+  return 1;
+}
+
+int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const char *key = lua_tostring(state, 1);
+  const char *value = lua_tostring(state, 2);
+  if (key == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state,
+                  g_world->game_mode().set_rule(key, value) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushnil(state);
+    return 1;
+  }
+  const char *key = lua_tostring(state, 1);
+  const char *value = g_world->game_mode().get_rule(key);
+  if (value != nullptr) {
+    lua_pushstring(state, value);
+  } else {
+    lua_pushnil(state);
+  }
+  return 1;
+}
+
+int lua_engine_game_mode_max_players(lua_State *state) noexcept {
+  if (g_world == nullptr) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
+  if (lua_gettop(state) >= 1 && lua_isnumber(state, 1)) {
+    const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
+    g_world->game_mode().maxPlayers = n;
+  }
+  lua_pushinteger(
+      state, static_cast<lua_Integer>(g_world->game_mode().maxPlayers));
+  return 1;
+}
+
+// --- Persistent GameState ---
+
+int lua_engine_game_state_set_number(lua_State *state) noexcept {
+  const char *key = lua_tostring(state, 1);
+  if ((key == nullptr) || !lua_isnumber(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state,
+                  g_persistentGameState.set_number(
+                      key, static_cast<float>(lua_tonumber(state, 2)))
+                      ? 1
+                      : 0);
+  return 1;
+}
+
+int lua_engine_game_state_get_number(lua_State *state) noexcept {
+  const char *key = lua_tostring(state, 1);
+  lua_pushnumber(
+      state,
+      static_cast<lua_Number>(g_persistentGameState.get_number(key)));
+  return 1;
+}
+
+int lua_engine_game_state_set_string(lua_State *state) noexcept {
+  const char *key = lua_tostring(state, 1);
+  const char *value = lua_tostring(state, 2);
+  if (key == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state,
+                  g_persistentGameState.set_string(key, value) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_game_state_get_string(lua_State *state) noexcept {
+  const char *key = lua_tostring(state, 1);
+  const char *value = g_persistentGameState.get_string(key);
+  if (value != nullptr) {
+    lua_pushstring(state, value);
+  } else {
+    lua_pushnil(state);
+  }
+  return 1;
+}
+
+int lua_engine_game_state_has(lua_State *state) noexcept {
+  const char *key = lua_tostring(state, 1);
+  lua_pushboolean(state, g_persistentGameState.has(key) ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_game_state_clear(lua_State *state) noexcept {
+  static_cast<void>(state);
+  g_persistentGameState.clear();
+  return 0;
 }
 
 int lua_engine_profiler_enable(lua_State *state) noexcept {
@@ -2981,6 +3160,36 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_get_player_controller);
   lua_setfield(state, -2, "get_player_controller");
 
+  // Game mode state transitions and rules.
+  lua_pushcfunction(state, &lua_engine_game_mode_start);
+  lua_setfield(state, -2, "game_mode_start");
+  lua_pushcfunction(state, &lua_engine_game_mode_pause);
+  lua_setfield(state, -2, "game_mode_pause");
+  lua_pushcfunction(state, &lua_engine_game_mode_end);
+  lua_setfield(state, -2, "game_mode_end");
+  lua_pushcfunction(state, &lua_engine_game_mode_state);
+  lua_setfield(state, -2, "game_mode_state");
+  lua_pushcfunction(state, &lua_engine_game_mode_set_rule);
+  lua_setfield(state, -2, "game_mode_set_rule");
+  lua_pushcfunction(state, &lua_engine_game_mode_get_rule);
+  lua_setfield(state, -2, "game_mode_get_rule");
+  lua_pushcfunction(state, &lua_engine_game_mode_max_players);
+  lua_setfield(state, -2, "game_mode_max_players");
+
+  // Persistent game state (survives scene transitions).
+  lua_pushcfunction(state, &lua_engine_game_state_set_number);
+  lua_setfield(state, -2, "game_state_set_number");
+  lua_pushcfunction(state, &lua_engine_game_state_get_number);
+  lua_setfield(state, -2, "game_state_get_number");
+  lua_pushcfunction(state, &lua_engine_game_state_set_string);
+  lua_setfield(state, -2, "game_state_set_string");
+  lua_pushcfunction(state, &lua_engine_game_state_get_string);
+  lua_setfield(state, -2, "game_state_get_string");
+  lua_pushcfunction(state, &lua_engine_game_state_has);
+  lua_setfield(state, -2, "game_state_has");
+  lua_pushcfunction(state, &lua_engine_game_state_clear);
+  lua_setfield(state, -2, "game_state_clear");
+
   lua_pushcfunction(state, &lua_engine_is_god_mode);
   lua_setfield(state, -2, "is_god_mode");
   lua_pushcfunction(state, &lua_engine_is_noclip);
@@ -3342,6 +3551,10 @@ void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
       if (g_playerControllerEntities[i] == entity.index) {
         return;
       }
+      if (g_playerControllers.get_controlled_entity(
+              static_cast<std::uint8_t>(i)) == entity.index) {
+        return;
+      }
     }
     g_services->destroy_entity_op(g_world, entity.index);
     ++destroyed;
@@ -3461,12 +3674,21 @@ void shutdown_scripting() noexcept {
   for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
     g_playerControllerEntities[i] = 0U;
   }
+  g_playerControllers.reset();
+  // Note: g_persistentGameState is NOT cleared here — it persists across
+  // scene resets. The GameMode is reset via World's own reset path.
 }
 
-void bind_runtime_world(runtime::World *world) noexcept { g_world = world; }
+void bind_runtime_world(runtime::World *world) noexcept {
+  g_world = world;
+  // Also register/update in the global service locator.
+  core::global_service_locator().register_service<runtime::World>(world);
+}
 
 void bind_runtime_services(const RuntimeServices *services) noexcept {
   g_services = services;
+  core::global_service_locator().register_service<RuntimeServices>(
+      const_cast<RuntimeServices *>(services));
 }
 
 void set_default_mesh_asset_id(std::uint32_t assetId) noexcept {

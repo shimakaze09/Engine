@@ -134,3 +134,20 @@ add_test(
     COMMAND engine_integration_lua_lifecycle
 )
 set_tests_properties(engine_integration_lua_lifecycle PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_game_mode
+    game_mode_test.cpp
+)
+
+target_compile_features(engine_integration_game_mode PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_game_mode
+    PRIVATE
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_game_mode
+    COMMAND engine_integration_game_mode
+)
+set_tests_properties(engine_integration_game_mode PROPERTIES LABELS "integration")

@@ -1,6 +1,7 @@
 #include "engine/runtime/scripting_bridge.h"
 
 #include "engine/audio/audio.h"
+#include "engine/core/service_locator.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/camera.h"
@@ -438,6 +439,12 @@ namespace runtime {
 void bind_scripting_runtime(World *world) noexcept {
   scripting::bind_runtime_world(world);
   scripting::bind_runtime_services(&kScriptingRuntimeServices);
+  // Register in the global service locator so subsystems can discover services
+  // without direct global pointers.
+  auto &loc = core::global_service_locator();
+  loc.register_service<World>(world);
+  loc.register_service<scripting::RuntimeServices>(
+      const_cast<scripting::RuntimeServices *>(&kScriptingRuntimeServices));
 }
 
 } // namespace runtime

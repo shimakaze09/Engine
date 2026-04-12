@@ -14,6 +14,7 @@ add_library(engine_core STATIC
     src/platform.cpp
     src/profiler.cpp
     src/reflect.cpp
+    src/service_locator.cpp
     src/vfs.cpp
 )
 

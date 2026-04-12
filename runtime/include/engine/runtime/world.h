@@ -11,6 +11,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/runtime/game_mode.h"
 
 namespace engine::runtime {
 
@@ -275,6 +276,10 @@ public:
   void begin_render_phase() noexcept;
   void end_frame_phase() noexcept;
   WorldPhase current_phase() const noexcept;
+
+  // Game mode (owned by World — reset on scene load). -------------------
+  GameMode &game_mode() noexcept { return m_gameMode; }
+  const GameMode &game_mode() const noexcept { return m_gameMode; }
 
   // Lifecycle phase helpers ------------------------------------------------
   // BeginPlay: transition Input → BeginPlay. Iterate new entities via
@@ -645,6 +650,7 @@ private:
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
   PhysicsContext m_physicsContext{};
+  GameMode m_gameMode{};
 
   std::size_t m_readStateIndex = 0U;
   std::size_t m_writeStateIndex = 1U;

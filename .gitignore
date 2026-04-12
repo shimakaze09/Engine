@@ -484,6 +484,7 @@ FodyWeavers.xsd
 !.github/workflows/*.yml
 .vscode
 [Bb]uild
+build-*/
 production_*.md
 
 ### VisualStudio Patch ###

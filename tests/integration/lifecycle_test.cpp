@@ -5,7 +5,6 @@
 #include <memory>
 #include <new>
 
-
 // Integration test for P1-M2-A1d:
 // Create entity → verify BeginPlay fires once → tick 3 frames verifying Tick
 // fires each → destroy → verify EndPlay fires once.
@@ -78,7 +77,8 @@ bool test_lifecycle_begin_play() {
 
 bool test_lifecycle_tick() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
 
   const Entity e1 = world->create_entity();
   const Transform t{};
@@ -112,7 +112,8 @@ bool test_lifecycle_tick() {
 
 bool test_lifecycle_end_play() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
 
   const Entity e1 = world->create_entity();
   const Transform t{};
@@ -172,7 +173,8 @@ bool test_lifecycle_end_play() {
 
 bool test_full_lifecycle_sequence() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
 
   // Create entity with components.
   const Entity e1 = world->create_entity();
@@ -207,8 +209,8 @@ bool test_full_lifecycle_sequence() {
     world->end_begin_play_phase();
 
     if (extraBeginPlay != 0U) {
-      std::fprintf(stderr,
-                   "FAIL: BeginPlay should not fire again on tick %d\n", step);
+      std::fprintf(stderr, "FAIL: BeginPlay should not fire again on tick %d\n",
+                   step);
       return false;
     }
 

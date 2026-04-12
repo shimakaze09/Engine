@@ -40,7 +40,8 @@ bool test_pool_init() {
 
 bool test_pool_acquire_release() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
   EntityPool pool;
   pool.init(world.get(), 5U);
 
@@ -82,7 +83,8 @@ bool test_pool_acquire_release() {
 
 bool test_pool_handle_reuse() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
   EntityPool pool;
   constexpr std::size_t kCount = 100U;
   pool.init(world.get(), kCount);
@@ -140,7 +142,8 @@ bool test_pool_handle_reuse() {
 
 bool test_pool_double_init() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
   EntityPool pool;
   pool.init(world.get(), 5U);
 
@@ -154,7 +157,8 @@ bool test_pool_double_init() {
 
 bool test_pool_release_unknown() {
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if (!world) return false;
+  if (!world)
+    return false;
   EntityPool pool;
   pool.init(world.get(), 2U);
 
