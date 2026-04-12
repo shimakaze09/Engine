@@ -453,3 +453,37 @@ add_test(
     NAME engine_unit_service_locator
     COMMAND engine_unit_service_locator
 )
+
+# ---- P1-M2-C: Input System ----
+
+add_executable(engine_unit_input_map
+    input_map_test.cpp
+)
+
+target_compile_features(engine_unit_input_map PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_input_map
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_input_map
+    COMMAND engine_unit_input_map
+)
+
+add_executable(engine_unit_touch_input
+    touch_input_test.cpp
+)
+
+target_compile_features(engine_unit_touch_input PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_touch_input
+    PRIVATE
+    engine_core
+)
+
+add_test(
+    NAME engine_unit_touch_input
+    COMMAND engine_unit_touch_input
+)

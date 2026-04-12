@@ -1,4 +1,6 @@
 #include "engine/core/input.h"
+#include "engine/core/input_map.h"
+#include "engine/core/touch_input.h"
 
 #ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
@@ -135,6 +137,8 @@ void begin_input_frame() noexcept {
   g_mouse.deltaX = 0;
   g_mouse.deltaY = 0;
   g_mouse.scrollDelta = 0;
+  input_mapper_begin_frame();
+  touch_begin_frame();
 }
 
 void input_process_event(const void *nativeEvent) noexcept {
@@ -214,10 +218,16 @@ void input_process_event(const void *nativeEvent) noexcept {
   default:
     break;
   }
+
+  // Forward to InputMapper and TouchInput subsystems.
+  input_mapper_process_event(nativeEvent);
+  touch_process_event(nativeEvent);
 }
 
 void end_input_frame() noexcept {
   // Keyboard and mouse state is maintained per-event; no sync needed.
+  input_mapper_end_frame();
+  touch_end_frame();
 }
 
 bool is_key_down(KeyScancode scancode) noexcept {

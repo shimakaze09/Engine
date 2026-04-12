@@ -7,6 +7,7 @@ add_library(engine_core STATIC
     src/mem_tracker.cpp
     src/event_bus.cpp
     src/input.cpp
+    src/input_map.cpp
     src/json.cpp
     src/job_system.cpp
     src/linear_allocator.cpp
@@ -15,6 +16,7 @@ add_library(engine_core STATIC
     src/profiler.cpp
     src/reflect.cpp
     src/service_locator.cpp
+    src/touch_input.cpp
     src/vfs.cpp
 )
 

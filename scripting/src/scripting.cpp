@@ -14,8 +14,10 @@ extern "C" {
 
 #include "engine/core/console.h"
 #include "engine/core/input.h"
+#include "engine/core/input_map.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
+#include "engine/core/touch_input.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/entity_pool.h"
 #include "engine/runtime/game_mode.h"
@@ -1312,6 +1314,323 @@ int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
   lua_pushnumber(
       state, static_cast<lua_Number>(core::gamepad_axis_value(axis, deadzone)));
   return 1;
+}
+
+// ---------------------------------------------------------------------------
+// InputMapper bindings (P1-M2-C)
+// ---------------------------------------------------------------------------
+
+// engine.add_input_action(name, {bindings...})
+// Each binding: {type=0..3, code=N [, axisThreshold=0.5, axisScale=1]}
+int lua_engine_add_input_action(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_istable(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const char *name = lua_tostring(state, 1);
+  core::InputBinding bindings[core::kMaxBindingsPerAction]{};
+  std::uint32_t count = 0U;
+  const int tableLen = static_cast<int>(lua_rawlen(state, 2));
+  for (int i = 1; i <= tableLen && count < core::kMaxBindingsPerAction; ++i) {
+    lua_rawgeti(state, 2, i);
+    if (lua_istable(state, -1)) {
+      lua_getfield(state, -1, "type");
+      bindings[count].type =
+          static_cast<core::InputBindingType>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "code");
+      bindings[count].code = static_cast<int>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "axis_threshold");
+      if (lua_isnumber(state, -1)) {
+        bindings[count].axisThreshold =
+            static_cast<float>(lua_tonumber(state, -1));
+      }
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "axis_scale");
+      if (lua_isnumber(state, -1)) {
+        bindings[count].axisScale =
+            static_cast<float>(lua_tonumber(state, -1));
+      }
+      lua_pop(state, 1);
+      ++count;
+    }
+    lua_pop(state, 1);
+  }
+  const bool ok = core::add_input_action(name, bindings, count);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.add_input_axis(name, {sources...})
+int lua_engine_add_input_axis(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_istable(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const char *name = lua_tostring(state, 1);
+  core::InputAxisSource sources[core::kMaxSourcesPerAxis]{};
+  std::uint32_t count = 0U;
+  const int tableLen = static_cast<int>(lua_rawlen(state, 2));
+  for (int i = 1; i <= tableLen && count < core::kMaxSourcesPerAxis; ++i) {
+    lua_rawgeti(state, 2, i);
+    if (lua_istable(state, -1)) {
+      lua_getfield(state, -1, "type");
+      sources[count].type =
+          static_cast<core::AxisSourceType>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "negative_key");
+      sources[count].negativeKey = static_cast<int>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "positive_key");
+      sources[count].positiveKey = static_cast<int>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "axis_index");
+      sources[count].axisIndex = static_cast<int>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "scale");
+      if (lua_isnumber(state, -1)) {
+        sources[count].scale = static_cast<float>(lua_tonumber(state, -1));
+      }
+      lua_pop(state, 1);
+      lua_getfield(state, -1, "dead_zone");
+      if (lua_isnumber(state, -1)) {
+        sources[count].deadZone = static_cast<float>(lua_tonumber(state, -1));
+      }
+      lua_pop(state, 1);
+      ++count;
+    }
+    lua_pop(state, 1);
+  }
+  const bool ok = core::add_input_axis(name, sources, count);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.is_mapped_action_down(name)
+int lua_engine_is_mapped_action_down(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushboolean(state, core::is_mapped_action_down(name) ? 1 : 0);
+  return 1;
+}
+
+// engine.is_mapped_action_pressed(name)
+int lua_engine_is_mapped_action_pressed(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushboolean(state, core::is_mapped_action_pressed(name) ? 1 : 0);
+  return 1;
+}
+
+// engine.mapped_axis_value(name)
+int lua_engine_mapped_axis_value(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  lua_pushnumber(state,
+                 static_cast<lua_Number>(core::mapped_axis_value(name)));
+  return 1;
+}
+
+// engine.rebind_action(actionName, bindingIndex, {type=N, code=N})
+int lua_engine_rebind_action(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
+      !lua_istable(state, 3)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const char *name = lua_tostring(state, 1);
+  const auto bindingIdx = static_cast<std::uint32_t>(lua_tointeger(state, 2));
+  core::InputBinding binding{};
+  lua_getfield(state, 3, "type");
+  binding.type = static_cast<core::InputBindingType>(lua_tointeger(state, -1));
+  lua_pop(state, 1);
+  lua_getfield(state, 3, "code");
+  binding.code = static_cast<int>(lua_tointeger(state, -1));
+  lua_pop(state, 1);
+  lua_getfield(state, 3, "axis_threshold");
+  if (lua_isnumber(state, -1)) {
+    binding.axisThreshold = static_cast<float>(lua_tonumber(state, -1));
+  }
+  lua_pop(state, 1);
+  lua_getfield(state, 3, "axis_scale");
+  if (lua_isnumber(state, -1)) {
+    binding.axisScale = static_cast<float>(lua_tonumber(state, -1));
+  }
+  lua_pop(state, 1);
+  const bool ok = core::rebind_action(name, bindingIdx, binding);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.save_input_config(path)
+int lua_engine_save_input_config(lua_State *state) noexcept {
+  const char *path = lua_tostring(state, 1);
+  if (path == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state, core::save_input_bindings(path) ? 1 : 0);
+  return 1;
+}
+
+// engine.load_input_config(path)
+int lua_engine_load_input_config(lua_State *state) noexcept {
+  const char *path = lua_tostring(state, 1);
+  if (path == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state, core::load_input_bindings(path) ? 1 : 0);
+  return 1;
+}
+
+// ---------------------------------------------------------------------------
+// Touch input bindings (P1-M2-C3e)
+// ---------------------------------------------------------------------------
+
+// Lua callback registry refs for touch/gesture.
+static lua_State *g_touchLuaState = nullptr;
+static int g_touchCallbackRef = LUA_NOREF;
+
+static void lua_touch_handler(const core::TouchEvent &event,
+                              void * /*userData*/) noexcept {
+  if ((g_touchLuaState == nullptr) || (g_touchCallbackRef == LUA_NOREF)) {
+    return;
+  }
+  lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
+  if (!lua_isfunction(g_touchLuaState, -1)) {
+    lua_pop(g_touchLuaState, 1);
+    return;
+  }
+  lua_newtable(g_touchLuaState);
+  lua_pushinteger(g_touchLuaState,
+                  static_cast<lua_Integer>(event.touchId));
+  lua_setfield(g_touchLuaState, -2, "id");
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.x));
+  lua_setfield(g_touchLuaState, -2, "x");
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.y));
+  lua_setfield(g_touchLuaState, -2, "y");
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.pressure));
+  lua_setfield(g_touchLuaState, -2, "pressure");
+  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.phase));
+  lua_setfield(g_touchLuaState, -2, "phase");
+  if (lua_pcall(g_touchLuaState, 1, 0, 0) != LUA_OK) {
+    const char *err = lua_tostring(g_touchLuaState, -1);
+    core::log_message(core::LogLevel::Error, "Scripting",
+                      err ? err : "touch callback error");
+    lua_pop(g_touchLuaState, 1);
+  }
+}
+
+// engine.on_touch(callback)
+int lua_engine_on_touch(lua_State *state) noexcept {
+  if (!lua_isfunction(state, 1)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  // Release old ref if any.
+  if ((g_touchLuaState != nullptr) && (g_touchCallbackRef != LUA_NOREF)) {
+    luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
+  }
+  g_touchLuaState = state;
+  lua_pushvalue(state, 1);
+  g_touchCallbackRef = luaL_ref(state, LUA_REGISTRYINDEX);
+  core::register_touch_callback(&lua_touch_handler, nullptr);
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+// Per-gesture-type Lua callback refs.
+static int g_gestureCallbackRefs[4] = {LUA_NOREF, LUA_NOREF, LUA_NOREF,
+                                       LUA_NOREF};
+
+static void lua_gesture_handler(const core::GestureEvent &event,
+                                void * /*userData*/) noexcept {
+  if (g_touchLuaState == nullptr) {
+    return;
+  }
+  const int idx = static_cast<int>(event.type);
+  if ((idx < 0) || (idx >= 4) ||
+      (g_gestureCallbackRefs[idx] == LUA_NOREF)) {
+    return;
+  }
+  lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX,
+              g_gestureCallbackRefs[idx]);
+  if (!lua_isfunction(g_touchLuaState, -1)) {
+    lua_pop(g_touchLuaState, 1);
+    return;
+  }
+  lua_newtable(g_touchLuaState);
+  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.type));
+  lua_setfield(g_touchLuaState, -2, "type");
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.tapX));
+  lua_setfield(g_touchLuaState, -2, "tap_x");
+  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.tapY));
+  lua_setfield(g_touchLuaState, -2, "tap_y");
+  lua_pushinteger(g_touchLuaState,
+                  static_cast<lua_Integer>(event.tapCount));
+  lua_setfield(g_touchLuaState, -2, "tap_count");
+  lua_pushinteger(g_touchLuaState,
+                  static_cast<lua_Integer>(event.swipeDir));
+  lua_setfield(g_touchLuaState, -2, "swipe_dir");
+  lua_pushnumber(g_touchLuaState,
+                 static_cast<lua_Number>(event.swipeVelocity));
+  lua_setfield(g_touchLuaState, -2, "swipe_velocity");
+  lua_pushnumber(g_touchLuaState,
+                 static_cast<lua_Number>(event.pinchScale));
+  lua_setfield(g_touchLuaState, -2, "pinch_scale");
+  lua_pushnumber(g_touchLuaState,
+                 static_cast<lua_Number>(event.rotationRadians));
+  lua_setfield(g_touchLuaState, -2, "rotation");
+  if (lua_pcall(g_touchLuaState, 1, 0, 0) != LUA_OK) {
+    const char *err = lua_tostring(g_touchLuaState, -1);
+    core::log_message(core::LogLevel::Error, "Scripting",
+                      err ? err : "gesture callback error");
+    lua_pop(g_touchLuaState, 1);
+  }
+}
+
+// engine.on_gesture(type_string, callback)
+// type_string: "tap", "swipe", "pinch", "rotate"
+int lua_engine_on_gesture(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_isfunction(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const char *typeStr = lua_tostring(state, 1);
+  int idx = -1;
+  if (std::strcmp(typeStr, "tap") == 0) {
+    idx = 0;
+  } else if (std::strcmp(typeStr, "swipe") == 0) {
+    idx = 1;
+  } else if (std::strcmp(typeStr, "pinch") == 0) {
+    idx = 2;
+  } else if (std::strcmp(typeStr, "rotate") == 0) {
+    idx = 3;
+  }
+  if (idx < 0) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  // Release old ref.
+  if ((g_touchLuaState != nullptr) &&
+      (g_gestureCallbackRefs[idx] != LUA_NOREF)) {
+    luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX,
+               g_gestureCallbackRefs[idx]);
+  }
+  g_touchLuaState = state;
+  lua_pushvalue(state, 2);
+  g_gestureCallbackRefs[idx] = luaL_ref(state, LUA_REGISTRYINDEX);
+  core::register_gesture_callback(static_cast<core::GestureType>(idx),
+                                  &lua_gesture_handler, nullptr);
+  lua_pushboolean(state, 1);
+  return 1;
+}
+
+// engine.set_touch_mouse_emulation(enabled)
+int lua_engine_set_touch_mouse_emulation(lua_State *state) noexcept {
+  const bool enabled = lua_toboolean(state, 1) != 0;
+  core::set_touch_mouse_emulation(enabled);
+  return 0;
 }
 
 int lua_engine_set_game_mode(lua_State *state) noexcept {
@@ -3146,6 +3465,32 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "is_gamepad_button_down");
   lua_pushcfunction(state, &lua_engine_gamepad_axis_value);
   lua_setfield(state, -2, "gamepad_axis_value");
+
+  // InputMapper bindings (P1-M2-C).
+  lua_pushcfunction(state, &lua_engine_add_input_action);
+  lua_setfield(state, -2, "add_input_action");
+  lua_pushcfunction(state, &lua_engine_add_input_axis);
+  lua_setfield(state, -2, "add_input_axis");
+  lua_pushcfunction(state, &lua_engine_is_mapped_action_down);
+  lua_setfield(state, -2, "is_mapped_action_down");
+  lua_pushcfunction(state, &lua_engine_is_mapped_action_pressed);
+  lua_setfield(state, -2, "is_mapped_action_pressed");
+  lua_pushcfunction(state, &lua_engine_mapped_axis_value);
+  lua_setfield(state, -2, "mapped_axis_value");
+  lua_pushcfunction(state, &lua_engine_rebind_action);
+  lua_setfield(state, -2, "rebind_action");
+  lua_pushcfunction(state, &lua_engine_save_input_config);
+  lua_setfield(state, -2, "save_input_config");
+  lua_pushcfunction(state, &lua_engine_load_input_config);
+  lua_setfield(state, -2, "load_input_config");
+
+  // Touch/gesture bindings (P1-M2-C3e).
+  lua_pushcfunction(state, &lua_engine_on_touch);
+  lua_setfield(state, -2, "on_touch");
+  lua_pushcfunction(state, &lua_engine_on_gesture);
+  lua_setfield(state, -2, "on_gesture");
+  lua_pushcfunction(state, &lua_engine_set_touch_mouse_emulation);
+  lua_setfield(state, -2, "set_touch_mouse_emulation");
 
   lua_pushcfunction(state, &lua_engine_set_game_mode);
   lua_setfield(state, -2, "set_game_mode");
