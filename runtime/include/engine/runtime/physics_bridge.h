@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "engine/math/vec3.h"
+#include "engine/physics/collider.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/world.h"
 
@@ -39,5 +40,13 @@ void remove_joint(World &world, physics::JointId id) noexcept;
 
 void wake_body(World &world, Entity entity) noexcept;
 bool is_sleeping(const World &world, Entity entity) noexcept;
+
+bool set_convex_hull_data(Entity entity,
+                          const physics::ConvexHullData &hull) noexcept;
+const physics::ConvexHullData *get_convex_hull_data(Entity entity) noexcept;
+
+bool set_heightfield_data(Entity entity,
+                          const physics::HeightfieldData &hf) noexcept;
+const physics::HeightfieldData *get_heightfield_data(Entity entity) noexcept;
 
 } // namespace engine::runtime

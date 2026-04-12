@@ -6,6 +6,8 @@
 
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/collider.h"
+#include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
@@ -1235,9 +1237,9 @@ int check_bridge_phase_misuse_rejected() {
 
 int check_multi_world_physics_isolation() {
   std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
-                                                      engine::runtime::World());
+                                                     engine::runtime::World());
   std::unique_ptr<engine::runtime::World> worldB(new (std::nothrow)
-                                                      engine::runtime::World());
+                                                     engine::runtime::World());
   if ((worldA == nullptr) || (worldB == nullptr)) {
     return 190;
   }
@@ -1320,7 +1322,8 @@ int check_collision_bookkeeping_scale() {
     engine::runtime::Transform t{};
     t.position = engine::math::Vec3(static_cast<float>(i % 6U) * 0.1F,
                                     static_cast<float>(i / 6U) * 0.1F, 0.0F);
-    if (!world->add_transform(entity, t) || !world->add_collider(entity, collider) ||
+    if (!world->add_transform(entity, t) ||
+        !world->add_collider(entity, collider) ||
         !world->add_rigid_body(entity, body)) {
       return 202;
     }
@@ -1346,12 +1349,668 @@ int check_collision_bookkeeping_scale() {
   }
 
   const std::size_t maxUniquePairs = (kBodies * (kBodies - 1U)) / 2U;
-  if ((g_dispatchedPairCount == 0U) || (g_dispatchedPairCount > maxUniquePairs)) {
+  if ((g_dispatchedPairCount == 0U) ||
+      (g_dispatchedPairCount > maxUniquePairs)) {
     return 204;
   }
 
   if (elapsedMs > 250) {
     return 205;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Capsule-vs-AABB collision: two overlapping entities should be separated.
+// ---------------------------------------------------------------------------
+int check_capsule_vs_aabb_collision() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 300;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity cap = world->create_entity();
+  const engine::runtime::Entity box = world->create_entity();
+  if ((cap == engine::runtime::kInvalidEntity) ||
+      (box == engine::runtime::kInvalidEntity)) {
+    return 301;
+  }
+
+  engine::runtime::Transform tCap{};
+  tCap.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform tBox{};
+  tBox.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider capCol{};
+  capCol.shape = engine::runtime::ColliderShape::Capsule;
+  capCol.halfExtents = engine::math::Vec3(0.3F, 0.5F, 0.3F); // r=0.3, hh=0.5
+
+  engine::runtime::Collider boxCol{};
+  boxCol.shape = engine::runtime::ColliderShape::AABB;
+  boxCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  if (!world->add_transform(cap, tCap) || !world->add_transform(box, tBox)) {
+    return 302;
+  }
+  if (!world->add_collider(cap, capCol) || !world->add_collider(box, boxCol)) {
+    return 303;
+  }
+  if (!world->add_rigid_body(cap, body) || !world->add_rigid_body(box, body)) {
+    return 304;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F)) {
+    world->end_frame_phase();
+    return 305;
+  }
+  if (!engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 306;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform outCap{};
+  engine::runtime::Transform outBox{};
+  if (!world->get_transform(cap, &outCap) ||
+      !world->get_transform(box, &outBox)) {
+    return 307;
+  }
+
+  // They should have been pushed apart.
+  const float separation = std::fabs(outBox.position.x - outCap.position.x) +
+                           std::fabs(outBox.position.y - outCap.position.y) +
+                           std::fabs(outBox.position.z - outCap.position.z);
+  if (separation < 0.1F) {
+    return 308;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Capsule-vs-Sphere collision: overlapping capsule and sphere are separated.
+// ---------------------------------------------------------------------------
+int check_capsule_vs_sphere_collision() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 310;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity cap = world->create_entity();
+  const engine::runtime::Entity sph = world->create_entity();
+  if ((cap == engine::runtime::kInvalidEntity) ||
+      (sph == engine::runtime::kInvalidEntity)) {
+    return 311;
+  }
+
+  engine::runtime::Transform tCap{};
+  tCap.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform tSph{};
+  tSph.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider capCol{};
+  capCol.shape = engine::runtime::ColliderShape::Capsule;
+  capCol.halfExtents = engine::math::Vec3(0.3F, 0.5F, 0.3F); // r=0.3, hh=0.5
+
+  engine::runtime::Collider sphCol{};
+  sphCol.shape = engine::runtime::ColliderShape::Sphere;
+  sphCol.halfExtents = engine::math::Vec3(0.4F, 0.4F, 0.4F); // r=0.4
+
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  if (!world->add_transform(cap, tCap) || !world->add_transform(sph, tSph)) {
+    return 312;
+  }
+  if (!world->add_collider(cap, capCol) || !world->add_collider(sph, sphCol)) {
+    return 313;
+  }
+  if (!world->add_rigid_body(cap, body) || !world->add_rigid_body(sph, body)) {
+    return 314;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F)) {
+    world->end_frame_phase();
+    return 315;
+  }
+  if (!engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 316;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform outCap{};
+  engine::runtime::Transform outSph{};
+  if (!world->get_transform(cap, &outCap) ||
+      !world->get_transform(sph, &outSph)) {
+    return 317;
+  }
+
+  // They should have been pushed apart.
+  const float dxCS = std::fabs(outSph.position.x - outCap.position.x) +
+                     std::fabs(outSph.position.y - outCap.position.y) +
+                     std::fabs(outSph.position.z - outCap.position.z);
+  if (dxCS < 0.1F) {
+    return 318;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Capsule-vs-Capsule collision: two overlapping capsules are separated.
+// ---------------------------------------------------------------------------
+int check_capsule_vs_capsule_collision() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 320;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity a = world->create_entity();
+  const engine::runtime::Entity b = world->create_entity();
+  if ((a == engine::runtime::kInvalidEntity) ||
+      (b == engine::runtime::kInvalidEntity)) {
+    return 321;
+  }
+
+  engine::runtime::Transform tA{};
+  tA.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform tB{};
+  tB.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider capCol{};
+  capCol.shape = engine::runtime::ColliderShape::Capsule;
+  capCol.halfExtents = engine::math::Vec3(0.3F, 0.5F, 0.3F); // r=0.3, hh=0.5
+
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  if (!world->add_transform(a, tA) || !world->add_transform(b, tB)) {
+    return 322;
+  }
+  if (!world->add_collider(a, capCol) || !world->add_collider(b, capCol)) {
+    return 323;
+  }
+  if (!world->add_rigid_body(a, body) || !world->add_rigid_body(b, body)) {
+    return 324;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F)) {
+    world->end_frame_phase();
+    return 325;
+  }
+  if (!engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 326;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform outA{};
+  engine::runtime::Transform outB{};
+  if (!world->get_transform(a, &outA) || !world->get_transform(b, &outB)) {
+    return 327;
+  }
+
+  // They should have been pushed apart.
+  const float dxCC = std::fabs(outB.position.x - outA.position.x) +
+                     std::fabs(outB.position.y - outA.position.y) +
+                     std::fabs(outB.position.z - outA.position.z);
+  if (dxCC < 0.1F) {
+    return 328;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Raycast hits a capsule.
+// ---------------------------------------------------------------------------
+int check_raycast_hits_capsule() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 330;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity cap = world->create_entity();
+  if (cap == engine::runtime::kInvalidEntity) {
+    return 331;
+  }
+
+  engine::runtime::Transform t{};
+  t.position = engine::math::Vec3(0.0F, 0.0F, 10.0F);
+  if (!world->add_transform(cap, t)) {
+    return 332;
+  }
+
+  engine::runtime::Collider col{};
+  col.shape = engine::runtime::ColliderShape::Capsule;
+  col.halfExtents = engine::math::Vec3(1.0F, 2.0F, 1.0F); // r=1, hh=2
+  if (!world->add_collider(cap, col)) {
+    return 333;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
+      *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      engine::math::Vec3(0.0F, 0.0F, 1.0F), 100.0F, &hit);
+  if (!found) {
+    return 334;
+  }
+  // Capsule at z=10 with radius 1 → near surface at z=9 (cylinder part).
+  if (std::fabs(hit.distance - 9.0F) > 0.15F) {
+    return 335;
+  }
+  // Normal should point toward ray origin: (0, 0, -1) approximately.
+  if (hit.normal.z > -0.9F) {
+    return 336;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Build convex hull from cube vertices.
+// ---------------------------------------------------------------------------
+int check_convex_hull_build() {
+  // Unit cube centered at origin: 8 vertices.
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, hull)) {
+    return 400;
+  }
+
+  // Cube should produce 6 planes (one per face) — or 12 triangulated faces.
+  // Quickhull triangulates, so we expect 12 triangle faces for a cube.
+  if (hull.planeCount < 6U || hull.planeCount > 12U) {
+    return 401;
+  }
+
+  // Should have 8 hull vertices.
+  if (hull.vertexCount != 8U) {
+    return 402;
+  }
+
+  // Local AABB half-extents should be ~(0.5, 0.5, 0.5).
+  if (std::fabs(hull.localHalfExtents.x - 0.5F) > 0.05F ||
+      std::fabs(hull.localHalfExtents.y - 0.5F) > 0.05F ||
+      std::fabs(hull.localHalfExtents.z - 0.5F) > 0.05F) {
+    return 403;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// ConvexHull vs AABB collision: overlapping are separated by physics.
+// ---------------------------------------------------------------------------
+int check_convex_hull_vs_aabb_collision() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 410;
+  }
+
+  // Build a unit-cube convex hull.
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, hull)) {
+    return 411;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity hullEnt = world->create_entity();
+  const engine::runtime::Entity boxEnt = world->create_entity();
+  if ((hullEnt == engine::runtime::kInvalidEntity) ||
+      (boxEnt == engine::runtime::kInvalidEntity)) {
+    return 412;
+  }
+
+  // Both at origin → overlapping.
+  engine::runtime::Transform tH{};
+  tH.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform tB{};
+  tB.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Collider hullCol{};
+  hullCol.shape = engine::runtime::ColliderShape::ConvexHull;
+  hullCol.halfExtents = hull.localHalfExtents;
+
+  engine::runtime::Collider boxCol{};
+  boxCol.shape = engine::runtime::ColliderShape::AABB;
+  boxCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  if (!world->add_transform(hullEnt, tH) || !world->add_transform(boxEnt, tB)) {
+    return 413;
+  }
+  if (!world->add_collider(hullEnt, hullCol) ||
+      !world->add_collider(boxEnt, boxCol)) {
+    return 414;
+  }
+  if (!world->add_rigid_body(hullEnt, body) ||
+      !world->add_rigid_body(boxEnt, body)) {
+    return 415;
+  }
+
+  // Assign hull data to the entity.
+  if (!engine::runtime::set_convex_hull_data(hullEnt, hull)) {
+    return 416;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F)) {
+    world->end_frame_phase();
+    return 417;
+  }
+  if (!engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 418;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform outH{};
+  engine::runtime::Transform outB{};
+  if (!world->get_transform(hullEnt, &outH) ||
+      !world->get_transform(boxEnt, &outB)) {
+    return 419;
+  }
+
+  // They should have been pushed apart.
+  const float separation = std::fabs(outB.position.x - outH.position.x) +
+                           std::fabs(outB.position.y - outH.position.y) +
+                           std::fabs(outB.position.z - outH.position.z);
+  if (separation < 0.1F) {
+    return 420;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Raycast hits a convex hull.
+// ---------------------------------------------------------------------------
+int check_raycast_hits_convex_hull() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 430;
+  }
+
+  // Build a unit cube hull.
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, hull)) {
+    return 431;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity ent = world->create_entity();
+  if (ent == engine::runtime::kInvalidEntity) {
+    return 432;
+  }
+
+  engine::runtime::Transform t{};
+  t.position = engine::math::Vec3(0.0F, 0.0F, 10.0F);
+  if (!world->add_transform(ent, t)) {
+    return 433;
+  }
+
+  engine::runtime::Collider col{};
+  col.shape = engine::runtime::ColliderShape::ConvexHull;
+  col.halfExtents = hull.localHalfExtents;
+  if (!world->add_collider(ent, col)) {
+    return 434;
+  }
+
+  if (!engine::runtime::set_convex_hull_data(ent, hull)) {
+    return 435;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
+      *world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      engine::math::Vec3(0.0F, 0.0F, 1.0F), 100.0F, &hit);
+  if (!found) {
+    return 436;
+  }
+  // Hull at z=10, half-extent 0.5 → near face at z=9.5.
+  if (std::fabs(hit.distance - 9.5F) > 0.15F) {
+    return 437;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Heightfield collision: sphere rests on flat heightfield terrain.
+// ---------------------------------------------------------------------------
+int check_heightfield_vs_sphere_collision() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 440;
+  }
+
+  // Build a flat heightfield at y=0 (all samples = 0).
+  engine::physics::HeightfieldData hf{};
+  hf.rows = 5U;
+  hf.columns = 5U;
+  hf.spacingX = 2.0F;
+  hf.spacingZ = 2.0F;
+  hf.minY = 0.0F;
+  hf.maxY = 0.0F;
+  // All heights default to 0.
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity terrain = world->create_entity();
+  const engine::runtime::Entity sphere = world->create_entity();
+  if ((terrain == engine::runtime::kInvalidEntity) ||
+      (sphere == engine::runtime::kInvalidEntity)) {
+    return 441;
+  }
+
+  // Terrain at origin.
+  engine::runtime::Transform tTerrain{};
+  tTerrain.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  // Sphere slightly below terrain surface (y=-0.3, radius=0.5 → bottom at
+  // -0.8).
+  engine::runtime::Transform tSphere{};
+  tSphere.position = engine::math::Vec3(0.0F, -0.3F, 0.0F);
+
+  // Heightfield collider: half extents cover the terrain footprint.
+  const float totalW = static_cast<float>(hf.columns - 1U) * hf.spacingX;
+  const float totalD = static_cast<float>(hf.rows - 1U) * hf.spacingZ;
+  engine::runtime::Collider terrainCol{};
+  terrainCol.shape = engine::runtime::ColliderShape::Heightfield;
+  terrainCol.halfExtents =
+      engine::math::Vec3(totalW * 0.5F, 1.0F, totalD * 0.5F);
+
+  engine::runtime::Collider sphCol{};
+  sphCol.shape = engine::runtime::ColliderShape::Sphere;
+  sphCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  // Terrain is static (no rigid body).
+  if (!world->add_transform(terrain, tTerrain) ||
+      !world->add_transform(sphere, tSphere)) {
+    return 442;
+  }
+  if (!world->add_collider(terrain, terrainCol) ||
+      !world->add_collider(sphere, sphCol)) {
+    return 443;
+  }
+  if (!world->add_rigid_body(sphere, body)) {
+    return 444;
+  }
+
+  if (!engine::runtime::set_heightfield_data(terrain, hf)) {
+    return 445;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F)) {
+    world->end_frame_phase();
+    return 446;
+  }
+  if (!engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 447;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform outSph{};
+  if (!world->get_transform(sphere, &outSph)) {
+    return 448;
+  }
+
+  // Sphere should have been pushed up.  Its center should be at least at
+  // y >= radius (0.5) minus some tolerance.
+  if (outSph.position.y < 0.3F) {
+    return 449;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Raycast hits a flat heightfield.
+// ---------------------------------------------------------------------------
+int check_raycast_hits_heightfield() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 450;
+  }
+
+  // Flat heightfield at y=0.
+  engine::physics::HeightfieldData hf{};
+  hf.rows = 5U;
+  hf.columns = 5U;
+  hf.spacingX = 2.0F;
+  hf.spacingZ = 2.0F;
+  hf.minY = 0.0F;
+  hf.maxY = 0.0F;
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity terrain = world->create_entity();
+  if (terrain == engine::runtime::kInvalidEntity) {
+    return 451;
+  }
+
+  engine::runtime::Transform t{};
+  t.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  if (!world->add_transform(terrain, t)) {
+    return 452;
+  }
+
+  const float totalW = static_cast<float>(hf.columns - 1U) * hf.spacingX;
+  const float totalD = static_cast<float>(hf.rows - 1U) * hf.spacingZ;
+  engine::runtime::Collider terrainCol{};
+  terrainCol.shape = engine::runtime::ColliderShape::Heightfield;
+  terrainCol.halfExtents =
+      engine::math::Vec3(totalW * 0.5F, 1.0F, totalD * 0.5F);
+  if (!world->add_collider(terrain, terrainCol)) {
+    return 453;
+  }
+  if (!engine::runtime::set_heightfield_data(terrain, hf)) {
+    return 454;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  // Cast ray straight down from y=10.
+  engine::runtime::PhysicsRaycastHit hit{};
+  const bool found = engine::runtime::raycast(
+      *world, engine::math::Vec3(0.0F, 10.0F, 0.0F),
+      engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F, &hit);
+  if (!found) {
+    return 455;
+  }
+  // Should hit at y=0, so distance ≈ 10.
+  if (std::fabs(hit.distance - 10.0F) > 0.5F) {
+    return 456;
+  }
+  // Normal should point up.
+  if (hit.normal.y < 0.9F) {
+    return 457;
   }
 
   return 0;
@@ -1461,6 +2120,51 @@ int main() {
   }
 
   result = check_collision_bookkeeping_scale();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_capsule_vs_aabb_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_capsule_vs_sphere_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_capsule_vs_capsule_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_hits_capsule();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_convex_hull_build();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_convex_hull_vs_aabb_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_hits_convex_hull();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_heightfield_vs_sphere_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_raycast_hits_heightfield();
   if (result != 0) {
     return result;
   }

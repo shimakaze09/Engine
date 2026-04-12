@@ -1,6 +1,7 @@
 #include "engine/runtime/physics_bridge.h"
 
 #include "engine/core/logging.h"
+#include "engine/physics/collider.h"
 #include "engine/runtime/world.h"
 
 namespace engine::physics {
@@ -23,6 +24,15 @@ JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
 void remove_joint(runtime::World &world, JointId id) noexcept;
 void wake_body(runtime::World &world, runtime::Entity entity) noexcept;
 bool is_sleeping(const runtime::World &world, runtime::Entity entity) noexcept;
+
+bool set_convex_hull_data_impl(std::uint32_t entityIndex,
+                               const ConvexHullData &hull) noexcept;
+const ConvexHullData *
+get_convex_hull_data_impl(std::uint32_t entityIndex) noexcept;
+bool set_heightfield_data_impl(std::uint32_t entityIndex,
+                               const HeightfieldData &hf) noexcept;
+const HeightfieldData *
+get_heightfield_data_impl(std::uint32_t entityIndex) noexcept;
 
 } // namespace engine::physics
 
@@ -84,7 +94,8 @@ bool get_gravity(const World &world, float *outX, float *outY,
   return true;
 }
 
-void set_collision_dispatch(World &world, physics::CollisionDispatchFn fn) noexcept {
+void set_collision_dispatch(World &world,
+                            physics::CollisionDispatchFn fn) noexcept {
   if (!require_phase(world, WorldPhase::Input, "set_collision_dispatch")) {
     return;
   }
@@ -136,6 +147,24 @@ void wake_body(World &world, Entity entity) noexcept {
 
 bool is_sleeping(const World &world, Entity entity) noexcept {
   return physics::is_sleeping(world, entity);
+}
+
+bool set_convex_hull_data(Entity entity,
+                          const physics::ConvexHullData &hull) noexcept {
+  return physics::set_convex_hull_data_impl(entity.index, hull);
+}
+
+const physics::ConvexHullData *get_convex_hull_data(Entity entity) noexcept {
+  return physics::get_convex_hull_data_impl(entity.index);
+}
+
+bool set_heightfield_data(Entity entity,
+                          const physics::HeightfieldData &hf) noexcept {
+  return physics::set_heightfield_data_impl(entity.index, hf);
+}
+
+const physics::HeightfieldData *get_heightfield_data(Entity entity) noexcept {
+  return physics::get_heightfield_data_impl(entity.index);
 }
 
 } // namespace engine::runtime

@@ -1,5 +1,6 @@
 add_library(engine_physics STATIC
     src/physics.cpp
+    src/convex_hull.cpp
 )
 
 target_include_directories(engine_physics

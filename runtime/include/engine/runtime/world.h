@@ -61,7 +61,13 @@ struct RigidBody final {
   bool sleeping = false;
 };
 
-enum class ColliderShape : std::uint8_t { AABB = 0, Sphere = 1 };
+enum class ColliderShape : std::uint8_t {
+  AABB = 0,
+  Sphere = 1,
+  Capsule = 2,
+  ConvexHull = 3,
+  Heightfield = 4,
+};
 
 struct Collider final {
   math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);

@@ -5,16 +5,107 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "engine/math/aabb.h"
 #include "engine/math/quat.h"
 #include "engine/math/ray.h"
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/collider.h"
+#include "engine/physics/convex_hull.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
 namespace engine::physics {
+
+// Storage for convex hull data.  Limited to 256 active hulls.
+// Maps entity index → hull slot.
+static constexpr std::size_t kMaxConvexHulls = 256U;
+static std::array<ConvexHullData, kMaxConvexHulls> g_convexHullData{};
+static std::array<std::uint32_t, kMaxConvexHulls> g_convexHullEntityIndex{};
+static std::size_t g_convexHullCount = 0U;
+
+ConvexHullData *find_hull_data(std::uint32_t entityIndex) noexcept {
+  for (std::size_t i = 0U; i < g_convexHullCount; ++i) {
+    if (g_convexHullEntityIndex[i] == entityIndex) {
+      return &g_convexHullData[i];
+    }
+  }
+  return nullptr;
+}
+
+ConvexHullData *allocate_hull_data(std::uint32_t entityIndex) noexcept {
+  ConvexHullData *existing = find_hull_data(entityIndex);
+  if (existing != nullptr) {
+    return existing;
+  }
+  if (g_convexHullCount >= kMaxConvexHulls) {
+    return nullptr;
+  }
+  g_convexHullEntityIndex[g_convexHullCount] = entityIndex;
+  g_convexHullData[g_convexHullCount] = ConvexHullData{};
+  return &g_convexHullData[g_convexHullCount++];
+}
+
+// Storage for heightfield data.  Limited to 16 active heightfields.
+static constexpr std::size_t kMaxHeightfields = 16U;
+static std::array<HeightfieldData, kMaxHeightfields> g_heightfieldData{};
+static std::array<std::uint32_t, kMaxHeightfields> g_heightfieldEntityIndex{};
+static std::size_t g_heightfieldCount = 0U;
+
+HeightfieldData *find_heightfield_data(std::uint32_t entityIndex) noexcept {
+  for (std::size_t i = 0U; i < g_heightfieldCount; ++i) {
+    if (g_heightfieldEntityIndex[i] == entityIndex) {
+      return &g_heightfieldData[i];
+    }
+  }
+  return nullptr;
+}
+
+HeightfieldData *allocate_heightfield_data(std::uint32_t entityIndex) noexcept {
+  HeightfieldData *existing = find_heightfield_data(entityIndex);
+  if (existing != nullptr) {
+    return existing;
+  }
+  if (g_heightfieldCount >= kMaxHeightfields) {
+    return nullptr;
+  }
+  g_heightfieldEntityIndex[g_heightfieldCount] = entityIndex;
+  g_heightfieldData[g_heightfieldCount] = HeightfieldData{};
+  return &g_heightfieldData[g_heightfieldCount++];
+}
+
+// Public accessors used by the runtime bridge.
+bool set_convex_hull_data_impl(std::uint32_t entityIndex,
+                               const ConvexHullData &hull) noexcept {
+  ConvexHullData *slot = allocate_hull_data(entityIndex);
+  if (slot == nullptr) {
+    return false;
+  }
+  *slot = hull;
+  return true;
+}
+
+const ConvexHullData *
+get_convex_hull_data_impl(std::uint32_t entityIndex) noexcept {
+  return find_hull_data(entityIndex);
+}
+
+bool set_heightfield_data_impl(std::uint32_t entityIndex,
+                               const HeightfieldData &hf) noexcept {
+  HeightfieldData *slot = allocate_heightfield_data(entityIndex);
+  if (slot == nullptr) {
+    return false;
+  }
+  *slot = hf;
+  return true;
+}
+
+const HeightfieldData *
+get_heightfield_data_impl(std::uint32_t entityIndex) noexcept {
+  return find_heightfield_data(entityIndex);
+}
 
 namespace {
 
@@ -102,6 +193,310 @@ void record_collision_pair(runtime::World &world, std::uint32_t idxA,
   ctx.collisionPairData[ctx.collisionPairCount * 2U] = idxA;
   ctx.collisionPairData[ctx.collisionPairCount * 2U + 1U] = idxB;
   ++ctx.collisionPairCount;
+}
+
+// ---------------------------------------------------------------------------
+// Capsule geometry helpers
+// ---------------------------------------------------------------------------
+
+// Return the two endpoints of a capsule's internal segment (along local Y).
+// The capsule is centered at `pos` with halfHeight = halfExtents.y,
+// radius = halfExtents.x.
+void capsule_segment(const engine::math::Vec3 &pos,
+                     const runtime::Collider &col, engine::math::Vec3 &outA,
+                     engine::math::Vec3 &outB) noexcept {
+  const float hh = col.halfExtents.y; // halfHeight
+  outA = engine::math::Vec3(pos.x, pos.y - hh, pos.z);
+  outB = engine::math::Vec3(pos.x, pos.y + hh, pos.z);
+}
+
+// Closest point on line segment AB to point P.  Returns parameter t in [0,1].
+float closest_point_on_segment(const engine::math::Vec3 &a,
+                               const engine::math::Vec3 &b,
+                               const engine::math::Vec3 &p,
+                               engine::math::Vec3 &outClosest) noexcept {
+  const engine::math::Vec3 ab = engine::math::sub(b, a);
+  const float ab2 = engine::math::dot(ab, ab);
+  if (ab2 < 1e-12F) {
+    outClosest = a;
+    return 0.0F;
+  }
+  float t = engine::math::dot(engine::math::sub(p, a), ab) / ab2;
+  t = std::max(0.0F, std::min(1.0F, t));
+  outClosest = engine::math::add(a, engine::math::mul(ab, t));
+  return t;
+}
+
+// Closest points between two line segments (P0-P1 and Q0-Q1).
+// Returns the two closest points and the squared distance between them.
+float closest_point_segment_segment(const engine::math::Vec3 &p0,
+                                    const engine::math::Vec3 &p1,
+                                    const engine::math::Vec3 &q0,
+                                    const engine::math::Vec3 &q1,
+                                    engine::math::Vec3 &outClosestP,
+                                    engine::math::Vec3 &outClosestQ) noexcept {
+  const engine::math::Vec3 d1 = engine::math::sub(p1, p0);
+  const engine::math::Vec3 d2 = engine::math::sub(q1, q0);
+  const engine::math::Vec3 r = engine::math::sub(p0, q0);
+  const float a = engine::math::dot(d1, d1);
+  const float e = engine::math::dot(d2, d2);
+  const float f = engine::math::dot(d2, r);
+
+  float s = 0.0F;
+  float t = 0.0F;
+
+  if (a <= 1e-12F && e <= 1e-12F) {
+    // Both segments degenerate to points.
+    outClosestP = p0;
+    outClosestQ = q0;
+    const engine::math::Vec3 diff = engine::math::sub(outClosestP, outClosestQ);
+    return engine::math::dot(diff, diff);
+  }
+
+  if (a <= 1e-12F) {
+    // First segment degenerates.
+    s = 0.0F;
+    t = std::max(0.0F, std::min(f / e, 1.0F));
+  } else {
+    const float c = engine::math::dot(d1, r);
+    if (e <= 1e-12F) {
+      // Second segment degenerates.
+      t = 0.0F;
+      s = std::max(0.0F, std::min(-c / a, 1.0F));
+    } else {
+      const float b = engine::math::dot(d1, d2);
+      const float denom = a * e - b * b;
+
+      if (denom > 1e-12F) {
+        s = std::max(0.0F, std::min((b * f - c * e) / denom, 1.0F));
+      } else {
+        s = 0.0F;
+      }
+
+      t = (b * s + f) / e;
+      if (t < 0.0F) {
+        t = 0.0F;
+        s = std::max(0.0F, std::min(-c / a, 1.0F));
+      } else if (t > 1.0F) {
+        t = 1.0F;
+        s = std::max(0.0F, std::min((b - c) / a, 1.0F));
+      }
+    }
+  }
+
+  outClosestP = engine::math::add(p0, engine::math::mul(d1, s));
+  outClosestQ = engine::math::add(q0, engine::math::mul(d2, t));
+  const engine::math::Vec3 diff = engine::math::sub(outClosestP, outClosestQ);
+  return engine::math::dot(diff, diff);
+}
+
+// Closest point on an AABB (defined by center + halfExtents) to a point.
+engine::math::Vec3
+closest_point_on_aabb(const engine::math::Vec3 &point,
+                      const engine::math::Vec3 &center,
+                      const engine::math::Vec3 &halfExt) noexcept {
+  return engine::math::Vec3(
+      std::max(center.x - halfExt.x, std::min(point.x, center.x + halfExt.x)),
+      std::max(center.y - halfExt.y, std::min(point.y, center.y + halfExt.y)),
+      std::max(center.z - halfExt.z, std::min(point.z, center.z + halfExt.z)));
+}
+
+// Compute the AABB halfExtents for a capsule (for broadphase insertion).
+engine::math::Vec3
+capsule_aabb_half_extents(const runtime::Collider &col) noexcept {
+  const float r = col.halfExtents.x;
+  const float hh = col.halfExtents.y;
+  return engine::math::Vec3(r, hh + r, r);
+}
+
+// --------------------------------------------------------------------------
+// Heightfield helpers
+// --------------------------------------------------------------------------
+
+// Sample height at fractional grid (col, row) with bilinear interpolation.
+float heightfield_sample(const HeightfieldData &hf, float col,
+                         float row) noexcept {
+  const auto maxCol = static_cast<float>(hf.columns - 1U);
+  const auto maxRow = static_cast<float>(hf.rows - 1U);
+  col = std::max(0.0F, std::min(col, maxCol));
+  row = std::max(0.0F, std::min(row, maxRow));
+
+  const auto c0 = static_cast<std::size_t>(col);
+  const auto r0 = static_cast<std::size_t>(row);
+  const std::size_t c1 = (c0 + 1U < hf.columns) ? c0 + 1U : c0;
+  const std::size_t r1 = (r0 + 1U < hf.rows) ? r0 + 1U : r0;
+
+  const float fc = col - static_cast<float>(c0);
+  const float fr = row - static_cast<float>(r0);
+
+  const float h00 = hf.heights[r0 * hf.columns + c0];
+  const float h10 = hf.heights[r0 * hf.columns + c1];
+  const float h01 = hf.heights[r1 * hf.columns + c0];
+  const float h11 = hf.heights[r1 * hf.columns + c1];
+
+  const float h0 = h00 + (h10 - h00) * fc;
+  const float h1 = h01 + (h11 - h01) * fc;
+  return h0 + (h1 - h0) * fr;
+}
+
+// Get height at world X/Z relative to the heightfield's transform position.
+// Returns the world-space Y height.  The heightfield origin is at
+// position - (totalWidth/2, 0, totalDepth/2).
+float heightfield_get_height(const HeightfieldData &hf,
+                             const engine::math::Vec3 &hfPos, float worldX,
+                             float worldZ) noexcept {
+  const float totalW = static_cast<float>(hf.columns - 1U) * hf.spacingX;
+  const float totalD = static_cast<float>(hf.rows - 1U) * hf.spacingZ;
+  const float localX = worldX - (hfPos.x - totalW * 0.5F);
+  const float localZ = worldZ - (hfPos.z - totalD * 0.5F);
+  const float gridCol = localX / hf.spacingX;
+  const float gridRow = localZ / hf.spacingZ;
+  return hfPos.y + heightfield_sample(hf, gridCol, gridRow);
+}
+
+// Compute the heightfield surface normal at a world X/Z via finite
+// differences.
+engine::math::Vec3 heightfield_get_normal(const HeightfieldData &hf,
+                                          const engine::math::Vec3 &hfPos,
+                                          float worldX, float worldZ) noexcept {
+  const float eps = hf.spacingX * 0.5F;
+  const float hL = heightfield_get_height(hf, hfPos, worldX - eps, worldZ);
+  const float hR = heightfield_get_height(hf, hfPos, worldX + eps, worldZ);
+  const float hD = heightfield_get_height(hf, hfPos, worldX, worldZ - eps);
+  const float hU = heightfield_get_height(hf, hfPos, worldX, worldZ + eps);
+  engine::math::Vec3 n(hL - hR, 2.0F * eps, hD - hU);
+  const float len = engine::math::length(n);
+  if (len > 1e-10F) {
+    n = engine::math::mul(n, 1.0F / len);
+  }
+  return n;
+}
+
+// Ray-vs-heightfield intersection by grid marching.
+bool ray_intersects_heightfield(const engine::math::Ray &ray,
+                                const engine::math::Vec3 &hfPos,
+                                const HeightfieldData &hf, float maxDist,
+                                float &outT,
+                                engine::math::Vec3 &outNormal) noexcept {
+  // Step along the ray in small increments and check height.
+  constexpr std::size_t kMaxSteps = 256U;
+  const float stepSize = std::min(hf.spacingX, hf.spacingZ) * 0.5F;
+  const float totalW = static_cast<float>(hf.columns - 1U) * hf.spacingX;
+  const float totalD = static_cast<float>(hf.rows - 1U) * hf.spacingZ;
+  const float hfMinX = hfPos.x - totalW * 0.5F;
+  const float hfMaxX = hfPos.x + totalW * 0.5F;
+  const float hfMinZ = hfPos.z - totalD * 0.5F;
+  const float hfMaxZ = hfPos.z + totalD * 0.5F;
+
+  float prevT = 0.0F;
+  float prevY = ray.origin.y;
+  float prevH = heightfield_get_height(hf, hfPos, ray.origin.x, ray.origin.z);
+
+  for (std::size_t step = 1U; step <= kMaxSteps; ++step) {
+    const float t = static_cast<float>(step) * stepSize;
+    if (t > maxDist) {
+      break;
+    }
+    const engine::math::Vec3 p =
+        engine::math::add(ray.origin, engine::math::mul(ray.direction, t));
+
+    // Skip if outside heightfield XZ bounds.
+    if (p.x < hfMinX || p.x > hfMaxX || p.z < hfMinZ || p.z > hfMaxZ) {
+      prevT = t;
+      prevY = p.y;
+      prevH = hfPos.y + hf.minY; // approximate
+      continue;
+    }
+
+    const float h = heightfield_get_height(hf, hfPos, p.x, p.z);
+    if (p.y <= h && prevY > prevH) {
+      // Crossed from above to below: interpolate hit t.
+      const float dPrev = prevY - prevH;
+      const float dCurr = h - p.y;
+      const float ratio = dPrev / (dPrev + dCurr);
+      outT = prevT + (t - prevT) * ratio;
+      const engine::math::Vec3 hitPt =
+          engine::math::add(ray.origin, engine::math::mul(ray.direction, outT));
+      outNormal = heightfield_get_normal(hf, hfPos, hitPt.x, hitPt.z);
+      return true;
+    }
+    prevT = t;
+    prevY = p.y;
+    prevH = h;
+  }
+  return false;
+}
+
+// Compute the AABB half-extents for broadphase purposes regardless of shape.
+engine::math::Vec3
+broadphase_half_extents(const runtime::Collider &col) noexcept {
+  if (col.shape == runtime::ColliderShape::Capsule) {
+    return capsule_aabb_half_extents(col);
+  }
+  // For heightfield, halfExtents is set externally from the heightfield data.
+  return col.halfExtents;
+}
+
+// Wake a sleeping body if the other body has velocity above threshold.
+void maybe_wake_pair(runtime::RigidBody *bodyA, runtime::RigidBody *bodyB,
+                     float vA2, float vB2) noexcept {
+  if ((bodyA != nullptr) && bodyA->sleeping && (vB2 > kSleepThreshold)) {
+    bodyA->sleeping = false;
+    bodyA->sleepFrameCount = 0U;
+  }
+  if ((bodyB != nullptr) && bodyB->sleeping && (vA2 > kSleepThreshold)) {
+    bodyB->sleeping = false;
+    bodyB->sleepFrameCount = 0U;
+  }
+}
+
+// Forward declaration.
+void apply_velocity_impulse(runtime::RigidBody *bodyA,
+                            runtime::RigidBody *bodyB,
+                            const engine::math::Vec3 &normal, float invMassA,
+                            float invMassB, float invMassSum,
+                            const engine::math::Vec3 &contactOffsetA,
+                            const engine::math::Vec3 &contactOffsetB,
+                            float restitution, float staticFric,
+                            float dynamicFric) noexcept;
+
+// Resolve a collision between two shapes given contact normal, overlap, and
+// the contact point.  Applies positional correction and velocity impulse.
+void resolve_contact(runtime::World &world,
+                     const runtime::World::SimulationAccessToken &simToken,
+                     runtime::Entity entityA, runtime::Entity entityB,
+                     runtime::RigidBody *bodyA, runtime::RigidBody *bodyB,
+                     float invMassA, float invMassB, float invMassSum,
+                     const engine::math::Vec3 &normal, float overlap,
+                     const engine::math::Vec3 &contactPt,
+                     const runtime::Collider &colliderA,
+                     const runtime::Collider &colliderB) noexcept {
+  const float moveA = overlap * (invMassA / invMassSum);
+  const float moveB = overlap * (invMassB / invMassSum);
+
+  runtime::Transform *mutableA =
+      world.get_transform_write_ptr(entityA, simToken);
+  runtime::Transform *mutableB =
+      world.get_transform_write_ptr(entityB, simToken);
+  if ((mutableA == nullptr) || (mutableB == nullptr)) {
+    return;
+  }
+
+  mutableA->position =
+      engine::math::sub(mutableA->position, engine::math::mul(normal, moveA));
+  mutableB->position =
+      engine::math::add(mutableB->position, engine::math::mul(normal, moveB));
+
+  const float combinedRest =
+      std::max(colliderA.restitution, colliderB.restitution);
+  const float combinedStaticFric =
+      std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
+  const float combinedDynFric =
+      std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+  apply_velocity_impulse(bodyA, bodyB, normal, invMassA, invMassB, invMassSum,
+                         engine::math::sub(contactPt, mutableA->position),
+                         engine::math::sub(contactPt, mutableB->position),
+                         combinedRest, combinedStaticFric, combinedDynFric);
 }
 
 void apply_velocity_impulse(runtime::RigidBody *bodyA,
@@ -229,6 +624,10 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
     const bool lockRotation =
         (col != nullptr) && (col->shape == runtime::ColliderShape::AABB);
 
+    // Capsules also lock rotation for now (upright-only capsule physics).
+    const bool isCapsule =
+        (col != nullptr) && (col->shape == runtime::ColliderShape::Capsule);
+
     // Skip sleeping bodies.
     if ((body != nullptr) && body->sleeping) {
       writeTransforms[i] = readTransforms[i];
@@ -248,10 +647,11 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
 
       // CCD: if travel distance exceeds half the smallest collider extent,
       // raycast forward to prevent tunneling.
+      const engine::math::Vec3 bpHe =
+          (col != nullptr) ? broadphase_half_extents(*col)
+                           : engine::math::Vec3(0.0F, 0.0F, 0.0F);
       const float minHalf =
-          (col != nullptr) ? std::min({col->halfExtents.x, col->halfExtents.y,
-                                       col->halfExtents.z})
-                           : 0.0F;
+          (col != nullptr) ? std::min({bpHe.x, bpHe.y, bpHe.z}) : 0.0F;
 
       bool clamped = false;
       if ((col != nullptr) && (travelDist > minHalf) && (speed > 1e-6F)) {
@@ -289,15 +689,16 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
         body->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
       }
 
-      // AABB colliders are axis-aligned in this physics backend. Keep visual
-      // mesh rotation fixed so render and collision stay in sync.
-      if (lockRotation) {
+      // AABB and capsule colliders are axis-aligned in this physics backend.
+      // Keep visual mesh rotation fixed so render and collision stay in sync.
+      if (lockRotation || isCapsule) {
         body->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
       }
     }
 
     // Angular velocity integration (independent of linear mass).
-    if ((body != nullptr) && (body->inverseInertia > 0.0F) && !lockRotation) {
+    if ((body != nullptr) && (body->inverseInertia > 0.0F) && !lockRotation &&
+        !isCapsule) {
       const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
       if (angSpeedSq > 1e-12F) {
         const float angSpeed = std::sqrt(angSpeedSq);
@@ -360,7 +761,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
     // Compute cell size: max of kDefaultCellSize and 2× largest half-extent.
     float cellSize = kDefaultCellSize;
     for (std::size_t i = 0U; i < colliderCount; ++i) {
-      const engine::math::Vec3 &he = colliders[i].halfExtents;
+      const engine::math::Vec3 he = broadphase_half_extents(colliders[i]);
       const float maxHe = std::max({he.x, he.y, he.z});
       if (maxHe * 2.0F > cellSize) {
         cellSize = maxHe * 2.0F;
@@ -409,7 +810,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
 
     // Insert each collider into all cells its AABB overlaps.
     for (std::size_t i = 0U; i < colliderCount; ++i) {
-      const engine::math::Vec3 &he = colliders[i].halfExtents;
+      const engine::math::Vec3 he = broadphase_half_extents(colliders[i]);
       const std::int32_t minCX = cell_coord(posX[i] - he.x);
       const std::int32_t maxCX = cell_coord(posX[i] + he.x);
       const std::int32_t minCY = cell_coord(posY[i] - he.y);
@@ -447,7 +848,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                        physicsCtx.testedStamps.size());
       physicsCtx.testedStamps[i] = physicsCtx.testedGeneration;
 
-      const engine::math::Vec3 &heA = colliders[i].halfExtents;
+      const engine::math::Vec3 heA = broadphase_half_extents(colliders[i]);
       const std::int32_t minCX = cell_coord(ax - heA.x);
       const std::int32_t maxCX = cell_coord(ax + heA.x);
       const std::int32_t minCY = cell_coord(ay - heA.y);
@@ -502,15 +903,414 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   (bodyB != nullptr) ? bodyB->inverseMass : kStaticInverseMass;
               const float invMassSum = invMassA + invMassB;
 
-              const bool aIsAABB =
-                  (colliderA.shape == runtime::ColliderShape::AABB);
-              const bool bIsAABB =
-                  (colliderB.shape == runtime::ColliderShape::AABB);
+              const auto shapeA = colliderA.shape;
+              const auto shapeB = colliderB.shape;
+              const bool aIsAABB = (shapeA == runtime::ColliderShape::AABB);
+              const bool bIsAABB = (shapeB == runtime::ColliderShape::AABB);
+              const bool aIsCapsule =
+                  (shapeA == runtime::ColliderShape::Capsule);
+              const bool bIsCapsule =
+                  (shapeB == runtime::ColliderShape::Capsule);
+              const bool aIsSphere = (shapeA == runtime::ColliderShape::Sphere);
+              const bool bIsSphere = (shapeB == runtime::ColliderShape::Sphere);
+              const bool aIsConvex =
+                  (shapeA == runtime::ColliderShape::ConvexHull);
+              const bool bIsConvex =
+                  (shapeB == runtime::ColliderShape::ConvexHull);
+              const bool aIsHeightfield =
+                  (shapeA == runtime::ColliderShape::Heightfield);
+              const bool bIsHeightfield =
+                  (shapeB == runtime::ColliderShape::Heightfield);
+
+              // -----------------------------------------------------------------------
+              // Heightfield vs Sphere/AABB/Capsule
+              // -----------------------------------------------------------------------
+              if (aIsHeightfield || bIsHeightfield) {
+                const bool aIsHF = aIsHeightfield;
+                const engine::math::Vec3 hfPos =
+                    aIsHF ? engine::math::Vec3(ax, ay, az)
+                          : engine::math::Vec3(bx, by, bz);
+                const engine::math::Vec3 objPos =
+                    aIsHF ? engine::math::Vec3(bx, by, bz)
+                          : engine::math::Vec3(ax, ay, az);
+                const runtime::Entity hfEnt = aIsHF ? entityA : entityB;
+                const runtime::Collider &objCol = aIsHF ? colliderB : colliderA;
+
+                const HeightfieldData *hf = find_heightfield_data(hfEnt.index);
+                if (hf == nullptr) {
+                  continue;
+                }
+
+                // Sample heightfield at object XZ.
+                const float terrainY =
+                    heightfield_get_height(*hf, hfPos, objPos.x, objPos.z);
+
+                // Compute the bottom Y of the object.
+                float objBottomY = objPos.y;
+                if (objCol.shape == runtime::ColliderShape::Sphere) {
+                  objBottomY -= objCol.halfExtents.x;
+                } else if (objCol.shape == runtime::ColliderShape::Capsule) {
+                  objBottomY -= (objCol.halfExtents.y + objCol.halfExtents.x);
+                } else {
+                  objBottomY -= objCol.halfExtents.y;
+                }
+
+                if (objBottomY >= terrainY) {
+                  continue; // not touching
+                }
+
+                const float overlap = terrainY - objBottomY;
+                const engine::math::Vec3 normal =
+                    heightfield_get_normal(*hf, hfPos, objPos.x, objPos.z);
+
+                record_collision_pair(world, entityA.index, entityB.index);
+                {
+                  const float vA2 =
+                      (bodyA != nullptr)
+                          ? engine::math::length_sq(bodyA->velocity)
+                          : 0.0F;
+                  const float vB2 =
+                      (bodyB != nullptr)
+                          ? engine::math::length_sq(bodyB->velocity)
+                          : 0.0F;
+                  maybe_wake_pair(bodyA, bodyB, vA2, vB2);
+                }
+                if (invMassSum <= 0.0F) {
+                  continue;
+                }
+
+                // Contact point is at the terrain surface below the object.
+                const engine::math::Vec3 contactPt(objPos.x, terrainY,
+                                                   objPos.z);
+
+                // Ensure normal points from A to B.
+                engine::math::Vec3 resolveNormal = normal;
+                if (aIsHF) {
+                  // HF is A, object is B. Normal should push B up (away
+                  // from terrain).  heightfield_get_normal already points
+                  // up, which is A→B, so keep as-is.
+                } else {
+                  // HF is B, object is A. Normal should point from A to B.
+                  // Terrain normal points up = from B toward A, so negate.
+                  resolveNormal = engine::math::mul(normal, -1.0F);
+                }
+
+                resolve_contact(world, simToken, entityA, entityB, bodyA, bodyB,
+                                invMassA, invMassB, invMassSum, resolveNormal,
+                                overlap, contactPt, colliderA, colliderB);
+                continue;
+              }
+
+              // -----------------------------------------------------------------------
+              // ConvexHull vs anything (GJK/EPA generic path)
+              // -----------------------------------------------------------------------
+              if (aIsConvex || bIsConvex) {
+                // Build support function and data for each side.
+                auto shape_support = [](const runtime::Collider &col,
+                                        runtime::Entity /*ent*/) -> SupportFn {
+                  switch (col.shape) {
+                  case runtime::ColliderShape::ConvexHull:
+                    return &support_convex_hull;
+                  case runtime::ColliderShape::Sphere:
+                    return &support_sphere;
+                  case runtime::ColliderShape::Capsule:
+                    return &support_capsule;
+                  case runtime::ColliderShape::AABB:
+                  default:
+                    return &support_aabb;
+                  }
+                };
+
+                // Opaque data for each shape's support function.
+                // Capsule: float[2]{radius, halfHeight}
+                // Sphere: float (radius)
+                // AABB: Vec3 (halfExtents)
+                // ConvexHull: ConvexHullData*
+                alignas(16) float dataStorageA[4]{};
+                alignas(16) float dataStorageB[4]{};
+                const void *dataA = nullptr;
+                const void *dataB = nullptr;
+
+                auto fill_data = [](const runtime::Collider &col,
+                                    runtime::Entity ent,
+                                    float *storage) -> const void * {
+                  switch (col.shape) {
+                  case runtime::ColliderShape::ConvexHull:
+                    return find_hull_data(ent.index);
+                  case runtime::ColliderShape::Sphere:
+                    storage[0] = col.halfExtents.x;
+                    return storage;
+                  case runtime::ColliderShape::Capsule:
+                    storage[0] = col.halfExtents.x; // radius
+                    storage[1] = col.halfExtents.y; // halfHeight
+                    return storage;
+                  case runtime::ColliderShape::AABB:
+                  default:
+                    std::memcpy(storage, &col.halfExtents, sizeof(float) * 3);
+                    return storage;
+                  }
+                };
+
+                SupportFn supA = shape_support(colliderA, entityA);
+                SupportFn supB = shape_support(colliderB, entityB);
+                dataA = fill_data(colliderA, entityA, dataStorageA);
+                dataB = fill_data(colliderB, entityB, dataStorageB);
+
+                if ((dataA == nullptr) || (dataB == nullptr)) {
+                  continue;
+                }
+
+                const engine::math::Vec3 posA(ax, ay, az);
+                const engine::math::Vec3 posB(bx, by, bz);
+                const GjkResult gjk =
+                    gjk_epa(dataA, posA, supA, dataB, posB, supB);
+
+                if (!gjk.intersecting || gjk.depth < 1e-6F) {
+                  continue;
+                }
+
+                record_collision_pair(world, entityA.index, entityB.index);
+                {
+                  const float vA2 =
+                      (bodyA != nullptr)
+                          ? engine::math::length_sq(bodyA->velocity)
+                          : 0.0F;
+                  const float vB2 =
+                      (bodyB != nullptr)
+                          ? engine::math::length_sq(bodyB->velocity)
+                          : 0.0F;
+                  maybe_wake_pair(bodyA, bodyB, vA2, vB2);
+                }
+                if (invMassSum <= 0.0F) {
+                  continue;
+                }
+
+                resolve_contact(world, simToken, entityA, entityB, bodyA, bodyB,
+                                invMassA, invMassB, invMassSum, gjk.normal,
+                                gjk.depth, gjk.contactPoint, colliderA,
+                                colliderB);
+                continue;
+              }
+
+              // -----------------------------------------------------------------------
+              // Capsule vs Capsule
+              // -----------------------------------------------------------------------
+              if (aIsCapsule && bIsCapsule) {
+                engine::math::Vec3 segAa, segAb, segBa, segBb;
+                capsule_segment(engine::math::Vec3(ax, ay, az), colliderA,
+                                segAa, segAb);
+                capsule_segment(engine::math::Vec3(bx, by, bz), colliderB,
+                                segBa, segBb);
+                engine::math::Vec3 closestA, closestB;
+                const float dist2 = closest_point_segment_segment(
+                    segAa, segAb, segBa, segBb, closestA, closestB);
+                const float rA = colliderA.halfExtents.x;
+                const float rB = colliderB.halfExtents.x;
+                const float sumR = rA + rB;
+                if (dist2 >= sumR * sumR) {
+                  continue;
+                }
+                record_collision_pair(world, entityA.index, entityB.index);
+                {
+                  const float vA2 =
+                      (bodyA != nullptr)
+                          ? engine::math::length_sq(bodyA->velocity)
+                          : 0.0F;
+                  const float vB2 =
+                      (bodyB != nullptr)
+                          ? engine::math::length_sq(bodyB->velocity)
+                          : 0.0F;
+                  maybe_wake_pair(bodyA, bodyB, vA2, vB2);
+                }
+                if (invMassSum <= 0.0F) {
+                  continue;
+                }
+                const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
+                const engine::math::Vec3 diff =
+                    engine::math::sub(closestB, closestA);
+                const engine::math::Vec3 normal =
+                    (dist2 > 0.0F) ? engine::math::mul(diff, 1.0F / dist)
+                                   : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                const float overlap = sumR - dist;
+                const engine::math::Vec3 contactPt = engine::math::mul(
+                    engine::math::add(closestA, closestB), 0.5F);
+                resolve_contact(world, simToken, entityA, entityB, bodyA, bodyB,
+                                invMassA, invMassB, invMassSum, normal, overlap,
+                                contactPt, colliderA, colliderB);
+                continue;
+              }
+
+              // -----------------------------------------------------------------------
+              // Capsule vs Sphere (handles both orderings)
+              // -----------------------------------------------------------------------
+              if ((aIsCapsule && bIsSphere) || (aIsSphere && bIsCapsule)) {
+                const bool aIsCap = aIsCapsule;
+                const engine::math::Vec3 capPos =
+                    aIsCap ? engine::math::Vec3(ax, ay, az)
+                           : engine::math::Vec3(bx, by, bz);
+                const engine::math::Vec3 sphPos =
+                    aIsCap ? engine::math::Vec3(bx, by, bz)
+                           : engine::math::Vec3(ax, ay, az);
+                const runtime::Collider &capCol =
+                    aIsCap ? colliderA : colliderB;
+                const float capR = capCol.halfExtents.x;
+                const float sphR =
+                    (aIsCap ? colliderB : colliderA).halfExtents.x;
+                engine::math::Vec3 segA, segB;
+                capsule_segment(capPos, capCol, segA, segB);
+                engine::math::Vec3 closest;
+                closest_point_on_segment(segA, segB, sphPos, closest);
+                const engine::math::Vec3 diff =
+                    engine::math::sub(sphPos, closest);
+                const float dist2 = engine::math::dot(diff, diff);
+                const float sumR = capR + sphR;
+                if (dist2 >= sumR * sumR) {
+                  continue;
+                }
+                record_collision_pair(world, entityA.index, entityB.index);
+                {
+                  const float vA2 =
+                      (bodyA != nullptr)
+                          ? engine::math::length_sq(bodyA->velocity)
+                          : 0.0F;
+                  const float vB2 =
+                      (bodyB != nullptr)
+                          ? engine::math::length_sq(bodyB->velocity)
+                          : 0.0F;
+                  maybe_wake_pair(bodyA, bodyB, vA2, vB2);
+                }
+                if (invMassSum <= 0.0F) {
+                  continue;
+                }
+                const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
+                // Normal points from capsule toward sphere.
+                engine::math::Vec3 normal =
+                    (dist2 > 0.0F) ? engine::math::mul(diff, 1.0F / dist)
+                                   : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                // Ensure normal points from A toward B.
+                if (!aIsCap) {
+                  normal = engine::math::mul(normal, -1.0F);
+                }
+                const float overlap = sumR - dist;
+                const engine::math::Vec3 contactPt =
+                    engine::math::mul(engine::math::add(closest, sphPos), 0.5F);
+                resolve_contact(world, simToken, entityA, entityB, bodyA, bodyB,
+                                invMassA, invMassB, invMassSum, normal, overlap,
+                                contactPt, colliderA, colliderB);
+                continue;
+              }
+
+              // -----------------------------------------------------------------------
+              // Capsule vs AABB (handles both orderings)
+              // -----------------------------------------------------------------------
+              if ((aIsCapsule && bIsAABB) || (aIsAABB && bIsCapsule)) {
+                const bool aIsCap = aIsCapsule;
+                const engine::math::Vec3 capPos =
+                    aIsCap ? engine::math::Vec3(ax, ay, az)
+                           : engine::math::Vec3(bx, by, bz);
+                const engine::math::Vec3 boxPos =
+                    aIsCap ? engine::math::Vec3(bx, by, bz)
+                           : engine::math::Vec3(ax, ay, az);
+                const runtime::Collider &capCol =
+                    aIsCap ? colliderA : colliderB;
+                const runtime::Collider &boxCol =
+                    aIsCap ? colliderB : colliderA;
+                const float capR = capCol.halfExtents.x;
+
+                engine::math::Vec3 segA, segB;
+                capsule_segment(capPos, capCol, segA, segB);
+
+                // Find closest point on capsule segment to the AABB.
+                // Strategy: clamp each segment endpoint to AABB, then also
+                // find the closest point on segment to the AABB center and
+                // clamp that.  Take the pair with smallest distance.
+                const engine::math::Vec3 cpA =
+                    closest_point_on_aabb(segA, boxPos, boxCol.halfExtents);
+                const engine::math::Vec3 cpB =
+                    closest_point_on_aabb(segB, boxPos, boxCol.halfExtents);
+
+                engine::math::Vec3 segClosest;
+                closest_point_on_segment(segA, segB, boxPos, segClosest);
+                const engine::math::Vec3 cpC = closest_point_on_aabb(
+                    segClosest, boxPos, boxCol.halfExtents);
+
+                // Evaluate distances from each candidate to its segment point.
+                auto seg_dist2 = [](const engine::math::Vec3 &segPt,
+                                    const engine::math::Vec3 &aabbPt) {
+                  const engine::math::Vec3 d = engine::math::sub(segPt, aabbPt);
+                  return engine::math::dot(d, d);
+                };
+                const float d2A = seg_dist2(segA, cpA);
+                const float d2B = seg_dist2(segB, cpB);
+                const float d2C = seg_dist2(segClosest, cpC);
+
+                // Pick the candidate with the smallest distance.
+                engine::math::Vec3 bestSeg = segA;
+                engine::math::Vec3 bestBox = cpA;
+                float bestDist2 = d2A;
+                if (d2B < bestDist2) {
+                  bestSeg = segB;
+                  bestBox = cpB;
+                  bestDist2 = d2B;
+                }
+                if (d2C < bestDist2) {
+                  bestSeg = segClosest;
+                  bestBox = cpC;
+                  bestDist2 = d2C;
+                }
+
+                // Now find closest point on the segment to the best AABB
+                // point, for a tighter fit.
+                engine::math::Vec3 finalSeg;
+                closest_point_on_segment(segA, segB, bestBox, finalSeg);
+                const engine::math::Vec3 finalBox =
+                    closest_point_on_aabb(finalSeg, boxPos, boxCol.halfExtents);
+                const engine::math::Vec3 diff =
+                    engine::math::sub(finalSeg, finalBox);
+                const float dist2 = engine::math::dot(diff, diff);
+
+                if (dist2 >= capR * capR) {
+                  continue;
+                }
+
+                record_collision_pair(world, entityA.index, entityB.index);
+                {
+                  const float vA2 =
+                      (bodyA != nullptr)
+                          ? engine::math::length_sq(bodyA->velocity)
+                          : 0.0F;
+                  const float vB2 =
+                      (bodyB != nullptr)
+                          ? engine::math::length_sq(bodyB->velocity)
+                          : 0.0F;
+                  maybe_wake_pair(bodyA, bodyB, vA2, vB2);
+                }
+                if (invMassSum <= 0.0F) {
+                  continue;
+                }
+
+                const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
+                // Normal points from box toward capsule segment.
+                engine::math::Vec3 normal =
+                    (dist2 > 0.0F) ? engine::math::mul(diff, 1.0F / dist)
+                                   : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                // Ensure normal points from A to B.
+                if (!aIsCap) {
+                  normal = engine::math::mul(normal, -1.0F);
+                }
+                const float overlap = capR - dist;
+                const engine::math::Vec3 contactPt = engine::math::mul(
+                    engine::math::add(finalSeg, finalBox), 0.5F);
+                resolve_contact(world, simToken, entityA, entityB, bodyA, bodyB,
+                                invMassA, invMassB, invMassSum, normal, overlap,
+                                contactPt, colliderA, colliderB);
+                continue;
+              }
 
               // -----------------------------------------------------------------------
               // Sphere vs Sphere
               // -----------------------------------------------------------------------
-              if (!aIsAABB && !bIsAABB) {
+              if (aIsSphere && bIsSphere) {
                 const float rA = colliderA.halfExtents.x;
                 const float rB = colliderB.halfExtents.x;
                 const float dx = bx - ax;
@@ -876,6 +1676,142 @@ engine::math::Vec3 aabb_hit_normal(const engine::math::Vec3 &hitPoint,
   return engine::math::Vec3(0.0F, 0.0F, sign_or_positive(dz));
 }
 
+// Ray-vs-capsule intersection.  The capsule is aligned along the Y axis,
+// centred at `center` with halfHeight (center to hemisphere center) and
+// radius.  Returns true if the ray hits within [0, maxDist], writing `outT`
+// and `outNormal`.
+bool ray_intersects_capsule(const engine::math::Ray &ray,
+                            const engine::math::Vec3 &center, float halfHeight,
+                            float radius, float maxDist, float &outT,
+                            engine::math::Vec3 &outNormal) noexcept {
+  // Translate ray into capsule-local space.
+  const float ox = ray.origin.x - center.x;
+  const float oy = ray.origin.y - center.y;
+  const float oz = ray.origin.z - center.z;
+  const float dx = ray.direction.x;
+  const float dy = ray.direction.y;
+  const float dz = ray.direction.z;
+
+  float bestT = maxDist + 1.0F;
+  engine::math::Vec3 bestN(0.0F, 1.0F, 0.0F);
+
+  // 1) Infinite cylinder test (along Y): x^2 + z^2 = r^2.
+  {
+    const float a = dx * dx + dz * dz;
+    const float b = 2.0F * (ox * dx + oz * dz);
+    const float c = ox * ox + oz * oz - radius * radius;
+    const float disc = b * b - 4.0F * a * c;
+    if ((a > 1e-12F) && (disc >= 0.0F)) {
+      const float sqrtDisc = std::sqrt(disc);
+      const float inv2a = 1.0F / (2.0F * a);
+      for (int sign = -1; sign <= 1; sign += 2) {
+        const float t = (-b + static_cast<float>(sign) * sqrtDisc) * inv2a;
+        if ((t >= 0.0F) && (t < bestT)) {
+          const float hitY = oy + dy * t;
+          if ((hitY >= -halfHeight) && (hitY <= halfHeight)) {
+            bestT = t;
+            const float hitX = ox + dx * t;
+            const float hitZ = oz + dz * t;
+            const float invR = 1.0F / std::max(radius, 1e-6F);
+            bestN = engine::math::Vec3(hitX * invR, 0.0F, hitZ * invR);
+          }
+        }
+      }
+    }
+  }
+
+  // 2) Hemisphere tests (top at +halfHeight, bottom at -halfHeight).
+  for (int h = -1; h <= 1; h += 2) {
+    const float cy = static_cast<float>(h) * halfHeight;
+    const float ooy = oy - cy;
+    const float a = dx * dx + dy * dy + dz * dz;
+    const float b = 2.0F * (ox * dx + ooy * dy + oz * dz);
+    const float c = ox * ox + ooy * ooy + oz * oz - radius * radius;
+    const float disc = b * b - 4.0F * a * c;
+    if ((a > 1e-12F) && (disc >= 0.0F)) {
+      const float sqrtDisc = std::sqrt(disc);
+      const float inv2a = 1.0F / (2.0F * a);
+      for (int sign = -1; sign <= 1; sign += 2) {
+        const float t = (-b + static_cast<float>(sign) * sqrtDisc) * inv2a;
+        if ((t >= 0.0F) && (t < bestT)) {
+          const float hitY = oy + dy * t - cy;
+          // Accept hit only on the correct hemisphere side.
+          if ((h > 0 && hitY >= 0.0F) || (h < 0 && hitY <= 0.0F)) {
+            bestT = t;
+            const float hitX = ox + dx * t;
+            const float hitZ = oz + dz * t;
+            const float invR = 1.0F / std::max(radius, 1e-6F);
+            bestN = engine::math::Vec3(hitX * invR, (oy + dy * t - cy) * invR,
+                                       hitZ * invR);
+          }
+        }
+      }
+    }
+  }
+
+  if (bestT <= maxDist) {
+    outT = bestT;
+    outNormal = engine::math::normalize(bestN);
+    return true;
+  }
+  return false;
+}
+
+// Ray-vs-convex-hull intersection using slab method against face planes.
+// `center` is the world-space position of the hull entity.
+bool ray_intersects_convex_hull(const engine::math::Ray &ray,
+                                const engine::math::Vec3 &center,
+                                const ConvexHullData &hull, float maxDist,
+                                float &outT,
+                                engine::math::Vec3 &outNormal) noexcept {
+  float tNear = 0.0F;
+  float tFar = maxDist;
+  engine::math::Vec3 nearNormal(0.0F, 1.0F, 0.0F);
+
+  for (std::size_t i = 0U; i < hull.planeCount; ++i) {
+    const ConvexHullData::Plane &plane = hull.planes[i];
+    // Plane in world space: dot(normal, X) = distance + dot(normal, center)
+    const float worldDist =
+        plane.distance + engine::math::dot(plane.normal, center);
+
+    const float denom = engine::math::dot(plane.normal, ray.direction);
+    const float numer = worldDist - engine::math::dot(plane.normal, ray.origin);
+
+    if (std::fabs(denom) < 1e-10F) {
+      // Ray parallel to plane.
+      if (numer < 0.0F) {
+        return false; // outside this plane
+      }
+      continue;
+    }
+
+    const float t = numer / denom;
+    if (denom < 0.0F) {
+      // Entry plane.
+      if (t > tNear) {
+        tNear = t;
+        nearNormal = plane.normal;
+      }
+    } else {
+      // Exit plane.
+      if (t < tFar) {
+        tFar = t;
+      }
+    }
+
+    if (tNear > tFar) {
+      return false;
+    }
+  }
+
+  if ((tNear >= 0.0F) && (tNear <= maxDist)) {
+    outT = tNear;
+    outNormal = nearNormal;
+    return true;
+  }
+  return false;
+}
+
 } // namespace
 
 bool raycast(const runtime::World &world, const math::Vec3 &origin,
@@ -913,9 +1849,30 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
     const runtime::Collider &col = colliders[i];
     float t = 0.0F;
 
+    math::Vec3 shapeNormal(0.0F, 1.0F, 0.0F);
+
     if (col.shape == runtime::ColliderShape::Sphere) {
       const math::Sphere sphere{transform.position, col.halfExtents.x};
       if (!math::ray_intersects_sphere(ray, sphere, &t)) {
+        continue;
+      }
+    } else if (col.shape == runtime::ColliderShape::Capsule) {
+      if (!ray_intersects_capsule(ray, transform.position, col.halfExtents.y,
+                                  col.halfExtents.x, bestT, t, shapeNormal)) {
+        continue;
+      }
+    } else if (col.shape == runtime::ColliderShape::ConvexHull) {
+      const ConvexHullData *hull = find_hull_data(entities[i].index);
+      if ((hull == nullptr) ||
+          !ray_intersects_convex_hull(ray, transform.position, *hull, bestT, t,
+                                      shapeNormal)) {
+        continue;
+      }
+    } else if (col.shape == runtime::ColliderShape::Heightfield) {
+      const HeightfieldData *hf = find_heightfield_data(entities[i].index);
+      if ((hf == nullptr) ||
+          !ray_intersects_heightfield(ray, transform.position, *hf, bestT, t,
+                                      shapeNormal)) {
         continue;
       }
     } else {
@@ -936,6 +1893,10 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
         if (col.shape == runtime::ColliderShape::Sphere) {
           outHit->normal =
               math::normalize(math::sub(outHit->point, transform.position));
+        } else if (col.shape == runtime::ColliderShape::Capsule ||
+                   col.shape == runtime::ColliderShape::ConvexHull ||
+                   col.shape == runtime::ColliderShape::Heightfield) {
+          outHit->normal = shapeNormal;
         } else {
           outHit->normal = aabb_hit_normal(outHit->point, transform.position,
                                            col.halfExtents);
@@ -981,10 +1942,31 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
     }
     const runtime::Collider &col = colliders[i];
     float t = 0.0F;
+    math::Vec3 shapeNormal(0.0F, 1.0F, 0.0F);
 
     if (col.shape == runtime::ColliderShape::Sphere) {
       const math::Sphere sphere{transform.position, col.halfExtents.x};
       if (!math::ray_intersects_sphere(ray, sphere, &t)) {
+        continue;
+      }
+    } else if (col.shape == runtime::ColliderShape::Capsule) {
+      if (!ray_intersects_capsule(ray, transform.position, col.halfExtents.y,
+                                  col.halfExtents.x, maxDistance, t,
+                                  shapeNormal)) {
+        continue;
+      }
+    } else if (col.shape == runtime::ColliderShape::ConvexHull) {
+      const ConvexHullData *hull = find_hull_data(entities[i].index);
+      if ((hull == nullptr) ||
+          !ray_intersects_convex_hull(ray, transform.position, *hull,
+                                      maxDistance, t, shapeNormal)) {
+        continue;
+      }
+    } else if (col.shape == runtime::ColliderShape::Heightfield) {
+      const HeightfieldData *hf = find_heightfield_data(entities[i].index);
+      if ((hf == nullptr) ||
+          !ray_intersects_heightfield(ray, transform.position, *hf, maxDistance,
+                                      t, shapeNormal)) {
         continue;
       }
     } else {
@@ -1003,6 +1985,10 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
         rh.point = math::add(origin, math::mul(direction, t));
         if (col.shape == runtime::ColliderShape::Sphere) {
           rh.normal = math::normalize(math::sub(rh.point, transform.position));
+        } else if (col.shape == runtime::ColliderShape::Capsule ||
+                   col.shape == runtime::ColliderShape::ConvexHull ||
+                   col.shape == runtime::ColliderShape::Heightfield) {
+          rh.normal = shapeNormal;
         } else {
           rh.normal =
               aabb_hit_normal(rh.point, transform.position, col.halfExtents);

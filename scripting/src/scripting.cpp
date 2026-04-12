@@ -1151,10 +1151,9 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0U) ? g_builtinCapsuleMesh
                                           : g_defaultMeshAssetId;
-    // Physics currently supports AABB/Sphere only; capsule uses a conservative
-    // AABB fit so the debug volume matches the rendered mesh bounds.
-    halfExtents = math::Vec3(0.5F, 1.0F, 0.5F);
-    colliderShape = runtime::ColliderShape::AABB;
+    // Capsule: halfExtents.x = radius, halfExtents.y = halfHeight.
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    colliderShape = runtime::ColliderShape::Capsule;
   } else if (std::strcmp(shape, "pyramid") == 0) {
     meshId = (g_builtinPyramidMesh != 0U) ? g_builtinPyramidMesh
                                           : g_defaultMeshAssetId;
@@ -1261,6 +1260,29 @@ int lua_engine_get_name(lua_State *state) noexcept {
   }
 
   lua_pushstring(state, component.name);
+  return 1;
+}
+
+// engine.add_capsule_collider(entity, half_height, radius) → bool
+int lua_engine_add_capsule_collider(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!lua_isnumber(state, 2) || !lua_isnumber(state, 3)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const float halfHeight = static_cast<float>(lua_tonumber(state, 2));
+  const float radius = static_cast<float>(lua_tonumber(state, 3));
+
+  runtime::Collider collider{};
+  collider.shape = runtime::ColliderShape::Capsule;
+  collider.halfExtents = math::Vec3(radius, halfHeight, radius);
+
+  const bool ok = apply_or_queue_collider(entity, collider);
+  lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
@@ -3858,6 +3880,9 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   lua_pushcfunction(state, &lua_engine_add_collider);
   lua_setfield(state, -2, "add_collider");
+
+  lua_pushcfunction(state, &lua_engine_add_capsule_collider);
+  lua_setfield(state, -2, "add_capsule_collider");
 
   lua_pushcfunction(state, &lua_engine_set_restitution);
   lua_setfield(state, -2, "set_restitution");
