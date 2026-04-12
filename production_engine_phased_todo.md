@@ -174,19 +174,6 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M2-G: Script Runtime Safety
 
-- [ ] P1-M2-G1a: DAP JSON-RPC transport over TCP socket
-- [ ] P1-M2-G1b: Handle initialize / launch / configurationDone
-- [ ] P1-M2-G1c: setBreakpoints via lua_sethook
-- [ ] P1-M2-G1d: continue / next / stepIn / stepOut
-- [ ] P1-M2-G1e: stackTrace — walk Lua call stack
-- [ ] P1-M2-G1f: scopes + variables (locals, upvalues, globals)
-- [ ] P1-M2-G1g: evaluate expression in paused context
-- [ ] P1-M2-G1h: Test: mock DAP client → breakpoint → verify pause at line
-- [ ] P1-M2-G2a: Per-script sandbox (restricted globals, no io/os.execute)
-- [ ] P1-M2-G2b: Allow-list safe functions (math, string, table, engine.*)
-- [ ] P1-M2-G2c: CPU instruction limit per script per frame
-- [ ] P1-M2-G2d: Memory limit per script environment
-- [ ] P1-M2-G2e: Test: io.open→error, infinite loop→terminate, huge alloc→fail
 - [x] P1-M2-G1a: DAP JSON-RPC transport over TCP socket
 - [x] P1-M2-G1b: Handle initialize / launch / configurationDone
 - [x] P1-M2-G1c: setBreakpoints via lua_sethook
