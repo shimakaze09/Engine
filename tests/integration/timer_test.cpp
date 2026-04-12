@@ -25,8 +25,8 @@ void on_cancel_target(engine::runtime::TimerId /*id*/, void * /*ud*/) noexcept {
 }
 
 bool test_timeout_fires_once() noexcept {
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return false;
   }
@@ -68,8 +68,8 @@ bool test_timeout_fires_once() noexcept {
 }
 
 bool test_interval_fires_repeatedly() noexcept {
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return false;
   }
@@ -110,8 +110,8 @@ bool test_interval_fires_repeatedly() noexcept {
 }
 
 bool test_cancel_prevents_fire() noexcept {
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return false;
   }
@@ -133,8 +133,8 @@ bool test_cancel_prevents_fire() noexcept {
 }
 
 bool test_clear_removes_all() noexcept {
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return false;
   }
@@ -164,8 +164,8 @@ bool test_clear_removes_all() noexcept {
 }
 
 bool test_snapshot_restore() noexcept {
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return false;
   }
@@ -212,8 +212,8 @@ bool test_snapshot_restore() noexcept {
   }
 
   // Restore into a fresh timer manager (new world).
-  std::unique_ptr<engine::runtime::World> world2(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world2(new (std::nothrow)
+                                                     engine::runtime::World());
   if (world2 == nullptr) {
     return false;
   }
@@ -230,8 +230,8 @@ bool test_snapshot_restore() noexcept {
 }
 
 bool test_null_callback_rejected() noexcept {
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return false;
   }
@@ -247,10 +247,10 @@ bool test_null_callback_rejected() noexcept {
 
 bool test_timer_per_world() noexcept {
   // Two separate worlds have independent timer managers.
-  std::unique_ptr<engine::runtime::World> worldA(
-      new (std::nothrow) engine::runtime::World());
-  std::unique_ptr<engine::runtime::World> worldB(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
+                                                     engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> worldB(new (std::nothrow)
+                                                     engine::runtime::World());
   if ((worldA == nullptr) || (worldB == nullptr)) {
     return false;
   }

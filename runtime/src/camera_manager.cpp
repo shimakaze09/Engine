@@ -9,14 +9,11 @@ namespace engine::runtime {
 namespace {
 constexpr const char *kLogChannel = "camera";
 
-float lerp(float a, float b, float t) noexcept {
-  return a + (b - a) * t;
-}
+float lerp(float a, float b, float t) noexcept { return a + (b - a) * t; }
 
 math::Vec3 lerp_vec3(const math::Vec3 &a, const math::Vec3 &b,
                      float t) noexcept {
-  return math::Vec3(lerp(a.x, b.x, t), lerp(a.y, b.y, t),
-                    lerp(a.z, b.z, t));
+  return math::Vec3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
 }
 
 float clamp01(float v) noexcept {
@@ -115,8 +112,7 @@ float CameraManager::noise1d(float t) noexcept {
   // Hash integers to pseudo-random floats in [-1, 1].
   auto hash = [](int n) noexcept -> float {
     n = (n << 13) ^ n;
-    const int t2 =
-        (n * (n * n * 15731 + 789221) + 1376312589) & 0x7FFFFFFF;
+    const int t2 = (n * (n * n * 15731 + 789221) + 1376312589) & 0x7FFFFFFF;
     return 1.0F - static_cast<float>(t2) / 1073741824.0F;
   };
   const float v0 = hash(i0);
@@ -127,9 +123,9 @@ float CameraManager::noise1d(float t) noexcept {
 }
 
 void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
-                              math::Vec3 *outTarget, math::Vec3 *outUp,
-                              float *outFov, float *outNear,
-                              float *outFar) noexcept {
+                             math::Vec3 *outTarget, math::Vec3 *outUp,
+                             float *outFov, float *outNear,
+                             float *outFar) noexcept {
   if ((outPosition == nullptr) || (outTarget == nullptr) ||
       (outUp == nullptr) || (outFov == nullptr) || (outNear == nullptr) ||
       (outFar == nullptr)) {
@@ -155,11 +151,9 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
       continue;
     }
     if (&cam == best) {
-      cam.blendWeight =
-          clamp01(cam.blendWeight + cam.blendSpeed * dt);
+      cam.blendWeight = clamp01(cam.blendWeight + cam.blendSpeed * dt);
     } else {
-      cam.blendWeight =
-          clamp01(cam.blendWeight - cam.blendSpeed * dt);
+      cam.blendWeight = clamp01(cam.blendWeight - cam.blendSpeed * dt);
     }
   }
 
@@ -196,22 +190,19 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
       continue;
     }
     const float progress = shake.elapsed / shake.duration;
-    const float envelope =
-        shake.amplitude * std::exp(-shake.decay * progress);
+    const float envelope = shake.amplitude * std::exp(-shake.decay * progress);
     const float phase = shake.elapsed * shake.frequency;
     shakeOffset.x += envelope * noise1d(phase);
     shakeOffset.y += envelope * noise1d(phase + 100.0F);
     shakeOffset.z += envelope * noise1d(phase + 200.0F);
   }
 
-  *outPosition =
-      math::Vec3(m_currentPosition.x + shakeOffset.x,
-                  m_currentPosition.y + shakeOffset.y,
-                  m_currentPosition.z + shakeOffset.z);
-  *outTarget =
-      math::Vec3(m_currentTarget.x + shakeOffset.x,
-                  m_currentTarget.y + shakeOffset.y,
-                  m_currentTarget.z + shakeOffset.z);
+  *outPosition = math::Vec3(m_currentPosition.x + shakeOffset.x,
+                            m_currentPosition.y + shakeOffset.y,
+                            m_currentPosition.z + shakeOffset.z);
+  *outTarget = math::Vec3(m_currentTarget.x + shakeOffset.x,
+                          m_currentTarget.y + shakeOffset.y,
+                          m_currentTarget.z + shakeOffset.z);
   *outUp = m_currentUp;
   *outFov = m_currentFov;
   *outNear = m_currentNear;

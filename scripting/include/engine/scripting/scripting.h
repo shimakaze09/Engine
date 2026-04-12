@@ -36,6 +36,10 @@ bool call_script_function(const char *name) noexcept;
 // Returns false if function doesn't exist or errors.
 bool call_script_function_float(const char *name, float arg) noexcept;
 
+// Debugger breakpoint controls (used by DAP transport).
+void debugger_clear_breakpoints() noexcept;
+bool debugger_add_breakpoint(const char *file, int line) noexcept;
+
 // Dispatch Lua on_collision(entityA, entityB) for each pair in pairData.
 // pairData is an array of [entityIndexA, entityIndexB, ...] uint32 values.
 // pairCount is the number of pairs (not element count).
@@ -99,5 +103,18 @@ void dispatch_entity_scripts_end() noexcept;
 
 // Drop all cached entity script modules (called on Stop / reload).
 void clear_entity_script_modules() noexcept;
+
+// --- Sandbox configuration ---
+// Enable or disable the Lua sandbox (restricted globals, CPU/memory limits).
+void set_sandbox_enabled(bool enabled) noexcept;
+bool is_sandbox_enabled() noexcept;
+
+// CPU instruction limit per protected Lua call (0 = unlimited).
+void set_instruction_limit(int limit) noexcept;
+int get_instruction_limit() noexcept;
+
+// Memory limit for the Lua allocator in bytes (0 = unlimited).
+void set_memory_limit(std::size_t limit) noexcept;
+std::size_t get_memory_limit() noexcept;
 
 } // namespace engine::scripting

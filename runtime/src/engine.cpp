@@ -45,6 +45,7 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
+#include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
 
 namespace engine {
@@ -819,6 +820,10 @@ bool bootstrap() noexcept {
       "r_showStats", true,
       "Toggle in-game stats and profiling overlays in the editor"));
 
+  static_cast<void>(core::cvar_register_int(
+      "debug_dap_port", 0,
+      "DAP debugger port (0 = disabled). Set to e.g. 4711 to enable."));
+
   // Mount the assets directory relative to CWD so that VFS paths like
   // "assets/shaders/pbr.vert" resolve correctly when running from build/.
   static_cast<void>(core::mount("assets", "assets"));
@@ -854,9 +859,24 @@ bool bootstrap() noexcept {
     return false;
   }
 
+  // Start DAP debugger server if CVar port is set.
+  {
+    const int dapPort = core::cvar_get_int("debug_dap_port");
+    if (dapPort > 0) {
+      if (scripting::dap_start(static_cast<std::uint16_t>(dapPort))) {
+        core::log_message(core::LogLevel::Info, "scripting",
+                          "DAP debugger listening");
+      } else {
+        core::log_message(core::LogLevel::Warning, "scripting",
+                          "failed to start DAP debugger");
+      }
+    }
+  }
+
   if (!audio::initialize_audio()) {
     core::log_message(core::LogLevel::Error, "audio",
                       "failed to initialize audio");
+    scripting::dap_stop();
     scripting::shutdown_scripting();
     if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
       bridge->shutdown();
@@ -1203,6 +1223,7 @@ void run(std::uint32_t maxFrames) noexcept {
     const LoopPlayState playState = query_editor_play_state();
     if ((playState == LoopPlayState::Playing) &&
         (previousPlayState == LoopPlayState::Stopped)) {
+      scripting::watch_script_file(kMainScriptPath);
       scripting::dispatch_entity_scripts_start();
     }
 
@@ -1297,6 +1318,7 @@ void run(std::uint32_t maxFrames) noexcept {
     }
 
     renderer::check_shader_reload();
+    scripting::check_script_reload();
 
     audio::update_audio();
 
@@ -1804,6 +1826,7 @@ void shutdown() noexcept {
   }
   renderer::shutdown_renderer();
   audio::shutdown_audio();
+  scripting::dap_stop();
   scripting::shutdown_scripting();
   g_frameContext.reset();
   core::shutdown_core();

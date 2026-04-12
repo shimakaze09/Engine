@@ -187,17 +187,30 @@ Everything in Phase 1 must be complete before a game can be shipped.
 - [ ] P1-M2-G2c: CPU instruction limit per script per frame
 - [ ] P1-M2-G2d: Memory limit per script environment
 - [ ] P1-M2-G2e: Test: io.open→error, infinite loop→terminate, huge alloc→fail
-- [~] P1-M2-G3a: Snapshot script state before reload (engine.persist vars)
-- [~] P1-M2-G3b: Re-execute modified scripts in fresh sandbox
-- [~] P1-M2-G3c: Restore snapshots, re-register callbacks
-- [ ] P1-M2-G3d: On error: revert to previous version
-- [ ] P1-M2-G3e: Test: modify script → reload → verify state survives
-- [ ] P1-M2-G4a: Binding generator tool: parse annotated C++ headers
-- [ ] P1-M2-G4b: Annotation syntax: // LUA_BIND: func(args) -> return
-- [ ] P1-M2-G4c: Generator emits: validation, conversion, call, push return
-- [ ] P1-M2-G4d: CMake pre-build step → generated_bindings.cpp
-- [ ] P1-M2-G4e: Migrate ≥20 hand-written bindings to generated
-- [ ] P1-M2-G4f: Test: bindgen processes header → valid C++ compiles
+- [x] P1-M2-G1a: DAP JSON-RPC transport over TCP socket
+- [x] P1-M2-G1b: Handle initialize / launch / configurationDone
+- [x] P1-M2-G1c: setBreakpoints via lua_sethook
+- [x] P1-M2-G1d: continue / next / stepIn / stepOut
+- [x] P1-M2-G1e: stackTrace — walk Lua call stack
+- [x] P1-M2-G1f: scopes + variables (locals, upvalues, globals)
+- [x] P1-M2-G1g: evaluate expression in paused context
+- [x] P1-M2-G1h: Test: mock DAP client → breakpoint → verify pause at line
+- [x] P1-M2-G2a: Per-script sandbox (restricted globals, no io/os.execute)
+- [x] P1-M2-G2b: Allow-list safe functions (math, string, table, engine.*)
+- [x] P1-M2-G2c: CPU instruction limit per script per frame
+- [x] P1-M2-G2d: Memory limit per script environment
+- [x] P1-M2-G2e: Test: io.open→error, infinite loop→terminate, huge alloc→fail
+- [x] P1-M2-G3a: Snapshot script state before reload (engine.persist vars)
+- [x] P1-M2-G3b: Re-execute modified scripts in fresh sandbox
+- [x] P1-M2-G3c: Restore snapshots, re-register callbacks
+- [x] P1-M2-G3d: On error: revert to previous version
+- [x] P1-M2-G3e: Test: modify script → reload → verify state survives
+- [x] P1-M2-G4a: Binding generator tool: parse annotated C++ headers
+- [x] P1-M2-G4b: Annotation syntax: // LUA_BIND: func(args) -> return
+- [x] P1-M2-G4c: Generator emits: validation, conversion, call, push return
+- [x] P1-M2-G4d: CMake pre-build step → generated_bindings.cpp
+- [x] P1-M2-G4e: Migrate ≥20 hand-written bindings to generated
+- [x] P1-M2-G4f: Test: bindgen processes header → valid C++ compiles
 
 ---
 

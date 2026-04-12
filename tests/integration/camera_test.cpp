@@ -18,7 +18,7 @@ bool test_push_pop_camera() noexcept {
   CameraEntry entry{};
   entry.position = math::Vec3(10.0F, 5.0F, 0.0F);
   entry.target = math::Vec3(0.0F, 0.0F, 0.0F);
-  
+
   if (!cm.push_camera(1U, entry, 1.0F)) {
     return false;
   }
@@ -192,8 +192,7 @@ bool test_multiple_shakes_additive() noexcept {
   cm.evaluate(0.05F, &pos, &tgt, &up, &fov, &nearP, &farP);
 
   // Offsets should be nonzero (additive of two shakes).
-  const float len =
-      std::sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+  const float len = std::sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
   if (len < 0.001F) {
     return false;
   }
@@ -275,7 +274,8 @@ int main() {
   run("test_push_pop_camera", test_push_pop_camera);
   run("test_priority_stack", test_priority_stack);
   run("test_blend_interpolation", test_blend_interpolation);
-  run("test_camera_shake_nonzero_then_zero", test_camera_shake_nonzero_during_and_zero_after);
+  run("test_camera_shake_nonzero_then_zero",
+      test_camera_shake_nonzero_during_and_zero_after);
   run("test_multiple_shakes_additive", test_multiple_shakes_additive);
   run("test_spring_arm_crud", test_spring_arm_crud);
   run("test_clear", test_clear);

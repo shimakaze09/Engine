@@ -30,7 +30,8 @@ constexpr const char *kPersistentIdKey = "persistentId";
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
-constexpr const char *kSpringArmTypeName = "engine::runtime::SpringArmComponent";
+constexpr const char *kSpringArmTypeName =
+    "engine::runtime::SpringArmComponent";
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
@@ -902,8 +903,8 @@ bool serialize_scene_to_writer(const World &world,
 
     SpringArmComponent springArm{};
     if (world.get_spring_arm(entity, &springArm) &&
-        !write_reflected_component(writer, "SpringArmComponent",
-                                   *springArmDesc, &springArm)) {
+        !write_reflected_component(writer, "SpringArmComponent", *springArmDesc,
+                                   &springArm)) {
       writeFailed = true;
       return;
     }
@@ -1102,8 +1103,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   }
 
   if (!deserialize_scene_entities(parser, entities, *transformDesc,
-                                  *rigidBodyDesc, *colliderDesc,
-                                  *springArmDesc, *stagedWorld)) {
+                                  *rigidBodyDesc, *colliderDesc, *springArmDesc,
+                                  *stagedWorld)) {
     return false;
   }
 

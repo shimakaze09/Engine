@@ -203,3 +203,79 @@ add_test(
     COMMAND engine_integration_coroutine
 )
 set_tests_properties(engine_integration_coroutine PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_sandbox
+    sandbox_test.cpp
+)
+
+target_compile_features(engine_integration_sandbox PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_sandbox
+    PRIVATE
+    engine_runtime
+    engine_scripting
+)
+
+add_test(
+    NAME engine_integration_sandbox
+    COMMAND engine_integration_sandbox
+)
+set_tests_properties(engine_integration_sandbox PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_hotreload
+    hotreload_test.cpp
+)
+
+target_compile_features(engine_integration_hotreload PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_hotreload
+    PRIVATE
+    engine_runtime
+    engine_scripting
+)
+
+add_test(
+    NAME engine_integration_hotreload
+    COMMAND engine_integration_hotreload
+)
+set_tests_properties(engine_integration_hotreload PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_bindgen
+    bindgen_test.cpp
+)
+
+target_compile_features(engine_integration_bindgen PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_bindgen
+    PRIVATE
+    engine_runtime
+    engine_scripting
+)
+
+add_test(
+    NAME engine_integration_bindgen
+    COMMAND engine_integration_bindgen
+)
+set_tests_properties(engine_integration_bindgen PROPERTIES LABELS "integration")
+
+add_executable(engine_integration_dap
+    dap_test.cpp
+)
+
+target_compile_features(engine_integration_dap PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_dap
+    PRIVATE
+    engine_runtime
+    engine_scripting
+)
+
+if(WIN32)
+    target_link_libraries(engine_integration_dap PRIVATE ws2_32)
+endif()
+
+add_test(
+    NAME engine_integration_dap
+    COMMAND engine_integration_dap
+)
+set_tests_properties(engine_integration_dap PROPERTIES LABELS "integration")

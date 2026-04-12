@@ -103,10 +103,10 @@ struct MeshComponent final {
 /// Spring arm component: drives a third-person camera boom that shortens on
 /// collision and smoothly interpolates length.
 struct SpringArmComponent final {
-  float armLength = 5.0F;       ///< Desired arm length (world units).
-  float currentLength = 5.0F;   ///< Interpolated length after collision.
+  float armLength = 5.0F;     ///< Desired arm length (world units).
+  float currentLength = 5.0F; ///< Interpolated length after collision.
   math::Vec3 offset = math::Vec3(0.0F, 1.0F, 0.0F); ///< Pivot offset.
-  float lagSpeed = 8.0F;        ///< Smoothing interpolation rate.
+  float lagSpeed = 8.0F;         ///< Smoothing interpolation rate.
   float collisionRadius = 0.25F; ///< Sphere sweep radius.
   bool collisionEnabled = true;
 };
@@ -425,9 +425,8 @@ private:
   using ScriptComponentSet =
       core::SparseSet<Entity, ScriptComponent, kMaxEntities,
                       kMaxScriptComponents>;
-  using SpringArmSet =
-      core::SparseSet<Entity, SpringArmComponent, kMaxEntities,
-                      kMaxSpringArmComponents>;
+  using SpringArmSet = core::SparseSet<Entity, SpringArmComponent, kMaxEntities,
+                                       kMaxSpringArmComponents>;
 
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;

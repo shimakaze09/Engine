@@ -1,4 +1,7 @@
 #include "engine/scripting/scripting.h"
+#include "engine/scripting/bindable_api.h"
+#include "engine/scripting/dap_server.h"
+
 
 extern "C" {
 #include "lauxlib.h"
@@ -39,6 +42,10 @@ extern "C" {
 #endif
 
 namespace engine::scripting {
+
+void register_generated_bindings(lua_State *L) noexcept;
+void debugger_clear_breakpoints() noexcept;
+bool debugger_add_breakpoint(const char *file, int line) noexcept;
 
 namespace {
 
@@ -196,6 +203,50 @@ char g_lastBreakpointFile[160] = {};
 int g_lastBreakpointLine = 0;
 std::uint32_t g_breakpointHitCount = 0U;
 bool g_debuggerEnabled = false;
+
+// DAP debugger stepping state.
+DapStepMode g_dapStepMode = DapStepMode::Continue;
+int g_dapStepDepth = 0;
+
+// Persist table for hot-reload state preservation (registry reference).
+int g_persistRef = LUA_NOREF;
+
+// --- Sandbox state ---
+bool g_sandboxEnabled = true;
+
+// CPU instruction limit per protected call. Default 1M instructions.
+constexpr int kDefaultInstructionLimit = 1000000;
+int g_instructionLimit = kDefaultInstructionLimit;
+
+// Memory limit for the Lua allocator (bytes). Default 64MB.
+constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
+std::size_t g_memoryLimit = kDefaultMemoryLimit;
+std::size_t g_memoryUsed = 0U;
+
+// Custom allocator wrapper that enforces memory limit.
+void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
+                    std::size_t nsize) noexcept {
+  if (nsize == 0U) {
+    if (osize > 0U) {
+      g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
+    }
+    std::free(ptr);
+    return nullptr;
+  }
+  if (nsize > osize && (g_memoryUsed + (nsize - osize)) > g_memoryLimit) {
+    return nullptr; // Memory limit exceeded.
+  }
+  void *newPtr = std::realloc(ptr, nsize);
+  if (newPtr != nullptr) {
+    if (nsize > osize) {
+      g_memoryUsed += (nsize - osize);
+    } else {
+      const std::size_t freed = osize - nsize;
+      g_memoryUsed = (g_memoryUsed >= freed) ? (g_memoryUsed - freed) : 0U;
+    }
+  }
+  return newPtr;
+}
 
 char g_gameMode[64] = "default";
 char g_gameState[64] = "startup";
@@ -592,36 +643,103 @@ void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
     return;
   }
 
+  // Instruction-count sandbox limit — fires after g_instructionLimit ops.
+  if (g_sandboxEnabled && ar->event == LUA_HOOKCOUNT) {
+    luaL_error(state, "CPU instruction limit exceeded (%d instructions)",
+               g_instructionLimit);
+    return; // Unreachable (luaL_error longjmps).
+  }
+
   if (g_profilerEnabled && (ar->event == LUA_HOOKCALL)) {
     if (lua_getinfo(state, "n", ar) != 0) {
       profiler_record_sample((ar->name != nullptr) ? ar->name : "<anonymous>");
     }
   }
 
-  if (g_debuggerEnabled && (ar->event == LUA_HOOKLINE)) {
-    if (lua_getinfo(state, "Sln", ar) == 0) {
-      return;
-    }
-    if (!debugger_line_matches(ar->source, ar->currentline)) {
-      return;
-    }
+  if (!g_debuggerEnabled) {
+    return;
+  }
 
-    const char *source = (ar->source != nullptr) ? ar->source : "";
-    if (source[0] == '@') {
-      ++source;
+  // Stepping: on return event, if stepping out, switch to step-in
+  // so we stop on the next line after the return.
+  if (g_dapStepMode == DapStepMode::StepOut && ar->event == LUA_HOOKRET) {
+    lua_Debug check{};
+    int depth = 0;
+    while (lua_getstack(state, depth, &check) != 0) {
+      ++depth;
     }
-    std::snprintf(g_lastBreakpointFile, sizeof(g_lastBreakpointFile), "%s",
-                  source);
-    g_lastBreakpointLine = ar->currentline;
-    ++g_breakpointHitCount;
+    // Current depth includes the returning frame; after return
+    // we'll be at depth-1. If that's <= the step depth, stop next line.
+    if (depth - 1 <= g_dapStepDepth) {
+      g_dapStepMode = DapStepMode::StepIn;
+    }
+    return;
+  }
 
-    luaL_traceback(state, state, "breakpoint", 1);
-    const char *trace = lua_tostring(state, -1);
-    if (trace != nullptr) {
-      std::snprintf(g_lastCallstack, sizeof(g_lastCallstack), "%s", trace);
+  if (ar->event != LUA_HOOKLINE) {
+    return;
+  }
+
+  if (lua_getinfo(state, "Sln", ar) == 0) {
+    return;
+  }
+
+  bool shouldStop = false;
+  const char *reason = "breakpoint";
+
+  if (debugger_line_matches(ar->source, ar->currentline)) {
+    shouldStop = true;
+    reason = "breakpoint";
+  } else if (g_dapStepMode == DapStepMode::StepIn) {
+    shouldStop = true;
+    reason = "step";
+  } else if (g_dapStepMode == DapStepMode::Next) {
+    // Stop only if at the same or lesser call depth.
+    lua_Debug check{};
+    int depth = 0;
+    while (lua_getstack(state, depth, &check) != 0) {
+      ++depth;
     }
-    lua_pop(state, 1);
-    debugger_capture_watch_values();
+    if (depth <= g_dapStepDepth) {
+      shouldStop = true;
+      reason = "step";
+    }
+  }
+
+  if (!shouldStop) {
+    return;
+  }
+
+  const char *source = (ar->source != nullptr) ? ar->source : "";
+  if (source[0] == '@') {
+    ++source;
+  }
+  std::snprintf(g_lastBreakpointFile, sizeof(g_lastBreakpointFile), "%s",
+                source);
+  g_lastBreakpointLine = ar->currentline;
+  ++g_breakpointHitCount;
+
+  luaL_traceback(state, state, "breakpoint", 1);
+  const char *trace = lua_tostring(state, -1);
+  if (trace != nullptr) {
+    std::snprintf(g_lastCallstack, sizeof(g_lastCallstack), "%s", trace);
+  }
+  lua_pop(state, 1);
+  debugger_capture_watch_values();
+
+  // If a DAP client is connected, pause and process DAP messages.
+  if (dap_has_client()) {
+    // Record current depth for step-over/step-out.
+    lua_Debug depthCheck{};
+    int currentDepth = 0;
+    while (lua_getstack(state, currentDepth, &depthCheck) != 0) {
+      ++currentDepth;
+    }
+    // Block until continue/step command.
+    g_dapStepMode = dap_on_stopped(state, source, ar->currentline, reason);
+    g_dapStepDepth = currentDepth;
+    // Re-enable hooks after processing (eval disables them).
+    refresh_lua_hook();
   }
 }
 
@@ -631,11 +749,20 @@ void refresh_lua_hook() noexcept {
   }
 
   int mask = 0;
+  int count = 0;
   if (g_profilerEnabled) {
     mask |= LUA_MASKCALL;
   }
   if (g_debuggerEnabled) {
     mask |= LUA_MASKLINE;
+    // Enable call/return hooks for stepping modes.
+    if (g_dapStepMode != DapStepMode::Continue) {
+      mask |= LUA_MASKCALL | LUA_MASKRET;
+    }
+  }
+  if (g_sandboxEnabled && g_instructionLimit > 0) {
+    mask |= LUA_MASKCOUNT;
+    count = g_instructionLimit;
   }
 
   if (mask == 0) {
@@ -643,7 +770,7 @@ void refresh_lua_hook() noexcept {
     return;
   }
 
-  lua_sethook(g_state, &scripting_debug_hook, mask, 0);
+  lua_sethook(g_state, &scripting_debug_hook, mask, count);
 }
 
 void log_lua_error(const char *context) noexcept {
@@ -1922,34 +2049,16 @@ int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-
   const int line = static_cast<int>(lua_tointeger(state, 2));
-  if (line <= 0) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    if (!g_breakpoints[i].active) {
-      std::snprintf(g_breakpoints[i].file, sizeof(g_breakpoints[i].file), "%s",
-                    file);
-      g_breakpoints[i].line = line;
-      g_breakpoints[i].active = true;
-      lua_pushboolean(state, 1);
-      return 1;
-    }
-  }
-
-  lua_pushboolean(state, 0);
+  lua_pushboolean(state, debugger_add_breakpoint(file, line) ? 1 : 0);
   return 1;
 }
 
 int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept {
   static_cast<void>(state);
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    g_breakpoints[i] = DebugBreakpoint{};
-  }
-  return 0;
+  debugger_clear_breakpoints();
+  lua_pushboolean(state, 1);
+  return 1;
 }
 
 int lua_engine_debugger_add_watch(lua_State *state) noexcept {
@@ -2083,8 +2192,7 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::CameraEntry *entry =
-      g_world->camera_manager().active_camera();
+  const runtime::CameraEntry *entry = g_world->camera_manager().active_camera();
   if (entry == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -2112,8 +2220,8 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
   if (lua_isnumber(state, 4)) {
     decay = static_cast<float>(lua_tonumber(state, 4));
   }
-  const bool ok =
-      g_world->camera_manager().add_shake(amplitude, frequency, duration, decay);
+  const bool ok = g_world->camera_manager().add_shake(amplitude, frequency,
+                                                      duration, decay);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -2141,8 +2249,7 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     arm.collisionEnabled = (lua_toboolean(state, 7) != 0);
   }
-  const runtime::Entity entity =
-      g_world->find_entity_by_index(entityIdx);
+  const runtime::Entity entity = g_world->find_entity_by_index(entityIdx);
   const bool ok = g_world->add_spring_arm(entity, arm);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -2157,8 +2264,7 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
   }
   const auto entityIdx =
       static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  const runtime::Entity entity =
-      g_world->find_entity_by_index(entityIdx);
+  const runtime::Entity entity = g_world->find_entity_by_index(entityIdx);
   runtime::SpringArmComponent arm{};
   if (!g_world->get_spring_arm(entity, &arm)) {
     lua_pushnil(state);
@@ -3029,8 +3135,8 @@ public:
     if (nresults >= 2 && lua_islightuserdata(thread, -1)) {
       void *tag = lua_touserdata(thread, -1);
       if (tag == static_cast<void *>(&kWaitFramesTag)) {
-        const auto frames = static_cast<std::uint32_t>(
-            lua_tointeger(thread, -2));
+        const auto frames =
+            static_cast<std::uint32_t>(lua_tointeger(thread, -2));
         entry.mode = WaitMode::Frames;
         entry.wakeAtFrame = g_frameIndex + frames;
       } else if (tag == static_cast<void *>(&kWaitConditionTag)) {
@@ -3041,8 +3147,7 @@ public:
       }
       lua_pop(thread, nresults);
     } else if (nresults >= 1 && lua_isnumber(thread, -1)) {
-      const float secs =
-          static_cast<float>(lua_tonumber(thread, -1));
+      const float secs = static_cast<float>(lua_tonumber(thread, -1));
       entry.wakeAt = g_totalSeconds + secs;
       lua_pop(thread, nresults);
     } else if (nresults > 0) {
@@ -3156,9 +3261,8 @@ int lua_engine_wait(lua_State *state) noexcept {
 }
 
 int lua_engine_wait_frames(lua_State *state) noexcept {
-  const int n = lua_isinteger(state, 1)
-                    ? static_cast<int>(lua_tointeger(state, 1))
-                    : 1;
+  const int n =
+      lua_isinteger(state, 1) ? static_cast<int>(lua_tointeger(state, 1)) : 1;
   lua_pushinteger(state, static_cast<lua_Integer>(n > 0 ? n : 1));
   lua_pushlightuserdata(state, static_cast<void *>(&kWaitFramesTag));
   return lua_yield(state, 2);
@@ -3454,6 +3558,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
           return mod.registryRef;
         }
 
+        refresh_lua_hook(); // Reset instruction counter.
+
         if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
           log_lua_error("reload entity script");
           return mod.registryRef;
@@ -3504,6 +3610,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     --g_moduleLoadDepth;
     return LUA_NOREF;
   }
+
+  refresh_lua_hook(); // Reset instruction counter.
 
   if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
     log_lua_error("exec entity script");
@@ -3581,6 +3689,7 @@ bool call_module_function(int moduleRef, const char *funcName,
     nargs = 2;
   }
 
+  refresh_lua_hook(); // Reset instruction counter per callback.
   if (lua_pcall(g_state, nargs, 0, 0) != LUA_OK) {
     log_lua_error(funcName);
     if ((entityIndex > 0U) && (entityIndex < kMaxFaultedEntities)) {
@@ -3643,6 +3752,33 @@ int lua_engine_require(lua_State *state) noexcept {
     return 1;
   }
   lua_rawgeti(state, LUA_REGISTRYINDEX, ref);
+  return 1;
+}
+
+// engine.persist(key, value) — store a value that survives hot-reload.
+int lua_engine_persist(lua_State *state) noexcept {
+  const char *key = luaL_checkstring(state, 1);
+  if (g_persistRef == LUA_NOREF) {
+    lua_newtable(state);
+    g_persistRef = luaL_ref(state, LUA_REGISTRYINDEX);
+  }
+  lua_rawgeti(state, LUA_REGISTRYINDEX, g_persistRef);
+  lua_pushvalue(state, 2); // value (may be nil to clear)
+  lua_setfield(state, -2, key);
+  lua_pop(state, 1); // pop persist table
+  return 0;
+}
+
+// engine.restore(key) — retrieve a value saved with engine.persist.
+int lua_engine_restore(lua_State *state) noexcept {
+  const char *key = luaL_checkstring(state, 1);
+  if (g_persistRef == LUA_NOREF) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_rawgeti(state, LUA_REGISTRYINDEX, g_persistRef);
+  lua_getfield(state, -1, key);
+  lua_remove(state, -2); // remove persist table, leave value
   return 1;
 }
 
@@ -4136,6 +4272,15 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_require);
   lua_setfield(state, -2, "require");
 
+  // Generated bindings override a curated subset of manual wrappers.
+  register_generated_bindings(state);
+
+  // Hot-reload state preservation.
+  lua_pushcfunction(state, &lua_engine_persist);
+  lua_setfield(state, -2, "persist");
+  lua_pushcfunction(state, &lua_engine_restore);
+  lua_setfield(state, -2, "restore");
+
   lua_setglobal(state, "engine");
 }
 
@@ -4226,6 +4371,121 @@ void register_debug_commands() noexcept {
 
 } // namespace
 
+float bindable_delta_time() noexcept { return g_deltaSeconds; }
+
+float bindable_elapsed_time() noexcept { return g_totalSeconds; }
+
+int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
+
+int bindable_get_entity_count() noexcept {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
+    return 0;
+  }
+  return static_cast<int>(g_services->get_transform_count(g_world));
+}
+
+bool bindable_is_god_mode() noexcept { return g_godModeEnabled; }
+
+bool bindable_is_noclip() noexcept { return g_noclipEnabled; }
+
+bool bindable_is_gamepad_connected() noexcept {
+  return core::is_gamepad_connected();
+}
+
+bool bindable_is_key_down(int scancode) noexcept {
+  return core::is_key_down(scancode);
+}
+
+bool bindable_is_key_pressed(int scancode) noexcept {
+  return core::is_key_pressed(scancode);
+}
+
+bool bindable_is_gamepad_button_down(int button) noexcept {
+  return core::is_gamepad_button_down(button);
+}
+
+bool bindable_is_action_down(const char *name) noexcept {
+  return (name != nullptr) ? core::is_action_down(name) : false;
+}
+
+bool bindable_is_action_pressed(const char *name) noexcept {
+  return (name != nullptr) ? core::is_action_pressed(name) : false;
+}
+
+float bindable_get_action_value(const char *name) noexcept {
+  return (name != nullptr) ? core::action_value(name) : 0.0F;
+}
+
+float bindable_get_axis_value(const char *name) noexcept {
+  return (name != nullptr) ? core::axis_value(name) : 0.0F;
+}
+
+bool bindable_set_game_mode(const char *name) noexcept {
+  if (name == nullptr) {
+    return false;
+  }
+  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
+  if (g_world != nullptr) {
+    std::snprintf(g_world->game_mode().name, runtime::GameMode::kMaxNameLength,
+                  "%s", name);
+  }
+  return true;
+}
+
+const char *bindable_get_game_state() noexcept { return g_gameState; }
+
+const char *bindable_get_game_mode() noexcept {
+  if (g_world != nullptr) {
+    return g_world->game_mode().name;
+  }
+  return g_gameMode;
+}
+
+bool bindable_set_game_state(const char *name) noexcept {
+  if (name == nullptr) {
+    return false;
+  }
+  std::snprintf(g_gameState, sizeof(g_gameState), "%s", name);
+  return true;
+}
+
+bool bindable_is_alive(std::uint32_t entity) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+  const runtime::Entity resolved = g_world->find_entity_by_index(entity);
+  return resolved != runtime::kInvalidEntity;
+}
+
+bool bindable_has_light(std::uint32_t entity) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+  const runtime::Entity resolved = g_world->find_entity_by_index(entity);
+  if (resolved == runtime::kInvalidEntity) {
+    return false;
+  }
+  return g_world->has_light_component(resolved);
+}
+
+void bindable_set_camera_fov(float fov) noexcept {
+  if ((g_services != nullptr) && (g_services->set_camera_fov != nullptr)) {
+    g_services->set_camera_fov(fov);
+  }
+}
+
+void bindable_set_master_volume(float volume) noexcept {
+  if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
+    g_services->set_master_volume(volume);
+  }
+}
+
+void bindable_stop_all_sounds() noexcept {
+  if ((g_services != nullptr) && (g_services->stop_all_sounds != nullptr)) {
+    g_services->stop_all_sounds();
+  }
+}
+
 bool initialize_scripting() noexcept {
   if (g_state != nullptr) {
     return true;
@@ -4255,12 +4515,24 @@ bool initialize_scripting() noexcept {
   lua_pop(g_state, 1);
   register_engine_bindings(g_state);
   register_debug_commands();
+
+  // Install sandboxed memory allocator. io/os/debug libraries are already
+  // excluded (only base, coroutine, table, string, math, utf8 are opened).
+  if (g_sandboxEnabled) {
+    lua_setallocf(g_state, sandbox_alloc, nullptr);
+  }
+
   refresh_lua_hook();
   return true;
 }
 
 void shutdown_scripting() noexcept {
   if (g_state != nullptr) {
+    // Release persist table.
+    if (g_persistRef != LUA_NOREF) {
+      luaL_unref(g_state, LUA_REGISTRYINDEX, g_persistRef);
+      g_persistRef = LUA_NOREF;
+    }
     // Release all timer Lua refs before closing.
     ensure_timer_refs_init();
     for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
@@ -4363,6 +4635,9 @@ void set_builtin_mesh_ids(std::uint32_t planeMesh, std::uint32_t cubeMesh,
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
   g_deltaSeconds = deltaSeconds;
   g_totalSeconds = totalSeconds;
+  if (dap_is_running()) {
+    dap_poll();
+  }
 }
 
 bool load_script(const char *path) noexcept {
@@ -4382,6 +4657,8 @@ bool load_script(const char *path) noexcept {
     log_lua_error("load_script");
     return false;
   }
+
+  refresh_lua_hook(); // Reset instruction counter for this invocation.
 
   if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
     log_lua_error("load_script");
@@ -4603,9 +4880,9 @@ void tick_coroutines() noexcept {
       luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
       entry.conditionRef = LUA_NOREF;
     }
+    refresh_lua_hook(); // Reset instruction counter per coroutine resume.
     int nresults = 0;
-    const int status =
-        lua_resume(entry.thread, g_state, 0, &nresults);
+    const int status = lua_resume(entry.thread, g_state, 0, &nresults);
     if (status == LUA_OK) {
       g_coroutineScheduler.release_entry(entry);
     } else if (status == LUA_YIELD) {
@@ -4666,7 +4943,10 @@ void check_script_reload() noexcept {
     g_watchedMtime = mtime;
     core::log_message(core::LogLevel::Info, "scripting",
                       "hot-reloading script");
-    load_script(g_watchedPath);
+    if (!load_script(g_watchedPath)) {
+      core::log_message(core::LogLevel::Warning, "scripting",
+                        "hot-reload failed; keeping previous version");
+    }
   }
 }
 
@@ -4824,5 +5104,47 @@ void clear_entity_script_modules() noexcept {
   }
   g_entityScriptModuleCount = 0U;
 }
+
+void debugger_clear_breakpoints() noexcept {
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    g_breakpoints[i] = DebugBreakpoint{};
+  }
+}
+
+bool debugger_add_breakpoint(const char *file, int line) noexcept {
+  if ((file == nullptr) || (line <= 0)) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    if (!g_breakpoints[i].active) {
+      std::snprintf(g_breakpoints[i].file, sizeof(g_breakpoints[i].file), "%s",
+                    file);
+      g_breakpoints[i].line = line;
+      g_breakpoints[i].active = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- Sandbox configuration ---
+
+void set_sandbox_enabled(bool enabled) noexcept {
+  g_sandboxEnabled = enabled;
+  refresh_lua_hook();
+}
+
+bool is_sandbox_enabled() noexcept { return g_sandboxEnabled; }
+
+void set_instruction_limit(int limit) noexcept {
+  g_instructionLimit = limit;
+  refresh_lua_hook();
+}
+
+int get_instruction_limit() noexcept { return g_instructionLimit; }
+
+void set_memory_limit(std::size_t limit) noexcept { g_memoryLimit = limit; }
+
+std::size_t get_memory_limit() noexcept { return g_memoryLimit; }
 
 } // namespace engine::scripting

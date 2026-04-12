@@ -39,8 +39,7 @@ int count_named(engine::runtime::World *w, const char *name) noexcept {
   int n = 0;
   w->for_each_alive([&](engine::runtime::Entity ent) noexcept {
     engine::runtime::NameComponent nc{};
-    if (w->get_name_component(ent, &nc) &&
-        std::strcmp(nc.name, name) == 0) {
+    if (w->get_name_component(ent, &nc) && std::strcmp(nc.name, name) == 0) {
       ++n;
     }
   });
@@ -60,14 +59,13 @@ bool test_wait_seconds() noexcept {
   engine::runtime::bind_scripting_runtime(world.get());
   engine::scripting::set_default_mesh_asset_id(1U);
 
-  const char *script =
-      "function on_start()\n"
-      "  engine.start_coroutine(function()\n"
-      "    engine.wait(0.5)\n"
-      "    local e = engine.spawn_entity()\n"
-      "    engine.set_name(e, 'wait_done')\n"
-      "  end)\n"
-      "end\n";
+  const char *script = "function on_start()\n"
+                       "  engine.start_coroutine(function()\n"
+                       "    engine.wait(0.5)\n"
+                       "    local e = engine.spawn_entity()\n"
+                       "    engine.set_name(e, 'wait_done')\n"
+                       "  end)\n"
+                       "end\n";
 
   if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
     engine::scripting::shutdown_scripting();
@@ -123,14 +121,13 @@ bool test_wait_frames() noexcept {
   engine::runtime::bind_scripting_runtime(world.get());
   engine::scripting::set_default_mesh_asset_id(1U);
 
-  const char *script =
-      "function on_start()\n"
-      "  engine.start_coroutine(function()\n"
-      "    engine.wait_frames(3)\n"
-      "    local e = engine.spawn_entity()\n"
-      "    engine.set_name(e, 'frames_done')\n"
-      "  end)\n"
-      "end\n";
+  const char *script = "function on_start()\n"
+                       "  engine.start_coroutine(function()\n"
+                       "    engine.wait_frames(3)\n"
+                       "    local e = engine.spawn_entity()\n"
+                       "    engine.set_name(e, 'frames_done')\n"
+                       "  end)\n"
+                       "end\n";
 
   if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
     engine::scripting::shutdown_scripting();
@@ -184,18 +181,17 @@ bool test_wait_until() noexcept {
   engine::scripting::set_default_mesh_asset_id(1U);
 
   // The condition checks a global flag. We set it from Lua after a few ticks.
-  const char *script =
-      "my_flag = false\n"
-      "function on_start()\n"
-      "  engine.start_coroutine(function()\n"
-      "    engine.wait_until(function() return my_flag end)\n"
-      "    local e = engine.spawn_entity()\n"
-      "    engine.set_name(e, 'cond_done')\n"
-      "  end)\n"
-      "end\n"
-      "function set_flag()\n"
-      "  my_flag = true\n"
-      "end\n";
+  const char *script = "my_flag = false\n"
+                       "function on_start()\n"
+                       "  engine.start_coroutine(function()\n"
+                       "    engine.wait_until(function() return my_flag end)\n"
+                       "    local e = engine.spawn_entity()\n"
+                       "    engine.set_name(e, 'cond_done')\n"
+                       "  end)\n"
+                       "end\n"
+                       "function set_flag()\n"
+                       "  my_flag = true\n"
+                       "end\n";
 
   if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
     engine::scripting::shutdown_scripting();
@@ -248,17 +244,16 @@ bool test_chained_waits() noexcept {
   engine::runtime::bind_scripting_runtime(world.get());
   engine::scripting::set_default_mesh_asset_id(1U);
 
-  const char *script =
-      "function on_start()\n"
-      "  engine.start_coroutine(function()\n"
-      "    engine.wait(0.1)\n"
-      "    local e1 = engine.spawn_entity()\n"
-      "    engine.set_name(e1, 'chain_step1')\n"
-      "    engine.wait_frames(2)\n"
-      "    local e2 = engine.spawn_entity()\n"
-      "    engine.set_name(e2, 'chain_step2')\n"
-      "  end)\n"
-      "end\n";
+  const char *script = "function on_start()\n"
+                       "  engine.start_coroutine(function()\n"
+                       "    engine.wait(0.1)\n"
+                       "    local e1 = engine.spawn_entity()\n"
+                       "    engine.set_name(e1, 'chain_step1')\n"
+                       "    engine.wait_frames(2)\n"
+                       "    local e2 = engine.spawn_entity()\n"
+                       "    engine.set_name(e2, 'chain_step2')\n"
+                       "  end)\n"
+                       "end\n";
 
   if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
     engine::scripting::shutdown_scripting();
@@ -378,14 +373,13 @@ bool test_clear() noexcept {
   engine::runtime::bind_scripting_runtime(world.get());
   engine::scripting::set_default_mesh_asset_id(1U);
 
-  const char *script =
-      "function on_start()\n"
-      "  engine.start_coroutine(function()\n"
-      "    engine.wait(10.0)\n"
-      "    local e = engine.spawn_entity()\n"
-      "    engine.set_name(e, 'should_not_exist')\n"
-      "  end)\n"
-      "end\n";
+  const char *script = "function on_start()\n"
+                       "  engine.start_coroutine(function()\n"
+                       "    engine.wait(10.0)\n"
+                       "    local e = engine.spawn_entity()\n"
+                       "    engine.set_name(e, 'should_not_exist')\n"
+                       "  end)\n"
+                       "end\n";
 
   if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
     engine::scripting::shutdown_scripting();
