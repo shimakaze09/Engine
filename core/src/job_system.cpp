@@ -1,5 +1,7 @@
 #include "engine/core/job_system.h"
 
+#include "engine/core/logging.h"
+
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -7,6 +9,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <mutex>
 #include <thread>
 
@@ -116,15 +119,25 @@ public:
 
   bool begin_graph() noexcept {
     if (!is_initialized()) {
+      log_message(LogLevel::Error, "jobs",
+                  "begin_graph failed: job system not initialized");
       return false;
     }
 
     std::lock_guard<std::mutex> lock(m_graphMutex);
     if (m_graphActive) {
+      log_message(LogLevel::Error, "jobs",
+                  "begin_graph failed: previous graph still active");
       return false;
     }
 
-    if (m_pendingJobs.load(std::memory_order_acquire) != 0U) {
+    const auto pending = m_pendingJobs.load(std::memory_order_acquire);
+    if (pending != 0U) {
+      char msg[128] = {};
+      std::snprintf(msg, sizeof(msg),
+                    "begin_graph failed: pendingJobs=%llu (expected 0)",
+                    static_cast<unsigned long long>(pending));
+      log_message(LogLevel::Error, "jobs", msg);
       return false;
     }
 

@@ -224,14 +224,11 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // ScriptComponent
+  // ScriptComponent — plain string format (matches scene serializer).
   ScriptComponent scriptComp{};
   if (world.get_script_component(entity, &scriptComp) &&
       (scriptComp.scriptPath[0] != '\0')) {
-    w.write_key("ScriptComponent");
-    w.begin_object();
-    w.write_string("scriptPath", scriptComp.scriptPath);
-    w.end_object();
+    w.write_string("ScriptComponent", scriptComp.scriptPath);
   }
 
   w.end_object(); // components
@@ -446,24 +443,31 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     static_cast<void>(world.add_light_component(entity, lc));
   }
 
-  // ScriptComponent
+  // ScriptComponent — accepts plain string (current) or legacy object format.
   core::JsonValue sval{};
-  if (parser.get_object_field(componentsVal, "ScriptComponent", &sval) &&
-      (sval.type == core::JsonValue::Type::Object)) {
-    ScriptComponent sc{};
-    core::JsonValue v{};
-    if (parser.get_object_field(sval, "scriptPath", &v)) {
-      const char *pathPtr = nullptr;
-      std::size_t pathLen = 0U;
-      if (parser.as_string(v, &pathPtr, &pathLen) && (pathPtr != nullptr)) {
-        const std::size_t copyLen = (pathLen < sizeof(sc.scriptPath) - 1U)
-                                        ? pathLen
-                                        : (sizeof(sc.scriptPath) - 1U);
-        std::memcpy(sc.scriptPath, pathPtr, copyLen);
-        sc.scriptPath[copyLen] = '\0';
+  if (parser.get_object_field(componentsVal, "ScriptComponent", &sval)) {
+    const char *pathPtr = nullptr;
+    std::size_t pathLen = 0U;
+    bool gotPath = false;
+
+    if (sval.type == core::JsonValue::Type::String) {
+      // Current format: "ScriptComponent": "path.lua"
+      gotPath = parser.as_string(sval, &pathPtr, &pathLen);
+    } else if (sval.type == core::JsonValue::Type::Object) {
+      // Legacy format: "ScriptComponent": { "scriptPath": "path.lua" }
+      core::JsonValue v{};
+      if (parser.get_object_field(sval, "scriptPath", &v)) {
+        gotPath = parser.as_string(v, &pathPtr, &pathLen);
       }
     }
-    if (sc.scriptPath[0] != '\0') {
+
+    if (gotPath && (pathPtr != nullptr) && (pathLen > 0U)) {
+      ScriptComponent sc{};
+      const std::size_t copyLen = (pathLen < sizeof(sc.scriptPath) - 1U)
+                                      ? pathLen
+                                      : (sizeof(sc.scriptPath) - 1U);
+      std::memcpy(sc.scriptPath, pathPtr, copyLen);
+      sc.scriptPath[copyLen] = '\0';
       static_cast<void>(world.add_script_component(entity, sc));
     }
   }

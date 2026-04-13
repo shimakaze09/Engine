@@ -1610,6 +1610,10 @@ void run(std::uint32_t maxFrames) noexcept {
         world->end_end_play_phase();
       }
 
+      // Flush mutations queued by on_collision / on_end_play callbacks so they
+      // apply this frame rather than one frame late.
+      scripting::flush_deferred_mutations();
+
       // Handle deferred scene operations requested from Lua.
       if (scripting::has_pending_scene_op()) {
         if (scripting::pending_scene_op_is_load()) {

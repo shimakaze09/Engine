@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <new>
 
 #include "engine/runtime/game_mode.h"
@@ -20,7 +21,8 @@ static void check(bool condition, const char *name) noexcept {
 }
 
 static bool test_game_mode_owned_by_world() noexcept {
-  auto *world = new (std::nothrow) engine::runtime::World();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (!world) {
     check(false, "world allocation");
     return false;
@@ -30,12 +32,12 @@ static bool test_game_mode_owned_by_world() noexcept {
         "initial state is WaitingToStart");
   check(gm.maxPlayers == 1U, "default maxPlayers is 1");
   check(gm.ruleCount == 0U, "no rules initially");
-  delete world;
   return true;
 }
 
 static bool test_game_mode_state_transitions() noexcept {
-  auto *world = new (std::nothrow) engine::runtime::World();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (!world) {
     check(false, "world allocation");
     return false;
@@ -66,12 +68,12 @@ static bool test_game_mode_state_transitions() noexcept {
   check(!gm.start(), "start from Ended fails");
   check(!gm.pause(), "pause from Ended fails");
   check(!gm.end(), "end from Ended fails (already ended)");
-  delete world;
   return true;
 }
 
 static bool test_game_mode_invalid_transitions() noexcept {
-  auto *world = new (std::nothrow) engine::runtime::World();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (!world) {
     check(false, "world allocation");
     return false;
@@ -83,12 +85,12 @@ static bool test_game_mode_invalid_transitions() noexcept {
 
   // Can end from WaitingToStart
   check(gm.end(), "end from WaitingToStart succeeds");
-  delete world;
   return true;
 }
 
 static bool test_game_mode_rules() noexcept {
-  auto *world = new (std::nothrow) engine::runtime::World();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (!world) {
     check(false, "world allocation");
     return false;
@@ -115,12 +117,12 @@ static bool test_game_mode_rules() noexcept {
   check(gm.get_rule(nullptr) == nullptr, "get_rule null key");
   check(!gm.set_rule(nullptr, "a"), "set_rule null key fails");
   check(!gm.set_rule("", "a"), "set_rule empty key fails");
-  delete world;
   return true;
 }
 
 static bool test_game_mode_reset() noexcept {
-  auto *world = new (std::nothrow) engine::runtime::World();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (!world) {
     check(false, "world allocation");
     return false;
@@ -137,7 +139,6 @@ static bool test_game_mode_reset() noexcept {
   check(std::strcmp(gm.name, "default") == 0, "reset name");
   check(gm.ruleCount == 0U, "reset rules");
   check(gm.maxPlayers == 1U, "reset maxPlayers");
-  delete world;
   return true;
 }
 
@@ -234,10 +235,10 @@ static bool test_game_state_persists_across_worlds() noexcept {
 
   // Simulate world reset (GameState is independent).
   {
-    auto *world = new (std::nothrow) engine::runtime::World();
+    std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                      engine::runtime::World());
     if (world) {
       world->game_mode().start();
-      delete world;
     }
   } // World destroyed
 
