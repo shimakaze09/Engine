@@ -479,13 +479,8 @@ FodyWeavers.xsd
 *.sln.iml
 
 # Misc
-.github/*
-!.github/workflows/
-!.github/workflows/*.yml
-.vscode
 [Bb]uild
 build-*/
-production_*.md
 
 ### VisualStudio Patch ###
 # Additional files built by Visual Studio

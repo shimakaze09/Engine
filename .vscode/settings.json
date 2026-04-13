@@ -1,0 +1,7 @@
+{
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "editor.formatOnSave": true,
+    "files.associations": {
+        "*.h": "cpp"
+    }
+}
