@@ -35,10 +35,12 @@ struct CcdSweepResult {
 /// @param transform The entity's current transform.
 /// @param dt        The timestep in seconds.
 /// @return CCD sweep result with time-of-impact if a hit was found.
-CcdSweepResult bilateral_advance_ccd(
-    const runtime::World &world, runtime::Entity entity,
-    const runtime::RigidBody &body, const runtime::Collider &collider,
-    const runtime::Transform &transform, float dt) noexcept;
+CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
+                                     runtime::Entity entity,
+                                     const runtime::RigidBody &body,
+                                     const runtime::Collider &collider,
+                                     const runtime::Transform &transform,
+                                     float dt) noexcept;
 
 /// Returns the CCD velocity threshold (minimum speed to trigger CCD).
 /// Reads from CVar `physics.ccd_threshold`.

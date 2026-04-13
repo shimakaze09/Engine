@@ -28,9 +28,8 @@ static void check(bool condition, const char *name) noexcept {
 static void test_ball_approaching_wall_no_penetration() noexcept {
   // A ball rolling toward a wall at moderate speed should stop without
   // any visible penetration frame.
-  auto world =
-      std::unique_ptr<engine::runtime::World>(
-          new (std::nothrow) engine::runtime::World());
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
   if (world == nullptr) {
     check(false, "World allocation");
     return;
@@ -96,9 +95,8 @@ static void test_ball_approaching_wall_no_penetration() noexcept {
 static void test_speculative_no_ghost_collision() noexcept {
   // Two objects moving parallel (not toward each other) should NOT get
   // ghost collision from speculative contacts.
-  auto world =
-      std::unique_ptr<engine::runtime::World>(
-          new (std::nothrow) engine::runtime::World());
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
   if (world == nullptr) {
     check(false, "World allocation");
     return;
@@ -165,9 +163,8 @@ static void test_speculative_no_ghost_collision() noexcept {
 static void test_speculative_approaching_spheres() noexcept {
   // Two spheres approaching each other — speculative contacts should
   // prevent deep penetration.
-  auto world =
-      std::unique_ptr<engine::runtime::World>(
-          new (std::nothrow) engine::runtime::World());
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
   if (world == nullptr) {
     check(false, "World allocation");
     return;

@@ -1099,16 +1099,17 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   runtime::Transform transform{};
-  transform.position = math::Vec3(0.0F, 1.5F, 0.0F);
+  transform.position = math::Vec3(-3.0F, 0.5F, -3.0F);
   if (!world->add_transform(entity, transform)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to add bootstrap transform");
     return;
   }
 
+  // Bootstrap cubes are static scenery (inverseMass = 0).
   runtime::RigidBody rigidBody{};
   rigidBody.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
-  rigidBody.inverseMass = 1.0F;
+  rigidBody.inverseMass = 0.0F;
   if (!world->add_rigid_body(entity, rigidBody)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to add bootstrap rigid body");
@@ -1135,7 +1136,7 @@ void run(std::uint32_t maxFrames) noexcept {
   }
 
   runtime::Transform stackedTransform{};
-  stackedTransform.position = math::Vec3(0.0F, 3.0F, 0.0F);
+  stackedTransform.position = math::Vec3(3.0F, 0.5F, -3.0F);
   if (!world->add_transform(stackedEntity, stackedTransform)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to add stacked transform");
@@ -1175,6 +1176,9 @@ void run(std::uint32_t maxFrames) noexcept {
 
   runtime::Collider groundCollider{};
   groundCollider.halfExtents = math::Vec3(5.0F, 0.5F, 5.0F);
+  groundCollider.staticFriction = 0.9F;
+  groundCollider.dynamicFriction = 0.7F;
+  groundCollider.restitution = 0.1F;
   if (!world->add_collider(groundEntity, groundCollider)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to add ground collider");

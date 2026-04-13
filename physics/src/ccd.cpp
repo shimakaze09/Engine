@@ -45,16 +45,12 @@ math::Vec3 broadphase_half_extents_ccd(const runtime::Collider &col) noexcept {
 
 // Separating distance between two AABBs given their centers and half-extents.
 // Returns a positive value when separated, negative when overlapping.
-float aabb_separating_distance(const math::Vec3 &posA,
-                               const math::Vec3 &heA,
+float aabb_separating_distance(const math::Vec3 &posA, const math::Vec3 &heA,
                                const math::Vec3 &posB,
                                const math::Vec3 &heB) noexcept {
-  const float dx =
-      std::fabs(posA.x - posB.x) - (heA.x + heB.x);
-  const float dy =
-      std::fabs(posA.y - posB.y) - (heA.y + heB.y);
-  const float dz =
-      std::fabs(posA.z - posB.z) - (heA.z + heB.z);
+  const float dx = std::fabs(posA.x - posB.x) - (heA.x + heB.x);
+  const float dy = std::fabs(posA.y - posB.y) - (heA.y + heB.y);
+  const float dz = std::fabs(posA.z - posB.z) - (heA.z + heB.z);
   // The separating distance is the maximum of the three axis distances.
   // If all are negative, they overlap — return the largest (least negative).
   return std::max({dx, dy, dz});
@@ -70,8 +66,7 @@ float sphere_separating_distance(const math::Vec3 &posA, float radiusA,
 
 // Generic separating distance between two colliders at given positions.
 // Positive means separated, negative means overlapping.
-float separating_distance(const runtime::Collider &colA,
-                          const math::Vec3 &posA,
+float separating_distance(const runtime::Collider &colA, const math::Vec3 &posA,
                           const runtime::Collider &colB,
                           const math::Vec3 &posB) noexcept {
   const bool aIsSphere = (colA.shape == runtime::ColliderShape::Sphere);
@@ -108,10 +103,12 @@ float ccd_velocity_threshold() noexcept {
   return core::cvar_get_float("physics.ccd_threshold", 2.0F);
 }
 
-CcdSweepResult bilateral_advance_ccd(
-    const runtime::World &world, runtime::Entity entity,
-    const runtime::RigidBody &body, const runtime::Collider &collider,
-    const runtime::Transform &transform, float dt) noexcept {
+CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
+                                     runtime::Entity entity,
+                                     const runtime::RigidBody &body,
+                                     const runtime::Collider &collider,
+                                     const runtime::Transform &transform,
+                                     float dt) noexcept {
 
   CcdSweepResult result{};
 
@@ -172,11 +169,10 @@ CcdSweepResult bilateral_advance_ccd(
     }
 
     // Get the other body's velocity (might be moving too).
-    const runtime::RigidBody *otherBody =
-        world.get_rigid_body_ptr(entities[i]);
-    const math::Vec3 otherVel =
-        (otherBody != nullptr) ? otherBody->velocity
-                               : math::Vec3(0.0F, 0.0F, 0.0F);
+    const runtime::RigidBody *otherBody = world.get_rigid_body_ptr(entities[i]);
+    const math::Vec3 otherVel = (otherBody != nullptr)
+                                    ? otherBody->velocity
+                                    : math::Vec3(0.0F, 0.0F, 0.0F);
 
     // Relative velocity of moving body w.r.t. other.
     const math::Vec3 relVel = math::sub(body.velocity, otherVel);
@@ -258,11 +254,10 @@ CcdSweepResult bilateral_advance_ccd(
 
       const math::Vec3 hitPosA =
           math::add(transform.position, math::mul(relVel, tLo * dt));
-      bestNormal =
-          contact_normal_between(collider, hitPosA, other,
-                                 otherTransform.position);
-      bestContactPt = math::mul(
-          math::add(hitPosA, otherTransform.position), 0.5F);
+      bestNormal = contact_normal_between(collider, hitPosA, other,
+                                          otherTransform.position);
+      bestContactPt =
+          math::mul(math::add(hitPosA, otherTransform.position), 0.5F);
       bestHitEntity = entities[i].index;
     }
   }

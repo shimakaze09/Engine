@@ -12,12 +12,13 @@
 #include "engine/math/ray.h"
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
-#include "engine/physics/collider.h"
 #include "engine/physics/ccd.h"
+#include "engine/physics/collider.h"
 #include "engine/physics/constraint_solver.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
+
 
 namespace engine::physics {
 
@@ -709,11 +710,10 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
             world, entity, *body, *col, readTransforms[i], deltaSeconds);
         if (ccdResult.hit) {
           // Move to the safe position at time-of-impact.
-          const float safeToi =
-              std::max(0.0F, ccdResult.timeOfImpact - 0.01F);
-          updated.position = engine::math::add(
-              readTransforms[i].position,
-              engine::math::mul(displacement, safeToi));
+          const float safeToi = std::max(0.0F, ccdResult.timeOfImpact - 0.01F);
+          updated.position =
+              engine::math::add(readTransforms[i].position,
+                                engine::math::mul(displacement, safeToi));
 
           // Reflect velocity off the contact normal.
           const float vn =
@@ -868,8 +868,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
       const engine::math::Vec3 he = broadphase_half_extents(colliders[i]);
 
       // Expand AABB by velocity to detect speculative contacts.
-      const runtime::RigidBody *bodyI =
-          world.get_rigid_body_ptr(entities[i]);
+      const runtime::RigidBody *bodyI = world.get_rigid_body_ptr(entities[i]);
       float expandX = 0.0F;
       float expandY = 0.0F;
       float expandZ = 0.0F;
@@ -1402,10 +1401,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   const float gap = dist - sumR;
                   if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
                     const engine::math::Vec3 specN =
-                        (dist2 > 0.0F)
-                            ? engine::math::Vec3(dx / dist, dy / dist,
-                                                 dz / dist)
-                            : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                        (dist2 > 0.0F) ? engine::math::Vec3(
+                                             dx / dist, dy / dist, dz / dist)
+                                       : engine::math::Vec3(0.0F, 1.0F, 0.0F);
                     resolve_speculative_contact(bodyA, bodyB, specN, invMassA,
                                                 invMassB, invMassSum, gap,
                                                 kSpeculativeDt);
@@ -1516,10 +1514,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   const float gap = dist - radius;
                   if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
                     engine::math::Vec3 specN =
-                        (dist2 > 0.0F)
-                            ? engine::math::Vec3(dx / dist, dy / dist,
-                                                 dz / dist)
-                            : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+                        (dist2 > 0.0F) ? engine::math::Vec3(
+                                             dx / dist, dy / dist, dz / dist)
+                                       : engine::math::Vec3(0.0F, 1.0F, 0.0F);
                     if (!aIsBox) {
                       specN = engine::math::mul(specN, -1.0F);
                     }
@@ -1620,14 +1617,14 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   (overlapX > 0.0F) && (overlapY > 0.0F) && (overlapZ > 0.0F);
 
               // Speculative contacts (E2a): if AABB pair is NOT overlapping but
-              // the gap is small enough that approach velocity could close it in
-              // one frame, apply a speculative impulse to prevent penetration.
+              // the gap is small enough that approach velocity could close it
+              // in one frame, apply a speculative impulse to prevent
+              // penetration.
               if (!hasOverlap) {
                 // Minimum overlap (most negative = largest gap on that axis).
                 const float minOverlap =
                     std::min({overlapX, overlapY, overlapZ});
-                const float gap =
-                    -minOverlap; // positive = actual gap distance
+                const float gap = -minOverlap; // positive = actual gap distance
 
                 if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
                   // Determine the speculative contact normal (axis of smallest

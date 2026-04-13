@@ -28,9 +28,8 @@ static void check(bool condition, const char *name) noexcept {
 // Helper: create a world with a fast bullet and thin wall, step one frame.
 // Returns the bullet's final X position.
 static float run_bullet_vs_wall(float speed) noexcept {
-  auto world =
-      std::unique_ptr<engine::runtime::World>(
-          new (std::nothrow) engine::runtime::World());
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
   if (world == nullptr) {
     return 999.0F;
   }
@@ -99,9 +98,8 @@ static void test_bullet_300_no_tunnel() noexcept {
 }
 
 static void test_slow_body_normal_integration() noexcept {
-  auto world =
-      std::unique_ptr<engine::runtime::World>(
-          new (std::nothrow) engine::runtime::World());
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
   if (world == nullptr) {
     check(false, "World allocation failed");
     return;
@@ -141,9 +139,8 @@ static void test_slow_body_normal_integration() noexcept {
 }
 
 static void test_ccd_velocity_reflects_on_hit() noexcept {
-  auto world =
-      std::unique_ptr<engine::runtime::World>(
-          new (std::nothrow) engine::runtime::World());
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
   if (world == nullptr) {
     check(false, "World allocation failed");
     return;

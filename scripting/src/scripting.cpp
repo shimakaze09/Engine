@@ -1146,8 +1146,9 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "cylinder") == 0) {
     meshId = (g_builtinCylinderMesh != 0U) ? g_builtinCylinderMesh
                                            : g_defaultMeshAssetId;
+    // Best available approximation for a round cylinder: upright capsule.
     halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    colliderShape = runtime::ColliderShape::AABB;
+    colliderShape = runtime::ColliderShape::Capsule;
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0U) ? g_builtinCapsuleMesh
                                           : g_defaultMeshAssetId;
@@ -5491,6 +5492,9 @@ void dispatch_entity_scripts_start() noexcept {
             g_entityFaulted[entity.index]) {
           return;
         }
+        // Mark begin_play done so dispatch_entity_scripts_begin_play does
+        // not fire on_start a second time for the same entity this frame.
+        g_world->mark_begin_play_done(entity);
         const int ref = get_or_load_entity_script_module(sc.scriptPath);
         if (ref == LUA_NOREF) {
           return;

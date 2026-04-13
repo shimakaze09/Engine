@@ -10,9 +10,11 @@
 --   assets/scripts/player.lua  <- handles player movement
 local M = {}
 
--- Helper: spawn a coloured cube with physics
-local function spawn_cube(x, y, z, r, g, b)
-    local e = engine.spawn_shape("cube", x, y, z, r, g, b)
+local g_scene_initialized = false
+
+-- Helper: spawn a coloured shape with gravity
+local function spawn_dynamic(shape, x, y, z, r, g, b)
+    local e = engine.spawn_shape(shape, x, y, z, r, g, b)
     if e == nil then
         return nil
     end
@@ -20,93 +22,58 @@ local function spawn_cube(x, y, z, r, g, b)
     return e
 end
 
--- Helper: spawn a sphere
-local function spawn_sphere(x, y, z, r, g, b)
-    local e = engine.spawn_shape("sphere", x, y, z, r, g, b)
+-- Helper: spawn a static shape (no gravity, no movement)
+local function spawn_static(shape, x, y, z, r, g, b)
+    local e = engine.spawn_shape(shape, x, y, z, r, g, b)
     if e == nil then
         return nil
     end
-    engine.set_acceleration(e, 0.0, -9.8, 0.0)
-    return e
-end
-
--- Helper: spawn a cylinder
-local function spawn_cylinder(x, y, z, r, g, b)
-    local e = engine.spawn_shape("cylinder", x, y, z, r, g, b)
-    if e == nil then
-        return nil
-    end
-    engine.set_acceleration(e, 0.0, -9.8, 0.0)
-    return e
-end
-
--- Helper: spawn a pyramid
-local function spawn_pyramid(x, y, z, r, g, b)
-    local e = engine.spawn_shape("pyramid", x, y, z, r, g, b)
-    if e == nil then
-        return nil
-    end
-    engine.set_acceleration(e, 0.0, -9.8, 0.0)
+    engine.set_inverse_mass(e, 0.0)
     return e
 end
 
 function M.on_start(self)
+    if g_scene_initialized then
+        return
+    end
+    g_scene_initialized = true
+
     engine.log("=== Scene Controller on_start ===")
 
-    -- Spawn the green player cube and attach a per-entity script to it.
-    local player = spawn_cube(0.0, 6.0, 0.0, 0.2, 0.8, 0.4)
+    -- Player: green cube the user controls with arrow keys + space.
+    local player = spawn_dynamic("cube", 0.0, 3.0, 0.0, 0.2, 0.8, 0.4)
     if player ~= nil then
         engine.set_name(player, "Player")
+        engine.set_friction(player, 0.9, 0.7)
+        engine.set_restitution(player, 0.05)
         engine.add_script_component(player, "assets/scripts/player.lua")
     end
 
-    -- A point light for colour variation (directional sun already exists)
-    local pt = engine.spawn_entity()
-    if pt ~= nil then
-        engine.set_name(pt, "PointLight")
-        engine.set_position(pt, 0.0, 6.0, 3.0)
-        engine.add_light(pt, "point")
-        engine.set_light_color(pt, 0.4, 0.6, 1.0)
-        engine.set_light_intensity(pt, 2.0)
+    -- A few static scenery shapes showing different collider types.
+    local sphere = spawn_static("sphere", -2.0, 0.5, 2.0, 0.9, 0.5, 0.2)
+    if sphere ~= nil then
+        engine.set_name(sphere, "Sphere Prop")
     end
 
-    -- Collision handler: log the first few bounces
-    local bounces = 0
-    engine.on_collision_handler(function(a, b)
-        bounces = bounces + 1
-        if bounces <= 5 then
-            engine.log("bounce #" .. bounces)
-        end
-    end)
+    local cylinder = spawn_static("cylinder", 2.0, 0.5, 2.0, 0.2, 0.6, 0.9)
+    if cylinder ~= nil then
+        engine.set_name(cylinder, "Cylinder Prop")
+    end
 
-    -- Timer: spawn two clones after 2 seconds
-    engine.set_timeout(function()
-        engine.log("timer: spawning clones")
-        local c1 = spawn_cube(-3.0, 9.0, 0.0, 0.9, 0.2, 0.2)
-        if c1 ~= nil then
-            engine.set_name(c1, "CloneRed")
-        end
-        local c2 = spawn_sphere(3.0, 9.0, 0.0, 0.2, 0.2, 0.9)
-        if c2 ~= nil then
-            engine.set_name(c2, "CloneSphere")
-        end
-    end, 2.0)
+    local pyramid = spawn_static("pyramid", 0.0, 0.5, 3.5, 0.8, 0.3, 0.6)
+    if pyramid ~= nil then
+        engine.set_name(pyramid, "Pyramid Prop")
+    end
 
-    -- Coroutine: drop waves of shapes from above
-    engine.start_coroutine(function()
-        engine.wait(4.0)
-        engine.log("coroutine wave 1")
-        spawn_cube(-4.0, 12.0, -2.0, 0.9, 0.6, 0.1)
-        spawn_sphere(0.0, 12.0, -2.0, 0.5, 0.9, 0.3)
-        spawn_cube(4.0, 12.0, -2.0, 0.9, 0.6, 0.1)
-        engine.wait(3.0)
-        engine.log("coroutine wave 2")
-        spawn_cylinder(-6.0, 15.0, 2.0, 0.6, 0.1, 0.9)
-        spawn_pyramid(0.0, 15.0, 2.0, 1.0, 0.8, 0.0)
-        spawn_cylinder(6.0, 15.0, 2.0, 0.6, 0.1, 0.9)
-    end)
+    -- One dynamic sphere to demonstrate physics interaction with the player.
+    local ball = spawn_dynamic("sphere", 3.0, 2.0, 0.0, 0.95, 0.85, 0.2)
+    if ball ~= nil then
+        engine.set_name(ball, "Ball")
+        engine.set_friction(ball, 0.6, 0.4)
+        engine.set_restitution(ball, 0.5)
+    end
 
-    engine.log("on_start done — " .. engine.get_entity_count() .. " entities")
+    engine.log("on_start done - " .. engine.get_entity_count() .. " entities")
 end
 
 function M.on_update(self, dt)

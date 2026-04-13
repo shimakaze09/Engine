@@ -10,9 +10,13 @@
 -- 'self' is the entity's integer ID.
 local M = {}
 
+local MOVE_SPEED = 5.0
+local JUMP_VY = 7.0
+
 function M.on_start(self)
     engine.log("Player on_start, entity=" .. self)
-    engine.set_restitution(self, 0.6)
+    engine.set_restitution(self, 0.05)
+    engine.set_friction(self, 0.9, 0.7)
     engine.set_roughness(self, 0.3)
     engine.set_metallic(self, 0.0)
 end
@@ -25,30 +29,40 @@ function M.on_update(self, dt)
     -- Respawn if the entity falls below y=-20
     local x, y, z = engine.get_position(self)
     if y ~= nil and y < -20.0 then
-        engine.set_position(self, 0.0, 6.0, 0.0)
+        engine.set_position(self, 0.0, 3.0, 0.0)
         engine.set_velocity(self, 0.0, 0.0, 0.0)
         engine.log("Player respawned")
         return
     end
 
-    -- Arrow keys: push the player horizontally
+    -- Read current velocity (preserve vertical component from physics).
+    local vx, vy, vz = engine.get_velocity(self)
+    if vx == nil then
+        return
+    end
+
+    -- Arrow keys: directly set horizontal velocity for responsive control.
+    local tx = 0.0
+    local tz = 0.0
     if engine.is_key_down(engine.KEY_LEFT) then
-        engine.set_additional_acceleration(self, -8.0, 0.0, 0.0)
+        tx = -MOVE_SPEED
     elseif engine.is_key_down(engine.KEY_RIGHT) then
-        engine.set_additional_acceleration(self, 8.0, 0.0, 0.0)
-    elseif engine.is_key_down(engine.KEY_UP) then
-        engine.set_additional_acceleration(self, 0.0, 0.0, -8.0)
+        tx = MOVE_SPEED
+    end
+    if engine.is_key_down(engine.KEY_UP) then
+        tz = -MOVE_SPEED
     elseif engine.is_key_down(engine.KEY_DOWN) then
-        engine.set_additional_acceleration(self, 0.0, 0.0, 8.0)
+        tz = MOVE_SPEED
     end
 
     -- Space bar: jump (only when nearly stationary vertically)
     if engine.is_key_pressed(engine.KEY_SPACE) then
-        local vx, vy, vz = engine.get_velocity(self)
-        if vy ~= nil and math.abs(vy) < 0.5 then
-            engine.set_velocity(self, vx, 8.0, vz)
+        if math.abs(vy) < 0.5 then
+            vy = JUMP_VY
         end
     end
+
+    engine.set_velocity(self, tx, vy, tz)
 end
 
 return M
