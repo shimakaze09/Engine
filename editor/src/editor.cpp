@@ -1308,7 +1308,7 @@ void draw_asset_browser_panel() noexcept {
     const GLuint thumbTex = load_thumbnail_texture(g_selectedAssetPath);
     if (thumbTex != 0U) {
       ImGui::Image(
-          reinterpret_cast<ImTextureID>(static_cast<std::uintptr_t>(thumbTex)),
+          static_cast<ImTextureID>(static_cast<std::uintptr_t>(thumbTex)),
           ImVec2(64.0F, 64.0F));
     }
   }
