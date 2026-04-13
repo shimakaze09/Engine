@@ -590,3 +590,21 @@ add_test(
     NAME engine_unit_speculative_contacts
     COMMAND engine_unit_speculative_contacts
 )
+
+# ---- P1-M4-A: Asset Database Hardening ----
+
+add_executable(engine_unit_asset_hash
+    asset_hash_test.cpp
+)
+
+target_compile_features(engine_unit_asset_hash PRIVATE cxx_std_20)
+
+target_link_libraries(engine_unit_asset_hash
+    PRIVATE
+    engine_renderer
+)
+
+add_test(
+    NAME engine_unit_asset_hash
+    COMMAND engine_unit_asset_hash
+)

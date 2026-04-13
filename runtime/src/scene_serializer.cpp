@@ -454,12 +454,12 @@ bool read_mesh_component(const core::JsonParser &parser,
 
   core::JsonValue meshIdValue{};
   if (parser.get_object_field(meshObject, kMeshAssetIdKey, &meshIdValue)) {
-    if (!parser.as_uint(meshIdValue, &component.meshAssetId)) {
+    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
       return false;
     }
   } else if (parser.get_object_field(meshObject, "meshId", &meshIdValue)) {
     // Backward-compatible read path for scenes authored before asset IDs.
-    if (!parser.as_uint(meshIdValue, &component.meshAssetId)) {
+    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
       return false;
     }
   }
@@ -871,7 +871,7 @@ bool serialize_scene_to_writer(const World &world,
     if (world.get_mesh_component(entity, &mesh)) {
       writer.write_key("MeshComponent");
       writer.begin_object();
-      writer.write_uint(kMeshAssetIdKey, mesh.meshAssetId);
+      writer.write_uint64(kMeshAssetIdKey, mesh.meshAssetId);
       write_vec3(writer, "albedo", mesh.albedo);
       writer.write_float("roughness", mesh.roughness);
       writer.write_float("metallic", mesh.metallic);

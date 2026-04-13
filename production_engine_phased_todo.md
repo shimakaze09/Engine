@@ -289,18 +289,18 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M4-A: Asset Database
 
-- [ ] P1-M4-A1a: Replace 32-bit FNV hash with 64-bit FNV-1a or xxHash64 for asset IDs
-- [ ] P1-M4-A1b: Update all AssetId typedefs from uint32_t to uint64_t, audit comparisons
-- [ ] P1-M4-A1c: Migrate existing asset registry files to 64-bit IDs
-- [ ] P1-M4-A1d: Test: hash 100K random asset paths, verify zero collisions
-- [ ] P1-M4-A2a: AssetMetadata struct (asset_id, type_tag, file_path, file_size, checksum, tags[])
-- [ ] P1-M4-A2b: Store metadata in sidecar .meta JSON files alongside source assets
-- [ ] P1-M4-A2c: Tag system: queryable from editor and runtime
-- [ ] P1-M4-A2d: Import settings per asset type (mesh: scale/up-axis/normals, texture: format/mip/sRGB)
-- [ ] P1-M4-A3a: Mesh thumbnail: render 64×64 offscreen, store as PNG in .thumbnails/
-- [ ] P1-M4-A3b: Texture thumbnail: downscale to 64×64
-- [ ] P1-M4-A3c: Load thumbnails in editor asset browser, fallback to type icon
-- [ ] P1-M4-A3d: Invalidate thumbnail on source asset change (mtime check)
+- [x] P1-M4-A1a: Replace 32-bit FNV hash with 64-bit FNV-1a or xxHash64 for asset IDs
+- [x] P1-M4-A1b: Update all AssetId typedefs from uint32_t to uint64_t, audit comparisons
+- [x] P1-M4-A1c: Migrate existing asset registry files to 64-bit IDs
+- [x] P1-M4-A1d: Test: hash 100K random asset paths, verify zero collisions
+- [x] P1-M4-A2a: AssetMetadata struct (asset_id, type_tag, file_path, file_size, checksum, tags[])
+- [x] P1-M4-A2b: Store metadata in sidecar .meta JSON files alongside source assets
+- [x] P1-M4-A2c: Tag system: queryable from editor and runtime
+- [x] P1-M4-A2d: Import settings per asset type (mesh: scale/up-axis/normals, texture: format/mip/sRGB)
+- [x] P1-M4-A3a: Mesh thumbnail: render 64×64 offscreen, store as PNG in .thumbnails/
+- [x] P1-M4-A3b: Texture thumbnail: downscale to 64×64
+- [x] P1-M4-A3c: Load thumbnails in editor asset browser, fallback to type icon
+- [x] P1-M4-A3d: Invalidate thumbnail on source asset change (mtime check)
 
 #### P1-M4-B: Dependency Graph
 

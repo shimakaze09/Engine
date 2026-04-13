@@ -12,8 +12,8 @@ namespace engine::core {
 namespace {
 
 constexpr bool is_whitespace(char value) noexcept {
-  return (value == ' ') || (value == '\t') || (value == '\n')
-         || (value == '\r');
+  return (value == ' ') || (value == '\t') || (value == '\n') ||
+         (value == '\r');
 }
 
 constexpr bool is_digit(char value) noexcept {
@@ -21,9 +21,9 @@ constexpr bool is_digit(char value) noexcept {
 }
 
 constexpr bool is_hex_digit(char value) noexcept {
-  return ((value >= '0') && (value <= '9'))
-         || ((value >= 'a') && (value <= 'f'))
-         || ((value >= 'A') && (value <= 'F'));
+  return ((value >= '0') && (value <= '9')) ||
+         ((value >= 'a') && (value <= 'f')) ||
+         ((value >= 'A') && (value <= 'F'));
 }
 
 void skip_whitespace(const char *&cursor, const char *end) noexcept {
@@ -32,10 +32,8 @@ void skip_whitespace(const char *&cursor, const char *end) noexcept {
   }
 }
 
-bool parse_string_token(const char *&cursor,
-                        const char *end,
-                        const char **outBegin,
-                        const char **outEnd) noexcept {
+bool parse_string_token(const char *&cursor, const char *end,
+                        const char **outBegin, const char **outEnd) noexcept {
   if ((outBegin == nullptr) || (outEnd == nullptr)) {
     return false;
   }
@@ -81,10 +79,8 @@ bool parse_string_token(const char *&cursor,
   return false;
 }
 
-bool parse_number_token(const char *&cursor,
-                        const char *end,
-                        const char **outBegin,
-                        const char **outEnd) noexcept {
+bool parse_number_token(const char *&cursor, const char *end,
+                        const char **outBegin, const char **outEnd) noexcept {
   if ((outBegin == nullptr) || (outEnd == nullptr) || (cursor >= end)) {
     return false;
   }
@@ -141,12 +137,10 @@ bool parse_number_token(const char *&cursor,
   return true;
 }
 
-bool parse_value(const char *&cursor,
-                 const char *end,
+bool parse_value(const char *&cursor, const char *end,
                  JsonValue *outValue) noexcept;
 
-bool parse_array(const char *&cursor,
-                 const char *end,
+bool parse_array(const char *&cursor, const char *end,
                  JsonValue *outValue) noexcept {
   if ((outValue == nullptr) || (cursor >= end) || (*cursor != '[')) {
     return false;
@@ -195,8 +189,7 @@ bool parse_array(const char *&cursor,
   return false;
 }
 
-bool parse_object(const char *&cursor,
-                  const char *end,
+bool parse_object(const char *&cursor, const char *end,
                   JsonValue *outValue) noexcept {
   if ((outValue == nullptr) || (cursor >= end) || (*cursor != '{')) {
     return false;
@@ -261,8 +254,7 @@ bool parse_object(const char *&cursor,
   return false;
 }
 
-bool parse_value(const char *&cursor,
-                 const char *end,
+bool parse_value(const char *&cursor, const char *end,
                  JsonValue *outValue) noexcept {
   if (outValue == nullptr) {
     return false;
@@ -333,8 +325,7 @@ bool parse_value(const char *&cursor,
   return true;
 }
 
-bool token_equals(const char *tokenBegin,
-                  const char *tokenEnd,
+bool token_equals(const char *tokenBegin, const char *tokenEnd,
                   const char *text) noexcept {
   if ((tokenBegin == nullptr) || (tokenEnd == nullptr) || (text == nullptr)) {
     return false;
@@ -352,9 +343,7 @@ bool token_equals(const char *tokenBegin,
 
 } // namespace
 
-JsonWriter::JsonWriter() noexcept {
-  reset();
-}
+JsonWriter::JsonWriter() noexcept { reset(); }
 
 JsonWriter::~JsonWriter() noexcept = default;
 
@@ -440,8 +429,8 @@ bool JsonWriter::ensure_capacity(std::size_t additionalBytes) noexcept {
     return false;
   }
 
-  if ((additionalBytes > kMaxBufferBytes) || (m_pos > kMaxBufferBytes)
-      || ((kMaxBufferBytes - m_pos) <= additionalBytes)) {
+  if ((additionalBytes > kMaxBufferBytes) || (m_pos > kMaxBufferBytes) ||
+      ((kMaxBufferBytes - m_pos) <= additionalBytes)) {
     m_failed = true;
     return false;
   }
@@ -539,10 +528,8 @@ bool JsonWriter::append_escaped(const char *value) noexcept {
     default:
       if (ch < 0x20U) {
         char escapeBuffer[7] = {};
-        const int written = std::snprintf(escapeBuffer,
-                                          sizeof(escapeBuffer),
-                                          "\\u%04X",
-                                          static_cast<unsigned>(ch));
+        const int written = std::snprintf(escapeBuffer, sizeof(escapeBuffer),
+                                          "\\u%04X", static_cast<unsigned>(ch));
         if ((written != 6) || !append_bytes(escapeBuffer, 6U)) {
           m_failed = true;
           return false;
@@ -566,8 +553,8 @@ bool JsonWriter::append_float(float value) noexcept {
   }
 
   char numberBuffer[32] = {};
-  const int written = std::snprintf(
-      numberBuffer, sizeof(numberBuffer), "%.9g", static_cast<double>(value));
+  const int written = std::snprintf(numberBuffer, sizeof(numberBuffer), "%.9g",
+                                    static_cast<double>(value));
   if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
     m_failed = true;
     return false;
@@ -580,6 +567,18 @@ bool JsonWriter::append_uint(std::uint32_t value) noexcept {
   char numberBuffer[16] = {};
   const int written =
       std::snprintf(numberBuffer, sizeof(numberBuffer), "%u", value);
+  if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
+    m_failed = true;
+    return false;
+  }
+
+  return append_bytes(numberBuffer, static_cast<std::size_t>(written));
+}
+
+bool JsonWriter::append_uint64(std::uint64_t value) noexcept {
+  char numberBuffer[24] = {};
+  const int written = std::snprintf(numberBuffer, sizeof(numberBuffer), "%llu",
+                                    static_cast<unsigned long long>(value));
   if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
     m_failed = true;
     return false;
@@ -709,6 +708,11 @@ void JsonWriter::write_uint(const char *key, std::uint32_t value) noexcept {
   write_uint_value(value);
 }
 
+void JsonWriter::write_uint64(const char *key, std::uint64_t value) noexcept {
+  write_key(key);
+  write_uint64_value(value);
+}
+
 void JsonWriter::write_bool(const char *key, bool value) noexcept {
   write_key(key);
   write_bool_value(value);
@@ -735,6 +739,14 @@ void JsonWriter::write_uint_value(std::uint32_t value) noexcept {
   static_cast<void>(append_uint(value));
 }
 
+void JsonWriter::write_uint64_value(std::uint64_t value) noexcept {
+  if (!begin_value()) {
+    return;
+  }
+
+  static_cast<void>(append_uint64(value));
+}
+
 void JsonWriter::write_bool_value(bool value) noexcept {
   if (!begin_value()) {
     return;
@@ -751,21 +763,15 @@ void JsonWriter::write_string_value(const char *value) noexcept {
   static_cast<void>(append_escaped(value));
 }
 
-bool JsonWriter::failed() const noexcept {
-  return m_failed;
-}
+bool JsonWriter::failed() const noexcept { return m_failed; }
 
-bool JsonWriter::ok() const noexcept {
-  return !m_failed && (m_depth == 0U);
-}
+bool JsonWriter::ok() const noexcept { return !m_failed && (m_depth == 0U); }
 
 const char *JsonWriter::result() const noexcept {
   return (m_buffer != nullptr) ? m_buffer.get() : "";
 }
 
-std::size_t JsonWriter::result_size() const noexcept {
-  return m_pos;
-}
+std::size_t JsonWriter::result_size() const noexcept { return m_pos; }
 
 bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_input = input;
@@ -827,9 +833,9 @@ JsonParser::get_object_field(const JsonValue &object,
 bool JsonParser::get_object_field(const JsonValue &object,
                                   const char *fieldName,
                                   JsonValue *outValue) const noexcept {
-  if ((outValue == nullptr) || (fieldName == nullptr)
-      || (object.type != JsonValue::Type::Object) || (object.begin == nullptr)
-      || (object.end == nullptr) || ((object.end - object.begin) < 2)) {
+  if ((outValue == nullptr) || (fieldName == nullptr) ||
+      (object.type != JsonValue::Type::Object) || (object.begin == nullptr) ||
+      (object.end == nullptr) || ((object.end - object.begin) < 2)) {
     return false;
   }
 
@@ -891,12 +897,11 @@ JsonParser::get_array_element(const JsonValue &array,
   return push_scratch(value);
 }
 
-bool JsonParser::get_array_element(const JsonValue &array,
-                                   std::size_t index,
+bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
                                    JsonValue *outValue) const noexcept {
-  if ((outValue == nullptr) || (array.type != JsonValue::Type::Array)
-      || (array.begin == nullptr) || (array.end == nullptr)
-      || ((array.end - array.begin) < 2)) {
+  if ((outValue == nullptr) || (array.type != JsonValue::Type::Array) ||
+      (array.begin == nullptr) || (array.end == nullptr) ||
+      ((array.end - array.begin) < 2)) {
     return false;
   }
 
@@ -939,8 +944,8 @@ bool JsonParser::get_array_element(const JsonValue &array,
 }
 
 std::size_t JsonParser::array_size(const JsonValue &array) const noexcept {
-  if ((array.type != JsonValue::Type::Array) || (array.begin == nullptr)
-      || (array.end == nullptr) || ((array.end - array.begin) < 2)) {
+  if ((array.type != JsonValue::Type::Array) || (array.begin == nullptr) ||
+      (array.end == nullptr) || ((array.end - array.begin) < 2)) {
     return 0U;
   }
 
@@ -978,9 +983,9 @@ std::size_t JsonParser::array_size(const JsonValue &array) const noexcept {
 
 bool JsonParser::as_float(const JsonValue &value,
                           float *outValue) const noexcept {
-  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number)
-      || (value.begin == nullptr) || (value.end == nullptr)
-      || (value.end <= value.begin)) {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
     return false;
   }
 
@@ -995,8 +1000,8 @@ bool JsonParser::as_float(const JsonValue &value,
 
   char *parseEnd = nullptr;
   const float parsed = std::strtof(buffer, &parseEnd);
-  if (parseEnd != (buffer + static_cast<std::ptrdiff_t>(length))
-      || !std::isfinite(parsed)) {
+  if (parseEnd != (buffer + static_cast<std::ptrdiff_t>(length)) ||
+      !std::isfinite(parsed)) {
     return false;
   }
 
@@ -1006,9 +1011,9 @@ bool JsonParser::as_float(const JsonValue &value,
 
 bool JsonParser::as_uint(const JsonValue &value,
                          std::uint32_t *outValue) const noexcept {
-  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number)
-      || (value.begin == nullptr) || (value.end == nullptr)
-      || (value.end <= value.begin)) {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
     return false;
   }
 
@@ -1034,11 +1039,45 @@ bool JsonParser::as_uint(const JsonValue &value,
   return true;
 }
 
+bool JsonParser::as_uint64(const JsonValue &value,
+                           std::uint64_t *outValue) const noexcept {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
+    return false;
+  }
+
+  const char *cursor = value.begin;
+  if (*cursor == '-') {
+    return false;
+  }
+
+  std::uint64_t parsed = 0U;
+  constexpr std::uint64_t kOverflowGuard = UINT64_MAX / 10U;
+  while (cursor < value.end) {
+    if (!is_digit(*cursor)) {
+      return false;
+    }
+
+    const std::uint64_t digit = static_cast<std::uint64_t>(*cursor - '0');
+    if ((parsed > kOverflowGuard) ||
+        ((parsed == kOverflowGuard) && (digit > UINT64_MAX % 10U))) {
+      return false;
+    }
+
+    parsed = (parsed * 10U) + digit;
+    ++cursor;
+  }
+
+  *outValue = parsed;
+  return true;
+}
+
 bool JsonParser::as_bool(const JsonValue &value,
                          bool *outValue) const noexcept {
-  if ((outValue == nullptr) || (value.type != JsonValue::Type::Bool)
-      || (value.begin == nullptr) || (value.end == nullptr)
-      || (value.end <= value.begin)) {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Bool) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
     return false;
   }
 
@@ -1055,12 +1094,11 @@ bool JsonParser::as_bool(const JsonValue &value,
   return false;
 }
 
-bool JsonParser::as_string(const JsonValue &value,
-                           const char **outBegin,
+bool JsonParser::as_string(const JsonValue &value, const char **outBegin,
                            std::size_t *outLength) const noexcept {
-  if ((outBegin == nullptr) || (outLength == nullptr)
-      || (value.type != JsonValue::Type::String) || (value.begin == nullptr)
-      || (value.end == nullptr) || (value.end < value.begin)) {
+  if ((outBegin == nullptr) || (outLength == nullptr) ||
+      (value.type != JsonValue::Type::String) || (value.begin == nullptr) ||
+      (value.end == nullptr) || (value.end < value.begin)) {
     return false;
   }
 

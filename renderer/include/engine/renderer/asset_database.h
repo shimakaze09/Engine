@@ -4,13 +4,13 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/renderer/asset_metadata.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/texture_loader.h"
 
 namespace engine::renderer {
 
-using AssetId = std::uint32_t;
-inline constexpr AssetId kInvalidAssetId = 0U;
+// AssetId and kInvalidAssetId are defined in asset_metadata.h (included above).
 
 enum class AssetState : std::uint8_t { Unloaded, Loading, Ready, Failed };
 
@@ -40,6 +40,10 @@ struct AssetDatabase final {
   static constexpr std::size_t kMaxTextureAssets = 512U;
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets{};
   std::array<bool, kMaxTextureAssets> textureOccupied{};
+
+  static constexpr std::size_t kMaxMetadata = 4096U;
+  std::array<AssetMetadata, kMaxMetadata> metadata{};
+  std::array<bool, kMaxMetadata> metadataOccupied{};
 };
 
 AssetId make_asset_id_from_path(const char *path) noexcept;
@@ -71,5 +75,20 @@ TextureHandle resolve_texture_asset(const AssetDatabase *database,
                                     AssetId id) noexcept;
 bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept;
 bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept;
+
+// Metadata management.
+bool register_asset_metadata(AssetDatabase *database,
+                             const AssetMetadata &metadata) noexcept;
+const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
+                                         AssetId id) noexcept;
+bool add_asset_tag(AssetDatabase *database, AssetId id,
+                   const char *tag) noexcept;
+bool asset_has_tag(const AssetDatabase *database, AssetId id,
+                   const char *tag) noexcept;
+std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
+                                AssetId *outIds, std::size_t maxIds) noexcept;
+std::size_t query_assets_by_type(const AssetDatabase *database,
+                                 AssetTypeTag typeTag, AssetId *outIds,
+                                 std::size_t maxIds) noexcept;
 
 } // namespace engine::renderer

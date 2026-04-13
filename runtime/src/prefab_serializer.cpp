@@ -204,7 +204,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_mesh_component(entity, &mesh)) {
     w.write_key("MeshComponent");
     w.begin_object();
-    w.write_uint("meshAssetId", mesh.meshAssetId);
+    w.write_uint64("meshAssetId", mesh.meshAssetId);
     write_vec3_arr(w, "albedo", mesh.albedo);
     w.write_float("roughness", mesh.roughness);
     w.write_float("metallic", mesh.metallic);
@@ -405,7 +405,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     MeshComponent mesh{};
     core::JsonValue v{};
     if (parser.get_object_field(mval, "meshAssetId", &v)) {
-      static_cast<void>(parser.as_uint(v, &mesh.meshAssetId));
+      static_cast<void>(parser.as_uint64(v, &mesh.meshAssetId));
     }
     if (parser.get_object_field(mval, "albedo", &v)) {
       static_cast<void>(read_vec3(parser, v, &mesh.albedo));

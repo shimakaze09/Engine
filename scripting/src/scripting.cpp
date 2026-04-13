@@ -51,13 +51,13 @@ namespace {
 lua_State *g_state = nullptr;
 runtime::World *g_world = nullptr;
 const RuntimeServices *g_services = nullptr;
-std::uint32_t g_defaultMeshAssetId = 0U;
-std::uint32_t g_builtinPlaneMesh = 0U;
-std::uint32_t g_builtinCubeMesh = 0U;
-std::uint32_t g_builtinSphereMesh = 0U;
-std::uint32_t g_builtinCylinderMesh = 0U;
-std::uint32_t g_builtinCapsuleMesh = 0U;
-std::uint32_t g_builtinPyramidMesh = 0U;
+std::uint64_t g_defaultMeshAssetId = 0ULL;
+std::uint64_t g_builtinPlaneMesh = 0ULL;
+std::uint64_t g_builtinCubeMesh = 0ULL;
+std::uint64_t g_builtinSphereMesh = 0ULL;
+std::uint64_t g_builtinCylinderMesh = 0ULL;
+std::uint64_t g_builtinCapsuleMesh = 0ULL;
+std::uint64_t g_builtinPyramidMesh = 0ULL;
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
 float g_totalSeconds = 0.0F;
@@ -1074,9 +1074,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   }
 
   const lua_Integer meshId = lua_tointeger(state, 2);
-  if ((meshId <= 0) ||
-      (meshId >
-       static_cast<lua_Integer>(std::numeric_limits<std::uint32_t>::max()))) {
+  if (meshId <= 0) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1088,14 +1086,14 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
     component = *existing;
   }
 
-  component.meshAssetId = static_cast<std::uint32_t>(meshId);
+  component.meshAssetId = static_cast<std::uint64_t>(meshId);
   const bool ok = apply_or_queue_mesh_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
-  if (g_defaultMeshAssetId == 0U) {
+  if (g_defaultMeshAssetId == 0ULL) {
     lua_pushnil(state);
     return 1;
   }
@@ -1129,40 +1127,40 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   const char *shape = lua_tostring(state, 1);
 
-  std::uint32_t meshId = g_defaultMeshAssetId;
+  std::uint64_t meshId = g_defaultMeshAssetId;
   math::Vec3 halfExtents(0.5F, 0.5F, 0.5F);
   runtime::ColliderShape colliderShape = runtime::ColliderShape::AABB;
 
   if (std::strcmp(shape, "cube") == 0) {
     meshId =
-        (g_builtinCubeMesh != 0U) ? g_builtinCubeMesh : g_defaultMeshAssetId;
+        (g_builtinCubeMesh != 0ULL) ? g_builtinCubeMesh : g_defaultMeshAssetId;
     halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
     colliderShape = runtime::ColliderShape::AABB;
   } else if (std::strcmp(shape, "sphere") == 0) {
-    meshId = (g_builtinSphereMesh != 0U) ? g_builtinSphereMesh
-                                         : g_defaultMeshAssetId;
+    meshId = (g_builtinSphereMesh != 0ULL) ? g_builtinSphereMesh
+                                           : g_defaultMeshAssetId;
     halfExtents = math::Vec3(0.5F, 0.5F, 0.5F); // halfExtents.x = radius
     colliderShape = runtime::ColliderShape::Sphere;
   } else if (std::strcmp(shape, "cylinder") == 0) {
-    meshId = (g_builtinCylinderMesh != 0U) ? g_builtinCylinderMesh
-                                           : g_defaultMeshAssetId;
+    meshId = (g_builtinCylinderMesh != 0ULL) ? g_builtinCylinderMesh
+                                             : g_defaultMeshAssetId;
     // Best available approximation for a round cylinder: upright capsule.
     halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
     colliderShape = runtime::ColliderShape::Capsule;
   } else if (std::strcmp(shape, "capsule") == 0) {
-    meshId = (g_builtinCapsuleMesh != 0U) ? g_builtinCapsuleMesh
-                                          : g_defaultMeshAssetId;
+    meshId = (g_builtinCapsuleMesh != 0ULL) ? g_builtinCapsuleMesh
+                                            : g_defaultMeshAssetId;
     // Capsule: halfExtents.x = radius, halfExtents.y = halfHeight.
     halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
     colliderShape = runtime::ColliderShape::Capsule;
   } else if (std::strcmp(shape, "pyramid") == 0) {
-    meshId = (g_builtinPyramidMesh != 0U) ? g_builtinPyramidMesh
-                                          : g_defaultMeshAssetId;
+    meshId = (g_builtinPyramidMesh != 0ULL) ? g_builtinPyramidMesh
+                                            : g_defaultMeshAssetId;
     halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
     colliderShape = runtime::ColliderShape::AABB;
   } else if (std::strcmp(shape, "plane") == 0) {
-    meshId =
-        (g_builtinPlaneMesh != 0U) ? g_builtinPlaneMesh : g_defaultMeshAssetId;
+    meshId = (g_builtinPlaneMesh != 0ULL) ? g_builtinPlaneMesh
+                                          : g_defaultMeshAssetId;
     halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
     colliderShape = runtime::ColliderShape::AABB;
   }
@@ -1186,7 +1184,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   collider.shape = colliderShape;
   static_cast<void>(g_world->add_collider(entity, collider));
 
-  if (meshId != 0U) {
+  if (meshId != 0ULL) {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
     meshComp.albedo = albedo;
@@ -5078,13 +5076,13 @@ void shutdown_scripting() noexcept {
   }
 
   g_world = nullptr;
-  g_defaultMeshAssetId = 0U;
-  g_builtinPlaneMesh = 0U;
-  g_builtinCubeMesh = 0U;
-  g_builtinSphereMesh = 0U;
-  g_builtinCylinderMesh = 0U;
-  g_builtinCapsuleMesh = 0U;
-  g_builtinPyramidMesh = 0U;
+  g_defaultMeshAssetId = 0ULL;
+  g_builtinPlaneMesh = 0ULL;
+  g_builtinCubeMesh = 0ULL;
+  g_builtinSphereMesh = 0ULL;
+  g_builtinCylinderMesh = 0ULL;
+  g_builtinCapsuleMesh = 0ULL;
+  g_builtinPyramidMesh = 0ULL;
   g_deferredMutationCount = 0U;
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
@@ -5134,14 +5132,14 @@ void bind_runtime_services(const RuntimeServices *services) noexcept {
       const_cast<RuntimeServices *>(services));
 }
 
-void set_default_mesh_asset_id(std::uint32_t assetId) noexcept {
+void set_default_mesh_asset_id(std::uint64_t assetId) noexcept {
   g_defaultMeshAssetId = assetId;
 }
 
-void set_builtin_mesh_ids(std::uint32_t planeMesh, std::uint32_t cubeMesh,
-                          std::uint32_t sphereMesh, std::uint32_t cylinderMesh,
-                          std::uint32_t capsuleMesh,
-                          std::uint32_t pyramidMesh) noexcept {
+void set_builtin_mesh_ids(std::uint64_t planeMesh, std::uint64_t cubeMesh,
+                          std::uint64_t sphereMesh, std::uint64_t cylinderMesh,
+                          std::uint64_t capsuleMesh,
+                          std::uint64_t pyramidMesh) noexcept {
   g_builtinPlaneMesh = planeMesh;
   g_builtinCubeMesh = cubeMesh;
   g_builtinSphereMesh = sphereMesh;

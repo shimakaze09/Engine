@@ -1,12 +1,32 @@
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <direct.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
+
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#endif
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 #include "engine/core/mesh_asset.h"
 #include "engine/math/vec3.h"
@@ -455,22 +475,45 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
 
-  int written = std::fprintf(metadataFile,
-                             "{\n"
-                             "  \"schemaVersion\": 1,\n"
-                             "  \"source\": \"%s\",\n"
-                             "  \"output\": \"%s\",\n"
-                             "  \"assetFormat\": \"engine.mesh\",\n"
-                             "  \"assetFormatVersion\": %u,\n"
-                             "  \"sourceContentHash\": \"%016llx\",\n"
-                             "  \"vertexCount\": %zu,\n"
-                             "  \"indexCount\": %zu,\n"
-                             "  \"dependencies\": [\n",
-                             inputPath, outputPath,
-                             data.hasUVs ? engine::core::kMeshAssetVersion2
-                                         : engine::core::kMeshAssetVersion,
-                             static_cast<unsigned long long>(sourceHash),
-                             vertexCount, indexCount);
+  // Compute output file size.
+  std::uint64_t outputFileSize = 0ULL;
+  {
+    FILE *outputCheck = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&outputCheck, outputPath, "rb") != 0) {
+      outputCheck = nullptr;
+    }
+#else
+    outputCheck = std::fopen(outputPath, "rb");
+#endif
+    if (outputCheck != nullptr) {
+      std::fseek(outputCheck, 0, SEEK_END);
+      outputFileSize = static_cast<std::uint64_t>(std::ftell(outputCheck));
+      std::fclose(outputCheck);
+    }
+  }
+
+  int written = std::fprintf(
+      metadataFile,
+      "{\n"
+      "  \"schemaVersion\": 2,\n"
+      "  \"assetId\": \"%016llx\",\n"
+      "  \"typeTag\": \"mesh\",\n"
+      "  \"source\": \"%s\",\n"
+      "  \"output\": \"%s\",\n"
+      "  \"assetFormat\": \"engine.mesh\",\n"
+      "  \"assetFormatVersion\": %u,\n"
+      "  \"sourceContentHash\": \"%016llx\",\n"
+      "  \"fileSize\": %llu,\n"
+      "  \"vertexCount\": %zu,\n"
+      "  \"indexCount\": %zu,\n"
+      "  \"tags\": [],\n"
+      "  \"dependencies\": [\n",
+      static_cast<unsigned long long>(sourceHash), inputPath, outputPath,
+      data.hasUVs ? engine::core::kMeshAssetVersion2
+                  : engine::core::kMeshAssetVersion,
+      static_cast<unsigned long long>(sourceHash),
+      static_cast<unsigned long long>(outputFileSize), vertexCount, indexCount);
 
   for (std::size_t i = 0U; i < dependencies.size(); ++i) {
     const DependencyDigest &dependency = dependencies[i];
@@ -486,12 +529,16 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
                           "  \"importSettings\": {\n"
                           "    \"meshIndex\": 0,\n"
                           "    \"primitiveIndex\": 0,\n"
+                          "    \"scaleFactor\": 1.0,\n"
+                          "    \"upAxis\": 1,\n"
+                          "    \"generateNormals\": false,\n"
                           "    \"interleavedLayout\": \"%s\"\n"
                           "  }\n"
                           "}\n",
                           data.hasUVs ? "position_normal_texcoord"
                                       : "position_normal");
 
+  std::fclose(metadataFile);
   return written > 0;
 }
 
@@ -586,6 +633,326 @@ bool cook_and_write_convex_hull(const char *outputPath,
 
   std::printf("cooked convex hull: planes=%u vertices=%u -> %s\n", planeCount32,
               vertCount32, hullPath);
+  return true;
+}
+
+bool ensure_directory_exists(const char *dirPath) {
+  if (dirPath == nullptr) {
+    return false;
+  }
+
+#ifdef _WIN32
+  // CreateDirectoryA returns 0 if it fails; ERROR_ALREADY_EXISTS is OK.
+  // Use _mkdir from direct.h as a simpler portable option.
+  struct _stat st{};
+  if (_stat(dirPath, &st) == 0) {
+    return true;
+  }
+  return _mkdir(dirPath) == 0;
+#else
+  struct stat st{};
+  if (stat(dirPath, &st) == 0) {
+    return true;
+  }
+  return mkdir(dirPath, 0755) == 0;
+#endif
+}
+
+// Returns file modification time in seconds, or 0 on failure.
+std::int64_t get_file_mtime(const char *path) noexcept {
+  if (path == nullptr) {
+    return 0;
+  }
+#ifdef _WIN32
+  struct _stat st{};
+  if (_stat(path, &st) != 0) {
+    return 0;
+  }
+  return static_cast<std::int64_t>(st.st_mtime);
+#else
+  struct stat st{};
+  if (stat(path, &st) != 0) {
+    return 0;
+  }
+  return static_cast<std::int64_t>(st.st_mtime);
+#endif
+}
+
+// Build thumbnail path: <dir>/.thumbnails/<basename>.png
+void build_thumbnail_path(const char *outputPath, char *thumbPath,
+                          std::size_t thumbPathSize) noexcept {
+  const char *lastSlash = std::strrchr(outputPath, '/');
+  const char *lastBackSlash = std::strrchr(outputPath, '\\');
+  if ((lastBackSlash != nullptr) &&
+      ((lastSlash == nullptr) || (lastBackSlash > lastSlash))) {
+    lastSlash = lastBackSlash;
+  }
+
+  char thumbDir[512] = {};
+  if (lastSlash != nullptr) {
+    const std::size_t dirLen = static_cast<std::size_t>(lastSlash - outputPath);
+    if (dirLen < sizeof(thumbDir) - 13U) {
+      std::memcpy(thumbDir, outputPath, dirLen);
+      std::snprintf(thumbDir + dirLen, sizeof(thumbDir) - dirLen,
+                    "/.thumbnails");
+    } else {
+      std::snprintf(thumbDir, sizeof(thumbDir), ".thumbnails");
+    }
+  } else {
+    std::snprintf(thumbDir, sizeof(thumbDir), ".thumbnails");
+  }
+  ensure_directory_exists(thumbDir);
+
+  const char *basename = (lastSlash != nullptr) ? (lastSlash + 1) : outputPath;
+  std::snprintf(thumbPath, thumbPathSize, "%s/%s.png", thumbDir, basename);
+}
+
+bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
+                             const PrimitiveData &data) {
+  if (outputPath == nullptr) {
+    return false;
+  }
+
+  // Build thumbnail output path.
+  char thumbPath[512] = {};
+  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
+
+  // Mtime invalidation: skip if thumbnail is newer than source.
+  if (inputPath != nullptr) {
+    const std::int64_t srcMtime = get_file_mtime(inputPath);
+    const std::int64_t thumbMtime = get_file_mtime(thumbPath);
+    if ((thumbMtime > 0) && (srcMtime > 0) && (thumbMtime >= srcMtime)) {
+      std::printf("thumbnail up-to-date; skipped: %s\n", thumbPath);
+      return true;
+    }
+  }
+
+  constexpr int kThumbSize = 64;
+  constexpr int kChannels = 4; // RGBA
+  std::vector<std::uint8_t> pixels(
+      static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
+  std::vector<float> depth(static_cast<std::size_t>(kThumbSize * kThumbSize),
+                           1e30F);
+
+  const std::size_t strideFloats = data.hasUVs ? 8U : 6U;
+  const std::size_t vertexCount =
+      data.interleavedVertices.size() / strideFloats;
+  if (vertexCount == 0U) {
+    return false;
+  }
+
+  // Compute AABB.
+  float minX = 1e30F;
+  float minY = 1e30F;
+  float minZ = 1e30F;
+  float maxX = -1e30F;
+  float maxY = -1e30F;
+  float maxZ = -1e30F;
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    const std::size_t base = i * strideFloats;
+    const float x = data.interleavedVertices[base + 0U];
+    const float y = data.interleavedVertices[base + 1U];
+    const float z = data.interleavedVertices[base + 2U];
+    if (x < minX) {
+      minX = x;
+    }
+    if (y < minY) {
+      minY = y;
+    }
+    if (z < minZ) {
+      minZ = z;
+    }
+    if (x > maxX) {
+      maxX = x;
+    }
+    if (y > maxY) {
+      maxY = y;
+    }
+    if (z > maxZ) {
+      maxZ = z;
+    }
+  }
+
+  const float cx = (minX + maxX) * 0.5F;
+  const float cy = (minY + maxY) * 0.5F;
+  const float dx = maxX - minX;
+  const float dy = maxY - minY;
+  const float dz = maxZ - minZ;
+  float extent = dx;
+  if (dy > extent) {
+    extent = dy;
+  }
+  if (dz > extent) {
+    extent = dz;
+  }
+  if (extent < 1e-6F) {
+    extent = 1.0F;
+  }
+  const float invExtent = static_cast<float>(kThumbSize - 4) / extent;
+
+  // Simple orthographic projection from +Z looking at center.
+  // Light direction: normalized (0.5, 0.7, 1.0).
+  constexpr float kLightX = 0.365148F;
+  constexpr float kLightY = 0.511208F;
+  constexpr float kLightZ = 0.730297F;
+
+  // Rasterize triangles.
+  auto project = [&](std::size_t vi, float *sx, float *sy, float *sz) {
+    const std::size_t base = vi * strideFloats;
+    const float x = data.interleavedVertices[base + 0U];
+    const float y = data.interleavedVertices[base + 1U];
+    const float z = data.interleavedVertices[base + 2U];
+    *sx = (x - cx) * invExtent + static_cast<float>(kThumbSize) * 0.5F;
+    *sy = static_cast<float>(kThumbSize) * 0.5F - (y - cy) * invExtent;
+    *sz = z;
+  };
+
+  auto rasterizeTriangle = [&](std::size_t i0, std::size_t i1, std::size_t i2) {
+    float x0 = 0.0F;
+    float y0 = 0.0F;
+    float z0 = 0.0F;
+    float x1 = 0.0F;
+    float y1 = 0.0F;
+    float z1 = 0.0F;
+    float x2 = 0.0F;
+    float y2 = 0.0F;
+    float z2 = 0.0F;
+    project(i0, &x0, &y0, &z0);
+    project(i1, &x1, &y1, &z1);
+    project(i2, &x2, &y2, &z2);
+
+    // Face normal from vertex normals (average).
+    const std::size_t b0 = i0 * strideFloats;
+    const std::size_t b1 = i1 * strideFloats;
+    const std::size_t b2 = i2 * strideFloats;
+    const float nx =
+        (data.interleavedVertices[b0 + 3U] + data.interleavedVertices[b1 + 3U] +
+         data.interleavedVertices[b2 + 3U]) /
+        3.0F;
+    const float ny =
+        (data.interleavedVertices[b0 + 4U] + data.interleavedVertices[b1 + 4U] +
+         data.interleavedVertices[b2 + 4U]) /
+        3.0F;
+    const float nz =
+        (data.interleavedVertices[b0 + 5U] + data.interleavedVertices[b1 + 5U] +
+         data.interleavedVertices[b2 + 5U]) /
+        3.0F;
+    float dot = nx * kLightX + ny * kLightY + nz * kLightZ;
+    if (dot < 0.0F) {
+      dot = 0.0F;
+    }
+    const float ambient = 0.15F;
+    const float shade = ambient + (1.0F - ambient) * dot;
+    const auto color = static_cast<std::uint8_t>(
+        shade > 1.0F ? 255U : static_cast<unsigned>(shade * 255.0F));
+
+    // Bounding box of triangle in screen space.
+    float fminX = x0;
+    if (x1 < fminX) {
+      fminX = x1;
+    }
+    if (x2 < fminX) {
+      fminX = x2;
+    }
+    float fmaxX = x0;
+    if (x1 > fmaxX) {
+      fmaxX = x1;
+    }
+    if (x2 > fmaxX) {
+      fmaxX = x2;
+    }
+    float fminY = y0;
+    if (y1 < fminY) {
+      fminY = y1;
+    }
+    if (y2 < fminY) {
+      fminY = y2;
+    }
+    float fmaxY = y0;
+    if (y1 > fmaxY) {
+      fmaxY = y1;
+    }
+    if (y2 > fmaxY) {
+      fmaxY = y2;
+    }
+
+    const int ixMin = static_cast<int>(fminX);
+    const int ixMax = static_cast<int>(fmaxX) + 1;
+    const int iyMin = static_cast<int>(fminY);
+    const int iyMax = static_cast<int>(fmaxY) + 1;
+
+    for (int py = iyMin; py <= iyMax; ++py) {
+      if ((py < 0) || (py >= kThumbSize)) {
+        continue;
+      }
+      for (int px = ixMin; px <= ixMax; ++px) {
+        if ((px < 0) || (px >= kThumbSize)) {
+          continue;
+        }
+        const float pxf = static_cast<float>(px) + 0.5F;
+        const float pyf = static_cast<float>(py) + 0.5F;
+        // Barycentric coordinates.
+        const float d00 = (x1 - x0) * (pyf - y0) - (y1 - y0) * (pxf - x0);
+        const float d01 = (x2 - x1) * (pyf - y1) - (y2 - y1) * (pxf - x1);
+        const float d02 = (x0 - x2) * (pyf - y2) - (y0 - y2) * (pxf - x2);
+        if ((d00 >= 0.0F && d01 >= 0.0F && d02 >= 0.0F) ||
+            (d00 <= 0.0F && d01 <= 0.0F && d02 <= 0.0F)) {
+          // Interpolate depth.
+          const float area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+          float z = z0;
+          if (std::fabs(area) > 1e-8F) {
+            const float invArea = 1.0F / area;
+            const float w0 =
+                ((x1 - pxf) * (y2 - pyf) - (y1 - pyf) * (x2 - pxf)) * invArea;
+            const float w1 =
+                ((x2 - pxf) * (y0 - pyf) - (y2 - pyf) * (x0 - pxf)) * invArea;
+            const float w2 = 1.0F - w0 - w1;
+            z = w0 * z0 + w1 * z1 + w2 * z2;
+          }
+          const std::size_t idx =
+              static_cast<std::size_t>(py * kThumbSize + px);
+          if (z < depth[idx]) {
+            depth[idx] = z;
+            const std::size_t pi = idx * kChannels;
+            pixels[pi + 0U] = color;
+            pixels[pi + 1U] = color;
+            pixels[pi + 2U] = color;
+            pixels[pi + 3U] = 255U;
+          }
+        }
+      }
+    }
+  };
+
+  if (!data.indices.empty()) {
+    for (std::size_t i = 0U; i + 2U < data.indices.size(); i += 3U) {
+      rasterizeTriangle(data.indices[i + 0U], data.indices[i + 1U],
+                        data.indices[i + 2U]);
+    }
+  } else {
+    for (std::size_t i = 0U; i + 2U < vertexCount; i += 3U) {
+      rasterizeTriangle(i + 0U, i + 1U, i + 2U);
+    }
+  }
+
+  // Set background to a neutral grey with alpha=0 for transparent areas.
+  for (std::size_t i = 0U;
+       i < static_cast<std::size_t>(kThumbSize * kThumbSize); ++i) {
+    if (pixels[i * kChannels + 3U] == 0U) {
+      pixels[i * kChannels + 0U] = 48U;
+      pixels[i * kChannels + 1U] = 48U;
+      pixels[i * kChannels + 2U] = 48U;
+      pixels[i * kChannels + 3U] = 255U;
+    }
+  }
+
+  if (!stbi_write_png(thumbPath, kThumbSize, kThumbSize, kChannels,
+                      pixels.data(), kThumbSize * kChannels)) {
+    std::fprintf(stderr, "warning: failed to write thumbnail: %s\n", thumbPath);
+    return false;
+  }
+
+  std::printf("generated thumbnail: %s\n", thumbPath);
   return true;
 }
 
@@ -689,6 +1056,9 @@ int main(int argc, char **argv) {
 
   // Cook convex hull sidecar (best-effort; failure is non-fatal).
   cook_and_write_convex_hull(outputPath, primitiveData);
+
+  // Generate mesh thumbnail (best-effort; failure is non-fatal).
+  generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
 
   std::printf(
       "packed mesh: vertices=%zu indices=%zu uvs=%s -> %s (+ .meta.json)\n",

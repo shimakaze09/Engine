@@ -48,7 +48,7 @@ int main() {
 
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 77U;
+  constexpr engine::renderer::AssetId kAssetId = 77ULL;
   constexpr engine::renderer::MeshHandle kMeshHandle{5U};
 
   if (!engine::renderer::register_mesh_asset(database.get(), kAssetId,

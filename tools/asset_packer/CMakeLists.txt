@@ -14,6 +14,7 @@ target_include_directories(asset_packer
     ${CMAKE_SOURCE_DIR}/math/include
     ${CMAKE_SOURCE_DIR}/physics/include
     ${ENGINE_CGLTF_INCLUDE_DIR}
+    ${ENGINE_STB_INCLUDE_DIR}
 )
 
 target_link_libraries(asset_packer PRIVATE engine_physics engine_math)

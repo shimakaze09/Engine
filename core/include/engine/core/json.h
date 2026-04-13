@@ -40,11 +40,13 @@ public:
   void write_key(const char *key) noexcept;
   void write_float(const char *key, float value) noexcept;
   void write_uint(const char *key, std::uint32_t value) noexcept;
+  void write_uint64(const char *key, std::uint64_t value) noexcept;
   void write_bool(const char *key, bool value) noexcept;
   void write_string(const char *key, const char *value) noexcept;
 
   void write_float_value(float value) noexcept;
   void write_uint_value(std::uint32_t value) noexcept;
+  void write_uint64_value(std::uint64_t value) noexcept;
   void write_bool_value(bool value) noexcept;
   void write_string_value(const char *value) noexcept;
 
@@ -70,6 +72,7 @@ private:
   bool append_escaped(const char *value) noexcept;
   bool append_float(float value) noexcept;
   bool append_uint(std::uint32_t value) noexcept;
+  bool append_uint64(std::uint64_t value) noexcept;
   bool push_container(ContainerKind kind) noexcept;
   bool pop_container(ContainerKind kind) noexcept;
 
@@ -90,23 +93,22 @@ public:
   // pointers across additional pointer-returning navigation calls.
   const JsonValue *get_object_field(const JsonValue &object,
                                     const char *fieldName) const noexcept;
-  bool get_object_field(const JsonValue &object,
-                        const char *fieldName,
+  bool get_object_field(const JsonValue &object, const char *fieldName,
                         JsonValue *outValue) const noexcept;
 
   const JsonValue *get_array_element(const JsonValue &array,
                                      std::size_t index) const noexcept;
-  bool get_array_element(const JsonValue &array,
-                         std::size_t index,
+  bool get_array_element(const JsonValue &array, std::size_t index,
                          JsonValue *outValue) const noexcept;
 
   std::size_t array_size(const JsonValue &array) const noexcept;
 
   bool as_float(const JsonValue &value, float *outValue) const noexcept;
   bool as_uint(const JsonValue &value, std::uint32_t *outValue) const noexcept;
+  bool as_uint64(const JsonValue &value,
+                 std::uint64_t *outValue) const noexcept;
   bool as_bool(const JsonValue &value, bool *outValue) const noexcept;
-  bool as_string(const JsonValue &value,
-                 const char **outBegin,
+  bool as_string(const JsonValue &value, const char **outBegin,
                  std::size_t *outLength) const noexcept;
 
 private:

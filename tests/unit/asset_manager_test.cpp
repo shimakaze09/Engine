@@ -19,9 +19,9 @@ int verify_failed_load_sets_failed_state() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 101U;
-  if (!engine::renderer::queue_mesh_load(
-          manager.get(), database.get(), kAssetId, "assets/missing.mesh")) {
+  constexpr engine::renderer::AssetId kAssetId = 101ULL;
+  if (!engine::renderer::queue_mesh_load(manager.get(), database.get(),
+                                         kAssetId, "assets/missing.mesh")) {
     return 2;
   }
 
@@ -29,18 +29,18 @@ int verify_failed_load_sets_failed_state() {
     return 3;
   }
 
-  if (engine::renderer::update_asset_manager(
-          manager.get(), database.get(), registry.get(), 4U)) {
+  if (engine::renderer::update_asset_manager(manager.get(), database.get(),
+                                             registry.get(), 4U)) {
     return 4;
   }
 
-  if (engine::renderer::mesh_asset_state(database.get(), kAssetId)
-      != engine::renderer::AssetState::Failed) {
+  if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
+      engine::renderer::AssetState::Failed) {
     return 5;
   }
 
-  if (engine::renderer::resolve_mesh_asset(database.get(), kAssetId)
-      != engine::renderer::kInvalidMeshHandle) {
+  if (engine::renderer::resolve_mesh_asset(database.get(), kAssetId) !=
+      engine::renderer::kInvalidMeshHandle) {
     return 6;
   }
 
@@ -61,22 +61,22 @@ int verify_release_during_pending_load_unloads() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 102U;
-  if (!engine::renderer::queue_mesh_load(
-          manager.get(), database.get(), kAssetId, "assets/missing.mesh")) {
+  constexpr engine::renderer::AssetId kAssetId = 102ULL;
+  if (!engine::renderer::queue_mesh_load(manager.get(), database.get(),
+                                         kAssetId, "assets/missing.mesh")) {
     return 21;
   }
 
-  if (!engine::renderer::queue_mesh_unload(
-          manager.get(), database.get(), kAssetId)) {
+  if (!engine::renderer::queue_mesh_unload(manager.get(), database.get(),
+                                           kAssetId)) {
     return 22;
   }
 
   static_cast<void>(engine::renderer::update_asset_manager(
       manager.get(), database.get(), registry.get(), 8U));
 
-  if (engine::renderer::mesh_asset_state(database.get(), kAssetId)
-      != engine::renderer::AssetState::Unloaded) {
+  if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
+      engine::renderer::AssetState::Unloaded) {
     return 23;
   }
 
@@ -97,28 +97,28 @@ int verify_unload_clears_registry_slot() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 103U;
+  constexpr engine::renderer::AssetId kAssetId = 103ULL;
   constexpr engine::renderer::MeshHandle kMeshHandle{3U};
   registry->occupied[kMeshHandle.id] = true;
   registry->meshes[kMeshHandle.id] = engine::renderer::GpuMesh{};
 
-  if (!engine::renderer::register_mesh_asset(
-          database.get(), kAssetId, "assets/test.mesh", kMeshHandle)) {
+  if (!engine::renderer::register_mesh_asset(database.get(), kAssetId,
+                                             "assets/test.mesh", kMeshHandle)) {
     return 41;
   }
 
-  if (!engine::renderer::queue_mesh_unload(
-          manager.get(), database.get(), kAssetId)) {
+  if (!engine::renderer::queue_mesh_unload(manager.get(), database.get(),
+                                           kAssetId)) {
     return 42;
   }
 
-  if (!engine::renderer::update_asset_manager(
-          manager.get(), database.get(), registry.get(), 4U)) {
+  if (!engine::renderer::update_asset_manager(manager.get(), database.get(),
+                                              registry.get(), 4U)) {
     return 43;
   }
 
-  if (engine::renderer::mesh_asset_state(database.get(), kAssetId)
-      != engine::renderer::AssetState::Unloaded) {
+  if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
+      engine::renderer::AssetState::Unloaded) {
     return 44;
   }
 
@@ -126,8 +126,8 @@ int verify_unload_clears_registry_slot() {
     return 45;
   }
 
-  if (engine::renderer::resolve_mesh_asset(database.get(), kAssetId)
-      != engine::renderer::kInvalidMeshHandle) {
+  if (engine::renderer::resolve_mesh_asset(database.get(), kAssetId) !=
+      engine::renderer::kInvalidMeshHandle) {
     return 46;
   }
 
@@ -148,13 +148,13 @@ int verify_auto_unload_from_release_intent() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 104U;
+  constexpr engine::renderer::AssetId kAssetId = 104ULL;
   constexpr engine::renderer::MeshHandle kMeshHandle{4U};
   registry->occupied[kMeshHandle.id] = true;
   registry->meshes[kMeshHandle.id] = engine::renderer::GpuMesh{};
 
-  if (!engine::renderer::register_mesh_asset(
-          database.get(), kAssetId, "assets/test.mesh", kMeshHandle)) {
+  if (!engine::renderer::register_mesh_asset(database.get(), kAssetId,
+                                             "assets/test.mesh", kMeshHandle)) {
     return 61;
   }
 
@@ -162,13 +162,13 @@ int verify_auto_unload_from_release_intent() {
     return 62;
   }
 
-  if (!engine::renderer::update_asset_manager(
-          manager.get(), database.get(), registry.get(), 4U)) {
+  if (!engine::renderer::update_asset_manager(manager.get(), database.get(),
+                                              registry.get(), 4U)) {
     return 63;
   }
 
-  if (engine::renderer::mesh_asset_state(database.get(), kAssetId)
-      != engine::renderer::AssetState::Unloaded) {
+  if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
+      engine::renderer::AssetState::Unloaded) {
     return 64;
   }
 

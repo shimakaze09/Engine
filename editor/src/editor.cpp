@@ -33,6 +33,7 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
@@ -55,6 +56,8 @@
 
 #include "engine/editor/command_history.h"
 #include "engine/editor/debug_camera.h"
+
+#include <stb_image.h>
 
 namespace engine::editor {
 
@@ -90,6 +93,100 @@ constexpr const char *kLightSectionLabel = "LightComponent";
 constexpr const char *kScriptSectionLabel = "ScriptComponent";
 constexpr const char *kScenePath = "assets/scene.json";
 char g_selectedAssetPath[512] = {};
+
+// Thumbnail cache: maps a file path to a GL texture.
+struct ThumbnailEntry final {
+  char path[512] = {};
+  GLuint textureId = 0U;
+  int width = 0;
+  int height = 0;
+};
+constexpr std::size_t kMaxThumbnails = 128U;
+ThumbnailEntry g_thumbnailCache[kMaxThumbnails] = {};
+std::size_t g_thumbnailCount = 0U;
+
+GLuint load_thumbnail_texture(const char *assetPath) noexcept {
+  if (assetPath == nullptr) {
+    return 0U;
+  }
+
+  // Check cache.
+  for (std::size_t i = 0U; i < g_thumbnailCount; ++i) {
+    if (std::strcmp(g_thumbnailCache[i].path, assetPath) == 0) {
+      return g_thumbnailCache[i].textureId;
+    }
+  }
+
+  // Build the .thumbnails/<basename>.png path.
+  // Asset path example: "assets/triangle.mesh" →
+  // "assets/.thumbnails/triangle.mesh.png"
+  std::string assetStr(assetPath);
+  std::size_t lastSlash = assetStr.find_last_of("/\\");
+  std::string thumbPath;
+  if (lastSlash != std::string::npos) {
+    thumbPath = assetStr.substr(0, lastSlash) + "/.thumbnails/" +
+                assetStr.substr(lastSlash + 1U) + ".png";
+  } else {
+    thumbPath = ".thumbnails/" + assetStr + ".png";
+  }
+
+  // Load file into memory (stbi_load not available: renderer uses
+  // STBI_NO_STDIO).
+  FILE *fp = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&fp, thumbPath.c_str(), "rb") != 0) {
+    fp = nullptr;
+  }
+#else
+  fp = std::fopen(thumbPath.c_str(), "rb");
+#endif
+  if (fp == nullptr) {
+    return 0U;
+  }
+  std::fseek(fp, 0, SEEK_END);
+  const long fileLen = std::ftell(fp);
+  std::fseek(fp, 0, SEEK_SET);
+  if (fileLen <= 0) {
+    std::fclose(fp);
+    return 0U;
+  }
+  std::vector<unsigned char> fileData(static_cast<std::size_t>(fileLen));
+  const std::size_t bytesRead =
+      std::fread(fileData.data(), 1U, fileData.size(), fp);
+  std::fclose(fp);
+  if (bytesRead != fileData.size()) {
+    return 0U;
+  }
+
+  int w = 0;
+  int h = 0;
+  int channels = 0;
+  unsigned char *pixels = stbi_load_from_memory(
+      fileData.data(), static_cast<int>(fileData.size()), &w, &h, &channels, 4);
+  if (pixels == nullptr) {
+    return 0U;
+  }
+
+  GLuint tex = 0U;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               pixels);
+  stbi_image_free(pixels);
+
+  if ((tex != 0U) && (g_thumbnailCount < kMaxThumbnails)) {
+    auto &entry = g_thumbnailCache[g_thumbnailCount];
+    std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
+    entry.textureId = tex;
+    entry.width = w;
+    entry.height = h;
+    ++g_thumbnailCount;
+  }
+
+  return tex;
+}
 
 bool world_is_editable() noexcept {
   return (g_world != nullptr) && !g_worldRestoreFailed &&
@@ -569,7 +666,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
 
   if (g_world->get_mesh_component_ptr(entity) == nullptr) {
     runtime::MeshComponent mesh{};
-    mesh.meshAssetId = 0U;
+    mesh.meshAssetId = 0ULL;
     mesh.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
     if (ImGui::Selectable(kMeshSectionLabel)) {
       static_cast<void>(g_world->add_mesh_component(entity, mesh));
@@ -963,7 +1060,8 @@ void draw_inspector_panel() noexcept {
 
     bool meshModified = false;
     if (sectionOpen) {
-      ImGui::Text("Mesh Asset ID: %u", mesh.meshAssetId);
+      ImGui::Text("Mesh Asset ID: %llu",
+                  static_cast<unsigned long long>(mesh.meshAssetId));
       if (editable) {
         meshModified |= ImGui::ColorEdit3("Albedo", &mesh.albedo.x);
         meshModified |= ImGui::SliderFloat("Roughness", &mesh.roughness, 0.0F,
@@ -1205,6 +1303,14 @@ void draw_asset_browser_panel() noexcept {
   if (g_selectedAssetPath[0] != '\0') {
     ImGui::Separator();
     ImGui::TextWrapped("Selected: %s", g_selectedAssetPath);
+
+    // Show thumbnail if one exists for this asset.
+    const GLuint thumbTex = load_thumbnail_texture(g_selectedAssetPath);
+    if (thumbTex != 0U) {
+      ImGui::Image(
+          reinterpret_cast<ImTextureID>(static_cast<std::uintptr_t>(thumbTex)),
+          ImVec2(64.0F, 64.0F));
+    }
   }
 
   ImGui::End();

@@ -102,7 +102,7 @@ struct ScriptComponent final {
 
 // Renderer-facing component; keep minimal to avoid bloating draw commands.
 struct MeshComponent final {
-  std::uint32_t meshAssetId = 0U;
+  std::uint64_t meshAssetId = 0ULL;
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
   float roughness = 0.5F;
   float metallic = 0.0F;

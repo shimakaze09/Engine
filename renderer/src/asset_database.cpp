@@ -8,8 +8,8 @@ namespace engine::renderer {
 
 namespace {
 
-constexpr std::uint32_t kFnvOffset = 2166136261U;
-constexpr std::uint32_t kFnvPrime = 16777619U;
+constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
+constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
 std::size_t hashed_slot(AssetId id, std::size_t capacity) noexcept {
   if ((capacity == 0U) || (id == kInvalidAssetId)) {
@@ -87,19 +87,19 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
     return kInvalidAssetId;
   }
 
-  std::uint32_t hash = kFnvOffset;
+  std::uint64_t hash = kFnv64Offset;
   for (const unsigned char *cursor =
            reinterpret_cast<const unsigned char *>(path);
        *cursor != 0U; ++cursor) {
     const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
                                  ? static_cast<unsigned char>('/')
                                  : *cursor;
-    hash ^= static_cast<std::uint32_t>(ch);
-    hash *= kFnvPrime;
+    hash ^= static_cast<std::uint64_t>(ch);
+    hash *= kFnv64Prime;
   }
 
   if (hash == kInvalidAssetId) {
-    hash = 1U;
+    hash = 1ULL;
   }
 
   return hash;
@@ -122,7 +122,7 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
     return make_asset_id_from_path(path);
   }
 
-  std::uint32_t hash = kFnvOffset;
+  std::uint64_t hash = kFnv64Offset;
   unsigned char buffer[4096] = {};
   while (true) {
     const std::size_t bytesRead = std::fread(buffer, 1U, sizeof(buffer), file);
@@ -130,14 +130,14 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
       break;
     }
     for (std::size_t i = 0U; i < bytesRead; ++i) {
-      hash ^= static_cast<std::uint32_t>(buffer[i]);
-      hash *= kFnvPrime;
+      hash ^= static_cast<std::uint64_t>(buffer[i]);
+      hash *= kFnv64Prime;
     }
   }
 
   std::fclose(file);
   if (hash == kInvalidAssetId) {
-    hash = 1U;
+    hash = 1ULL;
   }
   return hash;
 }
@@ -290,6 +290,11 @@ void clear_asset_database(AssetDatabase *database) noexcept {
   for (std::size_t i = 0U; i < database->textureAssets.size(); ++i) {
     database->textureOccupied[i] = false;
     database->textureAssets[i] = TextureAssetRecord{};
+  }
+
+  for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
+    database->metadataOccupied[i] = false;
+    database->metadata[i] = AssetMetadata{};
   }
 }
 
@@ -460,6 +465,157 @@ bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   }
 
   return true;
+}
+
+// --- Metadata management ---
+
+namespace {
+
+std::size_t find_metadata_slot(const AssetDatabase *database,
+                               AssetId id) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return database != nullptr ? database->metadata.size() : 0U;
+  }
+
+  const std::size_t capacity = database->metadata.size();
+  const std::size_t base = hashed_slot(id, capacity);
+  for (std::size_t probe = 0U; probe < capacity; ++probe) {
+    const std::size_t slot = (base + probe) % capacity;
+    if (!database->metadataOccupied[slot]) {
+      return capacity;
+    }
+    if (database->metadata[slot].assetId == id) {
+      return slot;
+    }
+  }
+
+  return capacity;
+}
+
+std::size_t find_metadata_insert_slot(const AssetDatabase *database,
+                                      AssetId id) noexcept {
+  if (database == nullptr) {
+    return 0U;
+  }
+
+  const std::size_t capacity = database->metadata.size();
+  const std::size_t base = hashed_slot(id, capacity);
+  for (std::size_t probe = 0U; probe < capacity; ++probe) {
+    const std::size_t slot = (base + probe) % capacity;
+    if (!database->metadataOccupied[slot] ||
+        (database->metadata[slot].assetId == id)) {
+      return slot;
+    }
+  }
+
+  return capacity;
+}
+
+} // namespace
+
+bool register_asset_metadata(AssetDatabase *database,
+                             const AssetMetadata &metadata) noexcept {
+  if ((database == nullptr) || (metadata.assetId == kInvalidAssetId)) {
+    return false;
+  }
+
+  const std::size_t slot =
+      find_metadata_insert_slot(database, metadata.assetId);
+  if (slot == database->metadata.size()) {
+    return false;
+  }
+
+  database->metadataOccupied[slot] = true;
+  database->metadata[slot] = metadata;
+  return true;
+}
+
+const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
+                                         AssetId id) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return nullptr;
+  }
+
+  const std::size_t slot = find_metadata_slot(database, id);
+  if (slot == database->metadata.size()) {
+    return nullptr;
+  }
+
+  return &database->metadata[slot];
+}
+
+bool add_asset_tag(AssetDatabase *database, AssetId id,
+                   const char *tag) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
+    return false;
+  }
+
+  const std::size_t slot = find_metadata_slot(database, id);
+  if (slot == database->metadata.size()) {
+    return false;
+  }
+
+  return asset_metadata_add_tag(&database->metadata[slot], tag);
+}
+
+bool asset_has_tag(const AssetDatabase *database, AssetId id,
+                   const char *tag) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
+    return false;
+  }
+
+  const std::size_t slot = find_metadata_slot(database, id);
+  if (slot == database->metadata.size()) {
+    return false;
+  }
+
+  return asset_metadata_has_tag(&database->metadata[slot], tag);
+}
+
+std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
+                                AssetId *outIds, std::size_t maxIds) noexcept {
+  if ((database == nullptr) || (tag == nullptr) || (outIds == nullptr) ||
+      (maxIds == 0U)) {
+    return 0U;
+  }
+
+  std::size_t count = 0U;
+  for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
+    if (!database->metadataOccupied[i]) {
+      continue;
+    }
+    if (asset_metadata_has_tag(&database->metadata[i], tag)) {
+      outIds[count] = database->metadata[i].assetId;
+      ++count;
+      if (count >= maxIds) {
+        break;
+      }
+    }
+  }
+  return count;
+}
+
+std::size_t query_assets_by_type(const AssetDatabase *database,
+                                 AssetTypeTag typeTag, AssetId *outIds,
+                                 std::size_t maxIds) noexcept {
+  if ((database == nullptr) || (outIds == nullptr) || (maxIds == 0U)) {
+    return 0U;
+  }
+
+  std::size_t count = 0U;
+  for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
+    if (!database->metadataOccupied[i]) {
+      continue;
+    }
+    if (database->metadata[i].typeTag == typeTag) {
+      outIds[count] = database->metadata[i].assetId;
+      ++count;
+      if (count >= maxIds) {
+        break;
+      }
+    }
+  }
+  return count;
 }
 
 } // namespace engine::renderer

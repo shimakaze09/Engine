@@ -10,6 +10,8 @@ target_include_directories(engine_editor
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/runtime/include
     ${CMAKE_SOURCE_DIR}/renderer/include
+    PRIVATE
+    ${ENGINE_STB_INCLUDE_DIR}
 )
 
 target_compile_features(engine_editor PUBLIC cxx_std_20)
