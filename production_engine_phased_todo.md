@@ -304,13 +304,13 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M4-B: Dependency Graph
 
-- [ ] P1-M4-B1a: DependencyGraph class (DAG of AssetId → AssetId edges)
-- [ ] P1-M4-B1b: Populate during import (mesh→materials→textures, prefab→meshes)
-- [ ] P1-M4-B1c: Persist graph to build/asset_deps.json, incremental rebuild on dependency change
-- [ ] P1-M4-B1d: Test: change texture, verify dependent material and mesh recooked
-- [ ] P1-M4-B2a: AssetDatabase::get_dependencies(asset_id) → AssetId[]
-- [ ] P1-M4-B2b: Load dependencies first (recursive), track order to prevent cycles
-- [ ] P1-M4-B2c: Test: load prefab, verify mesh and textures loaded first
+- [x] P1-M4-B1a: DependencyGraph class (DAG of AssetId → AssetId edges)
+- [x] P1-M4-B1b: Populate during import (mesh→materials→textures, prefab→meshes)
+- [x] P1-M4-B1c: Persist graph to build/asset_deps.json, incremental rebuild on dependency change
+- [x] P1-M4-B1d: Test: change texture, verify dependent material and mesh recooked
+- [x] P1-M4-B2a: AssetDatabase::get_dependencies(asset_id) → AssetId[]
+- [x] P1-M4-B2b: Load dependencies first (recursive), track order to prevent cycles
+- [x] P1-M4-B2c: Test: load prefab, verify mesh and textures loaded first
 
 #### P1-M4-C: Async Streaming
 

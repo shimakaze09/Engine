@@ -279,3 +279,22 @@ add_test(
     COMMAND engine_integration_dap
 )
 set_tests_properties(engine_integration_dap PROPERTIES LABELS "integration")
+
+# ---- P1-M4-B: Dependency Graph ----
+
+add_executable(engine_integration_asset_dep_load
+    asset_dep_load_test.cpp
+)
+
+target_compile_features(engine_integration_asset_dep_load PRIVATE cxx_std_20)
+
+target_link_libraries(engine_integration_asset_dep_load
+    PRIVATE
+    engine_renderer
+)
+
+add_test(
+    NAME engine_integration_asset_dep_load
+    COMMAND engine_integration_asset_dep_load
+)
+set_tests_properties(engine_integration_asset_dep_load PROPERTIES LABELS "integration")

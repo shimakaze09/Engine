@@ -618,4 +618,132 @@ std::size_t query_assets_by_type(const AssetDatabase *database,
   return count;
 }
 
+// --- Dependency management ---
+
+std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
+                             AssetId *outIds, std::size_t maxIds) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId) || (outIds == nullptr) ||
+      (maxIds == 0U)) {
+    return 0U;
+  }
+
+  const AssetMetadata *meta = find_asset_metadata(database, id);
+  if (meta == nullptr) {
+    return 0U;
+  }
+
+  const std::size_t count =
+      (meta->dependencyCount < maxIds) ? meta->dependencyCount : maxIds;
+  for (std::size_t i = 0U; i < count; ++i) {
+    outIds[i] = meta->dependencies[i];
+  }
+  return count;
+}
+
+bool add_asset_dependency(AssetDatabase *database, AssetId id,
+                          AssetId depId) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId) ||
+      (depId == kInvalidAssetId)) {
+    return false;
+  }
+
+  const std::size_t slot = find_metadata_slot(database, id);
+  if (slot == database->metadata.size()) {
+    return false;
+  }
+
+  return asset_metadata_add_dependency(&database->metadata[slot], depId);
+}
+
+namespace {
+
+bool load_with_deps_recursive(AssetDatabase *database, AssetId id,
+                              bool (*loadCallback)(AssetDatabase *db,
+                                                   AssetId id, void *userData),
+                              void *userData, AssetId *visitStack,
+                              std::size_t visitDepth, std::size_t maxVisitDepth,
+                              AssetId *loadedSet, std::size_t *loadedCount,
+                              std::size_t maxLoaded) noexcept {
+  // Cycle detection: check if id is already in the visit stack.
+  for (std::size_t i = 0U; i < visitDepth; ++i) {
+    if (visitStack[i] == id) {
+      std::fprintf(stderr,
+                   "error: circular dependency detected for asset %016llx\n",
+                   static_cast<unsigned long long>(id));
+      return false;
+    }
+  }
+
+  if (visitDepth >= maxVisitDepth) {
+    std::fprintf(stderr,
+                 "error: dependency chain exceeds maximum depth for asset "
+                 "%016llx\n",
+                 static_cast<unsigned long long>(id));
+    return false;
+  }
+
+  // Check if already loaded in this session.
+  for (std::size_t i = 0U; i < *loadedCount; ++i) {
+    if (loadedSet[i] == id) {
+      return true; // Already loaded, skip.
+    }
+  }
+
+  // Push this asset onto the visit stack.
+  visitStack[visitDepth] = id;
+
+  // Load dependencies first.
+  const AssetMetadata *meta = find_asset_metadata(database, id);
+  if (meta != nullptr) {
+    for (std::size_t i = 0U; i < meta->dependencyCount; ++i) {
+      const AssetId depId = meta->dependencies[i];
+      if (depId == kInvalidAssetId) {
+        continue;
+      }
+
+      if (!load_with_deps_recursive(database, depId, loadCallback, userData,
+                                    visitStack, visitDepth + 1U, maxVisitDepth,
+                                    loadedSet, loadedCount, maxLoaded)) {
+        return false;
+      }
+    }
+  }
+
+  // Now load the asset itself (after all deps are loaded).
+  if (loadCallback != nullptr) {
+    if (!loadCallback(database, id, userData)) {
+      return false;
+    }
+  }
+
+  // Mark as loaded.
+  if (*loadedCount < maxLoaded) {
+    loadedSet[*loadedCount] = id;
+    ++(*loadedCount);
+  }
+
+  return true;
+}
+
+} // namespace
+
+bool load_with_dependencies(AssetDatabase *database, AssetId rootId,
+                            bool (*loadCallback)(AssetDatabase *db, AssetId id,
+                                                 void *userData),
+                            void *userData) noexcept {
+  if ((database == nullptr) || (rootId == kInvalidAssetId)) {
+    return false;
+  }
+
+  constexpr std::size_t kMaxDepth = 64U;
+  constexpr std::size_t kMaxLoaded = 256U;
+  AssetId visitStack[kMaxDepth] = {};
+  AssetId loadedSet[kMaxLoaded] = {};
+  std::size_t loadedCount = 0U;
+
+  return load_with_deps_recursive(database, rootId, loadCallback, userData,
+                                  visitStack, 0U, kMaxDepth, loadedSet,
+                                  &loadedCount, kMaxLoaded);
+}
+
 } // namespace engine::renderer

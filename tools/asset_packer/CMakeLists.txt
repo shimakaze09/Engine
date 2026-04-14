@@ -1,5 +1,7 @@
 add_executable(asset_packer
     main.cpp
+    dependency_graph.cpp
+    dependency_graph.h
 )
 
 target_compile_features(asset_packer PRIVATE cxx_std_20)

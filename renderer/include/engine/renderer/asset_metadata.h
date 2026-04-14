@@ -37,6 +37,7 @@ struct TextureImportSettings final {
 struct AssetMetadata final {
   static constexpr std::size_t kMaxTags = 16U;
   static constexpr std::size_t kMaxTagLength = 32U;
+  static constexpr std::size_t kMaxDependencies = 32U;
 
   AssetId assetId = kInvalidAssetId;
   AssetTypeTag typeTag = AssetTypeTag::Unknown;
@@ -47,6 +48,9 @@ struct AssetMetadata final {
 
   std::array<std::array<char, kMaxTagLength>, kMaxTags> tags{};
   std::size_t tagCount = 0U;
+
+  std::array<AssetId, kMaxDependencies> dependencies{};
+  std::size_t dependencyCount = 0U;
 
   MeshImportSettings meshSettings{};
   TextureImportSettings textureSettings{};
@@ -102,6 +106,36 @@ inline void write_metadata_path(std::array<char, 260U> *outPath,
     std::memcpy(outPath->data(), path, copyLen);
   }
   (*outPath)[copyLen] = '\0';
+}
+
+inline bool asset_metadata_add_dependency(AssetMetadata *metadata,
+                                          AssetId depId) noexcept {
+  if ((metadata == nullptr) || (depId == kInvalidAssetId) ||
+      (metadata->dependencyCount >= AssetMetadata::kMaxDependencies)) {
+    return false;
+  }
+  // Check for duplicates.
+  for (std::size_t i = 0U; i < metadata->dependencyCount; ++i) {
+    if (metadata->dependencies[i] == depId) {
+      return true;
+    }
+  }
+  metadata->dependencies[metadata->dependencyCount] = depId;
+  ++metadata->dependencyCount;
+  return true;
+}
+
+inline bool asset_metadata_has_dependency(const AssetMetadata *metadata,
+                                          AssetId depId) noexcept {
+  if ((metadata == nullptr) || (depId == kInvalidAssetId)) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < metadata->dependencyCount; ++i) {
+    if (metadata->dependencies[i] == depId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace engine::renderer

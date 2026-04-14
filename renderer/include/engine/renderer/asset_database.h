@@ -91,4 +91,21 @@ std::size_t query_assets_by_type(const AssetDatabase *database,
                                  AssetTypeTag typeTag, AssetId *outIds,
                                  std::size_t maxIds) noexcept;
 
+// Dependency queries.
+std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
+                             AssetId *outIds, std::size_t maxIds) noexcept;
+
+bool add_asset_dependency(AssetDatabase *database, AssetId id,
+                          AssetId depId) noexcept;
+
+/// Load an asset and all its dependencies (depth-first, dependency-first).
+/// Returns false if a cycle is detected or if any dependency fails to resolve.
+/// The `loadCallback` is invoked for each asset that needs loading, in
+/// dependency order. It receives the AssetId and should return true if the
+/// load succeeds.
+bool load_with_dependencies(AssetDatabase *database, AssetId rootId,
+                            bool (*loadCallback)(AssetDatabase *db, AssetId id,
+                                                 void *userData),
+                            void *userData) noexcept;
+
 } // namespace engine::renderer

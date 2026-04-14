@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _WIN32
@@ -39,6 +40,8 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 
+#include "dependency_graph.h"
+
 namespace {
 
 struct PrimitiveData final {
@@ -58,7 +61,8 @@ constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
-               "[--dep <dependency_path>]... [--force]\n");
+               "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
+               "[--force]\n");
 }
 
 bool file_exists(const char *path) {
@@ -962,6 +966,159 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   return true;
 }
 
+std::uint64_t hash_path_to_asset_id(const char *path) {
+  if (path == nullptr) {
+    return 0ULL;
+  }
+
+  std::uint64_t hash = kFnv64Offset;
+  for (const unsigned char *cursor =
+           reinterpret_cast<const unsigned char *>(path);
+       *cursor != 0U; ++cursor) {
+    const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
+                                 ? static_cast<unsigned char>('/')
+                                 : *cursor;
+    hash ^= static_cast<std::uint64_t>(ch);
+    hash *= kFnv64Prime;
+  }
+
+  if (hash == 0ULL) {
+    hash = 1ULL;
+  }
+  return hash;
+}
+
+/// Resolve a glTF image URI relative to the input file directory.
+bool resolve_image_path(const char *inputPath, const char *imageUri,
+                        char *outPath, std::size_t outPathSize) {
+  if ((inputPath == nullptr) || (imageUri == nullptr) || (outPath == nullptr) ||
+      (outPathSize == 0U)) {
+    return false;
+  }
+
+  // Find directory of input file.
+  const char *lastSlash = std::strrchr(inputPath, '/');
+  const char *lastBackslash = std::strrchr(inputPath, '\\');
+  const char *sep = lastSlash;
+  if ((lastBackslash != nullptr) &&
+      ((sep == nullptr) || (lastBackslash > sep))) {
+    sep = lastBackslash;
+  }
+
+  if (sep != nullptr) {
+    const std::size_t dirLen = static_cast<std::size_t>(sep - inputPath) + 1U;
+    const std::size_t uriLen = std::strlen(imageUri);
+    if ((dirLen + uriLen) >= outPathSize) {
+      return false;
+    }
+    std::memcpy(outPath, inputPath, dirLen);
+    std::memcpy(outPath + dirLen, imageUri, uriLen);
+    outPath[dirLen + uriLen] = '\0';
+  } else {
+    const std::size_t uriLen = std::strlen(imageUri);
+    if (uriLen >= outPathSize) {
+      return false;
+    }
+    std::memcpy(outPath, imageUri, uriLen);
+    outPath[uriLen] = '\0';
+  }
+  return true;
+}
+
+/// Extract texture/material dependencies from glTF data and register them
+/// in the dependency graph. Returns dependency paths for cookstamp hashing.
+void extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
+                               std::uint64_t meshAssetId,
+                               engine::tools::DependencyGraph *graph,
+                               std::vector<DependencyDigest> *autoDepDigests) {
+  if ((data == nullptr) || (inputPath == nullptr) || (graph == nullptr)) {
+    return;
+  }
+
+  // Walk all materials used by this mesh's primitives.
+  std::unordered_set<const cgltf_image *> seenImages{};
+
+  auto processTexture = [&](const cgltf_texture_view &texView) {
+    if ((texView.texture == nullptr) || (texView.texture->image == nullptr)) {
+      return;
+    }
+    const cgltf_image *image = texView.texture->image;
+    if (image->uri == nullptr) {
+      return; // Embedded texture (buffer view), no external dep.
+    }
+    if (!seenImages.insert(image).second) {
+      return; // Already processed.
+    }
+
+    char resolvedPath[512] = {};
+    if (!resolve_image_path(inputPath, image->uri, resolvedPath,
+                            sizeof(resolvedPath))) {
+      return;
+    }
+
+    const std::uint64_t texAssetId = hash_path_to_asset_id(resolvedPath);
+    if (texAssetId == 0ULL) {
+      return;
+    }
+
+    engine::tools::register_asset_path(graph, texAssetId, resolvedPath);
+    // mesh depends on texture (forward edge).
+    // Use direct insert to avoid cycle check for texture→mesh (impossible).
+    graph->dependencies[meshAssetId].insert(texAssetId);
+    graph->dependents[texAssetId].insert(meshAssetId);
+
+    // Also add to the auto-discovered dependency list for cookstamp.
+    if (autoDepDigests != nullptr) {
+      bool hashOk = false;
+      const std::uint64_t fileHash = hash_file_contents(resolvedPath, &hashOk);
+      if (hashOk) {
+        DependencyDigest digest{};
+        digest.path = resolvedPath;
+        digest.hash = fileHash;
+        autoDepDigests->push_back(digest);
+      }
+    }
+  };
+
+  for (cgltf_size mi = 0U; mi < data->meshes_count; ++mi) {
+    const cgltf_mesh &mesh = data->meshes[mi];
+    for (cgltf_size pi = 0U; pi < mesh.primitives_count; ++pi) {
+      const cgltf_primitive &prim = mesh.primitives[pi];
+      if (prim.material == nullptr) {
+        continue;
+      }
+      const cgltf_material &mat = *prim.material;
+
+      // Register the material as a dependency of the mesh.
+      char matName[512] = {};
+      if (mat.name != nullptr) {
+        std::snprintf(matName, sizeof(matName), "%s#material:%s", inputPath,
+                      mat.name);
+      } else {
+        std::snprintf(matName, sizeof(matName), "%s#material:%zu", inputPath,
+                      static_cast<std::size_t>(mi * 1000U + pi));
+      }
+      const std::uint64_t matAssetId = hash_path_to_asset_id(matName);
+      if (matAssetId != 0ULL) {
+        engine::tools::register_asset_path(graph, matAssetId, matName);
+        graph->dependencies[meshAssetId].insert(matAssetId);
+        graph->dependents[matAssetId].insert(meshAssetId);
+      }
+
+      // PBR metallic roughness textures.
+      if (mat.has_pbr_metallic_roughness) {
+        processTexture(mat.pbr_metallic_roughness.base_color_texture);
+        processTexture(mat.pbr_metallic_roughness.metallic_roughness_texture);
+      }
+
+      // Other textures.
+      processTexture(mat.normal_texture);
+      processTexture(mat.occlusion_texture);
+      processTexture(mat.emissive_texture);
+    }
+  }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -975,6 +1132,7 @@ int main(int argc, char **argv) {
 
   bool forceRepack = false;
   std::vector<std::string> dependencyPaths{};
+  std::string graphPath{};
   for (int i = 3; i < argc; ++i) {
     if (std::strcmp(argv[i], "--dep") == 0) {
       if ((i + 1) >= argc) {
@@ -982,6 +1140,16 @@ int main(int argc, char **argv) {
         return 8;
       }
       dependencyPaths.emplace_back(argv[i + 1]);
+      ++i;
+      continue;
+    }
+
+    if (std::strcmp(argv[i], "--graph") == 0) {
+      if ((i + 1) >= argc) {
+        print_usage();
+        return 8;
+      }
+      graphPath = argv[i + 1];
       ++i;
       continue;
     }
@@ -1005,6 +1173,50 @@ int main(int argc, char **argv) {
   std::vector<DependencyDigest> dependencyDigests{};
   if (!build_dependency_digests(dependencyPaths, &dependencyDigests)) {
     return 11;
+  }
+
+  // Load the dependency graph (if a graph path was provided).
+  engine::tools::DependencyGraph depGraph{};
+  const bool hasGraphPath = !graphPath.empty();
+  if (hasGraphPath) {
+    // Load existing graph; failure is ok (first run).
+    engine::tools::read_dependency_graph_json(&depGraph, graphPath.c_str());
+  }
+
+  // Compute the mesh asset ID for graph registration.
+  const std::uint64_t meshAssetId = hash_path_to_asset_id(inputPath);
+  if (hasGraphPath && (meshAssetId != 0ULL)) {
+    engine::tools::register_asset_path(&depGraph, meshAssetId, inputPath);
+
+    // Check if any dependency in the graph has changed, requiring a repack.
+    // This extends beyond just the explicit --dep flags.
+    engine::tools::DependencyGraph::AssetId depIds[64] = {};
+    const std::size_t depCount =
+        engine::tools::get_dependencies(&depGraph, meshAssetId, depIds, 64U);
+    for (std::size_t i = 0U; i < depCount; ++i) {
+      auto pathIt = depGraph.assetPaths.find(depIds[i]);
+      if (pathIt != depGraph.assetPaths.end()) {
+        // Check if already in the manual deps list.
+        bool alreadyTracked = false;
+        for (const auto &d : dependencyDigests) {
+          if (d.path == pathIt->second) {
+            alreadyTracked = true;
+            break;
+          }
+        }
+        if (!alreadyTracked && file_exists(pathIt->second.c_str())) {
+          bool hashOk = false;
+          const std::uint64_t h =
+              hash_file_contents(pathIt->second.c_str(), &hashOk);
+          if (hashOk) {
+            DependencyDigest d{};
+            d.path = pathIt->second;
+            d.hash = h;
+            dependencyDigests.push_back(d);
+          }
+        }
+      }
+    }
   }
 
   if (!forceRepack &&
@@ -1042,6 +1254,53 @@ int main(int argc, char **argv) {
     return 5;
   }
 
+  // Extract material/texture dependencies from glTF and register in graph.
+  std::vector<DependencyDigest> autoDiscoveredDeps{};
+  if (hasGraphPath && (meshAssetId != 0ULL)) {
+    // Clear previous forward edges for this asset before repopulating.
+    auto fwdIt = depGraph.dependencies.find(meshAssetId);
+    if (fwdIt != depGraph.dependencies.end()) {
+      for (const auto oldDep : fwdIt->second) {
+        auto revIt = depGraph.dependents.find(oldDep);
+        if (revIt != depGraph.dependents.end()) {
+          revIt->second.erase(meshAssetId);
+          if (revIt->second.empty()) {
+            depGraph.dependents.erase(revIt);
+          }
+        }
+      }
+      depGraph.dependencies.erase(fwdIt);
+    }
+
+    extract_gltf_dependencies(data, inputPath, meshAssetId, &depGraph,
+                              &autoDiscoveredDeps);
+
+    // Also register manually specified deps in the graph.
+    for (const auto &manualDep : dependencyDigests) {
+      const std::uint64_t depId = hash_path_to_asset_id(manualDep.path.c_str());
+      if (depId != 0ULL) {
+        engine::tools::register_asset_path(&depGraph, depId,
+                                           manualDep.path.c_str());
+        depGraph.dependencies[meshAssetId].insert(depId);
+        depGraph.dependents[depId].insert(meshAssetId);
+      }
+    }
+  }
+
+  // Merge auto-discovered deps into the cookstamp dependency list.
+  for (const auto &autoDep : autoDiscoveredDeps) {
+    bool alreadyPresent = false;
+    for (const auto &existing : dependencyDigests) {
+      if (existing.path == autoDep.path) {
+        alreadyPresent = true;
+        break;
+      }
+    }
+    if (!alreadyPresent) {
+      dependencyDigests.push_back(autoDep);
+    }
+  }
+
   const bool writeOk = write_mesh_file(outputPath, primitiveData);
   cgltf_free(data);
 
@@ -1065,6 +1324,15 @@ int main(int argc, char **argv) {
 
   // Generate mesh thumbnail (best-effort; failure is non-fatal).
   generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
+
+  // Save the dependency graph (if graph path was provided).
+  if (hasGraphPath) {
+    if (!engine::tools::write_dependency_graph_json(&depGraph,
+                                                    graphPath.c_str())) {
+      std::fprintf(stderr, "warning: failed to write dependency graph: %s\n",
+                   graphPath.c_str());
+    }
+  }
 
   std::printf(
       "packed mesh: vertices=%zu indices=%zu uvs=%s -> %s (+ .meta.json)\n",

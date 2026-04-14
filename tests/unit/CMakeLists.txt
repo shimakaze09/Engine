@@ -608,3 +608,26 @@ add_test(
     NAME engine_unit_asset_hash
     COMMAND engine_unit_asset_hash
 )
+
+# ---- P1-M4-B: Dependency Graph ----
+
+add_executable(engine_unit_dependency_graph
+    dependency_graph_test.cpp
+    ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
+)
+
+target_compile_features(engine_unit_dependency_graph PRIVATE cxx_std_20)
+
+target_include_directories(engine_unit_dependency_graph
+    PRIVATE
+    ${CMAKE_SOURCE_DIR}/tools/asset_packer
+)
+
+if(WIN32)
+    target_compile_definitions(engine_unit_dependency_graph PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+add_test(
+    NAME engine_unit_dependency_graph
+    COMMAND engine_unit_dependency_graph
+)
