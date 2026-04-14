@@ -1,4 +1,5 @@
-add_library(engine_math STATIC
+engine_add_module_library(engine_math
+    SOURCES
     src/aabb.cpp
     src/mat4.cpp
     src/quat.cpp
@@ -8,16 +9,8 @@ add_library(engine_math STATIC
     src/vec2.cpp
     src/vec3.cpp
     src/vec4.cpp
-)
-
-target_include_directories(engine_math
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_compile_features(engine_math PUBLIC cxx_std_20)
-
-target_link_libraries(engine_math
-    PUBLIC
-        engine_core
+    PUBLIC_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PUBLIC_DEPS
+    engine_core
 )

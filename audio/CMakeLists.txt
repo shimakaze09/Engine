@@ -1,16 +1,9 @@
-add_library(engine_audio STATIC
+engine_add_module_library(engine_audio
+    SOURCES
     src/audio.cpp
-)
-
-target_include_directories(engine_audio
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_compile_features(engine_audio PUBLIC cxx_std_20)
-
-target_link_libraries(engine_audio
-    PUBLIC
+    PUBLIC_DEPS
     engine_core
     engine_math
 )

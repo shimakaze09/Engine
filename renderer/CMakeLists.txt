@@ -1,4 +1,5 @@
-add_library(engine_renderer STATIC
+engine_add_module_library(engine_renderer
+    SOURCES
     src/asset_database.cpp
     src/asset_manager.cpp
     src/command_buffer.cpp
@@ -8,23 +9,16 @@ add_library(engine_renderer STATIC
     src/render_device_gl.cpp
     src/shader_system.cpp
     src/texture_loader.cpp
-)
-
-target_include_directories(engine_renderer
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
+    PRIVATE_INCLUDE_DIRS
     ${ENGINE_STB_INCLUDE_DIR}
-)
-
-target_compile_features(engine_renderer PUBLIC cxx_std_20)
-
-target_link_libraries(engine_renderer
-    PUBLIC
+    PUBLIC_DEPS
     engine_core
     engine_math
     OpenGL::GL
+    PCH
+    src/pch.h
 )
 
-# Precompiled header — improves incremental rebuild time for engine_renderer.
-target_precompile_headers(engine_renderer PRIVATE src/pch.h)
+# Precompiled header remains PRIVATE via engine_add_module_library(... PCH ...).

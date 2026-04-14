@@ -1,4 +1,5 @@
-add_library(engine_core STATIC
+engine_add_module_library(engine_core
+    SOURCES
     src/bootstrap.cpp
     src/console.cpp
     src/cvar.cpp
@@ -18,21 +19,13 @@ add_library(engine_core STATIC
     src/service_locator.cpp
     src/touch_input.cpp
     src/vfs.cpp
-)
-
-target_include_directories(engine_core
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_compile_features(engine_core PUBLIC cxx_std_20)
-
-target_link_libraries(engine_core
-    PUBLIC
+    PUBLIC_DEPS
     Threads::Threads
     ${ENGINE_SDL2_TARGET}
+    PCH
+    src/pch.h
 )
 
-# Precompiled header — improves incremental rebuild time for engine_core.
-# PRIVATE so downstream consumers are not forced to use it.
-target_precompile_headers(engine_core PRIVATE src/pch.h)
+# Precompiled header remains PRIVATE via engine_add_module_library(... PCH ...).

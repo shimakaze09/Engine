@@ -1,4 +1,5 @@
-add_library(engine_physics STATIC
+engine_add_module_library(engine_physics
+    SOURCES
     src/physics.cpp
     src/convex_hull.cpp
     src/ccd.cpp
@@ -11,21 +12,13 @@ add_library(engine_physics STATIC
     src/joints/slider_joint.cpp
     src/joints/spring_joint.cpp
     src/joints/fixed_joint.cpp
-)
-
-target_include_directories(engine_physics
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
+    PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/runtime/include
     ${CMAKE_SOURCE_DIR}/core/include
-)
-
-target_compile_features(engine_physics PUBLIC cxx_std_20)
-
-target_link_libraries(engine_physics
-    PUBLIC
+    PUBLIC_DEPS
     engine_math
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )

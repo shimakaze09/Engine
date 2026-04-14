@@ -1,23 +1,16 @@
-add_library(engine_editor STATIC
+engine_add_module_library(engine_editor
+    SOURCES
     src/command_history.cpp
     src/debug_camera.cpp
     src/editor.cpp
     src/editor_camera.cpp
-)
-
-target_include_directories(engine_editor
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/runtime/include
     ${CMAKE_SOURCE_DIR}/renderer/include
-    PRIVATE
+    PRIVATE_INCLUDE_DIRS
     ${ENGINE_STB_INCLUDE_DIR}
-)
-
-target_compile_features(engine_editor PUBLIC cxx_std_20)
-
-target_link_libraries(engine_editor
-    PUBLIC
+    PUBLIC_DEPS
     engine_imgui
     engine_core
     engine_math

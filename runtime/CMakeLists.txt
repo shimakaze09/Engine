@@ -1,4 +1,5 @@
-add_library(engine_runtime STATIC
+engine_add_module_library(engine_runtime
+    SOURCES
     src/camera_manager.cpp
     src/editor_bridge.cpp
     src/engine.cpp
@@ -10,17 +11,9 @@ add_library(engine_runtime STATIC
     src/scripting_bridge.cpp
     src/timer_manager.cpp
     src/world.cpp
-)
-
-target_include_directories(engine_runtime
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_compile_features(engine_runtime PUBLIC cxx_std_20)
-
-target_link_libraries(engine_runtime
-    PUBLIC
+    PUBLIC_DEPS
     engine_core
     engine_math
     engine_physics

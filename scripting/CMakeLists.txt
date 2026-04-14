@@ -15,23 +15,16 @@ add_custom_command(
     VERBATIM
 )
 
-add_library(engine_scripting STATIC
+engine_add_module_library(engine_scripting
+    SOURCES
     src/scripting.cpp
     src/dap_server.cpp
     ${ENGINE_BINDGEN_OUTPUT}
-)
-
-target_include_directories(engine_scripting
-    PUBLIC
+    PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
+    PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/runtime/include
-)
-
-target_compile_features(engine_scripting PUBLIC cxx_std_20)
-
-target_link_libraries(engine_scripting
-    PUBLIC
+    PUBLIC_DEPS
     engine_core
     engine_math
     engine_lua

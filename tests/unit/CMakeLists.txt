@@ -1,633 +1,292 @@
-add_executable(engine_unit_foundation
+engine_add_test_executable(engine_unit_foundation
+    SOURCES
     smoke_test.cpp
-)
-
-target_compile_features(engine_unit_foundation PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_foundation
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
     engine_math
+    LABELS
+    gpu
 )
 
-add_test(
-    NAME engine_unit_foundation
-    COMMAND engine_unit_foundation
-)
-set_tests_properties(engine_unit_foundation PROPERTIES LABELS "gpu")
-
-add_executable(engine_unit_math
+engine_add_test_executable(engine_unit_math
+    SOURCES
     math_test.cpp
-)
-
-target_compile_features(engine_unit_math PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_math
-    PRIVATE
+    PRIVATE_DEPS
     engine_math
 )
 
-add_test(
-    NAME engine_unit_math
-    COMMAND engine_unit_math
-)
-
-add_executable(engine_unit_mesh_loader
+engine_add_test_executable(engine_unit_mesh_loader
+    SOURCES
     mesh_loader_test.cpp
-)
-
-target_compile_features(engine_unit_mesh_loader PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_mesh_loader
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
 )
 
-add_test(
-    NAME engine_unit_mesh_loader
-    COMMAND engine_unit_mesh_loader
-)
-
-add_executable(engine_unit_asset_database
+engine_add_test_executable(engine_unit_asset_database
+    SOURCES
     asset_database_test.cpp
-)
-
-target_compile_features(engine_unit_asset_database PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_asset_database
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
 )
 
-add_test(
-    NAME engine_unit_asset_database
-    COMMAND engine_unit_asset_database
-)
-
-add_executable(engine_unit_asset_manager
+engine_add_test_executable(engine_unit_asset_manager
+    SOURCES
     asset_manager_test.cpp
-)
-
-target_compile_features(engine_unit_asset_manager PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_asset_manager
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
 )
 
-add_test(
-    NAME engine_unit_asset_manager
-    COMMAND engine_unit_asset_manager
-)
-
-add_executable(engine_unit_physics
+engine_add_test_executable(engine_unit_physics
+    SOURCES
     physics_test.cpp
-)
-
-target_compile_features(engine_unit_physics PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_physics
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_physics
-    COMMAND engine_unit_physics
-)
-
-add_executable(engine_unit_reflect
+engine_add_test_executable(engine_unit_reflect
+    SOURCES
     reflect_test.cpp
-)
-
-target_compile_features(engine_unit_reflect PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_reflect
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_reflect
-    COMMAND engine_unit_reflect
-)
-
-add_executable(engine_unit_scripting
+engine_add_test_executable(engine_unit_scripting
+    SOURCES
     scripting_test.cpp
-)
-
-target_compile_features(engine_unit_scripting PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_scripting
-    PRIVATE
+    PRIVATE_DEPS
     engine_scripting
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_scripting
-    COMMAND engine_unit_scripting
-)
-
-add_executable(engine_unit_scene_serializer
+engine_add_test_executable(engine_unit_scene_serializer
+    SOURCES
     scene_serializer_test.cpp
-)
-
-target_compile_features(engine_unit_scene_serializer PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_scene_serializer
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_scene_serializer
-    COMMAND engine_unit_scene_serializer
-)
-
-add_executable(engine_unit_runtime_world
+engine_add_test_executable(engine_unit_runtime_world
+    SOURCES
     runtime_world_test.cpp
-)
-
-target_compile_features(engine_unit_runtime_world PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_runtime_world
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_runtime_world
-    COMMAND engine_unit_runtime_world
-)
-
-add_executable(engine_unit_vfs
+engine_add_test_executable(engine_unit_vfs
+    SOURCES
     vfs_test.cpp
-)
-
-target_compile_features(engine_unit_vfs PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_vfs
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_vfs
-    COMMAND engine_unit_vfs
-)
-
-add_executable(engine_unit_event_bus
+engine_add_test_executable(engine_unit_event_bus
+    SOURCES
     event_bus_test.cpp
-)
-
-target_compile_features(engine_unit_event_bus PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_event_bus
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_event_bus
-    COMMAND engine_unit_event_bus
-)
-
-add_executable(engine_unit_input
+engine_add_test_executable(engine_unit_input
+    SOURCES
     input_test.cpp
-)
-
-target_compile_features(engine_unit_input PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_input
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_input
-    COMMAND engine_unit_input
-)
-
-add_executable(engine_unit_profiler
+engine_add_test_executable(engine_unit_profiler
+    SOURCES
     profiler_test.cpp
-)
-
-target_compile_features(engine_unit_profiler PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_profiler
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_profiler
-    COMMAND engine_unit_profiler
-)
-
-add_executable(engine_unit_pool_allocator
+engine_add_test_executable(engine_unit_pool_allocator
+    SOURCES
     pool_allocator_test.cpp
-)
-
-target_compile_features(engine_unit_pool_allocator PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_pool_allocator
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_pool_allocator
-    COMMAND engine_unit_pool_allocator
-)
-
-add_executable(engine_unit_engine_stats
+engine_add_test_executable(engine_unit_engine_stats
+    SOURCES
     engine_stats_test.cpp
-)
-
-target_compile_features(engine_unit_engine_stats PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_engine_stats
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_engine_stats
-    COMMAND engine_unit_engine_stats
-)
-
-add_executable(engine_unit_gpu_profiler
+engine_add_test_executable(engine_unit_gpu_profiler
+    SOURCES
     gpu_profiler_test.cpp
-)
-
-target_compile_features(engine_unit_gpu_profiler PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_gpu_profiler
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
 )
 
-add_test(
-    NAME engine_unit_gpu_profiler
-    COMMAND engine_unit_gpu_profiler
-)
-
-add_executable(engine_unit_shader_system
+engine_add_test_executable(engine_unit_shader_system
+    SOURCES
     shader_system_test.cpp
-)
-
-target_compile_features(engine_unit_shader_system PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_shader_system
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
 )
 
-add_test(
-    NAME engine_unit_shader_system
-    COMMAND engine_unit_shader_system
-)
-
-add_executable(engine_unit_audio
+engine_add_test_executable(engine_unit_audio
+    SOURCES
     audio_test.cpp
-)
-
-target_compile_features(engine_unit_audio PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_audio
-    PRIVATE
+    PRIVATE_DEPS
     engine_audio
 )
 
-add_test(
-    NAME engine_unit_audio
-    COMMAND engine_unit_audio
-)
-
-add_executable(engine_unit_texture_loader
+engine_add_test_executable(engine_unit_texture_loader
+    SOURCES
     texture_loader_test.cpp
-)
-
-target_compile_features(engine_unit_texture_loader PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_texture_loader
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
 )
 
-add_test(
-    NAME engine_unit_texture_loader
-    COMMAND engine_unit_texture_loader
-)
-
-add_executable(engine_unit_prefab
+engine_add_test_executable(engine_unit_prefab
+    SOURCES
     prefab_test.cpp
-)
-
-target_compile_features(engine_unit_prefab PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_prefab
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
-)
-
-add_test(
-    NAME engine_unit_prefab
-    COMMAND engine_unit_prefab
 )
 
 # ---- P1-M1: Engine Production Baseline ----
 
-add_executable(engine_unit_cvar_console
+engine_add_test_executable(engine_unit_cvar_console
+    SOURCES
     cvar_console_test.cpp
-)
-
-target_compile_features(engine_unit_cvar_console PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_cvar_console
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_cvar_console
-    COMMAND engine_unit_cvar_console
-)
-
-add_executable(engine_unit_debug_draw
+engine_add_test_executable(engine_unit_debug_draw
+    SOURCES
     debug_draw_test.cpp
-)
-
-target_compile_features(engine_unit_debug_draw PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_debug_draw
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_debug_draw
-    COMMAND engine_unit_debug_draw
-)
-
-add_executable(engine_unit_ecs_stress
+engine_add_test_executable(engine_unit_ecs_stress
+    SOURCES
     ecs_stress_test.cpp
-)
-
-target_compile_features(engine_unit_ecs_stress PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_ecs_stress
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_ecs_stress
-    COMMAND engine_unit_ecs_stress
-)
-
-add_executable(engine_unit_determinism
+engine_add_test_executable(engine_unit_determinism
+    SOURCES
     determinism_test.cpp
-)
-
-target_compile_features(engine_unit_determinism PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_determinism
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_physics
 )
 
-add_test(
-    NAME engine_unit_determinism
-    COMMAND engine_unit_determinism
-)
-
-add_executable(engine_unit_mem_tracker
+engine_add_test_executable(engine_unit_mem_tracker
+    SOURCES
     mem_tracker_test.cpp
-)
-
-target_compile_features(engine_unit_mem_tracker PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_mem_tracker
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_mem_tracker
-    COMMAND engine_unit_mem_tracker
-)
-
-add_executable(engine_unit_entity_pool
+engine_add_test_executable(engine_unit_entity_pool
+    SOURCES
     entity_pool_test.cpp
-)
-
-target_compile_features(engine_unit_entity_pool PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_entity_pool
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_entity_pool
-    COMMAND engine_unit_entity_pool
-)
-
-add_executable(engine_unit_service_locator
+engine_add_test_executable(engine_unit_service_locator
+    SOURCES
     service_locator_test.cpp
-)
-
-target_compile_features(engine_unit_service_locator PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_service_locator
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
-)
-
-add_test(
-    NAME engine_unit_service_locator
-    COMMAND engine_unit_service_locator
 )
 
 # ---- P1-M2-C: Input System ----
 
-add_executable(engine_unit_input_map
+engine_add_test_executable(engine_unit_input_map
+    SOURCES
     input_map_test.cpp
-)
-
-target_compile_features(engine_unit_input_map PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_input_map
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
 )
 
-add_test(
-    NAME engine_unit_input_map
-    COMMAND engine_unit_input_map
-)
-
-add_executable(engine_unit_touch_input
+engine_add_test_executable(engine_unit_touch_input
+    SOURCES
     touch_input_test.cpp
-)
-
-target_compile_features(engine_unit_touch_input PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_touch_input
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
-)
-
-add_test(
-    NAME engine_unit_touch_input
-    COMMAND engine_unit_touch_input
 )
 
 # ---- P1-M3: Physics Engine Hardening ----
 
-add_executable(engine_unit_collision_layer
+engine_add_test_executable(engine_unit_collision_layer
+    SOURCES
     collision_layer_test.cpp
-)
-
-target_compile_features(engine_unit_collision_layer PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_collision_layer
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_collision_layer
-    COMMAND engine_unit_collision_layer
-)
-
-add_executable(engine_unit_joints
+engine_add_test_executable(engine_unit_joints
+    SOURCES
     joint_test.cpp
-)
-
-target_compile_features(engine_unit_joints PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_joints
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_joints
-    COMMAND engine_unit_joints
-)
-
-add_executable(engine_unit_manifold
+engine_add_test_executable(engine_unit_manifold
+    SOURCES
     manifold_test.cpp
-)
-
-target_compile_features(engine_unit_manifold PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_manifold
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
 )
 
-add_test(
-    NAME engine_unit_manifold
-    COMMAND engine_unit_manifold
-)
-
-add_executable(engine_unit_physics_query
+engine_add_test_executable(engine_unit_physics_query
+    SOURCES
     physics_query_test.cpp
-)
-
-target_compile_features(engine_unit_physics_query PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_physics_query
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_physics_query
-    COMMAND engine_unit_physics_query
-)
-
-add_executable(engine_unit_ccd
+engine_add_test_executable(engine_unit_ccd
+    SOURCES
     ccd_test.cpp
-)
-
-target_compile_features(engine_unit_ccd PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_ccd
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
     engine_runtime
 )
 
-add_test(
-    NAME engine_unit_ccd
-    COMMAND engine_unit_ccd
-)
-
-add_executable(engine_unit_speculative_contacts
+engine_add_test_executable(engine_unit_speculative_contacts
+    SOURCES
     speculative_contacts_test.cpp
-)
-
-target_compile_features(engine_unit_speculative_contacts PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_speculative_contacts
-    PRIVATE
+    PRIVATE_DEPS
     engine_physics
     engine_runtime
-)
-
-add_test(
-    NAME engine_unit_speculative_contacts
-    COMMAND engine_unit_speculative_contacts
 )
 
 # ---- P1-M4-A: Asset Database Hardening ----
 
-add_executable(engine_unit_asset_hash
+engine_add_test_executable(engine_unit_asset_hash
+    SOURCES
     asset_hash_test.cpp
-)
-
-target_compile_features(engine_unit_asset_hash PRIVATE cxx_std_20)
-
-target_link_libraries(engine_unit_asset_hash
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
-)
-
-add_test(
-    NAME engine_unit_asset_hash
-    COMMAND engine_unit_asset_hash
 )
 
 # ---- P1-M4-B: Dependency Graph ----
 
-add_executable(engine_unit_dependency_graph
+engine_add_test_executable(engine_unit_dependency_graph
+    SOURCES
     dependency_graph_test.cpp
     ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
-)
-
-target_compile_features(engine_unit_dependency_graph PRIVATE cxx_std_20)
-
-target_include_directories(engine_unit_dependency_graph
-    PRIVATE
+    PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/tools/asset_packer
 )
 
 if(WIN32)
     target_compile_definitions(engine_unit_dependency_graph PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
-
-add_test(
-    NAME engine_unit_dependency_graph
-    COMMAND engine_unit_dependency_graph
-)

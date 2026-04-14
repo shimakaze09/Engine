@@ -1,300 +1,164 @@
-add_executable(engine_integration_ecs
+engine_add_test_executable(engine_integration_ecs
+    SOURCES
     smoke_integration.cpp
-)
-
-target_compile_features(engine_integration_ecs PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_ecs
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    gpu;integration
 )
 
-add_test(
-    NAME engine_integration_ecs
-    COMMAND engine_integration_ecs
-)
-set_tests_properties(engine_integration_ecs PROPERTIES LABELS "gpu;integration")
-
-add_executable(engine_integration_vertical_slice
+engine_add_test_executable(engine_integration_vertical_slice
+    SOURCES
     vertical_slice_integration.cpp
-)
-
-target_compile_features(engine_integration_vertical_slice PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_vertical_slice
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_vertical_slice
-    COMMAND engine_integration_vertical_slice
-)
-set_tests_properties(engine_integration_vertical_slice PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_scheduler_stress
+engine_add_test_executable(engine_integration_scheduler_stress
+    SOURCES
     scheduler_stress.cpp
-)
-
-target_compile_features(engine_integration_scheduler_stress PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_scheduler_stress
-    PRIVATE
+    PRIVATE_DEPS
     engine_core
+    LABELS
+    gpu;integration
 )
 
-add_test(
-    NAME engine_integration_scheduler_stress
-    COMMAND engine_integration_scheduler_stress
-)
-set_tests_properties(engine_integration_scheduler_stress PROPERTIES LABELS "gpu;integration")
-
-add_executable(engine_integration_thread_count_determinism
+engine_add_test_executable(engine_integration_thread_count_determinism
+    SOURCES
     thread_count_determinism.cpp
-)
-
-target_compile_features(engine_integration_thread_count_determinism PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_thread_count_determinism
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_thread_count_determinism
-    COMMAND engine_integration_thread_count_determinism
-)
-set_tests_properties(engine_integration_thread_count_determinism PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_determinism
+engine_add_test_executable(engine_integration_determinism
+    SOURCES
     determinism_test.cpp
-)
-
-target_compile_features(engine_integration_determinism PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_determinism
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_determinism
-    COMMAND engine_integration_determinism
-)
-set_tests_properties(engine_integration_determinism PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_ecs_stress_50k
+engine_add_test_executable(engine_integration_ecs_stress_50k
+    SOURCES
     ecs_stress_50k.cpp
-)
-
-target_compile_features(engine_integration_ecs_stress_50k PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_ecs_stress_50k
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_ecs_stress_50k
-    COMMAND engine_integration_ecs_stress_50k
-)
-set_tests_properties(engine_integration_ecs_stress_50k PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_lifecycle
+engine_add_test_executable(engine_integration_lifecycle
+    SOURCES
     lifecycle_test.cpp
-)
-
-target_compile_features(engine_integration_lifecycle PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_lifecycle
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_lifecycle
-    COMMAND engine_integration_lifecycle
-)
-set_tests_properties(engine_integration_lifecycle PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_lua_lifecycle
+engine_add_test_executable(engine_integration_lua_lifecycle
+    SOURCES
     lua_lifecycle_test.cpp
-)
-
-target_compile_features(engine_integration_lua_lifecycle PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_lua_lifecycle
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_lua_lifecycle
-    COMMAND engine_integration_lua_lifecycle
-)
-set_tests_properties(engine_integration_lua_lifecycle PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_game_mode
+engine_add_test_executable(engine_integration_game_mode
+    SOURCES
     game_mode_test.cpp
-)
-
-target_compile_features(engine_integration_game_mode PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_game_mode
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_game_mode
-    COMMAND engine_integration_game_mode
-)
-set_tests_properties(engine_integration_game_mode PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_timer
+engine_add_test_executable(engine_integration_timer
+    SOURCES
     timer_test.cpp
-)
-
-target_compile_features(engine_integration_timer PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_timer
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_timer
-    COMMAND engine_integration_timer
-)
-set_tests_properties(engine_integration_timer PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_camera
+engine_add_test_executable(engine_integration_camera
+    SOURCES
     camera_test.cpp
-)
-
-target_compile_features(engine_integration_camera PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_camera
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_camera
-    COMMAND engine_integration_camera
-)
-set_tests_properties(engine_integration_camera PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_coroutine
+engine_add_test_executable(engine_integration_coroutine
+    SOURCES
     coroutine_test.cpp
-)
-
-target_compile_features(engine_integration_coroutine PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_coroutine
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_coroutine
-    COMMAND engine_integration_coroutine
-)
-set_tests_properties(engine_integration_coroutine PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_sandbox
+engine_add_test_executable(engine_integration_sandbox
+    SOURCES
     sandbox_test.cpp
-)
-
-target_compile_features(engine_integration_sandbox PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_sandbox
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_sandbox
-    COMMAND engine_integration_sandbox
-)
-set_tests_properties(engine_integration_sandbox PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_hotreload
+engine_add_test_executable(engine_integration_hotreload
+    SOURCES
     hotreload_test.cpp
-)
-
-target_compile_features(engine_integration_hotreload PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_hotreload
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_hotreload
-    COMMAND engine_integration_hotreload
-)
-set_tests_properties(engine_integration_hotreload PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_bindgen
+engine_add_test_executable(engine_integration_bindgen
+    SOURCES
     bindgen_test.cpp
-)
-
-target_compile_features(engine_integration_bindgen PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_bindgen
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
 )
 
-add_test(
-    NAME engine_integration_bindgen
-    COMMAND engine_integration_bindgen
-)
-set_tests_properties(engine_integration_bindgen PROPERTIES LABELS "integration")
-
-add_executable(engine_integration_dap
+engine_add_test_executable(engine_integration_dap
+    SOURCES
     dap_test.cpp
-)
-
-target_compile_features(engine_integration_dap PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_dap
-    PRIVATE
+    PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
 )
 
 if(WIN32)
     target_link_libraries(engine_integration_dap PRIVATE ws2_32)
 endif()
 
-add_test(
-    NAME engine_integration_dap
-    COMMAND engine_integration_dap
-)
-set_tests_properties(engine_integration_dap PROPERTIES LABELS "integration")
-
 # ---- P1-M4-B: Dependency Graph ----
 
-add_executable(engine_integration_asset_dep_load
+engine_add_test_executable(engine_integration_asset_dep_load
+    SOURCES
     asset_dep_load_test.cpp
-)
-
-target_compile_features(engine_integration_asset_dep_load PRIVATE cxx_std_20)
-
-target_link_libraries(engine_integration_asset_dep_load
-    PRIVATE
+    PRIVATE_DEPS
     engine_renderer
+    LABELS
+    integration
 )
-
-add_test(
-    NAME engine_integration_asset_dep_load
-    COMMAND engine_integration_asset_dep_load
-)
-set_tests_properties(engine_integration_asset_dep_load PROPERTIES LABELS "integration")
