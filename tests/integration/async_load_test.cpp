@@ -5,7 +5,6 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_streaming.h"
 
-
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -156,8 +155,8 @@ static void test_update_priority() noexcept {
   LoadHandle hA =
       load_asset_async(queue.get(), make_id(0), "a.mesh", LoadPriority::Low);
   // hB intentionally unused — we only check A gets promoted.
-  static_cast<void>(
-      load_asset_async(queue.get(), make_id(1), "b.mesh", LoadPriority::Normal));
+  static_cast<void>(load_asset_async(queue.get(), make_id(1), "b.mesh",
+                                     LoadPriority::Normal));
 
   // Promote A to Immediate.
   CHECK(update_load_priority(queue.get(), hA, LoadPriority::Immediate),

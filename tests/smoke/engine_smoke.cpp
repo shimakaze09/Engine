@@ -79,8 +79,16 @@ int main() {
 
   const engine::renderer::GpuProfilerDebugStats gpuDebug =
       engine::renderer::gpu_profiler_debug_stats();
-  if ((gpuDebug.beginMarksScene == 0U) || (gpuDebug.endMarksScene == 0U) ||
-      (gpuDebug.beginMarksTonemap == 0U) || (gpuDebug.endMarksTonemap == 0U)) {
+  // Accept either forward (Scene) or deferred (GBuffer) geometry pass.
+  const bool sceneOk =
+      (gpuDebug.beginMarksScene > 0U) && (gpuDebug.endMarksScene > 0U);
+  const bool gbufferOk =
+      (gpuDebug.beginMarksGBuffer > 0U) && (gpuDebug.endMarksGBuffer > 0U);
+  if (!sceneOk && !gbufferOk) {
+    engine::shutdown();
+    return 9;
+  }
+  if ((gpuDebug.beginMarksTonemap == 0U) || (gpuDebug.endMarksTonemap == 0U)) {
     engine::shutdown();
     return 9;
   }

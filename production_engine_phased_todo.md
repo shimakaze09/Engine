@@ -352,34 +352,34 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M5-A: G-Buffer
 
-- [ ] P1-M5-A1a: G-Buffer layout (RT0=albedo+metallic, RT1=normal+roughness, RT2=emissive+AO, depth24_stencil8)
-- [ ] P1-M5-A1b: Create FBO with MRT using glDrawBuffers
-- [ ] P1-M5-A1c: FBO completeness check and error reporting
-- [ ] P1-M5-A2a: gbuffer.vert — transform position, pass TBN matrix, UV
-- [ ] P1-M5-A2b: gbuffer.frag — sample textures, write to G-Buffer MRT targets
-- [ ] P1-M5-A2c: Handle missing textures (default 1×1 white albedo, flat normal, etc.)
-- [ ] P1-M5-A3a: CVar r_gbuffer_debug (0=off, 1=albedo, 2=normals, 3=metallic, 4=roughness, 5=depth)
-- [ ] P1-M5-A3b: gbuffer_debug.frag — fullscreen quad reading selected G-Buffer target
-- [ ] P1-M5-A3c: Render debug view as fullscreen pass when CVar set
+- [x] P1-M5-A1a: G-Buffer layout (RT0=albedo+metallic, RT1=normal+roughness, RT2=emissive+AO, depth24_stencil8)
+- [x] P1-M5-A1b: Create FBO with MRT using glDrawBuffers
+- [x] P1-M5-A1c: FBO completeness check and error reporting
+- [x] P1-M5-A2a: gbuffer.vert — transform position, pass TBN matrix, UV
+- [x] P1-M5-A2b: gbuffer.frag — sample textures, write to G-Buffer MRT targets
+- [x] P1-M5-A2c: Handle missing textures (default 1×1 white albedo, flat normal, etc.)
+- [x] P1-M5-A3a: CVar r_gbuffer_debug (0=off, 1=albedo, 2=normals, 3=metallic, 4=roughness, 5=depth)
+- [x] P1-M5-A3b: gbuffer_debug.frag — fullscreen quad reading selected G-Buffer target
+- [x] P1-M5-A3c: Render debug view as fullscreen pass when CVar set
 
 #### P1-M5-B: Deferred Lighting
 
-- [ ] P1-M5-B1a: deferred_lighting.frag — reconstruct world pos, PBR BRDF (Cook-Torrance)
-- [ ] P1-M5-B1b: Fullscreen triangle draw using fullscreen.vert
-- [ ] P1-M5-B1c: Output to HDR render target (RGBA16F)
-- [ ] P1-M5-B2a: PointLight struct (position, color, intensity, radius), SparseSet in World
-- [ ] P1-M5-B2b: Upload point lights as uniform array (max 128)
-- [ ] P1-M5-B2c: Deferred shader iterates lights, inverse square falloff + radius cutoff
-- [ ] P1-M5-B2d: Frustum-cull lights (skip if bounding sphere outside camera frustum)
-- [ ] P1-M5-B2e: Lua binding: engine.add_point_light(entity, r,g,b, intensity, radius)
-- [ ] P1-M5-B3a: SpotLight struct (position, direction, color, intensity, inner/outer angle, range)
-- [ ] P1-M5-B3b: Deferred shader: spot light contribution with cone falloff
-- [ ] P1-M5-B3c: Frustum-cull spot lights by bounding cone approximation
-- [ ] P1-M5-B3d: Lua binding: engine.add_spot_light(entity, ...)
-- [ ] P1-M5-B4a: Tiled light culling: divide screen into 16×16 tiles, compute min/max depth
-- [ ] P1-M5-B4b: Per-tile: test each light sphere against tile frustum, store per-tile light list
-- [ ] P1-M5-B4c: Deferred shader reads per-tile light list, only iterates relevant lights
-- [ ] P1-M5-B4d: Test: 256 lights scene, tile-culled vs brute-force pixel-identical
+- [x] P1-M5-B1a: deferred_lighting.frag — reconstruct world pos, PBR BRDF (Cook-Torrance)
+- [x] P1-M5-B1b: Fullscreen triangle draw using fullscreen.vert
+- [x] P1-M5-B1c: Output to HDR render target (RGBA16F)
+- [x] P1-M5-B2a: PointLight struct (position, color, intensity, radius), SparseSet in World
+- [x] P1-M5-B2b: Upload point lights as uniform array (max 128)
+- [x] P1-M5-B2c: Deferred shader iterates lights, inverse square falloff + radius cutoff
+- [x] P1-M5-B2d: Frustum-cull lights (skip if bounding sphere outside camera frustum)
+- [x] P1-M5-B2e: Lua binding: engine.add_point_light(entity, r,g,b, intensity, radius)
+- [x] P1-M5-B3a: SpotLight struct (position, direction, color, intensity, inner/outer angle, range)
+- [x] P1-M5-B3b: Deferred shader: spot light contribution with cone falloff
+- [x] P1-M5-B3c: Frustum-cull spot lights by bounding cone approximation
+- [x] P1-M5-B3d: Lua binding: engine.add_spot_light(entity, ...)
+- [x] P1-M5-B4a: Tiled light culling: divide screen into 16×16 tiles, compute min/max depth
+- [x] P1-M5-B4b: Per-tile: test each light sphere against tile frustum, store per-tile light list
+- [x] P1-M5-B4c: Deferred shader reads per-tile light list, only iterates relevant lights
+- [x] P1-M5-B4d: Test: 256 lights scene, tile-culled vs brute-force pixel-identical
 
 #### P1-M5-C: Shadow Mapping
 

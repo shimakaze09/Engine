@@ -7,7 +7,10 @@ namespace engine::renderer {
 enum class GpuPassId : std::uint8_t {
   Scene = 0U,
   Tonemap = 1U,
-  Count = 2U,
+  GBuffer = 2U,
+  DeferredLighting = 3U,
+  GBufferDebug = 4U,
+  Count = 5U,
 };
 
 struct GpuProfilerDebugStats final {
@@ -15,6 +18,8 @@ struct GpuProfilerDebugStats final {
   std::uint64_t endMarksScene = 0U;
   std::uint64_t beginMarksTonemap = 0U;
   std::uint64_t endMarksTonemap = 0U;
+  std::uint64_t beginMarksGBuffer = 0U;
+  std::uint64_t endMarksGBuffer = 0U;
 };
 
 bool initialize_gpu_profiler() noexcept;

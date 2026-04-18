@@ -161,6 +161,8 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
     ++g_gpuProfiler.debugStats.beginMarksScene;
   } else if (pass == GpuPassId::Tonemap) {
     ++g_gpuProfiler.debugStats.beginMarksTonemap;
+  } else if (pass == GpuPassId::GBuffer) {
+    ++g_gpuProfiler.debugStats.beginMarksGBuffer;
   }
 
   if (!g_gpuProfiler.supported) {
@@ -182,6 +184,8 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
     ++g_gpuProfiler.debugStats.endMarksScene;
   } else if (pass == GpuPassId::Tonemap) {
     ++g_gpuProfiler.debugStats.endMarksTonemap;
+  } else if (pass == GpuPassId::GBuffer) {
+    ++g_gpuProfiler.debugStats.endMarksGBuffer;
   }
 
   if (!g_gpuProfiler.supported) {

@@ -149,6 +149,10 @@ enum class DeferredMutationType : std::uint8_t {
   RemoveLightComponent,
   AddScriptComponent,
   RemoveScriptComponent,
+  AddPointLightComponent,
+  RemovePointLightComponent,
+  AddSpotLightComponent,
+  RemoveSpotLightComponent,
 };
 
 struct DeferredMutation final {
@@ -161,6 +165,8 @@ struct DeferredMutation final {
   runtime::NameComponent nameComponent{};
   runtime::LightComponent lightComponent{};
   runtime::ScriptComponent scriptComponent{};
+  runtime::PointLightComponent pointLightComponent{};
+  runtime::SpotLightComponent spotLightComponent{};
   runtime::MovementAuthority movementAuthority =
       runtime::MovementAuthority::None;
   bool setMovementAuthority = false;
@@ -452,6 +458,74 @@ bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
 
   DeferredMutation mutation{};
   mutation.type = DeferredMutationType::RemoveScriptComponent;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_point_light_component(
+    runtime::Entity entity,
+    const runtime::PointLightComponent &component) noexcept {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_point_light_component(entity, component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddPointLightComponent;
+  mutation.entity = entity;
+  mutation.pointLightComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_remove_point_light_component(
+    runtime::Entity entity) noexcept {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->remove_point_light_component(entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::RemovePointLightComponent;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_spot_light_component(
+    runtime::Entity entity,
+    const runtime::SpotLightComponent &component) noexcept {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->add_spot_light_component(entity, component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddSpotLightComponent;
+  mutation.entity = entity;
+  mutation.spotLightComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_remove_spot_light_component(
+    runtime::Entity entity) noexcept {
+  if ((g_world == nullptr) || (g_services == nullptr)) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return g_world->remove_spot_light_component(entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::RemoveSpotLightComponent;
   mutation.entity = entity;
   return queue_deferred_mutation(mutation);
 }
@@ -3407,6 +3481,204 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
   return 1;
 }
 
+// --- PointLightComponent bindings ---
+
+// Lua: engine.add_point_light(entity, r, g, b, intensity, radius) → boolean
+static int lua_engine_add_point_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 6) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::PointLightComponent comp{};
+  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
+  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
+  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
+  comp.intensity = static_cast<float>(luaL_checknumber(state, 5));
+  comp.radius = static_cast<float>(luaL_checknumber(state, 6));
+  const bool ok = apply_or_queue_point_light_component(entity, comp);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Lua: engine.get_point_light(entity) → r, g, b, intensity, radius or nil
+static int lua_engine_get_point_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 1) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::PointLightComponent comp{};
+  if (!g_world->get_point_light_component(entity, &comp)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushnumber(state, static_cast<lua_Number>(comp.color.x));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.color.y));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.color.z));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.intensity));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.radius));
+  return 5;
+}
+
+// Lua: engine.set_point_light(entity, r, g, b, intensity, radius) → boolean
+static int lua_engine_set_point_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 6) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!g_world->has_point_light_component(entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::PointLightComponent comp{};
+  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
+  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
+  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
+  comp.intensity = static_cast<float>(luaL_checknumber(state, 5));
+  comp.radius = static_cast<float>(luaL_checknumber(state, 6));
+  const bool ok = apply_or_queue_point_light_component(entity, comp);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Lua: engine.remove_point_light(entity) → boolean
+static int lua_engine_remove_point_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 1) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const bool ok = apply_or_queue_remove_point_light_component(entity);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// --- SpotLightComponent bindings ---
+
+// Lua: engine.add_spot_light(entity, r, g, b, dx, dy, dz, intensity, radius,
+//                            innerAngle, outerAngle) → boolean
+static int lua_engine_add_spot_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 11) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::SpotLightComponent comp{};
+  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
+  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
+  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
+  comp.direction.x = static_cast<float>(luaL_checknumber(state, 5));
+  comp.direction.y = static_cast<float>(luaL_checknumber(state, 6));
+  comp.direction.z = static_cast<float>(luaL_checknumber(state, 7));
+  comp.intensity = static_cast<float>(luaL_checknumber(state, 8));
+  comp.radius = static_cast<float>(luaL_checknumber(state, 9));
+  comp.innerConeAngle = static_cast<float>(luaL_checknumber(state, 10));
+  comp.outerConeAngle = static_cast<float>(luaL_checknumber(state, 11));
+  const bool ok = apply_or_queue_spot_light_component(entity, comp);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Lua: engine.get_spot_light(entity) → r, g, b, dx, dy, dz, intensity, radius,
+//                                      innerAngle, outerAngle or nil
+static int lua_engine_get_spot_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 1) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::SpotLightComponent comp{};
+  if (!g_world->get_spot_light_component(entity, &comp)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushnumber(state, static_cast<lua_Number>(comp.color.x));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.color.y));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.color.z));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.direction.x));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.direction.y));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.direction.z));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.intensity));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.radius));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.innerConeAngle));
+  lua_pushnumber(state, static_cast<lua_Number>(comp.outerConeAngle));
+  return 10;
+}
+
+// Lua: engine.set_spot_light(entity, r, g, b, dx, dy, dz, intensity, radius,
+//                            innerAngle, outerAngle) → boolean
+static int lua_engine_set_spot_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 11) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!g_world->has_spot_light_component(entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::SpotLightComponent comp{};
+  comp.color.x = static_cast<float>(luaL_checknumber(state, 2));
+  comp.color.y = static_cast<float>(luaL_checknumber(state, 3));
+  comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
+  comp.direction.x = static_cast<float>(luaL_checknumber(state, 5));
+  comp.direction.y = static_cast<float>(luaL_checknumber(state, 6));
+  comp.direction.z = static_cast<float>(luaL_checknumber(state, 7));
+  comp.intensity = static_cast<float>(luaL_checknumber(state, 8));
+  comp.radius = static_cast<float>(luaL_checknumber(state, 9));
+  comp.innerConeAngle = static_cast<float>(luaL_checknumber(state, 10));
+  comp.outerConeAngle = static_cast<float>(luaL_checknumber(state, 11));
+  const bool ok = apply_or_queue_spot_light_component(entity, comp);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Lua: engine.remove_spot_light(entity) → boolean
+static int lua_engine_remove_spot_light(lua_State *state) noexcept {
+  if (lua_gettop(state) < 1) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const bool ok = apply_or_queue_remove_spot_light_component(entity);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
 // --- Collision handlers (registered, multi-listener) ---
 
 static constexpr std::size_t kMaxCollisionHandlers = 8U;
@@ -4780,6 +5052,26 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_set_light_direction);
   lua_setfield(state, -2, "set_light_direction");
 
+  // PointLightComponent
+  lua_pushcfunction(state, &lua_engine_add_point_light);
+  lua_setfield(state, -2, "add_point_light");
+  lua_pushcfunction(state, &lua_engine_get_point_light);
+  lua_setfield(state, -2, "get_point_light");
+  lua_pushcfunction(state, &lua_engine_set_point_light);
+  lua_setfield(state, -2, "set_point_light");
+  lua_pushcfunction(state, &lua_engine_remove_point_light);
+  lua_setfield(state, -2, "remove_point_light");
+
+  // SpotLightComponent
+  lua_pushcfunction(state, &lua_engine_add_spot_light);
+  lua_setfield(state, -2, "add_spot_light");
+  lua_pushcfunction(state, &lua_engine_get_spot_light);
+  lua_setfield(state, -2, "get_spot_light");
+  lua_pushcfunction(state, &lua_engine_set_spot_light);
+  lua_setfield(state, -2, "set_spot_light");
+  lua_pushcfunction(state, &lua_engine_remove_spot_light);
+  lua_setfield(state, -2, "remove_spot_light");
+
   // Collision handlers
   lua_pushcfunction(state, &lua_engine_on_collision_register);
   lua_setfield(state, -2, "on_collision_handler");
@@ -5434,6 +5726,40 @@ void flush_deferred_mutations() noexcept {
       static_cast<void>(g_services->remove_script_component_op(
           g_world, mutation.entity.index));
       break;
+    case DeferredMutationType::AddPointLightComponent: {
+      const runtime::Entity resolved =
+          g_world->find_entity_by_index(mutation.entity.index);
+      if (resolved != runtime::kInvalidEntity) {
+        static_cast<void>(g_world->add_point_light_component(
+            resolved, mutation.pointLightComponent));
+      }
+      break;
+    }
+    case DeferredMutationType::RemovePointLightComponent: {
+      const runtime::Entity resolved =
+          g_world->find_entity_by_index(mutation.entity.index);
+      if (resolved != runtime::kInvalidEntity) {
+        static_cast<void>(g_world->remove_point_light_component(resolved));
+      }
+      break;
+    }
+    case DeferredMutationType::AddSpotLightComponent: {
+      const runtime::Entity resolved =
+          g_world->find_entity_by_index(mutation.entity.index);
+      if (resolved != runtime::kInvalidEntity) {
+        static_cast<void>(g_world->add_spot_light_component(
+            resolved, mutation.spotLightComponent));
+      }
+      break;
+    }
+    case DeferredMutationType::RemoveSpotLightComponent: {
+      const runtime::Entity resolved =
+          g_world->find_entity_by_index(mutation.entity.index);
+      if (resolved != runtime::kInvalidEntity) {
+        static_cast<void>(g_world->remove_spot_light_component(resolved));
+      }
+      break;
+    }
     }
   }
 }

@@ -151,6 +151,8 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_meshComponents.remove(entity));
   static_cast<void>(m_nameComponents.remove(entity));
   static_cast<void>(m_lightComponents.remove(entity));
+  static_cast<void>(m_pointLights.remove(entity));
+  static_cast<void>(m_spotLights.remove(entity));
   static_cast<void>(m_springArms.remove(entity));
 
   const std::uint32_t index = entity.index;
@@ -728,6 +730,132 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
     return kInvalidEntity;
   }
   return m_lightComponents.entity_at(index);
+}
+
+bool World::add_point_light_component(
+    Entity entity, const PointLightComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_point_light_component called outside mutation phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_point_light_component: invalid entity");
+    return false;
+  }
+  return m_pointLights.add(entity, component);
+}
+
+bool World::remove_point_light_component(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_point_light_component outside mutation phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  return m_pointLights.remove(entity);
+}
+
+bool World::get_point_light_component(
+    Entity entity, PointLightComponent *outComponent) const noexcept {
+  if ((outComponent == nullptr) || !is_valid_entity(entity)) {
+    return false;
+  }
+  const auto *ptr = m_pointLights.get_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  *outComponent = *ptr;
+  return true;
+}
+
+bool World::has_point_light_component(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_pointLights.contains(entity);
+}
+
+std::size_t World::point_light_count() const noexcept {
+  return m_pointLights.count();
+}
+
+const PointLightComponent *
+World::point_light_at(std::size_t index) const noexcept {
+  if (index >= m_pointLights.count()) {
+    return nullptr;
+  }
+  return &m_pointLights.component_at(index);
+}
+
+Entity World::point_light_entity_at(std::size_t index) const noexcept {
+  if (index >= m_pointLights.count()) {
+    return Entity{};
+  }
+  return m_pointLights.entity_at(index);
+}
+
+bool World::add_spot_light_component(
+    Entity entity, const SpotLightComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_spot_light_component called outside mutation phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_spot_light_component: invalid entity");
+    return false;
+  }
+  return m_spotLights.add(entity, component);
+}
+
+bool World::remove_spot_light_component(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_spot_light_component outside mutation phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  return m_spotLights.remove(entity);
+}
+
+bool World::get_spot_light_component(
+    Entity entity, SpotLightComponent *outComponent) const noexcept {
+  if ((outComponent == nullptr) || !is_valid_entity(entity)) {
+    return false;
+  }
+  const auto *ptr = m_spotLights.get_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  *outComponent = *ptr;
+  return true;
+}
+
+bool World::has_spot_light_component(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_spotLights.contains(entity);
+}
+
+std::size_t World::spot_light_count() const noexcept {
+  return m_spotLights.count();
+}
+
+const SpotLightComponent *
+World::spot_light_at(std::size_t index) const noexcept {
+  if (index >= m_spotLights.count()) {
+    return nullptr;
+  }
+  return &m_spotLights.component_at(index);
+}
+
+Entity World::spot_light_entity_at(std::size_t index) const noexcept {
+  if (index >= m_spotLights.count()) {
+    return Entity{};
+  }
+  return m_spotLights.entity_at(index);
 }
 
 bool World::add_script_component(Entity entity,

@@ -15,6 +15,10 @@ namespace {
 constexpr std::uint32_t kSceneColorSlot = 1U;
 constexpr std::uint32_t kSceneDepthSlot = 2U;
 constexpr std::uint32_t kFinalColorSlot = 3U;
+constexpr std::uint32_t kGBufferAlbedoSlot = 4U;
+constexpr std::uint32_t kGBufferNormalSlot = 5U;
+constexpr std::uint32_t kGBufferEmissiveSlot = 6U;
+constexpr std::uint32_t kGBufferDepthSlot = 7U;
 
 struct PassResourceState final {
   bool initialized = false;
@@ -28,6 +32,13 @@ struct PassResourceState final {
   std::uint32_t finalColorTexture = 0U;
   std::uint32_t finalFbo = 0U;
 
+  // G-Buffer textures (deferred path).
+  std::uint32_t gbufferAlbedoTex = 0U;   // RGBA8 — albedo.rgb + metallic.a
+  std::uint32_t gbufferNormalTex = 0U;   // RGBA16F — normal.xyz + roughness.a
+  std::uint32_t gbufferEmissiveTex = 0U; // RGBA8 — emissive.rgb + AO.a
+  std::uint32_t gbufferDepthTex = 0U;    // DEPTH24
+  std::uint32_t gbufferFbo = 0U;
+
   PassResources resources{};
 };
 
@@ -39,6 +50,29 @@ void destroy_gpu_resources() noexcept {
     return;
   }
 
+  // G-Buffer (reverse order of creation).
+  if (g_state.gbufferFbo != 0U) {
+    dev->destroy_framebuffer(g_state.gbufferFbo);
+    g_state.gbufferFbo = 0U;
+  }
+  if (g_state.gbufferDepthTex != 0U) {
+    dev->destroy_texture(g_state.gbufferDepthTex);
+    g_state.gbufferDepthTex = 0U;
+  }
+  if (g_state.gbufferEmissiveTex != 0U) {
+    dev->destroy_texture(g_state.gbufferEmissiveTex);
+    g_state.gbufferEmissiveTex = 0U;
+  }
+  if (g_state.gbufferNormalTex != 0U) {
+    dev->destroy_texture(g_state.gbufferNormalTex);
+    g_state.gbufferNormalTex = 0U;
+  }
+  if (g_state.gbufferAlbedoTex != 0U) {
+    dev->destroy_texture(g_state.gbufferAlbedoTex);
+    g_state.gbufferAlbedoTex = 0U;
+  }
+
+  // Forward path.
   if (g_state.finalFbo != 0U) {
     dev->destroy_framebuffer(g_state.finalFbo);
     g_state.finalFbo = 0U;
@@ -140,6 +174,69 @@ bool create_gpu_resources(int width, int height) noexcept {
   g_state.resources.sceneDepth = PassResourceId{kSceneDepthSlot};
   g_state.resources.finalColor = PassResourceId{kFinalColorSlot};
 
+  // --- G-Buffer textures (deferred path) ---
+  const auto w32 = static_cast<std::int32_t>(width);
+  const auto h32 = static_cast<std::int32_t>(height);
+
+  // RT0: albedo (RGBA8).
+  g_state.gbufferAlbedoTex = dev->create_texture_2d(w32, h32, 4, nullptr);
+  if (g_state.gbufferAlbedoTex == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create G-Buffer albedo texture");
+    return false;
+  }
+
+  // RT1: normals + roughness (RGBA16F).
+  g_state.gbufferNormalTex = dev->create_texture_2d_hdr(w32, h32, 4, nullptr);
+  if (g_state.gbufferNormalTex == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create G-Buffer normal texture");
+    return false;
+  }
+
+  // RT2: emissive + AO (RGBA8).
+  g_state.gbufferEmissiveTex = dev->create_texture_2d(w32, h32, 4, nullptr);
+  if (g_state.gbufferEmissiveTex == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create G-Buffer emissive texture");
+    return false;
+  }
+
+  // G-Buffer depth (DEPTH24).
+  g_state.gbufferDepthTex = dev->create_depth_texture(w32, h32);
+  if (g_state.gbufferDepthTex == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create G-Buffer depth texture");
+    return false;
+  }
+
+  // G-Buffer MRT FBO (3 color + 1 depth).
+  const std::uint32_t gbufferColors[] = {g_state.gbufferAlbedoTex,
+                                         g_state.gbufferNormalTex,
+                                         g_state.gbufferEmissiveTex};
+  g_state.gbufferFbo =
+      dev->create_framebuffer_mrt(gbufferColors, 3, g_state.gbufferDepthTex);
+  if (g_state.gbufferFbo == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create G-Buffer framebuffer");
+    return false;
+  }
+
+  // Verify G-Buffer FBO completeness.
+  dev->bind_framebuffer(g_state.gbufferFbo);
+  if (!dev->check_framebuffer_complete()) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "G-Buffer FBO is not complete");
+    dev->bind_framebuffer(0U);
+    return false;
+  }
+  dev->bind_framebuffer(0U);
+
+  g_state.resources.gbufferAlbedo = PassResourceId{kGBufferAlbedoSlot};
+  g_state.resources.gbufferNormal = PassResourceId{kGBufferNormalSlot};
+  g_state.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
+  g_state.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
+
   return true;
 }
 
@@ -204,6 +301,18 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kFinalColorSlot) {
     return g_state.finalColorTexture;
   }
+  if (resource.id == kGBufferAlbedoSlot) {
+    return g_state.gbufferAlbedoTex;
+  }
+  if (resource.id == kGBufferNormalSlot) {
+    return g_state.gbufferNormalTex;
+  }
+  if (resource.id == kGBufferEmissiveSlot) {
+    return g_state.gbufferEmissiveTex;
+  }
+  if (resource.id == kGBufferDepthSlot) {
+    return g_state.gbufferDepthTex;
+  }
   return 0U;
 }
 
@@ -214,6 +323,9 @@ pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
   }
   if (colorAttachment.id == kFinalColorSlot) {
     return g_state.finalFbo;
+  }
+  if (colorAttachment.id == kGBufferAlbedoSlot) {
+    return g_state.gbufferFbo;
   }
   return 0U;
 }

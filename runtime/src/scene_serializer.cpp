@@ -643,6 +643,51 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    // PointLightComponent
+    core::JsonValue plVal{};
+    if (parser.get_object_field(components, "PointLightComponent", &plVal) &&
+        (plVal.type == core::JsonValue::Type::Object)) {
+      PointLightComponent pc{};
+      core::JsonValue v{};
+      if (parser.get_object_field(plVal, "color", &v)) {
+        static_cast<void>(read_vec3(parser, v, &pc.color));
+      }
+      if (parser.get_object_field(plVal, "intensity", &v)) {
+        static_cast<void>(parser.as_float(v, &pc.intensity));
+      }
+      if (parser.get_object_field(plVal, "radius", &v)) {
+        static_cast<void>(parser.as_float(v, &pc.radius));
+      }
+      static_cast<void>(targetWorld.add_point_light_component(entity, pc));
+    }
+
+    // SpotLightComponent
+    core::JsonValue slVal{};
+    if (parser.get_object_field(components, "SpotLightComponent", &slVal) &&
+        (slVal.type == core::JsonValue::Type::Object)) {
+      SpotLightComponent sc{};
+      core::JsonValue v{};
+      if (parser.get_object_field(slVal, "color", &v)) {
+        static_cast<void>(read_vec3(parser, v, &sc.color));
+      }
+      if (parser.get_object_field(slVal, "direction", &v)) {
+        static_cast<void>(read_vec3(parser, v, &sc.direction));
+      }
+      if (parser.get_object_field(slVal, "intensity", &v)) {
+        static_cast<void>(parser.as_float(v, &sc.intensity));
+      }
+      if (parser.get_object_field(slVal, "radius", &v)) {
+        static_cast<void>(parser.as_float(v, &sc.radius));
+      }
+      if (parser.get_object_field(slVal, "innerConeAngle", &v)) {
+        static_cast<void>(parser.as_float(v, &sc.innerConeAngle));
+      }
+      if (parser.get_object_field(slVal, "outerConeAngle", &v)) {
+        static_cast<void>(parser.as_float(v, &sc.outerConeAngle));
+      }
+      static_cast<void>(targetWorld.add_spot_light_component(entity, sc));
+    }
+
     core::JsonValue nameValue{};
     if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
       const char *nameBegin = nullptr;
@@ -754,6 +799,20 @@ bool copy_world_contents(const World &sourceWorld,
     LightComponent light{};
     if (sourceWorld.get_light_component(sourceEntity, &light) &&
         !targetWorld.add_light_component(targetEntity, light)) {
+      success = false;
+      return;
+    }
+
+    PointLightComponent pointLight{};
+    if (sourceWorld.get_point_light_component(sourceEntity, &pointLight) &&
+        !targetWorld.add_point_light_component(targetEntity, pointLight)) {
+      success = false;
+      return;
+    }
+
+    SpotLightComponent spotLight{};
+    if (sourceWorld.get_spot_light_component(sourceEntity, &spotLight) &&
+        !targetWorld.add_spot_light_component(targetEntity, spotLight)) {
       success = false;
       return;
     }
@@ -887,6 +946,29 @@ bool serialize_scene_to_writer(const World &world,
       write_vec3(writer, "direction", light.direction);
       writer.write_float("intensity", light.intensity);
       writer.write_uint("type", static_cast<std::uint32_t>(light.type));
+      writer.end_object();
+    }
+
+    PointLightComponent pointLight{};
+    if (world.get_point_light_component(entity, &pointLight)) {
+      writer.write_key("PointLightComponent");
+      writer.begin_object();
+      write_vec3(writer, "color", pointLight.color);
+      writer.write_float("intensity", pointLight.intensity);
+      writer.write_float("radius", pointLight.radius);
+      writer.end_object();
+    }
+
+    SpotLightComponent spotLight{};
+    if (world.get_spot_light_component(entity, &spotLight)) {
+      writer.write_key("SpotLightComponent");
+      writer.begin_object();
+      write_vec3(writer, "color", spotLight.color);
+      write_vec3(writer, "direction", spotLight.direction);
+      writer.write_float("intensity", spotLight.intensity);
+      writer.write_float("radius", spotLight.radius);
+      writer.write_float("innerConeAngle", spotLight.innerConeAngle);
+      writer.write_float("outerConeAngle", spotLight.outerConeAngle);
       writer.end_object();
     }
 

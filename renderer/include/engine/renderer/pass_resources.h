@@ -20,6 +20,12 @@ struct PassResources final {
 
   // Post-process reads sceneColor, writes to back buffer (implicit).
   PassResourceId finalColor;
+
+  // G-Buffer pass writes (deferred path):
+  PassResourceId gbufferAlbedo;   // RGBA8  — rgb=albedo, a=metallic
+  PassResourceId gbufferNormal;   // RGBA16F — rgb=worldNormal, a=roughness
+  PassResourceId gbufferEmissive; // RGBA8  — rgb=emissive, a=AO
+  PassResourceId gbufferDepth;    // DEPTH24 — shared with deferred lighting
 };
 
 bool initialize_pass_resources(int width, int height) noexcept;

@@ -1763,6 +1763,55 @@ void run(std::uint32_t maxFrames) noexcept {
         }
       }
 
+      // Collect PointLightComponent data (dedicated component with radius).
+      const std::size_t plcCount = world->point_light_count();
+      for (std::size_t pi = 0U; pi < plcCount; ++pi) {
+        if (sceneLights.pointLightCount >= renderer::kMaxPointLights) {
+          break;
+        }
+        const runtime::PointLightComponent *plc = world->point_light_at(pi);
+        if (plc == nullptr) {
+          continue;
+        }
+        const runtime::Entity plEntity = world->point_light_entity_at(pi);
+        const runtime::WorldTransform *wt =
+            world->get_world_transform_read_ptr(plEntity);
+
+        auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
+        pl.position =
+            (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+        pl.color = plc->color;
+        pl.intensity = plc->intensity;
+        pl.radius = plc->radius;
+        ++sceneLights.pointLightCount;
+      }
+
+      // Collect SpotLightComponent data.
+      const std::size_t slcCount = world->spot_light_count();
+      for (std::size_t si = 0U; si < slcCount; ++si) {
+        if (sceneLights.spotLightCount >= renderer::kMaxSpotLights) {
+          break;
+        }
+        const runtime::SpotLightComponent *slc = world->spot_light_at(si);
+        if (slc == nullptr) {
+          continue;
+        }
+        const runtime::Entity slEntity = world->spot_light_entity_at(si);
+        const runtime::WorldTransform *wt =
+            world->get_world_transform_read_ptr(slEntity);
+
+        auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
+        sl.position =
+            (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+        sl.direction = slc->direction;
+        sl.color = slc->color;
+        sl.intensity = slc->intensity;
+        sl.radius = slc->radius;
+        sl.innerConeAngle = slc->innerConeAngle;
+        sl.outerConeAngle = slc->outerConeAngle;
+        ++sceneLights.spotLightCount;
+      }
+
       renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                                static_cast<float>(simulationTimeSeconds),
                                sceneLights);

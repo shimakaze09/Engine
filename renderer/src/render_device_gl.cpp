@@ -139,6 +139,30 @@ namespace {
 #define GL_BLEND 0x0BE2
 #endif
 
+#ifndef GL_COLOR_ATTACHMENT1
+#define GL_COLOR_ATTACHMENT1 0x8CE1
+#endif
+
+#ifndef GL_COLOR_ATTACHMENT2
+#define GL_COLOR_ATTACHMENT2 0x8CE2
+#endif
+
+#ifndef GL_COLOR_ATTACHMENT3
+#define GL_COLOR_ATTACHMENT3 0x8CE3
+#endif
+
+#ifndef GL_R32F
+#define GL_R32F 0x822E
+#endif
+
+#ifndef GL_NEAREST
+#define GL_NEAREST 0x2600
+#endif
+
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+
 #ifndef GL_SRC_ALPHA
 #define GL_SRC_ALPHA 0x0302
 #endif
@@ -204,6 +228,7 @@ using GlUniformMatrix3fvProc = void(APIENTRYP)(GLint, GLsizei, GLboolean,
                                                const GLfloat *);
 using GlUniform1fProc = void(APIENTRYP)(GLint, GLfloat);
 using GlUniform3fvProc = void(APIENTRYP)(GLint, GLsizei, const GLfloat *);
+using GlUniform2fvProc = void(APIENTRYP)(GLint, GLsizei, const GLfloat *);
 using GlGenVertexArraysProc = void(APIENTRYP)(GLsizei, GLuint *);
 using GlBindVertexArrayProc = void(APIENTRYP)(GLuint);
 using GlDeleteVertexArraysProc = void(APIENTRYP)(GLsizei, const GLuint *);
@@ -246,6 +271,10 @@ using GlBindFramebufferProc = void(APIENTRYP)(GLenum, GLuint);
 using GlFramebufferTexture2DProc = void(APIENTRYP)(GLenum, GLenum, GLenum,
                                                    GLuint, GLint);
 using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
+using GlDrawBuffersProc = void(APIENTRYP)(GLsizei, const GLenum *);
+using GlTexSubImage2DProc = void(APIENTRYP)(GLenum, GLint, GLint, GLint,
+                                            GLsizei, GLsizei, GLenum, GLenum,
+                                            const void *);
 
 // Blend procs
 using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
@@ -280,6 +309,7 @@ struct GlTable final {
   GlUniformMatrix3fvProc uniformMatrix3fv = nullptr;
   GlUniform1fProc uniform1f = nullptr;
   GlUniform3fvProc uniform3fv = nullptr;
+  GlUniform2fvProc uniform2fv = nullptr;
   GlGenVertexArraysProc genVertexArrays = nullptr;
   GlBindVertexArrayProc bindVertexArray = nullptr;
   GlDeleteVertexArraysProc deleteVertexArrays = nullptr;
@@ -316,6 +346,8 @@ struct GlTable final {
   GlBindFramebufferProc bindFramebuffer = nullptr;
   GlFramebufferTexture2DProc framebufferTexture2D = nullptr;
   GlCheckFramebufferStatusProc checkFramebufferStatus = nullptr;
+  GlDrawBuffersProc drawBuffers = nullptr;
+  GlTexSubImage2DProc texSubImage2D = nullptr;
 
   // Blend
   GlBlendFuncProc blendFunc = nullptr;
@@ -358,6 +390,7 @@ bool load_all_gl_functions() noexcept {
          load_proc(&g_gl.uniformMatrix3fv, "glUniformMatrix3fv") &&
          load_proc(&g_gl.uniform1f, "glUniform1f") &&
          load_proc(&g_gl.uniform3fv, "glUniform3fv") &&
+         load_proc(&g_gl.uniform2fv, "glUniform2fv") &&
          load_proc(&g_gl.genVertexArrays, "glGenVertexArrays") &&
          load_proc(&g_gl.bindVertexArray, "glBindVertexArray") &&
          load_proc(&g_gl.deleteVertexArrays, "glDeleteVertexArrays") &&
@@ -389,6 +422,8 @@ bool load_all_gl_functions() noexcept {
          load_proc(&g_gl.bindFramebuffer, "glBindFramebuffer") &&
          load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D") &&
          load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus") &&
+         load_proc(&g_gl.drawBuffers, "glDrawBuffers") &&
+         load_proc(&g_gl.texSubImage2D, "glTexSubImage2D") &&
          load_proc(&g_gl.blendFunc, "glBlendFunc") &&
          load_proc(&g_gl.depthMask, "glDepthMask") &&
          load_proc(&g_gl.genQueries, "glGenQueries") &&
@@ -496,6 +531,10 @@ void gl_set_uniform_float(std::int32_t loc, float value) noexcept {
 
 void gl_set_uniform_vec3(std::int32_t loc, const float *value) noexcept {
   g_gl.uniform3fv(static_cast<GLint>(loc), 1, value);
+}
+
+void gl_set_uniform_vec2(std::int32_t loc, const float *value) noexcept {
+  g_gl.uniform2fv(static_cast<GLint>(loc), 1, value);
 }
 
 std::uint32_t gl_create_vertex_array() noexcept {
@@ -735,6 +774,78 @@ bool gl_check_framebuffer_complete() noexcept {
   return g_gl.checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
+std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
+                                        std::int32_t colorCount,
+                                        std::uint32_t depthTex) noexcept {
+  if ((colorTextures == nullptr) || (colorCount <= 0) || (colorCount > 4)) {
+    return 0U;
+  }
+
+  GLuint fbo = 0U;
+  g_gl.genFramebuffers(1, &fbo);
+  if (fbo == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+  constexpr GLenum kAttachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
+                                     GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
+  for (std::int32_t i = 0; i < colorCount; ++i) {
+    if (colorTextures[i] != 0U) {
+      g_gl.framebufferTexture2D(GL_FRAMEBUFFER, kAttachments[i], GL_TEXTURE_2D,
+                                static_cast<GLuint>(colorTextures[i]), 0);
+    }
+  }
+
+  if (depthTex != 0U) {
+    g_gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_TEXTURE_2D, static_cast<GLuint>(depthTex), 0);
+  }
+
+  // Activate all color attachments for MRT output.
+  g_gl.drawBuffers(static_cast<GLsizei>(colorCount), kAttachments);
+
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, 0U);
+  return static_cast<std::uint32_t>(fbo);
+}
+
+std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
+                                        const float *data) noexcept {
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_2D, tex);
+  g_gl.texImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(GL_R32F),
+                  static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
+                  GL_RED, GL_FLOAT, data);
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                     static_cast<GLint>(GL_NEAREST));
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                     static_cast<GLint>(GL_NEAREST));
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                     static_cast<GLint>(GL_CLAMP_TO_EDGE));
+  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                     static_cast<GLint>(GL_CLAMP_TO_EDGE));
+  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+void gl_update_texture_2d_r32f(std::uint32_t texId, std::int32_t width,
+                               std::int32_t height,
+                               const float *data) noexcept {
+  if (texId == 0U) {
+    return;
+  }
+  g_gl.bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texId));
+  g_gl.texSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width),
+                     static_cast<GLsizei>(height), GL_RED, GL_FLOAT, data);
+  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+}
+
 // --- Blend ---
 
 void gl_enable_blending() noexcept { g_gl.enable(GL_BLEND); }
@@ -824,6 +935,7 @@ bool initialize_render_device() noexcept {
   g_device.set_uniform_mat3 = &gl_set_uniform_mat3;
   g_device.set_uniform_float = &gl_set_uniform_float;
   g_device.set_uniform_vec3 = &gl_set_uniform_vec3;
+  g_device.set_uniform_vec2 = &gl_set_uniform_vec2;
   g_device.create_vertex_array = &gl_create_vertex_array;
   g_device.destroy_vertex_array = &gl_destroy_vertex_array;
   g_device.bind_vertex_array = &gl_bind_vertex_array;
@@ -845,6 +957,7 @@ bool initialize_render_device() noexcept {
   g_device.destroy_texture = &gl_destroy_texture;
   g_device.bind_texture = &gl_bind_texture;
   g_device.create_framebuffer = &gl_create_framebuffer;
+  g_device.create_framebuffer_mrt = &gl_create_framebuffer_mrt;
   g_device.destroy_framebuffer = &gl_destroy_framebuffer;
   g_device.bind_framebuffer = &gl_bind_framebuffer;
   g_device.check_framebuffer_complete = &gl_check_framebuffer_complete;
@@ -864,6 +977,8 @@ bool initialize_render_device() noexcept {
   g_device.disable_depth_test = &gl_disable_depth_test;
   g_device.set_clear_color = &gl_set_clear_color;
   g_device.clear_color_depth = &gl_clear_color_depth;
+  g_device.create_texture_2d_r32f = &gl_create_texture_2d_r32f;
+  g_device.update_texture_2d_r32f = &gl_update_texture_2d_r32f;
 
   g_deviceInitialized = true;
   return true;

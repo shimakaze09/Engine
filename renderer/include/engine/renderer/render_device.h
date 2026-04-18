@@ -30,6 +30,8 @@ struct RenderDevice final {
   void (*set_uniform_float)(std::int32_t loc, float value) noexcept = nullptr;
   void (*set_uniform_vec3)(std::int32_t loc,
                            const float *value) noexcept = nullptr;
+  void (*set_uniform_vec2)(std::int32_t loc,
+                           const float *value) noexcept = nullptr;
 
   // Vertex arrays.
   std::uint32_t (*create_vertex_array)() noexcept = nullptr;
@@ -79,9 +81,20 @@ struct RenderDevice final {
   // Framebuffers.
   std::uint32_t (*create_framebuffer)(
       std::uint32_t colorTex, std::uint32_t depthTex) noexcept = nullptr;
+  std::uint32_t (*create_framebuffer_mrt)(
+      const std::uint32_t *colorTextures, std::int32_t colorCount,
+      std::uint32_t depthTex) noexcept = nullptr;
   void (*destroy_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   void (*bind_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   bool (*check_framebuffer_complete)() noexcept = nullptr;
+
+  // Textures — single-channel float (R32F).
+  std::uint32_t (*create_texture_2d_r32f)(std::int32_t width,
+                                          std::int32_t height,
+                                          const float *data) noexcept = nullptr;
+  void (*update_texture_2d_r32f)(std::uint32_t texId, std::int32_t width,
+                                 std::int32_t height,
+                                 const float *data) noexcept = nullptr;
 
   // Blend.
   void (*enable_blending)() noexcept = nullptr;

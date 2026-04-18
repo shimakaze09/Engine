@@ -324,3 +324,20 @@ engine_add_test_executable(engine_unit_import_settings
     PRIVATE_DEPS
     engine_core
 )
+
+# ---- P1-M5: Deferred Rendering ----
+
+engine_add_test_executable(engine_unit_deferred_light_component
+    SOURCES
+    deferred_light_component_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_light_culling
+    SOURCES
+    light_culling_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+)

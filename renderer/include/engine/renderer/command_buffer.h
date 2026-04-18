@@ -64,7 +64,8 @@ struct GpuMeshRegistry;
 
 // Scene light data collected from ECS each frame.
 static constexpr std::size_t kMaxDirectionalLights = 4U;
-static constexpr std::size_t kMaxPointLights = 8U;
+static constexpr std::size_t kMaxPointLights = 128U;
+static constexpr std::size_t kMaxSpotLights = 64U;
 
 struct DirectionalLightData final {
   math::Vec3 direction{};
@@ -76,6 +77,17 @@ struct PointLightData final {
   math::Vec3 position{};
   math::Vec3 color{};
   float intensity = 0.0F;
+  float radius = 10.0F;
+};
+
+struct SpotLightData final {
+  math::Vec3 position{};
+  math::Vec3 direction{};
+  math::Vec3 color{};
+  float intensity = 0.0F;
+  float radius = 10.0F;
+  float innerConeAngle = 0.3491F; // ~20 degrees
+  float outerConeAngle = 0.5236F; // ~30 degrees
 };
 
 struct SceneLightData final {
@@ -83,6 +95,8 @@ struct SceneLightData final {
   std::size_t directionalLightCount = 0U;
   std::array<PointLightData, kMaxPointLights> pointLights{};
   std::size_t pointLightCount = 0U;
+  std::array<SpotLightData, kMaxSpotLights> spotLights{};
+  std::size_t spotLightCount = 0U;
 };
 
 struct RendererFrameStats final {
@@ -90,6 +104,8 @@ struct RendererFrameStats final {
   std::uint64_t triangleCount = 0U;
   float gpuSceneMs = 0.0F;
   float gpuTonemapMs = 0.0F;
+  float gpuGBufferMs = 0.0F;
+  float gpuDeferredLightMs = 0.0F;
 };
 
 void flush_renderer(CommandBufferView commandBufferView,

@@ -43,17 +43,13 @@ struct RenderPrepPipelineContext final {
 };
 
 bool enqueue_render_prep_pipeline(
-    RenderPrepPipelineContext *context,
-    const World *world,
+    RenderPrepPipelineContext *context, const World *world,
     renderer::CommandBufferBuilder *mergedCommandBuffer,
     renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
-    core::JobHandle renderPrepPhaseHandle,
-    core::JobHandle renderPhaseHandle,
-    std::atomic<bool> *frameGraphFailed,
-    std::size_t frameThreadCount,
-    std::size_t chunkSize,
-    const math::Mat4 &viewProjection,
+    core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
+    std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
+    std::size_t chunkSize, const math::Mat4 &viewProjection,
     core::JobHandle *outMergeHandle) noexcept;
 
 } // namespace engine::runtime

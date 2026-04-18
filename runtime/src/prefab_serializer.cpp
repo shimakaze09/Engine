@@ -224,7 +224,32 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // ScriptComponent — plain string format (matches scene serializer).
+  // PointLightComponent
+  PointLightComponent pointLight{};
+  if (world.get_point_light_component(entity, &pointLight)) {
+    w.write_key("PointLightComponent");
+    w.begin_object();
+    write_vec3_arr(w, "color", pointLight.color);
+    w.write_float("intensity", pointLight.intensity);
+    w.write_float("radius", pointLight.radius);
+    w.end_object();
+  }
+
+  // SpotLightComponent
+  SpotLightComponent spotLight{};
+  if (world.get_spot_light_component(entity, &spotLight)) {
+    w.write_key("SpotLightComponent");
+    w.begin_object();
+    write_vec3_arr(w, "color", spotLight.color);
+    write_vec3_arr(w, "direction", spotLight.direction);
+    w.write_float("intensity", spotLight.intensity);
+    w.write_float("radius", spotLight.radius);
+    w.write_float("innerConeAngle", spotLight.innerConeAngle);
+    w.write_float("outerConeAngle", spotLight.outerConeAngle);
+    w.end_object();
+  }
+
+  // ScriptComponent— plain string format (matches scene serializer).
   ScriptComponent scriptComp{};
   if (world.get_script_component(entity, &scriptComp) &&
       (scriptComp.scriptPath[0] != '\0')) {
@@ -443,7 +468,52 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     static_cast<void>(world.add_light_component(entity, lc));
   }
 
-  // ScriptComponent — accepts plain string (current) or legacy object format.
+  // PointLightComponent
+  core::JsonValue plVal{};
+  if (parser.get_object_field(componentsVal, "PointLightComponent", &plVal) &&
+      (plVal.type == core::JsonValue::Type::Object)) {
+    PointLightComponent pc{};
+    core::JsonValue v{};
+    if (parser.get_object_field(plVal, "color", &v)) {
+      static_cast<void>(read_vec3(parser, v, &pc.color));
+    }
+    if (parser.get_object_field(plVal, "intensity", &v)) {
+      static_cast<void>(parser.as_float(v, &pc.intensity));
+    }
+    if (parser.get_object_field(plVal, "radius", &v)) {
+      static_cast<void>(parser.as_float(v, &pc.radius));
+    }
+    static_cast<void>(world.add_point_light_component(entity, pc));
+  }
+
+  // SpotLightComponent
+  core::JsonValue slVal{};
+  if (parser.get_object_field(componentsVal, "SpotLightComponent", &slVal) &&
+      (slVal.type == core::JsonValue::Type::Object)) {
+    SpotLightComponent sc{};
+    core::JsonValue v{};
+    if (parser.get_object_field(slVal, "color", &v)) {
+      static_cast<void>(read_vec3(parser, v, &sc.color));
+    }
+    if (parser.get_object_field(slVal, "direction", &v)) {
+      static_cast<void>(read_vec3(parser, v, &sc.direction));
+    }
+    if (parser.get_object_field(slVal, "intensity", &v)) {
+      static_cast<void>(parser.as_float(v, &sc.intensity));
+    }
+    if (parser.get_object_field(slVal, "radius", &v)) {
+      static_cast<void>(parser.as_float(v, &sc.radius));
+    }
+    if (parser.get_object_field(slVal, "innerConeAngle", &v)) {
+      static_cast<void>(parser.as_float(v, &sc.innerConeAngle));
+    }
+    if (parser.get_object_field(slVal, "outerConeAngle", &v)) {
+      static_cast<void>(parser.as_float(v, &sc.outerConeAngle));
+    }
+    static_cast<void>(world.add_spot_light_component(entity, sc));
+  }
+
+  // ScriptComponent— accepts plain string (current) or legacy object format.
   core::JsonValue sval{};
   if (parser.get_object_field(componentsVal, "ScriptComponent", &sval)) {
     const char *pathPtr = nullptr;

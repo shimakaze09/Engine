@@ -5,6 +5,7 @@ engine_add_module_library(engine_renderer
     src/asset_streaming.cpp
     src/command_buffer.cpp
     src/gpu_profiler.cpp
+    src/light_culling.cpp
     src/lru_cache.cpp
     src/mesh_loader.cpp
     src/pass_resources.cpp

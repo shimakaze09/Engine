@@ -93,6 +93,21 @@ struct LightComponent final {
   LightType type = LightType::Directional;
 };
 
+struct PointLightComponent final {
+  math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
+  float intensity = 1.0F;
+  float radius = 10.0F;
+};
+
+struct SpotLightComponent final {
+  math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
+  math::Vec3 direction = math::Vec3(0.0F, -1.0F, 0.0F);
+  float intensity = 1.0F;
+  float radius = 10.0F;
+  float innerConeAngle = 0.3491F; // ~20 degrees in radians
+  float outerConeAngle = 0.5236F; // ~30 degrees in radians
+};
+
 // Attaches a Lua script file to an entity.
 // The script must return a module table with optional on_start(self) and
 // on_update(self, dt) functions. Multiple entities may share the same file.
@@ -154,7 +169,9 @@ public:
       ENGINE_MAX_LIGHT_COMPONENTS;
   static constexpr std::size_t kMaxScriptComponents = kMaxEntities;
   static constexpr std::size_t kMaxSpringArmComponents = 64U;
-  static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
+  static constexpr std::size_t kMaxPointLightComponents = 128U;
+  static constexpr std::size_t kMaxSpotLightComponents = 64U;
+  static constexpr std::size_t kNameLookupCapacity= kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
   static constexpr std::size_t kMaxPhysicsJoints = 4096U;
@@ -322,6 +339,26 @@ public:
   const LightComponent *light_at(std::size_t index) const noexcept;
   Entity light_entity_at(std::size_t index) const noexcept;
 
+  bool add_point_light_component(Entity entity,
+                                 const PointLightComponent &component) noexcept;
+  bool remove_point_light_component(Entity entity) noexcept;
+  bool get_point_light_component(Entity entity,
+                                 PointLightComponent *outComponent) const noexcept;
+  bool has_point_light_component(Entity entity) const noexcept;
+  std::size_t point_light_count() const noexcept;
+  const PointLightComponent *point_light_at(std::size_t index) const noexcept;
+  Entity point_light_entity_at(std::size_t index) const noexcept;
+
+  bool add_spot_light_component(Entity entity,
+                                const SpotLightComponent &component) noexcept;
+  bool remove_spot_light_component(Entity entity) noexcept;
+  bool get_spot_light_component(Entity entity,
+                                SpotLightComponent *outComponent) const noexcept;
+  bool has_spot_light_component(Entity entity) const noexcept;
+  std::size_t spot_light_count() const noexcept;
+  const SpotLightComponent *spot_light_at(std::size_t index) const noexcept;
+  Entity spot_light_entity_at(std::size_t index) const noexcept;
+
   bool add_spring_arm(Entity entity,
                       const SpringArmComponent &component) noexcept;
   bool remove_spring_arm(Entity entity) noexcept;
@@ -467,8 +504,14 @@ private:
                       kMaxScriptComponents>;
   using SpringArmSet = core::SparseSet<Entity, SpringArmComponent, kMaxEntities,
                                        kMaxSpringArmComponents>;
+  using PointLightSet =
+      core::SparseSet<Entity, PointLightComponent, kMaxEntities,
+                      kMaxPointLightComponents>;
+  using SpotLightSet =
+      core::SparseSet<Entity, SpotLightComponent, kMaxEntities,
+                      kMaxSpotLightComponents>;
 
-  template <typename Component> static consteval bool is_supported_component() {
+  template <typename Component> static consteval bool is_supported_component(){
     using C = std::remove_cv_t<Component>;
     return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody> ||
            std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider> ||
@@ -476,7 +519,9 @@ private:
            std::is_same_v<C, NameComponent> ||
            std::is_same_v<C, LightComponent> ||
            std::is_same_v<C, ScriptComponent> ||
-           std::is_same_v<C, SpringArmComponent>;
+           std::is_same_v<C, SpringArmComponent> ||
+           std::is_same_v<C, PointLightComponent> ||
+           std::is_same_v<C, SpotLightComponent>;
   }
 
   bool is_mutation_phase() const noexcept;
@@ -516,6 +561,10 @@ private:
       return m_scriptComponents.count();
     } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
       return m_springArms.count();
+    } else if constexpr (std::is_same_v<C, PointLightComponent>) {
+      return m_pointLights.count();
+    } else if constexpr (std::is_same_v<C, SpotLightComponent>) {
+      return m_spotLights.count();
     } else {
       return 0U;
     }
@@ -547,6 +596,10 @@ private:
       return m_scriptComponents.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
       return m_springArms.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, PointLightComponent>) {
+      return m_pointLights.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, SpotLightComponent>) {
+      return m_spotLights.get_ptr(entity);
     } else {
       return nullptr;
     }
@@ -671,6 +724,14 @@ private:
       for (std::size_t i = 0U; i < m_springArms.count(); ++i) {
         fn(m_springArms.entity_at(i), m_springArms.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, PointLightComponent>) {
+      for (std::size_t i = 0U; i < m_pointLights.count(); ++i) {
+        fn(m_pointLights.entity_at(i), m_pointLights.component_at(i));
+      }
+    } else if constexpr (std::is_same_v<C, SpotLightComponent>) {
+      for (std::size_t i = 0U; i < m_spotLights.count(); ++i) {
+        fn(m_spotLights.entity_at(i), m_spotLights.component_at(i));
+      }
     }
   }
 
@@ -734,6 +795,8 @@ private:
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
   SpringArmSet m_springArms{};
+  PointLightSet m_pointLights{};
+  SpotLightSet m_spotLights{};
   PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
   TimerManager m_timerManager{};
