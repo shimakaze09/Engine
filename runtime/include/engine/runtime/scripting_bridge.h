@@ -189,6 +189,13 @@ struct RuntimeServices final {
                       const char *path) noexcept = nullptr;
   std::uint32_t (*instantiate_prefab)(runtime::World *world,
                                       const char *path) noexcept = nullptr;
+
+  // Async asset streaming (P1-M4-C2c).
+  // Returns an opaque handle index (0xFFFFFFFF = invalid).
+  // priority: 0=Low, 1=Normal, 2=High, 3=Immediate.
+  std::uint32_t (*load_asset_async)(const char *path,
+                                    std::uint8_t priority) noexcept = nullptr;
+  bool (*is_asset_ready)(std::uint32_t handleIndex) noexcept = nullptr;
 };
 
 void bind_runtime_world(runtime::World *world) noexcept;

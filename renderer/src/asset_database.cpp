@@ -6,6 +6,12 @@
 
 namespace engine::renderer {
 
+void advance_asset_database_frame(AssetDatabase *database) noexcept {
+  if (database != nullptr) {
+    ++database->currentFrame;
+  }
+}
+
 namespace {
 
 constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
@@ -220,8 +226,7 @@ bool mesh_asset_requested_resident(const AssetDatabase *database,
   return database->meshAssets[slot].requestedResident;
 }
 
-MeshHandle resolve_mesh_asset(const AssetDatabase *database,
-                              AssetId id) noexcept {
+MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return kInvalidMeshHandle;
   }
@@ -231,11 +236,12 @@ MeshHandle resolve_mesh_asset(const AssetDatabase *database,
     return kInvalidMeshHandle;
   }
 
-  const MeshAssetRecord &record = database->meshAssets[slot];
+  MeshAssetRecord &record = database->meshAssets[slot];
   if (record.state != AssetState::Ready) {
     return kInvalidMeshHandle;
   }
 
+  record.lastAccessFrame = database->currentFrame;
   return record.runtimeMesh;
 }
 
@@ -410,7 +416,7 @@ bool set_texture_asset_state(AssetDatabase *database, AssetId id,
   return true;
 }
 
-TextureHandle resolve_texture_asset(const AssetDatabase *database,
+TextureHandle resolve_texture_asset(AssetDatabase *database,
                                     AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return kInvalidTextureHandle;
@@ -421,11 +427,12 @@ TextureHandle resolve_texture_asset(const AssetDatabase *database,
     return kInvalidTextureHandle;
   }
 
-  const TextureAssetRecord &record = database->textureAssets[slot];
+  TextureAssetRecord &record = database->textureAssets[slot];
   if (record.state != AssetState::Ready) {
     return kInvalidTextureHandle;
   }
 
+  record.lastAccessFrame = database->currentFrame;
   return record.runtimeTexture;
 }
 

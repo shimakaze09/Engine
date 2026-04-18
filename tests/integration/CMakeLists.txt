@@ -118,6 +118,26 @@ engine_add_test_executable(engine_integration_sandbox
     integration
 )
 
+# ---- P1-M4-C / P1-M4-D: Async Streaming & LRU ----
+
+engine_add_test_executable(engine_integration_async_load
+    SOURCES
+    async_load_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_streaming_budget
+    SOURCES
+    streaming_budget_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_hotreload
     SOURCES
     hotreload_test.cpp

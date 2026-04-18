@@ -19,6 +19,8 @@ struct MeshAssetRecord final {
   MeshHandle runtimeMesh = kInvalidMeshHandle;
   std::array<char, 260U> sourcePath{};
   std::uint32_t refCount = 0U;
+  std::uint64_t lastAccessFrame = 0ULL;
+  std::uint64_t sizeBytes = 0ULL;
   AssetState state = AssetState::Unloaded;
   bool requestedResident = false;
 };
@@ -28,6 +30,8 @@ struct TextureAssetRecord final {
   TextureHandle runtimeTexture = kInvalidTextureHandle;
   std::array<char, 260U> sourcePath{};
   std::uint32_t refCount = 0U;
+  std::uint64_t lastAccessFrame = 0ULL;
+  std::uint64_t sizeBytes = 0ULL;
   AssetState state = AssetState::Unloaded;
   bool requestedResident = false;
 };
@@ -44,7 +48,11 @@ struct AssetDatabase final {
   static constexpr std::size_t kMaxMetadata = 4096U;
   std::array<AssetMetadata, kMaxMetadata> metadata{};
   std::array<bool, kMaxMetadata> metadataOccupied{};
+
+  std::uint64_t currentFrame = 0ULL;
 };
+
+void advance_asset_database_frame(AssetDatabase *database) noexcept;
 
 AssetId make_asset_id_from_path(const char *path) noexcept;
 AssetId make_asset_id_from_file(const char *path) noexcept;
@@ -56,8 +64,7 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
                           MeshHandle runtimeMesh) noexcept;
 bool mesh_asset_requested_resident(const AssetDatabase *database,
                                    AssetId id) noexcept;
-MeshHandle resolve_mesh_asset(const AssetDatabase *database,
-                              AssetId id) noexcept;
+MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 void clear_asset_database(AssetDatabase *database) noexcept;
@@ -71,7 +78,7 @@ AssetState texture_asset_state(const AssetDatabase *database,
 bool set_texture_asset_state(AssetDatabase *database, AssetId id,
                              AssetState state,
                              TextureHandle runtimeTexture) noexcept;
-TextureHandle resolve_texture_asset(const AssetDatabase *database,
+TextureHandle resolve_texture_asset(AssetDatabase *database,
                                     AssetId id) noexcept;
 bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept;
 bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept;

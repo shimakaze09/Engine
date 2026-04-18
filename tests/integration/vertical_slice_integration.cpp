@@ -131,7 +131,7 @@ bool run_render_prep_pipeline(
     engine::runtime::World *world,
     engine::runtime::RenderPrepPipelineContext *pipelineContext,
     engine::renderer::CommandBufferBuilder *commandBuffer,
-    const engine::renderer::AssetDatabase *assetDatabase,
+    engine::renderer::AssetDatabase *assetDatabase,
     const engine::renderer::GpuMeshRegistry *meshRegistry) noexcept {
   if ((world == nullptr) || (pipelineContext == nullptr) ||
       (commandBuffer == nullptr) || (assetDatabase == nullptr) ||

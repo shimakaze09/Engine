@@ -215,7 +215,7 @@ bool link_dependency(core::JobHandle prerequisite,
 bool enqueue_render_prep_pipeline(
     RenderPrepPipelineContext *context, const World *world,
     renderer::CommandBufferBuilder *mergedCommandBuffer,
-    const renderer::AssetDatabase *assetDatabase,
+    renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
     core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
     std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,

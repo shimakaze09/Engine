@@ -314,26 +314,26 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M4-C: Async Streaming
 
-- [ ] P1-M4-C1a: AssetLoadThread using job system (separate worker pool for IO)
-- [ ] P1-M4-C1b: AssetDatabase::load_async(asset_id) → LoadHandle (is_ready, get<T>, wait)
-- [ ] P1-M4-C1c: Loading states: Queued → Loading → Uploading → Ready
-- [ ] P1-M4-C1d: Test: queue 50 mesh loads, poll until ready, verify all loaded correctly
-- [ ] P1-M4-C2a: Priority levels: Immediate / High / Normal / Low
-- [ ] P1-M4-C2b: Load thread processes highest priority first, priority updatable while queued
-- [ ] P1-M4-C2c: Lua binding: engine.load_asset_async(path, priority) → handle
-- [ ] P1-M4-C3a: CVar asset.streaming_budget_mb (max memory for in-flight loads per frame)
-- [ ] P1-M4-C3b: CVar asset.max_uploads_per_frame (limit GPU uploads per frame)
-- [ ] P1-M4-C3c: Test: queue more than budget allows, verify spreading across frames
+- [x] P1-M4-C1a: AssetLoadThread using job system (separate worker pool for IO)
+- [x] P1-M4-C1b: AssetDatabase::load_async(asset_id) → LoadHandle (is_ready, get<T>, wait)
+- [x] P1-M4-C1c: Loading states: Queued → Loading → Uploading → Ready
+- [x] P1-M4-C1d: Test: queue 50 mesh loads, poll until ready, verify all loaded correctly
+- [x] P1-M4-C2a: Priority levels: Immediate / High / Normal / Low
+- [x] P1-M4-C2b: Load thread processes highest priority first, priority updatable while queued
+- [x] P1-M4-C2c: Lua binding: engine.load_asset_async(path, priority) → handle
+- [x] P1-M4-C3a: CVar asset.streaming_budget_mb (max memory for in-flight loads per frame)
+- [x] P1-M4-C3b: CVar asset.max_uploads_per_frame (limit GPU uploads per frame)
+- [x] P1-M4-C3c: Test: queue more than budget allows, verify spreading across frames
 
 #### P1-M4-D: LRU Eviction
 
-- [ ] P1-M4-D1a: last_access_frame field per loaded asset entry, update on access
-- [ ] P1-M4-D1b: Doubly-linked list sorted by access time (most recent at tail)
-- [ ] P1-M4-D1c: evict() removes head of list (least recently used), free GPU + CPU memory
-- [ ] P1-M4-D2a: CVar asset.cache_size_mb — evict until below target when exceeded
-- [ ] P1-M4-D2b: Protected assets: ref count > 0 cannot be evicted, skip in LRU
-- [ ] P1-M4-D2c: Eviction callback: notify systems before evicting (renderer drops GPU handles)
-- [ ] P1-M4-D2d: Test: load 100 assets into 50-asset cache, access subset, verify LRU evicts stale ones
+- [x] P1-M4-D1a: last_access_frame field per loaded asset entry, update on access
+- [x] P1-M4-D1b: Doubly-linked list sorted by access time (most recent at tail)
+- [x] P1-M4-D1c: evict() removes head of list (least recently used), free GPU + CPU memory
+- [x] P1-M4-D2a: CVar asset.cache_size_mb — evict until below target when exceeded
+- [x] P1-M4-D2b: Protected assets: ref count > 0 cannot be evicted, skip in LRU
+- [x] P1-M4-D2c: Eviction callback: notify systems before evicting (renderer drops GPU handles)
+- [x] P1-M4-D2d: Test: load 100 assets into 50-asset cache, access subset, verify LRU evicts stale ones
 
 #### P1-M4-E: Deterministic Cooking
 

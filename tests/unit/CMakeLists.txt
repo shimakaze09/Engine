@@ -290,3 +290,21 @@ engine_add_test_executable(engine_unit_dependency_graph
 if(WIN32)
     target_compile_definitions(engine_unit_dependency_graph PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+
+# ---- P1-M4-C: Async Streaming ----
+
+engine_add_test_executable(engine_unit_async_streaming
+    SOURCES
+    async_streaming_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+# ---- P1-M4-D: LRU Eviction ----
+
+engine_add_test_executable(engine_unit_lru_cache
+    SOURCES
+    lru_cache_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)

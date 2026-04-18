@@ -3918,6 +3918,60 @@ int lua_engine_instantiate(lua_State *state) noexcept {
   return 1;
 }
 
+// --- Async asset streaming (P1-M4-C2c) ---
+
+// engine.load_asset_async(path [, priority]) → handle_index or nil
+// priority: 0=Low, 1=Normal, 2=High, 3=Immediate (default=Normal)
+int lua_engine_load_asset_async(lua_State *state) noexcept {
+  if ((g_services == nullptr) || (g_services->load_asset_async == nullptr)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  if (!lua_isstring(state, 1)) {
+    luaL_traceback(state, state, "load_asset_async: path must be a string", 1);
+    core::log_message(core::LogLevel::Error, "scripting",
+                      lua_tostring(state, -1));
+    lua_pop(state, 1);
+    lua_pushnil(state);
+    return 1;
+  }
+  const char *path = lua_tostring(state, 1);
+  if (path == nullptr) {
+    lua_pushnil(state);
+    return 1;
+  }
+  std::uint8_t priority = 1U; // Normal
+  if (lua_isinteger(state, 2)) {
+    const lua_Integer p = lua_tointeger(state, 2);
+    if ((p >= 0) && (p <= 3)) {
+      priority = static_cast<std::uint8_t>(p);
+    }
+  }
+  const std::uint32_t handle = g_services->load_asset_async(path, priority);
+  if (handle == 0xFFFFFFFFU) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushinteger(state, static_cast<lua_Integer>(handle));
+  return 1;
+}
+
+// engine.is_asset_ready(handle_index) → boolean
+int lua_engine_is_asset_ready(lua_State *state) noexcept {
+  if ((g_services == nullptr) || (g_services->is_asset_ready == nullptr)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!lua_isinteger(state, 1)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const std::uint32_t handleIndex =
+      static_cast<std::uint32_t>(lua_tointeger(state, 1));
+  lua_pushboolean(state, g_services->is_asset_ready(handleIndex) ? 1 : 0);
+  return 1;
+}
+
 // --- Entity pool Lua bindings ---
 
 // engine.pool_create(count) → pool_id or nil
@@ -4769,6 +4823,12 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "save_prefab");
   lua_pushcfunction(state, &lua_engine_instantiate);
   lua_setfield(state, -2, "instantiate");
+
+  // Async asset streaming (P1-M4-C2c)
+  lua_pushcfunction(state, &lua_engine_load_asset_async);
+  lua_setfield(state, -2, "load_asset_async");
+  lua_pushcfunction(state, &lua_engine_is_asset_ready);
+  lua_setfield(state, -2, "is_asset_ready");
 
   // Entity pooling
   lua_pushcfunction(state, &lua_engine_pool_create);

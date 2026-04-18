@@ -2,8 +2,10 @@ engine_add_module_library(engine_renderer
     SOURCES
     src/asset_database.cpp
     src/asset_manager.cpp
+    src/asset_streaming.cpp
     src/command_buffer.cpp
     src/gpu_profiler.cpp
+    src/lru_cache.cpp
     src/mesh_loader.cpp
     src/pass_resources.cpp
     src/render_device_gl.cpp

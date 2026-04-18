@@ -18,7 +18,7 @@ struct RenderPrepChunkJobData final {
   std::size_t count = 0U;
   std::size_t threadCount = 0U;
   renderer::CommandBufferBuilder *localBuffers = nullptr;
-  const renderer::AssetDatabase *assetDatabase = nullptr;
+  renderer::AssetDatabase *assetDatabase = nullptr;
   const renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::atomic<bool> *frameGraphFailed = nullptr;
   math::Mat4 viewProjection{};
@@ -46,7 +46,7 @@ bool enqueue_render_prep_pipeline(
     RenderPrepPipelineContext *context,
     const World *world,
     renderer::CommandBufferBuilder *mergedCommandBuffer,
-    const renderer::AssetDatabase *assetDatabase,
+    renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
     core::JobHandle renderPrepPhaseHandle,
     core::JobHandle renderPhaseHandle,
