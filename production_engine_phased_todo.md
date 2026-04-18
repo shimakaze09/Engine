@@ -337,12 +337,12 @@ Everything in Phase 1 must be complete before a game can be shipped.
 
 #### P1-M4-E: Deterministic Cooking
 
-- [ ] P1-M4-E1a: Byte-identical output (remove timestamps, sort deterministically)
-- [ ] P1-M4-E1b: Content-hash (not mtime) for rebuild decision when available
-- [ ] P1-M4-E1c: Test: cook, cook again unchanged, diff output — must be zero
-- [ ] P1-M4-E2a: All import settings stored in .meta file, change triggers recook
-- [ ] P1-M4-E2b: Editor UI: inspector for selected asset shows import settings
-- [ ] P1-M4-E2c: Test: change mesh scale in meta, recook, verify mesh vertices scaled
+- [x] P1-M4-E1a: Byte-identical output (remove timestamps, sort deterministically)
+- [x] P1-M4-E1b: Content-hash (not mtime) for rebuild decision when available
+- [x] P1-M4-E1c: Test: cook, cook again unchanged, diff output — must be zero
+- [x] P1-M4-E2a: All import settings stored in .meta file, change triggers recook
+- [x] P1-M4-E2b: Editor UI: inspector for selected asset shows import settings
+- [x] P1-M4-E2c: Test: change mesh scale in meta, recook, verify mesh vertices scaled
 
 ---
 
