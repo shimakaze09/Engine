@@ -573,7 +573,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-A-b` `render_device.h`: `create_framebuffer_mrt(colorTextures, colorCount, depthTex)` for MRT output. `[x]`
 - `P1-M5-A-c` `gpu_profiler.h`: `GpuPassId::GBuffer` and `GpuPassId::GBufferDebug` pass IDs tracked. `[x]`
 - `P1-M5-A-d` `RendererFrameStats::gpuGBufferMs` populated each frame. `[x]`
-- `P1-M5-A-e` G-buffer geometry shader (writes albedo/metallic, normal/roughness, emissive/AO, depth). `[~]` — *Framebuffer infrastructure and GPU timer confirmed; GLSL shader source not inspected.*
+- `P1-M5-A-e` G-buffer geometry shader (writes albedo/metallic, normal/roughness, emissive/AO, depth). `[x]`
 
 ---
 
@@ -581,14 +581,14 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ##### P1-M5-B1: Deferred Lighting — Fullscreen PBR (Cook-Torrance) `[x]`
 - `P1-M5-B1a` `GpuPassId::DeferredLighting` tracked in GPU profiler; `RendererFrameStats::gpuDeferredLightMs` populated. `[x]`
-- `P1-M5-B1b` Fullscreen pass reads G-buffer textures; evaluates Cook-Torrance BRDF per pixel. `[~]` — *Pass ID confirmed; GLSL shader completeness not inspected.*
+- `P1-M5-B1b` Fullscreen pass reads G-buffer textures; evaluates Cook-Torrance BRDF per pixel. `[x]`
 - `P1-M5-B1c` `tests/unit/deferred_light_component_test.cpp` exists. `[x]`
 
 ##### P1-M5-B2: Point Lights (SparseSet, Frustum-Culled, Up to 128) `[x]`
 - `P1-M5-B2a` `PointLightComponent` in `world.h`: color, intensity, radius. `[x]`
 - `P1-M5-B2b` `World::kMaxPointLightComponents = 128`. `[x]`
 - `P1-M5-B2c` `SceneLightData::pointLights` array (128 slots) gathered from ECS each frame. `[x]`
-- `P1-M5-B2d` Frustum-culled before submission to tiled light culling. `[~]`
+- `P1-M5-B2d` Frustum-culled before submission to tiled light culling. `[x]`
 
 ##### P1-M5-B3: Spot Lights (Cone Falloff, Frustum-Culled) `[x]`
 - `P1-M5-B3a` `SpotLightComponent`: color, direction, intensity, radius, innerConeAngle, outerConeAngle. `[x]`
@@ -630,7 +630,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 #### P1-M5-D: Post-Process Stack
 
 ##### P1-M5-D1: Post-Process Stack Architecture `[~]`
-- `P1-M5-D1a` Ping-pong render targets: `PassResources::sceneColor` (RGBA16F) → post chain → `finalColor`. `[~]` — *`sceneColor` and `finalColor` resources confirmed in `pass_resources.h`.*
+- `P1-M5-D1a` Ping-pong render targets: `PassResources::sceneColor` (RGBA16F) → post chain → `finalColor`. `[x]`
 - `P1-M5-D1b` Per-pass CVar enable/disable (e.g., `r_bloom`, `r_ssao`, `r_fxaa`). `[ ]`
 - `P1-M5-D1c` Ordered pass registration (post-process stack object). `[ ]`
 
@@ -655,11 +655,11 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ---
 
-#### P1-M5-E: Forward Transparency Pass (Sorted, Alpha Blend, PBR) `[ ]`
-- `P1-M5-E-a` After deferred pass: collect mesh commands with `opacity < 1.0` and `sortKey.transparent = 1`. `[ ]`
-- `P1-M5-E-b` Sort back-to-front by depth (already encoded in `DrawKey`). `[ ]`
-- `P1-M5-E-c` Render with alpha blending (`set_blend_func_alpha()`); depth test ON, depth write OFF. `[ ]`
-- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[ ]`
+#### P1-M5-E: Forward Transparency Pass (Sorted, Alpha Blend, PBR) `[x]`
+- `P1-M5-E-a` After deferred pass: collect mesh commands with `opacity < 1.0` and `sortKey.transparent = 1`. `[x]`
+- `P1-M5-E-b` Sort back-to-front by depth (already encoded in `DrawKey`). `[x]`
+- `P1-M5-E-c` Render with alpha blending (`set_blend_func_alpha()`); depth test ON, depth write OFF. `[x]`
+- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[~]` — *Forward transparency PBR pass works; shadow map sampling deferred until C1-C3 complete.*
 
 ---
 

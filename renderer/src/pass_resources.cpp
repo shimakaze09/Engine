@@ -19,6 +19,8 @@ constexpr std::uint32_t kGBufferAlbedoSlot = 4U;
 constexpr std::uint32_t kGBufferNormalSlot = 5U;
 constexpr std::uint32_t kGBufferEmissiveSlot = 6U;
 constexpr std::uint32_t kGBufferDepthSlot = 7U;
+constexpr std::uint32_t kSsaoTextureSlot = 8U;
+constexpr std::uint32_t kSsaoBlurTextureSlot = 9U;
 
 struct PassResourceState final {
   bool initialized = false;
@@ -39,6 +41,12 @@ struct PassResourceState final {
   std::uint32_t gbufferDepthTex = 0U;    // DEPTH24
   std::uint32_t gbufferFbo = 0U;
 
+  // SSAO textures.
+  std::uint32_t ssaoTex = 0U;           // R32F — raw AO
+  std::uint32_t ssaoFbo = 0U;
+  std::uint32_t ssaoBlurTex = 0U;       // R32F — blurred AO
+  std::uint32_t ssaoBlurFbo = 0U;
+
   PassResources resources{};
 };
 
@@ -48,6 +56,24 @@ void destroy_gpu_resources() noexcept {
   const RenderDevice *dev = render_device();
   if (dev == nullptr) {
     return;
+  }
+
+  // SSAO (reverse order of creation).
+  if (g_state.ssaoBlurFbo != 0U) {
+    dev->destroy_framebuffer(g_state.ssaoBlurFbo);
+    g_state.ssaoBlurFbo = 0U;
+  }
+  if (g_state.ssaoBlurTex != 0U) {
+    dev->destroy_texture(g_state.ssaoBlurTex);
+    g_state.ssaoBlurTex = 0U;
+  }
+  if (g_state.ssaoFbo != 0U) {
+    dev->destroy_framebuffer(g_state.ssaoFbo);
+    g_state.ssaoFbo = 0U;
+  }
+  if (g_state.ssaoTex != 0U) {
+    dev->destroy_texture(g_state.ssaoTex);
+    g_state.ssaoTex = 0U;
   }
 
   // G-Buffer (reverse order of creation).
@@ -237,6 +263,38 @@ bool create_gpu_resources(int width, int height) noexcept {
   g_state.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
   g_state.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
 
+  // --- SSAO textures (R32F) ---
+  g_state.ssaoTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
+  if (g_state.ssaoTex == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create SSAO texture");
+    return false;
+  }
+
+  g_state.ssaoFbo = dev->create_framebuffer(g_state.ssaoTex, 0U);
+  if (g_state.ssaoFbo == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create SSAO framebuffer");
+    return false;
+  }
+
+  g_state.ssaoBlurTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
+  if (g_state.ssaoBlurTex == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create SSAO blur texture");
+    return false;
+  }
+
+  g_state.ssaoBlurFbo = dev->create_framebuffer(g_state.ssaoBlurTex, 0U);
+  if (g_state.ssaoBlurFbo == 0U) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "failed to create SSAO blur framebuffer");
+    return false;
+  }
+
+  g_state.resources.ssaoTexture = PassResourceId{kSsaoTextureSlot};
+  g_state.resources.ssaoBlurTexture = PassResourceId{kSsaoBlurTextureSlot};
+
   return true;
 }
 
@@ -313,6 +371,12 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kGBufferDepthSlot) {
     return g_state.gbufferDepthTex;
   }
+  if (resource.id == kSsaoTextureSlot) {
+    return g_state.ssaoTex;
+  }
+  if (resource.id == kSsaoBlurTextureSlot) {
+    return g_state.ssaoBlurTex;
+  }
   return 0U;
 }
 
@@ -326,6 +390,12 @@ pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
   }
   if (colorAttachment.id == kGBufferAlbedoSlot) {
     return g_state.gbufferFbo;
+  }
+  if (colorAttachment.id == kSsaoTextureSlot) {
+    return g_state.ssaoFbo;
+  }
+  if (colorAttachment.id == kSsaoBlurTextureSlot) {
+    return g_state.ssaoBlurFbo;
   }
   return 0U;
 }

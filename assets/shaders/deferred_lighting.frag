@@ -10,6 +10,10 @@ uniform sampler2D uGBufferNormal;
 uniform sampler2D uGBufferEmissive;
 uniform sampler2D uGBufferDepth;
 
+// SSAO.
+uniform sampler2D uSsaoTexture;
+uniform int uSsaoEnabled;
+
 // Tile light data (R32F texture: x = MAX_LIGHTS_PER_TILE+1, y = numTiles).
 uniform sampler2D uTileLightTex;
 uniform int uTileCountX;
@@ -198,7 +202,8 @@ void main() {
     }
 
     // Ambient + emissive.
-    vec3 ambient = vec3(0.03) * albedo * ao;
+    float ssaoFactor = (uSsaoEnabled != 0) ? texture(uSsaoTexture, vTexCoord).r : 1.0;
+    vec3 ambient = vec3(0.03) * albedo * ao * ssaoFactor;
     vec3 color = ambient + Lo + emissive;
 
     FragColor = vec4(color, 1.0);

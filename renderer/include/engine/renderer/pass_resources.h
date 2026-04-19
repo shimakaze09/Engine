@@ -26,6 +26,10 @@ struct PassResources final {
   PassResourceId gbufferNormal;   // RGBA16F — rgb=worldNormal, a=roughness
   PassResourceId gbufferEmissive; // RGBA8  — rgb=emissive, a=AO
   PassResourceId gbufferDepth;    // DEPTH24 — shared with deferred lighting
+
+  // SSAO pass (deferred path):
+  PassResourceId ssaoTexture;     // R32F — raw ambient occlusion
+  PassResourceId ssaoBlurTexture; // R32F — blurred ambient occlusion
 };
 
 bool initialize_pass_resources(int width, int height) noexcept;

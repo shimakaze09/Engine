@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -37,6 +38,7 @@ CameraState g_activeCamera{};
 int g_sceneViewportWidth = 0;
 int g_sceneViewportHeight = 0;
 RendererFrameStats g_lastFrameStats{};
+bool g_fxaaAppliedThisFrame = false;
 
 struct BackendState final {
   bool initialized = false;
@@ -79,6 +81,13 @@ struct BackendState final {
   std::uint32_t tonemapProgram = 0U;
   std::int32_t tonemapSceneColorLocation = -1;
   std::int32_t tonemapExposureLocation = -1;
+  std::int32_t tonemapOperatorLocation = -1;
+
+  // FXAA shader.
+  ShaderProgramHandle fxaaShaderHandle{};
+  std::uint32_t fxaaProgram = 0U;
+  std::int32_t fxaaInputTextureLocation = -1;
+  std::int32_t fxaaTexelSizeLocation = -1;
 
   // Empty VAO for fullscreen triangle.
   std::uint32_t emptyVao = 0U;
@@ -149,6 +158,64 @@ struct BackendState final {
   // Tile light texture (uploaded each frame by CPU culling).
   std::uint32_t tileLightTex = 0U;
   std::vector<float> tileBuffer;
+
+  // ---- Bloom state ----
+  ShaderProgramHandle bloomThresholdShaderHandle{};
+  std::uint32_t bloomThresholdProgram = 0U;
+  std::int32_t bloomThreshSceneColorLoc = -1;
+  std::int32_t bloomThreshThresholdLoc = -1;
+
+  ShaderProgramHandle bloomDownsampleShaderHandle{};
+  std::uint32_t bloomDownsampleProgram = 0U;
+  std::int32_t bloomDownInputLoc = -1;
+  std::int32_t bloomDownTexelSizeLoc = -1;
+
+  ShaderProgramHandle bloomUpsampleShaderHandle{};
+  std::uint32_t bloomUpsampleProgram = 0U;
+  std::int32_t bloomUpInputLoc = -1;
+  std::int32_t bloomUpTexelSizeLoc = -1;
+
+  // Tonemap bloom integration uniforms.
+  std::int32_t tonemapBloomTextureLoc = -1;
+  std::int32_t tonemapBloomIntensityLoc = -1;
+  std::int32_t tonemapBloomEnabledLoc = -1;
+
+  // Bloom mip chain resources (managed internally).
+  static constexpr int kBloomMipLevels = 6;
+  std::uint32_t bloomMipTextures[kBloomMipLevels] = {};
+  std::uint32_t bloomMipFbos[kBloomMipLevels] = {};
+  int bloomMipWidths[kBloomMipLevels] = {};
+  int bloomMipHeights[kBloomMipLevels] = {};
+  int bloomAllocatedWidth = 0;
+  int bloomAllocatedHeight = 0;
+
+  // ---- SSAO state ----
+  bool ssaoAvailable = false;
+
+  ShaderProgramHandle ssaoShaderHandle{};
+  std::uint32_t ssaoProgram = 0U;
+  std::int32_t ssaoDepthLoc = -1;
+  std::int32_t ssaoNormalLoc = -1;
+  std::int32_t ssaoNoiseLoc = -1;
+  std::int32_t ssaoProjectionLoc = -1;
+  std::int32_t ssaoNoiseScaleLoc = -1;
+  std::int32_t ssaoRadiusLoc = -1;
+  std::int32_t ssaoBiasLoc = -1;
+  std::array<std::int32_t, 32> ssaoSampleLocs{};
+
+  ShaderProgramHandle ssaoBlurShaderHandle{};
+  std::uint32_t ssaoBlurProgram = 0U;
+  std::int32_t ssaoBlurInputLoc = -1;
+  std::int32_t ssaoBlurTexelSizeLoc = -1;
+
+  // Deferred lighting SSAO uniforms.
+  std::int32_t dlSsaoTextureLoc = -1;
+  std::int32_t dlSsaoEnabledLoc = -1;
+
+  // 4x4 noise texture for SSAO kernel rotation.
+  std::uint32_t ssaoNoiseTexture = 0U;
+  // Precomputed hemisphere kernel (32 samples * 3 floats).
+  float ssaoKernel[32 * 3] = {};
 };
 
 BackendState &backend_state() noexcept {
@@ -202,6 +269,97 @@ void resolve_pbr_light_uniforms(BackendState &backend,
                         "index — lights will be invisible");
     }
   }
+}
+
+void destroy_bloom_resources(BackendState &b) noexcept {
+  const auto *dev = render_device();
+  if (dev == nullptr) {
+    return;
+  }
+  for (int i = 0; i < BackendState::kBloomMipLevels; ++i) {
+    if (b.bloomMipFbos[i] != 0U) {
+      dev->destroy_framebuffer(b.bloomMipFbos[i]);
+      b.bloomMipFbos[i] = 0U;
+    }
+    if (b.bloomMipTextures[i] != 0U) {
+      dev->destroy_texture(b.bloomMipTextures[i]);
+      b.bloomMipTextures[i] = 0U;
+    }
+  }
+  b.bloomAllocatedWidth = 0;
+  b.bloomAllocatedHeight = 0;
+}
+
+void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
+  if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
+    return;
+  }
+  destroy_bloom_resources(b);
+  const auto *dev = render_device();
+  int w = width / 2;
+  int h = height / 2;
+  for (int i = 0; i < BackendState::kBloomMipLevels; ++i) {
+    if (w < 1) {
+      w = 1;
+    }
+    if (h < 1) {
+      h = 1;
+    }
+    b.bloomMipWidths[i] = w;
+    b.bloomMipHeights[i] = h;
+    b.bloomMipTextures[i] =
+        dev->create_texture_2d_hdr(w, h, 4, nullptr);
+    b.bloomMipFbos[i] =
+        dev->create_framebuffer(b.bloomMipTextures[i], 0U);
+    w /= 2;
+    h /= 2;
+  }
+  b.bloomAllocatedWidth = width;
+  b.bloomAllocatedHeight = height;
+}
+
+void generate_ssao_kernel(float *kernel, int count) noexcept {
+  unsigned int seed = 12345U;
+  auto nextFloat = [&seed]() -> float {
+    seed = seed * 1103515245U + 12345U;
+    return static_cast<float>((seed >> 16) & 0x7FFF) / 32767.0F;
+  };
+  for (int i = 0; i < count; ++i) {
+    float x = nextFloat() * 2.0F - 1.0F;
+    float y = nextFloat() * 2.0F - 1.0F;
+    float z = nextFloat();
+    float len = std::sqrt(x * x + y * y + z * z);
+    if (len < 0.001F) {
+      x = 0.0F;
+      y = 0.0F;
+      z = 1.0F;
+      len = 1.0F;
+    }
+    x /= len;
+    y /= len;
+    z /= len;
+    float scale = static_cast<float>(i) / static_cast<float>(count);
+    scale = 0.1F + 0.9F * scale * scale;
+    kernel[i * 3 + 0] = x * scale;
+    kernel[i * 3 + 1] = y * scale;
+    kernel[i * 3 + 2] = z * scale;
+  }
+}
+
+std::uint32_t create_ssao_noise_texture() noexcept {
+  float noise[16 * 4] = {};
+  unsigned int seed = 54321U;
+  auto nextFloat = [&seed]() -> float {
+    seed = seed * 1103515245U + 12345U;
+    return static_cast<float>((seed >> 16) & 0x7FFF) / 32767.0F;
+  };
+  for (int i = 0; i < 16; ++i) {
+    noise[i * 4 + 0] = nextFloat() * 2.0F - 1.0F;
+    noise[i * 4 + 1] = nextFloat() * 2.0F - 1.0F;
+    noise[i * 4 + 2] = 0.0F;
+    noise[i * 4 + 3] = 0.0F;
+  }
+  return render_device()->create_texture_2d_hdr(4, 4, 4, noise);
 }
 
 bool initialize_backend() noexcept {
@@ -343,6 +501,11 @@ bool initialize_backend() noexcept {
       dev->uniform_location(tonemapProgram, "u_sceneColor");
   backend.tonemapExposureLocation =
       dev->uniform_location(tonemapProgram, "u_exposure");
+  backend.tonemapOperatorLocation =
+      dev->uniform_location(tonemapProgram, "u_tonemapOperator");
+
+  core::cvar_register_int("r_tonemap_operator", 1,
+                          "Tonemap operator (0=Reinhard, 1=ACES, 2=Uncharted2)");
 
   // Empty VAO for fullscreen triangle (required by core profile).
   backend.emptyVao = dev->create_vertex_array();
@@ -364,6 +527,160 @@ bool initialize_backend() noexcept {
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
       "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
+
+  // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
+  core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
+  const ShaderProgramHandle fxaaShader = load_shader_program(
+      "assets/shaders/fullscreen.vert", "assets/shaders/fxaa.frag");
+  if (fxaaShader != kInvalidShaderProgram) {
+    const std::uint32_t fxaaProg = shader_gpu_program(fxaaShader);
+    if (fxaaProg != 0U) {
+      backend.fxaaShaderHandle = fxaaShader;
+      backend.fxaaProgram = fxaaProg;
+      backend.fxaaInputTextureLocation =
+          dev->uniform_location(fxaaProg, "u_inputTexture");
+      backend.fxaaTexelSizeLocation =
+          dev->uniform_location(fxaaProg, "u_texelSize");
+    } else {
+      destroy_shader_program(fxaaShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "FXAA shader not available — anti-aliasing disabled");
+  }
+
+  // Bloom shaders (soft-fail: bloom simply disabled if shaders unavailable).
+  core::cvar_register_bool("r_bloom", true, "Enable bloom");
+  core::cvar_register_float("r_bloom_threshold", 1.0F,
+                            "Bloom brightness threshold");
+  core::cvar_register_float("r_bloom_intensity", 0.3F, "Bloom intensity");
+  {
+    const ShaderProgramHandle threshShader = load_shader_program(
+        "assets/shaders/fullscreen.vert",
+        "assets/shaders/bloom_threshold.frag");
+    if (threshShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(threshShader);
+      if (prog != 0U) {
+        backend.bloomThresholdShaderHandle = threshShader;
+        backend.bloomThresholdProgram = prog;
+        backend.bloomThreshSceneColorLoc =
+            dev->uniform_location(prog, "u_sceneColor");
+        backend.bloomThreshThresholdLoc =
+            dev->uniform_location(prog, "u_threshold");
+      } else {
+        destroy_shader_program(threshShader);
+      }
+    }
+
+    const ShaderProgramHandle downShader = load_shader_program(
+        "assets/shaders/fullscreen.vert",
+        "assets/shaders/bloom_downsample.frag");
+    if (downShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(downShader);
+      if (prog != 0U) {
+        backend.bloomDownsampleShaderHandle = downShader;
+        backend.bloomDownsampleProgram = prog;
+        backend.bloomDownInputLoc =
+            dev->uniform_location(prog, "u_input");
+        backend.bloomDownTexelSizeLoc =
+            dev->uniform_location(prog, "u_texelSize");
+      } else {
+        destroy_shader_program(downShader);
+      }
+    }
+
+    const ShaderProgramHandle upShader = load_shader_program(
+        "assets/shaders/fullscreen.vert",
+        "assets/shaders/bloom_upsample.frag");
+    if (upShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(upShader);
+      if (prog != 0U) {
+        backend.bloomUpsampleShaderHandle = upShader;
+        backend.bloomUpsampleProgram = prog;
+        backend.bloomUpInputLoc =
+            dev->uniform_location(prog, "u_input");
+        backend.bloomUpTexelSizeLoc =
+            dev->uniform_location(prog, "u_texelSize");
+      } else {
+        destroy_shader_program(upShader);
+      }
+    }
+
+    if (backend.bloomThresholdProgram == 0U ||
+        backend.bloomDownsampleProgram == 0U ||
+        backend.bloomUpsampleProgram == 0U) {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "bloom shaders not fully available — bloom disabled");
+    }
+  }
+
+  // Resolve tonemap bloom-integration uniforms (tonemap shader already loaded).
+  backend.tonemapBloomTextureLoc =
+      dev->uniform_location(tonemapProgram, "u_bloomTexture");
+  backend.tonemapBloomIntensityLoc =
+      dev->uniform_location(tonemapProgram, "u_bloomIntensity");
+  backend.tonemapBloomEnabledLoc =
+      dev->uniform_location(tonemapProgram, "u_bloomEnabled");
+
+  // SSAO shaders (soft-fail: SSAO simply disabled if shaders unavailable).
+  core::cvar_register_bool("r_ssao", true, "Enable SSAO");
+  core::cvar_register_float("r_ssao_radius", 0.5F, "SSAO sample radius");
+  core::cvar_register_float("r_ssao_bias", 0.025F, "SSAO depth bias");
+  {
+    const ShaderProgramHandle ssaoShader = load_shader_program(
+        "assets/shaders/fullscreen.vert", "assets/shaders/ssao.frag");
+    if (ssaoShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(ssaoShader);
+      if (prog != 0U) {
+        backend.ssaoShaderHandle = ssaoShader;
+        backend.ssaoProgram = prog;
+        backend.ssaoDepthLoc = dev->uniform_location(prog, "u_gBufferDepth");
+        backend.ssaoNormalLoc = dev->uniform_location(prog, "u_gBufferNormal");
+        backend.ssaoNoiseLoc = dev->uniform_location(prog, "u_noiseTexture");
+        backend.ssaoProjectionLoc = dev->uniform_location(prog, "u_projection");
+        backend.ssaoNoiseScaleLoc = dev->uniform_location(prog, "u_noiseScale");
+        backend.ssaoRadiusLoc = dev->uniform_location(prog, "u_radius");
+        backend.ssaoBiasLoc = dev->uniform_location(prog, "u_bias");
+        for (int i = 0; i < 32; ++i) {
+          char nm[64] = {};
+          std::snprintf(nm, sizeof(nm), "u_samples[%d]", i);
+          backend.ssaoSampleLocs[static_cast<std::size_t>(i)] =
+              dev->uniform_location(prog, nm);
+        }
+      } else {
+        destroy_shader_program(ssaoShader);
+      }
+    }
+
+    const ShaderProgramHandle ssaoBlurShader = load_shader_program(
+        "assets/shaders/fullscreen.vert", "assets/shaders/ssao_blur.frag");
+    if (ssaoBlurShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(ssaoBlurShader);
+      if (prog != 0U) {
+        backend.ssaoBlurShaderHandle = ssaoBlurShader;
+        backend.ssaoBlurProgram = prog;
+        backend.ssaoBlurInputLoc = dev->uniform_location(prog, "u_ssaoInput");
+        backend.ssaoBlurTexelSizeLoc =
+            dev->uniform_location(prog, "u_texelSize");
+      } else {
+        destroy_shader_program(ssaoBlurShader);
+      }
+    }
+
+    if (backend.ssaoProgram != 0U && backend.ssaoBlurProgram != 0U) {
+      backend.ssaoAvailable = true;
+      generate_ssao_kernel(backend.ssaoKernel, 32);
+      backend.ssaoNoiseTexture = create_ssao_noise_texture();
+      if (backend.ssaoNoiseTexture == 0U) {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "SSAO noise texture creation failed — SSAO disabled");
+        backend.ssaoAvailable = false;
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "SSAO shaders not fully available — SSAO disabled");
+    }
+  }
 
   // Load deferred rendering shaders (soft-fail: falls back to forward).
   bool deferredOk = true;
@@ -478,6 +795,10 @@ bool initialize_backend() noexcept {
       backend.dlSpotOuterConeLocs[i] = dev->uniform_location(dlProg, nm);
     }
 
+    // SSAO uniforms in deferred lighting shader.
+    backend.dlSsaoTextureLoc = dev->uniform_location(dlProg, "uSsaoTexture");
+    backend.dlSsaoEnabledLoc = dev->uniform_location(dlProg, "uSsaoEnabled");
+
     // --- G-Buffer debug shader uniforms ---
     if (gbufferDebugShader != kInvalidShaderProgram) {
       const auto dbgProg = shader_gpu_program(gbufferDebugShader);
@@ -515,6 +836,41 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   }
   backend->tileBuffer.clear();
 
+  // Destroy bloom resources.
+  destroy_bloom_resources(*backend);
+  if (backend->bloomUpsampleShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->bloomUpsampleShaderHandle);
+    backend->bloomUpsampleShaderHandle = ShaderProgramHandle{};
+  }
+  backend->bloomUpsampleProgram = 0U;
+  if (backend->bloomDownsampleShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->bloomDownsampleShaderHandle);
+    backend->bloomDownsampleShaderHandle = ShaderProgramHandle{};
+  }
+  backend->bloomDownsampleProgram = 0U;
+  if (backend->bloomThresholdShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->bloomThresholdShaderHandle);
+    backend->bloomThresholdShaderHandle = ShaderProgramHandle{};
+  }
+  backend->bloomThresholdProgram = 0U;
+
+  // Destroy SSAO resources.
+  if (backend->ssaoNoiseTexture != 0U && dev != nullptr) {
+    dev->destroy_texture(backend->ssaoNoiseTexture);
+    backend->ssaoNoiseTexture = 0U;
+  }
+  if (backend->ssaoBlurShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->ssaoBlurShaderHandle);
+    backend->ssaoBlurShaderHandle = ShaderProgramHandle{};
+  }
+  backend->ssaoBlurProgram = 0U;
+  if (backend->ssaoShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->ssaoShaderHandle);
+    backend->ssaoShaderHandle = ShaderProgramHandle{};
+  }
+  backend->ssaoProgram = 0U;
+  backend->ssaoAvailable = false;
+
   if (backend->emptyVao != 0U && dev != nullptr) {
     dev->destroy_vertex_array(backend->emptyVao);
     backend->emptyVao = 0U;
@@ -534,6 +890,12 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->gbufferShaderHandle = ShaderProgramHandle{};
   }
   backend->deferredAvailable = false;
+
+  if (backend->fxaaShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->fxaaShaderHandle);
+    backend->fxaaShaderHandle = ShaderProgramHandle{};
+  }
+  backend->fxaaProgram = 0U;
 
   if (backend->tonemapShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->tonemapShaderHandle);
@@ -820,6 +1182,90 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->bind_program(0U);
     gpu_profiler_end_pass(GpuPassId::GBuffer);
 
+    // --- SSAO pass: sample hemisphere, output raw AO ---
+    const bool ssaoEnabled =
+        backend.ssaoAvailable && core::cvar_get_bool("r_ssao", true);
+    if (ssaoEnabled) {
+      gpu_profiler_begin_pass(GpuPassId::SSAO);
+      const std::uint32_t ssaoFbo =
+          pass_resource_framebuffer(passRes.ssaoTexture);
+      dev->bind_framebuffer(ssaoFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      dev->disable_depth_test();
+
+      dev->bind_program(backend.ssaoProgram);
+
+      dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferDepth));
+      dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
+      dev->bind_texture(2, backend.ssaoNoiseTexture);
+
+      if (backend.ssaoDepthLoc >= 0)
+        dev->set_uniform_int(backend.ssaoDepthLoc, 0);
+      if (backend.ssaoNormalLoc >= 0)
+        dev->set_uniform_int(backend.ssaoNormalLoc, 1);
+      if (backend.ssaoNoiseLoc >= 0)
+        dev->set_uniform_int(backend.ssaoNoiseLoc, 2);
+
+      if (backend.ssaoProjectionLoc >= 0)
+        dev->set_uniform_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
+
+      if (backend.ssaoNoiseScaleLoc >= 0) {
+        const float noiseScale[2] = {
+            static_cast<float>(drawableWidth) / 4.0F,
+            static_cast<float>(drawableHeight) / 4.0F};
+        dev->set_uniform_vec2(backend.ssaoNoiseScaleLoc, noiseScale);
+      }
+      if (backend.ssaoRadiusLoc >= 0)
+        dev->set_uniform_float(backend.ssaoRadiusLoc,
+                               core::cvar_get_float("r_ssao_radius"));
+      if (backend.ssaoBiasLoc >= 0)
+        dev->set_uniform_float(backend.ssaoBiasLoc,
+                               core::cvar_get_float("r_ssao_bias"));
+
+      for (int i = 0; i < 32; ++i) {
+        const auto idx = static_cast<std::size_t>(i);
+        if (backend.ssaoSampleLocs[idx] >= 0) {
+          dev->set_uniform_vec3(backend.ssaoSampleLocs[idx],
+                                &backend.ssaoKernel[i * 3]);
+        }
+      }
+
+      dev->bind_vertex_array(backend.emptyVao);
+      dev->draw_arrays_triangles(0, 3);
+
+      dev->bind_texture(0, 0U);
+      dev->bind_texture(1, 0U);
+      dev->bind_texture(2, 0U);
+      dev->bind_vertex_array(0U);
+      dev->bind_program(0U);
+
+      // --- SSAO blur pass ---
+      const std::uint32_t ssaoBlurFbo =
+          pass_resource_framebuffer(passRes.ssaoBlurTexture);
+      dev->bind_framebuffer(ssaoBlurFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+
+      dev->bind_program(backend.ssaoBlurProgram);
+
+      dev->bind_texture(0, pass_resource_gpu_texture(passRes.ssaoTexture));
+      if (backend.ssaoBlurInputLoc >= 0)
+        dev->set_uniform_int(backend.ssaoBlurInputLoc, 0);
+      if (backend.ssaoBlurTexelSizeLoc >= 0) {
+        const float texelSize[2] = {
+            1.0F / static_cast<float>(drawableWidth),
+            1.0F / static_cast<float>(drawableHeight)};
+        dev->set_uniform_vec2(backend.ssaoBlurTexelSizeLoc, texelSize);
+      }
+
+      dev->bind_vertex_array(backend.emptyVao);
+      dev->draw_arrays_triangles(0, 3);
+
+      dev->bind_texture(0, 0U);
+      dev->bind_vertex_array(0U);
+      dev->bind_program(0U);
+      gpu_profiler_end_pass(GpuPassId::SSAO);
+    }
+
     // --- CPU tiled light culling ---
     const std::size_t tileBufferSize =
         compute_tile_buffer_size(drawableWidth, drawableHeight);
@@ -896,12 +1342,17 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       dev->bind_program(backend.deferredLightProgram);
 
-      // Bind G-Buffer textures on units 0-3 and tile on unit 4.
+      // Bind G-Buffer textures on units 0-3, tile on unit 4, SSAO on unit 5.
       dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferAlbedo));
       dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
       dev->bind_texture(2, pass_resource_gpu_texture(passRes.gbufferEmissive));
       dev->bind_texture(3, pass_resource_gpu_texture(passRes.gbufferDepth));
       dev->bind_texture(4, backend.tileLightTex);
+
+      if (ssaoEnabled) {
+        dev->bind_texture(5,
+                          pass_resource_gpu_texture(passRes.ssaoBlurTexture));
+      }
 
       if (backend.dlGBufAlbedoLoc >= 0)
         dev->set_uniform_int(backend.dlGBufAlbedoLoc, 0);
@@ -913,6 +1364,12 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_int(backend.dlGBufDepthLoc, 3);
       if (backend.dlTileLightTexLoc >= 0)
         dev->set_uniform_int(backend.dlTileLightTexLoc, 4);
+
+      if (backend.dlSsaoTextureLoc >= 0)
+        dev->set_uniform_int(backend.dlSsaoTextureLoc, 5);
+      if (backend.dlSsaoEnabledLoc >= 0)
+        dev->set_uniform_int(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
+
       if (backend.dlTileCountXLoc >= 0)
         dev->set_uniform_int(backend.dlTileCountXLoc, tileData.tileCountX);
       if (backend.dlTileCountYLoc >= 0)
@@ -1006,6 +1463,9 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_texture(2, 0U);
       dev->bind_texture(3, 0U);
       dev->bind_texture(4, 0U);
+      if (ssaoEnabled) {
+        dev->bind_texture(5, 0U);
+      }
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
@@ -1140,6 +1600,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     frameStats.gpuGBufferMs = gpu_profiler_pass_ms(GpuPassId::GBuffer);
     frameStats.gpuDeferredLightMs =
         gpu_profiler_pass_ms(GpuPassId::DeferredLighting);
+    frameStats.gpuSsaoMs = gpu_profiler_pass_ms(GpuPassId::SSAO);
 
   } else {
     // ====================================================================
@@ -1308,6 +1769,83 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_end_pass(GpuPassId::Scene);
   }
 
+  // --- Bloom pass (before tonemap, operates on HDR sceneColor) ---
+  const bool bloomAvailable =
+      backend.bloomThresholdProgram != 0U &&
+      backend.bloomDownsampleProgram != 0U &&
+      backend.bloomUpsampleProgram != 0U;
+  const bool bloomEnabled =
+      bloomAvailable && core::cvar_get_bool("r_bloom");
+
+  if (bloomEnabled) {
+    gpu_profiler_begin_pass(GpuPassId::Bloom);
+    ensure_bloom_resources(backend, drawableWidth, drawableHeight);
+
+    const std::uint32_t sceneColorTexBloom =
+        pass_resource_gpu_texture(passRes.sceneColor);
+
+    // Step 1: Threshold — extract bright pixels into mip[0].
+    dev->bind_framebuffer(backend.bloomMipFbos[0]);
+    dev->set_viewport(0, 0, backend.bloomMipWidths[0],
+                      backend.bloomMipHeights[0]);
+    dev->disable_depth_test();
+    dev->bind_program(backend.bloomThresholdProgram);
+    dev->bind_texture(0, sceneColorTexBloom);
+    if (backend.bloomThreshSceneColorLoc >= 0) {
+      dev->set_uniform_int(backend.bloomThreshSceneColorLoc, 0);
+    }
+    if (backend.bloomThreshThresholdLoc >= 0) {
+      dev->set_uniform_float(backend.bloomThreshThresholdLoc,
+                             core::cvar_get_float("r_bloom_threshold"));
+    }
+    dev->bind_vertex_array(backend.emptyVao);
+    dev->draw_arrays_triangles(0, 3);
+
+    // Step 2: Downsample chain.
+    dev->bind_program(backend.bloomDownsampleProgram);
+    for (int i = 1; i < BackendState::kBloomMipLevels; ++i) {
+      dev->bind_framebuffer(backend.bloomMipFbos[i]);
+      dev->set_viewport(0, 0, backend.bloomMipWidths[i],
+                        backend.bloomMipHeights[i]);
+      dev->bind_texture(0, backend.bloomMipTextures[i - 1]);
+      if (backend.bloomDownInputLoc >= 0) {
+        dev->set_uniform_int(backend.bloomDownInputLoc, 0);
+      }
+      if (backend.bloomDownTexelSizeLoc >= 0) {
+        const float ts[2] = {
+            1.0F / static_cast<float>(backend.bloomMipWidths[i - 1]),
+            1.0F / static_cast<float>(backend.bloomMipHeights[i - 1])};
+        dev->set_uniform_vec2(backend.bloomDownTexelSizeLoc, ts);
+      }
+      dev->draw_arrays_triangles(0, 3);
+    }
+
+    // Step 3: Upsample chain — each level is overwritten with the blurred
+    // result from the level below it.
+    dev->bind_program(backend.bloomUpsampleProgram);
+    for (int i = BackendState::kBloomMipLevels - 2; i >= 0; --i) {
+      dev->bind_framebuffer(backend.bloomMipFbos[i]);
+      dev->set_viewport(0, 0, backend.bloomMipWidths[i],
+                        backend.bloomMipHeights[i]);
+      dev->bind_texture(0, backend.bloomMipTextures[i + 1]);
+      if (backend.bloomUpInputLoc >= 0) {
+        dev->set_uniform_int(backend.bloomUpInputLoc, 0);
+      }
+      if (backend.bloomUpTexelSizeLoc >= 0) {
+        const float ts[2] = {
+            1.0F / static_cast<float>(backend.bloomMipWidths[i + 1]),
+            1.0F / static_cast<float>(backend.bloomMipHeights[i + 1])};
+        dev->set_uniform_vec2(backend.bloomUpTexelSizeLoc, ts);
+      }
+      dev->draw_arrays_triangles(0, 3);
+    }
+
+    dev->bind_texture(0, 0U);
+    dev->bind_vertex_array(0U);
+    dev->bind_program(0U);
+    gpu_profiler_end_pass(GpuPassId::Bloom);
+  }
+
   // --- Tonemap pass: HDR scene → LDR final FBO ---
   gpu_profiler_begin_pass(GpuPassId::Tonemap);
   const std::uint32_t finalFbo = pass_resource_framebuffer(passRes.finalColor);
@@ -1326,14 +1864,74 @@ void flush_renderer(CommandBufferView commandBufferView,
   if (backend.tonemapExposureLocation >= 0) {
     dev->set_uniform_float(backend.tonemapExposureLocation, 1.0F);
   }
+  if (backend.tonemapOperatorLocation >= 0) {
+    dev->set_uniform_int(backend.tonemapOperatorLocation,
+                         core::cvar_get_int("r_tonemap_operator"));
+  }
+
+  // Bloom integration: bind bloom mip[0] on texture unit 1.
+  if (bloomEnabled) {
+    dev->bind_texture(1, backend.bloomMipTextures[0]);
+    if (backend.tonemapBloomTextureLoc >= 0) {
+      dev->set_uniform_int(backend.tonemapBloomTextureLoc, 1);
+    }
+    if (backend.tonemapBloomIntensityLoc >= 0) {
+      dev->set_uniform_float(backend.tonemapBloomIntensityLoc,
+                             core::cvar_get_float("r_bloom_intensity"));
+    }
+    if (backend.tonemapBloomEnabledLoc >= 0) {
+      dev->set_uniform_int(backend.tonemapBloomEnabledLoc, 1);
+    }
+  } else {
+    if (backend.tonemapBloomEnabledLoc >= 0) {
+      dev->set_uniform_int(backend.tonemapBloomEnabledLoc, 0);
+    }
+  }
 
   dev->bind_vertex_array(backend.emptyVao);
   dev->draw_arrays_triangles(0, 3);
 
   dev->bind_texture(0, 0U);
+  if (bloomEnabled) {
+    dev->bind_texture(1, 0U);
+  }
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
   gpu_profiler_end_pass(GpuPassId::Tonemap);
+
+  // --- FXAA pass (optional): finalColor → sceneColor (ping-pong) ---
+  g_fxaaAppliedThisFrame = false;
+  if (backend.fxaaProgram != 0U && core::cvar_get_bool("r_fxaa")) {
+    const std::uint32_t sceneFbo =
+        pass_resource_framebuffer(passRes.sceneColor);
+    dev->bind_framebuffer(sceneFbo);
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    dev->disable_depth_test();
+
+    dev->bind_program(backend.fxaaProgram);
+
+    const std::uint32_t finalColorTex =
+        pass_resource_gpu_texture(passRes.finalColor);
+    dev->bind_texture(0, finalColorTex);
+    if (backend.fxaaInputTextureLocation >= 0) {
+      dev->set_uniform_int(backend.fxaaInputTextureLocation, 0);
+    }
+    if (backend.fxaaTexelSizeLocation >= 0) {
+      const float texelSize[2] = {
+          1.0F / static_cast<float>(drawableWidth),
+          1.0F / static_cast<float>(drawableHeight)};
+      dev->set_uniform_vec2(backend.fxaaTexelSizeLocation, texelSize);
+    }
+
+    dev->bind_vertex_array(backend.emptyVao);
+    dev->draw_arrays_triangles(0, 3);
+
+    dev->bind_texture(0, 0U);
+    dev->bind_vertex_array(0U);
+    dev->bind_program(0U);
+
+    g_fxaaAppliedThisFrame = true;
+  }
 
   // --- Prepare back buffer for editor overlay (ImGui) ---
   dev->bind_framebuffer(0U);
@@ -1344,6 +1942,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
+  frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
   g_lastFrameStats = frameStats;
 }
 
@@ -1376,6 +1975,9 @@ CameraState get_active_camera() noexcept { return g_activeCamera; }
 
 std::uint32_t get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
+  if (g_fxaaAppliedThisFrame) {
+    return pass_resource_gpu_texture(passRes.sceneColor);
+  }
   return pass_resource_gpu_texture(passRes.finalColor);
 }
 
