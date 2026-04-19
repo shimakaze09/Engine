@@ -48,7 +48,6 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=${{ matrix.config }}
-
           -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=ON
 
@@ -297,7 +296,6 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
-
           -DENGINE_SANITIZERS=ON
           -DENGINE_BUILD_TESTS=ON
 
@@ -340,7 +338,6 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
-
           -DCMAKE_C_FLAGS="-fsanitize=thread"
           -DCMAKE_CXX_FLAGS="-fsanitize=thread"
           -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
@@ -383,7 +380,6 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
-
           -DCMAKE_C_FLAGS="--coverage"
           -DCMAKE_CXX_FLAGS="--coverage"
           -DCMAKE_EXE_LINKER_FLAGS="--coverage"
@@ -453,7 +449,6 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
-
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
