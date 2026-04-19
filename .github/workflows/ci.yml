@@ -48,7 +48,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=${{ matrix.config }}
-          -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+
           -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=ON
 
@@ -155,7 +155,7 @@ jobs:
           restore-keys: deps-ubuntu-24.04-
 
       - name: Configure (needed for FetchContent headers)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
       - name: Generate binding code (needed by compile_commands.json)
         run: |
@@ -206,7 +206,7 @@ jobs:
           restore-keys: deps-ubuntu-24.04-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
       - name: Generate binding code (needed by compile_commands.json)
         run: |
@@ -264,7 +264,7 @@ jobs:
           restore-keys: deps-ubuntu-24.04-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build (will fail on any warning due to -Werror)
         run: cmake --build build --config Release --parallel
@@ -297,7 +297,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
-          -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+
           -DENGINE_SANITIZERS=ON
           -DENGINE_BUILD_TESTS=ON
 
@@ -340,7 +340,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
-          -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+
           -DCMAKE_C_FLAGS="-fsanitize=thread"
           -DCMAKE_CXX_FLAGS="-fsanitize=thread"
           -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
@@ -383,7 +383,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
-          -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+
           -DCMAKE_C_FLAGS="--coverage"
           -DCMAKE_CXX_FLAGS="--coverage"
           -DCMAKE_EXE_LINKER_FLAGS="--coverage"
@@ -453,7 +453,7 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
-          -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
+
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
