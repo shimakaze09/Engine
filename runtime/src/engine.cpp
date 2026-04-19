@@ -44,6 +44,7 @@
 #include "engine/runtime/render_prep_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
+#include "engine/runtime/spring_arm_update.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
@@ -1669,6 +1670,29 @@ void run(std::uint32_t maxFrames) noexcept {
       // Flush mutations queued by on_collision / on_end_play callbacks so they
       // apply this frame rather than one frame late.
       scripting::flush_deferred_mutations();
+
+      // Evaluate spring arm cameras → camera manager → renderer camera.
+      if (isPlaying) {
+        runtime::update_spring_arm_cameras(*world,
+                                           static_cast<float>(kFixedDeltaSeconds));
+        math::Vec3 camPos, camTarget, camUp;
+        float camFov = 0.0F;
+        float camNear = 0.0F;
+        float camFar = 0.0F;
+        world->camera_manager().evaluate(
+            static_cast<float>(kFixedDeltaSeconds), &camPos, &camTarget, &camUp,
+            &camFov, &camNear, &camFar);
+        if (world->camera_manager().camera_count() > 0U) {
+          renderer::CameraState cam{};
+          cam.position = camPos;
+          cam.target = camTarget;
+          cam.up = camUp;
+          cam.fovRadians = camFov;
+          cam.nearPlane = camNear;
+          cam.farPlane = camFar;
+          renderer::set_active_camera(cam);
+        }
+      }
 
       // Handle deferred scene operations requested from Lua.
       if (scripting::has_pending_scene_op()) {

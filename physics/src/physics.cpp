@@ -19,7 +19,6 @@
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
-
 namespace engine::physics {
 
 // Storage for convex hull data.  Limited to 256 active hulls.
@@ -373,6 +372,90 @@ engine::math::Vec3 heightfield_get_normal(const HeightfieldData &hf,
   return n;
 }
 
+// Closest point on triangle (a, b, c) to point p.
+// Voronoi region projection (Christer Ericson, Real-Time Collision Detection).
+engine::math::Vec3 closest_point_on_triangle(
+    const engine::math::Vec3 &p, const engine::math::Vec3 &a,
+    const engine::math::Vec3 &b, const engine::math::Vec3 &c) noexcept {
+  const engine::math::Vec3 ab = engine::math::sub(b, a);
+  const engine::math::Vec3 ac = engine::math::sub(c, a);
+  const engine::math::Vec3 ap = engine::math::sub(p, a);
+  const float d1 = engine::math::dot(ab, ap);
+  const float d2 = engine::math::dot(ac, ap);
+  if (d1 <= 0.0F && d2 <= 0.0F) {
+    return a; // vertex A region
+  }
+
+  const engine::math::Vec3 bp = engine::math::sub(p, b);
+  const float d3 = engine::math::dot(ab, bp);
+  const float d4 = engine::math::dot(ac, bp);
+  if (d3 >= 0.0F && d4 <= d3) {
+    return b; // vertex B region
+  }
+
+  const float vc = d1 * d4 - d3 * d2;
+  if (vc <= 0.0F && d1 >= 0.0F && d3 <= 0.0F) {
+    const float v = d1 / (d1 - d3);
+    return engine::math::add(a, engine::math::mul(ab, v)); // edge AB
+  }
+
+  const engine::math::Vec3 cp2 = engine::math::sub(p, c);
+  const float d5 = engine::math::dot(ab, cp2);
+  const float d6 = engine::math::dot(ac, cp2);
+  if (d6 >= 0.0F && d5 <= d6) {
+    return c; // vertex C region
+  }
+
+  const float vb = d5 * d2 - d1 * d6;
+  if (vb <= 0.0F && d2 >= 0.0F && d6 <= 0.0F) {
+    const float w = d2 / (d2 - d6);
+    return engine::math::add(a, engine::math::mul(ac, w)); // edge AC
+  }
+
+  const float va = d3 * d6 - d5 * d4;
+  if (va <= 0.0F && (d4 - d3) >= 0.0F && (d5 - d6) >= 0.0F) {
+    const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return engine::math::add(
+        b, engine::math::mul(engine::math::sub(c, b), w)); // edge BC
+  }
+
+  const float denom = 1.0F / (va + vb + vc);
+  const float v2 = vb * denom;
+  const float w2 = vc * denom;
+  return engine::math::add(
+      a, engine::math::add(engine::math::mul(ab, v2),
+                           engine::math::mul(ac, w2))); // interior
+}
+
+// Map world X/Z to fractional heightfield grid coordinates.
+void heightfield_world_to_grid(const HeightfieldData &hf,
+                               const engine::math::Vec3 &hfPos, float worldX,
+                               float worldZ, float &outCol,
+                               float &outRow) noexcept {
+  const float totalW = static_cast<float>(hf.columns - 1U) * hf.spacingX;
+  const float totalD = static_cast<float>(hf.rows - 1U) * hf.spacingZ;
+  const float localX = worldX - (hfPos.x - totalW * 0.5F);
+  const float localZ = worldZ - (hfPos.z - totalD * 0.5F);
+  outCol = localX / hf.spacingX;
+  outRow = localZ / hf.spacingZ;
+}
+
+// Convert grid coordinates to world-space vertex position.
+engine::math::Vec3 heightfield_grid_to_world(const HeightfieldData &hf,
+                                             const engine::math::Vec3 &hfPos,
+                                             std::size_t col,
+                                             std::size_t row) noexcept {
+  const float totalW = static_cast<float>(hf.columns - 1U) * hf.spacingX;
+  const float totalD = static_cast<float>(hf.rows - 1U) * hf.spacingZ;
+  const float wx =
+      (hfPos.x - totalW * 0.5F) + static_cast<float>(col) * hf.spacingX;
+  const float wz =
+      (hfPos.z - totalD * 0.5F) + static_cast<float>(row) * hf.spacingZ;
+  const float wy = hfPos.y + hf.heights[row * hf.columns + col];
+  return engine::math::Vec3(wx, wy, wz);
+}
+
+
 // Ray-vs-heightfield intersection by grid marching.
 bool ray_intersects_heightfield(const engine::math::Ray &ray,
                                 const engine::math::Vec3 &hfPos,
@@ -651,6 +734,10 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
 }
 
 } // namespace
+
+const ConvexHullData *get_hull_data_ptr(std::uint32_t entityIndex) noexcept {
+  return find_hull_data(entityIndex);
+}
 
 bool step_physics(runtime::World &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
@@ -1016,27 +1103,156 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   continue;
                 }
 
-                // Sample heightfield at object XZ.
-                const float terrainY =
-                    heightfield_get_height(*hf, hfPos, objPos.x, objPos.z);
-
-                // Compute the bottom Y of the object.
-                float objBottomY = objPos.y;
+                // Compute object radius for footprint.
+                float objRadius = 0.0F;
                 if (objCol.shape == runtime::ColliderShape::Sphere) {
-                  objBottomY -= objCol.halfExtents.x;
+                  objRadius = objCol.halfExtents.x;
                 } else if (objCol.shape == runtime::ColliderShape::Capsule) {
-                  objBottomY -= (objCol.halfExtents.y + objCol.halfExtents.x);
+                  objRadius = objCol.halfExtents.y + objCol.halfExtents.x;
                 } else {
-                  objBottomY -= objCol.halfExtents.y;
+                  objRadius = engine::math::length(objCol.halfExtents);
                 }
 
-                if (objBottomY >= terrainY) {
-                  continue; // not touching
+                // Map object footprint to grid cell range.
+                float gColMin = 0.0F;
+                float gRowMin = 0.0F;
+                float gColMax = 0.0F;
+                float gRowMax = 0.0F;
+                heightfield_world_to_grid(*hf, hfPos,
+                                          objPos.x - objRadius,
+                                          objPos.z - objRadius,
+                                          gColMin, gRowMin);
+                heightfield_world_to_grid(*hf, hfPos,
+                                          objPos.x + objRadius,
+                                          objPos.z + objRadius,
+                                          gColMax, gRowMax);
+
+                const auto cMin = static_cast<std::size_t>(
+                    std::max(0.0F, std::floor(gColMin)));
+                const auto rMin = static_cast<std::size_t>(
+                    std::max(0.0F, std::floor(gRowMin)));
+                const auto cMax = static_cast<std::size_t>(std::min(
+                    static_cast<float>(hf->columns - 2U), std::floor(gColMax)));
+                const auto rMax = static_cast<std::size_t>(std::min(
+                    static_cast<float>(hf->rows - 2U), std::floor(gRowMax)));
+
+                // Per-triangle sweep: track deepest penetration.
+                float bestOverlap = 0.0F;
+                engine::math::Vec3 bestNormal(0.0F, 1.0F, 0.0F);
+                engine::math::Vec3 bestContact = objPos;
+                bool anyContact = false;
+
+                for (std::size_t r = rMin; r <= rMax; ++r) {
+                  for (std::size_t c = cMin; c <= cMax; ++c) {
+                    const engine::math::Vec3 v00 =
+                        heightfield_grid_to_world(*hf, hfPos, c, r);
+                    const engine::math::Vec3 v10 =
+                        heightfield_grid_to_world(*hf, hfPos, c + 1U, r);
+                    const engine::math::Vec3 v01 =
+                        heightfield_grid_to_world(*hf, hfPos, c, r + 1U);
+                    const engine::math::Vec3 v11 =
+                        heightfield_grid_to_world(*hf, hfPos, c + 1U, r + 1U);
+
+                    engine::math::Vec3 triVerts[2][3] = {
+                        {v00, v10, v01}, {v10, v11, v01}};
+
+                    for (int ti = 0; ti < 2; ++ti) {
+                      // Upward-facing triangle face normal.
+                      const engine::math::Vec3 e1 = engine::math::sub(
+                          triVerts[ti][1], triVerts[ti][0]);
+                      const engine::math::Vec3 e2 = engine::math::sub(
+                          triVerts[ti][2], triVerts[ti][0]);
+                      engine::math::Vec3 faceN =
+                          engine::math::cross(e1, e2);
+                      const float faceLen = engine::math::length(faceN);
+                      if (faceLen < 1e-10F) {
+                        continue; // degenerate triangle
+                      }
+                      faceN = engine::math::mul(faceN, 1.0F / faceLen);
+                      if (faceN.y < 0.0F) {
+                        faceN = engine::math::mul(faceN, -1.0F);
+                      }
+
+                      float tOverlap = 0.0F;
+
+                      if (objCol.shape == runtime::ColliderShape::Sphere) {
+                        const engine::math::Vec3 cp =
+                            closest_point_on_triangle(
+                                objPos, triVerts[ti][0], triVerts[ti][1],
+                                triVerts[ti][2]);
+                        const engine::math::Vec3 diff =
+                            engine::math::sub(objPos, cp);
+                        if (engine::math::dot(diff, diff) >=
+                            objCol.halfExtents.x * objCol.halfExtents.x) {
+                          continue;
+                        }
+                        const float signedDist = engine::math::dot(
+                            engine::math::sub(objPos, triVerts[ti][0]), faceN);
+                        tOverlap = objCol.halfExtents.x - signedDist;
+                        if (tOverlap <= 0.0F) {
+                          continue;
+                        }
+                      } else if (objCol.shape ==
+                                 runtime::ColliderShape::Capsule) {
+                        const float halfH = objCol.halfExtents.y;
+                        const float capR = objCol.halfExtents.x;
+                        const engine::math::Vec3 top(objPos.x,
+                                                     objPos.y + halfH,
+                                                     objPos.z);
+                        const engine::math::Vec3 bot(objPos.x,
+                                                     objPos.y - halfH,
+                                                     objPos.z);
+                        engine::math::Vec3 cpTri =
+                            closest_point_on_triangle(
+                                objPos, triVerts[ti][0], triVerts[ti][1],
+                                triVerts[ti][2]);
+                        engine::math::Vec3 cpSeg{};
+                        closest_point_on_segment(bot, top, cpTri, cpSeg);
+                        const engine::math::Vec3 cpTri2 =
+                            closest_point_on_triangle(
+                                cpSeg, triVerts[ti][0], triVerts[ti][1],
+                                triVerts[ti][2]);
+                        const engine::math::Vec3 diff2 =
+                            engine::math::sub(cpSeg, cpTri2);
+                        if (engine::math::dot(diff2, diff2) >=
+                            capR * capR) {
+                          continue;
+                        }
+                        const float signedDist = engine::math::dot(
+                            engine::math::sub(cpSeg, triVerts[ti][0]), faceN);
+                        tOverlap = capR - signedDist;
+                        if (tOverlap <= 0.0F) {
+                          continue;
+                        }
+                      } else {
+                        const float signedDist = engine::math::dot(
+                            engine::math::sub(objPos, triVerts[ti][0]), faceN);
+                        const float effR =
+                            std::abs(faceN.x) * objCol.halfExtents.x +
+                            std::abs(faceN.y) * objCol.halfExtents.y +
+                            std::abs(faceN.z) * objCol.halfExtents.z;
+                        tOverlap = effR - signedDist;
+                        if (tOverlap <= 0.0F) {
+                          continue;
+                        }
+                      }
+
+                      if (tOverlap > bestOverlap) {
+                        bestOverlap = tOverlap;
+                        bestNormal = faceN;
+                        bestContact =
+                            closest_point_on_triangle(objPos, triVerts[ti][0],
+                                                      triVerts[ti][1],
+                                                      triVerts[ti][2]);
+                        anyContact = true;
+                      }
+                    }
+                  }
                 }
 
-                const float overlap = terrainY - objBottomY;
-                const engine::math::Vec3 normal =
-                    heightfield_get_normal(*hf, hfPos, objPos.x, objPos.z);
+                if (!anyContact) {
+                  continue;
+                }
 
                 record_collision_pair(world, entityA.index, entityB.index);
                 {
@@ -1054,29 +1270,17 @@ bool resolve_collisions(runtime::World &world) noexcept {
                   continue;
                 }
 
-                // Contact point is at the terrain surface below the object.
-                const engine::math::Vec3 contactPt(objPos.x, terrainY,
-                                                   objPos.z);
-
-                // Ensure normal points from A to B.
-                engine::math::Vec3 resolveNormal = normal;
-                if (aIsHF) {
-                  // HF is A, object is B. Normal should push B up (away
-                  // from terrain).  heightfield_get_normal already points
-                  // up, which is A→B, so keep as-is.
-                } else {
-                  // HF is B, object is A. Normal should point from A to B.
-                  // Terrain normal points up = from B toward A, so negate.
-                  resolveNormal = engine::math::mul(normal, -1.0F);
+                engine::math::Vec3 resolveNormal = bestNormal;
+                if (!aIsHF) {
+                  resolveNormal = engine::math::mul(bestNormal, -1.0F);
                 }
 
                 resolve_contact(world, simToken, entityA, entityB, bodyA, bodyB,
                                 invMassA, invMassB, invMassSum, resolveNormal,
-                                overlap, contactPt, colliderA, colliderB);
+                                bestOverlap, bestContact, colliderA, colliderB);
                 continue;
               }
-
-              // -----------------------------------------------------------------------
+// -----------------------------------------------------------------------
               // ConvexHull vs anything (GJK/EPA generic path)
               // -----------------------------------------------------------------------
               if (aIsConvex || bIsConvex) {

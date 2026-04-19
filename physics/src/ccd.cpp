@@ -7,6 +7,7 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
+#include "engine/physics/physics.h"
 #include "engine/runtime/world.h"
 
 #include <algorithm>
@@ -64,11 +65,50 @@ float sphere_separating_distance(const math::Vec3 &posA, float radiusA,
   return dist - (radiusA + radiusB);
 }
 
+// Resolve support function and opaque data for a collider shape.
+SupportFn resolve_support(const runtime::Collider &col) noexcept {
+  switch (col.shape) {
+  case runtime::ColliderShape::ConvexHull:
+    return &support_convex_hull;
+  case runtime::ColliderShape::Sphere:
+    return &support_sphere;
+  case runtime::ColliderShape::Capsule:
+    return &support_capsule;
+  case runtime::ColliderShape::AABB:
+  default:
+    return &support_aabb;
+  }
+}
+
+const void *resolve_support_data(const runtime::Collider &col,
+                                 std::uint32_t entityIndex,
+                                 float *storage) noexcept {
+  switch (col.shape) {
+  case runtime::ColliderShape::ConvexHull:
+    return get_hull_data_ptr(entityIndex);
+  case runtime::ColliderShape::Sphere:
+    storage[0] = col.halfExtents.x;
+    return storage;
+  case runtime::ColliderShape::Capsule:
+    storage[0] = col.halfExtents.x; // radius
+    storage[1] = col.halfExtents.y; // halfHeight
+    return storage;
+  case runtime::ColliderShape::AABB:
+  default:
+    std::memcpy(storage, &col.halfExtents, sizeof(float) * 3);
+    return storage;
+  }
+}
+
 // Generic separating distance between two colliders at given positions.
 // Positive means separated, negative means overlapping.
-float separating_distance(const runtime::Collider &colA, const math::Vec3 &posA,
+// Uses GJK for shape-aware distance; falls back to AABB when GJK data
+// is unavailable (e.g. missing hull).
+float separating_distance(const runtime::Collider &colA,
+                          const math::Vec3 &posA, std::uint32_t entityIdxA,
                           const runtime::Collider &colB,
-                          const math::Vec3 &posB) noexcept {
+                          const math::Vec3 &posB,
+                          std::uint32_t entityIdxB) noexcept {
   const bool aIsSphere = (colA.shape == runtime::ColliderShape::Sphere);
   const bool bIsSphere = (colB.shape == runtime::ColliderShape::Sphere);
 
@@ -77,18 +117,53 @@ float separating_distance(const runtime::Collider &colA, const math::Vec3 &posA,
                                       colB.halfExtents.x);
   }
 
-  // For all other shape combinations, approximate using AABB bounds.
+  // Use GJK for shape-accurate distance.
+  alignas(16) float storA[4]{};
+  alignas(16) float storB[4]{};
+  const void *dataA = resolve_support_data(colA, entityIdxA, storA);
+  const void *dataB = resolve_support_data(colB, entityIdxB, storB);
+
+  if ((dataA != nullptr) && (dataB != nullptr)) {
+    SupportFn supA = resolve_support(colA);
+    SupportFn supB = resolve_support(colB);
+    const GjkResult gjk = gjk_epa(dataA, posA, supA, dataB, posB, supB);
+    if (gjk.intersecting) {
+      return -gjk.depth; // overlapping → negative distance
+    }
+    // GJK says not intersecting — compute conservative distance from
+    // the Minkowski difference support.  Use the AABB lower bound.
+  }
+
+  // Fallback: AABB-based distance.
   const math::Vec3 heA = broadphase_half_extents_ccd(colA);
   const math::Vec3 heB = broadphase_half_extents_ccd(colB);
   return aabb_separating_distance(posA, heA, posB, heB);
 }
 
 // Compute the contact normal between two overlapping shapes (A hitting B).
-// Returns a normal pointing from B toward A (outward from surface being hit).
-math::Vec3 contact_normal_between(const runtime::Collider & /*colA*/,
+// Uses GJK/EPA for shape-accurate normal; falls back to center-to-center.
+math::Vec3 contact_normal_between(const runtime::Collider &colA,
                                   const math::Vec3 &posA,
-                                  const runtime::Collider & /*colB*/,
-                                  const math::Vec3 &posB) noexcept {
+                                  std::uint32_t entityIdxA,
+                                  const runtime::Collider &colB,
+                                  const math::Vec3 &posB,
+                                  std::uint32_t entityIdxB) noexcept {
+  alignas(16) float storA[4]{};
+  alignas(16) float storB[4]{};
+  const void *dataA = resolve_support_data(colA, entityIdxA, storA);
+  const void *dataB = resolve_support_data(colB, entityIdxB, storB);
+
+  if ((dataA != nullptr) && (dataB != nullptr)) {
+    SupportFn supA = resolve_support(colA);
+    SupportFn supB = resolve_support(colB);
+    const GjkResult gjk = gjk_epa(dataA, posA, supA, dataB, posB, supB);
+    if (gjk.intersecting && math::length(gjk.normal) > 1e-8F) {
+      // GJK normal points from A→B.  CCD wants normal from B→A.
+      return math::mul(gjk.normal, -1.0F);
+    }
+  }
+
+  // Fallback: center-to-center direction.
   const math::Vec3 delta = math::sub(posA, posB);
   const float len = math::length(delta);
   if (len > 1e-8F) {
@@ -230,7 +305,8 @@ CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
       // Position of B (assumed stationary in relative frame at otherPos).
       const math::Vec3 &posB = otherTransform.position;
 
-      const float sep = separating_distance(collider, posA, other, posB);
+      const float sep = separating_distance(collider, posA, entity.index,
+                                            other, posB, entities[i].index);
 
       if (sep <= kTolerance) {
         // Contact (or overlap) at tLo.
@@ -254,8 +330,9 @@ CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
 
       const math::Vec3 hitPosA =
           math::add(transform.position, math::mul(relVel, tLo * dt));
-      bestNormal = contact_normal_between(collider, hitPosA, other,
-                                          otherTransform.position);
+      bestNormal = contact_normal_between(collider, hitPosA, entity.index,
+                                          other, otherTransform.position,
+                                          entities[i].index);
       bestContactPt =
           math::mul(math::add(hitPosA, otherTransform.position), 0.5F);
       bestHitEntity = entities[i].index;

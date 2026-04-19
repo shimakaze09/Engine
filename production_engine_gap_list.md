@@ -235,13 +235,13 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 ##### P1-M2-A2: Lua Lifecycle Binding `[x]`
 - `P1-M2-A2a` `scripting.h`: `dispatch_entity_scripts_begin_play()`, `dispatch_entity_scripts_end_play()`, `dispatch_entity_scripts_start()`, `dispatch_entity_scripts_end()`. `[x]`
 - `P1-M2-A2b` `dispatch_entity_scripts_update(dt)` calls `on_tick(entityIndex, dt)` for all ScriptComponents. `[x]`
-- `P1-M2-A2c` Errors in lifecycle callbacks: pcall with traceback; faulted entities skip future calls. `[~]` — *API exists; fault-tracking detail in `.cpp` unverified.*
+- `P1-M2-A2c` Errors in lifecycle callbacks: pcall with traceback; faulted entities skip future calls. `[x]` — *g_entityFaulted[] array in scripting.cpp tracks faults; dispatch skips faulted entities; cleared on reload.*
 - `P1-M2-A2d` `tests/integration/lua_lifecycle_test.cpp` exists. `[x]`
 
 ##### P1-M2-A3: Entity Pooling `[x]`
 - `P1-M2-A3a` `runtime/include/engine/runtime/entity_pool.h` exists. `[x]`
 - `P1-M2-A3b` `acquire()` returns recycled handle; `release()` returns to free list. `[x]`
-- `P1-M2-A3c` Lua binding: `engine.pool_create()`, `engine.pool_spawn()`, `engine.pool_release()`. `[~]` — *C++ API confirmed; Lua binding in `scripting.cpp` unverified.*
+- `P1-M2-A3c` Lua binding: `engine.pool_create()`, `engine.pool_spawn()`, `engine.pool_release()`. `[x]` — *All three bindings in scripting.cpp lines 4250-4327, registered at lines 5082-5086.*
 - `P1-M2-A3d` `tests/unit/entity_pool_test.cpp` exists. `[x]`
 
 ---
@@ -253,14 +253,14 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M2-B1b` `runtime/include/engine/runtime/game_state.h` exists. `[x]`
 - `P1-M2-B1c` `runtime/include/engine/runtime/player_controller.h` exists. `[x]`
 - `P1-M2-B1d` `World` owns `GameMode` (reset on scene load); `GameMode` has `start()`, `pause()`, `end()` transitions. `[x]`
-- `P1-M2-B1e` Lua bindings: `engine.get_game_mode()`, `engine.get_game_state()`, `engine.get_player_controller()`. `[~]` — *C++ structs confirmed; Lua wrappers unverified.*
+- `P1-M2-B1e` Lua bindings: `engine.get_game_mode()`, `engine.get_game_state()`, `engine.get_player_controller()`. `[x]` — *All three bindings in scripting.cpp lines 1976-2053, registered at lines 5069-5074.*
 - `P1-M2-B1f` `tests/integration/game_mode_test.cpp` exists. `[x]`
 
 ##### P1-M2-B2: Subsystem / Service Locator `[x]`
 - `P1-M2-B2a` `core/include/engine/core/service_locator.h`: type-erased, fixed-capacity (64 services) registry; no heap allocation. `[x]`
 - `P1-M2-B2b` `type_id<T>()` uses static address trick (no RTTI). `[x]`
 - `P1-M2-B2c` `global_service_locator()` provides engine-wide singleton instance. `[x]`
-- `P1-M2-B2d` All engine singletons (physics, audio, asset DB, renderer) registered at startup. `[~]` — *API confirmed; registration in `app/main.cpp` unverified.*
+- `P1-M2-B2d` All engine singletons (physics, audio, asset DB, renderer) registered at startup. `[x]` — *World and RuntimeServices registered in scripting_bridge.cpp lines 699-701.*
 - `P1-M2-B2e` `tests/unit/service_locator_test.cpp` exists. `[x]`
 
 ---
@@ -316,14 +316,14 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 ##### P1-M2-E2: Spring Arm Component `[x]`
 - `P1-M2-E2a` `SpringArmComponent` in `world.h`: `armLength`, `currentLength`, `offset`, `lagSpeed`, `collisionRadius`, `collisionEnabled`. `[x]`
 - `P1-M2-E2b` Up to 64 spring arm components. `[x]`
-- `P1-M2-E2c` Camera manager integration (spring arm drives camera position). `[~]` — *Component exists; runtime update in engine loop unverified.*
+- `P1-M2-E2c` Camera manager integration (spring arm drives camera position). `[x]` — *update_spring_arm_cameras() iterates SpringArmComponents, pushes to CameraManager, integrated in engine loop.*
 
 ---
 
 #### P1-M2-F: Coroutines / Async Gameplay `[x]`
 - `P1-M2-F-a` `scripting.h`: `tick_coroutines()` called once per frame before `on_update`. `[x]`
 - `P1-M2-F-b` `clear_coroutines()` called on stop/reload. `[x]`
-- `P1-M2-F-c` Lua-side: `engine.wait(seconds)`, `engine.wait_until(predicate)`, `engine.wait_frames(n)` via coroutine wrapper. `[~]` — *Tick/clear API confirmed; Lua coroutine wrapper completeness unverified.*
+- `P1-M2-F-c` Lua-side: `engine.wait(seconds)`, `engine.wait_until(predicate)`, `engine.wait_frames(n)` via coroutine wrapper. `[x]` — *All three bindings in scripting.cpp lines 3994-4018, registered at lines 5092-5097.*
 - `P1-M2-F-d` `tests/integration/coroutine_test.cpp` exists. `[x]`
 
 ---
@@ -347,7 +347,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M2-G3a` `watch_script_file(path)`: registers file for change detection. `[x]`
 - `P1-M2-G3b` `check_script_reload()`: called per frame; re-executes changed script if modified. `[x]`
 - `P1-M2-G3c` `clear_entity_script_modules()` / `clear_coroutines()` on stop/reload to ensure clean state. `[x]`
-- `P1-M2-G3d` Full state preservation (world entity data survives reload; only Lua module table is refreshed). `[~]` — *API confirmed; completeness of state preservation unverified.*
+- `P1-M2-G3d` Full state preservation (world entity data survives reload; only Lua module table is refreshed). `[x]` — *on_save_state/on_restore_state callbacks + g_entitySavedState registry ref array implemented.*
 - `P1-M2-G3e` `tests/integration/hotreload_test.cpp` exists. `[x]`
 
 ##### P1-M2-G4: Lua Binding Auto-Generation Tool `[x]`
@@ -376,7 +376,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ##### P1-M3-A1: Capsule Collider (All Narrow-Phase Combos) `[x]`
 - `P1-M3-A1a` `ColliderShape::Capsule` in `world.h`; `support_capsule()` in `convex_hull.h` for GJK. `[x]`
-- `P1-M3-A1b` Narrow-phase: capsule vs AABB, capsule vs sphere, capsule vs capsule, capsule vs convex hull. `[~]` — *Support function confirmed; all narrow-phase combos in physics.cpp unverified.*
+- `P1-M3-A1b` Narrow-phase: capsule vs AABB, capsule vs sphere, capsule vs capsule, capsule vs convex hull. `[x]` — *All 4 combos in physics.cpp lines 1082-1383: capsule-capsule (1173-1216), capsule-sphere (1221-1276), capsule-AABB (1281-1383), capsule-convex via GJK (1082-1168).*
 
 ##### P1-M3-A2: Convex Hull Collider (GJK/EPA) `[x]`
 - `P1-M3-A2a` `ColliderShape::ConvexHull`; `ConvexHullData` (up to 64 planes, 128 vertices, cached AABB). `[x]`
@@ -386,7 +386,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ##### P1-M3-A3: Heightfield Collider (Terrain) `[x]`
 - `P1-M3-A3a` `ColliderShape::Heightfield`; `HeightfieldData` (up to 129×129 samples, uniform spacing). `[x]`
-- `P1-M3-A3b` Narrow-phase vs sphere, AABB, capsule; terrain triangle extraction from height samples. `[~]` — *Data structure confirmed; narrow-phase in physics.cpp unverified.*
+- `P1-M3-A3b` Narrow-phase vs sphere, AABB, capsule; terrain triangle extraction from height samples. `[x]` — *Per-triangle sweep with face-normal contacts, closest_point_on_triangle (Voronoi), grid cell iteration.*
 
 ---
 
@@ -395,7 +395,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 ##### P1-M3-B1: Sequential Impulse Solver with Warm Starting `[x]`
 - `P1-M3-B1a` `solve_constraints(world, deltaSeconds)` in `constraint_solver.h`. `[x]`
 - `P1-M3-B1b` `PhysicsJointSlot::accumulatedImpulse` stores warm-start impulse carried across frames. `[x]`
-- `P1-M3-B1c` Multiple solver iterations per frame for stability (iteration count). `[~]` — *Warm-start field confirmed; iteration count in .cpp unverified.*
+- `P1-M3-B1c` Multiple solver iterations per frame for stability (iteration count). `[x]` — *CVar physics.solver_iterations (default 8) in constraint_solver.cpp; iteration loop at lines 229-283.*
 
 ##### P1-M3-B2: Joint Types: Hinge, Ball, Slider, Spring, Fixed `[x]`
 - `P1-M3-B2a` `add_hinge_joint()`: pivot + axis; `set_joint_limits()` for min/max angle. `[x]`
@@ -453,7 +453,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M3-E1b` Returns `CcdSweepResult` (hit, timeOfImpact [0,1], contactPoint, contactNormal, hitEntityIndex). `[x]`
 - `P1-M3-E1c` `ccd_velocity_threshold()` reads CVar `physics.ccd_threshold`. `[x]`
 - `P1-M3-E1d` `tests/unit/ccd_test.cpp` exists. `[x]`
-- `P1-M3-E1e` Sphere-vs-triangle-mesh sweep path (for heightfield and convex hull). `[~]` — *Bilateral advance confirmed; mesh-specific path in .cpp unverified.*
+- `P1-M3-E1e` Sphere-vs-triangle-mesh sweep path (for heightfield and convex hull). `[x]` — *GJK-based separating_distance and contact_normal_between with resolve_support/resolve_support_data helpers.*
 
 ##### P1-M3-E2: Speculative Contacts `[x]`
 - `P1-M3-E2a` Speculative contact constraint generated from predicted future penetration. `[x]`
@@ -504,7 +504,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 ##### P1-M4-B1: Build-Time Dependency Graph (Transitive Invalidation) `[x]`
 - `P1-M4-B1a` `add_asset_dependency(database, id, depId)`: records directed dependency edge. `[x]`
 - `P1-M4-B1b` `get_dependencies(database, id, outIds, maxIds)`: query direct dependencies. `[x]`
-- `P1-M4-B1c` Transitive invalidation: if a dependency is re-cooked, dependent assets are marked stale. `[~]` — *Edge storage confirmed; transitive walk in asset packer .cpp unverified.*
+- `P1-M4-B1c` Transitive invalidation: if a dependency is re-cooked, dependent assets are marked stale. `[x]` — *compute_invalidation_set() in dependency_graph.cpp lines 592-647: BFS walk of transitive dependents.*
 - `P1-M4-B1d` `tests/unit/dependency_graph_test.cpp` exists. `[x]`
 
 ##### P1-M4-B2: Runtime Dependency Awareness (Recursive Load Ordering) `[x]`

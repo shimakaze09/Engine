@@ -138,6 +138,33 @@ std::size_t g_entityScriptModuleCount = 0U;
 constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
 bool g_entityFaulted[kMaxFaultedEntities]{};
 
+// Per-entity saved state for hot-reload (Lua registry references).
+// Before reload, on_save_state(entity) is called; return value stored here.
+// After reload, on_restore_state(entity, state) is called to hand it back.
+int g_entitySavedState[kMaxFaultedEntities]{};
+bool g_entitySavedStateInit = false;
+
+void init_entity_saved_state() noexcept {
+  if (!g_entitySavedStateInit) {
+    for (auto &ref : g_entitySavedState) {
+      ref = LUA_NOREF;
+    }
+    g_entitySavedStateInit = true;
+  }
+}
+
+void clear_entity_saved_state() noexcept {
+  if (g_state == nullptr) {
+    return;
+  }
+  for (auto &ref : g_entitySavedState) {
+    if (ref != LUA_NOREF) {
+      luaL_unref(g_state, LUA_REGISTRYINDEX, ref);
+      ref = LUA_NOREF;
+    }
+  }
+}
+
 enum class DeferredMutationType : std::uint8_t {
   DestroyEntity,
   SetTransform,
@@ -4347,6 +4374,50 @@ int get_or_load_entity_script_module(const char *path) noexcept {
       const std::int64_t currentMtime = get_file_mtime(path);
       if ((currentMtime != 0) && (mod.mtime != 0) &&
           (currentMtime != mod.mtime)) {
+        // Save per-entity state before replacing the old module.
+        init_entity_saved_state();
+        if ((g_world != nullptr) && (mod.registryRef != LUA_NOREF)) {
+          g_world->for_each<runtime::ScriptComponent>(
+              [&mod](runtime::Entity entity,
+                     const runtime::ScriptComponent &sc) noexcept {
+                if (std::strcmp(sc.scriptPath, mod.path) != 0) {
+                  return;
+                }
+                if (entity.index >= kMaxFaultedEntities) {
+                  return;
+                }
+                // Call on_save_state(entity_id) on old module.
+                lua_rawgeti(g_state, LUA_REGISTRYINDEX, mod.registryRef);
+                if (!lua_istable(g_state, -1)) {
+                  lua_pop(g_state, 1);
+                  return;
+                }
+                lua_getfield(g_state, -1, "on_save_state");
+                if (!lua_isfunction(g_state, -1)) {
+                  lua_pop(g_state, 2);
+                  return;
+                }
+                lua_remove(g_state, -2); // remove module table
+                lua_pushinteger(g_state,
+                                static_cast<lua_Integer>(entity.index));
+                refresh_lua_hook();
+                if (lua_pcall(g_state, 1, 1, 0) != LUA_OK) {
+                  log_lua_error("on_save_state");
+                  return;
+                }
+                if (lua_istable(g_state, -1)) {
+                  if (g_entitySavedState[entity.index] != LUA_NOREF) {
+                    luaL_unref(g_state, LUA_REGISTRYINDEX,
+                               g_entitySavedState[entity.index]);
+                  }
+                  g_entitySavedState[entity.index] =
+                      luaL_ref(g_state, LUA_REGISTRYINDEX);
+                } else {
+                  lua_pop(g_state, 1);
+                }
+              });
+        }
+
         if (luaL_loadfile(g_state, path) != LUA_OK) {
           log_lua_error("reload entity script");
           return mod.registryRef;
@@ -5401,6 +5472,8 @@ void shutdown_scripting() noexcept {
       luaL_unref(g_state, LUA_REGISTRYINDEX, g_persistRef);
       g_persistRef = LUA_NOREF;
     }
+    // Release saved entity state refs.
+    clear_entity_saved_state();
     // Release all timer Lua refs before closing.
     ensure_timer_refs_init();
     for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
