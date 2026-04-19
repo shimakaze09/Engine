@@ -171,7 +171,7 @@ public:
   static constexpr std::size_t kMaxSpringArmComponents = 64U;
   static constexpr std::size_t kMaxPointLightComponents = 128U;
   static constexpr std::size_t kMaxSpotLightComponents = 64U;
-  static constexpr std::size_t kNameLookupCapacity= kMaxNameComponents * 2U;
+  static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
   static constexpr std::size_t kMaxPhysicsJoints = 4096U;
@@ -342,8 +342,9 @@ public:
   bool add_point_light_component(Entity entity,
                                  const PointLightComponent &component) noexcept;
   bool remove_point_light_component(Entity entity) noexcept;
-  bool get_point_light_component(Entity entity,
-                                 PointLightComponent *outComponent) const noexcept;
+  bool
+  get_point_light_component(Entity entity,
+                            PointLightComponent *outComponent) const noexcept;
   bool has_point_light_component(Entity entity) const noexcept;
   std::size_t point_light_count() const noexcept;
   const PointLightComponent *point_light_at(std::size_t index) const noexcept;
@@ -352,8 +353,9 @@ public:
   bool add_spot_light_component(Entity entity,
                                 const SpotLightComponent &component) noexcept;
   bool remove_spot_light_component(Entity entity) noexcept;
-  bool get_spot_light_component(Entity entity,
-                                SpotLightComponent *outComponent) const noexcept;
+  bool
+  get_spot_light_component(Entity entity,
+                           SpotLightComponent *outComponent) const noexcept;
   bool has_spot_light_component(Entity entity) const noexcept;
   std::size_t spot_light_count() const noexcept;
   const SpotLightComponent *spot_light_at(std::size_t index) const noexcept;
@@ -504,14 +506,12 @@ private:
                       kMaxScriptComponents>;
   using SpringArmSet = core::SparseSet<Entity, SpringArmComponent, kMaxEntities,
                                        kMaxSpringArmComponents>;
-  using PointLightSet =
-      core::SparseSet<Entity, PointLightComponent, kMaxEntities,
-                      kMaxPointLightComponents>;
-  using SpotLightSet =
-      core::SparseSet<Entity, SpotLightComponent, kMaxEntities,
-                      kMaxSpotLightComponents>;
+  using PointLightSet = core::SparseSet<Entity, PointLightComponent,
+                                        kMaxEntities, kMaxPointLightComponents>;
+  using SpotLightSet = core::SparseSet<Entity, SpotLightComponent, kMaxEntities,
+                                       kMaxSpotLightComponents>;
 
-  template <typename Component> static consteval bool is_supported_component(){
+  template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
     return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody> ||
            std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider> ||

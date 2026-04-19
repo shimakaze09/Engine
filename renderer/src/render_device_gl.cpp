@@ -790,7 +790,8 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
   g_gl.bindFramebuffer(GL_FRAMEBUFFER, fbo);
 
   constexpr GLenum kAttachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
-                                     GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
+                                     GL_COLOR_ATTACHMENT2,
+                                     GL_COLOR_ATTACHMENT3};
   for (std::int32_t i = 0; i < colorCount; ++i) {
     if (colorTextures[i] != 0U) {
       g_gl.framebufferTexture2D(GL_FRAMEBUFFER, kAttachments[i], GL_TEXTURE_2D,

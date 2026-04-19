@@ -1,7 +1,11 @@
 # Production Engine Milestones — Atomic Execution Plan
 
+> **⚠ Combined Document Notice**: The master gap analysis, milestone definitions, exit criteria, and completion status are now consolidated in **`production_engine_gap_list.md`**. That file is the single source of truth.
+>
+> This file is retained as a **supplementary reference** containing detailed atomic task annotations (`[files:]`, `[test:]`, `[dep:]`) and implementation guidance that may be useful during development.
+
 Source checklist: production_engine_phased_todo.md
-Gap list: production_engine_gap_list.md
+Gap list (MASTER): production_engine_gap_list.md
 
 Every milestone is recursively subdivided until each leaf task is a single-session deliverable
 (one .cpp/.h file change, one shader, one test, one binding — roughly 1–4 hours of focused work).

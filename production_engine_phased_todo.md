@@ -1,7 +1,11 @@
 # Production Engine Phased Todo
 
+> **⚠ Combined Document Notice**: The master gap analysis, milestone definitions, exit criteria, and completion status are now consolidated in **`production_engine_gap_list.md`**. That file is the single source of truth.
+>
+> This file is retained as a **supplementary checkbox tracker**. Any status discrepancies should be resolved in favor of the gap list.
+
 > Source: production_engine_milestones.md (atomic execution plan)
-> Gap inventory: production_engine_gap_list.md
+> Gap inventory (MASTER): production_engine_gap_list.md
 >
 > Every checkbox maps 1:1 to an atomic task in the milestones document.
 > Mark [x] ONLY when the 7-point completion standard is met (see copilot-instructions.md).

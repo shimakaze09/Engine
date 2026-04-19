@@ -360,16 +360,16 @@ bool initialize_backend() noexcept {
 
   // Register CVars for deferred rendering.
   core::cvar_register_bool("r_deferred", true, "Enable deferred rendering");
-  core::cvar_register_int("r_gbuffer_debug", 0,
-                          "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
-                          "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
+  core::cvar_register_int(
+      "r_gbuffer_debug", 0,
+      "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
+      "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
 
   // Load deferred rendering shaders (soft-fail: falls back to forward).
   bool deferredOk = true;
 
-  const ShaderProgramHandle gbufferShader =
-      load_shader_program("assets/shaders/gbuffer.vert",
-                          "assets/shaders/gbuffer.frag");
+  const ShaderProgramHandle gbufferShader = load_shader_program(
+      "assets/shaders/gbuffer.vert", "assets/shaders/gbuffer.frag");
   if (gbufferShader == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "G-Buffer shader not available — deferred path disabled");
@@ -380,9 +380,9 @@ bool initialize_backend() noexcept {
   ShaderProgramHandle gbufferDebugShader{};
 
   if (deferredOk) {
-    deferredLightShader = load_shader_program(
-        "assets/shaders/fullscreen.vert",
-        "assets/shaders/deferred_lighting.frag");
+    deferredLightShader =
+        load_shader_program("assets/shaders/fullscreen.vert",
+                            "assets/shaders/deferred_lighting.frag");
     if (deferredLightShader == kInvalidShaderProgram) {
       core::log_message(
           core::LogLevel::Warning, "renderer",
@@ -394,8 +394,7 @@ bool initialize_backend() noexcept {
 
   if (deferredOk) {
     gbufferDebugShader = load_shader_program(
-        "assets/shaders/fullscreen.vert",
-        "assets/shaders/gbuffer_debug.frag");
+        "assets/shaders/fullscreen.vert", "assets/shaders/gbuffer_debug.frag");
     if (gbufferDebugShader == kInvalidShaderProgram) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "G-Buffer debug shader not available");
@@ -425,15 +424,12 @@ bool initialize_backend() noexcept {
     const auto dlProg = shader_gpu_program(deferredLightShader);
     backend.deferredLightShaderHandle = deferredLightShader;
     backend.deferredLightProgram = dlProg;
-    backend.dlGBufAlbedoLoc =
-        dev->uniform_location(dlProg, "uGBufferAlbedo");
-    backend.dlGBufNormalLoc =
-        dev->uniform_location(dlProg, "uGBufferNormal");
+    backend.dlGBufAlbedoLoc = dev->uniform_location(dlProg, "uGBufferAlbedo");
+    backend.dlGBufNormalLoc = dev->uniform_location(dlProg, "uGBufferNormal");
     backend.dlGBufEmissiveLoc =
         dev->uniform_location(dlProg, "uGBufferEmissive");
     backend.dlGBufDepthLoc = dev->uniform_location(dlProg, "uGBufferDepth");
-    backend.dlTileLightTexLoc =
-        dev->uniform_location(dlProg, "uTileLightTex");
+    backend.dlTileLightTexLoc = dev->uniform_location(dlProg, "uTileLightTex");
     backend.dlTileCountXLoc = dev->uniform_location(dlProg, "uTileCountX");
     backend.dlTileCountYLoc = dev->uniform_location(dlProg, "uTileCountY");
     backend.dlInvProjectionLoc =
@@ -493,8 +489,7 @@ bool initialize_backend() noexcept {
           dev->uniform_location(dbgProg, "uGBufferNormal");
       backend.dbgGBufEmissiveLoc =
           dev->uniform_location(dbgProg, "uGBufferEmissive");
-      backend.dbgGBufDepthLoc =
-          dev->uniform_location(dbgProg, "uGBufferDepth");
+      backend.dbgGBufDepthLoc = dev->uniform_location(dbgProg, "uGBufferDepth");
       backend.dbgModeLoc = dev->uniform_location(dbgProg, "uDebugMode");
     }
   }
@@ -685,10 +680,8 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   // Check if deferred rendering is enabled.
   const bool useDeferred =
-      backend.deferredAvailable &&
-      core::cvar_get_bool("r_deferred", true);
-  const int gbufferDebugMode =
-      core::cvar_get_int("r_gbuffer_debug", 0);
+      backend.deferredAvailable && core::cvar_get_bool("r_deferred", true);
+  const int gbufferDebugMode = core::cvar_get_int("r_gbuffer_debug", 0);
 
   // Camera setup (shared by both paths).
   const float aspect =
@@ -876,8 +869,9 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_int(backend.dbgGBufEmissiveLoc, 2);
       if (backend.dbgGBufDepthLoc >= 0)
         dev->set_uniform_int(backend.dbgGBufDepthLoc, 3);
-      // Debug mode: 0=albedo,1=normals,2=metallic,3=roughness,4=emissive,5=AO,6=depth
-      // CVar value 1..7 maps to shader 0..6.
+      // Debug mode:
+      // 0=albedo,1=normals,2=metallic,3=roughness,4=emissive,5=AO,6=depth CVar
+      // value 1..7 maps to shader 0..6.
       if (backend.dbgModeLoc >= 0)
         dev->set_uniform_int(backend.dbgModeLoc, gbufferDebugMode - 1);
 
@@ -934,13 +928,11 @@ void flush_renderer(CommandBufferView commandBufferView,
       math::Mat4 invView{};
       if (math::inverse(viewMat, &invView)) {
         if (backend.dlInvViewLoc >= 0)
-          dev->set_uniform_mat4(backend.dlInvViewLoc,
-                                &invView.columns[0].x);
+          dev->set_uniform_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
       }
 
       // Directional light (use first if available).
-      if (backend.dlDirLightDirLoc >= 0 &&
-          lights.directionalLightCount > 0U) {
+      if (backend.dlDirLightDirLoc >= 0 && lights.directionalLightCount > 0U) {
         dev->set_uniform_vec3(backend.dlDirLightDirLoc,
                               &lights.directionalLights[0].direction.x);
       }
@@ -961,9 +953,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
 
       // Upload point light data.
-      const auto plCount =
-          static_cast<int>(std::min(lights.pointLightCount,
-                                    static_cast<std::size_t>(kMaxPointLights)));
+      const auto plCount = static_cast<int>(std::min(
+          lights.pointLightCount, static_cast<std::size_t>(kMaxPointLights)));
       if (backend.dlPointLightCountLoc >= 0)
         dev->set_uniform_int(backend.dlPointLightCountLoc, plCount);
       for (int pi = 0; pi < plCount; ++pi) {
@@ -981,9 +972,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
 
       // Upload spot light data.
-      const auto slCount =
-          static_cast<int>(std::min(lights.spotLightCount,
-                                    static_cast<std::size_t>(kMaxSpotLights)));
+      const auto slCount = static_cast<int>(std::min(
+          lights.spotLightCount, static_cast<std::size_t>(kMaxSpotLights)));
       if (backend.dlSpotLightCountLoc >= 0)
         dev->set_uniform_int(backend.dlSpotLightCountLoc, slCount);
       for (int si = 0; si < slCount; ++si) {
@@ -1056,9 +1046,8 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
       }
       if (backend.pbrPointLightCountLocation >= 0) {
-        dev->set_uniform_int(
-            backend.pbrPointLightCountLocation,
-            static_cast<std::int32_t>(lights.pointLightCount));
+        dev->set_uniform_int(backend.pbrPointLightCountLocation,
+                             static_cast<std::int32_t>(lights.pointLightCount));
       }
       for (std::size_t i = 0U; i < lights.pointLightCount; ++i) {
         const auto &pl = lights.pointLights[i];
@@ -1275,8 +1264,7 @@ void flush_renderer(CommandBufferView commandBufferView,
         extract_normal_matrix(model, normalMatrix);
 
         if (backend.pbrModelLocation >= 0) {
-          dev->set_uniform_mat4(backend.pbrModelLocation,
-                                &model.columns[0].x);
+          dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
         }
         dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
         dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);

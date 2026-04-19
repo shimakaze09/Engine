@@ -244,7 +244,8 @@ int verify_256_lights_stress() {
       return 404;
     }
     for (int i = 0; i < pc; ++i) {
-      const int idx = static_cast<int>(buffer[base + 1U + static_cast<std::size_t>(i)]);
+      const int idx =
+          static_cast<int>(buffer[base + 1U + static_cast<std::size_t>(i)]);
       if (idx < 0 || idx >= 128) {
         return 405;
       }
@@ -257,7 +258,8 @@ int verify_256_lights_stress() {
       return 406;
     }
     for (int i = 0; i < sc; ++i) {
-      const int idx = static_cast<int>(buffer[spotOff + 1U + static_cast<std::size_t>(i)]);
+      const int idx =
+          static_cast<int>(buffer[spotOff + 1U + static_cast<std::size_t>(i)]);
       if (idx < 0 || idx >= 64) {
         return 407;
       }
@@ -271,11 +273,13 @@ int verify_256_lights_stress() {
     const std::size_t base =
         static_cast<std::size_t>(t) *
         static_cast<std::size_t>(engine::renderer::kTileDataWidth);
-    if (buffer[base] > 0.0F) anyPoint = true;
+    if (buffer[base] > 0.0F)
+      anyPoint = true;
     const std::size_t spotOff =
         base + 1U +
         static_cast<std::size_t>(engine::renderer::kMaxPointLightsPerTile);
-    if (buffer[spotOff] > 0.0F) anySpot = true;
+    if (buffer[spotOff] > 0.0F)
+      anySpot = true;
   }
   if (!anyPoint) {
     return 408;

@@ -735,8 +735,9 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
 bool World::add_point_light_component(
     Entity entity, const PointLightComponent &component) noexcept {
   if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_point_light_component called outside mutation phase");
+    core::log_message(
+        core::LogLevel::Error, "world",
+        "add_point_light_component called outside mutation phase");
     return false;
   }
   if (!is_valid_entity(entity)) {
