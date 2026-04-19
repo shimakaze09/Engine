@@ -1,6 +1,7 @@
 #include "engine/physics/physics_query.h"
 
 #include "engine/math/aabb.h"
+#include "engine/math/ray.h"
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"

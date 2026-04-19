@@ -3,6 +3,7 @@
 
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
+#include "engine/math/ray.h"
 #include "engine/math/sphere.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"

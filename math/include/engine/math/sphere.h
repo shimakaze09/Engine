@@ -1,7 +1,10 @@
 #pragma once
 
-#include "engine/math/ray.h"
 #include "engine/math/vec3.h"
+
+namespace engine::math {
+struct Ray;
+}
 
 namespace engine::math {
 

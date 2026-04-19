@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "engine/math/ray.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
