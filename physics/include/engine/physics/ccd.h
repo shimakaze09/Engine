@@ -1,15 +1,13 @@
 #pragma once
 
 #include "engine/math/vec3.h"
+#include "engine/physics/physics_types.h"
 
 #include <cstdint>
 
+// TODO(§0-2-a): World still lives in runtime — forward declaration required.
 namespace engine::runtime {
 class World;
-struct Entity;
-struct RigidBody;
-struct Collider;
-struct Transform;
 } // namespace engine::runtime
 
 namespace engine::physics {
@@ -35,11 +33,10 @@ struct CcdSweepResult {
 /// @param transform The entity's current transform.
 /// @param dt        The timestep in seconds.
 /// @return CCD sweep result with time-of-impact if a hit was found.
-CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
-                                     runtime::Entity entity,
-                                     const runtime::RigidBody &body,
-                                     const runtime::Collider &collider,
-                                     const runtime::Transform &transform,
+CcdSweepResult bilateral_advance_ccd(const runtime::World &world, Entity entity,
+                                     const RigidBody &body,
+                                     const Collider &collider,
+                                     const Transform &transform,
                                      float dt) noexcept;
 
 /// Returns the CCD velocity threshold (minimum speed to trigger CCD).

@@ -1,21 +1,18 @@
 #pragma once
 
+#include "engine/math/component_types.h"
 #include "engine/math/vec3.h"
-
-namespace engine::runtime {
-class World;
-struct Transform;
-struct RigidBody;
-struct Entity;
-} // namespace engine::runtime
 
 namespace engine::physics {
 
+using engine::math::RigidBody;
+using engine::math::Transform;
+
 struct JointSolveContext final {
-  runtime::Transform *tA = nullptr;
-  runtime::Transform *tB = nullptr;
-  runtime::RigidBody *bodyA = nullptr;
-  runtime::RigidBody *bodyB = nullptr;
+  Transform *tA = nullptr;
+  Transform *tB = nullptr;
+  RigidBody *bodyA = nullptr;
+  RigidBody *bodyB = nullptr;
   float invMassA = 0.0F;
   float invMassB = 0.0F;
 };

@@ -8,6 +8,7 @@
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
 
 namespace engine::runtime {
@@ -154,7 +155,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // Transform
   Transform transform{};
   if (world.get_transform(entity, &transform)) {
-    w.write_key("Transform");
+    w.write_key(kJsonKeyTransform);
     w.begin_object();
     write_vec3_arr(w, "position", transform.position);
     write_quat_arr(w, "rotation", transform.rotation);
@@ -165,7 +166,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // RigidBody
   RigidBody rigidBody{};
   if (world.get_rigid_body(entity, &rigidBody)) {
-    w.write_key("RigidBody");
+    w.write_key(kJsonKeyRigidBody);
     w.begin_object();
     write_vec3_arr(w, "velocity", rigidBody.velocity);
     write_vec3_arr(w, "acceleration", rigidBody.acceleration);
@@ -178,7 +179,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // Collider
   Collider collider{};
   if (world.get_collider(entity, &collider)) {
-    w.write_key("Collider");
+    w.write_key(kJsonKeyCollider);
     w.begin_object();
     write_vec3_arr(w, "halfExtents", collider.halfExtents);
     w.write_float("restitution", collider.restitution);
@@ -193,7 +194,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // NameComponent
   NameComponent nameComp{};
   if (world.get_name_component(entity, &nameComp)) {
-    w.write_key("NameComponent");
+    w.write_key(kJsonKeyNameComponent);
     w.begin_object();
     w.write_string("name", nameComp.name);
     w.end_object();
@@ -215,7 +216,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // LightComponent
   LightComponent light{};
   if (world.get_light_component(entity, &light)) {
-    w.write_key("LightComponent");
+    w.write_key(kJsonKeyLightComponent);
     w.begin_object();
     write_vec3_arr(w, "color", light.color);
     write_vec3_arr(w, "direction", light.direction);
@@ -253,7 +254,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   ScriptComponent scriptComp{};
   if (world.get_script_component(entity, &scriptComp) &&
       (scriptComp.scriptPath[0] != '\0')) {
-    w.write_string("ScriptComponent", scriptComp.scriptPath);
+    w.write_string(kJsonKeyScriptComponent, scriptComp.scriptPath);
   }
 
   w.end_object(); // components
@@ -331,7 +332,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // Transform
   core::JsonValue tval{};
-  if (parser.get_object_field(componentsVal, "Transform", &tval) &&
+  if (parser.get_object_field(componentsVal, kJsonKeyTransform, &tval) &&
       (tval.type == core::JsonValue::Type::Object)) {
     Transform t{};
     core::JsonValue v{};
@@ -349,7 +350,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // RigidBody
   core::JsonValue rbval{};
-  if (parser.get_object_field(componentsVal, "RigidBody", &rbval) &&
+  if (parser.get_object_field(componentsVal, kJsonKeyRigidBody, &rbval) &&
       (rbval.type == core::JsonValue::Type::Object)) {
     RigidBody rb{};
     core::JsonValue v{};
@@ -373,7 +374,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // Collider
   core::JsonValue cval{};
-  if (parser.get_object_field(componentsVal, "Collider", &cval) &&
+  if (parser.get_object_field(componentsVal, kJsonKeyCollider, &cval) &&
       (cval.type == core::JsonValue::Type::Object)) {
     Collider col{};
     core::JsonValue v{};
@@ -403,7 +404,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // NameComponent
   core::JsonValue nval{};
-  if (parser.get_object_field(componentsVal, "NameComponent", &nval) &&
+  if (parser.get_object_field(componentsVal, kJsonKeyNameComponent, &nval) &&
       (nval.type == core::JsonValue::Type::Object)) {
     NameComponent nc{};
     core::JsonValue v{};
@@ -446,7 +447,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // LightComponent
   core::JsonValue lval{};
-  if (parser.get_object_field(componentsVal, "LightComponent", &lval) &&
+  if (parser.get_object_field(componentsVal, kJsonKeyLightComponent, &lval) &&
       (lval.type == core::JsonValue::Type::Object)) {
     LightComponent lc{};
     core::JsonValue v{};
@@ -515,7 +516,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // ScriptComponent— accepts plain string (current) or legacy object format.
   core::JsonValue sval{};
-  if (parser.get_object_field(componentsVal, "ScriptComponent", &sval)) {
+  if (parser.get_object_field(componentsVal, kJsonKeyScriptComponent, &sval)) {
     const char *pathPtr = nullptr;
     std::size_t pathLen = 0U;
     bool gotPath = false;

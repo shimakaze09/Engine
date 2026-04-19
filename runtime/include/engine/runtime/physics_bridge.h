@@ -11,12 +11,9 @@
 
 namespace engine::runtime {
 
-struct PhysicsRaycastHit final {
-  Entity entity = kInvalidEntity;
-  float distance = 0.0F;
-  math::Vec3 point = math::Vec3(0.0F, 0.0F, 0.0F);
-  math::Vec3 normal = math::Vec3(0.0F, 0.0F, 0.0F);
-};
+// PhysicsRaycastHit is defined in engine::physics (physics_types.h),
+// re-exported here for runtime callers.
+using engine::physics::PhysicsRaycastHit;
 
 bool step_physics(World &world, float deltaSeconds) noexcept;
 bool step_physics_range(World &world, std::size_t startIndex, std::size_t count,

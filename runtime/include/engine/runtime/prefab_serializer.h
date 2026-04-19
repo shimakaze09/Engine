@@ -1,9 +1,12 @@
 #pragma once
 
+#include "engine/core/entity.h"
+
 namespace engine::runtime {
 
+using engine::core::Entity;
+
 class World;
-struct Entity;
 
 // Save a single entity and all its components to a JSON prefab file.
 // Returns false and logs on error.

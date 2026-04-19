@@ -2,13 +2,14 @@
 
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_types.h"
 
 #include <cstddef>
 #include <cstdint>
 
+// TODO(§0-2-a): World still lives in runtime — forward declaration required.
 namespace engine::runtime {
 class World;
-struct Entity;
 } // namespace engine::runtime
 
 namespace engine::physics {
@@ -42,24 +43,22 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept;
 
 // ------ Typed Joint Creation ------------------------------------------------
 
-JointId add_hinge_joint(runtime::World &world, runtime::Entity entityA,
-                        runtime::Entity entityB, const math::Vec3 &pivot,
+JointId add_hinge_joint(runtime::World &world, Entity entityA, Entity entityB,
+                        const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept;
 
-JointId add_ball_socket_joint(runtime::World &world, runtime::Entity entityA,
-                              runtime::Entity entityB,
-                              const math::Vec3 &pivot) noexcept;
+JointId add_ball_socket_joint(runtime::World &world, Entity entityA,
+                              Entity entityB, const math::Vec3 &pivot) noexcept;
 
-JointId add_slider_joint(runtime::World &world, runtime::Entity entityA,
-                         runtime::Entity entityB,
+JointId add_slider_joint(runtime::World &world, Entity entityA, Entity entityB,
                          const math::Vec3 &axis) noexcept;
 
-JointId add_spring_joint(runtime::World &world, runtime::Entity entityA,
-                         runtime::Entity entityB, float restLength,
-                         float stiffness, float damping) noexcept;
+JointId add_spring_joint(runtime::World &world, Entity entityA, Entity entityB,
+                         float restLength, float stiffness,
+                         float damping) noexcept;
 
-JointId add_fixed_joint(runtime::World &world, runtime::Entity entityA,
-                        runtime::Entity entityB) noexcept;
+JointId add_fixed_joint(runtime::World &world, Entity entityA,
+                        Entity entityB) noexcept;
 
 void set_joint_limits(runtime::World &world, JointId id, float minLimit,
                       float maxLimit) noexcept;

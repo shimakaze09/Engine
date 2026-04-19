@@ -809,6 +809,303 @@ count_mesh_asset_states(const renderer::AssetDatabase *assets) noexcept {
   return counts;
 }
 
+// ---------------------------------------------------------------------------
+// Bootstrap mesh loading — loads file-based mesh + procedural built-ins.
+// ---------------------------------------------------------------------------
+
+struct BootstrapMeshIds final {
+  renderer::AssetId bootstrap = renderer::kInvalidAssetId;
+  renderer::AssetId plane = renderer::kInvalidAssetId;
+  renderer::AssetId cube = renderer::kInvalidAssetId;
+  renderer::AssetId sphere = renderer::kInvalidAssetId;
+  renderer::AssetId cylinder = renderer::kInvalidAssetId;
+  renderer::AssetId capsule = renderer::kInvalidAssetId;
+  renderer::AssetId pyramid = renderer::kInvalidAssetId;
+};
+
+bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
+                           renderer::AssetDatabase *assetDatabase,
+                           renderer::GpuMeshRegistry *meshRegistry,
+                           BootstrapMeshIds *out) noexcept {
+  const char *meshPath = resolve_mesh_asset_path();
+  if (meshPath == nullptr) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to resolve mesh asset path");
+    return false;
+  }
+
+  out->bootstrap = renderer::make_asset_id_from_file(meshPath);
+  bool ok = (out->bootstrap != renderer::kInvalidAssetId) &&
+            renderer::queue_mesh_load(assetManager, assetDatabase,
+                                      out->bootstrap, meshPath);
+  if (ok) {
+    if (!core::make_render_context_current()) {
+      core::log_message(
+          core::LogLevel::Error, "engine",
+          "failed to acquire OpenGL context for bootstrap mesh upload");
+      return false;
+    }
+    ok = renderer::update_asset_manager(assetManager, assetDatabase,
+                                        meshRegistry, 8U);
+    core::release_render_context();
+    ok = ok && (renderer::mesh_asset_state(assetDatabase, out->bootstrap) ==
+                renderer::AssetState::Ready);
+  }
+  if (!ok) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to load bootstrap mesh asset");
+    return false;
+  }
+
+  // Create procedural built-in meshes (plane, cube, sphere, cylinder,
+  // capsule, pyramid). Requires GL context for GPU upload.
+  if (!core::make_render_context_current()) {
+    core::log_message(
+        core::LogLevel::Warning, "engine",
+        "failed to acquire OpenGL context for procedural mesh upload");
+  } else {
+    renderer::GpuMesh m{};
+    if (build_plane_mesh(&m)) {
+      out->plane = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                         "builtin://plane");
+    }
+    m = renderer::GpuMesh{};
+    if (build_cube_mesh(&m)) {
+      out->cube = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                        "builtin://cube");
+    }
+    m = renderer::GpuMesh{};
+    if (build_sphere_mesh(&m)) {
+      out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                          "builtin://sphere");
+    }
+    m = renderer::GpuMesh{};
+    if (build_cylinder_mesh(&m)) {
+      out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                            "builtin://cylinder");
+    }
+    m = renderer::GpuMesh{};
+    if (build_capsule_mesh(&m)) {
+      out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                           "builtin://capsule");
+    }
+    m = renderer::GpuMesh{};
+    if (build_pyramid_mesh(&m)) {
+      out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                           "builtin://pyramid");
+    }
+    core::release_render_context();
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap scene — creates the default entities with transforms, physics,
+// meshes, lights, and the scene-controller script component.
+// ---------------------------------------------------------------------------
+
+void create_bootstrap_scene(runtime::World *world,
+                            const BootstrapMeshIds &meshIds) noexcept {
+  const renderer::AssetId defaultMesh =
+      (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                   : meshIds.bootstrap;
+
+  const runtime::Entity entity = world->create_entity();
+  const runtime::Entity stackedEntity = world->create_entity();
+  const runtime::Entity groundEntity = world->create_entity();
+  const runtime::Entity lightEntity = world->create_entity();
+  const runtime::Entity sceneControllerEntity = world->create_entity();
+  if ((entity == runtime::kInvalidEntity) ||
+      (stackedEntity == runtime::kInvalidEntity) ||
+      (groundEntity == runtime::kInvalidEntity) ||
+      (lightEntity == runtime::kInvalidEntity) ||
+      (sceneControllerEntity == runtime::kInvalidEntity)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to create bootstrap entities");
+    return;
+  }
+
+  // Names.
+  auto add_name = [&](runtime::Entity e, const char *label) {
+    runtime::NameComponent n{};
+    std::snprintf(n.name, sizeof(n.name), "%s", label);
+    static_cast<void>(world->add_name_component(e, n));
+  };
+  add_name(entity, "Red Cube");
+  add_name(stackedEntity, "Blue Cube");
+  add_name(groundEntity, "Ground");
+  add_name(lightEntity, "Sun Light");
+  add_name(sceneControllerEntity, "Scene Controller");
+
+  // Directional light.
+  {
+    runtime::Transform lt{};
+    lt.position = math::Vec3(0.0F, 10.0F, 0.0F);
+    static_cast<void>(world->add_transform(lightEntity, lt));
+    runtime::LightComponent sunLight{};
+    sunLight.type = runtime::LightType::Directional;
+    sunLight.color = math::Vec3(1.0F, 0.95F, 0.9F);
+    sunLight.direction = math::Vec3(0.4F, -1.0F, 0.6F);
+    sunLight.intensity = 1.2F;
+    static_cast<void>(world->add_light_component(lightEntity, sunLight));
+  }
+
+  // Red cube.
+  {
+    runtime::Transform t{};
+    t.position = math::Vec3(-3.0F, 0.5F, -3.0F);
+    static_cast<void>(world->add_transform(entity, t));
+    runtime::RigidBody rb{};
+    rb.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
+    rb.inverseMass = 0.0F;
+    static_cast<void>(world->add_rigid_body(entity, rb));
+    runtime::Collider c{};
+    c.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    static_cast<void>(world->add_collider(entity, c));
+    runtime::MeshComponent mc{};
+    mc.meshAssetId = defaultMesh;
+    mc.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
+    static_cast<void>(world->add_mesh_component(entity, mc));
+  }
+
+  // Blue cube.
+  {
+    runtime::Transform t{};
+    t.position = math::Vec3(3.0F, 0.5F, -3.0F);
+    static_cast<void>(world->add_transform(stackedEntity, t));
+    runtime::RigidBody rb{};
+    rb.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
+    rb.inverseMass = 0.0F;
+    static_cast<void>(world->add_rigid_body(stackedEntity, rb));
+    runtime::Collider c{};
+    c.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    static_cast<void>(world->add_collider(stackedEntity, c));
+    runtime::MeshComponent mc{};
+    mc.meshAssetId = defaultMesh;
+    mc.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
+    static_cast<void>(world->add_mesh_component(stackedEntity, mc));
+  }
+
+  // Ground plane.
+  {
+    runtime::Transform t{};
+    t.position = math::Vec3(0.0F, -0.5F, 0.0F);
+    static_cast<void>(world->add_transform(groundEntity, t));
+    runtime::Collider gc{};
+    gc.halfExtents = math::Vec3(5.0F, 0.5F, 5.0F);
+    gc.staticFriction = 0.9F;
+    gc.dynamicFriction = 0.7F;
+    gc.restitution = 0.1F;
+    static_cast<void>(world->add_collider(groundEntity, gc));
+    runtime::MeshComponent mc{};
+    mc.meshAssetId = (meshIds.plane != renderer::kInvalidAssetId)
+                         ? meshIds.plane
+                         : meshIds.bootstrap;
+    mc.albedo = math::Vec3(0.45F, 0.42F, 0.38F);
+    static_cast<void>(world->add_mesh_component(groundEntity, mc));
+  }
+
+  // Scene controller script.
+  {
+    runtime::ScriptComponent sc{};
+    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kMainScriptPath);
+    static_cast<void>(
+        world->add_script_component(sceneControllerEntity, sc));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Collect all ECS light components into renderer::SceneLightData.
+// ---------------------------------------------------------------------------
+
+renderer::SceneLightData collect_scene_lights(
+    const runtime::World &world) noexcept {
+  renderer::SceneLightData sceneLights{};
+
+  // LightComponent (legacy: Directional + Point via single component).
+  const std::size_t lightCount = world.light_count();
+  for (std::size_t li = 0U; li < lightCount; ++li) {
+    const runtime::LightComponent *lc = world.light_at(li);
+    if (lc == nullptr) {
+      continue;
+    }
+    if (lc->type == runtime::LightType::Directional) {
+      if (sceneLights.directionalLightCount <
+          renderer::kMaxDirectionalLights) {
+        auto &dl =
+            sceneLights
+                .directionalLights[sceneLights.directionalLightCount];
+        dl.direction = lc->direction;
+        dl.color = lc->color;
+        dl.intensity = lc->intensity;
+        ++sceneLights.directionalLightCount;
+      }
+    } else if (lc->type == runtime::LightType::Point) {
+      if (sceneLights.pointLightCount < renderer::kMaxPointLights) {
+        const runtime::Entity ple = world.light_entity_at(li);
+        const runtime::WorldTransform *wt =
+            world.get_world_transform_read_ptr(ple);
+        auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
+        pl.position =
+            (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+        pl.color = lc->color;
+        pl.intensity = lc->intensity;
+        ++sceneLights.pointLightCount;
+      }
+    }
+  }
+
+  // PointLightComponent (dedicated component with radius).
+  const std::size_t plcCount = world.point_light_count();
+  for (std::size_t pi = 0U; pi < plcCount; ++pi) {
+    if (sceneLights.pointLightCount >= renderer::kMaxPointLights) {
+      break;
+    }
+    const runtime::PointLightComponent *plc = world.point_light_at(pi);
+    if (plc == nullptr) {
+      continue;
+    }
+    const runtime::Entity plEntity = world.point_light_entity_at(pi);
+    const runtime::WorldTransform *wt =
+        world.get_world_transform_read_ptr(plEntity);
+    auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
+    pl.position =
+        (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    pl.color = plc->color;
+    pl.intensity = plc->intensity;
+    pl.radius = plc->radius;
+    ++sceneLights.pointLightCount;
+  }
+
+  // SpotLightComponent.
+  const std::size_t slcCount = world.spot_light_count();
+  for (std::size_t si = 0U; si < slcCount; ++si) {
+    if (sceneLights.spotLightCount >= renderer::kMaxSpotLights) {
+      break;
+    }
+    const runtime::SpotLightComponent *slc = world.spot_light_at(si);
+    if (slc == nullptr) {
+      continue;
+    }
+    const runtime::Entity slEntity = world.spot_light_entity_at(si);
+    const runtime::WorldTransform *wt =
+        world.get_world_transform_read_ptr(slEntity);
+    auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
+    sl.position =
+        (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    sl.direction = slc->direction;
+    sl.color = slc->color;
+    sl.intensity = slc->intensity;
+    sl.radius = slc->radius;
+    sl.innerConeAngle = slc->innerConeAngle;
+    sl.outerConeAngle = slc->outerConeAngle;
+    ++sceneLights.spotLightCount;
+  }
+
+  return sceneLights;
+}
+
 } // namespace
 
 bool bootstrap() noexcept {
@@ -935,96 +1232,17 @@ void run(std::uint32_t maxFrames) noexcept {
   runtime::set_collision_dispatch(*world,
                                   &scripting::dispatch_physics_callbacks);
 
-  const char *bootstrapMeshPath = resolve_mesh_asset_path();
-  if (bootstrapMeshPath == nullptr) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to resolve mesh asset path");
+  BootstrapMeshIds meshIds{};
+  if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
+                             meshRegistry.get(), &meshIds)) {
     return;
   }
-
-  const renderer::AssetId bootstrapMeshAssetId =
-      renderer::make_asset_id_from_file(bootstrapMeshPath);
-  scripting::set_default_mesh_asset_id(bootstrapMeshAssetId);
-  bool bootstrapMeshLoadOk =
-      (bootstrapMeshAssetId != renderer::kInvalidAssetId) &&
-      renderer::queue_mesh_load(assetManager.get(), assetDatabase.get(),
-                                bootstrapMeshAssetId, bootstrapMeshPath);
-  if (bootstrapMeshLoadOk) {
-    if (!core::make_render_context_current()) {
-      core::log_message(
-          core::LogLevel::Error, "engine",
-          "failed to acquire OpenGL context for bootstrap mesh upload");
-      return;
-    }
-
-    bootstrapMeshLoadOk = renderer::update_asset_manager(
-        assetManager.get(), assetDatabase.get(), meshRegistry.get(), 8U);
-    core::release_render_context();
-    bootstrapMeshLoadOk = bootstrapMeshLoadOk &&
-                          (renderer::mesh_asset_state(assetDatabase.get(),
-                                                      bootstrapMeshAssetId) ==
-                           renderer::AssetState::Ready);
-  }
-
-  if (!bootstrapMeshLoadOk) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to load bootstrap mesh asset");
-    return;
-  }
-
-  // --- Create procedural built-in meshes (plane, cube, sphere, cylinder,
-  // capsule, pyramid). build_gpu_mesh_from_data requires owning the GL
-  // context, so acquire it explicitly for this upload block.
-  renderer::AssetId planeMeshAssetId = renderer::kInvalidAssetId;
-  renderer::AssetId cubeMeshAssetId = renderer::kInvalidAssetId;
-  renderer::AssetId sphereMeshAssetId = renderer::kInvalidAssetId;
-  renderer::AssetId cylinderMeshAssetId = renderer::kInvalidAssetId;
-  renderer::AssetId capsuleMeshAssetId = renderer::kInvalidAssetId;
-  renderer::AssetId pyramidMeshAssetId = renderer::kInvalidAssetId;
-  if (!core::make_render_context_current()) {
-    core::log_message(
-        core::LogLevel::Warning, "engine",
-        "failed to acquire OpenGL context for procedural mesh upload");
-  } else {
-    renderer::GpuMesh m{};
-    if (build_plane_mesh(&m)) {
-      planeMeshAssetId = register_builtin_mesh(
-          meshRegistry.get(), assetDatabase.get(), m, "builtin://plane");
-    }
-    m = renderer::GpuMesh{};
-    if (build_cube_mesh(&m)) {
-      cubeMeshAssetId = register_builtin_mesh(
-          meshRegistry.get(), assetDatabase.get(), m, "builtin://cube");
-    }
-    m = renderer::GpuMesh{};
-    if (build_sphere_mesh(&m)) {
-      sphereMeshAssetId = register_builtin_mesh(
-          meshRegistry.get(), assetDatabase.get(), m, "builtin://sphere");
-    }
-    m = renderer::GpuMesh{};
-    if (build_cylinder_mesh(&m)) {
-      cylinderMeshAssetId = register_builtin_mesh(
-          meshRegistry.get(), assetDatabase.get(), m, "builtin://cylinder");
-    }
-    m = renderer::GpuMesh{};
-    if (build_capsule_mesh(&m)) {
-      capsuleMeshAssetId = register_builtin_mesh(
-          meshRegistry.get(), assetDatabase.get(), m, "builtin://capsule");
-    }
-    m = renderer::GpuMesh{};
-    if (build_pyramid_mesh(&m)) {
-      pyramidMeshAssetId = register_builtin_mesh(
-          meshRegistry.get(), assetDatabase.get(), m, "builtin://pyramid");
-    }
-    core::release_render_context();
-  }
-  // Default mesh for Lua scripts is the cube; fall back to triangle.mesh.
   scripting::set_default_mesh_asset_id(
-      (cubeMeshAssetId != renderer::kInvalidAssetId) ? cubeMeshAssetId
-                                                     : bootstrapMeshAssetId);
-  scripting::set_builtin_mesh_ids(planeMeshAssetId, cubeMeshAssetId,
-                                  sphereMeshAssetId, cylinderMeshAssetId,
-                                  capsuleMeshAssetId, pyramidMeshAssetId);
+      (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                   : meshIds.bootstrap);
+  scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube, meshIds.sphere,
+                                  meshIds.cylinder, meshIds.capsule,
+                                  meshIds.pyramid);
 
   FrameContext *frameContext = g_frameContext.get();
   if (frameContext == nullptr) {
@@ -1042,170 +1260,7 @@ void run(std::uint32_t maxFrames) noexcept {
     return;
   }
 
-  const runtime::Entity entity = world->create_entity();
-  const runtime::Entity stackedEntity = world->create_entity();
-  const runtime::Entity groundEntity = world->create_entity();
-  const runtime::Entity lightEntity = world->create_entity();
-  const runtime::Entity sceneControllerEntity = world->create_entity();
-  if ((entity == runtime::kInvalidEntity) ||
-      (stackedEntity == runtime::kInvalidEntity) ||
-      (groundEntity == runtime::kInvalidEntity) ||
-      (lightEntity == runtime::kInvalidEntity) ||
-      (sceneControllerEntity == runtime::kInvalidEntity)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to create bootstrap entities");
-    return;
-  }
-
-  // Assign names to bootstrap entities.
-  {
-    runtime::NameComponent name{};
-    std::snprintf(name.name, sizeof(name.name), "Red Cube");
-    static_cast<void>(world->add_name_component(entity, name));
-  }
-  {
-    runtime::NameComponent name{};
-    std::snprintf(name.name, sizeof(name.name), "Blue Cube");
-    static_cast<void>(world->add_name_component(stackedEntity, name));
-  }
-  {
-    runtime::NameComponent name{};
-    std::snprintf(name.name, sizeof(name.name), "Ground");
-    static_cast<void>(world->add_name_component(groundEntity, name));
-  }
-  {
-    runtime::NameComponent name{};
-    std::snprintf(name.name, sizeof(name.name), "Sun Light");
-    static_cast<void>(world->add_name_component(lightEntity, name));
-  }
-  {
-    runtime::NameComponent name{};
-    std::snprintf(name.name, sizeof(name.name), "Scene Controller");
-    static_cast<void>(world->add_name_component(sceneControllerEntity, name));
-  }
-
-  // Add directional light.
-  {
-    runtime::Transform lightTransform{};
-    lightTransform.position = math::Vec3(0.0F, 10.0F, 0.0F);
-    static_cast<void>(world->add_transform(lightEntity, lightTransform));
-
-    runtime::LightComponent sunLight{};
-    sunLight.type = runtime::LightType::Directional;
-    sunLight.color = math::Vec3(1.0F, 0.95F, 0.9F);
-    sunLight.direction = math::Vec3(0.4F, -1.0F, 0.6F);
-    sunLight.intensity = 1.2F;
-    static_cast<void>(world->add_light_component(lightEntity, sunLight));
-  }
-
-  runtime::Transform transform{};
-  transform.position = math::Vec3(-3.0F, 0.5F, -3.0F);
-  if (!world->add_transform(entity, transform)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add bootstrap transform");
-    return;
-  }
-
-  // Bootstrap cubes are static scenery (inverseMass = 0).
-  runtime::RigidBody rigidBody{};
-  rigidBody.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
-  rigidBody.inverseMass = 0.0F;
-  if (!world->add_rigid_body(entity, rigidBody)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add bootstrap rigid body");
-    return;
-  }
-
-  runtime::Collider collider{};
-  collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-  if (!world->add_collider(entity, collider)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add bootstrap collider");
-    return;
-  }
-
-  runtime::MeshComponent meshComponent{};
-  meshComponent.meshAssetId = (cubeMeshAssetId != renderer::kInvalidAssetId)
-                                  ? cubeMeshAssetId
-                                  : bootstrapMeshAssetId;
-  meshComponent.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
-  if (!world->add_mesh_component(entity, meshComponent)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add bootstrap mesh component");
-    return;
-  }
-
-  runtime::Transform stackedTransform{};
-  stackedTransform.position = math::Vec3(3.0F, 0.5F, -3.0F);
-  if (!world->add_transform(stackedEntity, stackedTransform)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add stacked transform");
-    return;
-  }
-
-  if (!world->add_rigid_body(stackedEntity, rigidBody)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add stacked rigid body");
-    return;
-  }
-
-  if (!world->add_collider(stackedEntity, collider)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add stacked collider");
-    return;
-  }
-
-  runtime::MeshComponent stackedMesh{};
-  stackedMesh.meshAssetId = (cubeMeshAssetId != renderer::kInvalidAssetId)
-                                ? cubeMeshAssetId
-                                : bootstrapMeshAssetId;
-  stackedMesh.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
-  if (!world->add_mesh_component(stackedEntity, stackedMesh)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add stacked mesh component");
-    return;
-  }
-
-  runtime::Transform groundTransform{};
-  groundTransform.position = math::Vec3(0.0F, -0.5F, 0.0F);
-  if (!world->add_transform(groundEntity, groundTransform)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add ground transform");
-    return;
-  }
-
-  runtime::Collider groundCollider{};
-  groundCollider.halfExtents = math::Vec3(5.0F, 0.5F, 5.0F);
-  groundCollider.staticFriction = 0.9F;
-  groundCollider.dynamicFriction = 0.7F;
-  groundCollider.restitution = 0.1F;
-  if (!world->add_collider(groundEntity, groundCollider)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add ground collider");
-    return;
-  }
-
-  runtime::MeshComponent groundMesh{};
-  groundMesh.meshAssetId = (planeMeshAssetId != renderer::kInvalidAssetId)
-                               ? planeMeshAssetId
-                               : bootstrapMeshAssetId;
-  groundMesh.albedo = math::Vec3(0.45F, 0.42F, 0.38F);
-  if (!world->add_mesh_component(groundEntity, groundMesh)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "failed to add ground mesh component");
-    return;
-  }
-
-  // Attach the scene-setup script to the Scene Controller entity.
-  // dispatch_entity_scripts_start() will call M.on_start(self) when Play
-  // begins.
-  {
-    runtime::ScriptComponent sceneScript{};
-    std::snprintf(sceneScript.scriptPath, sizeof(sceneScript.scriptPath), "%s",
-                  kMainScriptPath);
-    static_cast<void>(
-        world->add_script_component(sceneControllerEntity, sceneScript));
-  }
+  create_bootstrap_scene(world.get(), meshIds);
 
   using Clock = std::chrono::steady_clock;
   auto previousTick = Clock::now();
@@ -1235,6 +1290,7 @@ void run(std::uint32_t maxFrames) noexcept {
     if (playState == LoopPlayState::Playing) {
       world->begin_begin_play_phase();
       scripting::dispatch_entity_scripts_begin_play(world.get());
+      scripting::flush_deferred_mutations();
       world->end_begin_play_phase();
     }
 
@@ -1249,12 +1305,12 @@ void run(std::uint32_t maxFrames) noexcept {
       } else {
         runtime::bind_scripting_runtime(world.get());
         scripting::set_default_mesh_asset_id(
-            (cubeMeshAssetId != renderer::kInvalidAssetId)
-                ? cubeMeshAssetId
-                : bootstrapMeshAssetId);
-        scripting::set_builtin_mesh_ids(planeMeshAssetId, cubeMeshAssetId,
-                                        sphereMeshAssetId, cylinderMeshAssetId,
-                                        capsuleMeshAssetId, pyramidMeshAssetId);
+            (meshIds.cube != renderer::kInvalidAssetId)
+                ? meshIds.cube
+                : meshIds.bootstrap);
+        scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
+                                        meshIds.sphere, meshIds.cylinder,
+                                        meshIds.capsule, meshIds.pyramid);
       }
 
       accumulator = 0.0;
@@ -1727,90 +1783,8 @@ void run(std::uint32_t maxFrames) noexcept {
         bridge->new_frame();
       }
 
-      // Collect lights from ECS for the PBR shader.
-      renderer::SceneLightData sceneLights{};
-      const std::size_t lightCount = world->light_count();
-      for (std::size_t li = 0U; li < lightCount; ++li) {
-        const runtime::LightComponent *lc = world->light_at(li);
-        if (lc == nullptr) {
-          continue;
-        }
-
-        if (lc->type == runtime::LightType::Directional) {
-          if (sceneLights.directionalLightCount <
-              renderer::kMaxDirectionalLights) {
-            auto &dl =
-                sceneLights
-                    .directionalLights[sceneLights.directionalLightCount];
-            dl.direction = lc->direction;
-            dl.color = lc->color;
-            dl.intensity = lc->intensity;
-            ++sceneLights.directionalLightCount;
-          }
-        } else if (lc->type == runtime::LightType::Point) {
-          if (sceneLights.pointLightCount < renderer::kMaxPointLights) {
-            const runtime::Entity pointLightEntity = world->light_entity_at(li);
-            const runtime::WorldTransform *wt =
-                world->get_world_transform_read_ptr(pointLightEntity);
-
-            auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
-            pl.position =
-                (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
-            pl.color = lc->color;
-            pl.intensity = lc->intensity;
-            ++sceneLights.pointLightCount;
-          }
-        }
-      }
-
-      // Collect PointLightComponent data (dedicated component with radius).
-      const std::size_t plcCount = world->point_light_count();
-      for (std::size_t pi = 0U; pi < plcCount; ++pi) {
-        if (sceneLights.pointLightCount >= renderer::kMaxPointLights) {
-          break;
-        }
-        const runtime::PointLightComponent *plc = world->point_light_at(pi);
-        if (plc == nullptr) {
-          continue;
-        }
-        const runtime::Entity plEntity = world->point_light_entity_at(pi);
-        const runtime::WorldTransform *wt =
-            world->get_world_transform_read_ptr(plEntity);
-
-        auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
-        pl.position =
-            (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
-        pl.color = plc->color;
-        pl.intensity = plc->intensity;
-        pl.radius = plc->radius;
-        ++sceneLights.pointLightCount;
-      }
-
-      // Collect SpotLightComponent data.
-      const std::size_t slcCount = world->spot_light_count();
-      for (std::size_t si = 0U; si < slcCount; ++si) {
-        if (sceneLights.spotLightCount >= renderer::kMaxSpotLights) {
-          break;
-        }
-        const runtime::SpotLightComponent *slc = world->spot_light_at(si);
-        if (slc == nullptr) {
-          continue;
-        }
-        const runtime::Entity slEntity = world->spot_light_entity_at(si);
-        const runtime::WorldTransform *wt =
-            world->get_world_transform_read_ptr(slEntity);
-
-        auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
-        sl.position =
-            (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
-        sl.direction = slc->direction;
-        sl.color = slc->color;
-        sl.intensity = slc->intensity;
-        sl.radius = slc->radius;
-        sl.innerConeAngle = slc->innerConeAngle;
-        sl.outerConeAngle = slc->outerConeAngle;
-        ++sceneLights.spotLightCount;
-      }
+      const renderer::SceneLightData sceneLights =
+          collect_scene_lights(*world);
 
       renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                                static_cast<float>(simulationTimeSeconds),

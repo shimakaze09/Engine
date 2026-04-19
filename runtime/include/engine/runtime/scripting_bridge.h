@@ -3,17 +3,22 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/entity.h"
+#include "engine/math/component_types.h"
+
 namespace engine::runtime {
 
+using engine::core::Entity;
+using engine::math::Collider;
+using engine::math::MovementAuthority;
+using engine::math::RigidBody;
+using engine::math::Transform;
+
 class World;
-struct Transform;
-struct RigidBody;
-struct Collider;
 struct MeshComponent;
 struct NameComponent;
 struct LightComponent;
 struct ScriptComponent;
-enum class MovementAuthority : std::uint8_t;
 enum class WorldPhase : std::uint8_t;
 
 } // namespace engine::runtime

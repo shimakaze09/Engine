@@ -7,8 +7,6 @@
 
 namespace engine::runtime {
 
-struct Entity;
-
 /// A single camera on the priority stack.
 struct CameraEntry final {
   math::Vec3 position = math::Vec3(0.0F, 2.0F, 5.0F);

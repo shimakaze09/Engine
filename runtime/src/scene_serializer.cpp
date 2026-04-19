@@ -15,6 +15,7 @@
 #include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
 #include "engine/runtime/reflect_types.h"
+#include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
 
 namespace engine::runtime {
@@ -591,7 +592,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue transformValue{};
-    if (parser.get_object_field(components, "Transform", &transformValue)) {
+    if (parser.get_object_field(components, kJsonKeyTransform, &transformValue)) {
       Transform transform{};
       if (!read_reflected_component(parser, transformValue, transformDesc,
                                     &transform) ||
@@ -602,7 +603,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue rigidBodyValue{};
-    if (parser.get_object_field(components, "RigidBody", &rigidBodyValue)) {
+    if (parser.get_object_field(components, kJsonKeyRigidBody, &rigidBodyValue)) {
       RigidBody rigidBody{};
       if (!read_reflected_component(parser, rigidBodyValue, rigidBodyDesc,
                                     &rigidBody) ||
@@ -613,7 +614,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue colliderValue{};
-    if (parser.get_object_field(components, "Collider", &colliderValue)) {
+    if (parser.get_object_field(components, kJsonKeyCollider, &colliderValue)) {
       Collider collider{};
       if (!read_reflected_component(parser, colliderValue, colliderDesc,
                                     &collider) ||
@@ -634,7 +635,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue lightValue{};
-    if (parser.get_object_field(components, "LightComponent", &lightValue)) {
+    if (parser.get_object_field(components, kJsonKeyLightComponent, &lightValue)) {
       LightComponent light{};
       if (!read_light_component(parser, lightValue, &light) ||
           !targetWorld.add_light_component(entity, light)) {
@@ -713,7 +714,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue scriptValue{};
-    if (parser.get_object_field(components, "ScriptComponent", &scriptValue)) {
+    if (parser.get_object_field(components, kJsonKeyScriptComponent,
+                                       &scriptValue)) {
       const char *pathBegin = nullptr;
       std::size_t pathLength = 0U;
       if (!parser.as_string(scriptValue, &pathBegin, &pathLength)) {
@@ -903,7 +905,7 @@ bool serialize_scene_to_writer(const World &world,
 
     Transform transform{};
     if (world.get_transform(entity, &transform)) {
-      if (!write_reflected_component(writer, "Transform", *transformDesc,
+      if (!write_reflected_component(writer, kJsonKeyTransform, *transformDesc,
                                      &transform)) {
         writeFailed = true;
         return;
@@ -912,7 +914,7 @@ bool serialize_scene_to_writer(const World &world,
 
     RigidBody rigidBody{};
     if (world.get_rigid_body(entity, &rigidBody) &&
-        !write_reflected_component(writer, "RigidBody", *rigidBodyDesc,
+        !write_reflected_component(writer, kJsonKeyRigidBody, *rigidBodyDesc,
                                    &rigidBody)) {
       writeFailed = true;
       return;
@@ -920,7 +922,7 @@ bool serialize_scene_to_writer(const World &world,
 
     Collider collider{};
     if (world.get_collider(entity, &collider) &&
-        !write_reflected_component(writer, "Collider", *colliderDesc,
+        !write_reflected_component(writer, kJsonKeyCollider, *colliderDesc,
                                    &collider)) {
       writeFailed = true;
       return;
@@ -940,7 +942,7 @@ bool serialize_scene_to_writer(const World &world,
 
     LightComponent light{};
     if (world.get_light_component(entity, &light)) {
-      writer.write_key("LightComponent");
+      writer.write_key(kJsonKeyLightComponent);
       writer.begin_object();
       write_vec3(writer, "color", light.color);
       write_vec3(writer, "direction", light.direction);
@@ -980,7 +982,7 @@ bool serialize_scene_to_writer(const World &world,
     ScriptComponent script{};
     if (world.get_script_component(entity, &script) &&
         (script.scriptPath[0] != '\0')) {
-      writer.write_string("ScriptComponent", script.scriptPath);
+      writer.write_string(kJsonKeyScriptComponent, script.scriptPath);
     }
 
     SpringArmComponent springArm{};

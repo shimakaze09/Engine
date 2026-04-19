@@ -7,7 +7,9 @@
 #include <tuple>
 #include <type_traits>
 
+#include "engine/core/entity.h"
 #include "engine/core/sparse_set.h"
+#include "engine/math/component_types.h"
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
@@ -25,59 +27,22 @@ namespace engine::runtime {
 #define ENGINE_MAX_LIGHT_COMPONENTS 1024U
 #endif
 
-struct Entity final {
-  std::uint32_t index = 0U;
-  std::uint32_t generation = 0U;
-
-  friend constexpr bool operator==(const Entity &, const Entity &) = default;
-};
-
-[[maybe_unused]] inline constexpr Entity kInvalidEntity{};
-using PersistentId = std::uint32_t;
-inline constexpr PersistentId kInvalidPersistentId = 0U;
-
-struct Transform final {
-  math::Vec3 position = math::Vec3(0.0F, 0.0F, 0.0F);
-  math::Quat rotation = math::Quat();
-  math::Vec3 scale = math::Vec3(1.0F, 1.0F, 1.0F);
-  // References parent by stable persistent ID, not transient runtime handles.
-  PersistentId parentId = kInvalidPersistentId;
-};
+// Types owned by core/math modules, re-exported into engine::runtime.
+using engine::core::Entity;
+using engine::core::kInvalidEntity;
+using engine::core::kInvalidPersistentId;
+using engine::core::PersistentId;
+using engine::math::Collider;
+using engine::math::ColliderShape;
+using engine::math::MovementAuthority;
+using engine::math::RigidBody;
+using engine::math::Transform;
 
 struct WorldTransform final {
   math::Vec3 position = math::Vec3(0.0F, 0.0F, 0.0F);
   math::Quat rotation = math::Quat();
   math::Vec3 scale = math::Vec3(1.0F, 1.0F, 1.0F);
   math::Mat4 matrix = math::Mat4();
-};
-
-struct RigidBody final {
-  math::Vec3 velocity = math::Vec3(0.0F, 0.0F, 0.0F);
-  math::Vec3 acceleration = math::Vec3(0.0F, 0.0F, 0.0F);
-  math::Vec3 angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
-  float inverseMass = 1.0F;
-  float inverseInertia = 1.0F;
-  std::uint8_t sleepFrameCount = 0U;
-  bool sleeping = false;
-};
-
-enum class ColliderShape : std::uint8_t {
-  AABB = 0,
-  Sphere = 1,
-  Capsule = 2,
-  ConvexHull = 3,
-  Heightfield = 4,
-};
-
-struct Collider final {
-  math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-  float restitution = 0.3F;
-  float staticFriction = 0.5F;
-  float dynamicFriction = 0.3F;
-  float density = 1.0F;
-  std::uint32_t collisionLayer = 1U;
-  std::uint32_t collisionMask = 0xFFFFFFFFU;
-  ColliderShape shape = ColliderShape::AABB;
 };
 
 struct NameComponent final {
@@ -150,11 +115,6 @@ enum class WorldPhase : std::uint8_t {
   Idle = Input,
   Update = Simulation,
   RenderPrep = RenderSubmission,
-};
-
-enum class MovementAuthority : std::uint8_t {
-  None,
-  Script,
 };
 
 class World final {

@@ -1,13 +1,14 @@
 #pragma once
 
 #include "engine/math/vec3.h"
+#include "engine/physics/physics_types.h"
 
 #include <cstddef>
 #include <cstdint>
 
+// TODO(§0-2-a): World still lives in runtime — forward declaration required.
 namespace engine::runtime {
 class World;
-struct PhysicsRaycastHit;
 } // namespace engine::runtime
 
 namespace engine::physics {
@@ -27,8 +28,7 @@ struct SweepHit final {
 // Raycast returning all hits, sorted by distance.  Respects collision mask.
 std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
-                        runtime::PhysicsRaycastHit *outHits,
-                        std::size_t maxHits,
+                        PhysicsRaycastHit *outHits, std::size_t maxHits,
                         std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
 // Overlap queries — return entity indices.

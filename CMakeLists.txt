@@ -40,7 +40,7 @@ if(NOT SDL2_FOUND)
     FetchContent_Declare(
         SDL2
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-2.30.11
+        GIT_TAG fa24d868ac2f8fd558e4e914c9863411245db8fd # release-2.30.11
     )
     FetchContent_MakeAvailable(SDL2)
 endif()
@@ -179,7 +179,7 @@ include(FetchContent)
 FetchContent_Declare(
     lua
     GIT_REPOSITORY https://github.com/lua/lua.git
-    GIT_TAG v5.4.6
+    GIT_TAG 6443185167c77adcc8552a3fee7edab7895db1a9 # v5.4.6
 )
 FetchContent_MakeAvailable(lua)
 
@@ -234,14 +234,14 @@ endif()
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG docking
+    GIT_TAG 329c5a6b3be75ebf54506d3ae94b836ffcf19fa0 # docking branch snapshot
 )
 FetchContent_MakeAvailable(imgui)
 
 FetchContent_Declare(
     imguizmo
     GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
-    GIT_TAG master
+    GIT_TAG a15acd87a3f3241a29ea1363ceafc680dca3a96b # master snapshot
 )
 FetchContent_MakeAvailable(imguizmo)
 
@@ -284,7 +284,7 @@ if(ENGINE_BUILD_TOOLS)
     FetchContent_Declare(
         cgltf
         GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-        GIT_TAG v1.14
+        GIT_TAG 52c23814dbb60c2fbb54750ddf41d342d432a498 # v1.14
     )
     FetchContent_MakeAvailable(cgltf)
     set(ENGINE_CGLTF_INCLUDE_DIR ${cgltf_SOURCE_DIR})
@@ -293,7 +293,7 @@ endif()
 FetchContent_Declare(
     stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG master
+    GIT_TAG 31c1ad37456438565541f4919958214b6e762fb4 # master snapshot
 )
 FetchContent_MakeAvailable(stb)
 set(ENGINE_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
