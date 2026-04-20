@@ -4,6 +4,7 @@ engine_add_module_library(engine_runtime
     src/spring_arm_update.cpp
     src/editor_bridge.cpp
     src/engine.cpp
+    src/engine_pipeline.cpp
     src/physics_bridge.cpp
     src/prefab_serializer.cpp
     src/render_prep_pipeline.cpp

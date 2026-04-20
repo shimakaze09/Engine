@@ -348,3 +348,12 @@ engine_add_test_executable(engine_unit_light_culling
     engine_renderer
     engine_math
 )
+
+# ---- §0-3: Engine Pipeline Decomposition ----
+
+engine_add_test_executable(engine_unit_engine_pipeline
+    SOURCES
+    engine_pipeline_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
