@@ -608,11 +608,11 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M5-C: Shadow Maps
 
-##### P1-M5-C1: Cascaded Shadow Maps (Directional, 4 Cascades, PCF) `[ ]`
-- `P1-M5-C1a` Directional light shadow: split scheme (logarithmic/uniform blend); 4 cascade frustums. `[ ]`
-- `P1-M5-C1b` Per-cascade depth framebuffer; shadow map atlas or array texture. `[ ]`
-- `P1-M5-C1c` PCF (percentage-closer filtering): 3×3 or 5×5 kernel; stable cascade seam blending. `[ ]`
-- `P1-M5-C1d` Shadow matrix injected into deferred lighting pass uniform block. `[ ]`
+##### P1-M5-C1: Cascaded Shadow Maps (Directional, 4 Cascades, PCF) `[x]`
+- `P1-M5-C1a` Directional light shadow: split scheme (logarithmic/uniform blend); 4 cascade frustums. `[x]` — *shadow_map.h/cpp: compute_cascade_splits() with lambda-blended log/uniform scheme. CVar r_shadow_lambda. 4 cascades (kShadowCascadeCount).*
+- `P1-M5-C1b` Per-cascade depth framebuffer; shadow map atlas or array texture. `[x]` — *shadow_map.h: ShadowMapState with depthTextures[4]/depthFbos[4]. initialize_shadow_maps() creates 1024×1024 GL_DEPTH_COMPONENT24 FBOs. command_buffer.cpp shadow pass renders all opaque geometry per cascade.*
+- `P1-M5-C1c` PCF (percentage-closer filtering): 3×3 or 5×5 kernel; stable cascade seam blending. `[x]` — *deferred_lighting.frag: sample_shadow_pcf() 3×3 kernel with 0.002 bias. compute_shadow() blends adjacent cascades at 10% of split distance to eliminate seams.*
+- `P1-M5-C1d` Shadow matrix injected into deferred lighting pass uniform block. `[x]` — *command_buffer.cpp binds uShadowMatrix[4], uCascadeSplit[4], uShadowMap[4] (texture units 6-9), uShadowEnabled uniforms in deferred lighting pass.*
 
 ##### P1-M5-C2: Spot Light Shadow Maps `[ ]`
 - `P1-M5-C2a` Per-spot-light depth framebuffer (perspective projection). `[ ]`
@@ -631,10 +631,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M5-D: Post-Process Stack
 
-##### P1-M5-D1: Post-Process Stack Architecture `[~]`
+##### P1-M5-D1: Post-Process Stack Architecture `[x]`
 - `P1-M5-D1a` Ping-pong render targets: `PassResources::sceneColor` (RGBA16F) → post chain → `finalColor`. `[x]`
 - `P1-M5-D1b` Per-pass CVar enable/disable (e.g., `r_bloom`, `r_ssao`, `r_fxaa`). `[x]` — *CVars registered in command_buffer.cpp: r_bloom (line 553), r_ssao (line 626), r_fxaa (line 532). Each pass is gated on its CVar.*
-- `P1-M5-D1c` Ordered pass registration (post-process stack object). `[ ]` — *Passes are hardcoded in sequence (bloom → SSAO → tonemap → FXAA) rather than driven by a configurable pass-list object. Works correctly but not data-driven.*
+- `P1-M5-D1c` Ordered pass registration (post-process stack object). `[x]` — *post_process_stack.h/cpp: PostProcessPassId enum (Bloom, SSAO, AutoExposure, Tonemap, FXAA), PostProcessStack with fixed-capacity ordered array, initialize/query/name APIs. CVar-driven enable flags.*
 
 ##### P1-M5-D2: Bloom `[x]`
 - `P1-M5-D2a` Threshold pass: extract pixels above luminance threshold. `[x]` — *`bloom_threshold.frag` shader + `bloomThresholdProgram` in BackendState (command_buffer.cpp:163). CVar `r_bloom_threshold` controls cutoff.*
@@ -650,7 +650,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-D4a` Tone mapping pass confirmed: `GpuPassId::Tonemap` in `gpu_profiler.h`; `RendererFrameStats::gpuTonemapMs`. `[x]`
 - `P1-M5-D4b` `get_scene_viewport_texture()` returns final tonemapped color texture for editor display. `[x]`
 - `P1-M5-D4c` Operators implemented (Reinhard, ACES, Uncharted 2). `[x]` — *All three in `tonemap.frag`: Reinhard (line 14), ACES Krzysztof Narkowicz approximation (line 19), Uncharted 2 John Hable film curve (line 29). CVar `r_tonemap_operator` (command_buffer.cpp:507) selects operator.*
-- `P1-M5-D4d` Auto-exposure: average scene luminance feedback loop. `[ ]` — *Not implemented. Exposure is a manual CVar (`r_exposure`) with no automatic adaptation. Auto-exposure requires a luminance histogram compute pass or progressive averaging.*
+- `P1-M5-D4d` Auto-exposure: average scene luminance feedback loop. `[x]` — *command_buffer.cpp: luminance.frag extracts log-luminance, progressive mip-chain downsample averages scene, temporal adaptation via lerp (r_auto_exposure_speed). CVar r_auto_exposure toggles; r_exposure_min/max clamp range.*
 
 ##### P1-M5-D5: FXAA Anti-Aliasing `[x]`
 - `P1-M5-D5a` FXAA 3.11 fullscreen pass after tone mapping. `[x]` — *`fxaa.frag` shader: full FXAA algorithm with 12-iteration edge detection, subpixel blending, and luma-based contrast detection. `fxaaProgram` in BackendState (command_buffer.cpp:87). Applied at line 1904.*

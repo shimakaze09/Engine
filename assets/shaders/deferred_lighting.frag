@@ -14,6 +14,12 @@ uniform sampler2D uGBufferDepth;
 uniform sampler2D uSsaoTexture;
 uniform int uSsaoEnabled;
 
+// Shadow maps (4 cascades).
+uniform sampler2D uShadowMap[4];
+uniform mat4 uShadowMatrix[4];
+uniform float uCascadeSplit[4];
+uniform int uShadowEnabled;
+
 // Tile light data (R32F texture: x = MAX_LIGHTS_PER_TILE+1, y = numTiles).
 uniform sampler2D uTileLightTex;
 uniform int uTileCountX;
@@ -114,6 +120,68 @@ vec3 reconstruct_world_pos(vec2 texCoord, float depth) {
     return worldPos.xyz;
 }
 
+// Compute view-space depth for cascade selection.
+float linearize_depth(float depth) {
+    float z = depth * 2.0 - 1.0;
+    vec4 clipPos = vec4(0.0, 0.0, z, 1.0);
+    vec4 viewPos = uInvProjection * clipPos;
+    return -viewPos.z / viewPos.w;
+}
+
+// PCF shadow sampling with 3x3 kernel.
+float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
+    if (projCoords.z > 1.0) return 1.0;
+
+    float shadow = 0.0;
+    vec2 texelSize = vec2(1.0 / 1024.0); // kShadowMapResolution
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap,
+                projCoords.xy + vec2(float(x), float(y)) * texelSize).r;
+            shadow += (projCoords.z - 0.002) > pcfDepth ? 0.0 : 1.0;
+        }
+    }
+    return shadow / 9.0;
+}
+
+// Compute shadow factor for a world position using CSM.
+float compute_shadow(vec3 worldPos, float depth) {
+    if (uShadowEnabled == 0) return 1.0;
+
+    float viewDepth = linearize_depth(depth);
+
+    // Select cascade based on view-space depth.
+    int cascadeIdx = 3;
+    for (int i = 0; i < 4; ++i) {
+        if (viewDepth < uCascadeSplit[i]) {
+            cascadeIdx = i;
+            break;
+        }
+    }
+
+    // Project world position into shadow map space.
+    vec4 shadowCoord = uShadowMatrix[cascadeIdx] * vec4(worldPos, 1.0);
+    vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    projCoords = projCoords * 0.5 + 0.5; // [-1,1] → [0,1]
+
+    // Blend between cascades at the boundary to reduce seams.
+    float shadow = sample_shadow_pcf(uShadowMap[cascadeIdx], projCoords);
+
+    // Cascade blending: blend with next cascade near the split boundary.
+    float blendFactor = 0.0;
+    float blendRange = uCascadeSplit[cascadeIdx] * 0.1;
+    if (cascadeIdx < 3 && viewDepth > uCascadeSplit[cascadeIdx] - blendRange) {
+        vec4 nextShadowCoord = uShadowMatrix[cascadeIdx + 1] * vec4(worldPos, 1.0);
+        vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
+        nextProjCoords = nextProjCoords * 0.5 + 0.5;
+        float nextShadow = sample_shadow_pcf(uShadowMap[cascadeIdx + 1], nextProjCoords);
+        blendFactor = (viewDepth - (uCascadeSplit[cascadeIdx] - blendRange)) / blendRange;
+        shadow = mix(shadow, nextShadow, clamp(blendFactor, 0.0, 1.0));
+    }
+
+    return shadow;
+}
+
 void main() {
     // Sample G-Buffer.
     vec4 albedoMetallic = texture(uGBufferAlbedo, vTexCoord);
@@ -140,10 +208,11 @@ void main() {
     // Accumulate lighting.
     vec3 Lo = vec3(0.0);
 
-    // Directional light.
+    // Directional light with shadow.
     vec3 L_dir = normalize(-uDirLightDirection);
+    float shadowFactor = compute_shadow(worldPos, depth);
     Lo += cook_torrance(N, V, L_dir, albedo, metallic, roughness,
-                        uDirLightColor, 1.0);
+                        uDirLightColor, 1.0) * shadowFactor;
 
     // Determine tile index for culled light lookup.
     int tileX = int(gl_FragCoord.x) / 16;

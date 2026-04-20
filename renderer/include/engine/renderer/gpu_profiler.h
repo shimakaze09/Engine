@@ -12,7 +12,9 @@ enum class GpuPassId : std::uint8_t {
   GBufferDebug = 4U,
   Bloom = 5U,
   SSAO = 6U,
-  Count = 7U,
+  ShadowMap = 7U,
+  AutoExposure = 8U,
+  Count = 9U,
 };
 
 struct GpuProfilerDebugStats final {

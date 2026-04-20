@@ -9,8 +9,10 @@ engine_add_module_library(engine_renderer
     src/lru_cache.cpp
     src/mesh_loader.cpp
     src/pass_resources.cpp
+    src/post_process_stack.cpp
     src/render_device_gl.cpp
     src/shader_system.cpp
+    src/shadow_map.cpp
     src/texture_loader.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include

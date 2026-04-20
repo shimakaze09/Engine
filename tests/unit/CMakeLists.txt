@@ -349,6 +349,33 @@ engine_add_test_executable(engine_unit_light_culling
     engine_math
 )
 
+# ---- P1-M5-C: Shadow Maps ----
+
+engine_add_test_executable(engine_unit_shadow_map
+    SOURCES
+    shadow_map_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+)
+
+# ---- P1-M5-D: Post-Processing ----
+
+engine_add_test_executable(engine_unit_post_process_stack
+    SOURCES
+    post_process_stack_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_auto_exposure
+    SOURCES
+    auto_exposure_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+)
+
 # ---- §0-3: Engine Pipeline Decomposition ----
 
 engine_add_test_executable(engine_unit_engine_pipeline

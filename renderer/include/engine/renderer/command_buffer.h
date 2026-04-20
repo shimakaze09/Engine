@@ -108,6 +108,8 @@ struct RendererFrameStats final {
   float gpuDeferredLightMs = 0.0F;
   float gpuBloomMs = 0.0F;
   float gpuSsaoMs = 0.0F;
+  float gpuShadowMapMs = 0.0F;
+  float gpuAutoExposureMs = 0.0F;
 };
 
 void flush_renderer(CommandBufferView commandBufferView,

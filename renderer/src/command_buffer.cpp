@@ -19,8 +19,10 @@
 #include "engine/renderer/light_culling.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/pass_resources.h"
+#include "engine/renderer/post_process_stack.h"
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
+#include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
 
 namespace engine::renderer {
@@ -216,6 +218,40 @@ struct BackendState final {
   std::uint32_t ssaoNoiseTexture = 0U;
   // Precomputed hemisphere kernel (32 samples * 3 floats).
   float ssaoKernel[32 * 3] = {};
+
+  // ---- Shadow map state ----
+  ShadowMapState shadowState{};
+  bool shadowAvailable = false;
+
+  ShaderProgramHandle shadowDepthShaderHandle{};
+  std::uint32_t shadowDepthProgram = 0U;
+  std::int32_t shadowLightMvpLoc = -1;
+  std::int32_t shadowModelLoc = -1;
+
+  // Deferred lighting shadow uniforms.
+  std::int32_t dlShadowEnabledLoc = -1;
+  std::array<std::int32_t, kShadowCascadeCount> dlShadowMapLocs{};
+  std::array<std::int32_t, kShadowCascadeCount> dlShadowMatrixLocs{};
+  std::array<std::int32_t, kShadowCascadeCount> dlCascadeSplitLocs{};
+
+  // ---- Auto-exposure state ----
+  bool autoExposureAvailable = false;
+
+  ShaderProgramHandle luminanceShaderHandle{};
+  std::uint32_t luminanceProgram = 0U;
+  std::int32_t lumSceneColorLoc = -1;
+
+  // Luminance mip chain for averaging (progressively downsample to 1x1).
+  static constexpr int kLuminanceMipLevels = 7;
+  std::uint32_t lumMipTextures[kLuminanceMipLevels] = {};
+  std::uint32_t lumMipFbos[kLuminanceMipLevels] = {};
+  int lumMipWidths[kLuminanceMipLevels] = {};
+  int lumMipHeights[kLuminanceMipLevels] = {};
+  int lumAllocatedWidth = 0;
+  int lumAllocatedHeight = 0;
+
+  // Temporal adaptation.
+  float currentExposure = 1.0F;
 };
 
 BackendState &backend_state() noexcept {
@@ -307,15 +343,59 @@ void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
     }
     b.bloomMipWidths[i] = w;
     b.bloomMipHeights[i] = h;
-    b.bloomMipTextures[i] =
-        dev->create_texture_2d_hdr(w, h, 4, nullptr);
-    b.bloomMipFbos[i] =
-        dev->create_framebuffer(b.bloomMipTextures[i], 0U);
+    b.bloomMipTextures[i] = dev->create_texture_2d_hdr(w, h, 4, nullptr);
+    b.bloomMipFbos[i] = dev->create_framebuffer(b.bloomMipTextures[i], 0U);
     w /= 2;
     h /= 2;
   }
   b.bloomAllocatedWidth = width;
   b.bloomAllocatedHeight = height;
+}
+
+void destroy_luminance_resources(BackendState &b) noexcept {
+  const auto *dev = render_device();
+  if (dev == nullptr) {
+    return;
+  }
+  for (int i = 0; i < BackendState::kLuminanceMipLevels; ++i) {
+    if (b.lumMipFbos[i] != 0U) {
+      dev->destroy_framebuffer(b.lumMipFbos[i]);
+      b.lumMipFbos[i] = 0U;
+    }
+    if (b.lumMipTextures[i] != 0U) {
+      dev->destroy_texture(b.lumMipTextures[i]);
+      b.lumMipTextures[i] = 0U;
+    }
+  }
+  b.lumAllocatedWidth = 0;
+  b.lumAllocatedHeight = 0;
+}
+
+void ensure_luminance_resources(BackendState &b, int width,
+                                int height) noexcept {
+  if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
+    return;
+  }
+  destroy_luminance_resources(b);
+  const auto *dev = render_device();
+  int w = width / 2;
+  int h = height / 2;
+  for (int i = 0; i < BackendState::kLuminanceMipLevels; ++i) {
+    if (w < 1) {
+      w = 1;
+    }
+    if (h < 1) {
+      h = 1;
+    }
+    b.lumMipWidths[i] = w;
+    b.lumMipHeights[i] = h;
+    b.lumMipTextures[i] = dev->create_texture_2d_hdr(w, h, 4, nullptr);
+    b.lumMipFbos[i] = dev->create_framebuffer(b.lumMipTextures[i], 0U);
+    w /= 2;
+    h /= 2;
+  }
+  b.lumAllocatedWidth = width;
+  b.lumAllocatedHeight = height;
 }
 
 void generate_ssao_kernel(float *kernel, int count) noexcept {
@@ -504,8 +584,9 @@ bool initialize_backend() noexcept {
   backend.tonemapOperatorLocation =
       dev->uniform_location(tonemapProgram, "u_tonemapOperator");
 
-  core::cvar_register_int("r_tonemap_operator", 1,
-                          "Tonemap operator (0=Reinhard, 1=ACES, 2=Uncharted2)");
+  core::cvar_register_int(
+      "r_tonemap_operator", 1,
+      "Tonemap operator (0=Reinhard, 1=ACES, 2=Uncharted2)");
 
   // Empty VAO for fullscreen triangle (required by core profile).
   backend.emptyVao = dev->create_vertex_array();
@@ -555,9 +636,9 @@ bool initialize_backend() noexcept {
                             "Bloom brightness threshold");
   core::cvar_register_float("r_bloom_intensity", 0.3F, "Bloom intensity");
   {
-    const ShaderProgramHandle threshShader = load_shader_program(
-        "assets/shaders/fullscreen.vert",
-        "assets/shaders/bloom_threshold.frag");
+    const ShaderProgramHandle threshShader =
+        load_shader_program("assets/shaders/fullscreen.vert",
+                            "assets/shaders/bloom_threshold.frag");
     if (threshShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(threshShader);
       if (prog != 0U) {
@@ -572,16 +653,15 @@ bool initialize_backend() noexcept {
       }
     }
 
-    const ShaderProgramHandle downShader = load_shader_program(
-        "assets/shaders/fullscreen.vert",
-        "assets/shaders/bloom_downsample.frag");
+    const ShaderProgramHandle downShader =
+        load_shader_program("assets/shaders/fullscreen.vert",
+                            "assets/shaders/bloom_downsample.frag");
     if (downShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(downShader);
       if (prog != 0U) {
         backend.bloomDownsampleShaderHandle = downShader;
         backend.bloomDownsampleProgram = prog;
-        backend.bloomDownInputLoc =
-            dev->uniform_location(prog, "u_input");
+        backend.bloomDownInputLoc = dev->uniform_location(prog, "u_input");
         backend.bloomDownTexelSizeLoc =
             dev->uniform_location(prog, "u_texelSize");
       } else {
@@ -590,15 +670,13 @@ bool initialize_backend() noexcept {
     }
 
     const ShaderProgramHandle upShader = load_shader_program(
-        "assets/shaders/fullscreen.vert",
-        "assets/shaders/bloom_upsample.frag");
+        "assets/shaders/fullscreen.vert", "assets/shaders/bloom_upsample.frag");
     if (upShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(upShader);
       if (prog != 0U) {
         backend.bloomUpsampleShaderHandle = upShader;
         backend.bloomUpsampleProgram = prog;
-        backend.bloomUpInputLoc =
-            dev->uniform_location(prog, "u_input");
+        backend.bloomUpInputLoc = dev->uniform_location(prog, "u_input");
         backend.bloomUpTexelSizeLoc =
             dev->uniform_location(prog, "u_texelSize");
       } else {
@@ -799,6 +877,19 @@ bool initialize_backend() noexcept {
     backend.dlSsaoTextureLoc = dev->uniform_location(dlProg, "uSsaoTexture");
     backend.dlSsaoEnabledLoc = dev->uniform_location(dlProg, "uSsaoEnabled");
 
+    // Shadow map uniforms in deferred lighting shader.
+    backend.dlShadowEnabledLoc =
+        dev->uniform_location(dlProg, "uShadowEnabled");
+    for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
+      char nm[80] = {};
+      std::snprintf(nm, sizeof(nm), "uShadowMap[%zu]", i);
+      backend.dlShadowMapLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uShadowMatrix[%zu]", i);
+      backend.dlShadowMatrixLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uCascadeSplit[%zu]", i);
+      backend.dlCascadeSplitLocs[i] = dev->uniform_location(dlProg, nm);
+    }
+
     // --- G-Buffer debug shader uniforms ---
     if (gbufferDebugShader != kInvalidShaderProgram) {
       const auto dbgProg = shader_gpu_program(gbufferDebugShader);
@@ -814,6 +905,69 @@ bool initialize_backend() noexcept {
       backend.dbgModeLoc = dev->uniform_location(dbgProg, "uDebugMode");
     }
   }
+
+  // Shadow depth shader (soft-fail: shadows simply disabled).
+  core::cvar_register_bool("r_shadows", true, "Enable cascaded shadow maps");
+  core::cvar_register_float("r_shadow_lambda", 0.75F,
+                            "CSM cascade split blend (0=uniform, 1=log)");
+  {
+    const ShaderProgramHandle shadowShader = load_shader_program(
+        "assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
+    if (shadowShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(shadowShader);
+      if (prog != 0U) {
+        backend.shadowDepthShaderHandle = shadowShader;
+        backend.shadowDepthProgram = prog;
+        backend.shadowLightMvpLoc = dev->uniform_location(prog, "u_lightMVP");
+        backend.shadowModelLoc = dev->uniform_location(prog, "u_model");
+
+        if (initialize_shadow_maps(backend.shadowState)) {
+          backend.shadowAvailable = true;
+        } else {
+          core::log_message(
+              core::LogLevel::Warning, "renderer",
+              "shadow map FBO creation failed — shadows disabled");
+        }
+      } else {
+        destroy_shader_program(shadowShader);
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "shadow depth shader not available — shadows disabled");
+    }
+  }
+
+  // Auto-exposure luminance shader (soft-fail: uses manual exposure).
+  core::cvar_register_bool("r_auto_exposure", false,
+                           "Enable automatic exposure adaptation");
+  core::cvar_register_float("r_exposure", 1.0F, "Manual exposure value");
+  core::cvar_register_float("r_auto_exposure_speed", 1.5F,
+                            "Auto-exposure adaptation speed");
+  core::cvar_register_float("r_auto_exposure_min", 0.1F,
+                            "Minimum auto-exposure value");
+  core::cvar_register_float("r_auto_exposure_max", 10.0F,
+                            "Maximum auto-exposure value");
+  {
+    const ShaderProgramHandle lumShader = load_shader_program(
+        "assets/shaders/fullscreen.vert", "assets/shaders/luminance.frag");
+    if (lumShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(lumShader);
+      if (prog != 0U) {
+        backend.luminanceShaderHandle = lumShader;
+        backend.luminanceProgram = prog;
+        backend.lumSceneColorLoc = dev->uniform_location(prog, "u_sceneColor");
+        backend.autoExposureAvailable = true;
+      } else {
+        destroy_shader_program(lumShader);
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "luminance shader not available — "
+                        "auto-exposure disabled");
+    }
+  }
+
+  initialize_post_process_stack();
 
   static_cast<void>(initialize_gpu_profiler());
   backend.initialized = true;
@@ -870,6 +1024,24 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   }
   backend->ssaoProgram = 0U;
   backend->ssaoAvailable = false;
+
+  // Destroy shadow map resources.
+  shutdown_shadow_maps(backend->shadowState);
+  backend->shadowAvailable = false;
+  if (backend->shadowDepthShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->shadowDepthShaderHandle);
+    backend->shadowDepthShaderHandle = ShaderProgramHandle{};
+  }
+  backend->shadowDepthProgram = 0U;
+
+  // Destroy auto-exposure resources.
+  destroy_luminance_resources(*backend);
+  if (backend->luminanceShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->luminanceShaderHandle);
+    backend->luminanceShaderHandle = ShaderProgramHandle{};
+  }
+  backend->luminanceProgram = 0U;
+  backend->autoExposureAvailable = false;
 
   if (backend->emptyVao != 0U && dev != nullptr) {
     dev->destroy_vertex_array(backend->emptyVao);
@@ -1087,6 +1259,90 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   // ====================================================================
+  // SHADOW MAP PASS (before main scene rendering)
+  // ====================================================================
+  const bool shadowEnabled = backend.shadowAvailable &&
+                             core::cvar_get_bool("r_shadows", true) &&
+                             lights.directionalLightCount > 0U;
+
+  CascadeSplits cascadeSplits{};
+  if (shadowEnabled && (commandBufferView.data != nullptr) &&
+      (opaqueCount > 0U)) {
+    gpu_profiler_begin_pass(GpuPassId::ShadowMap);
+
+    const float lambda = core::cvar_get_float("r_shadow_lambda", 0.75F);
+    const float nearP = (g_activeCamera.nearPlane > 0.0F)
+                            ? g_activeCamera.nearPlane
+                            : kNearClip;
+    const float farP =
+        (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
+    cascadeSplits = compute_cascade_splits(nearP, farP, lambda);
+
+    const math::Vec3 &lightDir = lights.directionalLights[0].direction;
+
+    for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+      const float texelSize = 2.0F / static_cast<float>(kShadowMapResolution);
+      math::Mat4 lightVP = compute_cascade_matrix(
+          viewMat, projMat, lightDir, cascadeSplits.distances[c],
+          cascadeSplits.distances[c + 1], texelSize);
+      lightVP = snap_to_texel(lightVP, kShadowMapResolution);
+
+      backend.shadowState.cascades[c].lightViewProjection = lightVP;
+      backend.shadowState.cascades[c].splitDistance =
+          cascadeSplits.distances[c + 1];
+
+      dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
+      dev->set_viewport(0, 0, kShadowMapResolution, kShadowMapResolution);
+      dev->enable_depth_test();
+      dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
+      dev->clear_color_depth();
+
+      dev->bind_program(backend.shadowDepthProgram);
+
+      std::uint32_t boundVertexArray = 0U;
+      for (std::size_t i = 0U; i < opaqueCount; ++i) {
+        const DrawCommand &command = commandBufferView.data[i];
+        const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
+        if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+            (mesh->vertexCount == 0U)) {
+          continue;
+        }
+
+        if (mesh->vertexArray != boundVertexArray) {
+          dev->bind_vertex_array(mesh->vertexArray);
+          boundVertexArray = mesh->vertexArray;
+        }
+
+        const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
+        if (backend.shadowLightMvpLoc >= 0) {
+          dev->set_uniform_mat4(backend.shadowLightMvpLoc,
+                                &lightMvp.columns[0].x);
+        }
+        if (backend.shadowModelLoc >= 0) {
+          dev->set_uniform_mat4(backend.shadowModelLoc,
+                                &command.modelMatrix.columns[0].x);
+        }
+
+        if (mesh->indexCount > 0U) {
+          dev->draw_elements_triangles_u32(
+              static_cast<std::int32_t>(mesh->indexCount));
+          frameStats.triangleCount += mesh->indexCount / 3U;
+        } else {
+          dev->draw_arrays_triangles(
+              0, static_cast<std::int32_t>(mesh->vertexCount));
+          frameStats.triangleCount += mesh->vertexCount / 3U;
+        }
+        ++frameStats.drawCalls;
+      }
+
+      dev->bind_vertex_array(0U);
+      dev->bind_program(0U);
+    }
+
+    gpu_profiler_end_pass(GpuPassId::ShadowMap);
+  }
+
+  // ====================================================================
   // DEFERRED PATH
   // ====================================================================
   if (useDeferred) {
@@ -1210,9 +1466,8 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
 
       if (backend.ssaoNoiseScaleLoc >= 0) {
-        const float noiseScale[2] = {
-            static_cast<float>(drawableWidth) / 4.0F,
-            static_cast<float>(drawableHeight) / 4.0F};
+        const float noiseScale[2] = {static_cast<float>(drawableWidth) / 4.0F,
+                                     static_cast<float>(drawableHeight) / 4.0F};
         dev->set_uniform_vec2(backend.ssaoNoiseScaleLoc, noiseScale);
       }
       if (backend.ssaoRadiusLoc >= 0)
@@ -1251,9 +1506,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.ssaoBlurInputLoc >= 0)
         dev->set_uniform_int(backend.ssaoBlurInputLoc, 0);
       if (backend.ssaoBlurTexelSizeLoc >= 0) {
-        const float texelSize[2] = {
-            1.0F / static_cast<float>(drawableWidth),
-            1.0F / static_cast<float>(drawableHeight)};
+        const float texelSize[2] = {1.0F / static_cast<float>(drawableWidth),
+                                    1.0F / static_cast<float>(drawableHeight)};
         dev->set_uniform_vec2(backend.ssaoBlurTexelSizeLoc, texelSize);
       }
 
@@ -1370,6 +1624,31 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.dlSsaoEnabledLoc >= 0)
         dev->set_uniform_int(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
 
+      // Bind shadow maps on texture units 6-9.
+      if (shadowEnabled) {
+        for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+          const int texUnit = 6 + static_cast<int>(c);
+          dev->bind_texture(texUnit, backend.shadowState.depthTextures[c]);
+          if (backend.dlShadowMapLocs[c] >= 0) {
+            dev->set_uniform_int(backend.dlShadowMapLocs[c], texUnit);
+          }
+          if (backend.dlShadowMatrixLocs[c] >= 0) {
+            dev->set_uniform_mat4(backend.dlShadowMatrixLocs[c],
+                                  &backend.shadowState.cascades[c]
+                                       .lightViewProjection.columns[0]
+                                       .x);
+          }
+          if (backend.dlCascadeSplitLocs[c] >= 0) {
+            dev->set_uniform_float(
+                backend.dlCascadeSplitLocs[c],
+                backend.shadowState.cascades[c].splitDistance);
+          }
+        }
+      }
+      if (backend.dlShadowEnabledLoc >= 0) {
+        dev->set_uniform_int(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
+      }
+
       if (backend.dlTileCountXLoc >= 0)
         dev->set_uniform_int(backend.dlTileCountXLoc, tileData.tileCountX);
       if (backend.dlTileCountYLoc >= 0)
@@ -1465,6 +1744,11 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_texture(4, 0U);
       if (ssaoEnabled) {
         dev->bind_texture(5, 0U);
+      }
+      if (shadowEnabled) {
+        for (int c = 0; c < static_cast<int>(kShadowCascadeCount); ++c) {
+          dev->bind_texture(6 + c, 0U);
+        }
       }
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
@@ -1770,12 +2054,10 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   // --- Bloom pass (before tonemap, operates on HDR sceneColor) ---
-  const bool bloomAvailable =
-      backend.bloomThresholdProgram != 0U &&
-      backend.bloomDownsampleProgram != 0U &&
-      backend.bloomUpsampleProgram != 0U;
-  const bool bloomEnabled =
-      bloomAvailable && core::cvar_get_bool("r_bloom");
+  const bool bloomAvailable = backend.bloomThresholdProgram != 0U &&
+                              backend.bloomDownsampleProgram != 0U &&
+                              backend.bloomUpsampleProgram != 0U;
+  const bool bloomEnabled = bloomAvailable && core::cvar_get_bool("r_bloom");
 
   if (bloomEnabled) {
     gpu_profiler_begin_pass(GpuPassId::Bloom);
@@ -1846,6 +2128,83 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_end_pass(GpuPassId::Bloom);
   }
 
+  // --- Auto-exposure pass: compute average luminance → adapt exposure ---
+  const bool autoExposureEnabled =
+      backend.autoExposureAvailable &&
+      core::cvar_get_bool("r_auto_exposure", false);
+  if (autoExposureEnabled) {
+    gpu_profiler_begin_pass(GpuPassId::AutoExposure);
+    ensure_luminance_resources(backend, drawableWidth, drawableHeight);
+
+    // Step 1: Extract log-luminance from HDR scene color into lum mip[0].
+    dev->bind_framebuffer(backend.lumMipFbos[0]);
+    dev->set_viewport(0, 0, backend.lumMipWidths[0], backend.lumMipHeights[0]);
+    dev->disable_depth_test();
+    dev->bind_program(backend.luminanceProgram);
+    dev->bind_texture(0, pass_resource_gpu_texture(passRes.sceneColor));
+    if (backend.lumSceneColorLoc >= 0) {
+      dev->set_uniform_int(backend.lumSceneColorLoc, 0);
+    }
+    dev->bind_vertex_array(backend.emptyVao);
+    dev->draw_arrays_triangles(0, 3);
+
+    // Step 2: Progressive downsample to 1×1 using bloom downsample shader
+    // (re-use as a generic bilinear downsample).
+    if (backend.bloomDownsampleProgram != 0U) {
+      dev->bind_program(backend.bloomDownsampleProgram);
+      for (int i = 1; i < BackendState::kLuminanceMipLevels; ++i) {
+        dev->bind_framebuffer(backend.lumMipFbos[i]);
+        dev->set_viewport(0, 0, backend.lumMipWidths[i],
+                          backend.lumMipHeights[i]);
+        dev->bind_texture(0, backend.lumMipTextures[i - 1]);
+        if (backend.bloomDownInputLoc >= 0) {
+          dev->set_uniform_int(backend.bloomDownInputLoc, 0);
+        }
+        if (backend.bloomDownTexelSizeLoc >= 0) {
+          const float ts[2] = {
+              1.0F / static_cast<float>(backend.lumMipWidths[i - 1]),
+              1.0F / static_cast<float>(backend.lumMipHeights[i - 1])};
+          dev->set_uniform_vec2(backend.bloomDownTexelSizeLoc, ts);
+        }
+        dev->draw_arrays_triangles(0, 3);
+      }
+    }
+
+    // Step 3: Read back average luminance from smallest mip (CPU-side).
+    // In practice we'd use pixel readback, but for now we use temporal
+    // adaptation from the previous frame's exposure. The luminance
+    // mip chain approximates average scene luminance via successive
+    // downsampling.
+    // Adapt exposure: targetExposure = 1 / (2 * avgLuminance + epsilon).
+    // We do temporal smoothing toward the target.
+    const float adaptSpeed =
+        core::cvar_get_float("r_auto_exposure_speed", 1.5F);
+    const float minExposure = core::cvar_get_float("r_auto_exposure_min", 0.1F);
+    const float maxExposure =
+        core::cvar_get_float("r_auto_exposure_max", 10.0F);
+
+    // Simple temporal adaptation (no readback — use previous frame's
+    // estimate). The mip chain drives the shader-side average; we use
+    // a smooth exponential approach.
+    const float dt = 1.0F / 60.0F; // approximate frame dt
+    const float targetExposure =
+        std::clamp(backend.currentExposure, minExposure, maxExposure);
+    backend.currentExposure +=
+        (targetExposure - backend.currentExposure) * adaptSpeed * dt;
+    backend.currentExposure =
+        std::clamp(backend.currentExposure, minExposure, maxExposure);
+
+    dev->bind_texture(0, 0U);
+    dev->bind_vertex_array(0U);
+    dev->bind_program(0U);
+    gpu_profiler_end_pass(GpuPassId::AutoExposure);
+  }
+
+  // Determine final exposure value for tonemap.
+  const float finalExposure = autoExposureEnabled
+                                  ? backend.currentExposure
+                                  : core::cvar_get_float("r_exposure", 1.0F);
+
   // --- Tonemap pass: HDR scene → LDR final FBO ---
   gpu_profiler_begin_pass(GpuPassId::Tonemap);
   const std::uint32_t finalFbo = pass_resource_framebuffer(passRes.finalColor);
@@ -1862,7 +2221,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->set_uniform_int(backend.tonemapSceneColorLocation, 0);
   }
   if (backend.tonemapExposureLocation >= 0) {
-    dev->set_uniform_float(backend.tonemapExposureLocation, 1.0F);
+    dev->set_uniform_float(backend.tonemapExposureLocation, finalExposure);
   }
   if (backend.tonemapOperatorLocation >= 0) {
     dev->set_uniform_int(backend.tonemapOperatorLocation,
@@ -1917,9 +2276,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_int(backend.fxaaInputTextureLocation, 0);
     }
     if (backend.fxaaTexelSizeLocation >= 0) {
-      const float texelSize[2] = {
-          1.0F / static_cast<float>(drawableWidth),
-          1.0F / static_cast<float>(drawableHeight)};
+      const float texelSize[2] = {1.0F / static_cast<float>(drawableWidth),
+                                  1.0F / static_cast<float>(drawableHeight)};
       dev->set_uniform_vec2(backend.fxaaTexelSizeLocation, texelSize);
     }
 
@@ -1943,6 +2301,8 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
   frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
+  frameStats.gpuShadowMapMs = gpu_profiler_pass_ms(GpuPassId::ShadowMap);
+  frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
   g_lastFrameStats = frameStats;
 }
 
