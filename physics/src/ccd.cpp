@@ -8,7 +8,8 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
-#include "engine/runtime/world.h"
+#include "engine/physics/physics_world_view.h"
+#include "engine/physics/physics_context.h"
 
 #include <algorithm>
 #include <cmath>
@@ -35,8 +36,8 @@ constexpr float kTolerance = 1e-4F;
 // We re-declare locally rather than exposing them publicly.
 
 // Compute broadphase half-extents for any collider shape.
-math::Vec3 broadphase_half_extents_ccd(const runtime::Collider &col) noexcept {
-  if (col.shape == runtime::ColliderShape::Capsule) {
+math::Vec3 broadphase_half_extents_ccd(const Collider &col) noexcept {
+  if (col.shape == ColliderShape::Capsule) {
     const float r = col.halfExtents.x;
     const float hh = col.halfExtents.y;
     return math::Vec3(r, hh + r, r);
@@ -66,34 +67,34 @@ float sphere_separating_distance(const math::Vec3 &posA, float radiusA,
 }
 
 // Resolve support function and opaque data for a collider shape.
-SupportFn resolve_support(const runtime::Collider &col) noexcept {
+SupportFn resolve_support(const Collider &col) noexcept {
   switch (col.shape) {
-  case runtime::ColliderShape::ConvexHull:
+  case ColliderShape::ConvexHull:
     return &support_convex_hull;
-  case runtime::ColliderShape::Sphere:
+  case ColliderShape::Sphere:
     return &support_sphere;
-  case runtime::ColliderShape::Capsule:
+  case ColliderShape::Capsule:
     return &support_capsule;
-  case runtime::ColliderShape::AABB:
+  case ColliderShape::AABB:
   default:
     return &support_aabb;
   }
 }
 
-const void *resolve_support_data(const runtime::Collider &col,
+const void *resolve_support_data(const Collider &col,
                                  std::uint32_t entityIndex,
                                  float *storage) noexcept {
   switch (col.shape) {
-  case runtime::ColliderShape::ConvexHull:
+  case ColliderShape::ConvexHull:
     return get_hull_data_ptr(entityIndex);
-  case runtime::ColliderShape::Sphere:
+  case ColliderShape::Sphere:
     storage[0] = col.halfExtents.x;
     return storage;
-  case runtime::ColliderShape::Capsule:
+  case ColliderShape::Capsule:
     storage[0] = col.halfExtents.x; // radius
     storage[1] = col.halfExtents.y; // halfHeight
     return storage;
-  case runtime::ColliderShape::AABB:
+  case ColliderShape::AABB:
   default:
     std::memcpy(storage, &col.halfExtents, sizeof(float) * 3);
     return storage;
@@ -104,13 +105,13 @@ const void *resolve_support_data(const runtime::Collider &col,
 // Positive means separated, negative means overlapping.
 // Uses GJK for shape-aware distance; falls back to AABB when GJK data
 // is unavailable (e.g. missing hull).
-float separating_distance(const runtime::Collider &colA,
+float separating_distance(const Collider &colA,
                           const math::Vec3 &posA, std::uint32_t entityIdxA,
-                          const runtime::Collider &colB,
+                          const Collider &colB,
                           const math::Vec3 &posB,
                           std::uint32_t entityIdxB) noexcept {
-  const bool aIsSphere = (colA.shape == runtime::ColliderShape::Sphere);
-  const bool bIsSphere = (colB.shape == runtime::ColliderShape::Sphere);
+  const bool aIsSphere = (colA.shape == ColliderShape::Sphere);
+  const bool bIsSphere = (colB.shape == ColliderShape::Sphere);
 
   if (aIsSphere && bIsSphere) {
     return sphere_separating_distance(posA, colA.halfExtents.x, posB,
@@ -142,10 +143,10 @@ float separating_distance(const runtime::Collider &colA,
 
 // Compute the contact normal between two overlapping shapes (A hitting B).
 // Uses GJK/EPA for shape-accurate normal; falls back to center-to-center.
-math::Vec3 contact_normal_between(const runtime::Collider &colA,
+math::Vec3 contact_normal_between(const Collider &colA,
                                   const math::Vec3 &posA,
                                   std::uint32_t entityIdxA,
-                                  const runtime::Collider &colB,
+                                  const Collider &colB,
                                   const math::Vec3 &posB,
                                   std::uint32_t entityIdxB) noexcept {
   alignas(16) float storA[4]{};
@@ -178,11 +179,11 @@ float ccd_velocity_threshold() noexcept {
   return core::cvar_get_float("physics.ccd_threshold", 2.0F);
 }
 
-CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
-                                     runtime::Entity entity,
-                                     const runtime::RigidBody &body,
-                                     const runtime::Collider &collider,
-                                     const runtime::Transform &transform,
+CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
+                                     Entity entity,
+                                     const RigidBody &body,
+                                     const Collider &collider,
+                                     const Transform &transform,
                                      float dt) noexcept {
 
   CcdSweepResult result{};
@@ -214,8 +215,8 @@ CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
     return result;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return result;
   }
@@ -232,19 +233,19 @@ CcdSweepResult bilateral_advance_ccd(const runtime::World &world,
     }
 
     // Collision layer/mask filtering.
-    const runtime::Collider &other = colliders[i];
+    const Collider &other = colliders[i];
     if (((collider.collisionLayer & other.collisionMask) == 0U) ||
         ((other.collisionLayer & collider.collisionMask) == 0U)) {
       continue;
     }
 
-    runtime::Transform otherTransform{};
+    Transform otherTransform{};
     if (!world.get_transform(entities[i], &otherTransform)) {
       continue;
     }
 
     // Get the other body's velocity (might be moving too).
-    const runtime::RigidBody *otherBody = world.get_rigid_body_ptr(entities[i]);
+    const RigidBody *otherBody = world.get_rigid_body_ptr(entities[i]);
     const math::Vec3 otherVel = (otherBody != nullptr)
                                     ? otherBody->velocity
                                     : math::Vec3(0.0F, 0.0F, 0.0F);

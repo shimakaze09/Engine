@@ -13,6 +13,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/physics_world_view.h"
 #include "engine/runtime/camera_manager.h"
 #include "engine/runtime/game_mode.h"
 #include "engine/runtime/timer_manager.h"
@@ -117,7 +118,7 @@ enum class WorldPhase : std::uint8_t {
   RenderPrep = RenderSubmission,
 };
 
-class World final {
+class World final : public physics::PhysicsWorldView {
 public:
   static constexpr std::size_t kMaxEntities = ENGINE_MAX_ENTITIES;
   static constexpr std::size_t kMaxTransforms = kMaxEntities;
@@ -134,70 +135,6 @@ public:
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
-  static constexpr std::size_t kMaxPhysicsJoints = 4096U;
-  static constexpr std::size_t kMaxCollisionPairs = 1024U;
-  static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
-  using PhysicsCollisionDispatchFn = void (*)(const std::uint32_t *pairs,
-                                              std::size_t pairCount) noexcept;
-
-  enum class JointType : std::uint8_t {
-    Distance = 0,
-    Hinge = 1,
-    BallSocket = 2,
-    Slider = 3,
-    Spring = 4,
-    Fixed = 5,
-  };
-
-  struct PhysicsJointSlot final {
-    Entity entityA = kInvalidEntity;
-    Entity entityB = kInvalidEntity;
-    JointType type = JointType::Distance;
-    bool active = false;
-    bool hasLimits = false;
-
-    // Local-space anchor offsets on each body.
-    math::Vec3 anchorA{};
-    math::Vec3 anchorB{};
-
-    // Distance / Spring rest length.
-    float distance = 1.0F;
-
-    // Hinge / Slider axis (world-space direction, normalized).
-    math::Vec3 axis = math::Vec3(0.0F, 1.0F, 0.0F);
-
-    // Angle or distance limits (hinge: radians, slider: distance).
-    float minLimit = 0.0F;
-    float maxLimit = 0.0F;
-
-    // Spring parameters.
-    float stiffness = 100.0F;
-    float damping = 1.0F;
-
-    // Warm starting: accumulated impulse from previous frame.
-    float accumulatedImpulse = 0.0F;
-  };
-
-  struct PhysicsContext final {
-    math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
-    std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
-    std::size_t jointCount = 0U;
-
-    // Packed collision pairs: [entityIndexA0, entityIndexB0, ...]
-    std::array<std::uint32_t, kMaxCollisionPairs * 2U> collisionPairData{};
-    std::size_t collisionPairCount = 0U;
-    PhysicsCollisionDispatchFn collisionDispatch = nullptr;
-
-    // O(1) collision-pair dedupe via open addressing and generation stamps.
-    std::array<std::uint64_t, kCollisionPairHashBuckets> pairHashKeys{};
-    std::array<std::uint32_t, kCollisionPairHashBuckets> pairHashStamps{};
-    std::uint32_t pairHashGeneration = 1U;
-
-    // O(1) broadphase neighbor dedupe using per-collider generation stamps.
-    std::array<std::uint32_t, kMaxColliders> testedStamps{};
-    std::uint32_t testedGeneration = 1U;
-  };
-
   World() noexcept;
 
   Entity create_entity() noexcept;
@@ -229,40 +166,33 @@ public:
 
   bool add_transform(Entity entity, const Transform &transform) noexcept;
   bool remove_transform(Entity entity) noexcept;
-  bool get_transform(Entity entity, Transform *outTransform) const noexcept;
+  bool get_transform(Entity entity,
+                     Transform *outTransform) const noexcept override;
   // Read buffer is last committed state; during Idle this is the previous
   // frame.
   const Transform *get_transform_read_ptr(Entity entity) const noexcept;
-  class SimulationAccessToken final {
-  public:
-    constexpr bool valid() const noexcept { return m_valid; }
-
-  private:
-    explicit constexpr SimulationAccessToken(bool isValid) noexcept
-        : m_valid(isValid) {}
-    bool m_valid = false;
-    friend class World;
-  };
-  SimulationAccessToken simulation_access_token() const noexcept;
+  SimulationAccessToken simulation_access_token() const noexcept override;
   Transform *
   get_transform_write_ptr(Entity entity,
-                          const SimulationAccessToken &token) noexcept;
+                          const SimulationAccessToken &token) noexcept override;
   const WorldTransform *
   get_world_transform_read_ptr(Entity entity) const noexcept;
   bool set_movement_authority(Entity entity,
                               MovementAuthority authority) noexcept;
-  MovementAuthority movement_authority(Entity entity) const noexcept;
+  MovementAuthority movement_authority(Entity entity) const noexcept override;
 
   bool add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept;
   bool remove_rigid_body(Entity entity) noexcept;
-  bool get_rigid_body(Entity entity, RigidBody *outRigidBody) const noexcept;
+  bool get_rigid_body(Entity entity,
+                     RigidBody *outRigidBody) const noexcept override;
 
   bool add_collider(Entity entity, const Collider &collider) noexcept;
   bool remove_collider(Entity entity) noexcept;
   bool get_collider(Entity entity, Collider *outCollider) const noexcept;
   bool get_collider_range(std::size_t startIndex, std::size_t count,
                           const Entity **outEntities,
-                          const Collider **outColliders) const noexcept;
+                          const Collider **outColliders) const
+      noexcept override;
 
   bool add_mesh_component(Entity entity,
                           const MeshComponent &component) noexcept;
@@ -406,24 +336,25 @@ public:
   bool get_transform_update_range(std::size_t startIndex, std::size_t count,
                                   const Entity **outEntities,
                                   const Transform **outReadTransforms,
-                                  Transform **outWriteTransforms) noexcept;
+                                  Transform **outWriteTransforms)
+      noexcept override;
   bool read_transform_range(std::size_t startIndex, std::size_t count,
                             const Entity **outEntities,
                             const Transform **outTransforms) const noexcept;
   bool read_world_transform_range(
       std::size_t startIndex, std::size_t count, const Entity **outEntities,
       const WorldTransform **outTransforms) const noexcept;
-  std::size_t transform_count() const noexcept;
+  std::size_t transform_count() const noexcept override;
   std::size_t world_transform_count() const noexcept;
   std::size_t rigid_body_count() const noexcept;
-  std::size_t collider_count() const noexcept;
+  std::size_t collider_count() const noexcept override;
 
-  PhysicsContext &physics_context() noexcept;
-  const PhysicsContext &physics_context() const noexcept;
+  physics::PhysicsContext &physics_context() noexcept override;
+  const physics::PhysicsContext &physics_context() const noexcept override;
 
-  RigidBody *get_rigid_body_ptr(Entity entity) noexcept;
-  const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept;
-  const Collider *get_collider_ptr(Entity entity) const noexcept;
+  RigidBody *get_rigid_body_ptr(Entity entity) noexcept override;
+  const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept override;
+  const Collider *get_collider_ptr(Entity entity) const noexcept override;
   Collider *get_collider_ptr(Entity entity) noexcept;
 
   template <typename... Components, typename Fn>
@@ -757,7 +688,7 @@ private:
   SpringArmSet m_springArms{};
   PointLightSet m_pointLights{};
   SpotLightSet m_spotLights{};
-  PhysicsContext m_physicsContext{};
+  physics::PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
   TimerManager m_timerManager{};
   CameraManager m_cameraManager{};

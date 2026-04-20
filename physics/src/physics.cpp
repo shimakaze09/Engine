@@ -16,8 +16,9 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/constraint_solver.h"
 #include "engine/physics/convex_hull.h"
-#include "engine/runtime/physics_bridge.h"
-#include "engine/runtime/world.h"
+
+#include "engine/physics/physics_world_view.h"
+#include "engine/physics/physics_context.h"
 
 namespace engine::physics {
 
@@ -155,7 +156,7 @@ std::uint64_t make_pair_key(std::uint32_t idxA, std::uint32_t idxB) noexcept {
          static_cast<std::uint64_t>(hi);
 }
 
-bool insert_pair_key(runtime::World::PhysicsContext &ctx,
+bool insert_pair_key(PhysicsContext &ctx,
                      std::uint64_t key) noexcept {
   const std::uint32_t generation = ctx.pairHashGeneration;
   const std::size_t bucketCount = ctx.pairHashStamps.size();
@@ -179,10 +180,10 @@ bool insert_pair_key(runtime::World::PhysicsContext &ctx,
   return false;
 }
 
-void record_collision_pair(runtime::World &world, std::uint32_t idxA,
+void record_collision_pair(PhysicsWorldView &world, std::uint32_t idxA,
                            std::uint32_t idxB) noexcept {
-  runtime::World::PhysicsContext &ctx = world.physics_context();
-  if (ctx.collisionPairCount >= runtime::World::kMaxCollisionPairs) {
+  PhysicsContext &ctx = world.physics_context();
+  if (ctx.collisionPairCount >= kMaxCollisionPairs) {
     return;
   }
 
@@ -203,7 +204,7 @@ void record_collision_pair(runtime::World &world, std::uint32_t idxA,
 // The capsule is centered at `pos` with halfHeight = halfExtents.y,
 // radius = halfExtents.x.
 void capsule_segment(const engine::math::Vec3 &pos,
-                     const runtime::Collider &col, engine::math::Vec3 &outA,
+                     const Collider &col, engine::math::Vec3 &outA,
                      engine::math::Vec3 &outB) noexcept {
   const float hh = col.halfExtents.y; // halfHeight
   outA = engine::math::Vec3(pos.x, pos.y - hh, pos.z);
@@ -303,7 +304,7 @@ closest_point_on_aabb(const engine::math::Vec3 &point,
 
 // Compute the AABB halfExtents for a capsule (for broadphase insertion).
 engine::math::Vec3
-capsule_aabb_half_extents(const runtime::Collider &col) noexcept {
+capsule_aabb_half_extents(const Collider &col) noexcept {
   const float r = col.halfExtents.x;
   const float hh = col.halfExtents.y;
   return engine::math::Vec3(r, hh + r, r);
@@ -513,8 +514,8 @@ bool ray_intersects_heightfield(const engine::math::Ray &ray,
 
 // Compute the AABB half-extents for broadphase purposes regardless of shape.
 engine::math::Vec3
-broadphase_half_extents(const runtime::Collider &col) noexcept {
-  if (col.shape == runtime::ColliderShape::Capsule) {
+broadphase_half_extents(const Collider &col) noexcept {
+  if (col.shape == ColliderShape::Capsule) {
     return capsule_aabb_half_extents(col);
   }
   // For heightfield, halfExtents is set externally from the heightfield data.
@@ -522,7 +523,7 @@ broadphase_half_extents(const runtime::Collider &col) noexcept {
 }
 
 // Wake a sleeping body if the other body has velocity above threshold.
-void maybe_wake_pair(runtime::RigidBody *bodyA, runtime::RigidBody *bodyB,
+void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB,
                      float vA2, float vB2) noexcept {
   if ((bodyA != nullptr) && bodyA->sleeping && (vB2 > kSleepThreshold)) {
     bodyA->sleeping = false;
@@ -535,8 +536,8 @@ void maybe_wake_pair(runtime::RigidBody *bodyA, runtime::RigidBody *bodyB,
 }
 
 // Forward declaration.
-void apply_velocity_impulse(runtime::RigidBody *bodyA,
-                            runtime::RigidBody *bodyB,
+void apply_velocity_impulse(RigidBody *bodyA,
+                            RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
                             const engine::math::Vec3 &contactOffsetA,
@@ -546,21 +547,21 @@ void apply_velocity_impulse(runtime::RigidBody *bodyA,
 
 // Resolve a collision between two shapes given contact normal, overlap, and
 // the contact point.  Applies positional correction and velocity impulse.
-void resolve_contact(runtime::World &world,
-                     const runtime::World::SimulationAccessToken &simToken,
-                     runtime::Entity entityA, runtime::Entity entityB,
-                     runtime::RigidBody *bodyA, runtime::RigidBody *bodyB,
+void resolve_contact(PhysicsWorldView &world,
+                     const PhysicsWorldView::SimulationAccessToken &simToken,
+                     Entity entityA, Entity entityB,
+                     RigidBody *bodyA, RigidBody *bodyB,
                      float invMassA, float invMassB, float invMassSum,
                      const engine::math::Vec3 &normal, float overlap,
                      const engine::math::Vec3 &contactPt,
-                     const runtime::Collider &colliderA,
-                     const runtime::Collider &colliderB) noexcept {
+                     const Collider &colliderA,
+                     const Collider &colliderB) noexcept {
   const float moveA = overlap * (invMassA / invMassSum);
   const float moveB = overlap * (invMassB / invMassSum);
 
-  runtime::Transform *mutableA =
+  Transform *mutableA =
       world.get_transform_write_ptr(entityA, simToken);
-  runtime::Transform *mutableB =
+  Transform *mutableB =
       world.get_transform_write_ptr(entityB, simToken);
   if ((mutableA == nullptr) || (mutableB == nullptr)) {
     return;
@@ -588,8 +589,8 @@ void resolve_contact(runtime::World &world,
 // impulse to prevent penetration in the next frame — no positional correction,
 // no restitution, and the impulse is clamped to zero minimum (can only push
 // apart, never pull together).
-void resolve_speculative_contact(runtime::RigidBody *bodyA,
-                                 runtime::RigidBody *bodyB,
+void resolve_speculative_contact(RigidBody *bodyA,
+                                 RigidBody *bodyB,
                                  const engine::math::Vec3 &normal,
                                  float invMassA, float invMassB,
                                  float invMassSum, float gap,
@@ -642,8 +643,8 @@ void resolve_speculative_contact(runtime::RigidBody *bodyA,
   }
 }
 
-void apply_velocity_impulse(runtime::RigidBody *bodyA,
-                            runtime::RigidBody *bodyB,
+void apply_velocity_impulse(RigidBody *bodyA,
+                            RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
                             const engine::math::Vec3 &contactOffsetA,
@@ -739,16 +740,20 @@ const ConvexHullData *get_hull_data_ptr(std::uint32_t entityIndex) noexcept {
   return find_hull_data(entityIndex);
 }
 
-bool step_physics(runtime::World &world, float deltaSeconds) noexcept {
+// Forward declaration — step_physics delegates to step_physics_range.
+bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
+                        std::size_t count, float deltaSeconds) noexcept;
+
+bool step_physics(PhysicsWorldView &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
 }
 
-bool step_physics_range(runtime::World &world, std::size_t startIndex,
+bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept {
-  const runtime::World::PhysicsContext &physicsCtx = world.physics_context();
-  const runtime::Entity *entities = nullptr;
-  const runtime::Transform *readTransforms = nullptr;
-  runtime::Transform *writeTransforms = nullptr;
+  const PhysicsContext &physicsCtx = world.physics_context();
+  const Entity *entities = nullptr;
+  const Transform *readTransforms = nullptr;
+  Transform *writeTransforms = nullptr;
 
   if (!world.get_transform_update_range(startIndex, count, &entities,
                                         &readTransforms, &writeTransforms)) {
@@ -756,22 +761,22 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
   }
 
   for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Entity entity = entities[i];
+    const Entity entity = entities[i];
     if (world.movement_authority(entity) ==
-        runtime::MovementAuthority::Script) {
+        MovementAuthority::Script) {
       writeTransforms[i] = readTransforms[i];
       continue;
     }
 
-    runtime::RigidBody *body = world.get_rigid_body_ptr(entity);
-    runtime::Transform updated = readTransforms[i];
-    const runtime::Collider *col = world.get_collider_ptr(entity);
+    RigidBody *body = world.get_rigid_body_ptr(entity);
+    Transform updated = readTransforms[i];
+    const Collider *col = world.get_collider_ptr(entity);
     const bool lockRotation =
-        (col != nullptr) && (col->shape == runtime::ColliderShape::AABB);
+        (col != nullptr) && (col->shape == ColliderShape::AABB);
 
     // Capsules also lock rotation for now (upright-only capsule physics).
     const bool isCapsule =
-        (col != nullptr) && (col->shape == runtime::ColliderShape::Capsule);
+        (col != nullptr) && (col->shape == ColliderShape::Capsule);
 
     // Skip sleeping bodies.
     if ((body != nullptr) && body->sleeping) {
@@ -858,9 +863,9 @@ bool step_physics_range(runtime::World &world, std::size_t startIndex,
   return true;
 }
 
-bool resolve_collisions(runtime::World &world) noexcept {
+bool resolve_collisions(PhysicsWorldView &world) noexcept {
   const auto simToken = world.simulation_access_token();
-  runtime::World::PhysicsContext &physicsCtx = world.physics_context();
+  PhysicsContext &physicsCtx = world.physics_context();
   physicsCtx.collisionPairCount = 0U;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
@@ -868,8 +873,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
 
   const std::size_t colliderCount = world.collider_count();
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if ((colliderCount > 0U) &&
       !world.get_collider_range(0U, colliderCount, &entities, &colliders)) {
     return false;
@@ -881,11 +886,11 @@ bool resolve_collisions(runtime::World &world) noexcept {
     // ----------------------------------------
 
     // Per-collider cached position.
-    thread_local static std::array<float, runtime::World::kMaxColliders> posX{},
+    thread_local static std::array<float, kMaxColliders> posX{},
         posY{}, posZ{};
 
     for (std::size_t i = 0U; i < colliderCount; ++i) {
-      const runtime::Transform *t =
+      const Transform *t =
           world.get_transform_write_ptr(entities[i], simToken);
       if (t != nullptr) {
         posX[i] = t->position.x;
@@ -916,7 +921,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
     };
 
     // Max entries: each collider may touch up to 8 cells (corners of its AABB).
-    constexpr std::size_t kMaxNodes = runtime::World::kMaxColliders * 8U;
+    constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
     thread_local static std::array<std::uint32_t, kSpatialHashBuckets>
         buckets{};
     thread_local static std::array<SpatialNode, kMaxNodes> nodes{};
@@ -955,7 +960,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
       const engine::math::Vec3 he = broadphase_half_extents(colliders[i]);
 
       // Expand AABB by velocity to detect speculative contacts.
-      const runtime::RigidBody *bodyI = world.get_rigid_body_ptr(entities[i]);
+      const RigidBody *bodyI = world.get_rigid_body_ptr(entities[i]);
       float expandX = 0.0F;
       float expandY = 0.0F;
       float expandZ = 0.0F;
@@ -981,13 +986,13 @@ bool resolve_collisions(runtime::World &world) noexcept {
     }
 
     for (std::size_t i = 0U; i < colliderCount; ++i) {
-      const runtime::Entity entityA = entities[i];
+      const Entity entityA = entities[i];
       if (world.movement_authority(entityA) ==
-          runtime::MovementAuthority::Script) {
+          MovementAuthority::Script) {
         continue;
       }
 
-      const runtime::Transform *transformA =
+      const Transform *transformA =
           world.get_transform_write_ptr(entityA, simToken);
       if (transformA == nullptr) {
         continue;
@@ -1030,13 +1035,13 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 continue;
               }
 
-              const runtime::Entity entityB = entities[j];
+              const Entity entityB = entities[j];
               if (world.movement_authority(entityB) ==
-                  runtime::MovementAuthority::Script) {
+                  MovementAuthority::Script) {
                 continue;
               }
 
-              const runtime::Transform *transformB =
+              const Transform *transformB =
                   world.get_transform_write_ptr(entityB, simToken);
               if (transformB == nullptr) {
                 continue;
@@ -1046,8 +1051,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
               const float by = posY[j];
               const float bz = posZ[j];
 
-              const runtime::Collider &colliderA = colliders[i];
-              const runtime::Collider &colliderB = colliders[j];
+              const Collider &colliderA = colliders[i];
+              const Collider &colliderB = colliders[j];
 
               // Collision layer/mask filtering (P1-M3-C2b).
               if (((colliderA.collisionLayer & colliderB.collisionMask) ==
@@ -1057,8 +1062,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 continue;
               }
 
-              runtime::RigidBody *bodyA = world.get_rigid_body_ptr(entityA);
-              runtime::RigidBody *bodyB = world.get_rigid_body_ptr(entityB);
+              RigidBody *bodyA = world.get_rigid_body_ptr(entityA);
+              RigidBody *bodyB = world.get_rigid_body_ptr(entityB);
               const float invMassA =
                   (bodyA != nullptr) ? bodyA->inverseMass : kStaticInverseMass;
               const float invMassB =
@@ -1067,22 +1072,22 @@ bool resolve_collisions(runtime::World &world) noexcept {
 
               const auto shapeA = colliderA.shape;
               const auto shapeB = colliderB.shape;
-              const bool aIsAABB = (shapeA == runtime::ColliderShape::AABB);
-              const bool bIsAABB = (shapeB == runtime::ColliderShape::AABB);
+              const bool aIsAABB = (shapeA == ColliderShape::AABB);
+              const bool bIsAABB = (shapeB == ColliderShape::AABB);
               const bool aIsCapsule =
-                  (shapeA == runtime::ColliderShape::Capsule);
+                  (shapeA == ColliderShape::Capsule);
               const bool bIsCapsule =
-                  (shapeB == runtime::ColliderShape::Capsule);
-              const bool aIsSphere = (shapeA == runtime::ColliderShape::Sphere);
-              const bool bIsSphere = (shapeB == runtime::ColliderShape::Sphere);
+                  (shapeB == ColliderShape::Capsule);
+              const bool aIsSphere = (shapeA == ColliderShape::Sphere);
+              const bool bIsSphere = (shapeB == ColliderShape::Sphere);
               const bool aIsConvex =
-                  (shapeA == runtime::ColliderShape::ConvexHull);
+                  (shapeA == ColliderShape::ConvexHull);
               const bool bIsConvex =
-                  (shapeB == runtime::ColliderShape::ConvexHull);
+                  (shapeB == ColliderShape::ConvexHull);
               const bool aIsHeightfield =
-                  (shapeA == runtime::ColliderShape::Heightfield);
+                  (shapeA == ColliderShape::Heightfield);
               const bool bIsHeightfield =
-                  (shapeB == runtime::ColliderShape::Heightfield);
+                  (shapeB == ColliderShape::Heightfield);
 
               // -----------------------------------------------------------------------
               // Heightfield vs Sphere/AABB/Capsule
@@ -1095,8 +1100,8 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const engine::math::Vec3 objPos =
                     aIsHF ? engine::math::Vec3(bx, by, bz)
                           : engine::math::Vec3(ax, ay, az);
-                const runtime::Entity hfEnt = aIsHF ? entityA : entityB;
-                const runtime::Collider &objCol = aIsHF ? colliderB : colliderA;
+                const Entity hfEnt = aIsHF ? entityA : entityB;
+                const Collider &objCol = aIsHF ? colliderB : colliderA;
 
                 const HeightfieldData *hf = find_heightfield_data(hfEnt.index);
                 if (hf == nullptr) {
@@ -1105,9 +1110,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
 
                 // Compute object radius for footprint.
                 float objRadius = 0.0F;
-                if (objCol.shape == runtime::ColliderShape::Sphere) {
+                if (objCol.shape == ColliderShape::Sphere) {
                   objRadius = objCol.halfExtents.x;
-                } else if (objCol.shape == runtime::ColliderShape::Capsule) {
+                } else if (objCol.shape == ColliderShape::Capsule) {
                   objRadius = objCol.halfExtents.y + objCol.halfExtents.x;
                 } else {
                   objRadius = engine::math::length(objCol.halfExtents);
@@ -1175,7 +1180,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
 
                       float tOverlap = 0.0F;
 
-                      if (objCol.shape == runtime::ColliderShape::Sphere) {
+                      if (objCol.shape == ColliderShape::Sphere) {
                         const engine::math::Vec3 cp =
                             closest_point_on_triangle(
                                 objPos, triVerts[ti][0], triVerts[ti][1],
@@ -1193,7 +1198,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                           continue;
                         }
                       } else if (objCol.shape ==
-                                 runtime::ColliderShape::Capsule) {
+                                 ColliderShape::Capsule) {
                         const float halfH = objCol.halfExtents.y;
                         const float capR = objCol.halfExtents.x;
                         const engine::math::Vec3 top(objPos.x,
@@ -1285,16 +1290,16 @@ bool resolve_collisions(runtime::World &world) noexcept {
               // -----------------------------------------------------------------------
               if (aIsConvex || bIsConvex) {
                 // Build support function and data for each side.
-                auto shape_support = [](const runtime::Collider &col,
-                                        runtime::Entity /*ent*/) -> SupportFn {
+                auto shape_support = [](const Collider &col,
+                                        Entity /*ent*/) -> SupportFn {
                   switch (col.shape) {
-                  case runtime::ColliderShape::ConvexHull:
+                  case ColliderShape::ConvexHull:
                     return &support_convex_hull;
-                  case runtime::ColliderShape::Sphere:
+                  case ColliderShape::Sphere:
                     return &support_sphere;
-                  case runtime::ColliderShape::Capsule:
+                  case ColliderShape::Capsule:
                     return &support_capsule;
-                  case runtime::ColliderShape::AABB:
+                  case ColliderShape::AABB:
                   default:
                     return &support_aabb;
                   }
@@ -1310,20 +1315,20 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const void *dataA = nullptr;
                 const void *dataB = nullptr;
 
-                auto fill_data = [](const runtime::Collider &col,
-                                    runtime::Entity ent,
+                auto fill_data = [](const Collider &col,
+                                    Entity ent,
                                     float *storage) -> const void * {
                   switch (col.shape) {
-                  case runtime::ColliderShape::ConvexHull:
+                  case ColliderShape::ConvexHull:
                     return find_hull_data(ent.index);
-                  case runtime::ColliderShape::Sphere:
+                  case ColliderShape::Sphere:
                     storage[0] = col.halfExtents.x;
                     return storage;
-                  case runtime::ColliderShape::Capsule:
+                  case ColliderShape::Capsule:
                     storage[0] = col.halfExtents.x; // radius
                     storage[1] = col.halfExtents.y; // halfHeight
                     return storage;
-                  case runtime::ColliderShape::AABB:
+                  case ColliderShape::AABB:
                   default:
                     std::memcpy(storage, &col.halfExtents, sizeof(float) * 3);
                     return storage;
@@ -1430,7 +1435,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const engine::math::Vec3 sphPos =
                     aIsCap ? engine::math::Vec3(bx, by, bz)
                            : engine::math::Vec3(ax, ay, az);
-                const runtime::Collider &capCol =
+                const Collider &capCol =
                     aIsCap ? colliderA : colliderB;
                 const float capR = capCol.halfExtents.x;
                 const float sphR =
@@ -1490,9 +1495,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const engine::math::Vec3 boxPos =
                     aIsCap ? engine::math::Vec3(bx, by, bz)
                            : engine::math::Vec3(ax, ay, az);
-                const runtime::Collider &capCol =
+                const Collider &capCol =
                     aIsCap ? colliderA : colliderB;
-                const runtime::Collider &boxCol =
+                const Collider &boxCol =
                     aIsCap ? colliderB : colliderA;
                 const float capR = capCol.halfExtents.x;
 
@@ -1649,9 +1654,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float moveA = overlap * (invMassA / invMassSum);
                 const float moveB = overlap * (invMassB / invMassSum);
 
-                runtime::Transform *mutableA =
+                Transform *mutableA =
                     world.get_transform_write_ptr(entityA, simToken);
-                runtime::Transform *mutableB =
+                Transform *mutableB =
                     world.get_transform_write_ptr(entityB, simToken);
                 if ((mutableA == nullptr) || (mutableB == nullptr)) {
                   continue;
@@ -1692,7 +1697,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float sphX = aIsBox ? bx : ax;
                 const float sphY = aIsBox ? by : ay;
                 const float sphZ = aIsBox ? bz : az;
-                const runtime::Collider &boxCol =
+                const Collider &boxCol =
                     aIsBox ? colliderA : colliderB;
                 const float radius =
                     (aIsBox ? colliderB : colliderA).halfExtents.x;
@@ -1774,9 +1779,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
                 const float moveA = overlap * (invMassA / invMassSum);
                 const float moveB = overlap * (invMassB / invMassSum);
 
-                runtime::Transform *mutableA =
+                Transform *mutableA =
                     world.get_transform_write_ptr(entityA, simToken);
-                runtime::Transform *mutableB =
+                Transform *mutableB =
                     world.get_transform_write_ptr(entityB, simToken);
                 if ((mutableA == nullptr) || (mutableB == nullptr)) {
                   continue;
@@ -1897,9 +1902,9 @@ bool resolve_collisions(runtime::World &world) noexcept {
               const float moveA = pushAmount * (invMassA / invMassSum);
               const float moveB = pushAmount * (invMassB / invMassSum);
 
-              runtime::Transform *mutableA =
+              Transform *mutableA =
                   world.get_transform_write_ptr(entityA, simToken);
-              runtime::Transform *mutableB =
+              Transform *mutableB =
                   world.get_transform_write_ptr(entityB, simToken);
               if ((mutableA == nullptr) || (mutableB == nullptr)) {
                 continue;
@@ -1941,7 +1946,7 @@ bool resolve_collisions(runtime::World &world) noexcept {
   // examine each rigid body. If velocity is below threshold for enough
   // consecutive frames, put it to sleep.
   for (std::size_t i = 0U; i < colliderCount; ++i) {
-    runtime::RigidBody *body = world.get_rigid_body_ptr(entities[i]);
+    RigidBody *body = world.get_rigid_body_ptr(entities[i]);
     if ((body == nullptr) || (body->inverseMass <= 0.0F) || body->sleeping) {
       continue;
     }
@@ -1963,21 +1968,21 @@ bool resolve_collisions(runtime::World &world) noexcept {
   return true;
 }
 
-void set_gravity(runtime::World &world, float x, float y, float z) noexcept {
+void set_gravity(PhysicsWorldView &world, float x, float y, float z) noexcept {
   world.physics_context().gravity = engine::math::Vec3(x, y, z);
 }
 
-engine::math::Vec3 get_gravity(const runtime::World &world) noexcept {
+engine::math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept {
   return world.physics_context().gravity;
 }
 
-void set_collision_dispatch(runtime::World &world,
+void set_collision_dispatch(PhysicsWorldView &world,
                             CollisionDispatchFn fn) noexcept {
   world.physics_context().collisionDispatch = fn;
 }
 
-void dispatch_collision_callbacks(runtime::World &world) noexcept {
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
+  PhysicsContext &ctx = world.physics_context();
   if ((ctx.collisionDispatch != nullptr) && (ctx.collisionPairCount > 0U)) {
     ctx.collisionDispatch(ctx.collisionPairData.data(), ctx.collisionPairCount);
   }
@@ -2146,10 +2151,10 @@ bool ray_intersects_convex_hull(const engine::math::Ray &ray,
 
 } // namespace
 
-bool raycast(const runtime::World &world, const math::Vec3 &origin,
+bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
-             runtime::PhysicsRaycastHit *outHit,
-             runtime::Entity skipEntity) noexcept {
+             PhysicsRaycastHit *outHit,
+             Entity skipEntity) noexcept {
   // Validate direction vector to prevent NaN from normalization.
   if (math::length_sq(direction) < 1e-12F) {
     return false;
@@ -2160,8 +2165,8 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
     return false;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return false;
   }
@@ -2174,33 +2179,33 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
     if (entities[i] == skipEntity) {
       continue;
     }
-    runtime::Transform transform{};
+    Transform transform{};
     if (!world.get_transform(entities[i], &transform)) {
       continue;
     }
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     float t = 0.0F;
 
     math::Vec3 shapeNormal(0.0F, 1.0F, 0.0F);
 
-    if (col.shape == runtime::ColliderShape::Sphere) {
+    if (col.shape == ColliderShape::Sphere) {
       const math::Sphere sphere{transform.position, col.halfExtents.x};
       if (!math::ray_intersects_sphere(ray, sphere, &t)) {
         continue;
       }
-    } else if (col.shape == runtime::ColliderShape::Capsule) {
+    } else if (col.shape == ColliderShape::Capsule) {
       if (!ray_intersects_capsule(ray, transform.position, col.halfExtents.y,
                                   col.halfExtents.x, bestT, t, shapeNormal)) {
         continue;
       }
-    } else if (col.shape == runtime::ColliderShape::ConvexHull) {
+    } else if (col.shape == ColliderShape::ConvexHull) {
       const ConvexHullData *hull = find_hull_data(entities[i].index);
       if ((hull == nullptr) ||
           !ray_intersects_convex_hull(ray, transform.position, *hull, bestT, t,
                                       shapeNormal)) {
         continue;
       }
-    } else if (col.shape == runtime::ColliderShape::Heightfield) {
+    } else if (col.shape == ColliderShape::Heightfield) {
       const HeightfieldData *hf = find_heightfield_data(entities[i].index);
       if ((hf == nullptr) ||
           !ray_intersects_heightfield(ray, transform.position, *hf, bestT, t,
@@ -2222,12 +2227,12 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
         outHit->entity = entities[i];
         outHit->distance = t;
         outHit->point = math::add(origin, math::mul(direction, t));
-        if (col.shape == runtime::ColliderShape::Sphere) {
+        if (col.shape == ColliderShape::Sphere) {
           outHit->normal =
               math::normalize(math::sub(outHit->point, transform.position));
-        } else if (col.shape == runtime::ColliderShape::Capsule ||
-                   col.shape == runtime::ColliderShape::ConvexHull ||
-                   col.shape == runtime::ColliderShape::Heightfield) {
+        } else if (col.shape == ColliderShape::Capsule ||
+                   col.shape == ColliderShape::ConvexHull ||
+                   col.shape == ColliderShape::Heightfield) {
           outHit->normal = shapeNormal;
         } else {
           outHit->normal = aabb_hit_normal(outHit->point, transform.position,
@@ -2240,9 +2245,9 @@ bool raycast(const runtime::World &world, const math::Vec3 &origin,
   return hit;
 }
 
-std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
+std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
-                        runtime::PhysicsRaycastHit *outHits,
+                        PhysicsRaycastHit *outHits,
                         std::size_t maxHits) noexcept {
   // Validate direction vector to prevent NaN from normalization.
   if (math::length_sq(direction) < 1e-12F) {
@@ -2258,8 +2263,8 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
     return 0U;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return 0U;
   }
@@ -2268,33 +2273,33 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
   std::size_t hitCount = 0U;
 
   for (std::size_t i = 0U; i < count; ++i) {
-    runtime::Transform transform{};
+    Transform transform{};
     if (!world.get_transform(entities[i], &transform)) {
       continue;
     }
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     float t = 0.0F;
     math::Vec3 shapeNormal(0.0F, 1.0F, 0.0F);
 
-    if (col.shape == runtime::ColliderShape::Sphere) {
+    if (col.shape == ColliderShape::Sphere) {
       const math::Sphere sphere{transform.position, col.halfExtents.x};
       if (!math::ray_intersects_sphere(ray, sphere, &t)) {
         continue;
       }
-    } else if (col.shape == runtime::ColliderShape::Capsule) {
+    } else if (col.shape == ColliderShape::Capsule) {
       if (!ray_intersects_capsule(ray, transform.position, col.halfExtents.y,
                                   col.halfExtents.x, maxDistance, t,
                                   shapeNormal)) {
         continue;
       }
-    } else if (col.shape == runtime::ColliderShape::ConvexHull) {
+    } else if (col.shape == ColliderShape::ConvexHull) {
       const ConvexHullData *hull = find_hull_data(entities[i].index);
       if ((hull == nullptr) ||
           !ray_intersects_convex_hull(ray, transform.position, *hull,
                                       maxDistance, t, shapeNormal)) {
         continue;
       }
-    } else if (col.shape == runtime::ColliderShape::Heightfield) {
+    } else if (col.shape == ColliderShape::Heightfield) {
       const HeightfieldData *hf = find_heightfield_data(entities[i].index);
       if ((hf == nullptr) ||
           !ray_intersects_heightfield(ray, transform.position, *hf, maxDistance,
@@ -2311,15 +2316,15 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 
     if ((t >= 0.0F) && (t <= maxDistance)) {
       if (hitCount < maxHits) {
-        runtime::PhysicsRaycastHit &rh = outHits[hitCount];
+        PhysicsRaycastHit &rh = outHits[hitCount];
         rh.entity = entities[i];
         rh.distance = t;
         rh.point = math::add(origin, math::mul(direction, t));
-        if (col.shape == runtime::ColliderShape::Sphere) {
+        if (col.shape == ColliderShape::Sphere) {
           rh.normal = math::normalize(math::sub(rh.point, transform.position));
-        } else if (col.shape == runtime::ColliderShape::Capsule ||
-                   col.shape == runtime::ColliderShape::ConvexHull ||
-                   col.shape == runtime::ColliderShape::Heightfield) {
+        } else if (col.shape == ColliderShape::Capsule ||
+                   col.shape == ColliderShape::ConvexHull ||
+                   col.shape == ColliderShape::Heightfield) {
           rh.normal = shapeNormal;
         } else {
           rh.normal =
@@ -2332,22 +2337,22 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 
   // Sort hits by distance.
   std::sort(outHits, outHits + hitCount,
-            [](const runtime::PhysicsRaycastHit &a,
-               const runtime::PhysicsRaycastHit &b) noexcept {
+            [](const PhysicsRaycastHit &a,
+               const PhysicsRaycastHit &b) noexcept {
               return a.distance < b.distance;
             });
 
   return hitCount;
 }
 
-JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
-                           runtime::Entity entityB, float distance) noexcept {
-  runtime::World::PhysicsContext &ctx = world.physics_context();
-  for (std::size_t i = 0U; i < runtime::World::kMaxPhysicsJoints; ++i) {
+JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
+                           Entity entityB, float distance) noexcept {
+  PhysicsContext &ctx = world.physics_context();
+  for (std::size_t i = 0U; i < kMaxPhysicsJoints; ++i) {
     if (!ctx.joints[i].active) {
       ctx.joints[i].entityA = entityA;
       ctx.joints[i].entityB = entityB;
-      ctx.joints[i].type = runtime::World::JointType::Distance;
+      ctx.joints[i].type = JointType::Distance;
       ctx.joints[i].distance = distance;
       ctx.joints[i].active = true;
       ctx.joints[i].accumulatedImpulse = 0.0F;
@@ -2360,9 +2365,9 @@ JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
   return kInvalidJointId;
 }
 
-void remove_joint(runtime::World &world, JointId id) noexcept {
-  runtime::World::PhysicsContext &ctx = world.physics_context();
-  if (id >= runtime::World::kMaxPhysicsJoints) {
+void remove_joint(PhysicsWorldView &world, JointId id) noexcept {
+  PhysicsContext &ctx = world.physics_context();
+  if (id >= kMaxPhysicsJoints) {
     return;
   }
   ctx.joints[id].active = false;
@@ -2372,16 +2377,16 @@ void remove_joint(runtime::World &world, JointId id) noexcept {
   }
 }
 
-void wake_body(runtime::World &world, runtime::Entity entity) noexcept {
-  runtime::RigidBody *body = world.get_rigid_body_ptr(entity);
+void wake_body(PhysicsWorldView &world, Entity entity) noexcept {
+  RigidBody *body = world.get_rigid_body_ptr(entity);
   if (body != nullptr) {
     body->sleeping = false;
     body->sleepFrameCount = 0U;
   }
 }
 
-bool is_sleeping(const runtime::World &world, runtime::Entity entity) noexcept {
-  runtime::RigidBody rb{};
+bool is_sleeping(const PhysicsWorldView &world, Entity entity) noexcept {
+  RigidBody rb{};
   if (!world.get_rigid_body(entity, &rb)) {
     return false;
   }

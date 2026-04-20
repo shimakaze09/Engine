@@ -7,12 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 
-// TODO(§0-2-a): World still lives in runtime — forward declaration required.
-namespace engine::runtime {
-class World;
-} // namespace engine::runtime
-
 namespace engine::physics {
+
+class PhysicsWorldView;
 
 // ------ Contact Manifold ---------------------------------------------------
 
@@ -39,28 +36,28 @@ static constexpr std::size_t kMaxContactManifolds = 2048U;
 // ------ Constraint Solver API -----------------------------------------------
 
 // Solve all joint constraints on the world.  Called after collision resolution.
-void solve_constraints(runtime::World &world, float deltaSeconds) noexcept;
+void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept;
 
 // ------ Typed Joint Creation ------------------------------------------------
 
-JointId add_hinge_joint(runtime::World &world, Entity entityA, Entity entityB,
+JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept;
 
-JointId add_ball_socket_joint(runtime::World &world, Entity entityA,
+JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
                               Entity entityB, const math::Vec3 &pivot) noexcept;
 
-JointId add_slider_joint(runtime::World &world, Entity entityA, Entity entityB,
-                         const math::Vec3 &axis) noexcept;
+JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
+                         Entity entityB, const math::Vec3 &axis) noexcept;
 
-JointId add_spring_joint(runtime::World &world, Entity entityA, Entity entityB,
-                         float restLength, float stiffness,
+JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
+                         Entity entityB, float restLength, float stiffness,
                          float damping) noexcept;
 
-JointId add_fixed_joint(runtime::World &world, Entity entityA,
+JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept;
 
-void set_joint_limits(runtime::World &world, JointId id, float minLimit,
+void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept;
 
 // ------ Contact Manifold API ------------------------------------------------

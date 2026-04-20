@@ -346,7 +346,7 @@ const Transform *World::get_transform_read_ptr(Entity entity) const noexcept {
 }
 
 World::SimulationAccessToken World::simulation_access_token() const noexcept {
-  return SimulationAccessToken{m_phase == WorldPhase::Simulation};
+  return make_token(m_phase == WorldPhase::Simulation);
 }
 
 Transform *
@@ -1331,11 +1331,11 @@ std::size_t World::collider_count() const noexcept {
   return m_colliders.count();
 }
 
-World::PhysicsContext &World::physics_context() noexcept {
+physics::PhysicsContext &World::physics_context() noexcept {
   return m_physicsContext;
 }
 
-const World::PhysicsContext &World::physics_context() const noexcept {
+const physics::PhysicsContext &World::physics_context() const noexcept {
   return m_physicsContext;
 }
 

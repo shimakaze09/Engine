@@ -7,24 +7,23 @@
 
 namespace engine::physics {
 
-bool step_physics(runtime::World &world, float deltaSeconds) noexcept;
-bool step_physics_range(runtime::World &world, std::size_t startIndex,
+bool step_physics(PhysicsWorldView &world, float deltaSeconds) noexcept;
+bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept;
-bool resolve_collisions(runtime::World &world) noexcept;
-void set_gravity(runtime::World &world, float x, float y, float z) noexcept;
-math::Vec3 get_gravity(const runtime::World &world) noexcept;
-void set_collision_dispatch(runtime::World &world,
+bool resolve_collisions(PhysicsWorldView &world) noexcept;
+void set_gravity(PhysicsWorldView &world, float x, float y, float z) noexcept;
+math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept;
+void set_collision_dispatch(PhysicsWorldView &world,
                             CollisionDispatchFn fn) noexcept;
-void dispatch_collision_callbacks(runtime::World &world) noexcept;
-bool raycast(const runtime::World &world, const math::Vec3 &origin,
+void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept;
+bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
-             runtime::PhysicsRaycastHit *outHit,
-             runtime::Entity skipEntity) noexcept;
-JointId add_distance_joint(runtime::World &world, runtime::Entity entityA,
-                           runtime::Entity entityB, float distance) noexcept;
-void remove_joint(runtime::World &world, JointId id) noexcept;
-void wake_body(runtime::World &world, runtime::Entity entity) noexcept;
-bool is_sleeping(const runtime::World &world, runtime::Entity entity) noexcept;
+             PhysicsRaycastHit *outHit, Entity skipEntity) noexcept;
+JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
+                           Entity entityB, float distance) noexcept;
+void remove_joint(PhysicsWorldView &world, JointId id) noexcept;
+void wake_body(PhysicsWorldView &world, Entity entity) noexcept;
+bool is_sleeping(const PhysicsWorldView &world, Entity entity) noexcept;
 
 bool set_convex_hull_data_impl(std::uint32_t entityIndex,
                                const ConvexHullData &hull) noexcept;

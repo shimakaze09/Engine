@@ -2,7 +2,8 @@
 
 #include "engine/core/cvar.h"
 #include "engine/math/vec3.h"
-#include "engine/runtime/world.h"
+#include "engine/physics/physics_context.h"
+#include "engine/physics/physics_world_view.h"
 #include "joints/joint_solvers.h"
 
 #include <cstddef>
@@ -19,9 +20,9 @@ const bool g_solverIterCVar = core::cvar_register_int(
 
 // --- Typed joint creation ---------------------------------------------------
 
-static JointId allocate_joint(runtime::World &world) noexcept {
-  runtime::World::PhysicsContext &ctx = world.physics_context();
-  for (std::size_t i = 0U; i < runtime::World::kMaxPhysicsJoints; ++i) {
+static JointId allocate_joint(PhysicsWorldView &world) noexcept {
+  PhysicsContext &ctx = world.physics_context();
+  for (std::size_t i = 0U; i < kMaxPhysicsJoints; ++i) {
     if (!ctx.joints[i].active) {
       if (i >= ctx.jointCount) {
         ctx.jointCount = i + 1U;
@@ -32,24 +33,24 @@ static JointId allocate_joint(runtime::World &world) noexcept {
   return kInvalidJointId;
 }
 
-JointId add_hinge_joint(runtime::World &world, runtime::Entity entityA,
-                        runtime::Entity entityB, const math::Vec3 &pivot,
+JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA,
+                        Entity entityB, const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
   }
 
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+  PhysicsContext &ctx = world.physics_context();
   auto &j = ctx.joints[id];
   j.entityA = entityA;
   j.entityB = entityB;
-  j.type = runtime::World::JointType::Hinge;
+  j.type = JointType::Hinge;
   j.active = true;
 
   // Compute local anchors from pivot (world-space).
-  runtime::Transform tA{};
-  runtime::Transform tB{};
+  Transform tA{};
+  Transform tB{};
   world.get_transform(entityA, &tA);
   world.get_transform(entityB, &tB);
   j.anchorA = math::sub(pivot, tA.position);
@@ -60,23 +61,23 @@ JointId add_hinge_joint(runtime::World &world, runtime::Entity entityA,
   return id;
 }
 
-JointId add_ball_socket_joint(runtime::World &world, runtime::Entity entityA,
-                              runtime::Entity entityB,
+JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
+                              Entity entityB,
                               const math::Vec3 &pivot) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
   }
 
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+  PhysicsContext &ctx = world.physics_context();
   auto &j = ctx.joints[id];
   j.entityA = entityA;
   j.entityB = entityB;
-  j.type = runtime::World::JointType::BallSocket;
+  j.type = JointType::BallSocket;
   j.active = true;
 
-  runtime::Transform tA{};
-  runtime::Transform tB{};
+  Transform tA{};
+  Transform tB{};
   world.get_transform(entityA, &tA);
   world.get_transform(entityB, &tB);
   j.anchorA = math::sub(pivot, tA.position);
@@ -86,19 +87,19 @@ JointId add_ball_socket_joint(runtime::World &world, runtime::Entity entityA,
   return id;
 }
 
-JointId add_slider_joint(runtime::World &world, runtime::Entity entityA,
-                         runtime::Entity entityB,
+JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
+                         Entity entityB,
                          const math::Vec3 &axis) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
   }
 
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+  PhysicsContext &ctx = world.physics_context();
   auto &j = ctx.joints[id];
   j.entityA = entityA;
   j.entityB = entityB;
-  j.type = runtime::World::JointType::Slider;
+  j.type = JointType::Slider;
   j.active = true;
   j.axis = axis;
   j.accumulatedImpulse = 0.0F;
@@ -106,19 +107,19 @@ JointId add_slider_joint(runtime::World &world, runtime::Entity entityA,
   return id;
 }
 
-JointId add_spring_joint(runtime::World &world, runtime::Entity entityA,
-                         runtime::Entity entityB, float restLength,
+JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
+                         Entity entityB, float restLength,
                          float stiffness, float damping) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
   }
 
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+  PhysicsContext &ctx = world.physics_context();
   auto &j = ctx.joints[id];
   j.entityA = entityA;
   j.entityB = entityB;
-  j.type = runtime::World::JointType::Spring;
+  j.type = JointType::Spring;
   j.active = true;
   j.distance = restLength;
   j.stiffness = stiffness;
@@ -128,22 +129,22 @@ JointId add_spring_joint(runtime::World &world, runtime::Entity entityA,
   return id;
 }
 
-JointId add_fixed_joint(runtime::World &world, runtime::Entity entityA,
-                        runtime::Entity entityB) noexcept {
+JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
+                        Entity entityB) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
   }
 
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+  PhysicsContext &ctx = world.physics_context();
   auto &j = ctx.joints[id];
   j.entityA = entityA;
   j.entityB = entityB;
-  j.type = runtime::World::JointType::Fixed;
+  j.type = JointType::Fixed;
   j.active = true;
 
-  runtime::Transform tA{};
-  runtime::Transform tB{};
+  Transform tA{};
+  Transform tB{};
   world.get_transform(entityA, &tA);
   world.get_transform(entityB, &tB);
   j.anchorA = math::sub(tB.position, tA.position);
@@ -153,10 +154,10 @@ JointId add_fixed_joint(runtime::World &world, runtime::Entity entityA,
   return id;
 }
 
-void set_joint_limits(runtime::World &world, JointId id, float minLimit,
+void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept {
-  runtime::World::PhysicsContext &ctx = world.physics_context();
-  if (id >= runtime::World::kMaxPhysicsJoints) {
+  PhysicsContext &ctx = world.physics_context();
+  if (id >= kMaxPhysicsJoints) {
     return;
   }
   auto &j = ctx.joints[id];
@@ -170,9 +171,9 @@ void set_joint_limits(runtime::World &world, JointId id, float minLimit,
 
 // --- Main constraint solver -------------------------------------------------
 
-void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
+void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
-  runtime::World::PhysicsContext &ctx = world.physics_context();
+  PhysicsContext &ctx = world.physics_context();
   if (ctx.jointCount == 0U) {
     return;
   }
@@ -191,14 +192,14 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
       continue;
     }
 
-    runtime::Transform *tA = world.get_transform_write_ptr(j.entityA, simToken);
-    runtime::Transform *tB = world.get_transform_write_ptr(j.entityB, simToken);
+    Transform *tA = world.get_transform_write_ptr(j.entityA, simToken);
+    Transform *tB = world.get_transform_write_ptr(j.entityB, simToken);
     if ((tA == nullptr) || (tB == nullptr)) {
       continue;
     }
 
-    runtime::RigidBody *bodyA = world.get_rigid_body_ptr(j.entityA);
-    runtime::RigidBody *bodyB = world.get_rigid_body_ptr(j.entityB);
+    RigidBody *bodyA = world.get_rigid_body_ptr(j.entityA);
+    RigidBody *bodyB = world.get_rigid_body_ptr(j.entityB);
     const float invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
     const float invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
     const float invMassSum = invMassA + invMassB;
@@ -234,16 +235,16 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
 
       auto &j = ctx.joints[i];
 
-      runtime::Transform *tA =
+      Transform *tA =
           world.get_transform_write_ptr(j.entityA, simToken);
-      runtime::Transform *tB =
+      Transform *tB =
           world.get_transform_write_ptr(j.entityB, simToken);
       if ((tA == nullptr) || (tB == nullptr)) {
         continue;
       }
 
-      runtime::RigidBody *bodyA = world.get_rigid_body_ptr(j.entityA);
-      runtime::RigidBody *bodyB = world.get_rigid_body_ptr(j.entityB);
+      RigidBody *bodyA = world.get_rigid_body_ptr(j.entityA);
+      RigidBody *bodyB = world.get_rigid_body_ptr(j.entityB);
 
       JointSolveContext solveCtx{};
       solveCtx.tA = tA;
@@ -253,29 +254,29 @@ void solve_constraints(runtime::World &world, float deltaSeconds) noexcept {
       solveCtx.invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
       solveCtx.invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
 
-      const auto jointType = static_cast<runtime::World::JointType>(j.type);
+      const auto jointType = static_cast<JointType>(j.type);
 
       switch (jointType) {
-      case runtime::World::JointType::Distance:
+      case JointType::Distance:
         solve_distance_joint(solveCtx, j.distance, j.accumulatedImpulse);
         break;
-      case runtime::World::JointType::Hinge:
+      case JointType::Hinge:
         solve_hinge_joint(solveCtx, j.anchorA, j.anchorB, j.axis, j.hasLimits,
                           j.minLimit, j.maxLimit, j.accumulatedImpulse);
         break;
-      case runtime::World::JointType::BallSocket:
+      case JointType::BallSocket:
         solve_ball_socket_joint(solveCtx, j.anchorA, j.anchorB,
                                 j.accumulatedImpulse);
         break;
-      case runtime::World::JointType::Slider:
+      case JointType::Slider:
         solve_slider_joint(solveCtx, j.axis, j.hasLimits, j.minLimit,
                            j.maxLimit, j.accumulatedImpulse);
         break;
-      case runtime::World::JointType::Spring:
+      case JointType::Spring:
         solve_spring_joint(solveCtx, j.distance, j.stiffness, j.damping,
                            deltaSeconds, j.accumulatedImpulse);
         break;
-      case runtime::World::JointType::Fixed:
+      case JointType::Fixed:
         solve_fixed_joint(solveCtx, j.anchorA, j.anchorB, j.accumulatedImpulse);
         break;
       }

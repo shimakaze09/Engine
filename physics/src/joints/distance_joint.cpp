@@ -1,7 +1,6 @@
 #include "joint_solvers.h"
 
 #include "engine/math/vec3.h"
-#include "engine/runtime/world.h"
 
 #include <cmath>
 

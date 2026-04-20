@@ -28,6 +28,8 @@ engine_add_module_library(engine_scripting
     engine_core
     engine_math
     engine_lua
+    PRIVATE_DEPS
+    engine_physics
 )
 
 if(WIN32)

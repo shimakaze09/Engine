@@ -5,8 +5,9 @@
 #include "engine/math/sphere.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
-#include "engine/runtime/physics_bridge.h"
-#include "engine/runtime/world.h"
+
+#include "engine/physics/physics_world_view.h"
+#include "engine/physics/physics_context.h"
 
 #include <algorithm>
 #include <cmath>
@@ -42,13 +43,13 @@ bool sphere_sphere_overlap(const math::Vec3 &a, float ra, const math::Vec3 &b,
 }
 
 // Check if collision mask includes the entity's layer.
-bool passes_mask(const runtime::Collider &col, std::uint32_t mask) noexcept {
+bool passes_mask(const Collider &col, std::uint32_t mask) noexcept {
   return (col.collisionLayer & mask) != 0U;
 }
 
 // AABB of a collider at a given transform position (axis-aligned only).
-math::AABB collider_aabb(const runtime::Transform &t,
-                         const runtime::Collider &col) noexcept {
+math::AABB collider_aabb(const Transform &t,
+                         const Collider &col) noexcept {
   return math::aabb_from_center_half_extents(t.position, col.halfExtents);
 }
 
@@ -121,9 +122,9 @@ math::Vec3 aabb_hit_normal(const math::Vec3 &hitPoint,
 
 // ---------- raycast_all with mask -------------------------------------------
 
-std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
+std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
-                        runtime::PhysicsRaycastHit *outHits,
+                        PhysicsRaycastHit *outHits,
                         std::size_t maxHits, std::uint32_t mask) noexcept {
   if (math::length_sq(direction) < 1e-12F) {
     return 0U;
@@ -137,8 +138,8 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
     return 0U;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return 0U;
   }
@@ -147,19 +148,19 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
   std::size_t hitCount = 0U;
 
   for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
       continue;
     }
 
-    runtime::Transform transform{};
+    Transform transform{};
     if (!world.get_transform(entities[i], &transform)) {
       continue;
     }
 
     float t = 0.0F;
 
-    if (col.shape == runtime::ColliderShape::Sphere) {
+    if (col.shape == ColliderShape::Sphere) {
       const math::Sphere sphere{transform.position, col.halfExtents.x};
       if (!math::ray_intersects_sphere(ray, sphere, &t)) {
         continue;
@@ -174,11 +175,11 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 
     if ((t >= 0.0F) && (t <= maxDistance)) {
       if (hitCount < maxHits) {
-        runtime::PhysicsRaycastHit &rh = outHits[hitCount];
+        PhysicsRaycastHit &rh = outHits[hitCount];
         rh.entity = entities[i];
         rh.distance = t;
         rh.point = math::add(origin, math::mul(direction, t));
-        if (col.shape == runtime::ColliderShape::Sphere) {
+        if (col.shape == ColliderShape::Sphere) {
           rh.normal = math::normalize(math::sub(rh.point, transform.position));
         } else {
           rh.normal =
@@ -190,8 +191,8 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
   }
 
   std::sort(outHits, outHits + hitCount,
-            [](const runtime::PhysicsRaycastHit &a,
-               const runtime::PhysicsRaycastHit &b) noexcept {
+            [](const PhysicsRaycastHit &a,
+               const PhysicsRaycastHit &b) noexcept {
               return a.distance < b.distance;
             });
 
@@ -200,7 +201,7 @@ std::size_t raycast_all(const runtime::World &world, const math::Vec3 &origin,
 
 // ---------- overlap_sphere ---------------------------------------------------
 
-std::size_t overlap_sphere(const runtime::World &world,
+std::size_t overlap_sphere(const PhysicsWorldView &world,
                            const math::Vec3 &center, float radius,
                            std::uint32_t *outEntityIndices,
                            std::size_t maxResults,
@@ -214,8 +215,8 @@ std::size_t overlap_sphere(const runtime::World &world,
     return 0U;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return 0U;
   }
@@ -223,18 +224,18 @@ std::size_t overlap_sphere(const runtime::World &world,
   std::size_t resultCount = 0U;
 
   for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
       continue;
     }
 
-    runtime::Transform t{};
+    Transform t{};
     if (!world.get_transform(entities[i], &t)) {
       continue;
     }
 
     bool overlaps = false;
-    if (col.shape == runtime::ColliderShape::Sphere) {
+    if (col.shape == ColliderShape::Sphere) {
       overlaps =
           sphere_sphere_overlap(center, radius, t.position, col.halfExtents.x);
     } else {
@@ -255,7 +256,7 @@ std::size_t overlap_sphere(const runtime::World &world,
 
 // ---------- overlap_box ------------------------------------------------------
 
-std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
+std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
                         const math::Vec3 &halfExtents,
                         std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask) noexcept {
@@ -268,8 +269,8 @@ std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
     return 0U;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return 0U;
   }
@@ -280,18 +281,18 @@ std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
   std::size_t resultCount = 0U;
 
   for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
       continue;
     }
 
-    runtime::Transform t{};
+    Transform t{};
     if (!world.get_transform(entities[i], &t)) {
       continue;
     }
 
     bool overlaps = false;
-    if (col.shape == runtime::ColliderShape::Sphere) {
+    if (col.shape == ColliderShape::Sphere) {
       // Sphere vs AABB.
       overlaps = sphere_aabb_overlap(t.position, col.halfExtents.x, queryBox);
     } else {
@@ -312,7 +313,7 @@ std::size_t overlap_box(const runtime::World &world, const math::Vec3 &center,
 
 // ---------- sweep_sphere -----------------------------------------------------
 
-bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
+bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
                   SweepHit *outHit, std::uint32_t mask) noexcept {
   if (math::length_sq(direction) < 1e-12F) {
@@ -324,8 +325,8 @@ bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
     return false;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return false;
   }
@@ -334,12 +335,12 @@ bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
   float bestT = maxDistance;
 
   for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
       continue;
     }
 
-    runtime::Transform t{};
+    Transform t{};
     if (!world.get_transform(entities[i], &t)) {
       continue;
     }
@@ -370,7 +371,7 @@ bool sweep_sphere(const runtime::World &world, const math::Vec3 &origin,
 
 // ---------- sweep_box --------------------------------------------------------
 
-bool sweep_box(const runtime::World &world, const math::Vec3 &center,
+bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, SweepHit *outHit,
                std::uint32_t mask) noexcept {
@@ -383,8 +384,8 @@ bool sweep_box(const runtime::World &world, const math::Vec3 &center,
     return false;
   }
 
-  const runtime::Entity *entities = nullptr;
-  const runtime::Collider *colliders = nullptr;
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return false;
   }
@@ -393,12 +394,12 @@ bool sweep_box(const runtime::World &world, const math::Vec3 &center,
   float bestT = maxDistance;
 
   for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Collider &col = colliders[i];
+    const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
       continue;
     }
 
-    runtime::Transform t{};
+    Transform t{};
     if (!world.get_transform(entities[i], &t)) {
       continue;
     }

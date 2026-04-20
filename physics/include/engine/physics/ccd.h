@@ -5,12 +5,9 @@
 
 #include <cstdint>
 
-// TODO(§0-2-a): World still lives in runtime — forward declaration required.
-namespace engine::runtime {
-class World;
-} // namespace engine::runtime
-
 namespace engine::physics {
+
+class PhysicsWorldView;
 
 /// Result of a CCD sweep for a single body.
 struct CcdSweepResult {
@@ -26,15 +23,15 @@ struct CcdSweepResult {
 /// for up to `dt` seconds. Returns the earliest time-of-impact against any
 /// static or dynamic collider in the world.
 ///
-/// @param world     The physics world.
+/// @param world     The physics world view.
 /// @param entity    The moving entity.
 /// @param body      The rigid body (must have inverseMass > 0).
 /// @param collider  The entity's collider.
 /// @param transform The entity's current transform.
 /// @param dt        The timestep in seconds.
 /// @return CCD sweep result with time-of-impact if a hit was found.
-CcdSweepResult bilateral_advance_ccd(const runtime::World &world, Entity entity,
-                                     const RigidBody &body,
+CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
+                                     Entity entity, const RigidBody &body,
                                      const Collider &collider,
                                      const Transform &transform,
                                      float dt) noexcept;
