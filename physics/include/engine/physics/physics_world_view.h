@@ -1,8 +1,8 @@
 #pragma once
 
-// Abstract interface exposing the subset of World that the physics module needs.
-// runtime::World implements this; physics code programs against the interface
-// so it has no compile-time dependency on the runtime module.
+// Abstract interface exposing the subset of World that the physics module
+// needs. runtime::World implements this; physics code programs against the
+// interface so it has no compile-time dependency on the runtime module.
 
 #include <cstddef>
 #include <cstdint>
@@ -46,16 +46,15 @@ public:
 
   // --- Colliders ------------------------------------------------------------
   virtual std::size_t collider_count() const noexcept = 0;
-  virtual bool get_collider_range(std::size_t startIndex, std::size_t count,
-                                  const Entity **outEntities,
-                                  const Collider **outColliders) const
-      noexcept = 0;
+  virtual bool
+  get_collider_range(std::size_t startIndex, std::size_t count,
+                     const Entity **outEntities,
+                     const Collider **outColliders) const noexcept = 0;
   virtual const Collider *get_collider_ptr(Entity entity) const noexcept = 0;
 
   // --- Rigid bodies ---------------------------------------------------------
   virtual RigidBody *get_rigid_body_ptr(Entity entity) noexcept = 0;
-  virtual const RigidBody *
-  get_rigid_body_ptr(Entity entity) const noexcept = 0;
+  virtual const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept = 0;
   virtual bool get_rigid_body(Entity entity,
                               RigidBody *outRigidBody) const noexcept = 0;
 

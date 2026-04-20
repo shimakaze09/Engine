@@ -33,8 +33,8 @@ static JointId allocate_joint(PhysicsWorldView &world) noexcept {
   return kInvalidJointId;
 }
 
-JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA,
-                        Entity entityB, const math::Vec3 &pivot,
+JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
+                        const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
@@ -88,8 +88,7 @@ JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
 }
 
 JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
-                         Entity entityB,
-                         const math::Vec3 &axis) noexcept {
+                         Entity entityB, const math::Vec3 &axis) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
@@ -108,8 +107,8 @@ JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
 }
 
 JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
-                         Entity entityB, float restLength,
-                         float stiffness, float damping) noexcept {
+                         Entity entityB, float restLength, float stiffness,
+                         float damping) noexcept {
   const JointId id = allocate_joint(world);
   if (id == kInvalidJointId) {
     return id;
@@ -235,10 +234,8 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
       auto &j = ctx.joints[i];
 
-      Transform *tA =
-          world.get_transform_write_ptr(j.entityA, simToken);
-      Transform *tB =
-          world.get_transform_write_ptr(j.entityB, simToken);
+      Transform *tA = world.get_transform_write_ptr(j.entityA, simToken);
+      Transform *tB = world.get_transform_write_ptr(j.entityB, simToken);
       if ((tA == nullptr) || (tB == nullptr)) {
         continue;
       }

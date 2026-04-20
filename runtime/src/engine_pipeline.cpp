@@ -883,7 +883,7 @@ void create_bootstrap_scene(runtime::World *world,
                             const BootstrapMeshIds &meshIds) noexcept {
   const renderer::AssetId defaultMesh =
       (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                   : meshIds.bootstrap;
+                                                  : meshIds.bootstrap;
 
   const runtime::Entity entity = world->create_entity();
   const runtime::Entity stackedEntity = world->create_entity();
@@ -983,8 +983,7 @@ void create_bootstrap_scene(runtime::World *world,
   {
     runtime::ScriptComponent sc{};
     std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kMainScriptPath);
-    static_cast<void>(
-        world->add_script_component(sceneControllerEntity, sc));
+    static_cast<void>(world->add_script_component(sceneControllerEntity, sc));
   }
 }
 
@@ -992,8 +991,8 @@ void create_bootstrap_scene(runtime::World *world,
 // Scene light collection
 // ---------------------------------------------------------------------------
 
-renderer::SceneLightData collect_scene_lights(
-    const runtime::World &world) noexcept {
+renderer::SceneLightData
+collect_scene_lights(const runtime::World &world) noexcept {
   renderer::SceneLightData sceneLights{};
 
   const std::size_t lightCount = world.light_count();
@@ -1003,11 +1002,9 @@ renderer::SceneLightData collect_scene_lights(
       continue;
     }
     if (lc->type == runtime::LightType::Directional) {
-      if (sceneLights.directionalLightCount <
-          renderer::kMaxDirectionalLights) {
+      if (sceneLights.directionalLightCount < renderer::kMaxDirectionalLights) {
         auto &dl =
-            sceneLights
-                .directionalLights[sceneLights.directionalLightCount];
+            sceneLights.directionalLights[sceneLights.directionalLightCount];
         dl.direction = lc->direction;
         dl.color = lc->color;
         dl.intensity = lc->intensity;
@@ -1041,8 +1038,7 @@ renderer::SceneLightData collect_scene_lights(
     const runtime::WorldTransform *wt =
         world.get_world_transform_read_ptr(plEntity);
     auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
-    pl.position =
-        (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    pl.position = (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
     pl.color = plc->color;
     pl.intensity = plc->intensity;
     pl.radius = plc->radius;
@@ -1062,8 +1058,7 @@ renderer::SceneLightData collect_scene_lights(
     const runtime::WorldTransform *wt =
         world.get_world_transform_read_ptr(slEntity);
     auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
-    sl.position =
-        (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    sl.position = (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
     sl.direction = slc->direction;
     sl.color = slc->color;
     sl.intensity = slc->intensity;
@@ -1180,7 +1175,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   }
   scripting::set_default_mesh_asset_id(
       (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                   : meshIds.bootstrap);
+                                                  : meshIds.bootstrap);
   scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube, meshIds.sphere,
                                   meshIds.cylinder, meshIds.capsule,
                                   meshIds.pyramid);
@@ -1304,9 +1299,8 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     } else {
       runtime::bind_scripting_runtime(world.get());
       scripting::set_default_mesh_asset_id(
-          (meshIds.cube != renderer::kInvalidAssetId)
-              ? meshIds.cube
-              : meshIds.bootstrap);
+          (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                      : meshIds.bootstrap);
       scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
                                       meshIds.sphere, meshIds.cylinder,
                                       meshIds.capsule, meshIds.pyramid);
@@ -1380,9 +1374,8 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
 void EnginePipeline::Impl::stage_assets() noexcept {
   bool updatedAssets = true;
   if (!core::make_render_context_current()) {
-    core::log_message(
-        core::LogLevel::Warning, "assets",
-        "skipping asset transitions: OpenGL context unavailable");
+    core::log_message(core::LogLevel::Warning, "assets",
+                      "skipping asset transitions: OpenGL context unavailable");
   } else {
     updatedAssets = renderer::update_asset_manager(
         assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
@@ -1408,9 +1401,7 @@ void EnginePipeline::Impl::stage_hot_reload() noexcept {
 // Stage: audio
 // ---------------------------------------------------------------------------
 
-void EnginePipeline::Impl::stage_audio() noexcept {
-  audio::update_audio();
-}
+void EnginePipeline::Impl::stage_audio() noexcept { audio::update_audio(); }
 
 // ---------------------------------------------------------------------------
 // Stage: frame graph (job submission + execution)
@@ -1474,8 +1465,7 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
     const std::size_t transformCount = world->transform_count();
     const std::size_t updateJobStart = updateJobCursor;
 
-    for (std::size_t start = 0U; start < transformCount;
-         start += kChunkSize) {
+    for (std::size_t start = 0U; start < transformCount; start += kChunkSize) {
       if (updateJobCursor >= frameContext->updateJobData.size()) {
         graphFailed = true;
         break;
@@ -1552,9 +1542,8 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
           break;
         }
 
-        if (!link_dependency(
-                frameContext->updateJobHandles[updateHandleIndex],
-                physicsHandle)) {
+        if (!link_dependency(frameContext->updateJobHandles[updateHandleIndex],
+                             physicsHandle)) {
           graphFailed = true;
           break;
         }
@@ -1609,8 +1598,9 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
     graphFailed = true;
   }
 
-  core::JobHandle renderPhaseHandle = submit_world_phase_job(
-      frameContext.get(), world.get(), &phaseJobCursor, &begin_render_phase_job);
+  core::JobHandle renderPhaseHandle =
+      submit_world_phase_job(frameContext.get(), world.get(), &phaseJobCursor,
+                             &begin_render_phase_job);
   if (!core::is_valid_handle(renderPhaseHandle)) {
     graphFailed = true;
   }
@@ -1627,8 +1617,7 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
     int vpH = 1;
     core::render_drawable_size(&vpW, &vpH);
     const float vpAspect =
-        (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH))
-                  : 1.0F;
+        (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH)) : 1.0F;
     const renderer::CameraState cam = renderer::get_active_camera();
     const math::Mat4 vpMatrix =
         math::mul(math::perspective(cam.fovRadians, vpAspect, cam.nearPlane,
@@ -1636,11 +1625,10 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
                   math::look_at(cam.position, cam.target, cam.up));
 
     if (!runtime::enqueue_render_prep_pipeline(
-            &frameContext->renderPrepPipeline, world.get(),
-            commandBuffer.get(), assetDatabase.get(), meshRegistry.get(),
-            renderPrepPhaseHandle, renderPhaseHandle,
-            &frameContext->frameGraphFailed, frameThreadCount, kChunkSize,
-            vpMatrix, &mergeHandle)) {
+            &frameContext->renderPrepPipeline, world.get(), commandBuffer.get(),
+            assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
+            renderPhaseHandle, &frameContext->frameGraphFailed,
+            frameThreadCount, kChunkSize, vpMatrix, &mergeHandle)) {
       graphFailed = true;
     }
   }
@@ -1707,9 +1695,9 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
     float camFov = 0.0F;
     float camNear = 0.0F;
     float camFar = 0.0F;
-    world->camera_manager().evaluate(
-        static_cast<float>(kFixedDeltaSeconds), &camPos, &camTarget, &camUp,
-        &camFov, &camNear, &camFar);
+    world->camera_manager().evaluate(static_cast<float>(kFixedDeltaSeconds),
+                                     &camPos, &camTarget, &camUp, &camFov,
+                                     &camNear, &camFar);
     if (world->camera_manager().camera_count() > 0U) {
       renderer::CameraState cam{};
       cam.position = camPos;
@@ -1810,10 +1798,10 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
     threadFrameAllocs += core::thread_frame_allocator_allocation_count(i);
   }
 
-  core::log_frame_metrics(
-      frameIndex, frameMs,
-      core::frame_allocator_bytes_used() + threadFrameBytes,
-      core::frame_allocator_allocation_count() + threadFrameAllocs);
+  core::log_frame_metrics(frameIndex, frameMs,
+                          core::frame_allocator_bytes_used() + threadFrameBytes,
+                          core::frame_allocator_allocation_count() +
+                              threadFrameAllocs);
 
   const std::size_t aliveCount = world->alive_entity_count();
   const std::size_t spawnedCount = (aliveCount >= previousAliveCount)
@@ -1828,11 +1816,9 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
 
   const bool shouldLogSliceDiagnostics =
       ((frameIndex % kSliceDiagnosticsPeriodFrames) == 0U) ||
-      (spawnedCount > 0U) || (destroyedCount > 0U) ||
-      (assetCounts.failed > 0U);
+      (spawnedCount > 0U) || (destroyedCount > 0U) || (assetCounts.failed > 0U);
   if (shouldLogSliceDiagnostics) {
-    const std::size_t movingRigidBodyCount =
-        count_moving_rigid_bodies(*world);
+    const std::size_t movingRigidBodyCount = count_moving_rigid_bodies(*world);
     const std::size_t meshComponentCount = count_mesh_components(*world);
     const std::size_t readyMeshComponentCount =
         count_ready_mesh_components(*world, assetDatabase.get());
@@ -1883,13 +1869,12 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   core::set_engine_stats(frameStats);
 
   char jobMessage[192] = {};
-  std::snprintf(
-      jobMessage, sizeof(jobMessage),
-      "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
-      static_cast<unsigned long long>(jobStats.jobsExecuted),
-      static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
-      utilizationPct,
-      static_cast<unsigned long long>(jobStats.queueContentionCount));
+  std::snprintf(jobMessage, sizeof(jobMessage),
+                "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
+                static_cast<unsigned long long>(jobStats.jobsExecuted),
+                static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
+                utilizationPct,
+                static_cast<unsigned long long>(jobStats.queueContentionCount));
   core::log_message(core::LogLevel::Trace, "jobs", jobMessage);
 }
 

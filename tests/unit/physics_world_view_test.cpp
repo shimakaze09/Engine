@@ -30,8 +30,7 @@ public:
 
   bool get_transform_update_range(
       std::size_t /*startIndex*/, std::size_t /*count*/,
-      const Entity ** /*outEntities*/,
-      const Transform ** /*outReadTransforms*/,
+      const Entity ** /*outEntities*/, const Transform ** /*outReadTransforms*/,
       Transform ** /*outWriteTransforms*/) noexcept override {
     return false;
   }
@@ -40,24 +39,22 @@ public:
     return make_token(m_inSimulation);
   }
 
-  Transform *
-  get_transform_write_ptr(Entity /*entity*/,
-                          const SimulationAccessToken & /*token*/) noexcept
-      override {
+  Transform *get_transform_write_ptr(
+      Entity /*entity*/,
+      const SimulationAccessToken & /*token*/) noexcept override {
     return nullptr;
   }
 
   std::size_t collider_count() const noexcept override { return 0U; }
 
-  bool get_collider_range(std::size_t /*startIndex*/, std::size_t /*count*/,
-                          const Entity ** /*outEntities*/,
-                          const Collider ** /*outColliders*/) const
-      noexcept override {
+  bool get_collider_range(
+      std::size_t /*startIndex*/, std::size_t /*count*/,
+      const Entity ** /*outEntities*/,
+      const Collider ** /*outColliders*/) const noexcept override {
     return false;
   }
 
-  const Collider *
-  get_collider_ptr(Entity /*entity*/) const noexcept override {
+  const Collider *get_collider_ptr(Entity /*entity*/) const noexcept override {
     return nullptr;
   }
 

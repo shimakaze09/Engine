@@ -184,15 +184,15 @@ public:
   bool add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept;
   bool remove_rigid_body(Entity entity) noexcept;
   bool get_rigid_body(Entity entity,
-                     RigidBody *outRigidBody) const noexcept override;
+                      RigidBody *outRigidBody) const noexcept override;
 
   bool add_collider(Entity entity, const Collider &collider) noexcept;
   bool remove_collider(Entity entity) noexcept;
   bool get_collider(Entity entity, Collider *outCollider) const noexcept;
-  bool get_collider_range(std::size_t startIndex, std::size_t count,
-                          const Entity **outEntities,
-                          const Collider **outColliders) const
-      noexcept override;
+  bool
+  get_collider_range(std::size_t startIndex, std::size_t count,
+                     const Entity **outEntities,
+                     const Collider **outColliders) const noexcept override;
 
   bool add_mesh_component(Entity entity,
                           const MeshComponent &component) noexcept;
@@ -333,11 +333,11 @@ public:
   // non-overlapping index ranges; the write state index is fixed per update.
   bool update_transforms_range(std::size_t startIndex, std::size_t count,
                                float deltaSeconds) noexcept;
-  bool get_transform_update_range(std::size_t startIndex, std::size_t count,
-                                  const Entity **outEntities,
-                                  const Transform **outReadTransforms,
-                                  Transform **outWriteTransforms)
-      noexcept override;
+  bool
+  get_transform_update_range(std::size_t startIndex, std::size_t count,
+                             const Entity **outEntities,
+                             const Transform **outReadTransforms,
+                             Transform **outWriteTransforms) noexcept override;
   bool read_transform_range(std::size_t startIndex, std::size_t count,
                             const Entity **outEntities,
                             const Transform **outTransforms) const noexcept;
