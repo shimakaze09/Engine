@@ -1,6 +1,10 @@
 #include <cmath>
 #include <cstdio>
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4127) // constant conditional (constexpr checks in tests)
+#endif
+
 #include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
 #include "engine/renderer/shadow_map.h"
