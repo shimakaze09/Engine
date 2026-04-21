@@ -1363,7 +1363,6 @@ const Collider *World::get_collider_ptr(Entity entity) const noexcept {
   return m_colliders.get_ptr(entity);
 }
 
-// cppcheck-suppress duplInheritedMember
 Collider *World::get_collider_ptr(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     return nullptr;

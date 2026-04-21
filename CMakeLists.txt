@@ -159,6 +159,8 @@ if(CPPCHECK_EXE)
         --suppress=*:*_deps/*
         --suppress=objectIndex:*/math/src/ray.cpp
         --suppress=arithOperationsOnVoidPointer:*/core/src/json.cpp
+        --suppress=duplInheritedMember:*/runtime/include/engine/runtime/world.h
+        --suppress=duplInheritedMember:*/runtime/src/world.cpp
         -i "${CMAKE_BINARY_DIR}/_deps"
         -i "${CMAKE_SOURCE_DIR}/tests"
         -i "${CMAKE_SOURCE_DIR}/tools"
