@@ -1,5 +1,9 @@
 #include <cstddef>
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4127) // constant conditional (constexpr checks in tests)
+#endif
+
 #include "engine/renderer/post_process_stack.h"
 
 namespace {

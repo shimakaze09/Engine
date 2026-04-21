@@ -20,13 +20,17 @@ int verify_point_matrices_distinct() {
   for (int a = 0; a < 6; ++a) {
     for (int b = a + 1; b < 6; ++b) {
       bool same = true;
-      for (int c = 0; c < 4 && same; ++c) {
-        for (int r = 0; r < 4 && same; ++r) {
+      for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
           const float va = (&vp[a].columns[c].x)[r];
           const float vb = (&vp[b].columns[c].x)[r];
           if (std::abs(va - vb) > 1e-4F) {
             same = false;
+            break;
           }
+        }
+        if (!same) {
+          break;
         }
       }
       if (same) {
@@ -48,13 +52,17 @@ int verify_point_matrices_not_identity() {
 
   for (int f = 0; f < 6; ++f) {
     bool isIdentity = true;
-    for (int c = 0; c < 4 && isIdentity; ++c) {
-      for (int r = 0; r < 4 && isIdentity; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      for (int r = 0; r < 4; ++r) {
         const float expected = (c == r) ? 1.0F : 0.0F;
         const float val = (&vp[f].columns[c].x)[r];
         if (std::abs(val - expected) > 1e-6F) {
           isIdentity = false;
+          break;
         }
+      }
+      if (!isIdentity) {
+        break;
       }
     }
     if (isIdentity) {
@@ -77,15 +85,22 @@ int verify_point_matrices_position_sensitivity() {
 
   // At least one face must differ.
   bool anyDiff = false;
-  for (int f = 0; f < 6 && !anyDiff; ++f) {
-    for (int c = 0; c < 4 && !anyDiff; ++c) {
-      for (int r = 0; r < 4 && !anyDiff; ++r) {
+  for (int f = 0; f < 6; ++f) {
+    for (int c = 0; c < 4; ++c) {
+      for (int r = 0; r < 4; ++r) {
         const float va = (&vpA[f].columns[c].x)[r];
         const float vb = (&vpB[f].columns[c].x)[r];
         if (std::abs(va - vb) > 1e-4F) {
           anyDiff = true;
+          break;
         }
       }
+      if (anyDiff) {
+        break;
+      }
+    }
+    if (anyDiff) {
+      break;
     }
   }
   if (!anyDiff) {

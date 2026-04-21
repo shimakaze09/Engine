@@ -72,12 +72,16 @@ int verify_spot_matrix_cone_sensitivity() {
 
   // Projection scale differs — any element must differ between narrow and wide.
   bool anyDiff = false;
-  for (int c = 0; c < 4 && !anyDiff; ++c) {
-    for (int r = 0; r < 4 && !anyDiff; ++r) {
+  for (int c = 0; c < 4; ++c) {
+    for (int r = 0; r < 4; ++r) {
       if (std::abs((&narrow.columns[c].x)[r] - (&wide.columns[c].x)[r]) >
           1e-4F) {
         anyDiff = true;
+        break;
       }
+    }
+    if (anyDiff) {
+      break;
     }
   }
   if (!anyDiff) {

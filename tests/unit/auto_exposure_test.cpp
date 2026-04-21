@@ -1,5 +1,9 @@
 #include <cmath>
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4127) // constant conditional (constexpr checks in tests)
+#endif
+
 #include "engine/renderer/shadow_map.h"
 
 namespace {
