@@ -14,7 +14,9 @@ enum class GpuPassId : std::uint8_t {
   SSAO = 6U,
   ShadowMap = 7U,
   AutoExposure = 8U,
-  Count = 9U,
+  SpotShadowMap = 9U,
+  PointShadowMap = 10U,
+  Count = 11U,
 };
 
 struct GpuProfilerDebugStats final {

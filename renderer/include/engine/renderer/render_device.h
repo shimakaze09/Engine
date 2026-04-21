@@ -78,6 +78,14 @@ struct RenderDevice final {
   void (*destroy_texture)(std::uint32_t id) noexcept = nullptr;
   void (*bind_texture)(std::int32_t unit, std::uint32_t id) noexcept = nullptr;
 
+  // Cubemap textures (for point light shadows).
+  std::uint32_t (*create_depth_cubemap)(std::int32_t faceSize) noexcept =
+      nullptr;
+  void (*bind_texture_cubemap)(std::int32_t unit,
+                               std::uint32_t id) noexcept = nullptr;
+  void (*framebuffer_cubemap_face)(std::uint32_t fbo, std::uint32_t cubeTex,
+                                   std::int32_t face) noexcept = nullptr;
+
   // Framebuffers.
   std::uint32_t (*create_framebuffer)(
       std::uint32_t colorTex, std::uint32_t depthTex) noexcept = nullptr;

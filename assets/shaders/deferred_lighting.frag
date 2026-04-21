@@ -20,6 +20,21 @@ uniform mat4 uShadowMatrix[4];
 uniform float uCascadeSplit[4];
 uniform int uShadowEnabled;
 
+// Spot light shadow maps (up to 4 shadow-casting spots).
+#define MAX_SPOT_SHADOW_LIGHTS 4
+uniform int uSpotShadowEnabled;
+uniform sampler2D uSpotShadowMap[MAX_SPOT_SHADOW_LIGHTS];
+uniform mat4 uSpotShadowMatrix[MAX_SPOT_SHADOW_LIGHTS];
+uniform int uSpotShadowLightIdx[MAX_SPOT_SHADOW_LIGHTS];
+
+// Point light cubemap shadow maps (up to 4 shadow-casting points).
+#define MAX_POINT_SHADOW_LIGHTS 4
+uniform int uPointShadowEnabled;
+uniform samplerCube uPointShadowMap[MAX_POINT_SHADOW_LIGHTS];
+uniform vec3 uPointShadowLightPos[MAX_POINT_SHADOW_LIGHTS];
+uniform float uPointShadowFarPlane[MAX_POINT_SHADOW_LIGHTS];
+uniform int uPointShadowLightIdx[MAX_POINT_SHADOW_LIGHTS];
+
 // Tile light data (R32F texture: x = MAX_LIGHTS_PER_TILE+1, y = numTiles).
 uniform sampler2D uTileLightTex;
 uniform int uTileCountX;
@@ -182,6 +197,58 @@ float compute_shadow(vec3 worldPos, float depth) {
     return shadow;
 }
 
+// Compute spot light shadow factor for a world position.
+float compute_spot_shadow(vec3 worldPos, int lightIdx) {
+    if (uSpotShadowEnabled == 0) return 1.0;
+
+    for (int s = 0; s < MAX_SPOT_SHADOW_LIGHTS; ++s) {
+        if (uSpotShadowLightIdx[s] != lightIdx) continue;
+
+        vec4 shadowCoord = uSpotShadowMatrix[s] * vec4(worldPos, 1.0);
+        vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+        projCoords = projCoords * 0.5 + 0.5;
+
+        if (projCoords.z > 1.0) return 1.0;
+        return sample_shadow_pcf(uSpotShadowMap[s], projCoords);
+    }
+
+    return 1.0; // No shadow slot for this light.
+}
+
+// Compute point light shadow factor using cubemap sampling.
+float compute_point_shadow(vec3 worldPos, int lightIdx) {
+    if (uPointShadowEnabled == 0) return 1.0;
+
+    for (int s = 0; s < MAX_POINT_SHADOW_LIGHTS; ++s) {
+        if (uPointShadowLightIdx[s] != lightIdx) continue;
+
+        vec3 fragToLight = worldPos - uPointShadowLightPos[s];
+        float currentDist = length(fragToLight);
+        float normalizedDist = currentDist / uPointShadowFarPlane[s];
+
+        // PCF with 20 offset sample directions for soft cubemap shadows.
+        vec3 sampleOffsets[20] = vec3[](
+            vec3( 1,  1,  1), vec3( 1, -1,  1), vec3(-1, -1,  1), vec3(-1,  1,  1),
+            vec3( 1,  1, -1), vec3( 1, -1, -1), vec3(-1, -1, -1), vec3(-1,  1, -1),
+            vec3( 1,  1,  0), vec3( 1, -1,  0), vec3(-1, -1,  0), vec3(-1,  1,  0),
+            vec3( 1,  0,  1), vec3(-1,  0,  1), vec3( 1,  0, -1), vec3(-1,  0, -1),
+            vec3( 0,  1,  1), vec3( 0, -1,  1), vec3( 0, -1, -1), vec3( 0,  1, -1)
+        );
+
+        float shadow = 0.0;
+        float diskRadius = 0.02;
+        float bias = 0.005;
+        for (int i = 0; i < 20; ++i) {
+            float closestDepth = texture(uPointShadowMap[s],
+                fragToLight + sampleOffsets[i] * diskRadius).r;
+            shadow += (normalizedDist - bias > closestDepth) ? 0.0 : 1.0;
+        }
+        return shadow / 20.0;
+    }
+
+    return 1.0; // No shadow slot for this light.
+}
+
 void main() {
     // Sample G-Buffer.
     vec4 albedoMetallic = texture(uGBufferAlbedo, vTexCoord);
@@ -237,7 +304,8 @@ void main() {
 
         Lo += cook_torrance(N, V, L, albedo, metallic, roughness,
                             uPointLightColors[lightIdx],
-                            uPointLightIntensities[lightIdx] * attenuation);
+                            uPointLightIntensities[lightIdx] * attenuation)
+              * compute_point_shadow(worldPos, lightIdx);
     }
 
     // Read tile spot light count.
@@ -267,7 +335,8 @@ void main() {
 
         Lo += cook_torrance(N, V, L, albedo, metallic, roughness,
                             uSpotLightColors[lightIdx],
-                            uSpotLightIntensities[lightIdx] * attenuation * spotFactor);
+                            uSpotLightIntensities[lightIdx] * attenuation * spotFactor)
+              * compute_spot_shadow(worldPos, lightIdx);
     }
 
     // Ambient + emissive.

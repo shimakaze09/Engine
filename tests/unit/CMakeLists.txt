@@ -359,6 +359,22 @@ engine_add_test_executable(engine_unit_shadow_map
     engine_math
 )
 
+engine_add_test_executable(engine_unit_spot_shadow
+    SOURCES
+    spot_shadow_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+)
+
+engine_add_test_executable(engine_unit_point_shadow
+    SOURCES
+    point_shadow_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+)
+
 # ---- P1-M5-D: Post-Processing ----
 
 engine_add_test_executable(engine_unit_post_process_stack

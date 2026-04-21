@@ -234,6 +234,32 @@ struct BackendState final {
   std::array<std::int32_t, kShadowCascadeCount> dlShadowMatrixLocs{};
   std::array<std::int32_t, kShadowCascadeCount> dlCascadeSplitLocs{};
 
+  // ---- Spot shadow state ----
+  SpotShadowState spotShadowState{};
+  bool spotShadowAvailable = false;
+
+  std::int32_t dlSpotShadowEnabledLoc = -1;
+  std::array<std::int32_t, kMaxSpotShadowLights> dlSpotShadowMapLocs{};
+  std::array<std::int32_t, kMaxSpotShadowLights> dlSpotShadowMatrixLocs{};
+  std::array<std::int32_t, kMaxSpotShadowLights> dlSpotShadowLightIdxLocs{};
+
+  // ---- Point shadow state ----
+  PointShadowState pointShadowState{};
+  bool pointShadowAvailable = false;
+
+  ShaderProgramHandle shadowDepthPointShaderHandle{};
+  std::uint32_t shadowDepthPointProgram = 0U;
+  std::int32_t shadowPointLightMvpLoc = -1;
+  std::int32_t shadowPointModelLoc = -1;
+  std::int32_t shadowPointLightPosLoc = -1;
+  std::int32_t shadowPointFarPlaneLoc = -1;
+
+  std::int32_t dlPointShadowEnabledLoc = -1;
+  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowMapLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowLightPosLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowFarPlaneLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowLightIdxLocs{};
+
   // ---- Auto-exposure state ----
   bool autoExposureAvailable = false;
 
@@ -890,6 +916,34 @@ bool initialize_backend() noexcept {
       backend.dlCascadeSplitLocs[i] = dev->uniform_location(dlProg, nm);
     }
 
+    // Spot shadow uniforms in deferred lighting shader.
+    backend.dlSpotShadowEnabledLoc =
+        dev->uniform_location(dlProg, "uSpotShadowEnabled");
+    for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
+      char nm[80] = {};
+      std::snprintf(nm, sizeof(nm), "uSpotShadowMap[%zu]", i);
+      backend.dlSpotShadowMapLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uSpotShadowMatrix[%zu]", i);
+      backend.dlSpotShadowMatrixLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uSpotShadowLightIdx[%zu]", i);
+      backend.dlSpotShadowLightIdxLocs[i] = dev->uniform_location(dlProg, nm);
+    }
+
+    // Point shadow uniforms in deferred lighting shader.
+    backend.dlPointShadowEnabledLoc =
+        dev->uniform_location(dlProg, "uPointShadowEnabled");
+    for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+      char nm[80] = {};
+      std::snprintf(nm, sizeof(nm), "uPointShadowMap[%zu]", i);
+      backend.dlPointShadowMapLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uPointShadowLightPos[%zu]", i);
+      backend.dlPointShadowLightPosLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uPointShadowFarPlane[%zu]", i);
+      backend.dlPointShadowFarPlaneLocs[i] = dev->uniform_location(dlProg, nm);
+      std::snprintf(nm, sizeof(nm), "uPointShadowLightIdx[%zu]", i);
+      backend.dlPointShadowLightIdxLocs[i] = dev->uniform_location(dlProg, nm);
+    }
+
     // --- G-Buffer debug shader uniforms ---
     if (gbufferDebugShader != kInvalidShaderProgram) {
       const auto dbgProg = shader_gpu_program(gbufferDebugShader);
@@ -934,6 +988,53 @@ bool initialize_backend() noexcept {
     } else {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "shadow depth shader not available — shadows disabled");
+    }
+  }
+
+  // Spot light shadow maps (soft-fail: spot shadows simply disabled).
+  core::cvar_register_bool("r_spot_shadows", true,
+                           "Enable spot light shadow maps");
+  if (backend.shadowAvailable) {
+    if (initialize_spot_shadow_maps(backend.spotShadowState)) {
+      backend.spotShadowAvailable = true;
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "spot shadow FBO creation failed — spot shadows disabled");
+    }
+  }
+
+  // Point light cubemap shadow maps (soft-fail).
+  core::cvar_register_bool("r_point_shadows", true,
+                           "Enable point light cubemap shadow maps");
+  {
+    const ShaderProgramHandle pointShader = load_shader_program(
+        "assets/shaders/shadow_depth_point.vert",
+        "assets/shaders/shadow_depth_point.frag");
+    if (pointShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(pointShader);
+      if (prog != 0U) {
+        backend.shadowDepthPointShaderHandle = pointShader;
+        backend.shadowDepthPointProgram = prog;
+        backend.shadowPointLightMvpLoc =
+            dev->uniform_location(prog, "u_lightMVP");
+        backend.shadowPointModelLoc = dev->uniform_location(prog, "u_model");
+        backend.shadowPointLightPosLoc =
+            dev->uniform_location(prog, "u_lightPos");
+        backend.shadowPointFarPlaneLoc =
+            dev->uniform_location(prog, "u_farPlane");
+
+        if (initialize_point_shadow_maps(backend.pointShadowState)) {
+          backend.pointShadowAvailable = true;
+        } else {
+          core::log_message(core::LogLevel::Warning, "renderer",
+                            "point shadow cubemap creation failed — disabled");
+        }
+      } else {
+        destroy_shader_program(pointShader);
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "point shadow shader not available — disabled");
     }
   }
 
@@ -1033,6 +1134,19 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->shadowDepthShaderHandle = ShaderProgramHandle{};
   }
   backend->shadowDepthProgram = 0U;
+
+  // Destroy spot shadow resources.
+  shutdown_spot_shadow_maps(backend->spotShadowState);
+  backend->spotShadowAvailable = false;
+
+  // Destroy point shadow resources.
+  shutdown_point_shadow_maps(backend->pointShadowState);
+  backend->pointShadowAvailable = false;
+  if (backend->shadowDepthPointShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->shadowDepthPointShaderHandle);
+    backend->shadowDepthPointShaderHandle = ShaderProgramHandle{};
+  }
+  backend->shadowDepthPointProgram = 0U;
 
   // Destroy auto-exposure resources.
   destroy_luminance_resources(*backend);
@@ -1342,6 +1456,160 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_end_pass(GpuPassId::ShadowMap);
   }
 
+  // ==== Spot Light Shadow Pass ====
+  const bool doSpotShadows =
+      backend.spotShadowAvailable && core::cvar_get_bool("r_spot_shadows");
+  if (doSpotShadows && (lights.spotLightCount > 0U)) {
+    gpu_profiler_begin_pass(GpuPassId::SpotShadowMap);
+
+    // Select up to kMaxSpotShadowLights nearest shadow-casting spots.
+    std::size_t activeSpotShadows = 0U;
+    for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
+      backend.spotShadowState.slots[i].lightIndex = -1;
+    }
+
+    for (std::size_t li = 0U;
+         li < lights.spotLightCount && activeSpotShadows < kMaxSpotShadowLights;
+         ++li) {
+      if (!lights.spotLights[li].castShadow) {
+        continue;
+      }
+      auto &slot = backend.spotShadowState.slots[activeSpotShadows];
+      slot.lightIndex = static_cast<int>(li);
+      slot.farPlane = lights.spotLights[li].radius;
+      slot.lightViewProjection = compute_spot_shadow_matrix(
+          lights.spotLights[li].position, lights.spotLights[li].direction,
+          lights.spotLights[li].outerConeAngle, lights.spotLights[li].radius);
+      ++activeSpotShadows;
+    }
+
+    // Render into each spot shadow FBO.
+    dev->bind_program(backend.shadowDepthProgram);
+    for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
+      const auto &slot = backend.spotShadowState.slots[s];
+      dev->bind_framebuffer(slot.depthFbo);
+      dev->set_viewport(0, 0, kSpotShadowMapResolution,
+                        kSpotShadowMapResolution);
+      dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
+      dev->clear_color_depth();
+      dev->enable_depth_test();
+
+      std::uint32_t boundVao = 0U;
+      for (std::size_t ci = 0U; ci < opaqueCount; ++ci) {
+        const DrawCommand &cmd = commandBufferView.data[ci];
+        const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
+        if ((mesh == nullptr) || (mesh->vertexArray == 0U)) {
+          continue;
+        }
+
+        const math::Mat4 mvp =
+            math::mul(slot.lightViewProjection, cmd.modelMatrix);
+        if (backend.shadowLightMvpLoc >= 0) {
+          dev->set_uniform_mat4(backend.shadowLightMvpLoc, &mvp.columns[0].x);
+        }
+        if (backend.shadowModelLoc >= 0) {
+          dev->set_uniform_mat4(backend.shadowModelLoc,
+                                &cmd.modelMatrix.columns[0].x);
+        }
+
+        if (mesh->vertexArray != boundVao) {
+          dev->bind_vertex_array(mesh->vertexArray);
+          boundVao = mesh->vertexArray;
+        }
+        dev->draw_elements_triangles_u32(mesh->indexCount);
+      }
+    }
+
+    dev->bind_vertex_array(0U);
+    dev->bind_program(0U);
+    gpu_profiler_end_pass(GpuPassId::SpotShadowMap);
+  }
+
+  // ==== Point Light Cubemap Shadow Pass ====
+  const bool doPointShadows =
+      backend.pointShadowAvailable && core::cvar_get_bool("r_point_shadows");
+  if (doPointShadows && (lights.pointLightCount > 0U)) {
+    gpu_profiler_begin_pass(GpuPassId::PointShadowMap);
+
+    // Select up to kMaxPointShadowLights nearest shadow-casting points.
+    std::size_t activePointShadows = 0U;
+    for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+      backend.pointShadowState.slots[i].lightIndex = -1;
+    }
+
+    for (std::size_t li = 0U;
+         li < lights.pointLightCount &&
+         activePointShadows < kMaxPointShadowLights;
+         ++li) {
+      if (!lights.pointLights[li].castShadow) {
+        continue;
+      }
+      auto &slot = backend.pointShadowState.slots[activePointShadows];
+      slot.lightIndex = static_cast<int>(li);
+      slot.farPlane = std::max(lights.pointLights[li].radius, 1.0F);
+      compute_point_shadow_matrices(lights.pointLights[li].position,
+                                    lights.pointLights[li].radius,
+                                    slot.faceViewProjections);
+      ++activePointShadows;
+    }
+
+    // Render into each point shadow cubemap (6 faces per light).
+    dev->bind_program(backend.shadowDepthPointProgram);
+    for (std::size_t s = 0U; s < activePointShadows; ++s) {
+      const auto &slot = backend.pointShadowState.slots[s];
+      const math::Vec3 &lightPos =
+          lights.pointLights[static_cast<std::size_t>(slot.lightIndex)]
+              .position;
+
+      if (backend.shadowPointLightPosLoc >= 0) {
+        dev->set_uniform_vec3(backend.shadowPointLightPosLoc, &lightPos.x);
+      }
+      if (backend.shadowPointFarPlaneLoc >= 0) {
+        dev->set_uniform_float(backend.shadowPointFarPlaneLoc, slot.farPlane);
+      }
+
+      for (int face = 0; face < 6; ++face) {
+        dev->framebuffer_cubemap_face(slot.depthFbo, slot.depthCubemap, face);
+        dev->bind_framebuffer(slot.depthFbo);
+        dev->set_viewport(0, 0, kPointShadowMapResolution,
+                          kPointShadowMapResolution);
+        dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
+        dev->clear_color_depth();
+        dev->enable_depth_test();
+
+        std::uint32_t boundVao = 0U;
+        for (std::size_t ci = 0U; ci < opaqueCount; ++ci) {
+          const DrawCommand &cmd = commandBufferView.data[ci];
+          const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
+          if ((mesh == nullptr) || (mesh->vertexArray == 0U)) {
+            continue;
+          }
+
+          const math::Mat4 mvp =
+              math::mul(slot.faceViewProjections[face], cmd.modelMatrix);
+          if (backend.shadowPointLightMvpLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowPointLightMvpLoc,
+                                  &mvp.columns[0].x);
+          }
+          if (backend.shadowPointModelLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowPointModelLoc,
+                                  &cmd.modelMatrix.columns[0].x);
+          }
+
+          if (mesh->vertexArray != boundVao) {
+            dev->bind_vertex_array(mesh->vertexArray);
+            boundVao = mesh->vertexArray;
+          }
+          dev->draw_elements_triangles_u32(mesh->indexCount);
+        }
+      }
+    }
+
+    dev->bind_vertex_array(0U);
+    dev->bind_program(0U);
+    gpu_profiler_end_pass(GpuPassId::PointShadowMap);
+  }
+
   // ====================================================================
   // DEFERRED PATH
   // ====================================================================
@@ -1647,6 +1915,65 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
       if (backend.dlShadowEnabledLoc >= 0) {
         dev->set_uniform_int(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
+      }
+
+      // Bind spot shadow maps on texture units 10-13.
+      const bool spotShadowEnabled = doSpotShadows;
+      if (spotShadowEnabled) {
+        for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
+          const auto &slot = backend.spotShadowState.slots[s];
+          const int texUnit = 10 + static_cast<int>(s);
+          dev->bind_texture(texUnit, slot.depthTexture);
+          if (backend.dlSpotShadowMapLocs[s] >= 0) {
+            dev->set_uniform_int(backend.dlSpotShadowMapLocs[s], texUnit);
+          }
+          if (backend.dlSpotShadowMatrixLocs[s] >= 0) {
+            dev->set_uniform_mat4(backend.dlSpotShadowMatrixLocs[s],
+                                  &slot.lightViewProjection.columns[0].x);
+          }
+          if (backend.dlSpotShadowLightIdxLocs[s] >= 0) {
+            dev->set_uniform_int(backend.dlSpotShadowLightIdxLocs[s],
+                                 slot.lightIndex);
+          }
+        }
+      }
+      if (backend.dlSpotShadowEnabledLoc >= 0) {
+        dev->set_uniform_int(backend.dlSpotShadowEnabledLoc,
+                             spotShadowEnabled ? 1 : 0);
+      }
+
+      // Bind point shadow cubemaps on texture units 14-17.
+      const bool pointShadowEnabled = doPointShadows;
+      if (pointShadowEnabled) {
+        for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+          const auto &slot = backend.pointShadowState.slots[s];
+          const int texUnit = 14 + static_cast<int>(s);
+          if (dev->bind_texture_cubemap != nullptr) {
+            dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
+          }
+          if (backend.dlPointShadowMapLocs[s] >= 0) {
+            dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
+          }
+          if (backend.dlPointShadowLightPosLocs[s] >= 0) {
+            const auto &lp =
+                lights.pointLights[static_cast<std::size_t>(
+                                       std::max(slot.lightIndex, 0))]
+                    .position;
+            dev->set_uniform_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
+          }
+          if (backend.dlPointShadowFarPlaneLocs[s] >= 0) {
+            dev->set_uniform_float(backend.dlPointShadowFarPlaneLocs[s],
+                                   slot.farPlane);
+          }
+          if (backend.dlPointShadowLightIdxLocs[s] >= 0) {
+            dev->set_uniform_int(backend.dlPointShadowLightIdxLocs[s],
+                                 slot.lightIndex);
+          }
+        }
+      }
+      if (backend.dlPointShadowEnabledLoc >= 0) {
+        dev->set_uniform_int(backend.dlPointShadowEnabledLoc,
+                             pointShadowEnabled ? 1 : 0);
       }
 
       if (backend.dlTileCountXLoc >= 0)
@@ -2302,6 +2629,9 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
   frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
   frameStats.gpuShadowMapMs = gpu_profiler_pass_ms(GpuPassId::ShadowMap);
+  frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
+  frameStats.gpuPointShadowMs =
+      gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
   g_lastFrameStats = frameStats;
 }

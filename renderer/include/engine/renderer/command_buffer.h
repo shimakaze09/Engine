@@ -78,6 +78,7 @@ struct PointLightData final {
   math::Vec3 color{};
   float intensity = 0.0F;
   float radius = 10.0F;
+  bool castShadow = false;
 };
 
 struct SpotLightData final {
@@ -88,6 +89,7 @@ struct SpotLightData final {
   float radius = 10.0F;
   float innerConeAngle = 0.3491F; // ~20 degrees
   float outerConeAngle = 0.5236F; // ~30 degrees
+  bool castShadow = false;
 };
 
 struct SceneLightData final {
@@ -109,6 +111,8 @@ struct RendererFrameStats final {
   float gpuBloomMs = 0.0F;
   float gpuSsaoMs = 0.0F;
   float gpuShadowMapMs = 0.0F;
+  float gpuSpotShadowMs = 0.0F;
+  float gpuPointShadowMs = 0.0F;
   float gpuAutoExposureMs = 0.0F;
 };
 

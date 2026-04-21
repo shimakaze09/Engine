@@ -493,11 +493,11 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M4-A2e` `asset_metadata_add_tag()`, `asset_metadata_has_tag()`, `asset_metadata_add_dependency()`. `[x]`
 - `P1-M4-A2f` `tests/unit/import_settings_test.cpp` exists. `[x]`
 
-##### P1-M4-A3: Thumbnail Generation (Mesh + Texture Previews) `[ ]`
-- `P1-M4-A3a` Off-screen render of mesh into thumbnail texture. `[ ]`
-- `P1-M4-A3b` Mip-sampled texture preview (64×64 or 128×128). `[ ]`
-- `P1-M4-A3c` Thumbnail cache (disk + in-memory); invalidated when asset checksum changes. `[ ]`
-- `P1-M4-A3d` Display in asset browser panel. `[ ]`
+##### P1-M4-A3: Thumbnail Generation (Mesh + Texture Previews) `[x]`
+- `P1-M4-A3a` Off-screen render of mesh into thumbnail texture. `[x]` — *asset_packer renders mesh to offscreen FBO, saves 64×64 PNG thumbnail.*
+- `P1-M4-A3b` Mip-sampled texture preview (64×64 or 128×128). `[x]` — *generate_texture_thumbnail() in asset_packer: stbi_load → box-filter mip-chain downsample → 64×64 PNG.*
+- `P1-M4-A3c` Thumbnail cache (disk + in-memory); invalidated when asset checksum changes. `[x]` — *FNV-64 hash sidecar (.checksum) replaces mtime; regenerates only when source changes.*
+- `P1-M4-A3d` Display in asset browser panel. `[x]` — *editor asset browser loads and displays thumbnail PNGs from .thumbnails/ directory.*
 
 ---
 
@@ -614,13 +614,13 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-C1c` PCF (percentage-closer filtering): 3×3 or 5×5 kernel; stable cascade seam blending. `[x]` — *deferred_lighting.frag: sample_shadow_pcf() 3×3 kernel with 0.002 bias. compute_shadow() blends adjacent cascades at 10% of split distance to eliminate seams.*
 - `P1-M5-C1d` Shadow matrix injected into deferred lighting pass uniform block. `[x]` — *command_buffer.cpp binds uShadowMatrix[4], uCascadeSplit[4], uShadowMap[4] (texture units 6-9), uShadowEnabled uniforms in deferred lighting pass.*
 
-##### P1-M5-C2: Spot Light Shadow Maps `[ ]`
-- `P1-M5-C2a` Per-spot-light depth framebuffer (perspective projection). `[ ]`
-- `P1-M5-C2b` Shadow comparison in deferred spotlight contribution. `[ ]`
+##### P1-M5-C2: Spot Light Shadow Maps `[x]`
+- `P1-M5-C2a` Per-spot-light depth framebuffer (perspective projection). `[x]` — *SpotShadowState with 4 slots (512×512 depth FBOs); compute_spot_shadow_matrix() builds perspective VP; shadow pass in flush_renderer().*
+- `P1-M5-C2b` Shadow comparison in deferred spotlight contribution. `[x]` — *compute_spot_shadow() in deferred_lighting.frag: PCF 3×3, units 10-13; uSpotShadowEnabled/Matrix/LightIdx uniforms.*
 
-##### P1-M5-C3: Point Light Cubemap Shadows `[ ]`
-- `P1-M5-C3a` Per-point-light cubemap depth texture (6 faces); geometry shader or 6-pass render. `[ ]`
-- `P1-M5-C3b` Omnidirectional shadow comparison in deferred point-light contribution. `[ ]`
+##### P1-M5-C3: Point Light Cubemap Shadows `[x]`
+- `P1-M5-C3a` Per-point-light cubemap depth texture (6 faces); geometry shader or 6-pass render. `[x]` — *PointShadowState with 4 slots; GL_TEXTURE_CUBE_MAP depth, 6-pass render (GLSL 330, no geo shader); shadow_depth_point.vert/frag writes linear depth.*
+- `P1-M5-C3b` Omnidirectional shadow comparison in deferred point-light contribution. `[x]` — *compute_point_shadow() in deferred_lighting.frag: 20-sample cubemap PCF, units 14-17; uPointShadowEnabled/LightPos/FarPlane/LightIdx uniforms.*
 
 ##### P1-M5-C4: Shadow Optimization `[ ]`
 - `P1-M5-C4a` Stable cascade matrices (world-space snap to texel size). `[ ]`

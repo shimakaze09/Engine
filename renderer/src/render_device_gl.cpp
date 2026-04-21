@@ -733,6 +733,44 @@ void gl_bind_texture(std::int32_t unit, std::uint32_t id) noexcept {
   g_gl.bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(id));
 }
 
+// --- Cubemap textures (point light shadows) ---
+
+std::uint32_t gl_create_depth_cubemap(std::int32_t faceSize) noexcept {
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  for (int i = 0; i < 6; ++i) {
+    g_gl.texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i), 0,
+                    GL_DEPTH_COMPONENT24, faceSize, faceSize, 0,
+                    GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+  }
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+void gl_bind_texture_cubemap(std::int32_t unit, std::uint32_t id) noexcept {
+  g_gl.activeTexture(
+      static_cast<GLenum>(GL_TEXTURE0 + static_cast<GLenum>(unit)));
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, static_cast<GLuint>(id));
+}
+
+void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
+                                 std::int32_t face) noexcept {
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+  g_gl.framebufferTexture2D(
+      GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+      static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+      static_cast<GLuint>(cubeTex), 0);
+}
+
 // --- Framebuffers ---
 
 std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
@@ -957,6 +995,9 @@ bool initialize_render_device() noexcept {
   g_device.create_depth_texture = &gl_create_depth_texture;
   g_device.destroy_texture = &gl_destroy_texture;
   g_device.bind_texture = &gl_bind_texture;
+  g_device.create_depth_cubemap = &gl_create_depth_cubemap;
+  g_device.bind_texture_cubemap = &gl_bind_texture_cubemap;
+  g_device.framebuffer_cubemap_face = &gl_framebuffer_cubemap_face;
   g_device.create_framebuffer = &gl_create_framebuffer;
   g_device.create_framebuffer_mrt = &gl_create_framebuffer_mrt;
   g_device.destroy_framebuffer = &gl_destroy_framebuffer;

@@ -218,4 +218,165 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept {
   state.initialized = false;
 }
 
+// ---- Spot Light Shadow Maps ----
+
+math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
+                                      const math::Vec3 &direction,
+                                      float outerConeAngle,
+                                      float radius) noexcept {
+  // Build light view matrix.
+  const math::Vec3 target(position.x + direction.x, position.y + direction.y,
+                          position.z + direction.z);
+
+  // Choose an up vector that is not collinear with direction.
+  math::Vec3 up(0.0F, 1.0F, 0.0F);
+  if (std::abs(direction.y) > 0.99F) {
+    up = math::Vec3(1.0F, 0.0F, 0.0F);
+  }
+
+  const math::Mat4 lightView = math::look_at(position, target, up);
+
+  // FOV slightly wider than the outer cone to avoid edge clipping.
+  const float fov = outerConeAngle * 2.0F + 0.05F;
+  constexpr float kNearPlane = 0.1F;
+  const float farPlane = std::max(radius, 1.0F);
+
+  const math::Mat4 lightProj = math::perspective(fov, 1.0F, kNearPlane, farPlane);
+  return math::mul(lightProj, lightView);
+}
+
+bool initialize_spot_shadow_maps(SpotShadowState &state) noexcept {
+  const RenderDevice *dev = render_device();
+  if (dev == nullptr) {
+    return false;
+  }
+
+  for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
+    state.slots[i].depthTexture = dev->create_depth_texture(
+        kSpotShadowMapResolution, kSpotShadowMapResolution);
+    if (state.slots[i].depthTexture == 0U) {
+      core::log_message(core::LogLevel::Error, "shadow_map",
+                        "failed to create spot shadow depth texture");
+      shutdown_spot_shadow_maps(state);
+      return false;
+    }
+
+    state.slots[i].depthFbo =
+        dev->create_framebuffer(0U, state.slots[i].depthTexture);
+    if (state.slots[i].depthFbo == 0U) {
+      core::log_message(core::LogLevel::Error, "shadow_map",
+                        "failed to create spot shadow FBO");
+      shutdown_spot_shadow_maps(state);
+      return false;
+    }
+  }
+
+  state.initialized = true;
+  return true;
+}
+
+void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept {
+  const RenderDevice *dev = render_device();
+  if (dev == nullptr) {
+    return;
+  }
+
+  for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
+    if (state.slots[i].depthFbo != 0U) {
+      dev->destroy_framebuffer(state.slots[i].depthFbo);
+      state.slots[i].depthFbo = 0U;
+    }
+    if (state.slots[i].depthTexture != 0U) {
+      dev->destroy_texture(state.slots[i].depthTexture);
+      state.slots[i].depthTexture = 0U;
+    }
+    state.slots[i].lightIndex = -1;
+  }
+
+  state.initialized = false;
+}
+
+// ---- Point Light Cubemap Shadow Maps ----
+
+void compute_point_shadow_matrices(const math::Vec3 &position, float radius,
+                                   math::Mat4 outVP[6]) noexcept {
+  constexpr float kNearPlane = 0.1F;
+  const float farPlane = std::max(radius, 1.0F);
+  constexpr float kFov = 3.14159265F / 2.0F; // 90 degrees
+
+  const math::Mat4 proj = math::perspective(kFov, 1.0F, kNearPlane, farPlane);
+
+  // Six face directions: +X, -X, +Y, -Y, +Z, -Z.
+  struct FaceDir {
+    math::Vec3 target;
+    math::Vec3 up;
+  };
+  const FaceDir faces[6] = {
+      {{position.x + 1, position.y, position.z}, {0, -1, 0}},  // +X
+      {{position.x - 1, position.y, position.z}, {0, -1, 0}},  // -X
+      {{position.x, position.y + 1, position.z}, {0, 0, 1}},   // +Y
+      {{position.x, position.y - 1, position.z}, {0, 0, -1}},  // -Y
+      {{position.x, position.y, position.z + 1}, {0, -1, 0}},  // +Z
+      {{position.x, position.y, position.z - 1}, {0, -1, 0}},  // -Z
+  };
+
+  for (int i = 0; i < 6; ++i) {
+    const math::Mat4 view =
+        math::look_at(position, faces[i].target, faces[i].up);
+    outVP[i] = math::mul(proj, view);
+  }
+}
+
+bool initialize_point_shadow_maps(PointShadowState &state) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((dev == nullptr) || (dev->create_depth_cubemap == nullptr)) {
+    return false;
+  }
+
+  for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+    state.slots[i].depthCubemap =
+        dev->create_depth_cubemap(kPointShadowMapResolution);
+    if (state.slots[i].depthCubemap == 0U) {
+      core::log_message(core::LogLevel::Error, "shadow_map",
+                        "failed to create point shadow cubemap");
+      shutdown_point_shadow_maps(state);
+      return false;
+    }
+
+    // Single FBO per slot — face is re-attached each frame.
+    state.slots[i].depthFbo = dev->create_framebuffer(0U, 0U);
+    if (state.slots[i].depthFbo == 0U) {
+      core::log_message(core::LogLevel::Error, "shadow_map",
+                        "failed to create point shadow FBO");
+      shutdown_point_shadow_maps(state);
+      return false;
+    }
+  }
+
+  state.initialized = true;
+  return true;
+}
+
+void shutdown_point_shadow_maps(PointShadowState &state) noexcept {
+  const RenderDevice *dev = render_device();
+  if (dev == nullptr) {
+    return;
+  }
+
+  for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+    if (state.slots[i].depthFbo != 0U) {
+      dev->destroy_framebuffer(state.slots[i].depthFbo);
+      state.slots[i].depthFbo = 0U;
+    }
+    if (state.slots[i].depthCubemap != 0U) {
+      dev->destroy_texture(state.slots[i].depthCubemap);
+      state.slots[i].depthCubemap = 0U;
+    }
+    state.slots[i].lightIndex = -1;
+  }
+
+  state.initialized = false;
+}
+
 } // namespace engine::renderer
+

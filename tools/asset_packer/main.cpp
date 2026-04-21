@@ -30,6 +30,8 @@
 #endif
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
 #elif defined(_MSC_VER)
@@ -847,24 +849,193 @@ bool ensure_directory_exists(const char *dirPath) {
 #endif
 }
 
-// Returns file modification time in seconds, or 0 on failure.
-std::int64_t get_file_mtime(const char *path) noexcept {
-  if (path == nullptr) {
-    return 0;
+// ---------------------------------------------------------------------------
+// Thumbnail checksum helpers
+// ---------------------------------------------------------------------------
+
+// Build checksum sidecar path from thumbnail PNG path.
+// E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.checksum"
+static void build_checksum_path(const char *thumbPath, char *checksumPath,
+                                std::size_t size) noexcept {
+  std::strncpy(checksumPath, thumbPath, size - 1U);
+  checksumPath[size - 1U] = '\0';
+  char *dot = std::strrchr(checksumPath, '.');
+  if (dot != nullptr) {
+    std::strncpy(dot, ".checksum",
+                 size - static_cast<std::size_t>(dot - checksumPath) - 1U);
+    checksumPath[size - 1U] = '\0';
+  } else {
+    std::strncat(checksumPath, ".checksum",
+                 size - std::strlen(checksumPath) - 1U);
   }
-#ifdef _WIN32
-  struct _stat st{};
-  if (_stat(path, &st) != 0) {
-    return 0;
+}
+
+// Read stored checksum from sidecar file. Returns false if file not found.
+static bool read_thumbnail_checksum(const char *checksumPath,
+                                    std::uint64_t *outHash) noexcept {
+  FILE *f = std::fopen(checksumPath, "r");
+  if (f == nullptr) {
+    return false;
   }
-  return static_cast<std::int64_t>(st.st_mtime);
-#else
-  struct stat st{};
-  if (stat(path, &st) != 0) {
-    return 0;
+  const int scanned =
+      std::fscanf(f, "%llu", // NOLINT
+                  reinterpret_cast<unsigned long long *>(outHash));
+  std::fclose(f);
+  return scanned == 1;
+}
+
+// Write checksum to sidecar file.
+static bool write_thumbnail_checksum(const char *checksumPath,
+                                     std::uint64_t hash) noexcept {
+  FILE *f = std::fopen(checksumPath, "w");
+  if (f == nullptr) {
+    return false;
   }
-  return static_cast<std::int64_t>(st.st_mtime);
-#endif
+  std::fprintf(f, "%llu", static_cast<unsigned long long>(hash)); // NOLINT
+  std::fclose(f);
+  return true;
+}
+
+// Forward declaration (defined below alongside mesh thumbnail).
+void build_thumbnail_path(const char *outputPath, char *thumbPath,
+                          std::size_t thumbPathSize) noexcept;
+
+// ---------------------------------------------------------------------------
+// Texture thumbnail generation
+// ---------------------------------------------------------------------------
+
+bool generate_texture_thumbnail(const char *inputPath,
+                                const char *outputPath) noexcept {
+  if ((inputPath == nullptr) || (outputPath == nullptr)) {
+    return false;
+  }
+
+  // Build thumbnail path.
+  char thumbPath[512] = {};
+  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
+
+  // Checksum-based invalidation.
+  bool hashOk = false;
+  const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
+  if (hashOk) {
+    char checksumPath[512] = {};
+    build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+    std::uint64_t storedHash = 0U;
+    if (read_thumbnail_checksum(checksumPath, &storedHash) &&
+        storedHash == srcHash) {
+      std::printf("thumbnail up-to-date; skipped: %s\n", thumbPath);
+      return true;
+    }
+  }
+
+  // Load source image.
+  int srcW = 0, srcH = 0, srcChannels = 0;
+  stbi_uc *srcPixels = stbi_load(inputPath, &srcW, &srcH, &srcChannels, 4);
+  if (srcPixels == nullptr) {
+    std::fprintf(stderr, "thumbnail: failed to load %s\n", inputPath);
+    return false;
+  }
+
+  constexpr int kThumbSize = 64;
+  constexpr int kChannels = 4;
+
+  // Box-filter downsample to 64x64.
+  // Progressively halve until <= 64x64 for better quality (mip-chain style).
+  std::vector<std::uint8_t> current(
+      static_cast<std::size_t>(srcW * srcH * kChannels));
+  std::memcpy(current.data(), srcPixels,
+              static_cast<std::size_t>(srcW * srcH * kChannels));
+  stbi_image_free(srcPixels);
+
+  int curW = srcW, curH = srcH;
+
+  while ((curW > kThumbSize) || (curH > kThumbSize)) {
+    const int newW = std::max(curW / 2, 1);
+    const int newH = std::max(curH / 2, 1);
+    std::vector<std::uint8_t> next(
+        static_cast<std::size_t>(newW * newH * kChannels), 0U);
+
+    for (int y = 0; y < newH; ++y) {
+      for (int x = 0; x < newW; ++x) {
+        const int sx = x * 2;
+        const int sy = y * 2;
+        for (int c = 0; c < kChannels; ++c) {
+          std::uint32_t sum = 0U;
+          std::uint32_t count = 0U;
+          for (int dy = 0; dy <= 1; ++dy) {
+            for (int dx = 0; dx <= 1; ++dx) {
+              const int px = std::min(sx + dx, curW - 1);
+              const int py = std::min(sy + dy, curH - 1);
+              sum +=
+                  static_cast<std::uint32_t>(current[static_cast<std::size_t>(
+                      (py * curW + px) * kChannels + c)]);
+              ++count;
+            }
+          }
+          next[static_cast<std::size_t>((y * newW + x) * kChannels + c)] =
+              static_cast<std::uint8_t>(sum / count);
+        }
+      }
+    }
+
+    current = std::move(next);
+    curW = newW;
+    curH = newH;
+  }
+
+  // Final resize to exactly 64x64 (bilinear).
+  std::vector<std::uint8_t> thumb(
+      static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
+  for (int y = 0; y < kThumbSize; ++y) {
+    for (int x = 0; x < kThumbSize; ++x) {
+      const float fx = (static_cast<float>(x) + 0.5F) /
+                           static_cast<float>(kThumbSize) *
+                           static_cast<float>(curW) -
+                       0.5F;
+      const float fy = (static_cast<float>(y) + 0.5F) /
+                           static_cast<float>(kThumbSize) *
+                           static_cast<float>(curH) -
+                       0.5F;
+      const int x0 = std::max(static_cast<int>(fx), 0);
+      const int y0 = std::max(static_cast<int>(fy), 0);
+      const int x1 = std::min(x0 + 1, curW - 1);
+      const int y1 = std::min(y0 + 1, curH - 1);
+      const float wx = fx - static_cast<float>(x0);
+      const float wy = fy - static_cast<float>(y0);
+
+      for (int c = 0; c < kChannels; ++c) {
+        const float s00 = static_cast<float>(current[static_cast<std::size_t>(
+            (y0 * curW + x0) * kChannels + c)]);
+        const float s10 = static_cast<float>(current[static_cast<std::size_t>(
+            (y0 * curW + x1) * kChannels + c)]);
+        const float s01 = static_cast<float>(current[static_cast<std::size_t>(
+            (y1 * curW + x0) * kChannels + c)]);
+        const float s11 = static_cast<float>(current[static_cast<std::size_t>(
+            (y1 * curW + x1) * kChannels + c)]);
+        const float val = s00 * (1.0F - wx) * (1.0F - wy) +
+                          s10 * wx * (1.0F - wy) + s01 * (1.0F - wx) * wy +
+                          s11 * wx * wy;
+        thumb[static_cast<std::size_t>((y * kThumbSize + x) * kChannels + c)] =
+            static_cast<std::uint8_t>(std::min(val + 0.5F, 255.0F));
+      }
+    }
+  }
+
+  if (!stbi_write_png(thumbPath, kThumbSize, kThumbSize, kChannels,
+                      thumb.data(), kThumbSize * kChannels)) {
+    std::fprintf(stderr, "thumbnail: failed to write %s\n", thumbPath);
+    return false;
+  }
+
+  // Update checksum sidecar.
+  if (hashOk) {
+    char checksumPath[512] = {};
+    build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+    write_thumbnail_checksum(checksumPath, srcHash);
+  }
+
+  std::printf("texture thumbnail: %s\n", thumbPath);
+  return true;
 }
 
 // Build thumbnail path: <dir>/.thumbnails/<basename>.png
@@ -906,13 +1077,19 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   char thumbPath[512] = {};
   build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
 
-  // Mtime invalidation: skip if thumbnail is newer than source.
+  // Checksum-based invalidation: skip if thumbnail checksum matches source.
   if (inputPath != nullptr) {
-    const std::int64_t srcMtime = get_file_mtime(inputPath);
-    const std::int64_t thumbMtime = get_file_mtime(thumbPath);
-    if ((thumbMtime > 0) && (srcMtime > 0) && (thumbMtime >= srcMtime)) {
-      std::printf("thumbnail up-to-date; skipped: %s\n", thumbPath);
-      return true;
+    bool hashOk = false;
+    const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
+    if (hashOk) {
+      char checksumPath[512] = {};
+      build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+      std::uint64_t storedHash = 0U;
+      if (read_thumbnail_checksum(checksumPath, &storedHash) &&
+          storedHash == srcHash) {
+        std::printf("thumbnail up-to-date; skipped: %s\n", thumbPath);
+        return true;
+      }
     }
   }
 
@@ -1139,6 +1316,17 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
                       pixels.data(), kThumbSize * kChannels)) {
     std::fprintf(stderr, "warning: failed to write thumbnail: %s\n", thumbPath);
     return false;
+  }
+
+  // Write checksum sidecar after successful generation.
+  if (inputPath != nullptr) {
+    bool hashOk = false;
+    const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
+    if (hashOk) {
+      char checksumPath[512] = {};
+      build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+      write_thumbnail_checksum(checksumPath, srcHash);
+    }
   }
 
   std::printf("generated thumbnail: %s\n", thumbPath);
@@ -1410,6 +1598,23 @@ int main(int argc, char **argv) {
                                      importSettingsHash)) {
     std::printf("asset up-to-date; skipped recook: %s\n", outputPath);
     return 0;
+  }
+
+  // If input is a texture file (PNG/JPG/JPEG), generate its thumbnail now.
+  {
+    const char *ext = std::strrchr(inputPath, '.');
+    if (ext != nullptr) {
+      const bool isPng =
+          std::strcmp(ext, ".png") == 0 || std::strcmp(ext, ".PNG") == 0;
+      const bool isJpg =
+          std::strcmp(ext, ".jpg") == 0 || std::strcmp(ext, ".jpeg") == 0 ||
+          std::strcmp(ext, ".JPG") == 0 || std::strcmp(ext, ".JPEG") == 0;
+      if (isPng || isJpg) {
+        generate_texture_thumbnail(inputPath, outputPath);
+        // Texture assets have no further cook step — just return success.
+        return 0;
+      }
+    }
   }
 
   cgltf_options options{};
