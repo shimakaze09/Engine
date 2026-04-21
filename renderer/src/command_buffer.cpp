@@ -1385,11 +1385,6 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_begin_pass(GpuPassId::ShadowMap);
 
     const float lambda = core::cvar_get_float("r_shadow_lambda", 0.75F);
-    const float nearP = (g_activeCamera.nearPlane > 0.0F)
-                            ? g_activeCamera.nearPlane
-                            : kNearClip;
-    const float farP =
-        (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
     cascadeSplits = compute_cascade_splits(nearP, farP, lambda);
 
     const math::Vec3 &lightDir = lights.directionalLights[0].direction;
