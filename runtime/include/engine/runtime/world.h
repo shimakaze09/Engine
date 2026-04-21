@@ -355,6 +355,7 @@ public:
   RigidBody *get_rigid_body_ptr(Entity entity) noexcept override;
   const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept override;
   const Collider *get_collider_ptr(Entity entity) const noexcept override;
+  // cppcheck-suppress duplInheritedMember
   Collider *get_collider_ptr(Entity entity) noexcept;
 
   template <typename... Components, typename Fn>
