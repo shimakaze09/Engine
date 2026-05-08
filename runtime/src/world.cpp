@@ -19,6 +19,21 @@ constexpr std::uint8_t kNameSlotEmpty = 0U;
 constexpr std::uint8_t kNameSlotOccupied = 1U;
 constexpr std::uint8_t kNameSlotTombstone = 2U;
 
+void copy_bounded_c_string(char *dst, std::size_t dstCapacity,
+                           const char *src) noexcept {
+  if ((dst == nullptr) || (dstCapacity == 0U)) {
+    return;
+  }
+
+  std::size_t i = 0U;
+  if (src != nullptr) {
+    for (; (i + 1U) < dstCapacity && src[i] != '\0'; ++i) {
+      dst[i] = src[i];
+    }
+  }
+  dst[i] = '\0';
+}
+
 WorldTransform world_transform_from_local(const Transform &local) noexcept {
   WorldTransform world{};
   world.position = local.position;
@@ -567,7 +582,10 @@ bool World::add_name_component(Entity entity,
     return false;
   }
 
-  const bool ok = m_nameComponents.add(entity, component);
+  NameComponent safe{};
+  copy_bounded_c_string(safe.name, sizeof(safe.name), component.name);
+
+  const bool ok = m_nameComponents.add(entity, safe);
   if (ok) {
     rebuild_name_lookup();
   }
@@ -873,7 +891,11 @@ bool World::add_script_component(Entity entity,
     return false;
   }
 
-  return m_scriptComponents.add(entity, component);
+  ScriptComponent safe{};
+  copy_bounded_c_string(safe.scriptPath, sizeof(safe.scriptPath),
+                        component.scriptPath);
+
+  return m_scriptComponents.add(entity, safe);
 }
 
 bool World::remove_script_component(Entity entity) noexcept {

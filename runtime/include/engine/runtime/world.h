@@ -47,7 +47,8 @@ struct WorldTransform final {
 };
 
 struct NameComponent final {
-  char name[32] = {};
+  static constexpr std::size_t kMaxNameLength = 31U; // +1 for null terminator
+  char name[kMaxNameLength + 1U] = {};
 };
 
 enum class LightType : std::uint8_t { Directional = 0, Point = 1 };
@@ -78,7 +79,8 @@ struct SpotLightComponent final {
 // The script must return a module table with optional on_start(self) and
 // on_update(self, dt) functions. Multiple entities may share the same file.
 struct ScriptComponent final {
-  char scriptPath[128] = {};
+  static constexpr std::size_t kMaxPathLength = 127U; // +1 for null terminator
+  char scriptPath[kMaxPathLength + 1U] = {};
 };
 
 // Renderer-facing component; keep minimal to avoid bloating draw commands.

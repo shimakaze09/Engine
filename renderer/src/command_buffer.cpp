@@ -36,6 +36,11 @@ constexpr float kClearRed = 0.18F;
 constexpr float kClearGreen = 0.28F;
 constexpr float kClearBlue = 0.60F;
 
+struct ShadowCandidate final {
+  std::size_t lightIndex = 0U;
+  float distSq = 0.0F;
+};
+
 CameraState g_activeCamera{};
 int g_sceneViewportWidth = 0;
 int g_sceneViewportHeight = 0;
@@ -964,6 +969,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_bool("r_shadows", true, "Enable cascaded shadow maps");
   core::cvar_register_float("r_shadow_lambda", 0.75F,
                             "CSM cascade split blend (0=uniform, 1=log)");
+  core::cvar_register_bool("r_shadow_debug", false,
+                           "Log when shadow casters are dropped due to slot limits");
   {
     const ShaderProgramHandle shadowShader = load_shader_program(
         "assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
@@ -1458,24 +1465,43 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_begin_pass(GpuPassId::SpotShadowMap);
 
     // Select up to kMaxSpotShadowLights nearest shadow-casting spots.
-    std::size_t activeSpotShadows = 0U;
     for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
       backend.spotShadowState.slots[i].lightIndex = -1;
     }
 
-    for (std::size_t li = 0U;
-         li < lights.spotLightCount && activeSpotShadows < kMaxSpotShadowLights;
-         ++li) {
+    std::array<ShadowCandidate, kMaxSpotLights> spotCandidates{};
+    std::size_t spotCandidateCount = 0U;
+    const math::Vec3 &camPos = g_activeCamera.position;
+    for (std::size_t li = 0U; li < lights.spotLightCount; ++li) {
       if (!lights.spotLights[li].castShadow) {
         continue;
       }
-      auto &slot = backend.spotShadowState.slots[activeSpotShadows];
+      const math::Vec3 &p = lights.spotLights[li].position;
+      const float dx = p.x - camPos.x;
+      const float dy = p.y - camPos.y;
+      const float dz = p.z - camPos.z;
+      spotCandidates[spotCandidateCount++] = {li, dx * dx + dy * dy + dz * dz};
+    }
+    std::sort(spotCandidates.data(),
+              spotCandidates.data() + spotCandidateCount,
+              [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
+                return a.distSq < b.distSq;
+              });
+    if ((spotCandidateCount > kMaxSpotShadowLights) &&
+        core::cvar_get_bool("r_shadow_debug")) {
+      core::log_message(core::LogLevel::Warning, "shadow",
+                        "spot shadow casters dropped: only 4 slots available");
+    }
+    const std::size_t activeSpotShadows =
+        std::min(spotCandidateCount, kMaxSpotShadowLights);
+    for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
+      const std::size_t li = spotCandidates[s].lightIndex;
+      auto &slot = backend.spotShadowState.slots[s];
       slot.lightIndex = static_cast<int>(li);
       slot.farPlane = lights.spotLights[li].radius;
       slot.lightViewProjection = compute_spot_shadow_matrix(
           lights.spotLights[li].position, lights.spotLights[li].direction,
           lights.spotLights[li].outerConeAngle, lights.spotLights[li].radius);
-      ++activeSpotShadows;
     }
 
     // Render into each spot shadow FBO.
@@ -1527,25 +1553,43 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_begin_pass(GpuPassId::PointShadowMap);
 
     // Select up to kMaxPointShadowLights nearest shadow-casting points.
-    std::size_t activePointShadows = 0U;
     for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
       backend.pointShadowState.slots[i].lightIndex = -1;
     }
 
-    for (std::size_t li = 0U;
-         li < lights.pointLightCount &&
-         activePointShadows < kMaxPointShadowLights;
-         ++li) {
+    std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
+    std::size_t pointCandidateCount = 0U;
+    const math::Vec3 &camPos = g_activeCamera.position;
+    for (std::size_t li = 0U; li < lights.pointLightCount; ++li) {
       if (!lights.pointLights[li].castShadow) {
         continue;
       }
-      auto &slot = backend.pointShadowState.slots[activePointShadows];
+      const math::Vec3 &p = lights.pointLights[li].position;
+      const float dx = p.x - camPos.x;
+      const float dy = p.y - camPos.y;
+      const float dz = p.z - camPos.z;
+      pointCandidates[pointCandidateCount++] = {li, dx * dx + dy * dy + dz * dz};
+    }
+    std::sort(pointCandidates.data(),
+              pointCandidates.data() + pointCandidateCount,
+              [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
+                return a.distSq < b.distSq;
+              });
+    if ((pointCandidateCount > kMaxPointShadowLights) &&
+        core::cvar_get_bool("r_shadow_debug")) {
+      core::log_message(core::LogLevel::Warning, "shadow",
+                        "point shadow casters dropped: only 4 slots available");
+    }
+    const std::size_t activePointShadows =
+        std::min(pointCandidateCount, kMaxPointShadowLights);
+    for (std::size_t s = 0U; s < activePointShadows; ++s) {
+      const std::size_t li = pointCandidates[s].lightIndex;
+      auto &slot = backend.pointShadowState.slots[s];
       slot.lightIndex = static_cast<int>(li);
       slot.farPlane = std::max(lights.pointLights[li].radius, 1.0F);
       compute_point_shadow_matrices(lights.pointLights[li].position,
                                     lights.pointLights[li].radius,
                                     slot.faceViewProjections);
-      ++activePointShadows;
     }
 
     // Render into each point shadow cubemap (6 faces per light).
