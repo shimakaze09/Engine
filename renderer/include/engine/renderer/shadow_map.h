@@ -12,8 +12,14 @@ namespace engine::renderer {
 /// Number of cascades for directional light CSM.
 inline constexpr std::size_t kShadowCascadeCount = 4U;
 
-/// Shadow map resolution per cascade (square).
+/// Maximum directional shadow map resolution (square).
 inline constexpr int kShadowMapResolution = 1024;
+
+/// Per-cascade directional shadow resolutions. Near cascades keep full
+/// resolution; distant cascades use lower resolution to reduce shadow cost.
+inline constexpr int kShadowCascadeResolutions[kShadowCascadeCount] = {
+    kShadowMapResolution, kShadowMapResolution, kShadowMapResolution / 2,
+    kShadowMapResolution / 2};
 
 /// Cascade split distances computed from camera near/far and a log/uniform
 /// blend factor (lambda). lambda=1 is fully logarithmic, lambda=0 is uniform.
@@ -32,8 +38,12 @@ struct ShadowMapState final {
   CascadeData cascades[kShadowCascadeCount]{};
   std::uint32_t depthTextures[kShadowCascadeCount]{};
   std::uint32_t depthFbos[kShadowCascadeCount]{};
+  int resolutions[kShadowCascadeCount]{};
   bool initialized = false;
 };
+
+/// Return the configured shadow texture size for a cascade.
+int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept;
 
 /// Compute cascade split distances using a log/uniform blend.
 /// @param nearClip Camera near plane distance.
@@ -48,11 +58,12 @@ CascadeSplits compute_cascade_splits(float nearClip, float farClip,
 /// @param lightDir       Normalized light direction (pointing toward scene).
 /// @param cascadeNear    Near split distance for this cascade.
 /// @param cascadeFar     Far split distance for this cascade.
-/// @param texelSize      Shadow map texel size for stable snapping.
+/// @param shadowMapSize  Cascade shadow texture size for stable snapping.
 math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
                                   const math::Vec3 &lightDir, float cascadeNear,
-                                  float cascadeFar, float texelSize) noexcept;
+                                  float cascadeFar,
+                                  int shadowMapSize) noexcept;
 
 /// Snap an orthographic projection to texel boundaries to prevent shadow
 /// swimming when the camera moves.

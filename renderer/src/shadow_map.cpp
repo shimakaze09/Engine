@@ -13,6 +13,13 @@
 
 namespace engine::renderer {
 
+int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
+  if (cascadeIndex >= kShadowCascadeCount) {
+    return kShadowCascadeResolutions[kShadowCascadeCount - 1U];
+  }
+  return kShadowCascadeResolutions[cascadeIndex];
+}
+
 CascadeSplits compute_cascade_splits(float nearClip, float farClip,
                                      float lambda) noexcept {
   CascadeSplits splits{};
@@ -74,7 +81,7 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
                                   const math::Vec3 &lightDir, float cascadeNear,
                                   float cascadeFar,
-                                  float texelSize) noexcept {
+                                  int shadowMapSize) noexcept {
   // Build a sub-frustum projection that covers [cascadeNear, cascadeFar].
   // We modify the projection matrix to clip to the cascade range by
   // interpolating the frustum corners between near and far.
@@ -158,10 +165,10 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
     return math::Mat4{};
   }
 
-  const float computedTexelSize =
-      (2.0F * radius) / static_cast<float>(kShadowMapResolution);
+  const int safeShadowMapSize =
+      (shadowMapSize > 0) ? shadowMapSize : kShadowMapResolution;
   const float snapStep =
-      (computedTexelSize > kShadowEpsilon) ? computedTexelSize : texelSize;
+      (2.0F * radius) / static_cast<float>(safeShadowMapSize);
 
   const math::Vec4 centerLs =
       math::mul(baseLightView, math::Vec4(center.x, center.y, center.z, 1.0F));
@@ -207,7 +214,9 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
 
 math::Mat4 snap_to_texel(const math::Mat4 &lightViewProj,
                          int shadowMapSize) noexcept {
-  const float texelWorld = 2.0F / static_cast<float>(shadowMapSize);
+  const int safeShadowMapSize =
+      (shadowMapSize > 0) ? shadowMapSize : kShadowMapResolution;
+  const float texelWorld = 2.0F / static_cast<float>(safeShadowMapSize);
 
   // Snap the x/y offset to texel boundaries.
   math::Mat4 result = lightViewProj;
@@ -225,8 +234,10 @@ bool initialize_shadow_maps(ShadowMapState &state) noexcept {
   }
 
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
+    const int cascadeResolution = shadow_cascade_resolution(i);
+    state.resolutions[i] = cascadeResolution;
     state.depthTextures[i] =
-        dev->create_depth_texture(kShadowMapResolution, kShadowMapResolution);
+        dev->create_depth_texture(cascadeResolution, cascadeResolution);
     if (state.depthTextures[i] == 0U) {
       core::log_message(core::LogLevel::Error, "shadow_map",
                         "failed to create shadow cascade depth texture");
@@ -263,6 +274,7 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept {
       dev->destroy_texture(state.depthTextures[i]);
       state.depthTextures[i] = 0U;
     }
+    state.resolutions[i] = 0;
   }
 
   state.initialized = false;

@@ -148,7 +148,7 @@ float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
     if (projCoords.z > 1.0) return 1.0;
 
     float shadow = 0.0;
-    vec2 texelSize = vec2(1.0 / 1024.0); // kShadowMapResolution
+    vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
             float pcfDepth = texture(shadowMap,

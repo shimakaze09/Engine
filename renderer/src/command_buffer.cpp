@@ -1464,11 +1464,14 @@ void flush_renderer(CommandBufferView commandBufferView,
     std::array<math::Mat4, kShadowCascadeCount> lightMatrices{};
 
     for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-      const float texelSize = 2.0F / static_cast<float>(kShadowMapResolution);
+      const int shadowResolution =
+          (backend.shadowState.resolutions[c] > 0)
+              ? backend.shadowState.resolutions[c]
+              : shadow_cascade_resolution(c);
       math::Mat4 lightVP = compute_cascade_matrix(
           viewMat, projMat, lightDir, cascadeSplits.distances[c],
-          cascadeSplits.distances[c + 1], texelSize);
-      lightVP = snap_to_texel(lightVP, kShadowMapResolution);
+          cascadeSplits.distances[c + 1], shadowResolution);
+      lightVP = snap_to_texel(lightVP, shadowResolution);
 
       backend.shadowState.cascades[c].lightViewProjection = lightVP;
       backend.shadowState.cascades[c].splitDistance =
@@ -1494,9 +1497,13 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
         const math::Mat4 &lightVP = lightMatrices[c];
+        const int shadowResolution =
+            (backend.shadowState.resolutions[c] > 0)
+                ? backend.shadowState.resolutions[c]
+                : shadow_cascade_resolution(c);
 
         dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
-        dev->set_viewport(0, 0, kShadowMapResolution, kShadowMapResolution);
+        dev->set_viewport(0, 0, shadowResolution, shadowResolution);
         dev->enable_depth_test();
         dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
         dev->clear_color_depth();
