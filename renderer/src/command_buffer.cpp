@@ -39,6 +39,27 @@ constexpr std::uint64_t kFnv1a64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv1a64Prime = 1099511628211ULL;
 constexpr std::size_t kForwardMaxPointLights = 8U;
 constexpr std::size_t kForwardMaxSpotLights = 8U;
+constexpr float kSkyboxCubeVertices[] = {
+    -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F,
+    1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F,
+
+    -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F,
+    -1.0F, 1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,
+
+    1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F, -1.0F,
+
+    -1.0F, -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F, -1.0F, 1.0F,
+
+    -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F,
+
+    -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F,
+    1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,
+};
+constexpr std::int32_t kSkyboxVertexCount = static_cast<std::int32_t>(
+    sizeof(kSkyboxCubeVertices) / (3U * sizeof(float)));
 
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
@@ -50,6 +71,7 @@ int g_sceneViewportWidth = 0;
 int g_sceneViewportHeight = 0;
 RendererFrameStats g_lastFrameStats{};
 bool g_fxaaAppliedThisFrame = false;
+TextureHandle g_activeSkyboxTexture = kInvalidTextureHandle;
 
 struct BackendState final {
   bool initialized = false;
@@ -130,6 +152,16 @@ struct BackendState final {
 
   // Empty VAO for fullscreen triangle.
   std::uint32_t emptyVao = 0U;
+
+  // Skybox shader and cube geometry.
+  bool skyboxAvailable = false;
+  ShaderProgramHandle skyboxShaderHandle{};
+  std::uint32_t skyboxProgram = 0U;
+  std::int32_t skyboxViewLoc = -1;
+  std::int32_t skyboxProjectionLoc = -1;
+  std::int32_t skyboxTextureLoc = -1;
+  std::uint32_t skyboxVertexArray = 0U;
+  std::uint32_t skyboxVertexBuffer = 0U;
 
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
@@ -400,8 +432,7 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
   const std::uint32_t prog = backend.pbrProgram;
   char name[64] = {};
 
-  backend.pbrShadowEnabledLoc =
-      dev->uniform_location(prog, "uShadowEnabled");
+  backend.pbrShadowEnabledLoc = dev->uniform_location(prog, "uShadowEnabled");
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
     std::snprintf(name, sizeof(name), "uShadowMap[%zu]", i);
     backend.pbrShadowMapLocs[i] = dev->uniform_location(prog, name);
@@ -516,8 +547,8 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
 
 void bind_pbr_shadow_uniforms(const BackendState &backend,
                               const RenderDevice *dev,
-                              const SceneLightData &lights,
-                              bool shadowEnabled, bool spotShadowEnabled,
+                              const SceneLightData &lights, bool shadowEnabled,
+                              bool spotShadowEnabled,
                               bool pointShadowEnabled) noexcept {
   if ((dev == nullptr) || (dev->set_uniform_int == nullptr)) {
     return;
@@ -583,12 +614,11 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
           (slot.lightIndex >= 0) &&
           (static_cast<std::size_t>(slot.lightIndex) < lights.pointLightCount);
       const math::Vec3 &lightPos =
-          validLight ? lights.pointLights[static_cast<std::size_t>(
-                                           slot.lightIndex)]
-                           .position
-                     : zero;
-      dev->set_uniform_vec3(backend.pbrPointShadowLightPosLocs[s],
-                            &lightPos.x);
+          validLight
+              ? lights.pointLights[static_cast<std::size_t>(slot.lightIndex)]
+                    .position
+              : zero;
+      dev->set_uniform_vec3(backend.pbrPointShadowLightPosLocs[s], &lightPos.x);
     }
     if (backend.pbrPointShadowFarPlaneLocs[s] >= 0) {
       dev->set_uniform_float(backend.pbrPointShadowFarPlaneLocs[s],
@@ -620,6 +650,106 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
       dev->bind_texture_cubemap(14 + static_cast<int>(s), 0U);
     }
   }
+}
+
+void destroy_skybox_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.skyboxVertexBuffer != 0U) && (dev != nullptr)) {
+    dev->destroy_buffer(backend.skyboxVertexBuffer);
+    backend.skyboxVertexBuffer = 0U;
+  }
+  if ((backend.skyboxVertexArray != 0U) && (dev != nullptr)) {
+    dev->destroy_vertex_array(backend.skyboxVertexArray);
+    backend.skyboxVertexArray = 0U;
+  }
+  if (backend.skyboxShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.skyboxShaderHandle);
+    backend.skyboxShaderHandle = ShaderProgramHandle{};
+  }
+  backend.skyboxProgram = 0U;
+  backend.skyboxAvailable = false;
+}
+
+bool create_skybox_geometry(BackendState &backend,
+                            const RenderDevice *dev) noexcept {
+  if ((dev == nullptr) || (dev->create_vertex_array == nullptr) ||
+      (dev->create_buffer == nullptr) || (dev->bind_vertex_array == nullptr) ||
+      (dev->bind_array_buffer == nullptr) ||
+      (dev->buffer_data_array == nullptr) ||
+      (dev->enable_vertex_attrib == nullptr) ||
+      (dev->vertex_attrib_float == nullptr)) {
+    return false;
+  }
+
+  backend.skyboxVertexArray = dev->create_vertex_array();
+  backend.skyboxVertexBuffer = dev->create_buffer();
+  if ((backend.skyboxVertexArray == 0U) || (backend.skyboxVertexBuffer == 0U)) {
+    destroy_skybox_resources(backend);
+    return false;
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->bind_array_buffer(backend.skyboxVertexBuffer);
+  dev->buffer_data_array(kSkyboxCubeVertices, sizeof(kSkyboxCubeVertices));
+  dev->enable_vertex_attrib(0U);
+  dev->vertex_attrib_float(0U, 3, static_cast<std::int32_t>(3 * sizeof(float)),
+                           nullptr);
+  dev->bind_array_buffer(0U);
+  dev->bind_vertex_array(0U);
+  return true;
+}
+
+std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
+  if (!backend.skyboxAvailable || !core::cvar_get_bool("r_skybox", true) ||
+      (g_activeSkyboxTexture == kInvalidTextureHandle) ||
+      !is_texture_cubemap(g_activeSkyboxTexture)) {
+    return 0U;
+  }
+
+  return texture_gpu_id(g_activeSkyboxTexture);
+}
+
+void draw_skybox(const BackendState &backend, const RenderDevice *dev,
+                 const math::Mat4 &viewMat, const math::Mat4 &projMat,
+                 std::uint32_t cubemapGpuId,
+                 RendererFrameStats &frameStats) noexcept {
+  if ((dev == nullptr) || (cubemapGpuId == 0U) ||
+      (dev->bind_texture_cubemap == nullptr) ||
+      (dev->set_depth_func_less_equal == nullptr) ||
+      (dev->set_depth_func_less == nullptr)) {
+    return;
+  }
+
+  dev->enable_depth_test();
+  dev->set_depth_func_less_equal();
+  dev->set_depth_mask(false);
+  dev->disable_face_culling();
+
+  dev->bind_program(backend.skyboxProgram);
+  if (backend.skyboxViewLoc >= 0) {
+    dev->set_uniform_mat4(backend.skyboxViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.skyboxProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.skyboxProjectionLoc, &projMat.columns[0].x);
+  }
+  if (backend.skyboxTextureLoc >= 0) {
+    dev->set_uniform_int(backend.skyboxTextureLoc, 0);
+  }
+
+  dev->bind_texture_cubemap(0, cubemapGpuId);
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+
+  dev->bind_texture_cubemap(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->set_depth_mask(true);
+  dev->set_depth_func_less();
+  dev->enable_face_culling();
+
+  ++frameStats.drawCalls;
+  frameStats.triangleCount +=
+      static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
 void destroy_bloom_resources(BackendState &b) noexcept {
@@ -919,6 +1049,38 @@ bool initialize_backend() noexcept {
     shutdown_render_device();
     reset_backend_on_failure();
     return false;
+  }
+
+  // Skybox shader and cube geometry (soft-fail: clear color remains visible).
+  core::cvar_register_bool("r_skybox", true, "Enable skybox rendering");
+  const ShaderProgramHandle skyboxShader = load_shader_program(
+      "assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
+  if (skyboxShader != kInvalidShaderProgram) {
+    const std::uint32_t skyboxProgram = shader_gpu_program(skyboxShader);
+    if (skyboxProgram != 0U) {
+      backend.skyboxShaderHandle = skyboxShader;
+      backend.skyboxProgram = skyboxProgram;
+      backend.skyboxViewLoc = dev->uniform_location(skyboxProgram, "u_view");
+      backend.skyboxProjectionLoc =
+          dev->uniform_location(skyboxProgram, "u_projection");
+      backend.skyboxTextureLoc =
+          dev->uniform_location(skyboxProgram, "u_skybox");
+
+      if ((backend.skyboxViewLoc >= 0) && (backend.skyboxProjectionLoc >= 0) &&
+          (backend.skyboxTextureLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.skyboxAvailable = true;
+      } else {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "skybox setup failed — skybox disabled");
+        destroy_skybox_resources(backend);
+      }
+    } else {
+      destroy_shader_program(skyboxShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "skybox shader not available — skybox disabled");
   }
 
   // Register CVars for deferred rendering.
@@ -1259,8 +1421,9 @@ bool initialize_backend() noexcept {
                             "CSM cascade split blend (0=uniform, 1=log)");
   core::cvar_register_bool("r_shadow_cache", true,
                            "Reuse directional shadow maps when unchanged");
-  core::cvar_register_bool("r_shadow_debug", false,
-                           "Log when shadow casters are dropped due to slot limits");
+  core::cvar_register_bool(
+      "r_shadow_debug", false,
+      "Log when shadow casters are dropped due to slot limits");
   {
     const ShaderProgramHandle shadowShader = load_shader_program(
         "assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
@@ -1295,8 +1458,9 @@ bool initialize_backend() noexcept {
     if (initialize_spot_shadow_maps(backend.spotShadowState)) {
       backend.spotShadowAvailable = true;
     } else {
-      core::log_message(core::LogLevel::Warning, "renderer",
-                        "spot shadow FBO creation failed — spot shadows disabled");
+      core::log_message(
+          core::LogLevel::Warning, "renderer",
+          "spot shadow FBO creation failed — spot shadows disabled");
     }
   }
 
@@ -1304,9 +1468,9 @@ bool initialize_backend() noexcept {
   core::cvar_register_bool("r_point_shadows", true,
                            "Enable point light cubemap shadow maps");
   {
-    const ShaderProgramHandle pointShader = load_shader_program(
-        "assets/shaders/shadow_depth_point.vert",
-        "assets/shaders/shadow_depth_point.frag");
+    const ShaderProgramHandle pointShader =
+        load_shader_program("assets/shaders/shadow_depth_point.vert",
+                            "assets/shaders/shadow_depth_point.frag");
     if (pointShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(pointShader);
       if (prog != 0U) {
@@ -1456,6 +1620,8 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->luminanceProgram = 0U;
   backend->autoExposureAvailable = false;
 
+  destroy_skybox_resources(*backend);
+
   if (backend->emptyVao != 0U && dev != nullptr) {
     dev->destroy_vertex_array(backend->emptyVao);
     backend->emptyVao = 0U;
@@ -1524,15 +1690,13 @@ std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
   return hash_u64(hash, bits);
 }
 
-std::uint64_t hash_vec3(std::uint64_t hash,
-                        const math::Vec3 &value) noexcept {
+std::uint64_t hash_vec3(std::uint64_t hash, const math::Vec3 &value) noexcept {
   hash = hash_float(hash, value.x);
   hash = hash_float(hash, value.y);
   return hash_float(hash, value.z);
 }
 
-std::uint64_t hash_mat4(std::uint64_t hash,
-                        const math::Mat4 &value) noexcept {
+std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
   for (const math::Vec4 &column : value.columns) {
     hash = hash_float(hash, column.x);
     hash = hash_float(hash, column.y);
@@ -1748,10 +1912,9 @@ void flush_renderer(CommandBufferView commandBufferView,
     std::array<math::Mat4, kShadowCascadeCount> lightMatrices{};
 
     for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-      const int shadowResolution =
-          (backend.shadowState.resolutions[c] > 0)
-              ? backend.shadowState.resolutions[c]
-              : shadow_cascade_resolution(c);
+      const int shadowResolution = (backend.shadowState.resolutions[c] > 0)
+                                       ? backend.shadowState.resolutions[c]
+                                       : shadow_cascade_resolution(c);
       math::Mat4 lightVP = compute_cascade_matrix(
           viewMat, projMat, lightDir, cascadeSplits.distances[c],
           cascadeSplits.distances[c + 1], shadowResolution);
@@ -1781,10 +1944,9 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
         const math::Mat4 &lightVP = lightMatrices[c];
-        const int shadowResolution =
-            (backend.shadowState.resolutions[c] > 0)
-                ? backend.shadowState.resolutions[c]
-                : shadow_cascade_resolution(c);
+        const int shadowResolution = (backend.shadowState.resolutions[c] > 0)
+                                         ? backend.shadowState.resolutions[c]
+                                         : shadow_cascade_resolution(c);
 
         dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
         dev->set_viewport(0, 0, shadowResolution, shadowResolution);
@@ -1867,8 +2029,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       const float dz = p.z - camPos.z;
       spotCandidates[spotCandidateCount++] = {li, dx * dx + dy * dy + dz * dz};
     }
-    std::sort(spotCandidates.data(),
-              spotCandidates.data() + spotCandidateCount,
+    std::sort(spotCandidates.data(), spotCandidates.data() + spotCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
                 return a.distSq < b.distSq;
               });
@@ -1953,7 +2114,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       const float dx = p.x - camPos.x;
       const float dy = p.y - camPos.y;
       const float dz = p.z - camPos.z;
-      pointCandidates[pointCandidateCount++] = {li, dx * dx + dy * dy + dz * dz};
+      pointCandidates[pointCandidateCount++] = {li,
+                                                dx * dx + dy * dy + dz * dz};
     }
     std::sort(pointCandidates.data(),
               pointCandidates.data() + pointCandidateCount,
@@ -2038,6 +2200,25 @@ void flush_renderer(CommandBufferView commandBufferView,
   // DEFERRED PATH
   // ====================================================================
   if (useDeferred) {
+    bool sceneDepthHasOpaque = false;
+    auto ensureSceneDepthHasOpaque = [&]() noexcept -> bool {
+      if (sceneDepthHasOpaque) {
+        return true;
+      }
+      if (dev->blit_depth == nullptr) {
+        return false;
+      }
+
+      const std::uint32_t gbufferFbo =
+          pass_resource_framebuffer(passRes.gbufferAlbedo);
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->blit_depth(gbufferFbo, sceneFbo, drawableWidth, drawableHeight);
+      dev->bind_framebuffer(sceneFbo);
+      sceneDepthHasOpaque = true;
+      return true;
+    };
+
     // --- G-Buffer pass: render geometry into MRT ---
     gpu_profiler_begin_pass(GpuPassId::GBuffer);
     const std::uint32_t gbufferFbo =
@@ -2379,10 +2560,10 @@ void flush_renderer(CommandBufferView commandBufferView,
             dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
           }
           if (backend.dlPointShadowLightPosLocs[s] >= 0) {
-            const auto &lp =
-                lights.pointLights[static_cast<std::size_t>(
-                                       std::max(slot.lightIndex, 0))]
-                    .position;
+            const auto &lp = lights
+                                 .pointLights[static_cast<std::size_t>(
+                                     std::max(slot.lightIndex, 0))]
+                                 .position;
             dev->set_uniform_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
           }
           if (backend.dlPointShadowFarPlaneLocs[s] >= 0) {
@@ -2506,6 +2687,17 @@ void flush_renderer(CommandBufferView commandBufferView,
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
     }
 
+    const std::uint32_t skyboxTexture = active_skybox_gpu_texture(backend);
+    if (skyboxTexture != 0U) {
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      if (ensureSceneDepthHasOpaque()) {
+        draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      }
+    }
+
     // Forward-render transparent geometry into the scene HDR FBO.
     if (opaqueCount < totalCount) {
       const std::uint32_t sceneFbo =
@@ -2515,12 +2707,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       // Carry opaque deferred depth into the scene FBO so forward transparent
       // draws depth-test against G-Buffer geometry.
-      if (dev->blit_depth != nullptr) {
-        const std::uint32_t gbufferFbo =
-            pass_resource_framebuffer(passRes.gbufferAlbedo);
-        dev->blit_depth(gbufferFbo, sceneFbo, drawableWidth, drawableHeight);
-        dev->bind_framebuffer(sceneFbo);
-      }
+      static_cast<void>(ensureSceneDepthHasOpaque());
       dev->bind_program(backend.pbrProgram);
 
       // Re-upload forward PBR camera/lights for transparent pass.
@@ -2744,6 +2931,12 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->disable_blending();
     dev->enable_face_culling();
     drawRange(0U, opaqueCount);
+
+    const std::uint32_t skyboxTexture = active_skybox_gpu_texture(backend);
+    if (skyboxTexture != 0U) {
+      draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      dev->bind_program(backend.pbrProgram);
+    }
 
     // Pass 2: Transparent.
     if (opaqueCount < totalCount) {
@@ -3017,8 +3210,7 @@ void flush_renderer(CommandBufferView commandBufferView,
                                   ? 0.0F
                                   : gpu_profiler_pass_ms(GpuPassId::ShadowMap);
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
-  frameStats.gpuPointShadowMs =
-      gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
+  frameStats.gpuPointShadowMs = gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
   g_lastFrameStats = frameStats;
 }
@@ -3037,6 +3229,7 @@ void shutdown_renderer() noexcept {
   }
 
   backend = BackendState{};
+  g_activeSkyboxTexture = kInvalidTextureHandle;
 }
 
 void set_active_camera(const CameraState &camera) noexcept {
@@ -3047,6 +3240,12 @@ void set_scene_viewport_size(int width, int height) noexcept {
   g_sceneViewportWidth = (width > 0) ? width : 0;
   g_sceneViewportHeight = (height > 0) ? height : 0;
 }
+
+void set_skybox_texture(TextureHandle cubemap) noexcept {
+  g_activeSkyboxTexture = cubemap;
+}
+
+TextureHandle get_skybox_texture() noexcept { return g_activeSkyboxTexture; }
 
 CameraState get_active_camera() noexcept { return g_activeCamera; }
 

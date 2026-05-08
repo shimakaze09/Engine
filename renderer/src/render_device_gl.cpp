@@ -43,6 +43,14 @@ namespace {
 #define GL_DEPTH_TEST 0x0B71
 #endif
 
+#ifndef GL_LESS
+#define GL_LESS 0x0201
+#endif
+
+#ifndef GL_LEQUAL
+#define GL_LEQUAL 0x0203
+#endif
+
 #ifndef GL_UNSIGNED_INT
 #define GL_UNSIGNED_INT 0x1405
 #endif
@@ -308,6 +316,7 @@ using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
 
 // Depth mask
 using GlDepthMaskProc = void(APIENTRYP)(GLboolean);
+using GlDepthFuncProc = void(APIENTRYP)(GLenum);
 
 // GPU query procs
 using GlGenQueriesProc = void(APIENTRYP)(GLsizei, GLuint *);
@@ -382,6 +391,7 @@ struct GlTable final {
 
   // Depth mask
   GlDepthMaskProc depthMask = nullptr;
+  GlDepthFuncProc depthFunc = nullptr;
 
   // GPU queries
   GlGenQueriesProc genQueries = nullptr;
@@ -455,6 +465,7 @@ bool load_all_gl_functions() noexcept {
          load_proc(&g_gl.texSubImage2D, "glTexSubImage2D") &&
          load_proc(&g_gl.blendFunc, "glBlendFunc") &&
          load_proc(&g_gl.depthMask, "glDepthMask") &&
+         load_proc(&g_gl.depthFunc, "glDepthFunc") &&
          load_proc(&g_gl.genQueries, "glGenQueries") &&
          load_proc(&g_gl.deleteQueries, "glDeleteQueries") &&
          load_proc(&g_gl.queryCounter, "glQueryCounter") &&
@@ -643,6 +654,10 @@ void gl_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
 void gl_enable_depth_test() noexcept { g_gl.enable(GL_DEPTH_TEST); }
 
 void gl_disable_depth_test() noexcept { g_gl.disable(GL_DEPTH_TEST); }
+
+void gl_set_depth_func_less() noexcept { g_gl.depthFunc(GL_LESS); }
+
+void gl_set_depth_func_less_equal() noexcept { g_gl.depthFunc(GL_LEQUAL); }
 
 void gl_set_clear_color(float r, float g, float b, float a) noexcept {
   g_gl.clearColor(r, g, b, a);
@@ -1101,6 +1116,8 @@ bool initialize_render_device() noexcept {
   g_device.set_viewport = &gl_set_viewport;
   g_device.enable_depth_test = &gl_enable_depth_test;
   g_device.disable_depth_test = &gl_disable_depth_test;
+  g_device.set_depth_func_less = &gl_set_depth_func_less;
+  g_device.set_depth_func_less_equal = &gl_set_depth_func_less_equal;
   g_device.set_clear_color = &gl_set_clear_color;
   g_device.clear_color_depth = &gl_clear_color_depth;
   g_device.create_texture_2d_r32f = &gl_create_texture_2d_r32f;

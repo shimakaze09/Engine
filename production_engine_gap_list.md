@@ -683,10 +683,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M6-A: Sky and Environment
 
-##### P1-M6-A1: Skybox (Cubemap, HDR Equirect Import) `[ ]`
+##### P1-M6-A1: Skybox (Cubemap, HDR Equirect Import) `[x]`
 - `P1-M6-A1a` Skybox vertex shader: render cube at far plane; cubemap sampler. `[x]` — *Added `assets/shaders/skybox.vert` and `skybox.frag`: view translation is stripped, clip depth is forced to the far plane with `xyww`, and the fragment shader samples `samplerCube u_skybox`.*
 - `P1-M6-A1b` HDR equirectangular import: stb_image HDR decode → equirect-to-cubemap compute or fragment pass. `[x]` — *Added HDR equirectangular cubemap loading through the texture system: STB decodes `.hdr` data, the importer resamples it into six HDR cubemap faces, and the GL render device uploads an RGB16F cubemap with mipmaps for sky/environment use.*
-- `P1-M6-A1c` Skybox rendered after opaque pass before transparency; depth test LEQUAL. `[ ]`
+- `P1-M6-A1c` Skybox rendered after opaque pass before transparency; depth test LEQUAL. `[x]` — *Added active skybox cubemap state, skybox shader/VAO setup, GL depth compare switching to `LEQUAL`, and skybox draws after opaque/deferred lighting but before transparent geometry in both forward and deferred paths.*
 
 ##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[ ]`
 - `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[ ]`

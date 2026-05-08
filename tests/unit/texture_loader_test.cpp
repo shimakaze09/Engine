@@ -1,6 +1,7 @@
 #include <cstdio>
 
 #include "engine/renderer/asset_database.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/renderer/texture_loader.h"
 
 namespace {
@@ -128,6 +129,23 @@ int check_cubemap_invalid_args() {
   return 0;
 }
 
+int check_skybox_assignment() {
+  engine::renderer::TextureHandle handle{};
+  handle.id = 123U;
+  engine::renderer::set_skybox_texture(handle);
+  if (engine::renderer::get_skybox_texture() != handle) {
+    return 71;
+  }
+
+  engine::renderer::set_skybox_texture(engine::renderer::kInvalidTextureHandle);
+  if (engine::renderer::get_skybox_texture() !=
+      engine::renderer::kInvalidTextureHandle) {
+    return 72;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -157,6 +175,11 @@ int main() {
   }
 
   result = check_cubemap_invalid_args();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_skybox_assignment();
   if (result != 0) {
     return result;
   }

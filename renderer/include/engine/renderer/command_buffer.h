@@ -126,6 +126,10 @@ void shutdown_renderer() noexcept;
 // instead of the full SDL drawable size.
 void set_scene_viewport_size(int width, int height) noexcept;
 
+/// Sets the active skybox cubemap. Pass kInvalidTextureHandle to disable it.
+void set_skybox_texture(TextureHandle cubemap) noexcept;
+TextureHandle get_skybox_texture() noexcept;
+
 /// Returns the GPU texture ID of the tonemapped scene (final color).
 /// Valid after the first flush_renderer call. Returns 0 if not yet available.
 std::uint32_t get_scene_viewport_texture() noexcept;
