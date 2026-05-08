@@ -163,6 +163,14 @@ struct BackendState final {
   std::uint32_t skyboxVertexArray = 0U;
   std::uint32_t skyboxVertexBuffer = 0U;
 
+  bool preethamSkyAvailable = false;
+  ShaderProgramHandle preethamSkyShaderHandle{};
+  std::uint32_t preethamSkyProgram = 0U;
+  std::int32_t preethamSkyViewLoc = -1;
+  std::int32_t preethamSkyProjectionLoc = -1;
+  std::int32_t preethamSkySunDirectionLoc = -1;
+  std::int32_t preethamSkyTurbidityLoc = -1;
+
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
   int lastHeight = 0;
@@ -666,12 +674,35 @@ void destroy_skybox_resources(BackendState &backend) noexcept {
     destroy_shader_program(backend.skyboxShaderHandle);
     backend.skyboxShaderHandle = ShaderProgramHandle{};
   }
+  if (backend.preethamSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.preethamSkyShaderHandle);
+    backend.preethamSkyShaderHandle = ShaderProgramHandle{};
+  }
   backend.skyboxProgram = 0U;
   backend.skyboxAvailable = false;
+  backend.preethamSkyProgram = 0U;
+  backend.preethamSkyAvailable = false;
+}
+
+void destroy_preetham_sky_resources(BackendState &backend) noexcept {
+  if (backend.preethamSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.preethamSkyShaderHandle);
+    backend.preethamSkyShaderHandle = ShaderProgramHandle{};
+  }
+  backend.preethamSkyProgram = 0U;
+  backend.preethamSkyAvailable = false;
+  backend.preethamSkyViewLoc = -1;
+  backend.preethamSkyProjectionLoc = -1;
+  backend.preethamSkySunDirectionLoc = -1;
+  backend.preethamSkyTurbidityLoc = -1;
 }
 
 bool create_skybox_geometry(BackendState &backend,
                             const RenderDevice *dev) noexcept {
+  if ((backend.skyboxVertexArray != 0U) && (backend.skyboxVertexBuffer != 0U)) {
+    return true;
+  }
+
   if ((dev == nullptr) || (dev->create_vertex_array == nullptr) ||
       (dev->create_buffer == nullptr) || (dev->bind_vertex_array == nullptr) ||
       (dev->bind_array_buffer == nullptr) ||
@@ -709,6 +740,23 @@ std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   return texture_gpu_id(g_activeSkyboxTexture);
 }
 
+bool preetham_sky_enabled(const BackendState &backend) noexcept {
+  return backend.preethamSkyAvailable &&
+         core::cvar_get_bool("r_preetham_sky", true);
+}
+
+math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
+  if (lights.directionalLightCount > 0U) {
+    const math::Vec3 sunDir =
+        math::normalize(math::negate(lights.directionalLights[0].direction));
+    if (math::length_sq(sunDir) > 0.0F) {
+      return sunDir;
+    }
+  }
+
+  return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
+}
+
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
                  const math::Mat4 &viewMat, const math::Mat4 &projMat,
                  std::uint32_t cubemapGpuId,
@@ -741,6 +789,53 @@ void draw_skybox(const BackendState &backend, const RenderDevice *dev,
   dev->draw_arrays_triangles(0, kSkyboxVertexCount);
 
   dev->bind_texture_cubemap(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->set_depth_mask(true);
+  dev->set_depth_func_less();
+  dev->enable_face_culling();
+
+  ++frameStats.drawCalls;
+  frameStats.triangleCount +=
+      static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
+}
+
+void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
+                       const math::Mat4 &viewMat, const math::Mat4 &projMat,
+                       const SceneLightData &lights,
+                       RendererFrameStats &frameStats) noexcept {
+  if ((dev == nullptr) || !backend.preethamSkyAvailable ||
+      (dev->set_depth_func_less_equal == nullptr) ||
+      (dev->set_depth_func_less == nullptr)) {
+    return;
+  }
+
+  const math::Vec3 sunDir = preetham_sun_direction(lights);
+  const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
+
+  dev->enable_depth_test();
+  dev->set_depth_func_less_equal();
+  dev->set_depth_mask(false);
+  dev->disable_face_culling();
+
+  dev->bind_program(backend.preethamSkyProgram);
+  if (backend.preethamSkyViewLoc >= 0) {
+    dev->set_uniform_mat4(backend.preethamSkyViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.preethamSkyProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.preethamSkyProjectionLoc,
+                          &projMat.columns[0].x);
+  }
+  if (backend.preethamSkySunDirectionLoc >= 0) {
+    dev->set_uniform_vec3(backend.preethamSkySunDirectionLoc, &sunDir.x);
+  }
+  if (backend.preethamSkyTurbidityLoc >= 0) {
+    dev->set_uniform_float(backend.preethamSkyTurbidityLoc, turbidity);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
   dev->set_depth_mask(true);
@@ -1081,6 +1176,49 @@ bool initialize_backend() noexcept {
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "skybox shader not available — skybox disabled");
+  }
+
+  // Preetham procedural sky (soft-fail: cubemap skybox or clear color remains).
+  core::cvar_register_bool(
+      "r_preetham_sky", true,
+      "Enable Preetham procedural sky when no cubemap skybox is active");
+  core::cvar_register_float("r_sky_turbidity", 3.0F,
+                            "Preetham sky turbidity (1.7 clear, 10 hazy)");
+  const ShaderProgramHandle preethamShader = load_shader_program(
+      "assets/shaders/skybox.vert", "assets/shaders/preetham_sky.frag");
+  if (preethamShader != kInvalidShaderProgram) {
+    const std::uint32_t preethamProgram = shader_gpu_program(preethamShader);
+    if (preethamProgram != 0U) {
+      backend.preethamSkyShaderHandle = preethamShader;
+      backend.preethamSkyProgram = preethamProgram;
+      backend.preethamSkyViewLoc =
+          dev->uniform_location(preethamProgram, "u_view");
+      backend.preethamSkyProjectionLoc =
+          dev->uniform_location(preethamProgram, "u_projection");
+      backend.preethamSkySunDirectionLoc =
+          dev->uniform_location(preethamProgram, "u_sunDirection");
+      backend.preethamSkyTurbidityLoc =
+          dev->uniform_location(preethamProgram, "u_turbidity");
+
+      if ((backend.preethamSkyViewLoc >= 0) &&
+          (backend.preethamSkyProjectionLoc >= 0) &&
+          (backend.preethamSkySunDirectionLoc >= 0) &&
+          (backend.preethamSkyTurbidityLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.preethamSkyAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "Preetham sky setup failed — procedural sky disabled");
+        destroy_preetham_sky_resources(backend);
+      }
+    } else {
+      destroy_shader_program(preethamShader);
+    }
+  } else {
+    core::log_message(
+        core::LogLevel::Warning, "renderer",
+        "Preetham sky shader not available — procedural sky disabled");
   }
 
   // Register CVars for deferred rendering.
@@ -2696,6 +2834,14 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (ensureSceneDepthHasOpaque()) {
         draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       }
+    } else if (preetham_sky_enabled(backend)) {
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      if (ensureSceneDepthHasOpaque()) {
+        draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      }
     }
 
     // Forward-render transparent geometry into the scene HDR FBO.
@@ -2935,6 +3081,9 @@ void flush_renderer(CommandBufferView commandBufferView,
     const std::uint32_t skyboxTexture = active_skybox_gpu_texture(backend);
     if (skyboxTexture != 0U) {
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      dev->bind_program(backend.pbrProgram);
+    } else if (preetham_sky_enabled(backend)) {
+      draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
       dev->bind_program(backend.pbrProgram);
     }
 

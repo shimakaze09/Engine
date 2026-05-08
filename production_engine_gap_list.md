@@ -689,7 +689,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M6-A1c` Skybox rendered after opaque pass before transparency; depth test LEQUAL. `[x]` — *Added active skybox cubemap state, skybox shader/VAO setup, GL depth compare switching to `LEQUAL`, and skybox draws after opaque/deferred lighting but before transparent geometry in both forward and deferred paths.*
 
 ##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[ ]`
-- `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[ ]`
+- `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[x]` — *Added a GPU Preetham sky shader driven by the primary directional light's sun vector and `r_sky_turbidity`; when no cubemap skybox is active, the renderer draws the procedural sky through the same far-plane sky pass.*
 - `P1-M6-A2b` Hosek-Wilkie model (higher quality): perez coefficients → chromatic sky. `[ ]`
 - `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[ ]`
 
