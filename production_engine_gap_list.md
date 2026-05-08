@@ -624,7 +624,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ##### P1-M5-C4: Shadow Optimization `[~]`
 - `P1-M5-C4a` Stable cascade matrices (world-space snap to texel size). `[x]` — *Implemented in `compute_cascade_matrix()` with snapped light-space cascade centers and sub-texel motion coverage in `engine_unit_shadow_map`.*
-- `P1-M5-C4b` Shadow map caching (static-only passes skip re-render if scene is unchanged). `[ ]`
+- `P1-M5-C4b` Shadow map caching (static-only passes skip re-render if scene is unchanged). `[x]` — *`r_shadow_cache` reuses directional shadow maps when the opaque caster list, caster transforms, first directional light, cascade splits, and snapped cascade matrices match the prior frame; cache invalidates automatically when shadows/casters disappear.*
 - `P1-M5-C4c` Shadow LOD (reduce shadow map resolution for distant cascades). `[ ]`
 
 ---
@@ -1924,6 +1924,6 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 6. Sky, fog, instancing, materials (P1-M6-A/B/C/D) — environment rendering and GPU instancing missing (~15 atomic tasks).
 7. Editor completion (P1-M9-A2/C/D) — reflection inspector, hierarchy panel, asset browser (~12 atomic tasks).
 8. Scene management and streaming (P1-M10-A1/B/C) — transition API, streaming volumes, LOD, save system (~12 atomic tasks).
-9. Shadow optimization (P1-M5-C4) — cascade snapping is implemented; caching and shadow LOD remain open.
+9. Shadow optimization (P1-M5-C4) — cascade snapping and directional shadow-map caching are implemented; shadow LOD remains open.
 
 **Gap-to-milestone traceability**: Every `[x]`/`[~]`/`[ ]` status code in this document is intended to map 1:1 to an atomic task in `production_engine_milestones.md` and a checkbox in `production_engine_phased_todo.md`. P1-M13 was added here as new master scope and should be mirrored into the supplementary milestone/checklist files before relying on those older documents for execution tracking. This file is the single source of truth — the other two files are supplementary.

@@ -35,6 +35,8 @@ constexpr float kFarClip = 100.0F;
 constexpr float kClearRed = 0.18F;
 constexpr float kClearGreen = 0.28F;
 constexpr float kClearBlue = 0.60F;
+constexpr std::uint64_t kFnv1a64Offset = 14695981039346656037ULL;
+constexpr std::uint64_t kFnv1a64Prime = 1099511628211ULL;
 
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
@@ -238,6 +240,8 @@ struct BackendState final {
   std::array<std::int32_t, kShadowCascadeCount> dlShadowMapLocs{};
   std::array<std::int32_t, kShadowCascadeCount> dlShadowMatrixLocs{};
   std::array<std::int32_t, kShadowCascadeCount> dlCascadeSplitLocs{};
+  std::uint64_t directionalShadowCacheKey = 0U;
+  bool directionalShadowCacheValid = false;
 
   // ---- Spot shadow state ----
   SpotShadowState spotShadowState{};
@@ -969,6 +973,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_bool("r_shadows", true, "Enable cascaded shadow maps");
   core::cvar_register_float("r_shadow_lambda", 0.75F,
                             "CSM cascade split blend (0=uniform, 1=log)");
+  core::cvar_register_bool("r_shadow_cache", true,
+                           "Reuse directional shadow maps when unchanged");
   core::cvar_register_bool("r_shadow_debug", false,
                            "Log when shadow casters are dropped due to slot limits");
   {
@@ -1136,6 +1142,8 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   // Destroy shadow map resources.
   shutdown_shadow_maps(backend->shadowState);
   backend->shadowAvailable = false;
+  backend->directionalShadowCacheKey = 0U;
+  backend->directionalShadowCacheValid = false;
   if (backend->shadowDepthShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->shadowDepthShaderHandle);
     backend->shadowDepthShaderHandle = ShaderProgramHandle{};
@@ -1217,6 +1225,65 @@ math::Mat4 compute_model_matrix(const DrawCommand &command) noexcept {
 math::Mat4 compute_mvp(const math::Mat4 &model,
                        const math::Mat4 &viewProjection) noexcept {
   return math::mul(viewProjection, model);
+}
+
+std::uint64_t hash_u64(std::uint64_t hash, std::uint64_t value) noexcept {
+  hash ^= value;
+  return hash * kFnv1a64Prime;
+}
+
+std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
+  std::uint32_t bits = 0U;
+  if (value != 0.0F) {
+    std::memcpy(&bits, &value, sizeof(bits));
+  }
+  return hash_u64(hash, bits);
+}
+
+std::uint64_t hash_vec3(std::uint64_t hash,
+                        const math::Vec3 &value) noexcept {
+  hash = hash_float(hash, value.x);
+  hash = hash_float(hash, value.y);
+  return hash_float(hash, value.z);
+}
+
+std::uint64_t hash_mat4(std::uint64_t hash,
+                        const math::Mat4 &value) noexcept {
+  for (const math::Vec4 &column : value.columns) {
+    hash = hash_float(hash, column.x);
+    hash = hash_float(hash, column.y);
+    hash = hash_float(hash, column.z);
+    hash = hash_float(hash, column.w);
+  }
+  return hash;
+}
+
+std::uint64_t directional_shadow_cache_key(
+    CommandBufferView commandBufferView, std::size_t opaqueCount,
+    const DirectionalLightData &light, const CascadeSplits &splits,
+    const std::array<math::Mat4, kShadowCascadeCount> &matrices) noexcept {
+  std::uint64_t hash = kFnv1a64Offset;
+  hash = hash_u64(hash, static_cast<std::uint64_t>(opaqueCount));
+  hash = hash_vec3(hash, light.direction);
+  hash = hash_vec3(hash, light.color);
+  hash = hash_float(hash, light.intensity);
+
+  for (std::size_t i = 0U; i <= kShadowCascadeCount; ++i) {
+    hash = hash_float(hash, splits.distances[i]);
+  }
+  for (const math::Mat4 &matrix : matrices) {
+    hash = hash_mat4(hash, matrix);
+  }
+
+  for (std::size_t i = 0U; i < opaqueCount; ++i) {
+    const DrawCommand &command = commandBufferView.data[i];
+    hash = hash_u64(hash, command.sortKey.value);
+    hash = hash_u64(hash, command.entity);
+    hash = hash_u64(hash, command.mesh.id);
+    hash = hash_mat4(hash, command.modelMatrix);
+  }
+
+  return hash;
 }
 
 void extract_normal_matrix(const math::Mat4 &model,
@@ -1387,14 +1454,14 @@ void flush_renderer(CommandBufferView commandBufferView,
                              lights.directionalLightCount > 0U;
 
   CascadeSplits cascadeSplits{};
+  bool directionalShadowCacheReused = false;
   if (shadowEnabled && (commandBufferView.data != nullptr) &&
       (opaqueCount > 0U)) {
-    gpu_profiler_begin_pass(GpuPassId::ShadowMap);
-
     const float lambda = core::cvar_get_float("r_shadow_lambda", 0.75F);
     cascadeSplits = compute_cascade_splits(nearP, farP, lambda);
 
     const math::Vec3 &lightDir = lights.directionalLights[0].direction;
+    std::array<math::Mat4, kShadowCascadeCount> lightMatrices{};
 
     for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
       const float texelSize = 2.0F / static_cast<float>(kShadowMapResolution);
@@ -1406,56 +1473,83 @@ void flush_renderer(CommandBufferView commandBufferView,
       backend.shadowState.cascades[c].lightViewProjection = lightVP;
       backend.shadowState.cascades[c].splitDistance =
           cascadeSplits.distances[c + 1];
-
-      dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
-      dev->set_viewport(0, 0, kShadowMapResolution, kShadowMapResolution);
-      dev->enable_depth_test();
-      dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
-      dev->clear_color_depth();
-
-      dev->bind_program(backend.shadowDepthProgram);
-
-      std::uint32_t boundVertexArray = 0U;
-      for (std::size_t i = 0U; i < opaqueCount; ++i) {
-        const DrawCommand &command = commandBufferView.data[i];
-        const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
-            (mesh->vertexCount == 0U)) {
-          continue;
-        }
-
-        if (mesh->vertexArray != boundVertexArray) {
-          dev->bind_vertex_array(mesh->vertexArray);
-          boundVertexArray = mesh->vertexArray;
-        }
-
-        const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
-        if (backend.shadowLightMvpLoc >= 0) {
-          dev->set_uniform_mat4(backend.shadowLightMvpLoc,
-                                &lightMvp.columns[0].x);
-        }
-        if (backend.shadowModelLoc >= 0) {
-          dev->set_uniform_mat4(backend.shadowModelLoc,
-                                &command.modelMatrix.columns[0].x);
-        }
-
-        if (mesh->indexCount > 0U) {
-          dev->draw_elements_triangles_u32(
-              static_cast<std::int32_t>(mesh->indexCount));
-          frameStats.triangleCount += mesh->indexCount / 3U;
-        } else {
-          dev->draw_arrays_triangles(
-              0, static_cast<std::int32_t>(mesh->vertexCount));
-          frameStats.triangleCount += mesh->vertexCount / 3U;
-        }
-        ++frameStats.drawCalls;
-      }
-
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      lightMatrices[c] = lightVP;
     }
 
-    gpu_profiler_end_pass(GpuPassId::ShadowMap);
+    const std::uint64_t cacheKey = directional_shadow_cache_key(
+        commandBufferView, opaqueCount, lights.directionalLights[0],
+        cascadeSplits, lightMatrices);
+    const bool cacheEnabled = core::cvar_get_bool("r_shadow_cache", true);
+    directionalShadowCacheReused =
+        cacheEnabled && backend.directionalShadowCacheValid &&
+        (backend.directionalShadowCacheKey == cacheKey);
+
+    if (directionalShadowCacheReused) {
+      if (core::cvar_get_bool("r_shadow_debug", false)) {
+        core::log_message(core::LogLevel::Info, "renderer",
+                          "reused directional shadow maps");
+      }
+    } else {
+      gpu_profiler_begin_pass(GpuPassId::ShadowMap);
+
+      for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+        const math::Mat4 &lightVP = lightMatrices[c];
+
+        dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
+        dev->set_viewport(0, 0, kShadowMapResolution, kShadowMapResolution);
+        dev->enable_depth_test();
+        dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
+        dev->clear_color_depth();
+
+        dev->bind_program(backend.shadowDepthProgram);
+
+        std::uint32_t boundVertexArray = 0U;
+        for (std::size_t i = 0U; i < opaqueCount; ++i) {
+          const DrawCommand &command = commandBufferView.data[i];
+          const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
+          if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+              (mesh->vertexCount == 0U)) {
+            continue;
+          }
+
+          if (mesh->vertexArray != boundVertexArray) {
+            dev->bind_vertex_array(mesh->vertexArray);
+            boundVertexArray = mesh->vertexArray;
+          }
+
+          const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
+          if (backend.shadowLightMvpLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowLightMvpLoc,
+                                  &lightMvp.columns[0].x);
+          }
+          if (backend.shadowModelLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowModelLoc,
+                                  &command.modelMatrix.columns[0].x);
+          }
+
+          if (mesh->indexCount > 0U) {
+            dev->draw_elements_triangles_u32(
+                static_cast<std::int32_t>(mesh->indexCount));
+            frameStats.triangleCount += mesh->indexCount / 3U;
+          } else {
+            dev->draw_arrays_triangles(
+                0, static_cast<std::int32_t>(mesh->vertexCount));
+            frameStats.triangleCount += mesh->vertexCount / 3U;
+          }
+          ++frameStats.drawCalls;
+        }
+
+        dev->bind_vertex_array(0U);
+        dev->bind_program(0U);
+      }
+
+      gpu_profiler_end_pass(GpuPassId::ShadowMap);
+      backend.directionalShadowCacheKey = cacheKey;
+      backend.directionalShadowCacheValid = true;
+    }
+  } else {
+    backend.directionalShadowCacheKey = 0U;
+    backend.directionalShadowCacheValid = false;
   }
 
   // ==== Spot Light Shadow Pass ====
@@ -2667,7 +2761,9 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
   frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
-  frameStats.gpuShadowMapMs = gpu_profiler_pass_ms(GpuPassId::ShadowMap);
+  frameStats.gpuShadowMapMs = directionalShadowCacheReused
+                                  ? 0.0F
+                                  : gpu_profiler_pass_ms(GpuPassId::ShadowMap);
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
   frameStats.gpuPointShadowMs =
       gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
