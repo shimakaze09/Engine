@@ -32,6 +32,20 @@ CascadeSplits compute_cascade_splits(float nearClip, float farClip,
 
 namespace {
 
+constexpr float kShadowEpsilon = 1.0e-6F;
+
+float snap_to_grid(float value, float step) noexcept {
+  if (step <= kShadowEpsilon) {
+    return value;
+  }
+  return std::floor((value / step) + 0.5F) * step;
+}
+
+math::Vec3 choose_light_up(const math::Vec3 &lightDir) noexcept {
+  return (std::abs(lightDir.y) > 0.99F) ? math::Vec3(1.0F, 0.0F, 0.0F)
+                                        : math::Vec3(0.0F, 1.0F, 0.0F);
+}
+
 /// Extract 8 world-space frustum corners from inverse view-projection.
 void extract_frustum_corners(const math::Mat4 &invViewProj,
                              math::Vec3 outCorners[8]) noexcept {
@@ -60,7 +74,7 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
                                   const math::Vec3 &lightDir, float cascadeNear,
                                   float cascadeFar,
-                                  float /*texelSize*/) noexcept {
+                                  float texelSize) noexcept {
   // Build a sub-frustum projection that covers [cascadeNear, cascadeFar].
   // We modify the projection matrix to clip to the cascade range by
   // interpolating the frustum corners between near and far.
@@ -123,26 +137,58 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
   center.y /= 8.0F;
   center.z /= 8.0F;
 
-  // Build a look-at matrix from the light's perspective.
-  const math::Vec3 lightPos(center.x - lightDir.x * 50.0F,
-                            center.y - lightDir.y * 50.0F,
-                            center.z - lightDir.z * 50.0F);
-  const math::Mat4 lightView =
-      math::look_at(lightPos, center, math::Vec3(0.0F, 1.0F, 0.0F));
+  float radius = 0.0F;
+  for (int i = 0; i < 8; ++i) {
+    radius = std::max(radius, math::distance(center, cascadeCorners[i]));
+  }
+  if (radius <= kShadowEpsilon) {
+    return math::Mat4{};
+  }
 
-  // Find AABB of cascade corners in light space.
-  float minX = 1e30F, maxX = -1e30F;
-  float minY = 1e30F, maxY = -1e30F;
+  const math::Vec3 stableLightDir = math::normalize(lightDir);
+  if (math::length_sq(stableLightDir) <= kShadowEpsilon) {
+    return math::Mat4{};
+  }
+
+  const math::Vec3 lightUp = choose_light_up(stableLightDir);
+  const math::Mat4 baseLightView =
+      math::look_at(math::mul(stableLightDir, -50.0F), math::Vec3(), lightUp);
+  math::Mat4 invBaseLightView{};
+  if (!math::inverse(baseLightView, &invBaseLightView)) {
+    return math::Mat4{};
+  }
+
+  const float computedTexelSize =
+      (2.0F * radius) / static_cast<float>(kShadowMapResolution);
+  const float snapStep =
+      (computedTexelSize > kShadowEpsilon) ? computedTexelSize : texelSize;
+
+  const math::Vec4 centerLs =
+      math::mul(baseLightView, math::Vec4(center.x, center.y, center.z, 1.0F));
+  const math::Vec4 snappedCenterLs(
+      snap_to_grid(centerLs.x, snapStep), snap_to_grid(centerLs.y, snapStep),
+      centerLs.z, 1.0F);
+  const math::Vec4 snappedCenterWorld =
+      math::mul(invBaseLightView, snappedCenterLs);
+  const math::Vec3 snappedCenter(snappedCenterWorld.x, snappedCenterWorld.y,
+                                 snappedCenterWorld.z);
+
+  // Build a look-at matrix from the light's perspective. The target is snapped
+  // in light-space world units so sub-texel camera motion does not move the
+  // shadow projection.
+  const math::Vec3 lightPos =
+      math::sub(snappedCenter, math::mul(stableLightDir, 50.0F));
+  const math::Mat4 lightView =
+      math::look_at(lightPos, snappedCenter, lightUp);
+
+  // Find depth bounds of cascade corners in light space. X/Y use a fixed
+  // bounding sphere extent around the snapped center for stable texel density.
   float minZ = 1e30F, maxZ = -1e30F;
 
   for (int i = 0; i < 8; ++i) {
     math::Vec4 lsCorner = math::mul(
         lightView, math::Vec4(cascadeCorners[i].x, cascadeCorners[i].y,
                               cascadeCorners[i].z, 1.0F));
-    minX = std::min(minX, lsCorner.x);
-    maxX = std::max(maxX, lsCorner.x);
-    minY = std::min(minY, lsCorner.y);
-    maxY = std::max(maxY, lsCorner.y);
     minZ = std::min(minZ, lsCorner.z);
     maxZ = std::max(maxZ, lsCorner.z);
   }
@@ -151,6 +197,10 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
   constexpr float kShadowNearExtend = 50.0F;
   minZ -= kShadowNearExtend;
 
+  const float minX = -radius;
+  const float maxX = radius;
+  const float minY = -radius;
+  const float maxY = radius;
   const math::Mat4 lightProj = math::ortho(minX, maxX, minY, maxY, minZ, maxZ);
   return math::mul(lightProj, lightView);
 }
@@ -379,4 +429,3 @@ void shutdown_point_shadow_maps(PointShadowState &state) noexcept {
 }
 
 } // namespace engine::renderer
-

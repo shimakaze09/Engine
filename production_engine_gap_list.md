@@ -622,8 +622,8 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-C3a` Per-point-light cubemap depth texture (6 faces); geometry shader or 6-pass render. `[x]` — *PointShadowState with 4 slots; GL_TEXTURE_CUBE_MAP depth, 6-pass render (GLSL 330, no geo shader); shadow_depth_point.vert/frag writes linear depth.*
 - `P1-M5-C3b` Omnidirectional shadow comparison in deferred point-light contribution. `[x]` — *compute_point_shadow() in deferred_lighting.frag: 20-sample cubemap PCF, units 14-17; uPointShadowEnabled/LightPos/FarPlane/LightIdx uniforms.*
 
-##### P1-M5-C4: Shadow Optimization `[ ]`
-- `P1-M5-C4a` Stable cascade matrices (world-space snap to texel size). `[ ]`
+##### P1-M5-C4: Shadow Optimization `[~]`
+- `P1-M5-C4a` Stable cascade matrices (world-space snap to texel size). `[x]` — *Implemented in `compute_cascade_matrix()` with snapped light-space cascade centers and sub-texel motion coverage in `engine_unit_shadow_map`.*
 - `P1-M5-C4b` Shadow map caching (static-only passes skip re-render if scene is unchanged). `[ ]`
 - `P1-M5-C4c` Shadow LOD (reduce shadow map resolution for distant cascades). `[ ]`
 
@@ -1905,11 +1905,11 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 | Phase | Milestones | Total Gap Items | Complete `[x]` | Partial `[~]` | Not Started `[ ]` |
 |-------|-----------|-----------------|----------------|---------------|-------------------|
 | §0 Technical Debt | 6 | 7 | 7 | 0 | 0 |
-| P1: Ship Blockers | 13 | ~188 | ~69 | ~15 | ~104 |
+| P1: Ship Blockers | 13 | ~188 | ~70 | ~16 | ~102 |
 | P2: Competitive Parity | 8 | ~50 | 2 | 1 | ~47 |
 | P3: Cutting-Edge | 6 | ~20 | 0 | 2 | ~18 |
 | Parallel Lanes | 3 | 16 | 0 | 0 | 16 |
-| **Total** | **36** | **~281** | **~78** | **~18** | **~185** |
+| **Total** | **36** | **~281** | **~79** | **~19** | **~183** |
 
 **§0 Technical Debt status**: All 7 of 7 items resolved. §0-2 (physics→runtime coupling) resolved via `PhysicsWorldView` abstract interface. §0-3 (engine.cpp decomposition) resolved via `EnginePipeline` class with 13 named stage methods.
 
@@ -1924,6 +1924,6 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 6. Sky, fog, instancing, materials (P1-M6-A/B/C/D) — environment rendering and GPU instancing missing (~15 atomic tasks).
 7. Editor completion (P1-M9-A2/C/D) — reflection inspector, hierarchy panel, asset browser (~12 atomic tasks).
 8. Scene management and streaming (P1-M10-A1/B/C) — transition API, streaming volumes, LOD, save system (~12 atomic tasks).
-9. Shadow optimization (P1-M5-C4) — stable cascade snapping, caching, and shadow LOD remain open.
+9. Shadow optimization (P1-M5-C4) — cascade snapping is implemented; caching and shadow LOD remain open.
 
 **Gap-to-milestone traceability**: Every `[x]`/`[~]`/`[ ]` status code in this document is intended to map 1:1 to an atomic task in `production_engine_milestones.md` and a checkbox in `production_engine_phased_todo.md`. P1-M13 was added here as new master scope and should be mirrored into the supplementary milestone/checklist files before relying on those older documents for execution tracking. This file is the single source of truth — the other two files are supplementary.
