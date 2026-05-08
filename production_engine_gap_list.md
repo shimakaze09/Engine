@@ -562,10 +562,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 > **Exit Criteria** *(all must pass before P1-M5 is closed)*:
 > 1. Deferred shading with G-Buffer debug visualization. **(DONE)**
-> 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — directional shadows pending)**
+> 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — shadow maps implemented; optimization remains P1-M5-C4)**
 > 3. Cascaded shadow maps with PCF soft shadows, no shimmer.
-> 4. Bloom, SSAO, tone mapping (3 operators), auto-exposure, FXAA functional. **(Bloom, SSAO, tonemap, FXAA DONE — auto-exposure pending)**
-> 5. Transparent objects render correctly in forward pass with shadows. **(Partial — forward pass works, shadow sampling pending P1-M5-C)**
+> 4. Bloom, SSAO, tone mapping (3 operators), auto-exposure, FXAA functional. **(DONE — bloom, SSAO, tone mapping, auto-exposure, FXAA)**
+> 5. Transparent objects render correctly in forward pass with shadows. **(Partial — forward pass works; transparent shadow sampling is still incomplete)**
 
 ---
 
@@ -658,11 +658,11 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ---
 
-#### P1-M5-E: Forward Transparency Pass (Sorted, Alpha Blend, PBR) `[x]`
+#### P1-M5-E: Forward Transparency Pass (Sorted, Alpha Blend, PBR) `[~]`
 - `P1-M5-E-a` After deferred pass: collect mesh commands with `opacity < 1.0` and `sortKey.transparent = 1`. `[x]`
 - `P1-M5-E-b` Sort back-to-front by depth (already encoded in `DrawKey`). `[x]`
 - `P1-M5-E-c` Render with alpha blending (`set_blend_func_alpha()`); depth test ON, depth write OFF. `[x]`
-- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[~]` — *Forward transparency PBR pass works; shadow map sampling deferred until P1-M5-C complete.*
+- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[~]` — *Forward transparency PBR pass works; shadow map sampling remains incomplete.*
 
 ---
 
@@ -992,7 +992,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M10-A1c` Transition callbacks: `on_scene_unloaded`, `on_scene_loaded` fired for Lua and C++. `[ ]`
 - `P1-M10-A1d` Loading screen / progress callbacks. `[ ]`
 
-##### P1-M10-A2: Persistent Entity IDs (UUID, Cross-Scene References) `[x]`
+##### P1-M10-A2: Persistent Entity IDs (UUID, Cross-Scene References) `[~]`
 - `P1-M10-A2a` `PersistentId = uint32_t`; FNV-hashed from entity path; never changes after creation. `[x]`
 - `P1-M10-A2b` `World::create_entity_with_persistent_id(pid)`. `[x]`
 - `P1-M10-A2c` `World::find_entity_by_persistent_id(pid)`: O(1) open-addressing hash lookup. `[x]`
@@ -1118,8 +1118,8 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ---
 
-#### P1-M12-A: Platform Abstraction (Windows / Linux / macOS, Filesystem, Save Paths) `[ ]`
-- `P1-M12-A-a` `platform.h` (exists in `core/`) — extend with: `platform_get_save_dir()`, `platform_get_app_dir()`, `platform_get_temp_dir()`. `[ ]`
+#### P1-M12-A: Platform Abstraction (Windows / Linux / macOS, Filesystem, Save Paths) `[~]`
+- `P1-M12-A-a` `platform.h` (exists in `core/`) — extend with: `platform_get_save_dir()`, `platform_get_app_dir()`, `platform_get_temp_dir()`. `[x]` — *Implemented in `core/src/platform.cpp` with normalized buffer-based APIs and `engine_unit_platform_paths` coverage.*
 - `P1-M12-A-b` Platform-aware file dialog (SDL\_ShowOpenFileDialog or native). `[ ]`
 - `P1-M12-A-c` High-DPI awareness: query display scale factor; apply to UI canvas. `[ ]`
 
@@ -1160,6 +1160,96 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M12-G-c` Screenshot regression test: headless render of reference scene; pixel diff against golden image. `[ ]`
 
 ---
+
+### P1-M13: Production Operations, Compatibility, and Project Workflow
+
+**Goal**: Make the engine shippable and maintainable across real projects and releases: versioned data compatibility, project manifests, headless commandlets, content validation, platform asset variants, support diagnostics, release trust, compliance, hardware QA, and editor recovery.
+**Dependencies**: P1-M4, P1-M9, P1-M10, P1-M12.
+**Status**: Entirely not started. Current repo is engine-centric; no project manifest, schema migration framework, commandlet runner, content validation report, signed release pipeline, or support artifact workflow exists.
+
+> **Exit Criteria** *(all must pass before P1-M13 is closed)*:
+> 1. Scene, prefab, save, and asset metadata files are versioned and migrate forward automatically with fixture-based regression tests.
+> 2. A standalone game project can be created, opened in the editor, cooked, validated, packaged, and smoke-tested without modifying engine source.
+> 3. CI can run headless commandlets for cook, validation, packaging, smoke, and documentation generation.
+> 4. Packaged builds include platform-appropriate compressed asset variants, symbol/debug artifacts, license notices, and verifiable checksums/signatures.
+> 5. Released builds can recover from bad user settings, emit crash/hang diagnostics, and pass a defined hardware/driver compatibility matrix.
+
+---
+
+#### P1-M13-A: Versioned Data Compatibility and Migrations `[ ]`
+- `P1-M13-A-a` Embed `schema_version` in scenes, prefabs, save files, project manifests, and asset metadata. `[ ]`
+- `P1-M13-A-b` Add migration registry: each migration upgrades one version step and is deterministic/idempotent. `[ ]`
+- `P1-M13-A-c` Maintain old-format fixture files under `tests/fixtures/compat/`; load them in CI and verify canonical upgraded output. `[ ]`
+- `P1-M13-A-d` Add save-game compatibility policy: supported version window, hard-fail path, and user-facing error for unsupported saves. `[ ]`
+- `P1-M13-A-e` Add Lua API compatibility/deprecation table: deprecated names warn, supported removals require version-gated migration. `[ ]`
+
+#### P1-M13-B: Project Manifest, Templates, and Workspace Layout `[ ]`
+- `P1-M13-B-a` Define `.engineproject` manifest: project name, startup scene, asset roots, script roots, target platforms, and package metadata. `[ ]`
+- `P1-M13-B-b` Add project settings loader with validation and defaulting; no engine source edits required for a game project. `[ ]`
+- `P1-M13-B-c` Add "new project" template with sample scene, script, asset folder, and CI-ready project config. `[ ]`
+- `P1-M13-B-d` Editor project browser: open project, recent projects, missing project recovery, and invalid-manifest diagnostics. `[ ]`
+- `P1-M13-B-e` Separate engine build output, project intermediate/cooked output, and packaged output directories. `[ ]`
+
+#### P1-M13-C: Headless Commandlets for CI and Release Automation `[ ]`
+- `P1-M13-C-a` Add commandlet entry point: `engine_editor_app --commandlet <name> --project <path>` with no editor UI. `[ ]`
+- `P1-M13-C-b` `cook` commandlet: cook all project assets for a target platform and fail on cook errors. `[ ]`
+- `P1-M13-C-c` `validate` commandlet: validate scenes, prefabs, scripts, asset references, import settings, and project manifest. `[ ]`
+- `P1-M13-C-d` `package` commandlet: produce distributable artifacts using cooked project data. `[ ]`
+- `P1-M13-C-e` `smoke` commandlet: boot startup scene for N frames headlessly and return nonzero on errors. `[ ]`
+- `P1-M13-C-f` `generate-docs` commandlet: emit Lua API and project-facing engine API references from bindings/reflection metadata. `[ ]`
+
+#### P1-M13-D: Content Validation and Cook Reports `[ ]`
+- `P1-M13-D-a` Detect missing, stale, or circular asset references across scenes, prefabs, materials, scripts, and metadata. `[ ]`
+- `P1-M13-D-b` Validate material/shader compatibility: missing textures, invalid texture color space, unsupported shader variant, and bad uniform overrides. `[ ]`
+- `P1-M13-D-c` Validate mesh limits: vertex/index count, missing normals/UVs, non-manifold import warnings, and platform-specific size limits. `[ ]`
+- `P1-M13-D-d` Validate texture limits: dimensions, format, mip policy, normal-map flags, sRGB/linear mismatch, and platform compression support. `[ ]`
+- `P1-M13-D-e` Emit machine-readable cook report: asset counts, dependency graph summary, per-type byte size, warnings, errors, and top memory offenders. `[ ]`
+- `P1-M13-D-f` Add CI gate: content warnings can be promoted to errors for release builds. `[ ]`
+
+#### P1-M13-E: Platform Asset Variants and Compression `[ ]`
+- `P1-M13-E-a` Cook desktop texture variants: BC1/BC3/BC5/BC7 where supported, with fallback uncompressed formats. `[ ]`
+- `P1-M13-E-b` Cook mobile texture variants: ASTC and ETC2 profiles, selected by target platform capability. `[ ]`
+- `P1-M13-E-c` Store per-platform cooked asset manifests with content hashes and original-source provenance. `[ ]`
+- `P1-M13-E-d` Add platform-specific import settings overrides: max texture size, mip strategy, mesh LOD stripping, audio codec/quality. `[ ]`
+- `P1-M13-E-e` Verify cooked package contains only target-platform assets and no editor-only/source-only files. `[ ]`
+
+#### P1-M13-F: Support Diagnostics, Crash Dumps, and Runtime Recovery `[ ]`
+- `P1-M13-F-a` Generate minidumps or platform crash dumps alongside textual crash logs. `[ ]`
+- `P1-M13-F-b` Archive PDB/dSYM/debug symbols by build ID; crash report records build ID and symbol lookup path. `[ ]`
+- `P1-M13-F-c` Add hang watchdog: detect main-thread stalls, dump thread stacks, and write diagnostic bundle. `[ ]`
+- `P1-M13-F-d` Structured log rotation: bounded log files with session IDs, build metadata, and last-N-frame markers. `[ ]`
+- `P1-M13-F-e` Diagnostic bundle command: collect logs, config, project manifest, hardware info, recent crash dumps, and renderer info. `[ ]`
+- `P1-M13-F-f` Optional telemetry/crash upload hook with explicit user consent and a no-network default. `[ ]`
+
+#### P1-M13-G: Release Trust, Signing, and Safe Mode `[ ]`
+- `P1-M13-G-a` Windows code signing for executables/installers; CI fails unsigned release artifacts. `[ ]`
+- `P1-M13-G-b` macOS app signing and notarization; packaged app verifies on a clean machine. `[ ]`
+- `P1-M13-G-c` Generate checksums and signed manifest for every release artifact and cooked asset pack. `[ ]`
+- `P1-M13-G-d` Asset pack tamper detection: verify package manifest and content hashes at startup. `[ ]`
+- `P1-M13-G-e` User settings file with versioning, defaults, validation, and corruption recovery. `[ ]`
+- `P1-M13-G-f` Safe mode launch flag: reset graphics settings, disable optional post effects/plugins, and use conservative window mode. `[ ]`
+- `P1-M13-G-g` GPU/display fallback: recover from invalid resolution, missing adapter, unsupported GL capability, or bad fullscreen mode. `[ ]`
+
+#### P1-M13-H: Compliance and Dependency Governance `[ ]`
+- `P1-M13-H-a` Automated third-party license scan; generated notice file included in packaged builds. `[ ]`
+- `P1-M13-H-b` Dependency vulnerability audit in CI for known CVEs where applicable. `[ ]`
+- `P1-M13-H-c` Dependency update policy: scheduled update PRs, changelog review, full CI, and rollback notes. `[ ]`
+- `P1-M13-H-d` Release checklist includes license notices, dependency versions, source obligations, and platform-specific legal metadata. `[ ]`
+
+#### P1-M13-I: Hardware, Driver, and Peripheral QA Matrix `[ ]`
+- `P1-M13-I-a` Define minimum/recommended hardware and OS matrix for Windows, Linux, and macOS. `[ ]`
+- `P1-M13-I-b` Validate GPU vendor matrix: NVIDIA, AMD, Intel integrated/discrete where available. `[ ]`
+- `P1-M13-I-c` High-DPI, multi-monitor, fullscreen/windowed, and display hot-plug smoke tests. `[ ]`
+- `P1-M13-I-d` Audio device hot-plug and default-device switch tests. `[ ]`
+- `P1-M13-I-e` Controller hot-plug, reconnect, remapping, and multiple-controller smoke tests. `[ ]`
+- `P1-M13-I-f` Release candidate checklist records tested hardware, driver versions, failures, and known issues. `[ ]`
+
+#### P1-M13-J: Editor Preferences, Autosave, and Recovery `[ ]`
+- `P1-M13-J-a` Editor preferences file: layout, theme, keybindings, recent projects, recent scenes, and import defaults. `[ ]`
+- `P1-M13-J-b` Dock layout persistence and reset-to-default command. `[ ]`
+- `P1-M13-J-c` Editor keybinding customization with conflict detection and import/export. `[ ]`
+- `P1-M13-J-d` Autosave dirty scenes/prefabs to recovery location without overwriting user files. `[ ]`
+- `P1-M13-J-e` Crash recovery flow: detect autosave/recovery files and prompt to restore or discard on next editor launch. `[ ]`
 
 ---
 
@@ -1457,9 +1547,9 @@ Phase 2 brings the engine to rough feature parity with Godot 4.x. All Phase 1 mu
 
 ---
 
-#### P2-M8-A: Multi-Threaded Rendering (Command Buffer Recording, Parallel Update) `[ ]` **[high]**
-- `P2-M8-A-a` Parallel command buffer recording: split entities across job workers; merge before submit. `[ ]`
-- `P2-M8-A-b` Parallel transform update: `World::update_transforms_range()` already thread-safe — wire to job scheduler. `[ ]`
+#### P2-M8-A: Multi-Threaded Rendering (Command Buffer Recording, Parallel Update) `[~]` **[high]**
+- `P2-M8-A-a` Parallel command buffer recording: split entities across job workers; merge before submit. `[x]` — *Implemented by `RenderPrepPipelineContext` local command buffers, chunk jobs, and merge job.*
+- `P2-M8-A-b` Parallel transform update: `World::update_transforms_range()` already thread-safe — wire to job scheduler. `[x]` — *Implemented by `EnginePipeline::stage_frame_graph()` update chunk jobs.*
 - `P2-M8-A-c` Render thread: dedicated thread consumes command buffer; main thread produces. `[ ]`
 
 #### P2-M8-B: Hierarchical Culling (BVH Frustum Cull, HZB Occlusion Cull) `[ ]` **[high]**
@@ -1525,7 +1615,7 @@ Phase 2 brings the engine to rough feature parity with Godot 4.x. All Phase 1 mu
 
 ---
 
-#### P3-M2-A: RenderDevice Abstraction (GL + Vulkan Backends) `[ ]` **[low]**
+#### P3-M2-A: RenderDevice Abstraction (GL + Vulkan Backends) `[~]` **[low]**
 - `P3-M2-A-a` `RenderDevice` function-pointer table (already exists in `render_device.h`) is the abstraction layer. `[~]` — *Structure exists; Vulkan backend implementation not started.*
 - `P3-M2-A-b` Implement all `RenderDevice` function pointers with Vulkan: vkCreateShaderModule, VkBuffer, VkDescriptorSet. `[ ]`
 - `P3-M2-A-c` Validation layer integration; VMA allocator for GPU memory. `[ ]`
@@ -1796,7 +1886,7 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 
 **Editor Module**
 - [x] ImGui-based editor (play/pause/stop, transform gizmos, `editor_is_playing`, `editor_is_paused`)
-- [x] Command history (undo/redo — partial; transforms confirmed)
+- [~] Command history (undo/redo partial; transforms confirmed)
 - [x] Debug camera (`debug_camera.h`)
 - [x] Editor camera (`editor_camera.h`)
 
@@ -1815,25 +1905,25 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 | Phase | Milestones | Total Gap Items | Complete `[x]` | Partial `[~]` | Not Started `[ ]` |
 |-------|-----------|-----------------|----------------|---------------|-------------------|
 | §0 Technical Debt | 6 | 7 | 7 | 0 | 0 |
-| P1: Ship Blockers | 12 | ~133 | ~70 | ~12 | ~51 |
-| P2: Competitive Parity | 8 | ~50 | 0 | 0 | ~50 |
-| P3: Cutting-Edge | 6 | ~20 | 0 | 1 | ~19 |
+| P1: Ship Blockers | 13 | ~188 | ~69 | ~15 | ~104 |
+| P2: Competitive Parity | 8 | ~50 | 2 | 1 | ~47 |
+| P3: Cutting-Edge | 6 | ~20 | 0 | 2 | ~18 |
 | Parallel Lanes | 3 | 16 | 0 | 0 | 16 |
-| **Total** | **35** | **~226** | **~77** | **~13** | **~136** |
+| **Total** | **36** | **~281** | **~78** | **~18** | **~185** |
 
 **§0 Technical Debt status**: All 7 of 7 items resolved. §0-2 (physics→runtime coupling) resolved via `PhysicsWorldView` abstract interface. §0-3 (engine.cpp decomposition) resolved via `EnginePipeline` class with 13 named stage methods.
 
-**P1 completion estimate**: ~53% of ship-blocker items are production-ready (up from ~44% at previous audit). The major completed clusters are: CI/build infrastructure, physics (all colliders + solver + queries + CCD), asset pipeline (all of M4), scripting (lifecycle + coroutines + DAP + sandbox + hot-reload + bindgen), World/ECS foundational systems (lifecycle, pooling, game mode, camera, timer, input), deferred rendering infrastructure (G-buffer, deferred lighting, tiled culling, GPU profiler), **and post-processing (bloom, SSAO, FXAA, tone mapping with 3 operators)**.
+**P1 completion estimate**: ~37% of ship-blocker items are production-ready after adding P1-M13 production operations and compatibility scope. The major completed clusters are: CI/build infrastructure, physics (all colliders + solver + queries + CCD), asset pipeline (all of M4), scripting (lifecycle + coroutines + DAP + sandbox + hot-reload + bindgen), World/ECS foundational systems (lifecycle, pooling, game mode, camera, timer, input), deferred rendering infrastructure (G-buffer, deferred lighting, tiled culling, GPU profiler), shadow rendering foundations, platform save/app/temp path helpers, and post-processing (bloom, SSAO, auto-exposure, FXAA, tone mapping with 3 operators).
 
 **Largest remaining P1 gaps by work volume** (in order):
-1. Animation system (P1-M7) — zero implementation; entire subsystem missing (~20 atomic tasks).
-2. Game UI runtime (P1-M11) — zero implementation; entire subsystem missing (~15 atomic tasks).
-3. Shadow maps (P1-M5-C) — deferred lighting is ready but no shadow depth passes (~10 atomic tasks).
-4. Audio advanced features (P1-M8 A/B/C/D) — only basic playback exists (~15 atomic tasks).
-5. Editor completion (P1-M9-A2/C/D) — reflection inspector, hierarchy panel, asset browser (~12 atomic tasks).
-6. Platform / packaging (P1-M12) — zero implementation (~15 atomic tasks).
-7. Sky, fog, instancing, materials (P1-M6-A/B/C/D) — environment rendering and GPU instancing missing (~15 atomic tasks).
+1. Production operations and compatibility (P1-M13) — zero implementation; project workflow, commandlets, migrations, validation, diagnostics, signing, compliance, hardware QA, and editor recovery missing (~55 atomic tasks).
+2. Animation system (P1-M7) — zero implementation; entire subsystem missing (~20 atomic tasks).
+3. Game UI runtime (P1-M11) — zero implementation; entire subsystem missing (~15 atomic tasks).
+4. Platform / packaging (P1-M12) — platform path helpers started; file dialogs, quality settings, packaging, config, and crash reporting remain (~14 atomic tasks).
+5. Audio advanced features (P1-M8 A/B/C/D) — only basic playback exists (~15 atomic tasks).
+6. Sky, fog, instancing, materials (P1-M6-A/B/C/D) — environment rendering and GPU instancing missing (~15 atomic tasks).
+7. Editor completion (P1-M9-A2/C/D) — reflection inspector, hierarchy panel, asset browser (~12 atomic tasks).
 8. Scene management and streaming (P1-M10-A1/B/C) — transition API, streaming volumes, LOD, save system (~12 atomic tasks).
-9. Auto-exposure (P1-M5-D4d) — luminance histogram or progressive averaging not implemented.
+9. Shadow optimization (P1-M5-C4) — stable cascade snapping, caching, and shadow LOD remain open.
 
-**Gap-to-milestone traceability**: Every `[x]`/`[~]`/`[ ]` status code in this document maps 1:1 to an atomic task in production_engine_milestones.md and a checkbox in production_engine_phased_todo.md. This file is the single source of truth — the other two files are supplementary.
+**Gap-to-milestone traceability**: Every `[x]`/`[~]`/`[ ]` status code in this document is intended to map 1:1 to an atomic task in `production_engine_milestones.md` and a checkbox in `production_engine_phased_todo.md`. P1-M13 was added here as new master scope and should be mirrored into the supplementary milestone/checklist files before relying on those older documents for execution tracking. This file is the single source of truth — the other two files are supplementary.

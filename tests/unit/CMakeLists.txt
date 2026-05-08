@@ -392,6 +392,15 @@ engine_add_test_executable(engine_unit_auto_exposure
     engine_math
 )
 
+# ---- P1-M12-A: Platform Paths ----
+
+engine_add_test_executable(engine_unit_platform_paths
+    SOURCES
+    platform_paths_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 # ---- §0-3: Engine Pipeline Decomposition ----
 
 engine_add_test_executable(engine_unit_engine_pipeline
