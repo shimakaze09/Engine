@@ -63,6 +63,14 @@ namespace {
 #define GL_TEXTURE_2D 0x0DE1
 #endif
 
+#ifndef GL_TEXTURE_CUBE_MAP
+#define GL_TEXTURE_CUBE_MAP 0x8513
+#endif
+
+#ifndef GL_TEXTURE_CUBE_MAP_POSITIVE_X
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X 0x8515
+#endif
+
 #ifndef GL_TEXTURE0
 #define GL_TEXTURE0 0x84C0
 #endif
@@ -73,6 +81,10 @@ namespace {
 
 #ifndef GL_TEXTURE_WRAP_T
 #define GL_TEXTURE_WRAP_T 0x2803
+#endif
+
+#ifndef GL_TEXTURE_WRAP_R
+#define GL_TEXTURE_WRAP_R 0x8072
 #endif
 
 #ifndef GL_TEXTURE_MIN_FILTER
@@ -284,9 +296,9 @@ using GlFramebufferTexture2DProc = void(APIENTRYP)(GLenum, GLenum, GLenum,
                                                    GLuint, GLint);
 using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
 using GlDrawBuffersProc = void(APIENTRYP)(GLsizei, const GLenum *);
-using GlBlitFramebufferProc = void(APIENTRYP)(GLint, GLint, GLint, GLint,
-                                              GLint, GLint, GLint, GLint,
-                                              GLbitfield, GLenum);
+using GlBlitFramebufferProc = void(APIENTRYP)(GLint, GLint, GLint, GLint, GLint,
+                                              GLint, GLint, GLint, GLbitfield,
+                                              GLenum);
 using GlTexSubImage2DProc = void(APIENTRYP)(GLenum, GLint, GLint, GLint,
                                             GLsizei, GLsizei, GLenum, GLenum,
                                             const void *);
@@ -718,6 +730,45 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
   return static_cast<std::uint32_t>(tex);
 }
 
+std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
+                                    std::int32_t channels,
+                                    const float *const facePixels[6]) noexcept {
+  if (faceSize <= 0) {
+    return 0U;
+  }
+
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  GLenum format = GL_RGBA;
+  GLint internalFormat = GL_RGBA16F;
+  if (channels == 3) {
+    format = GL_RGB;
+    internalFormat = GL_RGB16F;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  for (int face = 0; face < 6; ++face) {
+    const float *pixels = (facePixels != nullptr) ? facePixels[face] : nullptr;
+    g_gl.texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+                    0, internalFormat, static_cast<GLsizei>(faceSize),
+                    static_cast<GLsizei>(faceSize), 0, format, GL_FLOAT,
+                    pixels);
+  }
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+                     GL_LINEAR_MIPMAP_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  g_gl.generateMipmap(GL_TEXTURE_CUBE_MAP);
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
 std::uint32_t gl_create_depth_texture(std::int32_t width,
                                       std::int32_t height) noexcept {
   GLuint tex = 0U;
@@ -1023,6 +1074,7 @@ bool initialize_render_device() noexcept {
   g_device.set_uniform_vec4 = &gl_set_uniform_vec4;
   g_device.create_texture_2d = &gl_create_texture_2d;
   g_device.create_texture_2d_hdr = &gl_create_texture_2d_hdr;
+  g_device.create_cubemap_hdr = &gl_create_cubemap_hdr;
   g_device.create_depth_texture = &gl_create_depth_texture;
   g_device.destroy_texture = &gl_destroy_texture;
   g_device.bind_texture = &gl_bind_texture;

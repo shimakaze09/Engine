@@ -58,6 +58,13 @@ int check_invalid_handle() {
     return 33;
   }
 
+  const bool cubemap = engine::renderer::is_texture_cubemap(
+      engine::renderer::kInvalidTextureHandle);
+  if (cubemap) {
+    engine::renderer::shutdown_texture_system();
+    return 34;
+  }
+
   // Unloading invalid handle should not crash.
   engine::renderer::unload_texture(engine::renderer::kInvalidTextureHandle);
 
@@ -97,6 +104,30 @@ int check_texture_asset_database() {
   return 0;
 }
 
+int check_cubemap_invalid_args() {
+  const bool initOk = engine::renderer::initialize_texture_system();
+  if (!initOk) {
+    return 61;
+  }
+
+  engine::renderer::TextureHandle handle =
+      engine::renderer::load_hdr_equirect_cubemap(nullptr, 64);
+  if (handle != engine::renderer::kInvalidTextureHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 62;
+  }
+
+  handle = engine::renderer::load_hdr_equirect_cubemap(
+      "assets/textures/test.hdr", 0);
+  if (handle != engine::renderer::kInvalidTextureHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 63;
+  }
+
+  engine::renderer::shutdown_texture_system();
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -121,6 +152,11 @@ int main() {
   }
 
   result = check_texture_asset_database();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_cubemap_invalid_args();
   if (result != 0) {
     return result;
   }

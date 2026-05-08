@@ -73,12 +73,15 @@ struct RenderDevice final {
                                          std::int32_t height,
                                          std::int32_t channels,
                                          const float *data) noexcept = nullptr;
+  std::uint32_t (*create_cubemap_hdr)(
+      std::int32_t faceSize, std::int32_t channels,
+      const float *const facePixels[6]) noexcept = nullptr;
   std::uint32_t (*create_depth_texture)(std::int32_t width,
                                         std::int32_t height) noexcept = nullptr;
   void (*destroy_texture)(std::uint32_t id) noexcept = nullptr;
   void (*bind_texture)(std::int32_t unit, std::uint32_t id) noexcept = nullptr;
 
-  // Cubemap textures (for point light shadows).
+  // Cubemap textures.
   std::uint32_t (*create_depth_cubemap)(std::int32_t faceSize) noexcept =
       nullptr;
   void (*bind_texture_cubemap)(std::int32_t unit,
@@ -96,8 +99,8 @@ struct RenderDevice final {
   void (*bind_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   bool (*check_framebuffer_complete)() noexcept = nullptr;
   void (*blit_depth)(std::uint32_t srcFbo, std::uint32_t dstFbo,
-                     std::int32_t width, std::int32_t height) noexcept =
-      nullptr;
+                     std::int32_t width,
+                     std::int32_t height) noexcept = nullptr;
 
   // Textures — single-channel float (R32F).
   std::uint32_t (*create_texture_2d_r32f)(std::int32_t width,
