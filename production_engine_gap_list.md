@@ -562,10 +562,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 > **Exit Criteria** *(all must pass before P1-M5 is closed)*:
 > 1. Deferred shading with G-Buffer debug visualization. **(DONE)**
-> 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — shadow maps and optimization implemented; transparent forward shadow sampling remains P1-M5-E-d)**
-> 3. Cascaded shadow maps with PCF soft shadows, no shimmer.
+> 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — deferred and forward PBR paths bind matching light/shadow data)**
+> 3. Cascaded shadow maps with PCF soft shadows, no shimmer. **(DONE — stable cascades, cache, and LOD implemented)**
 > 4. Bloom, SSAO, tone mapping (3 operators), auto-exposure, FXAA functional. **(DONE — bloom, SSAO, tone mapping, auto-exposure, FXAA)**
-> 5. Transparent objects render correctly in forward pass with shadows. **(Partial — forward PBR shadow sampling is implemented; deferred-to-forward depth handoff remains P1-M5-E-e)**
+> 5. Transparent objects render correctly in forward pass with shadows. **(DONE — forward transparent pass samples shadows and depth-tests against copied deferred depth)**
 
 ---
 
@@ -658,12 +658,12 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ---
 
-#### P1-M5-E: Forward Transparency Pass (Sorted, Alpha Blend, PBR) `[~]`
+#### P1-M5-E: Forward Transparency Pass (Sorted, Alpha Blend, PBR) `[x]`
 - `P1-M5-E-a` After deferred pass: collect mesh commands with `opacity < 1.0` and `sortKey.transparent = 1`. `[x]`
 - `P1-M5-E-b` Sort back-to-front by depth (already encoded in `DrawKey`). `[x]`
 - `P1-M5-E-c` Render with alpha blending (`set_blend_func_alpha()`); depth test ON, depth write OFF. `[x]`
 - `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[x]` — *Forward PBR now binds directional cascade, spot, and point shadow maps; the shader samples shadows with GLSL-330-safe constant sampler access, applies material opacity, and keeps deferred shadow PCF sampler access valid.*
-- `P1-M5-E-e` Deferred-to-forward depth handoff: before drawing transparent geometry after deferred lighting, copy or share the G-buffer depth into the scene HDR FBO depth attachment so transparent objects depth-test against opaque deferred geometry. `[ ]`
+- `P1-M5-E-e` Deferred-to-forward depth handoff: before drawing transparent geometry after deferred lighting, copy or share the G-buffer depth into the scene HDR FBO depth attachment so transparent objects depth-test against opaque deferred geometry. `[x]` — *RenderDevice exposes `blit_depth`; GL backend uses `glBlitFramebuffer` from G-buffer FBO to scene FBO before the deferred transparent pass rebinds scene color for forward PBR drawing.*
 
 ---
 

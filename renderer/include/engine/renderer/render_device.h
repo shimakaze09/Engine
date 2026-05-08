@@ -95,6 +95,9 @@ struct RenderDevice final {
   void (*destroy_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   void (*bind_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   bool (*check_framebuffer_complete)() noexcept = nullptr;
+  void (*blit_depth)(std::uint32_t srcFbo, std::uint32_t dstFbo,
+                     std::int32_t width, std::int32_t height) noexcept =
+      nullptr;
 
   // Textures — single-channel float (R32F).
   std::uint32_t (*create_texture_2d_r32f)(std::int32_t width,

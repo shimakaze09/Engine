@@ -115,6 +115,18 @@ namespace {
 #define GL_FRAMEBUFFER 0x8D40
 #endif
 
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+
+#ifndef GL_DEPTH_BUFFER_BIT
+#define GL_DEPTH_BUFFER_BIT 0x00000100
+#endif
+
 #ifndef GL_COLOR_ATTACHMENT0
 #define GL_COLOR_ATTACHMENT0 0x8CE0
 #endif
@@ -272,6 +284,9 @@ using GlFramebufferTexture2DProc = void(APIENTRYP)(GLenum, GLenum, GLenum,
                                                    GLuint, GLint);
 using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
 using GlDrawBuffersProc = void(APIENTRYP)(GLsizei, const GLenum *);
+using GlBlitFramebufferProc = void(APIENTRYP)(GLint, GLint, GLint, GLint,
+                                              GLint, GLint, GLint, GLint,
+                                              GLbitfield, GLenum);
 using GlTexSubImage2DProc = void(APIENTRYP)(GLenum, GLint, GLint, GLint,
                                             GLsizei, GLsizei, GLenum, GLenum,
                                             const void *);
@@ -347,6 +362,7 @@ struct GlTable final {
   GlFramebufferTexture2DProc framebufferTexture2D = nullptr;
   GlCheckFramebufferStatusProc checkFramebufferStatus = nullptr;
   GlDrawBuffersProc drawBuffers = nullptr;
+  GlBlitFramebufferProc blitFramebuffer = nullptr;
   GlTexSubImage2DProc texSubImage2D = nullptr;
 
   // Blend
@@ -423,6 +439,7 @@ bool load_all_gl_functions() noexcept {
          load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D") &&
          load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus") &&
          load_proc(&g_gl.drawBuffers, "glDrawBuffers") &&
+         load_proc(&g_gl.blitFramebuffer, "glBlitFramebuffer") &&
          load_proc(&g_gl.texSubImage2D, "glTexSubImage2D") &&
          load_proc(&g_gl.blendFunc, "glBlendFunc") &&
          load_proc(&g_gl.depthMask, "glDepthMask") &&
@@ -812,6 +829,20 @@ bool gl_check_framebuffer_complete() noexcept {
   return g_gl.checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
+void gl_blit_depth(std::uint32_t srcFbo, std::uint32_t dstFbo,
+                   std::int32_t width, std::int32_t height) noexcept {
+  if ((srcFbo == 0U) || (dstFbo == 0U) || (width <= 0) || (height <= 0)) {
+    return;
+  }
+
+  g_gl.bindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(srcFbo));
+  g_gl.bindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(dstFbo));
+  g_gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                       GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+  g_gl.bindFramebuffer(GL_READ_FRAMEBUFFER, 0U);
+  g_gl.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0U);
+}
+
 std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
                                         std::int32_t colorCount,
                                         std::uint32_t depthTex) noexcept {
@@ -1003,6 +1034,7 @@ bool initialize_render_device() noexcept {
   g_device.destroy_framebuffer = &gl_destroy_framebuffer;
   g_device.bind_framebuffer = &gl_bind_framebuffer;
   g_device.check_framebuffer_complete = &gl_check_framebuffer_complete;
+  g_device.blit_depth = &gl_blit_depth;
   g_device.enable_blending = &gl_enable_blending;
   g_device.disable_blending = &gl_disable_blending;
   g_device.set_blend_func_alpha = &gl_set_blend_func_alpha;

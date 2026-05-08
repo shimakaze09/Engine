@@ -2513,9 +2513,14 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_framebuffer(sceneFbo);
       dev->enable_depth_test();
 
-      // Copy G-Buffer depth to scene FBO depth (they share same dimensions).
-      // For now, transparent objects render without depth test against opaques
-      // in the deferred path (limitation: no G-Buffer depth blit available).
+      // Carry opaque deferred depth into the scene FBO so forward transparent
+      // draws depth-test against G-Buffer geometry.
+      if (dev->blit_depth != nullptr) {
+        const std::uint32_t gbufferFbo =
+            pass_resource_framebuffer(passRes.gbufferAlbedo);
+        dev->blit_depth(gbufferFbo, sceneFbo, drawableWidth, drawableHeight);
+        dev->bind_framebuffer(sceneFbo);
+      }
       dev->bind_program(backend.pbrProgram);
 
       // Re-upload forward PBR camera/lights for transparent pass.
