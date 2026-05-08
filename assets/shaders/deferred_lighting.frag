@@ -159,6 +159,27 @@ float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
     return shadow / 9.0;
 }
 
+float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
+    if (cascadeIdx == 0) return sample_shadow_pcf(uShadowMap[0], projCoords);
+    if (cascadeIdx == 1) return sample_shadow_pcf(uShadowMap[1], projCoords);
+    if (cascadeIdx == 2) return sample_shadow_pcf(uShadowMap[2], projCoords);
+    return sample_shadow_pcf(uShadowMap[3], projCoords);
+}
+
+float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
+    if (shadowIdx == 0) return sample_shadow_pcf(uSpotShadowMap[0], projCoords);
+    if (shadowIdx == 1) return sample_shadow_pcf(uSpotShadowMap[1], projCoords);
+    if (shadowIdx == 2) return sample_shadow_pcf(uSpotShadowMap[2], projCoords);
+    return sample_shadow_pcf(uSpotShadowMap[3], projCoords);
+}
+
+float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
+    if (shadowIdx == 0) return texture(uPointShadowMap[0], sampleVector).r;
+    if (shadowIdx == 1) return texture(uPointShadowMap[1], sampleVector).r;
+    if (shadowIdx == 2) return texture(uPointShadowMap[2], sampleVector).r;
+    return texture(uPointShadowMap[3], sampleVector).r;
+}
+
 // Compute shadow factor for a world position using CSM.
 float compute_shadow(vec3 worldPos, float depth) {
     if (uShadowEnabled == 0) return 1.0;
@@ -180,7 +201,7 @@ float compute_shadow(vec3 worldPos, float depth) {
     projCoords = projCoords * 0.5 + 0.5; // [-1,1] → [0,1]
 
     // Blend between cascades at the boundary to reduce seams.
-    float shadow = sample_shadow_pcf(uShadowMap[cascadeIdx], projCoords);
+    float shadow = sample_directional_shadow_pcf(cascadeIdx, projCoords);
 
     // Cascade blending: blend with next cascade near the split boundary.
     float blendFactor = 0.0;
@@ -189,7 +210,7 @@ float compute_shadow(vec3 worldPos, float depth) {
         vec4 nextShadowCoord = uShadowMatrix[cascadeIdx + 1] * vec4(worldPos, 1.0);
         vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
         nextProjCoords = nextProjCoords * 0.5 + 0.5;
-        float nextShadow = sample_shadow_pcf(uShadowMap[cascadeIdx + 1], nextProjCoords);
+        float nextShadow = sample_directional_shadow_pcf(cascadeIdx + 1, nextProjCoords);
         blendFactor = (viewDepth - (uCascadeSplit[cascadeIdx] - blendRange)) / blendRange;
         shadow = mix(shadow, nextShadow, clamp(blendFactor, 0.0, 1.0));
     }
@@ -209,7 +230,7 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
         projCoords = projCoords * 0.5 + 0.5;
 
         if (projCoords.z > 1.0) return 1.0;
-        return sample_shadow_pcf(uSpotShadowMap[s], projCoords);
+        return sample_spot_shadow_pcf(s, projCoords);
     }
 
     return 1.0; // No shadow slot for this light.
@@ -239,8 +260,8 @@ float compute_point_shadow(vec3 worldPos, int lightIdx) {
         float diskRadius = 0.02;
         float bias = 0.005;
         for (int i = 0; i < 20; ++i) {
-            float closestDepth = texture(uPointShadowMap[s],
-                fragToLight + sampleOffsets[i] * diskRadius).r;
+            float closestDepth = sample_point_shadow_depth(
+                s, fragToLight + sampleOffsets[i] * diskRadius);
             shadow += (normalizedDist - bias > closestDepth) ? 0.0 : 1.0;
         }
         return shadow / 20.0;

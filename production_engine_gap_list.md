@@ -565,7 +565,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 > 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — shadow maps and optimization implemented; transparent forward shadow sampling remains P1-M5-E-d)**
 > 3. Cascaded shadow maps with PCF soft shadows, no shimmer.
 > 4. Bloom, SSAO, tone mapping (3 operators), auto-exposure, FXAA functional. **(DONE — bloom, SSAO, tone mapping, auto-exposure, FXAA)**
-> 5. Transparent objects render correctly in forward pass with shadows. **(Partial — forward pass works; transparent shadow sampling is still incomplete)**
+> 5. Transparent objects render correctly in forward pass with shadows. **(Partial — forward PBR shadow sampling is implemented; deferred-to-forward depth handoff remains P1-M5-E-e)**
 
 ---
 
@@ -662,7 +662,8 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-E-a` After deferred pass: collect mesh commands with `opacity < 1.0` and `sortKey.transparent = 1`. `[x]`
 - `P1-M5-E-b` Sort back-to-front by depth (already encoded in `DrawKey`). `[x]`
 - `P1-M5-E-c` Render with alpha blending (`set_blend_func_alpha()`); depth test ON, depth write OFF. `[x]`
-- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[~]` — *Forward transparency PBR pass works; shadow map sampling remains incomplete.*
+- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[x]` — *Forward PBR now binds directional cascade, spot, and point shadow maps; the shader samples shadows with GLSL-330-safe constant sampler access, applies material opacity, and keeps deferred shadow PCF sampler access valid.*
+- `P1-M5-E-e` Deferred-to-forward depth handoff: before drawing transparent geometry after deferred lighting, copy or share the G-buffer depth into the scene HDR FBO depth attachment so transparent objects depth-test against opaque deferred geometry. `[ ]`
 
 ---
 

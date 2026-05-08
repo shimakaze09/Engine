@@ -37,6 +37,8 @@ constexpr float kClearGreen = 0.28F;
 constexpr float kClearBlue = 0.60F;
 constexpr std::uint64_t kFnv1a64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv1a64Prime = 1099511628211ULL;
+constexpr std::size_t kForwardMaxPointLights = 8U;
+constexpr std::size_t kForwardMaxSpotLights = 8U;
 
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
@@ -72,6 +74,8 @@ struct BackendState final {
   std::int32_t pbrCameraPosLocation = -1;
   std::int32_t pbrHasAlbedoTextureLocation = -1;
   std::int32_t pbrAlbedoMapLocation = -1;
+  std::int32_t pbrOpacityLocation = -1;
+  std::int32_t pbrViewLocation = -1;
 
   // Directional lights.
   std::int32_t pbrDirLightCountLocation = -1;
@@ -81,9 +85,35 @@ struct BackendState final {
 
   // Point lights.
   std::int32_t pbrPointLightCountLocation = -1;
-  std::array<std::int32_t, kMaxPointLights> pbrPointLightPos{};
-  std::array<std::int32_t, kMaxPointLights> pbrPointLightColor{};
-  std::array<std::int32_t, kMaxPointLights> pbrPointLightIntensity{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightPos{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightColor{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightIntensity{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightRadius{};
+
+  // Spot lights.
+  std::int32_t pbrSpotLightCountLocation = -1;
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightPos{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightDir{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightColor{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightIntensity{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightRadius{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightInnerCone{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightOuterCone{};
+
+  // PBR forward shadow uniforms.
+  std::int32_t pbrShadowEnabledLoc = -1;
+  std::array<std::int32_t, kShadowCascadeCount> pbrShadowMapLocs{};
+  std::array<std::int32_t, kShadowCascadeCount> pbrShadowMatrixLocs{};
+  std::array<std::int32_t, kShadowCascadeCount> pbrCascadeSplitLocs{};
+  std::int32_t pbrSpotShadowEnabledLoc = -1;
+  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowMapLocs{};
+  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowMatrixLocs{};
+  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowLightIdxLocs{};
+  std::int32_t pbrPointShadowEnabledLoc = -1;
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowMapLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowLightPosLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowFarPlaneLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowLightIdxLocs{};
 
   // Tonemap shader.
   ShaderProgramHandle tonemapShaderHandle{};
@@ -324,7 +354,7 @@ void resolve_pbr_light_uniforms(BackendState &backend,
 
   backend.pbrPointLightCountLocation =
       dev->uniform_location(prog, "u_pointLightCount");
-  for (std::size_t i = 0U; i < kMaxPointLights; ++i) {
+  for (std::size_t i = 0U; i < kForwardMaxPointLights; ++i) {
     char name[64] = {};
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].position", i);
     backend.pbrPointLightPos[i] = dev->uniform_location(prog, name);
@@ -332,12 +362,262 @@ void resolve_pbr_light_uniforms(BackendState &backend,
     backend.pbrPointLightColor[i] = dev->uniform_location(prog, name);
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].intensity", i);
     backend.pbrPointLightIntensity[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_pointLights[%zu].radius", i);
+    backend.pbrPointLightRadius[i] = dev->uniform_location(prog, name);
     if ((backend.pbrPointLightPos[i] < 0) ||
         (backend.pbrPointLightColor[i] < 0) ||
-        (backend.pbrPointLightIntensity[i] < 0)) {
+        (backend.pbrPointLightIntensity[i] < 0) ||
+        (backend.pbrPointLightRadius[i] < 0)) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "PBR shader missing point light uniforms at "
                         "index — lights will be invisible");
+    }
+  }
+
+  backend.pbrSpotLightCountLocation =
+      dev->uniform_location(prog, "u_spotLightCount");
+  for (std::size_t i = 0U; i < kForwardMaxSpotLights; ++i) {
+    char name[64] = {};
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].position", i);
+    backend.pbrSpotLightPos[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].direction", i);
+    backend.pbrSpotLightDir[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].color", i);
+    backend.pbrSpotLightColor[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].intensity", i);
+    backend.pbrSpotLightIntensity[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].radius", i);
+    backend.pbrSpotLightRadius[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].innerCone", i);
+    backend.pbrSpotLightInnerCone[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].outerCone", i);
+    backend.pbrSpotLightOuterCone[i] = dev->uniform_location(prog, name);
+  }
+}
+
+void resolve_pbr_shadow_uniforms(BackendState &backend,
+                                 const RenderDevice *dev) noexcept {
+  const std::uint32_t prog = backend.pbrProgram;
+  char name[64] = {};
+
+  backend.pbrShadowEnabledLoc =
+      dev->uniform_location(prog, "uShadowEnabled");
+  for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
+    std::snprintf(name, sizeof(name), "uShadowMap[%zu]", i);
+    backend.pbrShadowMapLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uShadowMatrix[%zu]", i);
+    backend.pbrShadowMatrixLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uCascadeSplit[%zu]", i);
+    backend.pbrCascadeSplitLocs[i] = dev->uniform_location(prog, name);
+  }
+
+  backend.pbrSpotShadowEnabledLoc =
+      dev->uniform_location(prog, "uSpotShadowEnabled");
+  for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
+    std::snprintf(name, sizeof(name), "uSpotShadowMap[%zu]", i);
+    backend.pbrSpotShadowMapLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uSpotShadowMatrix[%zu]", i);
+    backend.pbrSpotShadowMatrixLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uSpotShadowLightIdx[%zu]", i);
+    backend.pbrSpotShadowLightIdxLocs[i] = dev->uniform_location(prog, name);
+  }
+
+  backend.pbrPointShadowEnabledLoc =
+      dev->uniform_location(prog, "uPointShadowEnabled");
+  for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+    std::snprintf(name, sizeof(name), "uPointShadowMap[%zu]", i);
+    backend.pbrPointShadowMapLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uPointShadowLightPos[%zu]", i);
+    backend.pbrPointShadowLightPosLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uPointShadowFarPlane[%zu]", i);
+    backend.pbrPointShadowFarPlaneLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uPointShadowLightIdx[%zu]", i);
+    backend.pbrPointShadowLightIdxLocs[i] = dev->uniform_location(prog, name);
+  }
+}
+
+void upload_pbr_lighting_uniforms(const BackendState &backend,
+                                  const RenderDevice *dev,
+                                  const SceneLightData &lights) noexcept {
+  const std::size_t dirCount =
+      std::min(lights.directionalLightCount, kMaxDirectionalLights);
+  if (backend.pbrDirLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrDirLightCountLocation,
+                         static_cast<std::int32_t>(dirCount));
+  }
+  for (std::size_t i = 0U; i < dirCount; ++i) {
+    const auto &dl = lights.directionalLights[i];
+    if (backend.pbrDirLightDir[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
+    }
+    if (backend.pbrDirLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
+    }
+    if (backend.pbrDirLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
+    }
+  }
+
+  const std::size_t pointCount =
+      std::min(lights.pointLightCount, kForwardMaxPointLights);
+  if (backend.pbrPointLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrPointLightCountLocation,
+                         static_cast<std::int32_t>(pointCount));
+  }
+  for (std::size_t i = 0U; i < pointCount; ++i) {
+    const auto &pl = lights.pointLights[i];
+    if (backend.pbrPointLightPos[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
+    }
+    if (backend.pbrPointLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
+    }
+    if (backend.pbrPointLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrPointLightIntensity[i], pl.intensity);
+    }
+    if (backend.pbrPointLightRadius[i] >= 0) {
+      dev->set_uniform_float(backend.pbrPointLightRadius[i], pl.radius);
+    }
+  }
+
+  const std::size_t spotCount =
+      std::min(lights.spotLightCount, kForwardMaxSpotLights);
+  if (backend.pbrSpotLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrSpotLightCountLocation,
+                         static_cast<std::int32_t>(spotCount));
+  }
+  for (std::size_t i = 0U; i < spotCount; ++i) {
+    const auto &sl = lights.spotLights[i];
+    if (backend.pbrSpotLightPos[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrSpotLightPos[i], &sl.position.x);
+    }
+    if (backend.pbrSpotLightDir[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrSpotLightDir[i], &sl.direction.x);
+    }
+    if (backend.pbrSpotLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrSpotLightColor[i], &sl.color.x);
+    }
+    if (backend.pbrSpotLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightIntensity[i], sl.intensity);
+    }
+    if (backend.pbrSpotLightRadius[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightRadius[i], sl.radius);
+    }
+    if (backend.pbrSpotLightInnerCone[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightInnerCone[i],
+                             sl.innerConeAngle);
+    }
+    if (backend.pbrSpotLightOuterCone[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightOuterCone[i],
+                             sl.outerConeAngle);
+    }
+  }
+}
+
+void bind_pbr_shadow_uniforms(const BackendState &backend,
+                              const RenderDevice *dev,
+                              const SceneLightData &lights,
+                              bool shadowEnabled, bool spotShadowEnabled,
+                              bool pointShadowEnabled) noexcept {
+  if ((dev == nullptr) || (dev->set_uniform_int == nullptr)) {
+    return;
+  }
+
+  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+    const int texUnit = 6 + static_cast<int>(c);
+    if (shadowEnabled) {
+      dev->bind_texture(texUnit, backend.shadowState.depthTextures[c]);
+    }
+    if (backend.pbrShadowMapLocs[c] >= 0) {
+      dev->set_uniform_int(backend.pbrShadowMapLocs[c], texUnit);
+    }
+    if (backend.pbrShadowMatrixLocs[c] >= 0) {
+      dev->set_uniform_mat4(
+          backend.pbrShadowMatrixLocs[c],
+          &backend.shadowState.cascades[c].lightViewProjection.columns[0].x);
+    }
+    if (backend.pbrCascadeSplitLocs[c] >= 0) {
+      dev->set_uniform_float(backend.pbrCascadeSplitLocs[c],
+                             backend.shadowState.cascades[c].splitDistance);
+    }
+  }
+  if (backend.pbrShadowEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
+  }
+
+  for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
+    const auto &slot = backend.spotShadowState.slots[s];
+    const int texUnit = 10 + static_cast<int>(s);
+    if (spotShadowEnabled) {
+      dev->bind_texture(texUnit, slot.depthTexture);
+    }
+    if (backend.pbrSpotShadowMapLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrSpotShadowMapLocs[s], texUnit);
+    }
+    if (backend.pbrSpotShadowMatrixLocs[s] >= 0) {
+      dev->set_uniform_mat4(backend.pbrSpotShadowMatrixLocs[s],
+                            &slot.lightViewProjection.columns[0].x);
+    }
+    if (backend.pbrSpotShadowLightIdxLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrSpotShadowLightIdxLocs[s],
+                           slot.lightIndex);
+    }
+  }
+  if (backend.pbrSpotShadowEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrSpotShadowEnabledLoc,
+                         spotShadowEnabled ? 1 : 0);
+  }
+
+  const math::Vec3 zero{};
+  for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+    const auto &slot = backend.pointShadowState.slots[s];
+    const int texUnit = 14 + static_cast<int>(s);
+    if (pointShadowEnabled && (dev->bind_texture_cubemap != nullptr)) {
+      dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
+    }
+    if (backend.pbrPointShadowMapLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrPointShadowMapLocs[s], texUnit);
+    }
+    if (backend.pbrPointShadowLightPosLocs[s] >= 0) {
+      const bool validLight =
+          (slot.lightIndex >= 0) &&
+          (static_cast<std::size_t>(slot.lightIndex) < lights.pointLightCount);
+      const math::Vec3 &lightPos =
+          validLight ? lights.pointLights[static_cast<std::size_t>(
+                                           slot.lightIndex)]
+                           .position
+                     : zero;
+      dev->set_uniform_vec3(backend.pbrPointShadowLightPosLocs[s],
+                            &lightPos.x);
+    }
+    if (backend.pbrPointShadowFarPlaneLocs[s] >= 0) {
+      dev->set_uniform_float(backend.pbrPointShadowFarPlaneLocs[s],
+                             slot.farPlane);
+    }
+    if (backend.pbrPointShadowLightIdxLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrPointShadowLightIdxLocs[s],
+                           slot.lightIndex);
+    }
+  }
+  if (backend.pbrPointShadowEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrPointShadowEnabledLoc,
+                         pointShadowEnabled ? 1 : 0);
+  }
+}
+
+void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
+  if (dev == nullptr) {
+    return;
+  }
+  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+    dev->bind_texture(6 + static_cast<int>(c), 0U);
+  }
+  for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
+    dev->bind_texture(10 + static_cast<int>(s), 0U);
+  }
+  if (dev->bind_texture_cubemap != nullptr) {
+    for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+      dev->bind_texture_cubemap(14 + static_cast<int>(s), 0U);
     }
   }
 }
@@ -570,9 +850,12 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_hasAlbedoTexture");
   backend.pbrAlbedoMapLocation =
       dev->uniform_location(pbrProgram, "u_albedoMap");
+  backend.pbrOpacityLocation = dev->uniform_location(pbrProgram, "u_opacity");
+  backend.pbrViewLocation = dev->uniform_location(pbrProgram, "u_viewMatrix");
 
   if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
-      (backend.pbrAlbedoLocation < 0)) {
+      (backend.pbrAlbedoLocation < 0) || (backend.pbrOpacityLocation < 0) ||
+      (backend.pbrViewLocation < 0)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to locate required PBR shader uniforms");
     destroy_shader_program(pbrShaderHandle);
@@ -584,6 +867,7 @@ bool initialize_backend() noexcept {
   }
 
   resolve_pbr_light_uniforms(backend, dev);
+  resolve_pbr_shadow_uniforms(backend, dev);
 
   // Load tonemap shader.
   const ShaderProgramHandle tonemapShaderHandle = load_shader_program(
@@ -2242,34 +2526,12 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_vec3(backend.pbrCameraPosLocation,
                               &g_activeCamera.position.x);
       }
-      if (backend.pbrDirLightCountLocation >= 0) {
-        dev->set_uniform_int(
-            backend.pbrDirLightCountLocation,
-            static_cast<std::int32_t>(lights.directionalLightCount));
+      if (backend.pbrViewLocation >= 0) {
+        dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
       }
-      for (std::size_t i = 0U; i < lights.directionalLightCount; ++i) {
-        const auto &dl = lights.directionalLights[i];
-        if (backend.pbrDirLightDir[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
-        if (backend.pbrDirLightColor[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
-        if (backend.pbrDirLightIntensity[i] >= 0)
-          dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
-      }
-      if (backend.pbrPointLightCountLocation >= 0) {
-        dev->set_uniform_int(backend.pbrPointLightCountLocation,
-                             static_cast<std::int32_t>(lights.pointLightCount));
-      }
-      for (std::size_t i = 0U; i < lights.pointLightCount; ++i) {
-        const auto &pl = lights.pointLights[i];
-        if (backend.pbrPointLightPos[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
-        if (backend.pbrPointLightColor[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
-        if (backend.pbrPointLightIntensity[i] >= 0)
-          dev->set_uniform_float(backend.pbrPointLightIntensity[i],
-                                 pl.intensity);
-      }
+      upload_pbr_lighting_uniforms(backend, dev, lights);
+      bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
+                               doSpotShadows, doPointShadows);
       if (backend.pbrAlbedoMapLocation >= 0)
         dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
 
@@ -2297,6 +2559,9 @@ void flush_renderer(CommandBufferView commandBufferView,
           if (backend.pbrMetallicLocation >= 0)
             dev->set_uniform_float(backend.pbrMetallicLocation,
                                    cmd.material.metallic);
+          if (backend.pbrOpacityLocation >= 0)
+            dev->set_uniform_float(backend.pbrOpacityLocation,
+                                   cmd.material.opacity);
           const std::uint32_t albedoGpu =
               texture_gpu_id(cmd.material.albedoTexture);
           const bool hasTex =
@@ -2344,6 +2609,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->disable_blending();
       dev->enable_face_culling();
       dev->bind_texture(0, 0U);
+      unbind_pbr_shadow_textures(dev);
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
     }
@@ -2377,43 +2643,12 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_vec3(backend.pbrCameraPosLocation,
                             &g_activeCamera.position.x);
     }
-
-    // Upload directional lights.
-    if (backend.pbrDirLightCountLocation >= 0) {
-      dev->set_uniform_int(
-          backend.pbrDirLightCountLocation,
-          static_cast<std::int32_t>(lights.directionalLightCount));
+    if (backend.pbrViewLocation >= 0) {
+      dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
     }
-    for (std::size_t i = 0U; i < lights.directionalLightCount; ++i) {
-      const auto &dl = lights.directionalLights[i];
-      if (backend.pbrDirLightDir[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
-      }
-      if (backend.pbrDirLightColor[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
-      }
-      if (backend.pbrDirLightIntensity[i] >= 0) {
-        dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
-      }
-    }
-
-    // Upload point lights.
-    if (backend.pbrPointLightCountLocation >= 0) {
-      dev->set_uniform_int(backend.pbrPointLightCountLocation,
-                           static_cast<std::int32_t>(lights.pointLightCount));
-    }
-    for (std::size_t i = 0U; i < lights.pointLightCount; ++i) {
-      const auto &pl = lights.pointLights[i];
-      if (backend.pbrPointLightPos[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
-      }
-      if (backend.pbrPointLightColor[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
-      }
-      if (backend.pbrPointLightIntensity[i] >= 0) {
-        dev->set_uniform_float(backend.pbrPointLightIntensity[i], pl.intensity);
-      }
-    }
+    upload_pbr_lighting_uniforms(backend, dev, lights);
+    bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
+                             doPointShadows);
 
     // Set albedo map sampler to texture unit 0.
     if (backend.pbrAlbedoMapLocation >= 0) {
@@ -2450,6 +2685,10 @@ void flush_renderer(CommandBufferView commandBufferView,
         if (backend.pbrMetallicLocation >= 0) {
           dev->set_uniform_float(backend.pbrMetallicLocation,
                                  command.material.metallic);
+        }
+        if (backend.pbrOpacityLocation >= 0) {
+          dev->set_uniform_float(backend.pbrOpacityLocation,
+                                 command.material.opacity);
         }
 
         // Albedo texture binding with state tracking.
@@ -2515,6 +2754,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
 
     dev->bind_texture(0, 0U);
+    unbind_pbr_shadow_textures(dev);
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
     gpu_profiler_end_pass(GpuPassId::Scene);
