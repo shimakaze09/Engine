@@ -688,10 +688,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M6-A1b` HDR equirectangular import: stb_image HDR decode → equirect-to-cubemap compute or fragment pass. `[x]` — *Added HDR equirectangular cubemap loading through the texture system: STB decodes `.hdr` data, the importer resamples it into six HDR cubemap faces, and the GL render device uploads an RGB16F cubemap with mipmaps for sky/environment use.*
 - `P1-M6-A1c` Skybox rendered after opaque pass before transparency; depth test LEQUAL. `[x]` — *Added active skybox cubemap state, skybox shader/VAO setup, GL depth compare switching to `LEQUAL`, and skybox draws after opaque/deferred lighting but before transparent geometry in both forward and deferred paths.*
 
-##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[ ]`
+##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[x]`
 - `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[x]` — *Added a GPU Preetham sky shader driven by the primary directional light's sun vector and `r_sky_turbidity`; when no cubemap skybox is active, the renderer draws the procedural sky through the same far-plane sky pass.*
 - `P1-M6-A2b` Hosek-Wilkie model (higher quality): perez coefficients → chromatic sky. `[x]` — *Added a GPU Hosek-Wilkie sky shader with chromatic distribution coefficients, sun direction, turbidity, and ground-albedo controls; the renderer now prefers this sky path over Preetham when no cubemap skybox is active.*
-- `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[ ]`
+- `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[x]` — *Added string CVar `r_sky_model` with `hosek`, `preetham`, `cubemap`, and `none` modes; sky rendering now selects the requested model explicitly, with Preetham as a fallback only when Hosek is selected but unavailable.*
 
 ##### P1-M6-A3: Environment Reflection Probes (Prefiltered IBL, BRDF LUT) `[ ]`
 - `P1-M6-A3a` Prefiltered environment map: specular radiance mip chain from cubemap. `[ ]`

@@ -66,6 +66,13 @@ struct ShadowCandidate final {
   float distSq = 0.0F;
 };
 
+enum class SkyModel : std::uint8_t {
+  Hosek = 0,
+  Preetham = 1,
+  Cubemap = 2,
+  None = 3,
+};
+
 CameraState g_activeCamera{};
 int g_sceneViewportWidth = 0;
 int g_sceneViewportHeight = 0;
@@ -759,23 +766,32 @@ bool create_skybox_geometry(BackendState &backend,
   return true;
 }
 
+bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
+  return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
+}
+
+SkyModel selected_sky_model() noexcept {
+  const char *model = core::cvar_get_string("r_sky_model", "hosek");
+  if (cvar_string_equals(model, "cubemap")) {
+    return SkyModel::Cubemap;
+  }
+  if (cvar_string_equals(model, "preetham")) {
+    return SkyModel::Preetham;
+  }
+  if (cvar_string_equals(model, "none")) {
+    return SkyModel::None;
+  }
+  return SkyModel::Hosek;
+}
+
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
-  if (!backend.skyboxAvailable || !core::cvar_get_bool("r_skybox", true) ||
+  if (!backend.skyboxAvailable ||
       (g_activeSkyboxTexture == kInvalidTextureHandle) ||
       !is_texture_cubemap(g_activeSkyboxTexture)) {
     return 0U;
   }
 
   return texture_gpu_id(g_activeSkyboxTexture);
-}
-
-bool preetham_sky_enabled(const BackendState &backend) noexcept {
-  return backend.preethamSkyAvailable &&
-         core::cvar_get_bool("r_preetham_sky", true);
-}
-
-bool hosek_sky_enabled(const BackendState &backend) noexcept {
-  return backend.hosekSkyAvailable && core::cvar_get_bool("r_hosek_sky", true);
 }
 
 math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
@@ -1224,7 +1240,8 @@ bool initialize_backend() noexcept {
   }
 
   // Skybox shader and cube geometry (soft-fail: clear color remains visible).
-  core::cvar_register_bool("r_skybox", true, "Enable skybox rendering");
+  core::cvar_register_string("r_sky_model", "hosek",
+                             "Sky model: hosek, preetham, cubemap, or none");
   const ShaderProgramHandle skyboxShader = load_shader_program(
       "assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
   if (skyboxShader != kInvalidShaderProgram) {
@@ -1256,9 +1273,6 @@ bool initialize_backend() noexcept {
   }
 
   // Preetham procedural sky (soft-fail: cubemap skybox or clear color remains).
-  core::cvar_register_bool(
-      "r_preetham_sky", true,
-      "Enable Preetham procedural sky when no cubemap skybox is active");
   core::cvar_register_float("r_sky_turbidity", 3.0F,
                             "Preetham sky turbidity (1.7 clear, 10 hazy)");
   const ShaderProgramHandle preethamShader = load_shader_program(
@@ -1299,9 +1313,6 @@ bool initialize_backend() noexcept {
   }
 
   // Hosek-Wilkie procedural sky (preferred over Preetham when available).
-  core::cvar_register_bool(
-      "r_hosek_sky", true,
-      "Enable Hosek-Wilkie procedural sky when no cubemap skybox is active");
   core::cvar_register_float("r_sky_ground_albedo", 0.1F,
                             "Procedural sky ground albedo");
   const ShaderProgramHandle hosekShader = load_shader_program(
@@ -2947,7 +2958,10 @@ void flush_renderer(CommandBufferView commandBufferView,
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
     }
 
-    const std::uint32_t skyboxTexture = active_skybox_gpu_texture(backend);
+    const SkyModel skyModel = selected_sky_model();
+    const std::uint32_t skyboxTexture = (skyModel == SkyModel::Cubemap)
+                                            ? active_skybox_gpu_texture(backend)
+                                            : 0U;
     if (skyboxTexture != 0U) {
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
@@ -2956,7 +2970,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (ensureSceneDepthHasOpaque()) {
         draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       }
-    } else if (hosek_sky_enabled(backend)) {
+    } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
       dev->bind_framebuffer(sceneFbo);
@@ -2964,7 +2978,9 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (ensureSceneDepthHasOpaque()) {
         draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
       }
-    } else if (preetham_sky_enabled(backend)) {
+    } else if (((skyModel == SkyModel::Preetham) ||
+                (skyModel == SkyModel::Hosek)) &&
+               backend.preethamSkyAvailable) {
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
       dev->bind_framebuffer(sceneFbo);
@@ -3208,14 +3224,19 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->enable_face_culling();
     drawRange(0U, opaqueCount);
 
-    const std::uint32_t skyboxTexture = active_skybox_gpu_texture(backend);
+    const SkyModel skyModel = selected_sky_model();
+    const std::uint32_t skyboxTexture = (skyModel == SkyModel::Cubemap)
+                                            ? active_skybox_gpu_texture(backend)
+                                            : 0U;
     if (skyboxTexture != 0U) {
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       dev->bind_program(backend.pbrProgram);
-    } else if (hosek_sky_enabled(backend)) {
+    } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
       draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
       dev->bind_program(backend.pbrProgram);
-    } else if (preetham_sky_enabled(backend)) {
+    } else if (((skyModel == SkyModel::Preetham) ||
+                (skyModel == SkyModel::Hosek)) &&
+               backend.preethamSkyAvailable) {
       draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
       dev->bind_program(backend.pbrProgram);
     }
