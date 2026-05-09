@@ -200,6 +200,17 @@ struct BackendState final {
   int prefilteredEnvironmentFaceSize = 0;
   int prefilteredEnvironmentMipLevels = 0;
 
+  bool environmentIrradianceAvailable = false;
+  ShaderProgramHandle environmentIrradianceShaderHandle{};
+  std::uint32_t environmentIrradianceProgram = 0U;
+  std::int32_t environmentIrradianceViewLoc = -1;
+  std::int32_t environmentIrradianceProjectionLoc = -1;
+  std::int32_t environmentIrradianceTextureLoc = -1;
+  std::uint32_t irradianceEnvironmentTexture = 0U;
+  std::uint32_t environmentIrradianceFbo = 0U;
+  std::uint32_t irradianceEnvironmentSource = 0U;
+  int irradianceEnvironmentFaceSize = 0;
+
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
   int lastHeight = 0;
@@ -1122,6 +1133,104 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   return prefiltered;
 }
 
+void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.irradianceEnvironmentTexture != 0U) && (dev != nullptr)) {
+    dev->destroy_texture(backend.irradianceEnvironmentTexture);
+    backend.irradianceEnvironmentTexture = 0U;
+  }
+  if ((backend.environmentIrradianceFbo != 0U) && (dev != nullptr)) {
+    dev->destroy_framebuffer(backend.environmentIrradianceFbo);
+    backend.environmentIrradianceFbo = 0U;
+  }
+  if (backend.environmentIrradianceShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.environmentIrradianceShaderHandle);
+    backend.environmentIrradianceShaderHandle = ShaderProgramHandle{};
+  }
+  backend.environmentIrradianceProgram = 0U;
+  backend.environmentIrradianceAvailable = false;
+  backend.irradianceEnvironmentSource = 0U;
+  backend.irradianceEnvironmentFaceSize = 0;
+}
+
+std::uint32_t
+ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
+                              std::uint32_t sourceCubemap) noexcept {
+  if ((dev == nullptr) || !backend.environmentIrradianceAvailable ||
+      !core::cvar_get_bool("r_env_irradiance", true) || (sourceCubemap == 0U) ||
+      (dev->create_cubemap_hdr_empty == nullptr) ||
+      (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
+      (dev->bind_texture_cubemap == nullptr)) {
+    return 0U;
+  }
+
+  const int requestedSize = core::cvar_get_int("r_env_irradiance_size", 32);
+  const int faceSize =
+      previous_power_of_two(clamp_int_value(requestedSize, 8, 256));
+
+  if ((backend.irradianceEnvironmentTexture != 0U) &&
+      (backend.irradianceEnvironmentSource == sourceCubemap) &&
+      (backend.irradianceEnvironmentFaceSize == faceSize)) {
+    return backend.irradianceEnvironmentTexture;
+  }
+
+  if (backend.irradianceEnvironmentTexture != 0U) {
+    dev->destroy_texture(backend.irradianceEnvironmentTexture);
+    backend.irradianceEnvironmentTexture = 0U;
+  }
+
+  if (backend.environmentIrradianceFbo == 0U) {
+    backend.environmentIrradianceFbo = dev->create_framebuffer(0U, 0U);
+    if (backend.environmentIrradianceFbo == 0U) {
+      return 0U;
+    }
+  }
+
+  const std::uint32_t irradiance = dev->create_cubemap_hdr_empty(faceSize, 1);
+  if (irradiance == 0U) {
+    return 0U;
+  }
+
+  std::array<math::Mat4, 6> views{};
+  cubemap_capture_views(views);
+  const math::Mat4 projection =
+      math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
+
+  dev->disable_depth_test();
+  dev->disable_face_culling();
+  dev->bind_program(backend.environmentIrradianceProgram);
+  dev->bind_texture_cubemap(0, sourceCubemap);
+  if (backend.environmentIrradianceTextureLoc >= 0) {
+    dev->set_uniform_int(backend.environmentIrradianceTextureLoc, 0);
+  }
+  if (backend.environmentIrradianceProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.environmentIrradianceProjectionLoc,
+                          &projection.columns[0].x);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->set_viewport(0, 0, faceSize, faceSize);
+  for (int face = 0; face < 6; ++face) {
+    dev->framebuffer_cubemap_color_face_mip(backend.environmentIrradianceFbo,
+                                            irradiance, face, 0);
+    if (backend.environmentIrradianceViewLoc >= 0) {
+      dev->set_uniform_mat4(
+          backend.environmentIrradianceViewLoc,
+          &views[static_cast<std::size_t>(face)].columns[0].x);
+    }
+    dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+  }
+
+  dev->bind_texture_cubemap(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+
+  backend.irradianceEnvironmentTexture = irradiance;
+  backend.irradianceEnvironmentSource = sourceCubemap;
+  backend.irradianceEnvironmentFaceSize = faceSize;
+  return irradiance;
+}
+
 void destroy_bloom_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1578,6 +1687,46 @@ bool initialize_backend() noexcept {
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "environment prefilter shader not available");
+  }
+
+  // Diffuse irradiance convolution for cubemap IBL.
+  core::cvar_register_bool("r_env_irradiance", true,
+                           "Bake diffuse irradiance cubemap");
+  core::cvar_register_int("r_env_irradiance_size", 32,
+                          "Diffuse irradiance cubemap face size");
+  const ShaderProgramHandle irradianceShader =
+      load_shader_program("assets/shaders/skybox.vert",
+                          "assets/shaders/irradiance_convolution.frag");
+  if (irradianceShader != kInvalidShaderProgram) {
+    const std::uint32_t irradianceProgram =
+        shader_gpu_program(irradianceShader);
+    if (irradianceProgram != 0U) {
+      backend.environmentIrradianceShaderHandle = irradianceShader;
+      backend.environmentIrradianceProgram = irradianceProgram;
+      backend.environmentIrradianceViewLoc =
+          dev->uniform_location(irradianceProgram, "u_view");
+      backend.environmentIrradianceProjectionLoc =
+          dev->uniform_location(irradianceProgram, "u_projection");
+      backend.environmentIrradianceTextureLoc =
+          dev->uniform_location(irradianceProgram, "u_environmentMap");
+
+      if ((backend.environmentIrradianceViewLoc >= 0) &&
+          (backend.environmentIrradianceProjectionLoc >= 0) &&
+          (backend.environmentIrradianceTextureLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.environmentIrradianceAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "environment irradiance setup failed — IBL irradiance disabled");
+        destroy_environment_irradiance_resources(backend);
+      }
+    } else {
+      destroy_shader_program(irradianceShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment irradiance shader not available");
   }
 
   // Register CVars for deferred rendering.
@@ -2117,6 +2266,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->luminanceProgram = 0U;
   backend->autoExposureAvailable = false;
 
+  destroy_environment_irradiance_resources(*backend);
   destroy_environment_prefilter_resources(*backend);
   destroy_skybox_resources(*backend);
 
@@ -3192,6 +3342,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     if (skyboxTexture != 0U) {
       static_cast<void>(
           ensure_prefiltered_environment(backend, dev, skyboxTexture));
+      static_cast<void>(
+          ensure_irradiance_environment(backend, dev, skyboxTexture));
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
       dev->bind_framebuffer(sceneFbo);
@@ -3460,6 +3612,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     if (skyboxTexture != 0U) {
       static_cast<void>(
           ensure_prefiltered_environment(backend, dev, skyboxTexture));
+      static_cast<void>(
+          ensure_irradiance_environment(backend, dev, skyboxTexture));
       dev->bind_framebuffer(sceneFbo);
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
@@ -3799,6 +3953,14 @@ std::uint32_t get_prefiltered_environment_texture() noexcept {
     return 0U;
   }
   return backend_state().prefilteredEnvironmentTexture;
+}
+
+std::uint32_t get_irradiance_environment_texture() noexcept {
+  if ((selected_sky_model() != SkyModel::Cubemap) ||
+      !core::cvar_get_bool("r_env_irradiance", true)) {
+    return 0U;
+  }
+  return backend_state().irradianceEnvironmentTexture;
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {
