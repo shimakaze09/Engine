@@ -132,6 +132,14 @@ namespace {
 #define GL_RGB16F 0x881B
 #endif
 
+#ifndef GL_RG
+#define GL_RG 0x8227
+#endif
+
+#ifndef GL_RG16F
+#define GL_RG16F 0x822F
+#endif
+
 #ifndef GL_RGBA16F
 #define GL_RGBA16F 0x881A
 #endif
@@ -733,7 +741,10 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
 
   GLenum format = GL_RGBA;
   GLint internalFormat = GL_RGBA16F;
-  if (channels == 3) {
+  if (channels == 2) {
+    format = GL_RG;
+    internalFormat = GL_RG16F;
+  } else if (channels == 3) {
     format = GL_RGB;
     internalFormat = GL_RGB16F;
   }

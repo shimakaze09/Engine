@@ -135,6 +135,7 @@ TextureHandle get_skybox_texture() noexcept;
 std::uint32_t get_scene_viewport_texture() noexcept;
 std::uint32_t get_prefiltered_environment_texture() noexcept;
 std::uint32_t get_irradiance_environment_texture() noexcept;
+std::uint32_t get_brdf_lut_texture() noexcept;
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer

@@ -696,7 +696,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 ##### P1-M6-A3: Environment Reflection Probes (Prefiltered IBL, BRDF LUT) `[ ]`
 - `P1-M6-A3a` Prefiltered environment map: specular radiance mip chain from cubemap. `[x]` — *Added a cubemap GGX prefilter shader and GL render-device support for allocating/attaching HDR cubemap mip chains; cubemap sky rendering now bakes and caches a prefiltered specular environment texture controlled by `r_env_prefilter`, `r_env_prefilter_size`, and `r_env_prefilter_mips`.*
 - `P1-M6-A3b` Irradiance map: diffuse convolution from cubemap. `[x]` — *Added a cosine-weighted diffuse irradiance convolution shader and cubemap bake/cache path; cubemap sky rendering now produces a low-resolution HDR irradiance cubemap controlled by `r_env_irradiance` and `r_env_irradiance_size` for later diffuse IBL sampling.*
-- `P1-M6-A3c` BRDF LUT: split-sum approximation (512×512 float texture). `[ ]`
+- `P1-M6-A3c` BRDF LUT: split-sum approximation (512×512 float texture). `[x]` — *Added a split-sum GGX BRDF integration shader and a cached 512×512 RG16F LUT bake path controlled by `r_env_brdf_lut` and `r_env_brdf_lut_size`; the renderer now exposes the generated LUT texture for later image-based lighting material integration.*
 - `P1-M6-A3d` Probe placement component; reflection probe bake tool. `[ ]`
 
 ---

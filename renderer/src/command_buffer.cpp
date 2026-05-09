@@ -211,6 +211,13 @@ struct BackendState final {
   std::uint32_t irradianceEnvironmentSource = 0U;
   int irradianceEnvironmentFaceSize = 0;
 
+  bool environmentBrdfLutAvailable = false;
+  ShaderProgramHandle environmentBrdfLutShaderHandle{};
+  std::uint32_t environmentBrdfLutProgram = 0U;
+  std::uint32_t brdfLutTexture = 0U;
+  std::uint32_t brdfLutFbo = 0U;
+  int brdfLutSize = 0;
+
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
   int lastHeight = 0;
@@ -1231,6 +1238,79 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   return irradiance;
 }
 
+void destroy_brdf_lut_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.brdfLutFbo != 0U) && (dev != nullptr)) {
+    dev->destroy_framebuffer(backend.brdfLutFbo);
+    backend.brdfLutFbo = 0U;
+  }
+  if ((backend.brdfLutTexture != 0U) && (dev != nullptr)) {
+    dev->destroy_texture(backend.brdfLutTexture);
+    backend.brdfLutTexture = 0U;
+  }
+  if (backend.environmentBrdfLutShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.environmentBrdfLutShaderHandle);
+    backend.environmentBrdfLutShaderHandle = ShaderProgramHandle{};
+  }
+  backend.environmentBrdfLutProgram = 0U;
+  backend.environmentBrdfLutAvailable = false;
+  backend.brdfLutSize = 0;
+}
+
+std::uint32_t ensure_brdf_lut(BackendState &backend,
+                              const RenderDevice *dev) noexcept {
+  if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
+      !core::cvar_get_bool("r_env_brdf_lut", true) ||
+      (dev->create_texture_2d_hdr == nullptr) ||
+      (dev->create_framebuffer == nullptr)) {
+    return 0U;
+  }
+
+  const int requestedSize = core::cvar_get_int("r_env_brdf_lut_size", 512);
+  const int lutSize =
+      previous_power_of_two(clamp_int_value(requestedSize, 64, 1024));
+  if ((backend.brdfLutTexture != 0U) && (backend.brdfLutSize == lutSize)) {
+    return backend.brdfLutTexture;
+  }
+
+  if (backend.brdfLutFbo != 0U) {
+    dev->destroy_framebuffer(backend.brdfLutFbo);
+    backend.brdfLutFbo = 0U;
+  }
+  if (backend.brdfLutTexture != 0U) {
+    dev->destroy_texture(backend.brdfLutTexture);
+    backend.brdfLutTexture = 0U;
+  }
+
+  const std::uint32_t lutTexture =
+      dev->create_texture_2d_hdr(lutSize, lutSize, 2, nullptr);
+  if (lutTexture == 0U) {
+    return 0U;
+  }
+
+  const std::uint32_t lutFbo = dev->create_framebuffer(lutTexture, 0U);
+  if (lutFbo == 0U) {
+    dev->destroy_texture(lutTexture);
+    return 0U;
+  }
+
+  dev->bind_framebuffer(lutFbo);
+  dev->set_viewport(0, 0, lutSize, lutSize);
+  dev->disable_depth_test();
+  dev->disable_face_culling();
+  dev->bind_program(backend.environmentBrdfLutProgram);
+  dev->bind_vertex_array(backend.emptyVao);
+  dev->draw_arrays_triangles(0, 3);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->bind_framebuffer(0U);
+
+  backend.brdfLutTexture = lutTexture;
+  backend.brdfLutFbo = lutFbo;
+  backend.brdfLutSize = lutSize;
+  return lutTexture;
+}
+
 void destroy_bloom_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1727,6 +1807,27 @@ bool initialize_backend() noexcept {
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "environment irradiance shader not available");
+  }
+
+  // Split-sum BRDF LUT for image-based lighting.
+  core::cvar_register_bool("r_env_brdf_lut", true,
+                           "Bake split-sum BRDF lookup texture");
+  core::cvar_register_int("r_env_brdf_lut_size", 512,
+                          "Split-sum BRDF LUT resolution");
+  const ShaderProgramHandle brdfLutShader = load_shader_program(
+      "assets/shaders/fullscreen.vert", "assets/shaders/brdf_lut.frag");
+  if (brdfLutShader != kInvalidShaderProgram) {
+    const std::uint32_t brdfLutProgram = shader_gpu_program(brdfLutShader);
+    if (brdfLutProgram != 0U) {
+      backend.environmentBrdfLutShaderHandle = brdfLutShader;
+      backend.environmentBrdfLutProgram = brdfLutProgram;
+      backend.environmentBrdfLutAvailable = true;
+    } else {
+      destroy_shader_program(brdfLutShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "BRDF LUT shader not available");
   }
 
   // Register CVars for deferred rendering.
@@ -2266,6 +2367,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->luminanceProgram = 0U;
   backend->autoExposureAvailable = false;
 
+  destroy_brdf_lut_resources(*backend);
   destroy_environment_irradiance_resources(*backend);
   destroy_environment_prefilter_resources(*backend);
   destroy_skybox_resources(*backend);
@@ -2495,6 +2597,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   const PassResources &passRes = get_pass_resources();
+  static_cast<void>(ensure_brdf_lut(backend, dev));
 
   // Check if deferred rendering is enabled.
   const bool useDeferred =
@@ -3961,6 +4064,13 @@ std::uint32_t get_irradiance_environment_texture() noexcept {
     return 0U;
   }
   return backend_state().irradianceEnvironmentTexture;
+}
+
+std::uint32_t get_brdf_lut_texture() noexcept {
+  if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
+    return 0U;
+  }
+  return backend_state().brdfLutTexture;
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {
