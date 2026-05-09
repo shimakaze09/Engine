@@ -76,6 +76,8 @@ struct RenderDevice final {
   std::uint32_t (*create_cubemap_hdr)(
       std::int32_t faceSize, std::int32_t channels,
       const float *const facePixels[6]) noexcept = nullptr;
+  std::uint32_t (*create_cubemap_hdr_empty)(
+      std::int32_t faceSize, std::int32_t mipLevels) noexcept = nullptr;
   std::uint32_t (*create_depth_texture)(std::int32_t width,
                                         std::int32_t height) noexcept = nullptr;
   void (*destroy_texture)(std::uint32_t id) noexcept = nullptr;
@@ -88,6 +90,9 @@ struct RenderDevice final {
                                std::uint32_t id) noexcept = nullptr;
   void (*framebuffer_cubemap_face)(std::uint32_t fbo, std::uint32_t cubeTex,
                                    std::int32_t face) noexcept = nullptr;
+  void (*framebuffer_cubemap_color_face_mip)(
+      std::uint32_t fbo, std::uint32_t cubeTex, std::int32_t face,
+      std::int32_t mipLevel) noexcept = nullptr;
 
   // Framebuffers.
   std::uint32_t (*create_framebuffer)(

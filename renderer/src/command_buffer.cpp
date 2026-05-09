@@ -187,6 +187,19 @@ struct BackendState final {
   std::int32_t hosekSkyTurbidityLoc = -1;
   std::int32_t hosekSkyGroundAlbedoLoc = -1;
 
+  bool environmentPrefilterAvailable = false;
+  ShaderProgramHandle environmentPrefilterShaderHandle{};
+  std::uint32_t environmentPrefilterProgram = 0U;
+  std::int32_t environmentPrefilterViewLoc = -1;
+  std::int32_t environmentPrefilterProjectionLoc = -1;
+  std::int32_t environmentPrefilterTextureLoc = -1;
+  std::int32_t environmentPrefilterRoughnessLoc = -1;
+  std::uint32_t prefilteredEnvironmentTexture = 0U;
+  std::uint32_t environmentPrefilterFbo = 0U;
+  std::uint32_t prefilteredEnvironmentSource = 0U;
+  int prefilteredEnvironmentFaceSize = 0;
+  int prefilteredEnvironmentMipLevels = 0;
+
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
   int lastHeight = 0;
@@ -940,6 +953,175 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+int clamp_int_value(int value, int minValue, int maxValue) noexcept {
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return value;
+}
+
+int previous_power_of_two(int value) noexcept {
+  int result = 1;
+  while ((result <= (value / 2)) && (result < 4096)) {
+    result *= 2;
+  }
+  return result;
+}
+
+int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
+  int size = faceSize;
+  for (int mip = 0; mip < mipLevel; ++mip) {
+    size = std::max(1, size / 2);
+  }
+  return size;
+}
+
+int max_cubemap_mip_levels(int faceSize) noexcept {
+  int levels = 1;
+  int size = faceSize;
+  while (size > 1) {
+    size /= 2;
+    ++levels;
+  }
+  return levels;
+}
+
+void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
+  const math::Vec3 origin{};
+  outViews[0] = math::look_at(origin, math::Vec3(1.0F, 0.0F, 0.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+  outViews[1] = math::look_at(origin, math::Vec3(-1.0F, 0.0F, 0.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+  outViews[2] = math::look_at(origin, math::Vec3(0.0F, 1.0F, 0.0F),
+                              math::Vec3(0.0F, 0.0F, 1.0F));
+  outViews[3] = math::look_at(origin, math::Vec3(0.0F, -1.0F, 0.0F),
+                              math::Vec3(0.0F, 0.0F, -1.0F));
+  outViews[4] = math::look_at(origin, math::Vec3(0.0F, 0.0F, 1.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+  outViews[5] = math::look_at(origin, math::Vec3(0.0F, 0.0F, -1.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+}
+
+void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.prefilteredEnvironmentTexture != 0U) && (dev != nullptr)) {
+    dev->destroy_texture(backend.prefilteredEnvironmentTexture);
+    backend.prefilteredEnvironmentTexture = 0U;
+  }
+  if ((backend.environmentPrefilterFbo != 0U) && (dev != nullptr)) {
+    dev->destroy_framebuffer(backend.environmentPrefilterFbo);
+    backend.environmentPrefilterFbo = 0U;
+  }
+  if (backend.environmentPrefilterShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.environmentPrefilterShaderHandle);
+    backend.environmentPrefilterShaderHandle = ShaderProgramHandle{};
+  }
+  backend.environmentPrefilterProgram = 0U;
+  backend.environmentPrefilterAvailable = false;
+  backend.prefilteredEnvironmentSource = 0U;
+  backend.prefilteredEnvironmentFaceSize = 0;
+  backend.prefilteredEnvironmentMipLevels = 0;
+}
+
+std::uint32_t
+ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
+                               std::uint32_t sourceCubemap) noexcept {
+  if ((dev == nullptr) || !backend.environmentPrefilterAvailable ||
+      !core::cvar_get_bool("r_env_prefilter", true) || (sourceCubemap == 0U) ||
+      (dev->create_cubemap_hdr_empty == nullptr) ||
+      (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
+      (dev->bind_texture_cubemap == nullptr)) {
+    return 0U;
+  }
+
+  const int requestedSize = core::cvar_get_int("r_env_prefilter_size", 128);
+  const int faceSize =
+      previous_power_of_two(clamp_int_value(requestedSize, 16, 1024));
+  const int maxMips = max_cubemap_mip_levels(faceSize);
+  const int mipLevels = clamp_int_value(
+      core::cvar_get_int("r_env_prefilter_mips", 5), 1, maxMips);
+
+  if ((backend.prefilteredEnvironmentTexture != 0U) &&
+      (backend.prefilteredEnvironmentSource == sourceCubemap) &&
+      (backend.prefilteredEnvironmentFaceSize == faceSize) &&
+      (backend.prefilteredEnvironmentMipLevels == mipLevels)) {
+    return backend.prefilteredEnvironmentTexture;
+  }
+
+  if (backend.prefilteredEnvironmentTexture != 0U) {
+    dev->destroy_texture(backend.prefilteredEnvironmentTexture);
+    backend.prefilteredEnvironmentTexture = 0U;
+  }
+
+  if (backend.environmentPrefilterFbo == 0U) {
+    backend.environmentPrefilterFbo = dev->create_framebuffer(0U, 0U);
+    if (backend.environmentPrefilterFbo == 0U) {
+      return 0U;
+    }
+  }
+
+  const std::uint32_t prefiltered =
+      dev->create_cubemap_hdr_empty(faceSize, mipLevels);
+  if (prefiltered == 0U) {
+    return 0U;
+  }
+
+  std::array<math::Mat4, 6> views{};
+  cubemap_capture_views(views);
+  const math::Mat4 projection =
+      math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
+
+  dev->disable_depth_test();
+  dev->disable_face_culling();
+  dev->bind_program(backend.environmentPrefilterProgram);
+  dev->bind_texture_cubemap(0, sourceCubemap);
+  if (backend.environmentPrefilterTextureLoc >= 0) {
+    dev->set_uniform_int(backend.environmentPrefilterTextureLoc, 0);
+  }
+  if (backend.environmentPrefilterProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.environmentPrefilterProjectionLoc,
+                          &projection.columns[0].x);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  for (int mip = 0; mip < mipLevels; ++mip) {
+    const int mipSize = cubemap_mip_size(faceSize, mip);
+    const float roughness =
+        (mipLevels > 1)
+            ? static_cast<float>(mip) / static_cast<float>(mipLevels - 1)
+            : 0.0F;
+    dev->set_viewport(0, 0, mipSize, mipSize);
+    if (backend.environmentPrefilterRoughnessLoc >= 0) {
+      dev->set_uniform_float(backend.environmentPrefilterRoughnessLoc,
+                             roughness);
+    }
+
+    for (int face = 0; face < 6; ++face) {
+      dev->framebuffer_cubemap_color_face_mip(backend.environmentPrefilterFbo,
+                                              prefiltered, face, mip);
+      if (backend.environmentPrefilterViewLoc >= 0) {
+        dev->set_uniform_mat4(
+            backend.environmentPrefilterViewLoc,
+            &views[static_cast<std::size_t>(face)].columns[0].x);
+      }
+      dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+    }
+  }
+
+  dev->bind_texture_cubemap(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+
+  backend.prefilteredEnvironmentTexture = prefiltered;
+  backend.prefilteredEnvironmentSource = sourceCubemap;
+  backend.prefilteredEnvironmentFaceSize = faceSize;
+  backend.prefilteredEnvironmentMipLevels = mipLevels;
+  return prefiltered;
+}
+
 void destroy_bloom_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1352,6 +1534,50 @@ bool initialize_backend() noexcept {
     core::log_message(
         core::LogLevel::Warning, "renderer",
         "Hosek-Wilkie sky shader not available — falling back to Preetham");
+  }
+
+  // Specular environment prefilter for cubemap IBL.
+  core::cvar_register_bool("r_env_prefilter", true,
+                           "Bake prefiltered specular cubemap radiance");
+  core::cvar_register_int("r_env_prefilter_size", 128,
+                          "Prefiltered environment cubemap face size");
+  core::cvar_register_int("r_env_prefilter_mips", 5,
+                          "Prefiltered environment cubemap mip levels");
+  const ShaderProgramHandle prefilterShader =
+      load_shader_program("assets/shaders/skybox.vert",
+                          "assets/shaders/prefilter_environment.frag");
+  if (prefilterShader != kInvalidShaderProgram) {
+    const std::uint32_t prefilterProgram = shader_gpu_program(prefilterShader);
+    if (prefilterProgram != 0U) {
+      backend.environmentPrefilterShaderHandle = prefilterShader;
+      backend.environmentPrefilterProgram = prefilterProgram;
+      backend.environmentPrefilterViewLoc =
+          dev->uniform_location(prefilterProgram, "u_view");
+      backend.environmentPrefilterProjectionLoc =
+          dev->uniform_location(prefilterProgram, "u_projection");
+      backend.environmentPrefilterTextureLoc =
+          dev->uniform_location(prefilterProgram, "u_environmentMap");
+      backend.environmentPrefilterRoughnessLoc =
+          dev->uniform_location(prefilterProgram, "u_roughness");
+
+      if ((backend.environmentPrefilterViewLoc >= 0) &&
+          (backend.environmentPrefilterProjectionLoc >= 0) &&
+          (backend.environmentPrefilterTextureLoc >= 0) &&
+          (backend.environmentPrefilterRoughnessLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.environmentPrefilterAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "environment prefilter setup failed — IBL prefilter disabled");
+        destroy_environment_prefilter_resources(backend);
+      }
+    } else {
+      destroy_shader_program(prefilterShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment prefilter shader not available");
   }
 
   // Register CVars for deferred rendering.
@@ -1891,6 +2117,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->luminanceProgram = 0U;
   backend->autoExposureAvailable = false;
 
+  destroy_environment_prefilter_resources(*backend);
   destroy_skybox_resources(*backend);
 
   if (backend->emptyVao != 0U && dev != nullptr) {
@@ -2963,6 +3190,8 @@ void flush_renderer(CommandBufferView commandBufferView,
                                             ? active_skybox_gpu_texture(backend)
                                             : 0U;
     if (skyboxTexture != 0U) {
+      static_cast<void>(
+          ensure_prefiltered_environment(backend, dev, skyboxTexture));
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
       dev->bind_framebuffer(sceneFbo);
@@ -3229,6 +3458,10 @@ void flush_renderer(CommandBufferView commandBufferView,
                                             ? active_skybox_gpu_texture(backend)
                                             : 0U;
     if (skyboxTexture != 0U) {
+      static_cast<void>(
+          ensure_prefiltered_environment(backend, dev, skyboxTexture));
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       dev->bind_program(backend.pbrProgram);
     } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
@@ -3558,6 +3791,14 @@ std::uint32_t get_scene_viewport_texture() noexcept {
     return pass_resource_gpu_texture(passRes.sceneColor);
   }
   return pass_resource_gpu_texture(passRes.finalColor);
+}
+
+std::uint32_t get_prefiltered_environment_texture() noexcept {
+  if ((selected_sky_model() != SkyModel::Cubemap) ||
+      !core::cvar_get_bool("r_env_prefilter", true)) {
+    return 0U;
+  }
+  return backend_state().prefilteredEnvironmentTexture;
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {

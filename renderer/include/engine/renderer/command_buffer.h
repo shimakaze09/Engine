@@ -133,6 +133,7 @@ TextureHandle get_skybox_texture() noexcept;
 /// Returns the GPU texture ID of the tonemapped scene (final color).
 /// Valid after the first flush_renderer call. Returns 0 if not yet available.
 std::uint32_t get_scene_viewport_texture() noexcept;
+std::uint32_t get_prefiltered_environment_texture() noexcept;
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer

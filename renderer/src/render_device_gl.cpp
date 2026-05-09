@@ -8,6 +8,7 @@
 #error "SDL OpenGL headers not found"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -101,6 +102,10 @@ namespace {
 
 #ifndef GL_TEXTURE_MAG_FILTER
 #define GL_TEXTURE_MAG_FILTER 0x2800
+#endif
+
+#ifndef GL_TEXTURE_MAX_LEVEL
+#define GL_TEXTURE_MAX_LEVEL 0x813D
 #endif
 
 #ifndef GL_LINEAR
@@ -784,6 +789,42 @@ std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
   return static_cast<std::uint32_t>(tex);
 }
 
+std::uint32_t gl_create_cubemap_hdr_empty(std::int32_t faceSize,
+                                          std::int32_t mipLevels) noexcept {
+  if ((faceSize <= 0) || (mipLevels <= 0)) {
+    return 0U;
+  }
+
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  for (std::int32_t mip = 0; mip < mipLevels; ++mip) {
+    std::int32_t mipSize = faceSize;
+    for (std::int32_t step = 0; step < mip; ++step) {
+      mipSize = std::max<std::int32_t>(1, mipSize / 2);
+    }
+    for (int face = 0; face < 6; ++face) {
+      g_gl.texImage2D(
+          static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), mip,
+          GL_RGB16F, static_cast<GLsizei>(mipSize),
+          static_cast<GLsizei>(mipSize), 0, GL_RGB, GL_FLOAT, nullptr);
+    }
+  }
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+                     (mipLevels > 1) ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, mipLevels - 1);
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
 std::uint32_t gl_create_depth_texture(std::int32_t width,
                                       std::int32_t height) noexcept {
   GLuint tex = 0U;
@@ -852,6 +893,17 @@ void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
       GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
       static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
       static_cast<GLuint>(cubeTex), 0);
+}
+
+void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
+                                           std::uint32_t cubeTex,
+                                           std::int32_t face,
+                                           std::int32_t mipLevel) noexcept {
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+  g_gl.framebufferTexture2D(
+      GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+      static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+      static_cast<GLuint>(cubeTex), static_cast<GLint>(mipLevel));
 }
 
 // --- Framebuffers ---
@@ -1090,12 +1142,15 @@ bool initialize_render_device() noexcept {
   g_device.create_texture_2d = &gl_create_texture_2d;
   g_device.create_texture_2d_hdr = &gl_create_texture_2d_hdr;
   g_device.create_cubemap_hdr = &gl_create_cubemap_hdr;
+  g_device.create_cubemap_hdr_empty = &gl_create_cubemap_hdr_empty;
   g_device.create_depth_texture = &gl_create_depth_texture;
   g_device.destroy_texture = &gl_destroy_texture;
   g_device.bind_texture = &gl_bind_texture;
   g_device.create_depth_cubemap = &gl_create_depth_cubemap;
   g_device.bind_texture_cubemap = &gl_bind_texture_cubemap;
   g_device.framebuffer_cubemap_face = &gl_framebuffer_cubemap_face;
+  g_device.framebuffer_cubemap_color_face_mip =
+      &gl_framebuffer_cubemap_color_face_mip;
   g_device.create_framebuffer = &gl_create_framebuffer;
   g_device.create_framebuffer_mrt = &gl_create_framebuffer_mrt;
   g_device.destroy_framebuffer = &gl_destroy_framebuffer;

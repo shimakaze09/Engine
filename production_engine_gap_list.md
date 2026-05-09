@@ -694,7 +694,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[x]` — *Added string CVar `r_sky_model` with `hosek`, `preetham`, `cubemap`, and `none` modes; sky rendering now selects the requested model explicitly, with Preetham as a fallback only when Hosek is selected but unavailable.*
 
 ##### P1-M6-A3: Environment Reflection Probes (Prefiltered IBL, BRDF LUT) `[ ]`
-- `P1-M6-A3a` Prefiltered environment map: specular radiance mip chain from cubemap. `[ ]`
+- `P1-M6-A3a` Prefiltered environment map: specular radiance mip chain from cubemap. `[x]` — *Added a cubemap GGX prefilter shader and GL render-device support for allocating/attaching HDR cubemap mip chains; cubemap sky rendering now bakes and caches a prefiltered specular environment texture controlled by `r_env_prefilter`, `r_env_prefilter_size`, and `r_env_prefilter_mips`.*
 - `P1-M6-A3b` Irradiance map: diffuse convolution from cubemap. `[ ]`
 - `P1-M6-A3c` BRDF LUT: split-sum approximation (512×512 float texture). `[ ]`
 - `P1-M6-A3d` Probe placement component; reflection probe bake tool. `[ ]`
