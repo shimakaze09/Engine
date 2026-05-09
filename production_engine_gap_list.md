@@ -690,7 +690,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[ ]`
 - `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[x]` — *Added a GPU Preetham sky shader driven by the primary directional light's sun vector and `r_sky_turbidity`; when no cubemap skybox is active, the renderer draws the procedural sky through the same far-plane sky pass.*
-- `P1-M6-A2b` Hosek-Wilkie model (higher quality): perez coefficients → chromatic sky. `[ ]`
+- `P1-M6-A2b` Hosek-Wilkie model (higher quality): perez coefficients → chromatic sky. `[x]` — *Added a GPU Hosek-Wilkie sky shader with chromatic distribution coefficients, sun direction, turbidity, and ground-albedo controls; the renderer now prefers this sky path over Preetham when no cubemap skybox is active.*
 - `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[ ]`
 
 ##### P1-M6-A3: Environment Reflection Probes (Prefiltered IBL, BRDF LUT) `[ ]`

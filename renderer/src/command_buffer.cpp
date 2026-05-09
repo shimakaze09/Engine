@@ -171,6 +171,15 @@ struct BackendState final {
   std::int32_t preethamSkySunDirectionLoc = -1;
   std::int32_t preethamSkyTurbidityLoc = -1;
 
+  bool hosekSkyAvailable = false;
+  ShaderProgramHandle hosekSkyShaderHandle{};
+  std::uint32_t hosekSkyProgram = 0U;
+  std::int32_t hosekSkyViewLoc = -1;
+  std::int32_t hosekSkyProjectionLoc = -1;
+  std::int32_t hosekSkySunDirectionLoc = -1;
+  std::int32_t hosekSkyTurbidityLoc = -1;
+  std::int32_t hosekSkyGroundAlbedoLoc = -1;
+
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
   int lastHeight = 0;
@@ -678,10 +687,16 @@ void destroy_skybox_resources(BackendState &backend) noexcept {
     destroy_shader_program(backend.preethamSkyShaderHandle);
     backend.preethamSkyShaderHandle = ShaderProgramHandle{};
   }
+  if (backend.hosekSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.hosekSkyShaderHandle);
+    backend.hosekSkyShaderHandle = ShaderProgramHandle{};
+  }
   backend.skyboxProgram = 0U;
   backend.skyboxAvailable = false;
   backend.preethamSkyProgram = 0U;
   backend.preethamSkyAvailable = false;
+  backend.hosekSkyProgram = 0U;
+  backend.hosekSkyAvailable = false;
 }
 
 void destroy_preetham_sky_resources(BackendState &backend) noexcept {
@@ -695,6 +710,20 @@ void destroy_preetham_sky_resources(BackendState &backend) noexcept {
   backend.preethamSkyProjectionLoc = -1;
   backend.preethamSkySunDirectionLoc = -1;
   backend.preethamSkyTurbidityLoc = -1;
+}
+
+void destroy_hosek_sky_resources(BackendState &backend) noexcept {
+  if (backend.hosekSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.hosekSkyShaderHandle);
+    backend.hosekSkyShaderHandle = ShaderProgramHandle{};
+  }
+  backend.hosekSkyProgram = 0U;
+  backend.hosekSkyAvailable = false;
+  backend.hosekSkyViewLoc = -1;
+  backend.hosekSkyProjectionLoc = -1;
+  backend.hosekSkySunDirectionLoc = -1;
+  backend.hosekSkyTurbidityLoc = -1;
+  backend.hosekSkyGroundAlbedoLoc = -1;
 }
 
 bool create_skybox_geometry(BackendState &backend,
@@ -745,6 +774,10 @@ bool preetham_sky_enabled(const BackendState &backend) noexcept {
          core::cvar_get_bool("r_preetham_sky", true);
 }
 
+bool hosek_sky_enabled(const BackendState &backend) noexcept {
+  return backend.hosekSkyAvailable && core::cvar_get_bool("r_hosek_sky", true);
+}
+
 math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   if (lights.directionalLightCount > 0U) {
     const math::Vec3 sunDir =
@@ -755,6 +788,21 @@ math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   }
 
   return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
+}
+
+void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
+  dev->enable_depth_test();
+  dev->set_depth_func_less_equal();
+  dev->set_depth_mask(false);
+  dev->disable_face_culling();
+}
+
+void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->set_depth_mask(true);
+  dev->set_depth_func_less();
+  dev->enable_face_culling();
 }
 
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
@@ -768,10 +816,7 @@ void draw_skybox(const BackendState &backend, const RenderDevice *dev,
     return;
   }
 
-  dev->enable_depth_test();
-  dev->set_depth_func_less_equal();
-  dev->set_depth_mask(false);
-  dev->disable_face_culling();
+  prepare_procedural_sky_draw(dev);
 
   dev->bind_program(backend.skyboxProgram);
   if (backend.skyboxViewLoc >= 0) {
@@ -789,11 +834,7 @@ void draw_skybox(const BackendState &backend, const RenderDevice *dev,
   dev->draw_arrays_triangles(0, kSkyboxVertexCount);
 
   dev->bind_texture_cubemap(0, 0U);
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
-  dev->set_depth_mask(true);
-  dev->set_depth_func_less();
-  dev->enable_face_culling();
+  finish_procedural_sky_draw(dev);
 
   ++frameStats.drawCalls;
   frameStats.triangleCount +=
@@ -813,10 +854,7 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
   const math::Vec3 sunDir = preetham_sun_direction(lights);
   const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
 
-  dev->enable_depth_test();
-  dev->set_depth_func_less_equal();
-  dev->set_depth_mask(false);
-  dev->disable_face_culling();
+  prepare_procedural_sky_draw(dev);
 
   dev->bind_program(backend.preethamSkyProgram);
   if (backend.preethamSkyViewLoc >= 0) {
@@ -836,11 +874,50 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
   dev->bind_vertex_array(backend.skyboxVertexArray);
   dev->draw_arrays_triangles(0, kSkyboxVertexCount);
 
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
-  dev->set_depth_mask(true);
-  dev->set_depth_func_less();
-  dev->enable_face_culling();
+  finish_procedural_sky_draw(dev);
+
+  ++frameStats.drawCalls;
+  frameStats.triangleCount +=
+      static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
+}
+
+void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
+                    const math::Mat4 &viewMat, const math::Mat4 &projMat,
+                    const SceneLightData &lights,
+                    RendererFrameStats &frameStats) noexcept {
+  if ((dev == nullptr) || !backend.hosekSkyAvailable ||
+      (dev->set_depth_func_less_equal == nullptr) ||
+      (dev->set_depth_func_less == nullptr)) {
+    return;
+  }
+
+  const math::Vec3 sunDir = preetham_sun_direction(lights);
+  const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
+  const float groundAlbedo = core::cvar_get_float("r_sky_ground_albedo", 0.1F);
+
+  prepare_procedural_sky_draw(dev);
+
+  dev->bind_program(backend.hosekSkyProgram);
+  if (backend.hosekSkyViewLoc >= 0) {
+    dev->set_uniform_mat4(backend.hosekSkyViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.hosekSkyProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.hosekSkyProjectionLoc, &projMat.columns[0].x);
+  }
+  if (backend.hosekSkySunDirectionLoc >= 0) {
+    dev->set_uniform_vec3(backend.hosekSkySunDirectionLoc, &sunDir.x);
+  }
+  if (backend.hosekSkyTurbidityLoc >= 0) {
+    dev->set_uniform_float(backend.hosekSkyTurbidityLoc, turbidity);
+  }
+  if (backend.hosekSkyGroundAlbedoLoc >= 0) {
+    dev->set_uniform_float(backend.hosekSkyGroundAlbedoLoc, groundAlbedo);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+
+  finish_procedural_sky_draw(dev);
 
   ++frameStats.drawCalls;
   frameStats.triangleCount +=
@@ -1219,6 +1296,51 @@ bool initialize_backend() noexcept {
     core::log_message(
         core::LogLevel::Warning, "renderer",
         "Preetham sky shader not available — procedural sky disabled");
+  }
+
+  // Hosek-Wilkie procedural sky (preferred over Preetham when available).
+  core::cvar_register_bool(
+      "r_hosek_sky", true,
+      "Enable Hosek-Wilkie procedural sky when no cubemap skybox is active");
+  core::cvar_register_float("r_sky_ground_albedo", 0.1F,
+                            "Procedural sky ground albedo");
+  const ShaderProgramHandle hosekShader = load_shader_program(
+      "assets/shaders/skybox.vert", "assets/shaders/hosek_wilkie_sky.frag");
+  if (hosekShader != kInvalidShaderProgram) {
+    const std::uint32_t hosekProgram = shader_gpu_program(hosekShader);
+    if (hosekProgram != 0U) {
+      backend.hosekSkyShaderHandle = hosekShader;
+      backend.hosekSkyProgram = hosekProgram;
+      backend.hosekSkyViewLoc = dev->uniform_location(hosekProgram, "u_view");
+      backend.hosekSkyProjectionLoc =
+          dev->uniform_location(hosekProgram, "u_projection");
+      backend.hosekSkySunDirectionLoc =
+          dev->uniform_location(hosekProgram, "u_sunDirection");
+      backend.hosekSkyTurbidityLoc =
+          dev->uniform_location(hosekProgram, "u_turbidity");
+      backend.hosekSkyGroundAlbedoLoc =
+          dev->uniform_location(hosekProgram, "u_groundAlbedo");
+
+      if ((backend.hosekSkyViewLoc >= 0) &&
+          (backend.hosekSkyProjectionLoc >= 0) &&
+          (backend.hosekSkySunDirectionLoc >= 0) &&
+          (backend.hosekSkyTurbidityLoc >= 0) &&
+          (backend.hosekSkyGroundAlbedoLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.hosekSkyAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "Hosek-Wilkie sky setup failed — falling back to Preetham");
+        destroy_hosek_sky_resources(backend);
+      }
+    } else {
+      destroy_shader_program(hosekShader);
+    }
+  } else {
+    core::log_message(
+        core::LogLevel::Warning, "renderer",
+        "Hosek-Wilkie sky shader not available — falling back to Preetham");
   }
 
   // Register CVars for deferred rendering.
@@ -2834,6 +2956,14 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (ensureSceneDepthHasOpaque()) {
         draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       }
+    } else if (hosek_sky_enabled(backend)) {
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      if (ensureSceneDepthHasOpaque()) {
+        draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      }
     } else if (preetham_sky_enabled(backend)) {
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
@@ -3081,6 +3211,9 @@ void flush_renderer(CommandBufferView commandBufferView,
     const std::uint32_t skyboxTexture = active_skybox_gpu_texture(backend);
     if (skyboxTexture != 0U) {
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      dev->bind_program(backend.pbrProgram);
+    } else if (hosek_sky_enabled(backend)) {
+      draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
       dev->bind_program(backend.pbrProgram);
     } else if (preetham_sky_enabled(backend)) {
       draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
