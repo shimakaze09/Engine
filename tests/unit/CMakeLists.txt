@@ -349,6 +349,15 @@ engine_add_test_executable(engine_unit_light_culling
     engine_math
 )
 
+engine_add_test_executable(engine_unit_command_buffer
+    SOURCES
+    command_buffer_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+    engine_core
+)
+
 # ---- P1-M5-C: Shadow Maps ----
 
 engine_add_test_executable(engine_unit_shadow_map
