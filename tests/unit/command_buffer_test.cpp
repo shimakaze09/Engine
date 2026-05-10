@@ -186,6 +186,41 @@ int check_environment_texture_getters() {
   return 0;
 }
 
+int check_reflection_probe_bake_settings() {
+  engine::renderer::ReflectionProbeBakeSettings settings{};
+  settings.prefilteredFaceSize = 130U;
+  settings.prefilteredMipLevels = 99U;
+  settings.irradianceFaceSize = 7U;
+  settings.brdfLutSize = 1000U;
+
+  const engine::renderer::ReflectionProbeBakeSettings normalized =
+      engine::renderer::normalize_reflection_probe_bake_settings(settings);
+  if (normalized.prefilteredFaceSize != 128U) {
+    return 61;
+  }
+  if (normalized.prefilteredMipLevels != 8U) {
+    return 62;
+  }
+  if (normalized.irradianceFaceSize != 8U) {
+    return 63;
+  }
+  if (normalized.brdfLutSize != 512U) {
+    return 64;
+  }
+
+  const engine::renderer::ReflectionProbeBakeResult inactive =
+      engine::renderer::bake_reflection_probe(
+          engine::renderer::ReflectionProbeBakeRequest{});
+  if (inactive.baked || (inactive.sourceCubemapTexture != 0U) ||
+      (inactive.prefilteredEnvironmentTexture != 0U) ||
+      (inactive.irradianceEnvironmentTexture != 0U) ||
+      (inactive.brdfLutTexture != 0U)) {
+    return 65;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -202,6 +237,10 @@ int main() {
     return result;
   }
   result = check_environment_texture_getters();
+  if (result != 0) {
+    return result;
+  }
+  result = check_reflection_probe_bake_settings();
   if (result != 0) {
     return result;
   }

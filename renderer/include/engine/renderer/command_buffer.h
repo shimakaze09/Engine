@@ -101,6 +101,27 @@ struct SceneLightData final {
   std::size_t spotLightCount = 0U;
 };
 
+struct ReflectionProbeBakeSettings final {
+  std::uint32_t prefilteredFaceSize = 128U;
+  std::uint32_t prefilteredMipLevels = 5U;
+  std::uint32_t irradianceFaceSize = 32U;
+  std::uint32_t brdfLutSize = 512U;
+};
+
+struct ReflectionProbeBakeRequest final {
+  TextureHandle sourceCubemap = kInvalidTextureHandle;
+  ReflectionProbeBakeSettings settings{};
+};
+
+struct ReflectionProbeBakeResult final {
+  std::uint32_t sourceCubemapTexture = 0U;
+  std::uint32_t prefilteredEnvironmentTexture = 0U;
+  std::uint32_t irradianceEnvironmentTexture = 0U;
+  std::uint32_t brdfLutTexture = 0U;
+  ReflectionProbeBakeSettings settings{};
+  bool baked = false;
+};
+
 struct RendererFrameStats final {
   std::uint32_t drawCalls = 0U;
   std::uint64_t triangleCount = 0U;
@@ -136,6 +157,10 @@ std::uint32_t get_scene_viewport_texture() noexcept;
 std::uint32_t get_prefiltered_environment_texture() noexcept;
 std::uint32_t get_irradiance_environment_texture() noexcept;
 std::uint32_t get_brdf_lut_texture() noexcept;
+ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
+    const ReflectionProbeBakeSettings &settings) noexcept;
+ReflectionProbeBakeResult
+bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept;
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer

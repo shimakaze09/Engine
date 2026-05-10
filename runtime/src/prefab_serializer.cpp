@@ -250,6 +250,25 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
+  // ReflectionProbeComponent
+  ReflectionProbeComponent reflectionProbe{};
+  if (world.get_reflection_probe_component(entity, &reflectionProbe)) {
+    w.write_key(kJsonKeyReflectionProbeComponent);
+    w.begin_object();
+    write_vec3_arr(w, "boxExtents", reflectionProbe.boxExtents);
+    w.write_float("radius", reflectionProbe.radius);
+    w.write_float("intensity", reflectionProbe.intensity);
+    w.write_uint("prefilteredResolution",
+                 reflectionProbe.prefilteredResolution);
+    w.write_uint("irradianceResolution",
+                 reflectionProbe.irradianceResolution);
+    w.write_uint("brdfLutResolution", reflectionProbe.brdfLutResolution);
+    w.write_uint("mipLevels", reflectionProbe.mipLevels);
+    w.write_bool("boxProjection", reflectionProbe.boxProjection);
+    w.write_bool("needsBake", reflectionProbe.needsBake);
+    w.end_object();
+  }
+
   // ScriptComponent— plain string format (matches scene serializer).
   ScriptComponent scriptComp{};
   if (world.get_script_component(entity, &scriptComp) &&
@@ -512,6 +531,43 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
       static_cast<void>(parser.as_float(v, &sc.outerConeAngle));
     }
     static_cast<void>(world.add_spot_light_component(entity, sc));
+  }
+
+  // ReflectionProbeComponent
+  core::JsonValue rpVal{};
+  if (parser.get_object_field(componentsVal, kJsonKeyReflectionProbeComponent,
+                              &rpVal) &&
+      (rpVal.type == core::JsonValue::Type::Object)) {
+    ReflectionProbeComponent rp{};
+    core::JsonValue v{};
+    if (parser.get_object_field(rpVal, "boxExtents", &v)) {
+      static_cast<void>(read_vec3(parser, v, &rp.boxExtents));
+    }
+    if (parser.get_object_field(rpVal, "radius", &v)) {
+      static_cast<void>(parser.as_float(v, &rp.radius));
+    }
+    if (parser.get_object_field(rpVal, "intensity", &v)) {
+      static_cast<void>(parser.as_float(v, &rp.intensity));
+    }
+    if (parser.get_object_field(rpVal, "prefilteredResolution", &v)) {
+      static_cast<void>(parser.as_uint(v, &rp.prefilteredResolution));
+    }
+    if (parser.get_object_field(rpVal, "irradianceResolution", &v)) {
+      static_cast<void>(parser.as_uint(v, &rp.irradianceResolution));
+    }
+    if (parser.get_object_field(rpVal, "brdfLutResolution", &v)) {
+      static_cast<void>(parser.as_uint(v, &rp.brdfLutResolution));
+    }
+    if (parser.get_object_field(rpVal, "mipLevels", &v)) {
+      static_cast<void>(parser.as_uint(v, &rp.mipLevels));
+    }
+    if (parser.get_object_field(rpVal, "boxProjection", &v)) {
+      static_cast<void>(parser.as_bool(v, &rp.boxProjection));
+    }
+    if (parser.get_object_field(rpVal, "needsBake", &v)) {
+      static_cast<void>(parser.as_bool(v, &rp.needsBake));
+    }
+    static_cast<void>(world.add_reflection_probe_component(entity, rp));
   }
 
   // ScriptComponent— accepts plain string (current) or legacy object format.

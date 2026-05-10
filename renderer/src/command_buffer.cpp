@@ -971,7 +971,8 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
-int clamp_int_value(int value, int minValue, int maxValue) noexcept {
+std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
+                              std::uint32_t maxValue) noexcept {
   if (value < minValue) {
     return minValue;
   }
@@ -981,10 +982,10 @@ int clamp_int_value(int value, int minValue, int maxValue) noexcept {
   return value;
 }
 
-int previous_power_of_two(int value) noexcept {
-  int result = 1;
-  while ((result <= (value / 2)) && (result < 4096)) {
-    result *= 2;
+std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
+  std::uint32_t result = 1U;
+  while ((result <= (value / 2U)) && (result < 4096U)) {
+    result *= 2U;
   }
   return result;
 }
@@ -997,14 +998,30 @@ int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   return size;
 }
 
-int max_cubemap_mip_levels(int faceSize) noexcept {
-  int levels = 1;
-  int size = faceSize;
-  while (size > 1) {
-    size /= 2;
+std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
+  std::uint32_t levels = 1U;
+  while (faceSize > 1U) {
+    faceSize /= 2U;
     ++levels;
   }
   return levels;
+}
+
+std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
+  const int value = core::cvar_get_int(name, fallback);
+  return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
+}
+
+ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
+  ReflectionProbeBakeSettings settings{};
+  settings.prefilteredFaceSize =
+      positive_cvar_u32("r_env_prefilter_size", 128);
+  settings.prefilteredMipLevels =
+      positive_cvar_u32("r_env_prefilter_mips", 5);
+  settings.irradianceFaceSize =
+      positive_cvar_u32("r_env_irradiance_size", 32);
+  settings.brdfLutSize = positive_cvar_u32("r_env_brdf_lut_size", 512);
+  return normalize_reflection_probe_bake_settings(settings);
 }
 
 void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
@@ -1046,7 +1063,8 @@ void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
 
 std::uint32_t
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
-                               std::uint32_t sourceCubemap) noexcept {
+                               std::uint32_t sourceCubemap,
+                               ReflectionProbeBakeSettings settings) noexcept {
   if ((dev == nullptr) || !backend.environmentPrefilterAvailable ||
       !core::cvar_get_bool("r_env_prefilter", true) || (sourceCubemap == 0U) ||
       (dev->create_cubemap_hdr_empty == nullptr) ||
@@ -1055,12 +1073,9 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
     return 0U;
   }
 
-  const int requestedSize = core::cvar_get_int("r_env_prefilter_size", 128);
-  const int faceSize =
-      previous_power_of_two(clamp_int_value(requestedSize, 16, 1024));
-  const int maxMips = max_cubemap_mip_levels(faceSize);
-  const int mipLevels = clamp_int_value(
-      core::cvar_get_int("r_env_prefilter_mips", 5), 1, maxMips);
+  settings = normalize_reflection_probe_bake_settings(settings);
+  const int faceSize = static_cast<int>(settings.prefilteredFaceSize);
+  const int mipLevels = static_cast<int>(settings.prefilteredMipLevels);
 
   if ((backend.prefilteredEnvironmentTexture != 0U) &&
       (backend.prefilteredEnvironmentSource == sourceCubemap) &&
@@ -1162,7 +1177,8 @@ void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
 
 std::uint32_t
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
-                              std::uint32_t sourceCubemap) noexcept {
+                              std::uint32_t sourceCubemap,
+                              ReflectionProbeBakeSettings settings) noexcept {
   if ((dev == nullptr) || !backend.environmentIrradianceAvailable ||
       !core::cvar_get_bool("r_env_irradiance", true) || (sourceCubemap == 0U) ||
       (dev->create_cubemap_hdr_empty == nullptr) ||
@@ -1171,9 +1187,8 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
     return 0U;
   }
 
-  const int requestedSize = core::cvar_get_int("r_env_irradiance_size", 32);
-  const int faceSize =
-      previous_power_of_two(clamp_int_value(requestedSize, 8, 256));
+  settings = normalize_reflection_probe_bake_settings(settings);
+  const int faceSize = static_cast<int>(settings.irradianceFaceSize);
 
   if ((backend.irradianceEnvironmentTexture != 0U) &&
       (backend.irradianceEnvironmentSource == sourceCubemap) &&
@@ -1257,8 +1272,8 @@ void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   backend.brdfLutSize = 0;
 }
 
-std::uint32_t ensure_brdf_lut(BackendState &backend,
-                              const RenderDevice *dev) noexcept {
+std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
+                              ReflectionProbeBakeSettings settings) noexcept {
   if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
       !core::cvar_get_bool("r_env_brdf_lut", true) ||
       (dev->create_texture_2d_hdr == nullptr) ||
@@ -1266,9 +1281,8 @@ std::uint32_t ensure_brdf_lut(BackendState &backend,
     return 0U;
   }
 
-  const int requestedSize = core::cvar_get_int("r_env_brdf_lut_size", 512);
-  const int lutSize =
-      previous_power_of_two(clamp_int_value(requestedSize, 64, 1024));
+  settings = normalize_reflection_probe_bake_settings(settings);
+  const int lutSize = static_cast<int>(settings.brdfLutSize);
   if ((backend.brdfLutTexture != 0U) && (backend.brdfLutSize == lutSize)) {
     return backend.brdfLutTexture;
   }
@@ -2597,7 +2611,9 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   const PassResources &passRes = get_pass_resources();
-  static_cast<void>(ensure_brdf_lut(backend, dev));
+  const ReflectionProbeBakeSettings environmentBakeSettings =
+      cvar_reflection_probe_bake_settings();
+  static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
   // Check if deferred rendering is enabled.
   const bool useDeferred =
@@ -3444,9 +3460,11 @@ void flush_renderer(CommandBufferView commandBufferView,
                                             : 0U;
     if (skyboxTexture != 0U) {
       static_cast<void>(
-          ensure_prefiltered_environment(backend, dev, skyboxTexture));
+          ensure_prefiltered_environment(backend, dev, skyboxTexture,
+                                         environmentBakeSettings));
       static_cast<void>(
-          ensure_irradiance_environment(backend, dev, skyboxTexture));
+          ensure_irradiance_environment(backend, dev, skyboxTexture,
+                                        environmentBakeSettings));
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
       dev->bind_framebuffer(sceneFbo);
@@ -3714,9 +3732,11 @@ void flush_renderer(CommandBufferView commandBufferView,
                                             : 0U;
     if (skyboxTexture != 0U) {
       static_cast<void>(
-          ensure_prefiltered_environment(backend, dev, skyboxTexture));
+          ensure_prefiltered_environment(backend, dev, skyboxTexture,
+                                         environmentBakeSettings));
       static_cast<void>(
-          ensure_irradiance_environment(backend, dev, skyboxTexture));
+          ensure_irradiance_environment(backend, dev, skyboxTexture,
+                                        environmentBakeSettings));
       dev->bind_framebuffer(sceneFbo);
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
@@ -4071,6 +4091,62 @@ std::uint32_t get_brdf_lut_texture() noexcept {
     return 0U;
   }
   return backend_state().brdfLutTexture;
+}
+
+ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
+    const ReflectionProbeBakeSettings &settings) noexcept {
+  ReflectionProbeBakeSettings normalized{};
+  normalized.prefilteredFaceSize = previous_power_of_two_u32(
+      clamp_u32_value(settings.prefilteredFaceSize, 16U, 1024U));
+  const std::uint32_t maxMips =
+      max_cubemap_mip_levels_u32(normalized.prefilteredFaceSize);
+  normalized.prefilteredMipLevels =
+      clamp_u32_value(settings.prefilteredMipLevels, 1U, maxMips);
+  normalized.irradianceFaceSize = previous_power_of_two_u32(
+      clamp_u32_value(settings.irradianceFaceSize, 8U, 256U));
+  normalized.brdfLutSize = previous_power_of_two_u32(
+      clamp_u32_value(settings.brdfLutSize, 64U, 1024U));
+  return normalized;
+}
+
+ReflectionProbeBakeResult
+bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
+  ReflectionProbeBakeResult result{};
+  result.settings = normalize_reflection_probe_bake_settings(request.settings);
+
+  if ((request.sourceCubemap == kInvalidTextureHandle) &&
+      (g_activeSkyboxTexture == kInvalidTextureHandle)) {
+    return result;
+  }
+
+  if (!initialize_backend()) {
+    return result;
+  }
+
+  BackendState &backend = backend_state();
+  const RenderDevice *dev = render_device();
+  if (dev == nullptr) {
+    return result;
+  }
+
+  const std::uint32_t sourceCubemap =
+      (request.sourceCubemap == kInvalidTextureHandle)
+          ? active_skybox_gpu_texture(backend)
+          : texture_gpu_id(request.sourceCubemap);
+  result.sourceCubemapTexture = sourceCubemap;
+  if (sourceCubemap == 0U) {
+    return result;
+  }
+
+  result.prefilteredEnvironmentTexture = ensure_prefiltered_environment(
+      backend, dev, sourceCubemap, result.settings);
+  result.irradianceEnvironmentTexture = ensure_irradiance_environment(
+      backend, dev, sourceCubemap, result.settings);
+  result.brdfLutTexture = ensure_brdf_lut(backend, dev, result.settings);
+  result.baked = (result.prefilteredEnvironmentTexture != 0U) &&
+                 (result.irradianceEnvironmentTexture != 0U) &&
+                 (result.brdfLutTexture != 0U);
+  return result;
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {

@@ -401,6 +401,15 @@ engine_add_test_executable(engine_unit_auto_exposure
     engine_math
 )
 
+# ---- P1-M6-A: Environment Reflection Probes ----
+
+engine_add_test_executable(engine_unit_reflection_probe_component
+    SOURCES
+    reflection_probe_component_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M12-A: Platform Paths ----
 
 engine_add_test_executable(engine_unit_platform_paths

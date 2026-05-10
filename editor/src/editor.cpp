@@ -85,11 +85,14 @@ constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kNameTypeName = "engine::runtime::NameComponent";
+constexpr const char *kReflectionProbeTypeName =
+    "engine::runtime::ReflectionProbeComponent";
 constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
 constexpr const char *kMeshSectionLabel = "MeshComponent";
 constexpr const char *kLightSectionLabel = "LightComponent";
+constexpr const char *kReflectionProbeSectionLabel = "ReflectionProbeComponent";
 constexpr const char *kScriptSectionLabel = "ScriptComponent";
 constexpr const char *kScenePath = "assets/scene.json";
 char g_selectedAssetPath[512] = {};
@@ -662,6 +665,16 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
       }
       continue;
     }
+
+    if ((std::strcmp(desc->name, kReflectionProbeTypeName) == 0) &&
+        (g_world->get_reflection_probe_component_ptr(entity) == nullptr)) {
+      runtime::ReflectionProbeComponent probe{};
+      if (ImGui::Selectable(kReflectionProbeSectionLabel)) {
+        static_cast<void>(
+            g_world->add_reflection_probe_component(entity, probe));
+      }
+      continue;
+    }
   }
 
   if (g_world->get_mesh_component_ptr(entity) == nullptr) {
@@ -1091,6 +1104,38 @@ void draw_inspector_panel() noexcept {
     }
   } else {
     ImGui::TextUnformatted("MeshComponent: <none>");
+  }
+
+  runtime::ReflectionProbeComponent reflectionProbe{};
+  if (g_world->get_reflection_probe_component(entity, &reflectionProbe)) {
+    ImGui::PushID("ReflectionProbeComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kReflectionProbeSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool probeModified = false;
+    if (sectionOpen) {
+      if (editable) {
+        probeModified =
+            draw_reflected_component(kReflectionProbeTypeName,
+                                     &reflectionProbe);
+      } else {
+        ImGui::BeginDisabled();
+        static_cast<void>(draw_reflected_component(kReflectionProbeTypeName,
+                                                   &reflectionProbe));
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      static_cast<void>(g_world->remove_reflection_probe_component(entity));
+    } else if (editable && probeModified) {
+      static_cast<void>(
+          g_world->add_reflection_probe_component(entity, reflectionProbe));
+    }
+  } else {
+    ImGui::TextUnformatted("ReflectionProbeComponent: <none>");
   }
 
   runtime::ScriptComponent script{};

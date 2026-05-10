@@ -77,6 +77,19 @@ int build_source_scene(const char *path) {
     return 8;
   }
 
+  engine::runtime::ReflectionProbeComponent thirdProbe{};
+  thirdProbe.boxExtents = engine::math::Vec3(3.0F, 4.0F, 5.0F);
+  thirdProbe.radius = 18.0F;
+  thirdProbe.intensity = 1.25F;
+  thirdProbe.prefilteredResolution = 256U;
+  thirdProbe.irradianceResolution = 64U;
+  thirdProbe.mipLevels = 6U;
+  thirdProbe.boxProjection = true;
+  thirdProbe.needsBake = false;
+  if (!world->add_reflection_probe_component(third, thirdProbe)) {
+    return 11;
+  }
+
   if (!engine::runtime::save_scene(*world, path)) {
     return 9;
   }
@@ -151,6 +164,19 @@ int build_source_buffer(
     return 38;
   }
 
+  engine::runtime::ReflectionProbeComponent thirdProbe{};
+  thirdProbe.boxExtents = engine::math::Vec3(3.0F, 4.0F, 5.0F);
+  thirdProbe.radius = 18.0F;
+  thirdProbe.intensity = 1.25F;
+  thirdProbe.prefilteredResolution = 256U;
+  thirdProbe.irradianceResolution = 64U;
+  thirdProbe.mipLevels = 6U;
+  thirdProbe.boxProjection = true;
+  thirdProbe.needsBake = false;
+  if (!world->add_reflection_probe_component(third, thirdProbe)) {
+    return 52;
+  }
+
   if (!engine::runtime::save_scene(
           *world, outBuffer->data(), outBuffer->size(), outSize)) {
     return 39;
@@ -180,6 +206,7 @@ int verify_loaded_scene(const char *path) {
   bool foundColliderValue = false;
   bool foundMeshValue = false;
   bool foundNameValue = false;
+  bool foundReflectionProbeValue = false;
 
   for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
                                      engine::runtime::World::kMaxEntities);
@@ -215,6 +242,18 @@ int verify_loaded_scene(const char *path) {
     if (world->get_name_component(entity, &name)
         && (std::strcmp(name.name, "Player") == 0)) {
       foundNameValue = true;
+    }
+
+    engine::runtime::ReflectionProbeComponent probe{};
+    if (world->get_reflection_probe_component(entity, &probe)) {
+      foundReflectionProbeValue =
+          nearly_equal(probe.boxExtents.z, 5.0F) &&
+          nearly_equal(probe.radius, 18.0F) &&
+          nearly_equal(probe.intensity, 1.25F) &&
+          (probe.prefilteredResolution == 256U) &&
+          (probe.irradianceResolution == 64U) &&
+          (probe.mipLevels == 6U) && probe.boxProjection &&
+          !probe.needsBake;
     }
   }
 
@@ -254,6 +293,14 @@ int verify_loaded_scene(const char *path) {
     return 60;
   }
 
+  if (world->reflection_probe_count() != 1U) {
+    return 78;
+  }
+
+  if (!foundReflectionProbeValue) {
+    return 79;
+  }
+
   return 0;
 }
 
@@ -276,6 +323,7 @@ int verify_loaded_scene_from_buffer(
   bool foundColliderValue = false;
   bool foundMeshValue = false;
   bool foundNameValue = false;
+  bool foundReflectionProbeValue = false;
 
   for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
                                      engine::runtime::World::kMaxEntities);
@@ -311,6 +359,18 @@ int verify_loaded_scene_from_buffer(
     if (world->get_name_component(entity, &name)
         && (std::strcmp(name.name, "Player") == 0)) {
       foundNameValue = true;
+    }
+
+    engine::runtime::ReflectionProbeComponent probe{};
+    if (world->get_reflection_probe_component(entity, &probe)) {
+      foundReflectionProbeValue =
+          nearly_equal(probe.boxExtents.z, 5.0F) &&
+          nearly_equal(probe.radius, 18.0F) &&
+          nearly_equal(probe.intensity, 1.25F) &&
+          (probe.prefilteredResolution == 256U) &&
+          (probe.irradianceResolution == 64U) &&
+          (probe.mipLevels == 6U) && probe.boxProjection &&
+          !probe.needsBake;
     }
   }
 
@@ -348,6 +408,14 @@ int verify_loaded_scene_from_buffer(
 
   if (!foundNameValue) {
     return 61;
+  }
+
+  if (world->reflection_probe_count() != 1U) {
+    return 87;
+  }
+
+  if (!foundReflectionProbeValue) {
+    return 88;
   }
 
   return 0;

@@ -33,6 +33,8 @@ constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
+constexpr const char *kReflectionProbeTypeName =
+    "engine::runtime::ReflectionProbeComponent";
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
@@ -549,6 +551,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::TypeDescriptor &rigidBodyDesc,
                                 const core::TypeDescriptor &colliderDesc,
                                 const core::TypeDescriptor &springArmDesc,
+                                const core::TypeDescriptor &reflectionProbeDesc,
                                 World &targetWorld) noexcept {
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
@@ -689,6 +692,20 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       static_cast<void>(targetWorld.add_spot_light_component(entity, sc));
     }
 
+    core::JsonValue reflectionProbeValue{};
+    if (parser.get_object_field(components, kJsonKeyReflectionProbeComponent,
+                                &reflectionProbeValue)) {
+      ReflectionProbeComponent reflectionProbe{};
+      if (!read_reflected_component(parser, reflectionProbeValue,
+                                    reflectionProbeDesc, &reflectionProbe) ||
+          !targetWorld.add_reflection_probe_component(entity,
+                                                     reflectionProbe)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error(
+            "failed to load ReflectionProbeComponent component");
+      }
+    }
+
     core::JsonValue nameValue{};
     if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
       const char *nameBegin = nullptr;
@@ -819,6 +836,15 @@ bool copy_world_contents(const World &sourceWorld,
       return;
     }
 
+    ReflectionProbeComponent reflectionProbe{};
+    if (sourceWorld.get_reflection_probe_component(sourceEntity,
+                                                   &reflectionProbe) &&
+        !targetWorld.add_reflection_probe_component(targetEntity,
+                                                   reflectionProbe)) {
+      success = false;
+      return;
+    }
+
     NameComponent name{};
     if (sourceWorld.get_name_component(sourceEntity, &name) &&
         !targetWorld.add_name_component(targetEntity, name)) {
@@ -876,8 +902,11 @@ bool serialize_scene_to_writer(const World &world,
       registry.find_type(kColliderTypeName);
   const core::TypeDescriptor *springArmDesc =
       registry.find_type(kSpringArmTypeName);
+  const core::TypeDescriptor *reflectionProbeDesc =
+      registry.find_type(kReflectionProbeTypeName);
   if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
-      (colliderDesc == nullptr) || (springArmDesc == nullptr)) {
+      (colliderDesc == nullptr) || (springArmDesc == nullptr) ||
+      (reflectionProbeDesc == nullptr)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "missing runtime reflection descriptors");
     return false;
@@ -972,6 +1001,14 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_float("innerConeAngle", spotLight.innerConeAngle);
       writer.write_float("outerConeAngle", spotLight.outerConeAngle);
       writer.end_object();
+    }
+
+    ReflectionProbeComponent reflectionProbe{};
+    if (world.get_reflection_probe_component(entity, &reflectionProbe) &&
+        !write_reflected_component(writer, kJsonKeyReflectionProbeComponent,
+                                   *reflectionProbeDesc, &reflectionProbe)) {
+      writeFailed = true;
+      return;
     }
 
     NameComponent name{};
@@ -1172,8 +1209,11 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
       registry.find_type(kColliderTypeName);
   const core::TypeDescriptor *springArmDesc =
       registry.find_type(kSpringArmTypeName);
+  const core::TypeDescriptor *reflectionProbeDesc =
+      registry.find_type(kReflectionProbeTypeName);
   if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
-      (colliderDesc == nullptr) || (springArmDesc == nullptr)) {
+      (colliderDesc == nullptr) || (springArmDesc == nullptr) ||
+      (reflectionProbeDesc == nullptr)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "missing runtime reflection descriptors");
     return false;
@@ -1188,6 +1228,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
 
   if (!deserialize_scene_entities(parser, entities, *transformDesc,
                                   *rigidBodyDesc, *colliderDesc, *springArmDesc,
+                                  *reflectionProbeDesc,
                                   *stagedWorld)) {
     return false;
   }
