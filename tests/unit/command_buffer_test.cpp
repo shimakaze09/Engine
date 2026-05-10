@@ -221,6 +221,62 @@ int check_reflection_probe_bake_settings() {
   return 0;
 }
 
+int check_distance_fog_settings() {
+  using engine::renderer::DistanceFogMode;
+
+  if (engine::renderer::parse_distance_fog_mode("linear") !=
+      DistanceFogMode::Linear) {
+    return 71;
+  }
+  if (engine::renderer::parse_distance_fog_mode("exp") !=
+      DistanceFogMode::Exp) {
+    return 72;
+  }
+  if (engine::renderer::parse_distance_fog_mode("exp2") !=
+      DistanceFogMode::Exp2) {
+    return 73;
+  }
+  if (engine::renderer::parse_distance_fog_mode("bad") !=
+      DistanceFogMode::Off) {
+    return 74;
+  }
+
+  engine::math::Vec3 color{};
+  if (!engine::renderer::parse_distance_fog_color("0.25, 0.5, 2.0",
+                                                  &color)) {
+    return 75;
+  }
+  if ((color.x != 0.25F) || (color.y != 0.5F) || (color.z != 1.0F)) {
+    return 76;
+  }
+  if (engine::renderer::parse_distance_fog_color("0.1 0.2", &color)) {
+    return 77;
+  }
+
+  engine::renderer::DistanceFogSettings settings{};
+  settings.mode = DistanceFogMode::Exp2;
+  settings.start = -5.0F;
+  settings.end = -1.0F;
+  settings.density = -0.5F;
+  settings.color = engine::math::Vec3(-1.0F, 0.5F, 2.0F);
+
+  const engine::renderer::DistanceFogSettings normalized =
+      engine::renderer::normalize_distance_fog_settings(settings);
+  if (normalized.mode != DistanceFogMode::Exp2) {
+    return 78;
+  }
+  if ((normalized.start != 0.0F) || (normalized.end <= normalized.start) ||
+      (normalized.density != 0.0F)) {
+    return 79;
+  }
+  if ((normalized.color.x != 0.0F) || (normalized.color.y != 0.5F) ||
+      (normalized.color.z != 1.0F)) {
+    return 80;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -241,6 +297,10 @@ int main() {
     return result;
   }
   result = check_reflection_probe_bake_settings();
+  if (result != 0) {
+    return result;
+  }
+  result = check_distance_fog_settings();
   if (result != 0) {
     return result;
   }

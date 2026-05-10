@@ -21,6 +21,11 @@ uniform vec3 u_cameraPos;
 uniform int u_hasAlbedoTexture;
 uniform sampler2D u_albedoMap;
 uniform mat4 u_viewMatrix;
+uniform int uFogMode;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform float uFogDensity;
+uniform vec3 uFogColor;
 
 struct DirLight {
   vec3 direction;
@@ -259,6 +264,22 @@ float compute_point_shadow(vec3 worldPos, int lightIdx) {
   return 1.0;
 }
 
+float compute_distance_fog_factor(float distanceToCamera) {
+  if (uFogMode == 1) {
+    float range = max(uFogEnd - uFogStart, 0.001);
+    return clamp((distanceToCamera - uFogStart) / range, 0.0, 1.0);
+  }
+  if (uFogMode == 2) {
+    float densityDistance = max(uFogDensity, 0.0) * distanceToCamera;
+    return clamp(1.0 - exp(-densityDistance), 0.0, 1.0);
+  }
+  if (uFogMode == 3) {
+    float densityDistance = max(uFogDensity, 0.0) * distanceToCamera;
+    return clamp(1.0 - exp(-(densityDistance * densityDistance)), 0.0, 1.0);
+  }
+  return 0.0;
+}
+
 void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(u_cameraPos - vWorldPos);
@@ -322,5 +343,7 @@ void main() {
   }
 
   vec3 ambient = vec3(0.03) * albedo;
-  outColor = vec4(ambient + Lo, opacity);
+  vec3 color = ambient + Lo;
+  float fogFactor = compute_distance_fog_factor(length(u_cameraPos - vWorldPos));
+  outColor = vec4(mix(color, uFogColor, fogFactor), opacity);
 }

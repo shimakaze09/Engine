@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -105,6 +106,11 @@ struct BackendState final {
   std::int32_t pbrAlbedoMapLocation = -1;
   std::int32_t pbrOpacityLocation = -1;
   std::int32_t pbrViewLocation = -1;
+  std::int32_t pbrFogModeLocation = -1;
+  std::int32_t pbrFogStartLocation = -1;
+  std::int32_t pbrFogEndLocation = -1;
+  std::int32_t pbrFogDensityLocation = -1;
+  std::int32_t pbrFogColorLocation = -1;
 
   // Directional lights.
   std::int32_t pbrDirLightCountLocation = -1;
@@ -254,6 +260,11 @@ struct BackendState final {
   std::int32_t dlDirLightColorLoc = -1;
   std::int32_t dlCameraPosLoc = -1;
   std::int32_t dlScreenSizeLoc = -1;
+  std::int32_t dlFogModeLoc = -1;
+  std::int32_t dlFogStartLoc = -1;
+  std::int32_t dlFogEndLoc = -1;
+  std::int32_t dlFogDensityLoc = -1;
+  std::int32_t dlFogColorLoc = -1;
   std::int32_t dlPointLightCountLoc = -1;
   std::int32_t dlSpotLightCountLoc = -1;
 
@@ -600,6 +611,50 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
   }
 }
 
+void upload_pbr_distance_fog_uniforms(
+    const BackendState &backend, const RenderDevice *dev,
+    const DistanceFogSettings &settings) noexcept {
+  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
+  if (backend.pbrFogModeLocation >= 0) {
+    dev->set_uniform_int(backend.pbrFogModeLocation,
+                         static_cast<std::int32_t>(fog.mode));
+  }
+  if (backend.pbrFogStartLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFogStartLocation, fog.start);
+  }
+  if (backend.pbrFogEndLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFogEndLocation, fog.end);
+  }
+  if (backend.pbrFogDensityLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFogDensityLocation, fog.density);
+  }
+  if (backend.pbrFogColorLocation >= 0) {
+    dev->set_uniform_vec3(backend.pbrFogColorLocation, &fog.color.x);
+  }
+}
+
+void upload_deferred_distance_fog_uniforms(
+    const BackendState &backend, const RenderDevice *dev,
+    const DistanceFogSettings &settings) noexcept {
+  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
+  if (backend.dlFogModeLoc >= 0) {
+    dev->set_uniform_int(backend.dlFogModeLoc,
+                         static_cast<std::int32_t>(fog.mode));
+  }
+  if (backend.dlFogStartLoc >= 0) {
+    dev->set_uniform_float(backend.dlFogStartLoc, fog.start);
+  }
+  if (backend.dlFogEndLoc >= 0) {
+    dev->set_uniform_float(backend.dlFogEndLoc, fog.end);
+  }
+  if (backend.dlFogDensityLoc >= 0) {
+    dev->set_uniform_float(backend.dlFogDensityLoc, fog.density);
+  }
+  if (backend.dlFogColorLoc >= 0) {
+    dev->set_uniform_vec3(backend.dlFogColorLoc, &fog.color.x);
+  }
+}
+
 void bind_pbr_shadow_uniforms(const BackendState &backend,
                               const RenderDevice *dev,
                               const SceneLightData &lights, bool shadowEnabled,
@@ -801,6 +856,29 @@ bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
   return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
 }
 
+void skip_fog_color_separators(const char *&cursor) noexcept {
+  while ((*cursor == ' ') || (*cursor == '\t') || (*cursor == '\n') ||
+         (*cursor == '\r') || (*cursor == ',')) {
+    ++cursor;
+  }
+}
+
+bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
+  if ((cursor == nullptr) || (valueOut == nullptr)) {
+    return false;
+  }
+
+  skip_fog_color_separators(cursor);
+  char *end = nullptr;
+  const float value = std::strtof(cursor, &end);
+  if ((end == cursor) || !std::isfinite(value)) {
+    return false;
+  }
+  *valueOut = value;
+  cursor = end;
+  return true;
+}
+
 SkyModel selected_sky_model() noexcept {
   const char *model = core::cvar_get_string("r_sky_model", "hosek");
   if (cvar_string_equals(model, "cubemap")) {
@@ -813,6 +891,23 @@ SkyModel selected_sky_model() noexcept {
     return SkyModel::None;
   }
   return SkyModel::Hosek;
+}
+
+DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
+  DistanceFogSettings settings{};
+  settings.mode =
+      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "off"));
+  settings.start = core::cvar_get_float("r_fog_start", settings.start);
+  settings.end = core::cvar_get_float("r_fog_end", settings.end);
+  settings.density = core::cvar_get_float("r_fog_density", settings.density);
+
+  math::Vec3 color = settings.color;
+  if (parse_distance_fog_color(
+          core::cvar_get_string("r_fog_color", "0.55 0.65 0.75"), &color)) {
+    settings.color = color;
+  }
+
+  return normalize_distance_fog_settings(settings);
 }
 
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
@@ -1555,6 +1650,12 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_albedoMap");
   backend.pbrOpacityLocation = dev->uniform_location(pbrProgram, "u_opacity");
   backend.pbrViewLocation = dev->uniform_location(pbrProgram, "u_viewMatrix");
+  backend.pbrFogModeLocation = dev->uniform_location(pbrProgram, "uFogMode");
+  backend.pbrFogStartLocation = dev->uniform_location(pbrProgram, "uFogStart");
+  backend.pbrFogEndLocation = dev->uniform_location(pbrProgram, "uFogEnd");
+  backend.pbrFogDensityLocation =
+      dev->uniform_location(pbrProgram, "uFogDensity");
+  backend.pbrFogColorLocation = dev->uniform_location(pbrProgram, "uFogColor");
 
   if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
       (backend.pbrAlbedoLocation < 0) || (backend.pbrOpacityLocation < 0) ||
@@ -1850,6 +1951,16 @@ bool initialize_backend() noexcept {
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
       "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
+  core::cvar_register_string("r_fog_mode", "off",
+                             "Distance fog mode: off, linear, exp, exp2");
+  core::cvar_register_float("r_fog_start", 25.0F,
+                            "Linear distance fog start");
+  core::cvar_register_float("r_fog_end", 150.0F,
+                            "Linear distance fog end");
+  core::cvar_register_float("r_fog_density", 0.01F,
+                            "Exponential distance fog density");
+  core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
+                             "Distance fog RGB color");
 
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
   core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
@@ -2078,6 +2189,11 @@ bool initialize_backend() noexcept {
         dev->uniform_location(dlProg, "uDirLightColor");
     backend.dlCameraPosLoc = dev->uniform_location(dlProg, "uCameraPos");
     backend.dlScreenSizeLoc = dev->uniform_location(dlProg, "uScreenSize");
+    backend.dlFogModeLoc = dev->uniform_location(dlProg, "uFogMode");
+    backend.dlFogStartLoc = dev->uniform_location(dlProg, "uFogStart");
+    backend.dlFogEndLoc = dev->uniform_location(dlProg, "uFogEnd");
+    backend.dlFogDensityLoc = dev->uniform_location(dlProg, "uFogDensity");
+    backend.dlFogColorLoc = dev->uniform_location(dlProg, "uFogColor");
     backend.dlPointLightCountLoc =
         dev->uniform_location(dlProg, "uPointLightCount");
     backend.dlSpotLightCountLoc =
@@ -2613,6 +2729,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   const PassResources &passRes = get_pass_resources();
   const ReflectionProbeBakeSettings environmentBakeSettings =
       cvar_reflection_probe_bake_settings();
+  const DistanceFogSettings fogSettings = distance_fog_settings_from_cvars();
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
   // Check if deferred rendering is enabled.
@@ -3386,6 +3503,7 @@ void flush_renderer(CommandBufferView commandBufferView,
                                      static_cast<float>(drawableHeight)};
         dev->set_uniform_vec2(backend.dlScreenSizeLoc, screenSize);
       }
+      upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
 
       // Upload point light data.
       const auto plCount = static_cast<int>(std::min(
@@ -3516,6 +3634,7 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
       }
       upload_pbr_lighting_uniforms(backend, dev, lights);
+      upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
       bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
                                doSpotShadows, doPointShadows);
       if (backend.pbrAlbedoMapLocation >= 0)
@@ -3633,6 +3752,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
     }
     upload_pbr_lighting_uniforms(backend, dev, lights);
+    upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
     bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
                              doPointShadows);
 
@@ -4091,6 +4211,75 @@ std::uint32_t get_brdf_lut_texture() noexcept {
     return 0U;
   }
   return backend_state().brdfLutTexture;
+}
+
+DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
+  if (cvar_string_equals(mode, "linear") || cvar_string_equals(mode, "1")) {
+    return DistanceFogMode::Linear;
+  }
+  if (cvar_string_equals(mode, "exp") || cvar_string_equals(mode, "2") ||
+      cvar_string_equals(mode, "exponential")) {
+    return DistanceFogMode::Exp;
+  }
+  if (cvar_string_equals(mode, "exp2") || cvar_string_equals(mode, "3") ||
+      cvar_string_equals(mode, "exponential2")) {
+    return DistanceFogMode::Exp2;
+  }
+  return DistanceFogMode::Off;
+}
+
+bool parse_distance_fog_color(const char *value,
+                              math::Vec3 *colorOut) noexcept {
+  if ((value == nullptr) || (colorOut == nullptr)) {
+    return false;
+  }
+
+  const char *cursor = value;
+  math::Vec3 parsed{};
+  if (!parse_fog_color_component(cursor, &parsed.x) ||
+      !parse_fog_color_component(cursor, &parsed.y) ||
+      !parse_fog_color_component(cursor, &parsed.z)) {
+    return false;
+  }
+
+  skip_fog_color_separators(cursor);
+  if (*cursor != '\0') {
+    return false;
+  }
+
+  *colorOut = math::clamp(parsed, 0.0F, 1.0F);
+  return true;
+}
+
+DistanceFogSettings normalize_distance_fog_settings(
+    const DistanceFogSettings &settings) noexcept {
+  DistanceFogSettings normalized{};
+  switch (settings.mode) {
+  case DistanceFogMode::Linear:
+  case DistanceFogMode::Exp:
+  case DistanceFogMode::Exp2:
+    normalized.mode = settings.mode;
+    break;
+  case DistanceFogMode::Off:
+  default:
+    normalized.mode = DistanceFogMode::Off;
+    break;
+  }
+
+  normalized.start =
+      std::isfinite(settings.start) ? std::max(0.0F, settings.start) : 25.0F;
+  const float requestedEnd =
+      std::isfinite(settings.end) ? settings.end : 150.0F;
+  normalized.end = std::max(normalized.start + 0.001F, requestedEnd);
+  normalized.density = std::isfinite(settings.density)
+                           ? std::max(0.0F, settings.density)
+                           : 0.01F;
+  normalized.color = ((std::isfinite(settings.color.x) &&
+                       std::isfinite(settings.color.y) &&
+                       std::isfinite(settings.color.z))
+                          ? math::clamp(settings.color, 0.0F, 1.0F)
+                          : math::Vec3(0.55F, 0.65F, 0.75F));
+  return normalized;
 }
 
 ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(

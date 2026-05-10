@@ -703,9 +703,9 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M6-B: Fog
 
-##### P1-M6-B1: Distance Fog (Linear / Exp / Exp²) `[ ]`
-- `P1-M6-B1a` Fog factor applied in deferred lighting pass or forward pass: `linear`, `exp`, `exp2` modes. `[ ]`
-- `P1-M6-B1b` CVars: `r_fog_mode`, `r_fog_start`, `r_fog_end`, `r_fog_density`, `r_fog_color`. `[ ]`
+##### P1-M6-B1: Distance Fog (Linear / Exp / Exp²) `[x]`
+- `P1-M6-B1a` Fog factor applied in deferred lighting pass or forward pass: `linear`, `exp`, `exp2` modes. `[x]` — *Deferred lighting and forward PBR shaders now mix lit surface color toward `uFogColor` using normalized distance fog settings for `linear`, `exp`, and `exp2` modes.*
+- `P1-M6-B1b` CVars: `r_fog_mode`, `r_fog_start`, `r_fog_end`, `r_fog_density`, `r_fog_color`. `[x]` — *Renderer registers these CVars, parses `r_fog_mode`/`r_fog_color`, normalizes ranges/density/color, and uploads the same fog uniforms to deferred and forward passes.*
 
 ##### P1-M6-B2: Height Fog (Height-Based Density, Ray-Marched) `[ ]`
 - `P1-M6-B2a` Height-based density function: exponential falloff above base height. `[ ]`

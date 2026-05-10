@@ -54,6 +54,13 @@ uniform vec3 uCameraPos;
 // Screen dimensions for tile computation.
 uniform vec2 uScreenSize;
 
+// Distance fog.
+uniform int uFogMode;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform float uFogDensity;
+uniform vec3 uFogColor;
+
 // ---- Point lights (uniform arrays, max 128) ----
 #define MAX_POINT_LIGHTS 128
 uniform int uPointLightCount;
@@ -141,6 +148,22 @@ float linearize_depth(float depth) {
     vec4 clipPos = vec4(0.0, 0.0, z, 1.0);
     vec4 viewPos = uInvProjection * clipPos;
     return -viewPos.z / viewPos.w;
+}
+
+float compute_distance_fog_factor(float distanceToCamera) {
+    if (uFogMode == 1) {
+        float range = max(uFogEnd - uFogStart, 0.001);
+        return clamp((distanceToCamera - uFogStart) / range, 0.0, 1.0);
+    }
+    if (uFogMode == 2) {
+        float densityDistance = max(uFogDensity, 0.0) * distanceToCamera;
+        return clamp(1.0 - exp(-densityDistance), 0.0, 1.0);
+    }
+    if (uFogMode == 3) {
+        float densityDistance = max(uFogDensity, 0.0) * distanceToCamera;
+        return clamp(1.0 - exp(-(densityDistance * densityDistance)), 0.0, 1.0);
+    }
+    return 0.0;
 }
 
 // PCF shadow sampling with 3x3 kernel.
@@ -364,6 +387,8 @@ void main() {
     float ssaoFactor = (uSsaoEnabled != 0) ? texture(uSsaoTexture, vTexCoord).r : 1.0;
     vec3 ambient = vec3(0.03) * albedo * ao * ssaoFactor;
     vec3 color = ambient + Lo + emissive;
+    float fogFactor = compute_distance_fog_factor(length(uCameraPos - worldPos));
+    color = mix(color, uFogColor, fogFactor);
 
     FragColor = vec4(color, 1.0);
 }

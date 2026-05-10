@@ -122,6 +122,21 @@ struct ReflectionProbeBakeResult final {
   bool baked = false;
 };
 
+enum class DistanceFogMode : std::uint8_t {
+  Off = 0,
+  Linear = 1,
+  Exp = 2,
+  Exp2 = 3,
+};
+
+struct DistanceFogSettings final {
+  DistanceFogMode mode = DistanceFogMode::Off;
+  float start = 25.0F;
+  float end = 150.0F;
+  float density = 0.01F;
+  math::Vec3 color = math::Vec3(0.55F, 0.65F, 0.75F);
+};
+
 struct RendererFrameStats final {
   std::uint32_t drawCalls = 0U;
   std::uint64_t triangleCount = 0U;
@@ -161,6 +176,11 @@ ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
     const ReflectionProbeBakeSettings &settings) noexcept;
 ReflectionProbeBakeResult
 bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept;
+DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept;
+bool parse_distance_fog_color(const char *value,
+                              math::Vec3 *colorOut) noexcept;
+DistanceFogSettings
+normalize_distance_fog_settings(const DistanceFogSettings &settings) noexcept;
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer
