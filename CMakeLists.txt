@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
 
+if(POLICY CMP0174)
+    cmake_policy(SET CMP0174 NEW)
+endif()
+
 project(Engine LANGUAGES C CXX)
 
 include(${CMAKE_SOURCE_DIR}/cmake/EngineHelpers.cmake)
@@ -198,7 +202,7 @@ else()
         "cppcheck not found; install cppcheck to enable the analysis target."
         COMMENT "Static analysis target (cppcheck not available)"
     )
-    message(STATUS "cppcheck not found; 'analysis' target will print a warning.")
+    message(STATUS "cppcheck not found; local 'analysis' target is unavailable.")
 endif()
 
 include(FetchContent)

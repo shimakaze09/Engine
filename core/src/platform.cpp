@@ -367,10 +367,11 @@ std::size_t process_memory_bytes() noexcept {
     return 0U;
   }
 
+  unsigned long long totalPages = 0ULL;
   unsigned long long residentPages = 0ULL;
-  const int scanned = std::fscanf(fp, "%*llu %llu", &residentPages);
+  const int scanned = std::fscanf(fp, "%llu %llu", &totalPages, &residentPages);
   std::fclose(fp);
-  if (scanned != 1) {
+  if (scanned != 2) {
     return 0U;
   }
 
