@@ -60,16 +60,24 @@ jobs:
       # ---- Determinism hash artifact (for cross-platform comparison) ----
       - name: Run determinism hash
         if: matrix.config == 'Release'
-        continue-on-error: true
         shell: bash
         run: |
+          set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then
             exe="build/tests/integration/Release/engine_integration_determinism.exe"
           else
             exe="build/tests/integration/engine_integration_determinism"
           fi
+          if [ ! -x "$exe" ]; then
+            echo "FAIL: determinism executable not found or not executable: $exe"
+            exit 1
+          fi
           "$exe" 2>&1 | tee determinism_output.txt
-          hash=$(sed -n 's/.*hash=\([0-9]*\).*/\1/p' determinism_output.txt)
+          hash=$(sed -n 's/.*hash=\([0-9][0-9]*\).*/\1/p' determinism_output.txt | tail -n 1)
+          if [ -z "$hash" ]; then
+            echo "FAIL: determinism hash was not emitted"
+            exit 1
+          fi
           echo "$hash" > determinism_hash.txt
           echo "Determinism hash on ${{ matrix.os }}: $hash"
 
@@ -102,20 +110,28 @@ jobs:
       - name: Compare hashes across platforms
         shell: bash
         run: |
+          set -euo pipefail
+          shopt -s nullglob
           echo "=== Cross-platform determinism check ==="
           hashes=()
           for dir in determinism-hash-*/; do
             file="${dir}determinism_hash.txt"
-            if [ -f "$file" ]; then
-              h=$(cat "$file" | tr -d '[:space:]')
-              platform=$(basename "$dir" | sed 's/determinism-hash-//')
-              echo "  $platform: $h"
-              hashes+=("$h")
+            platform=$(basename "$dir" | sed 's/determinism-hash-//')
+            if [ ! -f "$file" ]; then
+              echo "FAIL: missing determinism hash for $platform"
+              exit 1
             fi
+            h=$(cat "$file" | tr -d '[:space:]')
+            if [ -z "$h" ]; then
+              echo "FAIL: empty determinism hash for $platform"
+              exit 1
+            fi
+            echo "  $platform: $h"
+            hashes+=("$h")
           done
-          if [ ${#hashes[@]} -lt 2 ]; then
-            echo "WARN: fewer than 2 platform hashes found, skipping comparison"
-            exit 0
+          if [ ${#hashes[@]} -ne 3 ]; then
+            echo "FAIL: expected 3 platform hashes, found ${#hashes[@]}"
+            exit 1
           fi
           first="${hashes[0]}"
           for h in "${hashes[@]}"; do
@@ -503,3 +519,40 @@ jobs:
         with:
           name: benchmark-results
           path: bench_results/
+
+  quality-gate:
+    name: Required CI quality gate
+    needs:
+      - build
+      - determinism-check
+      - static-analysis
+      - clang-tidy
+      - werror-check
+      - sanitizers
+      - tsan
+      - coverage
+      - benchmarks
+    runs-on: ubuntu-24.04
+    if: always()
+    steps:
+      - name: Require all CI jobs
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = {
+              name: data.get("result")
+              for name, data in needs.items()
+              if data.get("result") != "success"
+          }
+          if failed:
+              for name, result in sorted(failed.items()):
+                  print(f"FAIL: {name} concluded {result}")
+              sys.exit(1)
+          print("PASS: all CI jobs completed successfully")
+          PY

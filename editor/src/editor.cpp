@@ -87,12 +87,21 @@ constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kNameTypeName = "engine::runtime::NameComponent";
 constexpr const char *kReflectionProbeTypeName =
     "engine::runtime::ReflectionProbeComponent";
+constexpr const char *kPointLightTypeName =
+    "engine::runtime::PointLightComponent";
+constexpr const char *kSpotLightTypeName =
+    "engine::runtime::SpotLightComponent";
+constexpr const char *kSpringArmTypeName =
+    "engine::runtime::SpringArmComponent";
 constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
 constexpr const char *kMeshSectionLabel = "MeshComponent";
 constexpr const char *kLightSectionLabel = "LightComponent";
 constexpr const char *kReflectionProbeSectionLabel = "ReflectionProbeComponent";
+constexpr const char *kPointLightSectionLabel = "PointLightComponent";
+constexpr const char *kSpotLightSectionLabel = "SpotLightComponent";
+constexpr const char *kSpringArmSectionLabel = "SpringArmComponent";
 constexpr const char *kScriptSectionLabel = "ScriptComponent";
 constexpr const char *kScenePath = "assets/scene.json";
 char g_selectedAssetPath[512] = {};
@@ -219,6 +228,227 @@ struct TransformEditCommand final : EditorCommand {
     }
   }
 };
+
+enum class ComponentEditType : std::uint8_t {
+  Name,
+  Transform,
+  RigidBody,
+  Collider,
+  Light,
+  Mesh,
+  Script,
+  ReflectionProbe,
+  PointLight,
+  SpotLight,
+  SpringArm,
+};
+
+void make_default_entity_name(std::uint32_t entityIndex,
+                              runtime::NameComponent *outName) noexcept;
+
+struct ComponentEditSnapshot final {
+  runtime::NameComponent name{};
+  runtime::Transform transform{};
+  runtime::RigidBody rigidBody{};
+  runtime::Collider collider{};
+  runtime::LightComponent light{};
+  runtime::MeshComponent mesh{};
+  runtime::ScriptComponent script{};
+  runtime::ReflectionProbeComponent reflectionProbe{};
+  runtime::PointLightComponent pointLight{};
+  runtime::SpotLightComponent spotLight{};
+  runtime::SpringArmComponent springArm{};
+};
+
+bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
+                                ComponentEditSnapshot *out) noexcept {
+  if ((g_world == nullptr) || (out == nullptr)) {
+    return false;
+  }
+
+  switch (type) {
+  case ComponentEditType::Name:
+    return g_world->get_name_component(entity, &out->name);
+  case ComponentEditType::Transform:
+    return g_world->get_transform(entity, &out->transform);
+  case ComponentEditType::RigidBody:
+    return g_world->get_rigid_body(entity, &out->rigidBody);
+  case ComponentEditType::Collider:
+    return g_world->get_collider(entity, &out->collider);
+  case ComponentEditType::Light:
+    return g_world->get_light_component(entity, &out->light);
+  case ComponentEditType::Mesh:
+    return g_world->get_mesh_component(entity, &out->mesh);
+  case ComponentEditType::Script:
+    return g_world->get_script_component(entity, &out->script);
+  case ComponentEditType::ReflectionProbe:
+    return g_world->get_reflection_probe_component(entity,
+                                                   &out->reflectionProbe);
+  case ComponentEditType::PointLight:
+    return g_world->get_point_light_component(entity, &out->pointLight);
+  case ComponentEditType::SpotLight:
+    return g_world->get_spot_light_component(entity, &out->spotLight);
+  case ComponentEditType::SpringArm:
+    return g_world->get_spring_arm(entity, &out->springArm);
+  }
+  return false;
+}
+
+bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
+                              bool exists,
+                              const ComponentEditSnapshot &snapshot) noexcept {
+  if (g_world == nullptr) {
+    return false;
+  }
+  const runtime::Entity resolved =
+      g_world->find_entity_by_index(entity.index);
+  if (resolved == runtime::kInvalidEntity) {
+    return false;
+  }
+
+  if (!exists) {
+    switch (type) {
+    case ComponentEditType::Name:
+      return g_world->remove_name_component(resolved);
+    case ComponentEditType::Transform:
+      return g_world->remove_transform(resolved);
+    case ComponentEditType::RigidBody:
+      return g_world->remove_rigid_body(resolved);
+    case ComponentEditType::Collider:
+      return g_world->remove_collider(resolved);
+    case ComponentEditType::Light:
+      return g_world->remove_light_component(resolved);
+    case ComponentEditType::Mesh:
+      return g_world->remove_mesh_component(resolved);
+    case ComponentEditType::Script:
+      return g_world->remove_script_component(resolved);
+    case ComponentEditType::ReflectionProbe:
+      return g_world->remove_reflection_probe_component(resolved);
+    case ComponentEditType::PointLight:
+      return g_world->remove_point_light_component(resolved);
+    case ComponentEditType::SpotLight:
+      return g_world->remove_spot_light_component(resolved);
+    case ComponentEditType::SpringArm:
+      return g_world->remove_spring_arm(resolved);
+    }
+    return false;
+  }
+
+  switch (type) {
+  case ComponentEditType::Name:
+    return g_world->add_name_component(resolved, snapshot.name);
+  case ComponentEditType::Transform:
+    return g_world->add_transform(resolved, snapshot.transform);
+  case ComponentEditType::RigidBody:
+    return g_world->add_rigid_body(resolved, snapshot.rigidBody);
+  case ComponentEditType::Collider:
+    return g_world->add_collider(resolved, snapshot.collider);
+  case ComponentEditType::Light:
+    return g_world->add_light_component(resolved, snapshot.light);
+  case ComponentEditType::Mesh:
+    return g_world->add_mesh_component(resolved, snapshot.mesh);
+  case ComponentEditType::Script:
+    return g_world->add_script_component(resolved, snapshot.script);
+  case ComponentEditType::ReflectionProbe:
+    return g_world->add_reflection_probe_component(resolved,
+                                                   snapshot.reflectionProbe);
+  case ComponentEditType::PointLight:
+    return g_world->add_point_light_component(resolved, snapshot.pointLight);
+  case ComponentEditType::SpotLight:
+    return g_world->add_spot_light_component(resolved, snapshot.spotLight);
+  case ComponentEditType::SpringArm:
+    return g_world->add_spring_arm(resolved, snapshot.springArm);
+  }
+  return false;
+}
+
+struct ComponentEditCommand final : EditorCommand {
+  runtime::Entity entity{};
+  ComponentEditType type = ComponentEditType::Transform;
+  bool beforeExists = false;
+  bool afterExists = false;
+  ComponentEditSnapshot before{};
+  ComponentEditSnapshot after{};
+
+  void execute() noexcept override {
+    static_cast<void>(
+        apply_component_snapshot(type, entity, afterExists, after));
+  }
+
+  void undo() noexcept override {
+    static_cast<void>(
+        apply_component_snapshot(type, entity, beforeExists, before));
+  }
+};
+
+void execute_component_add(runtime::Entity entity, ComponentEditType type,
+                           const ComponentEditSnapshot &after) noexcept {
+  ComponentEditSnapshot before{};
+  const bool beforeExists = capture_component_snapshot(type, entity, &before);
+
+  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  if (cmd == nullptr) {
+    static_cast<void>(apply_component_snapshot(type, entity, true, after));
+    return;
+  }
+
+  cmd->entity = entity;
+  cmd->type = type;
+  cmd->beforeExists = beforeExists;
+  cmd->before = before;
+  cmd->afterExists = true;
+  cmd->after = after;
+  g_commandHistory.execute(cmd);
+}
+
+void execute_component_remove(runtime::Entity entity,
+                              ComponentEditType type) noexcept {
+  ComponentEditSnapshot before{};
+  if (!capture_component_snapshot(type, entity, &before)) {
+    return;
+  }
+
+  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  if (cmd == nullptr) {
+    static_cast<void>(apply_component_snapshot(type, entity, false, before));
+    return;
+  }
+
+  cmd->entity = entity;
+  cmd->type = type;
+  cmd->beforeExists = true;
+  cmd->before = before;
+  cmd->afterExists = false;
+  g_commandHistory.execute(cmd);
+}
+
+ComponentEditSnapshot default_component_snapshot(
+    runtime::Entity entity, ComponentEditType type) noexcept {
+  ComponentEditSnapshot snapshot{};
+  switch (type) {
+  case ComponentEditType::Name:
+    make_default_entity_name(entity.index, &snapshot.name);
+    break;
+  case ComponentEditType::RigidBody:
+    snapshot.rigidBody.inverseMass = 1.0F;
+    break;
+  case ComponentEditType::Collider:
+    snapshot.collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+    break;
+  case ComponentEditType::Mesh:
+    snapshot.mesh.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
+    break;
+  case ComponentEditType::Transform:
+  case ComponentEditType::Light:
+  case ComponentEditType::Script:
+  case ComponentEditType::ReflectionProbe:
+  case ComponentEditType::PointLight:
+  case ComponentEditType::SpotLight:
+  case ComponentEditType::SpringArm:
+    break;
+  }
+  return snapshot;
+}
 
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept {
@@ -641,48 +871,79 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     if ((std::strcmp(desc->name, kTransformTypeName) == 0) &&
         (g_world->get_transform_read_ptr(entity) == nullptr)) {
       if (ImGui::Selectable(kTransformSectionLabel)) {
-        static_cast<void>(g_world->add_transform(entity, runtime::Transform{}));
+        execute_component_add(
+            entity, ComponentEditType::Transform,
+            default_component_snapshot(entity, ComponentEditType::Transform));
       }
       continue;
     }
 
     if ((std::strcmp(desc->name, kRigidBodyTypeName) == 0) &&
         (g_world->get_rigid_body_ptr(entity) == nullptr)) {
-      runtime::RigidBody rigidBody{};
-      rigidBody.inverseMass = 1.0F;
       if (ImGui::Selectable(kRigidBodySectionLabel)) {
-        static_cast<void>(g_world->add_rigid_body(entity, rigidBody));
+        execute_component_add(
+            entity, ComponentEditType::RigidBody,
+            default_component_snapshot(entity, ComponentEditType::RigidBody));
       }
       continue;
     }
 
     if ((std::strcmp(desc->name, kColliderTypeName) == 0) &&
         (g_world->get_collider_ptr(entity) == nullptr)) {
-      runtime::Collider collider{};
-      collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
       if (ImGui::Selectable(kColliderSectionLabel)) {
-        static_cast<void>(g_world->add_collider(entity, collider));
+        execute_component_add(
+            entity, ComponentEditType::Collider,
+            default_component_snapshot(entity, ComponentEditType::Collider));
       }
       continue;
     }
 
     if ((std::strcmp(desc->name, kReflectionProbeTypeName) == 0) &&
         (g_world->get_reflection_probe_component_ptr(entity) == nullptr)) {
-      runtime::ReflectionProbeComponent probe{};
       if (ImGui::Selectable(kReflectionProbeSectionLabel)) {
-        static_cast<void>(
-            g_world->add_reflection_probe_component(entity, probe));
+        execute_component_add(entity, ComponentEditType::ReflectionProbe,
+                              default_component_snapshot(
+                                  entity, ComponentEditType::ReflectionProbe));
+      }
+      continue;
+    }
+
+    if ((std::strcmp(desc->name, kPointLightTypeName) == 0) &&
+        !g_world->has_point_light_component(entity)) {
+      if (ImGui::Selectable(kPointLightSectionLabel)) {
+        execute_component_add(
+            entity, ComponentEditType::PointLight,
+            default_component_snapshot(entity, ComponentEditType::PointLight));
+      }
+      continue;
+    }
+
+    if ((std::strcmp(desc->name, kSpotLightTypeName) == 0) &&
+        !g_world->has_spot_light_component(entity)) {
+      if (ImGui::Selectable(kSpotLightSectionLabel)) {
+        execute_component_add(
+            entity, ComponentEditType::SpotLight,
+            default_component_snapshot(entity, ComponentEditType::SpotLight));
+      }
+      continue;
+    }
+
+    if ((std::strcmp(desc->name, kSpringArmTypeName) == 0) &&
+        !g_world->has_spring_arm(entity)) {
+      if (ImGui::Selectable(kSpringArmSectionLabel)) {
+        execute_component_add(
+            entity, ComponentEditType::SpringArm,
+            default_component_snapshot(entity, ComponentEditType::SpringArm));
       }
       continue;
     }
   }
 
   if (g_world->get_mesh_component_ptr(entity) == nullptr) {
-    runtime::MeshComponent mesh{};
-    mesh.meshAssetId = 0ULL;
-    mesh.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
     if (ImGui::Selectable(kMeshSectionLabel)) {
-      static_cast<void>(g_world->add_mesh_component(entity, mesh));
+      execute_component_add(
+          entity, ComponentEditType::Mesh,
+          default_component_snapshot(entity, ComponentEditType::Mesh));
     }
   }
 
@@ -690,8 +951,9 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     runtime::LightComponent tmpLight{};
     if (!g_world->get_light_component(entity, &tmpLight)) {
       if (ImGui::Selectable(kLightSectionLabel)) {
-        runtime::LightComponent newLight{};
-        static_cast<void>(g_world->add_light_component(entity, newLight));
+        execute_component_add(
+            entity, ComponentEditType::Light,
+            default_component_snapshot(entity, ComponentEditType::Light));
       }
     }
   }
@@ -700,8 +962,9 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     runtime::ScriptComponent tmpScript{};
     if (!g_world->get_script_component(entity, &tmpScript)) {
       if (ImGui::Selectable(kScriptSectionLabel)) {
-        runtime::ScriptComponent newScript{};
-        static_cast<void>(g_world->add_script_component(entity, newScript));
+        execute_component_add(
+            entity, ComponentEditType::Script,
+            default_component_snapshot(entity, ComponentEditType::Script));
       }
     }
   }
@@ -890,7 +1153,7 @@ void draw_inspector_panel() noexcept {
     }
 
     if (editable && removeNamePressed) {
-      static_cast<void>(g_world->remove_name_component(entity));
+      execute_component_remove(entity, ComponentEditType::Name);
     } else if (editable && nameChanged) {
       static_cast<void>(g_world->add_name_component(entity, nameComponent));
     }
@@ -900,9 +1163,9 @@ void draw_inspector_panel() noexcept {
     }
 
     if (ImGui::SmallButton("+ Name") && editable) {
-      runtime::NameComponent newName{};
-      make_default_entity_name(entity.index, &newName);
-      static_cast<void>(g_world->add_name_component(entity, newName));
+      execute_component_add(
+          entity, ComponentEditType::Name,
+          default_component_snapshot(entity, ComponentEditType::Name));
     }
 
     if (!editable) {
@@ -955,7 +1218,7 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removePressed) {
-      static_cast<void>(g_world->remove_transform(entity));
+      execute_component_remove(entity, ComponentEditType::Transform);
     } else if (editable && transformModified) {
       static_cast<void>(g_world->add_transform(entity, transform));
     }
@@ -985,7 +1248,7 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removePressed) {
-      static_cast<void>(g_world->remove_rigid_body(entity));
+      execute_component_remove(entity, ComponentEditType::RigidBody);
     } else if (editable && rigidBodyModified) {
       static_cast<void>(g_world->add_rigid_body(entity, rigidBody));
     }
@@ -1015,7 +1278,7 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removePressed) {
-      static_cast<void>(g_world->remove_collider(entity));
+      execute_component_remove(entity, ComponentEditType::Collider);
     } else if (editable && colliderModified) {
       static_cast<void>(g_world->add_collider(entity, collider));
     }
@@ -1056,12 +1319,73 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removeLightPressed) {
-      static_cast<void>(g_world->remove_light_component(entity));
+      execute_component_remove(entity, ComponentEditType::Light);
     } else if (editable && lightModified) {
       static_cast<void>(g_world->add_light_component(entity, light));
     }
   } else {
     ImGui::TextUnformatted("LightComponent: <none>");
+  }
+
+  runtime::PointLightComponent pointLight{};
+  if (g_world->get_point_light_component(entity, &pointLight)) {
+    ImGui::PushID("PointLightComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kPointLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool pointLightModified = false;
+    if (sectionOpen) {
+      if (editable) {
+        pointLightModified =
+            draw_reflected_component(kPointLightTypeName, &pointLight);
+      } else {
+        ImGui::BeginDisabled();
+        static_cast<void>(
+            draw_reflected_component(kPointLightTypeName, &pointLight));
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      execute_component_remove(entity, ComponentEditType::PointLight);
+    } else if (editable && pointLightModified) {
+      static_cast<void>(
+          g_world->add_point_light_component(entity, pointLight));
+    }
+  } else {
+    ImGui::TextUnformatted("PointLightComponent: <none>");
+  }
+
+  runtime::SpotLightComponent spotLight{};
+  if (g_world->get_spot_light_component(entity, &spotLight)) {
+    ImGui::PushID("SpotLightComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kSpotLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool spotLightModified = false;
+    if (sectionOpen) {
+      if (editable) {
+        spotLightModified =
+            draw_reflected_component(kSpotLightTypeName, &spotLight);
+      } else {
+        ImGui::BeginDisabled();
+        static_cast<void>(
+            draw_reflected_component(kSpotLightTypeName, &spotLight));
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      execute_component_remove(entity, ComponentEditType::SpotLight);
+    } else if (editable && spotLightModified) {
+      static_cast<void>(g_world->add_spot_light_component(entity, spotLight));
+    }
+  } else {
+    ImGui::TextUnformatted("SpotLightComponent: <none>");
   }
 
   runtime::MeshComponent mesh{};
@@ -1098,7 +1422,7 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removePressed) {
-      static_cast<void>(g_world->remove_mesh_component(entity));
+      execute_component_remove(entity, ComponentEditType::Mesh);
     } else if (editable && meshModified) {
       static_cast<void>(g_world->add_mesh_component(entity, mesh));
     }
@@ -1129,7 +1453,7 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removePressed) {
-      static_cast<void>(g_world->remove_reflection_probe_component(entity));
+      execute_component_remove(entity, ComponentEditType::ReflectionProbe);
     } else if (editable && probeModified) {
       static_cast<void>(
           g_world->add_reflection_probe_component(entity, reflectionProbe));
@@ -1167,12 +1491,42 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && removeScriptPressed) {
-      static_cast<void>(g_world->remove_script_component(entity));
+      execute_component_remove(entity, ComponentEditType::Script);
     } else if (editable && scriptModified) {
       static_cast<void>(g_world->add_script_component(entity, script));
     }
   } else {
     ImGui::TextUnformatted("ScriptComponent: <none>");
+  }
+
+  runtime::SpringArmComponent springArm{};
+  if (g_world->get_spring_arm(entity, &springArm)) {
+    ImGui::PushID("SpringArmComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kSpringArmSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool springArmModified = false;
+    if (sectionOpen) {
+      if (editable) {
+        springArmModified =
+            draw_reflected_component(kSpringArmTypeName, &springArm);
+      } else {
+        ImGui::BeginDisabled();
+        static_cast<void>(
+            draw_reflected_component(kSpringArmTypeName, &springArm));
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      execute_component_remove(entity, ComponentEditType::SpringArm);
+    } else if (editable && springArmModified) {
+      static_cast<void>(g_world->add_spring_arm(entity, springArm));
+    }
+  } else {
+    ImGui::TextUnformatted("SpringArmComponent: <none>");
   }
 
   draw_add_component_combo(entity, editable);

@@ -226,7 +226,50 @@ bool test_snapshot_restore() noexcept {
     return false;
   }
 
+  if ((snaps[0].timerId == engine::runtime::kInvalidTimerId) ||
+      (snaps[1].timerId == engine::runtime::kInvalidTimerId)) {
+    return false;
+  }
+
   return true;
+}
+
+bool test_restore_preserves_slots_and_rewires_callbacks() noexcept {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return false;
+  }
+  auto &tm = world->timer_manager();
+
+  g_timeoutFired = 0;
+  const auto id = tm.set_timeout(0.2F, on_timeout, nullptr);
+  if (id == engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+
+  engine::runtime::TimerManager::TimerSnapshot snaps[4]{};
+  const std::size_t count = tm.snapshot(snaps, 4U);
+  if ((count != 1U) || (snaps[0].timerId != id)) {
+    return false;
+  }
+
+  engine::runtime::TimerManager restored{};
+  if (restored.restore(snaps, count) != 1U) {
+    return false;
+  }
+
+  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  if (!restored.entry_at(slot).active ||
+      (restored.entry_at(slot).callback != nullptr)) {
+    return false;
+  }
+
+  if (restored.rewire_callbacks(on_timeout, nullptr) != 1U) {
+    return false;
+  }
+  restored.tick(0.25F);
+  return g_timeoutFired == 1;
 }
 
 bool test_null_callback_rejected() noexcept {
@@ -293,6 +336,8 @@ int main() {
   run("test_cancel_prevents_fire", test_cancel_prevents_fire);
   run("test_clear_removes_all", test_clear_removes_all);
   run("test_snapshot_restore", test_snapshot_restore);
+  run("test_restore_preserves_slots_and_rewires_callbacks",
+      test_restore_preserves_slots_and_rewires_callbacks);
   run("test_null_callback_rejected", test_null_callback_rejected);
   run("test_timer_per_world", test_timer_per_world);
 

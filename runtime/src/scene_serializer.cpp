@@ -1049,6 +1049,7 @@ bool serialize_scene_to_writer(const World &world,
           continue;
         }
         writer.begin_object();
+        writer.write_uint("id", snaps[i].timerId);
         writer.write_float("remaining", snaps[i].remainingSeconds);
         writer.write_float("interval", snaps[i].intervalSeconds);
         writer.write_bool("repeat", snaps[i].repeat);
@@ -1248,6 +1249,13 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
       TimerManager::TimerSnapshot snap{};
       snap.active = true;
 
+      core::JsonValue idVal{};
+      if (parser.get_object_field(timerVal, "id", &idVal)) {
+        std::uint32_t timerId = 0U;
+        if (parser.as_uint(idVal, &timerId)) {
+          snap.timerId = static_cast<TimerId>(timerId);
+        }
+      }
       core::JsonValue remainVal{};
       if (parser.get_object_field(timerVal, "remaining", &remainVal)) {
         static_cast<void>(parser.as_float(remainVal, &snap.remainingSeconds));

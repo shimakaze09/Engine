@@ -1,4 +1,5 @@
 #include "engine/core/engine_stats.h"
+#include "engine/core/platform.h"
 
 int main() {
   using namespace engine::core;
@@ -37,6 +38,10 @@ int main() {
   if ((stats.drawCalls != 0U) || (stats.triCount != 0U) ||
       (stats.entityCount != 0U)) {
     return 3;
+  }
+
+  if (process_memory_bytes() == 0U) {
+    return 4;
   }
 
   return 0;

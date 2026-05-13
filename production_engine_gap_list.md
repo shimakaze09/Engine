@@ -132,25 +132,29 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M1-B3a` ASAN + UBSAN job: `-DENGINE_SANITIZERS=ON`; `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`; `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`. `[x]`
 - `P1-M1-B3b` TSAN job: separate job (cannot combine with ASAN); `TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1`. `[x]`
 - `P1-M1-B3c` Sanitizer suppression files: `tests/sanitizer_suppressions/lsan.supp` and `tsan.supp` for known third-party issues. `[x]`
+- `P1-M1-B3d` Required CI quality gate depends on `sanitizers` and `tsan`, so sanitizer failures block the workflow result. `[x]`
 
 ##### P1-M1-B4: Code Coverage Reporting + Threshold Gate `[x]`
 - `P1-M1-B4a` Coverage job: `--coverage` flags; `lcov` capture + `genhtml` HTML report uploaded as artifact. `[x]`
 - `P1-M1-B4b` Threshold gate: CI fails if line coverage drops below 50%. `[x]`
 - `P1-M1-B4c` FetchContent sources, tests, and tools excluded from coverage measurement. `[x]`
+- `P1-M1-B4d` Required CI quality gate depends on `coverage`, so threshold failures block the workflow result. `[x]`
 
 ##### P1-M1-B5: Performance Regression Gate `[x]`
 - `P1-M1-B5a` `tests/benchmark/ecs_perf_test.cpp`: measures time to iterate 50K entities; emits JSON result. `[x]`
 - `P1-M1-B5b` `tests/benchmark/physics_perf_test.cpp`: measures 1000-body physics step time; emits JSON result. `[x]`
 - `P1-M1-B5c` CI `benchmarks` job: compares results against `tests/benchmark/perf_baseline.json`; fails on >10% regression. `[x]`
+- `P1-M1-B5d` Required CI quality gate depends on `benchmarks`, so performance regressions block the workflow result. `[x]`
 
 ---
 
 #### P1-M1-C: Determinism and Replay Baseline
 
 ##### P1-M1-C1: Cross-Platform Determinism Tests `[x]`
-- `P1-M1-C1a` Each Release CI cell runs `engine_integration_determinism`, hashes final state, uploads `determinism_hash.txt` artifact. `[x]`
-- `P1-M1-C1b` `determinism-check` job downloads all three platform hashes and fails if any differ. `[x]`
+- `P1-M1-C1a` Each Release CI cell runs `engine_integration_determinism`, extracts a non-empty hash, and fails immediately if the binary crashes or no hash is emitted. `[x]`
+- `P1-M1-C1b` `determinism-check` job downloads exactly three non-empty platform hashes and fails if any differ. `[x]`
 - `P1-M1-C1c` Thread-count determinism: `tests/integration/thread_count_determinism.cpp` verifies identical hashes for 1/2/4/8 worker counts. `[x]`
+- `P1-M1-C1d` Required CI quality gate depends on `determinism-check`, so determinism failures block the workflow result. `[x]`
 
 ##### P1-M1-C2: ECS Stress Test at 50K+ Entities `[x]`
 - `P1-M1-C2a` `kMaxEntities` raised to 65536 (configurable via `ENGINE_MAX_ENTITIES` CMake define). `[x]`
@@ -183,6 +187,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M1-D4b` `set_engine_stats()` / `get_engine_stats()` thread-safe API; `reset_engine_stats()` per frame. `[x]`
 - `P1-M1-D4c` `tests/unit/engine_stats_test.cpp` exists. `[x]`
 - `P1-M1-D4d` ImGui overlay rendering in editor (toggled by CVar `r_showStats`). `[x]` — *draw_stats_panel() + draw_in_game_stats_overlay() in editor.cpp; r_showStats CVar registered at editor.cpp:1858.*
+- `P1-M1-D4e` `core::process_memory_bytes()` reports resident process memory on Windows, Linux, and macOS; unit coverage rejects a zero reading on supported CI platforms. `[x]`
 
 ---
 
@@ -262,7 +267,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M2-B2a` `core/include/engine/core/service_locator.h`: type-erased, fixed-capacity (64 services) registry; no heap allocation. `[x]`
 - `P1-M2-B2b` `type_id<T>()` uses static address trick (no RTTI). `[x]`
 - `P1-M2-B2c` `global_service_locator()` provides engine-wide singleton instance. `[x]`
-- `P1-M2-B2d` All engine singletons (physics, audio, asset DB, renderer) registered at startup. `[x]` — *World and RuntimeServices registered in scripting_bridge.cpp lines 699-701.*
+- `P1-M2-B2d` All engine singletons (physics, audio, asset DB, renderer) registered at startup. `[x]` — *runtime/service_registry registers World, PhysicsWorldView, PhysicsContext, EngineAudioService, AssetDatabase/AssetManager, CommandBufferBuilder, GpuMeshRegistry, RenderDevice, and EngineRendererService from EnginePipeline::initialize; scripting still registers RuntimeServices in scripting_bridge.cpp.*
 - `P1-M2-B2e` `tests/unit/service_locator_test.cpp` exists. `[x]`
 
 ---
@@ -298,7 +303,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M2-D-a` `runtime/include/engine/runtime/timer_manager.h`: `set_timeout()`, `set_interval()`, `cancel()`. `[x]`
 - `P1-M2-D-b` `tick(dt)` advances all timers; returns count that fired. `[x]`
 - `P1-M2-D-c` Fixed-capacity (256 timers); no heap allocation. `[x]`
-- `P1-M2-D-d` Serialization: `snapshot()` / `restore()` for scene save/load round-trips; Lua refs re-wired by scripting layer. `[x]`
+- `P1-M2-D-d` Serialization: `snapshot()` / `restore()` preserve timer IDs for scene save/load and PIE restore; scripting re-wires Lua timer callbacks before ticking restored timers. `[x]`
 - `P1-M2-D-e` `World` owns `TimerManager` (reset on scene load). `[x]`
 - `P1-M2-D-f` `scripting.h`: `tick_timers()` called once per frame before `on_update`. `[x]`
 - `P1-M2-D-g` `tests/integration/timer_test.cpp` exists. `[x]`
@@ -494,7 +499,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M4-A2f` `tests/unit/import_settings_test.cpp` exists. `[x]`
 
 ##### P1-M4-A3: Thumbnail Generation (Mesh + Texture Previews) `[x]`
-- `P1-M4-A3a` Off-screen render of mesh into thumbnail texture. `[x]` — *asset_packer renders mesh to offscreen FBO, saves 64×64 PNG thumbnail.*
+- `P1-M4-A3a` Headless off-screen mesh thumbnail generation. `[x]` — *asset_packer uses a deterministic CPU rasterizer with depth buffer and writes a 64×64 PNG thumbnail; no OpenGL/FBO dependency is required for the command-line tool.*
 - `P1-M4-A3b` Mip-sampled texture preview (64×64 or 128×128). `[x]` — *generate_texture_thumbnail() in asset_packer: stbi_load → box-filter mip-chain downsample → 64×64 PNG.*
 - `P1-M4-A3c` Thumbnail cache (disk + in-memory); invalidated when asset checksum changes. `[x]` — *FNV-64 hash sidecar (.checksum) replaces mtime; regenerates only when source changes.*
 - `P1-M4-A3d` Display in asset browser panel. `[x]` — *editor asset browser loads and displays thumbnail PNGs from .thumbnails/ directory.*
@@ -901,16 +906,16 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 #### P1-M9-A: Reflection-Driven Property Inspector
 
 ##### P1-M9-A1: All-Types Inspector (Nested Structs, Arrays) `[~]`
-- `P1-M9-A1a` `core/include/engine/core/reflect.h` exists; `runtime/include/engine/runtime/reflect_types.h` exists. `[~]`
-- `P1-M9-A1b` Reflected types: Transform, RigidBody, Collider, MeshComponent, LightComponent, ScriptComponent, SpringArmComponent, PointLightComponent, SpotLightComponent. `[~]` — *Header files confirmed; reflect macro coverage in each struct unverified.*
-- `P1-M9-A1c` Inspector renders: float sliders, vec3 drag fields, bool checkboxes, enum dropdowns, string inputs, asset ID pickers. `[ ]`
+- `P1-M9-A1a` `core/include/engine/core/reflect.h` exists; `runtime/include/engine/runtime/reflect_types.h` exists. `[x]`
+- `P1-M9-A1b` Reflected editor-driven types: Transform, RigidBody, Collider, ReflectionProbeComponent, SpringArmComponent, PointLightComponent, SpotLightComponent. Mesh, Light, Script, and Name have manual editor panels for fixed strings/enums/asset IDs. `[x]`
+- `P1-M9-A1c` Inspector renders: float sliders, vec3 drag fields, bool checkboxes, enum dropdowns, strings, and manual asset IDs; dedicated panels now cover PointLightComponent, SpotLightComponent, and SpringArmComponent. `[~]`
 - `P1-M9-A1d` Nested struct expansion (Collider → shape enum + halfExtents + material fields). `[ ]`
 - `P1-M9-A1e` Array/SparseSet component display (list of lights with add/remove). `[ ]`
 
-##### P1-M9-A2: Component Add / Remove from Inspector `[ ]`
-- `P1-M9-A2a` Inspector shows "Add Component" dropdown listing all registered component types. `[ ]`
-- `P1-M9-A2b` Remove button per component (records undo command). `[ ]`
-- `P1-M9-A2c` Component add/remove generates undo/redo entry. `[ ]`
+##### P1-M9-A2: Component Add / Remove from Inspector `[x]`
+- `P1-M9-A2a` Inspector shows "Add Component" dropdown listing editor-supported component types, including Transform, RigidBody, Collider, Mesh, Light, Script, ReflectionProbe, PointLight, SpotLight, and SpringArm. `[x]`
+- `P1-M9-A2b` Remove button per editor-supported component records an undo command. `[x]`
+- `P1-M9-A2c` Component add/remove generates undo/redo entries through `ComponentEditCommand`. `[x]`
 
 ---
 

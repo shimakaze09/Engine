@@ -29,8 +29,11 @@
 #endif
 #include <windows.h>
 #include <psapi.h>
-
-
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/task.h>
+#elif defined(__linux__)
+#include <unistd.h>
 #endif
 
 #include "engine/core/logging.h"
@@ -343,6 +346,36 @@ std::size_t process_memory_bytes() noexcept {
     return 0U;
   }
   return static_cast<std::size_t>(pmc.WorkingSetSize);
+#elif defined(__APPLE__)
+  mach_task_basic_info info{};
+  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+  const kern_return_t result =
+      task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                reinterpret_cast<task_info_t>(&info), &count);
+  if (result != KERN_SUCCESS) {
+    return 0U;
+  }
+  return static_cast<std::size_t>(info.resident_size);
+#elif defined(__linux__)
+  const long pageSize = sysconf(_SC_PAGESIZE);
+  if (pageSize <= 0) {
+    return 0U;
+  }
+
+  FILE *fp = std::fopen("/proc/self/statm", "r");
+  if (fp == nullptr) {
+    return 0U;
+  }
+
+  unsigned long long residentPages = 0ULL;
+  const int scanned = std::fscanf(fp, "%*llu %llu", &residentPages);
+  std::fclose(fp);
+  if (scanned != 1) {
+    return 0U;
+  }
+
+  return static_cast<std::size_t>(
+      residentPages * static_cast<unsigned long long>(pageSize));
 #else
   return 0U;
 #endif
