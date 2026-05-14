@@ -10,9 +10,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     name: ${{ matrix.os }}-${{ matrix.config }}
@@ -20,16 +17,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-latest]
+        os: [ubuntu-24.04, macos-14, windows-2025-vs2026]
         config: [Debug, Release]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ---- Cache FetchContent dependencies ----
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
@@ -86,14 +83,14 @@ jobs:
 
       - name: Upload determinism hash
         if: matrix.config == 'Release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: determinism-hash-${{ matrix.os }}
           path: determinism_hash.txt
 
       - name: Upload compile_commands.json
         if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Debug'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compile_commands
           path: build/compile_commands.json
@@ -105,7 +102,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all determinism hashes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: determinism-hash-*
           merge-multiple: false
@@ -151,7 +148,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install cppcheck
         run: sudo apt-get update -qq && sudo apt-get install -y -qq cppcheck
@@ -166,7 +163,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -202,7 +199,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install clang-tidy
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy
@@ -217,7 +214,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -262,7 +259,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux dependencies
         run: |
@@ -275,7 +272,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -292,7 +289,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux dependencies
         run: |
@@ -305,7 +302,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -334,7 +331,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux dependencies
         run: |
@@ -347,7 +344,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -376,7 +373,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -389,7 +386,7 @@ jobs:
             libasound2-dev libpulse-dev lcov
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -420,7 +417,7 @@ jobs:
         run: genhtml coverage.info --output-directory coverage_html --title "Engine Coverage"
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage_html/
@@ -445,7 +442,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux dependencies
         run: |
@@ -458,7 +455,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -518,7 +515,7 @@ jobs:
           "
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: bench_results/
