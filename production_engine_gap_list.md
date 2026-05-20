@@ -1,13 +1,17 @@
 # Production Engine Gap List — Combined Master Document
 
-> **Consolidated from**: `production_engine_milestones.md` (execution plan + exit criteria), `production_engine_phased_todo.md` (checklist tracking). This file is the **single source of truth** for gap analysis, milestone definitions, exit criteria, and completion status. The other two files are retained as supplementary references only.
+> **Consolidated from**: earlier milestone and checklist trackers. This file is
+> the **single source of truth** for gap analysis, milestone definitions, exit
+> criteria, and completion status. No separate phased TODO or milestone
+> markdown file is tracked in this checkout; stale external copies must not be
+> used for status decisions.
 >
 > **Status codes**: `[x]` = production-ready (API complete, tests pass, meets 7-point completion standard), `[~]` = partial/prototype (header exists, implementation or tests incomplete), `[ ]` = not started (no implementation found).
 > **Priority**: **[critical]** = Phase 1 ship blocker · **[high]** = Phase 2 competitive parity · **[low]** = Phase 3 cutting-edge.
 > **Verification basis**: Direct review of all public headers under `core/`, `renderer/`, `physics/`, `scripting/`, `runtime/`, `audio/`, `editor/`, `tools/`; full read of `.github/workflows/ci.yml`; directory listing of `tests/unit/`, `tests/integration/`, `tests/benchmark/`.
-> **Codebase inventory**: 8 modules (core: 23 headers, math: 9, physics: 7, scripting: 3, renderer: 15, audio: 1, runtime: 14, editor: 4), 59 test files (44 unit, 16 integration, 2 benchmark), CI: 9 jobs.
-> **Third-party dependencies**: SDL2 2.30.11, Lua 5.4.6, ImGui (docking branch), ImGuizmo (master), cgltf 1.14, stb (master), miniaudio 0.11.21, OpenGL 4.5+.
-> **Last reviewed**: 2026-04-20 (after commit `e042fe0` — post-processing implementation).
+> **Codebase inventory**: 8 modules (core: 24 headers, math: 10, physics: 10, scripting: 3, renderer: 17, audio: 1, runtime: 19, editor: 4), 78 test source files (55 unit, 19 integration, 1 smoke, 3 benchmark), CI: 9 jobs.
+> **Third-party dependencies**: SDL2 2.30.11, Lua 5.4.6, ImGui (pinned docking snapshot), ImGuizmo (pinned master snapshot), cgltf 1.14, stb (pinned master snapshot), miniaudio 0.11.21, OpenGL 4.5+.
+> **Last reviewed**: 2026-05-20 (after P1-M6-C1 static mesh instancing implementation).
 
 ---
 
