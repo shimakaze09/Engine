@@ -26,6 +26,11 @@ uniform float uFogStart;
 uniform float uFogEnd;
 uniform float uFogDensity;
 uniform vec3 uFogColor;
+uniform int uHeightFogEnabled;
+uniform float uHeightFogBaseHeight;
+uniform float uHeightFogDensity;
+uniform float uHeightFogFalloff;
+uniform int uHeightFogStepCount;
 
 struct DirLight {
   vec3 direction;
@@ -280,6 +285,43 @@ float compute_distance_fog_factor(float distanceToCamera) {
   return 0.0;
 }
 
+float compute_height_fog_density(vec3 worldPos) {
+  float heightAboveBase = max(worldPos.y - uHeightFogBaseHeight, 0.0);
+  float falloff = max(uHeightFogFalloff, 0.001);
+  return max(uHeightFogDensity, 0.0) * exp(-heightAboveBase * falloff);
+}
+
+float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
+  if (uHeightFogEnabled == 0 || uHeightFogDensity <= 0.0) {
+    return 0.0;
+  }
+
+  vec3 ray = worldPos - cameraPos;
+  float rayLength = length(ray);
+  if (rayLength <= 0.001) {
+    return 0.0;
+  }
+
+  int stepCount = clamp(uHeightFogStepCount, 1, 64);
+  vec3 stepVector = ray / float(stepCount);
+  float stepLength = rayLength / float(stepCount);
+  float opticalDepth = 0.0;
+
+  for (int i = 0; i < 64; ++i) {
+    if (i >= stepCount) {
+      break;
+    }
+    vec3 samplePos = cameraPos + stepVector * (float(i) + 0.5);
+    opticalDepth += compute_height_fog_density(samplePos) * stepLength;
+  }
+
+  return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+}
+
+float combine_fog_factors(float distanceFog, float heightFog) {
+  return clamp(1.0 - ((1.0 - distanceFog) * (1.0 - heightFog)), 0.0, 1.0);
+}
+
 void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(u_cameraPos - vWorldPos);
@@ -344,6 +386,8 @@ void main() {
 
   vec3 ambient = vec3(0.03) * albedo;
   vec3 color = ambient + Lo;
-  float fogFactor = compute_distance_fog_factor(length(u_cameraPos - vWorldPos));
+  float distanceFog = compute_distance_fog_factor(length(u_cameraPos - vWorldPos));
+  float heightFog = compute_height_fog_factor(u_cameraPos, vWorldPos);
+  float fogFactor = combine_fog_factors(distanceFog, heightFog);
   outColor = vec4(mix(color, uFogColor, fogFactor), opacity);
 }

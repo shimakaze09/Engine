@@ -274,6 +274,31 @@ int check_distance_fog_settings() {
     return 80;
   }
 
+  engine::renderer::HeightFogSettings height{};
+  height.enabled = true;
+  height.baseHeight = 12.0F;
+  height.density = 2.0F;
+  height.falloff = -1.0F;
+  height.stepCount = 256;
+
+  const engine::renderer::HeightFogSettings normalizedHeight =
+      engine::renderer::normalize_height_fog_settings(height);
+  if (!normalizedHeight.enabled || (normalizedHeight.baseHeight != 12.0F)) {
+    return 81;
+  }
+  if ((normalizedHeight.density != 1.0F) ||
+      (normalizedHeight.falloff != 0.001F) ||
+      (normalizedHeight.stepCount != 64)) {
+    return 82;
+  }
+
+  height.density = 0.0F;
+  const engine::renderer::HeightFogSettings disabledHeight =
+      engine::renderer::normalize_height_fog_settings(height);
+  if (disabledHeight.enabled) {
+    return 83;
+  }
+
   return 0;
 }
 

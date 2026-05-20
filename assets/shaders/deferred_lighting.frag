@@ -60,6 +60,11 @@ uniform float uFogStart;
 uniform float uFogEnd;
 uniform float uFogDensity;
 uniform vec3 uFogColor;
+uniform int uHeightFogEnabled;
+uniform float uHeightFogBaseHeight;
+uniform float uHeightFogDensity;
+uniform float uHeightFogFalloff;
+uniform int uHeightFogStepCount;
 
 // ---- Point lights (uniform arrays, max 128) ----
 #define MAX_POINT_LIGHTS 128
@@ -164,6 +169,43 @@ float compute_distance_fog_factor(float distanceToCamera) {
         return clamp(1.0 - exp(-(densityDistance * densityDistance)), 0.0, 1.0);
     }
     return 0.0;
+}
+
+float compute_height_fog_density(vec3 worldPos) {
+    float heightAboveBase = max(worldPos.y - uHeightFogBaseHeight, 0.0);
+    float falloff = max(uHeightFogFalloff, 0.001);
+    return max(uHeightFogDensity, 0.0) * exp(-heightAboveBase * falloff);
+}
+
+float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
+    if (uHeightFogEnabled == 0 || uHeightFogDensity <= 0.0) {
+        return 0.0;
+    }
+
+    vec3 ray = worldPos - cameraPos;
+    float rayLength = length(ray);
+    if (rayLength <= 0.001) {
+        return 0.0;
+    }
+
+    int stepCount = clamp(uHeightFogStepCount, 1, 64);
+    vec3 stepVector = ray / float(stepCount);
+    float stepLength = rayLength / float(stepCount);
+    float opticalDepth = 0.0;
+
+    for (int i = 0; i < 64; ++i) {
+        if (i >= stepCount) {
+            break;
+        }
+        vec3 samplePos = cameraPos + stepVector * (float(i) + 0.5);
+        opticalDepth += compute_height_fog_density(samplePos) * stepLength;
+    }
+
+    return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+}
+
+float combine_fog_factors(float distanceFog, float heightFog) {
+    return clamp(1.0 - ((1.0 - distanceFog) * (1.0 - heightFog)), 0.0, 1.0);
 }
 
 // PCF shadow sampling with 3x3 kernel.
@@ -387,7 +429,9 @@ void main() {
     float ssaoFactor = (uSsaoEnabled != 0) ? texture(uSsaoTexture, vTexCoord).r : 1.0;
     vec3 ambient = vec3(0.03) * albedo * ao * ssaoFactor;
     vec3 color = ambient + Lo + emissive;
-    float fogFactor = compute_distance_fog_factor(length(uCameraPos - worldPos));
+    float distanceFog = compute_distance_fog_factor(length(uCameraPos - worldPos));
+    float heightFog = compute_height_fog_factor(uCameraPos, worldPos);
+    float fogFactor = combine_fog_factors(distanceFog, heightFog);
     color = mix(color, uFogColor, fogFactor);
 
     FragColor = vec4(color, 1.0);
