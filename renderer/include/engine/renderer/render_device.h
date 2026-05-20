@@ -53,11 +53,15 @@ struct RenderDevice final {
   void (*vertex_attrib_float)(std::uint32_t index, std::int32_t components,
                               std::int32_t stride,
                               const void *offset) noexcept = nullptr;
+  void (*vertex_attrib_divisor)(std::uint32_t index,
+                                std::uint32_t divisor) noexcept = nullptr;
 
   // Drawing.
   void (*draw_arrays_triangles)(std::int32_t first,
                                 std::int32_t count) noexcept = nullptr;
   void (*draw_elements_triangles_u32)(std::int32_t count) noexcept = nullptr;
+  void (*draw_elements_triangles_u32_instanced)(
+      std::int32_t count, std::int32_t instanceCount) noexcept = nullptr;
 
   // Uniform — additional types.
   void (*set_uniform_int)(std::int32_t loc,

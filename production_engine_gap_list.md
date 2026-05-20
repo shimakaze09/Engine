@@ -720,11 +720,11 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M6-C: GPU Instancing
 
-##### P1-M6-C1: Static Mesh GPU Instancing `[ ]`
-- `P1-M6-C1a` Sort opaque `DrawCommand` list by (shader, mesh, material); batch contiguous identical entries. `[ ]`
-- `P1-M6-C1b` Per-instance model matrix uploaded via per-instance vertex buffer or UBO array. `[ ]`
-- `P1-M6-C1c` `glDrawElementsInstanced(count, instanceCount)` call. `[ ]`
-- `P1-M6-C1d` Benchmark: 10K identical meshes → single draw call. `[ ]`
+##### P1-M6-C1: Static Mesh GPU Instancing `[x]`
+- `P1-M6-C1a` Sort opaque `DrawCommand` list by (shader, mesh, material); batch contiguous identical entries. `[x]` — *Opaque command sorting now groups by render-state bits, mesh, and material before depth; `build_static_mesh_batches()` collapses contiguous compatible static-mesh commands for renderer use and tests.*
+- `P1-M6-C1b` Per-instance model matrix uploaded via per-instance vertex buffer or UBO array. `[x]` — *Renderer owns a reusable instance-matrix buffer and binds `mat4` instance attributes at locations 3-6 with divisor 1 for opaque G-Buffer and forward PBR batches.*
+- `P1-M6-C1c` `glDrawElementsInstanced(count, instanceCount)` call. `[x]` — *RenderDevice now exposes `draw_elements_triangles_u32_instanced()`, the GL backend maps it to `glDrawElementsInstanced`, and indexed opaque batches issue one instanced draw when compatible.*
+- `P1-M6-C1d` Benchmark: 10K identical meshes → single draw call. `[x]` — *Added `engine_bench_instancing_batch`, which verifies 10K identical mesh commands collapse into one static-mesh batch; command-buffer unit coverage also asserts 10K batching and material split behavior.*
 
 ##### P1-M6-C2: Foliage Instancing (Wind Vertex Displacement, Per-Instance LOD) `[ ]`
 - `P1-M6-C2a` Wind displacement: sine wave vertex shader using time + world position + per-instance phase. `[ ]`

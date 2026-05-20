@@ -97,6 +97,61 @@ int check_append_and_capacity() {
   return 0;
 }
 
+int check_static_mesh_batches() {
+  static engine::renderer::CommandBufferBuilder builder;
+  builder.reset();
+
+  constexpr std::uint32_t kBenchmarkCount = 10000U;
+  for (std::uint32_t i = 0U; i < kBenchmarkCount; ++i) {
+    engine::renderer::DrawCommand command = make_command(kBenchmarkCount - i, i);
+    command.mesh.id = 7U;
+    command.material.albedo = engine::math::Vec3(0.25F, 0.5F, 0.75F);
+    command.material.roughness = 0.4F;
+    if (!builder.submit(command)) {
+      return 91;
+    }
+  }
+
+  builder.sort_by_key();
+  engine::renderer::StaticMeshBatch singleBatch{};
+  const std::size_t singleBatchCount =
+      engine::renderer::build_static_mesh_batches(builder.view(), 0U,
+                                                  builder.command_count(),
+                                                  &singleBatch, 1U);
+  if ((singleBatchCount != 1U) || (singleBatch.first != 0U) ||
+      (singleBatch.count != kBenchmarkCount)) {
+    return 92;
+  }
+
+  builder.reset();
+  engine::renderer::DrawCommand first = make_command(3U, 1U);
+  first.mesh.id = 12U;
+  first.material.roughness = 0.5F;
+  engine::renderer::DrawCommand second = make_command(1U, 2U);
+  second.mesh.id = 12U;
+  second.material.roughness = 0.9F;
+  engine::renderer::DrawCommand third = make_command(2U, 3U);
+  third.mesh.id = 12U;
+  third.material.roughness = 0.5F;
+  if (!builder.submit(first) || !builder.submit(second) ||
+      !builder.submit(third)) {
+    return 93;
+  }
+
+  builder.sort_by_key();
+  engine::renderer::StaticMeshBatch batches[4]{};
+  const std::size_t batchCount = engine::renderer::build_static_mesh_batches(
+      builder.view(), 0U, builder.command_count(), batches, 4U);
+  if (batchCount != 2U) {
+    return 94;
+  }
+  if ((batches[0].count != 2U) || (batches[1].count != 1U)) {
+    return 95;
+  }
+
+  return 0;
+}
+
 int check_camera_state() {
   engine::renderer::CameraState camera{};
   camera.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
@@ -310,6 +365,10 @@ int main() {
     return result;
   }
   result = check_append_and_capacity();
+  if (result != 0) {
+    return result;
+  }
+  result = check_static_mesh_batches();
   if (result != 0) {
     return result;
   }

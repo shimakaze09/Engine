@@ -40,6 +40,10 @@ constexpr std::uint64_t kFnv1a64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv1a64Prime = 1099511628211ULL;
 constexpr std::size_t kForwardMaxPointLights = 8U;
 constexpr std::size_t kForwardMaxSpotLights = 8U;
+constexpr std::uint32_t kInstanceModelAttrib0 = 3U;
+constexpr std::uint32_t kInstanceModelAttribCount = 4U;
+constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
+constexpr std::uint64_t kDrawKeyDepthMask = 0xFFFFULL;
 constexpr float kSkyboxCubeVertices[] = {
     -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F,
     1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F,
@@ -106,6 +110,8 @@ struct BackendState final {
   std::int32_t pbrAlbedoMapLocation = -1;
   std::int32_t pbrOpacityLocation = -1;
   std::int32_t pbrViewLocation = -1;
+  std::int32_t pbrViewProjectionLocation = -1;
+  std::int32_t pbrUseInstancingLocation = -1;
   std::int32_t pbrFogModeLocation = -1;
   std::int32_t pbrFogStartLocation = -1;
   std::int32_t pbrFogEndLocation = -1;
@@ -243,6 +249,7 @@ struct BackendState final {
   std::int32_t gbufViewLoc = -1;
   std::int32_t gbufProjectionLoc = -1;
   std::int32_t gbufNormalMatrixLoc = -1;
+  std::int32_t gbufUseInstancingLoc = -1;
   std::int32_t gbufAlbedoLoc = -1;
   std::int32_t gbufMetallicLoc = -1;
   std::int32_t gbufRoughnessLoc = -1;
@@ -305,6 +312,9 @@ struct BackendState final {
   // Tile light texture (uploaded each frame by CPU culling).
   std::uint32_t tileLightTex = 0U;
   std::vector<float> tileBuffer;
+  std::uint32_t instanceMatrixBuffer = 0U;
+  std::vector<math::Mat4> instanceMatrices;
+  std::vector<StaticMeshBatch> staticMeshBatches;
 
   // ---- Bloom state ----
   ShaderProgramHandle bloomThresholdShaderHandle{};
@@ -1718,6 +1728,10 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_albedoMap");
   backend.pbrOpacityLocation = dev->uniform_location(pbrProgram, "u_opacity");
   backend.pbrViewLocation = dev->uniform_location(pbrProgram, "u_viewMatrix");
+  backend.pbrViewProjectionLocation =
+      dev->uniform_location(pbrProgram, "u_viewProjection");
+  backend.pbrUseInstancingLocation =
+      dev->uniform_location(pbrProgram, "uUseInstancing");
   backend.pbrFogModeLocation = dev->uniform_location(pbrProgram, "uFogMode");
   backend.pbrFogStartLocation = dev->uniform_location(pbrProgram, "uFogStart");
   backend.pbrFogEndLocation = dev->uniform_location(pbrProgram, "uFogEnd");
@@ -1737,7 +1751,9 @@ bool initialize_backend() noexcept {
 
   if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
       (backend.pbrAlbedoLocation < 0) || (backend.pbrOpacityLocation < 0) ||
-      (backend.pbrViewLocation < 0)) {
+      (backend.pbrViewLocation < 0) ||
+      (backend.pbrViewProjectionLocation < 0) ||
+      (backend.pbrUseInstancingLocation < 0)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to locate required PBR shader uniforms");
     destroy_shader_program(pbrShaderHandle);
@@ -2249,6 +2265,8 @@ bool initialize_backend() noexcept {
     backend.gbufProjectionLoc = dev->uniform_location(gbufProg, "uProjection");
     backend.gbufNormalMatrixLoc =
         dev->uniform_location(gbufProg, "uNormalMatrix");
+    backend.gbufUseInstancingLoc =
+        dev->uniform_location(gbufProg, "uUseInstancing");
     backend.gbufAlbedoLoc = dev->uniform_location(gbufProg, "uAlbedo");
     backend.gbufMetallicLoc = dev->uniform_location(gbufProg, "uMetallic");
     backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
@@ -2603,6 +2621,12 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     dev->destroy_vertex_array(backend->emptyVao);
     backend->emptyVao = 0U;
   }
+  if (backend->instanceMatrixBuffer != 0U && dev != nullptr) {
+    dev->destroy_buffer(backend->instanceMatrixBuffer);
+    backend->instanceMatrixBuffer = 0U;
+  }
+  backend->instanceMatrices.clear();
+  backend->staticMeshBatches.clear();
 
   // Destroy deferred shaders.
   if (backend->gbufferDebugShaderHandle != kInvalidShaderProgram) {
@@ -2643,6 +2667,110 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->defaultProgram = 0U;
   backend->initialized = false;
   shutdown_gpu_profiler();
+}
+
+bool vec3_equal(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
+  return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
+}
+
+bool vec3_less(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
+  if (lhs.x != rhs.x) {
+    return lhs.x < rhs.x;
+  }
+  if (lhs.y != rhs.y) {
+    return lhs.y < rhs.y;
+  }
+  return lhs.z < rhs.z;
+}
+
+bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
+  return vec3_equal(lhs.albedo, rhs.albedo) &&
+         vec3_equal(lhs.emissive, rhs.emissive) &&
+         (lhs.roughness == rhs.roughness) && (lhs.metallic == rhs.metallic) &&
+         (lhs.opacity == rhs.opacity) &&
+         (lhs.albedoTexture == rhs.albedoTexture) &&
+         (lhs.normalTexture == rhs.normalTexture);
+}
+
+bool material_less(const Material &lhs, const Material &rhs) noexcept {
+  if (!vec3_equal(lhs.albedo, rhs.albedo)) {
+    return vec3_less(lhs.albedo, rhs.albedo);
+  }
+  if (!vec3_equal(lhs.emissive, rhs.emissive)) {
+    return vec3_less(lhs.emissive, rhs.emissive);
+  }
+  if (lhs.roughness != rhs.roughness) {
+    return lhs.roughness < rhs.roughness;
+  }
+  if (lhs.metallic != rhs.metallic) {
+    return lhs.metallic < rhs.metallic;
+  }
+  if (lhs.opacity != rhs.opacity) {
+    return lhs.opacity < rhs.opacity;
+  }
+  if (lhs.albedoTexture.id != rhs.albedoTexture.id) {
+    return lhs.albedoTexture.id < rhs.albedoTexture.id;
+  }
+  return lhs.normalTexture.id < rhs.normalTexture.id;
+}
+
+bool draw_commands_instance_compatible(const DrawCommand &lhs,
+                                       const DrawCommand &rhs) noexcept {
+  return (lhs.mesh == rhs.mesh) && materials_equal(lhs.material, rhs.material);
+}
+
+std::uint64_t draw_key_state_bits(const DrawCommand &command) noexcept {
+  return command.sortKey.value & ~kDrawKeyDepthMask;
+}
+
+bool can_upload_instance_matrices(const RenderDevice *dev) noexcept {
+  return (dev != nullptr) && (dev->vertex_attrib_divisor != nullptr) &&
+         (dev->draw_elements_triangles_u32_instanced != nullptr);
+}
+
+bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
+                              const GpuMesh &mesh,
+                              CommandBufferView commandBufferView,
+                              const StaticMeshBatch &batch) noexcept {
+  if (!can_upload_instance_matrices(dev) || (mesh.vertexArray == 0U) ||
+      (batch.count == 0U) || (commandBufferView.data == nullptr)) {
+    return false;
+  }
+
+  if (backend.instanceMatrixBuffer == 0U) {
+    backend.instanceMatrixBuffer = dev->create_buffer();
+    if (backend.instanceMatrixBuffer == 0U) {
+      return false;
+    }
+  }
+
+  backend.instanceMatrices.resize(batch.count);
+  for (std::uint32_t i = 0U; i < batch.count; ++i) {
+    const std::size_t commandIndex =
+        static_cast<std::size_t>(batch.first) + static_cast<std::size_t>(i);
+    backend.instanceMatrices[i] =
+        commandBufferView.data[commandIndex].modelMatrix;
+  }
+
+  dev->bind_vertex_array(mesh.vertexArray);
+  dev->bind_array_buffer(backend.instanceMatrixBuffer);
+  dev->buffer_data_array(
+      backend.instanceMatrices.data(),
+      static_cast<std::ptrdiff_t>(backend.instanceMatrices.size() *
+                                  sizeof(math::Mat4)));
+
+  constexpr std::int32_t stride = static_cast<std::int32_t>(sizeof(math::Mat4));
+  for (std::uint32_t column = 0U; column < kInstanceModelAttribCount;
+       ++column) {
+    const std::uint32_t attrib = kInstanceModelAttrib0 + column;
+    const auto offset = reinterpret_cast<const void *>(
+        static_cast<std::uintptr_t>(sizeof(float) * 4U * column));
+    dev->enable_vertex_attrib(attrib);
+    dev->vertex_attrib_float(attrib, 4, stride, offset);
+    dev->vertex_attrib_divisor(attrib, 1U);
+  }
+
+  return true;
 }
 
 math::Mat4 compute_model_matrix(const DrawCommand &command) noexcept {
@@ -2769,7 +2897,30 @@ void CommandBufferBuilder::sort_by_key() noexcept {
   std::sort(m_commands.begin(),
             m_commands.begin() + static_cast<std::ptrdiff_t>(m_commandCount),
             [](const DrawCommand &lhs, const DrawCommand &rhs) {
-              return lhs.sortKey.value < rhs.sortKey.value;
+              const bool lhsTransparent =
+                  (lhs.sortKey.value & kDrawKeyTransparentBit) != 0U;
+              const bool rhsTransparent =
+                  (rhs.sortKey.value & kDrawKeyTransparentBit) != 0U;
+              if (lhsTransparent != rhsTransparent) {
+                return lhsTransparent < rhsTransparent;
+              }
+              if (lhsTransparent) {
+                return lhs.sortKey.value < rhs.sortKey.value;
+              }
+
+              const std::uint64_t lhsState = draw_key_state_bits(lhs);
+              const std::uint64_t rhsState = draw_key_state_bits(rhs);
+              if (lhsState != rhsState) {
+                return lhsState < rhsState;
+              }
+              if (lhs.mesh.id != rhs.mesh.id) {
+                return lhs.mesh.id < rhs.mesh.id;
+              }
+              if (!materials_equal(lhs.material, rhs.material)) {
+                return material_less(lhs.material, rhs.material);
+              }
+              return (lhs.sortKey.value & kDrawKeyDepthMask) <
+                     (rhs.sortKey.value & kDrawKeyDepthMask);
             });
 }
 
@@ -2782,6 +2933,49 @@ CommandBufferView CommandBufferBuilder::view() const noexcept {
   commandBufferView.data = m_commands.data();
   commandBufferView.count = static_cast<std::uint32_t>(m_commandCount);
   return commandBufferView;
+}
+
+std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
+                                      std::size_t start, std::size_t end,
+                                      StaticMeshBatch *batches,
+                                      std::size_t batchCapacity) noexcept {
+  if ((commandBufferView.data == nullptr) || (batches == nullptr) ||
+      (batchCapacity == 0U)) {
+    return 0U;
+  }
+
+  const std::size_t viewCount = static_cast<std::size_t>(commandBufferView.count);
+  if (start > viewCount) {
+    start = viewCount;
+  }
+  if (end > viewCount) {
+    end = viewCount;
+  }
+  if (start >= end) {
+    return 0U;
+  }
+
+  std::size_t batchCount = 0U;
+  std::size_t first = start;
+  while (first < end) {
+    std::size_t next = first + 1U;
+    while ((next < end) &&
+           draw_commands_instance_compatible(commandBufferView.data[first],
+                                             commandBufferView.data[next])) {
+      ++next;
+    }
+
+    if (batchCount >= batchCapacity) {
+      return batchCount;
+    }
+
+    batches[batchCount].first = static_cast<std::uint32_t>(first);
+    batches[batchCount].count = static_cast<std::uint32_t>(next - first);
+    ++batchCount;
+    first = next;
+  }
+
+  return batchCount;
 }
 
 void flush_renderer(CommandBufferView commandBufferView,
@@ -2861,20 +3055,25 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   // Determine opaque / transparent partition.
-  constexpr std::uint64_t kTransparentBit = 1ULL << 63;
-
   std::size_t opaqueCount = 0U;
   std::size_t totalCount = 0U;
 
   if ((commandBufferView.data != nullptr) && (commandBufferView.count > 0U)) {
     totalCount = static_cast<std::size_t>(commandBufferView.count);
     for (std::size_t i = 0U; i < totalCount; ++i) {
-      if ((commandBufferView.data[i].sortKey.value & kTransparentBit) != 0U) {
+      if ((commandBufferView.data[i].sortKey.value & kDrawKeyTransparentBit) !=
+          0U) {
         break;
       }
       opaqueCount = i + 1U;
     }
   }
+  if (backend.staticMeshBatches.size() < opaqueCount) {
+    backend.staticMeshBatches.resize(opaqueCount);
+  }
+  const std::size_t opaqueBatchCount = build_static_mesh_batches(
+      commandBufferView, 0U, opaqueCount, backend.staticMeshBatches.data(),
+      backend.staticMeshBatches.size());
 
   // ====================================================================
   // SHADOW MAP PASS (before main scene rendering)
@@ -3221,11 +3420,12 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
     }
 
-    // Helper: draw a range in G-Buffer pass.
-    auto drawGBuffer = [&](std::size_t start, std::size_t end) {
+    auto drawGBufferBatches = [&]() {
       std::uint32_t boundVertexArray = 0U;
-      for (std::size_t i = start; i < end; ++i) {
-        const DrawCommand &command = commandBufferView.data[i];
+      for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
+           ++batchIndex) {
+        const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
+        const DrawCommand &command = commandBufferView.data[batch.first];
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
         if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
             (mesh->vertexCount == 0U)) {
@@ -3258,27 +3458,52 @@ void flush_renderer(CommandBufferView commandBufferView,
                                 &command.material.emissive.x);
         }
 
-        const math::Mat4 model = compute_model_matrix(command);
-        float normalMatrix[9] = {};
-        extract_normal_matrix(model, normalMatrix);
-
-        if (backend.gbufModelLoc >= 0) {
-          dev->set_uniform_mat4(backend.gbufModelLoc, &model.columns[0].x);
-        }
-        if (backend.gbufNormalMatrixLoc >= 0) {
-          dev->set_uniform_mat3(backend.gbufNormalMatrixLoc, normalMatrix);
-        }
-
-        if (mesh->indexCount > 0U) {
+        if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
+            upload_instance_matrices(backend, dev, *mesh, commandBufferView,
+                                     batch)) {
+          boundVertexArray = mesh->vertexArray;
+          if (backend.gbufUseInstancingLoc >= 0) {
+            dev->set_uniform_int(backend.gbufUseInstancingLoc, 1);
+          }
           ++frameStats.drawCalls;
-          frameStats.triangleCount += (mesh->indexCount / 3U);
-          dev->draw_elements_triangles_u32(
-              static_cast<std::int32_t>(mesh->indexCount));
-        } else {
-          ++frameStats.drawCalls;
-          frameStats.triangleCount += (mesh->vertexCount / 3U);
-          dev->draw_arrays_triangles(
-              0, static_cast<std::int32_t>(mesh->vertexCount));
+          frameStats.triangleCount +=
+              (mesh->indexCount / 3U) * static_cast<std::uint64_t>(batch.count);
+          dev->draw_elements_triangles_u32_instanced(
+              static_cast<std::int32_t>(mesh->indexCount),
+              static_cast<std::int32_t>(batch.count));
+          continue;
+        }
+
+        if (backend.gbufUseInstancingLoc >= 0) {
+          dev->set_uniform_int(backend.gbufUseInstancingLoc, 0);
+        }
+        for (std::uint32_t local = 0U; local < batch.count; ++local) {
+          const std::size_t commandIndex =
+              static_cast<std::size_t>(batch.first) +
+              static_cast<std::size_t>(local);
+          const DrawCommand &singleCommand = commandBufferView.data[commandIndex];
+          const math::Mat4 model = compute_model_matrix(singleCommand);
+          float normalMatrix[9] = {};
+          extract_normal_matrix(model, normalMatrix);
+
+          if (backend.gbufModelLoc >= 0) {
+            dev->set_uniform_mat4(backend.gbufModelLoc, &model.columns[0].x);
+          }
+          if (backend.gbufNormalMatrixLoc >= 0) {
+            dev->set_uniform_mat3(backend.gbufNormalMatrixLoc, normalMatrix);
+          }
+
+          if (mesh->indexCount > 0U) {
+            ++frameStats.drawCalls;
+            frameStats.triangleCount += (mesh->indexCount / 3U);
+            dev->draw_elements_triangles_u32(
+                static_cast<std::int32_t>(mesh->indexCount));
+          } else {
+            ++frameStats.drawCalls;
+            frameStats.triangleCount += (mesh->vertexCount / 3U);
+            dev->draw_arrays_triangles(
+                0, static_cast<std::int32_t>(mesh->vertexCount));
+          }
         }
       }
     };
@@ -3287,7 +3512,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->set_depth_mask(true);
     dev->disable_blending();
     dev->enable_face_culling();
-    drawGBuffer(0U, opaqueCount);
+    drawGBufferBatches();
 
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
@@ -3732,6 +3957,13 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.pbrViewLocation >= 0) {
         dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
       }
+      if (backend.pbrViewProjectionLocation >= 0) {
+        dev->set_uniform_mat4(backend.pbrViewProjectionLocation,
+                              &viewProjection.columns[0].x);
+      }
+      if (backend.pbrUseInstancingLocation >= 0) {
+        dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+      }
       upload_pbr_lighting_uniforms(backend, dev, lights);
       upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
       upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
@@ -3851,6 +4083,13 @@ void flush_renderer(CommandBufferView commandBufferView,
     if (backend.pbrViewLocation >= 0) {
       dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
     }
+    if (backend.pbrViewProjectionLocation >= 0) {
+      dev->set_uniform_mat4(backend.pbrViewProjectionLocation,
+                            &viewProjection.columns[0].x);
+    }
+    if (backend.pbrUseInstancingLocation >= 0) {
+      dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+    }
     upload_pbr_lighting_uniforms(backend, dev, lights);
     upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
     upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
@@ -3862,10 +4101,115 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
     }
 
-    // Helper: draw a range of draw commands.
+    auto drawForwardCommand = [&](const DrawCommand &command,
+                                  const GpuMesh &mesh) {
+      const math::Mat4 model = compute_model_matrix(command);
+      const math::Mat4 mvp = compute_mvp(model, viewProjection);
+      float normalMatrix[9] = {};
+      extract_normal_matrix(model, normalMatrix);
+
+      if (backend.pbrUseInstancingLocation >= 0) {
+        dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+      }
+      if (backend.pbrModelLocation >= 0) {
+        dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
+      }
+      dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
+      dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
+
+      if (mesh.indexCount > 0U) {
+        ++frameStats.drawCalls;
+        frameStats.triangleCount += (mesh.indexCount / 3U);
+        dev->draw_elements_triangles_u32(
+            static_cast<std::int32_t>(mesh.indexCount));
+      } else {
+        ++frameStats.drawCalls;
+        frameStats.triangleCount += (mesh.vertexCount / 3U);
+        dev->draw_arrays_triangles(0,
+                                   static_cast<std::int32_t>(mesh.vertexCount));
+      }
+    };
+
+    auto uploadForwardMaterial = [&](const Material &material,
+                                     std::uint32_t *boundAlbedoTexture) {
+      if (backend.pbrAlbedoLocation >= 0) {
+        dev->set_uniform_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
+      }
+      if (backend.pbrRoughnessLocation >= 0) {
+        dev->set_uniform_float(backend.pbrRoughnessLocation,
+                               material.roughness);
+      }
+      if (backend.pbrMetallicLocation >= 0) {
+        dev->set_uniform_float(backend.pbrMetallicLocation, material.metallic);
+      }
+      if (backend.pbrOpacityLocation >= 0) {
+        dev->set_uniform_float(backend.pbrOpacityLocation, material.opacity);
+      }
+
+      const std::uint32_t albedoGpuId = texture_gpu_id(material.albedoTexture);
+      const bool hasAlbedoTex =
+          (material.albedoTexture != kInvalidTextureHandle) &&
+          (albedoGpuId != 0U);
+      if (backend.pbrHasAlbedoTextureLocation >= 0) {
+        dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
+                             hasAlbedoTex ? 1 : 0);
+      }
+      if (hasAlbedoTex && (albedoGpuId != *boundAlbedoTexture)) {
+        dev->bind_texture(0, albedoGpuId);
+        *boundAlbedoTexture = albedoGpuId;
+      } else if (!hasAlbedoTex && (*boundAlbedoTexture != 0U)) {
+        dev->bind_texture(0, 0U);
+        *boundAlbedoTexture = 0U;
+      }
+    };
+
     auto drawRange = [&](std::size_t start, std::size_t end) {
       std::uint32_t boundVertexArray = 0U;
       std::uint32_t boundAlbedoTexture = 0U;
+
+      if ((start == 0U) && (end == opaqueCount)) {
+        for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
+             ++batchIndex) {
+          const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
+          const DrawCommand &command = commandBufferView.data[batch.first];
+          const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
+          if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+              (mesh->vertexCount == 0U)) {
+            continue;
+          }
+
+          if (mesh->vertexArray != boundVertexArray) {
+            dev->bind_vertex_array(mesh->vertexArray);
+            boundVertexArray = mesh->vertexArray;
+          }
+
+          uploadForwardMaterial(command.material, &boundAlbedoTexture);
+
+          if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
+              upload_instance_matrices(backend, dev, *mesh, commandBufferView,
+                                       batch)) {
+            boundVertexArray = mesh->vertexArray;
+            if (backend.pbrUseInstancingLocation >= 0) {
+              dev->set_uniform_int(backend.pbrUseInstancingLocation, 1);
+            }
+            ++frameStats.drawCalls;
+            frameStats.triangleCount += (mesh->indexCount / 3U) *
+                                        static_cast<std::uint64_t>(batch.count);
+            dev->draw_elements_triangles_u32_instanced(
+                static_cast<std::int32_t>(mesh->indexCount),
+                static_cast<std::int32_t>(batch.count));
+            continue;
+          }
+
+          for (std::uint32_t local = 0U; local < batch.count; ++local) {
+            const std::size_t commandIndex =
+                static_cast<std::size_t>(batch.first) +
+                static_cast<std::size_t>(local);
+            drawForwardCommand(commandBufferView.data[commandIndex], *mesh);
+          }
+        }
+        return;
+      }
 
       for (std::size_t i = start; i < end; ++i) {
         const DrawCommand &command = commandBufferView.data[i];
@@ -3880,64 +4224,8 @@ void flush_renderer(CommandBufferView commandBufferView,
           boundVertexArray = mesh->vertexArray;
         }
 
-        // Material uniforms.
-        if (backend.pbrAlbedoLocation >= 0) {
-          dev->set_uniform_vec3(backend.pbrAlbedoLocation,
-                                &command.material.albedo.x);
-        }
-        if (backend.pbrRoughnessLocation >= 0) {
-          dev->set_uniform_float(backend.pbrRoughnessLocation,
-                                 command.material.roughness);
-        }
-        if (backend.pbrMetallicLocation >= 0) {
-          dev->set_uniform_float(backend.pbrMetallicLocation,
-                                 command.material.metallic);
-        }
-        if (backend.pbrOpacityLocation >= 0) {
-          dev->set_uniform_float(backend.pbrOpacityLocation,
-                                 command.material.opacity);
-        }
-
-        // Albedo texture binding with state tracking.
-        const std::uint32_t albedoGpuId =
-            texture_gpu_id(command.material.albedoTexture);
-        const bool hasAlbedoTex =
-            (command.material.albedoTexture != kInvalidTextureHandle) &&
-            (albedoGpuId != 0U);
-        if (backend.pbrHasAlbedoTextureLocation >= 0) {
-          dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
-                               hasAlbedoTex ? 1 : 0);
-        }
-        if (hasAlbedoTex && (albedoGpuId != boundAlbedoTexture)) {
-          dev->bind_texture(0, albedoGpuId);
-          boundAlbedoTexture = albedoGpuId;
-        } else if (!hasAlbedoTex && (boundAlbedoTexture != 0U)) {
-          dev->bind_texture(0, 0U);
-          boundAlbedoTexture = 0U;
-        }
-
-        const math::Mat4 model = compute_model_matrix(command);
-        const math::Mat4 mvp = compute_mvp(model, viewProjection);
-        float normalMatrix[9] = {};
-        extract_normal_matrix(model, normalMatrix);
-
-        if (backend.pbrModelLocation >= 0) {
-          dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
-        }
-        dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-        dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
-
-        if (mesh->indexCount > 0U) {
-          ++frameStats.drawCalls;
-          frameStats.triangleCount += (mesh->indexCount / 3U);
-          dev->draw_elements_triangles_u32(
-              static_cast<std::int32_t>(mesh->indexCount));
-        } else {
-          ++frameStats.drawCalls;
-          frameStats.triangleCount += (mesh->vertexCount / 3U);
-          dev->draw_arrays_triangles(
-              0, static_cast<std::int32_t>(mesh->vertexCount));
-        }
+        uploadForwardMaterial(command.material, &boundAlbedoTexture);
+        drawForwardCommand(command, *mesh);
       }
     };
 

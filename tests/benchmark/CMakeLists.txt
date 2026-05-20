@@ -12,3 +12,10 @@ engine_add_test_executable(engine_bench_physics_perf
     PRIVATE_DEPS
     engine_runtime
 )
+
+engine_add_test_executable(engine_bench_instancing_batch
+    SOURCES
+    instancing_batch_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
