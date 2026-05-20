@@ -286,9 +286,12 @@ using GlEnableVertexAttribArrayProc = void(APIENTRYP)(GLuint);
 using GlVertexAttribPointerProc = void(APIENTRYP)(GLuint, GLint, GLenum,
                                                   GLboolean, GLsizei,
                                                   const void *);
+using GlVertexAttribDivisorProc = void(APIENTRYP)(GLuint, GLuint);
 using GlDrawArraysProc = void(APIENTRYP)(GLenum, GLint, GLsizei);
 using GlDrawElementsProc = void(APIENTRYP)(GLenum, GLsizei, GLenum,
                                            const void *);
+using GlDrawElementsInstancedProc = void(APIENTRYP)(GLenum, GLsizei, GLenum,
+                                                    const void *, GLsizei);
 using GlViewportProc = void(APIENTRYP)(GLint, GLint, GLsizei, GLsizei);
 using GlEnableProc = void(APIENTRYP)(GLenum);
 using GlDisableProc = void(APIENTRYP)(GLenum);
@@ -368,8 +371,10 @@ struct GlTable final {
   GlDeleteBuffersProc deleteBuffers = nullptr;
   GlEnableVertexAttribArrayProc enableVertexAttribArray = nullptr;
   GlVertexAttribPointerProc vertexAttribPointer = nullptr;
+  GlVertexAttribDivisorProc vertexAttribDivisor = nullptr;
   GlDrawArraysProc drawArrays = nullptr;
   GlDrawElementsProc drawElements = nullptr;
+  GlDrawElementsInstancedProc drawElementsInstanced = nullptr;
   GlViewportProc viewport = nullptr;
   GlEnableProc enable = nullptr;
   GlDisableProc disable = nullptr;
@@ -452,8 +457,10 @@ bool load_all_gl_functions() noexcept {
          load_proc(&g_gl.enableVertexAttribArray,
                    "glEnableVertexAttribArray") &&
          load_proc(&g_gl.vertexAttribPointer, "glVertexAttribPointer") &&
+         load_proc(&g_gl.vertexAttribDivisor, "glVertexAttribDivisor") &&
          load_proc(&g_gl.drawArrays, "glDrawArrays") &&
          load_proc(&g_gl.drawElements, "glDrawElements") &&
+         load_proc(&g_gl.drawElementsInstanced, "glDrawElementsInstanced") &&
          load_proc(&g_gl.viewport, "glViewport") &&
          load_proc(&g_gl.enable, "glEnable") &&
          load_proc(&g_gl.disable, "glDisable") &&
@@ -648,6 +655,12 @@ void gl_vertex_attrib_float(std::uint32_t index, std::int32_t components,
                            static_cast<GLsizei>(stride), offset);
 }
 
+void gl_vertex_attrib_divisor(std::uint32_t index,
+                              std::uint32_t divisor) noexcept {
+  g_gl.vertexAttribDivisor(static_cast<GLuint>(index),
+                           static_cast<GLuint>(divisor));
+}
+
 void gl_draw_arrays_triangles(std::int32_t first, std::int32_t count) noexcept {
   g_gl.drawArrays(GL_TRIANGLES, static_cast<GLint>(first),
                   static_cast<GLsizei>(count));
@@ -656,6 +669,13 @@ void gl_draw_arrays_triangles(std::int32_t first, std::int32_t count) noexcept {
 void gl_draw_elements_triangles_u32(std::int32_t count) noexcept {
   g_gl.drawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT,
                     nullptr);
+}
+
+void gl_draw_elements_triangles_u32_instanced(
+    std::int32_t count, std::int32_t instanceCount) noexcept {
+  g_gl.drawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(count),
+                             GL_UNSIGNED_INT, nullptr,
+                             static_cast<GLsizei>(instanceCount));
 }
 
 void gl_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
@@ -1146,8 +1166,11 @@ bool initialize_render_device() noexcept {
   g_device.buffer_data_element = &gl_buffer_data_element;
   g_device.enable_vertex_attrib = &gl_enable_vertex_attrib;
   g_device.vertex_attrib_float = &gl_vertex_attrib_float;
+  g_device.vertex_attrib_divisor = &gl_vertex_attrib_divisor;
   g_device.draw_arrays_triangles = &gl_draw_arrays_triangles;
   g_device.draw_elements_triangles_u32 = &gl_draw_elements_triangles_u32;
+  g_device.draw_elements_triangles_u32_instanced =
+      &gl_draw_elements_triangles_u32_instanced;
   g_device.set_uniform_int = &gl_set_uniform_int;
   g_device.set_uniform_vec4 = &gl_set_uniform_vec4;
   g_device.create_texture_2d = &gl_create_texture_2d;

@@ -46,7 +46,7 @@ struct CommandBufferView final {
 
 class CommandBufferBuilder final {
 public:
-  static constexpr std::size_t kMaxDrawCommands = 8192U;
+  static constexpr std::size_t kMaxDrawCommands = 16384U;
 
   void reset() noexcept;
   bool submit(const DrawCommand &command) noexcept;
@@ -59,6 +59,17 @@ private:
   std::array<DrawCommand, kMaxDrawCommands> m_commands{};
   std::size_t m_commandCount = 0U;
 };
+
+struct StaticMeshBatch final {
+  std::uint32_t first = 0U;
+  std::uint32_t count = 0U;
+};
+
+std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
+                                      std::size_t start,
+                                      std::size_t end,
+                                      StaticMeshBatch *batches,
+                                      std::size_t batchCapacity) noexcept;
 
 struct GpuMeshRegistry;
 

@@ -1,13 +1,17 @@
 # Production Engine Gap List — Combined Master Document
 
-> **Consolidated from**: `production_engine_milestones.md` (execution plan + exit criteria), `production_engine_phased_todo.md` (checklist tracking). This file is the **single source of truth** for gap analysis, milestone definitions, exit criteria, and completion status. The other two files are retained as supplementary references only.
+> **Consolidated from**: earlier milestone and checklist trackers. This file is
+> the **single source of truth** for gap analysis, milestone definitions, exit
+> criteria, and completion status. No separate phased TODO or milestone
+> markdown file is tracked in this checkout; stale external copies must not be
+> used for status decisions.
 >
 > **Status codes**: `[x]` = production-ready (API complete, tests pass, meets 7-point completion standard), `[~]` = partial/prototype (header exists, implementation or tests incomplete), `[ ]` = not started (no implementation found).
 > **Priority**: **[critical]** = Phase 1 ship blocker · **[high]** = Phase 2 competitive parity · **[low]** = Phase 3 cutting-edge.
 > **Verification basis**: Direct review of all public headers under `core/`, `renderer/`, `physics/`, `scripting/`, `runtime/`, `audio/`, `editor/`, `tools/`; full read of `.github/workflows/ci.yml`; directory listing of `tests/unit/`, `tests/integration/`, `tests/benchmark/`.
-> **Codebase inventory**: 8 modules (core: 23 headers, math: 9, physics: 7, scripting: 3, renderer: 15, audio: 1, runtime: 14, editor: 4), 59 test files (44 unit, 16 integration, 2 benchmark), CI: 9 jobs.
-> **Third-party dependencies**: SDL2 2.30.11, Lua 5.4.6, ImGui (docking branch), ImGuizmo (master), cgltf 1.14, stb (master), miniaudio 0.11.21, OpenGL 4.5+.
-> **Last reviewed**: 2026-04-20 (after commit `e042fe0` — post-processing implementation).
+> **Codebase inventory**: 8 modules (core: 24 headers, math: 10, physics: 10, scripting: 3, renderer: 17, audio: 1, runtime: 19, editor: 4), 78 test source files (55 unit, 19 integration, 1 smoke, 3 benchmark), CI: 9 jobs.
+> **Third-party dependencies**: SDL2 2.30.11, Lua 5.4.6, ImGui (pinned docking snapshot), ImGuizmo (pinned master snapshot), cgltf 1.14, stb (pinned master snapshot), miniaudio 0.11.21, OpenGL 4.5+.
+> **Last reviewed**: 2026-05-20 (after P1-M6-C1 static mesh instancing implementation).
 
 ---
 
@@ -720,11 +724,11 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M6-C: GPU Instancing
 
-##### P1-M6-C1: Static Mesh GPU Instancing `[ ]`
-- `P1-M6-C1a` Sort opaque `DrawCommand` list by (shader, mesh, material); batch contiguous identical entries. `[ ]`
-- `P1-M6-C1b` Per-instance model matrix uploaded via per-instance vertex buffer or UBO array. `[ ]`
-- `P1-M6-C1c` `glDrawElementsInstanced(count, instanceCount)` call. `[ ]`
-- `P1-M6-C1d` Benchmark: 10K identical meshes → single draw call. `[ ]`
+##### P1-M6-C1: Static Mesh GPU Instancing `[x]`
+- `P1-M6-C1a` Sort opaque `DrawCommand` list by (shader, mesh, material); batch contiguous identical entries. `[x]` — *Opaque command sorting now groups by render-state bits, mesh, and material before depth; `build_static_mesh_batches()` collapses contiguous compatible static-mesh commands for renderer use and tests.*
+- `P1-M6-C1b` Per-instance model matrix uploaded via per-instance vertex buffer or UBO array. `[x]` — *Renderer owns a reusable instance-matrix buffer and binds `mat4` instance attributes at locations 3-6 with divisor 1 for opaque G-Buffer and forward PBR batches.*
+- `P1-M6-C1c` `glDrawElementsInstanced(count, instanceCount)` call. `[x]` — *RenderDevice now exposes `draw_elements_triangles_u32_instanced()`, the GL backend maps it to `glDrawElementsInstanced`, and indexed opaque batches issue one instanced draw when compatible.*
+- `P1-M6-C1d` Benchmark: 10K identical meshes → single draw call. `[x]` — *Added `engine_bench_instancing_batch`, which verifies 10K identical mesh commands collapse into one static-mesh batch; command-buffer unit coverage also asserts 10K batching and material split behavior.*
 
 ##### P1-M6-C2: Foliage Instancing (Wind Vertex Displacement, Per-Instance LOD) `[ ]`
 - `P1-M6-C2a` Wind displacement: sine wave vertex shader using time + world position + per-instance phase. `[ ]`

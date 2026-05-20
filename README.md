@@ -29,14 +29,22 @@ Verified working areas in the current tree include:
 
 - Core systems such as logging, CVars, debug draw, job system, event bus, VFS, and math primitives
 - Runtime ECS/world simulation with SparseSet storage, double-buffered transforms, scene serialization, persistent IDs, and 65,536-entity capacity
-- Forward rendering with PBR shaders, frustum culling, mesh loading, and editor integration
-- Physics basics including rigid bodies, colliders, spatial broadphase, CCD, and distance joints
+- Hybrid deferred/forward OpenGL rendering with G-buffer resources, deferred
+  lighting for opaque geometry, forward transparency, PBR shaders, frustum
+  culling, mesh loading, and editor integration
+- Physics systems including rigid bodies, collider shapes, spatial broadphase,
+  CCD/speculative contacts, joints, materials, and query APIs
 - Editor play/pause/stop flow, gizmo transforms, and transform undo support
 - Audio playback via miniaudio with wav/mp3/ogg/flac support plus volume, pitch, and loop control
 - Lua module loading, traceback-based error reporting, generated and hand-written bindings, per-World timers, coroutine helpers, sandbox controls, and hot-reload coverage
-- GitHub Actions CI for multi-platform build/test, determinism comparison, `cppcheck`, and `clang-tidy`
+- GitHub Actions CI for multi-platform build/test, determinism comparison,
+  `cppcheck`, `clang-tidy`, sanitizers, coverage, and benchmark gates
 
-The engine is still forward-only, asset streaming and eviction are not yet fully production-grade, 3D audio and mixer buses are incomplete, and large roadmap items such as full animation production, advanced rendering, and platform shipping work remain open in `production_engine_milestones.md`.
+The engine is no longer forward-only; the deferred path is active behind
+`r_deferred` with forward fallback/transparency. Large roadmap items such as
+full animation production, game UI runtime, platform packaging, project
+workflow/commandlets, and release operations remain open in
+`production_engine_gap_list.md`.
 
 ## Tech stack
 
