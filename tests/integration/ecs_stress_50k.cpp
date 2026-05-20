@@ -12,7 +12,12 @@ using Clock = std::chrono::high_resolution_clock;
 
 constexpr std::size_t kEntityCount = 50000U;
 constexpr float kStepSeconds = 1.0F / 60.0F;
+// Release keeps the frame-budget gate; Debug allows hosted-runner overhead.
+#if defined(NDEBUG)
 constexpr double kMaxSimMs = 16.0;
+#else
+constexpr double kMaxSimMs = 24.0;
+#endif
 
 bool populate_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {

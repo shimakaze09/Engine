@@ -111,6 +111,11 @@ struct BackendState final {
   std::int32_t pbrFogEndLocation = -1;
   std::int32_t pbrFogDensityLocation = -1;
   std::int32_t pbrFogColorLocation = -1;
+  std::int32_t pbrHeightFogEnabledLocation = -1;
+  std::int32_t pbrHeightFogBaseHeightLocation = -1;
+  std::int32_t pbrHeightFogDensityLocation = -1;
+  std::int32_t pbrHeightFogFalloffLocation = -1;
+  std::int32_t pbrHeightFogStepCountLocation = -1;
 
   // Directional lights.
   std::int32_t pbrDirLightCountLocation = -1;
@@ -265,6 +270,11 @@ struct BackendState final {
   std::int32_t dlFogEndLoc = -1;
   std::int32_t dlFogDensityLoc = -1;
   std::int32_t dlFogColorLoc = -1;
+  std::int32_t dlHeightFogEnabledLoc = -1;
+  std::int32_t dlHeightFogBaseHeightLoc = -1;
+  std::int32_t dlHeightFogDensityLoc = -1;
+  std::int32_t dlHeightFogFalloffLoc = -1;
+  std::int32_t dlHeightFogStepCountLoc = -1;
   std::int32_t dlPointLightCountLoc = -1;
   std::int32_t dlSpotLightCountLoc = -1;
 
@@ -633,6 +643,29 @@ void upload_pbr_distance_fog_uniforms(
   }
 }
 
+void upload_pbr_height_fog_uniforms(
+    const BackendState &backend, const RenderDevice *dev,
+    const HeightFogSettings &settings) noexcept {
+  const HeightFogSettings fog = normalize_height_fog_settings(settings);
+  if (backend.pbrHeightFogEnabledLocation >= 0) {
+    dev->set_uniform_int(backend.pbrHeightFogEnabledLocation,
+                         fog.enabled ? 1 : 0);
+  }
+  if (backend.pbrHeightFogBaseHeightLocation >= 0) {
+    dev->set_uniform_float(backend.pbrHeightFogBaseHeightLocation,
+                           fog.baseHeight);
+  }
+  if (backend.pbrHeightFogDensityLocation >= 0) {
+    dev->set_uniform_float(backend.pbrHeightFogDensityLocation, fog.density);
+  }
+  if (backend.pbrHeightFogFalloffLocation >= 0) {
+    dev->set_uniform_float(backend.pbrHeightFogFalloffLocation, fog.falloff);
+  }
+  if (backend.pbrHeightFogStepCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrHeightFogStepCountLocation, fog.stepCount);
+  }
+}
+
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -652,6 +685,27 @@ void upload_deferred_distance_fog_uniforms(
   }
   if (backend.dlFogColorLoc >= 0) {
     dev->set_uniform_vec3(backend.dlFogColorLoc, &fog.color.x);
+  }
+}
+
+void upload_deferred_height_fog_uniforms(
+    const BackendState &backend, const RenderDevice *dev,
+    const HeightFogSettings &settings) noexcept {
+  const HeightFogSettings fog = normalize_height_fog_settings(settings);
+  if (backend.dlHeightFogEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.dlHeightFogEnabledLoc, fog.enabled ? 1 : 0);
+  }
+  if (backend.dlHeightFogBaseHeightLoc >= 0) {
+    dev->set_uniform_float(backend.dlHeightFogBaseHeightLoc, fog.baseHeight);
+  }
+  if (backend.dlHeightFogDensityLoc >= 0) {
+    dev->set_uniform_float(backend.dlHeightFogDensityLoc, fog.density);
+  }
+  if (backend.dlHeightFogFalloffLoc >= 0) {
+    dev->set_uniform_float(backend.dlHeightFogFalloffLoc, fog.falloff);
+  }
+  if (backend.dlHeightFogStepCountLoc >= 0) {
+    dev->set_uniform_int(backend.dlHeightFogStepCountLoc, fog.stepCount);
   }
 }
 
@@ -908,6 +962,20 @@ DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   }
 
   return normalize_distance_fog_settings(settings);
+}
+
+HeightFogSettings height_fog_settings_from_cvars() noexcept {
+  HeightFogSettings settings{};
+  settings.enabled = core::cvar_get_bool("r_height_fog", settings.enabled);
+  settings.baseHeight =
+      core::cvar_get_float("r_height_fog_base", settings.baseHeight);
+  settings.density =
+      core::cvar_get_float("r_height_fog_density", settings.density);
+  settings.falloff =
+      core::cvar_get_float("r_height_fog_falloff", settings.falloff);
+  settings.stepCount =
+      core::cvar_get_int("r_height_fog_steps", settings.stepCount);
+  return normalize_height_fog_settings(settings);
 }
 
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
@@ -1656,6 +1724,16 @@ bool initialize_backend() noexcept {
   backend.pbrFogDensityLocation =
       dev->uniform_location(pbrProgram, "uFogDensity");
   backend.pbrFogColorLocation = dev->uniform_location(pbrProgram, "uFogColor");
+  backend.pbrHeightFogEnabledLocation =
+      dev->uniform_location(pbrProgram, "uHeightFogEnabled");
+  backend.pbrHeightFogBaseHeightLocation =
+      dev->uniform_location(pbrProgram, "uHeightFogBaseHeight");
+  backend.pbrHeightFogDensityLocation =
+      dev->uniform_location(pbrProgram, "uHeightFogDensity");
+  backend.pbrHeightFogFalloffLocation =
+      dev->uniform_location(pbrProgram, "uHeightFogFalloff");
+  backend.pbrHeightFogStepCountLocation =
+      dev->uniform_location(pbrProgram, "uHeightFogStepCount");
 
   if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
       (backend.pbrAlbedoLocation < 0) || (backend.pbrOpacityLocation < 0) ||
@@ -1961,6 +2039,15 @@ bool initialize_backend() noexcept {
                             "Exponential distance fog density");
   core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
                              "Distance fog RGB color");
+  core::cvar_register_bool("r_height_fog", false, "Enable height fog");
+  core::cvar_register_float("r_height_fog_base", 0.0F,
+                            "Height fog base world Y");
+  core::cvar_register_float("r_height_fog_density", 0.015F,
+                            "Height fog density at base height");
+  core::cvar_register_float("r_height_fog_falloff", 0.08F,
+                            "Height fog exponential falloff above base");
+  core::cvar_register_int("r_height_fog_steps", 8,
+                          "Height fog ray-march step count");
 
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
   core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
@@ -2194,6 +2281,16 @@ bool initialize_backend() noexcept {
     backend.dlFogEndLoc = dev->uniform_location(dlProg, "uFogEnd");
     backend.dlFogDensityLoc = dev->uniform_location(dlProg, "uFogDensity");
     backend.dlFogColorLoc = dev->uniform_location(dlProg, "uFogColor");
+    backend.dlHeightFogEnabledLoc =
+        dev->uniform_location(dlProg, "uHeightFogEnabled");
+    backend.dlHeightFogBaseHeightLoc =
+        dev->uniform_location(dlProg, "uHeightFogBaseHeight");
+    backend.dlHeightFogDensityLoc =
+        dev->uniform_location(dlProg, "uHeightFogDensity");
+    backend.dlHeightFogFalloffLoc =
+        dev->uniform_location(dlProg, "uHeightFogFalloff");
+    backend.dlHeightFogStepCountLoc =
+        dev->uniform_location(dlProg, "uHeightFogStepCount");
     backend.dlPointLightCountLoc =
         dev->uniform_location(dlProg, "uPointLightCount");
     backend.dlSpotLightCountLoc =
@@ -2730,6 +2827,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   const ReflectionProbeBakeSettings environmentBakeSettings =
       cvar_reflection_probe_bake_settings();
   const DistanceFogSettings fogSettings = distance_fog_settings_from_cvars();
+  const HeightFogSettings heightFogSettings = height_fog_settings_from_cvars();
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
   // Check if deferred rendering is enabled.
@@ -3504,6 +3602,7 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_vec2(backend.dlScreenSizeLoc, screenSize);
       }
       upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
+      upload_deferred_height_fog_uniforms(backend, dev, heightFogSettings);
 
       // Upload point light data.
       const auto plCount = static_cast<int>(std::min(
@@ -3635,6 +3734,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
       upload_pbr_lighting_uniforms(backend, dev, lights);
       upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
+      upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
       bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
                                doSpotShadows, doPointShadows);
       if (backend.pbrAlbedoMapLocation >= 0)
@@ -3753,6 +3853,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
     upload_pbr_lighting_uniforms(backend, dev, lights);
     upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
+    upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
     bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
                              doPointShadows);
 
@@ -4279,6 +4380,25 @@ DistanceFogSettings normalize_distance_fog_settings(
                        std::isfinite(settings.color.z))
                           ? math::clamp(settings.color, 0.0F, 1.0F)
                           : math::Vec3(0.55F, 0.65F, 0.75F));
+  return normalized;
+}
+
+HeightFogSettings normalize_height_fog_settings(
+    const HeightFogSettings &settings) noexcept {
+  HeightFogSettings normalized{};
+  normalized.enabled = settings.enabled;
+  normalized.baseHeight =
+      std::isfinite(settings.baseHeight) ? settings.baseHeight : 0.0F;
+  normalized.density = std::isfinite(settings.density)
+                           ? std::clamp(settings.density, 0.0F, 1.0F)
+                           : 0.015F;
+  normalized.falloff = std::isfinite(settings.falloff)
+                           ? std::clamp(settings.falloff, 0.001F, 4.0F)
+                           : 0.08F;
+  normalized.stepCount = std::clamp(settings.stepCount, 1, 64);
+  if (normalized.density <= 0.0F) {
+    normalized.enabled = false;
+  }
   return normalized;
 }
 

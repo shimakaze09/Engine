@@ -712,9 +712,9 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M6-B1a` Fog factor applied in deferred lighting pass or forward pass: `linear`, `exp`, `exp2` modes. `[x]` — *Deferred lighting and forward PBR shaders now mix lit surface color toward `uFogColor` using normalized distance fog settings for `linear`, `exp`, and `exp2` modes.*
 - `P1-M6-B1b` CVars: `r_fog_mode`, `r_fog_start`, `r_fog_end`, `r_fog_density`, `r_fog_color`. `[x]` — *Renderer registers these CVars, parses `r_fog_mode`/`r_fog_color`, normalizes ranges/density/color, and uploads the same fog uniforms to deferred and forward passes.*
 
-##### P1-M6-B2: Height Fog (Height-Based Density, Ray-Marched) `[ ]`
-- `P1-M6-B2a` Height-based density function: exponential falloff above base height. `[ ]`
-- `P1-M6-B2b` Ray-marched integration from camera to surface; step count CVar. `[ ]`
+##### P1-M6-B2: Height Fog (Height-Based Density, Ray-Marched) `[x]`
+- `P1-M6-B2a` Height-based density function: exponential falloff above base height. `[x]` — *Deferred lighting and forward PBR shaders now sample height fog density as `r_height_fog_density * exp(-(worldY - r_height_fog_base) * r_height_fog_falloff)` above the base height, clamped to base density below it.*
+- `P1-M6-B2b` Ray-marched integration from camera to surface; step count CVar. `[x]` — *Both deferred and forward paths ray-march from camera to shaded surface with clamped `r_height_fog_steps` (1-64), combine height and distance fog factors, and share `r_height_fog`, `r_height_fog_base`, `r_height_fog_density`, `r_height_fog_falloff`, and `r_height_fog_steps` CVars.*
 
 ---
 

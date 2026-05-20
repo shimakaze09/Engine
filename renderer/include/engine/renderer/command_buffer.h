@@ -137,6 +137,14 @@ struct DistanceFogSettings final {
   math::Vec3 color = math::Vec3(0.55F, 0.65F, 0.75F);
 };
 
+struct HeightFogSettings final {
+  bool enabled = false;
+  float baseHeight = 0.0F;
+  float density = 0.015F;
+  float falloff = 0.08F;
+  std::int32_t stepCount = 8;
+};
+
 struct RendererFrameStats final {
   std::uint32_t drawCalls = 0U;
   std::uint64_t triangleCount = 0U;
@@ -181,6 +189,8 @@ bool parse_distance_fog_color(const char *value,
                               math::Vec3 *colorOut) noexcept;
 DistanceFogSettings
 normalize_distance_fog_settings(const DistanceFogSettings &settings) noexcept;
+HeightFogSettings
+normalize_height_fog_settings(const HeightFogSettings &settings) noexcept;
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer
