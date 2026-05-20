@@ -101,6 +101,42 @@ struct SceneLightData final {
   std::size_t spotLightCount = 0U;
 };
 
+struct ReflectionProbeBakeSettings final {
+  std::uint32_t prefilteredFaceSize = 128U;
+  std::uint32_t prefilteredMipLevels = 5U;
+  std::uint32_t irradianceFaceSize = 32U;
+  std::uint32_t brdfLutSize = 512U;
+};
+
+struct ReflectionProbeBakeRequest final {
+  TextureHandle sourceCubemap = kInvalidTextureHandle;
+  ReflectionProbeBakeSettings settings{};
+};
+
+struct ReflectionProbeBakeResult final {
+  std::uint32_t sourceCubemapTexture = 0U;
+  std::uint32_t prefilteredEnvironmentTexture = 0U;
+  std::uint32_t irradianceEnvironmentTexture = 0U;
+  std::uint32_t brdfLutTexture = 0U;
+  ReflectionProbeBakeSettings settings{};
+  bool baked = false;
+};
+
+enum class DistanceFogMode : std::uint8_t {
+  Off = 0,
+  Linear = 1,
+  Exp = 2,
+  Exp2 = 3,
+};
+
+struct DistanceFogSettings final {
+  DistanceFogMode mode = DistanceFogMode::Off;
+  float start = 25.0F;
+  float end = 150.0F;
+  float density = 0.01F;
+  math::Vec3 color = math::Vec3(0.55F, 0.65F, 0.75F);
+};
+
 struct RendererFrameStats final {
   std::uint32_t drawCalls = 0U;
   std::uint64_t triangleCount = 0U;
@@ -126,9 +162,25 @@ void shutdown_renderer() noexcept;
 // instead of the full SDL drawable size.
 void set_scene_viewport_size(int width, int height) noexcept;
 
+/// Sets the active skybox cubemap. Pass kInvalidTextureHandle to disable it.
+void set_skybox_texture(TextureHandle cubemap) noexcept;
+TextureHandle get_skybox_texture() noexcept;
+
 /// Returns the GPU texture ID of the tonemapped scene (final color).
 /// Valid after the first flush_renderer call. Returns 0 if not yet available.
 std::uint32_t get_scene_viewport_texture() noexcept;
+std::uint32_t get_prefiltered_environment_texture() noexcept;
+std::uint32_t get_irradiance_environment_texture() noexcept;
+std::uint32_t get_brdf_lut_texture() noexcept;
+ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
+    const ReflectionProbeBakeSettings &settings) noexcept;
+ReflectionProbeBakeResult
+bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept;
+DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept;
+bool parse_distance_fog_color(const char *value,
+                              math::Vec3 *colorOut) noexcept;
+DistanceFogSettings
+normalize_distance_fog_settings(const DistanceFogSettings &settings) noexcept;
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer

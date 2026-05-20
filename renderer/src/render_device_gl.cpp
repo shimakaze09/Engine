@@ -8,6 +8,7 @@
 #error "SDL OpenGL headers not found"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -43,6 +44,14 @@ namespace {
 #define GL_DEPTH_TEST 0x0B71
 #endif
 
+#ifndef GL_LESS
+#define GL_LESS 0x0201
+#endif
+
+#ifndef GL_LEQUAL
+#define GL_LEQUAL 0x0203
+#endif
+
 #ifndef GL_UNSIGNED_INT
 #define GL_UNSIGNED_INT 0x1405
 #endif
@@ -63,6 +72,14 @@ namespace {
 #define GL_TEXTURE_2D 0x0DE1
 #endif
 
+#ifndef GL_TEXTURE_CUBE_MAP
+#define GL_TEXTURE_CUBE_MAP 0x8513
+#endif
+
+#ifndef GL_TEXTURE_CUBE_MAP_POSITIVE_X
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X 0x8515
+#endif
+
 #ifndef GL_TEXTURE0
 #define GL_TEXTURE0 0x84C0
 #endif
@@ -75,12 +92,20 @@ namespace {
 #define GL_TEXTURE_WRAP_T 0x2803
 #endif
 
+#ifndef GL_TEXTURE_WRAP_R
+#define GL_TEXTURE_WRAP_R 0x8072
+#endif
+
 #ifndef GL_TEXTURE_MIN_FILTER
 #define GL_TEXTURE_MIN_FILTER 0x2801
 #endif
 
 #ifndef GL_TEXTURE_MAG_FILTER
 #define GL_TEXTURE_MAG_FILTER 0x2800
+#endif
+
+#ifndef GL_TEXTURE_MAX_LEVEL
+#define GL_TEXTURE_MAX_LEVEL 0x813D
 #endif
 
 #ifndef GL_LINEAR
@@ -107,12 +132,32 @@ namespace {
 #define GL_RGB16F 0x881B
 #endif
 
+#ifndef GL_RG
+#define GL_RG 0x8227
+#endif
+
+#ifndef GL_RG16F
+#define GL_RG16F 0x822F
+#endif
+
 #ifndef GL_RGBA16F
 #define GL_RGBA16F 0x881A
 #endif
 
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER 0x8D40
+#endif
+
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+
+#ifndef GL_DEPTH_BUFFER_BIT
+#define GL_DEPTH_BUFFER_BIT 0x00000100
 #endif
 
 #ifndef GL_COLOR_ATTACHMENT0
@@ -272,6 +317,9 @@ using GlFramebufferTexture2DProc = void(APIENTRYP)(GLenum, GLenum, GLenum,
                                                    GLuint, GLint);
 using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
 using GlDrawBuffersProc = void(APIENTRYP)(GLsizei, const GLenum *);
+using GlBlitFramebufferProc = void(APIENTRYP)(GLint, GLint, GLint, GLint, GLint,
+                                              GLint, GLint, GLint, GLbitfield,
+                                              GLenum);
 using GlTexSubImage2DProc = void(APIENTRYP)(GLenum, GLint, GLint, GLint,
                                             GLsizei, GLsizei, GLenum, GLenum,
                                             const void *);
@@ -281,6 +329,7 @@ using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
 
 // Depth mask
 using GlDepthMaskProc = void(APIENTRYP)(GLboolean);
+using GlDepthFuncProc = void(APIENTRYP)(GLenum);
 
 // GPU query procs
 using GlGenQueriesProc = void(APIENTRYP)(GLsizei, GLuint *);
@@ -347,6 +396,7 @@ struct GlTable final {
   GlFramebufferTexture2DProc framebufferTexture2D = nullptr;
   GlCheckFramebufferStatusProc checkFramebufferStatus = nullptr;
   GlDrawBuffersProc drawBuffers = nullptr;
+  GlBlitFramebufferProc blitFramebuffer = nullptr;
   GlTexSubImage2DProc texSubImage2D = nullptr;
 
   // Blend
@@ -354,6 +404,7 @@ struct GlTable final {
 
   // Depth mask
   GlDepthMaskProc depthMask = nullptr;
+  GlDepthFuncProc depthFunc = nullptr;
 
   // GPU queries
   GlGenQueriesProc genQueries = nullptr;
@@ -423,9 +474,11 @@ bool load_all_gl_functions() noexcept {
          load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D") &&
          load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus") &&
          load_proc(&g_gl.drawBuffers, "glDrawBuffers") &&
+         load_proc(&g_gl.blitFramebuffer, "glBlitFramebuffer") &&
          load_proc(&g_gl.texSubImage2D, "glTexSubImage2D") &&
          load_proc(&g_gl.blendFunc, "glBlendFunc") &&
          load_proc(&g_gl.depthMask, "glDepthMask") &&
+         load_proc(&g_gl.depthFunc, "glDepthFunc") &&
          load_proc(&g_gl.genQueries, "glGenQueries") &&
          load_proc(&g_gl.deleteQueries, "glDeleteQueries") &&
          load_proc(&g_gl.queryCounter, "glQueryCounter") &&
@@ -615,6 +668,10 @@ void gl_enable_depth_test() noexcept { g_gl.enable(GL_DEPTH_TEST); }
 
 void gl_disable_depth_test() noexcept { g_gl.disable(GL_DEPTH_TEST); }
 
+void gl_set_depth_func_less() noexcept { g_gl.depthFunc(GL_LESS); }
+
+void gl_set_depth_func_less_equal() noexcept { g_gl.depthFunc(GL_LEQUAL); }
+
 void gl_set_clear_color(float r, float g, float b, float a) noexcept {
   g_gl.clearColor(r, g, b, a);
 }
@@ -684,7 +741,10 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
 
   GLenum format = GL_RGBA;
   GLint internalFormat = GL_RGBA16F;
-  if (channels == 3) {
+  if (channels == 2) {
+    format = GL_RG;
+    internalFormat = GL_RG16F;
+  } else if (channels == 3) {
     format = GL_RGB;
     internalFormat = GL_RGB16F;
   }
@@ -698,6 +758,81 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
   g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
   g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
+                                    std::int32_t channels,
+                                    const float *const facePixels[6]) noexcept {
+  if (faceSize <= 0) {
+    return 0U;
+  }
+
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  GLenum format = GL_RGBA;
+  GLint internalFormat = GL_RGBA16F;
+  if (channels == 3) {
+    format = GL_RGB;
+    internalFormat = GL_RGB16F;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  for (int face = 0; face < 6; ++face) {
+    const float *pixels = (facePixels != nullptr) ? facePixels[face] : nullptr;
+    g_gl.texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+                    0, internalFormat, static_cast<GLsizei>(faceSize),
+                    static_cast<GLsizei>(faceSize), 0, format, GL_FLOAT,
+                    pixels);
+  }
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+                     GL_LINEAR_MIPMAP_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  g_gl.generateMipmap(GL_TEXTURE_CUBE_MAP);
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  return static_cast<std::uint32_t>(tex);
+}
+
+std::uint32_t gl_create_cubemap_hdr_empty(std::int32_t faceSize,
+                                          std::int32_t mipLevels) noexcept {
+  if ((faceSize <= 0) || (mipLevels <= 0)) {
+    return 0U;
+  }
+
+  GLuint tex = 0U;
+  g_gl.genTextures(1, &tex);
+  if (tex == 0U) {
+    return 0U;
+  }
+
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  for (std::int32_t mip = 0; mip < mipLevels; ++mip) {
+    std::int32_t mipSize = faceSize;
+    for (std::int32_t step = 0; step < mip; ++step) {
+      mipSize = std::max<std::int32_t>(1, mipSize / 2);
+    }
+    for (int face = 0; face < 6; ++face) {
+      g_gl.texImage2D(
+          static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), mip,
+          GL_RGB16F, static_cast<GLsizei>(mipSize),
+          static_cast<GLsizei>(mipSize), 0, GL_RGB, GL_FLOAT, nullptr);
+    }
+  }
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+                     (mipLevels > 1) ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, mipLevels - 1);
+  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -771,6 +906,17 @@ void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
       static_cast<GLuint>(cubeTex), 0);
 }
 
+void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
+                                           std::uint32_t cubeTex,
+                                           std::int32_t face,
+                                           std::int32_t mipLevel) noexcept {
+  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+  g_gl.framebufferTexture2D(
+      GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+      static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+      static_cast<GLuint>(cubeTex), static_cast<GLint>(mipLevel));
+}
+
 // --- Framebuffers ---
 
 std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
@@ -810,6 +956,20 @@ void gl_bind_framebuffer(std::uint32_t fbo) noexcept {
 
 bool gl_check_framebuffer_complete() noexcept {
   return g_gl.checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+void gl_blit_depth(std::uint32_t srcFbo, std::uint32_t dstFbo,
+                   std::int32_t width, std::int32_t height) noexcept {
+  if ((srcFbo == 0U) || (dstFbo == 0U) || (width <= 0) || (height <= 0)) {
+    return;
+  }
+
+  g_gl.bindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(srcFbo));
+  g_gl.bindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(dstFbo));
+  g_gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                       GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+  g_gl.bindFramebuffer(GL_READ_FRAMEBUFFER, 0U);
+  g_gl.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0U);
 }
 
 std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
@@ -992,17 +1152,22 @@ bool initialize_render_device() noexcept {
   g_device.set_uniform_vec4 = &gl_set_uniform_vec4;
   g_device.create_texture_2d = &gl_create_texture_2d;
   g_device.create_texture_2d_hdr = &gl_create_texture_2d_hdr;
+  g_device.create_cubemap_hdr = &gl_create_cubemap_hdr;
+  g_device.create_cubemap_hdr_empty = &gl_create_cubemap_hdr_empty;
   g_device.create_depth_texture = &gl_create_depth_texture;
   g_device.destroy_texture = &gl_destroy_texture;
   g_device.bind_texture = &gl_bind_texture;
   g_device.create_depth_cubemap = &gl_create_depth_cubemap;
   g_device.bind_texture_cubemap = &gl_bind_texture_cubemap;
   g_device.framebuffer_cubemap_face = &gl_framebuffer_cubemap_face;
+  g_device.framebuffer_cubemap_color_face_mip =
+      &gl_framebuffer_cubemap_color_face_mip;
   g_device.create_framebuffer = &gl_create_framebuffer;
   g_device.create_framebuffer_mrt = &gl_create_framebuffer_mrt;
   g_device.destroy_framebuffer = &gl_destroy_framebuffer;
   g_device.bind_framebuffer = &gl_bind_framebuffer;
   g_device.check_framebuffer_complete = &gl_check_framebuffer_complete;
+  g_device.blit_depth = &gl_blit_depth;
   g_device.enable_blending = &gl_enable_blending;
   g_device.disable_blending = &gl_disable_blending;
   g_device.set_blend_func_alpha = &gl_set_blend_func_alpha;
@@ -1017,6 +1182,8 @@ bool initialize_render_device() noexcept {
   g_device.set_viewport = &gl_set_viewport;
   g_device.enable_depth_test = &gl_enable_depth_test;
   g_device.disable_depth_test = &gl_disable_depth_test;
+  g_device.set_depth_func_less = &gl_set_depth_func_less;
+  g_device.set_depth_func_less_equal = &gl_set_depth_func_less_equal;
   g_device.set_clear_color = &gl_set_clear_color;
   g_device.clear_color_depth = &gl_clear_color_depth;
   g_device.create_texture_2d_r32f = &gl_create_texture_2d_r32f;

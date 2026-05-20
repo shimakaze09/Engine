@@ -42,6 +42,7 @@
 #include "engine/runtime/render_prep_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
+#include "engine/runtime/service_registry.h"
 #include "engine/runtime/spring_arm_update.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -1088,6 +1089,10 @@ struct EnginePipeline::Impl final {
   std::unique_ptr<renderer::AssetManager> assetManager;
   std::unique_ptr<FrameContext> frameContext;
   BootstrapMeshIds meshIds{};
+  runtime::EnginePhysicsService physicsService{};
+  runtime::EngineAudioService audioService{};
+  runtime::EngineAssetDatabaseService assetDatabaseService{};
+  runtime::EngineRendererService rendererService{};
 
   // --- External references ---
   const runtime::EditorBridge *bridge = nullptr;
@@ -1159,6 +1164,30 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   renderer::clear_asset_database(assetDatabase.get());
   renderer::clear_asset_manager(assetManager.get());
 
+  physicsService.world = world.get();
+  physicsService.worldView = static_cast<physics::PhysicsWorldView *>(world.get());
+  physicsService.context = &world->physics_context();
+  audioService.update = &audio::update_audio;
+  audioService.load_sound = &audio::load_sound;
+  audioService.unload_sound = &audio::unload_sound;
+  audioService.play_sound = &audio::play_sound;
+  audioService.stop_sound = &audio::stop_sound;
+  audioService.stop_all = &audio::stop_all;
+  audioService.set_master_volume = &audio::set_master_volume;
+  assetDatabaseService.database = assetDatabase.get();
+  assetDatabaseService.manager = assetManager.get();
+  rendererService.commandBuffer = commandBuffer.get();
+  rendererService.meshRegistry = meshRegistry.get();
+  rendererService.device = renderer::render_device();
+  if (!runtime::register_engine_subsystem_services(
+          world.get(), &physicsService, &audioService, &assetDatabaseService,
+          &rendererService)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to register engine subsystem services");
+    runtime::unregister_engine_subsystem_services();
+    return false;
+  }
+
   bridge = runtime::editor_bridge();
 
   runtime::bind_scripting_runtime(world.get());
@@ -1171,6 +1200,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
                              meshRegistry.get(), &meshIds)) {
+    scripting::bind_runtime_world(nullptr);
+    runtime::unregister_engine_subsystem_services();
     return false;
   }
   scripting::set_default_mesh_asset_id(
@@ -1184,6 +1215,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   if (!frameContext) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate frame context");
+    scripting::bind_runtime_world(nullptr);
+    runtime::unregister_engine_subsystem_services();
     return false;
   }
 
@@ -1193,6 +1226,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
        frameContext->renderPrepPipeline.localCommandBuffers.size())) {
     core::log_message(core::LogLevel::Error, "engine",
                       "invalid thread allocator count");
+    scripting::bind_runtime_world(nullptr);
+    runtime::unregister_engine_subsystem_services();
     return false;
   }
 
@@ -1254,6 +1289,7 @@ void EnginePipeline::Impl::teardown() noexcept {
   }
 
   scripting::bind_runtime_world(nullptr);
+  runtime::unregister_engine_subsystem_services();
 
   renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
                                    meshRegistry.get());

@@ -46,7 +46,9 @@ bool require_phase(const World &world, WorldPhase phase,
     return true;
   }
 
-  core::log_message(core::LogLevel::Error, "physics", apiName);
+  // Use apiName as the log channel so the offending call site is visible.
+  core::log_message(core::LogLevel::Error, apiName,
+                    "called in wrong world phase");
   return false;
 }
 

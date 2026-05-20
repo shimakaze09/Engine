@@ -944,6 +944,54 @@ int main() {
     }
   }
 
+  {
+    const char *rewireTimerScript =
+        "function on_start()\n"
+        "  engine.set_timeout(function()\n"
+        "    local e = engine.spawn_entity()\n"
+        "    engine.set_name(e, 'rewired_timer_fired')\n"
+        "  end, 0.1)\n"
+        "end\n";
+    if (!write_script_file(rewireTimerScript) ||
+        !engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 87;
+    }
+
+    engine::runtime::TimerManager::TimerSnapshot snaps[4]{};
+    const std::size_t count =
+        world->timer_manager().snapshot(snaps, 4U);
+    if (count == 0U) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 88;
+    }
+    world->timer_manager().clear();
+    if (world->timer_manager().restore(snaps, count) != count) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 89;
+    }
+
+    engine::scripting::set_frame_time(0.15F, 0.15F);
+    engine::scripting::tick_timers();
+    bool rewiredFired = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc) &&
+          std::strcmp(nc.name, "rewired_timer_fired") == 0) {
+        rewiredFired = true;
+      }
+    });
+    if (!rewiredFired) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 90;
+    }
+  }
+
   engine::scripting::shutdown_scripting();
   remove_script_file();
   return 0;

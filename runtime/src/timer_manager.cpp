@@ -122,6 +122,7 @@ std::size_t TimerManager::snapshot(TimerSnapshot *out,
     if (!m_timers[i].active) {
       continue;
     }
+    out[written].timerId = static_cast<TimerId>(i + 1U);
     out[written].remainingSeconds = m_timers[i].fireAt - m_elapsed;
     out[written].intervalSeconds = m_timers[i].interval;
     out[written].repeat = m_timers[i].repeat;
@@ -141,8 +142,16 @@ std::size_t TimerManager::restore(const TimerSnapshot *in,
     if (!in[i].active) {
       continue;
     }
-    // Find a free slot.
-    for (std::size_t s = 0U; s < kMaxTimers; ++s) {
+    std::size_t preferredSlot = kMaxTimers;
+    if ((in[i].timerId != kInvalidTimerId) && (in[i].timerId <= kMaxTimers)) {
+      preferredSlot = static_cast<std::size_t>(in[i].timerId - 1U);
+    }
+
+    for (std::size_t attempt = 0U; attempt <= kMaxTimers; ++attempt) {
+      const std::size_t s = (attempt == 0U) ? preferredSlot : (attempt - 1U);
+      if (s >= kMaxTimers) {
+        continue;
+      }
       if (!m_timers[s].active) {
         m_timers[s].fireAt = m_elapsed + in[i].remainingSeconds;
         m_timers[s].interval = in[i].intervalSeconds;
@@ -156,6 +165,23 @@ std::size_t TimerManager::restore(const TimerSnapshot *in,
     }
   }
   return restored;
+}
+
+std::size_t TimerManager::rewire_callbacks(Callback callback,
+                                           void *userData) noexcept {
+  if (callback == nullptr) {
+    return 0U;
+  }
+
+  std::size_t rewired = 0U;
+  for (std::size_t i = 0U; i < kMaxTimers; ++i) {
+    if (m_timers[i].active && (m_timers[i].callback == nullptr)) {
+      m_timers[i].callback = callback;
+      m_timers[i].userData = userData;
+      ++rewired;
+    }
+  }
+  return rewired;
 }
 
 const TimerManager::Entry &

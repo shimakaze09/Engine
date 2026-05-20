@@ -1,10 +1,10 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-
 
 namespace engine::core {
 
@@ -128,16 +128,25 @@ public:
   std::size_t count() const noexcept { return m_count; }
 
   EntityType entity_at(std::size_t denseIndex) const noexcept {
+    assert(denseIndex < m_count && "SparseSet::entity_at: index out of range");
     return m_entities[denseIndex];
   }
 
   Component &component_at(std::size_t denseIndex,
                           std::size_t stateIndex = 0U) noexcept {
+    assert(denseIndex < m_count &&
+           "SparseSet::component_at: index out of range");
+    assert(stateIndex < StateCount &&
+           "SparseSet::component_at: state index out of range");
     return m_components[stateIndex][denseIndex];
   }
 
   const Component &component_at(std::size_t denseIndex,
                                 std::size_t stateIndex = 0U) const noexcept {
+    assert(denseIndex < m_count &&
+           "SparseSet::component_at: index out of range");
+    assert(stateIndex < StateCount &&
+           "SparseSet::component_at: state index out of range");
     return m_components[stateIndex][denseIndex];
   }
 

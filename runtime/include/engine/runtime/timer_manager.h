@@ -47,6 +47,7 @@ public:
   // These operate on a flat snapshot understood by scene_serializer.
 
   struct TimerSnapshot final {
+    TimerId timerId = kInvalidTimerId;
     float remainingSeconds = 0.0F;
     float intervalSeconds = 0.0F;
     bool repeat = false;
@@ -60,6 +61,10 @@ public:
   /// caller (e.g. scripting layer) after deserialization.
   /// Returns count of timers restored.
   std::size_t restore(const TimerSnapshot *in, std::size_t count) noexcept;
+
+  /// Reconnect active timers that have no callback after restore.
+  /// Returns number of entries updated.
+  std::size_t rewire_callbacks(Callback callback, void *userData) noexcept;
 
   // Low-level access for scripting-layer Lua ref management.
   struct Entry final {

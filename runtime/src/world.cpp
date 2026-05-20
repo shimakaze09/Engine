@@ -19,6 +19,21 @@ constexpr std::uint8_t kNameSlotEmpty = 0U;
 constexpr std::uint8_t kNameSlotOccupied = 1U;
 constexpr std::uint8_t kNameSlotTombstone = 2U;
 
+void copy_bounded_c_string(char *dst, std::size_t dstCapacity,
+                           const char *src) noexcept {
+  if ((dst == nullptr) || (dstCapacity == 0U)) {
+    return;
+  }
+
+  std::size_t i = 0U;
+  if (src != nullptr) {
+    for (; (i + 1U) < dstCapacity && src[i] != '\0'; ++i) {
+      dst[i] = src[i];
+    }
+  }
+  dst[i] = '\0';
+}
+
 WorldTransform world_transform_from_local(const Transform &local) noexcept {
   WorldTransform world{};
   world.position = local.position;
@@ -56,6 +71,7 @@ World::World() noexcept {
   m_nameLookupEntityIndices.fill(0U);
   m_nameLookupState.fill(kNameSlotEmpty);
   m_scriptComponents.clear();
+  m_reflectionProbes.clear();
 }
 
 Entity World::create_entity() noexcept {
@@ -153,6 +169,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_lightComponents.remove(entity));
   static_cast<void>(m_pointLights.remove(entity));
   static_cast<void>(m_spotLights.remove(entity));
+  static_cast<void>(m_reflectionProbes.remove(entity));
   static_cast<void>(m_springArms.remove(entity));
 
   const std::uint32_t index = entity.index;
@@ -567,7 +584,10 @@ bool World::add_name_component(Entity entity,
     return false;
   }
 
-  const bool ok = m_nameComponents.add(entity, component);
+  NameComponent safe{};
+  copy_bounded_c_string(safe.name, sizeof(safe.name), component.name);
+
+  const bool ok = m_nameComponents.add(entity, safe);
   if (ok) {
     rebuild_name_lookup();
   }
@@ -859,6 +879,87 @@ Entity World::spot_light_entity_at(std::size_t index) const noexcept {
   return m_spotLights.entity_at(index);
 }
 
+bool World::add_reflection_probe_component(
+    Entity entity, const ReflectionProbeComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(
+        core::LogLevel::Error, "world",
+        "add_reflection_probe_component called outside mutation phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_reflection_probe_component: invalid entity");
+    return false;
+  }
+  return m_reflectionProbes.add(entity, component);
+}
+
+bool World::remove_reflection_probe_component(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(
+        core::LogLevel::Error, "world",
+        "remove_reflection_probe_component outside mutation phase");
+    return false;
+  }
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  return m_reflectionProbes.remove(entity);
+}
+
+bool World::get_reflection_probe_component(
+    Entity entity, ReflectionProbeComponent *outComponent) const noexcept {
+  if ((outComponent == nullptr) || !is_valid_entity(entity)) {
+    return false;
+  }
+  const ReflectionProbeComponent *ptr = m_reflectionProbes.get_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  *outComponent = *ptr;
+  return true;
+}
+
+bool World::has_reflection_probe_component(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_reflectionProbes.contains(entity);
+}
+
+std::size_t World::reflection_probe_count() const noexcept {
+  return m_reflectionProbes.count();
+}
+
+const ReflectionProbeComponent *
+World::reflection_probe_at(std::size_t index) const noexcept {
+  if (index >= m_reflectionProbes.count()) {
+    return nullptr;
+  }
+  return &m_reflectionProbes.component_at(index);
+}
+
+Entity World::reflection_probe_entity_at(std::size_t index) const noexcept {
+  if (index >= m_reflectionProbes.count()) {
+    return Entity{};
+  }
+  return m_reflectionProbes.entity_at(index);
+}
+
+ReflectionProbeComponent *
+World::get_reflection_probe_component_ptr(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+  return m_reflectionProbes.get_ptr(entity);
+}
+
+const ReflectionProbeComponent *
+World::get_reflection_probe_component_ptr(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+  return m_reflectionProbes.get_ptr(entity);
+}
+
 bool World::add_script_component(Entity entity,
                                  const ScriptComponent &component) noexcept {
   if (!is_mutation_phase()) {
@@ -873,7 +974,11 @@ bool World::add_script_component(Entity entity,
     return false;
   }
 
-  return m_scriptComponents.add(entity, component);
+  ScriptComponent safe{};
+  copy_bounded_c_string(safe.scriptPath, sizeof(safe.scriptPath),
+                        component.scriptPath);
+
+  return m_scriptComponents.add(entity, safe);
 }
 
 bool World::remove_script_component(Entity entity) noexcept {

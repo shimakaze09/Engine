@@ -3792,6 +3792,22 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   }
 }
 
+void rewire_lua_timer_callbacks() noexcept {
+  if (g_world == nullptr) {
+    return;
+  }
+  ensure_timer_refs_init();
+  auto &timerManager = g_world->timer_manager();
+  for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
+    auto &entry = timerManager.entry_at_mut(i);
+    if (entry.active && (entry.callback == nullptr) &&
+        (g_timerLuaRefs[i] != LUA_NOREF)) {
+      entry.callback = lua_timer_callback;
+      entry.userData = nullptr;
+    }
+  }
+}
+
 int lua_engine_set_timeout(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushnil(state);
@@ -5842,6 +5858,7 @@ void tick_timers() noexcept {
     return;
   }
   ensure_timer_refs_init();
+  rewire_lua_timer_callbacks();
   // The TimerManager uses accumulated elapsed time internally. We sync it to
   // the scripting layer's g_totalSeconds so that tests which jump total time
   // work correctly. Pass the delta as (totalSeconds - previous elapsed).

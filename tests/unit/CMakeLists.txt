@@ -210,6 +210,13 @@ engine_add_test_executable(engine_unit_service_locator
     engine_core
 )
 
+engine_add_test_executable(engine_unit_runtime_service_registry
+    SOURCES
+    runtime_service_registry_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M2-C: Input System ----
 
 engine_add_test_executable(engine_unit_input_map
@@ -349,6 +356,15 @@ engine_add_test_executable(engine_unit_light_culling
     engine_math
 )
 
+engine_add_test_executable(engine_unit_command_buffer
+    SOURCES
+    command_buffer_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+    engine_core
+)
+
 # ---- P1-M5-C: Shadow Maps ----
 
 engine_add_test_executable(engine_unit_shadow_map
@@ -390,6 +406,24 @@ engine_add_test_executable(engine_unit_auto_exposure
     PRIVATE_DEPS
     engine_renderer
     engine_math
+)
+
+# ---- P1-M6-A: Environment Reflection Probes ----
+
+engine_add_test_executable(engine_unit_reflection_probe_component
+    SOURCES
+    reflection_probe_component_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+# ---- P1-M12-A: Platform Paths ----
+
+engine_add_test_executable(engine_unit_platform_paths
+    SOURCES
+    platform_paths_test.cpp
+    PRIVATE_DEPS
+    engine_core
 )
 
 # ---- §0-3: Engine Pipeline Decomposition ----

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -35,12 +36,50 @@ constexpr float kFarClip = 100.0F;
 constexpr float kClearRed = 0.18F;
 constexpr float kClearGreen = 0.28F;
 constexpr float kClearBlue = 0.60F;
+constexpr std::uint64_t kFnv1a64Offset = 14695981039346656037ULL;
+constexpr std::uint64_t kFnv1a64Prime = 1099511628211ULL;
+constexpr std::size_t kForwardMaxPointLights = 8U;
+constexpr std::size_t kForwardMaxSpotLights = 8U;
+constexpr float kSkyboxCubeVertices[] = {
+    -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F,
+    1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F,
+
+    -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F,
+    -1.0F, 1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,
+
+    1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F, -1.0F,
+
+    -1.0F, -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F, -1.0F, 1.0F,
+
+    -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F,
+
+    -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F,
+    1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,
+};
+constexpr std::int32_t kSkyboxVertexCount = static_cast<std::int32_t>(
+    sizeof(kSkyboxCubeVertices) / (3U * sizeof(float)));
+
+struct ShadowCandidate final {
+  std::size_t lightIndex = 0U;
+  float distSq = 0.0F;
+};
+
+enum class SkyModel : std::uint8_t {
+  Hosek = 0,
+  Preetham = 1,
+  Cubemap = 2,
+  None = 3,
+};
 
 CameraState g_activeCamera{};
 int g_sceneViewportWidth = 0;
 int g_sceneViewportHeight = 0;
 RendererFrameStats g_lastFrameStats{};
 bool g_fxaaAppliedThisFrame = false;
+TextureHandle g_activeSkyboxTexture = kInvalidTextureHandle;
 
 struct BackendState final {
   bool initialized = false;
@@ -65,6 +104,13 @@ struct BackendState final {
   std::int32_t pbrCameraPosLocation = -1;
   std::int32_t pbrHasAlbedoTextureLocation = -1;
   std::int32_t pbrAlbedoMapLocation = -1;
+  std::int32_t pbrOpacityLocation = -1;
+  std::int32_t pbrViewLocation = -1;
+  std::int32_t pbrFogModeLocation = -1;
+  std::int32_t pbrFogStartLocation = -1;
+  std::int32_t pbrFogEndLocation = -1;
+  std::int32_t pbrFogDensityLocation = -1;
+  std::int32_t pbrFogColorLocation = -1;
 
   // Directional lights.
   std::int32_t pbrDirLightCountLocation = -1;
@@ -74,9 +120,35 @@ struct BackendState final {
 
   // Point lights.
   std::int32_t pbrPointLightCountLocation = -1;
-  std::array<std::int32_t, kMaxPointLights> pbrPointLightPos{};
-  std::array<std::int32_t, kMaxPointLights> pbrPointLightColor{};
-  std::array<std::int32_t, kMaxPointLights> pbrPointLightIntensity{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightPos{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightColor{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightIntensity{};
+  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightRadius{};
+
+  // Spot lights.
+  std::int32_t pbrSpotLightCountLocation = -1;
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightPos{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightDir{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightColor{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightIntensity{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightRadius{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightInnerCone{};
+  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightOuterCone{};
+
+  // PBR forward shadow uniforms.
+  std::int32_t pbrShadowEnabledLoc = -1;
+  std::array<std::int32_t, kShadowCascadeCount> pbrShadowMapLocs{};
+  std::array<std::int32_t, kShadowCascadeCount> pbrShadowMatrixLocs{};
+  std::array<std::int32_t, kShadowCascadeCount> pbrCascadeSplitLocs{};
+  std::int32_t pbrSpotShadowEnabledLoc = -1;
+  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowMapLocs{};
+  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowMatrixLocs{};
+  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowLightIdxLocs{};
+  std::int32_t pbrPointShadowEnabledLoc = -1;
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowMapLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowLightPosLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowFarPlaneLocs{};
+  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowLightIdxLocs{};
 
   // Tonemap shader.
   ShaderProgramHandle tonemapShaderHandle{};
@@ -93,6 +165,64 @@ struct BackendState final {
 
   // Empty VAO for fullscreen triangle.
   std::uint32_t emptyVao = 0U;
+
+  // Skybox shader and cube geometry.
+  bool skyboxAvailable = false;
+  ShaderProgramHandle skyboxShaderHandle{};
+  std::uint32_t skyboxProgram = 0U;
+  std::int32_t skyboxViewLoc = -1;
+  std::int32_t skyboxProjectionLoc = -1;
+  std::int32_t skyboxTextureLoc = -1;
+  std::uint32_t skyboxVertexArray = 0U;
+  std::uint32_t skyboxVertexBuffer = 0U;
+
+  bool preethamSkyAvailable = false;
+  ShaderProgramHandle preethamSkyShaderHandle{};
+  std::uint32_t preethamSkyProgram = 0U;
+  std::int32_t preethamSkyViewLoc = -1;
+  std::int32_t preethamSkyProjectionLoc = -1;
+  std::int32_t preethamSkySunDirectionLoc = -1;
+  std::int32_t preethamSkyTurbidityLoc = -1;
+
+  bool hosekSkyAvailable = false;
+  ShaderProgramHandle hosekSkyShaderHandle{};
+  std::uint32_t hosekSkyProgram = 0U;
+  std::int32_t hosekSkyViewLoc = -1;
+  std::int32_t hosekSkyProjectionLoc = -1;
+  std::int32_t hosekSkySunDirectionLoc = -1;
+  std::int32_t hosekSkyTurbidityLoc = -1;
+  std::int32_t hosekSkyGroundAlbedoLoc = -1;
+
+  bool environmentPrefilterAvailable = false;
+  ShaderProgramHandle environmentPrefilterShaderHandle{};
+  std::uint32_t environmentPrefilterProgram = 0U;
+  std::int32_t environmentPrefilterViewLoc = -1;
+  std::int32_t environmentPrefilterProjectionLoc = -1;
+  std::int32_t environmentPrefilterTextureLoc = -1;
+  std::int32_t environmentPrefilterRoughnessLoc = -1;
+  std::uint32_t prefilteredEnvironmentTexture = 0U;
+  std::uint32_t environmentPrefilterFbo = 0U;
+  std::uint32_t prefilteredEnvironmentSource = 0U;
+  int prefilteredEnvironmentFaceSize = 0;
+  int prefilteredEnvironmentMipLevels = 0;
+
+  bool environmentIrradianceAvailable = false;
+  ShaderProgramHandle environmentIrradianceShaderHandle{};
+  std::uint32_t environmentIrradianceProgram = 0U;
+  std::int32_t environmentIrradianceViewLoc = -1;
+  std::int32_t environmentIrradianceProjectionLoc = -1;
+  std::int32_t environmentIrradianceTextureLoc = -1;
+  std::uint32_t irradianceEnvironmentTexture = 0U;
+  std::uint32_t environmentIrradianceFbo = 0U;
+  std::uint32_t irradianceEnvironmentSource = 0U;
+  int irradianceEnvironmentFaceSize = 0;
+
+  bool environmentBrdfLutAvailable = false;
+  ShaderProgramHandle environmentBrdfLutShaderHandle{};
+  std::uint32_t environmentBrdfLutProgram = 0U;
+  std::uint32_t brdfLutTexture = 0U;
+  std::uint32_t brdfLutFbo = 0U;
+  int brdfLutSize = 0;
 
   // Tracked drawable dimensions for pass resource resize.
   int lastWidth = 0;
@@ -130,6 +260,11 @@ struct BackendState final {
   std::int32_t dlDirLightColorLoc = -1;
   std::int32_t dlCameraPosLoc = -1;
   std::int32_t dlScreenSizeLoc = -1;
+  std::int32_t dlFogModeLoc = -1;
+  std::int32_t dlFogStartLoc = -1;
+  std::int32_t dlFogEndLoc = -1;
+  std::int32_t dlFogDensityLoc = -1;
+  std::int32_t dlFogColorLoc = -1;
   std::int32_t dlPointLightCountLoc = -1;
   std::int32_t dlSpotLightCountLoc = -1;
 
@@ -233,6 +368,8 @@ struct BackendState final {
   std::array<std::int32_t, kShadowCascadeCount> dlShadowMapLocs{};
   std::array<std::int32_t, kShadowCascadeCount> dlShadowMatrixLocs{};
   std::array<std::int32_t, kShadowCascadeCount> dlCascadeSplitLocs{};
+  std::uint64_t directionalShadowCacheKey = 0U;
+  bool directionalShadowCacheValid = false;
 
   // ---- Spot shadow state ----
   SpotShadowState spotShadowState{};
@@ -315,7 +452,7 @@ void resolve_pbr_light_uniforms(BackendState &backend,
 
   backend.pbrPointLightCountLocation =
       dev->uniform_location(prog, "u_pointLightCount");
-  for (std::size_t i = 0U; i < kMaxPointLights; ++i) {
+  for (std::size_t i = 0U; i < kForwardMaxPointLights; ++i) {
     char name[64] = {};
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].position", i);
     backend.pbrPointLightPos[i] = dev->uniform_location(prog, name);
@@ -323,14 +460,964 @@ void resolve_pbr_light_uniforms(BackendState &backend,
     backend.pbrPointLightColor[i] = dev->uniform_location(prog, name);
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].intensity", i);
     backend.pbrPointLightIntensity[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_pointLights[%zu].radius", i);
+    backend.pbrPointLightRadius[i] = dev->uniform_location(prog, name);
     if ((backend.pbrPointLightPos[i] < 0) ||
         (backend.pbrPointLightColor[i] < 0) ||
-        (backend.pbrPointLightIntensity[i] < 0)) {
+        (backend.pbrPointLightIntensity[i] < 0) ||
+        (backend.pbrPointLightRadius[i] < 0)) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "PBR shader missing point light uniforms at "
                         "index — lights will be invisible");
     }
   }
+
+  backend.pbrSpotLightCountLocation =
+      dev->uniform_location(prog, "u_spotLightCount");
+  for (std::size_t i = 0U; i < kForwardMaxSpotLights; ++i) {
+    char name[64] = {};
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].position", i);
+    backend.pbrSpotLightPos[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].direction", i);
+    backend.pbrSpotLightDir[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].color", i);
+    backend.pbrSpotLightColor[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].intensity", i);
+    backend.pbrSpotLightIntensity[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].radius", i);
+    backend.pbrSpotLightRadius[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].innerCone", i);
+    backend.pbrSpotLightInnerCone[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "u_spotLights[%zu].outerCone", i);
+    backend.pbrSpotLightOuterCone[i] = dev->uniform_location(prog, name);
+  }
+}
+
+void resolve_pbr_shadow_uniforms(BackendState &backend,
+                                 const RenderDevice *dev) noexcept {
+  const std::uint32_t prog = backend.pbrProgram;
+  char name[64] = {};
+
+  backend.pbrShadowEnabledLoc = dev->uniform_location(prog, "uShadowEnabled");
+  for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
+    std::snprintf(name, sizeof(name), "uShadowMap[%zu]", i);
+    backend.pbrShadowMapLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uShadowMatrix[%zu]", i);
+    backend.pbrShadowMatrixLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uCascadeSplit[%zu]", i);
+    backend.pbrCascadeSplitLocs[i] = dev->uniform_location(prog, name);
+  }
+
+  backend.pbrSpotShadowEnabledLoc =
+      dev->uniform_location(prog, "uSpotShadowEnabled");
+  for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
+    std::snprintf(name, sizeof(name), "uSpotShadowMap[%zu]", i);
+    backend.pbrSpotShadowMapLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uSpotShadowMatrix[%zu]", i);
+    backend.pbrSpotShadowMatrixLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uSpotShadowLightIdx[%zu]", i);
+    backend.pbrSpotShadowLightIdxLocs[i] = dev->uniform_location(prog, name);
+  }
+
+  backend.pbrPointShadowEnabledLoc =
+      dev->uniform_location(prog, "uPointShadowEnabled");
+  for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+    std::snprintf(name, sizeof(name), "uPointShadowMap[%zu]", i);
+    backend.pbrPointShadowMapLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uPointShadowLightPos[%zu]", i);
+    backend.pbrPointShadowLightPosLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uPointShadowFarPlane[%zu]", i);
+    backend.pbrPointShadowFarPlaneLocs[i] = dev->uniform_location(prog, name);
+    std::snprintf(name, sizeof(name), "uPointShadowLightIdx[%zu]", i);
+    backend.pbrPointShadowLightIdxLocs[i] = dev->uniform_location(prog, name);
+  }
+}
+
+void upload_pbr_lighting_uniforms(const BackendState &backend,
+                                  const RenderDevice *dev,
+                                  const SceneLightData &lights) noexcept {
+  const std::size_t dirCount =
+      std::min(lights.directionalLightCount, kMaxDirectionalLights);
+  if (backend.pbrDirLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrDirLightCountLocation,
+                         static_cast<std::int32_t>(dirCount));
+  }
+  for (std::size_t i = 0U; i < dirCount; ++i) {
+    const auto &dl = lights.directionalLights[i];
+    if (backend.pbrDirLightDir[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
+    }
+    if (backend.pbrDirLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
+    }
+    if (backend.pbrDirLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
+    }
+  }
+
+  const std::size_t pointCount =
+      std::min(lights.pointLightCount, kForwardMaxPointLights);
+  if (backend.pbrPointLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrPointLightCountLocation,
+                         static_cast<std::int32_t>(pointCount));
+  }
+  for (std::size_t i = 0U; i < pointCount; ++i) {
+    const auto &pl = lights.pointLights[i];
+    if (backend.pbrPointLightPos[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
+    }
+    if (backend.pbrPointLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
+    }
+    if (backend.pbrPointLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrPointLightIntensity[i], pl.intensity);
+    }
+    if (backend.pbrPointLightRadius[i] >= 0) {
+      dev->set_uniform_float(backend.pbrPointLightRadius[i], pl.radius);
+    }
+  }
+
+  const std::size_t spotCount =
+      std::min(lights.spotLightCount, kForwardMaxSpotLights);
+  if (backend.pbrSpotLightCountLocation >= 0) {
+    dev->set_uniform_int(backend.pbrSpotLightCountLocation,
+                         static_cast<std::int32_t>(spotCount));
+  }
+  for (std::size_t i = 0U; i < spotCount; ++i) {
+    const auto &sl = lights.spotLights[i];
+    if (backend.pbrSpotLightPos[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrSpotLightPos[i], &sl.position.x);
+    }
+    if (backend.pbrSpotLightDir[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrSpotLightDir[i], &sl.direction.x);
+    }
+    if (backend.pbrSpotLightColor[i] >= 0) {
+      dev->set_uniform_vec3(backend.pbrSpotLightColor[i], &sl.color.x);
+    }
+    if (backend.pbrSpotLightIntensity[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightIntensity[i], sl.intensity);
+    }
+    if (backend.pbrSpotLightRadius[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightRadius[i], sl.radius);
+    }
+    if (backend.pbrSpotLightInnerCone[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightInnerCone[i],
+                             sl.innerConeAngle);
+    }
+    if (backend.pbrSpotLightOuterCone[i] >= 0) {
+      dev->set_uniform_float(backend.pbrSpotLightOuterCone[i],
+                             sl.outerConeAngle);
+    }
+  }
+}
+
+void upload_pbr_distance_fog_uniforms(
+    const BackendState &backend, const RenderDevice *dev,
+    const DistanceFogSettings &settings) noexcept {
+  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
+  if (backend.pbrFogModeLocation >= 0) {
+    dev->set_uniform_int(backend.pbrFogModeLocation,
+                         static_cast<std::int32_t>(fog.mode));
+  }
+  if (backend.pbrFogStartLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFogStartLocation, fog.start);
+  }
+  if (backend.pbrFogEndLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFogEndLocation, fog.end);
+  }
+  if (backend.pbrFogDensityLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFogDensityLocation, fog.density);
+  }
+  if (backend.pbrFogColorLocation >= 0) {
+    dev->set_uniform_vec3(backend.pbrFogColorLocation, &fog.color.x);
+  }
+}
+
+void upload_deferred_distance_fog_uniforms(
+    const BackendState &backend, const RenderDevice *dev,
+    const DistanceFogSettings &settings) noexcept {
+  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
+  if (backend.dlFogModeLoc >= 0) {
+    dev->set_uniform_int(backend.dlFogModeLoc,
+                         static_cast<std::int32_t>(fog.mode));
+  }
+  if (backend.dlFogStartLoc >= 0) {
+    dev->set_uniform_float(backend.dlFogStartLoc, fog.start);
+  }
+  if (backend.dlFogEndLoc >= 0) {
+    dev->set_uniform_float(backend.dlFogEndLoc, fog.end);
+  }
+  if (backend.dlFogDensityLoc >= 0) {
+    dev->set_uniform_float(backend.dlFogDensityLoc, fog.density);
+  }
+  if (backend.dlFogColorLoc >= 0) {
+    dev->set_uniform_vec3(backend.dlFogColorLoc, &fog.color.x);
+  }
+}
+
+void bind_pbr_shadow_uniforms(const BackendState &backend,
+                              const RenderDevice *dev,
+                              const SceneLightData &lights, bool shadowEnabled,
+                              bool spotShadowEnabled,
+                              bool pointShadowEnabled) noexcept {
+  if ((dev == nullptr) || (dev->set_uniform_int == nullptr)) {
+    return;
+  }
+
+  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+    const int texUnit = 6 + static_cast<int>(c);
+    if (shadowEnabled) {
+      dev->bind_texture(texUnit, backend.shadowState.depthTextures[c]);
+    }
+    if (backend.pbrShadowMapLocs[c] >= 0) {
+      dev->set_uniform_int(backend.pbrShadowMapLocs[c], texUnit);
+    }
+    if (backend.pbrShadowMatrixLocs[c] >= 0) {
+      dev->set_uniform_mat4(
+          backend.pbrShadowMatrixLocs[c],
+          &backend.shadowState.cascades[c].lightViewProjection.columns[0].x);
+    }
+    if (backend.pbrCascadeSplitLocs[c] >= 0) {
+      dev->set_uniform_float(backend.pbrCascadeSplitLocs[c],
+                             backend.shadowState.cascades[c].splitDistance);
+    }
+  }
+  if (backend.pbrShadowEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
+  }
+
+  for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
+    const auto &slot = backend.spotShadowState.slots[s];
+    const int texUnit = 10 + static_cast<int>(s);
+    if (spotShadowEnabled) {
+      dev->bind_texture(texUnit, slot.depthTexture);
+    }
+    if (backend.pbrSpotShadowMapLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrSpotShadowMapLocs[s], texUnit);
+    }
+    if (backend.pbrSpotShadowMatrixLocs[s] >= 0) {
+      dev->set_uniform_mat4(backend.pbrSpotShadowMatrixLocs[s],
+                            &slot.lightViewProjection.columns[0].x);
+    }
+    if (backend.pbrSpotShadowLightIdxLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrSpotShadowLightIdxLocs[s],
+                           slot.lightIndex);
+    }
+  }
+  if (backend.pbrSpotShadowEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrSpotShadowEnabledLoc,
+                         spotShadowEnabled ? 1 : 0);
+  }
+
+  const math::Vec3 zero{};
+  for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+    const auto &slot = backend.pointShadowState.slots[s];
+    const int texUnit = 14 + static_cast<int>(s);
+    if (pointShadowEnabled && (dev->bind_texture_cubemap != nullptr)) {
+      dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
+    }
+    if (backend.pbrPointShadowMapLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrPointShadowMapLocs[s], texUnit);
+    }
+    if (backend.pbrPointShadowLightPosLocs[s] >= 0) {
+      const bool validLight =
+          (slot.lightIndex >= 0) &&
+          (static_cast<std::size_t>(slot.lightIndex) < lights.pointLightCount);
+      const math::Vec3 &lightPos =
+          validLight
+              ? lights.pointLights[static_cast<std::size_t>(slot.lightIndex)]
+                    .position
+              : zero;
+      dev->set_uniform_vec3(backend.pbrPointShadowLightPosLocs[s], &lightPos.x);
+    }
+    if (backend.pbrPointShadowFarPlaneLocs[s] >= 0) {
+      dev->set_uniform_float(backend.pbrPointShadowFarPlaneLocs[s],
+                             slot.farPlane);
+    }
+    if (backend.pbrPointShadowLightIdxLocs[s] >= 0) {
+      dev->set_uniform_int(backend.pbrPointShadowLightIdxLocs[s],
+                           slot.lightIndex);
+    }
+  }
+  if (backend.pbrPointShadowEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrPointShadowEnabledLoc,
+                         pointShadowEnabled ? 1 : 0);
+  }
+}
+
+void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
+  if (dev == nullptr) {
+    return;
+  }
+  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+    dev->bind_texture(6 + static_cast<int>(c), 0U);
+  }
+  for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
+    dev->bind_texture(10 + static_cast<int>(s), 0U);
+  }
+  if (dev->bind_texture_cubemap != nullptr) {
+    for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+      dev->bind_texture_cubemap(14 + static_cast<int>(s), 0U);
+    }
+  }
+}
+
+void destroy_skybox_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.skyboxVertexBuffer != 0U) && (dev != nullptr)) {
+    dev->destroy_buffer(backend.skyboxVertexBuffer);
+    backend.skyboxVertexBuffer = 0U;
+  }
+  if ((backend.skyboxVertexArray != 0U) && (dev != nullptr)) {
+    dev->destroy_vertex_array(backend.skyboxVertexArray);
+    backend.skyboxVertexArray = 0U;
+  }
+  if (backend.skyboxShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.skyboxShaderHandle);
+    backend.skyboxShaderHandle = ShaderProgramHandle{};
+  }
+  if (backend.preethamSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.preethamSkyShaderHandle);
+    backend.preethamSkyShaderHandle = ShaderProgramHandle{};
+  }
+  if (backend.hosekSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.hosekSkyShaderHandle);
+    backend.hosekSkyShaderHandle = ShaderProgramHandle{};
+  }
+  backend.skyboxProgram = 0U;
+  backend.skyboxAvailable = false;
+  backend.preethamSkyProgram = 0U;
+  backend.preethamSkyAvailable = false;
+  backend.hosekSkyProgram = 0U;
+  backend.hosekSkyAvailable = false;
+}
+
+void destroy_preetham_sky_resources(BackendState &backend) noexcept {
+  if (backend.preethamSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.preethamSkyShaderHandle);
+    backend.preethamSkyShaderHandle = ShaderProgramHandle{};
+  }
+  backend.preethamSkyProgram = 0U;
+  backend.preethamSkyAvailable = false;
+  backend.preethamSkyViewLoc = -1;
+  backend.preethamSkyProjectionLoc = -1;
+  backend.preethamSkySunDirectionLoc = -1;
+  backend.preethamSkyTurbidityLoc = -1;
+}
+
+void destroy_hosek_sky_resources(BackendState &backend) noexcept {
+  if (backend.hosekSkyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.hosekSkyShaderHandle);
+    backend.hosekSkyShaderHandle = ShaderProgramHandle{};
+  }
+  backend.hosekSkyProgram = 0U;
+  backend.hosekSkyAvailable = false;
+  backend.hosekSkyViewLoc = -1;
+  backend.hosekSkyProjectionLoc = -1;
+  backend.hosekSkySunDirectionLoc = -1;
+  backend.hosekSkyTurbidityLoc = -1;
+  backend.hosekSkyGroundAlbedoLoc = -1;
+}
+
+bool create_skybox_geometry(BackendState &backend,
+                            const RenderDevice *dev) noexcept {
+  if ((backend.skyboxVertexArray != 0U) && (backend.skyboxVertexBuffer != 0U)) {
+    return true;
+  }
+
+  if ((dev == nullptr) || (dev->create_vertex_array == nullptr) ||
+      (dev->create_buffer == nullptr) || (dev->bind_vertex_array == nullptr) ||
+      (dev->bind_array_buffer == nullptr) ||
+      (dev->buffer_data_array == nullptr) ||
+      (dev->enable_vertex_attrib == nullptr) ||
+      (dev->vertex_attrib_float == nullptr)) {
+    return false;
+  }
+
+  backend.skyboxVertexArray = dev->create_vertex_array();
+  backend.skyboxVertexBuffer = dev->create_buffer();
+  if ((backend.skyboxVertexArray == 0U) || (backend.skyboxVertexBuffer == 0U)) {
+    destroy_skybox_resources(backend);
+    return false;
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->bind_array_buffer(backend.skyboxVertexBuffer);
+  dev->buffer_data_array(kSkyboxCubeVertices, sizeof(kSkyboxCubeVertices));
+  dev->enable_vertex_attrib(0U);
+  dev->vertex_attrib_float(0U, 3, static_cast<std::int32_t>(3 * sizeof(float)),
+                           nullptr);
+  dev->bind_array_buffer(0U);
+  dev->bind_vertex_array(0U);
+  return true;
+}
+
+bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
+  return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
+}
+
+void skip_fog_color_separators(const char *&cursor) noexcept {
+  while ((*cursor == ' ') || (*cursor == '\t') || (*cursor == '\n') ||
+         (*cursor == '\r') || (*cursor == ',')) {
+    ++cursor;
+  }
+}
+
+bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
+  if ((cursor == nullptr) || (valueOut == nullptr)) {
+    return false;
+  }
+
+  skip_fog_color_separators(cursor);
+  char *end = nullptr;
+  const float value = std::strtof(cursor, &end);
+  if ((end == cursor) || !std::isfinite(value)) {
+    return false;
+  }
+  *valueOut = value;
+  cursor = end;
+  return true;
+}
+
+SkyModel selected_sky_model() noexcept {
+  const char *model = core::cvar_get_string("r_sky_model", "hosek");
+  if (cvar_string_equals(model, "cubemap")) {
+    return SkyModel::Cubemap;
+  }
+  if (cvar_string_equals(model, "preetham")) {
+    return SkyModel::Preetham;
+  }
+  if (cvar_string_equals(model, "none")) {
+    return SkyModel::None;
+  }
+  return SkyModel::Hosek;
+}
+
+DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
+  DistanceFogSettings settings{};
+  settings.mode =
+      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "off"));
+  settings.start = core::cvar_get_float("r_fog_start", settings.start);
+  settings.end = core::cvar_get_float("r_fog_end", settings.end);
+  settings.density = core::cvar_get_float("r_fog_density", settings.density);
+
+  math::Vec3 color = settings.color;
+  if (parse_distance_fog_color(
+          core::cvar_get_string("r_fog_color", "0.55 0.65 0.75"), &color)) {
+    settings.color = color;
+  }
+
+  return normalize_distance_fog_settings(settings);
+}
+
+std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
+  if (!backend.skyboxAvailable ||
+      (g_activeSkyboxTexture == kInvalidTextureHandle) ||
+      !is_texture_cubemap(g_activeSkyboxTexture)) {
+    return 0U;
+  }
+
+  return texture_gpu_id(g_activeSkyboxTexture);
+}
+
+math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
+  if (lights.directionalLightCount > 0U) {
+    const math::Vec3 sunDir =
+        math::normalize(math::negate(lights.directionalLights[0].direction));
+    if (math::length_sq(sunDir) > 0.0F) {
+      return sunDir;
+    }
+  }
+
+  return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
+}
+
+void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
+  dev->enable_depth_test();
+  dev->set_depth_func_less_equal();
+  dev->set_depth_mask(false);
+  dev->disable_face_culling();
+}
+
+void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->set_depth_mask(true);
+  dev->set_depth_func_less();
+  dev->enable_face_culling();
+}
+
+void draw_skybox(const BackendState &backend, const RenderDevice *dev,
+                 const math::Mat4 &viewMat, const math::Mat4 &projMat,
+                 std::uint32_t cubemapGpuId,
+                 RendererFrameStats &frameStats) noexcept {
+  if ((dev == nullptr) || (cubemapGpuId == 0U) ||
+      (dev->bind_texture_cubemap == nullptr) ||
+      (dev->set_depth_func_less_equal == nullptr) ||
+      (dev->set_depth_func_less == nullptr)) {
+    return;
+  }
+
+  prepare_procedural_sky_draw(dev);
+
+  dev->bind_program(backend.skyboxProgram);
+  if (backend.skyboxViewLoc >= 0) {
+    dev->set_uniform_mat4(backend.skyboxViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.skyboxProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.skyboxProjectionLoc, &projMat.columns[0].x);
+  }
+  if (backend.skyboxTextureLoc >= 0) {
+    dev->set_uniform_int(backend.skyboxTextureLoc, 0);
+  }
+
+  dev->bind_texture_cubemap(0, cubemapGpuId);
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+
+  dev->bind_texture_cubemap(0, 0U);
+  finish_procedural_sky_draw(dev);
+
+  ++frameStats.drawCalls;
+  frameStats.triangleCount +=
+      static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
+}
+
+void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
+                       const math::Mat4 &viewMat, const math::Mat4 &projMat,
+                       const SceneLightData &lights,
+                       RendererFrameStats &frameStats) noexcept {
+  if ((dev == nullptr) || !backend.preethamSkyAvailable ||
+      (dev->set_depth_func_less_equal == nullptr) ||
+      (dev->set_depth_func_less == nullptr)) {
+    return;
+  }
+
+  const math::Vec3 sunDir = preetham_sun_direction(lights);
+  const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
+
+  prepare_procedural_sky_draw(dev);
+
+  dev->bind_program(backend.preethamSkyProgram);
+  if (backend.preethamSkyViewLoc >= 0) {
+    dev->set_uniform_mat4(backend.preethamSkyViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.preethamSkyProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.preethamSkyProjectionLoc,
+                          &projMat.columns[0].x);
+  }
+  if (backend.preethamSkySunDirectionLoc >= 0) {
+    dev->set_uniform_vec3(backend.preethamSkySunDirectionLoc, &sunDir.x);
+  }
+  if (backend.preethamSkyTurbidityLoc >= 0) {
+    dev->set_uniform_float(backend.preethamSkyTurbidityLoc, turbidity);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+
+  finish_procedural_sky_draw(dev);
+
+  ++frameStats.drawCalls;
+  frameStats.triangleCount +=
+      static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
+}
+
+void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
+                    const math::Mat4 &viewMat, const math::Mat4 &projMat,
+                    const SceneLightData &lights,
+                    RendererFrameStats &frameStats) noexcept {
+  if ((dev == nullptr) || !backend.hosekSkyAvailable ||
+      (dev->set_depth_func_less_equal == nullptr) ||
+      (dev->set_depth_func_less == nullptr)) {
+    return;
+  }
+
+  const math::Vec3 sunDir = preetham_sun_direction(lights);
+  const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
+  const float groundAlbedo = core::cvar_get_float("r_sky_ground_albedo", 0.1F);
+
+  prepare_procedural_sky_draw(dev);
+
+  dev->bind_program(backend.hosekSkyProgram);
+  if (backend.hosekSkyViewLoc >= 0) {
+    dev->set_uniform_mat4(backend.hosekSkyViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.hosekSkyProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.hosekSkyProjectionLoc, &projMat.columns[0].x);
+  }
+  if (backend.hosekSkySunDirectionLoc >= 0) {
+    dev->set_uniform_vec3(backend.hosekSkySunDirectionLoc, &sunDir.x);
+  }
+  if (backend.hosekSkyTurbidityLoc >= 0) {
+    dev->set_uniform_float(backend.hosekSkyTurbidityLoc, turbidity);
+  }
+  if (backend.hosekSkyGroundAlbedoLoc >= 0) {
+    dev->set_uniform_float(backend.hosekSkyGroundAlbedoLoc, groundAlbedo);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+
+  finish_procedural_sky_draw(dev);
+
+  ++frameStats.drawCalls;
+  frameStats.triangleCount +=
+      static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
+}
+
+std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
+                              std::uint32_t maxValue) noexcept {
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return value;
+}
+
+std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
+  std::uint32_t result = 1U;
+  while ((result <= (value / 2U)) && (result < 4096U)) {
+    result *= 2U;
+  }
+  return result;
+}
+
+int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
+  int size = faceSize;
+  for (int mip = 0; mip < mipLevel; ++mip) {
+    size = std::max(1, size / 2);
+  }
+  return size;
+}
+
+std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
+  std::uint32_t levels = 1U;
+  while (faceSize > 1U) {
+    faceSize /= 2U;
+    ++levels;
+  }
+  return levels;
+}
+
+std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
+  const int value = core::cvar_get_int(name, fallback);
+  return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
+}
+
+ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
+  ReflectionProbeBakeSettings settings{};
+  settings.prefilteredFaceSize =
+      positive_cvar_u32("r_env_prefilter_size", 128);
+  settings.prefilteredMipLevels =
+      positive_cvar_u32("r_env_prefilter_mips", 5);
+  settings.irradianceFaceSize =
+      positive_cvar_u32("r_env_irradiance_size", 32);
+  settings.brdfLutSize = positive_cvar_u32("r_env_brdf_lut_size", 512);
+  return normalize_reflection_probe_bake_settings(settings);
+}
+
+void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
+  const math::Vec3 origin{};
+  outViews[0] = math::look_at(origin, math::Vec3(1.0F, 0.0F, 0.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+  outViews[1] = math::look_at(origin, math::Vec3(-1.0F, 0.0F, 0.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+  outViews[2] = math::look_at(origin, math::Vec3(0.0F, 1.0F, 0.0F),
+                              math::Vec3(0.0F, 0.0F, 1.0F));
+  outViews[3] = math::look_at(origin, math::Vec3(0.0F, -1.0F, 0.0F),
+                              math::Vec3(0.0F, 0.0F, -1.0F));
+  outViews[4] = math::look_at(origin, math::Vec3(0.0F, 0.0F, 1.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+  outViews[5] = math::look_at(origin, math::Vec3(0.0F, 0.0F, -1.0F),
+                              math::Vec3(0.0F, -1.0F, 0.0F));
+}
+
+void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.prefilteredEnvironmentTexture != 0U) && (dev != nullptr)) {
+    dev->destroy_texture(backend.prefilteredEnvironmentTexture);
+    backend.prefilteredEnvironmentTexture = 0U;
+  }
+  if ((backend.environmentPrefilterFbo != 0U) && (dev != nullptr)) {
+    dev->destroy_framebuffer(backend.environmentPrefilterFbo);
+    backend.environmentPrefilterFbo = 0U;
+  }
+  if (backend.environmentPrefilterShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.environmentPrefilterShaderHandle);
+    backend.environmentPrefilterShaderHandle = ShaderProgramHandle{};
+  }
+  backend.environmentPrefilterProgram = 0U;
+  backend.environmentPrefilterAvailable = false;
+  backend.prefilteredEnvironmentSource = 0U;
+  backend.prefilteredEnvironmentFaceSize = 0;
+  backend.prefilteredEnvironmentMipLevels = 0;
+}
+
+std::uint32_t
+ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
+                               std::uint32_t sourceCubemap,
+                               ReflectionProbeBakeSettings settings) noexcept {
+  if ((dev == nullptr) || !backend.environmentPrefilterAvailable ||
+      !core::cvar_get_bool("r_env_prefilter", true) || (sourceCubemap == 0U) ||
+      (dev->create_cubemap_hdr_empty == nullptr) ||
+      (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
+      (dev->bind_texture_cubemap == nullptr)) {
+    return 0U;
+  }
+
+  settings = normalize_reflection_probe_bake_settings(settings);
+  const int faceSize = static_cast<int>(settings.prefilteredFaceSize);
+  const int mipLevels = static_cast<int>(settings.prefilteredMipLevels);
+
+  if ((backend.prefilteredEnvironmentTexture != 0U) &&
+      (backend.prefilteredEnvironmentSource == sourceCubemap) &&
+      (backend.prefilteredEnvironmentFaceSize == faceSize) &&
+      (backend.prefilteredEnvironmentMipLevels == mipLevels)) {
+    return backend.prefilteredEnvironmentTexture;
+  }
+
+  if (backend.prefilteredEnvironmentTexture != 0U) {
+    dev->destroy_texture(backend.prefilteredEnvironmentTexture);
+    backend.prefilteredEnvironmentTexture = 0U;
+  }
+
+  if (backend.environmentPrefilterFbo == 0U) {
+    backend.environmentPrefilterFbo = dev->create_framebuffer(0U, 0U);
+    if (backend.environmentPrefilterFbo == 0U) {
+      return 0U;
+    }
+  }
+
+  const std::uint32_t prefiltered =
+      dev->create_cubemap_hdr_empty(faceSize, mipLevels);
+  if (prefiltered == 0U) {
+    return 0U;
+  }
+
+  std::array<math::Mat4, 6> views{};
+  cubemap_capture_views(views);
+  const math::Mat4 projection =
+      math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
+
+  dev->disable_depth_test();
+  dev->disable_face_culling();
+  dev->bind_program(backend.environmentPrefilterProgram);
+  dev->bind_texture_cubemap(0, sourceCubemap);
+  if (backend.environmentPrefilterTextureLoc >= 0) {
+    dev->set_uniform_int(backend.environmentPrefilterTextureLoc, 0);
+  }
+  if (backend.environmentPrefilterProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.environmentPrefilterProjectionLoc,
+                          &projection.columns[0].x);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  for (int mip = 0; mip < mipLevels; ++mip) {
+    const int mipSize = cubemap_mip_size(faceSize, mip);
+    const float roughness =
+        (mipLevels > 1)
+            ? static_cast<float>(mip) / static_cast<float>(mipLevels - 1)
+            : 0.0F;
+    dev->set_viewport(0, 0, mipSize, mipSize);
+    if (backend.environmentPrefilterRoughnessLoc >= 0) {
+      dev->set_uniform_float(backend.environmentPrefilterRoughnessLoc,
+                             roughness);
+    }
+
+    for (int face = 0; face < 6; ++face) {
+      dev->framebuffer_cubemap_color_face_mip(backend.environmentPrefilterFbo,
+                                              prefiltered, face, mip);
+      if (backend.environmentPrefilterViewLoc >= 0) {
+        dev->set_uniform_mat4(
+            backend.environmentPrefilterViewLoc,
+            &views[static_cast<std::size_t>(face)].columns[0].x);
+      }
+      dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+    }
+  }
+
+  dev->bind_texture_cubemap(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+
+  backend.prefilteredEnvironmentTexture = prefiltered;
+  backend.prefilteredEnvironmentSource = sourceCubemap;
+  backend.prefilteredEnvironmentFaceSize = faceSize;
+  backend.prefilteredEnvironmentMipLevels = mipLevels;
+  return prefiltered;
+}
+
+void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.irradianceEnvironmentTexture != 0U) && (dev != nullptr)) {
+    dev->destroy_texture(backend.irradianceEnvironmentTexture);
+    backend.irradianceEnvironmentTexture = 0U;
+  }
+  if ((backend.environmentIrradianceFbo != 0U) && (dev != nullptr)) {
+    dev->destroy_framebuffer(backend.environmentIrradianceFbo);
+    backend.environmentIrradianceFbo = 0U;
+  }
+  if (backend.environmentIrradianceShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.environmentIrradianceShaderHandle);
+    backend.environmentIrradianceShaderHandle = ShaderProgramHandle{};
+  }
+  backend.environmentIrradianceProgram = 0U;
+  backend.environmentIrradianceAvailable = false;
+  backend.irradianceEnvironmentSource = 0U;
+  backend.irradianceEnvironmentFaceSize = 0;
+}
+
+std::uint32_t
+ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
+                              std::uint32_t sourceCubemap,
+                              ReflectionProbeBakeSettings settings) noexcept {
+  if ((dev == nullptr) || !backend.environmentIrradianceAvailable ||
+      !core::cvar_get_bool("r_env_irradiance", true) || (sourceCubemap == 0U) ||
+      (dev->create_cubemap_hdr_empty == nullptr) ||
+      (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
+      (dev->bind_texture_cubemap == nullptr)) {
+    return 0U;
+  }
+
+  settings = normalize_reflection_probe_bake_settings(settings);
+  const int faceSize = static_cast<int>(settings.irradianceFaceSize);
+
+  if ((backend.irradianceEnvironmentTexture != 0U) &&
+      (backend.irradianceEnvironmentSource == sourceCubemap) &&
+      (backend.irradianceEnvironmentFaceSize == faceSize)) {
+    return backend.irradianceEnvironmentTexture;
+  }
+
+  if (backend.irradianceEnvironmentTexture != 0U) {
+    dev->destroy_texture(backend.irradianceEnvironmentTexture);
+    backend.irradianceEnvironmentTexture = 0U;
+  }
+
+  if (backend.environmentIrradianceFbo == 0U) {
+    backend.environmentIrradianceFbo = dev->create_framebuffer(0U, 0U);
+    if (backend.environmentIrradianceFbo == 0U) {
+      return 0U;
+    }
+  }
+
+  const std::uint32_t irradiance = dev->create_cubemap_hdr_empty(faceSize, 1);
+  if (irradiance == 0U) {
+    return 0U;
+  }
+
+  std::array<math::Mat4, 6> views{};
+  cubemap_capture_views(views);
+  const math::Mat4 projection =
+      math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
+
+  dev->disable_depth_test();
+  dev->disable_face_culling();
+  dev->bind_program(backend.environmentIrradianceProgram);
+  dev->bind_texture_cubemap(0, sourceCubemap);
+  if (backend.environmentIrradianceTextureLoc >= 0) {
+    dev->set_uniform_int(backend.environmentIrradianceTextureLoc, 0);
+  }
+  if (backend.environmentIrradianceProjectionLoc >= 0) {
+    dev->set_uniform_mat4(backend.environmentIrradianceProjectionLoc,
+                          &projection.columns[0].x);
+  }
+
+  dev->bind_vertex_array(backend.skyboxVertexArray);
+  dev->set_viewport(0, 0, faceSize, faceSize);
+  for (int face = 0; face < 6; ++face) {
+    dev->framebuffer_cubemap_color_face_mip(backend.environmentIrradianceFbo,
+                                            irradiance, face, 0);
+    if (backend.environmentIrradianceViewLoc >= 0) {
+      dev->set_uniform_mat4(
+          backend.environmentIrradianceViewLoc,
+          &views[static_cast<std::size_t>(face)].columns[0].x);
+    }
+    dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+  }
+
+  dev->bind_texture_cubemap(0, 0U);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+
+  backend.irradianceEnvironmentTexture = irradiance;
+  backend.irradianceEnvironmentSource = sourceCubemap;
+  backend.irradianceEnvironmentFaceSize = faceSize;
+  return irradiance;
+}
+
+void destroy_brdf_lut_resources(BackendState &backend) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((backend.brdfLutFbo != 0U) && (dev != nullptr)) {
+    dev->destroy_framebuffer(backend.brdfLutFbo);
+    backend.brdfLutFbo = 0U;
+  }
+  if ((backend.brdfLutTexture != 0U) && (dev != nullptr)) {
+    dev->destroy_texture(backend.brdfLutTexture);
+    backend.brdfLutTexture = 0U;
+  }
+  if (backend.environmentBrdfLutShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend.environmentBrdfLutShaderHandle);
+    backend.environmentBrdfLutShaderHandle = ShaderProgramHandle{};
+  }
+  backend.environmentBrdfLutProgram = 0U;
+  backend.environmentBrdfLutAvailable = false;
+  backend.brdfLutSize = 0;
+}
+
+std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
+                              ReflectionProbeBakeSettings settings) noexcept {
+  if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
+      !core::cvar_get_bool("r_env_brdf_lut", true) ||
+      (dev->create_texture_2d_hdr == nullptr) ||
+      (dev->create_framebuffer == nullptr)) {
+    return 0U;
+  }
+
+  settings = normalize_reflection_probe_bake_settings(settings);
+  const int lutSize = static_cast<int>(settings.brdfLutSize);
+  if ((backend.brdfLutTexture != 0U) && (backend.brdfLutSize == lutSize)) {
+    return backend.brdfLutTexture;
+  }
+
+  if (backend.brdfLutFbo != 0U) {
+    dev->destroy_framebuffer(backend.brdfLutFbo);
+    backend.brdfLutFbo = 0U;
+  }
+  if (backend.brdfLutTexture != 0U) {
+    dev->destroy_texture(backend.brdfLutTexture);
+    backend.brdfLutTexture = 0U;
+  }
+
+  const std::uint32_t lutTexture =
+      dev->create_texture_2d_hdr(lutSize, lutSize, 2, nullptr);
+  if (lutTexture == 0U) {
+    return 0U;
+  }
+
+  const std::uint32_t lutFbo = dev->create_framebuffer(lutTexture, 0U);
+  if (lutFbo == 0U) {
+    dev->destroy_texture(lutTexture);
+    return 0U;
+  }
+
+  dev->bind_framebuffer(lutFbo);
+  dev->set_viewport(0, 0, lutSize, lutSize);
+  dev->disable_depth_test();
+  dev->disable_face_culling();
+  dev->bind_program(backend.environmentBrdfLutProgram);
+  dev->bind_vertex_array(backend.emptyVao);
+  dev->draw_arrays_triangles(0, 3);
+  dev->bind_vertex_array(0U);
+  dev->bind_program(0U);
+  dev->bind_framebuffer(0U);
+
+  backend.brdfLutTexture = lutTexture;
+  backend.brdfLutFbo = lutFbo;
+  backend.brdfLutSize = lutSize;
+  return lutTexture;
 }
 
 void destroy_bloom_resources(BackendState &b) noexcept {
@@ -561,9 +1648,18 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_hasAlbedoTexture");
   backend.pbrAlbedoMapLocation =
       dev->uniform_location(pbrProgram, "u_albedoMap");
+  backend.pbrOpacityLocation = dev->uniform_location(pbrProgram, "u_opacity");
+  backend.pbrViewLocation = dev->uniform_location(pbrProgram, "u_viewMatrix");
+  backend.pbrFogModeLocation = dev->uniform_location(pbrProgram, "uFogMode");
+  backend.pbrFogStartLocation = dev->uniform_location(pbrProgram, "uFogStart");
+  backend.pbrFogEndLocation = dev->uniform_location(pbrProgram, "uFogEnd");
+  backend.pbrFogDensityLocation =
+      dev->uniform_location(pbrProgram, "uFogDensity");
+  backend.pbrFogColorLocation = dev->uniform_location(pbrProgram, "uFogColor");
 
   if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
-      (backend.pbrAlbedoLocation < 0)) {
+      (backend.pbrAlbedoLocation < 0) || (backend.pbrOpacityLocation < 0) ||
+      (backend.pbrViewLocation < 0)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to locate required PBR shader uniforms");
     destroy_shader_program(pbrShaderHandle);
@@ -575,6 +1671,7 @@ bool initialize_backend() noexcept {
   }
 
   resolve_pbr_light_uniforms(backend, dev);
+  resolve_pbr_shadow_uniforms(backend, dev);
 
   // Load tonemap shader.
   const ShaderProgramHandle tonemapShaderHandle = load_shader_program(
@@ -628,12 +1725,242 @@ bool initialize_backend() noexcept {
     return false;
   }
 
+  // Skybox shader and cube geometry (soft-fail: clear color remains visible).
+  core::cvar_register_string("r_sky_model", "hosek",
+                             "Sky model: hosek, preetham, cubemap, or none");
+  const ShaderProgramHandle skyboxShader = load_shader_program(
+      "assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
+  if (skyboxShader != kInvalidShaderProgram) {
+    const std::uint32_t skyboxProgram = shader_gpu_program(skyboxShader);
+    if (skyboxProgram != 0U) {
+      backend.skyboxShaderHandle = skyboxShader;
+      backend.skyboxProgram = skyboxProgram;
+      backend.skyboxViewLoc = dev->uniform_location(skyboxProgram, "u_view");
+      backend.skyboxProjectionLoc =
+          dev->uniform_location(skyboxProgram, "u_projection");
+      backend.skyboxTextureLoc =
+          dev->uniform_location(skyboxProgram, "u_skybox");
+
+      if ((backend.skyboxViewLoc >= 0) && (backend.skyboxProjectionLoc >= 0) &&
+          (backend.skyboxTextureLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.skyboxAvailable = true;
+      } else {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "skybox setup failed — skybox disabled");
+        destroy_skybox_resources(backend);
+      }
+    } else {
+      destroy_shader_program(skyboxShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "skybox shader not available — skybox disabled");
+  }
+
+  // Preetham procedural sky (soft-fail: cubemap skybox or clear color remains).
+  core::cvar_register_float("r_sky_turbidity", 3.0F,
+                            "Preetham sky turbidity (1.7 clear, 10 hazy)");
+  const ShaderProgramHandle preethamShader = load_shader_program(
+      "assets/shaders/skybox.vert", "assets/shaders/preetham_sky.frag");
+  if (preethamShader != kInvalidShaderProgram) {
+    const std::uint32_t preethamProgram = shader_gpu_program(preethamShader);
+    if (preethamProgram != 0U) {
+      backend.preethamSkyShaderHandle = preethamShader;
+      backend.preethamSkyProgram = preethamProgram;
+      backend.preethamSkyViewLoc =
+          dev->uniform_location(preethamProgram, "u_view");
+      backend.preethamSkyProjectionLoc =
+          dev->uniform_location(preethamProgram, "u_projection");
+      backend.preethamSkySunDirectionLoc =
+          dev->uniform_location(preethamProgram, "u_sunDirection");
+      backend.preethamSkyTurbidityLoc =
+          dev->uniform_location(preethamProgram, "u_turbidity");
+
+      if ((backend.preethamSkyViewLoc >= 0) &&
+          (backend.preethamSkyProjectionLoc >= 0) &&
+          (backend.preethamSkySunDirectionLoc >= 0) &&
+          (backend.preethamSkyTurbidityLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.preethamSkyAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "Preetham sky setup failed — procedural sky disabled");
+        destroy_preetham_sky_resources(backend);
+      }
+    } else {
+      destroy_shader_program(preethamShader);
+    }
+  } else {
+    core::log_message(
+        core::LogLevel::Warning, "renderer",
+        "Preetham sky shader not available — procedural sky disabled");
+  }
+
+  // Hosek-Wilkie procedural sky (preferred over Preetham when available).
+  core::cvar_register_float("r_sky_ground_albedo", 0.1F,
+                            "Procedural sky ground albedo");
+  const ShaderProgramHandle hosekShader = load_shader_program(
+      "assets/shaders/skybox.vert", "assets/shaders/hosek_wilkie_sky.frag");
+  if (hosekShader != kInvalidShaderProgram) {
+    const std::uint32_t hosekProgram = shader_gpu_program(hosekShader);
+    if (hosekProgram != 0U) {
+      backend.hosekSkyShaderHandle = hosekShader;
+      backend.hosekSkyProgram = hosekProgram;
+      backend.hosekSkyViewLoc = dev->uniform_location(hosekProgram, "u_view");
+      backend.hosekSkyProjectionLoc =
+          dev->uniform_location(hosekProgram, "u_projection");
+      backend.hosekSkySunDirectionLoc =
+          dev->uniform_location(hosekProgram, "u_sunDirection");
+      backend.hosekSkyTurbidityLoc =
+          dev->uniform_location(hosekProgram, "u_turbidity");
+      backend.hosekSkyGroundAlbedoLoc =
+          dev->uniform_location(hosekProgram, "u_groundAlbedo");
+
+      if ((backend.hosekSkyViewLoc >= 0) &&
+          (backend.hosekSkyProjectionLoc >= 0) &&
+          (backend.hosekSkySunDirectionLoc >= 0) &&
+          (backend.hosekSkyTurbidityLoc >= 0) &&
+          (backend.hosekSkyGroundAlbedoLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.hosekSkyAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "Hosek-Wilkie sky setup failed — falling back to Preetham");
+        destroy_hosek_sky_resources(backend);
+      }
+    } else {
+      destroy_shader_program(hosekShader);
+    }
+  } else {
+    core::log_message(
+        core::LogLevel::Warning, "renderer",
+        "Hosek-Wilkie sky shader not available — falling back to Preetham");
+  }
+
+  // Specular environment prefilter for cubemap IBL.
+  core::cvar_register_bool("r_env_prefilter", true,
+                           "Bake prefiltered specular cubemap radiance");
+  core::cvar_register_int("r_env_prefilter_size", 128,
+                          "Prefiltered environment cubemap face size");
+  core::cvar_register_int("r_env_prefilter_mips", 5,
+                          "Prefiltered environment cubemap mip levels");
+  const ShaderProgramHandle prefilterShader =
+      load_shader_program("assets/shaders/skybox.vert",
+                          "assets/shaders/prefilter_environment.frag");
+  if (prefilterShader != kInvalidShaderProgram) {
+    const std::uint32_t prefilterProgram = shader_gpu_program(prefilterShader);
+    if (prefilterProgram != 0U) {
+      backend.environmentPrefilterShaderHandle = prefilterShader;
+      backend.environmentPrefilterProgram = prefilterProgram;
+      backend.environmentPrefilterViewLoc =
+          dev->uniform_location(prefilterProgram, "u_view");
+      backend.environmentPrefilterProjectionLoc =
+          dev->uniform_location(prefilterProgram, "u_projection");
+      backend.environmentPrefilterTextureLoc =
+          dev->uniform_location(prefilterProgram, "u_environmentMap");
+      backend.environmentPrefilterRoughnessLoc =
+          dev->uniform_location(prefilterProgram, "u_roughness");
+
+      if ((backend.environmentPrefilterViewLoc >= 0) &&
+          (backend.environmentPrefilterProjectionLoc >= 0) &&
+          (backend.environmentPrefilterTextureLoc >= 0) &&
+          (backend.environmentPrefilterRoughnessLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.environmentPrefilterAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "environment prefilter setup failed — IBL prefilter disabled");
+        destroy_environment_prefilter_resources(backend);
+      }
+    } else {
+      destroy_shader_program(prefilterShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment prefilter shader not available");
+  }
+
+  // Diffuse irradiance convolution for cubemap IBL.
+  core::cvar_register_bool("r_env_irradiance", true,
+                           "Bake diffuse irradiance cubemap");
+  core::cvar_register_int("r_env_irradiance_size", 32,
+                          "Diffuse irradiance cubemap face size");
+  const ShaderProgramHandle irradianceShader =
+      load_shader_program("assets/shaders/skybox.vert",
+                          "assets/shaders/irradiance_convolution.frag");
+  if (irradianceShader != kInvalidShaderProgram) {
+    const std::uint32_t irradianceProgram =
+        shader_gpu_program(irradianceShader);
+    if (irradianceProgram != 0U) {
+      backend.environmentIrradianceShaderHandle = irradianceShader;
+      backend.environmentIrradianceProgram = irradianceProgram;
+      backend.environmentIrradianceViewLoc =
+          dev->uniform_location(irradianceProgram, "u_view");
+      backend.environmentIrradianceProjectionLoc =
+          dev->uniform_location(irradianceProgram, "u_projection");
+      backend.environmentIrradianceTextureLoc =
+          dev->uniform_location(irradianceProgram, "u_environmentMap");
+
+      if ((backend.environmentIrradianceViewLoc >= 0) &&
+          (backend.environmentIrradianceProjectionLoc >= 0) &&
+          (backend.environmentIrradianceTextureLoc >= 0) &&
+          create_skybox_geometry(backend, dev)) {
+        backend.environmentIrradianceAvailable = true;
+      } else {
+        core::log_message(
+            core::LogLevel::Warning, "renderer",
+            "environment irradiance setup failed — IBL irradiance disabled");
+        destroy_environment_irradiance_resources(backend);
+      }
+    } else {
+      destroy_shader_program(irradianceShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment irradiance shader not available");
+  }
+
+  // Split-sum BRDF LUT for image-based lighting.
+  core::cvar_register_bool("r_env_brdf_lut", true,
+                           "Bake split-sum BRDF lookup texture");
+  core::cvar_register_int("r_env_brdf_lut_size", 512,
+                          "Split-sum BRDF LUT resolution");
+  const ShaderProgramHandle brdfLutShader = load_shader_program(
+      "assets/shaders/fullscreen.vert", "assets/shaders/brdf_lut.frag");
+  if (brdfLutShader != kInvalidShaderProgram) {
+    const std::uint32_t brdfLutProgram = shader_gpu_program(brdfLutShader);
+    if (brdfLutProgram != 0U) {
+      backend.environmentBrdfLutShaderHandle = brdfLutShader;
+      backend.environmentBrdfLutProgram = brdfLutProgram;
+      backend.environmentBrdfLutAvailable = true;
+    } else {
+      destroy_shader_program(brdfLutShader);
+    }
+  } else {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "BRDF LUT shader not available");
+  }
+
   // Register CVars for deferred rendering.
   core::cvar_register_bool("r_deferred", true, "Enable deferred rendering");
   core::cvar_register_int(
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
       "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
+  core::cvar_register_string("r_fog_mode", "off",
+                             "Distance fog mode: off, linear, exp, exp2");
+  core::cvar_register_float("r_fog_start", 25.0F,
+                            "Linear distance fog start");
+  core::cvar_register_float("r_fog_end", 150.0F,
+                            "Linear distance fog end");
+  core::cvar_register_float("r_fog_density", 0.01F,
+                            "Exponential distance fog density");
+  core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
+                             "Distance fog RGB color");
 
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
   core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
@@ -862,6 +2189,11 @@ bool initialize_backend() noexcept {
         dev->uniform_location(dlProg, "uDirLightColor");
     backend.dlCameraPosLoc = dev->uniform_location(dlProg, "uCameraPos");
     backend.dlScreenSizeLoc = dev->uniform_location(dlProg, "uScreenSize");
+    backend.dlFogModeLoc = dev->uniform_location(dlProg, "uFogMode");
+    backend.dlFogStartLoc = dev->uniform_location(dlProg, "uFogStart");
+    backend.dlFogEndLoc = dev->uniform_location(dlProg, "uFogEnd");
+    backend.dlFogDensityLoc = dev->uniform_location(dlProg, "uFogDensity");
+    backend.dlFogColorLoc = dev->uniform_location(dlProg, "uFogColor");
     backend.dlPointLightCountLoc =
         dev->uniform_location(dlProg, "uPointLightCount");
     backend.dlSpotLightCountLoc =
@@ -964,6 +2296,11 @@ bool initialize_backend() noexcept {
   core::cvar_register_bool("r_shadows", true, "Enable cascaded shadow maps");
   core::cvar_register_float("r_shadow_lambda", 0.75F,
                             "CSM cascade split blend (0=uniform, 1=log)");
+  core::cvar_register_bool("r_shadow_cache", true,
+                           "Reuse directional shadow maps when unchanged");
+  core::cvar_register_bool(
+      "r_shadow_debug", false,
+      "Log when shadow casters are dropped due to slot limits");
   {
     const ShaderProgramHandle shadowShader = load_shader_program(
         "assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
@@ -998,8 +2335,9 @@ bool initialize_backend() noexcept {
     if (initialize_spot_shadow_maps(backend.spotShadowState)) {
       backend.spotShadowAvailable = true;
     } else {
-      core::log_message(core::LogLevel::Warning, "renderer",
-                        "spot shadow FBO creation failed — spot shadows disabled");
+      core::log_message(
+          core::LogLevel::Warning, "renderer",
+          "spot shadow FBO creation failed — spot shadows disabled");
     }
   }
 
@@ -1007,9 +2345,9 @@ bool initialize_backend() noexcept {
   core::cvar_register_bool("r_point_shadows", true,
                            "Enable point light cubemap shadow maps");
   {
-    const ShaderProgramHandle pointShader = load_shader_program(
-        "assets/shaders/shadow_depth_point.vert",
-        "assets/shaders/shadow_depth_point.frag");
+    const ShaderProgramHandle pointShader =
+        load_shader_program("assets/shaders/shadow_depth_point.vert",
+                            "assets/shaders/shadow_depth_point.frag");
     if (pointShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(pointShader);
       if (prog != 0U) {
@@ -1129,6 +2467,8 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   // Destroy shadow map resources.
   shutdown_shadow_maps(backend->shadowState);
   backend->shadowAvailable = false;
+  backend->directionalShadowCacheKey = 0U;
+  backend->directionalShadowCacheValid = false;
   if (backend->shadowDepthShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->shadowDepthShaderHandle);
     backend->shadowDepthShaderHandle = ShaderProgramHandle{};
@@ -1156,6 +2496,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   }
   backend->luminanceProgram = 0U;
   backend->autoExposureAvailable = false;
+
+  destroy_brdf_lut_resources(*backend);
+  destroy_environment_irradiance_resources(*backend);
+  destroy_environment_prefilter_resources(*backend);
+  destroy_skybox_resources(*backend);
 
   if (backend->emptyVao != 0U && dev != nullptr) {
     dev->destroy_vertex_array(backend->emptyVao);
@@ -1210,6 +2555,63 @@ math::Mat4 compute_model_matrix(const DrawCommand &command) noexcept {
 math::Mat4 compute_mvp(const math::Mat4 &model,
                        const math::Mat4 &viewProjection) noexcept {
   return math::mul(viewProjection, model);
+}
+
+std::uint64_t hash_u64(std::uint64_t hash, std::uint64_t value) noexcept {
+  hash ^= value;
+  return hash * kFnv1a64Prime;
+}
+
+std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
+  std::uint32_t bits = 0U;
+  if (value != 0.0F) {
+    std::memcpy(&bits, &value, sizeof(bits));
+  }
+  return hash_u64(hash, bits);
+}
+
+std::uint64_t hash_vec3(std::uint64_t hash, const math::Vec3 &value) noexcept {
+  hash = hash_float(hash, value.x);
+  hash = hash_float(hash, value.y);
+  return hash_float(hash, value.z);
+}
+
+std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
+  for (const math::Vec4 &column : value.columns) {
+    hash = hash_float(hash, column.x);
+    hash = hash_float(hash, column.y);
+    hash = hash_float(hash, column.z);
+    hash = hash_float(hash, column.w);
+  }
+  return hash;
+}
+
+std::uint64_t directional_shadow_cache_key(
+    CommandBufferView commandBufferView, std::size_t opaqueCount,
+    const DirectionalLightData &light, const CascadeSplits &splits,
+    const std::array<math::Mat4, kShadowCascadeCount> &matrices) noexcept {
+  std::uint64_t hash = kFnv1a64Offset;
+  hash = hash_u64(hash, static_cast<std::uint64_t>(opaqueCount));
+  hash = hash_vec3(hash, light.direction);
+  hash = hash_vec3(hash, light.color);
+  hash = hash_float(hash, light.intensity);
+
+  for (std::size_t i = 0U; i <= kShadowCascadeCount; ++i) {
+    hash = hash_float(hash, splits.distances[i]);
+  }
+  for (const math::Mat4 &matrix : matrices) {
+    hash = hash_mat4(hash, matrix);
+  }
+
+  for (std::size_t i = 0U; i < opaqueCount; ++i) {
+    const DrawCommand &command = commandBufferView.data[i];
+    hash = hash_u64(hash, command.sortKey.value);
+    hash = hash_u64(hash, command.entity);
+    hash = hash_u64(hash, command.mesh.id);
+    hash = hash_mat4(hash, command.modelMatrix);
+  }
+
+  return hash;
 }
 
 void extract_normal_matrix(const math::Mat4 &model,
@@ -1325,6 +2727,10 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   const PassResources &passRes = get_pass_resources();
+  const ReflectionProbeBakeSettings environmentBakeSettings =
+      cvar_reflection_probe_bake_settings();
+  const DistanceFogSettings fogSettings = distance_fog_settings_from_cvars();
+  static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
   // Check if deferred rendering is enabled.
   const bool useDeferred =
@@ -1380,75 +2786,107 @@ void flush_renderer(CommandBufferView commandBufferView,
                              lights.directionalLightCount > 0U;
 
   CascadeSplits cascadeSplits{};
+  bool directionalShadowCacheReused = false;
   if (shadowEnabled && (commandBufferView.data != nullptr) &&
       (opaqueCount > 0U)) {
-    gpu_profiler_begin_pass(GpuPassId::ShadowMap);
-
     const float lambda = core::cvar_get_float("r_shadow_lambda", 0.75F);
     cascadeSplits = compute_cascade_splits(nearP, farP, lambda);
 
     const math::Vec3 &lightDir = lights.directionalLights[0].direction;
+    std::array<math::Mat4, kShadowCascadeCount> lightMatrices{};
 
     for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-      const float texelSize = 2.0F / static_cast<float>(kShadowMapResolution);
+      const int shadowResolution = (backend.shadowState.resolutions[c] > 0)
+                                       ? backend.shadowState.resolutions[c]
+                                       : shadow_cascade_resolution(c);
       math::Mat4 lightVP = compute_cascade_matrix(
           viewMat, projMat, lightDir, cascadeSplits.distances[c],
-          cascadeSplits.distances[c + 1], texelSize);
-      lightVP = snap_to_texel(lightVP, kShadowMapResolution);
+          cascadeSplits.distances[c + 1], shadowResolution);
+      lightVP = snap_to_texel(lightVP, shadowResolution);
 
       backend.shadowState.cascades[c].lightViewProjection = lightVP;
       backend.shadowState.cascades[c].splitDistance =
           cascadeSplits.distances[c + 1];
-
-      dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
-      dev->set_viewport(0, 0, kShadowMapResolution, kShadowMapResolution);
-      dev->enable_depth_test();
-      dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
-      dev->clear_color_depth();
-
-      dev->bind_program(backend.shadowDepthProgram);
-
-      std::uint32_t boundVertexArray = 0U;
-      for (std::size_t i = 0U; i < opaqueCount; ++i) {
-        const DrawCommand &command = commandBufferView.data[i];
-        const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
-            (mesh->vertexCount == 0U)) {
-          continue;
-        }
-
-        if (mesh->vertexArray != boundVertexArray) {
-          dev->bind_vertex_array(mesh->vertexArray);
-          boundVertexArray = mesh->vertexArray;
-        }
-
-        const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
-        if (backend.shadowLightMvpLoc >= 0) {
-          dev->set_uniform_mat4(backend.shadowLightMvpLoc,
-                                &lightMvp.columns[0].x);
-        }
-        if (backend.shadowModelLoc >= 0) {
-          dev->set_uniform_mat4(backend.shadowModelLoc,
-                                &command.modelMatrix.columns[0].x);
-        }
-
-        if (mesh->indexCount > 0U) {
-          dev->draw_elements_triangles_u32(
-              static_cast<std::int32_t>(mesh->indexCount));
-          frameStats.triangleCount += mesh->indexCount / 3U;
-        } else {
-          dev->draw_arrays_triangles(
-              0, static_cast<std::int32_t>(mesh->vertexCount));
-          frameStats.triangleCount += mesh->vertexCount / 3U;
-        }
-        ++frameStats.drawCalls;
-      }
-
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      lightMatrices[c] = lightVP;
     }
 
-    gpu_profiler_end_pass(GpuPassId::ShadowMap);
+    const std::uint64_t cacheKey = directional_shadow_cache_key(
+        commandBufferView, opaqueCount, lights.directionalLights[0],
+        cascadeSplits, lightMatrices);
+    const bool cacheEnabled = core::cvar_get_bool("r_shadow_cache", true);
+    directionalShadowCacheReused =
+        cacheEnabled && backend.directionalShadowCacheValid &&
+        (backend.directionalShadowCacheKey == cacheKey);
+
+    if (directionalShadowCacheReused) {
+      if (core::cvar_get_bool("r_shadow_debug", false)) {
+        core::log_message(core::LogLevel::Info, "renderer",
+                          "reused directional shadow maps");
+      }
+    } else {
+      gpu_profiler_begin_pass(GpuPassId::ShadowMap);
+
+      for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+        const math::Mat4 &lightVP = lightMatrices[c];
+        const int shadowResolution = (backend.shadowState.resolutions[c] > 0)
+                                         ? backend.shadowState.resolutions[c]
+                                         : shadow_cascade_resolution(c);
+
+        dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
+        dev->set_viewport(0, 0, shadowResolution, shadowResolution);
+        dev->enable_depth_test();
+        dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
+        dev->clear_color_depth();
+
+        dev->bind_program(backend.shadowDepthProgram);
+
+        std::uint32_t boundVertexArray = 0U;
+        for (std::size_t i = 0U; i < opaqueCount; ++i) {
+          const DrawCommand &command = commandBufferView.data[i];
+          const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
+          if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+              (mesh->vertexCount == 0U)) {
+            continue;
+          }
+
+          if (mesh->vertexArray != boundVertexArray) {
+            dev->bind_vertex_array(mesh->vertexArray);
+            boundVertexArray = mesh->vertexArray;
+          }
+
+          const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
+          if (backend.shadowLightMvpLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowLightMvpLoc,
+                                  &lightMvp.columns[0].x);
+          }
+          if (backend.shadowModelLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowModelLoc,
+                                  &command.modelMatrix.columns[0].x);
+          }
+
+          if (mesh->indexCount > 0U) {
+            dev->draw_elements_triangles_u32(
+                static_cast<std::int32_t>(mesh->indexCount));
+            frameStats.triangleCount += mesh->indexCount / 3U;
+          } else {
+            dev->draw_arrays_triangles(
+                0, static_cast<std::int32_t>(mesh->vertexCount));
+            frameStats.triangleCount += mesh->vertexCount / 3U;
+          }
+          ++frameStats.drawCalls;
+        }
+
+        dev->bind_vertex_array(0U);
+        dev->bind_program(0U);
+      }
+
+      gpu_profiler_end_pass(GpuPassId::ShadowMap);
+      backend.directionalShadowCacheKey = cacheKey;
+      backend.directionalShadowCacheValid = true;
+    }
+  } else {
+    backend.directionalShadowCacheKey = 0U;
+    backend.directionalShadowCacheValid = false;
   }
 
   // ==== Spot Light Shadow Pass ====
@@ -1458,24 +2896,42 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_begin_pass(GpuPassId::SpotShadowMap);
 
     // Select up to kMaxSpotShadowLights nearest shadow-casting spots.
-    std::size_t activeSpotShadows = 0U;
     for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
       backend.spotShadowState.slots[i].lightIndex = -1;
     }
 
-    for (std::size_t li = 0U;
-         li < lights.spotLightCount && activeSpotShadows < kMaxSpotShadowLights;
-         ++li) {
+    std::array<ShadowCandidate, kMaxSpotLights> spotCandidates{};
+    std::size_t spotCandidateCount = 0U;
+    const math::Vec3 &camPos = g_activeCamera.position;
+    for (std::size_t li = 0U; li < lights.spotLightCount; ++li) {
       if (!lights.spotLights[li].castShadow) {
         continue;
       }
-      auto &slot = backend.spotShadowState.slots[activeSpotShadows];
+      const math::Vec3 &p = lights.spotLights[li].position;
+      const float dx = p.x - camPos.x;
+      const float dy = p.y - camPos.y;
+      const float dz = p.z - camPos.z;
+      spotCandidates[spotCandidateCount++] = {li, dx * dx + dy * dy + dz * dz};
+    }
+    std::sort(spotCandidates.data(), spotCandidates.data() + spotCandidateCount,
+              [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
+                return a.distSq < b.distSq;
+              });
+    if ((spotCandidateCount > kMaxSpotShadowLights) &&
+        core::cvar_get_bool("r_shadow_debug")) {
+      core::log_message(core::LogLevel::Warning, "shadow",
+                        "spot shadow casters dropped: only 4 slots available");
+    }
+    const std::size_t activeSpotShadows =
+        std::min(spotCandidateCount, kMaxSpotShadowLights);
+    for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
+      const std::size_t li = spotCandidates[s].lightIndex;
+      auto &slot = backend.spotShadowState.slots[s];
       slot.lightIndex = static_cast<int>(li);
       slot.farPlane = lights.spotLights[li].radius;
       slot.lightViewProjection = compute_spot_shadow_matrix(
           lights.spotLights[li].position, lights.spotLights[li].direction,
           lights.spotLights[li].outerConeAngle, lights.spotLights[li].radius);
-      ++activeSpotShadows;
     }
 
     // Render into each spot shadow FBO.
@@ -1527,25 +2983,44 @@ void flush_renderer(CommandBufferView commandBufferView,
     gpu_profiler_begin_pass(GpuPassId::PointShadowMap);
 
     // Select up to kMaxPointShadowLights nearest shadow-casting points.
-    std::size_t activePointShadows = 0U;
     for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
       backend.pointShadowState.slots[i].lightIndex = -1;
     }
 
-    for (std::size_t li = 0U;
-         li < lights.pointLightCount &&
-         activePointShadows < kMaxPointShadowLights;
-         ++li) {
+    std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
+    std::size_t pointCandidateCount = 0U;
+    const math::Vec3 &camPos = g_activeCamera.position;
+    for (std::size_t li = 0U; li < lights.pointLightCount; ++li) {
       if (!lights.pointLights[li].castShadow) {
         continue;
       }
-      auto &slot = backend.pointShadowState.slots[activePointShadows];
+      const math::Vec3 &p = lights.pointLights[li].position;
+      const float dx = p.x - camPos.x;
+      const float dy = p.y - camPos.y;
+      const float dz = p.z - camPos.z;
+      pointCandidates[pointCandidateCount++] = {li,
+                                                dx * dx + dy * dy + dz * dz};
+    }
+    std::sort(pointCandidates.data(),
+              pointCandidates.data() + pointCandidateCount,
+              [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
+                return a.distSq < b.distSq;
+              });
+    if ((pointCandidateCount > kMaxPointShadowLights) &&
+        core::cvar_get_bool("r_shadow_debug")) {
+      core::log_message(core::LogLevel::Warning, "shadow",
+                        "point shadow casters dropped: only 4 slots available");
+    }
+    const std::size_t activePointShadows =
+        std::min(pointCandidateCount, kMaxPointShadowLights);
+    for (std::size_t s = 0U; s < activePointShadows; ++s) {
+      const std::size_t li = pointCandidates[s].lightIndex;
+      auto &slot = backend.pointShadowState.slots[s];
       slot.lightIndex = static_cast<int>(li);
       slot.farPlane = std::max(lights.pointLights[li].radius, 1.0F);
       compute_point_shadow_matrices(lights.pointLights[li].position,
                                     lights.pointLights[li].radius,
                                     slot.faceViewProjections);
-      ++activePointShadows;
     }
 
     // Render into each point shadow cubemap (6 faces per light).
@@ -1609,6 +3084,25 @@ void flush_renderer(CommandBufferView commandBufferView,
   // DEFERRED PATH
   // ====================================================================
   if (useDeferred) {
+    bool sceneDepthHasOpaque = false;
+    auto ensureSceneDepthHasOpaque = [&]() noexcept -> bool {
+      if (sceneDepthHasOpaque) {
+        return true;
+      }
+      if (dev->blit_depth == nullptr) {
+        return false;
+      }
+
+      const std::uint32_t gbufferFbo =
+          pass_resource_framebuffer(passRes.gbufferAlbedo);
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->blit_depth(gbufferFbo, sceneFbo, drawableWidth, drawableHeight);
+      dev->bind_framebuffer(sceneFbo);
+      sceneDepthHasOpaque = true;
+      return true;
+    };
+
     // --- G-Buffer pass: render geometry into MRT ---
     gpu_profiler_begin_pass(GpuPassId::GBuffer);
     const std::uint32_t gbufferFbo =
@@ -1950,10 +3444,10 @@ void flush_renderer(CommandBufferView commandBufferView,
             dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
           }
           if (backend.dlPointShadowLightPosLocs[s] >= 0) {
-            const auto &lp =
-                lights.pointLights[static_cast<std::size_t>(
-                                       std::max(slot.lightIndex, 0))]
-                    .position;
+            const auto &lp = lights
+                                 .pointLights[static_cast<std::size_t>(
+                                     std::max(slot.lightIndex, 0))]
+                                 .position;
             dev->set_uniform_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
           }
           if (backend.dlPointShadowFarPlaneLocs[s] >= 0) {
@@ -2009,6 +3503,7 @@ void flush_renderer(CommandBufferView commandBufferView,
                                      static_cast<float>(drawableHeight)};
         dev->set_uniform_vec2(backend.dlScreenSizeLoc, screenSize);
       }
+      upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
 
       // Upload point light data.
       const auto plCount = static_cast<int>(std::min(
@@ -2077,6 +3572,44 @@ void flush_renderer(CommandBufferView commandBufferView,
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
     }
 
+    const SkyModel skyModel = selected_sky_model();
+    const std::uint32_t skyboxTexture = (skyModel == SkyModel::Cubemap)
+                                            ? active_skybox_gpu_texture(backend)
+                                            : 0U;
+    if (skyboxTexture != 0U) {
+      static_cast<void>(
+          ensure_prefiltered_environment(backend, dev, skyboxTexture,
+                                         environmentBakeSettings));
+      static_cast<void>(
+          ensure_irradiance_environment(backend, dev, skyboxTexture,
+                                        environmentBakeSettings));
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      if (ensureSceneDepthHasOpaque()) {
+        draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      }
+    } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      if (ensureSceneDepthHasOpaque()) {
+        draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      }
+    } else if (((skyModel == SkyModel::Preetham) ||
+                (skyModel == SkyModel::Hosek)) &&
+               backend.preethamSkyAvailable) {
+      const std::uint32_t sceneFbo =
+          pass_resource_framebuffer(passRes.sceneColor);
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      if (ensureSceneDepthHasOpaque()) {
+        draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      }
+    }
+
     // Forward-render transparent geometry into the scene HDR FBO.
     if (opaqueCount < totalCount) {
       const std::uint32_t sceneFbo =
@@ -2084,9 +3617,9 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_framebuffer(sceneFbo);
       dev->enable_depth_test();
 
-      // Copy G-Buffer depth to scene FBO depth (they share same dimensions).
-      // For now, transparent objects render without depth test against opaques
-      // in the deferred path (limitation: no G-Buffer depth blit available).
+      // Carry opaque deferred depth into the scene FBO so forward transparent
+      // draws depth-test against G-Buffer geometry.
+      static_cast<void>(ensureSceneDepthHasOpaque());
       dev->bind_program(backend.pbrProgram);
 
       // Re-upload forward PBR camera/lights for transparent pass.
@@ -2097,34 +3630,13 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_vec3(backend.pbrCameraPosLocation,
                               &g_activeCamera.position.x);
       }
-      if (backend.pbrDirLightCountLocation >= 0) {
-        dev->set_uniform_int(
-            backend.pbrDirLightCountLocation,
-            static_cast<std::int32_t>(lights.directionalLightCount));
+      if (backend.pbrViewLocation >= 0) {
+        dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
       }
-      for (std::size_t i = 0U; i < lights.directionalLightCount; ++i) {
-        const auto &dl = lights.directionalLights[i];
-        if (backend.pbrDirLightDir[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
-        if (backend.pbrDirLightColor[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
-        if (backend.pbrDirLightIntensity[i] >= 0)
-          dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
-      }
-      if (backend.pbrPointLightCountLocation >= 0) {
-        dev->set_uniform_int(backend.pbrPointLightCountLocation,
-                             static_cast<std::int32_t>(lights.pointLightCount));
-      }
-      for (std::size_t i = 0U; i < lights.pointLightCount; ++i) {
-        const auto &pl = lights.pointLights[i];
-        if (backend.pbrPointLightPos[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
-        if (backend.pbrPointLightColor[i] >= 0)
-          dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
-        if (backend.pbrPointLightIntensity[i] >= 0)
-          dev->set_uniform_float(backend.pbrPointLightIntensity[i],
-                                 pl.intensity);
-      }
+      upload_pbr_lighting_uniforms(backend, dev, lights);
+      upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
+      bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
+                               doSpotShadows, doPointShadows);
       if (backend.pbrAlbedoMapLocation >= 0)
         dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
 
@@ -2152,6 +3664,9 @@ void flush_renderer(CommandBufferView commandBufferView,
           if (backend.pbrMetallicLocation >= 0)
             dev->set_uniform_float(backend.pbrMetallicLocation,
                                    cmd.material.metallic);
+          if (backend.pbrOpacityLocation >= 0)
+            dev->set_uniform_float(backend.pbrOpacityLocation,
+                                   cmd.material.opacity);
           const std::uint32_t albedoGpu =
               texture_gpu_id(cmd.material.albedoTexture);
           const bool hasTex =
@@ -2199,6 +3714,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->disable_blending();
       dev->enable_face_culling();
       dev->bind_texture(0, 0U);
+      unbind_pbr_shadow_textures(dev);
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
     }
@@ -2232,43 +3748,13 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_vec3(backend.pbrCameraPosLocation,
                             &g_activeCamera.position.x);
     }
-
-    // Upload directional lights.
-    if (backend.pbrDirLightCountLocation >= 0) {
-      dev->set_uniform_int(
-          backend.pbrDirLightCountLocation,
-          static_cast<std::int32_t>(lights.directionalLightCount));
+    if (backend.pbrViewLocation >= 0) {
+      dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
     }
-    for (std::size_t i = 0U; i < lights.directionalLightCount; ++i) {
-      const auto &dl = lights.directionalLights[i];
-      if (backend.pbrDirLightDir[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
-      }
-      if (backend.pbrDirLightColor[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
-      }
-      if (backend.pbrDirLightIntensity[i] >= 0) {
-        dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
-      }
-    }
-
-    // Upload point lights.
-    if (backend.pbrPointLightCountLocation >= 0) {
-      dev->set_uniform_int(backend.pbrPointLightCountLocation,
-                           static_cast<std::int32_t>(lights.pointLightCount));
-    }
-    for (std::size_t i = 0U; i < lights.pointLightCount; ++i) {
-      const auto &pl = lights.pointLights[i];
-      if (backend.pbrPointLightPos[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
-      }
-      if (backend.pbrPointLightColor[i] >= 0) {
-        dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
-      }
-      if (backend.pbrPointLightIntensity[i] >= 0) {
-        dev->set_uniform_float(backend.pbrPointLightIntensity[i], pl.intensity);
-      }
-    }
+    upload_pbr_lighting_uniforms(backend, dev, lights);
+    upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
+    bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
+                             doPointShadows);
 
     // Set albedo map sampler to texture unit 0.
     if (backend.pbrAlbedoMapLocation >= 0) {
@@ -2305,6 +3791,10 @@ void flush_renderer(CommandBufferView commandBufferView,
         if (backend.pbrMetallicLocation >= 0) {
           dev->set_uniform_float(backend.pbrMetallicLocation,
                                  command.material.metallic);
+        }
+        if (backend.pbrOpacityLocation >= 0) {
+          dev->set_uniform_float(backend.pbrOpacityLocation,
+                                 command.material.opacity);
         }
 
         // Albedo texture binding with state tracking.
@@ -2356,6 +3846,31 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->enable_face_culling();
     drawRange(0U, opaqueCount);
 
+    const SkyModel skyModel = selected_sky_model();
+    const std::uint32_t skyboxTexture = (skyModel == SkyModel::Cubemap)
+                                            ? active_skybox_gpu_texture(backend)
+                                            : 0U;
+    if (skyboxTexture != 0U) {
+      static_cast<void>(
+          ensure_prefiltered_environment(backend, dev, skyboxTexture,
+                                         environmentBakeSettings));
+      static_cast<void>(
+          ensure_irradiance_environment(backend, dev, skyboxTexture,
+                                        environmentBakeSettings));
+      dev->bind_framebuffer(sceneFbo);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      dev->bind_program(backend.pbrProgram);
+    } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
+      draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      dev->bind_program(backend.pbrProgram);
+    } else if (((skyModel == SkyModel::Preetham) ||
+                (skyModel == SkyModel::Hosek)) &&
+               backend.preethamSkyAvailable) {
+      draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      dev->bind_program(backend.pbrProgram);
+    }
+
     // Pass 2: Transparent.
     if (opaqueCount < totalCount) {
       dev->set_depth_mask(false);
@@ -2370,6 +3885,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
 
     dev->bind_texture(0, 0U);
+    unbind_pbr_shadow_textures(dev);
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
     gpu_profiler_end_pass(GpuPassId::Scene);
@@ -2623,10 +4139,11 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
   frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
-  frameStats.gpuShadowMapMs = gpu_profiler_pass_ms(GpuPassId::ShadowMap);
+  frameStats.gpuShadowMapMs = directionalShadowCacheReused
+                                  ? 0.0F
+                                  : gpu_profiler_pass_ms(GpuPassId::ShadowMap);
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
-  frameStats.gpuPointShadowMs =
-      gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
+  frameStats.gpuPointShadowMs = gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
   g_lastFrameStats = frameStats;
 }
@@ -2645,6 +4162,7 @@ void shutdown_renderer() noexcept {
   }
 
   backend = BackendState{};
+  g_activeSkyboxTexture = kInvalidTextureHandle;
 }
 
 void set_active_camera(const CameraState &camera) noexcept {
@@ -2656,6 +4174,12 @@ void set_scene_viewport_size(int width, int height) noexcept {
   g_sceneViewportHeight = (height > 0) ? height : 0;
 }
 
+void set_skybox_texture(TextureHandle cubemap) noexcept {
+  g_activeSkyboxTexture = cubemap;
+}
+
+TextureHandle get_skybox_texture() noexcept { return g_activeSkyboxTexture; }
+
 CameraState get_active_camera() noexcept { return g_activeCamera; }
 
 std::uint32_t get_scene_viewport_texture() noexcept {
@@ -2664,6 +4188,154 @@ std::uint32_t get_scene_viewport_texture() noexcept {
     return pass_resource_gpu_texture(passRes.sceneColor);
   }
   return pass_resource_gpu_texture(passRes.finalColor);
+}
+
+std::uint32_t get_prefiltered_environment_texture() noexcept {
+  if ((selected_sky_model() != SkyModel::Cubemap) ||
+      !core::cvar_get_bool("r_env_prefilter", true)) {
+    return 0U;
+  }
+  return backend_state().prefilteredEnvironmentTexture;
+}
+
+std::uint32_t get_irradiance_environment_texture() noexcept {
+  if ((selected_sky_model() != SkyModel::Cubemap) ||
+      !core::cvar_get_bool("r_env_irradiance", true)) {
+    return 0U;
+  }
+  return backend_state().irradianceEnvironmentTexture;
+}
+
+std::uint32_t get_brdf_lut_texture() noexcept {
+  if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
+    return 0U;
+  }
+  return backend_state().brdfLutTexture;
+}
+
+DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
+  if (cvar_string_equals(mode, "linear") || cvar_string_equals(mode, "1")) {
+    return DistanceFogMode::Linear;
+  }
+  if (cvar_string_equals(mode, "exp") || cvar_string_equals(mode, "2") ||
+      cvar_string_equals(mode, "exponential")) {
+    return DistanceFogMode::Exp;
+  }
+  if (cvar_string_equals(mode, "exp2") || cvar_string_equals(mode, "3") ||
+      cvar_string_equals(mode, "exponential2")) {
+    return DistanceFogMode::Exp2;
+  }
+  return DistanceFogMode::Off;
+}
+
+bool parse_distance_fog_color(const char *value,
+                              math::Vec3 *colorOut) noexcept {
+  if ((value == nullptr) || (colorOut == nullptr)) {
+    return false;
+  }
+
+  const char *cursor = value;
+  math::Vec3 parsed{};
+  if (!parse_fog_color_component(cursor, &parsed.x) ||
+      !parse_fog_color_component(cursor, &parsed.y) ||
+      !parse_fog_color_component(cursor, &parsed.z)) {
+    return false;
+  }
+
+  skip_fog_color_separators(cursor);
+  if (*cursor != '\0') {
+    return false;
+  }
+
+  *colorOut = math::clamp(parsed, 0.0F, 1.0F);
+  return true;
+}
+
+DistanceFogSettings normalize_distance_fog_settings(
+    const DistanceFogSettings &settings) noexcept {
+  DistanceFogSettings normalized{};
+  switch (settings.mode) {
+  case DistanceFogMode::Linear:
+  case DistanceFogMode::Exp:
+  case DistanceFogMode::Exp2:
+    normalized.mode = settings.mode;
+    break;
+  case DistanceFogMode::Off:
+  default:
+    normalized.mode = DistanceFogMode::Off;
+    break;
+  }
+
+  normalized.start =
+      std::isfinite(settings.start) ? std::max(0.0F, settings.start) : 25.0F;
+  const float requestedEnd =
+      std::isfinite(settings.end) ? settings.end : 150.0F;
+  normalized.end = std::max(normalized.start + 0.001F, requestedEnd);
+  normalized.density = std::isfinite(settings.density)
+                           ? std::max(0.0F, settings.density)
+                           : 0.01F;
+  normalized.color = ((std::isfinite(settings.color.x) &&
+                       std::isfinite(settings.color.y) &&
+                       std::isfinite(settings.color.z))
+                          ? math::clamp(settings.color, 0.0F, 1.0F)
+                          : math::Vec3(0.55F, 0.65F, 0.75F));
+  return normalized;
+}
+
+ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
+    const ReflectionProbeBakeSettings &settings) noexcept {
+  ReflectionProbeBakeSettings normalized{};
+  normalized.prefilteredFaceSize = previous_power_of_two_u32(
+      clamp_u32_value(settings.prefilteredFaceSize, 16U, 1024U));
+  const std::uint32_t maxMips =
+      max_cubemap_mip_levels_u32(normalized.prefilteredFaceSize);
+  normalized.prefilteredMipLevels =
+      clamp_u32_value(settings.prefilteredMipLevels, 1U, maxMips);
+  normalized.irradianceFaceSize = previous_power_of_two_u32(
+      clamp_u32_value(settings.irradianceFaceSize, 8U, 256U));
+  normalized.brdfLutSize = previous_power_of_two_u32(
+      clamp_u32_value(settings.brdfLutSize, 64U, 1024U));
+  return normalized;
+}
+
+ReflectionProbeBakeResult
+bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
+  ReflectionProbeBakeResult result{};
+  result.settings = normalize_reflection_probe_bake_settings(request.settings);
+
+  if ((request.sourceCubemap == kInvalidTextureHandle) &&
+      (g_activeSkyboxTexture == kInvalidTextureHandle)) {
+    return result;
+  }
+
+  if (!initialize_backend()) {
+    return result;
+  }
+
+  BackendState &backend = backend_state();
+  const RenderDevice *dev = render_device();
+  if (dev == nullptr) {
+    return result;
+  }
+
+  const std::uint32_t sourceCubemap =
+      (request.sourceCubemap == kInvalidTextureHandle)
+          ? active_skybox_gpu_texture(backend)
+          : texture_gpu_id(request.sourceCubemap);
+  result.sourceCubemapTexture = sourceCubemap;
+  if (sourceCubemap == 0U) {
+    return result;
+  }
+
+  result.prefilteredEnvironmentTexture = ensure_prefiltered_environment(
+      backend, dev, sourceCubemap, result.settings);
+  result.irradianceEnvironmentTexture = ensure_irradiance_environment(
+      backend, dev, sourceCubemap, result.settings);
+  result.brdfLutTexture = ensure_brdf_lut(backend, dev, result.settings);
+  result.baked = (result.prefilteredEnvironmentTexture != 0U) &&
+                 (result.irradianceEnvironmentTexture != 0U) &&
+                 (result.brdfLutTexture != 0U);
+  return result;
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {

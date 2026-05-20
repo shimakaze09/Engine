@@ -73,18 +73,26 @@ struct RenderDevice final {
                                          std::int32_t height,
                                          std::int32_t channels,
                                          const float *data) noexcept = nullptr;
+  std::uint32_t (*create_cubemap_hdr)(
+      std::int32_t faceSize, std::int32_t channels,
+      const float *const facePixels[6]) noexcept = nullptr;
+  std::uint32_t (*create_cubemap_hdr_empty)(
+      std::int32_t faceSize, std::int32_t mipLevels) noexcept = nullptr;
   std::uint32_t (*create_depth_texture)(std::int32_t width,
                                         std::int32_t height) noexcept = nullptr;
   void (*destroy_texture)(std::uint32_t id) noexcept = nullptr;
   void (*bind_texture)(std::int32_t unit, std::uint32_t id) noexcept = nullptr;
 
-  // Cubemap textures (for point light shadows).
+  // Cubemap textures.
   std::uint32_t (*create_depth_cubemap)(std::int32_t faceSize) noexcept =
       nullptr;
   void (*bind_texture_cubemap)(std::int32_t unit,
                                std::uint32_t id) noexcept = nullptr;
   void (*framebuffer_cubemap_face)(std::uint32_t fbo, std::uint32_t cubeTex,
                                    std::int32_t face) noexcept = nullptr;
+  void (*framebuffer_cubemap_color_face_mip)(
+      std::uint32_t fbo, std::uint32_t cubeTex, std::int32_t face,
+      std::int32_t mipLevel) noexcept = nullptr;
 
   // Framebuffers.
   std::uint32_t (*create_framebuffer)(
@@ -95,6 +103,9 @@ struct RenderDevice final {
   void (*destroy_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   void (*bind_framebuffer)(std::uint32_t fbo) noexcept = nullptr;
   bool (*check_framebuffer_complete)() noexcept = nullptr;
+  void (*blit_depth)(std::uint32_t srcFbo, std::uint32_t dstFbo,
+                     std::int32_t width,
+                     std::int32_t height) noexcept = nullptr;
 
   // Textures — single-channel float (R32F).
   std::uint32_t (*create_texture_2d_r32f)(std::int32_t width,
@@ -128,6 +139,8 @@ struct RenderDevice final {
                        std::int32_t h) noexcept = nullptr;
   void (*enable_depth_test)() noexcept = nullptr;
   void (*disable_depth_test)() noexcept = nullptr;
+  void (*set_depth_func_less)() noexcept = nullptr;
+  void (*set_depth_func_less_equal)() noexcept = nullptr;
   void (*set_clear_color)(float r, float g, float b,
                           float a) noexcept = nullptr;
   void (*clear_color_depth)() noexcept = nullptr;

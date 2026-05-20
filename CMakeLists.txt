@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
 
+if(POLICY CMP0174)
+    cmake_policy(SET CMP0174 NEW)
+endif()
+
 project(Engine LANGUAGES C CXX)
 
 include(${CMAKE_SOURCE_DIR}/cmake/EngineHelpers.cmake)
@@ -42,7 +46,18 @@ if(NOT SDL2_FOUND)
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
         GIT_TAG fa24d868ac2f8fd558e4e914c9863411245db8fd # release-2.30.11
     )
+    if(DEFINED CMAKE_WARN_DEPRECATED)
+        set(_ENGINE_PREV_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
+    endif()
+    set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL
+        "Suppress third-party CMake deprecation warnings" FORCE)
     FetchContent_MakeAvailable(SDL2)
+    if(DEFINED _ENGINE_PREV_CMAKE_WARN_DEPRECATED)
+        set(CMAKE_WARN_DEPRECATED "${_ENGINE_PREV_CMAKE_WARN_DEPRECATED}"
+            CACHE BOOL "Show CMake deprecation warnings" FORCE)
+    else()
+        unset(CMAKE_WARN_DEPRECATED CACHE)
+    endif()
 endif()
 
 if(NOT SDL2_FOUND AND NOT TARGET SDL2::SDL2)
@@ -90,6 +105,19 @@ if(ENGINE_DETERMINISTIC_FLOATS)
 endif()
 
 if(MSVC)
+    foreach(_engine_flag_var
+            CMAKE_CXX_FLAGS
+            CMAKE_CXX_FLAGS_DEBUG
+            CMAKE_CXX_FLAGS_RELEASE
+            CMAKE_CXX_FLAGS_RELWITHDEBINFO
+            CMAKE_CXX_FLAGS_MINSIZEREL)
+        if(DEFINED ${_engine_flag_var})
+            string(REGEX REPLACE "[/-]EH[a-zA-Z0-9-]*" ""
+                _engine_cleaned_flags "${${_engine_flag_var}}")
+            set(${_engine_flag_var} "${_engine_cleaned_flags}" CACHE STRING
+                "CXX flags with default exception mode removed" FORCE)
+        endif()
+    endforeach()
     add_compile_options(/W4 /WX /permissive- /GR- /EHs-c-)
     # C4324: structure was padded due to alignment specifier — intentional for
     # cache-aligned ECS data (Transform, WorldTransform, etc.).
@@ -174,7 +202,7 @@ else()
         "cppcheck not found; install cppcheck to enable the analysis target."
         COMMENT "Static analysis target (cppcheck not available)"
     )
-    message(STATUS "cppcheck not found; 'analysis' target will print a warning.")
+    message(STATUS "cppcheck not found; local 'analysis' target is unavailable.")
 endif()
 
 include(FetchContent)

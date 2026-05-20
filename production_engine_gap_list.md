@@ -132,25 +132,29 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M1-B3a` ASAN + UBSAN job: `-DENGINE_SANITIZERS=ON`; `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`; `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`. `[x]`
 - `P1-M1-B3b` TSAN job: separate job (cannot combine with ASAN); `TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1`. `[x]`
 - `P1-M1-B3c` Sanitizer suppression files: `tests/sanitizer_suppressions/lsan.supp` and `tsan.supp` for known third-party issues. `[x]`
+- `P1-M1-B3d` Required CI quality gate depends on `sanitizers` and `tsan`, so sanitizer failures block the workflow result. `[x]`
 
 ##### P1-M1-B4: Code Coverage Reporting + Threshold Gate `[x]`
 - `P1-M1-B4a` Coverage job: `--coverage` flags; `lcov` capture + `genhtml` HTML report uploaded as artifact. `[x]`
 - `P1-M1-B4b` Threshold gate: CI fails if line coverage drops below 50%. `[x]`
 - `P1-M1-B4c` FetchContent sources, tests, and tools excluded from coverage measurement. `[x]`
+- `P1-M1-B4d` Required CI quality gate depends on `coverage`, so threshold failures block the workflow result. `[x]`
 
 ##### P1-M1-B5: Performance Regression Gate `[x]`
 - `P1-M1-B5a` `tests/benchmark/ecs_perf_test.cpp`: measures time to iterate 50K entities; emits JSON result. `[x]`
 - `P1-M1-B5b` `tests/benchmark/physics_perf_test.cpp`: measures 1000-body physics step time; emits JSON result. `[x]`
 - `P1-M1-B5c` CI `benchmarks` job: compares results against `tests/benchmark/perf_baseline.json`; fails on >10% regression. `[x]`
+- `P1-M1-B5d` Required CI quality gate depends on `benchmarks`, so performance regressions block the workflow result. `[x]`
 
 ---
 
 #### P1-M1-C: Determinism and Replay Baseline
 
 ##### P1-M1-C1: Cross-Platform Determinism Tests `[x]`
-- `P1-M1-C1a` Each Release CI cell runs `engine_integration_determinism`, hashes final state, uploads `determinism_hash.txt` artifact. `[x]`
-- `P1-M1-C1b` `determinism-check` job downloads all three platform hashes and fails if any differ. `[x]`
+- `P1-M1-C1a` Each Release CI cell runs `engine_integration_determinism`, extracts a non-empty hash, and fails immediately if the binary crashes or no hash is emitted. `[x]`
+- `P1-M1-C1b` `determinism-check` job downloads exactly three non-empty platform hashes and fails if any differ. `[x]`
 - `P1-M1-C1c` Thread-count determinism: `tests/integration/thread_count_determinism.cpp` verifies identical hashes for 1/2/4/8 worker counts. `[x]`
+- `P1-M1-C1d` Required CI quality gate depends on `determinism-check`, so determinism failures block the workflow result. `[x]`
 
 ##### P1-M1-C2: ECS Stress Test at 50K+ Entities `[x]`
 - `P1-M1-C2a` `kMaxEntities` raised to 65536 (configurable via `ENGINE_MAX_ENTITIES` CMake define). `[x]`
@@ -183,6 +187,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M1-D4b` `set_engine_stats()` / `get_engine_stats()` thread-safe API; `reset_engine_stats()` per frame. `[x]`
 - `P1-M1-D4c` `tests/unit/engine_stats_test.cpp` exists. `[x]`
 - `P1-M1-D4d` ImGui overlay rendering in editor (toggled by CVar `r_showStats`). `[x]` — *draw_stats_panel() + draw_in_game_stats_overlay() in editor.cpp; r_showStats CVar registered at editor.cpp:1858.*
+- `P1-M1-D4e` `core::process_memory_bytes()` reports resident process memory on Windows, Linux, and macOS; unit coverage rejects a zero reading on supported CI platforms. `[x]`
 
 ---
 
@@ -262,7 +267,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M2-B2a` `core/include/engine/core/service_locator.h`: type-erased, fixed-capacity (64 services) registry; no heap allocation. `[x]`
 - `P1-M2-B2b` `type_id<T>()` uses static address trick (no RTTI). `[x]`
 - `P1-M2-B2c` `global_service_locator()` provides engine-wide singleton instance. `[x]`
-- `P1-M2-B2d` All engine singletons (physics, audio, asset DB, renderer) registered at startup. `[x]` — *World and RuntimeServices registered in scripting_bridge.cpp lines 699-701.*
+- `P1-M2-B2d` All engine singletons (physics, audio, asset DB, renderer) registered at startup. `[x]` — *runtime/service_registry registers World, PhysicsWorldView, PhysicsContext, EngineAudioService, AssetDatabase/AssetManager, CommandBufferBuilder, GpuMeshRegistry, RenderDevice, and EngineRendererService from EnginePipeline::initialize; scripting still registers RuntimeServices in scripting_bridge.cpp.*
 - `P1-M2-B2e` `tests/unit/service_locator_test.cpp` exists. `[x]`
 
 ---
@@ -298,7 +303,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M2-D-a` `runtime/include/engine/runtime/timer_manager.h`: `set_timeout()`, `set_interval()`, `cancel()`. `[x]`
 - `P1-M2-D-b` `tick(dt)` advances all timers; returns count that fired. `[x]`
 - `P1-M2-D-c` Fixed-capacity (256 timers); no heap allocation. `[x]`
-- `P1-M2-D-d` Serialization: `snapshot()` / `restore()` for scene save/load round-trips; Lua refs re-wired by scripting layer. `[x]`
+- `P1-M2-D-d` Serialization: `snapshot()` / `restore()` preserve timer IDs for scene save/load and PIE restore; scripting re-wires Lua timer callbacks before ticking restored timers. `[x]`
 - `P1-M2-D-e` `World` owns `TimerManager` (reset on scene load). `[x]`
 - `P1-M2-D-f` `scripting.h`: `tick_timers()` called once per frame before `on_update`. `[x]`
 - `P1-M2-D-g` `tests/integration/timer_test.cpp` exists. `[x]`
@@ -494,7 +499,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M4-A2f` `tests/unit/import_settings_test.cpp` exists. `[x]`
 
 ##### P1-M4-A3: Thumbnail Generation (Mesh + Texture Previews) `[x]`
-- `P1-M4-A3a` Off-screen render of mesh into thumbnail texture. `[x]` — *asset_packer renders mesh to offscreen FBO, saves 64×64 PNG thumbnail.*
+- `P1-M4-A3a` Headless off-screen mesh thumbnail generation. `[x]` — *asset_packer uses a deterministic CPU rasterizer with depth buffer and writes a 64×64 PNG thumbnail; no OpenGL/FBO dependency is required for the command-line tool.*
 - `P1-M4-A3b` Mip-sampled texture preview (64×64 or 128×128). `[x]` — *generate_texture_thumbnail() in asset_packer: stbi_load → box-filter mip-chain downsample → 64×64 PNG.*
 - `P1-M4-A3c` Thumbnail cache (disk + in-memory); invalidated when asset checksum changes. `[x]` — *FNV-64 hash sidecar (.checksum) replaces mtime; regenerates only when source changes.*
 - `P1-M4-A3d` Display in asset browser panel. `[x]` — *editor asset browser loads and displays thumbnail PNGs from .thumbnails/ directory.*
@@ -562,10 +567,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 > **Exit Criteria** *(all must pass before P1-M5 is closed)*:
 > 1. Deferred shading with G-Buffer debug visualization. **(DONE)**
-> 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — directional shadows pending)**
-> 3. Cascaded shadow maps with PCF soft shadows, no shimmer.
-> 4. Bloom, SSAO, tone mapping (3 operators), auto-exposure, FXAA functional. **(Bloom, SSAO, tonemap, FXAA DONE — auto-exposure pending)**
-> 5. Transparent objects render correctly in forward pass with shadows. **(Partial — forward pass works, shadow sampling pending P1-M5-C)**
+> 2. Point, spot, and directional lights with correct PBR BRDF. **(DONE — deferred and forward PBR paths bind matching light/shadow data)**
+> 3. Cascaded shadow maps with PCF soft shadows, no shimmer. **(DONE — stable cascades, cache, and LOD implemented)**
+> 4. Bloom, SSAO, tone mapping (3 operators), auto-exposure, FXAA functional. **(DONE — bloom, SSAO, tone mapping, auto-exposure, FXAA)**
+> 5. Transparent objects render correctly in forward pass with shadows. **(DONE — forward transparent pass samples shadows and depth-tests against copied deferred depth)**
 
 ---
 
@@ -622,10 +627,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-C3a` Per-point-light cubemap depth texture (6 faces); geometry shader or 6-pass render. `[x]` — *PointShadowState with 4 slots; GL_TEXTURE_CUBE_MAP depth, 6-pass render (GLSL 330, no geo shader); shadow_depth_point.vert/frag writes linear depth.*
 - `P1-M5-C3b` Omnidirectional shadow comparison in deferred point-light contribution. `[x]` — *compute_point_shadow() in deferred_lighting.frag: 20-sample cubemap PCF, units 14-17; uPointShadowEnabled/LightPos/FarPlane/LightIdx uniforms.*
 
-##### P1-M5-C4: Shadow Optimization `[ ]`
-- `P1-M5-C4a` Stable cascade matrices (world-space snap to texel size). `[ ]`
-- `P1-M5-C4b` Shadow map caching (static-only passes skip re-render if scene is unchanged). `[ ]`
-- `P1-M5-C4c` Shadow LOD (reduce shadow map resolution for distant cascades). `[ ]`
+##### P1-M5-C4: Shadow Optimization `[x]`
+- `P1-M5-C4a` Stable cascade matrices (world-space snap to texel size). `[x]` — *Implemented in `compute_cascade_matrix()` with snapped light-space cascade centers and sub-texel motion coverage in `engine_unit_shadow_map`.*
+- `P1-M5-C4b` Shadow map caching (static-only passes skip re-render if scene is unchanged). `[x]` — *`r_shadow_cache` reuses directional shadow maps when the opaque caster list, caster transforms, first directional light, cascade splits, and snapped cascade matrices match the prior frame; cache invalidates automatically when shadows/casters disappear.*
+- `P1-M5-C4c` Shadow LOD (reduce shadow map resolution for distant cascades). `[x]` — *Directional cascade resources now use per-cascade resolutions (`1024, 1024, 512, 512`), render with matching per-cascade viewports, snap with the cascade texture size, and PCF derives texel size from `textureSize()` so lower-resolution cascades sample correctly.*
 
 ---
 
@@ -662,7 +667,8 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M5-E-a` After deferred pass: collect mesh commands with `opacity < 1.0` and `sortKey.transparent = 1`. `[x]`
 - `P1-M5-E-b` Sort back-to-front by depth (already encoded in `DrawKey`). `[x]`
 - `P1-M5-E-c` Render with alpha blending (`set_blend_func_alpha()`); depth test ON, depth write OFF. `[x]`
-- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[~]` — *Forward transparency PBR pass works; shadow map sampling deferred until P1-M5-C complete.*
+- `P1-M5-E-d` PBR lighting via forward pass shader (sample shadow maps for transparency). `[x]` — *Forward PBR now binds directional cascade, spot, and point shadow maps; the shader samples shadows with GLSL-330-safe constant sampler access, applies material opacity, and keeps deferred shadow PCF sampler access valid.*
+- `P1-M5-E-e` Deferred-to-forward depth handoff: before drawing transparent geometry after deferred lighting, copy or share the G-buffer depth into the scene HDR FBO depth attachment so transparent objects depth-test against opaque deferred geometry. `[x]` — *RenderDevice exposes `blit_depth`; GL backend uses `glBlitFramebuffer` from G-buffer FBO to scene FBO before the deferred transparent pass rebinds scene color for forward PBR drawing.*
 
 ---
 
@@ -682,29 +688,29 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M6-A: Sky and Environment
 
-##### P1-M6-A1: Skybox (Cubemap, HDR Equirect Import) `[ ]`
-- `P1-M6-A1a` Skybox vertex shader: render cube at far plane; cubemap sampler. `[ ]`
-- `P1-M6-A1b` HDR equirectangular import: stb_image HDR decode → equirect-to-cubemap compute or fragment pass. `[ ]`
-- `P1-M6-A1c` Skybox rendered after opaque pass before transparency; depth test LEQUAL. `[ ]`
+##### P1-M6-A1: Skybox (Cubemap, HDR Equirect Import) `[x]`
+- `P1-M6-A1a` Skybox vertex shader: render cube at far plane; cubemap sampler. `[x]` — *Added `assets/shaders/skybox.vert` and `skybox.frag`: view translation is stripped, clip depth is forced to the far plane with `xyww`, and the fragment shader samples `samplerCube u_skybox`.*
+- `P1-M6-A1b` HDR equirectangular import: stb_image HDR decode → equirect-to-cubemap compute or fragment pass. `[x]` — *Added HDR equirectangular cubemap loading through the texture system: STB decodes `.hdr` data, the importer resamples it into six HDR cubemap faces, and the GL render device uploads an RGB16F cubemap with mipmaps for sky/environment use.*
+- `P1-M6-A1c` Skybox rendered after opaque pass before transparency; depth test LEQUAL. `[x]` — *Added active skybox cubemap state, skybox shader/VAO setup, GL depth compare switching to `LEQUAL`, and skybox draws after opaque/deferred lighting but before transparent geometry in both forward and deferred paths.*
 
-##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[ ]`
-- `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[ ]`
-- `P1-M6-A2b` Hosek-Wilkie model (higher quality): perez coefficients → chromatic sky. `[ ]`
-- `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[ ]`
+##### P1-M6-A2: Procedural Sky (Preetham / Hosek-Wilkie) `[x]`
+- `P1-M6-A2a` Preetham sky model: sun direction, turbidity → sky radiance on GPU. `[x]` — *Added a GPU Preetham sky shader driven by the primary directional light's sun vector and `r_sky_turbidity`; when no cubemap skybox is active, the renderer draws the procedural sky through the same far-plane sky pass.*
+- `P1-M6-A2b` Hosek-Wilkie model (higher quality): perez coefficients → chromatic sky. `[x]` — *Added a GPU Hosek-Wilkie sky shader with chromatic distribution coefficients, sun direction, turbidity, and ground-albedo controls; the renderer now prefers this sky path over Preetham when no cubemap skybox is active.*
+- `P1-M6-A2c` CVar `r_sky_model` selects Preetham / Hosek / Cubemap. `[x]` — *Added string CVar `r_sky_model` with `hosek`, `preetham`, `cubemap`, and `none` modes; sky rendering now selects the requested model explicitly, with Preetham as a fallback only when Hosek is selected but unavailable.*
 
-##### P1-M6-A3: Environment Reflection Probes (Prefiltered IBL, BRDF LUT) `[ ]`
-- `P1-M6-A3a` Prefiltered environment map: specular radiance mip chain from cubemap. `[ ]`
-- `P1-M6-A3b` Irradiance map: diffuse convolution from cubemap. `[ ]`
-- `P1-M6-A3c` BRDF LUT: split-sum approximation (512×512 float texture). `[ ]`
-- `P1-M6-A3d` Probe placement component; reflection probe bake tool. `[ ]`
+##### P1-M6-A3: Environment Reflection Probes (Prefiltered IBL, BRDF LUT) `[x]`
+- `P1-M6-A3a` Prefiltered environment map: specular radiance mip chain from cubemap. `[x]` — *Added a cubemap GGX prefilter shader and GL render-device support for allocating/attaching HDR cubemap mip chains; cubemap sky rendering now bakes and caches a prefiltered specular environment texture controlled by `r_env_prefilter`, `r_env_prefilter_size`, and `r_env_prefilter_mips`.*
+- `P1-M6-A3b` Irradiance map: diffuse convolution from cubemap. `[x]` — *Added a cosine-weighted diffuse irradiance convolution shader and cubemap bake/cache path; cubemap sky rendering now produces a low-resolution HDR irradiance cubemap controlled by `r_env_irradiance` and `r_env_irradiance_size` for later diffuse IBL sampling.*
+- `P1-M6-A3c` BRDF LUT: split-sum approximation (512×512 float texture). `[x]` — *Added a split-sum GGX BRDF integration shader and a cached 512×512 RG16F LUT bake path controlled by `r_env_brdf_lut` and `r_env_brdf_lut_size`; the renderer now exposes the generated LUT texture for later image-based lighting material integration.*
+- `P1-M6-A3d` Probe placement component; reflection probe bake tool. `[x]` — *Added `ReflectionProbeComponent` ECS storage with editor placement/inspection, reflection metadata, scene/prefab persistence, and a renderer bake API that normalizes probe bake settings and requests prefiltered environment, irradiance, and BRDF LUT textures from the active cubemap pipeline.*
 
 ---
 
 #### P1-M6-B: Fog
 
-##### P1-M6-B1: Distance Fog (Linear / Exp / Exp²) `[ ]`
-- `P1-M6-B1a` Fog factor applied in deferred lighting pass or forward pass: `linear`, `exp`, `exp2` modes. `[ ]`
-- `P1-M6-B1b` CVars: `r_fog_mode`, `r_fog_start`, `r_fog_end`, `r_fog_density`, `r_fog_color`. `[ ]`
+##### P1-M6-B1: Distance Fog (Linear / Exp / Exp²) `[x]`
+- `P1-M6-B1a` Fog factor applied in deferred lighting pass or forward pass: `linear`, `exp`, `exp2` modes. `[x]` — *Deferred lighting and forward PBR shaders now mix lit surface color toward `uFogColor` using normalized distance fog settings for `linear`, `exp`, and `exp2` modes.*
+- `P1-M6-B1b` CVars: `r_fog_mode`, `r_fog_start`, `r_fog_end`, `r_fog_density`, `r_fog_color`. `[x]` — *Renderer registers these CVars, parses `r_fog_mode`/`r_fog_color`, normalizes ranges/density/color, and uploads the same fog uniforms to deferred and forward passes.*
 
 ##### P1-M6-B2: Height Fog (Height-Based Density, Ray-Marched) `[ ]`
 - `P1-M6-B2a` Height-based density function: exponential falloff above base height. `[ ]`
@@ -900,16 +906,16 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 #### P1-M9-A: Reflection-Driven Property Inspector
 
 ##### P1-M9-A1: All-Types Inspector (Nested Structs, Arrays) `[~]`
-- `P1-M9-A1a` `core/include/engine/core/reflect.h` exists; `runtime/include/engine/runtime/reflect_types.h` exists. `[~]`
-- `P1-M9-A1b` Reflected types: Transform, RigidBody, Collider, MeshComponent, LightComponent, ScriptComponent, SpringArmComponent, PointLightComponent, SpotLightComponent. `[~]` — *Header files confirmed; reflect macro coverage in each struct unverified.*
-- `P1-M9-A1c` Inspector renders: float sliders, vec3 drag fields, bool checkboxes, enum dropdowns, string inputs, asset ID pickers. `[ ]`
+- `P1-M9-A1a` `core/include/engine/core/reflect.h` exists; `runtime/include/engine/runtime/reflect_types.h` exists. `[x]`
+- `P1-M9-A1b` Reflected editor-driven types: Transform, RigidBody, Collider, ReflectionProbeComponent, SpringArmComponent, PointLightComponent, SpotLightComponent. Mesh, Light, Script, and Name have manual editor panels for fixed strings/enums/asset IDs. `[x]`
+- `P1-M9-A1c` Inspector renders: float sliders, vec3 drag fields, bool checkboxes, enum dropdowns, strings, and manual asset IDs; dedicated panels now cover PointLightComponent, SpotLightComponent, and SpringArmComponent. `[~]`
 - `P1-M9-A1d` Nested struct expansion (Collider → shape enum + halfExtents + material fields). `[ ]`
 - `P1-M9-A1e` Array/SparseSet component display (list of lights with add/remove). `[ ]`
 
-##### P1-M9-A2: Component Add / Remove from Inspector `[ ]`
-- `P1-M9-A2a` Inspector shows "Add Component" dropdown listing all registered component types. `[ ]`
-- `P1-M9-A2b` Remove button per component (records undo command). `[ ]`
-- `P1-M9-A2c` Component add/remove generates undo/redo entry. `[ ]`
+##### P1-M9-A2: Component Add / Remove from Inspector `[x]`
+- `P1-M9-A2a` Inspector shows "Add Component" dropdown listing editor-supported component types, including Transform, RigidBody, Collider, Mesh, Light, Script, ReflectionProbe, PointLight, SpotLight, and SpringArm. `[x]`
+- `P1-M9-A2b` Remove button per editor-supported component records an undo command. `[x]`
+- `P1-M9-A2c` Component add/remove generates undo/redo entries through `ComponentEditCommand`. `[x]`
 
 ---
 
@@ -992,7 +998,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M10-A1c` Transition callbacks: `on_scene_unloaded`, `on_scene_loaded` fired for Lua and C++. `[ ]`
 - `P1-M10-A1d` Loading screen / progress callbacks. `[ ]`
 
-##### P1-M10-A2: Persistent Entity IDs (UUID, Cross-Scene References) `[x]`
+##### P1-M10-A2: Persistent Entity IDs (UUID, Cross-Scene References) `[~]`
 - `P1-M10-A2a` `PersistentId = uint32_t`; FNV-hashed from entity path; never changes after creation. `[x]`
 - `P1-M10-A2b` `World::create_entity_with_persistent_id(pid)`. `[x]`
 - `P1-M10-A2c` `World::find_entity_by_persistent_id(pid)`: O(1) open-addressing hash lookup. `[x]`
@@ -1118,8 +1124,8 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ---
 
-#### P1-M12-A: Platform Abstraction (Windows / Linux / macOS, Filesystem, Save Paths) `[ ]`
-- `P1-M12-A-a` `platform.h` (exists in `core/`) — extend with: `platform_get_save_dir()`, `platform_get_app_dir()`, `platform_get_temp_dir()`. `[ ]`
+#### P1-M12-A: Platform Abstraction (Windows / Linux / macOS, Filesystem, Save Paths) `[~]`
+- `P1-M12-A-a` `platform.h` (exists in `core/`) — extend with: `platform_get_save_dir()`, `platform_get_app_dir()`, `platform_get_temp_dir()`. `[x]` — *Implemented in `core/src/platform.cpp` with normalized buffer-based APIs and `engine_unit_platform_paths` coverage.*
 - `P1-M12-A-b` Platform-aware file dialog (SDL\_ShowOpenFileDialog or native). `[ ]`
 - `P1-M12-A-c` High-DPI awareness: query display scale factor; apply to UI canvas. `[ ]`
 
@@ -1160,6 +1166,96 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M12-G-c` Screenshot regression test: headless render of reference scene; pixel diff against golden image. `[ ]`
 
 ---
+
+### P1-M13: Production Operations, Compatibility, and Project Workflow
+
+**Goal**: Make the engine shippable and maintainable across real projects and releases: versioned data compatibility, project manifests, headless commandlets, content validation, platform asset variants, support diagnostics, release trust, compliance, hardware QA, and editor recovery.
+**Dependencies**: P1-M4, P1-M9, P1-M10, P1-M12.
+**Status**: Entirely not started. Current repo is engine-centric; no project manifest, schema migration framework, commandlet runner, content validation report, signed release pipeline, or support artifact workflow exists.
+
+> **Exit Criteria** *(all must pass before P1-M13 is closed)*:
+> 1. Scene, prefab, save, and asset metadata files are versioned and migrate forward automatically with fixture-based regression tests.
+> 2. A standalone game project can be created, opened in the editor, cooked, validated, packaged, and smoke-tested without modifying engine source.
+> 3. CI can run headless commandlets for cook, validation, packaging, smoke, and documentation generation.
+> 4. Packaged builds include platform-appropriate compressed asset variants, symbol/debug artifacts, license notices, and verifiable checksums/signatures.
+> 5. Released builds can recover from bad user settings, emit crash/hang diagnostics, and pass a defined hardware/driver compatibility matrix.
+
+---
+
+#### P1-M13-A: Versioned Data Compatibility and Migrations `[ ]`
+- `P1-M13-A-a` Embed `schema_version` in scenes, prefabs, save files, project manifests, and asset metadata. `[ ]`
+- `P1-M13-A-b` Add migration registry: each migration upgrades one version step and is deterministic/idempotent. `[ ]`
+- `P1-M13-A-c` Maintain old-format fixture files under `tests/fixtures/compat/`; load them in CI and verify canonical upgraded output. `[ ]`
+- `P1-M13-A-d` Add save-game compatibility policy: supported version window, hard-fail path, and user-facing error for unsupported saves. `[ ]`
+- `P1-M13-A-e` Add Lua API compatibility/deprecation table: deprecated names warn, supported removals require version-gated migration. `[ ]`
+
+#### P1-M13-B: Project Manifest, Templates, and Workspace Layout `[ ]`
+- `P1-M13-B-a` Define `.engineproject` manifest: project name, startup scene, asset roots, script roots, target platforms, and package metadata. `[ ]`
+- `P1-M13-B-b` Add project settings loader with validation and defaulting; no engine source edits required for a game project. `[ ]`
+- `P1-M13-B-c` Add "new project" template with sample scene, script, asset folder, and CI-ready project config. `[ ]`
+- `P1-M13-B-d` Editor project browser: open project, recent projects, missing project recovery, and invalid-manifest diagnostics. `[ ]`
+- `P1-M13-B-e` Separate engine build output, project intermediate/cooked output, and packaged output directories. `[ ]`
+
+#### P1-M13-C: Headless Commandlets for CI and Release Automation `[ ]`
+- `P1-M13-C-a` Add commandlet entry point: `engine_editor_app --commandlet <name> --project <path>` with no editor UI. `[ ]`
+- `P1-M13-C-b` `cook` commandlet: cook all project assets for a target platform and fail on cook errors. `[ ]`
+- `P1-M13-C-c` `validate` commandlet: validate scenes, prefabs, scripts, asset references, import settings, and project manifest. `[ ]`
+- `P1-M13-C-d` `package` commandlet: produce distributable artifacts using cooked project data. `[ ]`
+- `P1-M13-C-e` `smoke` commandlet: boot startup scene for N frames headlessly and return nonzero on errors. `[ ]`
+- `P1-M13-C-f` `generate-docs` commandlet: emit Lua API and project-facing engine API references from bindings/reflection metadata. `[ ]`
+
+#### P1-M13-D: Content Validation and Cook Reports `[ ]`
+- `P1-M13-D-a` Detect missing, stale, or circular asset references across scenes, prefabs, materials, scripts, and metadata. `[ ]`
+- `P1-M13-D-b` Validate material/shader compatibility: missing textures, invalid texture color space, unsupported shader variant, and bad uniform overrides. `[ ]`
+- `P1-M13-D-c` Validate mesh limits: vertex/index count, missing normals/UVs, non-manifold import warnings, and platform-specific size limits. `[ ]`
+- `P1-M13-D-d` Validate texture limits: dimensions, format, mip policy, normal-map flags, sRGB/linear mismatch, and platform compression support. `[ ]`
+- `P1-M13-D-e` Emit machine-readable cook report: asset counts, dependency graph summary, per-type byte size, warnings, errors, and top memory offenders. `[ ]`
+- `P1-M13-D-f` Add CI gate: content warnings can be promoted to errors for release builds. `[ ]`
+
+#### P1-M13-E: Platform Asset Variants and Compression `[ ]`
+- `P1-M13-E-a` Cook desktop texture variants: BC1/BC3/BC5/BC7 where supported, with fallback uncompressed formats. `[ ]`
+- `P1-M13-E-b` Cook mobile texture variants: ASTC and ETC2 profiles, selected by target platform capability. `[ ]`
+- `P1-M13-E-c` Store per-platform cooked asset manifests with content hashes and original-source provenance. `[ ]`
+- `P1-M13-E-d` Add platform-specific import settings overrides: max texture size, mip strategy, mesh LOD stripping, audio codec/quality. `[ ]`
+- `P1-M13-E-e` Verify cooked package contains only target-platform assets and no editor-only/source-only files. `[ ]`
+
+#### P1-M13-F: Support Diagnostics, Crash Dumps, and Runtime Recovery `[ ]`
+- `P1-M13-F-a` Generate minidumps or platform crash dumps alongside textual crash logs. `[ ]`
+- `P1-M13-F-b` Archive PDB/dSYM/debug symbols by build ID; crash report records build ID and symbol lookup path. `[ ]`
+- `P1-M13-F-c` Add hang watchdog: detect main-thread stalls, dump thread stacks, and write diagnostic bundle. `[ ]`
+- `P1-M13-F-d` Structured log rotation: bounded log files with session IDs, build metadata, and last-N-frame markers. `[ ]`
+- `P1-M13-F-e` Diagnostic bundle command: collect logs, config, project manifest, hardware info, recent crash dumps, and renderer info. `[ ]`
+- `P1-M13-F-f` Optional telemetry/crash upload hook with explicit user consent and a no-network default. `[ ]`
+
+#### P1-M13-G: Release Trust, Signing, and Safe Mode `[ ]`
+- `P1-M13-G-a` Windows code signing for executables/installers; CI fails unsigned release artifacts. `[ ]`
+- `P1-M13-G-b` macOS app signing and notarization; packaged app verifies on a clean machine. `[ ]`
+- `P1-M13-G-c` Generate checksums and signed manifest for every release artifact and cooked asset pack. `[ ]`
+- `P1-M13-G-d` Asset pack tamper detection: verify package manifest and content hashes at startup. `[ ]`
+- `P1-M13-G-e` User settings file with versioning, defaults, validation, and corruption recovery. `[ ]`
+- `P1-M13-G-f` Safe mode launch flag: reset graphics settings, disable optional post effects/plugins, and use conservative window mode. `[ ]`
+- `P1-M13-G-g` GPU/display fallback: recover from invalid resolution, missing adapter, unsupported GL capability, or bad fullscreen mode. `[ ]`
+
+#### P1-M13-H: Compliance and Dependency Governance `[ ]`
+- `P1-M13-H-a` Automated third-party license scan; generated notice file included in packaged builds. `[ ]`
+- `P1-M13-H-b` Dependency vulnerability audit in CI for known CVEs where applicable. `[ ]`
+- `P1-M13-H-c` Dependency update policy: scheduled update PRs, changelog review, full CI, and rollback notes. `[ ]`
+- `P1-M13-H-d` Release checklist includes license notices, dependency versions, source obligations, and platform-specific legal metadata. `[ ]`
+
+#### P1-M13-I: Hardware, Driver, and Peripheral QA Matrix `[ ]`
+- `P1-M13-I-a` Define minimum/recommended hardware and OS matrix for Windows, Linux, and macOS. `[ ]`
+- `P1-M13-I-b` Validate GPU vendor matrix: NVIDIA, AMD, Intel integrated/discrete where available. `[ ]`
+- `P1-M13-I-c` High-DPI, multi-monitor, fullscreen/windowed, and display hot-plug smoke tests. `[ ]`
+- `P1-M13-I-d` Audio device hot-plug and default-device switch tests. `[ ]`
+- `P1-M13-I-e` Controller hot-plug, reconnect, remapping, and multiple-controller smoke tests. `[ ]`
+- `P1-M13-I-f` Release candidate checklist records tested hardware, driver versions, failures, and known issues. `[ ]`
+
+#### P1-M13-J: Editor Preferences, Autosave, and Recovery `[ ]`
+- `P1-M13-J-a` Editor preferences file: layout, theme, keybindings, recent projects, recent scenes, and import defaults. `[ ]`
+- `P1-M13-J-b` Dock layout persistence and reset-to-default command. `[ ]`
+- `P1-M13-J-c` Editor keybinding customization with conflict detection and import/export. `[ ]`
+- `P1-M13-J-d` Autosave dirty scenes/prefabs to recovery location without overwriting user files. `[ ]`
+- `P1-M13-J-e` Crash recovery flow: detect autosave/recovery files and prompt to restore or discard on next editor launch. `[ ]`
 
 ---
 
@@ -1457,9 +1553,9 @@ Phase 2 brings the engine to rough feature parity with Godot 4.x. All Phase 1 mu
 
 ---
 
-#### P2-M8-A: Multi-Threaded Rendering (Command Buffer Recording, Parallel Update) `[ ]` **[high]**
-- `P2-M8-A-a` Parallel command buffer recording: split entities across job workers; merge before submit. `[ ]`
-- `P2-M8-A-b` Parallel transform update: `World::update_transforms_range()` already thread-safe — wire to job scheduler. `[ ]`
+#### P2-M8-A: Multi-Threaded Rendering (Command Buffer Recording, Parallel Update) `[~]` **[high]**
+- `P2-M8-A-a` Parallel command buffer recording: split entities across job workers; merge before submit. `[x]` — *Implemented by `RenderPrepPipelineContext` local command buffers, chunk jobs, and merge job.*
+- `P2-M8-A-b` Parallel transform update: `World::update_transforms_range()` already thread-safe — wire to job scheduler. `[x]` — *Implemented by `EnginePipeline::stage_frame_graph()` update chunk jobs.*
 - `P2-M8-A-c` Render thread: dedicated thread consumes command buffer; main thread produces. `[ ]`
 
 #### P2-M8-B: Hierarchical Culling (BVH Frustum Cull, HZB Occlusion Cull) `[ ]` **[high]**
@@ -1525,7 +1621,7 @@ Phase 2 brings the engine to rough feature parity with Godot 4.x. All Phase 1 mu
 
 ---
 
-#### P3-M2-A: RenderDevice Abstraction (GL + Vulkan Backends) `[ ]` **[low]**
+#### P3-M2-A: RenderDevice Abstraction (GL + Vulkan Backends) `[~]` **[low]**
 - `P3-M2-A-a` `RenderDevice` function-pointer table (already exists in `render_device.h`) is the abstraction layer. `[~]` — *Structure exists; Vulkan backend implementation not started.*
 - `P3-M2-A-b` Implement all `RenderDevice` function pointers with Vulkan: vkCreateShaderModule, VkBuffer, VkDescriptorSet. `[ ]`
 - `P3-M2-A-c` Validation layer integration; VMA allocator for GPU memory. `[ ]`
@@ -1796,7 +1892,7 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 
 **Editor Module**
 - [x] ImGui-based editor (play/pause/stop, transform gizmos, `editor_is_playing`, `editor_is_paused`)
-- [x] Command history (undo/redo — partial; transforms confirmed)
+- [~] Command history (undo/redo partial; transforms confirmed)
 - [x] Debug camera (`debug_camera.h`)
 - [x] Editor camera (`editor_camera.h`)
 
@@ -1815,25 +1911,24 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 | Phase | Milestones | Total Gap Items | Complete `[x]` | Partial `[~]` | Not Started `[ ]` |
 |-------|-----------|-----------------|----------------|---------------|-------------------|
 | §0 Technical Debt | 6 | 7 | 7 | 0 | 0 |
-| P1: Ship Blockers | 12 | ~133 | ~70 | ~12 | ~51 |
-| P2: Competitive Parity | 8 | ~50 | 0 | 0 | ~50 |
-| P3: Cutting-Edge | 6 | ~20 | 0 | 1 | ~19 |
+| P1: Ship Blockers | 13 | ~188 | ~70 | ~16 | ~102 |
+| P2: Competitive Parity | 8 | ~50 | 2 | 1 | ~47 |
+| P3: Cutting-Edge | 6 | ~20 | 0 | 2 | ~18 |
 | Parallel Lanes | 3 | 16 | 0 | 0 | 16 |
-| **Total** | **35** | **~226** | **~77** | **~13** | **~136** |
+| **Total** | **36** | **~281** | **~79** | **~19** | **~183** |
 
 **§0 Technical Debt status**: All 7 of 7 items resolved. §0-2 (physics→runtime coupling) resolved via `PhysicsWorldView` abstract interface. §0-3 (engine.cpp decomposition) resolved via `EnginePipeline` class with 13 named stage methods.
 
-**P1 completion estimate**: ~53% of ship-blocker items are production-ready (up from ~44% at previous audit). The major completed clusters are: CI/build infrastructure, physics (all colliders + solver + queries + CCD), asset pipeline (all of M4), scripting (lifecycle + coroutines + DAP + sandbox + hot-reload + bindgen), World/ECS foundational systems (lifecycle, pooling, game mode, camera, timer, input), deferred rendering infrastructure (G-buffer, deferred lighting, tiled culling, GPU profiler), **and post-processing (bloom, SSAO, FXAA, tone mapping with 3 operators)**.
+**P1 completion estimate**: ~37% of ship-blocker items are production-ready after adding P1-M13 production operations and compatibility scope. The major completed clusters are: CI/build infrastructure, physics (all colliders + solver + queries + CCD), asset pipeline (all of M4), scripting (lifecycle + coroutines + DAP + sandbox + hot-reload + bindgen), World/ECS foundational systems (lifecycle, pooling, game mode, camera, timer, input), deferred rendering infrastructure (G-buffer, deferred lighting, tiled culling, GPU profiler), shadow rendering foundations, platform save/app/temp path helpers, and post-processing (bloom, SSAO, auto-exposure, FXAA, tone mapping with 3 operators).
 
 **Largest remaining P1 gaps by work volume** (in order):
-1. Animation system (P1-M7) — zero implementation; entire subsystem missing (~20 atomic tasks).
-2. Game UI runtime (P1-M11) — zero implementation; entire subsystem missing (~15 atomic tasks).
-3. Shadow maps (P1-M5-C) — deferred lighting is ready but no shadow depth passes (~10 atomic tasks).
-4. Audio advanced features (P1-M8 A/B/C/D) — only basic playback exists (~15 atomic tasks).
-5. Editor completion (P1-M9-A2/C/D) — reflection inspector, hierarchy panel, asset browser (~12 atomic tasks).
-6. Platform / packaging (P1-M12) — zero implementation (~15 atomic tasks).
-7. Sky, fog, instancing, materials (P1-M6-A/B/C/D) — environment rendering and GPU instancing missing (~15 atomic tasks).
+1. Production operations and compatibility (P1-M13) — zero implementation; project workflow, commandlets, migrations, validation, diagnostics, signing, compliance, hardware QA, and editor recovery missing (~55 atomic tasks).
+2. Animation system (P1-M7) — zero implementation; entire subsystem missing (~20 atomic tasks).
+3. Game UI runtime (P1-M11) — zero implementation; entire subsystem missing (~15 atomic tasks).
+4. Platform / packaging (P1-M12) — platform path helpers started; file dialogs, quality settings, packaging, config, and crash reporting remain (~14 atomic tasks).
+5. Audio advanced features (P1-M8 A/B/C/D) — only basic playback exists (~15 atomic tasks).
+6. Sky, fog, instancing, materials (P1-M6-A/B/C/D) — environment rendering and GPU instancing missing (~15 atomic tasks).
+7. Editor completion (P1-M9-A2/C/D) — reflection inspector, hierarchy panel, asset browser (~12 atomic tasks).
 8. Scene management and streaming (P1-M10-A1/B/C) — transition API, streaming volumes, LOD, save system (~12 atomic tasks).
-9. Auto-exposure (P1-M5-D4d) — luminance histogram or progressive averaging not implemented.
 
-**Gap-to-milestone traceability**: Every `[x]`/`[~]`/`[ ]` status code in this document maps 1:1 to an atomic task in production_engine_milestones.md and a checkbox in production_engine_phased_todo.md. This file is the single source of truth — the other two files are supplementary.
+**Gap-to-milestone traceability**: Every `[x]`/`[~]`/`[ ]` status code in this document is intended to map 1:1 to an atomic task in `production_engine_milestones.md` and a checkbox in `production_engine_phased_todo.md`. P1-M13 was added here as new master scope and should be mirrored into the supplementary milestone/checklist files before relying on those older documents for execution tracking. This file is the single source of truth — the other two files are supplementary.

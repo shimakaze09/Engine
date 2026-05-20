@@ -88,6 +88,19 @@ int main() {
     return 8;
   }
 
+  engine::runtime::ReflectionProbeComponent reflectionProbe{};
+  reflectionProbe.boxExtents = engine::math::Vec3(4.0F, 5.0F, 6.0F);
+  reflectionProbe.radius = 14.0F;
+  reflectionProbe.intensity = 0.75F;
+  reflectionProbe.prefilteredResolution = 256U;
+  reflectionProbe.irradianceResolution = 64U;
+  reflectionProbe.mipLevels = 6U;
+  reflectionProbe.boxProjection = true;
+  reflectionProbe.needsBake = false;
+  if (!world->add_reflection_probe_component(src, reflectionProbe)) {
+    return 26;
+  }
+
   // Save the prefab.
   if (!engine::runtime::save_prefab(*world, src, kPrefabPath)) {
     remove_prefab_file();
@@ -182,6 +195,23 @@ int main() {
       instLight.type != engine::runtime::LightType::Point) {
     remove_prefab_file();
     return 23;
+  }
+
+  // Verify ReflectionProbeComponent.
+  engine::runtime::ReflectionProbeComponent instProbe{};
+  if (!world->get_reflection_probe_component(inst, &instProbe)) {
+    remove_prefab_file();
+    return 27;
+  }
+  if (!nearly_equal(instProbe.boxExtents.y, 5.0F) ||
+      !nearly_equal(instProbe.radius, 14.0F) ||
+      !nearly_equal(instProbe.intensity, 0.75F) ||
+      (instProbe.prefilteredResolution != 256U) ||
+      (instProbe.irradianceResolution != 64U) ||
+      (instProbe.mipLevels != 6U) || !instProbe.boxProjection ||
+      instProbe.needsBake) {
+    remove_prefab_file();
+    return 28;
   }
 
   // Verify invalid-input guards.
