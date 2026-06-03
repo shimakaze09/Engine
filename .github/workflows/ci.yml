@@ -412,8 +412,8 @@ jobs:
 
       - name: Collect coverage (lcov)
         run: |
-          lcov --quiet --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch,negative --rc geninfo_unexecuted_blocks=1
-          lcov --quiet --remove coverage_raw.info '*/build/_deps/*' '*/tests/*' '*/tools/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+          lcov --quiet --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch,mismatch,negative,negative --rc geninfo_unexecuted_blocks=1
+          lcov --quiet --remove coverage_raw.info '*/build/_deps/*' '*/tests/*' '*/tools/*' '/usr/*' --output-file coverage.info --ignore-errors unused,unused
           lcov --summary coverage.info
 
       - name: Generate HTML report
