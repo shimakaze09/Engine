@@ -85,3 +85,8 @@ REFLECT_FIELD(mipLevels, Uint32)
 REFLECT_FIELD(boxProjection, Bool)
 REFLECT_FIELD(needsBake, Bool)
 REFLECT_END()
+
+REFLECT_TYPE(engine::runtime::FoliagePatchComponent)
+static_cast<void>(desc);
+// Fixed instance and LOD arrays are edited/serialized manually.
+REFLECT_END()

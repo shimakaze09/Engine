@@ -730,10 +730,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M6-C1c` `glDrawElementsInstanced(count, instanceCount)` call. `[x]` — *RenderDevice now exposes `draw_elements_triangles_u32_instanced()`, the GL backend maps it to `glDrawElementsInstanced`, and indexed opaque batches issue one instanced draw when compatible.*
 - `P1-M6-C1d` Benchmark: 10K identical meshes → single draw call. `[x]` — *Added `engine_bench_instancing_batch`, which verifies 10K identical mesh commands collapse into one static-mesh batch; command-buffer unit coverage also asserts 10K batching and material split behavior.*
 
-##### P1-M6-C2: Foliage Instancing (Wind Vertex Displacement, Per-Instance LOD) `[ ]`
-- `P1-M6-C2a` Wind displacement: sine wave vertex shader using time + world position + per-instance phase. `[ ]`
-- `P1-M6-C2b` Per-instance LOD index stored in instance data; LOD mesh selected before batching. `[ ]`
-- `P1-M6-C2c` Density/distribution stored in foliage painting tool output. `[ ]`
+##### P1-M6-C2: Foliage Instancing (Wind Vertex Displacement, Per-Instance LOD) `[x]`
+- `P1-M6-C2a` Wind displacement: sine wave vertex shader using time + world position + per-instance phase. `[x]`
+- `P1-M6-C2b` Per-instance LOD index stored in instance data; LOD mesh selected before batching. `[x]`
+- `P1-M6-C2c` Density/distribution stored in foliage painting tool output. `[x]`
 
 ---
 

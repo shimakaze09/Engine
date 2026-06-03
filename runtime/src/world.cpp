@@ -72,6 +72,7 @@ World::World() noexcept {
   m_nameLookupState.fill(kNameSlotEmpty);
   m_scriptComponents.clear();
   m_reflectionProbes.clear();
+  m_foliagePatches.clear();
 }
 
 Entity World::create_entity() noexcept {
@@ -170,6 +171,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_pointLights.remove(entity));
   static_cast<void>(m_spotLights.remove(entity));
   static_cast<void>(m_reflectionProbes.remove(entity));
+  static_cast<void>(m_foliagePatches.remove(entity));
   static_cast<void>(m_springArms.remove(entity));
 
   const std::uint32_t index = entity.index;
@@ -568,6 +570,109 @@ World::get_mesh_component_ptr(Entity entity) const noexcept {
   }
 
   return m_meshComponents.get_ptr(entity);
+}
+
+bool World::add_foliage_patch_component(
+    Entity entity, const FoliagePatchComponent &component) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_foliage_patch_component requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_foliage_patch_component requires a live entity");
+    return false;
+  }
+
+  FoliagePatchComponent safe = component;
+  if (safe.instanceCount >
+      static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
+    safe.instanceCount =
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+  }
+  for (std::uint32_t i = 0U; i < safe.instanceCount; ++i) {
+    if (safe.instances[i].lodIndex >=
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxLods)) {
+      safe.instances[i].lodIndex = 0U;
+    }
+    if (safe.instances[i].scale <= 0.0F) {
+      safe.instances[i].scale = 1.0F;
+    }
+  }
+
+  return m_foliagePatches.add(entity, safe);
+}
+
+bool World::remove_foliage_patch_component(Entity entity) noexcept {
+  if (!is_mutation_phase()) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_foliage_patch_component requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "remove_foliage_patch_component requires a live entity");
+    return false;
+  }
+
+  return m_foliagePatches.remove(entity);
+}
+
+bool World::get_foliage_patch_component(
+    Entity entity, FoliagePatchComponent *outComponent) const noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "get_foliage_patch_component on stale or dead entity");
+    return false;
+  }
+
+  return m_foliagePatches.get(entity, outComponent);
+}
+
+bool World::has_foliage_patch_component(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_foliagePatches.contains(entity);
+}
+
+std::size_t World::foliage_patch_count() const noexcept {
+  return m_foliagePatches.count();
+}
+
+const FoliagePatchComponent *
+World::foliage_patch_at(std::size_t index) const noexcept {
+  if (index >= m_foliagePatches.count()) {
+    return nullptr;
+  }
+  return &m_foliagePatches.component_at(index);
+}
+
+Entity World::foliage_patch_entity_at(std::size_t index) const noexcept {
+  if (index >= m_foliagePatches.count()) {
+    return Entity{};
+  }
+  return m_foliagePatches.entity_at(index);
+}
+
+FoliagePatchComponent *
+World::get_foliage_patch_component_ptr(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+  return m_foliagePatches.get_ptr(entity);
+}
+
+const FoliagePatchComponent *
+World::get_foliage_patch_component_ptr(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return nullptr;
+  }
+  return m_foliagePatches.get_ptr(entity);
 }
 
 bool World::add_name_component(Entity entity,

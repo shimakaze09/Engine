@@ -417,6 +417,15 @@ engine_add_test_executable(engine_unit_reflection_probe_component
     engine_runtime
 )
 
+# ---- P1-M6-C: Static/Foliage Instancing ----
+
+engine_add_test_executable(engine_unit_foliage_patch_component
+    SOURCES
+    foliage_patch_component_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M12-A: Platform Paths ----
 
 engine_add_test_executable(engine_unit_platform_paths

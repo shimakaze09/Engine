@@ -47,6 +47,84 @@ void extract_frustum_planes(const math::Mat4 &vp,
   planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z}; // far
 }
 
+bool aabb_culled_by_frustum(const FrustumPlane planes[6],
+                            const math::Vec3 &center,
+                            const math::Vec3 &half) noexcept {
+  for (int p = 0; p < 6; ++p) {
+    if (aabb_outside_plane(planes[p], center, half)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::uint64_t build_draw_sort_key(const renderer::Material &material,
+                                  renderer::MeshHandle runtimeMesh,
+                                  const math::Vec3 &center,
+                                  const math::Mat4 &viewProjection) noexcept {
+  // Layout (MSB->LSB):
+  //   transparent:1 | shader:7 | texture:20 | mesh:20 | depth:16
+  const bool transparent = (material.opacity < 1.0F);
+  const std::uint64_t transparentBit = transparent ? (1ULL << 63U) : 0ULL;
+
+  // Shader index: 0 = PBR (only shader for now).
+  const std::uint64_t shaderBits = 0ULL;
+
+  const std::uint64_t textureBits =
+      (static_cast<std::uint64_t>(material.albedoTexture.id) & 0xFFFFFULL) <<
+      36U;
+
+  const std::uint64_t meshBits =
+      (static_cast<std::uint64_t>(runtimeMesh.id) & 0xFFFFFULL) << 16U;
+
+  const math::Vec4 clipPos =
+      math::mul(viewProjection, math::Vec4(center.x, center.y, center.z, 1.0F));
+  const float linearDepth = (clipPos.w > 0.0F) ? clipPos.w : 0.0F;
+  const float normalizedDepth =
+      (linearDepth < 200.0F) ? (linearDepth / 200.0F) : 1.0F;
+  std::uint16_t depthQuantized =
+      static_cast<std::uint16_t>(normalizedDepth * 65535.0F);
+
+  if (transparent) {
+    depthQuantized = static_cast<std::uint16_t>(65535U - depthQuantized);
+  }
+
+  return transparentBit | shaderBits | textureBits | meshBits |
+         static_cast<std::uint64_t>(depthQuantized);
+}
+
+void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
+
+bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
+                           const renderer::DrawCommand &command,
+                           std::atomic<bool> *frameGraphFailed) noexcept {
+  if (localBuffer.submit(command)) {
+    return true;
+  }
+
+  core::log_message(core::LogLevel::Error, "render_prep",
+                    "command buffer full; entity dropped from frame");
+  mark_graph_failed(frameGraphFailed);
+  return false;
+}
+
+renderer::AssetId fallback_foliage_mesh_asset(
+    const FoliagePatchComponent &foliage, std::uint32_t lodIndex) noexcept {
+  if (lodIndex < static_cast<std::uint32_t>(FoliagePatchComponent::kMaxLods)) {
+    const renderer::AssetId selected = foliage.meshAssetIds[lodIndex];
+    if (selected != renderer::kInvalidAssetId) {
+      return selected;
+    }
+  }
+
+  for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
+    if (foliage.meshAssetIds[i] != renderer::kInvalidAssetId) {
+      return foliage.meshAssetIds[i];
+    }
+  }
+  return renderer::kInvalidAssetId;
+}
+
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
   if (frameGraphFailed != nullptr) {
     frameGraphFailed->store(true, std::memory_order_release);
@@ -89,96 +167,122 @@ void render_prep_chunk_job(void *userData) noexcept {
   for (std::size_t i = 0U; i < jobData->count; ++i) {
     const MeshComponent *meshComponent =
         jobData->world->get_mesh_component_ptr(entities[i]);
-    if (meshComponent == nullptr) {
-      continue;
-    }
+    if (meshComponent != nullptr) {
+      // Derive a world-space AABB from the collider for frustum culling.
+      // Spheres use (radius, radius, radius) as conservative half-extents.
+      const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
+      const math::Vec3 center = transforms[i].position;
+      math::Vec3 half(0.5F, 0.5F, 0.5F);
+      if (collider != nullptr) {
+        if (collider->shape == ColliderShape::Sphere) {
+          const float r = collider->halfExtents.x;
+          half = math::Vec3(r, r, r);
+        } else {
+          half = collider->halfExtents;
+        }
+      }
 
-    // Derive a world-space AABB from the collider for frustum culling.
-    // Spheres use (radius, radius, radius) as conservative half-extents.
-    const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
-    const math::Vec3 center = transforms[i].position;
-    math::Vec3 half(0.5F, 0.5F, 0.5F);
-    if (collider != nullptr) {
-      if (collider->shape == ColliderShape::Sphere) {
-        const float r = collider->halfExtents.x;
-        half = math::Vec3(r, r, r);
-      } else {
-        half = collider->halfExtents;
+      if (!aabb_culled_by_frustum(frustumPlanes, center, half)) {
+        const renderer::MeshHandle runtimeMesh = renderer::resolve_mesh_asset(
+            jobData->assetDatabase, meshComponent->meshAssetId);
+        if (runtimeMesh != renderer::kInvalidMeshHandle) {
+          const renderer::GpuMesh *mesh =
+              renderer::lookup_gpu_mesh(jobData->meshRegistry, runtimeMesh);
+          if (mesh != nullptr) {
+            renderer::DrawCommand command{};
+            command.entity = entities[i].index;
+            command.mesh = runtimeMesh;
+            command.material.albedo = meshComponent->albedo;
+            command.material.roughness = meshComponent->roughness;
+            command.material.metallic = meshComponent->metallic;
+            command.material.opacity = meshComponent->opacity;
+            command.modelMatrix = transforms[i].matrix;
+            command.sortKey.value =
+                build_draw_sort_key(command.material, runtimeMesh, center, vp);
+
+            if (!submit_render_command(localBuffer, command,
+                                       jobData->frameGraphFailed)) {
+              return;
+            }
+          }
+        }
       }
     }
 
-    bool culled = false;
-    for (int p = 0; (p < 6) && !culled; ++p) {
-      culled = aabb_outside_plane(frustumPlanes[p], center, half);
-    }
-    if (culled) {
+    const FoliagePatchComponent *foliage =
+        jobData->world->get_foliage_patch_component_ptr(entities[i]);
+    if (foliage == nullptr) {
       continue;
     }
 
-    const renderer::MeshHandle runtimeMesh = renderer::resolve_mesh_asset(
-        jobData->assetDatabase, meshComponent->meshAssetId);
-    if (runtimeMesh == renderer::kInvalidMeshHandle) {
-      continue;
+    std::uint32_t instanceCount = foliage->instanceCount;
+    if (instanceCount >
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
+      instanceCount =
+          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
     }
 
-    const renderer::GpuMesh *mesh =
-        renderer::lookup_gpu_mesh(jobData->meshRegistry, runtimeMesh);
-    if (mesh == nullptr) {
-      continue;
-    }
+    for (std::uint32_t instanceIndex = 0U; instanceIndex < instanceCount;
+         ++instanceIndex) {
+      const FoliageInstance &instance = foliage->instances[instanceIndex];
+      std::uint32_t lodIndex = instance.lodIndex;
+      if (lodIndex >=
+          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxLods)) {
+        lodIndex = 0U;
+      }
 
-    renderer::DrawCommand command{};
-    command.entity = entities[i].index;
-    command.mesh = runtimeMesh;
-    command.material.albedo = meshComponent->albedo;
-    command.material.roughness = meshComponent->roughness;
-    command.material.metallic = meshComponent->metallic;
-    command.material.opacity = meshComponent->opacity;
-    command.modelMatrix = transforms[i].matrix;
+      const renderer::AssetId meshAsset =
+          fallback_foliage_mesh_asset(*foliage, lodIndex);
+      if (meshAsset == renderer::kInvalidAssetId) {
+        continue;
+      }
 
-    // Build instancing-ready sort key.
-    // Layout (MSB→LSB):
-    //   transparent:1 | shader:7 | texture:20 | mesh:20 | depth:16
-    const bool transparent = (command.material.opacity < 1.0F);
-    const std::uint64_t transparentBit = transparent ? (1ULL << 63U) : 0ULL;
+      const renderer::MeshHandle runtimeMesh =
+          renderer::resolve_mesh_asset(jobData->assetDatabase, meshAsset);
+      if (runtimeMesh == renderer::kInvalidMeshHandle) {
+        continue;
+      }
 
-    // Shader index: 0 = PBR (only shader for now).
-    const std::uint64_t shaderBits = 0ULL;
+      const renderer::GpuMesh *mesh =
+          renderer::lookup_gpu_mesh(jobData->meshRegistry, runtimeMesh);
+      if (mesh == nullptr) {
+        continue;
+      }
 
-    const std::uint64_t textureBits =
-        (static_cast<std::uint64_t>(command.material.albedoTexture.id) &
-         0xFFFFFULL)
-        << 36U;
+      const float safeScale =
+          (instance.scale > 0.0F) ? instance.scale : 1.0F;
+      const math::Mat4 instanceLocal = math::compose_trs(
+          instance.offset, math::Quat(), math::Vec3(safeScale, safeScale,
+                                                    safeScale));
+      const math::Mat4 model = math::mul(transforms[i].matrix, instanceLocal);
+      const math::Vec4 center4 =
+          math::mul(model, math::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+      const math::Vec3 center(center4.x, center4.y, center4.z);
+      const math::Vec3 half(0.5F * safeScale, 0.5F * safeScale,
+                            0.5F * safeScale);
+      if (aabb_culled_by_frustum(frustumPlanes, center, half)) {
+        continue;
+      }
 
-    const std::uint64_t meshBits =
-        (static_cast<std::uint64_t>(runtimeMesh.id) & 0xFFFFFULL) << 16U;
+      renderer::DrawCommand command{};
+      command.entity = entities[i].index;
+      command.mesh = runtimeMesh;
+      command.material.albedo = foliage->albedo;
+      command.material.roughness = foliage->roughness;
+      command.material.metallic = foliage->metallic;
+      command.material.opacity = foliage->opacity;
+      command.modelMatrix = model;
+      command.foliageWindStrength = foliage->windStrength;
+      command.foliageWindFrequency = foliage->windFrequency;
+      command.foliageWindPhase = instance.phase;
+      command.foliageLodIndex = lodIndex;
+      command.sortKey.value =
+          build_draw_sort_key(command.material, runtimeMesh, center, vp);
 
-    // Camera-space depth: transform Z into [0,1] range, quantize to 16 bits.
-    // Use VP * position to get clip-space w (approximation of depth).
-    const math::Vec4 clipPos =
-        math::mul(vp, math::Vec4(center.x, center.y, center.z, 1.0F));
-    const float linearDepth = (clipPos.w > 0.0F) ? clipPos.w : 0.0F;
-    // Clamp to [0, 65535] range with a max depth assumption of ~200 units.
-    const float normalizedDepth =
-        (linearDepth < 200.0F) ? (linearDepth / 200.0F) : 1.0F;
-    std::uint16_t depthQuantized =
-        static_cast<std::uint16_t>(normalizedDepth * 65535.0F);
-
-    // Opaque: front-to-back (small depth first, natural sort order).
-    // Transparent: back-to-front (invert depth so larger depth sorts first).
-    if (transparent) {
-      depthQuantized = static_cast<std::uint16_t>(65535U - depthQuantized);
-    }
-
-    command.sortKey.value = transparentBit | shaderBits | textureBits |
-                            meshBits |
-                            static_cast<std::uint64_t>(depthQuantized);
-
-    if (!localBuffer.submit(command)) {
-      core::log_message(core::LogLevel::Error, "render_prep",
-                        "command buffer full; entity dropped from frame");
-      mark_graph_failed(jobData->frameGraphFailed);
-      return;
+      if (!submit_render_command(localBuffer, command,
+                                 jobData->frameGraphFailed)) {
+        return;
+      }
     }
   }
 }

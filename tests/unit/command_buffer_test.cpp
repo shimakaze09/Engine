@@ -149,6 +149,38 @@ int check_static_mesh_batches() {
     return 95;
   }
 
+  builder.reset();
+  engine::renderer::DrawCommand foliageA = make_command(1U, 4U);
+  foliageA.mesh.id = 33U;
+  foliageA.material.albedo = engine::math::Vec3(0.1F, 0.6F, 0.2F);
+  foliageA.foliageWindStrength = 0.25F;
+  foliageA.foliageWindFrequency = 1.5F;
+  foliageA.foliageWindPhase = 0.0F;
+  foliageA.foliageLodIndex = 0U;
+  engine::renderer::DrawCommand foliageB = foliageA;
+  foliageB.entity = 5U;
+  foliageB.foliageWindPhase = 1.0F;
+  foliageB.foliageLodIndex = 1U;
+  engine::renderer::DrawCommand foliageC = foliageA;
+  foliageC.entity = 6U;
+  foliageC.foliageWindStrength = 0.5F;
+  if (!builder.submit(foliageA) || !builder.submit(foliageB) ||
+      !builder.submit(foliageC)) {
+    return 96;
+  }
+
+  builder.sort_by_key();
+  const std::size_t foliageBatchCount =
+      engine::renderer::build_static_mesh_batches(builder.view(), 0U,
+                                                  builder.command_count(),
+                                                  batches, 4U);
+  if (foliageBatchCount != 2U) {
+    return 97;
+  }
+  if ((batches[0].count != 2U) || (batches[1].count != 1U)) {
+    return 98;
+  }
+
   return 0;
 }
 
@@ -278,6 +310,15 @@ int check_reflection_probe_bake_settings() {
 
 int check_distance_fog_settings() {
   using engine::renderer::DistanceFogMode;
+
+  const engine::renderer::DistanceFogSettings defaultDistanceFog{};
+  if (defaultDistanceFog.mode != DistanceFogMode::Exp2) {
+    return 70;
+  }
+  const engine::renderer::HeightFogSettings defaultHeightFog{};
+  if (!defaultHeightFog.enabled) {
+    return 84;
+  }
 
   if (engine::renderer::parse_distance_fog_mode("linear") !=
       DistanceFogMode::Linear) {

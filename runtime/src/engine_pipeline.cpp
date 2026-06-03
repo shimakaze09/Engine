@@ -889,11 +889,13 @@ void create_bootstrap_scene(runtime::World *world,
   const runtime::Entity entity = world->create_entity();
   const runtime::Entity stackedEntity = world->create_entity();
   const runtime::Entity groundEntity = world->create_entity();
+  const runtime::Entity foliageEntity = world->create_entity();
   const runtime::Entity lightEntity = world->create_entity();
   const runtime::Entity sceneControllerEntity = world->create_entity();
   if ((entity == runtime::kInvalidEntity) ||
       (stackedEntity == runtime::kInvalidEntity) ||
       (groundEntity == runtime::kInvalidEntity) ||
+      (foliageEntity == runtime::kInvalidEntity) ||
       (lightEntity == runtime::kInvalidEntity) ||
       (sceneControllerEntity == runtime::kInvalidEntity)) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -909,6 +911,7 @@ void create_bootstrap_scene(runtime::World *world,
   add_name(entity, "Red Cube");
   add_name(stackedEntity, "Blue Cube");
   add_name(groundEntity, "Ground");
+  add_name(foliageEntity, "Foliage Patch");
   add_name(lightEntity, "Sun Light");
   add_name(sceneControllerEntity, "Scene Controller");
 
@@ -978,6 +981,50 @@ void create_bootstrap_scene(runtime::World *world,
                          : meshIds.bootstrap;
     mc.albedo = math::Vec3(0.45F, 0.42F, 0.38F);
     static_cast<void>(world->add_mesh_component(groundEntity, mc));
+  }
+
+  // Foliage patch demo.
+  {
+    runtime::Transform t{};
+    t.position = math::Vec3(0.0F, 0.0F, 1.3F);
+    static_cast<void>(world->add_transform(foliageEntity, t));
+
+    runtime::FoliagePatchComponent foliage{};
+    foliage.meshAssetIds[0] =
+        (meshIds.pyramid != renderer::kInvalidAssetId) ? meshIds.pyramid
+                                                       : defaultMesh;
+    foliage.meshAssetIds[1] =
+        (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                    : foliage.meshAssetIds[0];
+    foliage.meshAssetIds[2] = foliage.meshAssetIds[1];
+    foliage.instanceCount = 35U;
+    foliage.density = 2.5F;
+    foliage.albedo = math::Vec3(0.18F, 0.62F, 0.22F);
+    foliage.roughness = 0.92F;
+    foliage.windStrength = 0.18F;
+    foliage.windFrequency = 1.9F;
+
+    std::uint32_t cursor = 0U;
+    for (std::uint32_t z = 0U; z < 5U; ++z) {
+      for (std::uint32_t x = 0U; x < 7U; ++x) {
+        runtime::FoliageInstance &instance = foliage.instances[cursor];
+        const float jitterX =
+            (static_cast<float>((x * 17U + z * 11U) % 5U) - 2.0F) * 0.05F;
+        const float jitterZ =
+            (static_cast<float>((x * 7U + z * 19U) % 5U) - 2.0F) * 0.05F;
+        instance.offset =
+            math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX,
+                       0.0F,
+                       (static_cast<float>(z) - 2.0F) * 0.62F + jitterZ);
+        instance.scale = 0.34F + (static_cast<float>((x + z) % 4U) * 0.05F);
+        instance.phase = static_cast<float>(cursor) * 0.37F;
+        instance.lodIndex = ((x + z) % 5U == 0U) ? 1U : 0U;
+        ++cursor;
+      }
+    }
+
+    static_cast<void>(
+        world->add_foliage_patch_component(foliageEntity, foliage));
   }
 
   // Scene controller script.

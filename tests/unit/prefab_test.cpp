@@ -101,6 +101,26 @@ int main() {
     return 26;
   }
 
+  engine::runtime::FoliagePatchComponent foliage{};
+  foliage.meshAssetIds[0] = 77U;
+  foliage.meshAssetIds[1] = 88U;
+  foliage.instanceCount = 2U;
+  foliage.density = 1.75F;
+  foliage.albedo = engine::math::Vec3(0.2F, 0.8F, 0.25F);
+  foliage.windStrength = 0.3F;
+  foliage.windFrequency = 1.4F;
+  foliage.instances[0].offset = engine::math::Vec3(-0.5F, 0.0F, 0.25F);
+  foliage.instances[0].scale = 0.6F;
+  foliage.instances[0].phase = 0.2F;
+  foliage.instances[0].lodIndex = 0U;
+  foliage.instances[1].offset = engine::math::Vec3(0.75F, 0.0F, -0.5F);
+  foliage.instances[1].scale = 0.9F;
+  foliage.instances[1].phase = 1.2F;
+  foliage.instances[1].lodIndex = 1U;
+  if (!world->add_foliage_patch_component(src, foliage)) {
+    return 29;
+  }
+
   // Save the prefab.
   if (!engine::runtime::save_prefab(*world, src, kPrefabPath)) {
     remove_prefab_file();
@@ -212,6 +232,26 @@ int main() {
       instProbe.needsBake) {
     remove_prefab_file();
     return 28;
+  }
+
+  // Verify FoliagePatchComponent.
+  engine::runtime::FoliagePatchComponent instFoliage{};
+  if (!world->get_foliage_patch_component(inst, &instFoliage)) {
+    remove_prefab_file();
+    return 30;
+  }
+  if ((instFoliage.meshAssetIds[0] != 77U) ||
+      (instFoliage.meshAssetIds[1] != 88U) ||
+      (instFoliage.instanceCount != 2U) ||
+      !nearly_equal(instFoliage.density, 1.75F) ||
+      !nearly_equal(instFoliage.albedo.y, 0.8F) ||
+      !nearly_equal(instFoliage.windStrength, 0.3F) ||
+      !nearly_equal(instFoliage.windFrequency, 1.4F) ||
+      !nearly_equal(instFoliage.instances[1].offset.x, 0.75F) ||
+      !nearly_equal(instFoliage.instances[1].scale, 0.9F) ||
+      (instFoliage.instances[1].lodIndex != 1U)) {
+    remove_prefab_file();
+    return 31;
   }
 
   // Verify invalid-input guards.

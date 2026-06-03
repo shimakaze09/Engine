@@ -87,6 +87,8 @@ constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kNameTypeName = "engine::runtime::NameComponent";
 constexpr const char *kReflectionProbeTypeName =
     "engine::runtime::ReflectionProbeComponent";
+constexpr const char *kFoliagePatchTypeName =
+    "engine::runtime::FoliagePatchComponent";
 constexpr const char *kPointLightTypeName =
     "engine::runtime::PointLightComponent";
 constexpr const char *kSpotLightTypeName =
@@ -97,6 +99,7 @@ constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
 constexpr const char *kMeshSectionLabel = "MeshComponent";
+constexpr const char *kFoliagePatchSectionLabel = "FoliagePatchComponent";
 constexpr const char *kLightSectionLabel = "LightComponent";
 constexpr const char *kReflectionProbeSectionLabel = "ReflectionProbeComponent";
 constexpr const char *kPointLightSectionLabel = "PointLightComponent";
@@ -236,6 +239,7 @@ enum class ComponentEditType : std::uint8_t {
   Collider,
   Light,
   Mesh,
+  FoliagePatch,
   Script,
   ReflectionProbe,
   PointLight,
@@ -253,6 +257,7 @@ struct ComponentEditSnapshot final {
   runtime::Collider collider{};
   runtime::LightComponent light{};
   runtime::MeshComponent mesh{};
+  runtime::FoliagePatchComponent foliagePatch{};
   runtime::ScriptComponent script{};
   runtime::ReflectionProbeComponent reflectionProbe{};
   runtime::PointLightComponent pointLight{};
@@ -279,6 +284,8 @@ bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
     return g_world->get_light_component(entity, &out->light);
   case ComponentEditType::Mesh:
     return g_world->get_mesh_component(entity, &out->mesh);
+  case ComponentEditType::FoliagePatch:
+    return g_world->get_foliage_patch_component(entity, &out->foliagePatch);
   case ComponentEditType::Script:
     return g_world->get_script_component(entity, &out->script);
   case ComponentEditType::ReflectionProbe:
@@ -320,6 +327,8 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
       return g_world->remove_light_component(resolved);
     case ComponentEditType::Mesh:
       return g_world->remove_mesh_component(resolved);
+    case ComponentEditType::FoliagePatch:
+      return g_world->remove_foliage_patch_component(resolved);
     case ComponentEditType::Script:
       return g_world->remove_script_component(resolved);
     case ComponentEditType::ReflectionProbe:
@@ -347,6 +356,9 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
     return g_world->add_light_component(resolved, snapshot.light);
   case ComponentEditType::Mesh:
     return g_world->add_mesh_component(resolved, snapshot.mesh);
+  case ComponentEditType::FoliagePatch:
+    return g_world->add_foliage_patch_component(resolved,
+                                                snapshot.foliagePatch);
   case ComponentEditType::Script:
     return g_world->add_script_component(resolved, snapshot.script);
   case ComponentEditType::ReflectionProbe:
@@ -438,6 +450,30 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::Mesh:
     snapshot.mesh.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
     break;
+  case ComponentEditType::FoliagePatch: {
+    snapshot.foliagePatch.instanceCount = 16U;
+    snapshot.foliagePatch.density = 1.0F;
+    snapshot.foliagePatch.albedo = math::Vec3(0.22F, 0.62F, 0.24F);
+    runtime::MeshComponent sourceMesh{};
+    if ((g_world != nullptr) &&
+        g_world->get_mesh_component(entity, &sourceMesh)) {
+      snapshot.foliagePatch.meshAssetIds[0] = sourceMesh.meshAssetId;
+      snapshot.foliagePatch.meshAssetIds[1] = sourceMesh.meshAssetId;
+    }
+    for (std::uint32_t i = 0U; i < snapshot.foliagePatch.instanceCount; ++i) {
+      const std::uint32_t x = i % 4U;
+      const std::uint32_t z = i / 4U;
+      runtime::FoliageInstance &instance =
+          snapshot.foliagePatch.instances[i];
+      instance.offset = math::Vec3((static_cast<float>(x) - 1.5F) * 0.9F,
+                                   0.0F,
+                                   (static_cast<float>(z) - 1.5F) * 0.9F);
+      instance.scale = 0.55F + (static_cast<float>(i % 3U) * 0.08F);
+      instance.phase = static_cast<float>(i) * 0.41F;
+      instance.lodIndex = (i >= 12U) ? 1U : 0U;
+    }
+    break;
+  }
   case ComponentEditType::Transform:
   case ComponentEditType::Light:
   case ComponentEditType::Script:
@@ -908,6 +944,16 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
       continue;
     }
 
+    if ((std::strcmp(desc->name, kFoliagePatchTypeName) == 0) &&
+        !g_world->has_foliage_patch_component(entity)) {
+      if (ImGui::Selectable(kFoliagePatchSectionLabel)) {
+        execute_component_add(
+            entity, ComponentEditType::FoliagePatch,
+            default_component_snapshot(entity, ComponentEditType::FoliagePatch));
+      }
+      continue;
+    }
+
     if ((std::strcmp(desc->name, kPointLightTypeName) == 0) &&
         !g_world->has_point_light_component(entity)) {
       if (ImGui::Selectable(kPointLightSectionLabel)) {
@@ -970,6 +1016,94 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   }
 
   ImGui::EndCombo();
+}
+
+void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
+                               bool editable, bool *modified) noexcept {
+  if (!editable) {
+    ImGui::BeginDisabled();
+  }
+
+  for (std::size_t lod = 0U; lod < runtime::FoliagePatchComponent::kMaxLods;
+       ++lod) {
+    char label[32] = {};
+    std::snprintf(label, sizeof(label), "LOD %zu Mesh ID", lod);
+    mark_modified(
+        modified,
+        ImGui::InputScalar(label, ImGuiDataType_U64,
+                           &foliage.meshAssetIds[lod], nullptr, nullptr,
+                           "%llu", ImGuiInputTextFlags_None));
+  }
+
+  int instanceCount = static_cast<int>(foliage.instanceCount);
+  if (ImGui::SliderInt(
+          "Instance Count", &instanceCount, 0,
+          static_cast<int>(runtime::FoliagePatchComponent::kMaxInstances))) {
+    if (instanceCount < 0) {
+      instanceCount = 0;
+    }
+    foliage.instanceCount = static_cast<std::uint32_t>(instanceCount);
+    mark_modified(modified, true);
+  }
+
+  mark_modified(modified, ImGui::DragFloat("Density", &foliage.density, 0.05F,
+                                           0.0F, 100.0F, "%.2f"));
+  mark_modified(modified, ImGui::ColorEdit3("Albedo", &foliage.albedo.x));
+  mark_modified(modified, ImGui::SliderFloat("Roughness", &foliage.roughness,
+                                             0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, ImGui::SliderFloat("Metallic", &foliage.metallic,
+                                             0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, ImGui::SliderFloat("Opacity", &foliage.opacity, 0.0F,
+                                             1.0F, "%.2f"));
+  mark_modified(modified,
+                ImGui::DragFloat("Wind Strength", &foliage.windStrength,
+                                  0.01F, 0.0F, 5.0F, "%.2f"));
+  mark_modified(modified,
+                ImGui::DragFloat("Wind Frequency", &foliage.windFrequency,
+                                  0.05F, 0.0F, 20.0F, "%.2f"));
+
+  if (ImGui::TreeNode("Instances")) {
+    std::uint32_t visibleCount = foliage.instanceCount;
+    if (visibleCount >
+        static_cast<std::uint32_t>(runtime::FoliagePatchComponent::kMaxInstances)) {
+      visibleCount =
+          static_cast<std::uint32_t>(runtime::FoliagePatchComponent::kMaxInstances);
+    }
+    if (visibleCount > 16U) {
+      visibleCount = 16U;
+    }
+
+    for (std::uint32_t i = 0U; i < visibleCount; ++i) {
+      runtime::FoliageInstance &instance = foliage.instances[i];
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::Separator();
+      ImGui::Text("Instance %u", i);
+      draw_vec3_field("Offset", instance.offset, modified);
+      mark_modified(modified, ImGui::DragFloat("Scale", &instance.scale,
+                                               0.01F, 0.05F, 10.0F, "%.2f"));
+      mark_modified(modified, ImGui::DragFloat("Phase", &instance.phase,
+                                               0.05F, -100.0F, 100.0F,
+                                               "%.2f"));
+      int lodIndex = static_cast<int>(instance.lodIndex);
+      if (ImGui::SliderInt(
+              "LOD Index", &lodIndex, 0,
+              static_cast<int>(runtime::FoliagePatchComponent::kMaxLods - 1U))) {
+        instance.lodIndex = static_cast<std::uint32_t>(lodIndex);
+        mark_modified(modified, true);
+      }
+      ImGui::PopID();
+    }
+
+    if (foliage.instanceCount > visibleCount) {
+      ImGui::Text("%u more instances stored",
+                  foliage.instanceCount - visibleCount);
+    }
+    ImGui::TreePop();
+  }
+
+  if (!editable) {
+    ImGui::EndDisabled();
+  }
 }
 
 void draw_toolbar() noexcept {
@@ -1428,6 +1562,29 @@ void draw_inspector_panel() noexcept {
     }
   } else {
     ImGui::TextUnformatted("MeshComponent: <none>");
+  }
+
+  runtime::FoliagePatchComponent foliagePatch{};
+  if (g_world->get_foliage_patch_component(entity, &foliagePatch)) {
+    ImGui::PushID("FoliagePatchComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kFoliagePatchSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool foliageModified = false;
+    if (sectionOpen) {
+      draw_foliage_patch_fields(foliagePatch, editable, &foliageModified);
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      execute_component_remove(entity, ComponentEditType::FoliagePatch);
+    } else if (editable && foliageModified) {
+      static_cast<void>(
+          g_world->add_foliage_patch_component(entity, foliagePatch));
+    }
+  } else {
+    ImGui::TextUnformatted("FoliagePatchComponent: <none>");
   }
 
   runtime::ReflectionProbeComponent reflectionProbe{};

@@ -137,6 +137,145 @@ bool read_quat(const core::JsonParser &p, const core::JsonValue &v,
   return true;
 }
 
+void write_foliage_patch(core::JsonWriter &w,
+                         const FoliagePatchComponent &foliage) noexcept {
+  w.write_key(kJsonKeyFoliagePatchComponent);
+  w.begin_object();
+
+  w.begin_array("meshAssetIds");
+  for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
+    w.write_uint64_value(foliage.meshAssetIds[i]);
+  }
+  w.end_array();
+
+  const std::uint32_t instanceCount =
+      (foliage.instanceCount >
+       static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances))
+          ? static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)
+          : foliage.instanceCount;
+  w.write_uint("instanceCount", instanceCount);
+  w.write_float("density", foliage.density);
+  write_vec3_arr(w, "albedo", foliage.albedo);
+  w.write_float("roughness", foliage.roughness);
+  w.write_float("metallic", foliage.metallic);
+  w.write_float("opacity", foliage.opacity);
+  w.write_float("windStrength", foliage.windStrength);
+  w.write_float("windFrequency", foliage.windFrequency);
+
+  w.begin_array("instances");
+  for (std::uint32_t i = 0U; i < instanceCount; ++i) {
+    const FoliageInstance &instance = foliage.instances[i];
+    w.begin_object();
+    write_vec3_arr(w, "offset", instance.offset);
+    w.write_float("scale", instance.scale);
+    w.write_float("phase", instance.phase);
+    w.write_uint("lodIndex", instance.lodIndex);
+    w.end_object();
+  }
+  w.end_array();
+
+  w.end_object();
+}
+
+bool read_foliage_patch(const core::JsonParser &p, const core::JsonValue &v,
+                        FoliagePatchComponent *out) noexcept {
+  if ((out == nullptr) || (v.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  FoliagePatchComponent foliage{};
+  core::JsonValue field{};
+  if (p.get_object_field(v, "meshAssetIds", &field) &&
+      (field.type == core::JsonValue::Type::Array)) {
+    const std::size_t count = p.array_size(field);
+    const std::size_t capped =
+        (count < FoliagePatchComponent::kMaxLods)
+            ? count
+            : FoliagePatchComponent::kMaxLods;
+    for (std::size_t i = 0U; i < capped; ++i) {
+      core::JsonValue element{};
+      if (!p.get_array_element(field, i, &element) ||
+          !p.as_uint64(element, &foliage.meshAssetIds[i])) {
+        return false;
+      }
+    }
+  }
+
+  if (p.get_object_field(v, "density", &field)) {
+    static_cast<void>(p.as_float(field, &foliage.density));
+  }
+  if (p.get_object_field(v, "albedo", &field)) {
+    static_cast<void>(read_vec3(p, field, &foliage.albedo));
+  }
+  if (p.get_object_field(v, "roughness", &field)) {
+    static_cast<void>(p.as_float(field, &foliage.roughness));
+  }
+  if (p.get_object_field(v, "metallic", &field)) {
+    static_cast<void>(p.as_float(field, &foliage.metallic));
+  }
+  if (p.get_object_field(v, "opacity", &field)) {
+    static_cast<void>(p.as_float(field, &foliage.opacity));
+  }
+  if (p.get_object_field(v, "windStrength", &field)) {
+    static_cast<void>(p.as_float(field, &foliage.windStrength));
+  }
+  if (p.get_object_field(v, "windFrequency", &field)) {
+    static_cast<void>(p.as_float(field, &foliage.windFrequency));
+  }
+
+  std::uint32_t requestedCount =
+      static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+  if (p.get_object_field(v, "instanceCount", &field)) {
+    static_cast<void>(p.as_uint(field, &requestedCount));
+  }
+
+  core::JsonValue instances{};
+  if (p.get_object_field(v, "instances", &instances) &&
+      (instances.type == core::JsonValue::Type::Array)) {
+    std::size_t count = p.array_size(instances);
+    if (count > FoliagePatchComponent::kMaxInstances) {
+      count = FoliagePatchComponent::kMaxInstances;
+    }
+    if (count > requestedCount) {
+      count = requestedCount;
+    }
+
+    for (std::size_t i = 0U; i < count; ++i) {
+      core::JsonValue instanceValue{};
+      if (!p.get_array_element(instances, i, &instanceValue) ||
+          (instanceValue.type != core::JsonValue::Type::Object)) {
+        return false;
+      }
+
+      FoliageInstance instance{};
+      if (p.get_object_field(instanceValue, "offset", &field)) {
+        static_cast<void>(read_vec3(p, field, &instance.offset));
+      }
+      if (p.get_object_field(instanceValue, "scale", &field)) {
+        static_cast<void>(p.as_float(field, &instance.scale));
+      }
+      if (p.get_object_field(instanceValue, "phase", &field)) {
+        static_cast<void>(p.as_float(field, &instance.phase));
+      }
+      if (p.get_object_field(instanceValue, "lodIndex", &field)) {
+        static_cast<void>(p.as_uint(field, &instance.lodIndex));
+      }
+      foliage.instances[i] = instance;
+    }
+    foliage.instanceCount = static_cast<std::uint32_t>(count);
+  } else {
+    if (requestedCount >
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
+      requestedCount =
+          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+    }
+    foliage.instanceCount = requestedCount;
+  }
+
+  *out = foliage;
+  return true;
+}
+
 } // namespace
 
 bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
@@ -211,6 +350,12 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_float("metallic", mesh.metallic);
     w.write_float("opacity", mesh.opacity);
     w.end_object();
+  }
+
+  // FoliagePatchComponent
+  FoliagePatchComponent foliage{};
+  if (world.get_foliage_patch_component(entity, &foliage)) {
+    write_foliage_patch(w, foliage);
   }
 
   // LightComponent
@@ -462,6 +607,17 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
       static_cast<void>(parser.as_float(v, &mesh.opacity));
     }
     static_cast<void>(world.add_mesh_component(entity, mesh));
+  }
+
+  // FoliagePatchComponent
+  core::JsonValue foliageVal{};
+  if (parser.get_object_field(componentsVal, kJsonKeyFoliagePatchComponent,
+                              &foliageVal) &&
+      (foliageVal.type == core::JsonValue::Type::Object)) {
+    FoliagePatchComponent foliage{};
+    if (read_foliage_patch(parser, foliageVal, &foliage)) {
+      static_cast<void>(world.add_foliage_patch_component(entity, foliage));
+    }
   }
 
   // LightComponent

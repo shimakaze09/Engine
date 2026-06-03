@@ -104,6 +104,29 @@ struct MeshComponent final {
   float opacity = 1.0F;
 };
 
+struct FoliageInstance final {
+  math::Vec3 offset = math::Vec3(0.0F, 0.0F, 0.0F);
+  float scale = 1.0F;
+  float phase = 0.0F;
+  std::uint32_t lodIndex = 0U;
+};
+
+struct FoliagePatchComponent final {
+  static constexpr std::size_t kMaxInstances = 64U;
+  static constexpr std::size_t kMaxLods = 3U;
+
+  std::uint64_t meshAssetIds[kMaxLods] = {};
+  std::uint32_t instanceCount = 0U;
+  float density = 1.0F;
+  math::Vec3 albedo = math::Vec3(0.25F, 0.65F, 0.25F);
+  float roughness = 0.85F;
+  float metallic = 0.0F;
+  float opacity = 1.0F;
+  float windStrength = 0.14F;
+  float windFrequency = 1.6F;
+  FoliageInstance instances[kMaxInstances] = {};
+};
+
 /// Spring arm component: drives a third-person camera boom that shortens on
 /// collision and smoothly interpolates length.
 struct SpringArmComponent final {
@@ -147,6 +170,7 @@ public:
   static constexpr std::size_t kMaxPointLightComponents = 128U;
   static constexpr std::size_t kMaxSpotLightComponents = 64U;
   static constexpr std::size_t kMaxReflectionProbeComponents = 64U;
+  static constexpr std::size_t kMaxFoliagePatchComponents = 128U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -216,6 +240,21 @@ public:
                           MeshComponent *outComponent) const noexcept;
   MeshComponent *get_mesh_component_ptr(Entity entity) noexcept;
   const MeshComponent *get_mesh_component_ptr(Entity entity) const noexcept;
+
+  bool add_foliage_patch_component(
+      Entity entity, const FoliagePatchComponent &component) noexcept;
+  bool remove_foliage_patch_component(Entity entity) noexcept;
+  bool get_foliage_patch_component(
+      Entity entity, FoliagePatchComponent *outComponent) const noexcept;
+  bool has_foliage_patch_component(Entity entity) const noexcept;
+  std::size_t foliage_patch_count() const noexcept;
+  const FoliagePatchComponent *
+  foliage_patch_at(std::size_t index) const noexcept;
+  Entity foliage_patch_entity_at(std::size_t index) const noexcept;
+  FoliagePatchComponent *get_foliage_patch_component_ptr(
+      Entity entity) noexcept;
+  const FoliagePatchComponent *get_foliage_patch_component_ptr(
+      Entity entity) const noexcept;
 
   bool add_name_component(Entity entity,
                           const NameComponent &component) noexcept;
@@ -434,6 +473,9 @@ private:
   using ReflectionProbeSet =
       core::SparseSet<Entity, ReflectionProbeComponent, kMaxEntities,
                       kMaxReflectionProbeComponents>;
+  using FoliagePatchSet =
+      core::SparseSet<Entity, FoliagePatchComponent, kMaxEntities,
+                      kMaxFoliagePatchComponents>;
 
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
@@ -446,7 +488,8 @@ private:
            std::is_same_v<C, SpringArmComponent> ||
            std::is_same_v<C, PointLightComponent> ||
            std::is_same_v<C, SpotLightComponent> ||
-           std::is_same_v<C, ReflectionProbeComponent>;
+           std::is_same_v<C, ReflectionProbeComponent> ||
+           std::is_same_v<C, FoliagePatchComponent>;
   }
 
   bool is_mutation_phase() const noexcept;
@@ -492,6 +535,8 @@ private:
       return m_spotLights.count();
     } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
       return m_reflectionProbes.count();
+    } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
+      return m_foliagePatches.count();
     } else {
       return 0U;
     }
@@ -529,6 +574,8 @@ private:
       return m_spotLights.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
       return m_reflectionProbes.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
+      return m_foliagePatches.get_ptr(entity);
     } else {
       return nullptr;
     }
@@ -666,6 +713,10 @@ private:
         fn(m_reflectionProbes.entity_at(i),
            m_reflectionProbes.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
+      for (std::size_t i = 0U; i < m_foliagePatches.count(); ++i) {
+        fn(m_foliagePatches.entity_at(i), m_foliagePatches.component_at(i));
+      }
     }
   }
 
@@ -732,6 +783,7 @@ private:
   PointLightSet m_pointLights{};
   SpotLightSet m_spotLights{};
   ReflectionProbeSet m_reflectionProbes{};
+  FoliagePatchSet m_foliagePatches{};
   physics::PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
   TimerManager m_timerManager{};

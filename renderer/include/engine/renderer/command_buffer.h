@@ -36,6 +36,10 @@ struct DrawCommand final {
   std::uint32_t entity = 0U;
   MeshHandle mesh = kInvalidMeshHandle;
   Material material{};
+  float foliageWindStrength = 0.0F;
+  float foliageWindFrequency = 1.0F;
+  float foliageWindPhase = 0.0F;
+  std::uint32_t foliageLodIndex = 0U;
   math::Mat4 modelMatrix = math::Mat4();
 };
 
@@ -141,7 +145,7 @@ enum class DistanceFogMode : std::uint8_t {
 };
 
 struct DistanceFogSettings final {
-  DistanceFogMode mode = DistanceFogMode::Off;
+  DistanceFogMode mode = DistanceFogMode::Exp2;
   float start = 25.0F;
   float end = 150.0F;
   float density = 0.01F;
@@ -149,7 +153,7 @@ struct DistanceFogSettings final {
 };
 
 struct HeightFogSettings final {
-  bool enabled = false;
+  bool enabled = true;
   float baseHeight = 0.0F;
   float density = 0.015F;
   float falloff = 0.08F;

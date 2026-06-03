@@ -42,6 +42,7 @@ constexpr std::size_t kForwardMaxPointLights = 8U;
 constexpr std::size_t kForwardMaxSpotLights = 8U;
 constexpr std::uint32_t kInstanceModelAttrib0 = 3U;
 constexpr std::uint32_t kInstanceModelAttribCount = 4U;
+constexpr std::uint32_t kInstanceFoliageAttrib = 7U;
 constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
 constexpr std::uint64_t kDrawKeyDepthMask = 0xFFFFULL;
 constexpr float kSkyboxCubeVertices[] = {
@@ -69,6 +70,11 @@ constexpr std::int32_t kSkyboxVertexCount = static_cast<std::int32_t>(
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
   float distSq = 0.0F;
+};
+
+struct InstanceAttributes final {
+  math::Mat4 model = math::Mat4();
+  math::Vec4 foliage = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 };
 
 enum class SkyModel : std::uint8_t {
@@ -112,6 +118,9 @@ struct BackendState final {
   std::int32_t pbrViewLocation = -1;
   std::int32_t pbrViewProjectionLocation = -1;
   std::int32_t pbrUseInstancingLocation = -1;
+  std::int32_t pbrFoliageWindStrengthLocation = -1;
+  std::int32_t pbrFoliageWindFrequencyLocation = -1;
+  std::int32_t pbrFoliagePhaseLocation = -1;
   std::int32_t pbrFogModeLocation = -1;
   std::int32_t pbrFogStartLocation = -1;
   std::int32_t pbrFogEndLocation = -1;
@@ -250,6 +259,10 @@ struct BackendState final {
   std::int32_t gbufProjectionLoc = -1;
   std::int32_t gbufNormalMatrixLoc = -1;
   std::int32_t gbufUseInstancingLoc = -1;
+  std::int32_t gbufTimeLoc = -1;
+  std::int32_t gbufFoliageWindStrengthLoc = -1;
+  std::int32_t gbufFoliageWindFrequencyLoc = -1;
+  std::int32_t gbufFoliagePhaseLoc = -1;
   std::int32_t gbufAlbedoLoc = -1;
   std::int32_t gbufMetallicLoc = -1;
   std::int32_t gbufRoughnessLoc = -1;
@@ -313,7 +326,7 @@ struct BackendState final {
   std::uint32_t tileLightTex = 0U;
   std::vector<float> tileBuffer;
   std::uint32_t instanceMatrixBuffer = 0U;
-  std::vector<math::Mat4> instanceMatrices;
+  std::vector<InstanceAttributes> instanceAttributes;
   std::vector<StaticMeshBatch> staticMeshBatches;
 
   // ---- Bloom state ----
@@ -676,6 +689,40 @@ void upload_pbr_height_fog_uniforms(
   }
 }
 
+void upload_pbr_foliage_uniforms(const BackendState &backend,
+                                 const RenderDevice *dev,
+                                 const DrawCommand &command) noexcept {
+  if (backend.pbrFoliageWindStrengthLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFoliageWindStrengthLocation,
+                           command.foliageWindStrength);
+  }
+  if (backend.pbrFoliageWindFrequencyLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFoliageWindFrequencyLocation,
+                           command.foliageWindFrequency);
+  }
+  if (backend.pbrFoliagePhaseLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFoliagePhaseLocation,
+                           command.foliageWindPhase);
+  }
+}
+
+void upload_gbuffer_foliage_uniforms(const BackendState &backend,
+                                     const RenderDevice *dev,
+                                     const DrawCommand &command) noexcept {
+  if (backend.gbufFoliageWindStrengthLoc >= 0) {
+    dev->set_uniform_float(backend.gbufFoliageWindStrengthLoc,
+                           command.foliageWindStrength);
+  }
+  if (backend.gbufFoliageWindFrequencyLoc >= 0) {
+    dev->set_uniform_float(backend.gbufFoliageWindFrequencyLoc,
+                           command.foliageWindFrequency);
+  }
+  if (backend.gbufFoliagePhaseLoc >= 0) {
+    dev->set_uniform_float(backend.gbufFoliagePhaseLoc,
+                           command.foliageWindPhase);
+  }
+}
+
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -960,7 +1007,7 @@ SkyModel selected_sky_model() noexcept {
 DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   DistanceFogSettings settings{};
   settings.mode =
-      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "off"));
+      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "exp2"));
   settings.start = core::cvar_get_float("r_fog_start", settings.start);
   settings.end = core::cvar_get_float("r_fog_end", settings.end);
   settings.density = core::cvar_get_float("r_fog_density", settings.density);
@@ -1732,6 +1779,12 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_viewProjection");
   backend.pbrUseInstancingLocation =
       dev->uniform_location(pbrProgram, "uUseInstancing");
+  backend.pbrFoliageWindStrengthLocation =
+      dev->uniform_location(pbrProgram, "uFoliageWindStrength");
+  backend.pbrFoliageWindFrequencyLocation =
+      dev->uniform_location(pbrProgram, "uFoliageWindFrequency");
+  backend.pbrFoliagePhaseLocation =
+      dev->uniform_location(pbrProgram, "uFoliagePhase");
   backend.pbrFogModeLocation = dev->uniform_location(pbrProgram, "uFogMode");
   backend.pbrFogStartLocation = dev->uniform_location(pbrProgram, "uFogStart");
   backend.pbrFogEndLocation = dev->uniform_location(pbrProgram, "uFogEnd");
@@ -2045,7 +2098,7 @@ bool initialize_backend() noexcept {
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
       "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
-  core::cvar_register_string("r_fog_mode", "off",
+  core::cvar_register_string("r_fog_mode", "exp2",
                              "Distance fog mode: off, linear, exp, exp2");
   core::cvar_register_float("r_fog_start", 25.0F,
                             "Linear distance fog start");
@@ -2055,7 +2108,7 @@ bool initialize_backend() noexcept {
                             "Exponential distance fog density");
   core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
                              "Distance fog RGB color");
-  core::cvar_register_bool("r_height_fog", false, "Enable height fog");
+  core::cvar_register_bool("r_height_fog", true, "Enable height fog");
   core::cvar_register_float("r_height_fog_base", 0.0F,
                             "Height fog base world Y");
   core::cvar_register_float("r_height_fog_density", 0.015F,
@@ -2267,6 +2320,13 @@ bool initialize_backend() noexcept {
         dev->uniform_location(gbufProg, "uNormalMatrix");
     backend.gbufUseInstancingLoc =
         dev->uniform_location(gbufProg, "uUseInstancing");
+    backend.gbufTimeLoc = dev->uniform_location(gbufProg, "uTime");
+    backend.gbufFoliageWindStrengthLoc =
+        dev->uniform_location(gbufProg, "uFoliageWindStrength");
+    backend.gbufFoliageWindFrequencyLoc =
+        dev->uniform_location(gbufProg, "uFoliageWindFrequency");
+    backend.gbufFoliagePhaseLoc =
+        dev->uniform_location(gbufProg, "uFoliagePhase");
     backend.gbufAlbedoLoc = dev->uniform_location(gbufProg, "uAlbedo");
     backend.gbufMetallicLoc = dev->uniform_location(gbufProg, "uMetallic");
     backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
@@ -2492,7 +2552,7 @@ bool initialize_backend() noexcept {
   }
 
   // Auto-exposure luminance shader (soft-fail: uses manual exposure).
-  core::cvar_register_bool("r_auto_exposure", false,
+  core::cvar_register_bool("r_auto_exposure", true,
                            "Enable automatic exposure adaptation");
   core::cvar_register_float("r_exposure", 1.0F, "Manual exposure value");
   core::cvar_register_float("r_auto_exposure_speed", 1.5F,
@@ -2625,7 +2685,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     dev->destroy_buffer(backend->instanceMatrixBuffer);
     backend->instanceMatrixBuffer = 0U;
   }
-  backend->instanceMatrices.clear();
+  backend->instanceAttributes.clear();
   backend->staticMeshBatches.clear();
 
   // Destroy deferred shaders.
@@ -2716,7 +2776,9 @@ bool material_less(const Material &lhs, const Material &rhs) noexcept {
 
 bool draw_commands_instance_compatible(const DrawCommand &lhs,
                                        const DrawCommand &rhs) noexcept {
-  return (lhs.mesh == rhs.mesh) && materials_equal(lhs.material, rhs.material);
+  return (lhs.mesh == rhs.mesh) && materials_equal(lhs.material, rhs.material) &&
+         (lhs.foliageWindStrength == rhs.foliageWindStrength) &&
+         (lhs.foliageWindFrequency == rhs.foliageWindFrequency);
 }
 
 std::uint64_t draw_key_state_bits(const DrawCommand &command) noexcept {
@@ -2744,31 +2806,42 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
     }
   }
 
-  backend.instanceMatrices.resize(batch.count);
+  backend.instanceAttributes.resize(batch.count);
   for (std::uint32_t i = 0U; i < batch.count; ++i) {
     const std::size_t commandIndex =
         static_cast<std::size_t>(batch.first) + static_cast<std::size_t>(i);
-    backend.instanceMatrices[i] =
-        commandBufferView.data[commandIndex].modelMatrix;
+    const DrawCommand &command = commandBufferView.data[commandIndex];
+    backend.instanceAttributes[i].model = command.modelMatrix;
+    backend.instanceAttributes[i].foliage =
+        math::Vec4(command.foliageWindPhase,
+                   static_cast<float>(command.foliageLodIndex), 0.0F, 0.0F);
   }
 
   dev->bind_vertex_array(mesh.vertexArray);
   dev->bind_array_buffer(backend.instanceMatrixBuffer);
   dev->buffer_data_array(
-      backend.instanceMatrices.data(),
-      static_cast<std::ptrdiff_t>(backend.instanceMatrices.size() *
-                                  sizeof(math::Mat4)));
+      backend.instanceAttributes.data(),
+      static_cast<std::ptrdiff_t>(backend.instanceAttributes.size() *
+                                  sizeof(InstanceAttributes)));
 
-  constexpr std::int32_t stride = static_cast<std::int32_t>(sizeof(math::Mat4));
+  constexpr std::int32_t stride =
+      static_cast<std::int32_t>(sizeof(InstanceAttributes));
   for (std::uint32_t column = 0U; column < kInstanceModelAttribCount;
        ++column) {
     const std::uint32_t attrib = kInstanceModelAttrib0 + column;
     const auto offset = reinterpret_cast<const void *>(
-        static_cast<std::uintptr_t>(sizeof(float) * 4U * column));
+        static_cast<std::uintptr_t>(offsetof(InstanceAttributes, model) +
+                                    (sizeof(float) * 4U * column)));
     dev->enable_vertex_attrib(attrib);
     dev->vertex_attrib_float(attrib, 4, stride, offset);
     dev->vertex_attrib_divisor(attrib, 1U);
   }
+
+  const auto foliageOffset = reinterpret_cast<const void *>(
+      static_cast<std::uintptr_t>(offsetof(InstanceAttributes, foliage)));
+  dev->enable_vertex_attrib(kInstanceFoliageAttrib);
+  dev->vertex_attrib_float(kInstanceFoliageAttrib, 4, stride, foliageOffset);
+  dev->vertex_attrib_divisor(kInstanceFoliageAttrib, 1U);
 
   return true;
 }
@@ -2833,6 +2906,10 @@ std::uint64_t directional_shadow_cache_key(
     hash = hash_u64(hash, command.sortKey.value);
     hash = hash_u64(hash, command.entity);
     hash = hash_u64(hash, command.mesh.id);
+    hash = hash_float(hash, command.foliageWindStrength);
+    hash = hash_float(hash, command.foliageWindFrequency);
+    hash = hash_float(hash, command.foliageWindPhase);
+    hash = hash_u64(hash, command.foliageLodIndex);
     hash = hash_mat4(hash, command.modelMatrix);
   }
 
@@ -2918,6 +2995,12 @@ void CommandBufferBuilder::sort_by_key() noexcept {
               }
               if (!materials_equal(lhs.material, rhs.material)) {
                 return material_less(lhs.material, rhs.material);
+              }
+              if (lhs.foliageWindStrength != rhs.foliageWindStrength) {
+                return lhs.foliageWindStrength < rhs.foliageWindStrength;
+              }
+              if (lhs.foliageWindFrequency != rhs.foliageWindFrequency) {
+                return lhs.foliageWindFrequency < rhs.foliageWindFrequency;
               }
               return (lhs.sortKey.value & kDrawKeyDepthMask) <
                      (rhs.sortKey.value & kDrawKeyDepthMask);
@@ -3419,6 +3502,9 @@ void flush_renderer(CommandBufferView commandBufferView,
     if (backend.gbufProjectionLoc >= 0) {
       dev->set_uniform_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
     }
+    if (backend.gbufTimeLoc >= 0) {
+      dev->set_uniform_float(backend.gbufTimeLoc, timeSeconds);
+    }
 
     auto drawGBufferBatches = [&]() {
       std::uint32_t boundVertexArray = 0U;
@@ -3457,6 +3543,7 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->set_uniform_vec3(backend.gbufEmissiveLoc,
                                 &command.material.emissive.x);
         }
+        upload_gbuffer_foliage_uniforms(backend, dev, command);
 
         if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
             upload_instance_matrices(backend, dev, *mesh, commandBufferView,
@@ -3482,6 +3569,7 @@ void flush_renderer(CommandBufferView commandBufferView,
               static_cast<std::size_t>(batch.first) +
               static_cast<std::size_t>(local);
           const DrawCommand &singleCommand = commandBufferView.data[commandIndex];
+          upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
           const math::Mat4 model = compute_model_matrix(singleCommand);
           float normalMatrix[9] = {};
           extract_normal_matrix(model, normalMatrix);
@@ -3999,6 +4087,7 @@ void flush_renderer(CommandBufferView commandBufferView,
           if (backend.pbrOpacityLocation >= 0)
             dev->set_uniform_float(backend.pbrOpacityLocation,
                                    cmd.material.opacity);
+          upload_pbr_foliage_uniforms(backend, dev, cmd);
           const std::uint32_t albedoGpu =
               texture_gpu_id(cmd.material.albedoTexture);
           const bool hasTex =
@@ -4111,6 +4200,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.pbrUseInstancingLocation >= 0) {
         dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
       }
+      upload_pbr_foliage_uniforms(backend, dev, command);
       if (backend.pbrModelLocation >= 0) {
         dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
       }
@@ -4184,6 +4274,7 @@ void flush_renderer(CommandBufferView commandBufferView,
           }
 
           uploadForwardMaterial(command.material, &boundAlbedoTexture);
+          upload_pbr_foliage_uniforms(backend, dev, command);
 
           if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
               upload_instance_matrices(backend, dev, *mesh, commandBufferView,
@@ -4358,7 +4449,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   // --- Auto-exposure pass: compute average luminance → adapt exposure ---
   const bool autoExposureEnabled =
       backend.autoExposureAvailable &&
-      core::cvar_get_bool("r_auto_exposure", false);
+      core::cvar_get_bool("r_auto_exposure", true);
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
     ensure_luminance_resources(backend, drawableWidth, drawableHeight);
