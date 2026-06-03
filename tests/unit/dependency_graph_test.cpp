@@ -1,3 +1,5 @@
+// Verifies dependency graph test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +25,7 @@ bool make_temp_graph_path(char *outPath, std::size_t outSize) {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   using Graph = engine::tools::DependencyGraph;
   using AssetId = Graph::AssetId;

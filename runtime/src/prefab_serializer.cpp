@@ -1,3 +1,5 @@
+// Implements prefab serializer behavior for the Engine runtime world.
+
 #include "engine/runtime/prefab_serializer.h"
 
 #include <cstddef>
@@ -19,6 +21,7 @@ constexpr const char *kPrefabLogChannel = "prefab";
 constexpr std::uint32_t kPrefabVersion = 1U;
 [[maybe_unused]] constexpr std::size_t kReadBufferInit = 64U * 1024U;
 
+/// Handles prefab open write.
 bool prefab_open_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -32,6 +35,7 @@ bool prefab_open_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles prefab read file.
 bool prefab_read_file(const char *path, std::unique_ptr<char[]> *outBuf,
                       std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuf == nullptr) || (outSize == nullptr)) {
@@ -86,6 +90,7 @@ bool prefab_read_file(const char *path, std::unique_ptr<char[]> *outBuf,
   return true;
 }
 
+/// Writes vec3 arr data.
 void write_vec3_arr(core::JsonWriter &w, const char *key,
                     const math::Vec3 &v) noexcept {
   w.begin_array(key);
@@ -95,6 +100,7 @@ void write_vec3_arr(core::JsonWriter &w, const char *key,
   w.end_array();
 }
 
+/// Writes quat arr data.
 void write_quat_arr(core::JsonWriter &w, const char *key,
                     const math::Quat &q) noexcept {
   w.begin_array(key);
@@ -105,6 +111,7 @@ void write_quat_arr(core::JsonWriter &w, const char *key,
   w.end_array();
 }
 
+/// Reads vec3 data.
 bool read_vec3(const core::JsonParser &p, const core::JsonValue &v,
                math::Vec3 *out) noexcept {
   if ((out == nullptr) || (v.type != core::JsonValue::Type::Array)) {
@@ -121,6 +128,7 @@ bool read_vec3(const core::JsonParser &p, const core::JsonValue &v,
   return true;
 }
 
+/// Reads quat data.
 bool read_quat(const core::JsonParser &p, const core::JsonValue &v,
                math::Quat *out) noexcept {
   if ((out == nullptr) || (v.type != core::JsonValue::Type::Array)) {
@@ -137,6 +145,7 @@ bool read_quat(const core::JsonParser &p, const core::JsonValue &v,
   return true;
 }
 
+/// Writes foliage patch data.
 void write_foliage_patch(core::JsonWriter &w,
                          const FoliagePatchComponent &foliage) noexcept {
   w.write_key(kJsonKeyFoliagePatchComponent);
@@ -177,6 +186,7 @@ void write_foliage_patch(core::JsonWriter &w,
   w.end_object();
 }
 
+/// Reads foliage patch data.
 bool read_foliage_patch(const core::JsonParser &p, const core::JsonValue &v,
                         FoliagePatchComponent *out) noexcept {
   if ((out == nullptr) || (v.type != core::JsonValue::Type::Object)) {
@@ -278,6 +288,7 @@ bool read_foliage_patch(const core::JsonParser &p, const core::JsonValue &v,
 
 } // namespace
 
+/// Saves the requested resource for prefab.
 bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (!world.is_alive(entity) || (path == nullptr)) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
@@ -449,6 +460,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   return true;
 }
 
+/// Handles instantiate prefab.
 Entity instantiate_prefab(World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,

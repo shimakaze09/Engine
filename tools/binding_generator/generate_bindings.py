@@ -64,6 +64,7 @@ TYPE_MAP = {
 }
 
 
+# Parses text into the engine representation for params.
 def parse_params(param_str):
     """Parse 'name: type, name2: type2' into list of (name, type_key)."""
     params = []
@@ -83,6 +84,7 @@ def parse_params(param_str):
     return params
 
 
+# Parses text into the engine representation for header.
 def parse_header(path):
     """Parse a header file and return list of binding descriptors."""
     bindings = []
@@ -120,6 +122,7 @@ def parse_header(path):
     return bindings
 
 
+# Handles generate wrapper.
 def generate_wrapper(binding):
     """Generate a Lua C API wrapper function for a binding."""
     lua_name = binding['lua_name']
@@ -163,6 +166,7 @@ def generate_wrapper(binding):
     return '\n'.join(lines)
 
 
+# Handles generate registration.
 def generate_registration(bindings):
     """Generate a function that registers all bindings into an 'engine' table."""
     lines = []
@@ -176,6 +180,7 @@ def generate_registration(bindings):
     return '\n'.join(lines)
 
 
+# Handles generate output.
 def generate_output(bindings, input_headers):
     """Generate the full output .cpp file."""
     parts = []
@@ -217,6 +222,7 @@ def generate_output(bindings, input_headers):
     return '\n'.join(parts)
 
 
+# Runs this executable or test program.
 def main():
     parser = argparse.ArgumentParser(description='Lua binding generator')
     parser.add_argument('inputs', nargs='+', help='Input C++ header files')

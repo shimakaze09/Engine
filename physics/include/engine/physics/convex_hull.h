@@ -1,3 +1,5 @@
+// Declares convex hull types and APIs for the Engine physics system.
+
 #pragma once
 
 #include "engine/math/vec3.h"
@@ -41,12 +43,15 @@ GjkResult gjk_epa(const void *shapeA, const math::Vec3 &centerA,
 math::Vec3 support_convex_hull(const void *data, const math::Vec3 &center,
                                const math::Vec3 &dir) noexcept;
 
+/// Handles support sphere.
 math::Vec3 support_sphere(const void *data, const math::Vec3 &center,
                           const math::Vec3 &dir) noexcept;
 
+/// Handles support capsule.
 math::Vec3 support_capsule(const void *data, const math::Vec3 &center,
                            const math::Vec3 &dir) noexcept;
 
+/// Handles support aabb.
 math::Vec3 support_aabb(const void *data, const math::Vec3 &center,
                         const math::Vec3 &dir) noexcept;
 

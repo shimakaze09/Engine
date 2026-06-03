@@ -1,3 +1,5 @@
+// Implements editor behavior for the Engine editor tool.
+
 #include "engine/editor/editor.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -66,6 +68,7 @@ namespace {
 bool g_editorInitialized = false;
 runtime::World *g_world = nullptr;
 std::uint32_t g_selectedEntityIndex = 0U;
+/// Enumerates play state values used by the engine.
 enum class PlayState : std::uint8_t { Stopped, Playing, Paused };
 PlayState g_playState = PlayState::Stopped;
 std::unique_ptr<char[]> g_playSnapshotBuffer{};
@@ -120,6 +123,7 @@ constexpr std::size_t kMaxThumbnails = 128U;
 ThumbnailEntry g_thumbnailCache[kMaxThumbnails] = {};
 std::size_t g_thumbnailCount = 0U;
 
+/// Loads the requested resource for thumbnail texture.
 GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
     return 0U;
@@ -203,17 +207,20 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   return tex;
 }
 
+/// Handles world is editable.
 bool world_is_editable() noexcept {
   return (g_world != nullptr) && !g_worldRestoreFailed &&
          (g_playState == PlayState::Stopped) &&
          (g_world->current_phase() == runtime::WorldPhase::Idle);
 }
 
+/// Handles world can load scene.
 bool world_can_load_scene() noexcept {
   return (g_world != nullptr) &&
          (g_world->current_phase() == runtime::WorldPhase::Idle);
 }
 
+/// Stores transform edit command data used by the engine.
 struct TransformEditCommand final : EditorCommand {
   runtime::Entity entity{};
   runtime::Transform oldTransform{};
@@ -232,6 +239,7 @@ struct TransformEditCommand final : EditorCommand {
   }
 };
 
+/// Enumerates component edit type values used by the engine.
 enum class ComponentEditType : std::uint8_t {
   Name,
   Transform,
@@ -247,9 +255,11 @@ enum class ComponentEditType : std::uint8_t {
   SpringArm,
 };
 
+/// Handles make default entity name.
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept;
 
+/// Stores component edit snapshot data used by the engine.
 struct ComponentEditSnapshot final {
   runtime::NameComponent name{};
   runtime::Transform transform{};
@@ -265,6 +275,7 @@ struct ComponentEditSnapshot final {
   runtime::SpringArmComponent springArm{};
 };
 
+/// Handles capture component snapshot.
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
                                 ComponentEditSnapshot *out) noexcept {
   if ((g_world == nullptr) || (out == nullptr)) {
@@ -301,6 +312,7 @@ bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
   return false;
 }
 
+/// Handles apply component snapshot.
 bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
                               bool exists,
                               const ComponentEditSnapshot &snapshot) noexcept {
@@ -374,6 +386,7 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
   return false;
 }
 
+/// Stores component edit command data used by the engine.
 struct ComponentEditCommand final : EditorCommand {
   runtime::Entity entity{};
   ComponentEditType type = ComponentEditType::Transform;
@@ -393,6 +406,7 @@ struct ComponentEditCommand final : EditorCommand {
   }
 };
 
+/// Handles execute component add.
 void execute_component_add(runtime::Entity entity, ComponentEditType type,
                            const ComponentEditSnapshot &after) noexcept {
   ComponentEditSnapshot before{};
@@ -413,6 +427,7 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
   g_commandHistory.execute(cmd);
 }
 
+/// Handles execute component remove.
 void execute_component_remove(runtime::Entity entity,
                               ComponentEditType type) noexcept {
   ComponentEditSnapshot before{};
@@ -434,6 +449,7 @@ void execute_component_remove(runtime::Entity entity,
   g_commandHistory.execute(cmd);
 }
 
+/// Handles default component snapshot.
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept {
   ComponentEditSnapshot snapshot{};
@@ -486,6 +502,7 @@ ComponentEditSnapshot default_component_snapshot(
   return snapshot;
 }
 
+/// Handles make default entity name.
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept {
   if (outName == nullptr) {
@@ -496,6 +513,7 @@ void make_default_entity_name(std::uint32_t entityIndex,
   outName->name[sizeof(outName->name) - 1U] = '\0';
 }
 
+/// Handles capture play snapshot.
 bool capture_play_snapshot() noexcept {
   if (g_world == nullptr) {
     return false;
@@ -544,6 +562,7 @@ bool capture_play_snapshot() noexcept {
   return false;
 }
 
+/// Handles start play mode.
 void start_play_mode() noexcept {
   if (g_world == nullptr) {
     return;
@@ -571,6 +590,7 @@ void start_play_mode() noexcept {
   core::log_message(core::LogLevel::Info, "editor", "play");
 }
 
+/// Handles pause play mode.
 void pause_play_mode() noexcept {
   if ((g_world == nullptr) || (g_playState != PlayState::Playing)) {
     return;
@@ -580,6 +600,7 @@ void pause_play_mode() noexcept {
   core::log_message(core::LogLevel::Info, "editor", "pause");
 }
 
+/// Handles stop play mode.
 void stop_play_mode() noexcept {
   if ((g_world == nullptr) || (g_playState == PlayState::Stopped)) {
     return;
@@ -610,12 +631,14 @@ void stop_play_mode() noexcept {
   core::log_message(core::LogLevel::Info, "editor", "stop");
 }
 
+/// Handles mark modified.
 void mark_modified(bool *modified, bool changed) noexcept {
   if ((modified != nullptr) && changed) {
     *modified = true;
   }
 }
 
+/// Handles draw vec2 field.
 void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -633,6 +656,7 @@ void draw_vec2_field(const char *label, math::Vec2 &value,
   ImGui::PopID();
 }
 
+/// Handles draw vec3 field.
 void draw_vec3_field(const char *label, math::Vec3 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -654,6 +678,7 @@ void draw_vec3_field(const char *label, math::Vec3 &value,
   ImGui::PopID();
 }
 
+/// Handles draw vec4 field.
 void draw_vec4_field(const char *label, math::Vec4 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -679,6 +704,7 @@ void draw_vec4_field(const char *label, math::Vec4 &value,
   ImGui::PopID();
 }
 
+/// Handles draw quat field.
 void draw_quat_field(const char *label, math::Quat &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -704,6 +730,7 @@ void draw_quat_field(const char *label, math::Quat &value,
   ImGui::PopID();
 }
 
+/// Handles draw field.
 void draw_field(const core::TypeDescriptor &desc, void *instance,
                 const core::TypeField &field, bool *modified) noexcept {
   if ((instance == nullptr) || (field.name == nullptr)) {
@@ -777,6 +804,7 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
   }
 }
 
+/// Handles draw reflected component.
 bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   if ((typeName == nullptr) || (instance == nullptr)) {
     return false;
@@ -797,6 +825,7 @@ bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   return modified;
 }
 
+/// Handles draw main menu bar.
 void draw_main_menu_bar() noexcept {
   if (!ImGui::BeginMainMenuBar()) {
     return;
@@ -869,6 +898,7 @@ void draw_main_menu_bar() noexcept {
   ImGui::EndMainMenuBar();
 }
 
+/// Handles draw remove component button.
 bool draw_remove_component_button(const char *id, bool editable) noexcept {
   if (!editable || (id == nullptr)) {
     return false;
@@ -882,6 +912,7 @@ bool draw_remove_component_button(const char *id, bool editable) noexcept {
   return removePressed;
 }
 
+/// Handles draw add component combo.
 void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   if (!editable || (g_world == nullptr)) {
     return;
@@ -1018,6 +1049,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   ImGui::EndCombo();
 }
 
+/// Handles draw foliage patch fields.
 void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
                                bool editable, bool *modified) noexcept {
   if (!editable) {
@@ -1106,6 +1138,7 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
   }
 }
 
+/// Handles draw toolbar.
 void draw_toolbar() noexcept {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {
@@ -1186,6 +1219,7 @@ void draw_toolbar() noexcept {
   ImGui::End();
 }
 
+/// Handles draw entities panel.
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
     ImGui::End();
@@ -1238,6 +1272,7 @@ void draw_entities_panel() noexcept {
   ImGui::End();
 }
 
+/// Handles draw inspector panel.
 void draw_inspector_panel() noexcept {
   if (!ImGui::Begin("Inspector")) {
     ImGui::End();
@@ -1691,6 +1726,7 @@ void draw_inspector_panel() noexcept {
   ImGui::End();
 }
 
+/// Handles draw profiler flame graph.
 void draw_profiler_flame_graph() noexcept {
   std::array<core::ProfileEntry, 256U> entries{};
   const std::size_t count =
@@ -1742,6 +1778,7 @@ void draw_profiler_flame_graph() noexcept {
   ImGui::Dummy(ImVec2(graphWidth, graphHeight));
 }
 
+/// Handles draw stats panel.
 void draw_stats_panel(const core::EngineStats &stats) noexcept {
   if (!ImGui::Begin("Stats")) {
     ImGui::End();
@@ -1793,6 +1830,7 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
   ImGui::End();
 }
 
+/// Handles draw in game stats overlay.
 void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   constexpr ImGuiWindowFlags kOverlayFlags =
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -1816,6 +1854,7 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   ImGui::End();
 }
 
+/// Handles draw asset tree.
 void draw_asset_tree(const std::filesystem::path &dir) noexcept {
   std::error_code ec{};
   for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
@@ -2031,6 +2070,7 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
 }
 
+/// Handles draw asset browser panel.
 void draw_asset_browser_panel() noexcept {
   if (!ImGui::Begin("Assets")) {
     ImGui::End();
@@ -2064,6 +2104,7 @@ void draw_asset_browser_panel() noexcept {
   ImGui::End();
 }
 
+/// Handles project world to screen.
 bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
                              const ImVec2 &viewportOrigin,
                              const ImVec2 &viewportSize,
@@ -2089,6 +2130,7 @@ bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
   return true;
 }
 
+/// Handles draw selected collider overlay.
 void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
                                     const math::Mat4 &viewProjection,
                                     const ImVec2 &viewportOrigin,
@@ -2151,6 +2193,7 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
   }
 }
 
+/// Handles draw scene viewport panel.
 void draw_scene_viewport_panel() noexcept {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
   const bool visible = ImGui::Begin("Scene");
@@ -2316,6 +2359,7 @@ void draw_scene_viewport_panel() noexcept {
   ImGui::End();
 }
 
+/// Handles setup default dock layout.
 void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderRemoveNode(dockspaceId);
   ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
@@ -2338,6 +2382,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderFinish(dockspaceId);
 }
 
+/// Handles draw editor panels.
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   static_cast<void>(frameMs);
   static_cast<void>(utilizationPct);
@@ -2395,6 +2440,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
 
 } // namespace
 
+/// Initializes the owning system for editor.
 bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   if (g_editorInitialized) {
     return true;
@@ -2436,6 +2482,7 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   return true;
 }
 
+/// Shuts down the owning system for editor.
 void shutdown_editor() noexcept {
   if (!g_editorInitialized) {
     return;
@@ -2454,6 +2501,7 @@ void shutdown_editor() noexcept {
   g_worldRestoreFailed = false;
 }
 
+/// Handles editor new frame.
 void editor_new_frame() noexcept {
   if (!g_editorInitialized) {
     return;
@@ -2485,6 +2533,7 @@ void editor_new_frame() noexcept {
   }
 }
 
+/// Handles editor render.
 void editor_render(float frameMs, float utilizationPct) noexcept {
   if (!g_editorInitialized) {
     return;
@@ -2495,6 +2544,7 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
+/// Handles editor process event.
 void editor_process_event(void *sdlEvent) noexcept {
   if (!g_editorInitialized || (sdlEvent == nullptr)) {
     return;
@@ -2503,6 +2553,7 @@ void editor_process_event(void *sdlEvent) noexcept {
   ImGui_ImplSDL2_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
 }
 
+/// Handles editor set world.
 void editor_set_world(runtime::World *world) noexcept {
   g_world = world;
   if (world == nullptr) {
@@ -2514,12 +2565,15 @@ void editor_set_world(runtime::World *world) noexcept {
   }
 }
 
+/// Handles editor is playing.
 bool editor_is_playing() noexcept { return g_playState == PlayState::Playing; }
 
+/// Handles editor is paused.
 bool editor_is_paused() noexcept { return g_playState == PlayState::Paused; }
 
 namespace {
 
+/// Handles editor wants capture keyboard.
 bool editor_wants_capture_keyboard() noexcept {
   if (!g_editorInitialized) {
     return false;
@@ -2528,6 +2582,7 @@ bool editor_wants_capture_keyboard() noexcept {
   return ImGui::GetIO().WantCaptureKeyboard;
 }
 
+/// Handles editor wants capture mouse.
 bool editor_wants_capture_mouse() noexcept {
   if (!g_editorInitialized) {
     return false;

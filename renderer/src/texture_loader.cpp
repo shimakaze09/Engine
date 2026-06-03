@@ -1,3 +1,5 @@
+// Implements texture loader behavior for the Engine renderer system.
+
 #include "engine/renderer/texture_loader.h"
 
 #include <array>
@@ -56,6 +58,7 @@ constexpr std::int32_t kHdrCubemapChannels = 3;
 constexpr std::int32_t kMaxCubemapFaceSize = 4096;
 constexpr double kPi = 3.14159265358979323846264338327950288;
 
+/// Stores texture slot data used by the engine.
 struct TextureSlot final {
   std::uint32_t gpuId = 0U;
   bool occupied = false;
@@ -64,6 +67,7 @@ struct TextureSlot final {
   std::array<char, kMaxPathLen> path{};
 };
 
+/// Stores texture system state data used by the engine.
 struct TextureSystemState final {
   bool initialized = false;
   std::array<TextureSlot, kMaxTextureSlots> slots{};
@@ -71,6 +75,7 @@ struct TextureSystemState final {
 
 TextureSystemState g_texState{};
 
+/// Handles safe copy path.
 void safe_copy_path(char *dst, std::size_t dstSize, const char *src) noexcept {
   if ((dst == nullptr) || (src == nullptr) || (dstSize == 0U)) {
     return;
@@ -84,6 +89,7 @@ void safe_copy_path(char *dst, std::size_t dstSize, const char *src) noexcept {
   dst[i] = '\0';
 }
 
+/// Finds the matching object or resource for free texture slot.
 std::size_t find_free_texture_slot() noexcept {
   // Slot 0 is reserved as the invalid handle.
   for (std::size_t i = 1U; i < kMaxTextureSlots; ++i) {
@@ -95,6 +101,7 @@ std::size_t find_free_texture_slot() noexcept {
   return 0U;
 }
 
+/// Handles lookup texture slot.
 TextureSlot *lookup_texture_slot(TextureHandle handle) noexcept {
   if (!g_texState.initialized || handle == kInvalidTextureHandle) {
     return nullptr;
@@ -108,6 +115,7 @@ TextureSlot *lookup_texture_slot(TextureHandle handle) noexcept {
   return &g_texState.slots[idx];
 }
 
+/// Handles clamp int.
 int clamp_int(int value, int minValue, int maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -118,6 +126,7 @@ int clamp_int(int value, int minValue, int maxValue) noexcept {
   return value;
 }
 
+/// Handles clamp float.
 float clamp_float(float value, float minValue, float maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -128,6 +137,7 @@ float clamp_float(float value, float minValue, float maxValue) noexcept {
   return value;
 }
 
+/// Handles wrap index.
 int wrap_index(int value, int count) noexcept {
   int result = value % count;
   if (result < 0) {
@@ -136,12 +146,14 @@ int wrap_index(int value, int count) noexcept {
   return result;
 }
 
+/// Stores vec3 data used by the engine.
 struct Vec3 final {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
 };
 
+/// Clamps and fills settings into a safe runtime range.
 Vec3 normalize(Vec3 value) noexcept {
   const float lenSq = value.x * value.x + value.y * value.y + value.z * value.z;
   if (lenSq <= 0.0F) {
@@ -155,6 +167,7 @@ Vec3 normalize(Vec3 value) noexcept {
   return value;
 }
 
+/// Handles cube face direction.
 Vec3 cube_face_direction(int face, float u, float v) noexcept {
   switch (face) {
   case 0:
@@ -172,6 +185,7 @@ Vec3 cube_face_direction(int face, float u, float v) noexcept {
   }
 }
 
+/// Handles sample equirect channel.
 float sample_equirect_channel(const float *pixels, int width, int height,
                               double u, double v, int channel) noexcept {
   u -= std::floor(u);
@@ -209,6 +223,7 @@ float sample_equirect_channel(const float *pixels, int width, int height,
   return cx0 + (cx1 - cx0) * ty;
 }
 
+/// Handles sample equirect direction.
 void sample_equirect_direction(const float *pixels, int width, int height,
                                Vec3 direction, float *outRgb) noexcept {
   const double theta = std::atan2(static_cast<double>(direction.z),
@@ -224,6 +239,7 @@ void sample_equirect_direction(const float *pixels, int width, int height,
   }
 }
 
+/// Handles allocate equirect cubemap faces.
 bool allocate_equirect_cubemap_faces(
     const float *pixels, int width, int height, std::int32_t faceSize,
     std::array<std::unique_ptr<float[]>, 6> &faces) noexcept {
@@ -276,6 +292,7 @@ bool allocate_equirect_cubemap_faces(
 
 } // namespace
 
+/// Initializes the owning system for texture system.
 bool initialize_texture_system() noexcept {
   if (g_texState.initialized) {
     return true;
@@ -286,6 +303,7 @@ bool initialize_texture_system() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for texture system.
 void shutdown_texture_system() noexcept {
   if (!g_texState.initialized) {
     return;
@@ -304,6 +322,7 @@ void shutdown_texture_system() noexcept {
   g_texState.initialized = false;
 }
 
+/// Loads the requested resource for texture.
 TextureHandle load_texture(const char *virtualPath) noexcept {
   if ((virtualPath == nullptr) || !g_texState.initialized) {
     return kInvalidTextureHandle;
@@ -396,6 +415,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   return handle;
 }
 
+/// Loads the requested resource for hdr equirect cubemap.
 TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
                                         std::int32_t faceSize) noexcept {
   if ((virtualPath == nullptr) || !g_texState.initialized || (faceSize <= 0) ||
@@ -495,6 +515,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   return handle;
 }
 
+/// Handles unload texture.
 void unload_texture(TextureHandle handle) noexcept {
   if (!g_texState.initialized || handle == kInvalidTextureHandle) {
     return;
@@ -513,6 +534,7 @@ void unload_texture(TextureHandle handle) noexcept {
   g_texState.slots[idx] = TextureSlot{};
 }
 
+/// Handles texture gpu id.
 std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {
@@ -522,6 +544,7 @@ std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {
   return slot->gpuId;
 }
 
+/// Returns whether is texture hdr.
 bool is_texture_hdr(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {
@@ -531,6 +554,7 @@ bool is_texture_hdr(TextureHandle handle) noexcept {
   return slot->hdr;
 }
 
+/// Returns whether is texture cubemap.
 bool is_texture_cubemap(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {

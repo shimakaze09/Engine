@@ -1,3 +1,5 @@
+// Verifies determinism test behavior for the Engine test suite.
+
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -14,6 +16,7 @@ constexpr int kStepCount = 240;
 constexpr float kStepSeconds = 1.0F / 60.0F;
 constexpr std::uint64_t kExpectedHash = 0ULL;
 
+/// Handles populate world.
 bool populate_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
     return false;
@@ -44,6 +47,7 @@ bool populate_world(engine::runtime::World *world) noexcept {
   return true;
 }
 
+/// Runs the configured command, loop, or tool for sim.
 bool run_sim(std::uint64_t *outHash) noexcept {
   if (outHash == nullptr) {
     return false;
@@ -119,6 +123,7 @@ bool run_sim(std::uint64_t *outHash) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   std::uint64_t hashA = 0U;
   std::uint64_t hashB = 0U;

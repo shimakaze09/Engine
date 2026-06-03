@@ -1,3 +1,5 @@
+// Declares prefab serializer types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include "engine/core/entity.h"
@@ -6,6 +8,7 @@ namespace engine::runtime {
 
 using engine::core::Entity;
 
+/// Owns the world behavior and state.
 class World;
 
 // Save a single entity and all its components to a JSON prefab file.

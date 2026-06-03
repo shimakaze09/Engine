@@ -1,3 +1,5 @@
+// Implements scene serializer behavior for the Engine runtime world.
+
 #include "engine/runtime/scene_serializer.h"
 
 #include <cstddef>
@@ -38,6 +40,7 @@ constexpr const char *kReflectionProbeTypeName =
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
+/// Handles open file for read.
 bool open_file_for_read(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -52,6 +55,7 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -66,6 +70,7 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Reads text file data.
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
@@ -117,6 +122,7 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
   return true;
 }
 
+/// Writes text file data.
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept {
   if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
@@ -133,6 +139,7 @@ bool write_text_file(const char *path, const char *text,
   return written == size;
 }
 
+/// Writes vec2 data.
 void write_vec2(core::JsonWriter &writer, const char *key,
                 const math::Vec2 &value) noexcept {
   writer.begin_array(key);
@@ -141,6 +148,7 @@ void write_vec2(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Writes vec3 data.
 void write_vec3(core::JsonWriter &writer, const char *key,
                 const math::Vec3 &value) noexcept {
   writer.begin_array(key);
@@ -150,6 +158,7 @@ void write_vec3(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Writes vec4 data.
 void write_vec4(core::JsonWriter &writer, const char *key,
                 const math::Vec4 &value) noexcept {
   writer.begin_array(key);
@@ -160,6 +169,7 @@ void write_vec4(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Writes quat data.
 void write_quat(core::JsonWriter &writer, const char *key,
                 const math::Quat &value) noexcept {
   writer.begin_array(key);
@@ -170,6 +180,7 @@ void write_quat(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Reads float array data.
 bool read_float_array(const core::JsonParser &parser,
                       const core::JsonValue &arrayValue, float *outValues,
                       std::size_t expectedCount) noexcept {
@@ -196,6 +207,7 @@ bool read_float_array(const core::JsonParser &parser,
   return true;
 }
 
+/// Reads vec2 data.
 bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec2 *outVec) noexcept {
   if (outVec == nullptr) {
@@ -212,6 +224,7 @@ bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Reads vec3 data.
 bool read_vec3(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec3 *outVec) noexcept {
   if (outVec == nullptr) {
@@ -229,6 +242,7 @@ bool read_vec3(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Reads vec4 data.
 bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec4 *outVec) noexcept {
   if (outVec == nullptr) {
@@ -247,6 +261,7 @@ bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Reads quat data.
 bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
                math::Quat *outQuat) noexcept {
   if (outQuat == nullptr) {
@@ -265,6 +280,7 @@ bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Writes reflected component data.
 bool write_reflected_component(core::JsonWriter &writer,
                                const char *componentName,
                                const core::TypeDescriptor &descriptor,
@@ -365,6 +381,7 @@ bool write_reflected_component(core::JsonWriter &writer,
   return !writer.failed();
 }
 
+/// Reads reflected component data.
 bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
@@ -445,6 +462,7 @@ bool read_reflected_component(const core::JsonParser &parser,
   return true;
 }
 
+/// Reads mesh component data.
 bool read_mesh_component(const core::JsonParser &parser,
                          const core::JsonValue &meshObject,
                          MeshComponent *outComponent) noexcept {
@@ -493,6 +511,7 @@ bool read_mesh_component(const core::JsonParser &parser,
   return true;
 }
 
+/// Writes foliage patch component data.
 void write_foliage_patch_component(
     core::JsonWriter &writer,
     const FoliagePatchComponent &component) noexcept {
@@ -534,6 +553,7 @@ void write_foliage_patch_component(
   writer.end_object();
 }
 
+/// Reads foliage patch component data.
 bool read_foliage_patch_component(
     const core::JsonParser &parser, const core::JsonValue &foliageObject,
     FoliagePatchComponent *outComponent) noexcept {
@@ -644,6 +664,7 @@ bool read_foliage_patch_component(
   return true;
 }
 
+/// Reads light component data.
 bool read_light_component(const core::JsonParser &parser,
                           const core::JsonValue &lightObject,
                           LightComponent *outComponent) noexcept {
@@ -688,6 +709,7 @@ bool read_light_component(const core::JsonParser &parser,
   return true;
 }
 
+/// Handles log scene error.
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel, message);
@@ -696,6 +718,7 @@ bool log_scene_error(const char *message) noexcept {
   return false;
 }
 
+/// Handles deserialize scene entities.
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
                                 const core::TypeDescriptor &transformDesc,
@@ -933,6 +956,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
   return true;
 }
 
+/// Handles copy world contents.
 bool copy_world_contents(const World &sourceWorld,
                          World &targetWorld) noexcept {
   bool success = true;
@@ -1050,6 +1074,7 @@ bool copy_world_contents(const World &sourceWorld,
   return success;
 }
 
+/// Handles serialize scene to writer.
 bool serialize_scene_to_writer(const World &world,
                                core::JsonWriter *outWriter) noexcept {
   if (outWriter == nullptr) {
@@ -1247,6 +1272,7 @@ bool serialize_scene_to_writer(const World &world,
 
 } // namespace
 
+/// Resets this object back to its reusable empty state for world.
 void reset_world(World &world) noexcept {
   if (world.alive_entity_count() == 0U) {
     return;
@@ -1259,6 +1285,7 @@ void reset_world(World &world) noexcept {
   }
 }
 
+/// Saves the requested resource for scene.
 bool save_scene(const World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
@@ -1280,6 +1307,7 @@ bool save_scene(const World &world, const char *path) noexcept {
   return true;
 }
 
+/// Saves the requested resource for scene.
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept {
   if ((buffer == nullptr) || (outSize == nullptr) || (capacity < 2U)) {
@@ -1306,6 +1334,7 @@ bool save_scene(const World &world, char *buffer, std::size_t capacity,
   return true;
 }
 
+/// Loads the requested resource for scene.
 bool load_scene(World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
@@ -1324,6 +1353,7 @@ bool load_scene(World &world, const char *path) noexcept {
   return load_scene(world, fileBuffer.get(), fileSize);
 }
 
+/// Loads the requested resource for scene.
 bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   if ((buffer == nullptr) || (size == 0U)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,

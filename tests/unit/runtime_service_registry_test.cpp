@@ -1,3 +1,5 @@
+// Verifies runtime service registry test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <memory>
 #include <new>
@@ -17,6 +19,7 @@ namespace {
 
 int g_failed = 0;
 
+/// Handles check.
 void check(bool condition, const char *name) noexcept {
   if (!condition) {
     ++g_failed;
@@ -26,6 +29,7 @@ void check(bool condition, const char *name) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   auto &loc = engine::core::global_service_locator();
   loc.clear();

@@ -1,3 +1,5 @@
+// Verifies asset dep load test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -13,6 +15,7 @@ struct LoadTracker {
   std::vector<engine::renderer::AssetId> loadOrder{};
 };
 
+/// Handles tracking load callback.
 bool tracking_load_callback(engine::renderer::AssetDatabase *db,
                             engine::renderer::AssetId id, void *userData) {
   (void)db;
@@ -24,6 +27,7 @@ bool tracking_load_callback(engine::renderer::AssetDatabase *db,
   return true;
 }
 
+/// Handles failing load callback.
 bool failing_load_callback(engine::renderer::AssetDatabase * /*db*/,
                            engine::renderer::AssetId id, void *userData) {
   // Fail on a specific asset.
@@ -33,6 +37,7 @@ bool failing_load_callback(engine::renderer::AssetDatabase * /*db*/,
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   using namespace engine::renderer;
 

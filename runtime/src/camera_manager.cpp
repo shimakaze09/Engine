@@ -1,3 +1,5 @@
+// Implements camera manager behavior for the Engine runtime world.
+
 #include "engine/runtime/camera_manager.h"
 
 #include <cmath>
@@ -9,13 +11,16 @@ namespace engine::runtime {
 namespace {
 constexpr const char *kLogChannel = "camera";
 
+/// Handles lerp.
 float lerp(float a, float b, float t) noexcept { return a + (b - a) * t; }
 
+/// Handles lerp vec3.
 math::Vec3 lerp_vec3(const math::Vec3 &a, const math::Vec3 &b,
                      float t) noexcept {
   return math::Vec3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
 }
 
+/// Handles clamp01.
 float clamp01(float v) noexcept {
   if (v < 0.0F) {
     return 0.0F;

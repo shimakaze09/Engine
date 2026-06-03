@@ -1,3 +1,5 @@
+// Declares physics context types and APIs for the Engine physics system.
+
 #pragma once
 
 // Physics-side types that were previously nested inside runtime::World.
@@ -28,6 +30,7 @@ static constexpr std::size_t kMaxCollisionPairs = 1024U;
 static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
 static constexpr std::size_t kMaxColliders = ENGINE_MAX_ENTITIES;
 
+/// Enumerates joint type values used by the engine.
 enum class JointType : std::uint8_t {
   Distance = 0,
   Hinge = 1,
@@ -37,6 +40,7 @@ enum class JointType : std::uint8_t {
   Fixed = 5,
 };
 
+/// Stores physics joint slot data used by the engine.
 struct PhysicsJointSlot final {
   Entity entityA = kInvalidEntity;
   Entity entityB = kInvalidEntity;
@@ -66,6 +70,7 @@ struct PhysicsJointSlot final {
   float accumulatedImpulse = 0.0F;
 };
 
+/// Stores physics context data used by the engine.
 struct PhysicsContext final {
   math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
   std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};

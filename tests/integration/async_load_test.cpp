@@ -21,6 +21,7 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
+/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
@@ -199,6 +200,7 @@ static void test_null_safety() noexcept {
   CHECK(pending_load_count(nullptr) == 0U, "null queue pending count");
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== Async Load Tests ===\n");
 

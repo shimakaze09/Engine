@@ -1,3 +1,5 @@
+// Implements audio behavior for the Engine audio system.
+
 #include "engine/audio/audio.h"
 
 #include <cstddef>
@@ -37,6 +39,7 @@ namespace {
 
 constexpr std::size_t kMaxSounds = 256U;
 
+/// Stores sound entry data used by the engine.
 struct SoundEntry final {
   bool active = false;
   ma_decoder decoder{};
@@ -44,6 +47,7 @@ struct SoundEntry final {
   void *fileData = nullptr;
 };
 
+/// Stores audio state data used by the engine.
 struct AudioState final {
   bool initialized = false;
   ma_engine engine{};
@@ -54,6 +58,7 @@ AudioState g_audio{};
 
 } // namespace
 
+/// Initializes the owning system for audio.
 bool initialize_audio() noexcept {
   if (g_audio.initialized) {
     return true;
@@ -74,6 +79,7 @@ bool initialize_audio() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for audio.
 void shutdown_audio() noexcept {
   if (!g_audio.initialized) {
     return;
@@ -98,12 +104,14 @@ void shutdown_audio() noexcept {
   core::log_message(core::LogLevel::Info, "audio", "audio shut down");
 }
 
+/// Advances this system for the current frame or tick for audio.
 void update_audio() noexcept {
   // miniaudio's default device-driven mode handles playback on its own
   // thread.  Nothing to pump here, but the function is kept as a hook for
   // future per-frame work (spatial position updates, etc.).
 }
 
+/// Loads the requested resource for sound.
 SoundHandle load_sound(const char *virtualPath) noexcept {
   if ((virtualPath == nullptr) || !g_audio.initialized) {
     return kInvalidSound;
@@ -162,6 +170,7 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   return SoundHandle{static_cast<std::uint32_t>(slot + 1U)};
 }
 
+/// Handles unload sound.
 void unload_sound(SoundHandle handle) noexcept {
   if ((handle.id == 0U) || (handle.id > kMaxSounds) || !g_audio.initialized) {
     return;
@@ -181,6 +190,7 @@ void unload_sound(SoundHandle handle) noexcept {
   entry.active = false;
 }
 
+/// Handles play sound.
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   if ((handle.id == 0U) || (handle.id > kMaxSounds) || !g_audio.initialized) {
     return false;
@@ -202,6 +212,7 @@ bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   return res == MA_SUCCESS;
 }
 
+/// Handles stop sound.
 void stop_sound(SoundHandle handle) noexcept {
   if ((handle.id == 0U) || (handle.id > kMaxSounds) || !g_audio.initialized) {
     return;
@@ -213,6 +224,7 @@ void stop_sound(SoundHandle handle) noexcept {
   }
 }
 
+/// Handles stop all.
 void stop_all() noexcept {
   if (!g_audio.initialized) {
     return;
@@ -225,6 +237,7 @@ void stop_all() noexcept {
   }
 }
 
+/// Sets the requested value for master volume.
 void set_master_volume(float volume) noexcept {
   if (!g_audio.initialized) {
     return;

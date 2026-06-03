@@ -1,3 +1,5 @@
+# Configures scripting build settings for the Engine repository.
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(ENGINE_BINDGEN_SCRIPT ${CMAKE_SOURCE_DIR}/tools/binding_generator/generate_bindings.py)

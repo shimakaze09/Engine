@@ -1,3 +1,5 @@
+// Declares service locator types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <array>
@@ -17,6 +19,7 @@ template <typename T> struct TypeIdTag final {
 template <typename T> const char TypeIdTag<T>::kTag = '\0';
 } // namespace detail
 
+/// Handles type id.
 template <typename T> TypeId type_id() noexcept {
   return &detail::TypeIdTag<T>::kTag;
 }
@@ -54,11 +57,16 @@ public:
   // Number of currently registered services.
   std::size_t count() const noexcept { return m_count; }
 
+/// Handles register raw.
 private:
+  /// Handles register raw.
   bool register_raw(TypeId id, void *service) noexcept;
+  /// Returns the requested value for raw.
   void *get_raw(TypeId id) const noexcept;
+  /// Removes a value or component from the target system for raw.
   bool remove_raw(TypeId id) noexcept;
 
+  /// Stores entry data used by the engine.
   struct Entry final {
     TypeId typeId = nullptr;
     void *service = nullptr;

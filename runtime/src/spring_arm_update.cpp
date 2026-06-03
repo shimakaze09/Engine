@@ -1,3 +1,5 @@
+// Implements spring arm update behavior for the Engine runtime world.
+
 #include "engine/runtime/spring_arm_update.h"
 
 #include <cmath>
@@ -10,6 +12,7 @@
 
 namespace engine::runtime {
 
+/// Advances this system for the current frame or tick for spring arm cameras.
 void update_spring_arm_cameras(World &world, float dt) noexcept {
   CameraManager &camMgr = world.camera_manager();
 

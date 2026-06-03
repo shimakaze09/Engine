@@ -1,3 +1,5 @@
+// Implements platform behavior for the Engine core engine.
+
 #include "engine/core/platform.h"
 
 #ifndef SDL_MAIN_HANDLED
@@ -50,6 +52,7 @@ constexpr std::size_t kPlatformPathMax = 1024U;
 constexpr char kDefaultOrganizationName[] = "Engine";
 constexpr char kDefaultApplicationName[] = "Engine";
 
+/// Handles validate path output.
 bool validate_path_output(char *outBuffer,
                           std::size_t bufferCapacity) noexcept {
   if ((outBuffer == nullptr) || (bufferCapacity == 0U)) {
@@ -59,6 +62,7 @@ bool validate_path_output(char *outBuffer,
   return true;
 }
 
+/// Handles non empty env.
 const char *non_empty_env(const char *name) noexcept {
 #if defined(_WIN32)
   static thread_local char value[kPlatformPathMax] = {};
@@ -81,6 +85,7 @@ const char *non_empty_env(const char *name) noexcept {
 #endif
 }
 
+/// Clamps and fills settings into a safe runtime range for directory path.
 void normalize_directory_path(char *path) noexcept {
   if (path == nullptr) {
     return;
@@ -102,6 +107,7 @@ void normalize_directory_path(char *path) noexcept {
   }
 }
 
+/// Handles copy normalized path.
 bool copy_normalized_path(const char *path, char *outBuffer,
                           std::size_t bufferCapacity) noexcept {
   if (!validate_path_output(outBuffer, bufferCapacity) || (path == nullptr) ||
@@ -119,6 +125,7 @@ bool copy_normalized_path(const char *path, char *outBuffer,
   return outBuffer[0] != '\0';
 }
 
+/// Handles append path segment.
 bool append_path_segment(char *base, std::size_t capacity,
                          const char *segment) noexcept {
   if ((base == nullptr) || (segment == nullptr) || (segment[0] == '\0')) {
@@ -147,6 +154,7 @@ bool append_path_segment(char *base, std::size_t capacity,
   return true;
 }
 
+/// Builds the requested runtime data for save base.
 bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
 #if defined(_WIN32)
   if (const char *appData = non_empty_env("APPDATA")) {
@@ -186,6 +194,7 @@ bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
 #endif
 }
 
+/// Handles log sdl error.
 void log_sdl_error(const char *message) noexcept {
   const char *sdlError = SDL_GetError();
   if ((sdlError == nullptr) || (sdlError[0] == '\0')) {
@@ -198,6 +207,7 @@ void log_sdl_error(const char *message) noexcept {
   log_message(LogLevel::Error, "platform", buffer);
 }
 
+/// Shuts down the owning system for platform resources.
 void shutdown_platform_resources() noexcept {
   if (g_glContext != nullptr) {
     SDL_GL_MakeCurrent(g_window, nullptr);
@@ -213,6 +223,7 @@ void shutdown_platform_resources() noexcept {
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
+/// Initializes the owning system for platform impl.
 bool initialize_platform_impl(int width, int height, const char *title,
                               bool vsync) noexcept {
   SDL_SetMainReady();
@@ -271,10 +282,12 @@ bool initialize_platform_impl(int width, int height, const char *title,
 
 } // namespace
 
+/// Initializes the owning system for platform.
 bool initialize_platform() noexcept {
   return initialize_platform_impl(1280, 720, "engine", true);
 }
 
+/// Initializes the owning system for platform.
 bool initialize_platform(const PlatformConfig &config) noexcept {
   const int w = (config.width > 0) ? config.width : 1280;
   const int h = (config.height > 0) ? config.height : 720;
@@ -282,15 +295,19 @@ bool initialize_platform(const PlatformConfig &config) noexcept {
   return initialize_platform_impl(w, h, title, config.vsync);
 }
 
+/// Shuts down the owning system for platform.
 void shutdown_platform() noexcept {
   g_platformRunning = false;
   shutdown_platform_resources();
 }
 
+/// Returns whether is platform running.
 bool is_platform_running() noexcept { return g_platformRunning; }
 
+/// Handles request platform quit.
 void request_platform_quit() noexcept { g_platformRunning = false; }
 
+/// Handles make render context current.
 bool make_render_context_current() noexcept {
   if ((g_window == nullptr) || (g_glContext == nullptr)) {
     return false;
@@ -299,18 +316,21 @@ bool make_render_context_current() noexcept {
   return SDL_GL_MakeCurrent(g_window, g_glContext) == 0;
 }
 
+/// Handles release render context.
 void release_render_context() noexcept {
   if (g_window != nullptr) {
     static_cast<void>(SDL_GL_MakeCurrent(g_window, nullptr));
   }
 }
 
+/// Handles swap render buffers.
 void swap_render_buffers() noexcept {
   if (g_window != nullptr) {
     SDL_GL_SwapWindow(g_window);
   }
 }
 
+/// Returns the requested value for gl proc address.
 void *get_gl_proc_address(const char *name) noexcept {
   if (name == nullptr) {
     return nullptr;
@@ -319,6 +339,7 @@ void *get_gl_proc_address(const char *name) noexcept {
   return SDL_GL_GetProcAddress(name);
 }
 
+/// Handles render drawable size.
 void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   if ((outWidth == nullptr) || (outHeight == nullptr)) {
     return;
@@ -333,10 +354,13 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   SDL_GL_GetDrawableSize(g_window, outWidth, outHeight);
 }
 
+/// Returns the requested value for sdl window.
 void *get_sdl_window() noexcept { return g_window; }
 
+/// Returns the requested value for sdl gl context.
 void *get_sdl_gl_context() noexcept { return g_glContext; }
 
+/// Handles process memory bytes.
 std::size_t process_memory_bytes() noexcept {
 #if defined(_WIN32)
   PROCESS_MEMORY_COUNTERS_EX pmc{};
@@ -382,6 +406,7 @@ std::size_t process_memory_bytes() noexcept {
 #endif
 }
 
+/// Handles platform get save dir.
 bool platform_get_save_dir(char *outBuffer,
                            std::size_t bufferCapacity) noexcept {
   return platform_get_save_dir(kDefaultOrganizationName,
@@ -389,6 +414,7 @@ bool platform_get_save_dir(char *outBuffer,
                                bufferCapacity);
 }
 
+/// Handles platform get save dir.
 bool platform_get_save_dir(const char *organizationName,
                            const char *applicationName, char *outBuffer,
                            std::size_t bufferCapacity) noexcept {
@@ -414,6 +440,7 @@ bool platform_get_save_dir(const char *organizationName,
   return copy_normalized_path(path, outBuffer, bufferCapacity);
 }
 
+/// Handles platform get app dir.
 bool platform_get_app_dir(char *outBuffer,
                           std::size_t bufferCapacity) noexcept {
   if (!validate_path_output(outBuffer, bufferCapacity)) {
@@ -430,6 +457,7 @@ bool platform_get_app_dir(char *outBuffer,
   return result;
 }
 
+/// Handles platform get temp dir.
 bool platform_get_temp_dir(char *outBuffer,
                            std::size_t bufferCapacity) noexcept {
   if (!validate_path_output(outBuffer, bufferCapacity)) {

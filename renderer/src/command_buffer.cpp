@@ -1,3 +1,5 @@
+// Implements command buffer behavior for the Engine renderer system.
+
 #include "engine/renderer/command_buffer.h"
 
 #include <algorithm>
@@ -67,16 +69,19 @@ constexpr float kSkyboxCubeVertices[] = {
 constexpr std::int32_t kSkyboxVertexCount = static_cast<std::int32_t>(
     sizeof(kSkyboxCubeVertices) / (3U * sizeof(float)));
 
+/// Stores shadow candidate data used by the engine.
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
   float distSq = 0.0F;
 };
 
+/// Stores instance attributes data used by the engine.
 struct InstanceAttributes final {
   math::Mat4 model = math::Mat4();
   math::Vec4 foliage = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 };
 
+/// Enumerates sky model values used by the engine.
 enum class SkyModel : std::uint8_t {
   Hosek = 0,
   Preetham = 1,
@@ -91,6 +96,7 @@ RendererFrameStats g_lastFrameStats{};
 bool g_fxaaAppliedThisFrame = false;
 TextureHandle g_activeSkyboxTexture = kInvalidTextureHandle;
 
+/// Stores backend state data used by the engine.
 struct BackendState final {
   bool initialized = false;
   bool failed = false;
@@ -450,17 +456,20 @@ struct BackendState final {
   float currentExposure = 1.0F;
 };
 
+/// Handles backend state.
 BackendState &backend_state() noexcept {
   static BackendState state{};
   return state;
 }
 
+/// Resets this object back to its reusable empty state for backend on failure.
 void reset_backend_on_failure() noexcept {
   BackendState &backend = backend_state();
   backend = BackendState{};
   backend.failed = true;
 }
 
+/// Handles resolve pbr light uniforms.
 void resolve_pbr_light_uniforms(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   const std::uint32_t prog = backend.pbrProgram;
@@ -526,6 +535,7 @@ void resolve_pbr_light_uniforms(BackendState &backend,
   }
 }
 
+/// Handles resolve pbr shadow uniforms.
 void resolve_pbr_shadow_uniforms(BackendState &backend,
                                  const RenderDevice *dev) noexcept {
   const std::uint32_t prog = backend.pbrProgram;
@@ -566,6 +576,7 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
   }
 }
 
+/// Handles upload pbr lighting uniforms.
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
@@ -644,6 +655,7 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
   }
 }
 
+/// Handles upload pbr distance fog uniforms.
 void upload_pbr_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -666,6 +678,7 @@ void upload_pbr_distance_fog_uniforms(
   }
 }
 
+/// Handles upload pbr height fog uniforms.
 void upload_pbr_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
@@ -689,6 +702,7 @@ void upload_pbr_height_fog_uniforms(
   }
 }
 
+/// Handles upload pbr foliage uniforms.
 void upload_pbr_foliage_uniforms(const BackendState &backend,
                                  const RenderDevice *dev,
                                  const DrawCommand &command) noexcept {
@@ -706,6 +720,7 @@ void upload_pbr_foliage_uniforms(const BackendState &backend,
   }
 }
 
+/// Handles upload gbuffer foliage uniforms.
 void upload_gbuffer_foliage_uniforms(const BackendState &backend,
                                      const RenderDevice *dev,
                                      const DrawCommand &command) noexcept {
@@ -723,6 +738,7 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
   }
 }
 
+/// Handles upload deferred distance fog uniforms.
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -745,6 +761,7 @@ void upload_deferred_distance_fog_uniforms(
   }
 }
 
+/// Handles upload deferred height fog uniforms.
 void upload_deferred_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
@@ -766,6 +783,7 @@ void upload_deferred_height_fog_uniforms(
   }
 }
 
+/// Handles bind pbr shadow uniforms.
 void bind_pbr_shadow_uniforms(const BackendState &backend,
                               const RenderDevice *dev,
                               const SceneLightData &lights, bool shadowEnabled,
@@ -856,6 +874,7 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
   }
 }
 
+/// Handles unbind pbr shadow textures.
 void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   if (dev == nullptr) {
     return;
@@ -873,6 +892,7 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   }
 }
 
+/// Destroys or releases the requested object, handle, or resource for skybox resources.
 void destroy_skybox_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.skyboxVertexBuffer != 0U) && (dev != nullptr)) {
@@ -903,6 +923,7 @@ void destroy_skybox_resources(BackendState &backend) noexcept {
   backend.hosekSkyAvailable = false;
 }
 
+/// Destroys or releases the requested object, handle, or resource for preetham sky resources.
 void destroy_preetham_sky_resources(BackendState &backend) noexcept {
   if (backend.preethamSkyShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.preethamSkyShaderHandle);
@@ -916,6 +937,7 @@ void destroy_preetham_sky_resources(BackendState &backend) noexcept {
   backend.preethamSkyTurbidityLoc = -1;
 }
 
+/// Destroys or releases the requested object, handle, or resource for hosek sky resources.
 void destroy_hosek_sky_resources(BackendState &backend) noexcept {
   if (backend.hosekSkyShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.hosekSkyShaderHandle);
@@ -930,6 +952,7 @@ void destroy_hosek_sky_resources(BackendState &backend) noexcept {
   backend.hosekSkyGroundAlbedoLoc = -1;
 }
 
+/// Creates a new object, handle, or resource for skybox geometry.
 bool create_skybox_geometry(BackendState &backend,
                             const RenderDevice *dev) noexcept {
   if ((backend.skyboxVertexArray != 0U) && (backend.skyboxVertexBuffer != 0U)) {
@@ -963,10 +986,12 @@ bool create_skybox_geometry(BackendState &backend,
   return true;
 }
 
+/// Handles cvar string equals.
 bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
   return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
 }
 
+/// Handles skip fog color separators.
 void skip_fog_color_separators(const char *&cursor) noexcept {
   while ((*cursor == ' ') || (*cursor == '\t') || (*cursor == '\n') ||
          (*cursor == '\r') || (*cursor == ',')) {
@@ -974,6 +999,7 @@ void skip_fog_color_separators(const char *&cursor) noexcept {
   }
 }
 
+/// Parses text into the engine representation for fog color component.
 bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
   if ((cursor == nullptr) || (valueOut == nullptr)) {
     return false;
@@ -990,6 +1016,7 @@ bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
   return true;
 }
 
+/// Handles selected sky model.
 SkyModel selected_sky_model() noexcept {
   const char *model = core::cvar_get_string("r_sky_model", "hosek");
   if (cvar_string_equals(model, "cubemap")) {
@@ -1004,6 +1031,7 @@ SkyModel selected_sky_model() noexcept {
   return SkyModel::Hosek;
 }
 
+/// Handles distance fog settings from cvars.
 DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   DistanceFogSettings settings{};
   settings.mode =
@@ -1021,6 +1049,7 @@ DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   return normalize_distance_fog_settings(settings);
 }
 
+/// Handles height fog settings from cvars.
 HeightFogSettings height_fog_settings_from_cvars() noexcept {
   HeightFogSettings settings{};
   settings.enabled = core::cvar_get_bool("r_height_fog", settings.enabled);
@@ -1035,6 +1064,7 @@ HeightFogSettings height_fog_settings_from_cvars() noexcept {
   return normalize_height_fog_settings(settings);
 }
 
+/// Handles active skybox gpu texture.
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   if (!backend.skyboxAvailable ||
       (g_activeSkyboxTexture == kInvalidTextureHandle) ||
@@ -1045,6 +1075,7 @@ std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   return texture_gpu_id(g_activeSkyboxTexture);
 }
 
+/// Handles preetham sun direction.
 math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   if (lights.directionalLightCount > 0U) {
     const math::Vec3 sunDir =
@@ -1057,6 +1088,7 @@ math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
 }
 
+/// Handles prepare procedural sky draw.
 void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->enable_depth_test();
   dev->set_depth_func_less_equal();
@@ -1064,6 +1096,7 @@ void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->disable_face_culling();
 }
 
+/// Handles finish procedural sky draw.
 void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
@@ -1072,6 +1105,7 @@ void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->enable_face_culling();
 }
 
+/// Handles draw skybox.
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
                  const math::Mat4 &viewMat, const math::Mat4 &projMat,
                  std::uint32_t cubemapGpuId,
@@ -1108,6 +1142,7 @@ void draw_skybox(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+/// Handles draw preetham sky.
 void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
                        const math::Mat4 &viewMat, const math::Mat4 &projMat,
                        const SceneLightData &lights,
@@ -1148,6 +1183,7 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+/// Handles draw hosek sky.
 void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
                     const math::Mat4 &viewMat, const math::Mat4 &projMat,
                     const SceneLightData &lights,
@@ -1191,6 +1227,7 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+/// Handles clamp u32 value.
 std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
                               std::uint32_t maxValue) noexcept {
   if (value < minValue) {
@@ -1202,6 +1239,7 @@ std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
   return value;
 }
 
+/// Handles previous power of two u32.
 std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
   std::uint32_t result = 1U;
   while ((result <= (value / 2U)) && (result < 4096U)) {
@@ -1210,6 +1248,7 @@ std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
   return result;
 }
 
+/// Handles cubemap mip size.
 int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   int size = faceSize;
   for (int mip = 0; mip < mipLevel; ++mip) {
@@ -1218,6 +1257,7 @@ int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   return size;
 }
 
+/// Handles max cubemap mip levels u32.
 std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
   std::uint32_t levels = 1U;
   while (faceSize > 1U) {
@@ -1227,11 +1267,13 @@ std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
   return levels;
 }
 
+/// Handles positive cvar u32.
 std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
   const int value = core::cvar_get_int(name, fallback);
   return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
 }
 
+/// Handles cvar reflection probe bake settings.
 ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
   ReflectionProbeBakeSettings settings{};
   settings.prefilteredFaceSize =
@@ -1244,6 +1286,7 @@ ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
   return normalize_reflection_probe_bake_settings(settings);
 }
 
+/// Handles cubemap capture views.
 void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
   const math::Vec3 origin{};
   outViews[0] = math::look_at(origin, math::Vec3(1.0F, 0.0F, 0.0F),
@@ -1260,6 +1303,7 @@ void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
                               math::Vec3(0.0F, -1.0F, 0.0F));
 }
 
+/// Destroys or releases the requested object, handle, or resource for environment prefilter resources.
 void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.prefilteredEnvironmentTexture != 0U) && (dev != nullptr)) {
@@ -1281,6 +1325,7 @@ void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
   backend.prefilteredEnvironmentMipLevels = 0;
 }
 
+/// Handles ensure prefiltered environment.
 std::uint32_t
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
                                std::uint32_t sourceCubemap,
@@ -1375,6 +1420,7 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   return prefiltered;
 }
 
+/// Destroys or releases the requested object, handle, or resource for environment irradiance resources.
 void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.irradianceEnvironmentTexture != 0U) && (dev != nullptr)) {
@@ -1395,6 +1441,7 @@ void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
   backend.irradianceEnvironmentFaceSize = 0;
 }
 
+/// Handles ensure irradiance environment.
 std::uint32_t
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
                               std::uint32_t sourceCubemap,
@@ -1473,6 +1520,7 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   return irradiance;
 }
 
+/// Destroys or releases the requested object, handle, or resource for brdf lut resources.
 void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.brdfLutFbo != 0U) && (dev != nullptr)) {
@@ -1492,6 +1540,7 @@ void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   backend.brdfLutSize = 0;
 }
 
+/// Handles ensure brdf lut.
 std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
                               ReflectionProbeBakeSettings settings) noexcept {
   if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
@@ -1545,6 +1594,7 @@ std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
   return lutTexture;
 }
 
+/// Destroys or releases the requested object, handle, or resource for bloom resources.
 void destroy_bloom_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1564,6 +1614,7 @@ void destroy_bloom_resources(BackendState &b) noexcept {
   b.bloomAllocatedHeight = 0;
 }
 
+/// Handles ensure bloom resources.
 void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
     return;
@@ -1590,6 +1641,7 @@ void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   b.bloomAllocatedHeight = height;
 }
 
+/// Destroys or releases the requested object, handle, or resource for luminance resources.
 void destroy_luminance_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1609,6 +1661,7 @@ void destroy_luminance_resources(BackendState &b) noexcept {
   b.lumAllocatedHeight = 0;
 }
 
+/// Handles ensure luminance resources.
 void ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept {
   if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
@@ -1636,6 +1689,7 @@ void ensure_luminance_resources(BackendState &b, int width,
   b.lumAllocatedHeight = height;
 }
 
+/// Handles generate ssao kernel.
 void generate_ssao_kernel(float *kernel, int count) noexcept {
   unsigned int seed = 12345U;
   auto nextFloat = [&seed]() -> float {
@@ -1664,6 +1718,7 @@ void generate_ssao_kernel(float *kernel, int count) noexcept {
   }
 }
 
+/// Creates a new object, handle, or resource for ssao noise texture.
 std::uint32_t create_ssao_noise_texture() noexcept {
   float noise[16 * 4] = {};
   unsigned int seed = 54321U;
@@ -1680,6 +1735,7 @@ std::uint32_t create_ssao_noise_texture() noexcept {
   return render_device()->create_texture_2d_hdr(4, 4, 4, noise);
 }
 
+/// Initializes the owning system for backend.
 bool initialize_backend() noexcept {
   BackendState &backend = backend_state();
   if (backend.initialized) {
@@ -2588,6 +2644,7 @@ bool initialize_backend() noexcept {
   return true;
 }
 
+/// Destroys or releases the requested object, handle, or resource for backend resources.
 void destroy_backend_resources(BackendState *backend) noexcept {
   if (backend == nullptr) {
     return;
@@ -2729,10 +2786,12 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   shutdown_gpu_profiler();
 }
 
+/// Handles vec3 equal.
 bool vec3_equal(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
 }
 
+/// Handles vec3 less.
 bool vec3_less(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   if (lhs.x != rhs.x) {
     return lhs.x < rhs.x;
@@ -2743,6 +2802,7 @@ bool vec3_less(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   return lhs.z < rhs.z;
 }
 
+/// Handles materials equal.
 bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
   return vec3_equal(lhs.albedo, rhs.albedo) &&
          vec3_equal(lhs.emissive, rhs.emissive) &&
@@ -2752,6 +2812,7 @@ bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
          (lhs.normalTexture == rhs.normalTexture);
 }
 
+/// Handles material less.
 bool material_less(const Material &lhs, const Material &rhs) noexcept {
   if (!vec3_equal(lhs.albedo, rhs.albedo)) {
     return vec3_less(lhs.albedo, rhs.albedo);
@@ -2774,6 +2835,7 @@ bool material_less(const Material &lhs, const Material &rhs) noexcept {
   return lhs.normalTexture.id < rhs.normalTexture.id;
 }
 
+/// Handles draw commands instance compatible.
 bool draw_commands_instance_compatible(const DrawCommand &lhs,
                                        const DrawCommand &rhs) noexcept {
   return (lhs.mesh == rhs.mesh) && materials_equal(lhs.material, rhs.material) &&
@@ -2781,15 +2843,18 @@ bool draw_commands_instance_compatible(const DrawCommand &lhs,
          (lhs.foliageWindFrequency == rhs.foliageWindFrequency);
 }
 
+/// Handles draw key state bits.
 std::uint64_t draw_key_state_bits(const DrawCommand &command) noexcept {
   return command.sortKey.value & ~kDrawKeyDepthMask;
 }
 
+/// Returns whether can upload instance matrices.
 bool can_upload_instance_matrices(const RenderDevice *dev) noexcept {
   return (dev != nullptr) && (dev->vertex_attrib_divisor != nullptr) &&
          (dev->draw_elements_triangles_u32_instanced != nullptr);
 }
 
+/// Handles upload instance matrices.
 bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                               const GpuMesh &mesh,
                               CommandBufferView commandBufferView,
@@ -2846,20 +2911,24 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
   return true;
 }
 
+/// Handles compute model matrix.
 math::Mat4 compute_model_matrix(const DrawCommand &command) noexcept {
   return command.modelMatrix;
 }
 
+/// Handles compute mvp.
 math::Mat4 compute_mvp(const math::Mat4 &model,
                        const math::Mat4 &viewProjection) noexcept {
   return math::mul(viewProjection, model);
 }
 
+/// Handles hash u64.
 std::uint64_t hash_u64(std::uint64_t hash, std::uint64_t value) noexcept {
   hash ^= value;
   return hash * kFnv1a64Prime;
 }
 
+/// Handles hash float.
 std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
   std::uint32_t bits = 0U;
   if (value != 0.0F) {
@@ -2868,12 +2937,14 @@ std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
   return hash_u64(hash, bits);
 }
 
+/// Handles hash vec3.
 std::uint64_t hash_vec3(std::uint64_t hash, const math::Vec3 &value) noexcept {
   hash = hash_float(hash, value.x);
   hash = hash_float(hash, value.y);
   return hash_float(hash, value.z);
 }
 
+/// Handles hash mat4.
 std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
   for (const math::Vec4 &column : value.columns) {
     hash = hash_float(hash, column.x);
@@ -2884,6 +2955,7 @@ std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
   return hash;
 }
 
+/// Handles directional shadow cache key.
 std::uint64_t directional_shadow_cache_key(
     CommandBufferView commandBufferView, std::size_t opaqueCount,
     const DirectionalLightData &light, const CascadeSplits &splits,
@@ -2916,6 +2988,7 @@ std::uint64_t directional_shadow_cache_key(
   return hash;
 }
 
+/// Handles extract normal matrix.
 void extract_normal_matrix(const math::Mat4 &model,
                            float *normalMatrixOut) noexcept {
   if (normalMatrixOut == nullptr) {
@@ -3018,6 +3091,7 @@ CommandBufferView CommandBufferBuilder::view() const noexcept {
   return commandBufferView;
 }
 
+/// Builds the requested runtime data for static mesh batches.
 std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
                                       std::size_t start, std::size_t end,
                                       StaticMeshBatch *batches,
@@ -3061,6 +3135,7 @@ std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
   return batchCount;
 }
 
+/// Flushes queued work to the backing runtime system for renderer.
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept {
@@ -4628,6 +4703,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   g_lastFrameStats = frameStats;
 }
 
+/// Shuts down the owning system for renderer.
 void shutdown_renderer() noexcept {
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
@@ -4645,23 +4721,29 @@ void shutdown_renderer() noexcept {
   g_activeSkyboxTexture = kInvalidTextureHandle;
 }
 
+/// Sets the requested value for active camera.
 void set_active_camera(const CameraState &camera) noexcept {
   g_activeCamera = camera;
 }
 
+/// Sets the requested value for scene viewport size.
 void set_scene_viewport_size(int width, int height) noexcept {
   g_sceneViewportWidth = (width > 0) ? width : 0;
   g_sceneViewportHeight = (height > 0) ? height : 0;
 }
 
+/// Sets the requested value for skybox texture.
 void set_skybox_texture(TextureHandle cubemap) noexcept {
   g_activeSkyboxTexture = cubemap;
 }
 
+/// Returns the requested value for skybox texture.
 TextureHandle get_skybox_texture() noexcept { return g_activeSkyboxTexture; }
 
+/// Returns the requested value for active camera.
 CameraState get_active_camera() noexcept { return g_activeCamera; }
 
+/// Returns the requested value for scene viewport texture.
 std::uint32_t get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
   if (g_fxaaAppliedThisFrame) {
@@ -4670,6 +4752,7 @@ std::uint32_t get_scene_viewport_texture() noexcept {
   return pass_resource_gpu_texture(passRes.finalColor);
 }
 
+/// Returns the requested value for prefiltered environment texture.
 std::uint32_t get_prefiltered_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_prefilter", true)) {
@@ -4678,6 +4761,7 @@ std::uint32_t get_prefiltered_environment_texture() noexcept {
   return backend_state().prefilteredEnvironmentTexture;
 }
 
+/// Returns the requested value for irradiance environment texture.
 std::uint32_t get_irradiance_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_irradiance", true)) {
@@ -4686,6 +4770,7 @@ std::uint32_t get_irradiance_environment_texture() noexcept {
   return backend_state().irradianceEnvironmentTexture;
 }
 
+/// Returns the requested value for brdf lut texture.
 std::uint32_t get_brdf_lut_texture() noexcept {
   if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
     return 0U;
@@ -4693,6 +4778,7 @@ std::uint32_t get_brdf_lut_texture() noexcept {
   return backend_state().brdfLutTexture;
 }
 
+/// Parses text into the engine representation for distance fog mode.
 DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
   if (cvar_string_equals(mode, "linear") || cvar_string_equals(mode, "1")) {
     return DistanceFogMode::Linear;
@@ -4708,6 +4794,7 @@ DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
   return DistanceFogMode::Off;
 }
 
+/// Parses text into the engine representation for distance fog color.
 bool parse_distance_fog_color(const char *value,
                               math::Vec3 *colorOut) noexcept {
   if ((value == nullptr) || (colorOut == nullptr)) {
@@ -4731,6 +4818,7 @@ bool parse_distance_fog_color(const char *value,
   return true;
 }
 
+/// Clamps and fills settings into a safe runtime range for distance fog settings.
 DistanceFogSettings normalize_distance_fog_settings(
     const DistanceFogSettings &settings) noexcept {
   DistanceFogSettings normalized{};
@@ -4762,6 +4850,7 @@ DistanceFogSettings normalize_distance_fog_settings(
   return normalized;
 }
 
+/// Clamps and fills settings into a safe runtime range for height fog settings.
 HeightFogSettings normalize_height_fog_settings(
     const HeightFogSettings &settings) noexcept {
   HeightFogSettings normalized{};
@@ -4781,6 +4870,7 @@ HeightFogSettings normalize_height_fog_settings(
   return normalized;
 }
 
+/// Clamps and fills settings into a safe runtime range for reflection probe bake settings.
 ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
     const ReflectionProbeBakeSettings &settings) noexcept {
   ReflectionProbeBakeSettings normalized{};
@@ -4797,6 +4887,7 @@ ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
   return normalized;
 }
 
+/// Handles bake reflection probe.
 ReflectionProbeBakeResult
 bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   ReflectionProbeBakeResult result{};
@@ -4837,6 +4928,7 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   return result;
 }
 
+/// Handles renderer get last frame stats.
 RendererFrameStats renderer_get_last_frame_stats() noexcept {
   return g_lastFrameStats;
 }

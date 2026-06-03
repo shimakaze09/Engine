@@ -1,3 +1,5 @@
+// Verifies ecs perf test behavior for the Engine test suite.
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -12,20 +14,24 @@ namespace {
 
 using Clock = std::chrono::high_resolution_clock;
 
+/// Stores bench entity data used by the engine.
 struct BenchEntity final {
   std::uint32_t index = 0U;
 };
 
+/// Stores bench transform data used by the engine.
 struct BenchTransform final {
   engine::math::Vec3 position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
 };
 
+/// Stores bench rigid body data used by the engine.
 struct BenchRigidBody final {
   engine::math::Vec3 velocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
 };
 
 constexpr std::size_t kEntityCount = 50000U;
 
+/// Parses text into the engine representation for json out.
 bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
   if (outPath == nullptr) {
     return false;
@@ -41,6 +47,7 @@ bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
   return true;
 }
 
+/// Runs the configured command, loop, or tool for benchmark.
 bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
   if ((outIterMs == nullptr) || (outVisited == nullptr)) {
     return false;
@@ -104,6 +111,7 @@ bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
   return visited == kEntityCount;
 }
 
+/// Writes json data.
 bool write_json(const char *path, double iterMs, std::size_t visited) noexcept {
   if (path == nullptr) {
     return true;
@@ -135,6 +143,7 @@ bool write_json(const char *path, double iterMs, std::size_t visited) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main(int argc, char **argv) {
   const char *jsonOutPath = nullptr;
   if (!parse_json_out(argc, argv, &jsonOutPath)) {

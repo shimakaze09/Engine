@@ -1,3 +1,5 @@
+// Declares collider types and APIs for the Engine physics system.
+
 #pragma once
 
 #include "engine/math/vec3.h"
@@ -16,6 +18,7 @@ struct ConvexHullData final {
   static constexpr std::size_t kMaxPlanes = 64U;
   static constexpr std::size_t kMaxVertices = 128U;
 
+  /// Stores plane data used by the engine.
   struct Plane final {
     math::Vec3 normal{};
     float distance = 0.0F;

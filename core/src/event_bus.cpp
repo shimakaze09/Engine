@@ -1,3 +1,5 @@
+// Implements event bus behavior for the Engine core engine.
+
 #include "engine/core/event_bus.h"
 
 #include <array>
@@ -17,6 +19,7 @@ constexpr std::size_t kMaxEventTypes = 64U;
 constexpr std::size_t kMaxSubscribersPerType = 16U;
 [[maybe_unused]] constexpr std::uint32_t kMaxEmitDepth = 64U;
 
+/// Stores typed subscriber data used by the engine.
 struct TypedSubscriber final {
   RawEventHandler handler = nullptr;
   void *userData = nullptr;
@@ -27,6 +30,7 @@ constexpr std::size_t kTypedSnapshotBytes =
 static_assert(kTypedSnapshotBytes <= 1024U,
               "typed emit snapshot must remain bounded");
 
+/// Stores typed slot data used by the engine.
 struct TypedSlot final {
   EventTypeId typeId = nullptr;
   std::array<TypedSubscriber, kMaxSubscribersPerType> subscribers{};
@@ -37,6 +41,7 @@ struct TypedSlot final {
 std::array<TypedSlot, kMaxEventTypes> g_typedSlots{};
 bool g_eventBusInitialized = false;
 
+/// Finds the matching object or resource for typed slot.
 TypedSlot *find_typed_slot(EventTypeId typeId) noexcept {
   for (auto &slot : g_typedSlots) {
     if (slot.active && (slot.typeId == typeId)) {
@@ -46,6 +51,7 @@ TypedSlot *find_typed_slot(EventTypeId typeId) noexcept {
   return nullptr;
 }
 
+/// Finds an existing typed slot or creates one when capacity allows.
 TypedSlot *find_or_create_typed_slot(EventTypeId typeId) noexcept {
   // Try to find existing.
   if (auto *slot = find_typed_slot(typeId)) {
@@ -70,6 +76,7 @@ constexpr std::size_t kMaxChannels = 64U;
 constexpr std::size_t kMaxSubscribersPerChannel = 16U;
 constexpr std::size_t kMaxChannelNameLength = 64U;
 
+/// Stores channel subscriber data used by the engine.
 struct ChannelSubscriber final {
   ChannelHandler handler = nullptr;
   void *userData = nullptr;
@@ -80,6 +87,7 @@ constexpr std::size_t kChannelSnapshotBytes =
 static_assert(kChannelSnapshotBytes <= 1024U,
               "channel emit snapshot must remain bounded");
 
+/// Stores channel slot data used by the engine.
 struct ChannelSlot final {
   char name[kMaxChannelNameLength] = {};
   std::uint32_t nameHash = 0U;
@@ -91,6 +99,7 @@ struct ChannelSlot final {
 std::array<ChannelSlot, kMaxChannels> g_channelSlots{};
 thread_local std::uint32_t g_emitDepth = 0U;
 
+/// Stores emit depth scope data used by the engine.
 struct EmitDepthScope final {
   EmitDepthScope() noexcept {
     assert(g_emitDepth < kMaxEmitDepth);
@@ -104,6 +113,7 @@ struct EmitDepthScope final {
   }
 };
 
+/// Computes a 32-bit FNV-1a hash.
 std::uint32_t fnv1a_hash(const char *str) noexcept {
   std::uint32_t hash = 2166136261U;
   while (*str != '\0') {
@@ -114,6 +124,7 @@ std::uint32_t fnv1a_hash(const char *str) noexcept {
   return hash;
 }
 
+/// Finds the matching object or resource for channel slot.
 ChannelSlot *find_channel_slot(const char *name, std::uint32_t hash) noexcept {
   for (auto &slot : g_channelSlots) {
     if (slot.active && (slot.nameHash == hash) &&
@@ -124,6 +135,7 @@ ChannelSlot *find_channel_slot(const char *name, std::uint32_t hash) noexcept {
   return nullptr;
 }
 
+/// Finds an existing channel slot or creates one when capacity allows.
 ChannelSlot *find_or_create_channel_slot(const char *name) noexcept {
   const std::uint32_t hash = fnv1a_hash(name);
   if (auto *slot = find_channel_slot(name, hash)) {
@@ -166,6 +178,7 @@ bool initialize_event_bus() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for event bus.
 void shutdown_event_bus() noexcept {
   if (!g_eventBusInitialized) {
     return;
@@ -179,6 +192,7 @@ void shutdown_event_bus() noexcept {
   g_eventBusInitialized = false;
 }
 
+/// Registers a subscriber or callback for raw.
 bool subscribe_raw(EventTypeId typeId, RawEventHandler handler,
                    void *userData) noexcept {
   if ((typeId == nullptr) || (handler == nullptr)) {
@@ -201,6 +215,7 @@ bool subscribe_raw(EventTypeId typeId, RawEventHandler handler,
   return true;
 }
 
+/// Removes a subscriber or callback for raw.
 bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
                      void *userData) noexcept {
   auto *slot = find_typed_slot(typeId);
@@ -220,6 +235,7 @@ bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
   return false;
 }
 
+/// Emits an event or message to subscribers for raw.
 void emit_raw(EventTypeId typeId, const void *eventData) noexcept {
   EmitDepthScope emitDepthScope{};
   static_cast<void>(emitDepthScope);
@@ -272,6 +288,7 @@ bool subscribe_channel(const char *channelName, ChannelHandler handler,
   return true;
 }
 
+/// Removes a subscriber or callback for channel.
 bool unsubscribe_channel(const char *channelName, ChannelHandler handler,
                          void *userData) noexcept {
   if (channelName == nullptr) {
@@ -294,6 +311,7 @@ bool unsubscribe_channel(const char *channelName, ChannelHandler handler,
   return false;
 }
 
+/// Emits an event or message to subscribers for channel.
 void emit_channel(const char *channelName, const void *data,
                   std::size_t size) noexcept {
   EmitDepthScope emitDepthScope{};

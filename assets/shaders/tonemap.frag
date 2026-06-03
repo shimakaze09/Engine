@@ -1,3 +1,5 @@
+// Defines the tonemap fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -11,6 +13,7 @@ uniform int u_bloomEnabled;
 
 out vec4 outColor;
 
+/// Handles reinhard.
 vec3 reinhard(vec3 hdr) {
   return hdr / (hdr + vec3(1.0));
 }
@@ -36,6 +39,7 @@ vec3 uncharted2Tonemap(vec3 x) {
   return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
 
+/// Handles uncharted2.
 vec3 uncharted2(vec3 hdr) {
   const float W = 11.2;
   vec3 curr = uncharted2Tonemap(hdr);
@@ -43,6 +47,7 @@ vec3 uncharted2(vec3 hdr) {
   return curr * whiteScale;
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 hdr = texture(u_sceneColor, vTexCoord).rgb;
 

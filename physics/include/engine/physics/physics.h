@@ -1,3 +1,5 @@
+// Declares physics types and APIs for the Engine physics system.
+
 #pragma once
 
 #include "engine/physics/collider.h"

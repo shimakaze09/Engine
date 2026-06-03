@@ -1,3 +1,5 @@
+// Verifies asset database test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -7,6 +9,7 @@
 
 namespace {
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -21,6 +24,7 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Writes temp file data.
 bool write_temp_file(const char *path, const char *contents) {
   if ((path == nullptr) || (contents == nullptr)) {
     return false;
@@ -39,6 +43,7 @@ bool write_temp_file(const char *path, const char *contents) {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   std::unique_ptr<engine::renderer::AssetDatabase> database(
       new (std::nothrow) engine::renderer::AssetDatabase());

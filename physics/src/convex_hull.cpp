@@ -1,3 +1,5 @@
+// Implements convex hull behavior for the Engine physics system.
+
 #include "engine/physics/convex_hull.h"
 
 #include "engine/math/vec3.h"
@@ -19,6 +21,7 @@ namespace {
 static constexpr std::size_t kMaxFaces = 256U; // working faces during build
 static constexpr std::size_t kMaxEdges = 512U;
 
+/// Stores hull face data used by the engine.
 struct HullFace {
   std::uint16_t v[3]{};
   math::Vec3 normal{};
@@ -38,6 +41,7 @@ void face_plane(HullFace &f, const math::Vec3 *verts) noexcept {
   f.dist = math::dot(f.normal, verts[f.v[0]]);
 }
 
+/// Handles point plane distance.
 float point_plane_distance(const math::Vec3 &point,
                            const HullFace &face) noexcept {
   return math::dot(face.normal, point) - face.dist;
@@ -45,6 +49,7 @@ float point_plane_distance(const math::Vec3 &point,
 
 } // namespace
 
+/// Builds the requested runtime data for convex hull.
 bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
                        ConvexHullData &outHull) noexcept {
   if ((points == nullptr) || (pointCount < 4U)) {
@@ -309,12 +314,14 @@ static constexpr std::size_t kEpaMaxIter = 64U;
 static constexpr std::size_t kEpaMaxFaces = 128U;
 static constexpr float kEpaTolerance = 1e-4F;
 
+/// Stores minkowski point data used by the engine.
 struct MinkowskiPoint {
   math::Vec3 v{}; // Minkowski difference point
   math::Vec3 a{}; // support point on A
   math::Vec3 b{}; // support point on B
 };
 
+/// Handles support.
 MinkowskiPoint support(const void *shapeA, const math::Vec3 &centerA,
                        SupportFn supA, const void *shapeB,
                        const math::Vec3 &centerB, SupportFn supB,
@@ -343,6 +350,7 @@ struct Simplex {
   }
 };
 
+/// Handles do simplex line.
 bool do_simplex_line(Simplex &s, math::Vec3 &dir) noexcept {
   // A = s.pts[0], B = s.pts[1]
   const math::Vec3 ab = math::sub(s.pts[1].v, s.pts[0].v);
@@ -357,6 +365,7 @@ bool do_simplex_line(Simplex &s, math::Vec3 &dir) noexcept {
   return false;
 }
 
+/// Handles do simplex triangle.
 bool do_simplex_triangle(Simplex &s, math::Vec3 &dir) noexcept {
   const math::Vec3 &a = s.pts[0].v;
   const math::Vec3 &b = s.pts[1].v;
@@ -394,6 +403,7 @@ bool do_simplex_triangle(Simplex &s, math::Vec3 &dir) noexcept {
   return false;
 }
 
+/// Handles do simplex tetrahedron.
 bool do_simplex_tetrahedron(Simplex &s, math::Vec3 &dir) noexcept {
   const math::Vec3 &a = s.pts[0].v;
   const math::Vec3 &b = s.pts[1].v;
@@ -428,6 +438,7 @@ bool do_simplex_tetrahedron(Simplex &s, math::Vec3 &dir) noexcept {
   return true;
 }
 
+/// Handles do simplex.
 bool do_simplex(Simplex &s, math::Vec3 &dir) noexcept {
   switch (s.size) {
   case 2:
@@ -451,6 +462,7 @@ struct EpaFace {
   bool alive = true;
 };
 
+/// Handles epa face plane.
 void epa_face_plane(EpaFace &f,
                     const std::array<MinkowskiPoint, 256> &verts) noexcept {
   const math::Vec3 ab = math::sub(verts[f.v[1]].v, verts[f.v[0]].v);
@@ -471,6 +483,7 @@ void epa_face_plane(EpaFace &f,
   }
 }
 
+/// Handles epa.
 GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
               SupportFn supA, const void *shapeB, const math::Vec3 &centerB,
               SupportFn supB) noexcept {
@@ -634,6 +647,7 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
 
 } // namespace
 
+/// Handles gjk epa.
 GjkResult gjk_epa(const void *shapeA, const math::Vec3 &centerA,
                   SupportFn supportA, const void *shapeB,
                   const math::Vec3 &centerB, SupportFn supportB) noexcept {
@@ -697,6 +711,7 @@ math::Vec3 support_convex_hull(const void *data, const math::Vec3 &center,
   return math::add(center, hull->vertices[bestIdx]);
 }
 
+/// Handles support sphere.
 math::Vec3 support_sphere(const void *data, const math::Vec3 &center,
                           const math::Vec3 &dir) noexcept {
   const float radius = *static_cast<const float *>(data);
@@ -707,6 +722,7 @@ math::Vec3 support_sphere(const void *data, const math::Vec3 &center,
   return math::add(center, math::mul(dir, radius / len));
 }
 
+/// Handles support capsule.
 math::Vec3 support_capsule(const void *data, const math::Vec3 &center,
                            const math::Vec3 &dir) noexcept {
   // data points to float[2]: {radius, halfHeight}
@@ -727,6 +743,7 @@ math::Vec3 support_capsule(const void *data, const math::Vec3 &center,
   return math::add(base, math::mul(dir, radius / len));
 }
 
+/// Handles support aabb.
 math::Vec3 support_aabb(const void *data, const math::Vec3 &center,
                         const math::Vec3 &dir) noexcept {
   const auto *he = static_cast<const math::Vec3 *>(data);

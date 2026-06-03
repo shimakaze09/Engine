@@ -1,3 +1,5 @@
+# Configures app build settings for the Engine repository.
+
 engine_add_executable_target(engine_editor_app
     SOURCES
     main.cpp

@@ -1,3 +1,5 @@
+// Declares pool allocator types and APIs for the Engine core engine.
+
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +10,9 @@ namespace engine::core {
 // No heap allocation after initialization; uses a pre-allocated buffer.
 // Thread-UNSAFE — intended for single-threaded use or external locking.
 template <typename T, std::size_t Capacity>
+/// Owns the pool allocator behavior and state.
 class PoolAllocator final {
+/// Handles static assert.
 public:
   static_assert(Capacity > 0U, "PoolAllocator capacity must be > 0");
   static_assert(sizeof(T) >= sizeof(void*), "T must be at least pointer-sized");
@@ -42,8 +46,10 @@ public:
     m_freeHead = reinterpret_cast<void*>(ptr);
   }
 
+  /// Handles capacity.
   std::size_t capacity() const noexcept { return Capacity; }
 
+/// Handles alignas.
 private:
   // Storage: array of Capacity T-sized, T-aligned slots.
   alignas(alignof(T)) std::byte m_storage[Capacity][sizeof(T)];

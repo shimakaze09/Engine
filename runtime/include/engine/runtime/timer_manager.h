@@ -1,3 +1,5 @@
+// Declares timer manager types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <cstddef>
@@ -78,6 +80,7 @@ public:
 
   /// Direct read access (for scripting bridge inspection).
   const Entry &entry_at(std::size_t index) const noexcept;
+  /// Handles entry at mut.
   Entry &entry_at_mut(std::size_t index) noexcept;
 
 private:

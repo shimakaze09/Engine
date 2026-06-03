@@ -1,3 +1,5 @@
+// Implements quat behavior for the Engine math library.
+
 #include "engine/math/quat.h"
 
 #include <cmath>
@@ -15,6 +17,7 @@ namespace engine::math {
 
 namespace {
 
+/// Handles clamp.
 float clamp(float value, float minValue, float maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -40,6 +43,7 @@ float sse2_hsum(__m128 v) noexcept {
 
 } // namespace
 
+/// Handles conjugate.
 Quat conjugate(const Quat &value) noexcept {
 #if ENGINE_MATH_SSE2
   // Negate x,y,z but keep w: multiply by (-1,-1,-1,+1).
@@ -54,6 +58,7 @@ Quat conjugate(const Quat &value) noexcept {
 #endif
 }
 
+/// Handles dot.
 float dot(const Quat &lhs, const Quat &rhs) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 a = _mm_load_ps(&lhs.x);
@@ -64,6 +69,7 @@ float dot(const Quat &lhs, const Quat &rhs) noexcept {
 #endif
 }
 
+/// Handles mul.
 Quat mul(const Quat &lhs, const Quat &rhs) noexcept {
   return Quat(lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y,
               lhs.w * rhs.y - lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x,
@@ -71,6 +77,7 @@ Quat mul(const Quat &lhs, const Quat &rhs) noexcept {
               lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z);
 }
 
+/// Clamps and fills settings into a safe runtime range.
 Quat normalize(const Quat &value) noexcept {
   const float lenSq = dot(value, value);
   if (lenSq <= 0.0F) {
@@ -90,6 +97,7 @@ Quat normalize(const Quat &value) noexcept {
 #endif
 }
 
+/// Handles slerp.
 Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
   Quat end = to;
   float cosTheta = dot(from, end);
@@ -119,6 +127,7 @@ Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
               from.w * scaleFrom + end.w * scaleTo);
 }
 
+/// Handles from axis angle.
 Quat from_axis_angle(const Vec3 &axis, float radians) noexcept {
   const float axisLengthSq = dot(axis, axis);
   if (axisLengthSq <= 1.0e-12F) {
@@ -133,6 +142,7 @@ Quat from_axis_angle(const Vec3 &axis, float radians) noexcept {
               normalizedAxis.z * sinHalf, std::cos(halfAngle));
 }
 
+/// Converts axis angle into the target representation.
 bool to_axis_angle(const Quat &value, Vec3 *outAxis,
                    float *outRadians) noexcept {
   if ((outAxis == nullptr) || (outRadians == nullptr)) {
@@ -154,6 +164,7 @@ bool to_axis_angle(const Quat &value, Vec3 *outAxis,
   return true;
 }
 
+/// Converts mat4 into the target representation.
 Mat4 to_mat4(const Quat &value) noexcept {
   const Quat n = normalize(value);
   const float xx = n.x * n.x;
@@ -173,6 +184,7 @@ Mat4 to_mat4(const Quat &value) noexcept {
       Vec4(0.0F, 0.0F, 0.0F, 1.0F));
 }
 
+/// Handles from mat4.
 Quat from_mat4(const Mat4 &value) noexcept {
   const float m00 = value.columns[0].x;
   const float m01 = value.columns[1].x;
@@ -208,6 +220,7 @@ Quat from_mat4(const Mat4 &value) noexcept {
   return Quat((m02 + m20) * inv, (m12 + m21) * inv, s, (m10 - m01) * inv);
 }
 
+/// Handles rotate vector.
 Vec3 rotate_vector(const Vec3 &v, const Quat &q) noexcept {
   // Efficient Rodrigues: t = 2 * cross(q.xyz, v)
   // result = v + q.w * t + cross(q.xyz, t)
@@ -216,6 +229,7 @@ Vec3 rotate_vector(const Vec3 &v, const Quat &q) noexcept {
   return add(add(v, mul(t, q.w)), cross(qxyz, t));
 }
 
+/// Handles from euler.
 Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
   const float cy = std::cos(yawRad * 0.5F);
   const float sy = std::sin(yawRad * 0.5F);
@@ -228,6 +242,7 @@ Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
               cy * cp * sr - sy * sp * cr, cy * cp * cr + sy * sp * sr);
 }
 
+/// Converts euler into the target representation.
 bool to_euler(const Quat &q, float *outPitch, float *outYaw,
               float *outRoll) noexcept {
   if ((outPitch == nullptr) || (outYaw == nullptr) || (outRoll == nullptr)) {

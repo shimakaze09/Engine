@@ -1,3 +1,5 @@
+// Implements cvar behavior for the Engine core engine.
+
 #include "engine/core/cvar.h"
 
 #include <array>
@@ -22,6 +24,7 @@ union CVarValue final {
   char str[kMaxStringValLen];
 };
 
+/// Stores cvar entry data used by the engine.
 struct CVarEntry final {
   char name[kMaxNameLen] = {};
   char desc[kMaxDescLen] = {};
@@ -34,6 +37,7 @@ bool g_initialized = false;
 std::array<CVarEntry, kMaxCVars> g_entries{};
 std::size_t g_count = 0U;
 
+/// Finds the matching object or resource for cvar.
 int find_cvar(const char *name) noexcept {
   for (std::size_t i = 0U; i < g_count; ++i) {
     if (g_entries[i].used && std::strcmp(g_entries[i].name, name) == 0) {
@@ -45,6 +49,7 @@ int find_cvar(const char *name) noexcept {
 
 } // namespace
 
+/// Initializes the owning system for cvars.
 bool initialize_cvars() noexcept {
   if (g_initialized) {
     return true;
@@ -55,6 +60,7 @@ bool initialize_cvars() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for cvars.
 void shutdown_cvars() noexcept {
   g_entries = {};
   g_count = 0U;
@@ -84,6 +90,7 @@ bool cvar_register_bool(const char *name, bool defaultValue,
   return true;
 }
 
+/// Handles cvar register int.
 bool cvar_register_int(const char *name, int defaultValue,
                        const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -105,6 +112,7 @@ bool cvar_register_int(const char *name, int defaultValue,
   return true;
 }
 
+/// Handles cvar register float.
 bool cvar_register_float(const char *name, float defaultValue,
                          const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -126,6 +134,7 @@ bool cvar_register_float(const char *name, float defaultValue,
   return true;
 }
 
+/// Handles cvar register string.
 bool cvar_register_string(const char *name, const char *defaultValue,
                           const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -159,6 +168,7 @@ bool cvar_get_bool(const char *name, bool fallback) noexcept {
   return g_entries[idx].value.b;
 }
 
+/// Handles cvar get int.
 int cvar_get_int(const char *name, int fallback) noexcept {
   const int idx = find_cvar(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Int)) {
@@ -167,6 +177,7 @@ int cvar_get_int(const char *name, int fallback) noexcept {
   return g_entries[idx].value.i;
 }
 
+/// Handles cvar get float.
 float cvar_get_float(const char *name, float fallback) noexcept {
   const int idx = find_cvar(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Float)) {
@@ -175,6 +186,7 @@ float cvar_get_float(const char *name, float fallback) noexcept {
   return g_entries[idx].value.f;
 }
 
+/// Handles cvar get string.
 const char *cvar_get_string(const char *name, const char *fallback) noexcept {
   const int idx = find_cvar(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::String)) {
@@ -194,6 +206,7 @@ bool cvar_set_bool(const char *name, bool value) noexcept {
   return true;
 }
 
+/// Handles cvar set int.
 bool cvar_set_int(const char *name, int value) noexcept {
   const int idx = find_cvar(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Int)) {
@@ -203,6 +216,7 @@ bool cvar_set_int(const char *name, int value) noexcept {
   return true;
 }
 
+/// Handles cvar set float.
 bool cvar_set_float(const char *name, float value) noexcept {
   const int idx = find_cvar(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Float)) {
@@ -212,6 +226,7 @@ bool cvar_set_float(const char *name, float value) noexcept {
   return true;
 }
 
+/// Handles cvar set string.
 bool cvar_set_string(const char *name, const char *value) noexcept {
   if (value == nullptr) {
     return false;
@@ -226,6 +241,7 @@ bool cvar_set_string(const char *name, const char *value) noexcept {
   return true;
 }
 
+/// Handles cvar set from string.
 bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   if ((name == nullptr) || (valueStr == nullptr)) {
     return false;
@@ -268,6 +284,7 @@ bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   }
 }
 
+/// Handles cvar get all.
 std::size_t cvar_get_all(CVarInfo *out, std::size_t maxEntries) noexcept {
   if (out == nullptr) {
     return 0U;

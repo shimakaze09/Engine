@@ -1,3 +1,5 @@
+// Defines the luminance fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -11,6 +13,7 @@ float luminance(vec3 color) {
   return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 hdr = texture(u_sceneColor, vTexCoord).rgb;
   float lum = luminance(hdr);

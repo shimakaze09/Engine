@@ -1,3 +1,5 @@
+// Declares engine pipeline types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <cstdint>
@@ -18,11 +20,13 @@ namespace engine {
 ///   while (pipeline.execute_frame()) {}
 ///   pipeline.teardown();
 class EnginePipeline final {
+/// Handles engine pipeline.
 public:
   EnginePipeline() noexcept;
   ~EnginePipeline() noexcept;
 
   EnginePipeline(const EnginePipeline &) = delete;
+  /// Handles operator=.
   EnginePipeline &operator=(const EnginePipeline &) = delete;
 
   /// Allocate runtime resources (World, renderers, assets, bootstrap scene).
@@ -38,6 +42,7 @@ public:
   void teardown() noexcept;
 
 private:
+  /// Stores impl data used by the engine.
   struct Impl;
   std::unique_ptr<Impl> m_impl;
 };

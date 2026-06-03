@@ -77,6 +77,10 @@ These items do not represent missing *features* but rather defects or structural
 - `§0-6-a-i` ~~Several files under `tests/unit/` use raw `new`/`delete` in test scaffolding.~~ **[high]** `[x]`
   - *Resolved*: Audit of all test files confirms zero raw `new`/`delete` usage. All heap allocations use `std::unique_ptr` or placement new with `std::nothrow`. No ASAN false-positive risk.
 
+#### §0-6-b: Missing Source Comments
+- `§0-6-b-i` Every tracked source, script, shader, build, and test file must keep a concise file-level comment; every class, struct, enum, and function added or changed in future work must include a purpose comment close to its declaration or definition. **[high]** `[~]`
+  - *In progress*: Initial repository-wide comment coverage pass started on 2026-06-04. Keep this item open until the pass is reviewed and a lightweight audit command exists for future changes.
+
 ---
 
 ---

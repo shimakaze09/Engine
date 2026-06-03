@@ -1,3 +1,5 @@
+// Declares mesh loader types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <array>
@@ -8,6 +10,7 @@
 
 namespace engine::renderer {
 
+/// Stores gpu mesh data used by the engine.
 struct GpuMesh final {
   std::uint32_t vertexArray = 0U;
   std::uint32_t vertexBuffer = 0U;
@@ -17,6 +20,7 @@ struct GpuMesh final {
   bool hasUVs = false;
 };
 
+/// Stores gpu mesh registry data used by the engine.
 struct GpuMeshRegistry final {
   static constexpr std::size_t kMaxSlots = 4096U;
   std::array<GpuMesh, kMaxSlots> meshes{};
@@ -26,10 +30,13 @@ struct GpuMeshRegistry final {
 // Returns slot index (same as MeshHandle::id) or 0 on failure.
 std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
                                 const GpuMesh &mesh) noexcept;
+/// Handles lookup gpu mesh.
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
                                renderer::MeshHandle handle) noexcept;
 
+/// Loads the requested resource for mesh from file.
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept;
+/// Handles unload mesh.
 void unload_mesh(GpuMesh *mesh) noexcept;
 
 // Direct GPU upload from in-memory vertex/index data (no file I/O).

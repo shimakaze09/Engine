@@ -1,3 +1,5 @@
+// Verifies collision layer test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -259,6 +261,7 @@ int test_one_sided_mask_fails() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int failed = 0;
 

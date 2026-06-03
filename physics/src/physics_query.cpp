@@ -1,3 +1,5 @@
+// Implements physics query behavior for the Engine physics system.
+
 #include "engine/physics/physics_query.h"
 
 #include "engine/math/aabb.h"

@@ -1,3 +1,5 @@
+// Verifies shader system test behavior for the Engine test suite.
+
 #include "engine/renderer/shader_system.h"
 
 #include <cstdio>
@@ -38,6 +40,7 @@ static void test_init_shutdown() {
   ++g_passed;
 }
 
+/// Handles test load without init returns invalid.
 static void test_load_without_init_returns_invalid() {
   using namespace engine::renderer;
   // System not initialized — should return invalid.
@@ -47,6 +50,7 @@ static void test_load_without_init_returns_invalid() {
   ++g_passed;
 }
 
+/// Handles test load null paths.
 static void test_load_null_paths() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -57,6 +61,7 @@ static void test_load_null_paths() {
   ++g_passed;
 }
 
+/// Handles test gpu program invalid handle.
 static void test_gpu_program_invalid_handle() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -66,6 +71,7 @@ static void test_gpu_program_invalid_handle() {
   ++g_passed;
 }
 
+/// Handles test destroy invalid handle.
 static void test_destroy_invalid_handle() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -76,6 +82,7 @@ static void test_destroy_invalid_handle() {
   ++g_passed;
 }
 
+/// Handles test check reload without init.
 static void test_check_reload_without_init() {
   using namespace engine::renderer;
   // Should not crash when system is not initialized.
@@ -83,6 +90,7 @@ static void test_check_reload_without_init() {
   ++g_passed;
 }
 
+/// Runs this executable or test program.
 int main() {
   int before_test_init_shutdown = g_failed;
   RUN_TEST(test_init_shutdown);

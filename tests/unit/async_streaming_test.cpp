@@ -20,10 +20,12 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
+/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
 
+/// Handles ok load.
 static bool ok_load(AssetId, const char *, std::uint64_t *outSz,
                     void *) noexcept {
   if (outSz != nullptr) {
@@ -32,6 +34,7 @@ static bool ok_load(AssetId, const char *, std::uint64_t *outSz,
   return true;
 }
 
+/// Handles ok upload.
 static bool ok_upload(AssetId, void *) noexcept { return true; }
 
 // --- Basic queue and poll ---
@@ -135,6 +138,7 @@ static void test_pending_count() noexcept {
   engine::core::shutdown_cvars();
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
 

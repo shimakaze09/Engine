@@ -1,3 +1,5 @@
+// Implements timer manager behavior for the Engine runtime world.
+
 #include "engine/runtime/timer_manager.h"
 
 #include <cstring>

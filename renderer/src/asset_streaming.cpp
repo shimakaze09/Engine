@@ -1,3 +1,5 @@
+// Implements asset streaming behavior for the Engine renderer system.
+
 #include "engine/renderer/asset_streaming.h"
 
 #include <cstddef>
@@ -12,6 +14,7 @@ namespace engine::renderer {
 
 namespace {
 
+/// Writes path data.
 void write_path(std::array<char, 260U> *out, const char *src) noexcept {
   out->fill('\0');
   if (src == nullptr) {
@@ -26,6 +29,7 @@ void write_path(std::array<char, 260U> *out, const char *src) noexcept {
   (*out)[copyLen] = '\0';
 }
 
+/// Finds the matching object or resource for free request.
 std::uint32_t find_free_request(const AssetStreamingQueue *queue) noexcept {
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     if (!queue->requests[i].occupied) {
@@ -77,6 +81,7 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
   return true;
 }
 
+/// Shuts down the owning system for asset streaming.
 void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
     return;
@@ -132,6 +137,7 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
   return LoadHandle{slot};
 }
 
+/// Advances this system for the current frame or tick for load priority.
 bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
                           LoadPriority newPriority) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
@@ -147,6 +153,7 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
   return true;
 }
 
+/// Handles cancel load.
 bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return false;
@@ -175,6 +182,7 @@ bool is_load_ready(const AssetStreamingQueue *queue,
   return req.occupied && (req.state == LoadingState::Ready);
 }
 
+/// Returns the requested value for load state.
 LoadingState get_load_state(const AssetStreamingQueue *queue,
                             LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
@@ -187,6 +195,7 @@ LoadingState get_load_state(const AssetStreamingQueue *queue,
   return req.state;
 }
 
+/// Handles wait for load.
 void wait_for_load(const AssetStreamingQueue *queue,
                    LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
@@ -222,6 +231,7 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
   queue->uploads_this_frame = 0U;
 }
 
+/// Advances this system for the current frame or tick for asset streaming.
 std::size_t update_asset_streaming(
     AssetStreamingQueue *queue,
     bool (*loadCallback)(AssetId id, const char *path,
@@ -308,6 +318,7 @@ std::size_t update_asset_streaming(
   return readyCount;
 }
 
+/// Handles pending load count.
 std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
     return 0U;

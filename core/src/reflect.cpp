@@ -1,3 +1,5 @@
+// Implements reflect behavior for the Engine core engine.
+
 #include "engine/core/reflect.h"
 
 #include <cstring>
@@ -70,6 +72,7 @@ const TypeDescriptor *TypeRegistry::type_at(std::size_t index) const noexcept {
   return &types[index];
 }
 
+/// Handles global type registry.
 TypeRegistry &global_type_registry() noexcept {
   static TypeRegistry registry{};
   return registry;

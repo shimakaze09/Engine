@@ -1,3 +1,5 @@
+# Configures audio build settings for the Engine repository.
+
 engine_add_module_library(engine_audio
     SOURCES
     src/audio.cpp

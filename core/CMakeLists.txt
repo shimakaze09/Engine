@@ -1,3 +1,5 @@
+# Configures core build settings for the Engine repository.
+
 engine_add_module_library(engine_core
     SOURCES
     src/bootstrap.cpp

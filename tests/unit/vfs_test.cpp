@@ -1,3 +1,5 @@
+// Verifies vfs test behavior for the Engine test suite.
+
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -9,6 +11,7 @@ using namespace engine::core;
 
 namespace {
 
+/// Handles test init shutdown.
 bool test_init_shutdown() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -17,6 +20,7 @@ bool test_init_shutdown() noexcept {
   return true;
 }
 
+/// Handles test mount unmount.
 bool test_mount_unmount() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -43,6 +47,7 @@ bool test_mount_unmount() noexcept {
   return true;
 }
 
+/// Handles test path resolution.
 bool test_path_resolution() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -75,6 +80,7 @@ bool test_path_resolution() noexcept {
   return true;
 }
 
+/// Handles test read write roundtrip.
 bool test_read_write_roundtrip() noexcept {
   if (!initialize_logging()) {
     return false;
@@ -121,6 +127,7 @@ bool test_read_write_roundtrip() noexcept {
   return ok;
 }
 
+/// Handles test file exists.
 bool test_file_exists() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -156,6 +163,7 @@ bool test_file_exists() noexcept {
   return true;
 }
 
+/// Handles test mtime.
 bool test_mtime() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -179,6 +187,7 @@ bool test_mtime() noexcept {
   return mtime > 0;
 }
 
+/// Handles test longest prefix match.
 bool test_longest_prefix_match() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -224,6 +233,7 @@ bool test_longest_prefix_match() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   if (!test_init_shutdown()) {
     return 1;

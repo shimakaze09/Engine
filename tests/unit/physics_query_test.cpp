@@ -1,3 +1,5 @@
+// Verifies physics query test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -256,6 +258,7 @@ int test_sweep_box_wall() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   struct TestCase {
     const char *name;

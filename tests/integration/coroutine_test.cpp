@@ -15,6 +15,7 @@ namespace {
 
 static const char *kTempScript = "coroutine_test.lua";
 
+/// Writes script data.
 bool write_script(const char *code) noexcept {
   FILE *f = nullptr;
 #ifdef _WIN32
@@ -32,6 +33,7 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
+/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
 // Helper: count entities named |name| in the world.
@@ -412,6 +414,7 @@ bool test_clear() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   struct TestCase {
     const char *name;

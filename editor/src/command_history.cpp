@@ -1,3 +1,5 @@
+// Implements command history behavior for the Engine editor tool.
+
 #include "engine/editor/command_history.h"
 
 #include <cstddef>

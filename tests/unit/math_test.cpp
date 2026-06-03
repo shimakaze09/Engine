@@ -1,3 +1,5 @@
+// Verifies math test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstddef>
 
@@ -12,22 +14,26 @@
 
 namespace {
 
+/// Handles nearly equal.
 bool nearly_equal(float a, float b, float epsilon) {
   return std::fabs(a - b) <= epsilon;
 }
 
+/// Handles nearly equal vec3.
 bool nearly_equal_vec3(const engine::math::Vec3 &a, const engine::math::Vec3 &b,
                        float epsilon) {
   return nearly_equal(a.x, b.x, epsilon) && nearly_equal(a.y, b.y, epsilon) &&
          nearly_equal(a.z, b.z, epsilon);
 }
 
+/// Handles nearly equal quat.
 bool nearly_equal_quat(const engine::math::Quat &a, const engine::math::Quat &b,
                        float epsilon) {
   const float cosTheta = std::fabs(engine::math::dot(a, b));
   return cosTheta >= (1.0F - epsilon);
 }
 
+/// Handles check identity.
 bool check_identity(const engine::math::Mat4 &value, float epsilon) {
   const engine::math::Mat4 identity = engine::math::identity();
   for (std::size_t col = 0U; col < 4U; ++col) {
@@ -45,6 +51,7 @@ bool check_identity(const engine::math::Mat4 &value, float epsilon) {
   return true;
 }
 
+/// Handles nearly equal angle.
 bool nearly_equal_angle(float a, float b, float epsilon) {
   const float twoPi = 6.2831853072F;
   float delta = std::fmod(a - b, twoPi);
@@ -59,6 +66,7 @@ bool nearly_equal_angle(float a, float b, float epsilon) {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   const engine::math::Vec2 v2a(1.0F, 2.0F);
   const engine::math::Vec2 v2b(3.0F, 4.0F);

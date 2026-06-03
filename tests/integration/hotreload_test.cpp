@@ -17,6 +17,7 @@ namespace {
 
 static const char *kTempScript = "hotreload_test.lua";
 
+/// Writes script data.
 bool write_script(const char *code) noexcept {
   FILE *f = nullptr;
 #ifdef _WIN32
@@ -34,6 +35,7 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
+/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
 // -----------------------------------------------------------------------
@@ -219,6 +221,7 @@ bool test_persist_table() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int failures = 0;
 

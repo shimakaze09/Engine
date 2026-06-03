@@ -1,3 +1,5 @@
+// Verifies camera test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -11,6 +13,7 @@ namespace {
 using namespace engine;
 using namespace engine::runtime;
 
+/// Handles test push pop camera.
 bool test_push_pop_camera() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -47,6 +50,7 @@ bool test_push_pop_camera() noexcept {
   return true;
 }
 
+/// Handles test priority stack.
 bool test_priority_stack() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -82,6 +86,7 @@ bool test_priority_stack() noexcept {
   return true;
 }
 
+/// Handles test blend interpolation.
 bool test_blend_interpolation() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -117,6 +122,7 @@ bool test_blend_interpolation() noexcept {
   return true;
 }
 
+/// Handles test camera shake nonzero during and zero after.
 bool test_camera_shake_nonzero_during_and_zero_after() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -169,6 +175,7 @@ bool test_camera_shake_nonzero_during_and_zero_after() noexcept {
   return true;
 }
 
+/// Handles test multiple shakes additive.
 bool test_multiple_shakes_additive() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -200,6 +207,7 @@ bool test_multiple_shakes_additive() noexcept {
   return true;
 }
 
+/// Handles test spring arm crud.
 bool test_spring_arm_crud() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   const Entity entity = world->create_entity();
@@ -239,6 +247,7 @@ bool test_spring_arm_crud() noexcept {
   return true;
 }
 
+/// Handles test clear.
 bool test_clear() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -259,6 +268,7 @@ bool test_clear() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int failures = 0;
 

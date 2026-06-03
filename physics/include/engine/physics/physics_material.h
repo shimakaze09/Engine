@@ -1,9 +1,12 @@
+// Declares physics material types and APIs for the Engine physics system.
+
 #pragma once
 
 #include <cmath>
 
 namespace engine::physics {
 
+/// Stores physics material data used by the engine.
 struct PhysicsMaterial final {
   float staticFriction = 0.5F;
   float dynamicFriction = 0.3F;

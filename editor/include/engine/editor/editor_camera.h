@@ -1,3 +1,5 @@
+// Declares editor camera types and APIs for the Engine editor tool.
+
 #pragma once
 
 #include "engine/math/vec3.h"
@@ -5,6 +7,7 @@
 
 namespace engine::editor {
 
+/// Stores editor camera data used by the engine.
 struct EditorCamera final {
   math::Vec3 target = math::Vec3(0.0F, 0.0F, 0.0F);
   float yaw = 0.0F;      // radians

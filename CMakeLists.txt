@@ -1,3 +1,5 @@
+# Configures root build build settings for the Engine repository.
+
 cmake_minimum_required(VERSION 3.28)
 
 if(POLICY CMP0174)

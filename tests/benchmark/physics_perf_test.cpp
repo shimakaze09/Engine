@@ -1,3 +1,5 @@
+// Verifies physics perf test behavior for the Engine test suite.
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +18,7 @@ using Clock = std::chrono::high_resolution_clock;
 constexpr std::size_t kBodyCount = 1000U;
 constexpr int kSimulationSteps = 120;
 
+/// Parses text into the engine representation for json out.
 bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
   if (outPath == nullptr) {
     return false;
@@ -31,6 +34,7 @@ bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
   return true;
 }
 
+/// Handles setup world.
 bool setup_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
     return false;
@@ -64,6 +68,7 @@ bool setup_world(engine::runtime::World *world) noexcept {
   return true;
 }
 
+/// Runs the configured command, loop, or tool for benchmark.
 bool run_benchmark(double *outStepMs) noexcept {
   if (outStepMs == nullptr) {
     return false;
@@ -102,6 +107,7 @@ bool run_benchmark(double *outStepMs) noexcept {
   return true;
 }
 
+/// Writes json data.
 bool write_json(const char *path, double stepMs) noexcept {
   if (path == nullptr) {
     return true;
@@ -133,6 +139,7 @@ bool write_json(const char *path, double stepMs) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main(int argc, char **argv) {
   const char *jsonOutPath = nullptr;
   if (!parse_json_out(argc, argv, &jsonOutPath)) {

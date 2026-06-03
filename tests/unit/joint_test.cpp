@@ -1,3 +1,5 @@
+// Verifies joint test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -36,6 +38,7 @@ Entity make_body(World &w, const math::Vec3 &pos) noexcept {
   return e;
 }
 
+/// Handles vec distance.
 float vec_distance(const math::Vec3 &a, const math::Vec3 &b) noexcept {
   const math::Vec3 d = math::sub(a, b);
   return std::sqrt(math::dot(d, d));
@@ -332,6 +335,7 @@ int test_joint_limits() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   struct TestCase {
     const char *name;

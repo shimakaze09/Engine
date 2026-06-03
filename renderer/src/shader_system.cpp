@@ -1,3 +1,5 @@
+// Implements shader system behavior for the Engine renderer system.
+
 #include "engine/renderer/shader_system.h"
 
 #include <cstdint>
@@ -14,6 +16,7 @@ namespace {
 constexpr std::size_t kMaxShaderPrograms = 64U;
 constexpr std::size_t kMaxPathLength = 128U;
 
+/// Handles safe copy path.
 void safe_copy_path(char *dst, const char *src) noexcept {
   std::size_t i = 0U;
   while ((i < kMaxPathLength - 1U) && (src[i] != '\0')) {
@@ -23,6 +26,7 @@ void safe_copy_path(char *dst, const char *src) noexcept {
   dst[i] = '\0';
 }
 
+/// Stores shader entry data used by the engine.
 struct ShaderEntry final {
   bool active = false;
   char vertPath[kMaxPathLength] = {};
@@ -35,6 +39,7 @@ struct ShaderEntry final {
 ShaderEntry g_entries[kMaxShaderPrograms] = {};
 bool g_initialized = false;
 
+/// Handles compile program from source.
 std::uint32_t compile_program_from_source(const char *vertSource,
                                           const char *fragSource) noexcept {
   const RenderDevice *dev = render_device();
@@ -61,6 +66,7 @@ std::uint32_t compile_program_from_source(const char *vertSource,
   return program;
 }
 
+/// Handles try reload entry.
 bool try_reload_entry(ShaderEntry &entry) noexcept {
   char *vertSource = nullptr;
   std::size_t vertSize = 0U;
@@ -105,6 +111,7 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
 
 } // namespace
 
+/// Initializes the owning system for shader system.
 bool initialize_shader_system() noexcept {
   if (g_initialized) {
     return true;
@@ -118,6 +125,7 @@ bool initialize_shader_system() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for shader system.
 void shutdown_shader_system() noexcept {
   if (!g_initialized) {
     return;
@@ -134,6 +142,7 @@ void shutdown_shader_system() noexcept {
   g_initialized = false;
 }
 
+/// Loads the requested resource for shader program.
 ShaderProgramHandle load_shader_program(const char *vertPath,
                                         const char *fragPath) noexcept {
   if ((vertPath == nullptr) || (fragPath == nullptr) || !g_initialized) {
@@ -169,6 +178,7 @@ ShaderProgramHandle load_shader_program(const char *vertPath,
   return ShaderProgramHandle{static_cast<std::uint32_t>(slot + 1U)};
 }
 
+/// Destroys or releases the requested object, handle, or resource for shader program.
 void destroy_shader_program(ShaderProgramHandle handle) noexcept {
   if ((handle.id == 0U) || (handle.id > kMaxShaderPrograms) || !g_initialized) {
     return;
@@ -187,6 +197,7 @@ void destroy_shader_program(ShaderProgramHandle handle) noexcept {
   entry = ShaderEntry{};
 }
 
+/// Handles shader gpu program.
 std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
   if ((handle.id == 0U) || (handle.id > kMaxShaderPrograms) || !g_initialized) {
     return 0U;
@@ -196,6 +207,7 @@ std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
   return entry.active ? entry.gpuProgram : 0U;
 }
 
+/// Handles check shader reload.
 void check_shader_reload() noexcept {
   if (!g_initialized) {
     return;

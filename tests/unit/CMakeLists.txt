@@ -1,3 +1,5 @@
+# Verifies tests behavior for the Engine test suite.
+
 engine_add_test_executable(engine_unit_foundation
     SOURCES
     smoke_test.cpp

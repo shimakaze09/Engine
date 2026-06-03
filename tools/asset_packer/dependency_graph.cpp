@@ -1,3 +1,5 @@
+// Implements dependency graph behavior for the Engine tooling.
+
 #include "dependency_graph.h"
 
 #include <algorithm>
@@ -6,6 +8,7 @@
 
 namespace engine::tools {
 
+/// Adds a value or component to the target system for dependency.
 bool add_dependency(DependencyGraph *graph, DependencyGraph::AssetId dependent,
                     DependencyGraph::AssetId dependency) noexcept {
   if ((graph == nullptr) || (dependent == DependencyGraph::kInvalidAssetId) ||
@@ -29,6 +32,7 @@ bool add_dependency(DependencyGraph *graph, DependencyGraph::AssetId dependent,
   return true;
 }
 
+/// Removes a value or component from the target system for dependency.
 bool remove_dependency(DependencyGraph *graph,
                        DependencyGraph::AssetId dependent,
                        DependencyGraph::AssetId dependency) noexcept {
@@ -62,6 +66,7 @@ bool remove_dependency(DependencyGraph *graph,
   return true;
 }
 
+/// Removes a value or component from the target system for asset.
 void remove_asset(DependencyGraph *graph,
                   DependencyGraph::AssetId id) noexcept {
   if ((graph == nullptr) || (id == DependencyGraph::kInvalidAssetId)) {
@@ -101,6 +106,7 @@ void remove_asset(DependencyGraph *graph,
   graph->assetPaths.erase(id);
 }
 
+/// Returns the requested value for dependencies.
 std::size_t get_dependencies(const DependencyGraph *graph,
                              DependencyGraph::AssetId id,
                              DependencyGraph::AssetId *outIds,
@@ -129,6 +135,7 @@ std::size_t get_dependencies(const DependencyGraph *graph,
   return count;
 }
 
+/// Returns the requested value for dependents.
 std::size_t get_dependents(const DependencyGraph *graph,
                            DependencyGraph::AssetId id,
                            DependencyGraph::AssetId *outIds,
@@ -157,6 +164,7 @@ std::size_t get_dependents(const DependencyGraph *graph,
   return count;
 }
 
+/// Returns the requested value for all dependents recursive.
 std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
                                          DependencyGraph::AssetId id,
                                          DependencyGraph::AssetId *outIds,
@@ -205,6 +213,7 @@ std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
   return count;
 }
 
+/// Handles would create cycle.
 bool would_create_cycle(const DependencyGraph *graph,
                         DependencyGraph::AssetId dependent,
                         DependencyGraph::AssetId dependency) noexcept {
@@ -248,6 +257,7 @@ bool would_create_cycle(const DependencyGraph *graph,
   return false;
 }
 
+/// Returns whether has cycle.
 bool has_cycle(const DependencyGraph *graph) noexcept {
   if (graph == nullptr) {
     return false;
@@ -303,6 +313,7 @@ bool has_cycle(const DependencyGraph *graph) noexcept {
   return processed < allNodes.size();
 }
 
+/// Converts topological sort into the target representation.
 std::size_t topological_sort(const DependencyGraph *graph,
                              DependencyGraph::AssetId *outIds,
                              std::size_t maxIds) noexcept {
@@ -446,6 +457,7 @@ bool write_dependency_graph_json(const DependencyGraph *graph,
   return true;
 }
 
+/// Reads dependency graph json data.
 bool read_dependency_graph_json(DependencyGraph *graph,
                                 const char *path) noexcept {
   if ((graph == nullptr) || (path == nullptr)) {
@@ -589,6 +601,7 @@ bool read_dependency_graph_json(DependencyGraph *graph,
   return true;
 }
 
+/// Handles compute invalidation set.
 std::size_t compute_invalidation_set(const DependencyGraph *graph,
                                      const DependencyGraph::AssetId *changedIds,
                                      std::size_t changedCount,

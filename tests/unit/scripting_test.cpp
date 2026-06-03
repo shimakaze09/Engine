@@ -1,3 +1,5 @@
+// Verifies scripting test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -11,6 +13,7 @@ namespace {
 
 constexpr const char *kTempScriptPath = "scripting_test.lua";
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -25,15 +28,18 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) noexcept {
   const float diff = lhs - rhs;
   return (diff < 0.0001F) && (diff > -0.0001F);
 }
 
+/// Removes a value or component from the target system for script file.
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kTempScriptPath));
 }
 
+/// Writes script file data.
 bool write_script_file(const char *contents) noexcept {
   if (contents == nullptr) {
     return false;
@@ -52,6 +58,7 @@ bool write_script_file(const char *contents) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   remove_script_file();
 

@@ -1,3 +1,5 @@
+// Verifies prefab test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -10,10 +12,12 @@ namespace {
 
 constexpr const char *kPrefabPath = "prefab_test_temp.json";
 
+/// Removes a value or component from the target system for prefab file.
 void remove_prefab_file() noexcept {
   static_cast<void>(std::remove(kPrefabPath));
 }
 
+/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) noexcept {
   const float diff = lhs - rhs;
   return (diff < 0.0001F) && (diff > -0.0001F);
@@ -21,6 +25,7 @@ bool nearly_equal(float lhs, float rhs) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   remove_prefab_file();
 

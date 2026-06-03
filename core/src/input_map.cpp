@@ -1,3 +1,5 @@
+// Implements input map behavior for the Engine core engine.
+
 #include "engine/core/input_map.h"
 #include "engine/core/input.h"
 #include "engine/core/json.h"
@@ -28,6 +30,7 @@ std::array<bool, kMaxInputActions> g_prevActionDown{};
 float g_mouseDeltaX = 0.0F;
 float g_mouseDeltaY = 0.0F;
 
+/// Finds the matching object or resource for mapped action.
 InputAction *find_mapped_action(const char *name) noexcept {
   if (name == nullptr) {
     return nullptr;
@@ -40,6 +43,7 @@ InputAction *find_mapped_action(const char *name) noexcept {
   return nullptr;
 }
 
+/// Finds the matching object or resource for mapped axis.
 InputAxisMapping *find_mapped_axis(const char *name) noexcept {
   if (name == nullptr) {
     return nullptr;
@@ -52,6 +56,7 @@ InputAxisMapping *find_mapped_axis(const char *name) noexcept {
   return nullptr;
 }
 
+/// Handles evaluate binding.
 bool evaluate_binding(const InputBinding &binding) noexcept {
   switch (binding.type) {
   case InputBindingType::Key:
@@ -73,6 +78,7 @@ bool evaluate_binding(const InputBinding &binding) noexcept {
   return false;
 }
 
+/// Handles evaluate axis source.
 float evaluate_axis_source(const InputAxisSource &src) noexcept {
   switch (src.type) {
   case AxisSourceType::KeyPair: {
@@ -113,6 +119,7 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -126,6 +133,7 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Reads text file data.
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
   FILE *file = nullptr;
@@ -157,6 +165,7 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
   return true;
 }
 
+/// Writes text file data.
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept {
   if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
@@ -191,6 +200,7 @@ bool initialize_input_mapper() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for input mapper.
 void shutdown_input_mapper() noexcept {
   g_mapperInitialized = false;
   g_mappedActions = {};
@@ -251,6 +261,7 @@ bool add_input_action(const char *name, const InputBinding *bindings,
   return false;
 }
 
+/// Adds a value or component to the target system for input axis.
 bool add_input_axis(const char *name, const InputAxisSource *sources,
                     std::uint32_t count) noexcept {
   if (name == nullptr) {
@@ -297,6 +308,7 @@ bool add_input_axis(const char *name, const InputAxisSource *sources,
   return false;
 }
 
+/// Removes a value or component from the target system for input action.
 bool remove_input_action(const char *name) noexcept {
   InputAction *a = find_mapped_action(name);
   if (a == nullptr) {
@@ -306,6 +318,7 @@ bool remove_input_action(const char *name) noexcept {
   return true;
 }
 
+/// Removes a value or component from the target system for input axis.
 bool remove_input_axis(const char *name) noexcept {
   InputAxisMapping *a = find_mapped_axis(name);
   if (a == nullptr) {
@@ -330,6 +343,7 @@ bool set_action_callback(const char *name, ActionCallback cb,
   return true;
 }
 
+/// Sets the requested value for axis callback.
 bool set_axis_callback(const char *name, AxisCallback cb,
                        void *userData) noexcept {
   InputAxisMapping *a = find_mapped_axis(name);
@@ -358,6 +372,7 @@ bool is_mapped_action_down(const char *name) noexcept {
   return false;
 }
 
+/// Returns whether is mapped action pressed.
 bool is_mapped_action_pressed(const char *name) noexcept {
   // Find the action index to compare current vs previous frame.
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
@@ -369,6 +384,7 @@ bool is_mapped_action_pressed(const char *name) noexcept {
   return false;
 }
 
+/// Handles mapped axis value.
 float mapped_axis_value(const char *name) noexcept {
   const InputAxisMapping *a = find_mapped_axis(name);
   if (a == nullptr) {
@@ -419,6 +435,7 @@ void input_mapper_begin_frame() noexcept {
   g_mouseDeltaY = 0.0F;
 }
 
+/// Handles input mapper process event.
 void input_mapper_process_event(const void *nativeEvent) noexcept {
   if (nativeEvent == nullptr) {
     return;
@@ -431,6 +448,7 @@ void input_mapper_process_event(const void *nativeEvent) noexcept {
   g_mouseDeltaY = static_cast<float>(ms.deltaY);
 }
 
+/// Handles input mapper end frame.
 void input_mapper_end_frame() noexcept {
   // Evaluate all mapped actions and record their current state.
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
@@ -546,6 +564,7 @@ bool save_input_bindings(const char *path) noexcept {
   return write_text_file(path, writer.result(), writer.result_size());
 }
 
+/// Loads the requested resource for input bindings.
 bool load_input_bindings(const char *path) noexcept {
   std::size_t fileSize = 0U;
   std::unique_ptr<char[]> fileBuffer{};
@@ -557,6 +576,7 @@ bool load_input_bindings(const char *path) noexcept {
   return load_input_bindings_from_buffer(fileBuffer.get(), fileSize);
 }
 
+/// Saves the requested resource for input bindings to buffer.
 bool save_input_bindings_to_buffer(char *buffer, std::size_t capacity,
                                    std::size_t *outSize) noexcept {
   if ((buffer == nullptr) || (outSize == nullptr) || (capacity < 2U)) {
@@ -632,6 +652,7 @@ bool save_input_bindings_to_buffer(char *buffer, std::size_t capacity,
   return true;
 }
 
+/// Loads the requested resource for input bindings from buffer.
 bool load_input_bindings_from_buffer(const char *buffer,
                                      std::size_t size) noexcept {
   if ((buffer == nullptr) || (size == 0U)) {

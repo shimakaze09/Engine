@@ -1,3 +1,5 @@
+// Declares reflect types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <array>
@@ -11,6 +13,7 @@ struct TypeField final {
   const char *name = nullptr;
   std::size_t offset = 0U;
   std::size_t size = 0U;
+  /// Enumerates kind values used by the engine.
   enum class Kind : std::uint8_t {
     Float,
     Int32,
@@ -33,7 +36,9 @@ struct TypeDescriptor final {
   // O(fieldCount) string lookup; migrate to field IDs if this becomes hot.
   const TypeField *find_field(const char *fieldName) const noexcept;
 
+  /// Handles field ptr.
   template <typename T>
+  /// Handles field ptr.
   T *field_ptr(void *instance, const TypeField &field) const noexcept {
     if (instance == nullptr) {
       return nullptr;
@@ -48,7 +53,9 @@ struct TypeDescriptor final {
                                  + field.offset);
   }
 
+  /// Handles field ptr.
   template <typename T>
+  /// Handles field ptr.
   const T *field_ptr(const void *instance,
                      const TypeField &field) const noexcept {
     if (instance == nullptr) {
@@ -71,13 +78,17 @@ struct TypeRegistry final {
   std::array<TypeDescriptor, kMaxTypes> types{};
   std::size_t typeCount = 0U;
 
+  /// Handles register type.
   TypeDescriptor *register_type(const char *name, std::size_t size) noexcept;
   // O(typeCount) string lookup; migrate to type IDs if this becomes hot.
   const TypeDescriptor *find_type(const char *name) const noexcept;
+  /// Handles type count.
   std::size_t type_count() const noexcept;
+  /// Handles type at.
   const TypeDescriptor *type_at(std::size_t index) const noexcept;
 };
 
+/// Handles global type registry.
 TypeRegistry &global_type_registry() noexcept;
 
 #define ENGINE_REFLECT_CONCAT_IMPL(lhs, rhs) lhs##rhs

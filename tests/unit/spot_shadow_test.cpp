@@ -1,3 +1,5 @@
+// Verifies spot shadow test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 
@@ -143,6 +145,7 @@ int verify_spot_data_far_plane_default() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = verify_spot_matrix_not_identity();
   if (result != 0)

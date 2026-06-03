@@ -1,3 +1,5 @@
+// Implements engine pipeline behavior for the Engine runtime world.
+
 #include "engine/runtime/engine_pipeline.h"
 
 #include <array>
@@ -81,6 +83,7 @@ struct UpdateChunkJobData final {
   float deltaSeconds = 0.0F;
 };
 
+/// Stores physics chunk job data used by the engine.
 struct PhysicsChunkJobData final {
   runtime::World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -89,15 +92,18 @@ struct PhysicsChunkJobData final {
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
+/// Stores world phase job data used by the engine.
 struct WorldPhaseJobData final {
   runtime::World *world = nullptr;
 };
 
+/// Stores resolve collisions job data used by the engine.
 struct ResolveCollisionsJobData final {
   runtime::World *world = nullptr;
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
+/// Stores frame context data used by the engine.
 struct FrameContext final {
   runtime::RenderPrepPipelineContext renderPrepPipeline{};
   std::array<UpdateChunkJobData, kMaxChunkJobs> updateJobData{};
@@ -134,6 +140,7 @@ bool file_exists(const char *path) noexcept {
   return true;
 }
 
+/// Handles resolve mesh asset path.
 const char *resolve_mesh_asset_path() noexcept {
   for (const char *candidate : kMeshAssetPathCandidates) {
     if (file_exists(candidate)) {
@@ -164,6 +171,7 @@ bool build_plane_mesh(renderer::GpuMesh *outMesh) noexcept {
                                             outMesh);
 }
 
+/// Builds the requested runtime data for cube mesh.
 bool build_cube_mesh(renderer::GpuMesh *outMesh) noexcept {
   // clang-format off
   static constexpr float kVerts[] = {
@@ -211,6 +219,7 @@ bool build_cube_mesh(renderer::GpuMesh *outMesh) noexcept {
                                             outMesh);
 }
 
+/// Builds the requested runtime data for sphere mesh.
 bool build_sphere_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr int kStacks = 12;
   constexpr int kSlices = 24;
@@ -263,6 +272,7 @@ bool build_sphere_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kICount), false, outMesh);
 }
 
+/// Builds the requested runtime data for cylinder mesh.
 bool build_cylinder_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr int kSlices = 24;
   constexpr float kRadius = 0.5F;
@@ -365,6 +375,7 @@ bool build_cylinder_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kTotalIdx), false, outMesh);
 }
 
+/// Builds the requested runtime data for capsule mesh.
 bool build_capsule_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr int kHemiStacks = 8;
   constexpr int kSlices = 16;
@@ -430,6 +441,7 @@ bool build_capsule_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kICount), false, outMesh);
 }
 
+/// Builds the requested runtime data for pyramid mesh.
 bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr float kBaseZBack = -0.288675F;
   constexpr float kBaseZFront = 0.577350F;
@@ -491,6 +503,7 @@ bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
                                             outMesh);
 }
 
+/// Handles register builtin mesh.
 renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                         renderer::AssetDatabase *database,
                                         const renderer::GpuMesh &mesh,
@@ -520,6 +533,7 @@ void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
   }
 }
 
+/// Advances this system for the current frame or tick for chunk job.
 void update_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<UpdateChunkJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -530,6 +544,7 @@ void update_chunk_job(void *userData) noexcept {
       jobData->startIndex, jobData->count, jobData->deltaSeconds));
 }
 
+/// Handles physics chunk job.
 void physics_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<PhysicsChunkJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -542,6 +557,7 @@ void physics_chunk_job(void *userData) noexcept {
   }
 }
 
+/// Handles resolve collisions job.
 void resolve_collisions_job(void *userData) noexcept {
   auto *jobData = static_cast<ResolveCollisionsJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -553,6 +569,7 @@ void resolve_collisions_job(void *userData) noexcept {
   }
 }
 
+/// Handles commit update phase job.
 void commit_update_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -560,6 +577,7 @@ void commit_update_phase_job(void *userData) noexcept {
   }
 }
 
+/// Begins the requested operation or profiling range for update step job.
 void begin_update_step_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -567,6 +585,7 @@ void begin_update_step_job(void *userData) noexcept {
   }
 }
 
+/// Begins the requested operation or profiling range for render prep phase job.
 void begin_render_prep_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -574,6 +593,7 @@ void begin_render_prep_phase_job(void *userData) noexcept {
   }
 }
 
+/// Begins the requested operation or profiling range for render phase job.
 void begin_render_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -581,6 +601,7 @@ void begin_render_phase_job(void *userData) noexcept {
   }
 }
 
+/// Ends the requested operation or profiling range for frame phase job.
 void end_frame_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -588,6 +609,7 @@ void end_frame_phase_job(void *userData) noexcept {
   }
 }
 
+/// Handles link dependency.
 bool link_dependency(core::JobHandle prerequisite,
                      core::JobHandle dependent) noexcept {
   if (!core::is_valid_handle(prerequisite) ||
@@ -598,6 +620,7 @@ bool link_dependency(core::JobHandle prerequisite,
   return core::add_dependency(prerequisite, dependent);
 }
 
+/// Submits work to the owning buffer or system for world phase job.
 core::JobHandle submit_world_phase_job(FrameContext *frameContext,
                                        runtime::World *world,
                                        std::size_t *phaseJobCursor,
@@ -624,6 +647,7 @@ core::JobHandle submit_world_phase_job(FrameContext *frameContext,
 
 enum class LoopPlayState : std::uint8_t { Stopped, Playing, Paused };
 
+/// Handles query editor play state.
 LoopPlayState query_editor_play_state() noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if (bridge == nullptr) {
@@ -641,6 +665,7 @@ LoopPlayState query_editor_play_state() noexcept {
   return LoopPlayState::Stopped;
 }
 
+/// Handles process input events with editor.
 void process_input_events_with_editor() noexcept {
   core::begin_input_frame();
 
@@ -704,6 +729,7 @@ const char *world_phase_to_string(runtime::WorldPhase phase) noexcept {
   }
 }
 
+/// Handles vec3 has motion.
 bool vec3_has_motion(const math::Vec3 &value) noexcept {
   constexpr float kEpsilon = 0.0001F;
   return (value.x > kEpsilon) || (value.x < -kEpsilon) ||
@@ -711,6 +737,7 @@ bool vec3_has_motion(const math::Vec3 &value) noexcept {
          (value.z > kEpsilon) || (value.z < -kEpsilon);
 }
 
+/// Handles count moving rigid bodies.
 std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::RigidBody>(
@@ -723,6 +750,7 @@ std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   return count;
 }
 
+/// Handles count mesh components.
 std::size_t count_mesh_components(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::MeshComponent>(
@@ -732,6 +760,7 @@ std::size_t count_mesh_components(const runtime::World &world) noexcept {
   return count;
 }
 
+/// Handles count ready mesh components.
 std::size_t
 count_ready_mesh_components(const runtime::World &world,
                             const renderer::AssetDatabase *assets) noexcept {
@@ -751,12 +780,14 @@ count_ready_mesh_components(const runtime::World &world,
   return count;
 }
 
+/// Stores mesh asset state counts data used by the engine.
 struct MeshAssetStateCounts final {
   std::size_t ready = 0U;
   std::size_t loading = 0U;
   std::size_t failed = 0U;
 };
 
+/// Handles count mesh asset states.
 MeshAssetStateCounts
 count_mesh_asset_states(const renderer::AssetDatabase *assets) noexcept {
   MeshAssetStateCounts counts{};
@@ -801,6 +832,7 @@ struct BootstrapMeshIds final {
   renderer::AssetId pyramid = renderer::kInvalidAssetId;
 };
 
+/// Loads the requested resource for bootstrap meshes.
 bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::AssetDatabase *assetDatabase,
                            renderer::GpuMeshRegistry *meshRegistry,

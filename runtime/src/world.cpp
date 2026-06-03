@@ -1,3 +1,5 @@
+// Implements world behavior for the Engine runtime world.
+
 #include "engine/runtime/world.h"
 
 #include "engine/core/logging.h"
@@ -19,6 +21,7 @@ constexpr std::uint8_t kNameSlotEmpty = 0U;
 constexpr std::uint8_t kNameSlotOccupied = 1U;
 constexpr std::uint8_t kNameSlotTombstone = 2U;
 
+/// Handles copy bounded c string.
 void copy_bounded_c_string(char *dst, std::size_t dstCapacity,
                            const char *src) noexcept {
   if ((dst == nullptr) || (dstCapacity == 0U)) {
@@ -34,6 +37,7 @@ void copy_bounded_c_string(char *dst, std::size_t dstCapacity,
   dst[i] = '\0';
 }
 
+/// Handles world transform from local.
 WorldTransform world_transform_from_local(const Transform &local) noexcept {
   WorldTransform world{};
   world.position = local.position;

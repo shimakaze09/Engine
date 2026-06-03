@@ -1,3 +1,5 @@
+// Defines the hosek wilkie sky fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec3 vTexCoord;
@@ -10,12 +12,14 @@ out vec4 FragColor;
 
 const float PI = 3.14159265359;
 
+/// Handles hosek chi.
 float hosek_chi(float h, float gamma) {
   float cosGamma = cos(gamma);
   float denom = max(1.0 + h * h - 2.0 * h * cosGamma, 0.0001);
   return (1.0 + cosGamma * cosGamma) / pow(denom, 1.5);
 }
 
+/// Handles xy y to rgb.
 vec3 xyY_to_rgb(float x, float y, float Y) {
   y = max(y, 0.0001);
   float X = (x / y) * Y;
@@ -28,6 +32,7 @@ vec3 xyY_to_rgb(float x, float y, float Y) {
   return max(rgb, vec3(0.0));
 }
 
+/// Handles hosek distribution.
 vec3 hosek_distribution(float theta, float gamma, vec3 A, vec3 B, vec3 C,
                         vec3 D, vec3 E, vec3 F, vec3 G, vec3 H, vec3 I) {
   float cosTheta = max(cos(theta), 0.01);
@@ -36,9 +41,11 @@ vec3 hosek_distribution(float theta, float gamma, vec3 A, vec3 B, vec3 C,
                   hosek_chi(H.b, gamma));
   return (vec3(1.0) + A * exp(B / cosTheta)) *
          (C + D * exp(E * gamma) + F * cosGamma * cosGamma + G * chi +
+          /// Handles sqrt.
           I * sqrt(cosTheta));
 }
 
+/// Handles hosek coefficients.
 void hosek_coefficients(float turbidity, float albedo, out vec3 A, out vec3 B,
                         out vec3 C, out vec3 D, out vec3 E, out vec3 F,
                         out vec3 G, out vec3 H, out vec3 I) {
@@ -61,6 +68,7 @@ void hosek_coefficients(float turbidity, float albedo, out vec3 A, out vec3 B,
   I = mix(vec3(0.08, 0.12, 0.20), vec3(0.30, 0.32, 0.30), t) + albedoLift;
 }
 
+/// Handles hosek wilkie sky.
 vec3 hosek_wilkie_sky(vec3 direction, vec3 sunDirection, float turbidity,
                       float groundAlbedo) {
   vec3 sunDir = normalize(sunDirection);
@@ -112,6 +120,7 @@ vec3 hosek_wilkie_sky(vec3 direction, vec3 sunDirection, float turbidity,
   return sky;
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 direction = normalize(vTexCoord);
   vec3 skyColor =

@@ -1,3 +1,5 @@
+// Verifies ecs stress 50k behavior for the Engine test suite.
+
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -19,6 +21,7 @@ constexpr double kMaxSimMs = 16.0;
 constexpr double kMaxSimMs = 24.0;
 #endif
 
+/// Handles populate world.
 bool populate_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
     return false;
@@ -50,6 +53,7 @@ bool populate_world(engine::runtime::World *world) noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());

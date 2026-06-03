@@ -1,3 +1,5 @@
+// Defines the pbr vertex shader used by the Engine renderer.
+
 #version 330 core
 
 layout(location = 0) in vec3 inPosition;
@@ -20,9 +22,11 @@ out vec3 vWorldPos;
 out vec3 vNormal;
 out vec2 vTexCoord;
 
+/// Runs the shader entry point for this stage.
 void main() {
   mat4 model = (uUseInstancing != 0) ? inInstanceModel : u_model;
   mat3 normalMatrix = (uUseInstancing != 0)
+    /// Handles transpose.
     ? transpose(inverse(mat3(model)))
     : u_normalMatrix;
   vec4 worldPos = model * vec4(inPosition, 1.0);

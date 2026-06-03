@@ -1,3 +1,5 @@
+// Verifies lifecycle test behavior for the Engine test suite.
+
 #include "engine/runtime/world.h"
 
 #include <cstdint>
@@ -13,6 +15,7 @@ namespace {
 
 using namespace engine::runtime;
 
+/// Handles test lifecycle begin play.
 bool test_lifecycle_begin_play() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world) {
@@ -75,6 +78,7 @@ bool test_lifecycle_begin_play() {
   return true;
 }
 
+/// Handles test lifecycle tick.
 bool test_lifecycle_tick() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -110,6 +114,7 @@ bool test_lifecycle_tick() {
   return true;
 }
 
+/// Handles test lifecycle end play.
 bool test_lifecycle_end_play() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -171,6 +176,7 @@ bool test_lifecycle_end_play() {
   return true;
 }
 
+/// Handles test full lifecycle sequence.
 bool test_full_lifecycle_sequence() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -261,6 +267,7 @@ bool test_full_lifecycle_sequence() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   struct TestCase {
     const char *name;

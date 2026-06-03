@@ -1,3 +1,5 @@
+# Configures engine helpers build settings for the Engine repository.
+
 include(CMakeParseArguments)
 
 function(engine_set_cxx20 target visibility)

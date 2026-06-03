@@ -1,3 +1,5 @@
+// Declares camera manager types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <cstddef>
@@ -66,9 +68,12 @@ public:
   /// Clear all cameras and shakes.
   void clear() noexcept;
 
+  /// Handles camera count.
   std::size_t camera_count() const noexcept;
+  /// Handles shake count.
   std::size_t shake_count() const noexcept;
 
+/// Handles noise1d.
 private:
   /// Simple Perlin-like noise hash for shake offsets.
   static float noise1d(float t) noexcept;

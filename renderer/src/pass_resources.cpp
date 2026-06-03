@@ -1,3 +1,5 @@
+// Implements pass resources behavior for the Engine renderer system.
+
 #include "engine/renderer/pass_resources.h"
 
 #include <cstdint>
@@ -22,6 +24,7 @@ constexpr std::uint32_t kGBufferDepthSlot = 7U;
 constexpr std::uint32_t kSsaoTextureSlot = 8U;
 constexpr std::uint32_t kSsaoBlurTextureSlot = 9U;
 
+/// Stores pass resource state data used by the engine.
 struct PassResourceState final {
   bool initialized = false;
   int width = 0;
@@ -52,6 +55,7 @@ struct PassResourceState final {
 
 PassResourceState g_state{};
 
+/// Destroys or releases the requested object, handle, or resource for gpu resources.
 void destroy_gpu_resources() noexcept {
   const RenderDevice *dev = render_device();
   if (dev == nullptr) {
@@ -121,6 +125,7 @@ void destroy_gpu_resources() noexcept {
   }
 }
 
+/// Creates a new object, handle, or resource for gpu resources.
 bool create_gpu_resources(int width, int height) noexcept {
   const RenderDevice *dev = render_device();
   if (dev == nullptr) {
@@ -300,6 +305,7 @@ bool create_gpu_resources(int width, int height) noexcept {
 
 } // namespace
 
+/// Initializes the owning system for pass resources.
 bool initialize_pass_resources(int width, int height) noexcept {
   if (g_state.initialized) {
     return true;
@@ -317,6 +323,7 @@ bool initialize_pass_resources(int width, int height) noexcept {
   return true;
 }
 
+/// Shuts down the owning system for pass resources.
 void shutdown_pass_resources() noexcept {
   if (!g_state.initialized) {
     return;
@@ -326,6 +333,7 @@ void shutdown_pass_resources() noexcept {
   g_state = PassResourceState{};
 }
 
+/// Handles resize pass resources.
 void resize_pass_resources(int width, int height) noexcept {
   if (!g_state.initialized) {
     return;
@@ -347,8 +355,10 @@ void resize_pass_resources(int width, int height) noexcept {
   }
 }
 
+/// Returns the requested value for pass resources.
 const PassResources &get_pass_resources() noexcept { return g_state.resources; }
 
+/// Handles pass resource gpu texture.
 std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kSceneColorSlot) {
     return g_state.sceneColorTexture;
@@ -380,6 +390,7 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   return 0U;
 }
 
+/// Handles pass resource framebuffer.
 std::uint32_t
 pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
   if (colorAttachment.id == kSceneColorSlot) {

@@ -1,3 +1,5 @@
+// Verifies pool allocator test behavior for the Engine test suite.
+
 #include "engine/core/pool_allocator.h"
 
 #include <cstddef>
@@ -5,10 +7,12 @@
 
 namespace {
 
+/// Stores pointer sized item data used by the engine.
 struct PointerSizedItem final {
   void *data = nullptr;
 };
 
+/// Stores two pointer item data used by the engine.
 struct TwoPointerItem final {
   void *a = nullptr;
   void *b = nullptr;
@@ -16,6 +20,7 @@ struct TwoPointerItem final {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   // Test 1: Basic alloc/dealloc
   {

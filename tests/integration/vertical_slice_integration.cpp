@@ -1,3 +1,5 @@
+// Verifies vertical slice integration behavior for the Engine test suite.
+
 #include "engine/core/job_system.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
@@ -26,6 +28,7 @@ constexpr std::size_t kFrameCount = 60U;
 constexpr float kStepSeconds = 1.0F / 60.0F;
 constexpr float kStepX = 0.25F;
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -40,10 +43,12 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) noexcept {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
+/// Handles mat4 nearly equal.
 bool mat4_nearly_equal(const engine::math::Mat4 &lhs,
                        const engine::math::Mat4 &rhs) noexcept {
   for (std::size_t column = 0U; column < 4U; ++column) {
@@ -58,10 +63,12 @@ bool mat4_nearly_equal(const engine::math::Mat4 &lhs,
   return true;
 }
 
+/// Removes a value or component from the target system for script file.
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kTempScriptPath));
 }
 
+/// Writes script file data.
 bool write_script_file(const char *contents) noexcept {
   if (contents == nullptr) {
     return false;
@@ -78,6 +85,7 @@ bool write_script_file(const char *contents) noexcept {
   return ok;
 }
 
+/// Finds the matching object or resource for entity by name.
 bool find_entity_by_name(const engine::runtime::World &world, const char *name,
                          engine::runtime::Entity *outEntity) noexcept {
   if ((name == nullptr) || (outEntity == nullptr)) {
@@ -97,17 +105,20 @@ bool find_entity_by_name(const engine::runtime::World &world, const char *name,
   return *outEntity != engine::runtime::kInvalidEntity;
 }
 
+/// Enumerates world phase op values used by the engine.
 enum class WorldPhaseOp : std::uint8_t {
   BeginRenderPrep,
   BeginRender,
   EndFrame,
 };
 
+/// Stores world phase job data used by the engine.
 struct WorldPhaseJobData final {
   engine::runtime::World *world = nullptr;
   WorldPhaseOp op = WorldPhaseOp::BeginRenderPrep;
 };
 
+/// Handles world phase job.
 void world_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -127,6 +138,7 @@ void world_phase_job(void *userData) noexcept {
   }
 }
 
+/// Runs the configured command, loop, or tool for render prep pipeline.
 bool run_render_prep_pipeline(
     engine::runtime::World *world,
     engine::runtime::RenderPrepPipelineContext *pipelineContext,
@@ -219,6 +231,7 @@ bool run_render_prep_pipeline(
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   remove_script_file();
 

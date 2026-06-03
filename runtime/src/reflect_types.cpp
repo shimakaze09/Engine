@@ -1,9 +1,12 @@
+// Implements reflect types behavior for the Engine runtime world.
+
 #include "engine/runtime/reflect_types.h"
 #include "engine/core/reflect.h"
 #include "engine/runtime/world.h"
 
 namespace engine::runtime {
 
+/// Handles ensure runtime reflection registered.
 void ensure_runtime_reflection_registered() noexcept {
   // Intentionally empty: calling this symbol forces this translation unit
   // to link so static registration blocks execute.

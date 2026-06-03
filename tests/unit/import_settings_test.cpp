@@ -17,6 +17,7 @@ namespace {
 constexpr std::uint64_t kFnv64Offset = 1469598103934665603ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
+/// Stores import settings data used by the engine.
 struct ImportSettings final {
   int meshIndex = 0;
   int primitiveIndex = 0;
@@ -25,6 +26,7 @@ struct ImportSettings final {
   bool generateNormals = false;
 };
 
+/// Handles hash import settings.
 std::uint64_t hash_import_settings(const ImportSettings &settings) {
   std::uint64_t hash = kFnv64Offset;
   auto feed = [&](const void *data, std::size_t size) {
@@ -253,6 +255,7 @@ static int test_import_settings_hash_roundtrip() noexcept {
   return 0;
 }
 
+/// Runs this executable or test program.
 int main() {
   int failures = 0;
   failures += test_import_settings_roundtrip_default();

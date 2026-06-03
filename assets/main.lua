@@ -32,6 +32,7 @@ local function spawn_static(shape, x, y, z, r, g, b)
     return e
 end
 
+-- Handles on start.
 function M.on_start(self)
     if g_scene_initialized then
         return
@@ -76,6 +77,7 @@ function M.on_start(self)
     engine.log("on_start done - " .. engine.get_entity_count() .. " entities")
 end
 
+-- Handles on update.
 function M.on_update(self, dt)
     -- Per-frame coordinator logic goes here.
 end

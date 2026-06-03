@@ -1,3 +1,5 @@
+// Declares component types types and APIs for the Engine math library.
+
 #pragma once
 
 // Shared component POD types used across engine modules.
@@ -17,6 +19,7 @@ using engine::core::kInvalidEntity;
 using engine::core::kInvalidPersistentId;
 using engine::core::PersistentId;
 
+/// Stores transform data used by the engine.
 struct Transform final {
   Vec3 position = Vec3(0.0F, 0.0F, 0.0F);
   Quat rotation = Quat();
@@ -24,6 +27,7 @@ struct Transform final {
   PersistentId parentId = kInvalidPersistentId;
 };
 
+/// Stores rigid body data used by the engine.
 struct RigidBody final {
   Vec3 velocity = Vec3(0.0F, 0.0F, 0.0F);
   Vec3 acceleration = Vec3(0.0F, 0.0F, 0.0F);
@@ -34,6 +38,7 @@ struct RigidBody final {
   bool sleeping = false;
 };
 
+/// Enumerates collider shape values used by the engine.
 enum class ColliderShape : std::uint8_t {
   AABB = 0,
   Sphere = 1,
@@ -42,6 +47,7 @@ enum class ColliderShape : std::uint8_t {
   Heightfield = 4,
 };
 
+/// Stores collider data used by the engine.
 struct Collider final {
   Vec3 halfExtents = Vec3(0.5F, 0.5F, 0.5F);
   float restitution = 0.3F;
@@ -53,6 +59,7 @@ struct Collider final {
   ColliderShape shape = ColliderShape::AABB;
 };
 
+/// Enumerates movement authority values used by the engine.
 enum class MovementAuthority : std::uint8_t {
   None,
   Script,

@@ -1,9 +1,13 @@
+// Declares editor bridge types and APIs for the Engine runtime world.
+
 #pragma once
 
 namespace engine::runtime {
 
+/// Owns the world behavior and state.
 class World;
 
+/// Stores editor bridge data used by the engine.
 struct EditorBridge final {
   bool (*initialize)(void *sdlWindow, void *glContext) noexcept = nullptr;
   void (*shutdown)() noexcept = nullptr;
@@ -17,7 +21,9 @@ struct EditorBridge final {
   bool (*wants_capture_mouse)() noexcept = nullptr;
 };
 
+/// Sets the requested value for editor bridge.
 void set_editor_bridge(const EditorBridge *bridge) noexcept;
+/// Handles editor bridge.
 const EditorBridge *editor_bridge() noexcept;
 
 } // namespace engine::runtime

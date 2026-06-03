@@ -1,3 +1,5 @@
+// Implements bootstrap behavior for the Engine core engine.
+
 #include "engine/core/bootstrap.h"
 
 #include <array>
@@ -37,6 +39,7 @@ std::size_t g_threadFrameAllocatorCount = 1U;
 
 } // namespace
 
+/// Initializes the owning system for core.
 bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
   if (g_coreInitialized) {
     return true;
@@ -174,6 +177,7 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
   return false;
 }
 
+/// Shuts down the owning system for core.
 void shutdown_core() noexcept {
   if (!g_coreInitialized) {
     return;
@@ -195,10 +199,13 @@ void shutdown_core() noexcept {
   g_coreInitialized = false;
 }
 
+/// Returns whether is core initialized.
 bool is_core_initialized() noexcept { return g_coreInitialized; }
 
+/// Handles frame allocator.
 Allocator frame_allocator() noexcept { return g_mainFrameAllocatorInterface; }
 
+/// Handles thread frame allocator.
 Allocator thread_frame_allocator(std::size_t threadIndex) noexcept {
   if (threadIndex >= g_threadFrameAllocatorCount) {
     return Allocator{};
@@ -207,22 +214,27 @@ Allocator thread_frame_allocator(std::size_t threadIndex) noexcept {
   return g_threadFrameAllocatorInterfaces[threadIndex];
 }
 
+/// Resets this object back to its reusable empty state for frame allocator.
 void reset_frame_allocator() noexcept { g_mainFrameAllocator.reset(); }
 
+/// Resets this object back to its reusable empty state for thread frame allocators.
 void reset_thread_frame_allocators() noexcept {
   for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {
     g_threadFrameAllocators[i].reset();
   }
 }
 
+/// Handles frame allocator bytes used.
 std::size_t frame_allocator_bytes_used() noexcept {
   return g_mainFrameAllocator.bytes_used();
 }
 
+/// Handles frame allocator allocation count.
 std::size_t frame_allocator_allocation_count() noexcept {
   return g_mainFrameAllocator.allocation_count();
 }
 
+/// Handles thread frame allocator bytes used.
 std::size_t
 thread_frame_allocator_bytes_used(std::size_t threadIndex) noexcept {
   if (threadIndex >= g_threadFrameAllocatorCount) {
@@ -232,6 +244,7 @@ thread_frame_allocator_bytes_used(std::size_t threadIndex) noexcept {
   return g_threadFrameAllocators[threadIndex].bytes_used();
 }
 
+/// Handles thread frame allocator allocation count.
 std::size_t
 thread_frame_allocator_allocation_count(std::size_t threadIndex) noexcept {
   if (threadIndex >= g_threadFrameAllocatorCount) {
@@ -241,6 +254,7 @@ thread_frame_allocator_allocation_count(std::size_t threadIndex) noexcept {
   return g_threadFrameAllocators[threadIndex].allocation_count();
 }
 
+/// Handles thread frame allocator count.
 std::size_t thread_frame_allocator_count() noexcept {
   return g_threadFrameAllocatorCount;
 }

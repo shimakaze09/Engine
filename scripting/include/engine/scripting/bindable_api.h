@@ -1,3 +1,5 @@
+// Declares bindable api types and APIs for the Engine Lua scripting system.
+
 #pragma once
 // Bindable API — thin accessors for Lua binding generation.
 // Annotated with // LUA_BIND: for use with tools/binding_generator.

@@ -1,3 +1,5 @@
+// Declares touch input types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstddef>
@@ -35,8 +37,10 @@ struct TouchEvent final {
 
 enum class GestureType : std::uint8_t { Tap, Swipe, Pinch, Rotate };
 
+/// Enumerates swipe direction values used by the engine.
 enum class SwipeDirection : std::uint8_t { Left, Right, Up, Down };
 
+/// Stores gesture event data used by the engine.
 struct GestureEvent final {
   GestureType type = GestureType::Tap;
 
@@ -75,30 +79,40 @@ inline constexpr std::size_t kMaxActiveTouches = 10U;
 inline constexpr std::size_t kMaxTouchCallbacks = 16U;
 inline constexpr std::size_t kMaxGestureCallbacks = 16U;
 
+/// Initializes the owning system for touch input.
 bool initialize_touch_input() noexcept;
+/// Shuts down the owning system for touch input.
 void shutdown_touch_input() noexcept;
 
+/// Converts touch process event into the target representation.
 void touch_process_event(const void *nativeEvent) noexcept;
+/// Converts touch begin frame into the target representation.
 void touch_begin_frame() noexcept;
+/// Converts touch end frame into the target representation.
 void touch_end_frame() noexcept;
 
 // Query active touches.
 std::uint32_t active_touch_count() noexcept;
+/// Returns the requested value for active touch.
 bool get_active_touch(std::uint32_t index, TouchEvent *outTouch) noexcept;
 
 // Callback registration.
 bool register_touch_callback(TouchCallback cb,
                              void *userData = nullptr) noexcept;
+/// Handles unregister touch callback.
 bool unregister_touch_callback(TouchCallback cb,
                                void *userData = nullptr) noexcept;
 
+/// Handles register gesture callback.
 bool register_gesture_callback(GestureType type, GestureCallback cb,
                                void *userData = nullptr) noexcept;
+/// Handles unregister gesture callback.
 bool unregister_gesture_callback(GestureType type, GestureCallback cb,
                                  void *userData = nullptr) noexcept;
 
 // Touch-to-mouse emulation (C3d).
 void set_touch_mouse_emulation(bool enabled) noexcept;
+/// Returns whether is touch mouse emulation enabled.
 bool is_touch_mouse_emulation_enabled() noexcept;
 
 } // namespace engine::core

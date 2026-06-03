@@ -1,3 +1,5 @@
+// Verifies shadow map test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 
@@ -246,6 +248,7 @@ int verify_shadow_state_defaults() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = verify_cascade_splits_monotonic();
   if (result != 0)

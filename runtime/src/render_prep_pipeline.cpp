@@ -1,3 +1,5 @@
+// Implements render prep pipeline behavior for the Engine runtime world.
+
 #include "engine/runtime/render_prep_pipeline.h"
 
 #include <atomic>
@@ -15,6 +17,7 @@ namespace engine::runtime {
 
 namespace {
 
+/// Stores frustum plane data used by the engine.
 struct FrustumPlane final {
   float a;
   float b;
@@ -22,6 +25,7 @@ struct FrustumPlane final {
   float d;
 };
 
+/// Handles aabb outside plane.
 bool aabb_outside_plane(const FrustumPlane &p, const math::Vec3 &center,
                         const math::Vec3 &half) noexcept {
   const float px = center.x + (p.a >= 0.0F ? half.x : -half.x);
@@ -47,6 +51,7 @@ void extract_frustum_planes(const math::Mat4 &vp,
   planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z}; // far
 }
 
+/// Handles aabb culled by frustum.
 bool aabb_culled_by_frustum(const FrustumPlane planes[6],
                             const math::Vec3 &center,
                             const math::Vec3 &half) noexcept {
@@ -58,6 +63,7 @@ bool aabb_culled_by_frustum(const FrustumPlane planes[6],
   return false;
 }
 
+/// Builds the requested runtime data for draw sort key.
 std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::MeshHandle runtimeMesh,
                                   const math::Vec3 &center,
@@ -93,8 +99,10 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
          static_cast<std::uint64_t>(depthQuantized);
 }
 
+/// Handles mark graph failed.
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
 
+/// Submits work to the owning buffer or system for render command.
 bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
                            const renderer::DrawCommand &command,
                            std::atomic<bool> *frameGraphFailed) noexcept {
@@ -108,6 +116,7 @@ bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
   return false;
 }
 
+/// Handles fallback foliage mesh asset.
 renderer::AssetId fallback_foliage_mesh_asset(
     const FoliagePatchComponent &foliage, std::uint32_t lodIndex) noexcept {
   if (lodIndex < static_cast<std::uint32_t>(FoliagePatchComponent::kMaxLods)) {
@@ -125,12 +134,14 @@ renderer::AssetId fallback_foliage_mesh_asset(
   return renderer::kInvalidAssetId;
 }
 
+/// Handles mark graph failed.
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
   if (frameGraphFailed != nullptr) {
     frameGraphFailed->store(true, std::memory_order_release);
   }
 }
 
+/// Handles render prep chunk job.
 void render_prep_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<RenderPrepChunkJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr) ||
@@ -287,6 +298,7 @@ void render_prep_chunk_job(void *userData) noexcept {
   }
 }
 
+/// Handles merge command buffers job.
 void merge_command_buffers_job(void *userData) noexcept {
   auto *jobData = static_cast<MergeCommandsJobData *>(userData);
   if ((jobData == nullptr) || (jobData->merged == nullptr) ||
@@ -304,6 +316,7 @@ void merge_command_buffers_job(void *userData) noexcept {
   jobData->merged->sort_by_key();
 }
 
+/// Handles link dependency.
 bool link_dependency(core::JobHandle prerequisite,
                      core::JobHandle dependent) noexcept {
   if (!core::is_valid_handle(prerequisite) ||

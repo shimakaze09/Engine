@@ -1,3 +1,5 @@
+// Declares scripting bridge types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <cstddef>
@@ -14,17 +16,24 @@ using engine::math::MovementAuthority;
 using engine::math::RigidBody;
 using engine::math::Transform;
 
+/// Owns the world behavior and state.
 class World;
+/// Stores mesh component data used by the engine.
 struct MeshComponent;
+/// Stores name component data used by the engine.
 struct NameComponent;
+/// Stores light component data used by the engine.
 struct LightComponent;
+/// Stores script component data used by the engine.
 struct ScriptComponent;
+/// Enumerates world phase values used by the engine.
 enum class WorldPhase : std::uint8_t;
 
 } // namespace engine::runtime
 
 namespace engine::scripting {
 
+/// Stores runtime raycast hit data used by the engine.
 struct RuntimeRaycastHit final {
   std::uint32_t entityIndex = 0U;
   float distance = 0.0F;
@@ -36,6 +45,7 @@ struct RuntimeRaycastHit final {
   float normalZ = 0.0F;
 };
 
+/// Stores runtime services data used by the engine.
 struct RuntimeServices final {
   void (*set_camera_position)(float x, float y, float z) noexcept = nullptr;
   void (*set_camera_target)(float x, float y, float z) noexcept = nullptr;
@@ -60,10 +70,13 @@ struct RuntimeServices final {
   // World query operations needed by Lua bindings
   runtime::WorldPhase (*get_current_phase)(runtime::World *world) noexcept =
       nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*get_entity_index)(
       runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*get_transform_count)(runtime::World *world) noexcept =
       nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*create_entity_op)(runtime::World *world) noexcept = nullptr;
   const runtime::Transform *(*get_transform_read_ptr)(
       runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
@@ -121,16 +134,19 @@ struct RuntimeServices final {
   bool (*raycast)(runtime::World *world, float ox, float oy, float oz, float dx,
                   float dy, float dz, float maxDistance,
                   RuntimeRaycastHit *outHit) noexcept = nullptr;
+  /// Handles size t.
   std::size_t (*raycast_all)(runtime::World *world, float ox, float oy,
                              float oz, float dx, float dy, float dz,
                              float maxDistance, RuntimeRaycastHit *outHits,
                              std::size_t maxHits,
                              std::uint32_t mask) noexcept = nullptr;
+  /// Handles size t.
   std::size_t (*overlap_sphere)(runtime::World *world, float cx, float cy,
                                 float cz, float radius,
                                 std::uint32_t *outEntityIndices,
                                 std::size_t maxResults,
                                 std::uint32_t mask) noexcept = nullptr;
+  /// Handles size t.
   std::size_t (*overlap_box)(runtime::World *world, float cx, float cy,
                              float cz, float hx, float hy, float hz,
                              std::uint32_t *outEntityIndices,
@@ -144,30 +160,36 @@ struct RuntimeServices final {
                     float hx, float hy, float hz, float dx, float dy, float dz,
                     float maxDistance, RuntimeRaycastHit *outHit,
                     std::uint32_t mask) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*add_distance_joint)(runtime::World *world,
                                       std::uint32_t entityIndexA,
                                       std::uint32_t entityIndexB,
                                       float distance) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*add_hinge_joint)(runtime::World *world,
                                    std::uint32_t entityIndexA,
                                    std::uint32_t entityIndexB, float pivotX,
                                    float pivotY, float pivotZ, float axisX,
                                    float axisY, float axisZ) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*add_ball_socket_joint)(runtime::World *world,
                                          std::uint32_t entityIndexA,
                                          std::uint32_t entityIndexB,
                                          float pivotX, float pivotY,
                                          float pivotZ) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*add_slider_joint)(runtime::World *world,
                                     std::uint32_t entityIndexA,
                                     std::uint32_t entityIndexB, float axisX,
                                     float axisY,
                                     float axisZ) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*add_spring_joint)(runtime::World *world,
                                     std::uint32_t entityIndexA,
                                     std::uint32_t entityIndexB,
                                     float restLength, float stiffness,
                                     float damping) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*add_fixed_joint)(
       runtime::World *world, std::uint32_t entityIndexA,
       std::uint32_t entityIndexB) noexcept = nullptr;
@@ -180,6 +202,7 @@ struct RuntimeServices final {
   bool (*is_sleeping)(runtime::World *world,
                       std::uint32_t entityIndex) noexcept = nullptr;
 
+  /// Handles uint32 t.
   std::uint32_t (*load_sound)(const char *path) noexcept = nullptr;
   void (*unload_sound)(std::uint32_t soundId) noexcept = nullptr;
   bool (*play_sound)(std::uint32_t soundId, float volume, float pitch,
@@ -192,6 +215,7 @@ struct RuntimeServices final {
                      const char *path) noexcept = nullptr;
   bool (*save_prefab)(const runtime::World *world, std::uint32_t entityIndex,
                       const char *path) noexcept = nullptr;
+  /// Handles uint32 t.
   std::uint32_t (*instantiate_prefab)(runtime::World *world,
                                       const char *path) noexcept = nullptr;
 
@@ -203,13 +227,16 @@ struct RuntimeServices final {
   bool (*is_asset_ready)(std::uint32_t handleIndex) noexcept = nullptr;
 };
 
+/// Handles bind runtime world.
 void bind_runtime_world(runtime::World *world) noexcept;
+/// Handles bind runtime services.
 void bind_runtime_services(const RuntimeServices *services) noexcept;
 
 } // namespace engine::scripting
 
 namespace engine::runtime {
 
+/// Handles bind scripting runtime.
 void bind_scripting_runtime(World *world) noexcept;
 
 } // namespace engine::runtime

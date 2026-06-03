@@ -31,6 +31,7 @@ using SocketHandle = SOCKET;
 static constexpr SocketHandle kBadSocket = INVALID_SOCKET;
 static bool g_wsaInitialized = false;
 
+/// Handles platform init sockets.
 static bool platform_init_sockets() noexcept {
   if (g_wsaInitialized) {
     return true;
@@ -43,6 +44,7 @@ static bool platform_init_sockets() noexcept {
   return true;
 }
 
+/// Handles platform shutdown sockets.
 static void platform_shutdown_sockets() noexcept {
   if (g_wsaInitialized) {
     WSACleanup();
@@ -50,17 +52,20 @@ static void platform_shutdown_sockets() noexcept {
   }
 }
 
+/// Handles platform close socket.
 static void platform_close_socket(SocketHandle s) noexcept {
   if (s != kBadSocket) {
     closesocket(s);
   }
 }
 
+/// Handles platform set nonblocking.
 static bool platform_set_nonblocking(SocketHandle s) noexcept {
   unsigned long mode = 1;
   return ioctlsocket(s, static_cast<long>(FIONBIO), &mode) == 0;
 }
 
+/// Handles platform set blocking.
 static bool platform_set_blocking(SocketHandle s) noexcept {
   unsigned long mode = 0;
   return ioctlsocket(s, static_cast<long>(FIONBIO), &mode) == 0;
@@ -75,20 +80,25 @@ static bool platform_set_blocking(SocketHandle s) noexcept {
 using SocketHandle = int;
 static constexpr SocketHandle kBadSocket = -1;
 
+/// Handles platform init sockets.
 static bool platform_init_sockets() noexcept { return true; }
+/// Handles platform shutdown sockets.
 static void platform_shutdown_sockets() noexcept {}
 
+/// Handles platform close socket.
 static void platform_close_socket(SocketHandle s) noexcept {
   if (s != kBadSocket) {
     close(s);
   }
 }
 
+/// Handles platform set nonblocking.
 static bool platform_set_nonblocking(SocketHandle s) noexcept {
   const int flags = fcntl(s, F_GETFL, 0);
   return fcntl(s, F_SETFL, flags | O_NONBLOCK) != -1;
 }
 
+/// Handles platform set blocking.
 static bool platform_set_blocking(SocketHandle s) noexcept {
   const int flags = fcntl(s, F_GETFL, 0);
   return fcntl(s, F_SETFL, flags & ~O_NONBLOCK) != -1;
@@ -124,6 +134,7 @@ void write_response_header(core::JsonWriter &w, int requestSeq,
   w.write_string("command", command);
 }
 
+/// Writes event header data.
 void write_event_header(core::JsonWriter &w, const char *event) noexcept {
   w.begin_object();
   w.write_uint("seq", static_cast<std::uint32_t>(g_seq++));
@@ -167,6 +178,7 @@ bool send_dap_message(const char *json, std::size_t len) noexcept {
   return true;
 }
 
+/// Handles send json writer.
 bool send_json_writer(core::JsonWriter &w) noexcept {
   if (w.failed()) {
     return false;
@@ -288,6 +300,7 @@ void handle_initialize(int requestSeq) noexcept {
   send_json_writer(ev);
 }
 
+/// Handles handle launch.
 void handle_launch(int requestSeq) noexcept {
   core::JsonWriter w;
   write_response_header(w, requestSeq, "launch", true);
@@ -295,6 +308,7 @@ void handle_launch(int requestSeq) noexcept {
   send_json_writer(w);
 }
 
+/// Handles handle configuration done.
 void handle_configuration_done(int requestSeq) noexcept {
   core::JsonWriter w;
   write_response_header(w, requestSeq, "configurationDone", true);
@@ -302,6 +316,7 @@ void handle_configuration_done(int requestSeq) noexcept {
   send_json_writer(w);
 }
 
+/// Handles handle set breakpoints.
 void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
                             const core::JsonValue &args) noexcept {
   // Replace current breakpoints with incoming list.
@@ -364,6 +379,7 @@ void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
   send_json_writer(w);
 }
 
+/// Handles handle threads.
 void handle_threads(int requestSeq) noexcept {
   core::JsonWriter w;
   write_response_header(w, requestSeq, "threads", true);
@@ -380,6 +396,7 @@ void handle_threads(int requestSeq) noexcept {
   send_json_writer(w);
 }
 
+/// Handles handle stack trace.
 void handle_stack_trace(int requestSeq, lua_State *L) noexcept {
   core::JsonWriter w;
   write_response_header(w, requestSeq, "stackTrace", true);
@@ -419,6 +436,7 @@ void handle_stack_trace(int requestSeq, lua_State *L) noexcept {
   send_json_writer(w);
 }
 
+/// Handles handle scopes.
 void handle_scopes(int requestSeq, int frameId) noexcept {
   // We expose 3 scopes: Locals, Upvalues, Globals.
   // The variablesReference encodes (frameId * 3 + scopeType).
@@ -497,6 +515,7 @@ void format_lua_value(lua_State *L, int index, char *buf,
   }
 }
 
+/// Handles handle variables.
 void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
   // Decode: frameId = (varRef - 1) / 3, scopeType = (varRef - 1) % 3
   const int frameId = (varRef - 1) / 3;
@@ -586,6 +605,7 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
   send_json_writer(w);
 }
 
+/// Handles handle evaluate.
 void handle_evaluate(int requestSeq, lua_State *L,
                      const core::JsonParser &parser,
                      const core::JsonValue &args) noexcept {
@@ -647,6 +667,7 @@ void handle_evaluate(int requestSeq, lua_State *L,
   send_json_writer(w);
 }
 
+/// Handles handle disconnect.
 void handle_disconnect(int requestSeq) noexcept {
   core::JsonWriter w;
   write_response_header(w, requestSeq, "disconnect", true);
@@ -851,6 +872,7 @@ bool dap_start(std::uint16_t port) noexcept {
   return true;
 }
 
+/// Handles dap stop.
 void dap_stop() noexcept {
   if (g_clientSocket != kBadSocket) {
     platform_close_socket(g_clientSocket);
@@ -865,10 +887,13 @@ void dap_stop() noexcept {
   platform_shutdown_sockets();
 }
 
+/// Handles dap is running.
 bool dap_is_running() noexcept { return g_listenSocket != kBadSocket; }
 
+/// Handles dap has client.
 bool dap_has_client() noexcept { return g_clientSocket != kBadSocket; }
 
+/// Handles dap poll.
 void dap_poll() noexcept {
   if (g_listenSocket == kBadSocket) {
     return;
@@ -897,6 +922,7 @@ void dap_poll() noexcept {
   }
 }
 
+/// Handles dap on stopped.
 DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
                            const char *reason) noexcept {
   if (g_clientSocket == kBadSocket) {

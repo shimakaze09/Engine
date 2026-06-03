@@ -21,6 +21,7 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
+/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
@@ -29,6 +30,7 @@ static AssetId make_id(std::uint64_t n) noexcept {
 // frame.
 static constexpr std::uint64_t kAssetSize = 64ULL * 1024ULL * 1024ULL;
 
+/// Handles big load.
 static bool big_load(AssetId /*id*/, const char * /*path*/,
                      std::uint64_t *outSizeBytes,
                      void * /*userData*/) noexcept {
@@ -38,6 +40,7 @@ static bool big_load(AssetId /*id*/, const char * /*path*/,
   return true;
 }
 
+/// Handles big upload.
 static bool big_upload(AssetId /*id*/, void * /*userData*/) noexcept {
   return true;
 }
@@ -182,6 +185,7 @@ static void test_upload_limit() noexcept {
   engine::core::shutdown_cvars();
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== Streaming Budget Tests ===\n");
 

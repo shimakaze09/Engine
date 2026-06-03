@@ -1,3 +1,5 @@
+// Implements logging behavior for the Engine core engine.
+
 #include "engine/core/logging.h"
 
 #include <atomic>
@@ -13,6 +15,7 @@ namespace {
 
 std::atomic<bool> g_loggingInitialized{false};
 
+/// Converts string into the target representation.
 const char *to_string(LogLevel level) noexcept {
   switch (level) {
   case LogLevel::Trace:
@@ -32,15 +35,18 @@ const char *to_string(LogLevel level) noexcept {
 
 } // namespace
 
+/// Initializes the owning system for logging.
 bool initialize_logging() noexcept {
   g_loggingInitialized.store(true, std::memory_order_release);
   return true;
 }
 
+/// Shuts down the owning system for logging.
 void shutdown_logging() noexcept {
   g_loggingInitialized.store(false, std::memory_order_release);
 }
 
+/// Handles log message.
 void log_message(LogLevel level,
                  const char *channel,
                  const char *message) noexcept {
@@ -71,6 +77,7 @@ void log_message(LogLevel level,
   }
 }
 
+/// Handles log frame metrics.
 void log_frame_metrics(std::uint32_t frameIndex,
                        double frameMs,
                        std::size_t frameBytes,

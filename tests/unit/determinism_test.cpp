@@ -20,11 +20,13 @@ constexpr float kDt = 1.0F / 60.0F;
 constexpr float kEpsilon = 1e-5F;
 constexpr int kStepCount = 10;
 
+/// Stores sim snapshot data used by the engine.
 struct SimSnapshot final {
   engine::math::Vec3 position{};
   engine::math::Vec3 velocity{};
 };
 
+/// Handles snapshots equal.
 bool snapshots_equal(const SimSnapshot &a, const SimSnapshot &b) noexcept {
   const auto veq = [](float x, float y) noexcept {
     return std::fabs(x - y) <= kEpsilon;
@@ -84,6 +86,7 @@ int run_sim(SimSnapshot *out, int maxEntities) noexcept {
   return kCount;
 }
 
+/// Handles test deterministic replay.
 bool test_deterministic_replay() noexcept {
   constexpr int kMax = 16;
   SimSnapshot runA[kMax] = {};
@@ -115,6 +118,7 @@ bool test_deterministic_replay() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   if (!test_deterministic_replay()) {
     return 1;

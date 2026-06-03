@@ -1,3 +1,5 @@
+// Verifies smoke test behavior for the Engine test suite.
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -11,12 +13,14 @@
 
 namespace {
 
+/// Stores write order job data used by the engine.
 struct WriteOrderJobData final {
   std::atomic<std::int32_t> *cursor = nullptr;
   std::array<std::int32_t, 4U> *order = nullptr;
   std::int32_t value = 0;
 };
 
+/// Writes order job data.
 void write_order_job(void *userData) noexcept {
   auto *data = static_cast<WriteOrderJobData *>(userData);
   if ((data == nullptr) || (data->cursor == nullptr) ||
@@ -31,10 +35,12 @@ void write_order_job(void *userData) noexcept {
   }
 }
 
+/// Handles noop job.
 void noop_job(void *) noexcept {}
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   constexpr bool kVec4LayoutOk = (alignof(engine::math::Vec4) == 16U) &&
                                  (sizeof(engine::math::Vec4) == 16U);

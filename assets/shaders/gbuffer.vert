@@ -1,3 +1,5 @@
+// Defines the gbuffer vertex shader used by the Engine renderer.
+
 #version 330 core
 
 layout(location = 0) in vec3 aPosition;
@@ -20,9 +22,11 @@ out vec3 vWorldPos;
 out vec3 vNormal;
 out vec2 vTexCoord;
 
+/// Runs the shader entry point for this stage.
 void main() {
     mat4 model = (uUseInstancing != 0) ? aInstanceModel : uModel;
     mat3 normalMatrix = (uUseInstancing != 0)
+        /// Handles transpose.
         ? transpose(inverse(mat3(model)))
         : uNormalMatrix;
     vec4 worldPos = model * vec4(aPosition, 1.0);

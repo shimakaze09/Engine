@@ -1,3 +1,5 @@
+// Implements json behavior for the Engine core engine.
+
 #include "engine/core/json.h"
 
 #include <cmath>
@@ -11,27 +13,32 @@ namespace engine::core {
 
 namespace {
 
+/// Returns whether is whitespace.
 constexpr bool is_whitespace(char value) noexcept {
   return (value == ' ') || (value == '\t') || (value == '\n') ||
          (value == '\r');
 }
 
+/// Returns whether is digit.
 constexpr bool is_digit(char value) noexcept {
   return (value >= '0') && (value <= '9');
 }
 
+/// Returns whether is hex digit.
 constexpr bool is_hex_digit(char value) noexcept {
   return ((value >= '0') && (value <= '9')) ||
          ((value >= 'a') && (value <= 'f')) ||
          ((value >= 'A') && (value <= 'F'));
 }
 
+/// Handles skip whitespace.
 void skip_whitespace(const char *&cursor, const char *end) noexcept {
   while ((cursor < end) && is_whitespace(*cursor)) {
     ++cursor;
   }
 }
 
+/// Parses text into the engine representation for string token.
 bool parse_string_token(const char *&cursor, const char *end,
                         const char **outBegin, const char **outEnd) noexcept {
   if ((outBegin == nullptr) || (outEnd == nullptr)) {
@@ -79,6 +86,7 @@ bool parse_string_token(const char *&cursor, const char *end,
   return false;
 }
 
+/// Parses text into the engine representation for number token.
 bool parse_number_token(const char *&cursor, const char *end,
                         const char **outBegin, const char **outEnd) noexcept {
   if ((outBegin == nullptr) || (outEnd == nullptr) || (cursor >= end)) {
@@ -137,9 +145,11 @@ bool parse_number_token(const char *&cursor, const char *end,
   return true;
 }
 
+/// Parses text into the engine representation for value.
 bool parse_value(const char *&cursor, const char *end,
                  JsonValue *outValue) noexcept;
 
+/// Parses text into the engine representation for array.
 bool parse_array(const char *&cursor, const char *end,
                  JsonValue *outValue) noexcept {
   if ((outValue == nullptr) || (cursor >= end) || (*cursor != '[')) {
@@ -189,6 +199,7 @@ bool parse_array(const char *&cursor, const char *end,
   return false;
 }
 
+/// Parses text into the engine representation for object.
 bool parse_object(const char *&cursor, const char *end,
                   JsonValue *outValue) noexcept {
   if ((outValue == nullptr) || (cursor >= end) || (*cursor != '{')) {
@@ -254,6 +265,7 @@ bool parse_object(const char *&cursor, const char *end,
   return false;
 }
 
+/// Parses text into the engine representation for value.
 bool parse_value(const char *&cursor, const char *end,
                  JsonValue *outValue) noexcept {
   if (outValue == nullptr) {
@@ -325,6 +337,7 @@ bool parse_value(const char *&cursor, const char *end,
   return true;
 }
 
+/// Converts token equals into the target representation.
 bool token_equals(const char *tokenBegin, const char *tokenEnd,
                   const char *text) noexcept {
   if ((tokenBegin == nullptr) || (tokenEnd == nullptr) || (text == nullptr)) {

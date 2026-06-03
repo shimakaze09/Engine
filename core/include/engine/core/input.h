@@ -1,3 +1,5 @@
+// Declares input types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstddef>
@@ -11,17 +13,22 @@ using KeyScancode = int;
 // ----- Lifecycle -----------------------------------------------------------
 
 bool initialize_input() noexcept;
+/// Shuts down the owning system for input.
 void shutdown_input() noexcept;
 
 // Called once per frame around the platform event loop.
 void begin_input_frame() noexcept;
+/// Handles input process event.
 void input_process_event(const void *nativeEvent) noexcept;
+/// Ends the requested operation or profiling range for input frame.
 void end_input_frame() noexcept;
 
 // ----- Keyboard ------------------------------------------------------------
 
 bool is_key_down(KeyScancode scancode) noexcept;
+/// Returns whether is key pressed.
 bool is_key_pressed(KeyScancode scancode) noexcept;
+/// Returns whether is key released.
 bool is_key_released(KeyScancode scancode) noexcept;
 
 // ----- Mouse ---------------------------------------------------------------
@@ -35,8 +42,11 @@ struct MouseState final {
   bool buttons[5] = {};
 };
 
+/// Handles mouse state.
 MouseState mouse_state() noexcept;
+/// Returns whether is mouse button down.
 bool is_mouse_button_down(int button) noexcept;
+/// Returns whether is mouse button pressed.
 bool is_mouse_button_pressed(int button) noexcept;
 
 // ----- Action Mappings -----------------------------------------------------
@@ -44,19 +54,26 @@ bool is_mouse_button_pressed(int button) noexcept;
 inline constexpr std::size_t kMaxActions = 64U;
 inline constexpr std::size_t kMaxAxes = 64U;
 
+/// Handles register action.
 bool register_action(const char *name, KeyScancode key,
                      int mouseButton = -1) noexcept;
+/// Returns whether is action down.
 bool is_action_down(const char *name) noexcept;
+/// Returns whether is action pressed.
 bool is_action_pressed(const char *name) noexcept;
+/// Handles action value.
 float action_value(const char *name) noexcept;
 
+/// Handles register axis.
 bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept;
+/// Handles axis value.
 float axis_value(const char *name) noexcept;
 
 // ----- Gamepad ------------------------------------------------------------
 
 bool is_gamepad_connected() noexcept;
+/// Returns whether is gamepad button down.
 bool is_gamepad_button_down(int button) noexcept;
 // Returns normalized axis value in [-1, 1] with deadzone applied.
 float gamepad_axis_value(int axis, int deadzone = 8000) noexcept;
@@ -68,6 +85,7 @@ struct KeyEvent final {
   bool down = false;
 };
 
+/// Stores mouse move event data used by the engine.
 struct MouseMoveEvent final {
   int x = 0;
   int y = 0;
@@ -75,6 +93,7 @@ struct MouseMoveEvent final {
   int deltaY = 0;
 };
 
+/// Stores mouse button event data used by the engine.
 struct MouseButtonEvent final {
   int button = 0;
   bool down = false;

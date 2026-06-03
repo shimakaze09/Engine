@@ -1,3 +1,5 @@
+// Declares asset streaming types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <cstddef>
@@ -31,8 +33,10 @@ struct LoadHandle final {
 
   static constexpr std::uint32_t kInvalid = 0xFFFFFFFFU;
 
+  /// Handles valid.
   [[nodiscard]] bool valid() const noexcept { return index != kInvalid; }
 
+  /// Compares values for equality.
   friend constexpr bool operator==(const LoadHandle &,
                                    const LoadHandle &) = default;
 };
@@ -117,8 +121,10 @@ void wait_for_load(const AssetStreamingQueue *queue,
 /// @param userData       Forwarded to both callbacks.
 /// @return Number of requests that transitioned to Ready this frame.
 std::size_t update_asset_streaming(
+    /// Handles bool.
     AssetStreamingQueue *queue,
     bool (*loadCallback)(AssetId id, const char *path,
+                         /// Handles bool.
                          std::uint64_t *outSizeBytes, void *userData) noexcept,
     bool (*uploadCallback)(AssetId id, void *userData) noexcept,
     void *userData) noexcept;

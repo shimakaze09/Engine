@@ -1,16 +1,22 @@
+// Declares scripting types and APIs for the Engine Lua scripting system.
+
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 
 namespace engine::runtime {
+/// Owns the world behavior and state.
 class World;
 } // namespace engine::runtime
 
 namespace engine::scripting {
 
+/// Initializes the owning system for scripting.
 bool initialize_scripting() noexcept;
+/// Shuts down the owning system for scripting.
 void shutdown_scripting() noexcept;
+/// Sets the requested value for default mesh asset id.
 void set_default_mesh_asset_id(std::uint64_t assetId) noexcept;
 
 // Set AssetIds for built-in procedural shape meshes.  Any id equal to 0 means
@@ -38,6 +44,7 @@ bool call_script_function_float(const char *name, float arg) noexcept;
 
 // Debugger breakpoint controls (used by DAP transport).
 void debugger_clear_breakpoints() noexcept;
+/// Handles debugger add breakpoint.
 bool debugger_add_breakpoint(const char *file, int line) noexcept;
 
 // Dispatch Lua on_collision(entityA, entityB) for each pair in pairData.
@@ -65,9 +72,13 @@ void clear_coroutines() noexcept;
 
 // Scene operation query — engine.cpp polls these after each fixed-step batch.
 bool has_pending_scene_op() noexcept;
+/// Handles pending scene op is load.
 bool pending_scene_op_is_load() noexcept;
+/// Handles pending scene op is new.
 bool pending_scene_op_is_new() noexcept;
+/// Returns the requested value for pending scene path.
 const char *get_pending_scene_path() noexcept;
+/// Handles clear pending scene op.
 void clear_pending_scene_op() noexcept;
 
 // Begin watching a Lua script file for changes (hot-reload).
@@ -107,14 +118,17 @@ void clear_entity_script_modules() noexcept;
 // --- Sandbox configuration ---
 // Enable or disable the Lua sandbox (restricted globals, CPU/memory limits).
 void set_sandbox_enabled(bool enabled) noexcept;
+/// Returns whether is sandbox enabled.
 bool is_sandbox_enabled() noexcept;
 
 // CPU instruction limit per protected Lua call (0 = unlimited).
 void set_instruction_limit(int limit) noexcept;
+/// Returns the requested value for instruction limit.
 int get_instruction_limit() noexcept;
 
 // Memory limit for the Lua allocator in bytes (0 = unlimited).
 void set_memory_limit(std::size_t limit) noexcept;
+/// Returns the requested value for memory limit.
 std::size_t get_memory_limit() noexcept;
 
 } // namespace engine::scripting

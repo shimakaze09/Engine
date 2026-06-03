@@ -1,3 +1,5 @@
+// Defines the ssao blur fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -7,6 +9,7 @@ uniform vec2 u_texelSize;
 
 out float outAO;
 
+/// Runs the shader entry point for this stage.
 void main() {
     float result = 0.0;
     for (int x = -2; x <= 2; ++x) {

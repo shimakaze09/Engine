@@ -1,3 +1,5 @@
+// Implements console behavior for the Engine core engine.
+
 #include "engine/core/console.h"
 
 #include "engine/core/cvar.h"
@@ -57,6 +59,7 @@ void builtin_help(const char *const * /*args*/, int /*argCount*/,
   }
 }
 
+/// Handles builtin set.
 void builtin_set(const char *const *args, int argCount,
                  void * /*userData*/) noexcept {
   if (argCount < 3) {
@@ -75,6 +78,7 @@ void builtin_set(const char *const *args, int argCount,
   console_print(buf);
 }
 
+/// Handles builtin get.
 void builtin_get(const char *const *args, int argCount,
                  void * /*userData*/) noexcept {
   if (argCount < 2) {
@@ -175,6 +179,7 @@ bool initialize_console() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for console.
 void shutdown_console() noexcept {
   g_commands = {};
   g_commandCount = 0U;
@@ -184,6 +189,7 @@ void shutdown_console() noexcept {
   g_initialized = false;
 }
 
+/// Handles console register command.
 bool console_register_command(const char *name, ConsoleCommandFn fn,
                               void *userData,
                               const char *description) noexcept {
@@ -208,6 +214,7 @@ bool console_register_command(const char *name, ConsoleCommandFn fn,
   return true;
 }
 
+/// Handles console execute.
 bool console_execute(const char *line) noexcept {
   if (line == nullptr) {
     return false;
@@ -243,6 +250,7 @@ bool console_execute(const char *line) noexcept {
   return false;
 }
 
+/// Handles console print.
 void console_print(const char *text) noexcept {
   if (text == nullptr) {
     return;
@@ -260,8 +268,10 @@ void console_print(const char *text) noexcept {
   }
 }
 
+/// Handles console output line count.
 std::size_t console_output_line_count() noexcept { return g_outputCount; }
 
+/// Handles console get output line.
 bool console_get_output_line(std::size_t index, char *outBuf,
                              std::size_t bufCapacity) noexcept {
   if ((outBuf == nullptr) || (bufCapacity == 0U) || (index >= g_outputCount)) {
@@ -273,6 +283,7 @@ bool console_get_output_line(std::size_t index, char *outBuf,
   return true;
 }
 
+/// Handles console get commands.
 std::size_t console_get_commands(ConsoleCommandInfo *out,
                                  std::size_t maxEntries) noexcept {
   if (out == nullptr) {

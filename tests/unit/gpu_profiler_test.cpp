@@ -1,5 +1,8 @@
+// Verifies gpu profiler test behavior for the Engine test suite.
+
 #include "engine/renderer/gpu_profiler.h"
 
+/// Runs this executable or test program.
 int main() {
   using namespace engine::renderer;
 

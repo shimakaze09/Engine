@@ -1,3 +1,5 @@
+// Implements service registry behavior for the Engine runtime world.
+
 #include "engine/runtime/service_registry.h"
 
 #include "engine/core/service_locator.h"
@@ -7,12 +9,14 @@ namespace engine::runtime {
 
 namespace {
 
+/// Handles register pointer.
 template <typename T> bool register_pointer(T *ptr) noexcept {
   return core::global_service_locator().register_service<T>(ptr);
 }
 
 } // namespace
 
+/// Handles register engine subsystem services.
 bool register_engine_subsystem_services(
     World *world, EnginePhysicsService *physicsService,
     EngineAudioService *audioService,
@@ -59,6 +63,7 @@ bool register_engine_subsystem_services(
   return ok;
 }
 
+/// Handles unregister engine subsystem services.
 void unregister_engine_subsystem_services() noexcept {
   auto &loc = core::global_service_locator();
   static_cast<void>(loc.remove_service<EngineRendererService>());

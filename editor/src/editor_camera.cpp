@@ -1,3 +1,5 @@
+// Implements editor camera behavior for the Engine editor tool.
+
 #include "engine/editor/editor_camera.h"
 
 #include <cmath>
@@ -15,6 +17,7 @@ constexpr float kZoomFactor = 0.1F;
 
 } // namespace
 
+/// Advances this system for the current frame or tick for editor camera.
 void update_editor_camera(EditorCamera &camera, int deltaX, int deltaY,
                           int scrollDelta, bool orbit, bool pan) noexcept {
   const float dx = static_cast<float>(deltaX);
@@ -61,6 +64,7 @@ void update_editor_camera(EditorCamera &camera, int deltaX, int deltaY,
   }
 }
 
+/// Handles editor camera state.
 renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept {
   const float cosPitch = std::cos(camera.pitch);
   const float sinPitch = std::sin(camera.pitch);

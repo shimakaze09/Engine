@@ -1,3 +1,5 @@
+// Declares world types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <array>
@@ -39,6 +41,7 @@ using engine::math::MovementAuthority;
 using engine::math::RigidBody;
 using engine::math::Transform;
 
+/// Stores world transform data used by the engine.
 struct WorldTransform final {
   math::Vec3 position = math::Vec3(0.0F, 0.0F, 0.0F);
   math::Quat rotation = math::Quat();
@@ -46,13 +49,16 @@ struct WorldTransform final {
   math::Mat4 matrix = math::Mat4();
 };
 
+/// Stores name component data used by the engine.
 struct NameComponent final {
   static constexpr std::size_t kMaxNameLength = 31U; // +1 for null terminator
   char name[kMaxNameLength + 1U] = {};
 };
 
+/// Enumerates light type values used by the engine.
 enum class LightType : std::uint8_t { Directional = 0, Point = 1 };
 
+/// Stores light component data used by the engine.
 struct LightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
   math::Vec3 direction = math::Vec3(0.4F, -1.0F, 0.6F);
@@ -60,12 +66,14 @@ struct LightComponent final {
   LightType type = LightType::Directional;
 };
 
+/// Stores point light component data used by the engine.
 struct PointLightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
   float intensity = 1.0F;
   float radius = 10.0F;
 };
 
+/// Stores spot light component data used by the engine.
 struct SpotLightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
   math::Vec3 direction = math::Vec3(0.0F, -1.0F, 0.0F);
@@ -75,6 +83,7 @@ struct SpotLightComponent final {
   float outerConeAngle = 0.5236F; // ~30 degrees in radians
 };
 
+/// Stores reflection probe component data used by the engine.
 struct ReflectionProbeComponent final {
   math::Vec3 boxExtents = math::Vec3(5.0F, 5.0F, 5.0F);
   float radius = 10.0F;
@@ -104,6 +113,7 @@ struct MeshComponent final {
   float opacity = 1.0F;
 };
 
+/// Stores foliage instance data used by the engine.
 struct FoliageInstance final {
   math::Vec3 offset = math::Vec3(0.0F, 0.0F, 0.0F);
   float scale = 1.0F;
@@ -111,6 +121,7 @@ struct FoliageInstance final {
   std::uint32_t lodIndex = 0U;
 };
 
+/// Stores foliage patch component data used by the engine.
 struct FoliagePatchComponent final {
   static constexpr std::size_t kMaxInstances = 64U;
   static constexpr std::size_t kMaxLods = 3U;
@@ -141,6 +152,7 @@ struct SpringArmComponent final {
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,
                                   void *userData) noexcept;
 
+/// Enumerates world phase values used by the engine.
 enum class WorldPhase : std::uint8_t {
   Input,
   BeginPlay,
@@ -155,6 +167,7 @@ enum class WorldPhase : std::uint8_t {
   RenderPrep = RenderSubmission,
 };
 
+/// Owns the world behavior and state.
 class World final : public physics::PhysicsWorldView {
 public:
   static constexpr std::size_t kMaxEntities = ENGINE_MAX_ENTITIES;
@@ -176,15 +189,24 @@ public:
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
   World() noexcept;
 
+  /// Creates a new object, handle, or resource for entity.
   Entity create_entity() noexcept;
+  /// Creates a new object, handle, or resource for entity with persistent id.
   Entity create_entity_with_persistent_id(PersistentId persistentId) noexcept;
+  /// Destroys or releases the requested object, handle, or resource for entity.
   bool destroy_entity(Entity entity) noexcept;
+  /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
+  /// Finds the matching object or resource for entity by index.
   Entity find_entity_by_index(std::uint32_t index) const noexcept;
+  /// Finds the matching object or resource for entity by persistent id.
   Entity find_entity_by_persistent_id(PersistentId persistentId) const noexcept;
+  /// Handles persistent id.
   PersistentId persistent_id(Entity entity) const noexcept;
+  /// Handles alive entity count.
   std::size_t alive_entity_count() const noexcept;
 
+  /// Handles for each alive.
   template <typename Fn> void for_each_alive(Fn &&fn) const noexcept {
     if (m_aliveEntityCount == 0U) {
       return;
@@ -203,151 +225,238 @@ public:
     }
   }
 
+  /// Adds a value or component to the target system for transform.
   bool add_transform(Entity entity, const Transform &transform) noexcept;
+  /// Removes a value or component from the target system for transform.
   bool remove_transform(Entity entity) noexcept;
+  /// Returns the requested value for transform.
   bool get_transform(Entity entity,
                      Transform *outTransform) const noexcept override;
   // Read buffer is last committed state; during Idle this is the previous
   // frame.
   const Transform *get_transform_read_ptr(Entity entity) const noexcept;
+  /// Handles simulation access token.
   SimulationAccessToken simulation_access_token() const noexcept override;
+  /// Returns the requested value for transform write ptr.
   Transform *
   get_transform_write_ptr(Entity entity,
                           const SimulationAccessToken &token) noexcept override;
+  /// Returns the requested value for world transform read ptr.
   const WorldTransform *
   get_world_transform_read_ptr(Entity entity) const noexcept;
+  /// Sets the requested value for movement authority.
   bool set_movement_authority(Entity entity,
                               MovementAuthority authority) noexcept;
+  /// Handles movement authority.
   MovementAuthority movement_authority(Entity entity) const noexcept override;
 
+  /// Adds a value or component to the target system for rigid body.
   bool add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept;
+  /// Removes a value or component from the target system for rigid body.
   bool remove_rigid_body(Entity entity) noexcept;
+  /// Returns the requested value for rigid body.
   bool get_rigid_body(Entity entity,
                       RigidBody *outRigidBody) const noexcept override;
 
+  /// Adds a value or component to the target system for collider.
   bool add_collider(Entity entity, const Collider &collider) noexcept;
+  /// Removes a value or component from the target system for collider.
   bool remove_collider(Entity entity) noexcept;
+  /// Returns the requested value for collider.
   bool get_collider(Entity entity, Collider *outCollider) const noexcept;
+  /// Returns the requested value for collider range.
   bool
   get_collider_range(std::size_t startIndex, std::size_t count,
                      const Entity **outEntities,
                      const Collider **outColliders) const noexcept override;
 
+  /// Adds a value or component to the target system for mesh component.
   bool add_mesh_component(Entity entity,
                           const MeshComponent &component) noexcept;
+  /// Removes a value or component from the target system for mesh component.
   bool remove_mesh_component(Entity entity) noexcept;
+  /// Returns the requested value for mesh component.
   bool get_mesh_component(Entity entity,
                           MeshComponent *outComponent) const noexcept;
+  /// Returns the requested value for mesh component ptr.
   MeshComponent *get_mesh_component_ptr(Entity entity) noexcept;
+  /// Returns the requested value for mesh component ptr.
   const MeshComponent *get_mesh_component_ptr(Entity entity) const noexcept;
 
+  /// Adds a value or component to the target system for foliage patch component.
   bool add_foliage_patch_component(
       Entity entity, const FoliagePatchComponent &component) noexcept;
+  /// Removes a value or component from the target system for foliage patch component.
   bool remove_foliage_patch_component(Entity entity) noexcept;
+  /// Returns the requested value for foliage patch component.
   bool get_foliage_patch_component(
       Entity entity, FoliagePatchComponent *outComponent) const noexcept;
+  /// Returns whether has foliage patch component.
   bool has_foliage_patch_component(Entity entity) const noexcept;
+  /// Handles foliage patch count.
   std::size_t foliage_patch_count() const noexcept;
+  /// Handles foliage patch at.
   const FoliagePatchComponent *
   foliage_patch_at(std::size_t index) const noexcept;
+  /// Handles foliage patch entity at.
   Entity foliage_patch_entity_at(std::size_t index) const noexcept;
+  /// Returns the requested value for foliage patch component ptr.
   FoliagePatchComponent *get_foliage_patch_component_ptr(
       Entity entity) noexcept;
+  /// Returns the requested value for foliage patch component ptr.
   const FoliagePatchComponent *get_foliage_patch_component_ptr(
       Entity entity) const noexcept;
 
+  /// Adds a value or component to the target system for name component.
   bool add_name_component(Entity entity,
                           const NameComponent &component) noexcept;
+  /// Removes a value or component from the target system for name component.
   bool remove_name_component(Entity entity) noexcept;
+  /// Returns the requested value for name component.
   bool get_name_component(Entity entity,
                           NameComponent *outComponent) const noexcept;
+  /// Returns the requested value for name component ptr.
   NameComponent *get_name_component_ptr(Entity entity) noexcept;
+  /// Returns the requested value for name component ptr.
   const NameComponent *get_name_component_ptr(Entity entity) const noexcept;
+  /// Finds the matching object or resource for entity by name.
   Entity find_entity_by_name(const char *name) const noexcept;
 
+  /// Adds a value or component to the target system for script component.
   bool add_script_component(Entity entity,
                             const ScriptComponent &component) noexcept;
+  /// Removes a value or component from the target system for script component.
   bool remove_script_component(Entity entity) noexcept;
+  /// Returns the requested value for script component.
   bool get_script_component(Entity entity,
                             ScriptComponent *outComponent) const noexcept;
+  /// Returns the requested value for script component ptr.
   ScriptComponent *get_script_component_ptr(Entity entity) noexcept;
+  /// Returns the requested value for script component ptr.
   const ScriptComponent *get_script_component_ptr(Entity entity) const noexcept;
 
+  /// Adds a value or component to the target system for light component.
   bool add_light_component(Entity entity,
                            const LightComponent &component) noexcept;
+  /// Removes a value or component from the target system for light component.
   bool remove_light_component(Entity entity) noexcept;
+  /// Returns the requested value for light component.
   bool get_light_component(Entity entity,
                            LightComponent *outComponent) const noexcept;
+  /// Returns whether has light component.
   bool has_light_component(Entity entity) const noexcept;
+  /// Handles light count.
   std::size_t light_count() const noexcept;
+  /// Handles light at.
   const LightComponent *light_at(std::size_t index) const noexcept;
+  /// Handles light entity at.
   Entity light_entity_at(std::size_t index) const noexcept;
 
+  /// Adds a value or component to the target system for point light component.
   bool add_point_light_component(Entity entity,
                                  const PointLightComponent &component) noexcept;
+  /// Removes a value or component from the target system for point light component.
   bool remove_point_light_component(Entity entity) noexcept;
+  /// Returns the requested value for point light component.
   bool
   get_point_light_component(Entity entity,
                             PointLightComponent *outComponent) const noexcept;
+  /// Returns whether has point light component.
   bool has_point_light_component(Entity entity) const noexcept;
+  /// Handles point light count.
   std::size_t point_light_count() const noexcept;
+  /// Handles point light at.
   const PointLightComponent *point_light_at(std::size_t index) const noexcept;
+  /// Handles point light entity at.
   Entity point_light_entity_at(std::size_t index) const noexcept;
 
+  /// Adds a value or component to the target system for spot light component.
   bool add_spot_light_component(Entity entity,
                                 const SpotLightComponent &component) noexcept;
+  /// Removes a value or component from the target system for spot light component.
   bool remove_spot_light_component(Entity entity) noexcept;
+  /// Returns the requested value for spot light component.
   bool
   get_spot_light_component(Entity entity,
                            SpotLightComponent *outComponent) const noexcept;
+  /// Returns whether has spot light component.
   bool has_spot_light_component(Entity entity) const noexcept;
+  /// Handles spot light count.
   std::size_t spot_light_count() const noexcept;
+  /// Handles spot light at.
   const SpotLightComponent *spot_light_at(std::size_t index) const noexcept;
+  /// Handles spot light entity at.
   Entity spot_light_entity_at(std::size_t index) const noexcept;
 
+  /// Adds a value or component to the target system for reflection probe component.
   bool add_reflection_probe_component(
       Entity entity, const ReflectionProbeComponent &component) noexcept;
+  /// Removes a value or component from the target system for reflection probe component.
   bool remove_reflection_probe_component(Entity entity) noexcept;
+  /// Returns the requested value for reflection probe component.
   bool get_reflection_probe_component(
       Entity entity, ReflectionProbeComponent *outComponent) const noexcept;
+  /// Returns whether has reflection probe component.
   bool has_reflection_probe_component(Entity entity) const noexcept;
+  /// Handles reflection probe count.
   std::size_t reflection_probe_count() const noexcept;
+  /// Handles reflection probe at.
   const ReflectionProbeComponent *
   reflection_probe_at(std::size_t index) const noexcept;
+  /// Handles reflection probe entity at.
   Entity reflection_probe_entity_at(std::size_t index) const noexcept;
+  /// Returns the requested value for reflection probe component ptr.
   ReflectionProbeComponent *
   get_reflection_probe_component_ptr(Entity entity) noexcept;
+  /// Returns the requested value for reflection probe component ptr.
   const ReflectionProbeComponent *
   get_reflection_probe_component_ptr(Entity entity) const noexcept;
 
+  /// Adds a value or component to the target system for spring arm.
   bool add_spring_arm(Entity entity,
                       const SpringArmComponent &component) noexcept;
+  /// Removes a value or component from the target system for spring arm.
   bool remove_spring_arm(Entity entity) noexcept;
+  /// Returns the requested value for spring arm.
   bool get_spring_arm(Entity entity,
                       SpringArmComponent *outComponent) const noexcept;
+  /// Returns whether has spring arm.
   bool has_spring_arm(Entity entity) const noexcept;
+  /// Returns the requested value for spring arm ptr.
   SpringArmComponent *get_spring_arm_ptr(Entity entity) noexcept;
+  /// Returns the requested value for spring arm ptr.
   const SpringArmComponent *get_spring_arm_ptr(Entity entity) const noexcept;
 
+  /// Begins the requested operation or profiling range for update phase.
   void begin_update_phase() noexcept;
+  /// Begins the requested operation or profiling range for update step.
   void begin_update_step() noexcept;
+  /// Handles commit update phase.
   void commit_update_phase() noexcept;
+  /// Begins the requested operation or profiling range for transform phase.
   void begin_transform_phase() noexcept;
+  /// Begins the requested operation or profiling range for render prep phase.
   void begin_render_prep_phase() noexcept;
+  /// Begins the requested operation or profiling range for render phase.
   void begin_render_phase() noexcept;
+  /// Ends the requested operation or profiling range for frame phase.
   void end_frame_phase() noexcept;
+  /// Handles current phase.
   WorldPhase current_phase() const noexcept;
 
   // Game mode (owned by World — reset on scene load). -------------------
   GameMode &game_mode() noexcept { return m_gameMode; }
+  /// Handles game mode.
   const GameMode &game_mode() const noexcept { return m_gameMode; }
 
   // Per-World timer manager (reset on scene load). -------------------------
   TimerManager &timer_manager() noexcept { return m_timerManager; }
+  /// Handles timer manager.
   const TimerManager &timer_manager() const noexcept { return m_timerManager; }
 
   // Per-World camera manager (priority stack + shake). ---------------------
   CameraManager &camera_manager() noexcept { return m_cameraManager; }
+  /// Handles camera manager.
   const CameraManager &camera_manager() const noexcept {
     return m_cameraManager;
   }
@@ -356,11 +465,13 @@ public:
   // BeginPlay: transition Input → BeginPlay. Iterate new entities via
   // for_each_needs_begin_play, then call end_begin_play_phase.
   void begin_begin_play_phase() noexcept;
+  /// Ends the requested operation or profiling range for begin play phase.
   void end_begin_play_phase() noexcept;
 
   // EndPlay: transition Render → EndPlay. Iterate pending-destroy entities
   // via for_each_pending_destroy, then call end_end_play_phase which flushes.
   void begin_end_play_phase() noexcept;
+  /// Ends the requested operation or profiling range for end play phase.
   void end_end_play_phase() noexcept;
 
   // Mark entity as having received its begin_play callback.
@@ -395,38 +506,55 @@ public:
     }
   }
 
+  /// Handles for each transform.
   void for_each_transform(TransformVisitor visitor,
                           void *userData) const noexcept;
+  /// Advances this system for the current frame or tick for transforms.
   bool update_transforms(float deltaSeconds) noexcept;
   // Thread-safety contract: may be called in parallel during Update with
   // non-overlapping index ranges; the write state index is fixed per update.
   bool update_transforms_range(std::size_t startIndex, std::size_t count,
                                float deltaSeconds) noexcept;
+  /// Returns the requested value for transform update range.
   bool
   get_transform_update_range(std::size_t startIndex, std::size_t count,
                              const Entity **outEntities,
                              const Transform **outReadTransforms,
                              Transform **outWriteTransforms) noexcept override;
+  /// Reads transform range data.
   bool read_transform_range(std::size_t startIndex, std::size_t count,
                             const Entity **outEntities,
                             const Transform **outTransforms) const noexcept;
+  /// Reads world transform range data.
   bool read_world_transform_range(
       std::size_t startIndex, std::size_t count, const Entity **outEntities,
       const WorldTransform **outTransforms) const noexcept;
+  /// Handles transform count.
   std::size_t transform_count() const noexcept override;
+  /// Handles world transform count.
   std::size_t world_transform_count() const noexcept;
+  /// Handles rigid body count.
   std::size_t rigid_body_count() const noexcept;
+  /// Handles collider count.
   std::size_t collider_count() const noexcept override;
 
+  /// Handles physics context.
   physics::PhysicsContext &physics_context() noexcept override;
+  /// Handles physics context.
   const physics::PhysicsContext &physics_context() const noexcept override;
 
+  /// Returns the requested value for rigid body ptr.
   RigidBody *get_rigid_body_ptr(Entity entity) noexcept override;
+  /// Returns the requested value for rigid body ptr.
   const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept override;
+  /// Returns the requested value for collider ptr.
   const Collider *get_collider_ptr(Entity entity) const noexcept override;
+  /// Returns the requested value for collider ptr.
   Collider *get_collider_ptr(Entity entity) noexcept;
 
+  /// Handles for each.
   template <typename... Components, typename Fn>
+  /// Handles for each.
   void for_each(Fn &&fn) const noexcept {
     static_assert(sizeof...(Components) >= 1U,
                   "World::for_each requires at least one component type.");
@@ -477,6 +605,7 @@ private:
       core::SparseSet<Entity, FoliagePatchComponent, kMaxEntities,
                       kMaxFoliagePatchComponents>;
 
+  /// Returns whether is supported component.
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
     return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody> ||
@@ -492,23 +621,38 @@ private:
            std::is_same_v<C, FoliagePatchComponent>;
   }
 
+  /// Returns whether is mutation phase.
   bool is_mutation_phase() const noexcept;
+  /// Returns whether is valid entity.
   bool is_valid_entity(Entity entity) const noexcept;
+  /// Destroys or releases the requested object, handle, or resource for entity immediate.
   bool destroy_entity_immediate(Entity entity) noexcept;
+  /// Handles queue deferred destroy.
   bool queue_deferred_destroy(Entity entity) noexcept;
+  /// Flushes queued work to the backing runtime system for deferred destroys.
   void flush_deferred_destroys() noexcept;
+  /// Handles insert persistent index.
   bool insert_persistent_index(PersistentId persistentId,
                                std::uint32_t entityIndex) noexcept;
+  /// Finds the matching object or resource for persistent index.
   std::uint32_t find_persistent_index(PersistentId persistentId) const noexcept;
+  /// Handles erase persistent index.
   void erase_persistent_index(PersistentId persistentId) noexcept;
+  /// Resets this object back to its reusable empty state for transform cache.
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
+  /// Handles propagate world transforms.
   bool propagate_world_transforms() noexcept;
+  /// Handles query state index.
   std::size_t query_state_index() const noexcept;
+  /// Handles hash name string.
   std::uint32_t hash_name_string(const char *name) const noexcept;
+  /// Handles name lookup insert.
   bool name_lookup_insert(std::uint32_t nameHash, const char *name,
                           std::uint32_t entityIndex) noexcept;
+  /// Handles rebuild name lookup.
   void rebuild_name_lookup() noexcept;
 
+  /// Handles component count.
   template <typename Component> std::size_t component_count() const noexcept {
     using C = std::remove_cv_t<Component>;
     if constexpr (std::is_same_v<C, Transform>) {
@@ -542,7 +686,9 @@ private:
     }
   }
 
+  /// Handles try get component.
   template <typename Component>
+  /// Handles try get component.
   const std::remove_cv_t<Component> *
   try_get_component(Entity entity) const noexcept {
     using C = std::remove_cv_t<Component>;
@@ -585,6 +731,7 @@ private:
 
   // Find the index (within a tuple) of the component type with lowest count.
   template <typename Tuple, std::size_t... Is>
+  /// Handles smallest component index.
   std::size_t
   smallest_component_index(std::index_sequence<Is...>) const noexcept {
     std::size_t minCount = (std::numeric_limits<std::size_t>::max)();
@@ -601,7 +748,9 @@ private:
 
   // Dispatch: iterate the component set at PrimaryIdx, probe the rest.
   template <typename Tuple, std::size_t PrimaryIdx, typename Fn,
+            /// Handles for each with primary.
             std::size_t... AllIs>
+  /// Handles for each with primary.
   void for_each_with_primary(Fn &&fn,
                              std::index_sequence<AllIs...>) const noexcept {
     using PrimaryC = std::tuple_element_t<PrimaryIdx, Tuple>;
@@ -618,7 +767,9 @@ private:
         });
   }
 
+  /// Handles try get rest excluding.
   template <typename Tuple, std::size_t PrimaryIdx, std::size_t... AllIs>
+  /// Handles try get rest excluding.
   bool try_get_rest_excluding(
       Entity entity, std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
       std::index_sequence<AllIs...>) const noexcept {
@@ -636,7 +787,9 @@ private:
     return allPresent;
   }
 
+  /// Handles invoke for each.
   template <typename Tuple, typename Fn, std::size_t... Is>
+  /// Handles invoke for each.
   static void invoke_for_each(
       Fn &&fn, Entity entity,
       const std::array<const void *, std::tuple_size_v<Tuple>> &ptrs,
@@ -647,6 +800,7 @@ private:
 
   // Entry point: picks smallest component at runtime and dispatches.
   template <typename Tuple, typename Fn, std::size_t... Is>
+  /// Handles for each variadic.
   void for_each_variadic(Fn &&fn, std::index_sequence<Is...>) const noexcept {
     const std::size_t primaryIdx =
         smallest_component_index<Tuple>(std::index_sequence<Is...>{});
@@ -659,7 +813,9 @@ private:
     (dispatch(std::integral_constant<std::size_t, Is>{}), ...);
   }
 
+  /// Handles for each primary.
   template <typename Component, typename Fn>
+  /// Handles for each primary.
   void for_each_primary(Fn &&fn) const noexcept {
     using C = std::remove_cv_t<Component>;
 
@@ -711,6 +867,7 @@ private:
     } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
       for (std::size_t i = 0U; i < m_reflectionProbes.count(); ++i) {
         fn(m_reflectionProbes.entity_at(i),
+           /// Handles component at.
            m_reflectionProbes.component_at(i));
       }
     } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
@@ -745,6 +902,7 @@ private:
     // Cached local transform — compared each frame for dirty detection.
     // The I/O path uses the full Transform stored in m_transforms (SparseSet).
     math::Vec3 position{};
+    /// Handles alignas.
     math::Quat rotation{}; // alignas(16)
     math::Vec3 scale{1.0F, 1.0F, 1.0F};
     // Resolved runtime tree links, rebuilt every propagation pass.

@@ -1,3 +1,5 @@
+// Declares event bus types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstddef>
@@ -28,36 +30,48 @@ template <typename E> EventTypeId event_type_id() noexcept {
 using RawEventHandler = void (*)(const void *eventData,
                                  void *userData) noexcept;
 
+/// Initializes the owning system for event bus.
 bool initialize_event_bus() noexcept;
+/// Shuts down the owning system for event bus.
 void shutdown_event_bus() noexcept;
 
+/// Registers a subscriber or callback for raw.
 bool subscribe_raw(EventTypeId typeId, RawEventHandler handler,
                    void *userData) noexcept;
+/// Removes a subscriber or callback for raw.
 bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
                      void *userData) noexcept;
+/// Emits an event or message to subscribers for raw.
 void emit_raw(EventTypeId typeId, const void *eventData) noexcept;
 
 // Typed convenience wrappers — Handler is a NTTP to avoid function-pointer
 // casts.  Usage: subscribe<MyEvent, my_handler>(userData);
 namespace detail {
+/// Handles void.
 template <typename E, void (*Handler)(const E &, void *) noexcept>
+/// Handles event trampoline.
 void event_trampoline(const void *data, void *userData) noexcept {
   Handler(*static_cast<const E *>(data), userData);
 }
 } // namespace detail
 
+/// Handles void.
 template <typename E, void (*Handler)(const E &, void *) noexcept>
+/// Registers a subscriber or callback.
 bool subscribe(void *userData = nullptr) noexcept {
   return subscribe_raw(event_type_id<E>(),
                        &detail::event_trampoline<E, Handler>, userData);
 }
 
+/// Handles void.
 template <typename E, void (*Handler)(const E &, void *) noexcept>
+/// Removes a subscriber or callback.
 bool unsubscribe(void *userData = nullptr) noexcept {
   return unsubscribe_raw(event_type_id<E>(),
                          &detail::event_trampoline<E, Handler>, userData);
 }
 
+/// Emits an event or message to subscribers.
 template <typename E> void emit(const E &event) noexcept {
   emit_raw(event_type_id<E>(), &event);
 }
@@ -74,10 +88,13 @@ template <typename E> void emit(const E &event) noexcept {
 using ChannelHandler = void (*)(const void *data, std::size_t size,
                                 void *userData) noexcept;
 
+/// Registers a subscriber or callback for channel.
 bool subscribe_channel(const char *channelName, ChannelHandler handler,
                        void *userData = nullptr) noexcept;
+/// Removes a subscriber or callback for channel.
 bool unsubscribe_channel(const char *channelName, ChannelHandler handler,
                          void *userData = nullptr) noexcept;
+/// Emits an event or message to subscribers for channel.
 void emit_channel(const char *channelName, const void *data,
                   std::size_t size) noexcept;
 

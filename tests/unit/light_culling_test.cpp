@@ -1,3 +1,5 @@
+// Verifies light culling test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -293,6 +295,7 @@ int verify_256_lights_stress() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = verify_empty_scene_culling();
   if (result != 0) {

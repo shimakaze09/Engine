@@ -1,3 +1,5 @@
+// Defines the bloom threshold fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -7,6 +9,7 @@ uniform float u_threshold;
 
 out vec4 outColor;
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 c = texture(u_sceneColor, vTexCoord).rgb;
   float brightness = dot(c, vec3(0.2126, 0.7152, 0.0722));

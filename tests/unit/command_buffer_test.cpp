@@ -1,3 +1,5 @@
+// Verifies command buffer test behavior for the Engine test suite.
+
 #include "engine/core/cvar.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
@@ -7,6 +9,7 @@
 
 namespace {
 
+/// Handles make command.
 engine::renderer::DrawCommand make_command(std::uint64_t sortKey,
                                            std::uint32_t entity) noexcept {
   engine::renderer::DrawCommand command{};
@@ -16,6 +19,7 @@ engine::renderer::DrawCommand make_command(std::uint64_t sortKey,
   return command;
 }
 
+/// Handles check submit sort and reset.
 int check_submit_sort_and_reset() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();
@@ -49,6 +53,7 @@ int check_submit_sort_and_reset() {
   return 0;
 }
 
+/// Handles check append and capacity.
 int check_append_and_capacity() {
   static engine::renderer::CommandBufferBuilder left;
   static engine::renderer::CommandBufferBuilder right;
@@ -97,6 +102,7 @@ int check_append_and_capacity() {
   return 0;
 }
 
+/// Handles check static mesh batches.
 int check_static_mesh_batches() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();
@@ -184,6 +190,7 @@ int check_static_mesh_batches() {
   return 0;
 }
 
+/// Handles check camera state.
 int check_camera_state() {
   engine::renderer::CameraState camera{};
   camera.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
@@ -211,6 +218,7 @@ int check_camera_state() {
   return 0;
 }
 
+/// Handles check environment texture getters.
 int check_environment_texture_getters() {
   engine::core::shutdown_cvars();
   if (!engine::core::initialize_cvars()) {
@@ -273,6 +281,7 @@ int check_environment_texture_getters() {
   return 0;
 }
 
+/// Handles check reflection probe bake settings.
 int check_reflection_probe_bake_settings() {
   engine::renderer::ReflectionProbeBakeSettings settings{};
   settings.prefilteredFaceSize = 130U;
@@ -308,6 +317,7 @@ int check_reflection_probe_bake_settings() {
   return 0;
 }
 
+/// Handles check distance fog settings.
 int check_distance_fog_settings() {
   using engine::renderer::DistanceFogMode;
 
@@ -400,6 +410,7 @@ int check_distance_fog_settings() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = check_submit_sort_and_reset();
   if (result != 0) {

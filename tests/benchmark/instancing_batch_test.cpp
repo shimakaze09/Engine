@@ -1,8 +1,11 @@
+// Verifies instancing batch test behavior for the Engine test suite.
+
 #include "engine/renderer/command_buffer.h"
 
 #include <chrono>
 #include <cstdio>
 
+/// Runs this executable or test program.
 int main() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();

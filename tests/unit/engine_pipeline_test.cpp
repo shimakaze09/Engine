@@ -1,7 +1,10 @@
+// Verifies engine pipeline test behavior for the Engine test suite.
+
 #include "engine/runtime/engine_pipeline.h"
 
 namespace {
 
+/// Handles check construction destruction.
 int check_construction_destruction() {
   engine::EnginePipeline pipeline;
   // Without engine::bootstrap(), initialize() should fail gracefully.
@@ -13,6 +16,7 @@ int check_construction_destruction() {
 
 using TestFn = int (*)();
 
+/// Stores test entry data used by the engine.
 struct TestEntry {
   const char *name;
   TestFn fn;
@@ -24,6 +28,7 @@ const TestEntry g_tests[] = {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int failures = 0;
   for (const auto &test : g_tests) {

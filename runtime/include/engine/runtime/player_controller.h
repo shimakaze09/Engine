@@ -1,3 +1,5 @@
+// Declares player controller types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <array>
@@ -19,6 +21,7 @@ struct PlayerController final {
   std::uint8_t playerIndex = 0U;
   bool active = false;
 
+  /// Resets this object back to its reusable empty state.
   void reset() noexcept {
     name[0] = '\0';
     controlledEntity = 0U;
@@ -62,6 +65,7 @@ struct PlayerControllerArray final {
     return &controllers[playerIndex];
   }
 
+  /// Returns the requested value.
   PlayerController *get(std::uint8_t playerIndex) noexcept {
     if (playerIndex >= kMaxPlayers) {
       return nullptr;
@@ -82,6 +86,7 @@ struct PlayerControllerArray final {
   // Reset all player controllers.
   void reset() noexcept {
     for (auto &pc : controllers) {
+      /// Resets this object back to its reusable empty state.
       pc.reset();
     }
   }

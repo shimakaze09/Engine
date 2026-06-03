@@ -1,3 +1,5 @@
+// Implements engine behavior for the Engine runtime world.
+
 #include "engine/engine.h"
 
 #include <cstddef>
@@ -23,6 +25,7 @@ constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
 
 } // namespace
 
+/// Handles bootstrap.
 bool bootstrap() noexcept {
   if (!core::initialize_core(kFrameAllocatorBytes)) {
     return false;
@@ -101,6 +104,7 @@ bool bootstrap() noexcept {
   return true;
 }
 
+/// Runs the configured command, loop, or tool.
 void run(std::uint32_t maxFrames) noexcept {
   EnginePipeline pipeline;
   if (!pipeline.initialize(maxFrames)) {
@@ -113,6 +117,7 @@ void run(std::uint32_t maxFrames) noexcept {
   pipeline.teardown();
 }
 
+/// Shuts down the owning system.
 void shutdown() noexcept {
   core::log_message(core::LogLevel::Info, "engine", "shutdown complete");
 

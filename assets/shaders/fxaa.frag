@@ -1,3 +1,5 @@
+// Defines the fxaa fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -7,10 +9,12 @@ uniform vec2 u_texelSize;
 
 out vec4 outColor;
 
+/// Handles luminance.
 float luminance(vec3 c) {
   return dot(c, vec3(0.299, 0.587, 0.114));
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 rgbM = texture(u_inputTexture, vTexCoord).rgb;
   float lumaM = luminance(rgbM);

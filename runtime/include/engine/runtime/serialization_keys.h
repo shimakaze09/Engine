@@ -1,3 +1,5 @@
+// Declares serialization keys types and APIs for the Engine runtime world.
+
 #pragma once
 
 // Shared JSON keys for component serialization.

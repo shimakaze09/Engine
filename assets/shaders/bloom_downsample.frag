@@ -1,3 +1,5 @@
+// Defines the bloom downsample fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -7,6 +9,7 @@ uniform vec2 u_texelSize;
 
 out vec4 outColor;
 
+/// Runs the shader entry point for this stage.
 void main() {
   // Dual-Kawase downsample: 5-tap pattern.
   vec3 sum = texture(u_input, vTexCoord).rgb * 4.0;

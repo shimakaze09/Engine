@@ -1,3 +1,5 @@
+// Implements linear allocator behavior for the Engine core engine.
+
 #include "engine/core/linear_allocator.h"
 
 #include <cstdint>
@@ -7,10 +9,12 @@ namespace engine::core {
 
 namespace {
 
+/// Returns whether is power of two.
 bool is_power_of_two(std::size_t value) noexcept {
   return (value != 0U) && ((value & (value - 1U)) == 0U);
 }
 
+/// Handles allocator allocate.
 void *allocator_allocate(void *context, std::size_t sizeBytes,
                          std::size_t alignment) noexcept {
   if (context == nullptr) {
@@ -21,6 +25,7 @@ void *allocator_allocate(void *context, std::size_t sizeBytes,
   return allocator->allocate(sizeBytes, alignment);
 }
 
+/// Handles allocator reset.
 void allocator_reset(void *context) noexcept {
   if (context != nullptr) {
     auto *allocator = static_cast<LinearAllocator *>(context);
@@ -98,6 +103,7 @@ std::size_t LinearAllocator::allocation_count() const noexcept {
   return m_allocationCount;
 }
 
+/// Handles make allocator.
 Allocator make_allocator(LinearAllocator *allocator) noexcept {
   Allocator interfaceAllocator{};
   interfaceAllocator.context = allocator;

@@ -1,3 +1,5 @@
+// Declares ray types and APIs for the Engine math library.
+
 #pragma once
 
 #include "engine/math/aabb.h"
@@ -5,6 +7,7 @@
 
 namespace engine::math {
 
+/// Stores ray data used by the engine.
 struct Ray final {
   Vec3 origin = Vec3(0.0F, 0.0F, 0.0F);
   Vec3 direction = Vec3(0.0F, 0.0F, 1.0F);

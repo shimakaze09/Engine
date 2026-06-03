@@ -1,3 +1,5 @@
+# Verifies tests behavior for the Engine test suite.
+
 engine_add_test_executable(engine_integration_ecs
     SOURCES
     smoke_integration.cpp

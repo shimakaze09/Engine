@@ -1,3 +1,5 @@
+// Declares debug draw types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstddef>
@@ -14,12 +16,14 @@
 
 namespace engine::core {
 
+/// Stores debug vec3 data used by the engine.
 struct DebugVec3 final {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
 };
 
+/// Stores debug color data used by the engine.
 struct DebugColor final {
   float r = 1.0F;
   float g = 1.0F;
@@ -27,6 +31,7 @@ struct DebugColor final {
   float a = 1.0F;
 };
 
+/// Stores debug line data used by the engine.
 struct DebugLine final {
   DebugVec3 from{};
   DebugVec3 to{};
@@ -34,6 +39,7 @@ struct DebugLine final {
   std::uint32_t lifeFrames = 1U;
 };
 
+/// Stores debug sphere data used by the engine.
 struct DebugSphere final {
   DebugVec3 center{};
   float radius = 1.0F;
@@ -41,6 +47,7 @@ struct DebugSphere final {
   std::uint32_t lifeFrames = 1U;
 };
 
+/// Stores debug text data used by the engine.
 struct DebugText final {
   DebugVec3 position{};
   char text[128] = {};
@@ -48,7 +55,9 @@ struct DebugText final {
   std::uint32_t lifeFrames = 1U;
 };
 
+/// Initializes the owning system for debug draw.
 bool initialize_debug_draw() noexcept;
+/// Shuts down the owning system for debug draw.
 void shutdown_debug_draw() noexcept;
 
 // Submit draw commands.  lifeFrames == 1 means visible for the current frame
@@ -67,8 +76,10 @@ void debug_draw_tick() noexcept;
 // Query current live entries.  Returns the number of entries written to `out`.
 std::size_t debug_draw_get_lines(DebugLine *out,
                                  std::size_t maxEntries) noexcept;
+/// Handles debug draw get spheres.
 std::size_t debug_draw_get_spheres(DebugSphere *out,
                                    std::size_t maxEntries) noexcept;
+/// Handles debug draw get texts.
 std::size_t debug_draw_get_texts(DebugText *out,
                                  std::size_t maxEntries) noexcept;
 

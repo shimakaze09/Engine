@@ -15,6 +15,7 @@
 static int g_passed = 0;
 static int g_failed = 0;
 
+/// Handles check.
 static void check(bool condition, const char *name) noexcept {
   if (condition) {
     ++g_passed;
@@ -25,6 +26,7 @@ static void check(bool condition, const char *name) noexcept {
   }
 }
 
+/// Handles test ball approaching wall no penetration.
 static void test_ball_approaching_wall_no_penetration() noexcept {
   // A ball rolling toward a wall at moderate speed should stop without
   // any visible penetration frame.
@@ -92,6 +94,7 @@ static void test_ball_approaching_wall_no_penetration() noexcept {
         "Ball stops at wall without deep penetration");
 }
 
+/// Handles test speculative no ghost collision.
 static void test_speculative_no_ghost_collision() noexcept {
   // Two objects moving parallel (not toward each other) should NOT get
   // ghost collision from speculative contacts.
@@ -160,6 +163,7 @@ static void test_speculative_no_ghost_collision() noexcept {
         "Object B has no spurious X velocity");
 }
 
+/// Handles test speculative approaching spheres.
 static void test_speculative_approaching_spheres() noexcept {
   // Two spheres approaching each other — speculative contacts should
   // prevent deep penetration.
@@ -223,6 +227,7 @@ static void test_speculative_approaching_spheres() noexcept {
   check(dist >= sumR - 0.2F, "Approaching spheres don't deeply penetrate");
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== Speculative Contacts Tests (P1-M3-E2) ===\n");
 

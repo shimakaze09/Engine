@@ -1,3 +1,5 @@
+// Implements sphere behavior for the Engine math library.
+
 #include "engine/math/sphere.h"
 
 #include <cmath>
@@ -7,16 +9,19 @@
 
 namespace engine::math {
 
+/// Handles sphere contains.
 bool sphere_contains(const Sphere &sphere, const Vec3 &point) noexcept {
   return length_sq(sub(point, sphere.center)) <=
          (sphere.radius * sphere.radius);
 }
 
+/// Handles sphere intersects sphere.
 bool sphere_intersects_sphere(const Sphere &a, const Sphere &b) noexcept {
   const float radiusSum = a.radius + b.radius;
   return length_sq(sub(b.center, a.center)) <= (radiusSum * radiusSum);
 }
 
+/// Handles ray intersects sphere.
 bool ray_intersects_sphere(const Ray &ray, const Sphere &sphere,
                            float *outT) noexcept {
   const Vec3 oc = sub(ray.origin, sphere.center);

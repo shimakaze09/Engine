@@ -1,3 +1,5 @@
+// Defines the pbr fragment shader used by the Engine renderer.
+
 #version 330 core
 
 const float PI = 3.14159265359;
@@ -32,6 +34,7 @@ uniform float uHeightFogDensity;
 uniform float uHeightFogFalloff;
 uniform int uHeightFogStepCount;
 
+/// Stores dir light data used by the engine.
 struct DirLight {
   vec3 direction;
   vec3 color;
@@ -40,6 +43,7 @@ struct DirLight {
 uniform int u_dirLightCount;
 uniform DirLight u_dirLights[MAX_DIR_LIGHTS];
 
+/// Stores point light data used by the engine.
 struct PointLight {
   vec3 position;
   vec3 color;
@@ -49,6 +53,7 @@ struct PointLight {
 uniform int u_pointLightCount;
 uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
 
+/// Stores spot light data used by the engine.
 struct SpotLight {
   vec3 position;
   vec3 direction;
@@ -79,6 +84,7 @@ uniform int uPointShadowLightIdx[MAX_POINT_SHADOW_LIGHTS];
 
 out vec4 outColor;
 
+/// Handles distribution ggx.
 float distribution_ggx(vec3 N, vec3 H, float roughness) {
   float a = roughness * roughness;
   float a2 = a * a;
@@ -89,12 +95,14 @@ float distribution_ggx(vec3 N, vec3 H, float roughness) {
   return a2 / max(denom, 0.0001);
 }
 
+/// Handles geometry schlick ggx.
 float geometry_schlick_ggx(float NdotV, float roughness) {
   float r = roughness + 1.0;
   float k = (r * r) / 8.0;
   return NdotV / (NdotV * (1.0 - k) + k);
 }
 
+/// Handles geometry smith.
 float geometry_smith(vec3 N, vec3 V, vec3 L, float roughness) {
   float NdotV = max(dot(N, V), 0.0);
   float NdotL = max(dot(N, L), 0.0);
@@ -102,10 +110,12 @@ float geometry_smith(vec3 N, vec3 V, vec3 L, float roughness) {
          geometry_schlick_ggx(NdotL, roughness);
 }
 
+/// Handles fresnel schlick.
 vec3 fresnel_schlick(float cosTheta, vec3 F0) {
   return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+/// Handles cook torrance.
 vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
                    float metallic, float roughness, vec3 F0) {
   vec3 H = normalize(V + L);
@@ -121,6 +131,7 @@ vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
   return (kD * albedo / PI + specular) * radiance * NdotL;
 }
 
+/// Handles sample shadow pcf.
 float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
   if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
       projCoords.y < 0.0 || projCoords.y > 1.0) {
@@ -139,6 +150,7 @@ float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
   return shadow / 9.0;
 }
 
+/// Handles sample directional shadow pcf.
 float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
   if (cascadeIdx == 0) {
     return sample_shadow_pcf(uShadowMap[0], projCoords);
@@ -152,6 +164,7 @@ float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
   return sample_shadow_pcf(uShadowMap[3], projCoords);
 }
 
+/// Handles sample spot shadow pcf.
 float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
   if (shadowIdx == 0) {
     return sample_shadow_pcf(uSpotShadowMap[0], projCoords);
@@ -165,6 +178,7 @@ float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
   return sample_shadow_pcf(uSpotShadowMap[3], projCoords);
 }
 
+/// Handles sample point shadow depth.
 float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
   if (shadowIdx == 0) {
     return texture(uPointShadowMap[0], sampleVector).r;
@@ -178,6 +192,7 @@ float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
   return texture(uPointShadowMap[3], sampleVector).r;
 }
 
+/// Handles compute directional shadow.
 float compute_directional_shadow(vec3 worldPos) {
   if (uShadowEnabled == 0) {
     return 1.0;
@@ -214,6 +229,7 @@ float compute_directional_shadow(vec3 worldPos) {
   return shadow;
 }
 
+/// Handles compute spot shadow.
 float compute_spot_shadow(vec3 worldPos, int lightIdx) {
   if (uSpotShadowEnabled == 0) {
     return 1.0;
@@ -232,6 +248,7 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
   return 1.0;
 }
 
+/// Handles compute point shadow.
 float compute_point_shadow(vec3 worldPos, int lightIdx) {
   if (uPointShadowEnabled == 0) {
     return 1.0;
@@ -269,6 +286,7 @@ float compute_point_shadow(vec3 worldPos, int lightIdx) {
   return 1.0;
 }
 
+/// Handles compute distance fog factor.
 float compute_distance_fog_factor(float distanceToCamera) {
   if (uFogMode == 1) {
     float range = max(uFogEnd - uFogStart, 0.001);
@@ -285,12 +303,14 @@ float compute_distance_fog_factor(float distanceToCamera) {
   return 0.0;
 }
 
+/// Handles compute height fog density.
 float compute_height_fog_density(vec3 worldPos) {
   float heightAboveBase = max(worldPos.y - uHeightFogBaseHeight, 0.0);
   float falloff = max(uHeightFogFalloff, 0.001);
   return max(uHeightFogDensity, 0.0) * exp(-heightAboveBase * falloff);
 }
 
+/// Handles compute height fog factor.
 float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
   if (uHeightFogEnabled == 0 || uHeightFogDensity <= 0.0) {
     return 0.0;
@@ -318,10 +338,12 @@ float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
   return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
 }
 
+/// Handles combine fog factors.
 float combine_fog_factors(float distanceFog, float heightFog) {
   return clamp(1.0 - ((1.0 - distanceFog) * (1.0 - heightFog)), 0.0, 1.0);
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(u_cameraPos - vWorldPos);

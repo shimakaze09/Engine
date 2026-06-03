@@ -1,3 +1,5 @@
+# Configures math build settings for the Engine repository.
+
 engine_add_module_library(engine_math
     SOURCES
     src/aabb.cpp

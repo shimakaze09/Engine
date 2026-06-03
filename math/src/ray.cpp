@@ -1,3 +1,5 @@
+// Implements ray behavior for the Engine math library.
+
 #include "engine/math/ray.h"
 
 #include <cmath>
@@ -5,6 +7,7 @@
 
 namespace engine::math {
 
+/// Handles ray intersects aabb.
 bool ray_intersects_aabb(const Ray &ray, const AABB &box,
                          float *outT) noexcept {
   constexpr float kInfinity = std::numeric_limits<float>::infinity();
