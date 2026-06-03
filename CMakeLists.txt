@@ -74,9 +74,17 @@ endif()
 
 find_package(OpenGL REQUIRED)
 
-# Silence OpenGL deprecation warnings on macOS (deprecated since 10.14 Mojave).
 if(APPLE)
+    foreach(_engine_sdl_target SDL2-static SDL2)
+        if(TARGET ${_engine_sdl_target})
+            target_compile_options(${_engine_sdl_target} PRIVATE -Wno-deprecated-declarations)
+        endif()
+    endforeach()
+    unset(_engine_sdl_target)
+
+    # Silence OpenGL and third-party dependency deprecation noise on macOS.
     add_compile_definitions(GL_SILENCE_DEPRECATION)
+    add_link_options(-Wl,-no_warn_duplicate_libraries)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)

@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_OPTIONS: --no-deprecation
+
 jobs:
   build:
     name: ${{ matrix.os }}-${{ matrix.config }}
@@ -409,12 +412,12 @@ jobs:
 
       - name: Collect coverage (lcov)
         run: |
-          lcov --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch,negative
-          lcov --remove coverage_raw.info '*/build/_deps/*' '*/tests/*' '*/tools/*' '/usr/*' --output-file coverage.info --ignore-errors unused
+          lcov --quiet --capture --directory build --output-file coverage_raw.info --ignore-errors mismatch,negative --rc geninfo_unexecuted_blocks=1
+          lcov --quiet --remove coverage_raw.info '*/build/_deps/*' '*/tests/*' '*/tools/*' '/usr/*' --output-file coverage.info --ignore-errors unused
           lcov --summary coverage.info
 
       - name: Generate HTML report
-        run: genhtml coverage.info --output-directory coverage_html --title "Engine Coverage"
+        run: genhtml --quiet coverage.info --output-directory coverage_html --title "Engine Coverage"
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7
