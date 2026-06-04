@@ -29,6 +29,7 @@ static int g_failed = 0;
 // Tests — no GL context available, so we test the registry bookkeeping only.
 // --------------------------------------------------------------------------
 
+/// Handles test init shutdown.
 static void test_init_shutdown() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -36,6 +37,76 @@ static void test_init_shutdown() {
   TEST_ASSERT(initialize_shader_system());
   shutdown_shader_system();
   // Double-shutdown is fine.
+  shutdown_shader_system();
+  ++g_passed;
+}
+
+/// Handles test variant key order independent.
+static void test_variant_key_order_independent() {
+  using namespace engine::renderer;
+
+  const ShaderDefine definesA[] = {{"HAS_NORMAL_MAP", "1"}, {"SKINNED", "1"}};
+  const ShaderDefine definesB[] = {{"SKINNED", "1"}, {"HAS_NORMAL_MAP", "1"}};
+  const ShaderVariantDesc descA{"assets/shaders/pbr.vert",
+                                "assets/shaders/pbr.frag",
+                                definesA,
+                                2U};
+  const ShaderVariantDesc descB{"assets/shaders/pbr.vert",
+                                "assets/shaders/pbr.frag",
+                                definesB,
+                                2U};
+
+  const ShaderVariantKey keyA = shader_variant_key(descA);
+  const ShaderVariantKey keyB = shader_variant_key(descB);
+  TEST_ASSERT(keyA.value != 0U);
+  TEST_ASSERT(keyA == keyB);
+  ++g_passed;
+}
+
+/// Handles test variant key distinguishes values.
+static void test_variant_key_distinguishes_values() {
+  using namespace engine::renderer;
+
+  const ShaderDefine enabled[] = {{"HAS_EMISSIVE", "1"}};
+  const ShaderDefine disabled[] = {{"HAS_EMISSIVE", "0"}};
+  const ShaderVariantDesc enabledDesc{"assets/shaders/pbr.vert",
+                                      "assets/shaders/pbr.frag",
+                                      enabled,
+                                      1U};
+  const ShaderVariantDesc disabledDesc{"assets/shaders/pbr.vert",
+                                       "assets/shaders/pbr.frag",
+                                       disabled,
+                                       1U};
+
+  const ShaderVariantKey enabledKey = shader_variant_key(enabledDesc);
+  const ShaderVariantKey disabledKey = shader_variant_key(disabledDesc);
+  TEST_ASSERT(enabledKey.value != 0U);
+  TEST_ASSERT(disabledKey.value != 0U);
+  TEST_ASSERT(!(enabledKey == disabledKey));
+  ++g_passed;
+}
+
+/// Handles test variant invalid descriptors.
+static void test_variant_invalid_descriptors() {
+  using namespace engine::renderer;
+
+  TEST_ASSERT(shader_variant_key(ShaderVariantDesc{}).value == 0U);
+  TEST_ASSERT(load_shader_variant(ShaderVariantDesc{}) == kInvalidShaderProgram);
+
+  const ShaderVariantDesc missingDefineArray{
+      "assets/shaders/pbr.vert", "assets/shaders/pbr.frag", nullptr, 1U};
+  TEST_ASSERT(shader_variant_key(missingDefineArray).value == 0U);
+
+  const ShaderDefine badDefine[] = {{nullptr, "1"}};
+  const ShaderVariantDesc badDefineDesc{"assets/shaders/pbr.vert",
+                                        "assets/shaders/pbr.frag",
+                                        badDefine,
+                                        1U};
+  TEST_ASSERT(shader_variant_key(badDefineDesc).value == 0U);
+
+  TEST_ASSERT(initialize_shader_system());
+  TEST_ASSERT(load_shader_variant(missingDefineArray) == kInvalidShaderProgram);
+  TEST_ASSERT(load_shader_variant(badDefineDesc) == kInvalidShaderProgram);
   shutdown_shader_system();
   ++g_passed;
 }
@@ -94,6 +165,12 @@ static void test_check_reload_without_init() {
 int main() {
   int before_test_init_shutdown = g_failed;
   RUN_TEST(test_init_shutdown);
+  int before_test_variant_key_order_independent = g_failed;
+  RUN_TEST(test_variant_key_order_independent);
+  int before_test_variant_key_distinguishes_values = g_failed;
+  RUN_TEST(test_variant_key_distinguishes_values);
+  int before_test_variant_invalid_descriptors = g_failed;
+  RUN_TEST(test_variant_invalid_descriptors);
   int before_test_load_without_init_returns_invalid = g_failed;
   RUN_TEST(test_load_without_init_returns_invalid);
   int before_test_load_null_paths = g_failed;

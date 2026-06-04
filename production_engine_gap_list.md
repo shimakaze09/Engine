@@ -744,9 +744,9 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 #### P1-M6-D: Shader and Material System
 
 ##### P1-M6-D1: Shader Variant / Permutation System (Macro-Based, Cached) `[~]`
-- `P1-M6-D1a` `renderer/include/engine/renderer/shader_system.h`: `load_shader_program(vertPath, fragPath)`, `check_shader_reload()`. `[~]` — *Basic load/reload confirmed; macro permutation compilation missing.*
+- `P1-M6-D1a` `renderer/include/engine/renderer/shader_system.h`: `load_shader_program(vertPath, fragPath)`, `check_shader_reload()`. `[x]` — *Basic load/reload confirmed; variant reload now preserves copied macro defines.*
 - `P1-M6-D1b` `ShaderProgramHandle` typed handle; `kInvalidShaderProgram` sentinel. `[x]`
-- `P1-M6-D1c` Macro permutation table: define set → variant key; compile on demand, cache by key. `[ ]`
+- `P1-M6-D1c` Macro permutation table: define set → variant key; compile on demand, cache by key. `[x]` — *Implemented `ShaderVariantDesc`/`ShaderVariantKey`, order-independent define hashing, cached `load_shader_variant()`, macro injection, and reload-safe define storage; covered by `engine_unit_shader_system`.*
 - `P1-M6-D1d` Variant selection: material properties (has_normal_map, has_emissive, skinned, etc.) select defines. `[ ]`
 - `P1-M6-D1e` Binary shader cache: compiled SPIR-V or driver binary; restored on identical source hash. `[ ]`
 
