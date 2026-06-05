@@ -83,6 +83,46 @@ These items do not represent missing *features* but rather defects or structural
 
 ---
 
+### §0-7: Runtime / Editor / Renderer Ownership Stability
+
+#### §0-7-a: Scene and editor lifecycle hardening
+- `§0-7-a-i` Scene load must not destroy the current world until the replacement scene parses and validates successfully. **[critical]** `[x]`
+  - *Resolved*: `runtime::load_scene` now stages into a replacement `World` and commits only after load succeeds; regression coverage protects failed-load preservation.
+- `§0-7-a-ii` Scripted pending scene-load failures must remain visible instead of being cleared as if the load succeeded. **[critical]** `[x]`
+  - *Resolved*: `process_pending_scene_op(World&)` keeps failed load requests pending and is covered by scripting tests.
+- `§0-7-a-iii` Editor scene swaps and shutdown must clear stale command history, selected entities, play snapshots, gizmo state, and thumbnail GPU resources. **[high]** `[x]`
+  - *Resolved*: Editor cleanup now releases thumbnail GL textures, clears command history and play snapshot buffers, resets selection/gizmo state, and clears stale world state after scene loads.
+
+#### §0-7-b: Runtime ownership and startup configuration
+- `§0-7-b-i` Engine startup must accept a core/runtime configuration instead of hardcoding asset roots, script paths, shader roots, bootstrap mesh paths, and editor scene paths. **[high]** `[x]`
+  - *Resolved*: `core::CoreConfig` and `runtime::EngineConfig` now drive core bootstrap, asset mounting, shader roots, bootstrap meshes, scripts, and editor scene/assets paths.
+- `§0-7-b-ii` Pipeline initialization failures must tear down partial service/editor/scripting bindings. **[critical]** `[x]`
+  - *Resolved*: initialization failure paths call `teardown()` after post-binding failures, so partial runtime/editor bindings are not left alive.
+- `§0-7-b-iii` Runtime subsystem and scripting service registrations must be scoped to the pipeline instance, not only to `core::global_service_locator()`. **[critical]** `[x]`
+  - *Resolved*: `EnginePipeline::Impl` owns a `ServiceLocator` and `EngineServiceRegistry`; scripting runtime bindings register through the owned locator, and shutdown removes stale world/service entries. Legacy global wrappers remain for old callers and tests.
+
+#### §0-7-c: Renderer, streaming, and validation hardening
+- `§0-7-c-i` Asset streaming callbacks must run through an actual worker queue instead of only polling synchronously on the main thread. **[high]** `[x]`
+  - *Resolved*: `AssetStreamingQueue` now owns a worker thread, mutex/condition variable, CPU load callbacks, main-thread upload callbacks, and shutdown join logic; async ordering and budget tests cover it.
+- `§0-7-c-ii` Renderer public state must be reset on shutdown and grouped behind a renderer-owned context object. **[high]** `[~]`
+  - *In progress*: `RendererContext` now owns public renderer state and backend state, and shutdown resets camera, viewport, frame stats, FXAA, and skybox state. A true multi-renderer-context API remains open.
+- `§0-7-c-iii` Static analysis must fail closed when no real analyzer is available. **[high]** `[x]`
+  - *Resolved*: the `analysis` target now uses `cppcheck` when available, otherwise `clang-tidy --warnings-as-errors=*` on engine sources, and fails if neither analyzer is found.
+
+#### §0-7-d: Second ownership audit findings
+- `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, runtime bindings, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[ ]`
+  - *Audit*: Split into an owned `ScriptingContext` and narrow modules before allowing multiple runtime/editor sessions or isolated tests.
+- `§0-7-d-ii` `physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime. **[critical]** `[ ]`
+  - *Audit*: Move shape data into `PhysicsContext` or world-owned component storage so scene resets and multiple worlds cannot share stale collision data.
+- `§0-7-d-iii` `scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state. **[high]** `[ ]`
+  - *Audit*: Convert DAP to an explicit server/session object so debugger lifecycle cannot leak across scripting shutdown/reinitialize cycles.
+- `§0-7-d-iv` `core::global_service_locator()` still exists for legacy callers, tests, and wrappers. **[high]** `[~]`
+  - *Audit*: Runtime now has scoped registration, but global service access should keep shrinking toward explicit locator/context injection.
+- `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[ ]`
+  - *Audit*: Current largest files include `scripting.cpp` (~5753 lines), `command_buffer.cpp` (~4509), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
+
+---
+
 ---
 
 ## Phase 1 — Ship Blockers (P1)
