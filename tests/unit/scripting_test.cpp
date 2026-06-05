@@ -1025,6 +1025,45 @@ int main() {
     return 92;
   }
 
+  engine::core::ServiceLocator localLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), localLocator);
+  if (localLocator.get_service<engine::runtime::World>() != world.get()) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 95;
+  }
+  if (localLocator.get_service<engine::scripting::RuntimeServices>() ==
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 96;
+  }
+  if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 97;
+  }
+  if (serviceLocator.get_service<engine::scripting::RuntimeServices>() !=
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 98;
+  }
+
+  engine::runtime::unbind_scripting_runtime();
+  if (localLocator.get_service<engine::runtime::World>() != nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 99;
+  }
+  if (localLocator.get_service<engine::scripting::RuntimeServices>() !=
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 100;
+  }
+
+  engine::runtime::bind_scripting_runtime(world.get());
   engine::scripting::shutdown_scripting();
   if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
     remove_script_file();
