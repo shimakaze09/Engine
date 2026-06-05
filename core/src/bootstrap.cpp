@@ -39,12 +39,13 @@ std::size_t g_threadFrameAllocatorCount = 1U;
 
 } // namespace
 
-/// Initializes the owning system for core.
-bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
+/// Initializes the owning system for core with explicit subsystem ownership.
+bool initialize_core(const CoreConfig &config) noexcept {
   if (g_coreInitialized) {
     return true;
   }
 
+  const std::size_t frameAllocatorBytes = config.frameAllocatorBytes;
   if ((frameAllocatorBytes == 0U) ||
       (frameAllocatorBytes > kMaxFrameAllocatorBytes)) {
     log_message(LogLevel::Error, "core",
@@ -85,11 +86,13 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
     }
     eventBusInitialized = true;
 
-    if (!initialize_platform()) {
-      failureMessage = "failed to initialize platform";
-      break;
+    if (config.initializePlatform) {
+      if (!initialize_platform(config.platform)) {
+        failureMessage = "failed to initialize platform";
+        break;
+      }
+      platformInitialized = true;
     }
-    platformInitialized = true;
 
     if (!initialize_input()) {
       failureMessage = "failed to initialize input";
@@ -175,6 +178,13 @@ bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
   g_threadFrameAllocatorCount = 1U;
 
   return false;
+}
+
+/// Initializes the owning system for core.
+bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
+  CoreConfig config{};
+  config.frameAllocatorBytes = frameAllocatorBytes;
+  return initialize_core(config);
 }
 
 /// Shuts down the owning system for core.

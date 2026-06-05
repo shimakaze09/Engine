@@ -22,12 +22,22 @@ namespace engine {
 namespace {
 
 constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
+EngineConfig g_activeConfig{};
 
 } // namespace
 
 /// Handles bootstrap.
 bool bootstrap() noexcept {
-  if (!core::initialize_core(kFrameAllocatorBytes)) {
+  EngineConfig config{};
+  config.core.frameAllocatorBytes = kFrameAllocatorBytes;
+  return bootstrap(config);
+}
+
+/// Boots the engine with explicit app/runtime configuration.
+bool bootstrap(const EngineConfig &config) noexcept {
+  g_activeConfig = config;
+
+  if (!core::initialize_core(g_activeConfig.core)) {
     return false;
   }
 
@@ -39,9 +49,15 @@ bool bootstrap() noexcept {
       "debug_dap_port", 0,
       "DAP debugger port (0 = disabled). Set to e.g. 4711 to enable."));
 
-  // Mount the assets directory relative to CWD so that VFS paths like
-  // "assets/shaders/pbr.vert" resolve correctly when running from build/.
-  static_cast<void>(core::mount("assets", "assets"));
+  // Mount the configured project asset root before runtime/editor paths are
+  // resolved through the VFS.
+  if (!core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to mount configured asset root");
+    core::shutdown_core();
+    return false;
+  }
+  renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
@@ -103,6 +119,9 @@ bool bootstrap() noexcept {
   core::log_message(core::LogLevel::Info, "engine", "bootstrap complete");
   return true;
 }
+
+/// Returns the active engine configuration for runtime/editor systems.
+const EngineConfig &active_config() noexcept { return g_activeConfig; }
 
 /// Runs the configured command, loop, or tool.
 void run(std::uint32_t maxFrames) noexcept {

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "engine/audio/audio.h"
+#include "engine/core/service_locator.h"
 #include "engine/physics/physics_world_view.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
@@ -48,14 +49,50 @@ struct EngineRendererService final {
   const renderer::RenderDevice *device = nullptr;
 };
 
-/// Handles register engine subsystem services.
+/// Owns the service-locator registrations for one runtime service lifetime.
+class EngineServiceRegistry final {
+public:
+  explicit EngineServiceRegistry(core::ServiceLocator &locator) noexcept;
+  ~EngineServiceRegistry() noexcept;
+
+  EngineServiceRegistry(const EngineServiceRegistry &) = delete;
+  EngineServiceRegistry &operator=(const EngineServiceRegistry &) = delete;
+
+  /// Registers this runtime's subsystem service pointers.
+  bool register_services(World *world, EnginePhysicsService *physicsService,
+                         EngineAudioService *audioService,
+                         EngineAssetDatabaseService *assetDatabaseService,
+                         EngineRendererService *rendererService) noexcept;
+
+  /// Removes any services registered through this scoped registry.
+  void unregister_services() noexcept;
+
+  /// Returns the service locator owned by the runtime context.
+  core::ServiceLocator &locator() noexcept { return *m_locator; }
+
+private:
+  core::ServiceLocator *m_locator = nullptr;
+  bool m_registered = false;
+};
+
+/// Registers engine subsystem services into an explicit service locator.
+bool register_engine_subsystem_services(
+    core::ServiceLocator &locator, World *world,
+    EnginePhysicsService *physicsService, EngineAudioService *audioService,
+    EngineAssetDatabaseService *assetDatabaseService,
+    EngineRendererService *rendererService) noexcept;
+
+/// Removes engine subsystem services from an explicit service locator.
+void unregister_engine_subsystem_services(core::ServiceLocator &locator) noexcept;
+
+/// Registers engine subsystem services into the legacy global locator.
 bool register_engine_subsystem_services(
     World *world, EnginePhysicsService *physicsService,
     EngineAudioService *audioService,
     EngineAssetDatabaseService *assetDatabaseService,
     EngineRendererService *rendererService) noexcept;
 
-/// Handles unregister engine subsystem services.
+/// Removes engine subsystem services from the legacy global locator.
 void unregister_engine_subsystem_services() noexcept;
 
 } // namespace engine::runtime

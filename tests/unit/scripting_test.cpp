@@ -5,6 +5,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
@@ -1011,7 +1012,30 @@ int main() {
     }
   }
 
+  auto &serviceLocator = engine::core::global_service_locator();
+  if (serviceLocator.get_service<engine::runtime::World>() != world.get()) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 91;
+  }
+  if (serviceLocator.get_service<engine::scripting::RuntimeServices>() ==
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 92;
+  }
+
   engine::scripting::shutdown_scripting();
+  if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
+    remove_script_file();
+    return 93;
+  }
+  if (serviceLocator.get_service<engine::scripting::RuntimeServices>() !=
+      nullptr) {
+    remove_script_file();
+    return 94;
+  }
+
   remove_script_file();
   return 0;
 }

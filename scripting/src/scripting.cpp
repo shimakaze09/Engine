@@ -54,8 +54,14 @@ bool debugger_add_breakpoint(const char *file, int line) noexcept;
 namespace {
 
 lua_State *g_state = nullptr;
-runtime::World *g_world = nullptr;
-const RuntimeServices *g_services = nullptr;
+/// Owns the current runtime binding exposed to Lua callbacks.
+struct ScriptingRuntimeBinding final {
+  runtime::World *world = nullptr;
+  const RuntimeServices *services = nullptr;
+  core::ServiceLocator *worldLocator = nullptr;
+  core::ServiceLocator *servicesLocator = nullptr;
+};
+ScriptingRuntimeBinding g_runtimeBinding{};
 std::uint64_t g_defaultMeshAssetId = 0ULL;
 std::uint64_t g_builtinPlaneMesh = 0ULL;
 std::uint64_t g_builtinCubeMesh = 0ULL;
@@ -315,8 +321,8 @@ void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept;
 
 /// Returns whether can apply mutations now.
 bool can_apply_mutations_now() noexcept {
-  return (g_world != nullptr) && (g_services != nullptr) &&
-         (g_services->get_current_phase(g_world) == runtime::WorldPhase::Input);
+  return (g_runtimeBinding.world != nullptr) && (g_runtimeBinding.services != nullptr) &&
+         (g_runtimeBinding.services->get_current_phase(g_runtimeBinding.world) == runtime::WorldPhase::Input);
 }
 
 /// Handles queue deferred mutation.
@@ -334,12 +340,12 @@ bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
 
 /// Handles apply or queue destroy entity.
 bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->destroy_entity_op(g_world, entity.index);
+    return g_runtimeBinding.services->destroy_entity_op(g_runtimeBinding.world, entity.index);
   }
 
   DeferredMutation mutation{};
@@ -353,18 +359,18 @@ bool apply_or_queue_transform(runtime::Entity entity,
                               const runtime::Transform &transform,
                               bool setAuthority,
                               runtime::MovementAuthority authority) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
     const bool transformUpdated =
-        g_services->add_transform_op(g_world, entity.index, transform);
+        g_runtimeBinding.services->add_transform_op(g_runtimeBinding.world, entity.index, transform);
     if (!transformUpdated) {
       return false;
     }
-    return !setAuthority || g_services->set_movement_authority_op(
-                                g_world, entity.index, authority);
+    return !setAuthority || g_runtimeBinding.services->set_movement_authority_op(
+                                g_runtimeBinding.world, entity.index, authority);
   }
 
   DeferredMutation mutation{};
@@ -379,12 +385,12 @@ bool apply_or_queue_transform(runtime::Entity entity,
 /// Handles apply or queue rigid body.
 bool apply_or_queue_rigid_body(runtime::Entity entity,
                                const runtime::RigidBody &rigidBody) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->add_rigid_body_op(g_world, entity.index, rigidBody);
+    return g_runtimeBinding.services->add_rigid_body_op(g_runtimeBinding.world, entity.index, rigidBody);
   }
 
   DeferredMutation mutation{};
@@ -397,12 +403,12 @@ bool apply_or_queue_rigid_body(runtime::Entity entity,
 /// Handles apply or queue collider.
 bool apply_or_queue_collider(runtime::Entity entity,
                              const runtime::Collider &collider) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->add_collider_op(g_world, entity.index, collider);
+    return g_runtimeBinding.services->add_collider_op(g_runtimeBinding.world, entity.index, collider);
   }
 
   DeferredMutation mutation{};
@@ -415,12 +421,12 @@ bool apply_or_queue_collider(runtime::Entity entity,
 /// Handles apply or queue mesh component.
 bool apply_or_queue_mesh_component(
     runtime::Entity entity, const runtime::MeshComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->add_mesh_component_op(g_world, entity.index, component);
+    return g_runtimeBinding.services->add_mesh_component_op(g_runtimeBinding.world, entity.index, component);
   }
 
   DeferredMutation mutation{};
@@ -433,12 +439,12 @@ bool apply_or_queue_mesh_component(
 /// Handles apply or queue name component.
 bool apply_or_queue_name_component(
     runtime::Entity entity, const runtime::NameComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->add_name_component_op(g_world, entity.index, component);
+    return g_runtimeBinding.services->add_name_component_op(g_runtimeBinding.world, entity.index, component);
   }
 
   DeferredMutation mutation{};
@@ -451,12 +457,12 @@ bool apply_or_queue_name_component(
 /// Handles apply or queue light component.
 bool apply_or_queue_light_component(
     runtime::Entity entity, const runtime::LightComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->add_light_component_op(g_world, entity.index, component);
+    return g_runtimeBinding.services->add_light_component_op(g_runtimeBinding.world, entity.index, component);
   }
 
   DeferredMutation mutation{};
@@ -468,12 +474,12 @@ bool apply_or_queue_light_component(
 
 /// Handles apply or queue remove light component.
 bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->remove_light_component_op(g_world, entity.index);
+    return g_runtimeBinding.services->remove_light_component_op(g_runtimeBinding.world, entity.index);
   }
 
   DeferredMutation mutation{};
@@ -486,12 +492,12 @@ bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
 bool apply_or_queue_script_component(
     runtime::Entity entity,
     const runtime::ScriptComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->add_script_component_op(g_world, entity.index,
+    return g_runtimeBinding.services->add_script_component_op(g_runtimeBinding.world, entity.index,
                                                component);
   }
 
@@ -504,12 +510,12 @@ bool apply_or_queue_script_component(
 
 /// Handles apply or queue remove script component.
 bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_services->remove_script_component_op(g_world, entity.index);
+    return g_runtimeBinding.services->remove_script_component_op(g_runtimeBinding.world, entity.index);
   }
 
   DeferredMutation mutation{};
@@ -522,12 +528,12 @@ bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
 bool apply_or_queue_point_light_component(
     runtime::Entity entity,
     const runtime::PointLightComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_point_light_component(entity, component);
+    return g_runtimeBinding.world->add_point_light_component(entity, component);
   }
 
   DeferredMutation mutation{};
@@ -540,12 +546,12 @@ bool apply_or_queue_point_light_component(
 /// Handles apply or queue remove point light component.
 bool apply_or_queue_remove_point_light_component(
     runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->remove_point_light_component(entity);
+    return g_runtimeBinding.world->remove_point_light_component(entity);
   }
 
   DeferredMutation mutation{};
@@ -558,12 +564,12 @@ bool apply_or_queue_remove_point_light_component(
 bool apply_or_queue_spot_light_component(
     runtime::Entity entity,
     const runtime::SpotLightComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->add_spot_light_component(entity, component);
+    return g_runtimeBinding.world->add_spot_light_component(entity, component);
   }
 
   DeferredMutation mutation{};
@@ -576,12 +582,12 @@ bool apply_or_queue_spot_light_component(
 /// Handles apply or queue remove spot light component.
 bool apply_or_queue_remove_spot_light_component(
     runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return g_world->remove_spot_light_component(entity);
+    return g_runtimeBinding.world->remove_spot_light_component(entity);
   }
 
   DeferredMutation mutation{};
@@ -626,7 +632,7 @@ bool read_vec3_args(lua_State *state, int startIndex,
 /// Reads entity data.
 bool read_entity(lua_State *state, int index,
                  runtime::Entity *outEntity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
       (outEntity == nullptr)) {
     return false;
   }
@@ -637,12 +643,12 @@ bool read_entity(lua_State *state, int index,
   }
 
   const std::uint32_t validIndex =
-      g_services->get_entity_index(g_world, entityIndex);
+      g_runtimeBinding.services->get_entity_index(g_runtimeBinding.world, entityIndex);
   if (validIndex == 0U) {
     return false;
   }
 
-  const runtime::Entity resolved = g_world->find_entity_by_index(validIndex);
+  const runtime::Entity resolved = g_runtimeBinding.world->find_entity_by_index(validIndex);
   if (resolved == runtime::kInvalidEntity) {
     return false;
   }
@@ -957,8 +963,8 @@ int lua_engine_log(lua_State *state) noexcept {
 
 /// Handles lua engine get entity count.
 int lua_engine_get_entity_count(lua_State *state) noexcept {
-  const std::size_t count = (g_world != nullptr && g_services != nullptr)
-                                ? g_services->get_transform_count(g_world)
+  const std::size_t count = (g_runtimeBinding.world != nullptr && g_runtimeBinding.services != nullptr)
+                                ? g_runtimeBinding.services->get_transform_count(g_runtimeBinding.world)
                                 : 0U;
   lua_pushinteger(state, static_cast<lua_Integer>(count));
   return 1;
@@ -966,14 +972,14 @@ int lua_engine_get_entity_count(lua_State *state) noexcept {
 
 /// Handles lua engine spawn entity.
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
       !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
 
   // Only valid during Input; create_entity returns 0 otherwise.
-  const std::uint32_t entityIndex = g_services->create_entity_op(g_world);
+  const std::uint32_t entityIndex = g_runtimeBinding.services->create_entity_op(g_runtimeBinding.world);
   if (entityIndex == 0U) {
     lua_pushnil(state);
     return 1;
@@ -998,7 +1004,7 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
 
 /// Handles lua engine is alive.
 int lua_engine_is_alive(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1009,7 +1015,7 @@ int lua_engine_is_alive(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIndex);
+  const runtime::Entity entity = g_runtimeBinding.world->find_entity_by_index(entityIndex);
   lua_pushboolean(state, (entity != runtime::kInvalidEntity) ? 1 : 0);
   return 1;
 }
@@ -1022,13 +1028,13 @@ int lua_engine_get_position(lua_State *state) noexcept {
     return 1;
   }
 
-  if (g_services == nullptr) {
+  if (g_runtimeBinding.services == nullptr) {
     lua_pushnil(state);
     return 1;
   }
 
   const runtime::Transform *transform =
-      g_services->get_transform_read_ptr(g_world, entity.index);
+      g_runtimeBinding.services->get_transform_read_ptr(g_runtimeBinding.world, entity.index);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -1050,9 +1056,9 @@ int lua_engine_set_position(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  if (g_services != nullptr) {
+  if (g_runtimeBinding.services != nullptr) {
     static_cast<void>(
-        g_services->get_transform_op(g_world, entity.index, &transform));
+        g_runtimeBinding.services->get_transform_op(g_runtimeBinding.world, entity.index, &transform));
   }
   transform.position = position;
 
@@ -1071,7 +1077,7 @@ int lua_engine_get_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1115,7 +1121,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -1139,7 +1145,7 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_acceleration requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -1167,7 +1173,7 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_additional_acceleration requires an existing "
                       "RigidBody");
@@ -1190,7 +1196,7 @@ int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1211,7 +1217,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_angular_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -1240,7 +1246,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
 
   runtime::MeshComponent component{};
   const runtime::MeshComponent *existing =
-      g_world->get_mesh_component_ptr(entity);
+      g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (existing != nullptr) {
     component = *existing;
   }
@@ -1266,7 +1272,7 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // shape: "cube" | "sphere" | "cylinder" | "capsule" | "pyramid" | "plane"
 // Spawns a physics entity with the matching mesh and appropriate collider.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !can_apply_mutations_now() ||
+  if ((g_runtimeBinding.world == nullptr) || !can_apply_mutations_now() ||
       !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
@@ -1325,7 +1331,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     colliderShape = runtime::ColliderShape::AABB;
   }
 
-  const runtime::Entity entity = g_world->create_entity();
+  const runtime::Entity entity = g_runtimeBinding.world->create_entity();
   if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
@@ -1333,22 +1339,22 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   runtime::Transform transform{};
   transform.position = pos;
-  static_cast<void>(g_world->add_transform(entity, transform));
+  static_cast<void>(g_runtimeBinding.world->add_transform(entity, transform));
 
   runtime::RigidBody rigidBody{};
   rigidBody.inverseMass = 1.0F;
-  static_cast<void>(g_world->add_rigid_body(entity, rigidBody));
+  static_cast<void>(g_runtimeBinding.world->add_rigid_body(entity, rigidBody));
 
   runtime::Collider collider{};
   collider.halfExtents = halfExtents;
   collider.shape = colliderShape;
-  static_cast<void>(g_world->add_collider(entity, collider));
+  static_cast<void>(g_runtimeBinding.world->add_collider(entity, collider));
 
   if (meshId != 0ULL) {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
     meshComp.albedo = albedo;
-    static_cast<void>(g_world->add_mesh_component(entity, meshComp));
+    static_cast<void>(g_runtimeBinding.world->add_mesh_component(entity, meshComp));
   }
 
   lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
@@ -1366,7 +1372,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
 
   runtime::MeshComponent component{};
   const runtime::MeshComponent *existing =
-      g_world->get_mesh_component_ptr(entity);
+      g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (existing != nullptr) {
     component = *existing;
   }
@@ -1415,8 +1421,8 @@ int lua_engine_get_name(lua_State *state) noexcept {
   }
 
   runtime::NameComponent component{};
-  if ((g_services == nullptr) ||
-      !g_services->get_name_component_op(g_world, entity.index, &component)) {
+  if ((g_runtimeBinding.services == nullptr) ||
+      !g_runtimeBinding.services->get_name_component_op(g_runtimeBinding.world, entity.index, &component)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1479,7 +1485,7 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
   }
   const float value = static_cast<float>(lua_tonumber(state, 2));
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1504,7 +1510,7 @@ int lua_engine_set_friction(lua_State *state) noexcept {
   const float staticF = static_cast<float>(lua_tonumber(state, 2));
   const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1551,7 +1557,7 @@ int lua_engine_set_collider_material(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1597,7 +1603,7 @@ int lua_engine_set_collision_layer(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1619,7 +1625,7 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2073,8 +2079,8 @@ int lua_engine_set_game_mode(lua_State *state) noexcept {
   }
   // Write to both legacy string and World's GameMode struct.
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
-  if (g_world != nullptr) {
-    std::snprintf(g_world->game_mode().name, runtime::GameMode::kMaxNameLength,
+  if (g_runtimeBinding.world != nullptr) {
+    std::snprintf(g_runtimeBinding.world->game_mode().name, runtime::GameMode::kMaxNameLength,
                   "%s", name);
   }
   lua_pushboolean(state, 1);
@@ -2083,8 +2089,8 @@ int lua_engine_set_game_mode(lua_State *state) noexcept {
 
 /// Handles lua engine get game mode.
 int lua_engine_get_game_mode(lua_State *state) noexcept {
-  if (g_world != nullptr) {
-    lua_pushstring(state, g_world->game_mode().name);
+  if (g_runtimeBinding.world != nullptr) {
+    lua_pushstring(state, g_runtimeBinding.world->game_mode().name);
   } else {
     lua_pushstring(state, g_gameMode);
   }
@@ -2170,42 +2176,42 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
 // --- Game Mode state transitions ---
 
 int lua_engine_game_mode_start(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().start() ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.world->game_mode().start() ? 1 : 0);
   return 1;
 }
 
 /// Handles lua engine game mode pause.
 int lua_engine_game_mode_pause(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().pause() ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.world->game_mode().pause() ? 1 : 0);
   return 1;
 }
 
 /// Handles lua engine game mode end.
 int lua_engine_game_mode_end(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().end() ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.world->game_mode().end() ? 1 : 0);
   return 1;
 }
 
 /// Handles lua engine game mode state.
 int lua_engine_game_mode_state(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushstring(state, "none");
     return 1;
   }
   using S = runtime::GameMode::State;
-  switch (g_world->game_mode().state) {
+  switch (g_runtimeBinding.world->game_mode().state) {
   case S::WaitingToStart:
     lua_pushstring(state, "waiting_to_start");
     break;
@@ -2224,7 +2230,7 @@ int lua_engine_game_mode_state(lua_State *state) noexcept {
 
 /// Handles lua engine game mode set rule.
 int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2234,18 +2240,18 @@ int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().set_rule(key, value) ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.world->game_mode().set_rule(key, value) ? 1 : 0);
   return 1;
 }
 
 /// Handles lua engine game mode get rule.
 int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   const char *key = lua_tostring(state, 1);
-  const char *value = g_world->game_mode().get_rule(key);
+  const char *value = g_runtimeBinding.world->game_mode().get_rule(key);
   if (value != nullptr) {
     lua_pushstring(state, value);
   } else {
@@ -2256,16 +2262,16 @@ int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
 
 /// Handles lua engine game mode max players.
 int lua_engine_game_mode_max_players(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushinteger(state, 0);
     return 1;
   }
   if (lua_gettop(state) >= 1 && lua_isnumber(state, 1)) {
     const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_world->game_mode().maxPlayers = n;
+    g_runtimeBinding.world->game_mode().maxPlayers = n;
   }
   lua_pushinteger(state,
-                  static_cast<lua_Integer>(g_world->game_mode().maxPlayers));
+                  static_cast<lua_Integer>(g_runtimeBinding.world->game_mode().maxPlayers));
   return 1;
 }
 
@@ -2453,43 +2459,43 @@ int lua_engine_debugger_last_watch_values(lua_State *state) noexcept {
 /// Handles lua engine set camera position.
 int lua_engine_set_camera_position(lua_State *state) noexcept {
   math::Vec3 pos{};
-  if (!read_vec3_args(state, 1, &pos) || (g_services == nullptr) ||
-      (g_services->set_camera_position == nullptr)) {
+  if (!read_vec3_args(state, 1, &pos) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->set_camera_position == nullptr)) {
     return 0;
   }
-  g_services->set_camera_position(pos.x, pos.y, pos.z);
+  g_runtimeBinding.services->set_camera_position(pos.x, pos.y, pos.z);
   return 0;
 }
 
 /// Handles lua engine set camera target.
 int lua_engine_set_camera_target(lua_State *state) noexcept {
   math::Vec3 target{};
-  if (!read_vec3_args(state, 1, &target) || (g_services == nullptr) ||
-      (g_services->set_camera_target == nullptr)) {
+  if (!read_vec3_args(state, 1, &target) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->set_camera_target == nullptr)) {
     return 0;
   }
-  g_services->set_camera_target(target.x, target.y, target.z);
+  g_runtimeBinding.services->set_camera_target(target.x, target.y, target.z);
   return 0;
 }
 
 /// Handles lua engine set camera up.
 int lua_engine_set_camera_up(lua_State *state) noexcept {
   math::Vec3 up{};
-  if (!read_vec3_args(state, 1, &up) || (g_services == nullptr) ||
-      (g_services->set_camera_up == nullptr)) {
+  if (!read_vec3_args(state, 1, &up) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->set_camera_up == nullptr)) {
     return 0;
   }
-  g_services->set_camera_up(up.x, up.y, up.z);
+  g_runtimeBinding.services->set_camera_up(up.x, up.y, up.z);
   return 0;
 }
 
 /// Handles lua engine set camera fov.
 int lua_engine_set_camera_fov(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || (g_services == nullptr) ||
-      (g_services->set_camera_fov == nullptr)) {
+  if (!lua_isnumber(state, 1) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->set_camera_fov == nullptr)) {
     return 0;
   }
-  g_services->set_camera_fov(static_cast<float>(lua_tonumber(state, 1)));
+  g_runtimeBinding.services->set_camera_fov(static_cast<float>(lua_tonumber(state, 1)));
   return 0;
 }
 
@@ -2498,8 +2504,8 @@ int lua_engine_set_camera_fov(lua_State *state) noexcept {
 // Engine.push_camera(entityIndex, posX,posY,posZ, tgtX,tgtY,tgtZ, priority
 // [, blendSpeed])
 int lua_engine_push_camera(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->push_camera_op == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->push_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2517,7 +2523,7 @@ int lua_engine_push_camera(lua_State *state) noexcept {
     blendSpeed = static_cast<float>(lua_tonumber(state, 9));
   }
   const bool ok =
-      g_services->push_camera_op(g_world, entityIdx, posX, posY, posZ, tgtX,
+      g_runtimeBinding.services->push_camera_op(g_runtimeBinding.world, entityIdx, posX, posY, posZ, tgtX,
                                  tgtY, tgtZ, priority, blendSpeed);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -2525,22 +2531,22 @@ int lua_engine_push_camera(lua_State *state) noexcept {
 
 // Engine.pop_camera(entityIndex)
 int lua_engine_pop_camera(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->pop_camera_op == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->pop_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   const auto entityIdx =
       static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  const bool ok = g_services->pop_camera_op(g_world, entityIdx);
+  const bool ok = g_runtimeBinding.services->pop_camera_op(g_runtimeBinding.world, entityIdx);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Engine.get_active_camera() -> posX,posY,posZ, tgtX,tgtY,tgtZ, fov | nil
 int lua_engine_get_active_camera(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->get_active_camera_op == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->get_active_camera_op == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2551,7 +2557,7 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
   float tgtY = 0.0F;
   float tgtZ = 0.0F;
   float fov = 0.0F;
-  if (!g_services->get_active_camera_op(g_world, &posX, &posY, &posZ, &tgtX,
+  if (!g_runtimeBinding.services->get_active_camera_op(g_runtimeBinding.world, &posX, &posY, &posZ, &tgtX,
                                         &tgtY, &tgtZ, &fov)) {
     lua_pushnil(state);
     return 1;
@@ -2568,8 +2574,8 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
 
 // Engine.camera_shake(amplitude, frequency, duration [, decay])
 int lua_engine_camera_shake(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->camera_shake_op == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->camera_shake_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2580,7 +2586,7 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
   if (lua_isnumber(state, 4)) {
     decay = static_cast<float>(lua_tonumber(state, 4));
   }
-  const bool ok = g_services->camera_shake_op(g_world, amplitude, frequency,
+  const bool ok = g_runtimeBinding.services->camera_shake_op(g_runtimeBinding.world, amplitude, frequency,
                                               duration, decay);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -2591,7 +2597,7 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
 // Engine.add_spring_arm(entityIndex, armLength, offsetX, offsetY, offsetZ
 // [, lagSpeed] [, collisionEnabled])
 int lua_engine_add_spring_arm(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2609,8 +2615,8 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     arm.collisionEnabled = (lua_toboolean(state, 7) != 0);
   }
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIdx);
-  const bool ok = g_world->add_spring_arm(entity, arm);
+  const runtime::Entity entity = g_runtimeBinding.world->find_entity_by_index(entityIdx);
+  const bool ok = g_runtimeBinding.world->add_spring_arm(entity, arm);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -2618,15 +2624,15 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
 // Engine.get_spring_arm(entityIndex) -> armLength, currentLength, offX, offY,
 // offZ, lagSpeed | nil
 int lua_engine_get_spring_arm(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   const auto entityIdx =
       static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIdx);
+  const runtime::Entity entity = g_runtimeBinding.world->find_entity_by_index(entityIdx);
   runtime::SpringArmComponent arm{};
-  if (!g_world->get_spring_arm(entity, &arm)) {
+  if (!g_runtimeBinding.world->get_spring_arm(entity, &arm)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2653,8 +2659,8 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
   if (lua_isnumber(state, 3)) {
     z = static_cast<float>(lua_tonumber(state, 3));
   }
-  if ((g_services != nullptr) && (g_services->set_gravity != nullptr)) {
-    g_services->set_gravity(g_world, x, y, z);
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->set_gravity != nullptr)) {
+    g_runtimeBinding.services->set_gravity(g_runtimeBinding.world, x, y, z);
   }
   return 0;
 }
@@ -2664,8 +2670,8 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
-  if ((g_services == nullptr) || (g_services->get_gravity == nullptr) ||
-      !g_services->get_gravity(g_world, &x, &y, &z)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->get_gravity == nullptr) ||
+      !g_runtimeBinding.services->get_gravity(g_runtimeBinding.world, &x, &y, &z)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2677,7 +2683,7 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
 
 /// Handles lua engine raycast.
 int lua_engine_raycast(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
@@ -2697,8 +2703,8 @@ int lua_engine_raycast(lua_State *state) noexcept {
   const float maxDist = static_cast<float>(lua_tonumber(state, 7));
 
   RuntimeRaycastHit hit{};
-  if ((g_services == nullptr) || (g_services->raycast == nullptr) ||
-      !g_services->raycast(g_world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->raycast == nullptr) ||
+      !g_runtimeBinding.services->raycast(g_runtimeBinding.world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2715,8 +2721,8 @@ int lua_engine_raycast(lua_State *state) noexcept {
 
 // engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask]) → table of hits
 int lua_engine_raycast_all(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->raycast_all == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->raycast_all == nullptr)) {
     lua_newtable(state);
     return 1;
   }
@@ -2741,8 +2747,8 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
 
   constexpr std::size_t kMaxHits = 32U;
   RuntimeRaycastHit hits[kMaxHits]{};
-  const std::size_t count = g_services->raycast_all(
-      g_world, ox, oy, oz, dx, dy, dz, maxDist, hits, kMaxHits, mask);
+  const std::size_t count = g_runtimeBinding.services->raycast_all(
+      g_runtimeBinding.world, ox, oy, oz, dx, dy, dz, maxDist, hits, kMaxHits, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -2770,8 +2776,8 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
 
 // engine.overlap_sphere(cx,cy,cz, radius [, mask]) → table of entity indices
 int lua_engine_overlap_sphere(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->overlap_sphere == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->overlap_sphere == nullptr)) {
     lua_newtable(state);
     return 1;
   }
@@ -2791,8 +2797,8 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
 
   constexpr std::size_t kMaxResults = 64U;
   std::uint32_t indices[kMaxResults]{};
-  const std::size_t count = g_services->overlap_sphere(
-      g_world, cx, cy, cz, radius, indices, kMaxResults, mask);
+  const std::size_t count = g_runtimeBinding.services->overlap_sphere(
+      g_runtimeBinding.world, cx, cy, cz, radius, indices, kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -2804,8 +2810,8 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
 
 // engine.overlap_box(cx,cy,cz, hx,hy,hz [, mask]) → table of entity indices
 int lua_engine_overlap_box(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->overlap_box == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->overlap_box == nullptr)) {
     lua_newtable(state);
     return 1;
   }
@@ -2828,8 +2834,8 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
 
   constexpr std::size_t kMaxResults = 64U;
   std::uint32_t indices[kMaxResults]{};
-  const std::size_t count = g_services->overlap_box(
-      g_world, cx, cy, cz, hx, hy, hz, indices, kMaxResults, mask);
+  const std::size_t count = g_runtimeBinding.services->overlap_box(
+      g_runtimeBinding.world, cx, cy, cz, hx, hy, hz, indices, kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -2841,8 +2847,8 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
 
 // engine.sweep_sphere(ox,oy,oz, radius, dx,dy,dz, max_dist [, mask])
 int lua_engine_sweep_sphere(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->sweep_sphere == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->sweep_sphere == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2867,7 +2873,7 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
           : 0xFFFFFFFFU;
 
   RuntimeRaycastHit hit{};
-  if (!g_services->sweep_sphere(g_world, ox, oy, oz, radius, dx, dy, dz,
+  if (!g_runtimeBinding.services->sweep_sphere(g_runtimeBinding.world, ox, oy, oz, radius, dx, dy, dz,
                                 maxDist, &hit, mask)) {
     lua_pushnil(state);
     return 1;
@@ -2885,8 +2891,8 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
 
 // engine.sweep_box(cx,cy,cz, hx,hy,hz, dx,dy,dz, max_dist [, mask])
 int lua_engine_sweep_box(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->sweep_box == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->sweep_box == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2914,7 +2920,7 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
           : 0xFFFFFFFFU;
 
   RuntimeRaycastHit hit{};
-  if (!g_services->sweep_box(g_world, cx, cy, cz, hx, hy, hz, dx, dy, dz,
+  if (!g_runtimeBinding.services->sweep_box(g_runtimeBinding.world, cx, cy, cz, hx, hy, hz, dx, dy, dz,
                              maxDist, &hit, mask)) {
     lua_pushnil(state);
     return 1;
@@ -2935,15 +2941,15 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_distance_joint == nullptr)) {
+      (g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->add_distance_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const float dist = lua_isnumber(state, 3)
                          ? static_cast<float>(lua_tonumber(state, 3))
                          : 1.0F;
-  const std::uint32_t id = g_services->add_distance_joint(
-      g_world, entityA.index, entityB.index, dist);
+  const std::uint32_t id = g_runtimeBinding.services->add_distance_joint(
+      g_runtimeBinding.world, entityA.index, entityB.index, dist);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2953,9 +2959,9 @@ int lua_engine_remove_joint(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->remove_joint != nullptr)) {
-    g_services->remove_joint(
-        g_world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->remove_joint != nullptr)) {
+    g_runtimeBinding.services->remove_joint(
+        g_runtimeBinding.world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
   }
   return 0;
 }
@@ -2966,7 +2972,7 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_hinge_joint == nullptr)) {
+      (g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->add_hinge_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
@@ -2976,8 +2982,8 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
   const auto ax = static_cast<float>(luaL_optnumber(state, 6, 0.0));
   const auto ay = static_cast<float>(luaL_optnumber(state, 7, 1.0));
   const auto az = static_cast<float>(luaL_optnumber(state, 8, 0.0));
-  const std::uint32_t id = g_services->add_hinge_joint(
-      g_world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
+  const std::uint32_t id = g_runtimeBinding.services->add_hinge_joint(
+      g_runtimeBinding.world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2987,16 +2993,16 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) ||
-      (g_services->add_ball_socket_joint == nullptr)) {
+      (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->add_ball_socket_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const auto px = static_cast<float>(luaL_optnumber(state, 3, 0.0));
   const auto py = static_cast<float>(luaL_optnumber(state, 4, 0.0));
   const auto pz = static_cast<float>(luaL_optnumber(state, 5, 0.0));
-  const std::uint32_t id = g_services->add_ball_socket_joint(
-      g_world, entityA.index, entityB.index, px, py, pz);
+  const std::uint32_t id = g_runtimeBinding.services->add_ball_socket_joint(
+      g_runtimeBinding.world, entityA.index, entityB.index, px, py, pz);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -3006,15 +3012,15 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_slider_joint == nullptr)) {
+      (g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->add_slider_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const auto ax = static_cast<float>(luaL_optnumber(state, 3, 1.0));
   const auto ay = static_cast<float>(luaL_optnumber(state, 4, 0.0));
   const auto az = static_cast<float>(luaL_optnumber(state, 5, 0.0));
-  const std::uint32_t id = g_services->add_slider_joint(
-      g_world, entityA.index, entityB.index, ax, ay, az);
+  const std::uint32_t id = g_runtimeBinding.services->add_slider_joint(
+      g_runtimeBinding.world, entityA.index, entityB.index, ax, ay, az);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -3024,15 +3030,15 @@ int lua_engine_add_spring_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_spring_joint == nullptr)) {
+      (g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->add_spring_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const auto rest = static_cast<float>(luaL_optnumber(state, 3, 1.0));
   const auto stiff = static_cast<float>(luaL_optnumber(state, 4, 100.0));
   const auto damp = static_cast<float>(luaL_optnumber(state, 5, 1.0));
-  const std::uint32_t id = g_services->add_spring_joint(
-      g_world, entityA.index, entityB.index, rest, stiff, damp);
+  const std::uint32_t id = g_runtimeBinding.services->add_spring_joint(
+      g_runtimeBinding.world, entityA.index, entityB.index, rest, stiff, damp);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -3042,12 +3048,12 @@ int lua_engine_add_fixed_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_fixed_joint == nullptr)) {
+      (g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->add_fixed_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const std::uint32_t id =
-      g_services->add_fixed_joint(g_world, entityA.index, entityB.index);
+      g_runtimeBinding.services->add_fixed_joint(g_runtimeBinding.world, entityA.index, entityB.index);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -3057,33 +3063,33 @@ int lua_engine_set_joint_limits(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->set_joint_limits != nullptr)) {
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->set_joint_limits != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
     const auto minL = static_cast<float>(luaL_optnumber(state, 2, 0.0));
     const auto maxL = static_cast<float>(luaL_optnumber(state, 3, 0.0));
-    g_services->set_joint_limits(g_world, id, minL, maxL);
+    g_runtimeBinding.services->set_joint_limits(g_runtimeBinding.world, id, minL, maxL);
   }
   return 0;
 }
 
 /// Handles lua engine wake body.
 int lua_engine_wake_body(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     return 0;
   }
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->wake_body != nullptr)) {
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->wake_body != nullptr)) {
     const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_services->wake_body(g_world, idx);
+    g_runtimeBinding.services->wake_body(g_runtimeBinding.world, idx);
   }
   return 0;
 }
 
 /// Handles lua engine is sleeping.
 int lua_engine_is_sleeping(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3091,12 +3097,12 @@ int lua_engine_is_sleeping(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if ((g_services == nullptr) || (g_services->is_sleeping == nullptr)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->is_sleeping == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  lua_pushboolean(state, g_services->is_sleeping(g_world, idx) ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.services->is_sleeping(g_runtimeBinding.world, idx) ? 1 : 0);
   return 1;
 }
 
@@ -3117,12 +3123,12 @@ int lua_engine_load_sound(lua_State *state) noexcept {
     lua_pushinteger(state, 0);
     return 1;
   }
-  if ((g_services == nullptr) || (g_services->load_sound == nullptr)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->load_sound == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   lua_pushinteger(state,
-                  static_cast<lua_Integer>(g_services->load_sound(path)));
+                  static_cast<lua_Integer>(g_runtimeBinding.services->load_sound(path)));
   return 1;
 }
 
@@ -3131,16 +3137,16 @@ int lua_engine_unload_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->unload_sound != nullptr)) {
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->unload_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_services->unload_sound(id);
+    g_runtimeBinding.services->unload_sound(id);
   }
   return 0;
 }
 
 /// Handles lua engine play sound.
 int lua_engine_play_sound(lua_State *state) noexcept {
-  if ((g_services == nullptr) || (g_services->play_sound == nullptr)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->play_sound == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3161,7 +3167,7 @@ int lua_engine_play_sound(lua_State *state) noexcept {
   if (lua_gettop(state) >= 4) {
     loop = lua_toboolean(state, 4) != 0;
   }
-  const bool ok = g_services->play_sound(id, volume, pitch, loop);
+  const bool ok = g_runtimeBinding.services->play_sound(id, volume, pitch, loop);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -3171,9 +3177,9 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->stop_sound != nullptr)) {
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->stop_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_services->stop_sound(id);
+    g_runtimeBinding.services->stop_sound(id);
   }
   return 0;
 }
@@ -3181,8 +3187,8 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
 /// Handles lua engine stop all sounds.
 int lua_engine_stop_all_sounds(lua_State *state) noexcept {
   static_cast<void>(state);
-  if ((g_services != nullptr) && (g_services->stop_all_sounds != nullptr)) {
-    g_services->stop_all_sounds();
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->stop_all_sounds != nullptr)) {
+    g_runtimeBinding.services->stop_all_sounds();
   }
   return 0;
 }
@@ -3192,9 +3198,9 @@ int lua_engine_set_master_volume(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->set_master_volume != nullptr)) {
     const auto vol = static_cast<float>(lua_tonumber(state, 1));
-    g_services->set_master_volume(vol);
+    g_runtimeBinding.services->set_master_volume(vol);
   }
   return 0;
 }
@@ -3207,7 +3213,7 @@ int lua_engine_get_rotation(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Transform *transform = g_world->get_transform_read_ptr(entity);
+  const runtime::Transform *transform = g_runtimeBinding.world->get_transform_read_ptr(entity);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3237,7 +3243,7 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   const float qw = static_cast<float>(lua_tonumber(state, 5));
 
   runtime::Transform transform{};
-  static_cast<void>(g_world->get_transform(entity, &transform));
+  static_cast<void>(g_runtimeBinding.world->get_transform(entity, &transform));
   transform.rotation = math::Quat(qx, qy, qz, qw);
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -3253,7 +3259,7 @@ int lua_engine_get_scale(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Transform *transform = g_world->get_transform_read_ptr(entity);
+  const runtime::Transform *transform = g_runtimeBinding.world->get_transform_read_ptr(entity);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3274,7 +3280,7 @@ int lua_engine_set_scale(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  static_cast<void>(g_world->get_transform(entity, &transform));
+  static_cast<void>(g_runtimeBinding.world->get_transform(entity, &transform));
   transform.scale = scale;
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -3292,7 +3298,7 @@ int lua_engine_get_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3308,7 +3314,7 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!g_runtimeBinding.world->get_rigid_body(entity, &rigidBody)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3327,7 +3333,7 @@ int lua_engine_get_half_extents(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3347,7 +3353,7 @@ int lua_engine_set_half_extents(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3364,7 +3370,7 @@ int lua_engine_get_restitution(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3380,7 +3386,7 @@ int lua_engine_get_friction(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!g_runtimeBinding.world->get_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3397,7 +3403,7 @@ int lua_engine_get_albedo(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3415,7 +3421,7 @@ int lua_engine_get_mesh(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3432,7 +3438,7 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!g_world->get_mesh_component(entity, &mesh)) {
+  if (!g_runtimeBinding.world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3448,7 +3454,7 @@ int lua_engine_get_roughness(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3465,7 +3471,7 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!g_world->get_mesh_component(entity, &mesh)) {
+  if (!g_runtimeBinding.world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3481,7 +3487,7 @@ int lua_engine_get_metallic(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3498,7 +3504,7 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!g_world->get_mesh_component(entity, &mesh)) {
+  if (!g_runtimeBinding.world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3514,7 +3520,7 @@ int lua_engine_get_opacity(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = g_runtimeBinding.world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3563,7 +3569,7 @@ int lua_engine_has_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->has_light_component(entity) ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.world->has_light_component(entity) ? 1 : 0);
   return 1;
 }
 
@@ -3576,7 +3582,7 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!g_runtimeBinding.world->get_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3594,7 +3600,7 @@ int lua_engine_get_light_color(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!g_runtimeBinding.world->get_light_component(entity, &light)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3612,7 +3618,7 @@ int lua_engine_set_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!g_runtimeBinding.world->get_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3630,7 +3636,7 @@ int lua_engine_get_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!g_runtimeBinding.world->get_light_component(entity, &light)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3647,7 +3653,7 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!g_runtimeBinding.world->get_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3693,7 +3699,7 @@ static int lua_engine_get_point_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::PointLightComponent comp{};
-  if (!g_world->get_point_light_component(entity, &comp)) {
+  if (!g_runtimeBinding.world->get_point_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3716,7 +3722,7 @@ static int lua_engine_set_point_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!g_world->has_point_light_component(entity)) {
+  if (!g_runtimeBinding.world->has_point_light_component(entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3790,7 +3796,7 @@ static int lua_engine_get_spot_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpotLightComponent comp{};
-  if (!g_world->get_spot_light_component(entity, &comp)) {
+  if (!g_runtimeBinding.world->get_spot_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3819,7 +3825,7 @@ static int lua_engine_set_spot_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!g_world->has_spot_light_component(entity)) {
+  if (!g_runtimeBinding.world->has_spot_light_component(entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3936,8 +3942,8 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   }
   // For one-shots the TimerManager already deactivated the slot.
   // Check if it's no longer active and release the ref.
-  if (g_world != nullptr) {
-    const auto &entry = g_world->timer_manager().entry_at(slot);
+  if (g_runtimeBinding.world != nullptr) {
+    const auto &entry = g_runtimeBinding.world->timer_manager().entry_at(slot);
     if (!entry.active) {
       luaL_unref(g_state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
       g_timerLuaRefs[slot] = LUA_NOREF;
@@ -3947,11 +3953,11 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
 
 /// Handles rewire lua timer callbacks.
 void rewire_lua_timer_callbacks() noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     return;
   }
   ensure_timer_refs_init();
-  auto &timerManager = g_world->timer_manager();
+  auto &timerManager = g_runtimeBinding.world->timer_manager();
   for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
     auto &entry = timerManager.entry_at_mut(i);
     if (entry.active && (entry.callback == nullptr) &&
@@ -3968,14 +3974,14 @@ int lua_engine_set_timeout(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   ensure_timer_refs_init();
   const float secs = static_cast<float>(lua_tonumber(state, 2));
   const runtime::TimerId id =
-      g_world->timer_manager().set_timeout(secs, lua_timer_callback, nullptr);
+      g_runtimeBinding.world->timer_manager().set_timeout(secs, lua_timer_callback, nullptr);
   if (id == runtime::kInvalidTimerId) {
     lua_pushnil(state);
     return 1;
@@ -3993,14 +3999,14 @@ int lua_engine_set_interval(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   ensure_timer_refs_init();
   const float secs = static_cast<float>(lua_tonumber(state, 2));
   const runtime::TimerId id =
-      g_world->timer_manager().set_interval(secs, lua_timer_callback, nullptr);
+      g_runtimeBinding.world->timer_manager().set_interval(secs, lua_timer_callback, nullptr);
   if (id == runtime::kInvalidTimerId) {
     lua_pushnil(state);
     return 1;
@@ -4017,14 +4023,14 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     return 0;
   }
   const auto id = static_cast<runtime::TimerId>(lua_tointeger(state, 1));
   if ((id == runtime::kInvalidTimerId) || (id > kMaxTimerRefs)) {
     return 0;
   }
-  g_world->timer_manager().cancel(id);
+  g_runtimeBinding.world->timer_manager().cancel(id);
   const std::size_t slot = static_cast<std::size_t>(id - 1U);
   if (g_timerLuaRefs[slot] != LUA_NOREF) {
     luaL_unref(state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
@@ -4226,7 +4232,7 @@ int lua_engine_wait_until(lua_State *state) noexcept {
 // --- Entity lifecycle completeness ---
 
 int lua_engine_find_by_name(lua_State *state) noexcept {
-  if (g_world == nullptr || !lua_isstring(state, 1)) {
+  if (g_runtimeBinding.world == nullptr || !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4236,7 +4242,7 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity found = g_world->find_entity_by_name(searchName);
+  const runtime::Entity found = g_runtimeBinding.world->find_entity_by_name(searchName);
 
   if (found == runtime::kInvalidEntity) {
     lua_pushnil(state);
@@ -4248,7 +4254,7 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
 
 /// Handles lua engine clone entity.
 int lua_engine_clone_entity(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !can_apply_mutations_now()) {
+  if ((g_runtimeBinding.world == nullptr) || !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -4258,7 +4264,7 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity newEntity = g_world->create_entity();
+  const runtime::Entity newEntity = g_runtimeBinding.world->create_entity();
   if (newEntity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
@@ -4266,40 +4272,40 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
 
   // Copy Transform.
   runtime::Transform transform{};
-  if (g_world->get_transform(source, &transform)) {
-    static_cast<void>(g_world->add_transform(newEntity, transform));
+  if (g_runtimeBinding.world->get_transform(source, &transform)) {
+    static_cast<void>(g_runtimeBinding.world->add_transform(newEntity, transform));
   }
 
   // Copy RigidBody.
   runtime::RigidBody rigidBody{};
-  if (g_world->get_rigid_body(source, &rigidBody)) {
-    static_cast<void>(g_world->add_rigid_body(newEntity, rigidBody));
+  if (g_runtimeBinding.world->get_rigid_body(source, &rigidBody)) {
+    static_cast<void>(g_runtimeBinding.world->add_rigid_body(newEntity, rigidBody));
   }
 
   // Copy Collider.
   runtime::Collider collider{};
-  if (g_world->get_collider(source, &collider)) {
-    static_cast<void>(g_world->add_collider(newEntity, collider));
+  if (g_runtimeBinding.world->get_collider(source, &collider)) {
+    static_cast<void>(g_runtimeBinding.world->add_collider(newEntity, collider));
   }
 
   // Copy MeshComponent.
   runtime::MeshComponent mesh{};
-  if (g_world->get_mesh_component(source, &mesh)) {
-    static_cast<void>(g_world->add_mesh_component(newEntity, mesh));
+  if (g_runtimeBinding.world->get_mesh_component(source, &mesh)) {
+    static_cast<void>(g_runtimeBinding.world->add_mesh_component(newEntity, mesh));
   }
 
   // Copy NameComponent with "(clone)" suffix.
   runtime::NameComponent name{};
-  if (g_world->get_name_component(source, &name)) {
+  if (g_runtimeBinding.world->get_name_component(source, &name)) {
     runtime::NameComponent cloneName{};
     copy_clone_name(cloneName.name, sizeof(cloneName.name), name.name);
-    static_cast<void>(g_world->add_name_component(newEntity, cloneName));
+    static_cast<void>(g_runtimeBinding.world->add_name_component(newEntity, cloneName));
   }
 
   // Copy LightComponent.
   runtime::LightComponent light{};
-  if (g_world->get_light_component(source, &light)) {
-    static_cast<void>(g_world->add_light_component(newEntity, light));
+  if (g_runtimeBinding.world->get_light_component(source, &light)) {
+    static_cast<void>(g_runtimeBinding.world->add_light_component(newEntity, light));
   }
 
   lua_pushinteger(state, static_cast<lua_Integer>(newEntity.index));
@@ -4314,7 +4320,7 @@ static char g_pendingScenePath[512] = {};
 
 /// Handles lua engine save scene.
 int lua_engine_save_scene(lua_State *state) noexcept {
-  if (g_world == nullptr || !lua_isstring(state, 1)) {
+  if (g_runtimeBinding.world == nullptr || !lua_isstring(state, 1)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -4323,8 +4329,8 @@ int lua_engine_save_scene(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = (g_services != nullptr) && (g_services->save_scene != nullptr)
-                      ? g_services->save_scene(g_world, path)
+  const bool ok = (g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->save_scene != nullptr)
+                      ? g_runtimeBinding.services->save_scene(g_runtimeBinding.world, path)
                       : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -4355,7 +4361,7 @@ int lua_engine_new_scene(lua_State *state) noexcept {
 // --- Prefab bindings ---
 
 int lua_engine_save_prefab(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isinteger(state, 1) ||
+  if ((g_runtimeBinding.world == nullptr) || !lua_isinteger(state, 1) ||
       !lua_isstring(state, 2)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -4371,8 +4377,8 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
     return 1;
   }
   const bool ok =
-      (g_services != nullptr) && (g_services->save_prefab != nullptr)
-          ? g_services->save_prefab(g_world, entity.index, path)
+      (g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->save_prefab != nullptr)
+          ? g_runtimeBinding.services->save_prefab(g_runtimeBinding.world, entity.index, path)
           : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -4380,7 +4386,7 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
 
 /// Handles lua engine instantiate.
 int lua_engine_instantiate(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isstring(state, 1)) {
+  if ((g_runtimeBinding.world == nullptr) || !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4390,8 +4396,8 @@ int lua_engine_instantiate(lua_State *state) noexcept {
     return 1;
   }
   const std::uint32_t entityIndex =
-      ((g_services != nullptr) && (g_services->instantiate_prefab != nullptr))
-          ? g_services->instantiate_prefab(g_world, path)
+      ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->instantiate_prefab != nullptr))
+          ? g_runtimeBinding.services->instantiate_prefab(g_runtimeBinding.world, path)
           : 0U;
   if (entityIndex == 0U) {
     lua_pushnil(state);
@@ -4406,7 +4412,7 @@ int lua_engine_instantiate(lua_State *state) noexcept {
 // engine.load_asset_async(path [, priority]) → handle_index or nil
 // priority: 0=Low, 1=Normal, 2=High, 3=Immediate (default=Normal)
 int lua_engine_load_asset_async(lua_State *state) noexcept {
-  if ((g_services == nullptr) || (g_services->load_asset_async == nullptr)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->load_asset_async == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4430,7 +4436,7 @@ int lua_engine_load_asset_async(lua_State *state) noexcept {
       priority = static_cast<std::uint8_t>(p);
     }
   }
-  const std::uint32_t handle = g_services->load_asset_async(path, priority);
+  const std::uint32_t handle = g_runtimeBinding.services->load_asset_async(path, priority);
   if (handle == 0xFFFFFFFFU) {
     lua_pushnil(state);
     return 1;
@@ -4441,7 +4447,7 @@ int lua_engine_load_asset_async(lua_State *state) noexcept {
 
 // engine.is_asset_ready(handle_index) → boolean
 int lua_engine_is_asset_ready(lua_State *state) noexcept {
-  if ((g_services == nullptr) || (g_services->is_asset_ready == nullptr)) {
+  if ((g_runtimeBinding.services == nullptr) || (g_runtimeBinding.services->is_asset_ready == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -4451,7 +4457,7 @@ int lua_engine_is_asset_ready(lua_State *state) noexcept {
   }
   const std::uint32_t handleIndex =
       static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  lua_pushboolean(state, g_services->is_asset_ready(handleIndex) ? 1 : 0);
+  lua_pushboolean(state, g_runtimeBinding.services->is_asset_ready(handleIndex) ? 1 : 0);
   return 1;
 }
 
@@ -4459,7 +4465,7 @@ int lua_engine_is_asset_ready(lua_State *state) noexcept {
 
 // engine.pool_create(count) → pool_id or nil
 int lua_engine_pool_create(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isinteger(state, 1)) {
+  if ((g_runtimeBinding.world == nullptr) || !lua_isinteger(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4477,7 +4483,7 @@ int lua_engine_pool_create(lua_State *state) noexcept {
   }
 
   runtime::EntityPool &pool = g_entityPools[g_entityPoolCount];
-  if (!pool.init(g_world, static_cast<std::size_t>(count))) {
+  if (!pool.init(g_runtimeBinding.world, static_cast<std::size_t>(count))) {
     lua_pushnil(state);
     return 1;
   }
@@ -4560,8 +4566,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
           (currentMtime != mod.mtime)) {
         // Save per-entity state before replacing the old module.
         init_entity_saved_state();
-        if ((g_world != nullptr) && (mod.registryRef != LUA_NOREF)) {
-          g_world->for_each<runtime::ScriptComponent>(
+        if ((g_runtimeBinding.world != nullptr) && (mod.registryRef != LUA_NOREF)) {
+          g_runtimeBinding.world->for_each<runtime::ScriptComponent>(
               [&mod](runtime::Entity entity,
                      const runtime::ScriptComponent &sc) noexcept {
                 if (std::strcmp(sc.scriptPath, mod.path) != 0) {
@@ -5432,19 +5438,19 @@ void cmd_spawn(const char *const *args, int argCount,
     core::console_print("Usage: spawn <prefab> [x y z]");
     return;
   }
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->instantiate_prefab == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->instantiate_prefab == nullptr)) {
     core::console_print("Cannot spawn: world not ready");
     return;
   }
   const std::uint32_t entityIndex =
-      g_services->instantiate_prefab(g_world, args[1]);
+      g_runtimeBinding.services->instantiate_prefab(g_runtimeBinding.world, args[1]);
   if (entityIndex == 0U) {
     core::console_print("Spawn failed (prefab not found?)");
     return;
   }
   // Optionally set position if x y z provided.
-  if ((argCount >= 5) && (g_services->add_transform_op != nullptr)) {
+  if ((argCount >= 5) && (g_runtimeBinding.services->add_transform_op != nullptr)) {
     runtime::Transform t{};
     t.position.x = static_cast<float>(std::atof(args[2]));
     t.position.y = static_cast<float>(std::atof(args[3]));
@@ -5452,7 +5458,7 @@ void cmd_spawn(const char *const *args, int argCount,
     t.scale = {1.0F, 1.0F, 1.0F};
     t.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
     // Overwrite the transform that was loaded from the prefab.
-    g_services->add_transform_op(g_world, entityIndex, t);
+    g_runtimeBinding.services->add_transform_op(g_runtimeBinding.world, entityIndex, t);
   }
   char buf[64] = {};
   std::snprintf(buf, sizeof(buf), "Spawned entity %u", entityIndex);
@@ -5462,13 +5468,13 @@ void cmd_spawn(const char *const *args, int argCount,
 /// Handles cmd kill all.
 void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
                   void * /*userData*/) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->destroy_entity_op == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
+      (g_runtimeBinding.services->destroy_entity_op == nullptr)) {
     core::console_print("Cannot kill_all: world not ready");
     return;
   }
   std::size_t destroyed = 0U;
-  g_world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
+  g_runtimeBinding.world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
     // Skip player controller entities.
     for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
       if (g_playerControllerEntities[i] == entity.index) {
@@ -5479,7 +5485,7 @@ void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
         return;
       }
     }
-    g_services->destroy_entity_op(g_world, entity.index);
+    g_runtimeBinding.services->destroy_entity_op(g_runtimeBinding.world, entity.index);
     ++destroyed;
   });
   char buf[64] = {};
@@ -5512,10 +5518,10 @@ int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
 
 /// Handles bindable get entity count.
 int bindable_get_entity_count() noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr)) {
     return 0;
   }
-  return static_cast<int>(g_services->get_transform_count(g_world));
+  return static_cast<int>(g_runtimeBinding.services->get_transform_count(g_runtimeBinding.world));
 }
 
 /// Handles bindable is god mode.
@@ -5570,8 +5576,8 @@ bool bindable_set_game_mode(const char *name) noexcept {
     return false;
   }
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
-  if (g_world != nullptr) {
-    std::snprintf(g_world->game_mode().name, runtime::GameMode::kMaxNameLength,
+  if (g_runtimeBinding.world != nullptr) {
+    std::snprintf(g_runtimeBinding.world->game_mode().name, runtime::GameMode::kMaxNameLength,
                   "%s", name);
   }
   return true;
@@ -5582,8 +5588,8 @@ const char *bindable_get_game_state() noexcept { return g_gameState; }
 
 /// Handles bindable get game mode.
 const char *bindable_get_game_mode() noexcept {
-  if (g_world != nullptr) {
-    return g_world->game_mode().name;
+  if (g_runtimeBinding.world != nullptr) {
+    return g_runtimeBinding.world->game_mode().name;
   }
   return g_gameMode;
 }
@@ -5599,43 +5605,43 @@ bool bindable_set_game_state(const char *name) noexcept {
 
 /// Handles bindable is alive.
 bool bindable_is_alive(std::uint32_t entity) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     return false;
   }
-  const runtime::Entity resolved = g_world->find_entity_by_index(entity);
+  const runtime::Entity resolved = g_runtimeBinding.world->find_entity_by_index(entity);
   return resolved != runtime::kInvalidEntity;
 }
 
 /// Handles bindable has light.
 bool bindable_has_light(std::uint32_t entity) noexcept {
-  if (g_world == nullptr) {
+  if (g_runtimeBinding.world == nullptr) {
     return false;
   }
-  const runtime::Entity resolved = g_world->find_entity_by_index(entity);
+  const runtime::Entity resolved = g_runtimeBinding.world->find_entity_by_index(entity);
   if (resolved == runtime::kInvalidEntity) {
     return false;
   }
-  return g_world->has_light_component(resolved);
+  return g_runtimeBinding.world->has_light_component(resolved);
 }
 
 /// Handles bindable set camera fov.
 void bindable_set_camera_fov(float fov) noexcept {
-  if ((g_services != nullptr) && (g_services->set_camera_fov != nullptr)) {
-    g_services->set_camera_fov(fov);
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->set_camera_fov != nullptr)) {
+    g_runtimeBinding.services->set_camera_fov(fov);
   }
 }
 
 /// Handles bindable set master volume.
 void bindable_set_master_volume(float volume) noexcept {
-  if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
-    g_services->set_master_volume(volume);
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->set_master_volume != nullptr)) {
+    g_runtimeBinding.services->set_master_volume(volume);
   }
 }
 
 /// Handles bindable stop all sounds.
 void bindable_stop_all_sounds() noexcept {
-  if ((g_services != nullptr) && (g_services->stop_all_sounds != nullptr)) {
-    g_services->stop_all_sounds();
+  if ((g_runtimeBinding.services != nullptr) && (g_runtimeBinding.services->stop_all_sounds != nullptr)) {
+    g_runtimeBinding.services->stop_all_sounds();
   }
 }
 
@@ -5698,8 +5704,8 @@ void shutdown_scripting() noexcept {
         g_timerLuaRefs[i] = LUA_NOREF;
       }
     }
-    if (g_world != nullptr) {
-      g_world->timer_manager().clear();
+    if (g_runtimeBinding.world != nullptr) {
+      g_runtimeBinding.world->timer_manager().clear();
     }
     // Release collision handler refs.
     for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
@@ -5716,7 +5722,8 @@ void shutdown_scripting() noexcept {
     g_state = nullptr;
   }
 
-  g_world = nullptr;
+  bind_runtime_world(nullptr);
+  bind_runtime_services(nullptr);
   g_defaultMeshAssetId = 0ULL;
   g_builtinPlaneMesh = 0ULL;
   g_builtinCubeMesh = 0ULL;
@@ -5761,18 +5768,53 @@ void shutdown_scripting() noexcept {
   // scene resets. The GameMode is reset via World's own reset path.
 }
 
-/// Handles bind runtime world.
+/// Binds scripting to a runtime world and mirrors the binding in services.
 void bind_runtime_world(runtime::World *world) noexcept {
-  g_world = world;
-  // Also register/update in the global service locator.
-  core::global_service_locator().register_service<runtime::World>(world);
+  bind_runtime_world(world, core::global_service_locator());
 }
 
-/// Handles bind runtime services.
+/// Binds scripting to a runtime world and mirrors it in an explicit locator.
+void bind_runtime_world(runtime::World *world,
+                        core::ServiceLocator &locator) noexcept {
+  if ((g_runtimeBinding.worldLocator != nullptr) && (g_runtimeBinding.worldLocator != &locator)) {
+    static_cast<void>(g_runtimeBinding.worldLocator->remove_service<runtime::World>());
+  }
+
+  g_runtimeBinding.world = world;
+  if (world != nullptr) {
+    locator.register_service<runtime::World>(world);
+    g_runtimeBinding.worldLocator = &locator;
+  } else {
+    core::ServiceLocator *target =
+        (g_runtimeBinding.worldLocator != nullptr) ? g_runtimeBinding.worldLocator : &locator;
+    static_cast<void>(target->remove_service<runtime::World>());
+    g_runtimeBinding.worldLocator = nullptr;
+  }
+}
+
+/// Binds scripting runtime callbacks and unregisters them on null.
 void bind_runtime_services(const RuntimeServices *services) noexcept {
-  g_services = services;
-  core::global_service_locator().register_service<RuntimeServices>(
-      const_cast<RuntimeServices *>(services));
+  bind_runtime_services(services, core::global_service_locator());
+}
+
+/// Binds scripting runtime callbacks and unregisters them on null.
+void bind_runtime_services(const RuntimeServices *services,
+                           core::ServiceLocator &locator) noexcept {
+  if ((g_runtimeBinding.servicesLocator != nullptr) && (g_runtimeBinding.servicesLocator != &locator)) {
+    static_cast<void>(g_runtimeBinding.servicesLocator->remove_service<RuntimeServices>());
+  }
+
+  g_runtimeBinding.services = services;
+  if (services != nullptr) {
+    locator.register_service<RuntimeServices>(
+        const_cast<RuntimeServices *>(services));
+    g_runtimeBinding.servicesLocator = &locator;
+  } else {
+    core::ServiceLocator *target =
+        (g_runtimeBinding.servicesLocator != nullptr) ? g_runtimeBinding.servicesLocator : &locator;
+    static_cast<void>(target->remove_service<RuntimeServices>());
+    g_runtimeBinding.servicesLocator = nullptr;
+  }
 }
 
 /// Sets the requested value for default mesh asset id.
@@ -5972,7 +6014,7 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
 
 /// Flushes queued work to the backing runtime system for deferred mutations.
 void flush_deferred_mutations() noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
+  if ((g_runtimeBinding.world == nullptr) || (g_runtimeBinding.services == nullptr) ||
       (g_deferredMutationCount == 0U) || !can_apply_mutations_now()) {
     return;
   }
@@ -5984,80 +6026,80 @@ void flush_deferred_mutations() noexcept {
     switch (mutation.type) {
     case DeferredMutationType::DestroyEntity:
       static_cast<void>(
-          g_services->destroy_entity_op(g_world, mutation.entity.index));
+          g_runtimeBinding.services->destroy_entity_op(g_runtimeBinding.world, mutation.entity.index));
       break;
     case DeferredMutationType::SetTransform: {
-      const bool transformUpdated = g_services->add_transform_op(
-          g_world, mutation.entity.index, mutation.transform);
+      const bool transformUpdated = g_runtimeBinding.services->add_transform_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.transform);
       if (transformUpdated && mutation.setMovementAuthority) {
-        static_cast<void>(g_services->set_movement_authority_op(
-            g_world, mutation.entity.index, mutation.movementAuthority));
+        static_cast<void>(g_runtimeBinding.services->set_movement_authority_op(
+            g_runtimeBinding.world, mutation.entity.index, mutation.movementAuthority));
       }
       break;
     }
     case DeferredMutationType::AddRigidBody:
-      static_cast<void>(g_services->add_rigid_body_op(
-          g_world, mutation.entity.index, mutation.rigidBody));
+      static_cast<void>(g_runtimeBinding.services->add_rigid_body_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.rigidBody));
       break;
     case DeferredMutationType::AddCollider:
-      static_cast<void>(g_services->add_collider_op(
-          g_world, mutation.entity.index, mutation.collider));
+      static_cast<void>(g_runtimeBinding.services->add_collider_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.collider));
       break;
     case DeferredMutationType::AddMeshComponent:
-      static_cast<void>(g_services->add_mesh_component_op(
-          g_world, mutation.entity.index, mutation.meshComponent));
+      static_cast<void>(g_runtimeBinding.services->add_mesh_component_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.meshComponent));
       break;
     case DeferredMutationType::AddNameComponent:
-      static_cast<void>(g_services->add_name_component_op(
-          g_world, mutation.entity.index, mutation.nameComponent));
+      static_cast<void>(g_runtimeBinding.services->add_name_component_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.nameComponent));
       break;
     case DeferredMutationType::AddLightComponent:
-      static_cast<void>(g_services->add_light_component_op(
-          g_world, mutation.entity.index, mutation.lightComponent));
+      static_cast<void>(g_runtimeBinding.services->add_light_component_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.lightComponent));
       break;
     case DeferredMutationType::RemoveLightComponent:
-      static_cast<void>(g_services->remove_light_component_op(
-          g_world, mutation.entity.index));
+      static_cast<void>(g_runtimeBinding.services->remove_light_component_op(
+          g_runtimeBinding.world, mutation.entity.index));
       break;
     case DeferredMutationType::AddScriptComponent:
-      static_cast<void>(g_services->add_script_component_op(
-          g_world, mutation.entity.index, mutation.scriptComponent));
+      static_cast<void>(g_runtimeBinding.services->add_script_component_op(
+          g_runtimeBinding.world, mutation.entity.index, mutation.scriptComponent));
       break;
     case DeferredMutationType::RemoveScriptComponent:
-      static_cast<void>(g_services->remove_script_component_op(
-          g_world, mutation.entity.index));
+      static_cast<void>(g_runtimeBinding.services->remove_script_component_op(
+          g_runtimeBinding.world, mutation.entity.index));
       break;
     case DeferredMutationType::AddPointLightComponent: {
       const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
+          g_runtimeBinding.world->find_entity_by_index(mutation.entity.index);
       if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->add_point_light_component(
+        static_cast<void>(g_runtimeBinding.world->add_point_light_component(
             resolved, mutation.pointLightComponent));
       }
       break;
     }
     case DeferredMutationType::RemovePointLightComponent: {
       const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
+          g_runtimeBinding.world->find_entity_by_index(mutation.entity.index);
       if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->remove_point_light_component(resolved));
+        static_cast<void>(g_runtimeBinding.world->remove_point_light_component(resolved));
       }
       break;
     }
     case DeferredMutationType::AddSpotLightComponent: {
       const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
+          g_runtimeBinding.world->find_entity_by_index(mutation.entity.index);
       if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->add_spot_light_component(
+        static_cast<void>(g_runtimeBinding.world->add_spot_light_component(
             resolved, mutation.spotLightComponent));
       }
       break;
     }
     case DeferredMutationType::RemoveSpotLightComponent: {
       const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
+          g_runtimeBinding.world->find_entity_by_index(mutation.entity.index);
       if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->remove_spot_light_component(resolved));
+        static_cast<void>(g_runtimeBinding.world->remove_spot_light_component(resolved));
       }
       break;
     }
@@ -6067,7 +6109,7 @@ void flush_deferred_mutations() noexcept {
 
 /// Handles tick timers.
 void tick_timers() noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (g_runtimeBinding.world == nullptr)) {
     return;
   }
   ensure_timer_refs_init();
@@ -6075,7 +6117,7 @@ void tick_timers() noexcept {
   // The TimerManager uses accumulated elapsed time internally. We sync it to
   // the scripting layer's g_totalSeconds so that tests which jump total time
   // work correctly. Pass the delta as (totalSeconds - previous elapsed).
-  g_world->timer_manager().tick(g_deltaSeconds);
+  g_runtimeBinding.world->timer_manager().tick(g_deltaSeconds);
 }
 
 /// Handles tick coroutines.
@@ -6176,11 +6218,11 @@ void check_script_reload() noexcept {
 
 /// Handles dispatch entity scripts start.
 void dispatch_entity_scripts_start() noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (g_runtimeBinding.world == nullptr)) {
     return;
   }
 
-  g_world->for_each<runtime::ScriptComponent>(
+  g_runtimeBinding.world->for_each<runtime::ScriptComponent>(
       [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
@@ -6191,7 +6233,7 @@ void dispatch_entity_scripts_start() noexcept {
         }
         // Mark begin_play done so dispatch_entity_scripts_begin_play does
         // not fire on_start a second time for the same entity this frame.
-        g_world->mark_begin_play_done(entity);
+        g_runtimeBinding.world->mark_begin_play_done(entity);
         const int ref = get_or_load_entity_script_module(sc.scriptPath);
         if (ref == LUA_NOREF) {
           return;
@@ -6249,7 +6291,7 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
 
 /// Handles dispatch entity scripts update.
 void dispatch_entity_scripts_update(float dt) noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (g_runtimeBinding.world == nullptr)) {
     return;
   }
 
@@ -6260,7 +6302,7 @@ void dispatch_entity_scripts_update(float dt) noexcept {
 
     const char *reloadedPath = g_entityScriptModules[i].path;
     const int moduleRef = g_entityScriptModules[i].registryRef;
-    g_world->for_each<runtime::ScriptComponent>(
+    g_runtimeBinding.world->for_each<runtime::ScriptComponent>(
         [reloadedPath, moduleRef](runtime::Entity entity,
                                   const runtime::ScriptComponent &sc) noexcept {
           if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
@@ -6280,7 +6322,7 @@ void dispatch_entity_scripts_update(float dt) noexcept {
     g_entityScriptModules[i].reloaded = false;
   }
 
-  g_world->for_each<runtime::ScriptComponent>(
+  g_runtimeBinding.world->for_each<runtime::ScriptComponent>(
       [dt](runtime::Entity entity,
            const runtime::ScriptComponent &sc) noexcept {
         if (sc.scriptPath[0] == '\0') {
@@ -6301,11 +6343,11 @@ void dispatch_entity_scripts_update(float dt) noexcept {
 
 /// Handles dispatch entity scripts end.
 void dispatch_entity_scripts_end() noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (g_runtimeBinding.world == nullptr)) {
     return;
   }
 
-  g_world->for_each<runtime::ScriptComponent>(
+  g_runtimeBinding.world->for_each<runtime::ScriptComponent>(
       [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;

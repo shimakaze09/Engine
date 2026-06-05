@@ -31,8 +31,9 @@ void check(bool condition, const char *name) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  auto &loc = engine::core::global_service_locator();
-  loc.clear();
+  auto &globalLoc = engine::core::global_service_locator();
+  globalLoc.clear();
+  engine::core::ServiceLocator loc{};
 
   std::unique_ptr<engine::runtime::World> world(
       new (std::nothrow) engine::runtime::World());
@@ -72,9 +73,10 @@ int main() {
   rendererService.device = renderDevice.get();
 
   check(engine::runtime::register_engine_subsystem_services(
-            world.get(), &physicsService, &audioService, &assetService,
+            loc, world.get(), &physicsService, &audioService, &assetService,
             &rendererService),
         "register subsystem services");
+  check(globalLoc.count() == 0U, "explicit registry did not touch global");
 
   check(loc.get_service<engine::runtime::World>() == world.get(),
         "world registered");
@@ -111,12 +113,22 @@ int main() {
             &rendererService,
         "renderer service registered");
 
-  engine::runtime::unregister_engine_subsystem_services();
+  engine::runtime::unregister_engine_subsystem_services(loc);
   check(loc.get_service<engine::runtime::EngineRendererService>() == nullptr,
         "renderer service removed");
   check(loc.get_service<engine::runtime::World>() == nullptr,
         "world removed");
 
-  loc.clear();
+  check(engine::runtime::register_engine_subsystem_services(
+            world.get(), &physicsService, &audioService, &assetService,
+            &rendererService),
+        "legacy register subsystem services");
+  check(globalLoc.get_service<engine::runtime::World>() == world.get(),
+        "legacy world registered");
+  engine::runtime::unregister_engine_subsystem_services();
+  check(globalLoc.get_service<engine::runtime::World>() == nullptr,
+        "legacy world removed");
+
+  globalLoc.clear();
   return g_failed == 0 ? 0 : 1;
 }

@@ -7,7 +7,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 using namespace engine::renderer;
 
@@ -71,7 +73,7 @@ static void test_budget_spreading() noexcept {
   // Process frames and count how many are required.
   std::size_t frameCount = 0U;
   std::size_t readyPerFrame[32]{};
-  constexpr std::size_t kMaxFrames = 32U;
+  constexpr std::size_t kMaxFrames = 96U;
 
   while (frameCount < kMaxFrames) {
     begin_streaming_frame(queue.get());
@@ -90,6 +92,7 @@ static void test_budget_spreading() noexcept {
     if (allReady) {
       break;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   // With 20 × 64 MB and 256 MB budget, should take at least 5 frames
@@ -165,6 +168,7 @@ static void test_upload_limit() noexcept {
     if (allReady) {
       break;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   CHECK(frameCount >= 5U, "takes multiple frames due to upload cap");

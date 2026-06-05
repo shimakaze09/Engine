@@ -208,6 +208,9 @@ void flush_renderer(CommandBufferView commandBufferView,
 /// Shuts down the owning system for renderer.
 void shutdown_renderer() noexcept;
 
+/// Sets the virtual root used for built-in renderer shaders.
+void set_shader_root_path(const char *path) noexcept;
+
 // Optional scene viewport override from editor UI. When set to positive
 // values, flush_renderer uses this size for projection and pass resources
 // instead of the full SDL drawable size.

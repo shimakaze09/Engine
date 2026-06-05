@@ -6,7 +6,9 @@
 
 
 #include <cstdio>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 using namespace engine::renderer;
 
@@ -37,6 +39,23 @@ static bool ok_load(AssetId, const char *, std::uint64_t *outSz,
 /// Handles ok upload.
 static bool ok_upload(AssetId, void *) noexcept { return true; }
 
+/// Advances the streaming queue until a handle reaches a terminal state.
+static void pump_until_terminal(AssetStreamingQueue *queue, LoadHandle handle,
+                                AssetLoadCallback loadCallback,
+                                AssetUploadCallback uploadCallback,
+                                void *userData) noexcept {
+  for (std::size_t frame = 0U; frame < 128U; ++frame) {
+    const LoadingState state = get_load_state(queue, handle);
+    if ((state == LoadingState::Ready) || (state == LoadingState::Failed)) {
+      return;
+    }
+    begin_streaming_frame(queue);
+    static_cast<void>(
+        update_asset_streaming(queue, loadCallback, uploadCallback, userData));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
+
 // --- Basic queue and poll ---
 static void test_basic_queue_poll() noexcept {
   engine::core::initialize_cvars();
@@ -49,8 +68,7 @@ static void test_basic_queue_poll() noexcept {
   CHECK(!is_load_ready(queue.get(), h), "not ready before processing");
   CHECK(get_load_state(queue.get(), h) == LoadingState::Queued, "queued");
 
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &ok_load, &ok_upload, nullptr);
+  pump_until_terminal(queue.get(), h, &ok_load, &ok_upload, nullptr);
   CHECK(is_load_ready(queue.get(), h), "ready after processing");
 
   shutdown_asset_streaming(queue.get());
@@ -87,8 +105,7 @@ static void test_state_transitions() noexcept {
   CHECK(get_load_state(queue.get(), h) == LoadingState::Queued,
         "starts queued");
 
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), nullptr, nullptr, nullptr);
+  pump_until_terminal(queue.get(), h, nullptr, nullptr, nullptr);
   CHECK(get_load_state(queue.get(), h) == LoadingState::Ready,
         "ready with null callbacks");
 
@@ -109,8 +126,7 @@ static void test_load_failure() noexcept {
   LoadHandle h = load_asset_async(queue.get(), make_id(0), "bad.mesh",
                                   LoadPriority::Normal);
 
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), +fail_load, &ok_upload, nullptr);
+  pump_until_terminal(queue.get(), h, +fail_load, &ok_upload, nullptr);
   CHECK(get_load_state(queue.get(), h) == LoadingState::Failed,
         "marked failed");
 
@@ -130,9 +146,50 @@ static void test_pending_count() noexcept {
   load_asset_async(queue.get(), make_id(1), "b.mesh", LoadPriority::Normal);
   CHECK(pending_load_count(queue.get()) == 2U, "2 pending");
 
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &ok_load, &ok_upload, nullptr);
+  for (std::size_t frame = 0U; frame < 128U; ++frame) {
+    if (pending_load_count(queue.get()) == 0U) {
+      break;
+    }
+    begin_streaming_frame(queue.get());
+    static_cast<void>(
+        update_asset_streaming(queue.get(), &ok_load, &ok_upload, nullptr));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   CHECK(pending_load_count(queue.get()) == 0U, "0 after processing");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
+// --- Load callbacks must not execute inline on the frame thread. ---
+static void test_load_callback_is_async() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  auto slow_load = [](AssetId, const char *, std::uint64_t *outSz,
+                      void *) noexcept -> bool {
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    if (outSz != nullptr) {
+      *outSz = 1024ULL;
+    }
+    return true;
+  };
+
+  LoadHandle h = load_asset_async(queue.get(), make_id(0), "slow.mesh",
+                                  LoadPriority::Normal);
+  const auto before = std::chrono::steady_clock::now();
+  begin_streaming_frame(queue.get());
+  static_cast<void>(
+      update_asset_streaming(queue.get(), +slow_load, &ok_upload, nullptr));
+  const auto after = std::chrono::steady_clock::now();
+  const auto elapsedMs =
+      std::chrono::duration_cast<std::chrono::milliseconds>(after - before)
+          .count();
+  CHECK(elapsedMs < 30, "update does not block on load callback");
+
+  pump_until_terminal(queue.get(), h, +slow_load, &ok_upload, nullptr);
+  CHECK(is_load_ready(queue.get(), h), "slow load eventually ready");
 
   shutdown_asset_streaming(queue.get());
   engine::core::shutdown_cvars();
@@ -147,6 +204,7 @@ int main() {
   test_state_transitions();
   test_load_failure();
   test_pending_count();
+  test_load_callback_is_async();
 
   std::printf("\n%s (%d failure(s))\n",
               g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);

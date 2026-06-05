@@ -5,11 +5,21 @@
 #include <cstddef>
 
 #include "engine/core/allocator.h"
+#include "engine/core/platform.h"
 
 namespace engine::core {
 
+/// Describes core-owned subsystem startup choices.
+struct CoreConfig final {
+  std::size_t frameAllocatorBytes = 1024U * 1024U;
+  bool initializePlatform = true;
+  PlatformConfig platform{};
+};
+
 /// Initializes the owning system for core.
 bool initialize_core(std::size_t frameAllocatorBytes) noexcept;
+/// Initializes the owning system for core with explicit subsystem ownership.
+bool initialize_core(const CoreConfig &config) noexcept;
 /// Shuts down the owning system for core.
 void shutdown_core() noexcept;
 /// Returns whether is core initialized.

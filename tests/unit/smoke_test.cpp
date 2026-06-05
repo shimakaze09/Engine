@@ -9,6 +9,7 @@
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
 #include "engine/core/linear_allocator.h"
+#include "engine/core/platform.h"
 #include "engine/math/vec4.h"
 
 namespace {
@@ -111,6 +112,18 @@ int main() {
   if ((allocator.bytes_used() != 0U) || (allocator.allocation_count() != 0U)) {
     return 11;
   }
+
+  engine::core::CoreConfig headlessCore{};
+  headlessCore.frameAllocatorBytes = 1024U * 1024U;
+  headlessCore.initializePlatform = false;
+  if (!engine::core::initialize_core(headlessCore)) {
+    return 26;
+  }
+  if (engine::core::is_platform_running()) {
+    engine::core::shutdown_core();
+    return 27;
+  }
+  engine::core::shutdown_core();
 
   if (!engine::core::initialize_core(1024U * 1024U)) {
     return 12;

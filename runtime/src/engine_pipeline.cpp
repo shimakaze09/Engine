@@ -25,6 +25,7 @@
 #endif
 
 #include "engine/audio/audio.h"
+#include "engine/engine.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
@@ -32,6 +33,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
+#include "engine/core/vfs.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
@@ -93,14 +95,6 @@ constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
 constexpr std::size_t kMaxChunkJobs = 1024U;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
-constexpr const char *kMainScriptPath = "assets/main.lua";
-
-constexpr std::array<const char *, 4U> kMeshAssetPathCandidates = {
-    "assets/triangle.mesh",
-    "../assets/triangle.mesh",
-    "../../assets/triangle.mesh",
-    "../../../assets/triangle.mesh",
-};
 
 // ---------------------------------------------------------------------------
 // Job data structures
@@ -149,36 +143,17 @@ struct FrameContext final {
 // Utility helpers
 // ---------------------------------------------------------------------------
 
-bool file_exists(const char *path) noexcept {
-  if (path == nullptr) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  std::fclose(file);
-  return true;
-}
-
 /// Handles resolve mesh asset path.
-const char *resolve_mesh_asset_path() noexcept {
-  for (const char *candidate : kMeshAssetPathCandidates) {
-    if (file_exists(candidate)) {
-      return candidate;
-    }
+bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
+  if ((outPath == nullptr) || (outCapacity == 0U)) {
+    return false;
   }
 
-  return nullptr;
+  const char *virtualPath = active_config().bootstrapMeshPath;
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0')) {
+    return false;
+  }
+  return core::vfs_resolve_os_path(virtualPath, outPath, outCapacity);
 }
 
 // ---------------------------------------------------------------------------
@@ -867,8 +842,8 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::AssetDatabase *assetDatabase,
                            renderer::GpuMeshRegistry *meshRegistry,
                            BootstrapMeshIds *out) noexcept {
-  const char *meshPath = resolve_mesh_asset_path();
-  if (meshPath == nullptr) {
+  char meshPath[512]{};
+  if (!resolve_mesh_asset_path(meshPath, sizeof(meshPath))) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to resolve mesh asset path");
     return false;
@@ -1092,7 +1067,9 @@ void create_bootstrap_scene(runtime::World *world,
   // Scene controller script.
   {
     runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kMainScriptPath);
+    const char *mainScriptPath = active_config().mainScriptPath;
+    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s",
+                  (mainScriptPath != nullptr) ? mainScriptPath : "");
     static_cast<void>(world->add_script_component(sceneControllerEntity, sc));
   }
 }
@@ -1190,7 +1167,11 @@ collect_scene_lights(const runtime::World &world) noexcept {
 struct EnginePipeline::Impl final {
   using Clock = std::chrono::steady_clock;
 
+  Impl() noexcept;
+
   // --- Owned resources ---
+  core::ServiceLocator serviceLocator{};
+  runtime::EngineServiceRegistry serviceRegistry;
   std::unique_ptr<runtime::World> world;
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
@@ -1251,6 +1232,8 @@ struct EnginePipeline::Impl final {
   void stage_frame_cleanup() noexcept;
 };
 
+EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
+
 // ---------------------------------------------------------------------------
 // Impl::initialize
 // ---------------------------------------------------------------------------
@@ -1288,18 +1271,18 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   rendererService.commandBuffer = commandBuffer.get();
   rendererService.meshRegistry = meshRegistry.get();
   rendererService.device = renderer::render_device();
-  if (!runtime::register_engine_subsystem_services(
-          world.get(), &physicsService, &audioService, &assetDatabaseService,
-          &rendererService)) {
+  if (!serviceRegistry.register_services(world.get(), &physicsService,
+                                         &audioService, &assetDatabaseService,
+                                         &rendererService)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to register engine subsystem services");
-    runtime::unregister_engine_subsystem_services();
+    serviceRegistry.unregister_services();
     return false;
   }
 
   bridge = runtime::editor_bridge();
 
-  runtime::bind_scripting_runtime(world.get());
+  runtime::bind_scripting_runtime(world.get(), serviceLocator);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
     bridge->set_world(world.get());
   }
@@ -1394,8 +1377,8 @@ void EnginePipeline::Impl::teardown() noexcept {
     bridge->set_world(nullptr);
   }
 
-  scripting::bind_runtime_world(nullptr);
-  runtime::unregister_engine_subsystem_services();
+  runtime::unbind_scripting_runtime(serviceLocator);
+  serviceRegistry.unregister_services();
 
   renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
                                    meshRegistry.get());
@@ -1418,7 +1401,10 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 
   if ((playState == LoopPlayState::Playing) &&
       (previousPlayState == LoopPlayState::Stopped)) {
-    scripting::watch_script_file(kMainScriptPath);
+    const char *mainScriptPath = active_config().mainScriptPath;
+    if (mainScriptPath != nullptr) {
+      scripting::watch_script_file(mainScriptPath);
+    }
     scripting::dispatch_entity_scripts_start();
   }
 
@@ -1439,7 +1425,7 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
       core::log_message(core::LogLevel::Error, "scripting",
                         "failed to reinitialize scripting on stop");
     } else {
-      runtime::bind_scripting_runtime(world.get());
+      runtime::bind_scripting_runtime(world.get(), serviceLocator);
       scripting::set_default_mesh_asset_id(
           (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
                                                       : meshIds.bootstrap);

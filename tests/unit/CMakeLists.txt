@@ -219,6 +219,13 @@ engine_add_test_executable(engine_unit_runtime_service_registry
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_scripting_binding
+    SOURCES
+    scripting_binding_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M2-C: Input System ----
 
 engine_add_test_executable(engine_unit_input_map

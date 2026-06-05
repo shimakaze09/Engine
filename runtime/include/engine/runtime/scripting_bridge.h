@@ -31,6 +31,10 @@ enum class WorldPhase : std::uint8_t;
 
 } // namespace engine::runtime
 
+namespace engine::core {
+class ServiceLocator;
+} // namespace engine::core
+
 namespace engine::scripting {
 
 /// Stores runtime raycast hit data used by the engine.
@@ -229,8 +233,14 @@ struct RuntimeServices final {
 
 /// Handles bind runtime world.
 void bind_runtime_world(runtime::World *world) noexcept;
+/// Binds the runtime world into an explicit service locator.
+void bind_runtime_world(runtime::World *world,
+                        core::ServiceLocator &locator) noexcept;
 /// Handles bind runtime services.
 void bind_runtime_services(const RuntimeServices *services) noexcept;
+/// Binds runtime services into an explicit service locator.
+void bind_runtime_services(const RuntimeServices *services,
+                           core::ServiceLocator &locator) noexcept;
 
 } // namespace engine::scripting
 
@@ -238,5 +248,12 @@ namespace engine::runtime {
 
 /// Handles bind scripting runtime.
 void bind_scripting_runtime(World *world) noexcept;
+/// Binds scripting runtime pointers into an explicit service locator.
+void bind_scripting_runtime(World *world,
+                            core::ServiceLocator &locator) noexcept;
+/// Clears scripting runtime bindings and service-locator entries.
+void unbind_scripting_runtime() noexcept;
+/// Clears scripting runtime bindings from an explicit service locator.
+void unbind_scripting_runtime(core::ServiceLocator &locator) noexcept;
 
 } // namespace engine::runtime

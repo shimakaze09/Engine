@@ -89,13 +89,6 @@ enum class SkyModel : std::uint8_t {
   None = 3,
 };
 
-CameraState g_activeCamera{};
-int g_sceneViewportWidth = 0;
-int g_sceneViewportHeight = 0;
-RendererFrameStats g_lastFrameStats{};
-bool g_fxaaAppliedThisFrame = false;
-TextureHandle g_activeSkyboxTexture = kInvalidTextureHandle;
-
 /// Stores backend state data used by the engine.
 struct BackendState final {
   bool initialized = false;
@@ -456,20 +449,62 @@ struct BackendState final {
   float currentExposure = 1.0F;
 };
 
+/// Owns renderer state for the default renderer context.
+struct RendererContext final {
+  CameraState activeCamera{};
+  int sceneViewportWidth = 0;
+  int sceneViewportHeight = 0;
+  RendererFrameStats lastFrameStats{};
+  bool fxaaAppliedThisFrame = false;
+  TextureHandle activeSkyboxTexture = kInvalidTextureHandle;
+  char shaderRootPath[260] = "assets/shaders";
+  BackendState backend{};
+};
+
+/// Returns the default renderer context used by the legacy renderer API.
+RendererContext &renderer_context() noexcept {
+  static RendererContext context{};
+  return context;
+}
+
 /// Handles backend state.
 BackendState &backend_state() noexcept {
-  static BackendState state{};
-  return state;
+  return renderer_context().backend;
+}
+
+/// Builds a configured shader path from a shader file name.
+bool make_shader_path(const char *fileName, char *outPath,
+                      std::size_t outCapacity) noexcept {
+  if ((fileName == nullptr) || (outPath == nullptr) || (outCapacity == 0U)) {
+    return false;
+  }
+  const int written =
+      std::snprintf(outPath, outCapacity, "%s/%s",
+                    renderer_context().shaderRootPath, fileName);
+  return (written > 0) &&
+         (static_cast<std::size_t>(written) < outCapacity);
+}
+
+/// Loads a shader program from the configured shader root.
+ShaderProgramHandle load_configured_shader_program(
+    const char *vertexShader, const char *fragmentShader) noexcept {
+  char vertexPath[512]{};
+  char fragmentPath[512]{};
+  if (!make_shader_path(vertexShader, vertexPath, sizeof(vertexPath)) ||
+      !make_shader_path(fragmentShader, fragmentPath, sizeof(fragmentPath))) {
+    return ShaderProgramHandle{};
+  }
+  return load_shader_program(vertexPath, fragmentPath);
 }
 
 /// Resets public renderer state that can otherwise leak between runs.
 void reset_renderer_public_state() noexcept {
-  g_activeCamera = CameraState{};
-  g_sceneViewportWidth = 0;
-  g_sceneViewportHeight = 0;
-  g_lastFrameStats = RendererFrameStats{};
-  g_fxaaAppliedThisFrame = false;
-  g_activeSkyboxTexture = kInvalidTextureHandle;
+  renderer_context().activeCamera = CameraState{};
+  renderer_context().sceneViewportWidth = 0;
+  renderer_context().sceneViewportHeight = 0;
+  renderer_context().lastFrameStats = RendererFrameStats{};
+  renderer_context().fxaaAppliedThisFrame = false;
+  renderer_context().activeSkyboxTexture = kInvalidTextureHandle;
 }
 
 /// Resets this object back to its reusable empty state for backend on failure.
@@ -1077,12 +1112,12 @@ HeightFogSettings height_fog_settings_from_cvars() noexcept {
 /// Handles active skybox gpu texture.
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   if (!backend.skyboxAvailable ||
-      (g_activeSkyboxTexture == kInvalidTextureHandle) ||
-      !is_texture_cubemap(g_activeSkyboxTexture)) {
+      (renderer_context().activeSkyboxTexture == kInvalidTextureHandle) ||
+      !is_texture_cubemap(renderer_context().activeSkyboxTexture)) {
     return 0U;
   }
 
-  return texture_gpu_id(g_activeSkyboxTexture);
+  return texture_gpu_id(renderer_context().activeSkyboxTexture);
 }
 
 /// Handles preetham sun direction.
@@ -1774,8 +1809,8 @@ bool initialize_backend() noexcept {
   const RenderDevice *dev = render_device();
 
   // Load default fallback shader.
-  const ShaderProgramHandle defaultShaderHandle = load_shader_program(
-      "assets/shaders/default.vert", "assets/shaders/default.frag");
+  const ShaderProgramHandle defaultShaderHandle = load_configured_shader_program(
+      "default.vert", "default.frag");
   if (defaultShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load default shader program");
@@ -1799,7 +1834,7 @@ bool initialize_backend() noexcept {
 
   // Load PBR shader.
   const ShaderProgramHandle pbrShaderHandle =
-      load_shader_program("assets/shaders/pbr.vert", "assets/shaders/pbr.frag");
+      load_configured_shader_program("pbr.vert", "pbr.frag");
   if (pbrShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load PBR shader program");
@@ -1887,8 +1922,8 @@ bool initialize_backend() noexcept {
   resolve_pbr_shadow_uniforms(backend, dev);
 
   // Load tonemap shader.
-  const ShaderProgramHandle tonemapShaderHandle = load_shader_program(
-      "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
+  const ShaderProgramHandle tonemapShaderHandle = load_configured_shader_program(
+      "fullscreen.vert", "tonemap.frag");
   if (tonemapShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load tonemap shader program");
@@ -1941,8 +1976,8 @@ bool initialize_backend() noexcept {
   // Skybox shader and cube geometry (soft-fail: clear color remains visible).
   core::cvar_register_string("r_sky_model", "hosek",
                              "Sky model: hosek, preetham, cubemap, or none");
-  const ShaderProgramHandle skyboxShader = load_shader_program(
-      "assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
+  const ShaderProgramHandle skyboxShader = load_configured_shader_program(
+      "skybox.vert", "skybox.frag");
   if (skyboxShader != kInvalidShaderProgram) {
     const std::uint32_t skyboxProgram = shader_gpu_program(skyboxShader);
     if (skyboxProgram != 0U) {
@@ -1974,8 +2009,8 @@ bool initialize_backend() noexcept {
   // Preetham procedural sky (soft-fail: cubemap skybox or clear color remains).
   core::cvar_register_float("r_sky_turbidity", 3.0F,
                             "Preetham sky turbidity (1.7 clear, 10 hazy)");
-  const ShaderProgramHandle preethamShader = load_shader_program(
-      "assets/shaders/skybox.vert", "assets/shaders/preetham_sky.frag");
+  const ShaderProgramHandle preethamShader = load_configured_shader_program(
+      "skybox.vert", "preetham_sky.frag");
   if (preethamShader != kInvalidShaderProgram) {
     const std::uint32_t preethamProgram = shader_gpu_program(preethamShader);
     if (preethamProgram != 0U) {
@@ -2014,8 +2049,8 @@ bool initialize_backend() noexcept {
   // Hosek-Wilkie procedural sky (preferred over Preetham when available).
   core::cvar_register_float("r_sky_ground_albedo", 0.1F,
                             "Procedural sky ground albedo");
-  const ShaderProgramHandle hosekShader = load_shader_program(
-      "assets/shaders/skybox.vert", "assets/shaders/hosek_wilkie_sky.frag");
+  const ShaderProgramHandle hosekShader = load_configured_shader_program(
+      "skybox.vert", "hosek_wilkie_sky.frag");
   if (hosekShader != kInvalidShaderProgram) {
     const std::uint32_t hosekProgram = shader_gpu_program(hosekShader);
     if (hosekProgram != 0U) {
@@ -2061,8 +2096,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_int("r_env_prefilter_mips", 5,
                           "Prefiltered environment cubemap mip levels");
   const ShaderProgramHandle prefilterShader =
-      load_shader_program("assets/shaders/skybox.vert",
-                          "assets/shaders/prefilter_environment.frag");
+      load_configured_shader_program("skybox.vert",
+                          "prefilter_environment.frag");
   if (prefilterShader != kInvalidShaderProgram) {
     const std::uint32_t prefilterProgram = shader_gpu_program(prefilterShader);
     if (prefilterProgram != 0U) {
@@ -2103,8 +2138,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_int("r_env_irradiance_size", 32,
                           "Diffuse irradiance cubemap face size");
   const ShaderProgramHandle irradianceShader =
-      load_shader_program("assets/shaders/skybox.vert",
-                          "assets/shaders/irradiance_convolution.frag");
+      load_configured_shader_program("skybox.vert",
+                          "irradiance_convolution.frag");
   if (irradianceShader != kInvalidShaderProgram) {
     const std::uint32_t irradianceProgram =
         shader_gpu_program(irradianceShader);
@@ -2142,8 +2177,8 @@ bool initialize_backend() noexcept {
                            "Bake split-sum BRDF lookup texture");
   core::cvar_register_int("r_env_brdf_lut_size", 512,
                           "Split-sum BRDF LUT resolution");
-  const ShaderProgramHandle brdfLutShader = load_shader_program(
-      "assets/shaders/fullscreen.vert", "assets/shaders/brdf_lut.frag");
+  const ShaderProgramHandle brdfLutShader = load_configured_shader_program(
+      "fullscreen.vert", "brdf_lut.frag");
   if (brdfLutShader != kInvalidShaderProgram) {
     const std::uint32_t brdfLutProgram = shader_gpu_program(brdfLutShader);
     if (brdfLutProgram != 0U) {
@@ -2186,8 +2221,8 @@ bool initialize_backend() noexcept {
 
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
   core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
-  const ShaderProgramHandle fxaaShader = load_shader_program(
-      "assets/shaders/fullscreen.vert", "assets/shaders/fxaa.frag");
+  const ShaderProgramHandle fxaaShader = load_configured_shader_program(
+      "fullscreen.vert", "fxaa.frag");
   if (fxaaShader != kInvalidShaderProgram) {
     const std::uint32_t fxaaProg = shader_gpu_program(fxaaShader);
     if (fxaaProg != 0U) {
@@ -2212,8 +2247,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_float("r_bloom_intensity", 0.3F, "Bloom intensity");
   {
     const ShaderProgramHandle threshShader =
-        load_shader_program("assets/shaders/fullscreen.vert",
-                            "assets/shaders/bloom_threshold.frag");
+        load_configured_shader_program("fullscreen.vert",
+                            "bloom_threshold.frag");
     if (threshShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(threshShader);
       if (prog != 0U) {
@@ -2229,8 +2264,8 @@ bool initialize_backend() noexcept {
     }
 
     const ShaderProgramHandle downShader =
-        load_shader_program("assets/shaders/fullscreen.vert",
-                            "assets/shaders/bloom_downsample.frag");
+        load_configured_shader_program("fullscreen.vert",
+                            "bloom_downsample.frag");
     if (downShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(downShader);
       if (prog != 0U) {
@@ -2244,8 +2279,8 @@ bool initialize_backend() noexcept {
       }
     }
 
-    const ShaderProgramHandle upShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/bloom_upsample.frag");
+    const ShaderProgramHandle upShader = load_configured_shader_program(
+        "fullscreen.vert", "bloom_upsample.frag");
     if (upShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(upShader);
       if (prog != 0U) {
@@ -2280,8 +2315,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_float("r_ssao_radius", 0.5F, "SSAO sample radius");
   core::cvar_register_float("r_ssao_bias", 0.025F, "SSAO depth bias");
   {
-    const ShaderProgramHandle ssaoShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/ssao.frag");
+    const ShaderProgramHandle ssaoShader = load_configured_shader_program(
+        "fullscreen.vert", "ssao.frag");
     if (ssaoShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(ssaoShader);
       if (prog != 0U) {
@@ -2305,8 +2340,8 @@ bool initialize_backend() noexcept {
       }
     }
 
-    const ShaderProgramHandle ssaoBlurShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/ssao_blur.frag");
+    const ShaderProgramHandle ssaoBlurShader = load_configured_shader_program(
+        "fullscreen.vert", "ssao_blur.frag");
     if (ssaoBlurShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(ssaoBlurShader);
       if (prog != 0U) {
@@ -2338,8 +2373,8 @@ bool initialize_backend() noexcept {
   // Load deferred rendering shaders (soft-fail: falls back to forward).
   bool deferredOk = true;
 
-  const ShaderProgramHandle gbufferShader = load_shader_program(
-      "assets/shaders/gbuffer.vert", "assets/shaders/gbuffer.frag");
+  const ShaderProgramHandle gbufferShader = load_configured_shader_program(
+      "gbuffer.vert", "gbuffer.frag");
   if (gbufferShader == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "G-Buffer shader not available — deferred path disabled");
@@ -2351,8 +2386,8 @@ bool initialize_backend() noexcept {
 
   if (deferredOk) {
     deferredLightShader =
-        load_shader_program("assets/shaders/fullscreen.vert",
-                            "assets/shaders/deferred_lighting.frag");
+        load_configured_shader_program("fullscreen.vert",
+                            "deferred_lighting.frag");
     if (deferredLightShader == kInvalidShaderProgram) {
       core::log_message(
           core::LogLevel::Warning, "renderer",
@@ -2363,8 +2398,8 @@ bool initialize_backend() noexcept {
   }
 
   if (deferredOk) {
-    gbufferDebugShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/gbuffer_debug.frag");
+    gbufferDebugShader = load_configured_shader_program(
+        "fullscreen.vert", "gbuffer_debug.frag");
     if (gbufferDebugShader == kInvalidShaderProgram) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "G-Buffer debug shader not available");
@@ -2543,8 +2578,8 @@ bool initialize_backend() noexcept {
       "r_shadow_debug", false,
       "Log when shadow casters are dropped due to slot limits");
   {
-    const ShaderProgramHandle shadowShader = load_shader_program(
-        "assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
+    const ShaderProgramHandle shadowShader = load_configured_shader_program(
+        "shadow_depth.vert", "shadow_depth.frag");
     if (shadowShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(shadowShader);
       if (prog != 0U) {
@@ -2587,8 +2622,8 @@ bool initialize_backend() noexcept {
                            "Enable point light cubemap shadow maps");
   {
     const ShaderProgramHandle pointShader =
-        load_shader_program("assets/shaders/shadow_depth_point.vert",
-                            "assets/shaders/shadow_depth_point.frag");
+        load_configured_shader_program("shadow_depth_point.vert",
+                            "shadow_depth_point.frag");
     if (pointShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(pointShader);
       if (prog != 0U) {
@@ -2628,8 +2663,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_float("r_auto_exposure_max", 10.0F,
                             "Maximum auto-exposure value");
   {
-    const ShaderProgramHandle lumShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/luminance.frag");
+    const ShaderProgramHandle lumShader = load_configured_shader_program(
+        "fullscreen.vert", "luminance.frag");
     if (lumShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(lumShader);
       if (prog != 0U) {
@@ -3160,9 +3195,9 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   int drawableWidth = 1280;
   int drawableHeight = 720;
-  if ((g_sceneViewportWidth > 0) && (g_sceneViewportHeight > 0)) {
-    drawableWidth = g_sceneViewportWidth;
-    drawableHeight = g_sceneViewportHeight;
+  if ((renderer_context().sceneViewportWidth > 0) && (renderer_context().sceneViewportHeight > 0)) {
+    drawableWidth = renderer_context().sceneViewportWidth;
+    drawableHeight = renderer_context().sceneViewportHeight;
   } else {
     core::render_drawable_size(&drawableWidth, &drawableHeight);
   }
@@ -3201,14 +3236,14 @@ void flush_renderer(CommandBufferView commandBufferView,
   const float aspect =
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
   const math::Mat4 viewMat = math::look_at(
-      g_activeCamera.position, g_activeCamera.target, g_activeCamera.up);
-  const float fov = (g_activeCamera.fovRadians > 0.0F)
-                        ? g_activeCamera.fovRadians
+      renderer_context().activeCamera.position, renderer_context().activeCamera.target, renderer_context().activeCamera.up);
+  const float fov = (renderer_context().activeCamera.fovRadians > 0.0F)
+                        ? renderer_context().activeCamera.fovRadians
                         : kDefaultFovRadians;
   const float nearP =
-      (g_activeCamera.nearPlane > 0.0F) ? g_activeCamera.nearPlane : kNearClip;
+      (renderer_context().activeCamera.nearPlane > 0.0F) ? renderer_context().activeCamera.nearPlane : kNearClip;
   const float farP =
-      (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
+      (renderer_context().activeCamera.farPlane > nearP) ? renderer_context().activeCamera.farPlane : kFarClip;
   const math::Mat4 projMat = math::perspective(fov, aspect, nearP, farP);
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 
@@ -3367,7 +3402,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     std::array<ShadowCandidate, kMaxSpotLights> spotCandidates{};
     std::size_t spotCandidateCount = 0U;
-    const math::Vec3 &camPos = g_activeCamera.position;
+    const math::Vec3 &camPos = renderer_context().activeCamera.position;
     for (std::size_t li = 0U; li < lights.spotLightCount; ++li) {
       if (!lights.spotLights[li].castShadow) {
         continue;
@@ -3454,7 +3489,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
     std::size_t pointCandidateCount = 0U;
-    const math::Vec3 &camPos = g_activeCamera.position;
+    const math::Vec3 &camPos = renderer_context().activeCamera.position;
     for (std::size_t li = 0U; li < lights.pointLightCount; ++li) {
       if (!lights.pointLights[li].castShadow) {
         continue;
@@ -3992,7 +4027,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       if (backend.dlCameraPosLoc >= 0) {
         dev->set_uniform_vec3(backend.dlCameraPosLoc,
-                              &g_activeCamera.position.x);
+                              &renderer_context().activeCamera.position.x);
       }
       if (backend.dlScreenSizeLoc >= 0) {
         const float screenSize[2] = {static_cast<float>(drawableWidth),
@@ -4125,7 +4160,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
       if (backend.pbrCameraPosLocation >= 0) {
         dev->set_uniform_vec3(backend.pbrCameraPosLocation,
-                              &g_activeCamera.position.x);
+                              &renderer_context().activeCamera.position.x);
       }
       if (backend.pbrViewLocation >= 0) {
         dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
@@ -4252,7 +4287,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
     if (backend.pbrCameraPosLocation >= 0) {
       dev->set_uniform_vec3(backend.pbrCameraPosLocation,
-                            &g_activeCamera.position.x);
+                            &renderer_context().activeCamera.position.x);
     }
     if (backend.pbrViewLocation >= 0) {
       dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
@@ -4662,7 +4697,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   gpu_profiler_end_pass(GpuPassId::Tonemap);
 
   // --- FXAA pass (optional): finalColor → sceneColor (ping-pong) ---
-  g_fxaaAppliedThisFrame = false;
+  renderer_context().fxaaAppliedThisFrame = false;
   if (backend.fxaaProgram != 0U && core::cvar_get_bool("r_fxaa")) {
     const std::uint32_t sceneFbo =
         pass_resource_framebuffer(passRes.sceneColor);
@@ -4691,7 +4726,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
 
-    g_fxaaAppliedThisFrame = true;
+    renderer_context().fxaaAppliedThisFrame = true;
   }
 
   // --- Prepare back buffer for editor overlay (ImGui) ---
@@ -4710,7 +4745,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
   frameStats.gpuPointShadowMs = gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
-  g_lastFrameStats = frameStats;
+  renderer_context().lastFrameStats = frameStats;
 }
 
 /// Shuts down the owning system for renderer.
@@ -4734,30 +4769,50 @@ void shutdown_renderer() noexcept {
 
 /// Sets the requested value for active camera.
 void set_active_camera(const CameraState &camera) noexcept {
-  g_activeCamera = camera;
+  renderer_context().activeCamera = camera;
+}
+
+/// Sets the virtual root used for built-in renderer shaders.
+void set_shader_root_path(const char *path) noexcept {
+  const char *source =
+      ((path != nullptr) && (path[0] != '\0')) ? path : "assets/shaders";
+  const std::size_t len = std::strlen(source);
+  const std::size_t maxCopy =
+      sizeof(renderer_context().shaderRootPath) - 1U;
+  const std::size_t copyLen = (len < maxCopy) ? len : maxCopy;
+  std::memcpy(renderer_context().shaderRootPath, source, copyLen);
+  renderer_context().shaderRootPath[copyLen] = '\0';
+  if ((copyLen > 0U) &&
+      (renderer_context().shaderRootPath[copyLen - 1U] == '/')) {
+    renderer_context().shaderRootPath[copyLen - 1U] = '\0';
+  }
 }
 
 /// Sets the requested value for scene viewport size.
 void set_scene_viewport_size(int width, int height) noexcept {
-  g_sceneViewportWidth = (width > 0) ? width : 0;
-  g_sceneViewportHeight = (height > 0) ? height : 0;
+  renderer_context().sceneViewportWidth = (width > 0) ? width : 0;
+  renderer_context().sceneViewportHeight = (height > 0) ? height : 0;
 }
 
 /// Sets the requested value for skybox texture.
 void set_skybox_texture(TextureHandle cubemap) noexcept {
-  g_activeSkyboxTexture = cubemap;
+  renderer_context().activeSkyboxTexture = cubemap;
 }
 
 /// Returns the requested value for skybox texture.
-TextureHandle get_skybox_texture() noexcept { return g_activeSkyboxTexture; }
+TextureHandle get_skybox_texture() noexcept {
+  return renderer_context().activeSkyboxTexture;
+}
 
 /// Returns the requested value for active camera.
-CameraState get_active_camera() noexcept { return g_activeCamera; }
+CameraState get_active_camera() noexcept {
+  return renderer_context().activeCamera;
+}
 
 /// Returns the requested value for scene viewport texture.
 std::uint32_t get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
-  if (g_fxaaAppliedThisFrame) {
+  if (renderer_context().fxaaAppliedThisFrame) {
     return pass_resource_gpu_texture(passRes.sceneColor);
   }
   return pass_resource_gpu_texture(passRes.finalColor);
@@ -4905,7 +4960,7 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   result.settings = normalize_reflection_probe_bake_settings(request.settings);
 
   if ((request.sourceCubemap == kInvalidTextureHandle) &&
-      (g_activeSkyboxTexture == kInvalidTextureHandle)) {
+      (renderer_context().activeSkyboxTexture == kInvalidTextureHandle)) {
     return result;
   }
 
@@ -4941,7 +4996,7 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
 
 /// Handles renderer get last frame stats.
 RendererFrameStats renderer_get_last_frame_stats() noexcept {
-  return g_lastFrameStats;
+  return renderer_context().lastFrameStats;
 }
 
 } // namespace engine::renderer

@@ -3,7 +3,6 @@
 #include "engine/runtime/scripting_bridge.h"
 
 #include "engine/audio/audio.h"
-#include "engine/core/service_locator.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_query.h"
@@ -750,12 +749,24 @@ namespace runtime {
 void bind_scripting_runtime(World *world) noexcept {
   scripting::bind_runtime_world(world);
   scripting::bind_runtime_services(&kScriptingRuntimeServices);
-  // Register in the global service locator so subsystems can discover services
-  // without direct global pointers.
-  auto &loc = core::global_service_locator();
-  loc.register_service<World>(world);
-  loc.register_service<scripting::RuntimeServices>(
-      const_cast<scripting::RuntimeServices *>(&kScriptingRuntimeServices));
+}
+
+/// Binds scripting runtime pointers into an explicit service locator.
+void bind_scripting_runtime(World *world, core::ServiceLocator &locator) noexcept {
+  scripting::bind_runtime_world(world, locator);
+  scripting::bind_runtime_services(&kScriptingRuntimeServices, locator);
+}
+
+/// Clears scripting runtime bindings from scripting and the service locator.
+void unbind_scripting_runtime() noexcept {
+  scripting::bind_runtime_world(nullptr);
+  scripting::bind_runtime_services(nullptr);
+}
+
+/// Clears scripting runtime bindings from an explicit service locator.
+void unbind_scripting_runtime(core::ServiceLocator &locator) noexcept {
+  scripting::bind_runtime_world(nullptr, locator);
+  scripting::bind_runtime_services(nullptr, locator);
 }
 
 } // namespace runtime
