@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
+#include <thread>
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
@@ -202,12 +204,14 @@ void wait_for_load(const AssetStreamingQueue *queue,
     return;
   }
 
-  // Spin-poll.  In production, replace with condvar + mutex.
+  // Poll without burning a full CPU core; a future threaded queue should wake
+  // waiters with a condition variable when request state changes.
   while (true) {
     const LoadingState s = get_load_state(queue, handle);
     if ((s == LoadingState::Ready) || (s == LoadingState::Failed)) {
       return;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 }
 

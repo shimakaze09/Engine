@@ -7,6 +7,14 @@
 
 namespace engine {
 
+namespace runtime {
+class World;
+
+/// Processes a queued script scene operation, if one exists.
+/// Returns false when a pending operation exists but cannot be applied.
+bool process_pending_scene_op(World &world) noexcept;
+} // namespace runtime
+
 /// Decomposed engine main-loop pipeline.
 ///
 /// Each frame is split into named stages (input, play transitions, timing,

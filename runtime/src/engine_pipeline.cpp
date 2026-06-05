@@ -51,6 +51,36 @@
 
 namespace engine {
 
+namespace runtime {
+
+/// Processes a queued script scene operation, if one exists.
+bool process_pending_scene_op(World &world) noexcept {
+  if (!scripting::has_pending_scene_op()) {
+    return true;
+  }
+
+  bool processed = false;
+  if (scripting::pending_scene_op_is_load()) {
+    const char *scenePath = scripting::get_pending_scene_path();
+    if ((scenePath != nullptr) && runtime::load_scene(world, scenePath)) {
+      processed = true;
+    } else {
+      core::log_message(core::LogLevel::Error, "engine",
+                        "failed to process pending scene load");
+    }
+  } else if (scripting::pending_scene_op_is_new()) {
+    runtime::reset_world(world);
+    processed = true;
+  }
+
+  if (processed) {
+    scripting::clear_pending_scene_op();
+  }
+  return processed;
+}
+
+} // namespace runtime
+
 // ===========================================================================
 // Anonymous-namespace helpers (moved verbatim from engine.cpp)
 // ===========================================================================
@@ -1044,11 +1074,11 @@ void create_bootstrap_scene(runtime::World *world,
             (static_cast<float>((x * 17U + z * 11U) % 5U) - 2.0F) * 0.05F;
         const float jitterZ =
             (static_cast<float>((x * 7U + z * 19U) % 5U) - 2.0F) * 0.05F;
+        instance.scale = 0.34F + (static_cast<float>((x + z) % 4U) * 0.05F);
         instance.offset =
             math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX,
-                       0.0F,
+                       instance.scale * 0.5F,
                        (static_cast<float>(z) - 2.0F) * 0.62F + jitterZ);
-        instance.scale = 0.34F + (static_cast<float>((x + z) % 4U) * 0.05F);
         instance.phase = static_cast<float>(cursor) * 0.37F;
         instance.lodIndex = ((x + z) % 5U == 0U) ? 1U : 0U;
         ++cursor;
@@ -1279,8 +1309,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
                              meshRegistry.get(), &meshIds)) {
-    scripting::bind_runtime_world(nullptr);
-    runtime::unregister_engine_subsystem_services();
+    teardown();
     return false;
   }
   scripting::set_default_mesh_asset_id(
@@ -1294,8 +1323,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   if (!frameContext) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate frame context");
-    scripting::bind_runtime_world(nullptr);
-    runtime::unregister_engine_subsystem_services();
+    teardown();
     return false;
   }
 
@@ -1305,8 +1333,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
        frameContext->renderPrepPipeline.localCommandBuffers.size())) {
     core::log_message(core::LogLevel::Error, "engine",
                       "invalid thread allocator count");
-    scripting::bind_runtime_world(nullptr);
-    runtime::unregister_engine_subsystem_services();
+    teardown();
     return false;
   }
 
@@ -1825,18 +1852,7 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
     }
   }
 
-  if (scripting::has_pending_scene_op()) {
-    if (scripting::pending_scene_op_is_load()) {
-      const char *scenePath = scripting::get_pending_scene_path();
-      if (scenePath != nullptr) {
-        runtime::load_scene(*world, scenePath);
-      }
-    }
-    if (scripting::pending_scene_op_is_new()) {
-      runtime::reset_world(*world);
-    }
-    scripting::clear_pending_scene_op();
-  }
+  static_cast<void>(runtime::process_pending_scene_op(*world));
 }
 
 // ---------------------------------------------------------------------------

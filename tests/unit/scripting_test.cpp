@@ -5,6 +5,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -675,6 +676,17 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 67;
+    }
+    if (engine::runtime::process_pending_scene_op(*world)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 82;
+    }
+    if (!engine::scripting::has_pending_scene_op() ||
+        !engine::scripting::pending_scene_op_is_load()) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 83;
     }
     engine::scripting::clear_pending_scene_op();
   }

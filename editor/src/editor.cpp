@@ -207,6 +207,18 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   return tex;
 }
 
+/// Releases cached thumbnail GL textures owned by the editor.
+void clear_thumbnail_cache() noexcept {
+  for (std::size_t i = 0U; i < g_thumbnailCount; ++i) {
+    if (g_thumbnailCache[i].textureId != 0U) {
+      const GLuint tex = g_thumbnailCache[i].textureId;
+      glDeleteTextures(1, &tex);
+    }
+    g_thumbnailCache[i] = ThumbnailEntry{};
+  }
+  g_thumbnailCount = 0U;
+}
+
 /// Handles world is editable.
 bool world_is_editable() noexcept {
   return (g_world != nullptr) && !g_worldRestoreFailed &&
@@ -218,6 +230,12 @@ bool world_is_editable() noexcept {
 bool world_can_load_scene() noexcept {
   return (g_world != nullptr) &&
          (g_world->current_phase() == runtime::WorldPhase::Idle);
+}
+
+/// Returns whether the default scene file is available on disk.
+bool default_scene_file_exists() noexcept {
+  std::error_code ec{};
+  return std::filesystem::is_regular_file(kScenePath, ec) && !ec;
 }
 
 /// Stores transform edit command data used by the engine.
@@ -833,7 +851,8 @@ void draw_main_menu_bar() noexcept {
 
   if (ImGui::BeginMenu("File")) {
     const bool canSaveScene = world_is_editable();
-    const bool canLoadScene = world_can_load_scene();
+    const bool sceneFileExists = default_scene_file_exists();
+    const bool canLoadScene = world_can_load_scene() && sceneFileExists;
 
     if (!canSaveScene) {
       ImGui::BeginDisabled();
@@ -854,13 +873,22 @@ void draw_main_menu_bar() noexcept {
       ImGui::BeginDisabled();
     }
 
-    if (ImGui::MenuItem("Load Scene") && canLoadScene) {
+    const bool loadScenePressed = ImGui::MenuItem("Load Scene");
+    if (!sceneFileExists &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::BeginTooltip();
+      ImGui::Text("No saved scene at %s", kScenePath);
+      ImGui::EndTooltip();
+    }
+
+    if (loadScenePressed && canLoadScene) {
       if (!runtime::load_scene(*g_world, kScenePath)) {
         core::log_message(core::LogLevel::Error, "editor",
                           "failed to load scene from assets/scene.json");
       } else {
         g_selectedEntityIndex = 0U;
         g_worldRestoreFailed = false;
+        g_commandHistory.clear();
       }
     }
 
@@ -2492,10 +2520,15 @@ void shutdown_editor() noexcept {
   ImGui_ImplSDL2_Shutdown();
   ImGui::DestroyContext();
 
+  clear_thumbnail_cache();
+  g_commandHistory.clear();
+
   g_editorInitialized = false;
   g_world = nullptr;
   g_selectedEntityIndex = 0U;
   g_playState = PlayState::Stopped;
+  g_playSnapshotBuffer.reset();
+  g_playSnapshotCapacity = 0U;
   g_playSnapshotSize = 0U;
   g_hasPlaySnapshot = false;
   g_worldRestoreFailed = false;
@@ -2555,6 +2588,10 @@ void editor_process_event(void *sdlEvent) noexcept {
 
 /// Handles editor set world.
 void editor_set_world(runtime::World *world) noexcept {
+  if (g_world != world) {
+    g_commandHistory.clear();
+    g_gizmoWasUsing = false;
+  }
   g_world = world;
   if (world == nullptr) {
     g_selectedEntityIndex = 0U;

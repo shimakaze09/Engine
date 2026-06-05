@@ -19,6 +19,55 @@ bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
+/// No-op timer callback used to create active timer state for reset tests.
+void noop_timer(engine::runtime::TimerId, void *) noexcept {}
+
+/// Seeds scene-owned state that must not survive reset or scene replacement.
+int seed_non_entity_scene_state(engine::runtime::World &world) {
+  if (world.timer_manager().set_timeout(1.0F, noop_timer, nullptr)
+      == engine::runtime::kInvalidTimerId) {
+    return 80;
+  }
+
+  engine::runtime::CameraEntry camera{};
+  camera.position = engine::math::Vec3(2.0F, 3.0F, 4.0F);
+  if (!world.camera_manager().push_camera(1U, camera, 10.0F)) {
+    return 81;
+  }
+
+  if (!world.game_mode().set_rule("round", "warmup")) {
+    return 82;
+  }
+  if (!world.game_mode().start()) {
+    return 83;
+  }
+
+  return 0;
+}
+
+/// Verifies that scene state has been restored to the default empty state.
+int verify_non_entity_scene_state_cleared(
+    const engine::runtime::World &world) {
+  if (world.timer_manager().active_count() != 0U) {
+    return 84;
+  }
+  if (world.camera_manager().camera_count() != 0U) {
+    return 85;
+  }
+  if (world.game_mode().state
+      != engine::runtime::GameMode::State::WaitingToStart) {
+    return 86;
+  }
+  if (std::strcmp(world.game_mode().name, "default") != 0) {
+    return 89;
+  }
+  if (world.game_mode().ruleCount != 0U) {
+    return 90;
+  }
+
+  return 0;
+}
+
 /// Builds the requested runtime data for source scene.
 int build_source_scene(const char *path) {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
@@ -530,6 +579,64 @@ int verify_large_scene_round_trip(const char *path) {
   return 0;
 }
 
+/// Verifies that reset_world clears all scene-owned state, not just entities.
+int verify_reset_world_clears_scene_state() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 91;
+  }
+
+  const engine::runtime::Entity entity = world->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 92;
+  }
+
+  engine::runtime::Transform transform{};
+  if (!world->add_transform(entity, transform)) {
+    return 93;
+  }
+
+  const int seedResult = seed_non_entity_scene_state(*world);
+  if (seedResult != 0) {
+    return seedResult;
+  }
+
+  engine::runtime::reset_world(*world);
+
+  if (world->alive_entity_count() != 0U) {
+    return 94;
+  }
+
+  return verify_non_entity_scene_state_cleared(*world);
+}
+
+/// Verifies that loading a scene replaces stale non-entity world state.
+int verify_load_scene_replaces_existing_scene_state(
+    const std::array<char, engine::core::JsonWriter::kBufferBytes> &buffer,
+    std::size_t size) {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 95;
+  }
+
+  const int seedResult = seed_non_entity_scene_state(*world);
+  if (seedResult != 0) {
+    return seedResult;
+  }
+
+  if (!engine::runtime::load_scene(*world, buffer.data(), size)) {
+    return 96;
+  }
+
+  if (world->alive_entity_count() != 3U) {
+    return 97;
+  }
+
+  return verify_non_entity_scene_state_cleared(*world);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -579,6 +686,21 @@ int main() {
   }
 
   result = verify_large_scene_round_trip(kLargeScenePath);
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_reset_world_clears_scene_state();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_load_scene_replaces_existing_scene_state(sceneBuffer,
+                                                           sceneSize);
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

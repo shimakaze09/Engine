@@ -1274,15 +1274,18 @@ bool serialize_scene_to_writer(const World &world,
 
 /// Resets this object back to its reusable empty state for world.
 void reset_world(World &world) noexcept {
-  if (world.alive_entity_count() == 0U) {
-    return;
+  if (world.alive_entity_count() > 0U) {
+    thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
+    std::size_t count = 0U;
+    world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
+    for (std::size_t i = 0U; i < count; ++i) {
+      static_cast<void>(world.destroy_entity(toDestroy[i]));
+    }
   }
-  thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
-  std::size_t count = 0U;
-  world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
-  for (std::size_t i = 0U; i < count; ++i) {
-    static_cast<void>(world.destroy_entity(toDestroy[i]));
-  }
+
+  world.timer_manager().clear();
+  world.camera_manager().clear();
+  world.game_mode().reset();
 }
 
 /// Saves the requested resource for scene.
@@ -1478,25 +1481,30 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     }
   }
 
-  reset_world(world);
+  std::unique_ptr<World> committedWorld(new (std::nothrow) World());
+  if (committedWorld == nullptr) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "failed to allocate committed world for scene load");
+    return false;
+  }
 
-  if (!copy_world_contents(*stagedWorld, world)) {
+  if (!copy_world_contents(*stagedWorld, *committedWorld)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "failed to commit loaded scene");
-    reset_world(world);
     return false;
   }
 
-  if ((world.alive_entity_count() != stagedWorld->alive_entity_count()) ||
-      (world.transform_count() != stagedWorld->transform_count()) ||
-      (world.rigid_body_count() != stagedWorld->rigid_body_count()) ||
-      (world.collider_count() != stagedWorld->collider_count())) {
+  if ((committedWorld->alive_entity_count() !=
+       stagedWorld->alive_entity_count()) ||
+      (committedWorld->transform_count() != stagedWorld->transform_count()) ||
+      (committedWorld->rigid_body_count() != stagedWorld->rigid_body_count()) ||
+      (committedWorld->collider_count() != stagedWorld->collider_count())) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "scene commit invariant mismatch after copy");
-    reset_world(world);
     return false;
   }
 
+  world = *committedWorld;
   return true;
 }
 

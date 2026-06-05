@@ -462,6 +462,16 @@ BackendState &backend_state() noexcept {
   return state;
 }
 
+/// Resets public renderer state that can otherwise leak between runs.
+void reset_renderer_public_state() noexcept {
+  g_activeCamera = CameraState{};
+  g_sceneViewportWidth = 0;
+  g_sceneViewportHeight = 0;
+  g_lastFrameStats = RendererFrameStats{};
+  g_fxaaAppliedThisFrame = false;
+  g_activeSkyboxTexture = kInvalidTextureHandle;
+}
+
 /// Resets this object back to its reusable empty state for backend on failure.
 void reset_backend_on_failure() noexcept {
   BackendState &backend = backend_state();
@@ -4707,6 +4717,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 void shutdown_renderer() noexcept {
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
+    reset_renderer_public_state();
     return;
   }
 
@@ -4718,7 +4729,7 @@ void shutdown_renderer() noexcept {
   }
 
   backend = BackendState{};
-  g_activeSkyboxTexture = kInvalidTextureHandle;
+  reset_renderer_public_state();
 }
 
 /// Sets the requested value for active camera.

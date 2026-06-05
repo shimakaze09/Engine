@@ -108,6 +108,7 @@ bool bootstrap() noexcept {
 void run(std::uint32_t maxFrames) noexcept {
   EnginePipeline pipeline;
   if (!pipeline.initialize(maxFrames)) {
+    pipeline.teardown();
     return;
   }
 

@@ -218,6 +218,38 @@ int check_camera_state() {
   return 0;
 }
 
+/// Verifies renderer shutdown clears public singleton state even when cold.
+int check_shutdown_resets_public_renderer_state() {
+  engine::renderer::CameraState camera{};
+  camera.position = engine::math::Vec3(8.0F, 9.0F, 10.0F);
+  camera.target = engine::math::Vec3(11.0F, 12.0F, 13.0F);
+  camera.fovRadians = 0.5F;
+  engine::renderer::set_active_camera(camera);
+  engine::renderer::set_skybox_texture(engine::renderer::TextureHandle{77U});
+
+  engine::renderer::shutdown_renderer();
+
+  const engine::renderer::CameraState resetCamera =
+      engine::renderer::get_active_camera();
+  if ((resetCamera.position.x != 0.0F) || (resetCamera.position.y != 2.0F) ||
+      (resetCamera.position.z != 5.0F)) {
+    return 34;
+  }
+  if ((resetCamera.target.x != 0.0F) || (resetCamera.target.y != 0.0F) ||
+      (resetCamera.target.z != 0.0F)) {
+    return 35;
+  }
+  if (resetCamera.fovRadians != 1.0471975512F) {
+    return 36;
+  }
+  if (engine::renderer::get_skybox_texture() !=
+      engine::renderer::kInvalidTextureHandle) {
+    return 37;
+  }
+
+  return 0;
+}
+
 /// Handles check environment texture getters.
 int check_environment_texture_getters() {
   engine::core::shutdown_cvars();
@@ -425,6 +457,10 @@ int main() {
     return result;
   }
   result = check_camera_state();
+  if (result != 0) {
+    return result;
+  }
+  result = check_shutdown_resets_public_renderer_state();
   if (result != 0) {
     return result;
   }
