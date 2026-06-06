@@ -110,8 +110,9 @@ These items do not represent missing *features* but rather defects or structural
   - *Resolved*: the `analysis` target now uses `cppcheck` when available, otherwise `clang-tidy --warnings-as-errors=*` on engine sources, and fails if neither analyzer is found.
 
 #### §0-7-d: Second ownership audit findings
-- `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, runtime bindings, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[ ]`
+- `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[~]`
   - *Audit*: Split into an owned `ScriptingContext` and narrow modules before allowing multiple runtime/editor sessions or isolated tests.
+  - *In progress*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; `scripting.cpp` uses the private `runtime_binding()` accessor until the remaining Lua state, mutation queue, timer, debugger, and script lifecycle clusters move behind `ScriptingContext`.
 - `§0-7-d-ii` ~~`physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime.~~ **[critical]** `[x]`
   - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
 - `§0-7-d-iii` `scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state. **[high]** `[ ]`
@@ -119,7 +120,7 @@ These items do not represent missing *features* but rather defects or structural
 - `§0-7-d-iv` `core::global_service_locator()` still exists for legacy callers, tests, and wrappers. **[high]** `[~]`
   - *Audit*: Runtime now has scoped registration, but global service access should keep shrinking toward explicit locator/context injection.
 - `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[ ]`
-  - *Audit*: Current largest files include `scripting.cpp` (~5753 lines), `command_buffer.cpp` (~4509), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
+  - *Audit*: Current largest files include `scripting.cpp` (~5702 lines after the runtime binding split), `command_buffer.cpp` (~4509), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
 
 ---
 
