@@ -29,26 +29,38 @@ extern "C" {
 #include <ws2tcpip.h>
 using SocketHandle = SOCKET;
 static constexpr SocketHandle kBadSocket = INVALID_SOCKET;
-static bool g_wsaInitialized = false;
+
+/// Tracks process socket startup for the Windows DAP transport.
+struct PlatformSocketState final {
+  bool wsaInitialized = false;
+};
+
+/// Returns Windows socket startup state for the DAP transport.
+static PlatformSocketState &platform_socket_state() noexcept {
+  static PlatformSocketState state{};
+  return state;
+}
 
 /// Handles platform init sockets.
 static bool platform_init_sockets() noexcept {
-  if (g_wsaInitialized) {
+  PlatformSocketState &state = platform_socket_state();
+  if (state.wsaInitialized) {
     return true;
   }
   WSADATA wsa{};
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
     return false;
   }
-  g_wsaInitialized = true;
+  state.wsaInitialized = true;
   return true;
 }
 
 /// Handles platform shutdown sockets.
 static void platform_shutdown_sockets() noexcept {
-  if (g_wsaInitialized) {
+  PlatformSocketState &state = platform_socket_state();
+  if (state.wsaInitialized) {
     WSACleanup();
-    g_wsaInitialized = false;
+    state.wsaInitialized = false;
   }
 }
 
@@ -112,22 +124,62 @@ namespace {
 
 // ---------- Server state ----------
 
-static SocketHandle g_listenSocket = kBadSocket;
-static SocketHandle g_clientSocket = kBadSocket;
-static int g_seq = 1;
-
-// Receive buffer for DAP messages.
 static constexpr std::size_t kRecvBufferSize = 64U * 1024U;
-static char g_recvBuffer[kRecvBufferSize]{};
-static std::size_t g_recvUsed = 0U;
+
+/// Owns the active DAP transport session and buffered protocol state.
+struct DapServerState final {
+  SocketHandle listenSocket = kBadSocket;
+  SocketHandle clientSocket = kBadSocket;
+  int seq = 1;
+  char recvBuffer[kRecvBufferSize]{};
+  std::size_t recvUsed = 0U;
+};
+
+/// Returns the default DAP server instance used by the legacy API wrappers.
+DapServerState &dap_server_state() noexcept {
+  static DapServerState state{};
+  return state;
+}
+
+/// Clears buffered client input for the active DAP session.
+void reset_recv_buffer(DapServerState &state) noexcept {
+  state.recvUsed = 0U;
+  std::memset(state.recvBuffer, 0, sizeof(state.recvBuffer));
+}
+
+/// Closes the current DAP client connection and clears session input.
+void close_dap_client(DapServerState &state) noexcept {
+  if (state.clientSocket != kBadSocket) {
+    platform_close_socket(state.clientSocket);
+    state.clientSocket = kBadSocket;
+  }
+  reset_recv_buffer(state);
+}
+
+/// Closes the current DAP listening socket.
+void close_dap_listener(DapServerState &state) noexcept {
+  if (state.listenSocket != kBadSocket) {
+    platform_close_socket(state.listenSocket);
+    state.listenSocket = kBadSocket;
+  }
+}
+
+/// Resets all DAP server-owned transport state to a fresh stopped session.
+void reset_dap_server_state(DapServerState &state) noexcept {
+  close_dap_client(state);
+  close_dap_listener(state);
+  state.seq = 1;
+  reset_recv_buffer(state);
+}
 
 // ---------- Utility: JSON response helpers ----------
 
 // Write a minimal DAP response header into a JsonWriter.
 void write_response_header(core::JsonWriter &w, int requestSeq,
                            const char *command, bool success) noexcept {
+  DapServerState &state = dap_server_state();
   w.begin_object();
-  w.write_uint("seq", static_cast<std::uint32_t>(g_seq++));
+  w.write_uint("seq", static_cast<std::uint32_t>(state.seq++));
   w.write_string("type", "response");
   w.write_uint("request_seq", static_cast<std::uint32_t>(requestSeq));
   w.write_bool("success", success);
@@ -136,8 +188,9 @@ void write_response_header(core::JsonWriter &w, int requestSeq,
 
 /// Writes event header data.
 void write_event_header(core::JsonWriter &w, const char *event) noexcept {
+  DapServerState &state = dap_server_state();
   w.begin_object();
-  w.write_uint("seq", static_cast<std::uint32_t>(g_seq++));
+  w.write_uint("seq", static_cast<std::uint32_t>(state.seq++));
   w.write_string("type", "event");
   w.write_string("event", event);
 }
@@ -145,7 +198,8 @@ void write_event_header(core::JsonWriter &w, const char *event) noexcept {
 // ---------- Transport ----------
 
 bool send_dap_message(const char *json, std::size_t len) noexcept {
-  if (g_clientSocket == kBadSocket) {
+  DapServerState &state = dap_server_state();
+  if (state.clientSocket == kBadSocket) {
     return false;
   }
   char header[64]{};
@@ -159,7 +213,8 @@ bool send_dap_message(const char *json, std::size_t len) noexcept {
   std::size_t sent = 0U;
   while (sent < hLen) {
     const auto n =
-        send(g_clientSocket, header + sent, static_cast<int>(hLen - sent), 0);
+        send(state.clientSocket, header + sent,
+             static_cast<int>(hLen - sent), 0);
     if (n <= 0) {
       return false;
     }
@@ -169,7 +224,8 @@ bool send_dap_message(const char *json, std::size_t len) noexcept {
   sent = 0U;
   while (sent < len) {
     const auto n =
-        send(g_clientSocket, json + sent, static_cast<int>(len - sent), 0);
+        send(state.clientSocket, json + sent, static_cast<int>(len - sent),
+             0);
     if (n <= 0) {
       return false;
     }
@@ -188,17 +244,18 @@ bool send_json_writer(core::JsonWriter &w) noexcept {
 
 // Try to extract a complete DAP message from the receive buffer.
 // Returns the number of bytes consumed (0 if no complete message).
-// If successful, *outBody points into g_recvBuffer at the JSON start,
+// If successful, *outBody points into the receive buffer at the JSON start,
 // and *outBodyLen is the JSON length (not null-terminated).
 std::size_t try_extract_message(const char **outBody,
                                 std::size_t *outBodyLen) noexcept {
+  DapServerState &state = dap_server_state();
   // Look for "Content-Length: <number>\r\n\r\n".
-  const char *haystack = g_recvBuffer;
+  const char *haystack = state.recvBuffer;
   const char *needle = "Content-Length: ";
   const std::size_t needleLen = 16U;
   const char *found = nullptr;
-  if (g_recvUsed >= needleLen) {
-    for (std::size_t i = 0U; i <= g_recvUsed - needleLen; ++i) {
+  if (state.recvUsed >= needleLen) {
+    for (std::size_t i = 0U; i <= state.recvUsed - needleLen; ++i) {
       if (std::memcmp(haystack + i, needle, needleLen) == 0) {
         found = haystack + i;
         break;
@@ -227,7 +284,7 @@ std::size_t try_extract_message(const char **outBody,
   // Find the header/body separator "\r\n\r\n".
   const char *sep = nullptr;
   const std::size_t remaining =
-      g_recvUsed - static_cast<std::size_t>(found - g_recvBuffer);
+      state.recvUsed - static_cast<std::size_t>(found - state.recvBuffer);
   for (std::size_t i = 0U; i + 3U < remaining; ++i) {
     if (found[i] == '\r' && found[i + 1] == '\n' && found[i + 2] == '\r' &&
         found[i + 3] == '\n') {
@@ -241,9 +298,9 @@ std::size_t try_extract_message(const char **outBody,
 
   const char *bodyStart = sep + 4;
   const std::size_t headerSize =
-      static_cast<std::size_t>(bodyStart - g_recvBuffer);
+      static_cast<std::size_t>(bodyStart - state.recvBuffer);
   const auto bodyLen = static_cast<std::size_t>(contentLength);
-  if (headerSize + bodyLen > g_recvUsed) {
+  if (headerSize + bodyLen > state.recvUsed) {
     return 0U; // Not enough data yet.
   }
 
@@ -255,28 +312,31 @@ std::size_t try_extract_message(const char **outBody,
 // Receive data from the client into the recv buffer.
 // Returns false if the connection was closed.
 bool recv_into_buffer() noexcept {
-  if (g_clientSocket == kBadSocket) {
+  DapServerState &state = dap_server_state();
+  if (state.clientSocket == kBadSocket) {
     return false;
   }
-  if (g_recvUsed >= kRecvBufferSize) {
+  if (state.recvUsed >= kRecvBufferSize) {
     return false; // Buffer full.
   }
-  const auto n = recv(g_clientSocket, g_recvBuffer + g_recvUsed,
-                      static_cast<int>(kRecvBufferSize - g_recvUsed), 0);
+  const auto n = recv(state.clientSocket, state.recvBuffer + state.recvUsed,
+                      static_cast<int>(kRecvBufferSize - state.recvUsed), 0);
   if (n <= 0) {
     return false;
   }
-  g_recvUsed += static_cast<std::size_t>(n);
+  state.recvUsed += static_cast<std::size_t>(n);
   return true;
 }
 
 // Consume bytes from the front of the recv buffer.
 void consume_recv_buffer(std::size_t count) noexcept {
-  if (count >= g_recvUsed) {
-    g_recvUsed = 0U;
+  DapServerState &state = dap_server_state();
+  if (count >= state.recvUsed) {
+    reset_recv_buffer(state);
   } else {
-    std::memmove(g_recvBuffer, g_recvBuffer + count, g_recvUsed - count);
-    g_recvUsed -= count;
+    std::memmove(state.recvBuffer, state.recvBuffer + count,
+                 state.recvUsed - count);
+    state.recvUsed -= count;
   }
 }
 
@@ -674,9 +734,7 @@ void handle_disconnect(int requestSeq) noexcept {
   w.end_object();
   send_json_writer(w);
 
-  platform_close_socket(g_clientSocket);
-  g_clientSocket = kBadSocket;
-  g_recvUsed = 0U;
+  close_dap_client(dap_server_state());
 }
 
 // Process a single DAP message. Returns the step mode if a continue/step
@@ -813,25 +871,29 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
 // ---------- Public API ----------
 
 bool dap_start(std::uint16_t port) noexcept {
-  if (g_listenSocket != kBadSocket) {
+  DapServerState &state = dap_server_state();
+  if (state.listenSocket != kBadSocket) {
     return true; // Already running.
   }
+  reset_dap_server_state(state);
   if (!platform_init_sockets()) {
     core::log_message(core::LogLevel::Error, "dap",
                       "failed to initialize sockets");
     return false;
   }
 
-  g_listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (g_listenSocket == kBadSocket) {
+  state.listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (state.listenSocket == kBadSocket) {
     core::log_message(core::LogLevel::Error, "dap",
                       "failed to create listen socket");
+    reset_dap_server_state(state);
+    platform_shutdown_sockets();
     return false;
   }
 
   // Allow address reuse.
   int optVal = 1;
-  setsockopt(g_listenSocket, SOL_SOCKET, SO_REUSEADDR,
+  setsockopt(state.listenSocket, SOL_SOCKET, SO_REUSEADDR,
              reinterpret_cast<const char *>(&optVal),
              static_cast<int>(sizeof(optVal)));
 
@@ -840,28 +902,28 @@ bool dap_start(std::uint16_t port) noexcept {
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = htons(port);
 
-  if (bind(g_listenSocket, reinterpret_cast<struct sockaddr *>(&addr),
+  if (bind(state.listenSocket, reinterpret_cast<struct sockaddr *>(&addr),
            sizeof(addr)) != 0) {
     core::log_message(core::LogLevel::Error, "dap",
                       "failed to bind listen socket");
-    platform_close_socket(g_listenSocket);
-    g_listenSocket = kBadSocket;
+    reset_dap_server_state(state);
+    platform_shutdown_sockets();
     return false;
   }
 
-  if (listen(g_listenSocket, 1) != 0) {
+  if (listen(state.listenSocket, 1) != 0) {
     core::log_message(core::LogLevel::Error, "dap",
                       "failed to listen on socket");
-    platform_close_socket(g_listenSocket);
-    g_listenSocket = kBadSocket;
+    reset_dap_server_state(state);
+    platform_shutdown_sockets();
     return false;
   }
 
-  if (!platform_set_nonblocking(g_listenSocket)) {
+  if (!platform_set_nonblocking(state.listenSocket)) {
     core::log_message(core::LogLevel::Error, "dap",
                       "failed to set non-blocking");
-    platform_close_socket(g_listenSocket);
-    g_listenSocket = kBadSocket;
+    reset_dap_server_state(state);
+    platform_shutdown_sockets();
     return false;
   }
 
@@ -874,42 +936,38 @@ bool dap_start(std::uint16_t port) noexcept {
 
 /// Handles dap stop.
 void dap_stop() noexcept {
-  if (g_clientSocket != kBadSocket) {
-    platform_close_socket(g_clientSocket);
-    g_clientSocket = kBadSocket;
-  }
-  if (g_listenSocket != kBadSocket) {
-    platform_close_socket(g_listenSocket);
-    g_listenSocket = kBadSocket;
-  }
-  g_recvUsed = 0U;
-  g_seq = 1;
+  reset_dap_server_state(dap_server_state());
   platform_shutdown_sockets();
 }
 
 /// Handles dap is running.
-bool dap_is_running() noexcept { return g_listenSocket != kBadSocket; }
+bool dap_is_running() noexcept {
+  return dap_server_state().listenSocket != kBadSocket;
+}
 
 /// Handles dap has client.
-bool dap_has_client() noexcept { return g_clientSocket != kBadSocket; }
+bool dap_has_client() noexcept {
+  return dap_server_state().clientSocket != kBadSocket;
+}
 
 /// Handles dap poll.
 void dap_poll() noexcept {
-  if (g_listenSocket == kBadSocket) {
+  DapServerState &state = dap_server_state();
+  if (state.listenSocket == kBadSocket) {
     return;
   }
   // Accept new client if none connected.
-  if (g_clientSocket == kBadSocket) {
-    g_clientSocket = accept(g_listenSocket, nullptr, nullptr);
-    if (g_clientSocket != kBadSocket) {
+  if (state.clientSocket == kBadSocket) {
+    state.clientSocket = accept(state.listenSocket, nullptr, nullptr);
+    if (state.clientSocket != kBadSocket) {
       core::log_message(core::LogLevel::Info, "dap", "DAP client connected");
-      g_recvUsed = 0U;
+      reset_recv_buffer(state);
       // Client socket stays blocking for the message processing loop.
     }
   }
   // Try to process any already-buffered or incoming messages (non-blocking).
-  if (g_clientSocket != kBadSocket) {
-    platform_set_nonblocking(g_clientSocket);
+  if (state.clientSocket != kBadSocket) {
+    platform_set_nonblocking(state.clientSocket);
     recv_into_buffer();
     const char *body = nullptr;
     std::size_t bodyLen = 0U;
@@ -925,7 +983,8 @@ void dap_poll() noexcept {
 /// Handles dap on stopped.
 DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
                            const char *reason) noexcept {
-  if (g_clientSocket == kBadSocket) {
+  DapServerState &state = dap_server_state();
+  if (state.clientSocket == kBadSocket) {
     return DapStepMode::Continue;
   }
 
@@ -942,7 +1001,7 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
   send_json_writer(ev);
 
   // Enter blocking message loop — process DAP requests until continue/step.
-  platform_set_blocking(g_clientSocket);
+  platform_set_blocking(state.clientSocket);
 
   DapStepMode mode = DapStepMode::Continue;
   for (;;) {
@@ -963,9 +1022,7 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
     // Need more data.
     if (!recv_into_buffer()) {
       // Connection lost — resume execution.
-      platform_close_socket(g_clientSocket);
-      g_clientSocket = kBadSocket;
-      g_recvUsed = 0U;
+      close_dap_client(state);
       break;
     }
   }

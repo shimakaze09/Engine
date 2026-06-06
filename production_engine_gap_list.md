@@ -115,8 +115,8 @@ These items do not represent missing *features* but rather defects or structural
   - *In progress*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; `scripting.cpp` uses the private `runtime_binding()` accessor until the remaining Lua state, mutation queue, timer, debugger, and script lifecycle clusters move behind `ScriptingContext`.
 - `§0-7-d-ii` ~~`physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime.~~ **[critical]** `[x]`
   - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
-- `§0-7-d-iii` `scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state. **[high]** `[ ]`
-  - *Audit*: Convert DAP to an explicit server/session object so debugger lifecycle cannot leak across scripting shutdown/reinitialize cycles.
+- `§0-7-d-iii` ~~`scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state.~~ **[high]** `[x]`
+  - *Resolved*: DAP transport state now lives in an explicit `DapServerState` owner, start failure paths share the same cleanup path as `dap_stop()`, and `engine_integration_dap` verifies stop clears an accepted partial session before restart on the same port.
 - `§0-7-d-iv` `core::global_service_locator()` still exists for legacy callers, tests, and wrappers. **[high]** `[~]`
   - *Audit*: Runtime now has scoped registration, but global service access should keep shrinking toward explicit locator/context injection.
 - `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[ ]`
