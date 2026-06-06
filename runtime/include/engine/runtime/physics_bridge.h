@@ -76,16 +76,18 @@ void wake_body(World &world, Entity entity) noexcept;
 bool is_sleeping(const World &world, Entity entity) noexcept;
 
 /// Sets the requested value for convex hull data.
-bool set_convex_hull_data(Entity entity,
+bool set_convex_hull_data(World &world, Entity entity,
                           const physics::ConvexHullData &hull) noexcept;
 /// Returns the requested value for convex hull data.
-const physics::ConvexHullData *get_convex_hull_data(Entity entity) noexcept;
+const physics::ConvexHullData *get_convex_hull_data(
+    const World &world, Entity entity) noexcept;
 
 /// Sets the requested value for heightfield data.
-bool set_heightfield_data(Entity entity,
+bool set_heightfield_data(World &world, Entity entity,
                           const physics::HeightfieldData &hf) noexcept;
 /// Returns the requested value for heightfield data.
-const physics::HeightfieldData *get_heightfield_data(Entity entity) noexcept;
+const physics::HeightfieldData *get_heightfield_data(
+    const World &world, Entity entity) noexcept;
 
 // Physics queries (P1-M3-D)
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,

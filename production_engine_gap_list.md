@@ -112,8 +112,8 @@ These items do not represent missing *features* but rather defects or structural
 #### §0-7-d: Second ownership audit findings
 - `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, runtime bindings, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[ ]`
   - *Audit*: Split into an owned `ScriptingContext` and narrow modules before allowing multiple runtime/editor sessions or isolated tests.
-- `§0-7-d-ii` `physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime. **[critical]** `[ ]`
-  - *Audit*: Move shape data into `PhysicsContext` or world-owned component storage so scene resets and multiple worlds cannot share stale collision data.
+- `§0-7-d-ii` ~~`physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime.~~ **[critical]** `[x]`
+  - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
 - `§0-7-d-iii` `scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state. **[high]** `[ ]`
   - *Audit*: Convert DAP to an explicit server/session object so debugger lifecycle cannot leak across scripting shutdown/reinitialize cycles.
 - `§0-7-d-iv` `core::global_service_locator()` still exists for legacy callers, tests, and wrappers. **[high]** `[~]`

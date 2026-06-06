@@ -39,19 +39,6 @@ void wake_body(PhysicsWorldView &world, Entity entity) noexcept;
 /// Returns whether is sleeping.
 bool is_sleeping(const PhysicsWorldView &world, Entity entity) noexcept;
 
-/// Sets the requested value for convex hull data impl.
-bool set_convex_hull_data_impl(std::uint32_t entityIndex,
-                               const ConvexHullData &hull) noexcept;
-/// Returns the requested value for convex hull data impl.
-const ConvexHullData *
-get_convex_hull_data_impl(std::uint32_t entityIndex) noexcept;
-/// Sets the requested value for heightfield data impl.
-bool set_heightfield_data_impl(std::uint32_t entityIndex,
-                               const HeightfieldData &hf) noexcept;
-/// Returns the requested value for heightfield data impl.
-const HeightfieldData *
-get_heightfield_data_impl(std::uint32_t entityIndex) noexcept;
-
 } // namespace engine::physics
 
 namespace engine::runtime {
@@ -261,25 +248,29 @@ bool is_sleeping(const World &world, Entity entity) noexcept {
 }
 
 /// Sets the requested value for convex hull data.
-bool set_convex_hull_data(Entity entity,
+bool set_convex_hull_data(World &world, Entity entity,
                           const physics::ConvexHullData &hull) noexcept {
-  return physics::set_convex_hull_data_impl(entity.index, hull);
+  return physics::set_convex_hull_data(world.physics_context(), entity.index,
+                                       hull);
 }
 
 /// Returns the requested value for convex hull data.
-const physics::ConvexHullData *get_convex_hull_data(Entity entity) noexcept {
-  return physics::get_convex_hull_data_impl(entity.index);
+const physics::ConvexHullData *get_convex_hull_data(
+    const World &world, Entity entity) noexcept {
+  return physics::get_convex_hull_data(world.physics_context(), entity.index);
 }
 
 /// Sets the requested value for heightfield data.
-bool set_heightfield_data(Entity entity,
+bool set_heightfield_data(World &world, Entity entity,
                           const physics::HeightfieldData &hf) noexcept {
-  return physics::set_heightfield_data_impl(entity.index, hf);
+  return physics::set_heightfield_data(world.physics_context(), entity.index,
+                                       hf);
 }
 
 /// Returns the requested value for heightfield data.
-const physics::HeightfieldData *get_heightfield_data(Entity entity) noexcept {
-  return physics::get_heightfield_data_impl(entity.index);
+const physics::HeightfieldData *get_heightfield_data(
+    const World &world, Entity entity) noexcept {
+  return physics::get_heightfield_data(world.physics_context(), entity.index);
 }
 
 // ------ Physics Queries (P1-M3-D) -------------------------------------------

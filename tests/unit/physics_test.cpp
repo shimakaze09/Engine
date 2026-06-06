@@ -1768,7 +1768,7 @@ int check_convex_hull_vs_aabb_collision() {
   }
 
   // Assign hull data to the entity.
-  if (!engine::runtime::set_convex_hull_data(hullEnt, hull)) {
+  if (!engine::runtime::set_convex_hull_data(*world, hullEnt, hull)) {
     return 416;
   }
 
@@ -1849,7 +1849,7 @@ int check_raycast_hits_convex_hull() {
     return 434;
   }
 
-  if (!engine::runtime::set_convex_hull_data(ent, hull)) {
+  if (!engine::runtime::set_convex_hull_data(*world, ent, hull)) {
     return 435;
   }
 
@@ -1938,7 +1938,7 @@ int check_heightfield_vs_sphere_collision() {
     return 444;
   }
 
-  if (!engine::runtime::set_heightfield_data(terrain, hf)) {
+  if (!engine::runtime::set_heightfield_data(*world, terrain, hf)) {
     return 445;
   }
 
@@ -2010,7 +2010,7 @@ int check_raycast_hits_heightfield() {
   if (!world->add_collider(terrain, terrainCol)) {
     return 453;
   }
-  if (!engine::runtime::set_heightfield_data(terrain, hf)) {
+  if (!engine::runtime::set_heightfield_data(*world, terrain, hf)) {
     return 454;
   }
 
@@ -2034,6 +2034,71 @@ int check_raycast_hits_heightfield() {
   // Normal should point up.
   if (hit.normal.y < 0.9F) {
     return 457;
+  }
+
+  return 0;
+}
+
+/// Checks non-primitive collider payloads stay scoped to their World.
+int check_shape_payload_world_isolation() {
+  std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
+                                                     engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> worldB(new (std::nothrow)
+                                                     engine::runtime::World());
+  if ((worldA == nullptr) || (worldB == nullptr)) {
+    return 500;
+  }
+
+  worldA->end_frame_phase();
+  worldB->end_frame_phase();
+
+  const engine::runtime::Entity entityA = worldA->create_entity();
+  const engine::runtime::Entity entityB = worldB->create_entity();
+  if ((entityA == engine::runtime::kInvalidEntity) ||
+      (entityB == engine::runtime::kInvalidEntity)) {
+    return 501;
+  }
+  if (entityA.index != entityB.index) {
+    return 502;
+  }
+
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, hull)) {
+    return 503;
+  }
+  if (!engine::runtime::set_convex_hull_data(*worldA, entityA, hull)) {
+    return 504;
+  }
+  if (engine::runtime::get_convex_hull_data(*worldA, entityA) == nullptr) {
+    return 505;
+  }
+  if (engine::runtime::get_convex_hull_data(*worldB, entityB) != nullptr) {
+    return 506;
+  }
+
+  engine::physics::HeightfieldData hf{};
+  hf.rows = 2U;
+  hf.columns = 2U;
+  hf.spacingX = 1.0F;
+  hf.spacingZ = 1.0F;
+  if (!engine::runtime::set_heightfield_data(*worldB, entityB, hf)) {
+    return 507;
+  }
+  if (engine::runtime::get_heightfield_data(*worldB, entityB) == nullptr) {
+    return 508;
+  }
+  if (engine::runtime::get_heightfield_data(*worldA, entityA) != nullptr) {
+    return 509;
   }
 
   return 0;
@@ -2189,6 +2254,11 @@ int main() {
   }
 
   result = check_raycast_hits_heightfield();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_shape_payload_world_isolation();
   if (result != 0) {
     return result;
   }

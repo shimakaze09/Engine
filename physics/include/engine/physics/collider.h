@@ -12,8 +12,8 @@ namespace engine::physics {
 
 // Convex hull: up to 64 faces (plane normals + offsets) and 128 vertices.
 // The AABB cache is stored in the Collider::halfExtents of the matching
-// entity.  ConvexHullData lives in the physics module, not the runtime
-// World, to keep the runtime data model simple.
+// entity.  ConvexHullData payloads are stored in PhysicsContext so World
+// lifetime owns non-primitive collider data.
 struct ConvexHullData final {
   static constexpr std::size_t kMaxPlanes = 64U;
   static constexpr std::size_t kMaxVertices = 128U;

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <new>
 
 #include "engine/math/aabb.h"
 #include "engine/math/quat.h"
@@ -24,71 +25,142 @@
 
 namespace engine::physics {
 
-// Storage for convex hull data.  Limited to 256 active hulls.
-// Maps entity index → hull slot.
-static constexpr std::size_t kMaxConvexHulls = 256U;
-static std::array<ConvexHullData, kMaxConvexHulls> g_convexHullData{};
-static std::array<std::uint32_t, kMaxConvexHulls> g_convexHullEntityIndex{};
-static std::size_t g_convexHullCount = 0U;
+PhysicsContext::PhysicsContext() noexcept
+    : shapeStore(new (std::nothrow) PhysicsShapeStore()) {}
+
+PhysicsContext::PhysicsContext(const PhysicsContext &other) noexcept
+    : PhysicsContext() {
+  *this = other;
+}
+
+PhysicsContext &PhysicsContext::operator=(
+    const PhysicsContext &other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+
+  gravity = other.gravity;
+  joints = other.joints;
+  jointCount = other.jointCount;
+  collisionPairData = other.collisionPairData;
+  collisionPairCount = other.collisionPairCount;
+  collisionDispatch = other.collisionDispatch;
+  pairHashKeys = other.pairHashKeys;
+  pairHashStamps = other.pairHashStamps;
+  pairHashGeneration = other.pairHashGeneration;
+  testedStamps = other.testedStamps;
+  testedGeneration = other.testedGeneration;
+
+  if (other.shapeStore == nullptr) {
+    shapeStore.reset();
+  } else {
+    if (shapeStore == nullptr) {
+      shapeStore.reset(new (std::nothrow) PhysicsShapeStore());
+    }
+    if (shapeStore != nullptr) {
+      *shapeStore = *other.shapeStore;
+    }
+  }
+
+  return *this;
+}
 
 /// Finds the matching object or resource for hull data.
-ConvexHullData *find_hull_data(std::uint32_t entityIndex) noexcept {
-  for (std::size_t i = 0U; i < g_convexHullCount; ++i) {
-    if (g_convexHullEntityIndex[i] == entityIndex) {
-      return &g_convexHullData[i];
+ConvexHullData *find_hull_data(PhysicsContext &context,
+                               std::uint32_t entityIndex) noexcept {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < store->convexHullCount; ++i) {
+    if (store->convexHullEntityIndex[i] == entityIndex) {
+      return &store->convexHullData[i];
+    }
+  }
+  return nullptr;
+}
+
+/// Finds the matching object or resource for hull data.
+const ConvexHullData *find_hull_data(const PhysicsContext &context,
+                                     std::uint32_t entityIndex) noexcept {
+  const PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < store->convexHullCount; ++i) {
+    if (store->convexHullEntityIndex[i] == entityIndex) {
+      return &store->convexHullData[i];
     }
   }
   return nullptr;
 }
 
 /// Handles allocate hull data.
-ConvexHullData *allocate_hull_data(std::uint32_t entityIndex) noexcept {
-  ConvexHullData *existing = find_hull_data(entityIndex);
+ConvexHullData *allocate_hull_data(PhysicsContext &context,
+                                   std::uint32_t entityIndex) noexcept {
+  ConvexHullData *existing = find_hull_data(context, entityIndex);
   if (existing != nullptr) {
     return existing;
   }
-  if (g_convexHullCount >= kMaxConvexHulls) {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || (store->convexHullCount >= kMaxConvexHulls)) {
     return nullptr;
   }
-  g_convexHullEntityIndex[g_convexHullCount] = entityIndex;
-  g_convexHullData[g_convexHullCount] = ConvexHullData{};
-  return &g_convexHullData[g_convexHullCount++];
+  store->convexHullEntityIndex[store->convexHullCount] = entityIndex;
+  store->convexHullData[store->convexHullCount] = ConvexHullData{};
+  return &store->convexHullData[store->convexHullCount++];
 }
 
-// Storage for heightfield data.  Limited to 16 active heightfields.
-static constexpr std::size_t kMaxHeightfields = 16U;
-static std::array<HeightfieldData, kMaxHeightfields> g_heightfieldData{};
-static std::array<std::uint32_t, kMaxHeightfields> g_heightfieldEntityIndex{};
-static std::size_t g_heightfieldCount = 0U;
+/// Finds the matching object or resource for heightfield data.
+HeightfieldData *find_heightfield_data(PhysicsContext &context,
+                                       std::uint32_t entityIndex) noexcept {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < store->heightfieldCount; ++i) {
+    if (store->heightfieldEntityIndex[i] == entityIndex) {
+      return &store->heightfieldData[i];
+    }
+  }
+  return nullptr;
+}
 
 /// Finds the matching object or resource for heightfield data.
-HeightfieldData *find_heightfield_data(std::uint32_t entityIndex) noexcept {
-  for (std::size_t i = 0U; i < g_heightfieldCount; ++i) {
-    if (g_heightfieldEntityIndex[i] == entityIndex) {
-      return &g_heightfieldData[i];
+const HeightfieldData *find_heightfield_data(const PhysicsContext &context,
+                                             std::uint32_t entityIndex) noexcept {
+  const PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < store->heightfieldCount; ++i) {
+    if (store->heightfieldEntityIndex[i] == entityIndex) {
+      return &store->heightfieldData[i];
     }
   }
   return nullptr;
 }
 
 /// Handles allocate heightfield data.
-HeightfieldData *allocate_heightfield_data(std::uint32_t entityIndex) noexcept {
-  HeightfieldData *existing = find_heightfield_data(entityIndex);
+HeightfieldData *allocate_heightfield_data(PhysicsContext &context,
+                                           std::uint32_t entityIndex) noexcept {
+  HeightfieldData *existing = find_heightfield_data(context, entityIndex);
   if (existing != nullptr) {
     return existing;
   }
-  if (g_heightfieldCount >= kMaxHeightfields) {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || (store->heightfieldCount >= kMaxHeightfields)) {
     return nullptr;
   }
-  g_heightfieldEntityIndex[g_heightfieldCount] = entityIndex;
-  g_heightfieldData[g_heightfieldCount] = HeightfieldData{};
-  return &g_heightfieldData[g_heightfieldCount++];
+  store->heightfieldEntityIndex[store->heightfieldCount] = entityIndex;
+  store->heightfieldData[store->heightfieldCount] = HeightfieldData{};
+  return &store->heightfieldData[store->heightfieldCount++];
 }
 
 // Public accessors used by the runtime bridge.
-bool set_convex_hull_data_impl(std::uint32_t entityIndex,
-                               const ConvexHullData &hull) noexcept {
-  ConvexHullData *slot = allocate_hull_data(entityIndex);
+bool set_convex_hull_data(PhysicsContext &context, std::uint32_t entityIndex,
+                          const ConvexHullData &hull) noexcept {
+  ConvexHullData *slot = allocate_hull_data(context, entityIndex);
   if (slot == nullptr) {
     return false;
   }
@@ -98,14 +170,15 @@ bool set_convex_hull_data_impl(std::uint32_t entityIndex,
 
 /// Returns the requested value for convex hull data impl.
 const ConvexHullData *
-get_convex_hull_data_impl(std::uint32_t entityIndex) noexcept {
-  return find_hull_data(entityIndex);
+get_convex_hull_data(const PhysicsContext &context,
+                     std::uint32_t entityIndex) noexcept {
+  return find_hull_data(context, entityIndex);
 }
 
 /// Sets the requested value for heightfield data impl.
-bool set_heightfield_data_impl(std::uint32_t entityIndex,
-                               const HeightfieldData &hf) noexcept {
-  HeightfieldData *slot = allocate_heightfield_data(entityIndex);
+bool set_heightfield_data(PhysicsContext &context, std::uint32_t entityIndex,
+                          const HeightfieldData &hf) noexcept {
+  HeightfieldData *slot = allocate_heightfield_data(context, entityIndex);
   if (slot == nullptr) {
     return false;
   }
@@ -115,8 +188,9 @@ bool set_heightfield_data_impl(std::uint32_t entityIndex,
 
 /// Returns the requested value for heightfield data impl.
 const HeightfieldData *
-get_heightfield_data_impl(std::uint32_t entityIndex) noexcept {
-  return find_heightfield_data(entityIndex);
+get_heightfield_data(const PhysicsContext &context,
+                     std::uint32_t entityIndex) noexcept {
+  return find_heightfield_data(context, entityIndex);
 }
 
 namespace {
@@ -743,8 +817,9 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
 } // namespace
 
 /// Returns the requested value for hull data ptr.
-const ConvexHullData *get_hull_data_ptr(std::uint32_t entityIndex) noexcept {
-  return find_hull_data(entityIndex);
+const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
+                                        std::uint32_t entityIndex) noexcept {
+  return find_hull_data(context, entityIndex);
 }
 
 // Forward declaration — step_physics delegates to step_physics_range.
@@ -1105,7 +1180,8 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                 const Entity hfEnt = aIsHF ? entityA : entityB;
                 const Collider &objCol = aIsHF ? colliderB : colliderA;
 
-                const HeightfieldData *hf = find_heightfield_data(hfEnt.index);
+                const HeightfieldData *hf =
+                    find_heightfield_data(physicsCtx, hfEnt.index);
                 if (hf == nullptr) {
                   continue;
                 }
@@ -1307,11 +1383,11 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                 const void *dataA = nullptr;
                 const void *dataB = nullptr;
 
-                auto fill_data = [](const Collider &col, Entity ent,
-                                    float *storage) -> const void * {
+                auto fill_data = [&physicsCtx](const Collider &col, Entity ent,
+                                                float *storage) -> const void * {
                   switch (col.shape) {
                   case ColliderShape::ConvexHull:
-                    return find_hull_data(ent.index);
+                    return find_hull_data(physicsCtx, ent.index);
                   case ColliderShape::Sphere:
                     storage[0] = col.halfExtents.x;
                     return storage;
@@ -2162,6 +2238,7 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return false;
   }
+  const PhysicsContext &physicsCtx = world.physics_context();
 
   const math::Ray ray{origin, direction};
   bool hit = false;
@@ -2191,14 +2268,15 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
         continue;
       }
     } else if (col.shape == ColliderShape::ConvexHull) {
-      const ConvexHullData *hull = find_hull_data(entities[i].index);
+      const ConvexHullData *hull = find_hull_data(physicsCtx, entities[i].index);
       if ((hull == nullptr) ||
           !ray_intersects_convex_hull(ray, transform.position, *hull, bestT, t,
                                       shapeNormal)) {
         continue;
       }
     } else if (col.shape == ColliderShape::Heightfield) {
-      const HeightfieldData *hf = find_heightfield_data(entities[i].index);
+      const HeightfieldData *hf =
+          find_heightfield_data(physicsCtx, entities[i].index);
       if ((hf == nullptr) ||
           !ray_intersects_heightfield(ray, transform.position, *hf, bestT, t,
                                       shapeNormal)) {
@@ -2261,6 +2339,7 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
     return 0U;
   }
+  const PhysicsContext &physicsCtx = world.physics_context();
 
   const math::Ray ray{origin, direction};
   std::size_t hitCount = 0U;
@@ -2286,14 +2365,15 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
         continue;
       }
     } else if (col.shape == ColliderShape::ConvexHull) {
-      const ConvexHullData *hull = find_hull_data(entities[i].index);
+      const ConvexHullData *hull = find_hull_data(physicsCtx, entities[i].index);
       if ((hull == nullptr) ||
           !ray_intersects_convex_hull(ray, transform.position, *hull,
                                       maxDistance, t, shapeNormal)) {
         continue;
       }
     } else if (col.shape == ColliderShape::Heightfield) {
-      const HeightfieldData *hf = find_heightfield_data(entities[i].index);
+      const HeightfieldData *hf =
+          find_heightfield_data(physicsCtx, entities[i].index);
       if ((hf == nullptr) ||
           !ray_intersects_heightfield(ray, transform.position, *hf, maxDistance,
                                       t, shapeNormal)) {
