@@ -20,6 +20,7 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/deferred_mutations.cpp
     src/runtime_binding.cpp
     src/dap_server.cpp
     ${ENGINE_BINDGEN_OUTPUT}

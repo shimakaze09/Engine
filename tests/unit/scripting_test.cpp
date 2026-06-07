@@ -1013,6 +1013,70 @@ int main() {
     }
   }
 
+  {
+    const engine::runtime::Entity target = world->create_entity();
+    if (target == engine::runtime::kInvalidEntity) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 101;
+    }
+    engine::runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "%s", "queued_target");
+    if (!world->add_name_component(target, name)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 102;
+    }
+
+    const char *deferredClearScript =
+        "function queue_name_change()\n"
+        "  local e = engine.find_entity_by_name('queued_target')\n"
+        "  if e == nil then error('target missing') end\n"
+        "  engine.set_name(e, 'queued_before_shutdown')\n"
+        "end\n";
+    if (!write_script_file(deferredClearScript) ||
+        !engine::scripting::load_script(kTempScriptPath)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 103;
+    }
+
+    world->begin_update_phase();
+    const bool queued = engine::scripting::call_script_function(
+        "queue_name_change");
+    engine::scripting::shutdown_scripting();
+    world->commit_update_phase();
+    world->end_frame_phase();
+    if (!queued) {
+      remove_script_file();
+      return 104;
+    }
+
+    if (!engine::scripting::initialize_scripting()) {
+      remove_script_file();
+      return 105;
+    }
+    engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
+
+    engine::runtime::NameComponent beforeFlush{};
+    if (!world->get_name_component(target, &beforeFlush) ||
+        std::strcmp(beforeFlush.name, "queued_target") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 106;
+    }
+
+    engine::scripting::flush_deferred_mutations();
+    engine::runtime::NameComponent afterFlush{};
+    if (!world->get_name_component(target, &afterFlush) ||
+        std::strcmp(afterFlush.name, "queued_target") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 107;
+    }
+  }
+
   if (serviceLocator.get_service<engine::runtime::World>() != world.get()) {
     engine::scripting::shutdown_scripting();
     remove_script_file();
