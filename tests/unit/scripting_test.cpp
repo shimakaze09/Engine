@@ -75,7 +75,8 @@ int main() {
     return 2;
   }
 
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   constexpr std::uint32_t kDefaultMeshAssetId = 777U;
   engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
 
@@ -1012,7 +1013,6 @@ int main() {
     }
   }
 
-  auto &serviceLocator = engine::core::global_service_locator();
   if (serviceLocator.get_service<engine::runtime::World>() != world.get()) {
     engine::scripting::shutdown_scripting();
     remove_script_file();
@@ -1050,7 +1050,7 @@ int main() {
     return 98;
   }
 
-  engine::runtime::unbind_scripting_runtime();
+  engine::runtime::unbind_scripting_runtime(localLocator);
   if (localLocator.get_service<engine::runtime::World>() != nullptr) {
     engine::scripting::shutdown_scripting();
     remove_script_file();
@@ -1063,7 +1063,7 @@ int main() {
     return 100;
   }
 
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::shutdown_scripting();
   if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
     remove_script_file();

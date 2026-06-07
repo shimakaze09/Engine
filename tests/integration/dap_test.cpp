@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
@@ -416,7 +417,8 @@ bool test_dap_breakpoint_pause() noexcept {
     engine::scripting::shutdown_scripting();
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   const char *script = "engine.debugger_enable(true)\n"
                        "function dap_target()\n"

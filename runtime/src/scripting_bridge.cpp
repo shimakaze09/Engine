@@ -745,22 +745,10 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
 
 namespace runtime {
 
-/// Handles bind scripting runtime.
-void bind_scripting_runtime(World *world) noexcept {
-  scripting::bind_runtime_world(world);
-  scripting::bind_runtime_services(&kScriptingRuntimeServices);
-}
-
 /// Binds scripting runtime pointers into an explicit service locator.
 void bind_scripting_runtime(World *world, core::ServiceLocator &locator) noexcept {
   scripting::bind_runtime_world(world, locator);
   scripting::bind_runtime_services(&kScriptingRuntimeServices, locator);
-}
-
-/// Clears scripting runtime bindings from scripting and the service locator.
-void unbind_scripting_runtime() noexcept {
-  scripting::bind_runtime_world(nullptr);
-  scripting::bind_runtime_services(nullptr);
 }
 
 /// Clears scripting runtime bindings from an explicit service locator.

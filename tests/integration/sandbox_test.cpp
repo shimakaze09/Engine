@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -45,7 +46,8 @@ bool test_io_blocked() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   // Ensure sandbox is enabled.
   engine::scripting::set_sandbox_enabled(true);
@@ -88,7 +90,8 @@ bool test_safe_globals_available() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_sandbox_enabled(true);
 
@@ -126,7 +129,8 @@ bool test_instruction_limit() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_sandbox_enabled(true);
   // Set a low instruction limit for the test.
@@ -161,7 +165,8 @@ bool test_memory_limit() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_sandbox_enabled(true);
   // Set a small memory limit (256KB).
@@ -201,7 +206,8 @@ bool test_debug_blocked() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_sandbox_enabled(true);
 

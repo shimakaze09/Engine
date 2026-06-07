@@ -17,4 +17,7 @@ struct ScriptingRuntimeBinding final {
 /// Returns the process-local runtime binding state for scripting internals.
 ScriptingRuntimeBinding &runtime_binding() noexcept;
 
+/// Clears runtime binding pointers and any locator entries they registered.
+void clear_runtime_binding() noexcept;
+
 } // namespace engine::scripting

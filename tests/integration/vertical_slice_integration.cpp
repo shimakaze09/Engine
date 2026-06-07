@@ -1,6 +1,7 @@
 // Verifies vertical slice integration behavior for the Engine test suite.
 
 #include "engine/core/job_system.h"
+#include "engine/core/service_locator.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/camera.h"
@@ -248,7 +249,8 @@ int main() {
     return fail(2);
   }
 
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   std::unique_ptr<engine::renderer::AssetDatabase> assetDatabase(
       new (std::nothrow) engine::renderer::AssetDatabase());

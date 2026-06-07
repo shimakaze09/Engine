@@ -117,20 +117,4 @@ void unregister_engine_subsystem_services(core::ServiceLocator &locator) noexcep
   static_cast<void>(locator.remove_service<World>());
 }
 
-/// Registers engine subsystem services into the legacy global locator.
-bool register_engine_subsystem_services(
-    World *world, EnginePhysicsService *physicsService,
-    EngineAudioService *audioService,
-    EngineAssetDatabaseService *assetDatabaseService,
-    EngineRendererService *rendererService) noexcept {
-  return register_engine_subsystem_services(
-      core::global_service_locator(), world, physicsService, audioService,
-      assetDatabaseService, rendererService);
-}
-
-/// Removes engine subsystem services from the legacy global locator.
-void unregister_engine_subsystem_services() noexcept {
-  unregister_engine_subsystem_services(core::global_service_locator());
-}
-
 } // namespace engine::runtime

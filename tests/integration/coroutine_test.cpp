@@ -7,6 +7,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -58,7 +59,8 @@ bool test_wait_seconds() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   const char *script = "function on_start()\n"
@@ -120,7 +122,8 @@ bool test_wait_frames() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   const char *script = "function on_start()\n"
@@ -179,7 +182,8 @@ bool test_wait_until() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   // The condition checks a global flag. We set it from Lua after a few ticks.
@@ -243,7 +247,8 @@ bool test_chained_waits() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   const char *script = "function on_start()\n"
@@ -318,7 +323,8 @@ bool test_error_handling() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   const char *script =
@@ -372,7 +378,8 @@ bool test_clear() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   const char *script = "function on_start()\n"

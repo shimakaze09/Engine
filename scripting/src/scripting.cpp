@@ -5714,8 +5714,7 @@ void shutdown_scripting() noexcept {
     g_state = nullptr;
   }
 
-  bind_runtime_world(nullptr);
-  bind_runtime_services(nullptr);
+  clear_runtime_binding();
   g_defaultMeshAssetId = 0ULL;
   g_builtinPlaneMesh = 0ULL;
   g_builtinCubeMesh = 0ULL;

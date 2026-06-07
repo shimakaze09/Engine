@@ -5,6 +5,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -148,9 +149,10 @@ int main() {
   }
 
   g_testWorld = world.get();
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   auto svc = build_test_services();
-  engine::scripting::bind_runtime_services(&svc);
+  engine::scripting::bind_runtime_services(&svc, serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   int failures = 0;

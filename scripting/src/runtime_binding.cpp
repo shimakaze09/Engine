@@ -18,11 +18,6 @@ ScriptingRuntimeBinding &binding_storage() noexcept {
 /// Returns the process-local runtime binding state for scripting internals.
 ScriptingRuntimeBinding &runtime_binding() noexcept { return binding_storage(); }
 
-/// Binds scripting to a runtime world and mirrors the binding in services.
-void bind_runtime_world(runtime::World *world) noexcept {
-  bind_runtime_world(world, core::global_service_locator());
-}
-
 /// Binds scripting to a runtime world and mirrors it in an explicit locator.
 void bind_runtime_world(runtime::World *world,
                         core::ServiceLocator &locator) noexcept {
@@ -41,11 +36,6 @@ void bind_runtime_world(runtime::World *world,
     static_cast<void>(target->remove_service<runtime::World>());
     binding.worldLocator = nullptr;
   }
-}
-
-/// Binds scripting runtime callbacks and unregisters them on null.
-void bind_runtime_services(const RuntimeServices *services) noexcept {
-  bind_runtime_services(services, core::global_service_locator());
 }
 
 /// Binds scripting runtime callbacks and unregisters them on null.
@@ -69,6 +59,22 @@ void bind_runtime_services(const RuntimeServices *services,
     static_cast<void>(target->remove_service<RuntimeServices>());
     binding.servicesLocator = nullptr;
   }
+}
+
+/// Clears runtime binding pointers and any locator entries they registered.
+void clear_runtime_binding() noexcept {
+  ScriptingRuntimeBinding &binding = runtime_binding();
+  if (binding.worldLocator != nullptr) {
+    static_cast<void>(binding.worldLocator->remove_service<runtime::World>());
+  }
+  if (binding.servicesLocator != nullptr) {
+    static_cast<void>(
+        binding.servicesLocator->remove_service<RuntimeServices>());
+  }
+  binding.world = nullptr;
+  binding.services = nullptr;
+  binding.worldLocator = nullptr;
+  binding.servicesLocator = nullptr;
 }
 
 } // namespace engine::scripting

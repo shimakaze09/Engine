@@ -99,7 +99,7 @@ These items do not represent missing *features* but rather defects or structural
 - `§0-7-b-ii` Pipeline initialization failures must tear down partial service/editor/scripting bindings. **[critical]** `[x]`
   - *Resolved*: initialization failure paths call `teardown()` after post-binding failures, so partial runtime/editor bindings are not left alive.
 - `§0-7-b-iii` Runtime subsystem and scripting service registrations must be scoped to the pipeline instance, not only to `core::global_service_locator()`. **[critical]** `[x]`
-  - *Resolved*: `EnginePipeline::Impl` owns a `ServiceLocator` and `EngineServiceRegistry`; scripting runtime bindings register through the owned locator, and shutdown removes stale world/service entries. Legacy global wrappers remain for old callers and tests.
+  - *Resolved*: `EnginePipeline::Impl` owns a `ServiceLocator` and `EngineServiceRegistry`; scripting runtime bindings register through the owned locator, shutdown removes stale world/service entries, and legacy global wrappers were removed.
 
 #### §0-7-c: Renderer, streaming, and validation hardening
 - `§0-7-c-i` Asset streaming callbacks must run through an actual worker queue instead of only polling synchronously on the main thread. **[high]** `[x]`
@@ -117,8 +117,8 @@ These items do not represent missing *features* but rather defects or structural
   - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
 - `§0-7-d-iii` ~~`scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state.~~ **[high]** `[x]`
   - *Resolved*: DAP transport state now lives in an explicit `DapServerState` owner, start failure paths share the same cleanup path as `dap_stop()`, and `engine_integration_dap` verifies stop clears an accepted partial session before restart on the same port.
-- `§0-7-d-iv` `core::global_service_locator()` still exists for legacy callers, tests, and wrappers. **[high]** `[~]`
-  - *Audit*: Runtime now has scoped registration, but global service access should keep shrinking toward explicit locator/context injection.
+- `§0-7-d-iv` ~~`core::global_service_locator()` still exists for legacy callers, tests, and wrappers.~~ **[high]** `[x]`
+  - *Resolved*: Runtime and scripting bridge callers now bind through explicit `ServiceLocator` instances; legacy global register/bind wrappers were removed, and tests no longer rely on the global locator except for the core singleton API coverage.
 - `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[ ]`
   - *Audit*: Current largest files include `scripting.cpp` (~5702 lines after the runtime binding split), `command_buffer.cpp` (~4509), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
 

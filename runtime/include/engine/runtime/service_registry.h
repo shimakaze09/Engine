@@ -85,14 +85,4 @@ bool register_engine_subsystem_services(
 /// Removes engine subsystem services from an explicit service locator.
 void unregister_engine_subsystem_services(core::ServiceLocator &locator) noexcept;
 
-/// Registers engine subsystem services into the legacy global locator.
-bool register_engine_subsystem_services(
-    World *world, EnginePhysicsService *physicsService,
-    EngineAudioService *audioService,
-    EngineAssetDatabaseService *assetDatabaseService,
-    EngineRendererService *rendererService) noexcept;
-
-/// Removes engine subsystem services from the legacy global locator.
-void unregister_engine_subsystem_services() noexcept;
-
 } // namespace engine::runtime

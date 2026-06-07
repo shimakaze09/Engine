@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -47,7 +48,8 @@ bool test_generated_bindings() noexcept {
     engine::scripting::shutdown_scripting();
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_frame_time(0.016F, 1.0F);
   engine::scripting::set_frame_index(60U);

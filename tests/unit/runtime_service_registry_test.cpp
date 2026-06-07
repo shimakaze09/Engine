@@ -31,8 +31,6 @@ void check(bool condition, const char *name) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  auto &globalLoc = engine::core::global_service_locator();
-  globalLoc.clear();
   engine::core::ServiceLocator loc{};
 
   std::unique_ptr<engine::runtime::World> world(
@@ -76,7 +74,6 @@ int main() {
             loc, world.get(), &physicsService, &audioService, &assetService,
             &rendererService),
         "register subsystem services");
-  check(globalLoc.count() == 0U, "explicit registry did not touch global");
 
   check(loc.get_service<engine::runtime::World>() == world.get(),
         "world registered");
@@ -119,16 +116,5 @@ int main() {
   check(loc.get_service<engine::runtime::World>() == nullptr,
         "world removed");
 
-  check(engine::runtime::register_engine_subsystem_services(
-            world.get(), &physicsService, &audioService, &assetService,
-            &rendererService),
-        "legacy register subsystem services");
-  check(globalLoc.get_service<engine::runtime::World>() == world.get(),
-        "legacy world registered");
-  engine::runtime::unregister_engine_subsystem_services();
-  check(globalLoc.get_service<engine::runtime::World>() == nullptr,
-        "legacy world removed");
-
-  globalLoc.clear();
   return g_failed == 0 ? 0 : 1;
 }
