@@ -123,11 +123,6 @@ int main() {
     engine::core::shutdown_core();
     return 27;
   }
-  engine::core::shutdown_core();
-
-  if (!engine::core::initialize_core(1024U * 1024U)) {
-    return 12;
-  }
 
   if (!engine::core::begin_frame_graph()) {
     engine::core::shutdown_core();
