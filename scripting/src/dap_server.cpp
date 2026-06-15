@@ -12,6 +12,7 @@ extern "C" {
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -135,6 +136,12 @@ struct DapServerState final {
   std::size_t recvUsed = 0U;
 };
 
+enum class DapMessageExtractResult : std::uint8_t {
+  NeedMore,
+  Complete,
+  Invalid,
+};
+
 /// Returns the default DAP server instance used by the legacy API wrappers.
 DapServerState &dap_server_state() noexcept {
   static DapServerState state{};
@@ -243,11 +250,20 @@ bool send_json_writer(core::JsonWriter &w) noexcept {
 }
 
 // Try to extract a complete DAP message from the receive buffer.
-// Returns the number of bytes consumed (0 if no complete message).
 // If successful, *outBody points into the receive buffer at the JSON start,
-// and *outBodyLen is the JSON length (not null-terminated).
-std::size_t try_extract_message(const char **outBody,
-                                std::size_t *outBodyLen) noexcept {
+// *outBodyLen is the JSON length, and *outConsumed is the frame size.
+DapMessageExtractResult try_extract_message(const char **outBody,
+                                            std::size_t *outBodyLen,
+                                            std::size_t *outConsumed) noexcept {
+  if ((outBody == nullptr) || (outBodyLen == nullptr) ||
+      (outConsumed == nullptr)) {
+    return DapMessageExtractResult::Invalid;
+  }
+
+  *outBody = nullptr;
+  *outBodyLen = 0U;
+  *outConsumed = 0U;
+
   DapServerState &state = dap_server_state();
   // Look for "Content-Length: <number>\r\n\r\n".
   const char *haystack = state.recvBuffer;
@@ -263,22 +279,7 @@ std::size_t try_extract_message(const char **outBody,
     }
   }
   if (found == nullptr) {
-    return 0U;
-  }
-
-  // Parse content length.
-  const char *numStart = found + needleLen;
-  int contentLength = 0;
-  {
-    // Parse integer manually to avoid sscanf deprecation on MSVC.
-    const char *p = numStart;
-    while (*p >= '0' && *p <= '9') {
-      contentLength = contentLength * 10 + (*p - '0');
-      ++p;
-    }
-    if (p == numStart || contentLength <= 0) {
-      return 0U;
-    }
+    return DapMessageExtractResult::NeedMore;
   }
 
   // Find the header/body separator "\r\n\r\n".
@@ -293,20 +294,53 @@ std::size_t try_extract_message(const char **outBody,
     }
   }
   if (sep == nullptr) {
-    return 0U;
+    return DapMessageExtractResult::NeedMore;
+  }
+
+  // Parse after the full header is present so malformed lengths can be
+  // rejected instead of being treated as incomplete frames forever.
+  const char *p = found + needleLen;
+  while ((*p == ' ') || (*p == '\t')) {
+    ++p;
+  }
+
+  std::size_t contentLength = 0U;
+  bool sawDigit = false;
+  while ((*p >= '0') && (*p <= '9')) {
+    const std::size_t digit = static_cast<std::size_t>(*p - '0');
+    if (contentLength >
+        (std::numeric_limits<std::size_t>::max() - digit) / 10U) {
+      return DapMessageExtractResult::Invalid;
+    }
+    contentLength = (contentLength * 10U) + digit;
+    sawDigit = true;
+    ++p;
+  }
+
+  while ((*p == ' ') || (*p == '\t')) {
+    ++p;
+  }
+
+  if (!sawDigit || (contentLength == 0U) || (*p != '\r')) {
+    return DapMessageExtractResult::Invalid;
   }
 
   const char *bodyStart = sep + 4;
   const std::size_t headerSize =
       static_cast<std::size_t>(bodyStart - state.recvBuffer);
-  const auto bodyLen = static_cast<std::size_t>(contentLength);
-  if (headerSize + bodyLen > state.recvUsed) {
-    return 0U; // Not enough data yet.
+  if ((headerSize > kRecvBufferSize) ||
+      (contentLength > (kRecvBufferSize - headerSize))) {
+    return DapMessageExtractResult::Invalid;
+  }
+
+  if (contentLength > (state.recvUsed - headerSize)) {
+    return DapMessageExtractResult::NeedMore;
   }
 
   *outBody = bodyStart;
-  *outBodyLen = bodyLen;
-  return headerSize + bodyLen;
+  *outBodyLen = contentLength;
+  *outConsumed = headerSize + contentLength;
+  return DapMessageExtractResult::Complete;
 }
 
 // Receive data from the client into the recv buffer.
@@ -971,11 +1005,15 @@ void dap_poll() noexcept {
     recv_into_buffer();
     const char *body = nullptr;
     std::size_t bodyLen = 0U;
-    const std::size_t consumed = try_extract_message(&body, &bodyLen);
-    if (consumed > 0U) {
+    std::size_t consumed = 0U;
+    const DapMessageExtractResult extractResult =
+        try_extract_message(&body, &bodyLen, &consumed);
+    if (extractResult == DapMessageExtractResult::Complete) {
       bool resume = false;
       process_message(body, bodyLen, nullptr, &resume);
       consume_recv_buffer(consumed);
+    } else if (extractResult == DapMessageExtractResult::Invalid) {
+      close_dap_client(state);
     }
   }
 }
@@ -1008,8 +1046,10 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
     // Try to extract from buffer first.
     const char *body = nullptr;
     std::size_t bodyLen = 0U;
-    std::size_t consumed = try_extract_message(&body, &bodyLen);
-    if (consumed > 0U) {
+    std::size_t consumed = 0U;
+    const DapMessageExtractResult extractResult =
+        try_extract_message(&body, &bodyLen, &consumed);
+    if (extractResult == DapMessageExtractResult::Complete) {
       bool resume = false;
       mode = process_message(body, bodyLen, L, &resume);
       consume_recv_buffer(consumed);
@@ -1017,6 +1057,11 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
         break;
       }
       continue;
+    }
+
+    if (extractResult == DapMessageExtractResult::Invalid) {
+      close_dap_client(state);
+      break;
     }
 
     // Need more data.

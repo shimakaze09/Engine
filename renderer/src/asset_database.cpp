@@ -550,7 +550,9 @@ std::size_t find_metadata_insert_slot(const AssetDatabase *database,
 /// Handles register asset metadata.
 bool register_asset_metadata(AssetDatabase *database,
                              const AssetMetadata &metadata) noexcept {
-  if ((database == nullptr) || (metadata.assetId == kInvalidAssetId)) {
+  if ((database == nullptr) || (metadata.assetId == kInvalidAssetId) ||
+      (metadata.tagCount > AssetMetadata::kMaxTags) ||
+      (metadata.dependencyCount > AssetMetadata::kMaxDependencies)) {
     return false;
   }
 

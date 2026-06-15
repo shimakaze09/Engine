@@ -124,6 +124,7 @@ struct WorldPhaseJobData final {
 /// Stores resolve collisions job data used by the engine.
 struct ResolveCollisionsJobData final {
   runtime::World *world = nullptr;
+  float deltaSeconds = 0.0F;
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
@@ -569,7 +570,7 @@ void resolve_collisions_job(void *userData) noexcept {
     return;
   }
 
-  if (!runtime::resolve_collisions(*jobData->world)) {
+  if (!runtime::resolve_collisions(*jobData->world, jobData->deltaSeconds)) {
     mark_graph_failed(jobData->frameGraphFailed);
   }
 }
@@ -1686,6 +1687,8 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
       }
 
       frameContext->resolveCollisionsJobData.world = world.get();
+      frameContext->resolveCollisionsJobData.deltaSeconds =
+          static_cast<float>(kFixedDeltaSeconds);
       frameContext->resolveCollisionsJobData.frameGraphFailed =
           &frameContext->frameGraphFailed;
       core::Job resolveJob{};

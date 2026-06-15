@@ -321,7 +321,10 @@ void touch_process_event(const void *nativeEvent) noexcept {
     const float y = event->tfinger.y;
     const float pressure = event->tfinger.pressure;
 
-    ActiveTouch *slot = find_empty_touch();
+    ActiveTouch *slot = find_touch(fingerId);
+    if (slot == nullptr) {
+      slot = find_empty_touch();
+    }
     if (slot != nullptr) {
       slot->touchId = fingerId;
       slot->x = x;
@@ -334,13 +337,19 @@ void touch_process_event(const void *nativeEvent) noexcept {
     }
 
     // Record timing for gesture recognition.
-    for (auto &timing : g_touchTimings) {
-      if (!timing.active) {
-        timing.touchId = fingerId;
-        timing.framesBegan = g_frameCounter;
-        timing.active = true;
-        break;
+    TouchTiming *timing = find_timing(fingerId);
+    if (timing == nullptr) {
+      for (auto &candidate : g_touchTimings) {
+        if (!candidate.active) {
+          timing = &candidate;
+          break;
+        }
       }
+    }
+    if (timing != nullptr) {
+      timing->touchId = fingerId;
+      timing->framesBegan = g_frameCounter;
+      timing->active = true;
     }
 
     TouchEvent te{};

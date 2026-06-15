@@ -15,7 +15,7 @@ bool step_physics(PhysicsWorldView &world, float deltaSeconds) noexcept;
 bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept;
 /// Handles resolve collisions.
-bool resolve_collisions(PhysicsWorldView &world) noexcept;
+bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept;
 /// Sets the requested value for gravity.
 void set_gravity(PhysicsWorldView &world, float x, float y, float z) noexcept;
 /// Returns the requested value for gravity.
@@ -78,11 +78,11 @@ bool step_physics_range(World &world, std::size_t startIndex, std::size_t count,
 }
 
 /// Handles resolve collisions.
-bool resolve_collisions(World &world) noexcept {
+bool resolve_collisions(World &world, float deltaSeconds) noexcept {
   if (!require_phase(world, WorldPhase::Simulation, "resolve_collisions")) {
     return false;
   }
-  return physics::resolve_collisions(world);
+  return physics::resolve_collisions(world, deltaSeconds);
 }
 
 /// Sets the requested value for gravity.

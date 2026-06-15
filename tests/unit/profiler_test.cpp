@@ -239,6 +239,37 @@ bool test_double_buffer() noexcept {
   return true;
 }
 
+bool test_dropped_scope_does_not_pop_parent() noexcept {
+  if (!initialize_profiler()) {
+    return false;
+  }
+
+  profiler_begin_frame();
+  constexpr std::size_t kProfilerMaxDepth = 16U;
+  for (std::size_t i = 0U; i < kProfilerMaxDepth; ++i) {
+    if (!profiler_begin_scope("depth")) {
+      shutdown_profiler();
+      return false;
+    }
+  }
+
+  {
+    ProfileScope dropped("overflow");
+  }
+
+  const bool pushedAfterDroppedScope = profiler_begin_scope("after_overflow");
+  if (pushedAfterDroppedScope) {
+    profiler_end_scope();
+  }
+  for (std::size_t i = 0U; i < kProfilerMaxDepth; ++i) {
+    profiler_end_scope();
+  }
+  profiler_end_frame();
+
+  shutdown_profiler();
+  return !pushedAfterDroppedScope;
+}
+
 /// Handles test null out.
 bool test_null_out() noexcept {
   if (!initialize_profiler()) {
@@ -290,6 +321,8 @@ int main() {
   run("profile_scope_macro_alias", &test_profile_scope_macro_alias);
   run("flame_layout_helper", &test_flame_layout_helper);
   run("double_buffer", &test_double_buffer);
+  run("dropped_scope_does_not_pop_parent",
+      &test_dropped_scope_does_not_pop_parent);
   run("null_out", &test_null_out);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

@@ -685,6 +685,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   const std::size_t vertexCount =
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
+  const std::string escapedInputPath =
+      engine::tools::escape_json_string(inputPath);
+  const std::string escapedOutputPath =
+      engine::tools::escape_json_string(outputPath);
 
   // Compute output file size.
   std::uint64_t outputFileSize = 0ULL;
@@ -720,7 +724,8 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
       "  \"indexCount\": %zu,\n"
       "  \"tags\": [],\n"
       "  \"dependencies\": [\n",
-      static_cast<unsigned long long>(sourceHash), inputPath, outputPath,
+      static_cast<unsigned long long>(sourceHash), escapedInputPath.c_str(),
+      escapedOutputPath.c_str(),
       data.hasUVs ? engine::core::kMeshAssetVersion2
                   : engine::core::kMeshAssetVersion,
       static_cast<unsigned long long>(sourceHash),
@@ -728,9 +733,11 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
 
   for (std::size_t i = 0U; i < dependencies.size(); ++i) {
     const DependencyDigest &dependency = dependencies[i];
+    const std::string escapedDependencyPath =
+        engine::tools::escape_json_string(dependency.path.c_str());
     written += std::fprintf(
         metadataFile, "    { \"path\": \"%s\", \"hash\": \"%016llx\" }%s\n",
-        dependency.path.c_str(),
+        escapedDependencyPath.c_str(),
         static_cast<unsigned long long>(dependency.hash),
         (i + 1U < dependencies.size()) ? "," : "");
   }
@@ -898,15 +905,24 @@ static void build_checksum_path(const char *thumbPath, char *checksumPath,
 // Read stored checksum from sidecar file. Returns false if file not found.
 static bool read_thumbnail_checksum(const char *checksumPath,
                                     std::uint64_t *outHash) noexcept {
+  if ((checksumPath == nullptr) || (outHash == nullptr)) {
+    return false;
+  }
+
   FILE *f = std::fopen(checksumPath, "r");
   if (f == nullptr) {
     return false;
   }
-  const int scanned =
-      std::fscanf(f, "%llu", // NOLINT
-                  reinterpret_cast<unsigned long long *>(outHash));
+
+  unsigned long long parsedHash = 0ULL;
+  const int scanned = std::fscanf(f, "%llu", &parsedHash); // NOLINT
   std::fclose(f);
-  return scanned == 1;
+  if (scanned != 1) {
+    return false;
+  }
+
+  *outHash = static_cast<std::uint64_t>(parsedHash);
+  return true;
 }
 
 // Write checksum to sidecar file.

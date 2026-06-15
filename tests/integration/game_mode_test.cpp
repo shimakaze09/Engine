@@ -213,28 +213,40 @@ static bool test_game_state_remove_and_clear() noexcept {
 /// Handles test player controller array.
 static bool test_player_controller_array() noexcept {
   engine::runtime::PlayerControllerArray pca;
+  constexpr engine::runtime::Entity kEntityA{42U, 1U};
+  constexpr engine::runtime::Entity kEntityARecycled{42U, 2U};
+  constexpr engine::runtime::Entity kEntityB{99U, 1U};
 
-  check(pca.set_controlled_entity(0, 42U), "set player 0 entity 42");
-  check(pca.get_controlled_entity(0) == 42U, "get player 0");
+  check(pca.set_controlled_entity(0, kEntityA), "set player 0 entity 42");
+  check(pca.get_controlled_entity(0) == kEntityA, "get player 0");
+  check(pca.get_controlled_entity_index(0) == 42U, "get player 0 index");
   check(pca.controllers[0].active, "player 0 active");
 
-  check(pca.set_controlled_entity(3, 99U), "set player 3 entity 99");
-  check(pca.get_controlled_entity(3) == 99U, "get player 3");
+  check(pca.set_controlled_entity(3, kEntityB), "set player 3 entity 99");
+  check(pca.get_controlled_entity(3) == kEntityB, "get player 3");
 
   // Out of range
-  check(!pca.set_controlled_entity(4, 1U), "set player 4 OOB");
-  check(pca.get_controlled_entity(4) == 0U, "get player 4 OOB");
+  check(!pca.set_controlled_entity(4, kEntityA), "set player 4 OOB");
+  check(pca.get_controlled_entity(4) == engine::runtime::kInvalidEntity,
+        "get player 4 OOB");
 
-  // Entity destroyed
-  pca.on_entity_destroyed(42U);
-  check(pca.get_controlled_entity(0) == 0U, "player 0 cleared on destroy");
+  // Recycled entity indices must not clear a controller for another generation.
+  pca.on_entity_destroyed(kEntityARecycled);
+  check(pca.get_controlled_entity(0) == kEntityA,
+        "player 0 ignores recycled generation");
+
+  pca.on_entity_destroyed(kEntityA);
+  check(pca.get_controlled_entity(0) == engine::runtime::kInvalidEntity,
+        "player 0 cleared on destroy");
   check(!pca.controllers[0].active, "player 0 inactive after destroy");
-  check(pca.get_controlled_entity(3) == 99U, "player 3 unaffected");
+  check(pca.get_controlled_entity(3) == kEntityB, "player 3 unaffected");
 
   // Reset
   pca.reset();
-  check(pca.get_controlled_entity(0) == 0U, "reset player 0");
-  check(pca.get_controlled_entity(3) == 0U, "reset player 3");
+  check(pca.get_controlled_entity(0) == engine::runtime::kInvalidEntity,
+        "reset player 0");
+  check(pca.get_controlled_entity(3) == engine::runtime::kInvalidEntity,
+        "reset player 3");
   return true;
 }
 

@@ -66,6 +66,12 @@ bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
   return true;
 }
 
+/// Returns whether a deferred mutation still targets the same live entity.
+bool is_deferred_entity_current(runtime::World *world,
+                                runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->is_alive(entity);
+}
+
 } // namespace
 
 /// Returns whether script-driven world mutations may run immediately.
@@ -371,11 +377,16 @@ void flush_deferred_mutations() noexcept {
     const DeferredMutation &mutation = g_deferredMutations[i];
     switch (mutation.type) {
     case DeferredMutationType::DestroyEntity:
-      static_cast<void>(
-          binding.services->destroy_entity_op(binding.world,
-                                              mutation.entity.index));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(
+            binding.services->destroy_entity_op(binding.world,
+                                                mutation.entity.index));
+      }
       break;
     case DeferredMutationType::SetTransform: {
+      if (!is_deferred_entity_current(binding.world, mutation.entity)) {
+        break;
+      }
       const bool transformUpdated = binding.services->add_transform_op(
           binding.world, mutation.entity.index, mutation.transform);
       if (transformUpdated && mutation.setMovementAuthority) {
@@ -385,70 +396,78 @@ void flush_deferred_mutations() noexcept {
       break;
     }
     case DeferredMutationType::AddRigidBody:
-      static_cast<void>(binding.services->add_rigid_body_op(
-          binding.world, mutation.entity.index, mutation.rigidBody));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->add_rigid_body_op(
+            binding.world, mutation.entity.index, mutation.rigidBody));
+      }
       break;
     case DeferredMutationType::AddCollider:
-      static_cast<void>(binding.services->add_collider_op(
-          binding.world, mutation.entity.index, mutation.collider));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->add_collider_op(
+            binding.world, mutation.entity.index, mutation.collider));
+      }
       break;
     case DeferredMutationType::AddMeshComponent:
-      static_cast<void>(binding.services->add_mesh_component_op(
-          binding.world, mutation.entity.index, mutation.meshComponent));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->add_mesh_component_op(
+            binding.world, mutation.entity.index, mutation.meshComponent));
+      }
       break;
     case DeferredMutationType::AddNameComponent:
-      static_cast<void>(binding.services->add_name_component_op(
-          binding.world, mutation.entity.index, mutation.nameComponent));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->add_name_component_op(
+            binding.world, mutation.entity.index, mutation.nameComponent));
+      }
       break;
     case DeferredMutationType::AddLightComponent:
-      static_cast<void>(binding.services->add_light_component_op(
-          binding.world, mutation.entity.index, mutation.lightComponent));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->add_light_component_op(
+            binding.world, mutation.entity.index, mutation.lightComponent));
+      }
       break;
     case DeferredMutationType::RemoveLightComponent:
-      static_cast<void>(binding.services->remove_light_component_op(
-          binding.world, mutation.entity.index));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->remove_light_component_op(
+            binding.world, mutation.entity.index));
+      }
       break;
     case DeferredMutationType::AddScriptComponent:
-      static_cast<void>(binding.services->add_script_component_op(
-          binding.world, mutation.entity.index, mutation.scriptComponent));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->add_script_component_op(
+            binding.world, mutation.entity.index, mutation.scriptComponent));
+      }
       break;
     case DeferredMutationType::RemoveScriptComponent:
-      static_cast<void>(binding.services->remove_script_component_op(
-          binding.world, mutation.entity.index));
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        static_cast<void>(binding.services->remove_script_component_op(
+            binding.world, mutation.entity.index));
+      }
       break;
     case DeferredMutationType::AddPointLightComponent: {
-      const runtime::Entity resolved =
-          binding.world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
         static_cast<void>(binding.world->add_point_light_component(
-            resolved, mutation.pointLightComponent));
+            mutation.entity, mutation.pointLightComponent));
       }
       break;
     }
     case DeferredMutationType::RemovePointLightComponent: {
-      const runtime::Entity resolved =
-          binding.world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
         static_cast<void>(
-            binding.world->remove_point_light_component(resolved));
+            binding.world->remove_point_light_component(mutation.entity));
       }
       break;
     }
     case DeferredMutationType::AddSpotLightComponent: {
-      const runtime::Entity resolved =
-          binding.world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
         static_cast<void>(binding.world->add_spot_light_component(
-            resolved, mutation.spotLightComponent));
+            mutation.entity, mutation.spotLightComponent));
       }
       break;
     }
     case DeferredMutationType::RemoveSpotLightComponent: {
-      const runtime::Entity resolved =
-          binding.world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
+      if (is_deferred_entity_current(binding.world, mutation.entity)) {
         static_cast<void>(
-            binding.world->remove_spot_light_component(resolved));
+            binding.world->remove_spot_light_component(mutation.entity));
       }
       break;
     }

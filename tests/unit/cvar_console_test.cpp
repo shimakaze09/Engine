@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <atomic>
+#include <thread>
 
 #include "engine/core/console.h"
 #include "engine/core/cvar.h"
@@ -167,6 +169,41 @@ static bool test_cvar_enumerate() noexcept {
   return true;
 }
 
+static bool test_cvar_null_names_after_registration() noexcept {
+  initialize_cvars();
+  cvar_register_bool("null.b", true, "d");
+  cvar_register_int("null.i", 5, "d");
+  cvar_register_float("null.f", 1.0F, "d");
+  cvar_register_string("null.s", "value", "d");
+
+  if (!cvar_get_bool(nullptr, true)) {
+    shutdown_cvars();
+    return false;
+  }
+  if (cvar_get_int(nullptr, 17) != 17) {
+    shutdown_cvars();
+    return false;
+  }
+  if (cvar_get_float(nullptr, 2.0F) != 2.0F) {
+    shutdown_cvars();
+    return false;
+  }
+  if (std::strcmp(cvar_get_string(nullptr, "fallback"), "fallback") != 0) {
+    shutdown_cvars();
+    return false;
+  }
+  if (cvar_set_bool(nullptr, false) || cvar_set_int(nullptr, 9) ||
+      cvar_set_float(nullptr, 3.0F) ||
+      cvar_set_string(nullptr, "new") ||
+      cvar_set_from_string(nullptr, "new")) {
+    shutdown_cvars();
+    return false;
+  }
+
+  shutdown_cvars();
+  return true;
+}
+
 // ---- Console tests ----
 
 static bool test_console_basic_execute() noexcept {
@@ -296,6 +333,85 @@ static bool test_console_output_ring_buffer() noexcept {
   return true;
 }
 
+static bool test_cvar_console_threaded_access() noexcept {
+  initialize_cvars();
+  cvar_register_int("thread.i", 0, "threaded int");
+  cvar_register_string("thread.s", "start", "threaded string");
+  initialize_console();
+
+  std::atomic<int> commandCalls{0};
+  std::atomic<bool> ok{true};
+
+  auto command = [](const char *const * /*args*/, int /*argCount*/,
+                    void *userData) noexcept {
+    auto *counter = static_cast<std::atomic<int> *>(userData);
+    counter->fetch_add(1, std::memory_order_relaxed);
+    console_print("thread command");
+  };
+
+  if (!console_register_command("thread.ping", command, &commandCalls,
+                                "thread ping")) {
+    shutdown_console();
+    shutdown_cvars();
+    return false;
+  }
+
+  constexpr int kThreadCount = 4;
+  constexpr int kIterations = 64;
+  std::thread workers[kThreadCount];
+
+  for (int t = 0; t < kThreadCount; ++t) {
+    workers[t] = std::thread([t, &ok]() noexcept {
+      for (int i = 0; i < kIterations; ++i) {
+        char value[32] = {};
+        std::snprintf(value, sizeof(value), "t%d-%d", t, i);
+
+        if (!cvar_set_int("thread.i", (t * kIterations) + i)) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+        if (cvar_get_int("thread.i", -1) < 0) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+        if (!cvar_set_string("thread.s", value)) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+        if (cvar_get_string("thread.s", nullptr) == nullptr) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+
+        CVarInfo cvars[8] = {};
+        if (cvar_get_all(cvars, 8U) == 0U) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+
+        ConsoleCommandInfo commands[8] = {};
+        if (console_get_commands(commands, 8U) == 0U) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+
+        console_print("thread line");
+        if (!console_execute("thread.ping")) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+
+  for (std::thread &worker : workers) {
+    worker.join();
+  }
+
+  const bool passed =
+      ok.load(std::memory_order_relaxed) &&
+      (commandCalls.load(std::memory_order_relaxed) ==
+       (kThreadCount * kIterations)) &&
+      (console_output_line_count() > 0U);
+
+  shutdown_console();
+  shutdown_cvars();
+  return passed;
+}
+
 // ---- entry point ----
 
 int main() {
@@ -308,11 +424,14 @@ int main() {
       {"cvar_set_from_string", test_cvar_set_from_string},
       {"cvar_duplicate_rejected", test_cvar_duplicate_rejected},
       {"cvar_enumerate", test_cvar_enumerate},
+      {"cvar_null_names_after_registration",
+       test_cvar_null_names_after_registration},
       {"console_basic_execute", test_console_basic_execute},
       {"console_unknown_command", test_console_unknown_command},
       {"console_set_get_cvar", test_console_set_get_cvar},
       {"console_custom_command", test_console_custom_command},
       {"console_output_ring_buffer", test_console_output_ring_buffer},
+      {"cvar_console_threaded_access", test_cvar_console_threaded_access},
   };
 
   int failures = 0;

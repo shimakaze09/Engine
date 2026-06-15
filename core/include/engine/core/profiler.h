@@ -17,8 +17,8 @@ void profiler_begin_frame() noexcept;
 /// Handles profiler end frame.
 void profiler_end_frame() noexcept;
 
-/// Handles profiler begin scope.
-void profiler_begin_scope(const char *name) noexcept;
+/// Begins a profiler scope. Returns false if the scope was not recorded.
+bool profiler_begin_scope(const char *name) noexcept;
 /// Handles profiler end scope.
 void profiler_end_scope() noexcept;
 
@@ -30,6 +30,9 @@ struct ProfileScope final {
   ProfileScope(const ProfileScope &) = delete;
   /// Handles operator=.
   ProfileScope &operator=(const ProfileScope &) = delete;
+
+private:
+  bool m_active = false;
 };
 
 /// Stores profile entry data used by the engine.

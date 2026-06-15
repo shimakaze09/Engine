@@ -516,6 +516,17 @@ bool test_null_and_edge_cases() noexcept {
     shutdown_all();
     return false;
   }
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  if (!add_input_action("occupied", &binding, 1U)) {
+    shutdown_all();
+    return false;
+  }
+  if (is_mapped_action_pressed(nullptr)) {
+    shutdown_all();
+    return false;
+  }
   if (mapped_axis_value(nullptr) != 0.0F) {
     shutdown_all();
     return false;

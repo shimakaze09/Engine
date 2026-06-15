@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::renderer {
@@ -27,6 +28,9 @@ TextureHandle load_texture(const char *virtualPath) noexcept;
 /// Loads the requested resource for hdr equirect cubemap.
 TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
                                         std::int32_t faceSize) noexcept;
+/// Validates texture input size before calling stb's int-length APIs.
+bool texture_input_size_fits_stb(std::size_t fileSize,
+                                 int *outStbSize) noexcept;
 /// Handles unload texture.
 void unload_texture(TextureHandle handle) noexcept;
 /// Handles texture gpu id.

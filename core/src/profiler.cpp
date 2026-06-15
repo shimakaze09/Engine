@@ -76,13 +76,13 @@ void profiler_end_frame() noexcept {
 }
 
 /// Handles profiler begin scope.
-void profiler_begin_scope(const char *name) noexcept {
+bool profiler_begin_scope(const char *name) noexcept {
   if (g_writeBuffer.count >= kMaxEntries) {
-    return;
+    return false;
   }
 
   if (g_scopeDepth >= kMaxDepth) {
-    return;
+    return false;
   }
 
   const std::size_t idx = g_writeBuffer.count;
@@ -98,6 +98,7 @@ void profiler_begin_scope(const char *name) noexcept {
   g_scopeStack[g_scopeDepth] = idx;
   ++g_scopeDepth;
   ++g_writeBuffer.count;
+  return true;
 }
 
 /// Handles profiler end scope.
@@ -113,11 +114,14 @@ void profiler_end_scope() noexcept {
   }
 }
 
-ProfileScope::ProfileScope(const char *name) noexcept {
-  profiler_begin_scope(name);
-}
+ProfileScope::ProfileScope(const char *name) noexcept
+    : m_active(profiler_begin_scope(name)) {}
 
-ProfileScope::~ProfileScope() noexcept { profiler_end_scope(); }
+ProfileScope::~ProfileScope() noexcept {
+  if (m_active) {
+    profiler_end_scope();
+  }
+}
 
 /// Handles profiler get entries.
 std::size_t profiler_get_entries(ProfileEntry *out,

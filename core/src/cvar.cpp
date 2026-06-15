@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
+#include <mutex>
 
 namespace engine::core {
 
@@ -36,9 +36,22 @@ struct CVarEntry final {
 bool g_initialized = false;
 std::array<CVarEntry, kMaxCVars> g_entries{};
 std::size_t g_count = 0U;
+std::mutex g_mutex{};
 
-/// Finds the matching object or resource for cvar.
-int find_cvar(const char *name) noexcept {
+struct CVarInfoSnapshot final {
+  char names[kMaxCVars][kMaxNameLen] = {};
+  char descriptions[kMaxCVars][kMaxDescLen] = {};
+};
+
+thread_local char g_stringResult[kMaxStringValLen] = {};
+thread_local CVarInfoSnapshot g_infoSnapshot{};
+
+/// Finds the matching object or resource for cvar. Caller must hold g_mutex.
+int find_cvar_unlocked(const char *name) noexcept {
+  if (name == nullptr) {
+    return -1;
+  }
+
   for (std::size_t i = 0U; i < g_count; ++i) {
     if (g_entries[i].used && std::strcmp(g_entries[i].name, name) == 0) {
       return static_cast<int>(i);
@@ -51,6 +64,7 @@ int find_cvar(const char *name) noexcept {
 
 /// Initializes the owning system for cvars.
 bool initialize_cvars() noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
   if (g_initialized) {
     return true;
   }
@@ -62,6 +76,7 @@ bool initialize_cvars() noexcept {
 
 /// Shuts down the owning system for cvars.
 void shutdown_cvars() noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
   g_entries = {};
   g_count = 0U;
   g_initialized = false;
@@ -74,10 +89,11 @@ bool cvar_register_bool(const char *name, bool defaultValue,
   if ((name == nullptr) || (description == nullptr)) {
     return false;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
   if (g_count >= kMaxCVars) {
     return false;
   }
-  if (find_cvar(name) >= 0) {
+  if (find_cvar_unlocked(name) >= 0) {
     return false;
   }
 
@@ -96,10 +112,11 @@ bool cvar_register_int(const char *name, int defaultValue,
   if ((name == nullptr) || (description == nullptr)) {
     return false;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
   if (g_count >= kMaxCVars) {
     return false;
   }
-  if (find_cvar(name) >= 0) {
+  if (find_cvar_unlocked(name) >= 0) {
     return false;
   }
 
@@ -118,10 +135,11 @@ bool cvar_register_float(const char *name, float defaultValue,
   if ((name == nullptr) || (description == nullptr)) {
     return false;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
   if (g_count >= kMaxCVars) {
     return false;
   }
-  if (find_cvar(name) >= 0) {
+  if (find_cvar_unlocked(name) >= 0) {
     return false;
   }
 
@@ -140,10 +158,11 @@ bool cvar_register_string(const char *name, const char *defaultValue,
   if ((name == nullptr) || (description == nullptr)) {
     return false;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
   if (g_count >= kMaxCVars) {
     return false;
   }
-  if (find_cvar(name) >= 0) {
+  if (find_cvar_unlocked(name) >= 0) {
     return false;
   }
 
@@ -161,7 +180,8 @@ bool cvar_register_string(const char *name, const char *defaultValue,
 // ---- getters ----
 
 bool cvar_get_bool(const char *name, bool fallback) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Bool)) {
     return fallback;
   }
@@ -170,7 +190,8 @@ bool cvar_get_bool(const char *name, bool fallback) noexcept {
 
 /// Handles cvar get int.
 int cvar_get_int(const char *name, int fallback) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Int)) {
     return fallback;
   }
@@ -179,7 +200,8 @@ int cvar_get_int(const char *name, int fallback) noexcept {
 
 /// Handles cvar get float.
 float cvar_get_float(const char *name, float fallback) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Float)) {
     return fallback;
   }
@@ -188,17 +210,21 @@ float cvar_get_float(const char *name, float fallback) noexcept {
 
 /// Handles cvar get string.
 const char *cvar_get_string(const char *name, const char *fallback) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::String)) {
     return fallback;
   }
-  return g_entries[idx].value.str;
+  std::snprintf(g_stringResult, sizeof(g_stringResult), "%s",
+                g_entries[idx].value.str);
+  return g_stringResult;
 }
 
 // ---- setters ----
 
 bool cvar_set_bool(const char *name, bool value) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Bool)) {
     return false;
   }
@@ -208,7 +234,8 @@ bool cvar_set_bool(const char *name, bool value) noexcept {
 
 /// Handles cvar set int.
 bool cvar_set_int(const char *name, int value) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Int)) {
     return false;
   }
@@ -218,7 +245,8 @@ bool cvar_set_int(const char *name, int value) noexcept {
 
 /// Handles cvar set float.
 bool cvar_set_float(const char *name, float value) noexcept {
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::Float)) {
     return false;
   }
@@ -231,7 +259,8 @@ bool cvar_set_string(const char *name, const char *value) noexcept {
   if (value == nullptr) {
     return false;
   }
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (g_entries[idx].type != CVarType::String)) {
     return false;
   }
@@ -246,7 +275,8 @@ bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   if ((name == nullptr) || (valueStr == nullptr)) {
     return false;
   }
-  const int idx = find_cvar(name);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const int idx = find_cvar_unlocked(name);
   if (idx < 0) {
     return false;
   }
@@ -289,13 +319,20 @@ std::size_t cvar_get_all(CVarInfo *out, std::size_t maxEntries) noexcept {
   if (out == nullptr) {
     return 0U;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
   std::size_t written = 0U;
   for (std::size_t i = 0U; (i < g_count) && (written < maxEntries); ++i) {
     if (!g_entries[i].used) {
       continue;
     }
-    out[written].name = g_entries[i].name;
-    out[written].description = g_entries[i].desc;
+    std::snprintf(g_infoSnapshot.names[written],
+                  sizeof(g_infoSnapshot.names[written]), "%s",
+                  g_entries[i].name);
+    std::snprintf(g_infoSnapshot.descriptions[written],
+                  sizeof(g_infoSnapshot.descriptions[written]), "%s",
+                  g_entries[i].desc);
+    out[written].name = g_infoSnapshot.names[written];
+    out[written].description = g_infoSnapshot.descriptions[written];
     out[written].type = g_entries[i].type;
     ++written;
   }

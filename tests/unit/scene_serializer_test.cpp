@@ -31,7 +31,8 @@ int seed_non_entity_scene_state(engine::runtime::World &world) {
 
   engine::runtime::CameraEntry camera{};
   camera.position = engine::math::Vec3(2.0F, 3.0F, 4.0F);
-  if (!world.camera_manager().push_camera(1U, camera, 10.0F)) {
+  if (!world.camera_manager().push_camera(engine::runtime::Entity{1U, 1U},
+                                          camera, 10.0F)) {
     return 81;
   }
 
@@ -637,6 +638,42 @@ int verify_load_scene_replaces_existing_scene_state(
   return verify_non_entity_scene_state_cleared(*world);
 }
 
+int verify_point_spot_light_parse_failures_reject_scene() {
+  constexpr const char *kBadPointLightScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"PointLightComponent\":{\"color\":\"bad\"}}}]}";
+  std::unique_ptr<engine::runtime::World> pointWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (pointWorld == nullptr) {
+    return 114;
+  }
+  if (engine::runtime::load_scene(*pointWorld, kBadPointLightScene,
+                                  std::strlen(kBadPointLightScene))) {
+    return 110;
+  }
+  if (pointWorld->alive_entity_count() != 0U) {
+    return 111;
+  }
+
+  constexpr const char *kBadSpotLightScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"SpotLightComponent\":{\"outerConeAngle\":\"wide\"}}}]}";
+  std::unique_ptr<engine::runtime::World> spotWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (spotWorld == nullptr) {
+    return 115;
+  }
+  if (engine::runtime::load_scene(*spotWorld, kBadSpotLightScene,
+                                  std::strlen(kBadSpotLightScene))) {
+    return 112;
+  }
+  if (spotWorld->alive_entity_count() != 0U) {
+    return 113;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -701,6 +738,13 @@ int main() {
 
   result = verify_load_scene_replaces_existing_scene_state(sceneBuffer,
                                                            sceneSize);
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_point_spot_light_parse_failures_reject_scene();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

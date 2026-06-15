@@ -132,6 +132,18 @@ ImportSettings read_import_settings_from_json(const std::string &jsonStr) {
   return out;
 }
 
+bool json_parses(const std::string &json) noexcept {
+  engine::core::JsonParser parser{};
+  return parser.parse(json.c_str(), json.size());
+}
+
+std::string nested_array_json(std::size_t depth) {
+  std::string json(depth, '[');
+  json += '0';
+  json.append(depth, ']');
+  return json;
+}
+
 } // namespace
 
 // ---- Tests ----
@@ -255,6 +267,47 @@ static int test_import_settings_hash_roundtrip() noexcept {
   return 0;
 }
 
+static int test_json_parser_rejects_invalid_strings() noexcept {
+  if (!json_parses("{\"s\":\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\u0041\"}")) {
+    std::fprintf(stderr, "FAIL: valid JSON escapes were rejected\n");
+    return 1;
+  }
+
+  if (json_parses("{\"s\":\"bad\\q\"}")) {
+    std::fprintf(stderr, "FAIL: invalid JSON escape was accepted\n");
+    return 1;
+  }
+  if (json_parses("{\"s\":\"bad\\u12G4\"}")) {
+    std::fprintf(stderr, "FAIL: invalid unicode escape was accepted\n");
+    return 1;
+  }
+
+  std::string rawControl = "{\"s\":\"bad";
+  rawControl.push_back('\x01');
+  rawControl += "\"}";
+  if (json_parses(rawControl)) {
+    std::fprintf(stderr, "FAIL: raw control character was accepted\n");
+    return 1;
+  }
+
+  std::printf("PASS: JSON parser rejects invalid string tokens\n");
+  return 0;
+}
+
+static int test_json_parser_rejects_excessive_depth() noexcept {
+  if (!json_parses(nested_array_json(16U))) {
+    std::fprintf(stderr, "FAIL: reasonable JSON nesting was rejected\n");
+    return 1;
+  }
+  if (json_parses(nested_array_json(140U))) {
+    std::fprintf(stderr, "FAIL: excessive JSON nesting was accepted\n");
+    return 1;
+  }
+
+  std::printf("PASS: JSON parser enforces nesting depth\n");
+  return 0;
+}
+
 /// Runs this executable or test program.
 int main() {
   int failures = 0;
@@ -262,6 +315,8 @@ int main() {
   failures += test_import_settings_roundtrip_custom();
   failures += test_import_settings_hash_change();
   failures += test_import_settings_hash_roundtrip();
+  failures += test_json_parser_rejects_invalid_strings();
+  failures += test_json_parser_rejects_excessive_depth();
   if (failures > 0) {
     std::fprintf(stderr, "FAILED: %d test(s) failed\n", failures);
   }

@@ -54,6 +54,49 @@ void normalize_path(char *path, std::size_t length) noexcept {
   }
 }
 
+bool is_ascii_alpha(char ch) noexcept {
+  return ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z'));
+}
+
+bool is_drive_designator(const char *segment) noexcept {
+  return (segment != nullptr) && is_ascii_alpha(segment[0]) &&
+         (segment[1] == ':');
+}
+
+bool is_safe_virtual_remainder(const char *remainder) noexcept {
+  if (remainder == nullptr) {
+    return false;
+  }
+  if (remainder[0] == '\0') {
+    return true;
+  }
+  if (remainder[0] == '/') {
+    return false;
+  }
+
+  const char *segment = remainder;
+  while (*segment != '\0') {
+    const char *end = segment;
+    while ((*end != '\0') && (*end != '/')) {
+      ++end;
+    }
+
+    const auto length = static_cast<std::size_t>(end - segment);
+    if (((length == 1U) && (segment[0] == '.')) ||
+        ((length == 2U) && (segment[0] == '.') && (segment[1] == '.')) ||
+        ((length >= 2U) && is_drive_designator(segment))) {
+      return false;
+    }
+
+    if (*end == '\0') {
+      break;
+    }
+    segment = end + 1;
+  }
+
+  return true;
+}
+
 // Resolve virtualPath to an OS path using the longest-prefix match.
 // Returns the number of characters written (excluding null) or 0 on failure.
 std::size_t resolve(const char *virtualPath, char *outBuffer,
@@ -109,6 +152,10 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
     ++remainder;
   } else if (remainder[0] == '/') {
     remainder = "";
+  }
+
+  if (!is_safe_virtual_remainder(remainder)) {
+    return 0U;
   }
 
   const std::size_t osLen = std::strlen(bestMount->osPath);

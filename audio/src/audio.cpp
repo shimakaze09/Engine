@@ -38,10 +38,13 @@ namespace engine::audio {
 namespace {
 
 constexpr std::size_t kMaxSounds = 256U;
+constexpr unsigned kSoundSlotBits = 9U;
+constexpr std::uint32_t kSoundSlotMask = (1U << kSoundSlotBits) - 1U;
 
 /// Stores sound entry data used by the engine.
 struct SoundEntry final {
   bool active = false;
+  std::uint32_t generation = 1U;
   ma_decoder decoder{};
   ma_sound sound{};
   void *fileData = nullptr;
@@ -55,6 +58,52 @@ struct AudioState final {
 };
 
 AudioState g_audio{};
+
+/// Advances a generation counter, skipping zero.
+std::uint32_t next_sound_generation(std::uint32_t generation) noexcept {
+  ++generation;
+  if (generation == 0U) {
+    generation = 1U;
+  }
+  return generation;
+}
+
+/// Builds an externally visible handle for a live sound slot.
+SoundHandle make_sound_handle(std::size_t slot) noexcept {
+  if (slot >= kMaxSounds) {
+    return kInvalidSound;
+  }
+
+  const SoundEntry &entry = g_audio.sounds[slot];
+  const std::uint32_t slotToken = static_cast<std::uint32_t>(slot + 1U);
+  return SoundHandle{(entry.generation << kSoundSlotBits) | slotToken};
+}
+
+/// Decodes and validates a sound handle against the current slot generation.
+SoundEntry *lookup_sound_entry(SoundHandle handle) noexcept {
+  if ((handle == kInvalidSound) || !g_audio.initialized) {
+    return nullptr;
+  }
+
+  const std::uint32_t slotToken = handle.id & kSoundSlotMask;
+  const std::uint32_t generation = handle.id >> kSoundSlotBits;
+  if ((slotToken == 0U) || (slotToken > kMaxSounds) || (generation == 0U)) {
+    return nullptr;
+  }
+
+  SoundEntry &entry = g_audio.sounds[slotToken - 1U];
+  if (!entry.active || (entry.generation != generation)) {
+    return nullptr;
+  }
+
+  return &entry;
+}
+
+/// Clears a slot's resources and advances its generation.
+void reset_sound_entry(SoundEntry &entry) noexcept {
+  entry = SoundEntry{false, next_sound_generation(entry.generation), {}, {},
+                     nullptr};
+}
 
 } // namespace
 
@@ -95,11 +144,12 @@ void shutdown_audio() noexcept {
       core::vfs_free(entry.fileData);
       entry.fileData = nullptr;
     }
-    entry.active = false;
+    reset_sound_entry(entry);
   }
 
   ma_engine_uninit(&g_audio.engine);
-  g_audio = AudioState{};
+  g_audio.engine = ma_engine{};
+  g_audio.initialized = false;
 
   core::log_message(core::LogLevel::Info, "audio", "audio shut down");
 }
@@ -167,60 +217,48 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   }
 
   entry.active = true;
-  return SoundHandle{static_cast<std::uint32_t>(slot + 1U)};
+  return make_sound_handle(slot);
 }
 
 /// Handles unload sound.
 void unload_sound(SoundHandle handle) noexcept {
-  if ((handle.id == 0U) || (handle.id > kMaxSounds) || !g_audio.initialized) {
+  SoundEntry *entry = lookup_sound_entry(handle);
+  if (entry == nullptr) {
     return;
   }
 
-  SoundEntry &entry = g_audio.sounds[handle.id - 1U];
-  if (!entry.active) {
-    return;
+  ma_sound_uninit(&entry->sound);
+  ma_decoder_uninit(&entry->decoder);
+  if (entry->fileData != nullptr) {
+    core::vfs_free(entry->fileData);
+    entry->fileData = nullptr;
   }
-
-  ma_sound_uninit(&entry.sound);
-  ma_decoder_uninit(&entry.decoder);
-  if (entry.fileData != nullptr) {
-    core::vfs_free(entry.fileData);
-    entry.fileData = nullptr;
-  }
-  entry.active = false;
+  reset_sound_entry(*entry);
 }
 
 /// Handles play sound.
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
-  if ((handle.id == 0U) || (handle.id > kMaxSounds) || !g_audio.initialized) {
+  SoundEntry *entry = lookup_sound_entry(handle);
+  if (entry == nullptr) {
     return false;
   }
 
-  SoundEntry &entry = g_audio.sounds[handle.id - 1U];
-  if (!entry.active) {
-    return false;
-  }
-
-  ma_sound_set_volume(&entry.sound, params.volume);
-  ma_sound_set_pitch(&entry.sound, params.pitch);
-  ma_sound_set_looping(&entry.sound, params.loop ? MA_TRUE : MA_FALSE);
+  ma_sound_set_volume(&entry->sound, params.volume);
+  ma_sound_set_pitch(&entry->sound, params.pitch);
+  ma_sound_set_looping(&entry->sound, params.loop ? MA_TRUE : MA_FALSE);
 
   // Rewind to start before playing.
-  ma_sound_seek_to_pcm_frame(&entry.sound, 0);
+  ma_sound_seek_to_pcm_frame(&entry->sound, 0);
 
-  const ma_result res = ma_sound_start(&entry.sound);
+  const ma_result res = ma_sound_start(&entry->sound);
   return res == MA_SUCCESS;
 }
 
 /// Handles stop sound.
 void stop_sound(SoundHandle handle) noexcept {
-  if ((handle.id == 0U) || (handle.id > kMaxSounds) || !g_audio.initialized) {
-    return;
-  }
-
-  SoundEntry &entry = g_audio.sounds[handle.id - 1U];
-  if (entry.active) {
-    ma_sound_stop(&entry.sound);
+  SoundEntry *entry = lookup_sound_entry(handle);
+  if (entry != nullptr) {
+    ma_sound_stop(&entry->sound);
   }
 }
 

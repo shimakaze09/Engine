@@ -18,6 +18,19 @@ struct TwoPointerItem final {
   void *b = nullptr;
 };
 
+struct CountingItem final {
+  static int constructed;
+  static int destroyed;
+
+  int value = 0;
+
+  CountingItem() noexcept { ++constructed; }
+  ~CountingItem() noexcept { ++destroyed; }
+};
+
+int CountingItem::constructed = 0;
+int CountingItem::destroyed = 0;
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -33,6 +46,9 @@ int main() {
     PointerSizedItem *p = pool.allocate();
     if (p == nullptr) {
       return 2;
+    }
+    if (p->data != nullptr) {
+      return 9;
     }
 
     p->data = reinterpret_cast<void *>(0xDEADBEEFULL);
@@ -97,6 +113,37 @@ int main() {
   {
     engine::core::PoolAllocator<PointerSizedItem, 2U> pool;
     pool.deallocate(nullptr); // must not crash
+  }
+
+  // Test 5: constructors/destructors are paired.
+  {
+    CountingItem::constructed = 0;
+    CountingItem::destroyed = 0;
+
+    {
+      engine::core::PoolAllocator<CountingItem, 2U> pool;
+      CountingItem *a = pool.allocate();
+      if ((a == nullptr) || (CountingItem::constructed != 1) ||
+          (CountingItem::destroyed != 0)) {
+        return 10;
+      }
+      a->value = 42;
+      pool.deallocate(a);
+      if ((CountingItem::constructed != 1) ||
+          (CountingItem::destroyed != 1)) {
+        return 11;
+      }
+      CountingItem *b = pool.allocate();
+      if ((b == nullptr) || (CountingItem::constructed != 2) ||
+          (CountingItem::destroyed != 1)) {
+        return 12;
+      }
+      b->value = 7;
+    }
+
+    if ((CountingItem::constructed != 2) || (CountingItem::destroyed != 2)) {
+      return 13;
+    }
   }
 
   return 0;

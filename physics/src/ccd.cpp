@@ -22,14 +22,10 @@
 namespace engine::physics {
 
 // ---------------------------------------------------------------------------
-// CVar: physics.ccd_threshold (default 2.0 m/s)
+// physics.ccd_threshold CVar is registered by register_physics_cvars().
 // Bodies slower than this skip CCD entirely.
 // ---------------------------------------------------------------------------
 namespace {
-
-const bool g_ccdThresholdCVar = core::cvar_register_float(
-    "physics.ccd_threshold", 2.0F,
-    "Minimum velocity magnitude (m/s) to trigger CCD");
 
 constexpr int kMaxBilateralIterations = 32;
 constexpr float kTolerance = 1e-4F;

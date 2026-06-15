@@ -23,6 +23,98 @@ bool nearly_equal(float lhs, float rhs) noexcept {
   return (diff < 0.0001F) && (diff > -0.0001F);
 }
 
+bool write_prefab_text(const char *text) noexcept {
+  if (text == nullptr) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kPrefabPath, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kPrefabPath, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+
+  const std::size_t size = std::strlen(text);
+  const std::size_t written = std::fwrite(text, 1U, size, file);
+  std::fclose(file);
+  return written == size;
+}
+
+int verify_instantiate_rejects_malformed_component() {
+  remove_prefab_file();
+  constexpr const char *kMalformedPrefab =
+      "{\"version\":1,\"components\":{\"Transform\":{\"position\":\"bad\"}}}";
+  if (!write_prefab_text(kMalformedPrefab)) {
+    remove_prefab_file();
+    return 32;
+  }
+
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    remove_prefab_file();
+    return 40;
+  }
+  const engine::runtime::Entity entity =
+      engine::runtime::instantiate_prefab(*world, kPrefabPath);
+  remove_prefab_file();
+  if (entity != engine::runtime::kInvalidEntity) {
+    return 33;
+  }
+  if (world->alive_entity_count() != 0U) {
+    return 34;
+  }
+  return 0;
+}
+
+int verify_instantiate_rolls_back_on_component_add_failure() {
+  remove_prefab_file();
+  constexpr const char *kPointLightPrefab =
+      "{\"version\":1,\"components\":{\"PointLightComponent\":{\"radius\":3}}}";
+  if (!write_prefab_text(kPointLightPrefab)) {
+    remove_prefab_file();
+    return 35;
+  }
+
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    remove_prefab_file();
+    return 41;
+  }
+  for (std::size_t i = 0U;
+       i < engine::runtime::World::kMaxPointLightComponents; ++i) {
+    const engine::runtime::Entity entity = world->create_entity();
+    if (entity == engine::runtime::kInvalidEntity) {
+      remove_prefab_file();
+      return 36;
+    }
+    engine::runtime::PointLightComponent pointLight{};
+    if (!world->add_point_light_component(entity, pointLight)) {
+      remove_prefab_file();
+      return 37;
+    }
+  }
+
+  const std::size_t aliveBefore = world->alive_entity_count();
+  const engine::runtime::Entity entity =
+      engine::runtime::instantiate_prefab(*world, kPrefabPath);
+  remove_prefab_file();
+  if (entity != engine::runtime::kInvalidEntity) {
+    return 38;
+  }
+  if (world->alive_entity_count() != aliveBefore) {
+    return 39;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -269,6 +361,18 @@ int main() {
       engine::runtime::kInvalidEntity) {
     remove_prefab_file();
     return 25;
+  }
+
+  int result = verify_instantiate_rejects_malformed_component();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_instantiate_rolls_back_on_component_add_failure();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
   }
 
   remove_prefab_file();

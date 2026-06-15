@@ -165,6 +165,8 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   NameComponent removedName{};
   const bool hadName = m_nameComponents.get(entity, &removedName);
 
+  m_cameraManager.on_entity_destroyed(entity);
+
   static_cast<void>(m_transforms.remove(entity));
   static_cast<void>(m_worldTransforms.remove(entity));
   static_cast<void>(m_rigidBodies.remove(entity));

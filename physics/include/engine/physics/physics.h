@@ -12,6 +12,9 @@ namespace engine::physics {
 /// Stores physics context data used by the engine.
 struct PhysicsContext;
 
+/// Registers physics runtime CVars. Call after core::initialize_cvars().
+bool register_physics_cvars() noexcept;
+
 // Joints / Constraints --------------------------------------------------------
 using JointId = std::uint32_t;
 constexpr JointId kInvalidJointId = 0xFFFFFFFFU;

@@ -189,6 +189,10 @@ endif()
 #      would trigger fewer TUs.
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+option(ENGINE_REQUIRE_ANALYSIS_TOOL
+    "Require cppcheck or clang-tidy and create a failing analysis target when neither is found"
+    OFF
+)
 find_program(CPPCHECK_EXE NAMES cppcheck DOC "Path to cppcheck")
 find_program(CLANG_TIDY_EXE NAMES clang-tidy DOC "Path to clang-tidy")
 if(CPPCHECK_EXE)
@@ -224,7 +228,7 @@ elseif(CLANG_TIDY_EXE AND Python3_Interpreter_FOUND)
         VERBATIM
     )
     message(STATUS "Static analysis target 'analysis' configured (clang-tidy: ${CLANG_TIDY_EXE})")
-else()
+elseif(ENGINE_REQUIRE_ANALYSIS_TOOL)
     add_custom_target(analysis
         COMMAND ${CMAKE_COMMAND} -E echo
         "No static analyzer found. Install cppcheck or clang-tidy."
@@ -232,6 +236,8 @@ else()
         COMMENT "Static analysis target unavailable"
     )
     message(WARNING "No static analyzer found; 'analysis' target will fail.")
+else()
+    message(STATUS "Static analysis target 'analysis' not configured; install cppcheck or clang-tidy, or set ENGINE_REQUIRE_ANALYSIS_TOOL=ON to require one.")
 endif()
 
 include(FetchContent)

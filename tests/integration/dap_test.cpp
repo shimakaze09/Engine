@@ -405,6 +405,58 @@ bool test_dap_restart_clears_session() noexcept {
          !engine::scripting::dap_has_client();
 }
 
+bool wait_for_dap_client(bool expectedConnected) noexcept {
+  for (int i = 0; i < 50; ++i) {
+    engine::scripting::dap_poll();
+    if (engine::scripting::dap_has_client() == expectedConnected) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return false;
+}
+
+bool send_malformed_dap_frame_and_expect_disconnect(const char *frame) noexcept {
+  if (frame == nullptr) {
+    return false;
+  }
+
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock)) {
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  const bool accepted = wait_for_dap_client(true);
+  const bool sent = accepted && send_all(sock, frame, std::strlen(frame));
+  const bool disconnected = sent && wait_for_dap_client(false);
+
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  engine::scripting::dap_stop();
+  return accepted && sent && disconnected;
+}
+
+bool test_dap_rejects_oversized_content_length() noexcept {
+  return send_malformed_dap_frame_and_expect_disconnect(
+      "Content-Length: 70000\r\n\r\n{}");
+}
+
+bool test_dap_rejects_overflowing_content_length() noexcept {
+  return send_malformed_dap_frame_and_expect_disconnect(
+      "Content-Length: 999999999999999999999999999999\r\n\r\n{}");
+}
+
 /// Handles test dap breakpoint pause.
 bool test_dap_breakpoint_pause() noexcept {
   if (!engine::scripting::initialize_scripting()) {
@@ -487,8 +539,16 @@ int main() {
   const bool restartOk = test_dap_restart_clears_session();
   std::printf(restartOk ? "PASS\n" : "FAIL\n");
 
+  std::printf("  dap_test::rejects_oversized_content_length ... ");
+  const bool oversizedOk = test_dap_rejects_oversized_content_length();
+  std::printf(oversizedOk ? "PASS\n" : "FAIL\n");
+
+  std::printf("  dap_test::rejects_overflowing_content_length ... ");
+  const bool overflowOk = test_dap_rejects_overflowing_content_length();
+  std::printf(overflowOk ? "PASS\n" : "FAIL\n");
+
   std::printf("  dap_test::breakpoint_pause ... ");
   const bool breakpointOk = test_dap_breakpoint_pause();
   std::printf(breakpointOk ? "PASS\n" : "FAIL\n");
-  return (restartOk && breakpointOk) ? 0 : 1;
+  return (restartOk && oversizedOk && overflowOk && breakpointOk) ? 0 : 1;
 }

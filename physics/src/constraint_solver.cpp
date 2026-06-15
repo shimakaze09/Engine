@@ -12,14 +12,6 @@
 
 namespace engine::physics {
 
-namespace {
-
-// CVar: physics.solver_iterations (default 8).
-const bool g_solverIterCVar = core::cvar_register_int(
-    "physics.solver_iterations", 8, "Number of constraint solver iterations");
-
-} // namespace
-
 // --- Typed joint creation ---------------------------------------------------
 
 static JointId allocate_joint(PhysicsWorldView &world) noexcept {

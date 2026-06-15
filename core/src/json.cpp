@@ -13,6 +13,8 @@ namespace engine::core {
 
 namespace {
 
+constexpr std::uint32_t kMaxJsonDepth = 128U;
+
 /// Returns whether is whitespace.
 constexpr bool is_whitespace(char value) noexcept {
   return (value == ' ') || (value == '\t') || (value == '\n') ||
@@ -67,17 +69,33 @@ bool parse_string_token(const char *&cursor, const char *end,
         return false;
       }
 
-      if (*cursor == 'u') {
+      switch (*cursor) {
+      case '"':
+      case '\\':
+      case '/':
+      case 'b':
+      case 'f':
+      case 'n':
+      case 'r':
+      case 't':
+        ++cursor;
+        continue;
+      case 'u':
         for (std::size_t i = 0U; i < 4U; ++i) {
           ++cursor;
           if ((cursor >= end) || !is_hex_digit(*cursor)) {
             return false;
           }
         }
+        ++cursor;
+        continue;
+      default:
+        return false;
       }
+    }
 
-      ++cursor;
-      continue;
+    if (static_cast<unsigned char>(ch) < 0x20U) {
+      return false;
     }
 
     ++cursor;
@@ -147,12 +165,13 @@ bool parse_number_token(const char *&cursor, const char *end,
 
 /// Parses text into the engine representation for value.
 bool parse_value(const char *&cursor, const char *end,
-                 JsonValue *outValue) noexcept;
+                 JsonValue *outValue, std::uint32_t depth) noexcept;
 
 /// Parses text into the engine representation for array.
 bool parse_array(const char *&cursor, const char *end,
-                 JsonValue *outValue) noexcept {
-  if ((outValue == nullptr) || (cursor >= end) || (*cursor != '[')) {
+                 JsonValue *outValue, std::uint32_t depth) noexcept {
+  if ((outValue == nullptr) || (cursor >= end) || (*cursor != '[') ||
+      (depth > kMaxJsonDepth)) {
     return false;
   }
 
@@ -170,7 +189,7 @@ bool parse_array(const char *&cursor, const char *end,
 
   while (cursor < end) {
     JsonValue ignored{};
-    if (!parse_value(cursor, end, &ignored)) {
+    if (!parse_value(cursor, end, &ignored, depth)) {
       return false;
     }
 
@@ -201,8 +220,9 @@ bool parse_array(const char *&cursor, const char *end,
 
 /// Parses text into the engine representation for object.
 bool parse_object(const char *&cursor, const char *end,
-                  JsonValue *outValue) noexcept {
-  if ((outValue == nullptr) || (cursor >= end) || (*cursor != '{')) {
+                  JsonValue *outValue, std::uint32_t depth) noexcept {
+  if ((outValue == nullptr) || (cursor >= end) || (*cursor != '{') ||
+      (depth > kMaxJsonDepth)) {
     return false;
   }
 
@@ -236,7 +256,7 @@ bool parse_object(const char *&cursor, const char *end,
     ++cursor;
 
     JsonValue ignored{};
-    if (!parse_value(cursor, end, &ignored)) {
+    if (!parse_value(cursor, end, &ignored, depth)) {
       return false;
     }
 
@@ -267,7 +287,7 @@ bool parse_object(const char *&cursor, const char *end,
 
 /// Parses text into the engine representation for value.
 bool parse_value(const char *&cursor, const char *end,
-                 JsonValue *outValue) noexcept {
+                 JsonValue *outValue, std::uint32_t depth) noexcept {
   if (outValue == nullptr) {
     return false;
   }
@@ -279,9 +299,9 @@ bool parse_value(const char *&cursor, const char *end,
 
   switch (*cursor) {
   case '{':
-    return parse_object(cursor, end, outValue);
+    return parse_object(cursor, end, outValue, depth + 1U);
   case '[':
-    return parse_array(cursor, end, outValue);
+    return parse_array(cursor, end, outValue, depth + 1U);
   case '"': {
     const char *stringBegin = nullptr;
     const char *stringEnd = nullptr;
@@ -802,7 +822,7 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   skip_whitespace(cursor, end);
 
   JsonValue parsedRoot{};
-  if (!parse_value(cursor, end, &parsedRoot)) {
+  if (!parse_value(cursor, end, &parsedRoot, 0U)) {
     return false;
   }
 
@@ -873,7 +893,7 @@ bool JsonParser::get_object_field(const JsonValue &object,
     ++cursor;
 
     JsonValue value{};
-    if (!parse_value(cursor, end, &value)) {
+    if (!parse_value(cursor, end, &value, 1U)) {
       return false;
     }
 
@@ -928,7 +948,7 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
   std::size_t currentIndex = 0U;
   while (cursor < end) {
     JsonValue value{};
-    if (!parse_value(cursor, end, &value)) {
+    if (!parse_value(cursor, end, &value, 1U)) {
       return false;
     }
 
@@ -972,7 +992,7 @@ std::size_t JsonParser::array_size(const JsonValue &array) const noexcept {
   std::size_t count = 0U;
   while (cursor < end) {
     JsonValue ignored{};
-    if (!parse_value(cursor, end, &ignored)) {
+    if (!parse_value(cursor, end, &ignored, 1U)) {
       return 0U;
     }
     ++count;

@@ -13,8 +13,8 @@ Supported parameter types:
     double    - lua_Number  (luaL_checknumber)
     bool      - int         (lua_toboolean)
     string    - const char* (luaL_checkstring)
-    entity    - uint32_t    (luaL_checkinteger, entity index)
     uint32    - uint32_t    (luaL_checkinteger)
+    uint64    - uint64_t    (luaL_checkinteger)
 
 Supported return types:
     void      - no return value
@@ -23,8 +23,8 @@ Supported return types:
     double    - lua_pushnumber
     bool      - lua_pushboolean
     string    - lua_pushstring
-    entity    - lua_pushinteger (entity index)
     uint32    - lua_pushinteger
+    uint64    - lua_pushinteger
 
 Usage:
     python generate_bindings.py <input_header> [<input_header2> ...] -o <output.cpp>
@@ -55,11 +55,11 @@ TYPE_MAP = {
     'double': ('lua_Number',   'luaL_checknumber(L, {i})',      'lua_pushnumber(L, result)'),
     'bool':   ('bool',         'lua_toboolean(L, {i}) != 0',    'lua_pushboolean(L, result ? 1 : 0)'),
     'string': ('const char*',  'luaL_checkstring(L, {i})',      'lua_pushstring(L, result)'),
-    'entity': ('std::uint32_t',
-               'static_cast<std::uint32_t>(luaL_checkinteger(L, {i}))',
-               'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
     'uint32': ('std::uint32_t',
                'static_cast<std::uint32_t>(luaL_checkinteger(L, {i}))',
+               'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
+    'uint64': ('std::uint64_t',
+               'static_cast<std::uint64_t>(luaL_checkinteger(L, {i}))',
                'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
 }
 

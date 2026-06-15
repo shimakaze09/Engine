@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "engine/core/mesh_asset.h"
+#include "dependency_graph.h"
 
 // ---- Inline reimplementation of packer primitives for isolated testing ----
 
@@ -120,6 +121,10 @@ write_metadata_to_string(const char *inputPath, const char *outputPath,
   const std::size_t vertexCount =
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
+  const std::string escapedInputPath =
+      engine::tools::escape_json_string(inputPath);
+  const std::string escapedOutputPath =
+      engine::tools::escape_json_string(outputPath);
 
   char buf[4096] = {};
   int pos = std::snprintf(
@@ -138,16 +143,19 @@ write_metadata_to_string(const char *inputPath, const char *outputPath,
       "  \"indexCount\": %zu,\n"
       "  \"tags\": [],\n"
       "  \"dependencies\": [\n",
-      static_cast<unsigned long long>(sourceHash), inputPath, outputPath,
+      static_cast<unsigned long long>(sourceHash), escapedInputPath.c_str(),
+      escapedOutputPath.c_str(),
       data.hasUVs ? engine::core::kMeshAssetVersion2
                   : engine::core::kMeshAssetVersion,
       static_cast<unsigned long long>(sourceHash), vertexCount, indexCount);
 
   for (std::size_t i = 0U; i < dependencies.size(); ++i) {
     const DependencyDigest &dep = dependencies[i];
+    const std::string escapedDependencyPath =
+        engine::tools::escape_json_string(dep.path.c_str());
     pos += std::snprintf(buf + pos, sizeof(buf) - static_cast<std::size_t>(pos),
                          "    { \"path\": \"%s\", \"hash\": \"%016llx\" }%s\n",
-                         dep.path.c_str(),
+                         escapedDependencyPath.c_str(),
                          static_cast<unsigned long long>(dep.hash),
                          (i + 1U < dependencies.size()) ? "," : "");
   }
@@ -264,6 +272,41 @@ static int test_metadata_determinism() noexcept {
   return 0;
 }
 
+static int test_metadata_json_escaping() noexcept {
+  PrimitiveData data{};
+  data.hasUVs = false;
+  data.interleavedVertices.resize(6U, 0.0F);
+  data.indices.push_back(0U);
+
+  std::string inputPath = "meshes\\hero \"source\"\ninput.gltf";
+  inputPath.push_back('\x02');
+  const std::string outputPath = "out\\hero\tmesh.bin";
+  std::vector<DependencyDigest> deps{{"textures\\hero \"albedo\".png", 7ULL}};
+  ImportSettings settings{};
+
+  const std::string metadata =
+      write_metadata_to_string(inputPath.c_str(), outputPath.c_str(), data,
+                               0x1234ULL, deps, settings);
+  if (metadata.find("meshes\\\\hero \\\"source\\\"\\ninput.gltf\\u0002") ==
+      std::string::npos) {
+    std::fprintf(stderr, "FAIL: metadata source path was not JSON escaped\n");
+    return 1;
+  }
+  if (metadata.find("out\\\\hero\\tmesh.bin") == std::string::npos) {
+    std::fprintf(stderr, "FAIL: metadata output path was not JSON escaped\n");
+    return 1;
+  }
+  if (metadata.find("textures\\\\hero \\\"albedo\\\".png") ==
+      std::string::npos) {
+    std::fprintf(stderr,
+                 "FAIL: metadata dependency path was not JSON escaped\n");
+    return 1;
+  }
+
+  std::printf("PASS: metadata JSON escapes paths\n");
+  return 0;
+}
+
 /// Handles test cookstamp determinism.
 static int test_cookstamp_determinism() noexcept {
   std::vector<DependencyDigest> deps = {{"b_dep.png", 0x2222ULL},
@@ -355,6 +398,7 @@ int main() {
   int failures = 0;
   failures += test_mesh_binary_determinism();
   failures += test_metadata_determinism();
+  failures += test_metadata_json_escaping();
   failures += test_cookstamp_determinism();
   failures += test_dependency_sort_determinism();
   failures += test_import_settings_hash_determinism();

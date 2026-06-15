@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 using namespace engine::renderer;
@@ -134,6 +135,70 @@ static void test_load_failure() noexcept {
   engine::core::shutdown_cvars();
 }
 
+static void test_release_terminal_requests() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  LoadHandle ready = load_asset_async(queue.get(), make_id(0), "ready.mesh",
+                                      LoadPriority::Normal);
+  pump_until_terminal(queue.get(), ready, &ok_load, &ok_upload, nullptr);
+  CHECK(is_load_ready(queue.get(), ready), "ready request completed");
+  CHECK(release_load(queue.get(), ready), "release ready request");
+  CHECK(queue->count == 0U, "ready release decrements queue count");
+  CHECK(!release_load(queue.get(), ready), "cannot release twice");
+
+  auto fail_load = [](AssetId, const char *, std::uint64_t *,
+                      void *) noexcept -> bool { return false; };
+
+  LoadHandle failed = load_asset_async(queue.get(), make_id(1), "failed.mesh",
+                                       LoadPriority::Normal);
+  pump_until_terminal(queue.get(), failed, +fail_load, &ok_upload, nullptr);
+  CHECK(get_load_state(queue.get(), failed) == LoadingState::Failed,
+        "failed request reached terminal state");
+  CHECK(release_load(queue.get(), failed), "release failed request");
+  CHECK(queue->count == 0U, "failed release decrements queue count");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
+static void test_release_reuses_terminal_slots() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
+      LoadRequest &request = queue->requests[i];
+      request.assetId = make_id(i);
+      request.state = LoadingState::Ready;
+      request.occupied = true;
+    }
+    queue->count = AssetStreamingQueue::kMaxRequests;
+  }
+
+  const LoadHandle full =
+      load_asset_async(queue.get(), make_id(AssetStreamingQueue::kMaxRequests),
+                       "overflow.mesh", LoadPriority::Normal);
+  CHECK(!full.valid(), "full terminal queue rejects new request");
+
+  for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
+    CHECK(release_load(queue.get(), LoadHandle{i}), "release terminal slot");
+  }
+  CHECK(queue->count == 0U, "all terminal slots released");
+
+  LoadHandle reused =
+      load_asset_async(queue.get(), make_id(AssetStreamingQueue::kMaxRequests),
+                       "reused.mesh", LoadPriority::Normal);
+  CHECK(reused.valid(), "released terminal slots can be reused");
+  CHECK(cancel_load(queue.get(), reused), "cleanup reused queued request");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
 // --- Pending count tracking ---
 static void test_pending_count() noexcept {
   engine::core::initialize_cvars();
@@ -203,6 +268,8 @@ int main() {
   test_dedup();
   test_state_transitions();
   test_load_failure();
+  test_release_terminal_requests();
+  test_release_reuses_terminal_slots();
   test_pending_count();
   test_load_callback_is_async();
 

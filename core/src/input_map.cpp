@@ -374,6 +374,10 @@ bool is_mapped_action_down(const char *name) noexcept {
 
 /// Returns whether is mapped action pressed.
 bool is_mapped_action_pressed(const char *name) noexcept {
+  if (name == nullptr) {
+    return false;
+  }
+
   // Find the action index to compare current vs previous frame.
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
     if (g_mappedActions[i].occupied &&

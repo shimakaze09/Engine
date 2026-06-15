@@ -186,5 +186,38 @@ int main() {
     return 22;
   }
 
+  engine::renderer::AssetMetadata validMetadata{};
+  validMetadata.assetId = 88ULL;
+  validMetadata.tagCount = engine::renderer::AssetMetadata::kMaxTags;
+  validMetadata.dependencyCount =
+      engine::renderer::AssetMetadata::kMaxDependencies;
+  if (!engine::renderer::register_asset_metadata(database.get(),
+                                                 validMetadata)) {
+    return 23;
+  }
+
+  engine::renderer::AssetMetadata invalidTags{};
+  invalidTags.assetId = 89ULL;
+  invalidTags.tagCount = engine::renderer::AssetMetadata::kMaxTags + 1U;
+  if (engine::renderer::register_asset_metadata(database.get(), invalidTags)) {
+    return 24;
+  }
+  if (engine::renderer::find_asset_metadata(database.get(),
+                                            invalidTags.assetId) != nullptr) {
+    return 25;
+  }
+
+  engine::renderer::AssetMetadata invalidDeps{};
+  invalidDeps.assetId = 90ULL;
+  invalidDeps.dependencyCount =
+      engine::renderer::AssetMetadata::kMaxDependencies + 1U;
+  if (engine::renderer::register_asset_metadata(database.get(), invalidDeps)) {
+    return 26;
+  }
+  if (engine::renderer::find_asset_metadata(database.get(),
+                                            invalidDeps.assetId) != nullptr) {
+    return 27;
+  }
+
   return 0;
 }

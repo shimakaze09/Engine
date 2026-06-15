@@ -709,6 +709,72 @@ bool read_light_component(const core::JsonParser &parser,
   return true;
 }
 
+bool read_point_light_component(const core::JsonParser &parser,
+                                const core::JsonValue &lightObject,
+                                PointLightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (lightObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  PointLightComponent component{};
+  core::JsonValue value{};
+  if (parser.get_object_field(lightObject, "color", &value) &&
+      !read_vec3(parser, value, &component.color)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "intensity", &value) &&
+      !parser.as_float(value, &component.intensity)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "radius", &value) &&
+      !parser.as_float(value, &component.radius)) {
+    return false;
+  }
+
+  *outComponent = component;
+  return true;
+}
+
+bool read_spot_light_component(const core::JsonParser &parser,
+                               const core::JsonValue &lightObject,
+                               SpotLightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (lightObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  SpotLightComponent component{};
+  core::JsonValue value{};
+  if (parser.get_object_field(lightObject, "color", &value) &&
+      !read_vec3(parser, value, &component.color)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "direction", &value) &&
+      !read_vec3(parser, value, &component.direction)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "intensity", &value) &&
+      !parser.as_float(value, &component.intensity)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "radius", &value) &&
+      !parser.as_float(value, &component.radius)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "innerConeAngle", &value) &&
+      !parser.as_float(value, &component.innerConeAngle)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "outerConeAngle", &value) &&
+      !parser.as_float(value, &component.outerConeAngle)) {
+    return false;
+  }
+
+  *outComponent = component;
+  return true;
+}
+
 /// Handles log scene error.
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
@@ -835,47 +901,24 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 
     // PointLightComponent
     core::JsonValue plVal{};
-    if (parser.get_object_field(components, "PointLightComponent", &plVal) &&
-        (plVal.type == core::JsonValue::Type::Object)) {
+    if (parser.get_object_field(components, "PointLightComponent", &plVal)) {
       PointLightComponent pc{};
-      core::JsonValue v{};
-      if (parser.get_object_field(plVal, "color", &v)) {
-        static_cast<void>(read_vec3(parser, v, &pc.color));
+      if (!read_point_light_component(parser, plVal, &pc) ||
+          !targetWorld.add_point_light_component(entity, pc)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load PointLightComponent component");
       }
-      if (parser.get_object_field(plVal, "intensity", &v)) {
-        static_cast<void>(parser.as_float(v, &pc.intensity));
-      }
-      if (parser.get_object_field(plVal, "radius", &v)) {
-        static_cast<void>(parser.as_float(v, &pc.radius));
-      }
-      static_cast<void>(targetWorld.add_point_light_component(entity, pc));
     }
 
     // SpotLightComponent
     core::JsonValue slVal{};
-    if (parser.get_object_field(components, "SpotLightComponent", &slVal) &&
-        (slVal.type == core::JsonValue::Type::Object)) {
+    if (parser.get_object_field(components, "SpotLightComponent", &slVal)) {
       SpotLightComponent sc{};
-      core::JsonValue v{};
-      if (parser.get_object_field(slVal, "color", &v)) {
-        static_cast<void>(read_vec3(parser, v, &sc.color));
+      if (!read_spot_light_component(parser, slVal, &sc) ||
+          !targetWorld.add_spot_light_component(entity, sc)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load SpotLightComponent component");
       }
-      if (parser.get_object_field(slVal, "direction", &v)) {
-        static_cast<void>(read_vec3(parser, v, &sc.direction));
-      }
-      if (parser.get_object_field(slVal, "intensity", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.intensity));
-      }
-      if (parser.get_object_field(slVal, "radius", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.radius));
-      }
-      if (parser.get_object_field(slVal, "innerConeAngle", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.innerConeAngle));
-      }
-      if (parser.get_object_field(slVal, "outerConeAngle", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.outerConeAngle));
-      }
-      static_cast<void>(targetWorld.add_spot_light_component(entity, sc));
     }
 
     core::JsonValue reflectionProbeValue{};

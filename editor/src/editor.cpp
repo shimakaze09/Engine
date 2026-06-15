@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -153,6 +154,9 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
       return g_editorSession.thumbnailCache[i].textureId;
     }
   }
+  if (g_editorSession.thumbnailCount >= kMaxThumbnails) {
+    return 0U;
+  }
 
   // Build the .thumbnails/<basename>.png path.
   // Asset path example: "assets/triangle.mesh" →
@@ -183,7 +187,9 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   std::fseek(fp, 0, SEEK_END);
   const long fileLen = std::ftell(fp);
   std::fseek(fp, 0, SEEK_SET);
-  if (fileLen <= 0) {
+  if ((fileLen <= 0) ||
+      (static_cast<unsigned long>(fileLen) >
+       static_cast<unsigned long>(std::numeric_limits<int>::max()))) {
     std::fclose(fp);
     return 0U;
   }
@@ -198,8 +204,9 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   int w = 0;
   int h = 0;
   int channels = 0;
+  const int stbSize = static_cast<int>(fileData.size());
   unsigned char *pixels = stbi_load_from_memory(
-      fileData.data(), static_cast<int>(fileData.size()), &w, &h, &channels, 4);
+      fileData.data(), stbSize, &w, &h, &channels, 4);
   if (pixels == nullptr) {
     return 0U;
   }
@@ -213,7 +220,7 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
                pixels);
   stbi_image_free(pixels);
 
-  if ((tex != 0U) && (g_editorSession.thumbnailCount < kMaxThumbnails)) {
+  if (tex != 0U) {
     auto &entry = g_editorSession.thumbnailCache[g_editorSession.thumbnailCount];
     std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
     entry.textureId = tex;

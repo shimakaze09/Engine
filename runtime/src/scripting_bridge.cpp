@@ -57,7 +57,11 @@ bool scripting_push_camera(runtime::World *world, std::uint32_t entityIndex,
   entry.position = math::Vec3(posX, posY, posZ);
   entry.target = math::Vec3(tgtX, tgtY, tgtZ);
   entry.blendSpeed = blendSpeed;
-  return world->camera_manager().push_camera(entityIndex, entry, priority);
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  if (entity == runtime::kInvalidEntity) {
+    return false;
+  }
+  return world->camera_manager().push_camera(entity, entry, priority);
 }
 
 /// Handles scripting pop camera.
@@ -66,7 +70,11 @@ bool scripting_pop_camera(runtime::World *world,
   if (world == nullptr) {
     return false;
   }
-  return world->camera_manager().pop_camera(entityIndex);
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  if (entity == runtime::kInvalidEntity) {
+    return false;
+  }
+  return world->camera_manager().pop_camera(entity);
 }
 
 /// Handles scripting get active camera.

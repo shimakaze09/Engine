@@ -56,7 +56,7 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
     entry.up = math::Vec3(0.0F, 1.0F, 0.0F);
     entry.blendSpeed = 5.0F;
 
-    camMgr.push_camera(entity.index, entry, 10.0F);
+    camMgr.push_camera(entity, entry, 10.0F);
   });
 }
 

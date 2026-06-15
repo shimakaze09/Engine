@@ -23,7 +23,8 @@ bool step_physics(World &world, float deltaSeconds) noexcept;
 bool step_physics_range(World &world, std::size_t startIndex, std::size_t count,
                         float deltaSeconds) noexcept;
 /// Handles resolve collisions.
-bool resolve_collisions(World &world) noexcept;
+bool resolve_collisions(World &world,
+                        float deltaSeconds = 1.0F / 60.0F) noexcept;
 
 /// Sets the requested value for gravity.
 void set_gravity(World &world, float x, float y, float z) noexcept;

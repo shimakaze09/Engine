@@ -33,12 +33,15 @@ float clamp01(float v) noexcept {
 
 } // namespace
 
-bool CameraManager::push_camera(std::uint32_t ownerEntityIndex,
+bool CameraManager::push_camera(core::Entity ownerEntity,
                                 const CameraEntry &entry,
                                 float priority) noexcept {
-  // Check if this owner already has a camera, update it.
+  if (ownerEntity == core::kInvalidEntity) {
+    return false;
+  }
+
   for (auto &cam : m_cameras) {
-    if (cam.active && (cam.ownerEntityIndex == ownerEntityIndex)) {
+    if (cam.active && (cam.ownerEntity == ownerEntity)) {
       cam.position = entry.position;
       cam.target = entry.target;
       cam.up = entry.up;
@@ -55,7 +58,7 @@ bool CameraManager::push_camera(std::uint32_t ownerEntityIndex,
   for (auto &cam : m_cameras) {
     if (!cam.active) {
       cam = entry;
-      cam.ownerEntityIndex = ownerEntityIndex;
+      cam.ownerEntity = ownerEntity;
       cam.priority = priority;
       cam.blendWeight = 0.0F;
       cam.active = true;
@@ -68,14 +71,22 @@ bool CameraManager::push_camera(std::uint32_t ownerEntityIndex,
   return false;
 }
 
-bool CameraManager::pop_camera(std::uint32_t ownerEntityIndex) noexcept {
+bool CameraManager::pop_camera(core::Entity ownerEntity) noexcept {
+  if (ownerEntity == core::kInvalidEntity) {
+    return false;
+  }
+
   for (auto &cam : m_cameras) {
-    if (cam.active && (cam.ownerEntityIndex == ownerEntityIndex)) {
+    if (cam.active && (cam.ownerEntity == ownerEntity)) {
       cam.active = false;
       return true;
     }
   }
   return false;
+}
+
+void CameraManager::on_entity_destroyed(core::Entity entity) noexcept {
+  static_cast<void>(pop_camera(entity));
 }
 
 const CameraEntry *CameraManager::active_camera() const noexcept {

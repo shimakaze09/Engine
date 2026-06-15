@@ -1,7 +1,9 @@
 // Declares command history types and APIs for the Engine editor tool.
 
 #pragma once
+#include <array>
 #include <cstddef>
+#include <memory>
 namespace engine::editor {
 
 // Abstract editor command.
@@ -21,6 +23,14 @@ class CommandHistory final {
 public:
   static constexpr std::size_t kMaxHistory = 64U;
 
+  CommandHistory() noexcept = default;
+  ~CommandHistory() noexcept = default;
+
+  CommandHistory(const CommandHistory &) = delete;
+  CommandHistory &operator=(const CommandHistory &) = delete;
+  CommandHistory(CommandHistory &&) = delete;
+  CommandHistory &operator=(CommandHistory &&) = delete;
+
   // Execute a command and push it on the undo stack. Clears redo stack.
   // Takes ownership of the command pointer (must be allocated with new(nothrow)).
   void execute(EditorCommand *cmd) noexcept;
@@ -36,7 +46,7 @@ public:
   void clear() noexcept;
 
 private:
-  EditorCommand *m_history[kMaxHistory] = {};
+  std::array<std::unique_ptr<EditorCommand>, kMaxHistory> m_history{};
   int m_top = -1;       // index of last executed command
   int m_count = 0;      // total valid entries in history
 };

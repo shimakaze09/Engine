@@ -6,8 +6,6 @@ engine_add_test_executable(engine_unit_foundation
     PRIVATE_DEPS
     engine_core
     engine_math
-    LABELS
-    gpu
 )
 
 engine_add_test_executable(engine_unit_math
@@ -132,6 +130,25 @@ engine_add_test_executable(engine_unit_gpu_profiler
     engine_renderer
 )
 
+engine_add_test_executable(engine_unit_pass_resources
+    SOURCES
+    pass_resources_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/core/include
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_command_history
+    SOURCES
+    command_history_test.cpp
+    ${CMAKE_SOURCE_DIR}/editor/src/command_history.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+)
+
 engine_add_test_executable(engine_unit_shader_system
     SOURCES
     shader_system_test.cpp
@@ -151,6 +168,18 @@ engine_add_test_executable(engine_unit_texture_loader
     texture_loader_test.cpp
     PRIVATE_DEPS
     engine_renderer
+)
+
+engine_add_test_executable(engine_unit_texture_loader_handles
+    SOURCES
+    texture_loader_handle_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/core/include
+    ${ENGINE_STB_INCLUDE_DIR}
+    PRIVATE_DEPS
+    engine_core
 )
 
 engine_add_test_executable(engine_unit_prefab
@@ -330,9 +359,16 @@ engine_add_test_executable(engine_unit_lru_cache
 engine_add_test_executable(engine_unit_deterministic_cook
     SOURCES
     deterministic_cook_test.cpp
+    ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/tools/asset_packer
     PRIVATE_DEPS
     engine_core
 )
+
+if(WIN32)
+    target_compile_definitions(engine_unit_deterministic_cook PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
 
 engine_add_test_executable(engine_unit_import_settings
     SOURCES

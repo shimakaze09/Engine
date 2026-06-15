@@ -140,6 +140,59 @@ bool test_cancel_prevents_fire() noexcept {
   return true;
 }
 
+/// Handles test stale timer ids cannot affect reused slots.
+bool test_stale_timer_ids_do_not_cancel_reused_slots() noexcept {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return false;
+  }
+  auto &tm = world->timer_manager();
+
+  g_timeoutFired = 0;
+  g_cancelTargetFired = 0;
+
+  const auto cancelledId = tm.set_timeout(1.0F, on_timeout, nullptr);
+  if (cancelledId == engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  tm.cancel(cancelledId);
+
+  const auto replacementAfterCancel =
+      tm.set_timeout(0.1F, on_cancel_target, nullptr);
+  if ((replacementAfterCancel == engine::runtime::kInvalidTimerId) ||
+      (replacementAfterCancel == cancelledId)) {
+    return false;
+  }
+  tm.cancel(cancelledId);
+  tm.tick(0.2F);
+  if ((g_timeoutFired != 0) || (g_cancelTargetFired != 1)) {
+    return false;
+  }
+
+  g_timeoutFired = 0;
+  g_cancelTargetFired = 0;
+
+  const auto firedId = tm.set_timeout(0.1F, on_timeout, nullptr);
+  if (firedId == engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  tm.tick(0.2F);
+  if (g_timeoutFired != 1) {
+    return false;
+  }
+
+  const auto replacementAfterFire =
+      tm.set_timeout(0.1F, on_cancel_target, nullptr);
+  if ((replacementAfterFire == engine::runtime::kInvalidTimerId) ||
+      (replacementAfterFire == firedId)) {
+    return false;
+  }
+  tm.cancel(firedId);
+  tm.tick(0.2F);
+  return g_cancelTargetFired == 1;
+}
+
 /// Handles test clear removes all.
 bool test_clear_removes_all() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
@@ -270,7 +323,10 @@ bool test_restore_preserves_slots_and_rewires_callbacks() noexcept {
     return false;
   }
 
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  const std::size_t slot = restored.slot_for_id(id);
+  if (slot == engine::runtime::TimerManager::kInvalidTimerSlot) {
+    return false;
+  }
   if (!restored.entry_at(slot).active ||
       (restored.entry_at(slot).callback != nullptr)) {
     return false;
@@ -348,6 +404,8 @@ int main() {
   run("test_timeout_fires_once", test_timeout_fires_once);
   run("test_interval_fires_repeatedly", test_interval_fires_repeatedly);
   run("test_cancel_prevents_fire", test_cancel_prevents_fire);
+  run("test_stale_timer_ids_do_not_cancel_reused_slots",
+      test_stale_timer_ids_do_not_cancel_reused_slots);
   run("test_clear_removes_all", test_clear_removes_all);
   run("test_snapshot_restore", test_snapshot_restore);
   run("test_restore_preserves_slots_and_rewires_callbacks",

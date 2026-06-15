@@ -20,6 +20,7 @@ inline constexpr TimerId kInvalidTimerId = 0U;
 class TimerManager final {
 public:
   static constexpr std::size_t kMaxTimers = 256U;
+  static constexpr std::size_t kInvalidTimerSlot = kMaxTimers;
 
   /// Callback signature for C++ timers.
   using Callback = void (*)(TimerId id, void *userData) noexcept;
@@ -34,6 +35,9 @@ public:
 
   /// Cancel a pending timer. No-op if already fired / invalid.
   void cancel(TimerId id) noexcept;
+
+  /// Return the generation-matching slot for a TimerId, or kInvalidTimerSlot.
+  std::size_t slot_for_id(TimerId id) const noexcept;
 
   /// Advance all timers by @p dt seconds with pcall-safe callbacks.
   /// Returns number of timers that fired this tick.
@@ -84,10 +88,14 @@ public:
   Entry &entry_at_mut(std::size_t index) noexcept;
 
 private:
+  TimerId make_timer_id(std::size_t slot) const noexcept;
+  void ensure_generation(std::size_t slot) noexcept;
+  void advance_generation(std::size_t slot) noexcept;
+  void release_slot(std::size_t slot) noexcept;
+
   Entry m_timers[kMaxTimers]{};
+  std::uint16_t m_generations[kMaxTimers]{};
   float m_elapsed = 0.0F;
-  // Map TimerId → slot index. Simple: ID = slot+1 after allocation.
-  // We use the slot index directly: id = slotIndex + 1.
 };
 
 } // namespace engine::runtime

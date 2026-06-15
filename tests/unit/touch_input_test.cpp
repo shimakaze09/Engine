@@ -251,6 +251,44 @@ bool test_multi_touch() noexcept {
   return true;
 }
 
+bool test_duplicate_finger_down_reuses_touch() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  begin_input_frame();
+  sim_finger_down(7, 0.2F, 0.3F);
+  sim_finger_down(7, 0.4F, 0.5F);
+  end_input_frame();
+
+  if (active_touch_count() != 1U) {
+    shutdown_all();
+    return false;
+  }
+
+  TouchEvent touch{};
+  if (!get_active_touch(0U, &touch)) {
+    shutdown_all();
+    return false;
+  }
+  if ((touch.touchId != 7) || (touch.x != 0.4F) || (touch.y != 0.5F)) {
+    shutdown_all();
+    return false;
+  }
+
+  begin_input_frame();
+  sim_finger_up(7, 0.4F, 0.5F);
+  end_input_frame();
+
+  if (active_touch_count() != 0U) {
+    shutdown_all();
+    return false;
+  }
+
+  shutdown_all();
+  return true;
+}
+
 /// Handles test tap gesture.
 bool test_tap_gesture() noexcept {
   if (!init_all()) {
@@ -464,6 +502,8 @@ int main() {
   std::printf("--- touch_input tests ---\n");
   run("touch_lifecycle", &test_touch_lifecycle);
   run("multi_touch", &test_multi_touch);
+  run("duplicate_finger_down_reuses_touch",
+      &test_duplicate_finger_down_reuses_touch);
   run("tap_gesture", &test_tap_gesture);
   run("swipe_gesture", &test_swipe_gesture);
   run("pinch_gesture", &test_pinch_gesture);

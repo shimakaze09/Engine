@@ -11,6 +11,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/vfs.h"
+#include "engine/physics/physics.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -48,6 +49,8 @@ bool bootstrap(const EngineConfig &config) noexcept {
   static_cast<void>(core::cvar_register_int(
       "debug_dap_port", 0,
       "DAP debugger port (0 = disabled). Set to e.g. 4711 to enable."));
+
+  static_cast<void>(physics::register_physics_cvars());
 
   // Mount the configured project asset root before runtime/editor paths are
   // resolved through the VFS.

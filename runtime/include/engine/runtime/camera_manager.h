@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/entity.h"
 #include "engine/math/vec3.h"
 
 namespace engine::runtime {
@@ -20,7 +21,7 @@ struct CameraEntry final {
   float priority = 0.0F;
   float blendSpeed = 5.0F; ///< How fast blend weight ramps from 0→1.
   float blendWeight = 0.0F;
-  std::uint32_t ownerEntityIndex = 0U;
+  core::Entity ownerEntity = core::kInvalidEntity;
   bool active = false;
 };
 
@@ -45,11 +46,14 @@ public:
   static constexpr std::size_t kMaxShakes = 8U;
 
   /// Push a new camera onto the priority stack (or update if owner exists).
-  bool push_camera(std::uint32_t ownerEntityIndex, const CameraEntry &entry,
+  bool push_camera(core::Entity ownerEntity, const CameraEntry &entry,
                    float priority) noexcept;
 
   /// Pop (remove) the camera owned by the given entity.
-  bool pop_camera(std::uint32_t ownerEntityIndex) noexcept;
+  bool pop_camera(core::Entity ownerEntity) noexcept;
+
+  /// Remove any cameras owned by an entity that is being destroyed.
+  void on_entity_destroyed(core::Entity entity) noexcept;
 
   /// Get the raw entry for the highest-priority camera (before shake).
   const CameraEntry *active_camera() const noexcept;

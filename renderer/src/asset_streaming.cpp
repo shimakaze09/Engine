@@ -310,6 +310,31 @@ bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   return true;
 }
 
+bool release_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
+  if ((queue == nullptr) || !handle.valid()) {
+    return false;
+  }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(queue->mutex);
+  LoadRequest &req = queue->requests[handle.index];
+  if (!req.occupied) {
+    return false;
+  }
+  if ((req.state != LoadingState::Ready) && (req.state != LoadingState::Failed)) {
+    return false;
+  }
+
+  req = LoadRequest{};
+  if (queue->count > 0U) {
+    --queue->count;
+  }
+  queue->stateChanged.notify_all();
+  return true;
+}
+
 // ---- Polling ----
 
 bool is_load_ready(const AssetStreamingQueue *queue,
@@ -460,16 +485,8 @@ std::size_t update_asset_streaming(
     queue->stateChanged.notify_all();
   }
 
-  // Phase 3: Garbage-collect completed/failed requests.
-  for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    std::lock_guard<std::mutex> lock(queue->mutex);
-    LoadRequest &req = queue->requests[i];
-    if (req.occupied && ((req.state == LoadingState::Ready) ||
-                         (req.state == LoadingState::Failed))) {
-      // Keep them around so callers can poll is_load_ready().
-      // They are cleaned up when the handle goes out of scope or on shutdown.
-    }
-  }
+  // Completed/failed requests remain observable until callers retire their
+  // terminal handles with release_load().
 
   return readyCount;
 }

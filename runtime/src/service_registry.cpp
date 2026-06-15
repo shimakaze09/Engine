@@ -15,6 +15,29 @@ bool register_pointer(core::ServiceLocator &locator, T *ptr) noexcept {
   return locator.register_service<T>(ptr);
 }
 
+template <typename T> struct ServiceSnapshot final {
+  bool existed = false;
+  T *service = nullptr;
+};
+
+template <typename T>
+ServiceSnapshot<T> snapshot_service(core::ServiceLocator &locator) noexcept {
+  ServiceSnapshot<T> snapshot{};
+  snapshot.existed = locator.has_service<T>();
+  snapshot.service = locator.get_service<T>();
+  return snapshot;
+}
+
+template <typename T>
+void restore_service(core::ServiceLocator &locator,
+                     const ServiceSnapshot<T> &snapshot) noexcept {
+  if (snapshot.existed) {
+    static_cast<void>(locator.register_service<T>(snapshot.service));
+  } else {
+    static_cast<void>(locator.remove_service<T>());
+  }
+}
+
 } // namespace
 
 /// Creates a scoped service registry bound to one locator.
@@ -56,20 +79,12 @@ bool register_engine_subsystem_services(
     EngineAudioService *audioService,
     EngineAssetDatabaseService *assetDatabaseService,
     EngineRendererService *rendererService) noexcept {
-  bool ok = true;
-  ok = register_pointer<World>(locator, world) && ok;
-
   physics::PhysicsWorldView *worldView = nullptr;
   physics::PhysicsContext *physicsContext = nullptr;
   if (world != nullptr) {
     worldView = static_cast<physics::PhysicsWorldView *>(world);
     physicsContext = &world->physics_context();
   }
-  ok = register_pointer<physics::PhysicsWorldView>(locator, worldView) && ok;
-  ok = register_pointer<physics::PhysicsContext>(locator, physicsContext) && ok;
-  ok = register_pointer<EnginePhysicsService>(locator, physicsService) && ok;
-
-  ok = register_pointer<EngineAudioService>(locator, audioService) && ok;
 
   renderer::AssetDatabase *assetDatabase = nullptr;
   renderer::AssetManager *assetManager = nullptr;
@@ -77,11 +92,6 @@ bool register_engine_subsystem_services(
     assetDatabase = assetDatabaseService->database;
     assetManager = assetDatabaseService->manager;
   }
-  ok = register_pointer<renderer::AssetDatabase>(locator, assetDatabase) && ok;
-  ok = register_pointer<renderer::AssetManager>(locator, assetManager) && ok;
-  ok = register_pointer<EngineAssetDatabaseService>(locator,
-                                                    assetDatabaseService) &&
-       ok;
 
   renderer::CommandBufferBuilder *commandBuffer = nullptr;
   renderer::GpuMeshRegistry *meshRegistry = nullptr;
@@ -91,14 +101,104 @@ bool register_engine_subsystem_services(
     meshRegistry = rendererService->meshRegistry;
     renderDevice = const_cast<renderer::RenderDevice *>(rendererService->device);
   }
-  ok = register_pointer<renderer::CommandBufferBuilder>(locator,
-                                                        commandBuffer) &&
-       ok;
-  ok = register_pointer<renderer::GpuMeshRegistry>(locator, meshRegistry) && ok;
-  ok = register_pointer<renderer::RenderDevice>(locator, renderDevice) && ok;
-  ok = register_pointer<EngineRendererService>(locator, rendererService) && ok;
 
-  return ok;
+  const auto worldSnapshot = snapshot_service<World>(locator);
+  const auto worldViewSnapshot =
+      snapshot_service<physics::PhysicsWorldView>(locator);
+  const auto physicsContextSnapshot =
+      snapshot_service<physics::PhysicsContext>(locator);
+  const auto physicsServiceSnapshot =
+      snapshot_service<EnginePhysicsService>(locator);
+  const auto audioServiceSnapshot = snapshot_service<EngineAudioService>(locator);
+  const auto assetDatabaseSnapshot =
+      snapshot_service<renderer::AssetDatabase>(locator);
+  const auto assetManagerSnapshot =
+      snapshot_service<renderer::AssetManager>(locator);
+  const auto assetServiceSnapshot =
+      snapshot_service<EngineAssetDatabaseService>(locator);
+  const auto commandBufferSnapshot =
+      snapshot_service<renderer::CommandBufferBuilder>(locator);
+  const auto meshRegistrySnapshot =
+      snapshot_service<renderer::GpuMeshRegistry>(locator);
+  const auto renderDeviceSnapshot =
+      snapshot_service<renderer::RenderDevice>(locator);
+  const auto rendererServiceSnapshot =
+      snapshot_service<EngineRendererService>(locator);
+
+  auto rollback = [&]() noexcept {
+    restore_service<EngineRendererService>(locator, rendererServiceSnapshot);
+    restore_service<renderer::RenderDevice>(locator, renderDeviceSnapshot);
+    restore_service<renderer::GpuMeshRegistry>(locator, meshRegistrySnapshot);
+    restore_service<renderer::CommandBufferBuilder>(locator,
+                                                    commandBufferSnapshot);
+    restore_service<EngineAssetDatabaseService>(locator, assetServiceSnapshot);
+    restore_service<renderer::AssetManager>(locator, assetManagerSnapshot);
+    restore_service<renderer::AssetDatabase>(locator, assetDatabaseSnapshot);
+    restore_service<EngineAudioService>(locator, audioServiceSnapshot);
+    restore_service<EnginePhysicsService>(locator, physicsServiceSnapshot);
+    restore_service<physics::PhysicsContext>(locator,
+                                             physicsContextSnapshot);
+    restore_service<physics::PhysicsWorldView>(locator, worldViewSnapshot);
+    restore_service<World>(locator, worldSnapshot);
+  };
+
+  auto registerOrRollback = [&rollback](bool registered) noexcept -> bool {
+    if (!registered) {
+      rollback();
+      return false;
+    }
+    return true;
+  };
+
+  if (!registerOrRollback(register_pointer<World>(locator, world))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<physics::PhysicsWorldView>(locator, worldView))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<physics::PhysicsContext>(locator, physicsContext))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<EnginePhysicsService>(locator, physicsService))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<EngineAudioService>(locator, audioService))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<renderer::AssetDatabase>(locator, assetDatabase))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<renderer::AssetManager>(locator, assetManager))) {
+    return false;
+  }
+  if (!registerOrRollback(register_pointer<EngineAssetDatabaseService>(
+          locator, assetDatabaseService))) {
+    return false;
+  }
+  if (!registerOrRollback(register_pointer<renderer::CommandBufferBuilder>(
+          locator, commandBuffer))) {
+    return false;
+  }
+  if (!registerOrRollback(register_pointer<renderer::GpuMeshRegistry>(
+          locator, meshRegistry))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<renderer::RenderDevice>(locator, renderDevice))) {
+    return false;
+  }
+  if (!registerOrRollback(
+          register_pointer<EngineRendererService>(locator, rendererService))) {
+    return false;
+  }
+
+  return true;
 }
 
 /// Removes engine subsystem services from an explicit service locator.

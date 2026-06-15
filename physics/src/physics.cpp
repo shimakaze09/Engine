@@ -10,6 +10,7 @@
 #include <cstring>
 #include <new>
 
+#include "engine/core/cvar.h"
 #include "engine/math/aabb.h"
 #include "engine/math/quat.h"
 #include "engine/math/ray.h"
@@ -24,6 +25,42 @@
 #include "engine/physics/physics_world_view.h"
 
 namespace engine::physics {
+
+namespace {
+
+bool cvar_exists(const char *name) noexcept {
+  if (name == nullptr) {
+    return false;
+  }
+
+  core::CVarInfo infos[256] = {};
+  const std::size_t count = core::cvar_get_all(infos, 256U);
+  for (std::size_t i = 0U; i < count; ++i) {
+    if ((infos[i].name != nullptr) && (std::strcmp(infos[i].name, name) == 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+bool register_physics_cvars() noexcept {
+  bool ok = true;
+  if (!cvar_exists("physics.solver_iterations")) {
+    ok = core::cvar_register_int(
+             "physics.solver_iterations", 8,
+             "Number of constraint solver iterations") &&
+         ok;
+  }
+  if (!cvar_exists("physics.ccd_threshold")) {
+    ok = core::cvar_register_float(
+             "physics.ccd_threshold", 2.0F,
+             "Minimum velocity magnitude (m/s) to trigger CCD") &&
+         ok;
+  }
+  return ok;
+}
 
 PhysicsContext::PhysicsContext() noexcept
     : shapeStore(new (std::nothrow) PhysicsShapeStore()) {}
@@ -157,9 +194,31 @@ HeightfieldData *allocate_heightfield_data(PhysicsContext &context,
   return &store->heightfieldData[store->heightfieldCount++];
 }
 
+bool validate_convex_hull_data(const ConvexHullData &hull) noexcept {
+  return (hull.vertexCount > 0U) &&
+         (hull.vertexCount <= ConvexHullData::kMaxVertices) &&
+         (hull.planeCount > 0U) &&
+         (hull.planeCount <= ConvexHullData::kMaxPlanes);
+}
+
+bool validate_heightfield_data(const HeightfieldData &heightfield) noexcept {
+  if ((heightfield.rows < 2U) || (heightfield.columns < 2U) ||
+      (heightfield.rows > HeightfieldData::kMaxResolution) ||
+      (heightfield.columns > HeightfieldData::kMaxResolution) ||
+      (heightfield.spacingX <= 0.0F) || (heightfield.spacingZ <= 0.0F)) {
+    return false;
+  }
+
+  return heightfield.rows <= (HeightfieldData::kMaxSamples / heightfield.columns);
+}
+
 // Public accessors used by the runtime bridge.
 bool set_convex_hull_data(PhysicsContext &context, std::uint32_t entityIndex,
                           const ConvexHullData &hull) noexcept {
+  if (!validate_convex_hull_data(hull)) {
+    return false;
+  }
+
   ConvexHullData *slot = allocate_hull_data(context, entityIndex);
   if (slot == nullptr) {
     return false;
@@ -178,6 +237,10 @@ get_convex_hull_data(const PhysicsContext &context,
 /// Sets the requested value for heightfield data impl.
 bool set_heightfield_data(PhysicsContext &context, std::uint32_t entityIndex,
                           const HeightfieldData &hf) noexcept {
+  if (!validate_heightfield_data(hf)) {
+    return false;
+  }
+
   HeightfieldData *slot = allocate_heightfield_data(context, entityIndex);
   if (slot == nullptr) {
     return false;
@@ -947,9 +1010,14 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
 }
 
 /// Handles resolve collisions.
-bool resolve_collisions(PhysicsWorldView &world) noexcept {
+bool resolve_collisions(PhysicsWorldView &world,
+                        float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
   PhysicsContext &physicsCtx = world.physics_context();
+  if (deltaSeconds <= 0.0F) {
+    return false;
+  }
+
   physicsCtx.collisionPairCount = 0U;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
@@ -1036,8 +1104,8 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
     };
 
     // Insert each collider into all cells its AABB overlaps.
-    // For speculative contacts: expand AABB by velocity * dt (1/60s assumed).
-    constexpr float kSpeculativeDt = 1.0F / 60.0F;
+    // For speculative contacts: expand AABB by velocity * active timestep.
+    const float speculativeDt = deltaSeconds;
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       const engine::math::Vec3 he = broadphase_half_extents(colliders[i]);
 
@@ -1047,9 +1115,9 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
       float expandY = 0.0F;
       float expandZ = 0.0F;
       if ((bodyI != nullptr) && (bodyI->inverseMass > 0.0F)) {
-        expandX = std::fabs(bodyI->velocity.x) * kSpeculativeDt;
-        expandY = std::fabs(bodyI->velocity.y) * kSpeculativeDt;
-        expandZ = std::fabs(bodyI->velocity.z) * kSpeculativeDt;
+        expandX = std::fabs(bodyI->velocity.x) * speculativeDt;
+        expandY = std::fabs(bodyI->velocity.y) * speculativeDt;
+        expandZ = std::fabs(bodyI->velocity.z) * speculativeDt;
       }
 
       const std::int32_t minCX = cell_coord(posX[i] - he.x - expandX);
@@ -1672,14 +1740,14 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                   const float dist =
                       (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
                   const float gap = dist - sumR;
-                  if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
+                  if ((gap > 0.0F) && (gap < speculativeDt * 300.0F)) {
                     const engine::math::Vec3 specN =
                         (dist2 > 0.0F) ? engine::math::Vec3(
                                              dx / dist, dy / dist, dz / dist)
                                        : engine::math::Vec3(0.0F, 1.0F, 0.0F);
                     resolve_speculative_contact(bodyA, bodyB, specN, invMassA,
                                                 invMassB, invMassSum, gap,
-                                                kSpeculativeDt);
+                                                speculativeDt);
                   }
                   continue;
                 }
@@ -1784,7 +1852,7 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                   const float dist =
                       (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
                   const float gap = dist - radius;
-                  if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
+                  if ((gap > 0.0F) && (gap < speculativeDt * 300.0F)) {
                     engine::math::Vec3 specN =
                         (dist2 > 0.0F) ? engine::math::Vec3(
                                              dx / dist, dy / dist, dz / dist)
@@ -1794,7 +1862,7 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                     }
                     resolve_speculative_contact(bodyA, bodyB, specN, invMassA,
                                                 invMassB, invMassSum, gap,
-                                                kSpeculativeDt);
+                                                speculativeDt);
                   }
                   continue;
                 }
@@ -1898,7 +1966,7 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                     std::min({overlapX, overlapY, overlapZ});
                 const float gap = -minOverlap; // positive = actual gap distance
 
-                if ((gap > 0.0F) && (gap < kSpeculativeDt * 300.0F)) {
+                if ((gap > 0.0F) && (gap < speculativeDt * 300.0F)) {
                   // Determine the speculative contact normal (axis of smallest
                   // gap).
                   float specNx = 0.0F;
@@ -1914,7 +1982,7 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
                   const engine::math::Vec3 specNormal(specNx, specNy, specNz);
                   resolve_speculative_contact(bodyA, bodyB, specNormal,
                                               invMassA, invMassB, invMassSum,
-                                              gap, kSpeculativeDt);
+                                              gap, speculativeDt);
                 }
                 continue;
               }
@@ -2003,7 +2071,7 @@ bool resolve_collisions(PhysicsWorldView &world) noexcept {
     } // for i
   } // if (colliderCount >= 2U)
 
-  solve_constraints(world, 1.0F / 60.0F);
+  solve_constraints(world, deltaSeconds);
 
   // Sleep check: after all collision responses and joint solving,
   // examine each rigid body. If velocity is below threshold for enough

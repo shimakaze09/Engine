@@ -1,6 +1,8 @@
 // Verifies texture loader test behavior for the Engine test suite.
 
+#include <cstddef>
 #include <cstdio>
+#include <limits>
 
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/command_buffer.h"
@@ -91,6 +93,33 @@ int check_load_before_init() {
   return 0;
 }
 
+int check_stb_input_size_validation() {
+  int stbSize = -1;
+  const auto maxSize =
+      static_cast<std::size_t>(std::numeric_limits<int>::max());
+  if (!engine::renderer::texture_input_size_fits_stb(maxSize, &stbSize)) {
+    return 51;
+  }
+  if (stbSize != std::numeric_limits<int>::max()) {
+    return 52;
+  }
+
+  stbSize = 123;
+  if (engine::renderer::texture_input_size_fits_stb(maxSize + 1U,
+                                                    &stbSize)) {
+    return 53;
+  }
+  if (stbSize != 123) {
+    return 54;
+  }
+
+  if (engine::renderer::texture_input_size_fits_stb(1U, nullptr)) {
+    return 55;
+  }
+
+  return 0;
+}
+
 /// Handles check texture asset database.
 int check_texture_asset_database() {
   // Basic texture asset database test.
@@ -175,6 +204,11 @@ int main() {
   }
 
   result = check_load_before_init();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_stb_input_size_validation();
   if (result != 0) {
     return result;
   }

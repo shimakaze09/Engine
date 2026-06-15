@@ -119,6 +119,10 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
 /// Cancel a pending request.
 bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept;
 
+/// Release a completed or failed request slot after the caller has observed its
+/// terminal state.
+bool release_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept;
+
 // ---- Polling ----
 
 /// Check if the load has reached the Ready state.

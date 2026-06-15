@@ -76,6 +76,24 @@ bool test_path_resolution() noexcept {
     return false;
   }
 
+  const char *badPaths[] = {
+      "assets/../outside.txt",
+      "assets/sub/../../outside.txt",
+      "assets/./same.txt",
+      "assets/sub/./same.txt",
+      "assets//absolute-like.txt",
+      "assets/C:/outside.txt",
+      "assets/sub/D:/outside.txt",
+      "assets\\..\\outside.txt",
+      "assets\\C:\\outside.txt",
+  };
+  for (const char *path : badPaths) {
+    if (vfs_resolve_os_path(path, resolved, sizeof(resolved))) {
+      shutdown_vfs();
+      return false;
+    }
+  }
+
   shutdown_vfs();
   return true;
 }
