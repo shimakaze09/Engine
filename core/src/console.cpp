@@ -108,7 +108,7 @@ void builtin_help(const char *const * /*args*/, int /*argCount*/,
   console_print("Registered commands:");
   for (std::size_t i = 0U; i < commandCount; ++i) {
     char buf[kMaxLineLen] = {};
-    std::snprintf(buf, sizeof(buf), "  %-20s  %s", commands[i].name,
+    std::snprintf(buf, sizeof(buf), "  %-20.63s  %.127s", commands[i].name,
                   commands[i].desc);
     console_print(buf);
   }
