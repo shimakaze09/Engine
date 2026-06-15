@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
+# Runs the check coverage threshold Python helper for Engine tooling.
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
 
+# Runs this executable or test program.
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check gcovr JSON summary coverage threshold")
     parser.add_argument("--summary", required=True)

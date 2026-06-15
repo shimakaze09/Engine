@@ -1,3 +1,5 @@
+// Declares debug camera types and APIs for the Engine editor tool.
+
 #pragma once
 
 #include "engine/math/vec3.h"

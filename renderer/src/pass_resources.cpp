@@ -1,3 +1,5 @@
+// Implements pass resources behavior for the Engine renderer system.
+
 #include "engine/renderer/pass_resources.h"
 
 #include <cstdint>
@@ -22,6 +24,7 @@ constexpr std::uint32_t kGBufferDepthSlot = 7U;
 constexpr std::uint32_t kSsaoTextureSlot = 8U;
 constexpr std::uint32_t kSsaoBlurTextureSlot = 9U;
 
+/// Stores pass resource state data used by the engine.
 struct PassResourceState final {
   bool initialized = false;
   int width = 0;
@@ -52,254 +55,222 @@ struct PassResourceState final {
 
 PassResourceState g_state{};
 
-void destroy_gpu_resources() noexcept {
+/// Destroys or releases the requested object, handle, or resource for gpu resources.
+void destroy_gpu_resources(PassResourceState &state) noexcept {
   const RenderDevice *dev = render_device();
   if (dev == nullptr) {
     return;
   }
 
   // SSAO (reverse order of creation).
-  if (g_state.ssaoBlurFbo != 0U) {
-    dev->destroy_framebuffer(g_state.ssaoBlurFbo);
-    g_state.ssaoBlurFbo = 0U;
+  if (state.ssaoBlurFbo != 0U) {
+    dev->destroy_framebuffer(state.ssaoBlurFbo);
+    state.ssaoBlurFbo = 0U;
   }
-  if (g_state.ssaoBlurTex != 0U) {
-    dev->destroy_texture(g_state.ssaoBlurTex);
-    g_state.ssaoBlurTex = 0U;
+  if (state.ssaoBlurTex != 0U) {
+    dev->destroy_texture(state.ssaoBlurTex);
+    state.ssaoBlurTex = 0U;
   }
-  if (g_state.ssaoFbo != 0U) {
-    dev->destroy_framebuffer(g_state.ssaoFbo);
-    g_state.ssaoFbo = 0U;
+  if (state.ssaoFbo != 0U) {
+    dev->destroy_framebuffer(state.ssaoFbo);
+    state.ssaoFbo = 0U;
   }
-  if (g_state.ssaoTex != 0U) {
-    dev->destroy_texture(g_state.ssaoTex);
-    g_state.ssaoTex = 0U;
+  if (state.ssaoTex != 0U) {
+    dev->destroy_texture(state.ssaoTex);
+    state.ssaoTex = 0U;
   }
 
   // G-Buffer (reverse order of creation).
-  if (g_state.gbufferFbo != 0U) {
-    dev->destroy_framebuffer(g_state.gbufferFbo);
-    g_state.gbufferFbo = 0U;
+  if (state.gbufferFbo != 0U) {
+    dev->destroy_framebuffer(state.gbufferFbo);
+    state.gbufferFbo = 0U;
   }
-  if (g_state.gbufferDepthTex != 0U) {
-    dev->destroy_texture(g_state.gbufferDepthTex);
-    g_state.gbufferDepthTex = 0U;
+  if (state.gbufferDepthTex != 0U) {
+    dev->destroy_texture(state.gbufferDepthTex);
+    state.gbufferDepthTex = 0U;
   }
-  if (g_state.gbufferEmissiveTex != 0U) {
-    dev->destroy_texture(g_state.gbufferEmissiveTex);
-    g_state.gbufferEmissiveTex = 0U;
+  if (state.gbufferEmissiveTex != 0U) {
+    dev->destroy_texture(state.gbufferEmissiveTex);
+    state.gbufferEmissiveTex = 0U;
   }
-  if (g_state.gbufferNormalTex != 0U) {
-    dev->destroy_texture(g_state.gbufferNormalTex);
-    g_state.gbufferNormalTex = 0U;
+  if (state.gbufferNormalTex != 0U) {
+    dev->destroy_texture(state.gbufferNormalTex);
+    state.gbufferNormalTex = 0U;
   }
-  if (g_state.gbufferAlbedoTex != 0U) {
-    dev->destroy_texture(g_state.gbufferAlbedoTex);
-    g_state.gbufferAlbedoTex = 0U;
+  if (state.gbufferAlbedoTex != 0U) {
+    dev->destroy_texture(state.gbufferAlbedoTex);
+    state.gbufferAlbedoTex = 0U;
   }
 
   // Forward path.
-  if (g_state.finalFbo != 0U) {
-    dev->destroy_framebuffer(g_state.finalFbo);
-    g_state.finalFbo = 0U;
+  if (state.finalFbo != 0U) {
+    dev->destroy_framebuffer(state.finalFbo);
+    state.finalFbo = 0U;
   }
-  if (g_state.finalColorTexture != 0U) {
-    dev->destroy_texture(g_state.finalColorTexture);
-    g_state.finalColorTexture = 0U;
+  if (state.finalColorTexture != 0U) {
+    dev->destroy_texture(state.finalColorTexture);
+    state.finalColorTexture = 0U;
   }
-  if (g_state.sceneFbo != 0U) {
-    dev->destroy_framebuffer(g_state.sceneFbo);
-    g_state.sceneFbo = 0U;
+  if (state.sceneFbo != 0U) {
+    dev->destroy_framebuffer(state.sceneFbo);
+    state.sceneFbo = 0U;
   }
-  if (g_state.sceneColorTexture != 0U) {
-    dev->destroy_texture(g_state.sceneColorTexture);
-    g_state.sceneColorTexture = 0U;
+  if (state.sceneColorTexture != 0U) {
+    dev->destroy_texture(state.sceneColorTexture);
+    state.sceneColorTexture = 0U;
   }
-  if (g_state.sceneDepthTexture != 0U) {
-    dev->destroy_texture(g_state.sceneDepthTexture);
-    g_state.sceneDepthTexture = 0U;
+  if (state.sceneDepthTexture != 0U) {
+    dev->destroy_texture(state.sceneDepthTexture);
+    state.sceneDepthTexture = 0U;
   }
 }
 
-bool create_gpu_resources(int width, int height) noexcept {
+bool fail_create(PassResourceState &state, const char *message) noexcept {
+  core::log_message(core::LogLevel::Error, "pass_resources", message);
+  destroy_gpu_resources(state);
+  state = PassResourceState{};
+  return false;
+}
+
+/// Creates a new object, handle, or resource for gpu resources.
+bool create_gpu_resources(PassResourceState *outState, int width,
+                          int height) noexcept {
+  if (outState == nullptr) {
+    return false;
+  }
+
   const RenderDevice *dev = render_device();
   if (dev == nullptr) {
     return false;
   }
 
+  PassResourceState next{};
+  next.width = width;
+  next.height = height;
+
   // Scene color: RGBA16F (via create_texture_2d_hdr with nullptr data).
-  g_state.sceneColorTexture =
+  next.sceneColorTexture =
       dev->create_texture_2d_hdr(static_cast<std::int32_t>(width),
                                  static_cast<std::int32_t>(height), 4, nullptr);
-  if (g_state.sceneColorTexture == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create scene color texture");
-    return false;
+  if (next.sceneColorTexture == 0U) {
+    return fail_create(next, "failed to create scene color texture");
   }
 
   // Scene depth: DEPTH24.
-  g_state.sceneDepthTexture = dev->create_depth_texture(
+  next.sceneDepthTexture = dev->create_depth_texture(
       static_cast<std::int32_t>(width), static_cast<std::int32_t>(height));
-  if (g_state.sceneDepthTexture == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create scene depth texture");
-    dev->destroy_texture(g_state.sceneColorTexture);
-    g_state.sceneColorTexture = 0U;
-    return false;
+  if (next.sceneDepthTexture == 0U) {
+    return fail_create(next, "failed to create scene depth texture");
   }
 
   // Scene FBO.
-  g_state.sceneFbo = dev->create_framebuffer(g_state.sceneColorTexture,
-                                             g_state.sceneDepthTexture);
-  if (g_state.sceneFbo == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create scene framebuffer");
-    dev->destroy_texture(g_state.sceneDepthTexture);
-    g_state.sceneDepthTexture = 0U;
-    dev->destroy_texture(g_state.sceneColorTexture);
-    g_state.sceneColorTexture = 0U;
-    return false;
+  next.sceneFbo =
+      dev->create_framebuffer(next.sceneColorTexture, next.sceneDepthTexture);
+  if (next.sceneFbo == 0U) {
+    return fail_create(next, "failed to create scene framebuffer");
   }
 
   // Final color: RGBA8 LDR (tonemapped output for editor viewport).
-  g_state.finalColorTexture =
+  next.finalColorTexture =
       dev->create_texture_2d(static_cast<std::int32_t>(width),
                              static_cast<std::int32_t>(height), 4, nullptr);
-  if (g_state.finalColorTexture == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create final color texture");
-    dev->destroy_framebuffer(g_state.sceneFbo);
-    g_state.sceneFbo = 0U;
-    dev->destroy_texture(g_state.sceneDepthTexture);
-    g_state.sceneDepthTexture = 0U;
-    dev->destroy_texture(g_state.sceneColorTexture);
-    g_state.sceneColorTexture = 0U;
-    return false;
+  if (next.finalColorTexture == 0U) {
+    return fail_create(next, "failed to create final color texture");
   }
 
   // Final FBO (color-only, no depth).
-  g_state.finalFbo = dev->create_framebuffer(g_state.finalColorTexture, 0U);
-  if (g_state.finalFbo == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create final framebuffer");
-    dev->destroy_texture(g_state.finalColorTexture);
-    g_state.finalColorTexture = 0U;
-    dev->destroy_framebuffer(g_state.sceneFbo);
-    g_state.sceneFbo = 0U;
-    dev->destroy_texture(g_state.sceneDepthTexture);
-    g_state.sceneDepthTexture = 0U;
-    dev->destroy_texture(g_state.sceneColorTexture);
-    g_state.sceneColorTexture = 0U;
-    return false;
+  next.finalFbo = dev->create_framebuffer(next.finalColorTexture, 0U);
+  if (next.finalFbo == 0U) {
+    return fail_create(next, "failed to create final framebuffer");
   }
 
-  g_state.width = width;
-  g_state.height = height;
-
-  g_state.resources.sceneColor = PassResourceId{kSceneColorSlot};
-  g_state.resources.sceneDepth = PassResourceId{kSceneDepthSlot};
-  g_state.resources.finalColor = PassResourceId{kFinalColorSlot};
+  next.resources.sceneColor = PassResourceId{kSceneColorSlot};
+  next.resources.sceneDepth = PassResourceId{kSceneDepthSlot};
+  next.resources.finalColor = PassResourceId{kFinalColorSlot};
 
   // --- G-Buffer textures (deferred path) ---
   const auto w32 = static_cast<std::int32_t>(width);
   const auto h32 = static_cast<std::int32_t>(height);
 
   // RT0: albedo (RGBA8).
-  g_state.gbufferAlbedoTex = dev->create_texture_2d(w32, h32, 4, nullptr);
-  if (g_state.gbufferAlbedoTex == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create G-Buffer albedo texture");
-    return false;
+  next.gbufferAlbedoTex = dev->create_texture_2d(w32, h32, 4, nullptr);
+  if (next.gbufferAlbedoTex == 0U) {
+    return fail_create(next, "failed to create G-Buffer albedo texture");
   }
 
   // RT1: normals + roughness (RGBA16F).
-  g_state.gbufferNormalTex = dev->create_texture_2d_hdr(w32, h32, 4, nullptr);
-  if (g_state.gbufferNormalTex == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create G-Buffer normal texture");
-    return false;
+  next.gbufferNormalTex = dev->create_texture_2d_hdr(w32, h32, 4, nullptr);
+  if (next.gbufferNormalTex == 0U) {
+    return fail_create(next, "failed to create G-Buffer normal texture");
   }
 
   // RT2: emissive + AO (RGBA8).
-  g_state.gbufferEmissiveTex = dev->create_texture_2d(w32, h32, 4, nullptr);
-  if (g_state.gbufferEmissiveTex == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create G-Buffer emissive texture");
-    return false;
+  next.gbufferEmissiveTex = dev->create_texture_2d(w32, h32, 4, nullptr);
+  if (next.gbufferEmissiveTex == 0U) {
+    return fail_create(next, "failed to create G-Buffer emissive texture");
   }
 
   // G-Buffer depth (DEPTH24).
-  g_state.gbufferDepthTex = dev->create_depth_texture(w32, h32);
-  if (g_state.gbufferDepthTex == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create G-Buffer depth texture");
-    return false;
+  next.gbufferDepthTex = dev->create_depth_texture(w32, h32);
+  if (next.gbufferDepthTex == 0U) {
+    return fail_create(next, "failed to create G-Buffer depth texture");
   }
 
   // G-Buffer MRT FBO (3 color + 1 depth).
-  const std::uint32_t gbufferColors[] = {g_state.gbufferAlbedoTex,
-                                         g_state.gbufferNormalTex,
-                                         g_state.gbufferEmissiveTex};
-  g_state.gbufferFbo =
-      dev->create_framebuffer_mrt(gbufferColors, 3, g_state.gbufferDepthTex);
-  if (g_state.gbufferFbo == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create G-Buffer framebuffer");
-    return false;
+  const std::uint32_t gbufferColors[] = {next.gbufferAlbedoTex,
+                                         next.gbufferNormalTex,
+                                         next.gbufferEmissiveTex};
+  next.gbufferFbo =
+      dev->create_framebuffer_mrt(gbufferColors, 3, next.gbufferDepthTex);
+  if (next.gbufferFbo == 0U) {
+    return fail_create(next, "failed to create G-Buffer framebuffer");
   }
 
   // Verify G-Buffer FBO completeness.
-  dev->bind_framebuffer(g_state.gbufferFbo);
+  dev->bind_framebuffer(next.gbufferFbo);
   if (!dev->check_framebuffer_complete()) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "G-Buffer FBO is not complete");
     dev->bind_framebuffer(0U);
-    return false;
+    return fail_create(next, "G-Buffer FBO is not complete");
   }
   dev->bind_framebuffer(0U);
 
-  g_state.resources.gbufferAlbedo = PassResourceId{kGBufferAlbedoSlot};
-  g_state.resources.gbufferNormal = PassResourceId{kGBufferNormalSlot};
-  g_state.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
-  g_state.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
+  next.resources.gbufferAlbedo = PassResourceId{kGBufferAlbedoSlot};
+  next.resources.gbufferNormal = PassResourceId{kGBufferNormalSlot};
+  next.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
+  next.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
 
   // --- SSAO textures (R32F) ---
-  g_state.ssaoTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
-  if (g_state.ssaoTex == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create SSAO texture");
-    return false;
+  next.ssaoTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
+  if (next.ssaoTex == 0U) {
+    return fail_create(next, "failed to create SSAO texture");
   }
 
-  g_state.ssaoFbo = dev->create_framebuffer(g_state.ssaoTex, 0U);
-  if (g_state.ssaoFbo == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create SSAO framebuffer");
-    return false;
+  next.ssaoFbo = dev->create_framebuffer(next.ssaoTex, 0U);
+  if (next.ssaoFbo == 0U) {
+    return fail_create(next, "failed to create SSAO framebuffer");
   }
 
-  g_state.ssaoBlurTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
-  if (g_state.ssaoBlurTex == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create SSAO blur texture");
-    return false;
+  next.ssaoBlurTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
+  if (next.ssaoBlurTex == 0U) {
+    return fail_create(next, "failed to create SSAO blur texture");
   }
 
-  g_state.ssaoBlurFbo = dev->create_framebuffer(g_state.ssaoBlurTex, 0U);
-  if (g_state.ssaoBlurFbo == 0U) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to create SSAO blur framebuffer");
-    return false;
+  next.ssaoBlurFbo = dev->create_framebuffer(next.ssaoBlurTex, 0U);
+  if (next.ssaoBlurFbo == 0U) {
+    return fail_create(next, "failed to create SSAO blur framebuffer");
   }
 
-  g_state.resources.ssaoTexture = PassResourceId{kSsaoTextureSlot};
-  g_state.resources.ssaoBlurTexture = PassResourceId{kSsaoBlurTextureSlot};
+  next.resources.ssaoTexture = PassResourceId{kSsaoTextureSlot};
+  next.resources.ssaoBlurTexture = PassResourceId{kSsaoBlurTextureSlot};
+  next.initialized = true;
 
+  *outState = next;
   return true;
 }
 
 } // namespace
 
+/// Initializes the owning system for pass resources.
 bool initialize_pass_resources(int width, int height) noexcept {
   if (g_state.initialized) {
     return true;
@@ -309,23 +280,26 @@ bool initialize_pass_resources(int width, int height) noexcept {
     return false;
   }
 
-  if (!create_gpu_resources(width, height)) {
+  PassResourceState next{};
+  if (!create_gpu_resources(&next, width, height)) {
     return false;
   }
 
-  g_state.initialized = true;
+  g_state = next;
   return true;
 }
 
+/// Shuts down the owning system for pass resources.
 void shutdown_pass_resources() noexcept {
   if (!g_state.initialized) {
     return;
   }
 
-  destroy_gpu_resources();
+  destroy_gpu_resources(g_state);
   g_state = PassResourceState{};
 }
 
+/// Handles resize pass resources.
 void resize_pass_resources(int width, int height) noexcept {
   if (!g_state.initialized) {
     return;
@@ -339,16 +313,21 @@ void resize_pass_resources(int width, int height) noexcept {
     return;
   }
 
-  destroy_gpu_resources();
-  if (!create_gpu_resources(width, height)) {
+  PassResourceState next{};
+  if (!create_gpu_resources(&next, width, height)) {
     core::log_message(core::LogLevel::Error, "pass_resources",
                       "failed to recreate pass resources on resize");
-    g_state.initialized = false;
+    return;
   }
+
+  destroy_gpu_resources(g_state);
+  g_state = next;
 }
 
+/// Returns the requested value for pass resources.
 const PassResources &get_pass_resources() noexcept { return g_state.resources; }
 
+/// Handles pass resource gpu texture.
 std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kSceneColorSlot) {
     return g_state.sceneColorTexture;
@@ -380,6 +359,7 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   return 0U;
 }
 
+/// Handles pass resource framebuffer.
 std::uint32_t
 pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
   if (colorAttachment.id == kSceneColorSlot) {

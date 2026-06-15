@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
@@ -45,6 +46,7 @@ using SocketHandle = int;
 constexpr SocketHandle kInvalidSocket = -1;
 #endif
 
+/// Writes script data.
 bool write_script(const char *code) noexcept {
   FILE *f = nullptr;
 #ifdef _WIN32
@@ -62,8 +64,10 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
+/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
+/// Handles close socket safe.
 void close_socket_safe(SocketHandle s) noexcept {
   if (s == kInvalidSocket) {
     return;
@@ -75,6 +79,53 @@ void close_socket_safe(SocketHandle s) noexcept {
 #endif
 }
 
+/// Starts client-side socket support for the DAP integration test.
+bool init_client_socket_platform() noexcept {
+#if defined(_WIN32)
+  WSADATA wsa{};
+  return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+#else
+  return true;
+#endif
+}
+
+/// Stops client-side socket support for the DAP integration test.
+void shutdown_client_socket_platform() noexcept {
+#if defined(_WIN32)
+  WSACleanup();
+#endif
+}
+
+/// Connects a client socket to the local DAP server with a short retry window.
+bool connect_to_dap_server(SocketHandle *outSock) noexcept {
+  if (outSock == nullptr) {
+    return false;
+  }
+  *outSock = kInvalidSocket;
+
+  SocketHandle sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (sock == kInvalidSocket) {
+    return false;
+  }
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(kDapPort);
+  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+  for (int i = 0; i < 120; ++i) {
+    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0) {
+      *outSock = sock;
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  close_socket_safe(sock);
+  return false;
+}
+
+/// Handles send all.
 bool send_all(SocketHandle s, const char *data, std::size_t len) noexcept {
   std::size_t sent = 0U;
   while (sent < len) {
@@ -91,6 +142,7 @@ bool send_all(SocketHandle s, const char *data, std::size_t len) noexcept {
   return true;
 }
 
+/// Handles send dap request.
 bool send_dap_request(SocketHandle s, int seq, const char *command,
                       const char *argumentsJson) noexcept {
   char body[2048] = {};
@@ -117,6 +169,7 @@ bool send_dap_request(SocketHandle s, int seq, const char *command,
          send_all(s, body, std::strlen(body));
 }
 
+/// Handles try extract dap message.
 bool try_extract_dap_message(std::string *buffer,
                              std::string *outBody) noexcept {
   const std::size_t headerEnd = buffer->find("\r\n\r\n");
@@ -152,6 +205,7 @@ bool try_extract_dap_message(std::string *buffer,
   return true;
 }
 
+/// Handles recv dap message.
 bool recv_dap_message(SocketHandle s, std::string *buffer, std::string *outBody,
                       int timeoutMs) noexcept {
   auto deadline =
@@ -198,6 +252,7 @@ bool recv_dap_message(SocketHandle s, std::string *buffer, std::string *outBody,
   return false;
 }
 
+/// Stores client result data used by the engine.
 struct ClientResult {
   bool connected = false;
   bool stoppedEventSeen = false;
@@ -205,48 +260,19 @@ struct ClientResult {
   bool continueAckSeen = false;
 };
 
+/// Runs the configured command, loop, or tool for mock dap client.
 void run_mock_dap_client(int breakpointLine, ClientResult *result) noexcept {
   if (result == nullptr) {
     return;
   }
 
-#if defined(_WIN32)
-  WSADATA wsa{};
-  if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-    return;
-  }
-#endif
-
-  SocketHandle sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (sock == kInvalidSocket) {
-#if defined(_WIN32)
-    WSACleanup();
-#endif
+  if (!init_client_socket_platform()) {
     return;
   }
 
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(kDapPort);
-#if defined(_WIN32)
-  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-#else
-  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-#endif
-
-  bool connected = false;
-  for (int i = 0; i < 120; ++i) {
-    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0) {
-      connected = true;
-      break;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  if (!connected) {
-    close_socket_safe(sock);
-#if defined(_WIN32)
-    WSACleanup();
-#endif
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock)) {
+    shutdown_client_socket_platform();
     return;
   }
 
@@ -325,11 +351,113 @@ void run_mock_dap_client(int breakpointLine, ClientResult *result) noexcept {
   }
 
   close_socket_safe(sock);
-#if defined(_WIN32)
-  WSACleanup();
-#endif
+  shutdown_client_socket_platform();
 }
 
+/// Verifies DAP stop clears client state and releases the listen socket.
+bool test_dap_restart_clears_session() noexcept {
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock)) {
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  bool accepted = false;
+  for (int i = 0; i < 50; ++i) {
+    engine::scripting::dap_poll();
+    if (engine::scripting::dap_has_client()) {
+      accepted = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  const char *partialFrame = "Content-Length: 64\r\n\r\n{\"seq\":1";
+  const bool partialSent =
+      accepted && send_all(sock, partialFrame, std::strlen(partialFrame));
+  if (partialSent) {
+    engine::scripting::dap_poll();
+  }
+
+  engine::scripting::dap_stop();
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+
+  const bool stopped = !engine::scripting::dap_is_running() &&
+                       !engine::scripting::dap_has_client();
+  const bool restarted = stopped && engine::scripting::dap_start(kDapPort) &&
+                         engine::scripting::dap_is_running() &&
+                         !engine::scripting::dap_has_client();
+  engine::scripting::dap_stop();
+
+  return accepted && partialSent && restarted &&
+         !engine::scripting::dap_is_running() &&
+         !engine::scripting::dap_has_client();
+}
+
+bool wait_for_dap_client(bool expectedConnected) noexcept {
+  for (int i = 0; i < 50; ++i) {
+    engine::scripting::dap_poll();
+    if (engine::scripting::dap_has_client() == expectedConnected) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return false;
+}
+
+bool send_malformed_dap_frame_and_expect_disconnect(const char *frame) noexcept {
+  if (frame == nullptr) {
+    return false;
+  }
+
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock)) {
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  const bool accepted = wait_for_dap_client(true);
+  const bool sent = accepted && send_all(sock, frame, std::strlen(frame));
+  const bool disconnected = sent && wait_for_dap_client(false);
+
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  engine::scripting::dap_stop();
+  return accepted && sent && disconnected;
+}
+
+bool test_dap_rejects_oversized_content_length() noexcept {
+  return send_malformed_dap_frame_and_expect_disconnect(
+      "Content-Length: 70000\r\n\r\n{}");
+}
+
+bool test_dap_rejects_overflowing_content_length() noexcept {
+  return send_malformed_dap_frame_and_expect_disconnect(
+      "Content-Length: 999999999999999999999999999999\r\n\r\n{}");
+}
+
+/// Handles test dap breakpoint pause.
 bool test_dap_breakpoint_pause() noexcept {
   if (!engine::scripting::initialize_scripting()) {
     return false;
@@ -341,7 +469,8 @@ bool test_dap_breakpoint_pause() noexcept {
     engine::scripting::shutdown_scripting();
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   const char *script = "engine.debugger_enable(true)\n"
                        "function dap_target()\n"
@@ -404,9 +533,22 @@ bool test_dap_breakpoint_pause() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
+  std::printf("  dap_test::restart_clears_session ... ");
+  const bool restartOk = test_dap_restart_clears_session();
+  std::printf(restartOk ? "PASS\n" : "FAIL\n");
+
+  std::printf("  dap_test::rejects_oversized_content_length ... ");
+  const bool oversizedOk = test_dap_rejects_oversized_content_length();
+  std::printf(oversizedOk ? "PASS\n" : "FAIL\n");
+
+  std::printf("  dap_test::rejects_overflowing_content_length ... ");
+  const bool overflowOk = test_dap_rejects_overflowing_content_length();
+  std::printf(overflowOk ? "PASS\n" : "FAIL\n");
+
   std::printf("  dap_test::breakpoint_pause ... ");
-  const bool ok = test_dap_breakpoint_pause();
-  std::printf(ok ? "PASS\n" : "FAIL\n");
-  return ok ? 0 : 1;
+  const bool breakpointOk = test_dap_breakpoint_pause();
+  std::printf(breakpointOk ? "PASS\n" : "FAIL\n");
+  return (restartOk && oversizedOk && overflowOk && breakpointOk) ? 0 : 1;
 }

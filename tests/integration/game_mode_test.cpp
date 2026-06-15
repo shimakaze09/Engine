@@ -1,3 +1,5 @@
+// Verifies game mode test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -11,6 +13,7 @@
 static int g_testsPassed = 0;
 static int g_testsFailed = 0;
 
+/// Handles check.
 static void check(bool condition, const char *name) noexcept {
   if (condition) {
     ++g_testsPassed;
@@ -20,6 +23,7 @@ static void check(bool condition, const char *name) noexcept {
   }
 }
 
+/// Handles test game mode owned by world.
 static bool test_game_mode_owned_by_world() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -35,6 +39,7 @@ static bool test_game_mode_owned_by_world() noexcept {
   return true;
 }
 
+/// Handles test game mode state transitions.
 static bool test_game_mode_state_transitions() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -71,6 +76,7 @@ static bool test_game_mode_state_transitions() noexcept {
   return true;
 }
 
+/// Handles test game mode invalid transitions.
 static bool test_game_mode_invalid_transitions() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -88,6 +94,7 @@ static bool test_game_mode_invalid_transitions() noexcept {
   return true;
 }
 
+/// Handles test game mode rules.
 static bool test_game_mode_rules() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -120,6 +127,7 @@ static bool test_game_mode_rules() noexcept {
   return true;
 }
 
+/// Handles test game mode reset.
 static bool test_game_mode_reset() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -142,6 +150,7 @@ static bool test_game_mode_reset() noexcept {
   return true;
 }
 
+/// Handles test game state numbers.
 static bool test_game_state_numbers() noexcept {
   engine::runtime::GameState gs;
   check(gs.set_number("score", 42.0F), "set_number score");
@@ -160,6 +169,7 @@ static bool test_game_state_numbers() noexcept {
   return true;
 }
 
+/// Handles test game state strings.
 static bool test_game_state_strings() noexcept {
   engine::runtime::GameState gs;
   check(gs.set_string("checkpoint", "level3_start"), "set_string");
@@ -179,6 +189,7 @@ static bool test_game_state_strings() noexcept {
   return true;
 }
 
+/// Handles test game state remove and clear.
 static bool test_game_state_remove_and_clear() noexcept {
   engine::runtime::GameState gs;
   gs.set_number("a", 1.0F);
@@ -199,33 +210,47 @@ static bool test_game_state_remove_and_clear() noexcept {
   return true;
 }
 
+/// Handles test player controller array.
 static bool test_player_controller_array() noexcept {
   engine::runtime::PlayerControllerArray pca;
+  constexpr engine::runtime::Entity kEntityA{42U, 1U};
+  constexpr engine::runtime::Entity kEntityARecycled{42U, 2U};
+  constexpr engine::runtime::Entity kEntityB{99U, 1U};
 
-  check(pca.set_controlled_entity(0, 42U), "set player 0 entity 42");
-  check(pca.get_controlled_entity(0) == 42U, "get player 0");
+  check(pca.set_controlled_entity(0, kEntityA), "set player 0 entity 42");
+  check(pca.get_controlled_entity(0) == kEntityA, "get player 0");
+  check(pca.get_controlled_entity_index(0) == 42U, "get player 0 index");
   check(pca.controllers[0].active, "player 0 active");
 
-  check(pca.set_controlled_entity(3, 99U), "set player 3 entity 99");
-  check(pca.get_controlled_entity(3) == 99U, "get player 3");
+  check(pca.set_controlled_entity(3, kEntityB), "set player 3 entity 99");
+  check(pca.get_controlled_entity(3) == kEntityB, "get player 3");
 
   // Out of range
-  check(!pca.set_controlled_entity(4, 1U), "set player 4 OOB");
-  check(pca.get_controlled_entity(4) == 0U, "get player 4 OOB");
+  check(!pca.set_controlled_entity(4, kEntityA), "set player 4 OOB");
+  check(pca.get_controlled_entity(4) == engine::runtime::kInvalidEntity,
+        "get player 4 OOB");
 
-  // Entity destroyed
-  pca.on_entity_destroyed(42U);
-  check(pca.get_controlled_entity(0) == 0U, "player 0 cleared on destroy");
+  // Recycled entity indices must not clear a controller for another generation.
+  pca.on_entity_destroyed(kEntityARecycled);
+  check(pca.get_controlled_entity(0) == kEntityA,
+        "player 0 ignores recycled generation");
+
+  pca.on_entity_destroyed(kEntityA);
+  check(pca.get_controlled_entity(0) == engine::runtime::kInvalidEntity,
+        "player 0 cleared on destroy");
   check(!pca.controllers[0].active, "player 0 inactive after destroy");
-  check(pca.get_controlled_entity(3) == 99U, "player 3 unaffected");
+  check(pca.get_controlled_entity(3) == kEntityB, "player 3 unaffected");
 
   // Reset
   pca.reset();
-  check(pca.get_controlled_entity(0) == 0U, "reset player 0");
-  check(pca.get_controlled_entity(3) == 0U, "reset player 3");
+  check(pca.get_controlled_entity(0) == engine::runtime::kInvalidEntity,
+        "reset player 0");
+  check(pca.get_controlled_entity(3) == engine::runtime::kInvalidEntity,
+        "reset player 3");
   return true;
 }
 
+/// Handles test game state persists across worlds.
 static bool test_game_state_persists_across_worlds() noexcept {
   // GameState is separate from World — verify it survives World
   // reconstruction.
@@ -250,6 +275,7 @@ static bool test_game_state_persists_across_worlds() noexcept {
   return true;
 }
 
+/// Runs this executable or test program.
 int main() {
   test_game_mode_owned_by_world();
   test_game_mode_state_transitions();

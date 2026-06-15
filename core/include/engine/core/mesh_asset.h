@@ -1,3 +1,5 @@
+// Declares mesh asset types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstdint>

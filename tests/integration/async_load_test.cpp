@@ -7,7 +7,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 using namespace engine::renderer;
 
@@ -21,6 +23,7 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
+/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
@@ -38,6 +41,48 @@ static bool dummy_load(AssetId /*id*/, const char * /*path*/,
 // Dummy upload callback — always succeeds.
 static bool dummy_upload(AssetId /*id*/, void * /*userData*/) noexcept {
   return true;
+}
+
+/// Records worker load order for priority assertions.
+struct LoadOrder final {
+  AssetId ids[64]{};
+  std::size_t count = 0U;
+};
+
+/// Handles recording load.
+static bool recording_load(AssetId id, const char *path,
+                           std::uint64_t *outSizeBytes,
+                           void *userData) noexcept {
+  auto *order = static_cast<LoadOrder *>(userData);
+  if ((order != nullptr) && (order->count < 64U)) {
+    order->ids[order->count++] = id;
+  }
+  return dummy_load(id, path, outSizeBytes, nullptr);
+}
+
+/// Advances the queue until all supplied handles are ready or failed.
+static void pump_until_all_ready(AssetStreamingQueue *queue,
+                                 const LoadHandle *handles,
+                                 std::size_t handleCount,
+                                 AssetLoadCallback loadCallback,
+                                 AssetUploadCallback uploadCallback,
+                                 void *userData) noexcept {
+  for (std::size_t frame = 0U; frame < 160U; ++frame) {
+    bool allReady = true;
+    for (std::size_t i = 0U; i < handleCount; ++i) {
+      if (!is_load_ready(queue, handles[i])) {
+        allReady = false;
+        break;
+      }
+    }
+    if (allReady) {
+      return;
+    }
+    begin_streaming_frame(queue);
+    static_cast<void>(
+        update_asset_streaming(queue, loadCallback, uploadCallback, userData));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 }
 
 // --- Queue 50 loads and poll to completion ---
@@ -80,6 +125,7 @@ static void test_50_mesh_loads() noexcept {
     if (allReady) {
       break;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   // Verify all 50 are ready.
@@ -118,25 +164,15 @@ static void test_priority_ordering() noexcept {
   LoadHandle hImm = load_asset_async(queue.get(), make_id(3), "imm.mesh",
                                      LoadPriority::Immediate);
 
-  // First frame: Immediate should process first.
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &dummy_load, &dummy_upload, nullptr);
-  CHECK(is_load_ready(queue.get(), hImm), "Immediate first");
-
-  // Second frame: High.
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &dummy_load, &dummy_upload, nullptr);
-  CHECK(is_load_ready(queue.get(), hHigh), "High second");
-
-  // Third frame: Normal.
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &dummy_load, &dummy_upload, nullptr);
-  CHECK(is_load_ready(queue.get(), hNorm), "Normal third");
-
-  // Fourth frame: Low.
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &dummy_load, &dummy_upload, nullptr);
-  CHECK(is_load_ready(queue.get(), hLow), "Low fourth");
+  LoadHandle handles[] = {hLow, hNorm, hHigh, hImm};
+  LoadOrder order{};
+  pump_until_all_ready(queue.get(), handles, 4U, &recording_load,
+                       &dummy_upload, &order);
+  CHECK(order.count >= 4U, "all priority loads recorded");
+  CHECK(order.ids[0] == make_id(3), "Immediate first");
+  CHECK(order.ids[1] == make_id(2), "High second");
+  CHECK(order.ids[2] == make_id(1), "Normal third");
+  CHECK(order.ids[3] == make_id(0), "Low fourth");
 
   shutdown_asset_streaming(queue.get());
   engine::core::shutdown_cvars();
@@ -162,9 +198,13 @@ static void test_update_priority() noexcept {
   CHECK(update_load_priority(queue.get(), hA, LoadPriority::Immediate),
         "priority update");
 
-  begin_streaming_frame(queue.get());
-  update_asset_streaming(queue.get(), &dummy_load, &dummy_upload, nullptr);
+  LoadHandle handles[] = {hA};
+  LoadOrder order{};
+  pump_until_all_ready(queue.get(), handles, 1U, &recording_load,
+                       &dummy_upload, &order);
   CHECK(is_load_ready(queue.get(), hA), "promoted asset loaded first");
+  CHECK((order.count > 0U) && (order.ids[0] == make_id(0)),
+        "promoted asset was first worker load");
 
   shutdown_asset_streaming(queue.get());
   engine::core::shutdown_cvars();
@@ -199,6 +239,7 @@ static void test_null_safety() noexcept {
   CHECK(pending_load_count(nullptr) == 0U, "null queue pending count");
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== Async Load Tests ===\n");
 

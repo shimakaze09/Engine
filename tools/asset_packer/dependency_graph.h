@@ -1,3 +1,5 @@
+// Declares dependency graph types and APIs for the Engine tooling.
+
 #pragma once
 
 #include <cstddef>
@@ -37,8 +39,11 @@ inline void clear_dependency_graph(DependencyGraph *graph) noexcept {
   if (graph == nullptr) {
     return;
   }
+  /// Handles clear.
   graph->dependencies.clear();
+  /// Handles clear.
   graph->dependents.clear();
+  /// Handles clear.
   graph->assetPaths.clear();
 }
 
@@ -106,6 +111,9 @@ std::size_t topological_sort(const DependencyGraph *graph,
 /// Serialize graph to JSON file at `path`.
 bool write_dependency_graph_json(const DependencyGraph *graph,
                                  const char *path) noexcept;
+
+/// Escape raw UTF-8 bytes for safe JSON string content.
+std::string escape_json_string(const char *text);
 
 /// Deserialize graph from JSON file at `path`.
 bool read_dependency_graph_json(DependencyGraph *graph,

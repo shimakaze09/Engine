@@ -1,3 +1,5 @@
+// Declares material types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <cstdint>
@@ -7,6 +9,7 @@
 
 namespace engine::renderer {
 
+/// Stores material data used by the engine.
 struct Material final {
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
   math::Vec3 emissive = math::Vec3(0.0F, 0.0F, 0.0F);

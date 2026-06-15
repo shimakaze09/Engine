@@ -1,3 +1,5 @@
+# Verifies tests behavior for the Engine test suite.
+
 engine_add_test_executable(engine_bench_ecs_perf
     SOURCES
     ecs_perf_test.cpp

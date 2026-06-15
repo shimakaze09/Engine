@@ -1,3 +1,5 @@
+// Verifies platform paths test behavior for the Engine test suite.
+
 #include <cstddef>
 #include <cstring>
 
@@ -7,6 +9,7 @@ using namespace engine::core;
 
 namespace {
 
+/// Returns whether is normalized directory path.
 bool is_normalized_directory_path(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     return false;
@@ -23,6 +26,7 @@ bool is_normalized_directory_path(const char *path) noexcept {
   return true;
 }
 
+/// Handles test rejects invalid buffers.
 bool test_rejects_invalid_buffers() noexcept {
   if (platform_get_temp_dir(nullptr, 0U)) {
     return false;
@@ -35,6 +39,7 @@ bool test_rejects_invalid_buffers() noexcept {
   return tiny[0] == '\0';
 }
 
+/// Handles test temp dir.
 bool test_temp_dir() noexcept {
   char path[1024] = {};
   if (!platform_get_temp_dir(path, sizeof(path))) {
@@ -43,6 +48,7 @@ bool test_temp_dir() noexcept {
   return is_normalized_directory_path(path);
 }
 
+/// Handles test app dir.
 bool test_app_dir() noexcept {
   char path[1024] = {};
   if (!platform_get_app_dir(path, sizeof(path))) {
@@ -51,6 +57,7 @@ bool test_app_dir() noexcept {
   return is_normalized_directory_path(path);
 }
 
+/// Handles test save dir.
 bool test_save_dir() noexcept {
   char path[1024] = {};
   if (!platform_get_save_dir("EngineTestOrg", "EngineTestApp", path,
@@ -63,6 +70,7 @@ bool test_save_dir() noexcept {
   return std::strstr(path, "EngineTestApp") != nullptr;
 }
 
+/// Handles test default save dir.
 bool test_default_save_dir() noexcept {
   char path[1024] = {};
   if (!platform_get_save_dir(path, sizeof(path))) {
@@ -73,6 +81,7 @@ bool test_default_save_dir() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   if (!test_rejects_invalid_buffers()) {
     return 1;

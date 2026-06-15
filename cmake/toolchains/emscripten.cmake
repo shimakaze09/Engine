@@ -37,7 +37,15 @@ set(ENGINE_TARGET_PLATFORM "Web" CACHE STRING
 # -sUSE_SDL=2 uses the Emscripten SDL2 port.
 # -sALLOW_MEMORY_GROWTH allows heap to expand at runtime.
 # -O2 is the default; use -Oz for size-optimized shipping builds.
-set(CMAKE_EXE_LINKER_FLAGS_INIT
-    "-sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sWASM=1 --shell-file ${CMAKE_SOURCE_DIR}/app/web/shell.html")
+set(_ENGINE_WEB_LINKER_FLAGS "-sUSE_SDL=2 -sALLOW_MEMORY_GROWTH=1 -sWASM=1")
+set(_ENGINE_WEB_SHELL_FILE "${CMAKE_SOURCE_DIR}/app/web/shell.html")
+if(EXISTS "${_ENGINE_WEB_SHELL_FILE}")
+    string(APPEND _ENGINE_WEB_LINKER_FLAGS " --shell-file ${_ENGINE_WEB_SHELL_FILE}")
+else()
+    message(STATUS
+        "Emscripten shell file not found at ${_ENGINE_WEB_SHELL_FILE}; "
+        "using the default Emscripten shell.")
+endif()
+set(CMAKE_EXE_LINKER_FLAGS_INIT "${_ENGINE_WEB_LINKER_FLAGS}")
 
 message(STATUS "Emscripten toolchain configured.")

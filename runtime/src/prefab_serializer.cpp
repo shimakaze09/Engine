@@ -1,3 +1,5 @@
+// Implements prefab serializer behavior for the Engine runtime world.
+
 #include "engine/runtime/prefab_serializer.h"
 
 #include <cstddef>
@@ -19,6 +21,7 @@ constexpr const char *kPrefabLogChannel = "prefab";
 constexpr std::uint32_t kPrefabVersion = 1U;
 [[maybe_unused]] constexpr std::size_t kReadBufferInit = 64U * 1024U;
 
+/// Handles prefab open write.
 bool prefab_open_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -32,6 +35,7 @@ bool prefab_open_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles prefab read file.
 bool prefab_read_file(const char *path, std::unique_ptr<char[]> *outBuf,
                       std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuf == nullptr) || (outSize == nullptr)) {
@@ -86,6 +90,7 @@ bool prefab_read_file(const char *path, std::unique_ptr<char[]> *outBuf,
   return true;
 }
 
+/// Writes vec3 arr data.
 void write_vec3_arr(core::JsonWriter &w, const char *key,
                     const math::Vec3 &v) noexcept {
   w.begin_array(key);
@@ -95,6 +100,7 @@ void write_vec3_arr(core::JsonWriter &w, const char *key,
   w.end_array();
 }
 
+/// Writes quat arr data.
 void write_quat_arr(core::JsonWriter &w, const char *key,
                     const math::Quat &q) noexcept {
   w.begin_array(key);
@@ -105,6 +111,7 @@ void write_quat_arr(core::JsonWriter &w, const char *key,
   w.end_array();
 }
 
+/// Reads vec3 data.
 bool read_vec3(const core::JsonParser &p, const core::JsonValue &v,
                math::Vec3 *out) noexcept {
   if ((out == nullptr) || (v.type != core::JsonValue::Type::Array)) {
@@ -121,6 +128,7 @@ bool read_vec3(const core::JsonParser &p, const core::JsonValue &v,
   return true;
 }
 
+/// Reads quat data.
 bool read_quat(const core::JsonParser &p, const core::JsonValue &v,
                math::Quat *out) noexcept {
   if ((out == nullptr) || (v.type != core::JsonValue::Type::Array)) {
@@ -137,8 +145,174 @@ bool read_quat(const core::JsonParser &p, const core::JsonValue &v,
   return true;
 }
 
+/// Writes foliage patch data.
+void write_foliage_patch(core::JsonWriter &w,
+                         const FoliagePatchComponent &foliage) noexcept {
+  w.write_key(kJsonKeyFoliagePatchComponent);
+  w.begin_object();
+
+  w.begin_array("meshAssetIds");
+  for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
+    w.write_uint64_value(foliage.meshAssetIds[i]);
+  }
+  w.end_array();
+
+  const std::uint32_t instanceCount =
+      (foliage.instanceCount >
+       static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances))
+          ? static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)
+          : foliage.instanceCount;
+  w.write_uint("instanceCount", instanceCount);
+  w.write_float("density", foliage.density);
+  write_vec3_arr(w, "albedo", foliage.albedo);
+  w.write_float("roughness", foliage.roughness);
+  w.write_float("metallic", foliage.metallic);
+  w.write_float("opacity", foliage.opacity);
+  w.write_float("windStrength", foliage.windStrength);
+  w.write_float("windFrequency", foliage.windFrequency);
+
+  w.begin_array("instances");
+  for (std::uint32_t i = 0U; i < instanceCount; ++i) {
+    const FoliageInstance &instance = foliage.instances[i];
+    w.begin_object();
+    write_vec3_arr(w, "offset", instance.offset);
+    w.write_float("scale", instance.scale);
+    w.write_float("phase", instance.phase);
+    w.write_uint("lodIndex", instance.lodIndex);
+    w.end_object();
+  }
+  w.end_array();
+
+  w.end_object();
+}
+
+/// Reads foliage patch data.
+bool read_foliage_patch(const core::JsonParser &p, const core::JsonValue &v,
+                        FoliagePatchComponent *out) noexcept {
+  if ((out == nullptr) || (v.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  FoliagePatchComponent foliage{};
+  core::JsonValue field{};
+  if (p.get_object_field(v, "meshAssetIds", &field) &&
+      (field.type == core::JsonValue::Type::Array)) {
+    const std::size_t count = p.array_size(field);
+    const std::size_t capped =
+        (count < FoliagePatchComponent::kMaxLods)
+            ? count
+            : FoliagePatchComponent::kMaxLods;
+    for (std::size_t i = 0U; i < capped; ++i) {
+      core::JsonValue element{};
+      if (!p.get_array_element(field, i, &element) ||
+          !p.as_uint64(element, &foliage.meshAssetIds[i])) {
+        return false;
+      }
+    }
+  }
+
+  if (p.get_object_field(v, "density", &field)) {
+    if (!p.as_float(field, &foliage.density)) {
+      return false;
+    }
+  }
+  if (p.get_object_field(v, "albedo", &field)) {
+    if (!read_vec3(p, field, &foliage.albedo)) {
+      return false;
+    }
+  }
+  if (p.get_object_field(v, "roughness", &field)) {
+    if (!p.as_float(field, &foliage.roughness)) {
+      return false;
+    }
+  }
+  if (p.get_object_field(v, "metallic", &field)) {
+    if (!p.as_float(field, &foliage.metallic)) {
+      return false;
+    }
+  }
+  if (p.get_object_field(v, "opacity", &field)) {
+    if (!p.as_float(field, &foliage.opacity)) {
+      return false;
+    }
+  }
+  if (p.get_object_field(v, "windStrength", &field)) {
+    if (!p.as_float(field, &foliage.windStrength)) {
+      return false;
+    }
+  }
+  if (p.get_object_field(v, "windFrequency", &field)) {
+    if (!p.as_float(field, &foliage.windFrequency)) {
+      return false;
+    }
+  }
+
+  std::uint32_t requestedCount =
+      static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+  if (p.get_object_field(v, "instanceCount", &field)) {
+    if (!p.as_uint(field, &requestedCount)) {
+      return false;
+    }
+  }
+
+  core::JsonValue instances{};
+  if (p.get_object_field(v, "instances", &instances) &&
+      (instances.type == core::JsonValue::Type::Array)) {
+    std::size_t count = p.array_size(instances);
+    if (count > FoliagePatchComponent::kMaxInstances) {
+      count = FoliagePatchComponent::kMaxInstances;
+    }
+    if (count > requestedCount) {
+      count = requestedCount;
+    }
+
+    for (std::size_t i = 0U; i < count; ++i) {
+      core::JsonValue instanceValue{};
+      if (!p.get_array_element(instances, i, &instanceValue) ||
+          (instanceValue.type != core::JsonValue::Type::Object)) {
+        return false;
+      }
+
+      FoliageInstance instance{};
+      if (p.get_object_field(instanceValue, "offset", &field)) {
+        if (!read_vec3(p, field, &instance.offset)) {
+          return false;
+        }
+      }
+      if (p.get_object_field(instanceValue, "scale", &field)) {
+        if (!p.as_float(field, &instance.scale)) {
+          return false;
+        }
+      }
+      if (p.get_object_field(instanceValue, "phase", &field)) {
+        if (!p.as_float(field, &instance.phase)) {
+          return false;
+        }
+      }
+      if (p.get_object_field(instanceValue, "lodIndex", &field)) {
+        if (!p.as_uint(field, &instance.lodIndex)) {
+          return false;
+        }
+      }
+      foliage.instances[i] = instance;
+    }
+    foliage.instanceCount = static_cast<std::uint32_t>(count);
+  } else {
+    if (requestedCount >
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
+      requestedCount =
+          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+    }
+    foliage.instanceCount = requestedCount;
+  }
+
+  *out = foliage;
+  return true;
+}
+
 } // namespace
 
+/// Saves the requested resource for prefab.
 bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (!world.is_alive(entity) || (path == nullptr)) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
@@ -211,6 +385,12 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_float("metallic", mesh.metallic);
     w.write_float("opacity", mesh.opacity);
     w.end_object();
+  }
+
+  // FoliagePatchComponent
+  FoliagePatchComponent foliage{};
+  if (world.get_foliage_patch_component(entity, &foliage)) {
+    write_foliage_patch(w, foliage);
   }
 
   // LightComponent
@@ -304,6 +484,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   return true;
 }
 
+/// Handles instantiate prefab.
 Entity instantiate_prefab(World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
@@ -349,253 +530,292 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     return kInvalidEntity;
   }
 
-  // Transform
-  core::JsonValue tval{};
-  if (parser.get_object_field(componentsVal, kJsonKeyTransform, &tval) &&
-      (tval.type == core::JsonValue::Type::Object)) {
-    Transform t{};
-    core::JsonValue v{};
-    if (parser.get_object_field(tval, "position", &v)) {
-      static_cast<void>(read_vec3(parser, v, &t.position));
+  auto failComponent = [&](const char *message) noexcept -> Entity {
+    world.destroy_entity(entity);
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel, message);
+    return kInvalidEntity;
+  };
+
+  auto readComponentObject = [&](const char *key, core::JsonValue *outValue,
+                                 bool *outPresent) noexcept -> bool {
+    if ((key == nullptr) || (outValue == nullptr) || (outPresent == nullptr)) {
+      return false;
     }
-    if (parser.get_object_field(tval, "rotation", &v)) {
-      static_cast<void>(read_quat(parser, v, &t.rotation));
+    *outPresent = false;
+    core::JsonValue value{};
+    if (!parser.get_object_field(componentsVal, key, &value)) {
+      return true;
     }
-    if (parser.get_object_field(tval, "scale", &v)) {
-      static_cast<void>(read_vec3(parser, v, &t.scale));
+    if (value.type != core::JsonValue::Type::Object) {
+      return false;
     }
-    static_cast<void>(world.add_transform(entity, t));
+    *outPresent = true;
+    *outValue = value;
+    return true;
+  };
+
+  auto readVec3Field = [&](const core::JsonValue &object, const char *key,
+                           math::Vec3 *out) noexcept -> bool {
+    core::JsonValue value{};
+    return !parser.get_object_field(object, key, &value) ||
+           read_vec3(parser, value, out);
+  };
+  auto readQuatField = [&](const core::JsonValue &object, const char *key,
+                           math::Quat *out) noexcept -> bool {
+    core::JsonValue value{};
+    return !parser.get_object_field(object, key, &value) ||
+           read_quat(parser, value, out);
+  };
+  auto readFloatField = [&](const core::JsonValue &object, const char *key,
+                            float *out) noexcept -> bool {
+    core::JsonValue value{};
+    return !parser.get_object_field(object, key, &value) ||
+           parser.as_float(value, out);
+  };
+  auto readUintField = [&](const core::JsonValue &object, const char *key,
+                           std::uint32_t *out) noexcept -> bool {
+    core::JsonValue value{};
+    return !parser.get_object_field(object, key, &value) ||
+           parser.as_uint(value, out);
+  };
+  auto readUint64Field = [&](const core::JsonValue &object, const char *key,
+                             std::uint64_t *out) noexcept -> bool {
+    core::JsonValue value{};
+    return !parser.get_object_field(object, key, &value) ||
+           parser.as_uint64(value, out);
+  };
+  auto readBoolField = [&](const core::JsonValue &object, const char *key,
+                           bool *out) noexcept -> bool {
+    core::JsonValue value{};
+    return !parser.get_object_field(object, key, &value) ||
+           parser.as_bool(value, out);
+  };
+
+  bool hasComponent = false;
+  core::JsonValue componentValue{};
+
+  if (!readComponentObject(kJsonKeyTransform, &componentValue, &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid Transform component");
+  }
+  if (hasComponent) {
+    Transform transform{};
+    if (!readVec3Field(componentValue, "position", &transform.position) ||
+        !readQuatField(componentValue, "rotation", &transform.rotation) ||
+        !readVec3Field(componentValue, "scale", &transform.scale) ||
+        !world.add_transform(entity, transform)) {
+      return failComponent("instantiate_prefab: failed to add Transform");
+    }
   }
 
-  // RigidBody
-  core::JsonValue rbval{};
-  if (parser.get_object_field(componentsVal, kJsonKeyRigidBody, &rbval) &&
-      (rbval.type == core::JsonValue::Type::Object)) {
-    RigidBody rb{};
-    core::JsonValue v{};
-    if (parser.get_object_field(rbval, "velocity", &v)) {
-      static_cast<void>(read_vec3(parser, v, &rb.velocity));
+  if (!readComponentObject(kJsonKeyRigidBody, &componentValue, &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid RigidBody component");
+  }
+  if (hasComponent) {
+    RigidBody rigidBody{};
+    if (!readVec3Field(componentValue, "velocity", &rigidBody.velocity) ||
+        !readVec3Field(componentValue, "acceleration",
+                       &rigidBody.acceleration) ||
+        !readVec3Field(componentValue, "angularVelocity",
+                       &rigidBody.angularVelocity) ||
+        !readFloatField(componentValue, "inverseMass",
+                        &rigidBody.inverseMass) ||
+        !readFloatField(componentValue, "inverseInertia",
+                        &rigidBody.inverseInertia) ||
+        !world.add_rigid_body(entity, rigidBody)) {
+      return failComponent("instantiate_prefab: failed to add RigidBody");
     }
-    if (parser.get_object_field(rbval, "acceleration", &v)) {
-      static_cast<void>(read_vec3(parser, v, &rb.acceleration));
-    }
-    if (parser.get_object_field(rbval, "angularVelocity", &v)) {
-      static_cast<void>(read_vec3(parser, v, &rb.angularVelocity));
-    }
-    if (parser.get_object_field(rbval, "inverseMass", &v)) {
-      static_cast<void>(parser.as_float(v, &rb.inverseMass));
-    }
-    if (parser.get_object_field(rbval, "inverseInertia", &v)) {
-      static_cast<void>(parser.as_float(v, &rb.inverseInertia));
-    }
-    static_cast<void>(world.add_rigid_body(entity, rb));
   }
 
-  // Collider
-  core::JsonValue cval{};
-  if (parser.get_object_field(componentsVal, kJsonKeyCollider, &cval) &&
-      (cval.type == core::JsonValue::Type::Object)) {
-    Collider col{};
-    core::JsonValue v{};
-    if (parser.get_object_field(cval, "halfExtents", &v)) {
-      static_cast<void>(read_vec3(parser, v, &col.halfExtents));
+  if (!readComponentObject(kJsonKeyCollider, &componentValue, &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid Collider component");
+  }
+  if (hasComponent) {
+    Collider collider{};
+    if (!readVec3Field(componentValue, "halfExtents",
+                       &collider.halfExtents) ||
+        !readFloatField(componentValue, "restitution",
+                        &collider.restitution) ||
+        !readFloatField(componentValue, "staticFriction",
+                        &collider.staticFriction) ||
+        !readFloatField(componentValue, "dynamicFriction",
+                        &collider.dynamicFriction) ||
+        !readFloatField(componentValue, "density", &collider.density) ||
+        !readUintField(componentValue, "collisionLayer",
+                       &collider.collisionLayer) ||
+        !readUintField(componentValue, "collisionMask",
+                       &collider.collisionMask) ||
+        !world.add_collider(entity, collider)) {
+      return failComponent("instantiate_prefab: failed to add Collider");
     }
-    if (parser.get_object_field(cval, "restitution", &v)) {
-      static_cast<void>(parser.as_float(v, &col.restitution));
-    }
-    if (parser.get_object_field(cval, "staticFriction", &v)) {
-      static_cast<void>(parser.as_float(v, &col.staticFriction));
-    }
-    if (parser.get_object_field(cval, "dynamicFriction", &v)) {
-      static_cast<void>(parser.as_float(v, &col.dynamicFriction));
-    }
-    if (parser.get_object_field(cval, "density", &v)) {
-      static_cast<void>(parser.as_float(v, &col.density));
-    }
-    if (parser.get_object_field(cval, "collisionLayer", &v)) {
-      static_cast<void>(parser.as_uint(v, &col.collisionLayer));
-    }
-    if (parser.get_object_field(cval, "collisionMask", &v)) {
-      static_cast<void>(parser.as_uint(v, &col.collisionMask));
-    }
-    static_cast<void>(world.add_collider(entity, col));
   }
 
-  // NameComponent
-  core::JsonValue nval{};
-  if (parser.get_object_field(componentsVal, kJsonKeyNameComponent, &nval) &&
-      (nval.type == core::JsonValue::Type::Object)) {
-    NameComponent nc{};
-    core::JsonValue v{};
-    if (parser.get_object_field(nval, "name", &v)) {
+  if (!readComponentObject(kJsonKeyNameComponent, &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid NameComponent");
+  }
+  if (hasComponent) {
+    NameComponent nameComponent{};
+    core::JsonValue nameValue{};
+    if (parser.get_object_field(componentValue, "name", &nameValue)) {
       const char *namePtr = nullptr;
       std::size_t nameLen = 0U;
-      if (parser.as_string(v, &namePtr, &nameLen) && (namePtr != nullptr)) {
-        const std::size_t copyLen =
-            (nameLen < sizeof(nc.name) - 1U) ? nameLen : (sizeof(nc.name) - 1U);
-        std::memcpy(nc.name, namePtr, copyLen);
-        nc.name[copyLen] = '\0';
+      if (!parser.as_string(nameValue, &namePtr, &nameLen) ||
+          (namePtr == nullptr)) {
+        return failComponent("instantiate_prefab: invalid NameComponent name");
       }
+      const std::size_t copyLen =
+          (nameLen < sizeof(nameComponent.name) - 1U)
+              ? nameLen
+              : (sizeof(nameComponent.name) - 1U);
+      std::memcpy(nameComponent.name, namePtr, copyLen);
+      nameComponent.name[copyLen] = '\0';
     }
-    static_cast<void>(world.add_name_component(entity, nc));
+    if (!world.add_name_component(entity, nameComponent)) {
+      return failComponent("instantiate_prefab: failed to add NameComponent");
+    }
   }
 
-  // MeshComponent
-  core::JsonValue mval{};
-  if (parser.get_object_field(componentsVal, "MeshComponent", &mval) &&
-      (mval.type == core::JsonValue::Type::Object)) {
+  if (!readComponentObject("MeshComponent", &componentValue, &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid MeshComponent");
+  }
+  if (hasComponent) {
     MeshComponent mesh{};
-    core::JsonValue v{};
-    if (parser.get_object_field(mval, "meshAssetId", &v)) {
-      static_cast<void>(parser.as_uint64(v, &mesh.meshAssetId));
+    if (!readUint64Field(componentValue, "meshAssetId", &mesh.meshAssetId) ||
+        !readVec3Field(componentValue, "albedo", &mesh.albedo) ||
+        !readFloatField(componentValue, "roughness", &mesh.roughness) ||
+        !readFloatField(componentValue, "metallic", &mesh.metallic) ||
+        !readFloatField(componentValue, "opacity", &mesh.opacity) ||
+        !world.add_mesh_component(entity, mesh)) {
+      return failComponent("instantiate_prefab: failed to add MeshComponent");
     }
-    if (parser.get_object_field(mval, "albedo", &v)) {
-      static_cast<void>(read_vec3(parser, v, &mesh.albedo));
-    }
-    if (parser.get_object_field(mval, "roughness", &v)) {
-      static_cast<void>(parser.as_float(v, &mesh.roughness));
-    }
-    if (parser.get_object_field(mval, "metallic", &v)) {
-      static_cast<void>(parser.as_float(v, &mesh.metallic));
-    }
-    if (parser.get_object_field(mval, "opacity", &v)) {
-      static_cast<void>(parser.as_float(v, &mesh.opacity));
-    }
-    static_cast<void>(world.add_mesh_component(entity, mesh));
   }
 
-  // LightComponent
-  core::JsonValue lval{};
-  if (parser.get_object_field(componentsVal, kJsonKeyLightComponent, &lval) &&
-      (lval.type == core::JsonValue::Type::Object)) {
-    LightComponent lc{};
-    core::JsonValue v{};
-    if (parser.get_object_field(lval, "color", &v)) {
-      static_cast<void>(read_vec3(parser, v, &lc.color));
+  if (!readComponentObject(kJsonKeyFoliagePatchComponent, &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid FoliagePatchComponent");
+  }
+  if (hasComponent) {
+    FoliagePatchComponent foliage{};
+    if (!read_foliage_patch(parser, componentValue, &foliage) ||
+        !world.add_foliage_patch_component(entity, foliage)) {
+      return failComponent(
+          "instantiate_prefab: failed to add FoliagePatchComponent");
     }
-    if (parser.get_object_field(lval, "direction", &v)) {
-      static_cast<void>(read_vec3(parser, v, &lc.direction));
-    }
-    if (parser.get_object_field(lval, "intensity", &v)) {
-      static_cast<void>(parser.as_float(v, &lc.intensity));
-    }
-    if (parser.get_object_field(lval, "type", &v)) {
-      std::uint32_t typeVal = 0U;
-      if (parser.as_uint(v, &typeVal)) {
-        lc.type = (typeVal == 1U) ? LightType::Point : LightType::Directional;
-      }
-    }
-    static_cast<void>(world.add_light_component(entity, lc));
   }
 
-  // PointLightComponent
-  core::JsonValue plVal{};
-  if (parser.get_object_field(componentsVal, "PointLightComponent", &plVal) &&
-      (plVal.type == core::JsonValue::Type::Object)) {
-    PointLightComponent pc{};
-    core::JsonValue v{};
-    if (parser.get_object_field(plVal, "color", &v)) {
-      static_cast<void>(read_vec3(parser, v, &pc.color));
+  if (!readComponentObject(kJsonKeyLightComponent, &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid LightComponent");
+  }
+  if (hasComponent) {
+    LightComponent light{};
+    std::uint32_t typeVal = 0U;
+    if (!readVec3Field(componentValue, "color", &light.color) ||
+        !readVec3Field(componentValue, "direction", &light.direction) ||
+        !readFloatField(componentValue, "intensity", &light.intensity) ||
+        !readUintField(componentValue, "type", &typeVal)) {
+      return failComponent("instantiate_prefab: failed to add LightComponent");
     }
-    if (parser.get_object_field(plVal, "intensity", &v)) {
-      static_cast<void>(parser.as_float(v, &pc.intensity));
+    light.type = (typeVal == 1U) ? LightType::Point : LightType::Directional;
+    if (!world.add_light_component(entity, light)) {
+      return failComponent("instantiate_prefab: failed to add LightComponent");
     }
-    if (parser.get_object_field(plVal, "radius", &v)) {
-      static_cast<void>(parser.as_float(v, &pc.radius));
-    }
-    static_cast<void>(world.add_point_light_component(entity, pc));
   }
 
-  // SpotLightComponent
-  core::JsonValue slVal{};
-  if (parser.get_object_field(componentsVal, "SpotLightComponent", &slVal) &&
-      (slVal.type == core::JsonValue::Type::Object)) {
-    SpotLightComponent sc{};
-    core::JsonValue v{};
-    if (parser.get_object_field(slVal, "color", &v)) {
-      static_cast<void>(read_vec3(parser, v, &sc.color));
+  if (!readComponentObject("PointLightComponent", &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid PointLightComponent");
+  }
+  if (hasComponent) {
+    PointLightComponent pointLight{};
+    if (!readVec3Field(componentValue, "color", &pointLight.color) ||
+        !readFloatField(componentValue, "intensity", &pointLight.intensity) ||
+        !readFloatField(componentValue, "radius", &pointLight.radius) ||
+        !world.add_point_light_component(entity, pointLight)) {
+      return failComponent(
+          "instantiate_prefab: failed to add PointLightComponent");
     }
-    if (parser.get_object_field(slVal, "direction", &v)) {
-      static_cast<void>(read_vec3(parser, v, &sc.direction));
-    }
-    if (parser.get_object_field(slVal, "intensity", &v)) {
-      static_cast<void>(parser.as_float(v, &sc.intensity));
-    }
-    if (parser.get_object_field(slVal, "radius", &v)) {
-      static_cast<void>(parser.as_float(v, &sc.radius));
-    }
-    if (parser.get_object_field(slVal, "innerConeAngle", &v)) {
-      static_cast<void>(parser.as_float(v, &sc.innerConeAngle));
-    }
-    if (parser.get_object_field(slVal, "outerConeAngle", &v)) {
-      static_cast<void>(parser.as_float(v, &sc.outerConeAngle));
-    }
-    static_cast<void>(world.add_spot_light_component(entity, sc));
   }
 
-  // ReflectionProbeComponent
-  core::JsonValue rpVal{};
-  if (parser.get_object_field(componentsVal, kJsonKeyReflectionProbeComponent,
-                              &rpVal) &&
-      (rpVal.type == core::JsonValue::Type::Object)) {
-    ReflectionProbeComponent rp{};
-    core::JsonValue v{};
-    if (parser.get_object_field(rpVal, "boxExtents", &v)) {
-      static_cast<void>(read_vec3(parser, v, &rp.boxExtents));
+  if (!readComponentObject("SpotLightComponent", &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid SpotLightComponent");
+  }
+  if (hasComponent) {
+    SpotLightComponent spotLight{};
+    if (!readVec3Field(componentValue, "color", &spotLight.color) ||
+        !readVec3Field(componentValue, "direction", &spotLight.direction) ||
+        !readFloatField(componentValue, "intensity", &spotLight.intensity) ||
+        !readFloatField(componentValue, "radius", &spotLight.radius) ||
+        !readFloatField(componentValue, "innerConeAngle",
+                        &spotLight.innerConeAngle) ||
+        !readFloatField(componentValue, "outerConeAngle",
+                        &spotLight.outerConeAngle) ||
+        !world.add_spot_light_component(entity, spotLight)) {
+      return failComponent(
+          "instantiate_prefab: failed to add SpotLightComponent");
     }
-    if (parser.get_object_field(rpVal, "radius", &v)) {
-      static_cast<void>(parser.as_float(v, &rp.radius));
-    }
-    if (parser.get_object_field(rpVal, "intensity", &v)) {
-      static_cast<void>(parser.as_float(v, &rp.intensity));
-    }
-    if (parser.get_object_field(rpVal, "prefilteredResolution", &v)) {
-      static_cast<void>(parser.as_uint(v, &rp.prefilteredResolution));
-    }
-    if (parser.get_object_field(rpVal, "irradianceResolution", &v)) {
-      static_cast<void>(parser.as_uint(v, &rp.irradianceResolution));
-    }
-    if (parser.get_object_field(rpVal, "brdfLutResolution", &v)) {
-      static_cast<void>(parser.as_uint(v, &rp.brdfLutResolution));
-    }
-    if (parser.get_object_field(rpVal, "mipLevels", &v)) {
-      static_cast<void>(parser.as_uint(v, &rp.mipLevels));
-    }
-    if (parser.get_object_field(rpVal, "boxProjection", &v)) {
-      static_cast<void>(parser.as_bool(v, &rp.boxProjection));
-    }
-    if (parser.get_object_field(rpVal, "needsBake", &v)) {
-      static_cast<void>(parser.as_bool(v, &rp.needsBake));
-    }
-    static_cast<void>(world.add_reflection_probe_component(entity, rp));
   }
 
-  // ScriptComponent— accepts plain string (current) or legacy object format.
-  core::JsonValue sval{};
-  if (parser.get_object_field(componentsVal, kJsonKeyScriptComponent, &sval)) {
+  if (!readComponentObject(kJsonKeyReflectionProbeComponent, &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid ReflectionProbeComponent");
+  }
+  if (hasComponent) {
+    ReflectionProbeComponent reflectionProbe{};
+    if (!readVec3Field(componentValue, "boxExtents",
+                       &reflectionProbe.boxExtents) ||
+        !readFloatField(componentValue, "radius", &reflectionProbe.radius) ||
+        !readFloatField(componentValue, "intensity",
+                        &reflectionProbe.intensity) ||
+        !readUintField(componentValue, "prefilteredResolution",
+                       &reflectionProbe.prefilteredResolution) ||
+        !readUintField(componentValue, "irradianceResolution",
+                       &reflectionProbe.irradianceResolution) ||
+        !readUintField(componentValue, "brdfLutResolution",
+                       &reflectionProbe.brdfLutResolution) ||
+        !readUintField(componentValue, "mipLevels",
+                       &reflectionProbe.mipLevels) ||
+        !readBoolField(componentValue, "boxProjection",
+                       &reflectionProbe.boxProjection) ||
+        !readBoolField(componentValue, "needsBake",
+                       &reflectionProbe.needsBake) ||
+        !world.add_reflection_probe_component(entity, reflectionProbe)) {
+      return failComponent(
+          "instantiate_prefab: failed to add ReflectionProbeComponent");
+    }
+  }
+
+  core::JsonValue scriptValue{};
+  if (parser.get_object_field(componentsVal, kJsonKeyScriptComponent,
+                              &scriptValue)) {
     const char *pathPtr = nullptr;
     std::size_t pathLen = 0U;
     bool gotPath = false;
 
-    if (sval.type == core::JsonValue::Type::String) {
-      // Current format: "ScriptComponent": "path.lua"
-      gotPath = parser.as_string(sval, &pathPtr, &pathLen);
-    } else if (sval.type == core::JsonValue::Type::Object) {
-      // Legacy format: "ScriptComponent": { "scriptPath": "path.lua" }
-      core::JsonValue v{};
-      if (parser.get_object_field(sval, "scriptPath", &v)) {
-        gotPath = parser.as_string(v, &pathPtr, &pathLen);
+    if (scriptValue.type == core::JsonValue::Type::String) {
+      gotPath = parser.as_string(scriptValue, &pathPtr, &pathLen);
+    } else if (scriptValue.type == core::JsonValue::Type::Object) {
+      core::JsonValue pathValue{};
+      if (parser.get_object_field(scriptValue, "scriptPath", &pathValue)) {
+        gotPath = parser.as_string(pathValue, &pathPtr, &pathLen);
       }
+    } else {
+      return failComponent("instantiate_prefab: invalid ScriptComponent");
     }
 
-    if (gotPath && (pathPtr != nullptr) && (pathLen > 0U)) {
-      ScriptComponent sc{};
-      const std::size_t copyLen = (pathLen < sizeof(sc.scriptPath) - 1U)
-                                      ? pathLen
-                                      : (sizeof(sc.scriptPath) - 1U);
-      std::memcpy(sc.scriptPath, pathPtr, copyLen);
-      sc.scriptPath[copyLen] = '\0';
-      static_cast<void>(world.add_script_component(entity, sc));
+    if (!gotPath || (pathPtr == nullptr) || (pathLen == 0U)) {
+      return failComponent("instantiate_prefab: invalid ScriptComponent path");
+    }
+
+    ScriptComponent script{};
+    const std::size_t copyLen = (pathLen < sizeof(script.scriptPath) - 1U)
+                                    ? pathLen
+                                    : (sizeof(script.scriptPath) - 1U);
+    std::memcpy(script.scriptPath, pathPtr, copyLen);
+    script.scriptPath[copyLen] = '\0';
+    if (!world.add_script_component(entity, script)) {
+      return failComponent("instantiate_prefab: failed to add ScriptComponent");
     }
   }
 

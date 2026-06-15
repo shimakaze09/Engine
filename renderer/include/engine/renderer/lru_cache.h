@@ -1,3 +1,5 @@
+// Declares lru cache types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <cstddef>
@@ -69,7 +71,9 @@ std::size_t lru_evict_to_budget(LruCache *cache, std::uint64_t targetBytes,
 
 /// Query helpers.
 std::size_t lru_count(const LruCache *cache) noexcept;
+/// Handles lru total size.
 std::uint64_t lru_total_size(const LruCache *cache) noexcept;
+/// Handles lru contains.
 bool lru_contains(const LruCache *cache, AssetId id) noexcept;
 
 /// Update the ref count for an asset already in the cache.

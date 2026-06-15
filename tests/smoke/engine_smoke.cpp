@@ -1,3 +1,5 @@
+// Verifies engine smoke behavior for the Engine test suite.
+
 #include "engine/engine.h"
 
 #include "engine/core/cvar.h"
@@ -8,6 +10,7 @@
 
 namespace {
 
+/// Sets the requested value for working directory with assets.
 bool set_working_directory_with_assets() noexcept {
   const std::filesystem::path original = std::filesystem::current_path();
   const std::filesystem::path candidates[] = {
@@ -35,6 +38,7 @@ bool set_working_directory_with_assets() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   if (!set_working_directory_with_assets()) {
     return 1;

@@ -1,3 +1,5 @@
+// Implements dependency graph behavior for the Engine tooling.
+
 #include "dependency_graph.h"
 
 #include <algorithm>
@@ -5,7 +7,228 @@
 #include <stack>
 
 namespace engine::tools {
+namespace {
 
+constexpr char kHexDigits[] = "0123456789abcdef";
+
+int from_hex_digit(char digit) noexcept {
+  if ((digit >= '0') && (digit <= '9')) {
+    return digit - '0';
+  }
+  if ((digit >= 'a') && (digit <= 'f')) {
+    return 10 + (digit - 'a');
+  }
+  if ((digit >= 'A') && (digit <= 'F')) {
+    return 10 + (digit - 'A');
+  }
+  return -1;
+}
+
+bool append_utf8_codepoint(std::string *text,
+                           unsigned int codepoint) noexcept {
+  if ((text == nullptr) || (codepoint > 0x10FFFFU) ||
+      ((codepoint >= 0xD800U) && (codepoint <= 0xDFFFU))) {
+    return false;
+  }
+
+  if (codepoint <= 0x7FU) {
+    text->push_back(static_cast<char>(codepoint));
+  } else if (codepoint <= 0x7FFU) {
+    text->push_back(static_cast<char>(0xC0U | (codepoint >> 6U)));
+    text->push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  } else if (codepoint <= 0xFFFFU) {
+    text->push_back(static_cast<char>(0xE0U | (codepoint >> 12U)));
+    text->push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+    text->push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  } else {
+    text->push_back(static_cast<char>(0xF0U | (codepoint >> 18U)));
+    text->push_back(static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3FU)));
+    text->push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+    text->push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  }
+  return true;
+}
+
+bool read_hex_quad(const char *text, unsigned int *value) noexcept {
+  if ((text == nullptr) || (value == nullptr)) {
+    return false;
+  }
+
+  unsigned int parsed = 0U;
+  for (int i = 0; i < 4; ++i) {
+    const int digit = from_hex_digit(text[i]);
+    if (digit < 0) {
+      return false;
+    }
+    parsed = (parsed << 4U) | static_cast<unsigned int>(digit);
+  }
+  *value = parsed;
+  return true;
+}
+
+bool parse_json_string(const char *openingQuote, std::string *out,
+                       const char **end) noexcept {
+  if ((openingQuote == nullptr) || (out == nullptr) ||
+      (*openingQuote != '"')) {
+    return false;
+  }
+
+  std::string parsed{};
+  const char *cursor = openingQuote + 1;
+  while (*cursor != '\0') {
+    const auto ch = static_cast<unsigned char>(*cursor);
+    if (ch == '"') {
+      *out = parsed;
+      if (end != nullptr) {
+        *end = cursor + 1;
+      }
+      return true;
+    }
+
+    if (ch != '\\') {
+      if (ch < 0x20U) {
+        return false;
+      }
+      parsed.push_back(static_cast<char>(ch));
+      ++cursor;
+      continue;
+    }
+
+    ++cursor;
+    switch (*cursor) {
+    case '"':
+      parsed.push_back('"');
+      ++cursor;
+      break;
+    case '\\':
+      parsed.push_back('\\');
+      ++cursor;
+      break;
+    case '/':
+      parsed.push_back('/');
+      ++cursor;
+      break;
+    case 'b':
+      parsed.push_back('\b');
+      ++cursor;
+      break;
+    case 'f':
+      parsed.push_back('\f');
+      ++cursor;
+      break;
+    case 'n':
+      parsed.push_back('\n');
+      ++cursor;
+      break;
+    case 'r':
+      parsed.push_back('\r');
+      ++cursor;
+      break;
+    case 't':
+      parsed.push_back('\t');
+      ++cursor;
+      break;
+    case 'u': {
+      unsigned int codepoint = 0U;
+      if (!read_hex_quad(cursor + 1, &codepoint)) {
+        return false;
+      }
+      cursor += 5;
+
+      if ((codepoint >= 0xD800U) && (codepoint <= 0xDBFFU)) {
+        if ((cursor[0] != '\\') || (cursor[1] != 'u')) {
+          return false;
+        }
+        unsigned int lowSurrogate = 0U;
+        if (!read_hex_quad(cursor + 2, &lowSurrogate) ||
+            (lowSurrogate < 0xDC00U) || (lowSurrogate > 0xDFFFU)) {
+          return false;
+        }
+        codepoint = 0x10000U +
+                    (((codepoint - 0xD800U) << 10U) |
+                     (lowSurrogate - 0xDC00U));
+        cursor += 6;
+      }
+
+      if (!append_utf8_codepoint(&parsed, codepoint)) {
+        return false;
+      }
+      break;
+    }
+    default:
+      return false;
+    }
+  }
+
+  return false;
+}
+
+bool read_json_value_string(const char *key, std::string *out,
+                            const char **end) noexcept {
+  if ((key == nullptr) || (out == nullptr)) {
+    return false;
+  }
+
+  const char *separator = std::strchr(key, ':');
+  if (separator == nullptr) {
+    return false;
+  }
+  const char *valueStart = std::strchr(separator, '"');
+  if (valueStart == nullptr) {
+    return false;
+  }
+  return parse_json_string(valueStart, out, end);
+}
+
+} // namespace
+
+std::string escape_json_string(const char *text) {
+  std::string escaped{};
+  if (text == nullptr) {
+    return escaped;
+  }
+
+  for (const unsigned char *cursor =
+           reinterpret_cast<const unsigned char *>(text);
+       *cursor != '\0'; ++cursor) {
+    const unsigned char ch = *cursor;
+    switch (ch) {
+    case '"':
+      escaped += "\\\"";
+      break;
+    case '\\':
+      escaped += "\\\\";
+      break;
+    case '\b':
+      escaped += "\\b";
+      break;
+    case '\f':
+      escaped += "\\f";
+      break;
+    case '\n':
+      escaped += "\\n";
+      break;
+    case '\r':
+      escaped += "\\r";
+      break;
+    case '\t':
+      escaped += "\\t";
+      break;
+    default:
+      if (ch < 0x20U) {
+        escaped += "\\u00";
+        escaped.push_back(kHexDigits[(ch >> 4U) & 0x0FU]);
+        escaped.push_back(kHexDigits[ch & 0x0FU]);
+      } else {
+        escaped.push_back(static_cast<char>(ch));
+      }
+      break;
+    }
+  }
+  return escaped;
+}
+
+/// Adds a value or component to the target system for dependency.
 bool add_dependency(DependencyGraph *graph, DependencyGraph::AssetId dependent,
                     DependencyGraph::AssetId dependency) noexcept {
   if ((graph == nullptr) || (dependent == DependencyGraph::kInvalidAssetId) ||
@@ -29,6 +252,7 @@ bool add_dependency(DependencyGraph *graph, DependencyGraph::AssetId dependent,
   return true;
 }
 
+/// Removes a value or component from the target system for dependency.
 bool remove_dependency(DependencyGraph *graph,
                        DependencyGraph::AssetId dependent,
                        DependencyGraph::AssetId dependency) noexcept {
@@ -62,6 +286,7 @@ bool remove_dependency(DependencyGraph *graph,
   return true;
 }
 
+/// Removes a value or component from the target system for asset.
 void remove_asset(DependencyGraph *graph,
                   DependencyGraph::AssetId id) noexcept {
   if ((graph == nullptr) || (id == DependencyGraph::kInvalidAssetId)) {
@@ -101,6 +326,7 @@ void remove_asset(DependencyGraph *graph,
   graph->assetPaths.erase(id);
 }
 
+/// Returns the requested value for dependencies.
 std::size_t get_dependencies(const DependencyGraph *graph,
                              DependencyGraph::AssetId id,
                              DependencyGraph::AssetId *outIds,
@@ -129,6 +355,7 @@ std::size_t get_dependencies(const DependencyGraph *graph,
   return count;
 }
 
+/// Returns the requested value for dependents.
 std::size_t get_dependents(const DependencyGraph *graph,
                            DependencyGraph::AssetId id,
                            DependencyGraph::AssetId *outIds,
@@ -157,6 +384,7 @@ std::size_t get_dependents(const DependencyGraph *graph,
   return count;
 }
 
+/// Returns the requested value for all dependents recursive.
 std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
                                          DependencyGraph::AssetId id,
                                          DependencyGraph::AssetId *outIds,
@@ -205,6 +433,7 @@ std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
   return count;
 }
 
+/// Handles would create cycle.
 bool would_create_cycle(const DependencyGraph *graph,
                         DependencyGraph::AssetId dependent,
                         DependencyGraph::AssetId dependency) noexcept {
@@ -248,6 +477,7 @@ bool would_create_cycle(const DependencyGraph *graph,
   return false;
 }
 
+/// Returns whether has cycle.
 bool has_cycle(const DependencyGraph *graph) noexcept {
   if (graph == nullptr) {
     return false;
@@ -303,6 +533,7 @@ bool has_cycle(const DependencyGraph *graph) noexcept {
   return processed < allNodes.size();
 }
 
+/// Converts topological sort into the target representation.
 std::size_t topological_sort(const DependencyGraph *graph,
                              DependencyGraph::AssetId *outIds,
                              std::size_t maxIds) noexcept {
@@ -408,15 +639,15 @@ bool write_dependency_graph_json(const DependencyGraph *graph,
       }
       firstEdge = false;
 
-      const char *depPath = "";
-      const char *depyPath = "";
+      std::string depPath{};
+      std::string depyPath{};
       auto pathIt = graph->assetPaths.find(dependent);
       if (pathIt != graph->assetPaths.end()) {
-        depPath = pathIt->second.c_str();
+        depPath = escape_json_string(pathIt->second.c_str());
       }
       auto pathIt2 = graph->assetPaths.find(dependency);
       if (pathIt2 != graph->assetPaths.end()) {
-        depyPath = pathIt2->second.c_str();
+        depyPath = escape_json_string(pathIt2->second.c_str());
       }
 
       std::fprintf(file,
@@ -424,8 +655,8 @@ bool write_dependency_graph_json(const DependencyGraph *graph,
                    "\"%016llx\", \"dependentPath\": \"%s\", "
                    "\"dependencyPath\": \"%s\" }",
                    static_cast<unsigned long long>(dependent),
-                   static_cast<unsigned long long>(dependency), depPath,
-                   depyPath);
+                   static_cast<unsigned long long>(dependency),
+                   depPath.c_str(), depyPath.c_str());
     }
   }
 
@@ -437,8 +668,9 @@ bool write_dependency_graph_json(const DependencyGraph *graph,
       std::fprintf(file, ",\n");
     }
     firstAsset = false;
+    const std::string escapedPath = escape_json_string(assetPath.c_str());
     std::fprintf(file, "    { \"id\": \"%016llx\", \"path\": \"%s\" }",
-                 static_cast<unsigned long long>(id), assetPath.c_str());
+                 static_cast<unsigned long long>(id), escapedPath.c_str());
   }
 
   std::fprintf(file, "\n  ]\n}\n");
@@ -446,6 +678,7 @@ bool write_dependency_graph_json(const DependencyGraph *graph,
   return true;
 }
 
+/// Reads dependency graph json data.
 bool read_dependency_graph_json(DependencyGraph *graph,
                                 const char *path) noexcept {
   if ((graph == nullptr) || (path == nullptr)) {
@@ -515,23 +748,16 @@ bool read_dependency_graph_json(DependencyGraph *graph,
         ++pos;
         continue;
       }
-      const char *pathValStart = std::strchr(pathKey + 6, '"');
-      if (pathValStart == nullptr) {
-        ++pos;
-        continue;
-      }
-      ++pathValStart; // skip opening quote
-      const char *pathValEnd = std::strchr(pathValStart, '"');
-      if (pathValEnd == nullptr) {
+      std::string assetPath{};
+      const char *pathValEnd = nullptr;
+      if (!read_json_value_string(pathKey, &assetPath, &pathValEnd)) {
         ++pos;
         continue;
       }
 
-      std::string assetPath(
-          pathValStart, static_cast<std::size_t>(pathValEnd - pathValStart));
       graph->assetPaths[static_cast<DependencyGraph::AssetId>(idVal)] =
           assetPath;
-      pos = pathValEnd + 1;
+      pos = pathValEnd;
     }
   }
 
@@ -589,6 +815,7 @@ bool read_dependency_graph_json(DependencyGraph *graph,
   return true;
 }
 
+/// Handles compute invalidation set.
 std::size_t compute_invalidation_set(const DependencyGraph *graph,
                                      const DependencyGraph::AssetId *changedIds,
                                      std::size_t changedCount,

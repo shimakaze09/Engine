@@ -1,3 +1,5 @@
+// Implements transform behavior for the Engine math library.
+
 #include "engine/math/transform.h"
 
 #include <cassert>
@@ -7,6 +9,7 @@
 
 namespace engine::math {
 
+/// Handles compose trs.
 Mat4 compose_trs(const Vec3 &translation, const Quat &rotation,
                  const Vec3 &scale) noexcept {
   Mat4 result = to_mat4(rotation);
@@ -17,6 +20,7 @@ Mat4 compose_trs(const Vec3 &translation, const Quat &rotation,
   return result;
 }
 
+/// Handles decompose trs.
 bool decompose_trs(const Mat4 &value, Vec3 *outTranslation, Quat *outRotation,
                    Vec3 *outScale) noexcept {
   if ((outTranslation == nullptr) || (outRotation == nullptr) ||
@@ -59,6 +63,7 @@ bool decompose_trs(const Mat4 &value, Vec3 *outTranslation, Quat *outRotation,
   return true;
 }
 
+/// Handles look at.
 Mat4 look_at(const Vec3 &eye, const Vec3 &target, const Vec3 &up) noexcept {
   const Vec3 forward = normalize(sub(target, eye));
   const Vec3 right = normalize(cross(forward, up));
@@ -71,6 +76,7 @@ Mat4 look_at(const Vec3 &eye, const Vec3 &target, const Vec3 &up) noexcept {
       Vec4(-dot(right, eye), -dot(trueUp, eye), dot(forward, eye), 1.0F));
 }
 
+/// Handles perspective.
 Mat4 perspective(float verticalFovRadians, float aspect, float nearZ,
                  float farZ) noexcept {
 #ifndef NDEBUG
@@ -90,6 +96,7 @@ Mat4 perspective(float verticalFovRadians, float aspect, float nearZ,
               Vec4(0.0F, 0.0F, (2.0F * farZ * nearZ) * invDepth, 0.0F));
 }
 
+/// Handles ortho.
 Mat4 ortho(float left, float right, float bottom, float top, float nearZ,
            float farZ) noexcept {
 #ifndef NDEBUG

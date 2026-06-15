@@ -1,3 +1,5 @@
+// Verifies reflect test behavior for the Engine test suite.
+
 #include <cstddef>
 #include <cstdint>
 
@@ -7,6 +9,7 @@
 
 namespace {
 
+/// Stores local reflect data used by the engine.
 struct LocalReflect final {
   std::int32_t id = 0;
   bool enabled = false;
@@ -15,6 +18,7 @@ struct LocalReflect final {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   // Explicitly call the anchor symbol so static-library linking pulls
   // runtime reflection registrations into this test binary.

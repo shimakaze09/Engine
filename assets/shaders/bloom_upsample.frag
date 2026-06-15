@@ -1,3 +1,5 @@
+// Defines the bloom upsample fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -7,6 +9,7 @@ uniform vec2 u_texelSize;
 
 out vec4 outColor;
 
+/// Runs the shader entry point for this stage.
 void main() {
   // Dual-Kawase upsample: 9-tap tent filter.
   vec3 sum = vec3(0.0);

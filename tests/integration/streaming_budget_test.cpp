@@ -7,7 +7,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 using namespace engine::renderer;
 
@@ -21,6 +23,7 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
+/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
@@ -29,6 +32,7 @@ static AssetId make_id(std::uint64_t n) noexcept {
 // frame.
 static constexpr std::uint64_t kAssetSize = 64ULL * 1024ULL * 1024ULL;
 
+/// Handles big load.
 static bool big_load(AssetId /*id*/, const char * /*path*/,
                      std::uint64_t *outSizeBytes,
                      void * /*userData*/) noexcept {
@@ -38,6 +42,7 @@ static bool big_load(AssetId /*id*/, const char * /*path*/,
   return true;
 }
 
+/// Handles big upload.
 static bool big_upload(AssetId /*id*/, void * /*userData*/) noexcept {
   return true;
 }
@@ -68,7 +73,7 @@ static void test_budget_spreading() noexcept {
   // Process frames and count how many are required.
   std::size_t frameCount = 0U;
   std::size_t readyPerFrame[32]{};
-  constexpr std::size_t kMaxFrames = 32U;
+  constexpr std::size_t kMaxFrames = 96U;
 
   while (frameCount < kMaxFrames) {
     begin_streaming_frame(queue.get());
@@ -87,6 +92,7 @@ static void test_budget_spreading() noexcept {
     if (allReady) {
       break;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   // With 20 × 64 MB and 256 MB budget, should take at least 5 frames
@@ -162,6 +168,7 @@ static void test_upload_limit() noexcept {
     if (allReady) {
       break;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   CHECK(frameCount >= 5U, "takes multiple frames due to upload cap");
@@ -182,6 +189,7 @@ static void test_upload_limit() noexcept {
   engine::core::shutdown_cvars();
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== Streaming Budget Tests ===\n");
 

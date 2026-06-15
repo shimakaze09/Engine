@@ -1,3 +1,5 @@
+// Verifies scheduler stress behavior for the Engine test suite.
+
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
 
@@ -9,11 +11,13 @@ namespace {
 
 constexpr std::size_t kJobCount = 1500U;
 
+/// Stores stress job data used by the engine.
 struct StressJobData final {
   std::uint32_t jobIndex = 0U;
   std::uint64_t *output = nullptr;
 };
 
+/// Handles stress job.
 void stress_job(void *userData) noexcept {
   auto *data = static_cast<StressJobData *>(userData);
   if ((data == nullptr) || (data->output == nullptr)) {
@@ -40,8 +44,10 @@ void stress_job(void *userData) noexcept {
   *data->output = value;
 }
 
+/// Handles completion job.
 void completion_job(void *) noexcept {}
 
+/// Runs the configured command, loop, or tool for stress round.
 std::uint64_t run_stress_round(std::uint64_t *outExecutedJobs,
                                std::uint64_t *outQueueContention) {
   if (!engine::core::begin_frame_graph()) {
@@ -106,6 +112,7 @@ std::uint64_t run_stress_round(std::uint64_t *outExecutedJobs,
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   if (!engine::core::initialize_core(1024U * 1024U)) {
     return 1;

@@ -1,3 +1,5 @@
+// Verifies event bus test behavior for the Engine test suite.
+
 #include <cstddef>
 #include <cstdio>
 
@@ -7,10 +9,12 @@ using namespace engine::core;
 
 namespace {
 
+/// Stores test event a data used by the engine.
 struct TestEventA final {
   int value = 0;
 };
 
+/// Stores test event b data used by the engine.
 struct TestEventB final {
   float x = 0.0F;
   float y = 0.0F;
@@ -54,6 +58,7 @@ std::size_t g_deepSequenceCount = 0U;
 
 int g_emptyBusTouchCount = 0;
 
+/// Resets this object back to its reusable empty state for mutation test state.
 void reset_mutation_test_state() noexcept {
   g_selfUnsubscribeCalls = 0;
   g_selfUnsubscribeResult = false;
@@ -91,6 +96,7 @@ void reset_mutation_test_state() noexcept {
   g_emptyBusTouchCount = 0;
 }
 
+/// Handles record nested step.
 void record_nested_step(int code) noexcept {
   if (g_nestedSequenceCount >= (sizeof(g_nestedSequence) / sizeof(int))) {
     return;
@@ -100,6 +106,7 @@ void record_nested_step(int code) noexcept {
   ++g_nestedSequenceCount;
 }
 
+/// Handles record deep step.
 void record_deep_step(int code) noexcept {
   if (g_deepSequenceCount >= (sizeof(g_deepSequence) / sizeof(int))) {
     return;
@@ -109,30 +116,36 @@ void record_deep_step(int code) noexcept {
   ++g_deepSequenceCount;
 }
 
+/// Handles on test event a.
 void on_test_event_a(const TestEventA &e, void *) noexcept {
   g_lastValueA = e.value;
   ++g_callCountA;
 }
 
+/// Handles on test event b.
 void on_test_event_b(const TestEventB &e, void *) noexcept {
   g_lastX = e.x;
   g_lastY = e.y;
 }
 
+/// Handles on test event a double.
 void on_test_event_a_double(const TestEventA &e, void *) noexcept {
   g_lastValueA = e.value * 2;
 }
 
+/// Handles on self unsubscribe event a.
 void on_self_unsubscribe_event_a(const TestEventA &, void *) noexcept {
   ++g_selfUnsubscribeCalls;
   g_selfUnsubscribeResult =
       unsubscribe<TestEventA, on_self_unsubscribe_event_a>();
 }
 
+/// Handles on unsubscribe other target event a.
 void on_unsubscribe_other_target_event_a(const TestEventA &, void *) noexcept {
   ++g_unsubscribeOtherTargetCalls;
 }
 
+/// Handles on unsubscribe other event a.
 void on_unsubscribe_other_event_a(const TestEventA &, void *) noexcept {
   ++g_unsubscribeOtherCalls;
   if (!g_unsubscribeOtherAttempted) {
@@ -142,10 +155,12 @@ void on_unsubscribe_other_event_a(const TestEventA &, void *) noexcept {
   }
 }
 
+/// Handles on subscribe late event a.
 void on_subscribe_late_event_a(const TestEventA &, void *) noexcept {
   ++g_subscribeDuringEmitLateCalls;
 }
 
+/// Handles on subscribe during emit event a.
 void on_subscribe_during_emit_event_a(const TestEventA &, void *) noexcept {
   ++g_subscribeDuringEmitCalls;
   if (!g_subscribeDuringEmitAttempted) {
@@ -155,10 +170,12 @@ void on_subscribe_during_emit_event_a(const TestEventA &, void *) noexcept {
   }
 }
 
+/// Stores nested event data used by the engine.
 struct NestedEvent final {
   int depth = 0;
 };
 
+/// Handles on nested late.
 void on_nested_late(const NestedEvent &event, void *) noexcept {
   ++g_nestedLateCalls;
   if (event.depth == 1) {
@@ -168,6 +185,7 @@ void on_nested_late(const NestedEvent &event, void *) noexcept {
   }
 }
 
+/// Handles on nested observer.
 void on_nested_observer(const NestedEvent &event, void *) noexcept {
   ++g_nestedObserverCalls;
   if (event.depth == 1) {
@@ -177,6 +195,7 @@ void on_nested_observer(const NestedEvent &event, void *) noexcept {
   }
 }
 
+/// Handles on nested primary.
 void on_nested_primary(const NestedEvent &event, void *) noexcept {
   ++g_nestedPrimaryCalls;
   if (event.depth == 1) {
@@ -188,10 +207,12 @@ void on_nested_primary(const NestedEvent &event, void *) noexcept {
   }
 }
 
+/// Handles on unsub nested observer.
 void on_unsub_nested_observer(const NestedEvent &, void *) noexcept {
   ++g_unsubNestedObserverCalls;
 }
 
+/// Handles on unsub nested primary.
 void on_unsub_nested_primary(const NestedEvent &event, void *) noexcept {
   ++g_unsubNestedPrimaryCalls;
   if (event.depth == 1) {
@@ -200,15 +221,18 @@ void on_unsub_nested_primary(const NestedEvent &event, void *) noexcept {
   }
 }
 
+/// Stores deep nested event data used by the engine.
 struct DeepNestedEvent final {
   int depth = 0;
 };
 
+/// Handles on deep nested observer.
 void on_deep_nested_observer(const DeepNestedEvent &event, void *) noexcept {
   ++g_deepObserverCalls;
   record_deep_step(20 + event.depth);
 }
 
+/// Handles on deep nested primary.
 void on_deep_nested_primary(const DeepNestedEvent &event, void *) noexcept {
   ++g_deepPrimaryCalls;
   record_deep_step(10 + event.depth);
@@ -217,8 +241,10 @@ void on_deep_nested_primary(const DeepNestedEvent &event, void *) noexcept {
   }
 }
 
+/// Handles on empty bus raw.
 void on_empty_bus_raw(const void *, void *) noexcept { ++g_emptyBusTouchCount; }
 
+/// Handles test init shutdown.
 bool test_init_shutdown() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -227,6 +253,7 @@ bool test_init_shutdown() noexcept {
   return true;
 }
 
+/// Handles test typed subscribe emit.
 bool test_typed_subscribe_emit() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -268,6 +295,7 @@ bool test_typed_subscribe_emit() noexcept {
   return true;
 }
 
+/// Handles test typed unsubscribe.
 bool test_typed_unsubscribe() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -299,6 +327,7 @@ bool test_typed_unsubscribe() noexcept {
   return true;
 }
 
+/// Handles test multiple subscribers.
 bool test_multiple_subscribers() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -326,12 +355,14 @@ bool test_multiple_subscribers() noexcept {
 
 int g_channelIntValue = 0;
 
+/// Handles on channel int.
 void on_channel_int(const void *data, std::size_t size, void *) noexcept {
   if ((data != nullptr) && (size == sizeof(int))) {
     g_channelIntValue = *static_cast<const int *>(data);
   }
 }
 
+/// Handles test channel subscribe emit.
 bool test_channel_subscribe_emit() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -371,6 +402,7 @@ bool test_channel_subscribe_emit() noexcept {
   return true;
 }
 
+/// Handles test typed event isolation.
 bool test_typed_event_isolation() noexcept {
   // Verify that emitting EventA does not trigger EventB subscribers.
   if (!initialize_event_bus()) {
@@ -393,6 +425,7 @@ bool test_typed_event_isolation() noexcept {
   return true;
 }
 
+/// Handles test self unsubscribe during emit.
 bool test_self_unsubscribe_during_emit() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -421,6 +454,7 @@ bool test_self_unsubscribe_during_emit() noexcept {
   return true;
 }
 
+/// Handles test unsubscribe another before turn.
 bool test_unsubscribe_another_before_turn() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -456,6 +490,7 @@ bool test_unsubscribe_another_before_turn() noexcept {
   return true;
 }
 
+/// Handles test subscribe new handler during emit.
 bool test_subscribe_new_handler_during_emit() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -487,6 +522,7 @@ bool test_subscribe_new_handler_during_emit() noexcept {
   return true;
 }
 
+/// Handles test nested emit allowed with fresh snapshot.
 bool test_nested_emit_allowed_with_fresh_snapshot() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -529,6 +565,7 @@ bool test_nested_emit_allowed_with_fresh_snapshot() noexcept {
   return true;
 }
 
+/// Handles test unsubscribe then nested emit uses fresh snapshot.
 bool test_unsubscribe_then_nested_emit_uses_fresh_snapshot() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -558,6 +595,7 @@ bool test_unsubscribe_then_nested_emit_uses_fresh_snapshot() noexcept {
   return true;
 }
 
+/// Handles test multiple nested levels.
 bool test_multiple_nested_levels() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -597,6 +635,7 @@ bool test_multiple_nested_levels() noexcept {
   return true;
 }
 
+/// Handles test empty bus edge cases.
 bool test_empty_bus_edge_cases() noexcept {
   if (!initialize_event_bus()) {
     return false;
@@ -638,6 +677,7 @@ bool test_empty_bus_edge_cases() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int passed = 0;
   int failed = 0;

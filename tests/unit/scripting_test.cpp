@@ -1,8 +1,13 @@
+// Verifies scripting test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
 
+#include "engine/core/touch_input.h"
+#include "engine/core/service_locator.h"
+#include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -11,6 +16,7 @@ namespace {
 
 constexpr const char *kTempScriptPath = "scripting_test.lua";
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -25,15 +31,18 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) noexcept {
   const float diff = lhs - rhs;
   return (diff < 0.0001F) && (diff > -0.0001F);
 }
 
+/// Removes a value or component from the target system for script file.
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kTempScriptPath));
 }
 
+/// Writes script file data.
 bool write_script_file(const char *contents) noexcept {
   if (contents == nullptr) {
     return false;
@@ -50,8 +59,15 @@ bool write_script_file(const char *contents) noexcept {
   return ok;
 }
 
+void touch_probe_callback(const engine::core::TouchEvent &,
+                          void *) noexcept {}
+
+void gesture_probe_callback(const engine::core::GestureEvent &,
+                            void *) noexcept {}
+
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   remove_script_file();
 
@@ -66,7 +82,8 @@ int main() {
     return 2;
   }
 
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   constexpr std::uint32_t kDefaultMeshAssetId = 777U;
   engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
 
@@ -229,6 +246,60 @@ int main() {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 18;
+  }
+
+  // =========================================================================
+  // Regression: Lua entity handles include generation, not only slot index.
+  // =========================================================================
+  {
+    const char *staleEntityScript =
+        "function on_start()\n"
+        "    local stale = engine.spawn_entity()\n"
+        "    engine.set_name(stale, 'stale_original')\n"
+        "    engine.destroy_entity(stale)\n"
+        "    local recycled = engine.spawn_entity()\n"
+        "    engine.set_name(recycled, 'stale_recycled')\n"
+        "    if recycled == stale then\n"
+        "        engine.set_name(recycled, 'stale_equal_bug')\n"
+        "    end\n"
+        "    if engine.is_alive(stale) then\n"
+        "        engine.set_name(recycled, 'stale_alive_bug')\n"
+        "    end\n"
+        "    if engine.set_name(stale, 'stale_write_bug') then\n"
+        "        engine.set_name(recycled, 'stale_write_bug')\n"
+        "    end\n"
+        "    if engine.destroy_entity(stale) then\n"
+        "        engine.set_name(recycled, 'stale_destroy_bug')\n"
+        "    end\n"
+        "end\n";
+    if (!write_script_file(staleEntityScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 204;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 205;
+    }
+    const engine::runtime::Entity recycled = world->find_entity_by_index(1U);
+    if (recycled == engine::runtime::kInvalidEntity) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 206;
+    }
+    engine::runtime::NameComponent recycledName{};
+    if (!world->get_name_component(recycled, &recycledName)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 207;
+    }
+    if (std::strcmp(recycledName.name, "stale_recycled") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 208;
+    }
   }
 
   // =========================================================================
@@ -435,6 +506,57 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 48;
+    }
+  }
+
+  // =========================================================================
+  // Step 4.6 Regression: stale timer ids cannot cancel reused slots
+  // =========================================================================
+  {
+    const char *staleTimerScript =
+        "local old_id = nil\n"
+        "function on_start()\n"
+        "    old_id = engine.set_timeout(function()\n"
+        "        local e = engine.spawn_entity()\n"
+        "        engine.set_name(e, 'stale_old_timer_fired')\n"
+        "    end, 0.1)\n"
+        "    engine.cancel_timer(old_id)\n"
+        "    engine.set_timeout(function()\n"
+        "        local e = engine.spawn_entity()\n"
+        "        engine.set_name(e, 'stale_new_timer_fired')\n"
+        "    end, 0.1)\n"
+        "    engine.cancel_timer(old_id)\n"
+        "end\n";
+    if (!write_script_file(staleTimerScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 201;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 202;
+    }
+    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::scripting::tick_timers();
+    bool oldTimerFired = false;
+    bool newTimerFired = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc)) {
+        if (std::strcmp(nc.name, "stale_old_timer_fired") == 0) {
+          oldTimerFired = true;
+        }
+        if (std::strcmp(nc.name, "stale_new_timer_fired") == 0) {
+          newTimerFired = true;
+        }
+      }
+    });
+    if (oldTimerFired || !newTimerFired) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 203;
     }
   }
 
@@ -669,6 +791,17 @@ int main() {
       remove_script_file();
       return 67;
     }
+    if (engine::runtime::process_pending_scene_op(*world)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 82;
+    }
+    if (!engine::scripting::has_pending_scene_op() ||
+        !engine::scripting::pending_scene_op_is_load()) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 83;
+    }
     engine::scripting::clear_pending_scene_op();
   }
 
@@ -862,6 +995,41 @@ int main() {
   }
 
   {
+    const char *controllerDestroyScript =
+        "function on_start()\n"
+        "  local controlled = engine.spawn_entity()\n"
+        "  engine.set_player_controller(0, controlled)\n"
+        "  engine.destroy_entity(controlled)\n"
+        "  local cleared = engine.get_player_controller(0)\n"
+        "  local replacement = engine.spawn_entity()\n"
+        "  if cleared == 0 and replacement ~= nil then\n"
+        "    local ok = engine.spawn_entity()\n"
+        "    engine.set_name(ok, 'controller_cleared_on_destroy')\n"
+        "  end\n"
+        "end\n";
+    if (!write_script_file(controllerDestroyScript) ||
+        !engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 204;
+    }
+    bool controllerCleared = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc) &&
+          std::strcmp(nc.name, "controller_cleared_on_destroy") == 0) {
+        controllerCleared = true;
+      }
+    });
+    if (!controllerCleared) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 205;
+    }
+  }
+
+  {
     const char *profilerScript =
         "function foo() end\n"
         "function on_start()\n"
@@ -992,7 +1160,221 @@ int main() {
     }
   }
 
+  {
+    const engine::runtime::Entity target = world->create_entity();
+    if (target == engine::runtime::kInvalidEntity) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 101;
+    }
+    engine::runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "%s", "queued_target");
+    if (!world->add_name_component(target, name)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 102;
+    }
+
+    const char *deferredClearScript =
+        "function queue_name_change()\n"
+        "  local e = engine.find_entity_by_name('queued_target')\n"
+        "  if e == nil then error('target missing') end\n"
+        "  engine.set_name(e, 'queued_before_shutdown')\n"
+        "end\n";
+    if (!write_script_file(deferredClearScript) ||
+        !engine::scripting::load_script(kTempScriptPath)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 103;
+    }
+
+    world->begin_update_phase();
+    const bool queued = engine::scripting::call_script_function(
+        "queue_name_change");
+    engine::scripting::shutdown_scripting();
+    world->commit_update_phase();
+    world->end_frame_phase();
+    if (!queued) {
+      remove_script_file();
+      return 104;
+    }
+
+    if (!engine::scripting::initialize_scripting()) {
+      remove_script_file();
+      return 105;
+    }
+    engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
+
+    engine::runtime::NameComponent beforeFlush{};
+    if (!world->get_name_component(target, &beforeFlush) ||
+        std::strcmp(beforeFlush.name, "queued_target") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 106;
+    }
+
+    engine::scripting::flush_deferred_mutations();
+    engine::runtime::NameComponent afterFlush{};
+    if (!world->get_name_component(target, &afterFlush) ||
+        std::strcmp(afterFlush.name, "queued_target") != 0) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 107;
+    }
+  }
+
+  if (serviceLocator.get_service<engine::runtime::World>() != world.get()) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 91;
+  }
+  if (serviceLocator.get_service<engine::scripting::RuntimeServices>() ==
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 92;
+  }
+
+  engine::core::ServiceLocator localLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), localLocator);
+  if (localLocator.get_service<engine::runtime::World>() != world.get()) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 95;
+  }
+  if (localLocator.get_service<engine::scripting::RuntimeServices>() ==
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 96;
+  }
+  if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 97;
+  }
+  if (serviceLocator.get_service<engine::scripting::RuntimeServices>() !=
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 98;
+  }
+
+  engine::runtime::unbind_scripting_runtime(localLocator);
+  if (localLocator.get_service<engine::runtime::World>() != nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 99;
+  }
+  if (localLocator.get_service<engine::scripting::RuntimeServices>() !=
+      nullptr) {
+    engine::scripting::shutdown_scripting();
+    remove_script_file();
+    return 100;
+  }
+
+  {
+    if (!engine::core::initialize_touch_input()) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 108;
+    }
+
+    const char *touchCleanupScript =
+        "function register_touch_hooks()\n"
+        "  if not engine.on_touch(function(event) end) then\n"
+        "    error('on_touch failed')\n"
+        "  end\n"
+        "  if not engine.on_touch(function(event) end) then\n"
+        "    error('second on_touch failed')\n"
+        "  end\n"
+        "  if not engine.on_gesture('tap', function(event) end) then\n"
+        "    error('on_gesture failed')\n"
+        "  end\n"
+        "  if not engine.on_gesture('tap', function(event) end) then\n"
+        "    error('second on_gesture failed')\n"
+        "  end\n"
+        "end\n";
+
+    if (!write_script_file(touchCleanupScript) ||
+        !engine::scripting::load_script(kTempScriptPath)) {
+      engine::core::shutdown_touch_input();
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 109;
+    }
+    if (!engine::scripting::call_script_function("register_touch_hooks")) {
+      engine::core::shutdown_touch_input();
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 110;
+    }
+
+    engine::scripting::shutdown_scripting();
+
+    int touchTokens[engine::core::kMaxTouchCallbacks] = {};
+    for (std::size_t i = 0U; i < engine::core::kMaxTouchCallbacks; ++i) {
+      if (!engine::core::register_touch_callback(&touch_probe_callback,
+                                                 &touchTokens[i])) {
+        engine::core::shutdown_touch_input();
+        remove_script_file();
+        return 111;
+      }
+    }
+    int extraTouchToken = 0;
+    if (engine::core::register_touch_callback(&touch_probe_callback,
+                                              &extraTouchToken)) {
+      engine::core::shutdown_touch_input();
+      remove_script_file();
+      return 112;
+    }
+    for (std::size_t i = 0U; i < engine::core::kMaxTouchCallbacks; ++i) {
+      static_cast<void>(engine::core::unregister_touch_callback(
+          &touch_probe_callback, &touchTokens[i]));
+    }
+
+    int gestureTokens[engine::core::kMaxGestureCallbacks] = {};
+    for (std::size_t i = 0U; i < engine::core::kMaxGestureCallbacks; ++i) {
+      if (!engine::core::register_gesture_callback(
+              engine::core::GestureType::Tap, &gesture_probe_callback,
+              &gestureTokens[i])) {
+        engine::core::shutdown_touch_input();
+        remove_script_file();
+        return 113;
+      }
+    }
+    int extraGestureToken = 0;
+    if (engine::core::register_gesture_callback(
+            engine::core::GestureType::Tap, &gesture_probe_callback,
+            &extraGestureToken)) {
+      engine::core::shutdown_touch_input();
+      remove_script_file();
+      return 114;
+    }
+
+    engine::core::shutdown_touch_input();
+
+    if (!engine::scripting::initialize_scripting()) {
+      remove_script_file();
+      return 115;
+    }
+    engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
+  }
+
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::shutdown_scripting();
+  if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
+    remove_script_file();
+    return 93;
+  }
+  if (serviceLocator.get_service<engine::scripting::RuntimeServices>() !=
+      nullptr) {
+    remove_script_file();
+    return 94;
+  }
+
   remove_script_file();
   return 0;
 }

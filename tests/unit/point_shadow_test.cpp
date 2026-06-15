@@ -1,3 +1,5 @@
+// Verifies point shadow test behavior for the Engine test suite.
+
 #include <cmath>
 #include <cstdio>
 
@@ -172,6 +174,7 @@ int verify_point_data_defaults() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = verify_point_matrices_distinct();
   if (result != 0)

@@ -1,3 +1,5 @@
+// Implements scene serializer behavior for the Engine runtime world.
+
 #include "engine/runtime/scene_serializer.h"
 
 #include <cstddef>
@@ -38,6 +40,7 @@ constexpr const char *kReflectionProbeTypeName =
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
+/// Handles open file for read.
 bool open_file_for_read(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -52,6 +55,7 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -66,6 +70,7 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Reads text file data.
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
@@ -117,6 +122,7 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
   return true;
 }
 
+/// Writes text file data.
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept {
   if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
@@ -133,6 +139,7 @@ bool write_text_file(const char *path, const char *text,
   return written == size;
 }
 
+/// Writes vec2 data.
 void write_vec2(core::JsonWriter &writer, const char *key,
                 const math::Vec2 &value) noexcept {
   writer.begin_array(key);
@@ -141,6 +148,7 @@ void write_vec2(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Writes vec3 data.
 void write_vec3(core::JsonWriter &writer, const char *key,
                 const math::Vec3 &value) noexcept {
   writer.begin_array(key);
@@ -150,6 +158,7 @@ void write_vec3(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Writes vec4 data.
 void write_vec4(core::JsonWriter &writer, const char *key,
                 const math::Vec4 &value) noexcept {
   writer.begin_array(key);
@@ -160,6 +169,7 @@ void write_vec4(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Writes quat data.
 void write_quat(core::JsonWriter &writer, const char *key,
                 const math::Quat &value) noexcept {
   writer.begin_array(key);
@@ -170,6 +180,7 @@ void write_quat(core::JsonWriter &writer, const char *key,
   writer.end_array();
 }
 
+/// Reads float array data.
 bool read_float_array(const core::JsonParser &parser,
                       const core::JsonValue &arrayValue, float *outValues,
                       std::size_t expectedCount) noexcept {
@@ -196,6 +207,7 @@ bool read_float_array(const core::JsonParser &parser,
   return true;
 }
 
+/// Reads vec2 data.
 bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec2 *outVec) noexcept {
   if (outVec == nullptr) {
@@ -212,6 +224,7 @@ bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Reads vec3 data.
 bool read_vec3(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec3 *outVec) noexcept {
   if (outVec == nullptr) {
@@ -229,6 +242,7 @@ bool read_vec3(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Reads vec4 data.
 bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
                math::Vec4 *outVec) noexcept {
   if (outVec == nullptr) {
@@ -247,6 +261,7 @@ bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Reads quat data.
 bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
                math::Quat *outQuat) noexcept {
   if (outQuat == nullptr) {
@@ -265,6 +280,7 @@ bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+/// Writes reflected component data.
 bool write_reflected_component(core::JsonWriter &writer,
                                const char *componentName,
                                const core::TypeDescriptor &descriptor,
@@ -365,6 +381,7 @@ bool write_reflected_component(core::JsonWriter &writer,
   return !writer.failed();
 }
 
+/// Reads reflected component data.
 bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
@@ -445,6 +462,7 @@ bool read_reflected_component(const core::JsonParser &parser,
   return true;
 }
 
+/// Reads mesh component data.
 bool read_mesh_component(const core::JsonParser &parser,
                          const core::JsonValue &meshObject,
                          MeshComponent *outComponent) noexcept {
@@ -493,6 +511,160 @@ bool read_mesh_component(const core::JsonParser &parser,
   return true;
 }
 
+/// Writes foliage patch component data.
+void write_foliage_patch_component(
+    core::JsonWriter &writer,
+    const FoliagePatchComponent &component) noexcept {
+  writer.write_key(kJsonKeyFoliagePatchComponent);
+  writer.begin_object();
+
+  writer.begin_array("meshAssetIds");
+  for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
+    writer.write_uint64_value(component.meshAssetIds[i]);
+  }
+  writer.end_array();
+
+  const std::uint32_t instanceCount =
+      (component.instanceCount >
+       static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances))
+          ? static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)
+          : component.instanceCount;
+  writer.write_uint("instanceCount", instanceCount);
+  writer.write_float("density", component.density);
+  write_vec3(writer, "albedo", component.albedo);
+  writer.write_float("roughness", component.roughness);
+  writer.write_float("metallic", component.metallic);
+  writer.write_float("opacity", component.opacity);
+  writer.write_float("windStrength", component.windStrength);
+  writer.write_float("windFrequency", component.windFrequency);
+
+  writer.begin_array("instances");
+  for (std::uint32_t i = 0U; i < instanceCount; ++i) {
+    const FoliageInstance &instance = component.instances[i];
+    writer.begin_object();
+    write_vec3(writer, "offset", instance.offset);
+    writer.write_float("scale", instance.scale);
+    writer.write_float("phase", instance.phase);
+    writer.write_uint("lodIndex", instance.lodIndex);
+    writer.end_object();
+  }
+  writer.end_array();
+
+  writer.end_object();
+}
+
+/// Reads foliage patch component data.
+bool read_foliage_patch_component(
+    const core::JsonParser &parser, const core::JsonValue &foliageObject,
+    FoliagePatchComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (foliageObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  FoliagePatchComponent component{};
+  core::JsonValue value{};
+
+  if (parser.get_object_field(foliageObject, "meshAssetIds", &value) &&
+      (value.type == core::JsonValue::Type::Array)) {
+    const std::size_t meshCount = parser.array_size(value);
+    const std::size_t count =
+        (meshCount < FoliagePatchComponent::kMaxLods)
+            ? meshCount
+            : FoliagePatchComponent::kMaxLods;
+    for (std::size_t i = 0U; i < count; ++i) {
+      core::JsonValue element{};
+      if (!parser.get_array_element(value, i, &element) ||
+          !parser.as_uint64(element, &component.meshAssetIds[i])) {
+        return false;
+      }
+    }
+  }
+
+  if (parser.get_object_field(foliageObject, "density", &value)) {
+    static_cast<void>(parser.as_float(value, &component.density));
+  }
+  if (parser.get_object_field(foliageObject, "albedo", &value) &&
+      !read_vec3(parser, value, &component.albedo)) {
+    return false;
+  }
+  if (parser.get_object_field(foliageObject, "roughness", &value)) {
+    static_cast<void>(parser.as_float(value, &component.roughness));
+  }
+  if (parser.get_object_field(foliageObject, "metallic", &value)) {
+    static_cast<void>(parser.as_float(value, &component.metallic));
+  }
+  if (parser.get_object_field(foliageObject, "opacity", &value)) {
+    static_cast<void>(parser.as_float(value, &component.opacity));
+  }
+  if (parser.get_object_field(foliageObject, "windStrength", &value)) {
+    static_cast<void>(parser.as_float(value, &component.windStrength));
+  }
+  if (parser.get_object_field(foliageObject, "windFrequency", &value)) {
+    static_cast<void>(parser.as_float(value, &component.windFrequency));
+  }
+
+  std::uint32_t requestedCount =
+      static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+  if (parser.get_object_field(foliageObject, "instanceCount", &value)) {
+    static_cast<void>(parser.as_uint(value, &requestedCount));
+  }
+
+  core::JsonValue instancesValue{};
+  if (parser.get_object_field(foliageObject, "instances", &instancesValue) &&
+      (instancesValue.type == core::JsonValue::Type::Array)) {
+    const std::size_t arrayCount = parser.array_size(instancesValue);
+    std::size_t clampedCount = arrayCount;
+    if (clampedCount > FoliagePatchComponent::kMaxInstances) {
+      clampedCount = FoliagePatchComponent::kMaxInstances;
+    }
+    std::uint32_t count = static_cast<std::uint32_t>(clampedCount);
+    if (count > requestedCount) {
+      count = requestedCount;
+    }
+    if (count >
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
+      count = static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+    }
+
+    for (std::uint32_t i = 0U; i < count; ++i) {
+      core::JsonValue instanceValue{};
+      if (!parser.get_array_element(instancesValue, i, &instanceValue) ||
+          (instanceValue.type != core::JsonValue::Type::Object)) {
+        return false;
+      }
+
+      FoliageInstance instance{};
+      if (parser.get_object_field(instanceValue, "offset", &value) &&
+          !read_vec3(parser, value, &instance.offset)) {
+        return false;
+      }
+      if (parser.get_object_field(instanceValue, "scale", &value)) {
+        static_cast<void>(parser.as_float(value, &instance.scale));
+      }
+      if (parser.get_object_field(instanceValue, "phase", &value)) {
+        static_cast<void>(parser.as_float(value, &instance.phase));
+      }
+      if (parser.get_object_field(instanceValue, "lodIndex", &value)) {
+        static_cast<void>(parser.as_uint(value, &instance.lodIndex));
+      }
+      component.instances[i] = instance;
+    }
+    component.instanceCount = count;
+  } else {
+    if (requestedCount >
+        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
+      requestedCount =
+          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+    }
+    component.instanceCount = requestedCount;
+  }
+
+  *outComponent = component;
+  return true;
+}
+
+/// Reads light component data.
 bool read_light_component(const core::JsonParser &parser,
                           const core::JsonValue &lightObject,
                           LightComponent *outComponent) noexcept {
@@ -537,6 +709,73 @@ bool read_light_component(const core::JsonParser &parser,
   return true;
 }
 
+bool read_point_light_component(const core::JsonParser &parser,
+                                const core::JsonValue &lightObject,
+                                PointLightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (lightObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  PointLightComponent component{};
+  core::JsonValue value{};
+  if (parser.get_object_field(lightObject, "color", &value) &&
+      !read_vec3(parser, value, &component.color)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "intensity", &value) &&
+      !parser.as_float(value, &component.intensity)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "radius", &value) &&
+      !parser.as_float(value, &component.radius)) {
+    return false;
+  }
+
+  *outComponent = component;
+  return true;
+}
+
+bool read_spot_light_component(const core::JsonParser &parser,
+                               const core::JsonValue &lightObject,
+                               SpotLightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (lightObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  SpotLightComponent component{};
+  core::JsonValue value{};
+  if (parser.get_object_field(lightObject, "color", &value) &&
+      !read_vec3(parser, value, &component.color)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "direction", &value) &&
+      !read_vec3(parser, value, &component.direction)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "intensity", &value) &&
+      !parser.as_float(value, &component.intensity)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "radius", &value) &&
+      !parser.as_float(value, &component.radius)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "innerConeAngle", &value) &&
+      !parser.as_float(value, &component.innerConeAngle)) {
+    return false;
+  }
+  if (parser.get_object_field(lightObject, "outerConeAngle", &value) &&
+      !parser.as_float(value, &component.outerConeAngle)) {
+    return false;
+  }
+
+  *outComponent = component;
+  return true;
+}
+
+/// Handles log scene error.
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel, message);
@@ -545,6 +784,7 @@ bool log_scene_error(const char *message) noexcept {
   return false;
 }
 
+/// Handles deserialize scene entities.
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
                                 const core::TypeDescriptor &transformDesc,
@@ -637,6 +877,18 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    core::JsonValue foliageValue{};
+    if (parser.get_object_field(components, kJsonKeyFoliagePatchComponent,
+                                &foliageValue)) {
+      FoliagePatchComponent foliage{};
+      if (!read_foliage_patch_component(parser, foliageValue, &foliage) ||
+          !targetWorld.add_foliage_patch_component(entity, foliage)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error(
+            "failed to load FoliagePatchComponent component");
+      }
+    }
+
     core::JsonValue lightValue{};
     if (parser.get_object_field(components, kJsonKeyLightComponent, &lightValue)) {
       LightComponent light{};
@@ -649,47 +901,24 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 
     // PointLightComponent
     core::JsonValue plVal{};
-    if (parser.get_object_field(components, "PointLightComponent", &plVal) &&
-        (plVal.type == core::JsonValue::Type::Object)) {
+    if (parser.get_object_field(components, "PointLightComponent", &plVal)) {
       PointLightComponent pc{};
-      core::JsonValue v{};
-      if (parser.get_object_field(plVal, "color", &v)) {
-        static_cast<void>(read_vec3(parser, v, &pc.color));
+      if (!read_point_light_component(parser, plVal, &pc) ||
+          !targetWorld.add_point_light_component(entity, pc)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load PointLightComponent component");
       }
-      if (parser.get_object_field(plVal, "intensity", &v)) {
-        static_cast<void>(parser.as_float(v, &pc.intensity));
-      }
-      if (parser.get_object_field(plVal, "radius", &v)) {
-        static_cast<void>(parser.as_float(v, &pc.radius));
-      }
-      static_cast<void>(targetWorld.add_point_light_component(entity, pc));
     }
 
     // SpotLightComponent
     core::JsonValue slVal{};
-    if (parser.get_object_field(components, "SpotLightComponent", &slVal) &&
-        (slVal.type == core::JsonValue::Type::Object)) {
+    if (parser.get_object_field(components, "SpotLightComponent", &slVal)) {
       SpotLightComponent sc{};
-      core::JsonValue v{};
-      if (parser.get_object_field(slVal, "color", &v)) {
-        static_cast<void>(read_vec3(parser, v, &sc.color));
+      if (!read_spot_light_component(parser, slVal, &sc) ||
+          !targetWorld.add_spot_light_component(entity, sc)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load SpotLightComponent component");
       }
-      if (parser.get_object_field(slVal, "direction", &v)) {
-        static_cast<void>(read_vec3(parser, v, &sc.direction));
-      }
-      if (parser.get_object_field(slVal, "intensity", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.intensity));
-      }
-      if (parser.get_object_field(slVal, "radius", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.radius));
-      }
-      if (parser.get_object_field(slVal, "innerConeAngle", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.innerConeAngle));
-      }
-      if (parser.get_object_field(slVal, "outerConeAngle", &v)) {
-        static_cast<void>(parser.as_float(v, &sc.outerConeAngle));
-      }
-      static_cast<void>(targetWorld.add_spot_light_component(entity, sc));
     }
 
     core::JsonValue reflectionProbeValue{};
@@ -770,6 +999,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
   return true;
 }
 
+/// Handles copy world contents.
 bool copy_world_contents(const World &sourceWorld,
                          World &targetWorld) noexcept {
   bool success = true;
@@ -811,6 +1041,13 @@ bool copy_world_contents(const World &sourceWorld,
     MeshComponent mesh{};
     if (sourceWorld.get_mesh_component(sourceEntity, &mesh) &&
         !targetWorld.add_mesh_component(targetEntity, mesh)) {
+      success = false;
+      return;
+    }
+
+    FoliagePatchComponent foliage{};
+    if (sourceWorld.get_foliage_patch_component(sourceEntity, &foliage) &&
+        !targetWorld.add_foliage_patch_component(targetEntity, foliage)) {
       success = false;
       return;
     }
@@ -880,6 +1117,7 @@ bool copy_world_contents(const World &sourceWorld,
   return success;
 }
 
+/// Handles serialize scene to writer.
 bool serialize_scene_to_writer(const World &world,
                                core::JsonWriter *outWriter) noexcept {
   if (outWriter == nullptr) {
@@ -967,6 +1205,11 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_float("metallic", mesh.metallic);
       writer.write_float("opacity", mesh.opacity);
       writer.end_object();
+    }
+
+    FoliagePatchComponent foliage{};
+    if (world.get_foliage_patch_component(entity, &foliage)) {
+      write_foliage_patch_component(writer, foliage);
     }
 
     LightComponent light{};
@@ -1072,18 +1315,23 @@ bool serialize_scene_to_writer(const World &world,
 
 } // namespace
 
+/// Resets this object back to its reusable empty state for world.
 void reset_world(World &world) noexcept {
-  if (world.alive_entity_count() == 0U) {
-    return;
+  if (world.alive_entity_count() > 0U) {
+    thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
+    std::size_t count = 0U;
+    world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
+    for (std::size_t i = 0U; i < count; ++i) {
+      static_cast<void>(world.destroy_entity(toDestroy[i]));
+    }
   }
-  thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
-  std::size_t count = 0U;
-  world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
-  for (std::size_t i = 0U; i < count; ++i) {
-    static_cast<void>(world.destroy_entity(toDestroy[i]));
-  }
+
+  world.timer_manager().clear();
+  world.camera_manager().clear();
+  world.game_mode().reset();
 }
 
+/// Saves the requested resource for scene.
 bool save_scene(const World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
@@ -1105,6 +1353,7 @@ bool save_scene(const World &world, const char *path) noexcept {
   return true;
 }
 
+/// Saves the requested resource for scene.
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept {
   if ((buffer == nullptr) || (outSize == nullptr) || (capacity < 2U)) {
@@ -1131,6 +1380,7 @@ bool save_scene(const World &world, char *buffer, std::size_t capacity,
   return true;
 }
 
+/// Loads the requested resource for scene.
 bool load_scene(World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
@@ -1149,6 +1399,7 @@ bool load_scene(World &world, const char *path) noexcept {
   return load_scene(world, fileBuffer.get(), fileSize);
 }
 
+/// Loads the requested resource for scene.
 bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   if ((buffer == nullptr) || (size == 0U)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
@@ -1273,25 +1524,30 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     }
   }
 
-  reset_world(world);
+  std::unique_ptr<World> committedWorld(new (std::nothrow) World());
+  if (committedWorld == nullptr) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "failed to allocate committed world for scene load");
+    return false;
+  }
 
-  if (!copy_world_contents(*stagedWorld, world)) {
+  if (!copy_world_contents(*stagedWorld, *committedWorld)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "failed to commit loaded scene");
-    reset_world(world);
     return false;
   }
 
-  if ((world.alive_entity_count() != stagedWorld->alive_entity_count()) ||
-      (world.transform_count() != stagedWorld->transform_count()) ||
-      (world.rigid_body_count() != stagedWorld->rigid_body_count()) ||
-      (world.collider_count() != stagedWorld->collider_count())) {
+  if ((committedWorld->alive_entity_count() !=
+       stagedWorld->alive_entity_count()) ||
+      (committedWorld->transform_count() != stagedWorld->transform_count()) ||
+      (committedWorld->rigid_body_count() != stagedWorld->rigid_body_count()) ||
+      (committedWorld->collider_count() != stagedWorld->collider_count())) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "scene commit invariant mismatch after copy");
-    reset_world(world);
     return false;
   }
 
+  world = *committedWorld;
   return true;
 }
 

@@ -1,7 +1,10 @@
+// Defines the fullscreen vertex shader used by the Engine renderer.
+
 #version 330 core
 
 out vec2 vTexCoord;
 
+/// Runs the shader entry point for this stage.
 void main() {
   // Fullscreen triangle from gl_VertexID — no VAO data needed.
   // Vertex 0: (-1, -1)  UV (0, 0)

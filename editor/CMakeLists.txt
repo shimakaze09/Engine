@@ -1,3 +1,5 @@
+# Configures editor build settings for the Engine repository.
+
 engine_add_module_library(engine_editor
     SOURCES
     src/command_history.cpp

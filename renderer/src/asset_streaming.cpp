@@ -1,9 +1,12 @@
+// Implements asset streaming behavior for the Engine renderer system.
+
 #include "engine/renderer/asset_streaming.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
@@ -12,6 +15,7 @@ namespace engine::renderer {
 
 namespace {
 
+/// Writes path data.
 void write_path(std::array<char, 260U> *out, const char *src) noexcept {
   out->fill('\0');
   if (src == nullptr) {
@@ -26,6 +30,7 @@ void write_path(std::array<char, 260U> *out, const char *src) noexcept {
   (*out)[copyLen] = '\0';
 }
 
+/// Finds the matching object or resource for free request.
 std::uint32_t find_free_request(const AssetStreamingQueue *queue) noexcept {
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     if (!queue->requests[i].occupied) {
@@ -55,9 +60,114 @@ pick_highest_priority_queued(const AssetStreamingQueue *queue) noexcept {
   return best;
 }
 
+/// Returns whether a load job is already active.
+bool has_active_load_unlocked(const AssetStreamingQueue *queue) noexcept {
+  for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
+    const LoadRequest &req = queue->requests[i];
+    if (req.occupied &&
+        ((req.state == LoadingState::Loading) || req.loadInProgress)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Resets queue request state while the queue mutex is already held.
+void reset_requests_unlocked(AssetStreamingQueue *queue) noexcept {
+  for (std::size_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
+    queue->requests[i] = LoadRequest{};
+  }
+  queue->count = 0U;
+  queue->inflight_bytes_this_frame = 0ULL;
+  queue->uploads_this_frame = 0U;
+  queue->loadCallback = nullptr;
+  queue->uploadCallback = nullptr;
+  queue->callbackUserData = nullptr;
+}
+
+/// Finds a queued worker job while the queue mutex is already held.
+std::uint32_t find_worker_job_unlocked(const AssetStreamingQueue *queue)
+    noexcept {
+  for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
+    const LoadRequest &req = queue->requests[i];
+    if (req.occupied && (req.state == LoadingState::Loading) &&
+        !req.loadInProgress) {
+      return i;
+    }
+  }
+  return LoadHandle::kInvalid;
+}
+
+/// Runs CPU-side load callbacks on the streaming worker thread.
+void streaming_worker_main(AssetStreamingQueue *queue) noexcept {
+  while (true) {
+    std::uint32_t index = LoadHandle::kInvalid;
+    AssetId assetId = kInvalidAssetId;
+    char sourcePath[260]{};
+    AssetLoadCallback loadCallback = nullptr;
+    void *userData = nullptr;
+
+    {
+      std::unique_lock<std::mutex> lock(queue->mutex);
+      queue->stateChanged.wait(lock, [&]() noexcept {
+        return queue->workerStopRequested ||
+               (find_worker_job_unlocked(queue) != LoadHandle::kInvalid);
+      });
+
+      if (queue->workerStopRequested) {
+        return;
+      }
+
+      index = find_worker_job_unlocked(queue);
+      if (index == LoadHandle::kInvalid) {
+        continue;
+      }
+
+      LoadRequest &request = queue->requests[index];
+      request.loadInProgress = true;
+      assetId = request.assetId;
+      std::memcpy(sourcePath, request.sourcePath.data(),
+                  request.sourcePath.size());
+      sourcePath[sizeof(sourcePath) - 1U] = '\0';
+      loadCallback = queue->loadCallback;
+      userData = queue->callbackUserData;
+    }
+
+    std::uint64_t sizeBytes = 0ULL;
+    const bool loaded =
+        (loadCallback != nullptr)
+            ? loadCallback(assetId, sourcePath, &sizeBytes, userData)
+            : true;
+
+    {
+      std::lock_guard<std::mutex> lock(queue->mutex);
+      if (index < AssetStreamingQueue::kMaxRequests) {
+        LoadRequest &request = queue->requests[index];
+        if (request.occupied && request.loadInProgress &&
+            (request.assetId == assetId) &&
+            (request.state == LoadingState::Loading)) {
+          request.loadInProgress = false;
+          request.loadedSizeBytes = sizeBytes;
+          request.state = loaded ? LoadingState::Uploading
+                                 : LoadingState::Failed;
+          if (!loaded) {
+            core::log_message(core::LogLevel::Error, "streaming",
+                              "load callback failed for asset");
+          }
+        }
+      }
+    }
+    queue->stateChanged.notify_all();
+  }
+}
+
 } // namespace
 
 // ---- Lifecycle ----
+
+AssetStreamingQueue::~AssetStreamingQueue() noexcept {
+  shutdown_asset_streaming(this);
+}
 
 bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
@@ -74,20 +184,39 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
       "Max cached asset memory (MB) before LRU eviction");
 
   shutdown_asset_streaming(queue);
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    reset_requests_unlocked(queue);
+    queue->workerStopRequested = false;
+    queue->workerRunning = true;
+  }
+
+  queue->workerThread = std::thread(streaming_worker_main, queue);
   return true;
 }
 
+/// Shuts down the owning system for asset streaming.
 void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
     return;
   }
 
-  for (std::size_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    queue->requests[i] = LoadRequest{};
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    queue->workerStopRequested = true;
   }
-  queue->count = 0U;
-  queue->inflight_bytes_this_frame = 0ULL;
-  queue->uploads_this_frame = 0U;
+  queue->stateChanged.notify_all();
+
+  if (queue->workerThread.joinable()) {
+    queue->workerThread.join();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    reset_requests_unlocked(queue);
+    queue->workerRunning = false;
+    queue->workerStopRequested = false;
+  }
 }
 
 // ---- Request management ----
@@ -100,6 +229,8 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
                       "load_asset_async: null queue or invalid id");
     return kInvalidLoadHandle;
   }
+
+  std::lock_guard<std::mutex> lock(queue->mutex);
 
   // Check if already queued.
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
@@ -128,16 +259,22 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
   req.state = LoadingState::Queued;
   req.occupied = true;
   ++queue->count;
+  queue->stateChanged.notify_all();
 
   return LoadHandle{slot};
 }
 
+/// Advances this system for the current frame or tick for load priority.
 bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
                           LoadPriority newPriority) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return false;
+  }
 
+  std::lock_guard<std::mutex> lock(queue->mutex);
   LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied || (req.state != LoadingState::Queued)) {
     return false; // Can only update priority while still queued.
@@ -147,13 +284,21 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
   return true;
 }
 
+/// Handles cancel load.
 bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return false;
+  }
 
+  std::lock_guard<std::mutex> lock(queue->mutex);
   LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied) {
+    return false;
+  }
+  if (req.loadInProgress) {
     return false;
   }
 
@@ -161,6 +306,32 @@ bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if (queue->count > 0U) {
     --queue->count;
   }
+  queue->stateChanged.notify_all();
+  return true;
+}
+
+bool release_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
+  if ((queue == nullptr) || !handle.valid()) {
+    return false;
+  }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(queue->mutex);
+  LoadRequest &req = queue->requests[handle.index];
+  if (!req.occupied) {
+    return false;
+  }
+  if ((req.state != LoadingState::Ready) && (req.state != LoadingState::Failed)) {
+    return false;
+  }
+
+  req = LoadRequest{};
+  if (queue->count > 0U) {
+    --queue->count;
+  }
+  queue->stateChanged.notify_all();
   return true;
 }
 
@@ -171,15 +342,24 @@ bool is_load_ready(const AssetStreamingQueue *queue,
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(queue->mutex);
   const LoadRequest &req = queue->requests[handle.index];
   return req.occupied && (req.state == LoadingState::Ready);
 }
 
+/// Returns the requested value for load state.
 LoadingState get_load_state(const AssetStreamingQueue *queue,
                             LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return LoadingState::Failed;
   }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return LoadingState::Failed;
+  }
+  std::lock_guard<std::mutex> lock(queue->mutex);
   const LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied) {
     return LoadingState::Failed;
@@ -187,19 +367,22 @@ LoadingState get_load_state(const AssetStreamingQueue *queue,
   return req.state;
 }
 
+/// Handles wait for load.
 void wait_for_load(const AssetStreamingQueue *queue,
                    LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return;
   }
-
-  // Spin-poll.  In production, replace with condvar + mutex.
-  while (true) {
-    const LoadingState s = get_load_state(queue, handle);
-    if ((s == LoadingState::Ready) || (s == LoadingState::Failed)) {
-      return;
-    }
+  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+    return;
   }
+
+  std::unique_lock<std::mutex> lock(queue->mutex);
+  queue->stateChanged.wait(lock, [&]() noexcept {
+    const LoadRequest &request = queue->requests[handle.index];
+    return !request.occupied || (request.state == LoadingState::Ready) ||
+           (request.state == LoadingState::Failed);
+  });
 }
 
 // ---- Per-frame processing ----
@@ -208,6 +391,8 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
     return;
   }
+
+  std::lock_guard<std::mutex> lock(queue->mutex);
 
   // Refresh budget from CVars.
   const int budgetMb =
@@ -222,11 +407,11 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
   queue->uploads_this_frame = 0U;
 }
 
+/// Advances this system for the current frame or tick for asset streaming.
 std::size_t update_asset_streaming(
     AssetStreamingQueue *queue,
-    bool (*loadCallback)(AssetId id, const char *path,
-                         std::uint64_t *outSizeBytes, void *userData) noexcept,
-    bool (*uploadCallback)(AssetId id, void *userData) noexcept,
+    AssetLoadCallback loadCallback,
+    AssetUploadCallback uploadCallback,
     void *userData) noexcept {
   if (queue == nullptr) {
     return 0U;
@@ -234,52 +419,61 @@ std::size_t update_asset_streaming(
 
   std::size_t readyCount = 0U;
 
-  // Phase 1: Promote Queued → Loading for highest-priority requests within
-  //          the streaming budget.
-  while (true) {
-    if (queue->inflight_bytes_this_frame >= queue->streamingBudgetBytes) {
-      break; // Budget exhausted for this frame.
-    }
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    queue->loadCallback = loadCallback;
+    queue->uploadCallback = uploadCallback;
+    queue->callbackUserData = userData;
 
-    const std::uint32_t idx = pick_highest_priority_queued(queue);
-    if (idx == LoadHandle::kInvalid) {
-      break; // No more queued requests.
-    }
-
-    LoadRequest &req = queue->requests[idx];
-    req.state = LoadingState::Loading;
-
-    if (loadCallback != nullptr) {
-      std::uint64_t sizeBytes = 0ULL;
-      if (loadCallback(req.assetId, req.sourcePath.data(), &sizeBytes,
-                       userData)) {
-        queue->inflight_bytes_this_frame += sizeBytes;
-        req.state = LoadingState::Uploading;
-      } else {
-        core::log_message(core::LogLevel::Error, "streaming",
-                          "load callback failed for asset");
-        req.state = LoadingState::Failed;
+    // Phase 1: schedule one queued request for the worker. The loaded byte
+    // size is only known after CPU IO finishes, so scheduling is conservative
+    // and never runs load callbacks on the frame thread.
+    if ((queue->inflight_bytes_this_frame < queue->streamingBudgetBytes) &&
+        !has_active_load_unlocked(queue)) {
+      const std::uint32_t idx = pick_highest_priority_queued(queue);
+      if (idx != LoadHandle::kInvalid) {
+        LoadRequest &req = queue->requests[idx];
+        req.state = LoadingState::Loading;
+        queue->stateChanged.notify_all();
       }
-    } else {
-      // No callback — auto-advance for testing.
-      req.state = LoadingState::Uploading;
     }
   }
 
   // Phase 2: Promote Uploading → Ready up to maxUploadsPerFrame.
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    if (queue->uploads_this_frame >= queue->maxUploadsPerFrame) {
-      break;
+    AssetId assetId = kInvalidAssetId;
+    AssetUploadCallback callback = nullptr;
+    void *callbackUserData = nullptr;
+
+    {
+      std::lock_guard<std::mutex> lock(queue->mutex);
+      if (queue->uploads_this_frame >= queue->maxUploadsPerFrame) {
+        break;
+      }
+
+      LoadRequest &req = queue->requests[i];
+      if (!req.occupied || (req.state != LoadingState::Uploading)) {
+        continue;
+      }
+      assetId = req.assetId;
+      callback = queue->uploadCallback;
+      callbackUserData = queue->callbackUserData;
     }
 
-    LoadRequest &req = queue->requests[i];
-    if (!req.occupied || (req.state != LoadingState::Uploading)) {
-      continue;
-    }
+    const bool uploaded =
+        (callback != nullptr) ? callback(assetId, callbackUserData) : true;
 
-    if (uploadCallback != nullptr) {
-      if (uploadCallback(req.assetId, userData)) {
+    {
+      std::lock_guard<std::mutex> lock(queue->mutex);
+      LoadRequest &req = queue->requests[i];
+      if (!req.occupied || (req.assetId != assetId) ||
+          (req.state != LoadingState::Uploading)) {
+        continue;
+      }
+
+      if (uploaded) {
         req.state = LoadingState::Ready;
+        queue->inflight_bytes_this_frame += req.loadedSizeBytes;
         ++queue->uploads_this_frame;
         ++readyCount;
       } else {
@@ -287,32 +481,23 @@ std::size_t update_asset_streaming(
                           "upload callback failed for asset");
         req.state = LoadingState::Failed;
       }
-    } else {
-      // No callback — auto-advance for testing.
-      req.state = LoadingState::Ready;
-      ++queue->uploads_this_frame;
-      ++readyCount;
     }
+    queue->stateChanged.notify_all();
   }
 
-  // Phase 3: Garbage-collect completed/failed requests.
-  for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    LoadRequest &req = queue->requests[i];
-    if (req.occupied && ((req.state == LoadingState::Ready) ||
-                         (req.state == LoadingState::Failed))) {
-      // Keep them around so callers can poll is_load_ready().
-      // They are cleaned up when the handle goes out of scope or on shutdown.
-    }
-  }
+  // Completed/failed requests remain observable until callers retire their
+  // terminal handles with release_load().
 
   return readyCount;
 }
 
+/// Handles pending load count.
 std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
     return 0U;
   }
 
+  std::lock_guard<std::mutex> lock(queue->mutex);
   std::size_t pending = 0U;
   for (std::size_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     const LoadRequest &req = queue->requests[i];

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Runs the run perf gate Python helper for Engine tooling.
+
 import argparse
 import json
 import os
@@ -8,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 
+# Finds the matching object or resource for executable.
 def find_executable(build_dir: Path, name: str) -> Path:
     candidates = []
     exts = ["", ".exe"]
@@ -21,6 +24,7 @@ def find_executable(build_dir: Path, name: str) -> Path:
     return candidates[0]
 
 
+# Runs the configured command, loop, or tool for benchmark.
 def run_benchmark(executable: Path, metric_key: str) -> float:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp:
         tmp_path = Path(tmp.name)
@@ -48,6 +52,7 @@ def run_benchmark(executable: Path, metric_key: str) -> float:
             pass
 
 
+# Runs this executable or test program.
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run perf benchmarks and compare to baseline")
     parser.add_argument("--build-dir", required=True)

@@ -1,3 +1,5 @@
+// Defines the deferred lighting fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -89,6 +91,7 @@ uniform float uSpotLightOuterCones[MAX_SPOT_LIGHTS];
 
 const float PI = 3.14159265359;
 
+/// Handles distribution ggx.
 float distribution_ggx(vec3 N, vec3 H, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
@@ -98,12 +101,14 @@ float distribution_ggx(vec3 N, vec3 H, float roughness) {
     return a2 / (PI * denom * denom);
 }
 
+/// Handles geometry schlick ggx.
 float geometry_schlick_ggx(float NdotV, float roughness) {
     float r = roughness + 1.0;
     float k = (r * r) / 8.0;
     return NdotV / (NdotV * (1.0 - k) + k);
 }
 
+/// Handles geometry smith.
 float geometry_smith(vec3 N, vec3 V, vec3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
@@ -111,6 +116,7 @@ float geometry_smith(vec3 N, vec3 V, vec3 L, float roughness) {
            geometry_schlick_ggx(NdotL, roughness);
 }
 
+/// Handles fresnel schlick.
 vec3 fresnel_schlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
@@ -155,6 +161,7 @@ float linearize_depth(float depth) {
     return -viewPos.z / viewPos.w;
 }
 
+/// Handles compute distance fog factor.
 float compute_distance_fog_factor(float distanceToCamera) {
     if (uFogMode == 1) {
         float range = max(uFogEnd - uFogStart, 0.001);
@@ -171,12 +178,14 @@ float compute_distance_fog_factor(float distanceToCamera) {
     return 0.0;
 }
 
+/// Handles compute height fog density.
 float compute_height_fog_density(vec3 worldPos) {
     float heightAboveBase = max(worldPos.y - uHeightFogBaseHeight, 0.0);
     float falloff = max(uHeightFogFalloff, 0.001);
     return max(uHeightFogDensity, 0.0) * exp(-heightAboveBase * falloff);
 }
 
+/// Handles compute height fog factor.
 float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
     if (uHeightFogEnabled == 0 || uHeightFogDensity <= 0.0) {
         return 0.0;
@@ -204,6 +213,7 @@ float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
     return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
 }
 
+/// Handles combine fog factors.
 float combine_fog_factors(float distanceFog, float heightFog) {
     return clamp(1.0 - ((1.0 - distanceFog) * (1.0 - heightFog)), 0.0, 1.0);
 }
@@ -224,6 +234,7 @@ float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
     return shadow / 9.0;
 }
 
+/// Handles sample directional shadow pcf.
 float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
     if (cascadeIdx == 0) return sample_shadow_pcf(uShadowMap[0], projCoords);
     if (cascadeIdx == 1) return sample_shadow_pcf(uShadowMap[1], projCoords);
@@ -231,6 +242,7 @@ float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
     return sample_shadow_pcf(uShadowMap[3], projCoords);
 }
 
+/// Handles sample spot shadow pcf.
 float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
     if (shadowIdx == 0) return sample_shadow_pcf(uSpotShadowMap[0], projCoords);
     if (shadowIdx == 1) return sample_shadow_pcf(uSpotShadowMap[1], projCoords);
@@ -238,6 +250,7 @@ float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
     return sample_shadow_pcf(uSpotShadowMap[3], projCoords);
 }
 
+/// Handles sample point shadow depth.
 float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
     if (shadowIdx == 0) return texture(uPointShadowMap[0], sampleVector).r;
     if (shadowIdx == 1) return texture(uPointShadowMap[1], sampleVector).r;
@@ -335,6 +348,7 @@ float compute_point_shadow(vec3 worldPos, int lightIdx) {
     return 1.0; // No shadow slot for this light.
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
     // Sample G-Buffer.
     vec4 albedoMetallic = texture(uGBufferAlbedo, vTexCoord);

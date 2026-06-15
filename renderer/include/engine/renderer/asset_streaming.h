@@ -1,7 +1,13 @@
+// Declares asset streaming types and APIs for the Engine renderer system.
+
 #pragma once
 
+#include <array>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 
 #include "engine/renderer/asset_database.h"
 
@@ -31,13 +37,23 @@ struct LoadHandle final {
 
   static constexpr std::uint32_t kInvalid = 0xFFFFFFFFU;
 
+  /// Handles valid.
   [[nodiscard]] bool valid() const noexcept { return index != kInvalid; }
 
+  /// Compares values for equality.
   friend constexpr bool operator==(const LoadHandle &,
                                    const LoadHandle &) = default;
 };
 
 inline constexpr LoadHandle kInvalidLoadHandle{};
+
+/// Performs CPU-side asset loading for a streaming request.
+using AssetLoadCallback = bool (*)(AssetId id, const char *path,
+                                   std::uint64_t *outSizeBytes,
+                                   void *userData) noexcept;
+
+/// Performs main-thread upload for a loaded streaming request.
+using AssetUploadCallback = bool (*)(AssetId id, void *userData) noexcept;
 
 /// Per-request payload tracked inside the streaming queue.
 struct LoadRequest final {
@@ -45,11 +61,19 @@ struct LoadRequest final {
   std::array<char, 260U> sourcePath{};
   LoadPriority priority = LoadPriority::Normal;
   LoadingState state = LoadingState::Queued;
+  std::uint64_t loadedSizeBytes = 0ULL;
+  bool loadInProgress = false;
   bool occupied = false;
 };
 
 /// Fixed-capacity streaming queue processed by a background IO thread.
 struct AssetStreamingQueue final {
+  AssetStreamingQueue() noexcept = default;
+  ~AssetStreamingQueue() noexcept;
+
+  AssetStreamingQueue(const AssetStreamingQueue &) = delete;
+  AssetStreamingQueue &operator=(const AssetStreamingQueue &) = delete;
+
   static constexpr std::size_t kMaxRequests = 1024U;
   LoadRequest requests[kMaxRequests]{};
   std::size_t count = 0U;
@@ -61,6 +85,16 @@ struct AssetStreamingQueue final {
   // Frame-local tracking:
   std::uint64_t inflight_bytes_this_frame = 0ULL;
   std::uint32_t uploads_this_frame = 0U;
+
+  AssetLoadCallback loadCallback = nullptr;
+  AssetUploadCallback uploadCallback = nullptr;
+  void *callbackUserData = nullptr;
+
+  mutable std::mutex mutex{};
+  mutable std::condition_variable stateChanged{};
+  std::thread workerThread{};
+  bool workerRunning = false;
+  bool workerStopRequested = false;
 };
 
 // ---- Lifecycle ----
@@ -85,6 +119,10 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
 /// Cancel a pending request.
 bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept;
 
+/// Release a completed or failed request slot after the caller has observed its
+/// terminal state.
+bool release_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept;
+
 // ---- Polling ----
 
 /// Check if the load has reached the Ready state.
@@ -96,8 +134,8 @@ LoadingState get_load_state(const AssetStreamingQueue *queue,
                             LoadHandle handle) noexcept;
 
 /// Blocking wait until the request reaches Ready or Failed.
-/// In a real engine this would use a condition variable; here we spin-poll
-/// (acceptable for tooling / test use).
+/// Uses the queue condition variable; callers must still drive
+/// update_asset_streaming so loaded requests can be uploaded on the main thread.
 void wait_for_load(const AssetStreamingQueue *queue,
                    LoadHandle handle) noexcept;
 
@@ -118,9 +156,8 @@ void wait_for_load(const AssetStreamingQueue *queue,
 /// @return Number of requests that transitioned to Ready this frame.
 std::size_t update_asset_streaming(
     AssetStreamingQueue *queue,
-    bool (*loadCallback)(AssetId id, const char *path,
-                         std::uint64_t *outSizeBytes, void *userData) noexcept,
-    bool (*uploadCallback)(AssetId id, void *userData) noexcept,
+    AssetLoadCallback loadCallback,
+    AssetUploadCallback uploadCallback,
     void *userData) noexcept;
 
 /// Reset per-frame counters. Call at the start of each frame.

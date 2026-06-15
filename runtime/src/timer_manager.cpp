@@ -1,3 +1,5 @@
+// Implements timer manager behavior for the Engine runtime world.
+
 #include "engine/runtime/timer_manager.h"
 
 #include <cstring>
@@ -8,7 +10,71 @@ namespace engine::runtime {
 
 namespace {
 constexpr const char *kLogChannel = "timer";
+constexpr unsigned kTimerSlotBits = 16U;
+constexpr TimerId kTimerSlotMask = (1U << kTimerSlotBits) - 1U;
+
+constexpr std::uint16_t decode_generation(TimerId id) noexcept {
+  return static_cast<std::uint16_t>(id >> kTimerSlotBits);
+}
+
+constexpr std::size_t decode_slot(TimerId id) noexcept {
+  const TimerId slotValue = id & kTimerSlotMask;
+  if ((slotValue == 0U) || (slotValue > TimerManager::kMaxTimers)) {
+    return TimerManager::kInvalidTimerSlot;
+  }
+  return static_cast<std::size_t>(slotValue - 1U);
+}
+
+constexpr std::size_t preferred_restore_slot(TimerId id) noexcept {
+  if (id == kInvalidTimerId) {
+    return TimerManager::kInvalidTimerSlot;
+  }
+  const std::size_t encodedSlot = decode_slot(id);
+  if (encodedSlot != TimerManager::kInvalidTimerSlot) {
+    return encodedSlot;
+  }
+  if (id <= TimerManager::kMaxTimers) {
+    return static_cast<std::size_t>(id - 1U);
+  }
+  return TimerManager::kInvalidTimerSlot;
+}
 } // namespace
+
+TimerId TimerManager::make_timer_id(std::size_t slot) const noexcept {
+  if (slot >= kMaxTimers) {
+    return kInvalidTimerId;
+  }
+  const std::uint16_t generation = m_generations[slot];
+  if (generation == 0U) {
+    return kInvalidTimerId;
+  }
+  return (static_cast<TimerId>(generation) << kTimerSlotBits) |
+         static_cast<TimerId>(slot + 1U);
+}
+
+void TimerManager::ensure_generation(std::size_t slot) noexcept {
+  if ((slot < kMaxTimers) && (m_generations[slot] == 0U)) {
+    m_generations[slot] = 1U;
+  }
+}
+
+void TimerManager::advance_generation(std::size_t slot) noexcept {
+  if (slot >= kMaxTimers) {
+    return;
+  }
+  ++m_generations[slot];
+  if (m_generations[slot] == 0U) {
+    m_generations[slot] = 1U;
+  }
+}
+
+void TimerManager::release_slot(std::size_t slot) noexcept {
+  if (slot >= kMaxTimers) {
+    return;
+  }
+  m_timers[slot] = Entry{};
+  advance_generation(slot);
+}
 
 TimerId TimerManager::set_timeout(float delaySeconds, Callback callback,
                                   void *userData) noexcept {
@@ -19,13 +85,14 @@ TimerId TimerManager::set_timeout(float delaySeconds, Callback callback,
   }
   for (std::size_t i = 0U; i < kMaxTimers; ++i) {
     if (!m_timers[i].active) {
+      ensure_generation(i);
       m_timers[i].fireAt = m_elapsed + delaySeconds;
       m_timers[i].interval = 0.0F;
       m_timers[i].callback = callback;
       m_timers[i].userData = userData;
       m_timers[i].repeat = false;
       m_timers[i].active = true;
-      return static_cast<TimerId>(i + 1U);
+      return make_timer_id(i);
     }
   }
   core::log_message(core::LogLevel::Warning, kLogChannel,
@@ -47,13 +114,14 @@ TimerId TimerManager::set_interval(float intervalSeconds, Callback callback,
   }
   for (std::size_t i = 0U; i < kMaxTimers; ++i) {
     if (!m_timers[i].active) {
+      ensure_generation(i);
       m_timers[i].fireAt = m_elapsed + intervalSeconds;
       m_timers[i].interval = intervalSeconds;
       m_timers[i].callback = callback;
       m_timers[i].userData = userData;
       m_timers[i].repeat = true;
       m_timers[i].active = true;
-      return static_cast<TimerId>(i + 1U);
+      return make_timer_id(i);
     }
   }
   core::log_message(core::LogLevel::Warning, kLogChannel,
@@ -62,13 +130,25 @@ TimerId TimerManager::set_interval(float intervalSeconds, Callback callback,
 }
 
 void TimerManager::cancel(TimerId id) noexcept {
-  if ((id == kInvalidTimerId) || (id > kMaxTimers)) {
+  const std::size_t slot = slot_for_id(id);
+  if (slot == kInvalidTimerSlot) {
     return;
   }
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
   if (m_timers[slot].active) {
-    m_timers[slot] = Entry{};
+    release_slot(slot);
   }
+}
+
+std::size_t TimerManager::slot_for_id(TimerId id) const noexcept {
+  const std::size_t slot = decode_slot(id);
+  if (slot == kInvalidTimerSlot) {
+    return kInvalidTimerSlot;
+  }
+  const std::uint16_t generation = decode_generation(id);
+  if ((generation == 0U) || (m_generations[slot] != generation)) {
+    return kInvalidTimerSlot;
+  }
+  return slot;
 }
 
 std::size_t TimerManager::tick(float dt) noexcept {
@@ -81,15 +161,22 @@ std::size_t TimerManager::tick(float dt) noexcept {
     if (m_elapsed < m_timers[i].fireAt) {
       continue;
     }
-    // Fire callback.
+    const TimerId firedId = make_timer_id(i);
+    const bool wasRepeating = m_timers[i].repeat;
+
     if (m_timers[i].callback != nullptr) {
-      m_timers[i].callback(static_cast<TimerId>(i + 1U), m_timers[i].userData);
+      m_timers[i].callback(firedId, m_timers[i].userData);
     }
     ++fired;
-    if (m_timers[i].repeat) {
+
+    if ((slot_for_id(firedId) != i) || !m_timers[i].active) {
+      continue;
+    }
+
+    if (wasRepeating && m_timers[i].repeat) {
       m_timers[i].fireAt += m_timers[i].interval;
     } else {
-      m_timers[i] = Entry{};
+      release_slot(i);
     }
   }
   return fired;
@@ -97,7 +184,11 @@ std::size_t TimerManager::tick(float dt) noexcept {
 
 void TimerManager::clear() noexcept {
   for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-    m_timers[i] = Entry{};
+    if (m_timers[i].active) {
+      release_slot(i);
+    } else {
+      m_timers[i] = Entry{};
+    }
   }
   m_elapsed = 0.0F;
 }
@@ -122,7 +213,7 @@ std::size_t TimerManager::snapshot(TimerSnapshot *out,
     if (!m_timers[i].active) {
       continue;
     }
-    out[written].timerId = static_cast<TimerId>(i + 1U);
+    out[written].timerId = make_timer_id(i);
     out[written].remainingSeconds = m_timers[i].fireAt - m_elapsed;
     out[written].intervalSeconds = m_timers[i].interval;
     out[written].repeat = m_timers[i].repeat;
@@ -142,10 +233,8 @@ std::size_t TimerManager::restore(const TimerSnapshot *in,
     if (!in[i].active) {
       continue;
     }
-    std::size_t preferredSlot = kMaxTimers;
-    if ((in[i].timerId != kInvalidTimerId) && (in[i].timerId <= kMaxTimers)) {
-      preferredSlot = static_cast<std::size_t>(in[i].timerId - 1U);
-    }
+    const std::size_t preferredSlot = preferred_restore_slot(in[i].timerId);
+    const std::uint16_t restoredGeneration = decode_generation(in[i].timerId);
 
     for (std::size_t attempt = 0U; attempt <= kMaxTimers; ++attempt) {
       const std::size_t s = (attempt == 0U) ? preferredSlot : (attempt - 1U);
@@ -153,6 +242,11 @@ std::size_t TimerManager::restore(const TimerSnapshot *in,
         continue;
       }
       if (!m_timers[s].active) {
+        if ((s == preferredSlot) && (restoredGeneration != 0U)) {
+          m_generations[s] = restoredGeneration;
+        } else {
+          ensure_generation(s);
+        }
         m_timers[s].fireAt = m_elapsed + in[i].remainingSeconds;
         m_timers[s].interval = in[i].intervalSeconds;
         m_timers[s].repeat = in[i].repeat;

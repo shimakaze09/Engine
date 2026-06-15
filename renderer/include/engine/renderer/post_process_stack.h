@@ -1,3 +1,5 @@
+// Declares post process stack types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <cstddef>

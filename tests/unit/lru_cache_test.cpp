@@ -20,6 +20,7 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
+/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U); // Avoid kInvalidAssetId (0).
 }
@@ -268,6 +269,7 @@ static void test_null_safety() noexcept {
               g_failures == before ? "PASS" : "FAIL");
 }
 
+/// Runs this executable or test program.
 int main() {
   std::printf("=== LRU Cache Tests ===\n");
 

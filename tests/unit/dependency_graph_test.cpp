@@ -1,6 +1,9 @@
+// Verifies dependency graph test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 // Include the dependency graph header directly from the tools directory.
 // The test links against the dependency_graph.cpp object.
@@ -21,8 +24,41 @@ bool make_temp_graph_path(char *outPath, std::size_t outSize) {
 #endif
 }
 
+bool read_text_file(const char *path, std::string *outText) {
+  if ((path == nullptr) || (outText == nullptr)) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+
+  std::fseek(file, 0, SEEK_END);
+  const long fileSize = std::ftell(file);
+  std::fseek(file, 0, SEEK_SET);
+  if (fileSize < 0) {
+    std::fclose(file);
+    return false;
+  }
+
+  outText->assign(static_cast<std::size_t>(fileSize), '\0');
+  const std::size_t readBytes =
+      std::fread(outText->data(), 1U, outText->size(), file);
+  std::fclose(file);
+  return readBytes == outText->size();
+}
+
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   using Graph = engine::tools::DependencyGraph;
   using AssetId = Graph::AssetId;
@@ -306,6 +342,73 @@ int main() {
   }
 
   // --- Test 11: compute_invalidation_set ---
+  {
+    std::string dependentPath = "meshes\\boss \"alpha\"\nframe";
+    dependentPath.push_back('\x01');
+    dependentPath += ".mesh";
+    const std::string dependencyPath = "textures\\diffuse\tmain.png";
+
+    const std::string escapedDependent =
+        engine::tools::escape_json_string(dependentPath.c_str());
+    if (escapedDependent !=
+        "meshes\\\\boss \\\"alpha\\\"\\nframe\\u0001.mesh") {
+      return 100;
+    }
+    if (engine::tools::escape_json_string(nullptr) != "") {
+      return 101;
+    }
+
+    Graph graph{};
+    engine::tools::register_asset_path(&graph, 1000ULL,
+                                       dependentPath.c_str());
+    engine::tools::register_asset_path(&graph, 2000ULL,
+                                       dependencyPath.c_str());
+    engine::tools::add_dependency(&graph, 1000ULL, 2000ULL);
+
+    char tempPath[512] = {};
+    if (!make_temp_graph_path(tempPath, sizeof(tempPath))) {
+      return 102;
+    }
+
+    if (!engine::tools::write_dependency_graph_json(&graph, tempPath)) {
+      return 103;
+    }
+
+    std::string json{};
+    if (!read_text_file(tempPath, &json)) {
+      std::remove(tempPath);
+      return 104;
+    }
+    if (json.find("meshes\\\\boss \\\"alpha\\\"\\nframe\\u0001.mesh") ==
+        std::string::npos) {
+      std::remove(tempPath);
+      return 105;
+    }
+    if (json.find("textures\\\\diffuse\\tmain.png") == std::string::npos) {
+      std::remove(tempPath);
+      return 106;
+    }
+
+    Graph loaded{};
+    if (!engine::tools::read_dependency_graph_json(&loaded, tempPath)) {
+      std::remove(tempPath);
+      return 107;
+    }
+    std::remove(tempPath);
+
+    auto dependentIt = loaded.assetPaths.find(1000ULL);
+    if ((dependentIt == loaded.assetPaths.end()) ||
+        (dependentIt->second != dependentPath)) {
+      return 108;
+    }
+    auto dependencyIt = loaded.assetPaths.find(2000ULL);
+    if ((dependencyIt == loaded.assetPaths.end()) ||
+        (dependencyIt->second != dependencyPath)) {
+      return 109;
+    }
+  }
+
+  // --- Test 12: compute_invalidation_set ---
   {
     Graph graph{};
     // mesh1 -> material -> texture

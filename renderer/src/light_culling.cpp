@@ -1,3 +1,5 @@
+// Implements light culling behavior for the Engine renderer system.
+
 #include "engine/renderer/light_culling.h"
 
 #include <algorithm>
@@ -8,6 +10,7 @@ namespace engine::renderer {
 
 namespace {
 
+/// Stores vec4 data used by the engine.
 struct Vec4 final {
   float x = 0.0F;
   float y = 0.0F;
@@ -15,6 +18,7 @@ struct Vec4 final {
   float w = 0.0F;
 };
 
+/// Stores frustum data used by the engine.
 struct Frustum final {
   Vec4 planes[6]; // left, right, bottom, top, near, far
 };
@@ -113,6 +117,7 @@ void build_tile_vp(int x0, int y0, int x1, int y1, int screenW, int screenH,
 
 } // namespace
 
+/// Handles compute tile buffer size.
 std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept {
   if (screenW <= 0 || screenH <= 0) {
     return 0;
@@ -124,6 +129,7 @@ std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept {
          static_cast<std::size_t>(kTileDataWidth);
 }
 
+/// Handles cull lights tiled.
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
                        const float *projMatrix, int screenW, int screenH,
                        TileLightData &outData) noexcept {

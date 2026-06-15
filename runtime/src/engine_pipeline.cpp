@@ -1,3 +1,5 @@
+// Implements engine pipeline behavior for the Engine runtime world.
+
 #include "engine/runtime/engine_pipeline.h"
 
 #include <array>
@@ -23,6 +25,7 @@
 #endif
 
 #include "engine/audio/audio.h"
+#include "engine/engine.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
@@ -30,6 +33,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
+#include "engine/core/vfs.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
@@ -49,6 +53,36 @@
 
 namespace engine {
 
+namespace runtime {
+
+/// Processes a queued script scene operation, if one exists.
+bool process_pending_scene_op(World &world) noexcept {
+  if (!scripting::has_pending_scene_op()) {
+    return true;
+  }
+
+  bool processed = false;
+  if (scripting::pending_scene_op_is_load()) {
+    const char *scenePath = scripting::get_pending_scene_path();
+    if ((scenePath != nullptr) && runtime::load_scene(world, scenePath)) {
+      processed = true;
+    } else {
+      core::log_message(core::LogLevel::Error, "engine",
+                        "failed to process pending scene load");
+    }
+  } else if (scripting::pending_scene_op_is_new()) {
+    runtime::reset_world(world);
+    processed = true;
+  }
+
+  if (processed) {
+    scripting::clear_pending_scene_op();
+  }
+  return processed;
+}
+
+} // namespace runtime
+
 // ===========================================================================
 // Anonymous-namespace helpers (moved verbatim from engine.cpp)
 // ===========================================================================
@@ -61,14 +95,6 @@ constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
 constexpr std::size_t kMaxChunkJobs = 1024U;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
-constexpr const char *kMainScriptPath = "assets/main.lua";
-
-constexpr std::array<const char *, 4U> kMeshAssetPathCandidates = {
-    "assets/triangle.mesh",
-    "../assets/triangle.mesh",
-    "../../assets/triangle.mesh",
-    "../../../assets/triangle.mesh",
-};
 
 // ---------------------------------------------------------------------------
 // Job data structures
@@ -81,6 +107,7 @@ struct UpdateChunkJobData final {
   float deltaSeconds = 0.0F;
 };
 
+/// Stores physics chunk job data used by the engine.
 struct PhysicsChunkJobData final {
   runtime::World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -89,15 +116,19 @@ struct PhysicsChunkJobData final {
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
+/// Stores world phase job data used by the engine.
 struct WorldPhaseJobData final {
   runtime::World *world = nullptr;
 };
 
+/// Stores resolve collisions job data used by the engine.
 struct ResolveCollisionsJobData final {
   runtime::World *world = nullptr;
+  float deltaSeconds = 0.0F;
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
+/// Stores frame context data used by the engine.
 struct FrameContext final {
   runtime::RenderPrepPipelineContext renderPrepPipeline{};
   std::array<UpdateChunkJobData, kMaxChunkJobs> updateJobData{};
@@ -113,35 +144,17 @@ struct FrameContext final {
 // Utility helpers
 // ---------------------------------------------------------------------------
 
-bool file_exists(const char *path) noexcept {
-  if (path == nullptr) {
+/// Handles resolve mesh asset path.
+bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
+  if ((outPath == nullptr) || (outCapacity == 0U)) {
     return false;
   }
 
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
+  const char *virtualPath = active_config().bootstrapMeshPath;
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0')) {
     return false;
   }
-
-  std::fclose(file);
-  return true;
-}
-
-const char *resolve_mesh_asset_path() noexcept {
-  for (const char *candidate : kMeshAssetPathCandidates) {
-    if (file_exists(candidate)) {
-      return candidate;
-    }
-  }
-
-  return nullptr;
+  return core::vfs_resolve_os_path(virtualPath, outPath, outCapacity);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +177,7 @@ bool build_plane_mesh(renderer::GpuMesh *outMesh) noexcept {
                                             outMesh);
 }
 
+/// Builds the requested runtime data for cube mesh.
 bool build_cube_mesh(renderer::GpuMesh *outMesh) noexcept {
   // clang-format off
   static constexpr float kVerts[] = {
@@ -211,6 +225,7 @@ bool build_cube_mesh(renderer::GpuMesh *outMesh) noexcept {
                                             outMesh);
 }
 
+/// Builds the requested runtime data for sphere mesh.
 bool build_sphere_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr int kStacks = 12;
   constexpr int kSlices = 24;
@@ -263,6 +278,7 @@ bool build_sphere_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kICount), false, outMesh);
 }
 
+/// Builds the requested runtime data for cylinder mesh.
 bool build_cylinder_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr int kSlices = 24;
   constexpr float kRadius = 0.5F;
@@ -365,6 +381,7 @@ bool build_cylinder_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kTotalIdx), false, outMesh);
 }
 
+/// Builds the requested runtime data for capsule mesh.
 bool build_capsule_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr int kHemiStacks = 8;
   constexpr int kSlices = 16;
@@ -430,6 +447,7 @@ bool build_capsule_mesh(renderer::GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kICount), false, outMesh);
 }
 
+/// Builds the requested runtime data for pyramid mesh.
 bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
   constexpr float kBaseZBack = -0.288675F;
   constexpr float kBaseZFront = 0.577350F;
@@ -491,6 +509,7 @@ bool build_pyramid_mesh(renderer::GpuMesh *outMesh) noexcept {
                                             outMesh);
 }
 
+/// Handles register builtin mesh.
 renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                         renderer::AssetDatabase *database,
                                         const renderer::GpuMesh &mesh,
@@ -520,6 +539,7 @@ void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
   }
 }
 
+/// Advances this system for the current frame or tick for chunk job.
 void update_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<UpdateChunkJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -530,6 +550,7 @@ void update_chunk_job(void *userData) noexcept {
       jobData->startIndex, jobData->count, jobData->deltaSeconds));
 }
 
+/// Handles physics chunk job.
 void physics_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<PhysicsChunkJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -542,17 +563,19 @@ void physics_chunk_job(void *userData) noexcept {
   }
 }
 
+/// Handles resolve collisions job.
 void resolve_collisions_job(void *userData) noexcept {
   auto *jobData = static_cast<ResolveCollisionsJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
     return;
   }
 
-  if (!runtime::resolve_collisions(*jobData->world)) {
+  if (!runtime::resolve_collisions(*jobData->world, jobData->deltaSeconds)) {
     mark_graph_failed(jobData->frameGraphFailed);
   }
 }
 
+/// Handles commit update phase job.
 void commit_update_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -560,6 +583,7 @@ void commit_update_phase_job(void *userData) noexcept {
   }
 }
 
+/// Begins the requested operation or profiling range for update step job.
 void begin_update_step_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -567,6 +591,7 @@ void begin_update_step_job(void *userData) noexcept {
   }
 }
 
+/// Begins the requested operation or profiling range for render prep phase job.
 void begin_render_prep_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -574,6 +599,7 @@ void begin_render_prep_phase_job(void *userData) noexcept {
   }
 }
 
+/// Begins the requested operation or profiling range for render phase job.
 void begin_render_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -581,6 +607,7 @@ void begin_render_phase_job(void *userData) noexcept {
   }
 }
 
+/// Ends the requested operation or profiling range for frame phase job.
 void end_frame_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -588,6 +615,7 @@ void end_frame_phase_job(void *userData) noexcept {
   }
 }
 
+/// Handles link dependency.
 bool link_dependency(core::JobHandle prerequisite,
                      core::JobHandle dependent) noexcept {
   if (!core::is_valid_handle(prerequisite) ||
@@ -598,6 +626,7 @@ bool link_dependency(core::JobHandle prerequisite,
   return core::add_dependency(prerequisite, dependent);
 }
 
+/// Submits work to the owning buffer or system for world phase job.
 core::JobHandle submit_world_phase_job(FrameContext *frameContext,
                                        runtime::World *world,
                                        std::size_t *phaseJobCursor,
@@ -624,6 +653,7 @@ core::JobHandle submit_world_phase_job(FrameContext *frameContext,
 
 enum class LoopPlayState : std::uint8_t { Stopped, Playing, Paused };
 
+/// Handles query editor play state.
 LoopPlayState query_editor_play_state() noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if (bridge == nullptr) {
@@ -641,6 +671,7 @@ LoopPlayState query_editor_play_state() noexcept {
   return LoopPlayState::Stopped;
 }
 
+/// Handles process input events with editor.
 void process_input_events_with_editor() noexcept {
   core::begin_input_frame();
 
@@ -704,6 +735,7 @@ const char *world_phase_to_string(runtime::WorldPhase phase) noexcept {
   }
 }
 
+/// Handles vec3 has motion.
 bool vec3_has_motion(const math::Vec3 &value) noexcept {
   constexpr float kEpsilon = 0.0001F;
   return (value.x > kEpsilon) || (value.x < -kEpsilon) ||
@@ -711,6 +743,7 @@ bool vec3_has_motion(const math::Vec3 &value) noexcept {
          (value.z > kEpsilon) || (value.z < -kEpsilon);
 }
 
+/// Handles count moving rigid bodies.
 std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::RigidBody>(
@@ -723,6 +756,7 @@ std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   return count;
 }
 
+/// Handles count mesh components.
 std::size_t count_mesh_components(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::MeshComponent>(
@@ -732,6 +766,7 @@ std::size_t count_mesh_components(const runtime::World &world) noexcept {
   return count;
 }
 
+/// Handles count ready mesh components.
 std::size_t
 count_ready_mesh_components(const runtime::World &world,
                             const renderer::AssetDatabase *assets) noexcept {
@@ -751,12 +786,14 @@ count_ready_mesh_components(const runtime::World &world,
   return count;
 }
 
+/// Stores mesh asset state counts data used by the engine.
 struct MeshAssetStateCounts final {
   std::size_t ready = 0U;
   std::size_t loading = 0U;
   std::size_t failed = 0U;
 };
 
+/// Handles count mesh asset states.
 MeshAssetStateCounts
 count_mesh_asset_states(const renderer::AssetDatabase *assets) noexcept {
   MeshAssetStateCounts counts{};
@@ -801,12 +838,13 @@ struct BootstrapMeshIds final {
   renderer::AssetId pyramid = renderer::kInvalidAssetId;
 };
 
+/// Loads the requested resource for bootstrap meshes.
 bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::AssetDatabase *assetDatabase,
                            renderer::GpuMeshRegistry *meshRegistry,
                            BootstrapMeshIds *out) noexcept {
-  const char *meshPath = resolve_mesh_asset_path();
-  if (meshPath == nullptr) {
+  char meshPath[512]{};
+  if (!resolve_mesh_asset_path(meshPath, sizeof(meshPath))) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to resolve mesh asset path");
     return false;
@@ -889,11 +927,13 @@ void create_bootstrap_scene(runtime::World *world,
   const runtime::Entity entity = world->create_entity();
   const runtime::Entity stackedEntity = world->create_entity();
   const runtime::Entity groundEntity = world->create_entity();
+  const runtime::Entity foliageEntity = world->create_entity();
   const runtime::Entity lightEntity = world->create_entity();
   const runtime::Entity sceneControllerEntity = world->create_entity();
   if ((entity == runtime::kInvalidEntity) ||
       (stackedEntity == runtime::kInvalidEntity) ||
       (groundEntity == runtime::kInvalidEntity) ||
+      (foliageEntity == runtime::kInvalidEntity) ||
       (lightEntity == runtime::kInvalidEntity) ||
       (sceneControllerEntity == runtime::kInvalidEntity)) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -909,6 +949,7 @@ void create_bootstrap_scene(runtime::World *world,
   add_name(entity, "Red Cube");
   add_name(stackedEntity, "Blue Cube");
   add_name(groundEntity, "Ground");
+  add_name(foliageEntity, "Foliage Patch");
   add_name(lightEntity, "Sun Light");
   add_name(sceneControllerEntity, "Scene Controller");
 
@@ -980,10 +1021,56 @@ void create_bootstrap_scene(runtime::World *world,
     static_cast<void>(world->add_mesh_component(groundEntity, mc));
   }
 
+  // Foliage patch demo.
+  {
+    runtime::Transform t{};
+    t.position = math::Vec3(0.0F, 0.0F, 1.3F);
+    static_cast<void>(world->add_transform(foliageEntity, t));
+
+    runtime::FoliagePatchComponent foliage{};
+    foliage.meshAssetIds[0] =
+        (meshIds.pyramid != renderer::kInvalidAssetId) ? meshIds.pyramid
+                                                       : defaultMesh;
+    foliage.meshAssetIds[1] =
+        (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                    : foliage.meshAssetIds[0];
+    foliage.meshAssetIds[2] = foliage.meshAssetIds[1];
+    foliage.instanceCount = 35U;
+    foliage.density = 2.5F;
+    foliage.albedo = math::Vec3(0.18F, 0.62F, 0.22F);
+    foliage.roughness = 0.92F;
+    foliage.windStrength = 0.18F;
+    foliage.windFrequency = 1.9F;
+
+    std::uint32_t cursor = 0U;
+    for (std::uint32_t z = 0U; z < 5U; ++z) {
+      for (std::uint32_t x = 0U; x < 7U; ++x) {
+        runtime::FoliageInstance &instance = foliage.instances[cursor];
+        const float jitterX =
+            (static_cast<float>((x * 17U + z * 11U) % 5U) - 2.0F) * 0.05F;
+        const float jitterZ =
+            (static_cast<float>((x * 7U + z * 19U) % 5U) - 2.0F) * 0.05F;
+        instance.scale = 0.34F + (static_cast<float>((x + z) % 4U) * 0.05F);
+        instance.offset =
+            math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX,
+                       instance.scale * 0.5F,
+                       (static_cast<float>(z) - 2.0F) * 0.62F + jitterZ);
+        instance.phase = static_cast<float>(cursor) * 0.37F;
+        instance.lodIndex = ((x + z) % 5U == 0U) ? 1U : 0U;
+        ++cursor;
+      }
+    }
+
+    static_cast<void>(
+        world->add_foliage_patch_component(foliageEntity, foliage));
+  }
+
   // Scene controller script.
   {
     runtime::ScriptComponent sc{};
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kMainScriptPath);
+    const char *mainScriptPath = active_config().mainScriptPath;
+    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s",
+                  (mainScriptPath != nullptr) ? mainScriptPath : "");
     static_cast<void>(world->add_script_component(sceneControllerEntity, sc));
   }
 }
@@ -1081,7 +1168,11 @@ collect_scene_lights(const runtime::World &world) noexcept {
 struct EnginePipeline::Impl final {
   using Clock = std::chrono::steady_clock;
 
+  Impl() noexcept;
+
   // --- Owned resources ---
+  core::ServiceLocator serviceLocator{};
+  runtime::EngineServiceRegistry serviceRegistry;
   std::unique_ptr<runtime::World> world;
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
@@ -1142,6 +1233,8 @@ struct EnginePipeline::Impl final {
   void stage_frame_cleanup() noexcept;
 };
 
+EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
+
 // ---------------------------------------------------------------------------
 // Impl::initialize
 // ---------------------------------------------------------------------------
@@ -1179,18 +1272,18 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   rendererService.commandBuffer = commandBuffer.get();
   rendererService.meshRegistry = meshRegistry.get();
   rendererService.device = renderer::render_device();
-  if (!runtime::register_engine_subsystem_services(
-          world.get(), &physicsService, &audioService, &assetDatabaseService,
-          &rendererService)) {
+  if (!serviceRegistry.register_services(world.get(), &physicsService,
+                                         &audioService, &assetDatabaseService,
+                                         &rendererService)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to register engine subsystem services");
-    runtime::unregister_engine_subsystem_services();
+    serviceRegistry.unregister_services();
     return false;
   }
 
   bridge = runtime::editor_bridge();
 
-  runtime::bind_scripting_runtime(world.get());
+  runtime::bind_scripting_runtime(world.get(), serviceLocator);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
     bridge->set_world(world.get());
   }
@@ -1200,8 +1293,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
                              meshRegistry.get(), &meshIds)) {
-    scripting::bind_runtime_world(nullptr);
-    runtime::unregister_engine_subsystem_services();
+    teardown();
     return false;
   }
   scripting::set_default_mesh_asset_id(
@@ -1215,8 +1307,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   if (!frameContext) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate frame context");
-    scripting::bind_runtime_world(nullptr);
-    runtime::unregister_engine_subsystem_services();
+    teardown();
     return false;
   }
 
@@ -1226,8 +1317,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
        frameContext->renderPrepPipeline.localCommandBuffers.size())) {
     core::log_message(core::LogLevel::Error, "engine",
                       "invalid thread allocator count");
-    scripting::bind_runtime_world(nullptr);
-    runtime::unregister_engine_subsystem_services();
+    teardown();
     return false;
   }
 
@@ -1288,8 +1378,8 @@ void EnginePipeline::Impl::teardown() noexcept {
     bridge->set_world(nullptr);
   }
 
-  scripting::bind_runtime_world(nullptr);
-  runtime::unregister_engine_subsystem_services();
+  runtime::unbind_scripting_runtime(serviceLocator);
+  serviceRegistry.unregister_services();
 
   renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
                                    meshRegistry.get());
@@ -1312,7 +1402,10 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 
   if ((playState == LoopPlayState::Playing) &&
       (previousPlayState == LoopPlayState::Stopped)) {
-    scripting::watch_script_file(kMainScriptPath);
+    const char *mainScriptPath = active_config().mainScriptPath;
+    if (mainScriptPath != nullptr) {
+      scripting::watch_script_file(mainScriptPath);
+    }
     scripting::dispatch_entity_scripts_start();
   }
 
@@ -1333,7 +1426,7 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
       core::log_message(core::LogLevel::Error, "scripting",
                         "failed to reinitialize scripting on stop");
     } else {
-      runtime::bind_scripting_runtime(world.get());
+      runtime::bind_scripting_runtime(world.get(), serviceLocator);
       scripting::set_default_mesh_asset_id(
           (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
                                                       : meshIds.bootstrap);
@@ -1594,6 +1687,8 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
       }
 
       frameContext->resolveCollisionsJobData.world = world.get();
+      frameContext->resolveCollisionsJobData.deltaSeconds =
+          static_cast<float>(kFixedDeltaSeconds);
       frameContext->resolveCollisionsJobData.frameGraphFailed =
           &frameContext->frameGraphFailed;
       core::Job resolveJob{};
@@ -1746,18 +1841,7 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
     }
   }
 
-  if (scripting::has_pending_scene_op()) {
-    if (scripting::pending_scene_op_is_load()) {
-      const char *scenePath = scripting::get_pending_scene_path();
-      if (scenePath != nullptr) {
-        runtime::load_scene(*world, scenePath);
-      }
-    }
-    if (scripting::pending_scene_op_is_new()) {
-      runtime::reset_world(*world);
-    }
-    scripting::clear_pending_scene_op();
-  }
+  static_cast<void>(runtime::process_pending_scene_op(*world));
 }
 
 // ---------------------------------------------------------------------------

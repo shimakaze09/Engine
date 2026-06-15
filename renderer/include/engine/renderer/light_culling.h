@@ -1,3 +1,5 @@
+// Declares light culling types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <cstddef>

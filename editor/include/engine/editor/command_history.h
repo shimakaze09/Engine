@@ -1,12 +1,20 @@
+// Declares command history types and APIs for the Engine editor tool.
+
 #pragma once
+#include <array>
 #include <cstddef>
+#include <memory>
 namespace engine::editor {
 
 // Abstract editor command.
 struct EditorCommand {
+  /// Handles editor command.
   virtual ~EditorCommand() = default;  // OK to have vtable here (editor only)
+  /// Handles execute.
   virtual void execute() noexcept = 0;
+  /// Handles undo.
   virtual void undo() noexcept = 0;
+  /// Handles redo.
   virtual void redo() noexcept { execute(); }
 };
 
@@ -15,17 +23,30 @@ class CommandHistory final {
 public:
   static constexpr std::size_t kMaxHistory = 64U;
 
+  CommandHistory() noexcept = default;
+  ~CommandHistory() noexcept = default;
+
+  CommandHistory(const CommandHistory &) = delete;
+  CommandHistory &operator=(const CommandHistory &) = delete;
+  CommandHistory(CommandHistory &&) = delete;
+  CommandHistory &operator=(CommandHistory &&) = delete;
+
   // Execute a command and push it on the undo stack. Clears redo stack.
   // Takes ownership of the command pointer (must be allocated with new(nothrow)).
   void execute(EditorCommand *cmd) noexcept;
+  /// Handles undo.
   void undo() noexcept;
+  /// Handles redo.
   void redo() noexcept;
+  /// Returns whether can undo.
   bool can_undo() const noexcept;
+  /// Returns whether can redo.
   bool can_redo() const noexcept;
+  /// Handles clear.
   void clear() noexcept;
 
 private:
-  EditorCommand *m_history[kMaxHistory] = {};
+  std::array<std::unique_ptr<EditorCommand>, kMaxHistory> m_history{};
   int m_top = -1;       // index of last executed command
   int m_count = 0;      // total valid entries in history
 };

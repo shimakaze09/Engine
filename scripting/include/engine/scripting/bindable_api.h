@@ -1,3 +1,5 @@
+// Declares bindable api types and APIs for the Engine Lua scripting system.
+
 #pragma once
 // Bindable API — thin accessors for Lua binding generation.
 // Annotated with // LUA_BIND: for use with tools/binding_generator.
@@ -61,11 +63,11 @@ const char *bindable_get_game_mode() noexcept;
 // LUA_BIND: set_game_state(name: string) -> bool
 bool bindable_set_game_state(const char *name) noexcept;
 
-// LUA_BIND: is_alive(entity: uint32) -> bool
-bool bindable_is_alive(std::uint32_t entity) noexcept;
+// LUA_BIND: is_alive(entity: uint64) -> bool
+bool bindable_is_alive(std::uint64_t entity) noexcept;
 
-// LUA_BIND: has_light(entity: uint32) -> bool
-bool bindable_has_light(std::uint32_t entity) noexcept;
+// LUA_BIND: has_light(entity: uint64) -> bool
+bool bindable_has_light(std::uint64_t entity) noexcept;
 
 // LUA_BIND: set_camera_fov(fov: float) -> void
 void bindable_set_camera_fov(float fov) noexcept;

@@ -1,3 +1,5 @@
+// Verifies auto exposure test behavior for the Engine test suite.
+
 #include <cmath>
 
 #ifdef _MSC_VER
@@ -68,6 +70,7 @@ int verify_cascade_splits_narrow_range() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = verify_shadow_map_constants();
   if (result != 0)

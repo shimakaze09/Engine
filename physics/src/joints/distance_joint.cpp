@@ -1,3 +1,5 @@
+// Implements distance joint behavior for the Engine physics system.
+
 #include "joint_solvers.h"
 
 #include "engine/math/vec3.h"
@@ -6,6 +8,7 @@
 
 namespace engine::physics {
 
+/// Handles solve distance joint.
 float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
                            float &accumulatedImpulse) noexcept {
   if ((ctx.tA == nullptr) || (ctx.tB == nullptr)) {

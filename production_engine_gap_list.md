@@ -77,6 +77,52 @@ These items do not represent missing *features* but rather defects or structural
 - `§0-6-a-i` ~~Several files under `tests/unit/` use raw `new`/`delete` in test scaffolding.~~ **[high]** `[x]`
   - *Resolved*: Audit of all test files confirms zero raw `new`/`delete` usage. All heap allocations use `std::unique_ptr` or placement new with `std::nothrow`. No ASAN false-positive risk.
 
+#### §0-6-b: Missing Source Comments
+- `§0-6-b-i` Every tracked source, script, shader, build, and test file must keep a concise file-level comment; every class, struct, enum, and function added or changed in future work must include a purpose comment close to its declaration or definition. **[high]** `[~]`
+  - *In progress*: Initial repository-wide comment coverage pass started on 2026-06-04. Keep this item open until the pass is reviewed and a lightweight audit command exists for future changes.
+
+---
+
+### §0-7: Runtime / Editor / Renderer Ownership Stability
+
+#### §0-7-a: Scene and editor lifecycle hardening
+- `§0-7-a-i` Scene load must not destroy the current world until the replacement scene parses and validates successfully. **[critical]** `[x]`
+  - *Resolved*: `runtime::load_scene` now stages into a replacement `World` and commits only after load succeeds; regression coverage protects failed-load preservation.
+- `§0-7-a-ii` Scripted pending scene-load failures must remain visible instead of being cleared as if the load succeeded. **[critical]** `[x]`
+  - *Resolved*: `process_pending_scene_op(World&)` keeps failed load requests pending and is covered by scripting tests.
+- `§0-7-a-iii` Editor scene swaps and shutdown must clear stale command history, selected entities, play snapshots, gizmo state, and thumbnail GPU resources. **[high]** `[x]`
+  - *Resolved*: Editor cleanup now releases thumbnail GL textures, clears command history and play snapshot buffers, resets selection/gizmo state, and clears stale world state after scene loads.
+
+#### §0-7-b: Runtime ownership and startup configuration
+- `§0-7-b-i` Engine startup must accept a core/runtime configuration instead of hardcoding asset roots, script paths, shader roots, bootstrap mesh paths, and editor scene paths. **[high]** `[x]`
+  - *Resolved*: `core::CoreConfig` and `runtime::EngineConfig` now drive core bootstrap, asset mounting, shader roots, bootstrap meshes, scripts, and editor scene/assets paths.
+- `§0-7-b-ii` Pipeline initialization failures must tear down partial service/editor/scripting bindings. **[critical]** `[x]`
+  - *Resolved*: initialization failure paths call `teardown()` after post-binding failures, so partial runtime/editor bindings are not left alive.
+- `§0-7-b-iii` Runtime subsystem and scripting service registrations must be scoped to the pipeline instance, not only to `core::global_service_locator()`. **[critical]** `[x]`
+  - *Resolved*: `EnginePipeline::Impl` owns a `ServiceLocator` and `EngineServiceRegistry`; scripting runtime bindings register through the owned locator, shutdown removes stale world/service entries, and legacy global wrappers were removed.
+
+#### §0-7-c: Renderer, streaming, and validation hardening
+- `§0-7-c-i` Asset streaming callbacks must run through an actual worker queue instead of only polling synchronously on the main thread. **[high]** `[x]`
+  - *Resolved*: `AssetStreamingQueue` now owns a worker thread, mutex/condition variable, CPU load callbacks, main-thread upload callbacks, and shutdown join logic; async ordering and budget tests cover it.
+- `§0-7-c-ii` Renderer public state must be reset on shutdown and grouped behind a renderer-owned context object. **[high]** `[~]`
+  - *In progress*: `RendererContext` now owns public renderer state and backend state, and shutdown resets camera, viewport, frame stats, FXAA, and skybox state. A true multi-renderer-context API remains open.
+- `§0-7-c-iii` Static analysis must fail closed when no real analyzer is available. **[high]** `[x]`
+  - *Resolved*: the `analysis` target now uses `cppcheck` when available, otherwise `clang-tidy --warnings-as-errors=*` on engine sources, and fails if neither analyzer is found.
+
+#### §0-7-d: Second ownership audit findings
+- `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[~]`
+  - *Audit*: Split into an owned `ScriptingContext` and narrow modules before allowing multiple runtime/editor sessions or isolated tests.
+  - *In progress*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; deferred world-mutation queueing now lives in `scripting/src/deferred_mutations.cpp`; `scripting.cpp` still owns Lua state, timer refs, coroutine scheduling, debugger/profiler state, entity script modules, player controllers, and persistent game state until those move behind `ScriptingContext`.
+- `§0-7-d-ii` ~~`physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime.~~ **[critical]** `[x]`
+  - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
+- `§0-7-d-iii` ~~`scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state.~~ **[high]** `[x]`
+  - *Resolved*: DAP transport state now lives in an explicit `DapServerState` owner, start failure paths share the same cleanup path as `dap_stop()`, and `engine_integration_dap` verifies stop clears an accepted partial session before restart on the same port.
+- `§0-7-d-iv` ~~`core::global_service_locator()` still exists for legacy callers, tests, and wrappers.~~ **[high]** `[x]`
+  - *Resolved*: Runtime and scripting bridge callers now bind through explicit `ServiceLocator` instances; legacy global register/bind wrappers were removed, and tests no longer rely on the global locator except for the core singleton API coverage.
+- `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[~]`
+  - *In progress*: `scripting/src/deferred_mutations.cpp` now owns the deferred world-mutation queue, phase gate, apply-or-queue helpers, flush path, and shutdown clear; `engine_unit_scripting` verifies queued mutations are discarded across scripting shutdown/reinitialization.
+  - *Audit*: Current largest files still include `scripting.cpp` (~5963 lines after the deferred mutation split), `command_buffer.cpp` (~4509), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
+
 ---
 
 ---
@@ -730,19 +776,19 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M6-C1c` `glDrawElementsInstanced(count, instanceCount)` call. `[x]` — *RenderDevice now exposes `draw_elements_triangles_u32_instanced()`, the GL backend maps it to `glDrawElementsInstanced`, and indexed opaque batches issue one instanced draw when compatible.*
 - `P1-M6-C1d` Benchmark: 10K identical meshes → single draw call. `[x]` — *Added `engine_bench_instancing_batch`, which verifies 10K identical mesh commands collapse into one static-mesh batch; command-buffer unit coverage also asserts 10K batching and material split behavior.*
 
-##### P1-M6-C2: Foliage Instancing (Wind Vertex Displacement, Per-Instance LOD) `[ ]`
-- `P1-M6-C2a` Wind displacement: sine wave vertex shader using time + world position + per-instance phase. `[ ]`
-- `P1-M6-C2b` Per-instance LOD index stored in instance data; LOD mesh selected before batching. `[ ]`
-- `P1-M6-C2c` Density/distribution stored in foliage painting tool output. `[ ]`
+##### P1-M6-C2: Foliage Instancing (Wind Vertex Displacement, Per-Instance LOD) `[x]`
+- `P1-M6-C2a` Wind displacement: sine wave vertex shader using time + world position + per-instance phase. `[x]`
+- `P1-M6-C2b` Per-instance LOD index stored in instance data; LOD mesh selected before batching. `[x]`
+- `P1-M6-C2c` Density/distribution stored in foliage painting tool output. `[x]`
 
 ---
 
 #### P1-M6-D: Shader and Material System
 
 ##### P1-M6-D1: Shader Variant / Permutation System (Macro-Based, Cached) `[~]`
-- `P1-M6-D1a` `renderer/include/engine/renderer/shader_system.h`: `load_shader_program(vertPath, fragPath)`, `check_shader_reload()`. `[~]` — *Basic load/reload confirmed; macro permutation compilation missing.*
+- `P1-M6-D1a` `renderer/include/engine/renderer/shader_system.h`: `load_shader_program(vertPath, fragPath)`, `check_shader_reload()`. `[x]` — *Basic load/reload confirmed; variant reload now preserves copied macro defines.*
 - `P1-M6-D1b` `ShaderProgramHandle` typed handle; `kInvalidShaderProgram` sentinel. `[x]`
-- `P1-M6-D1c` Macro permutation table: define set → variant key; compile on demand, cache by key. `[ ]`
+- `P1-M6-D1c` Macro permutation table: define set → variant key; compile on demand, cache by key. `[x]` — *Implemented `ShaderVariantDesc`/`ShaderVariantKey`, order-independent define hashing, cached `load_shader_variant()`, macro injection, and reload-safe define storage; covered by `engine_unit_shader_system`.*
 - `P1-M6-D1d` Variant selection: material properties (has_normal_map, has_emissive, skinned, etc.) select defines. `[ ]`
 - `P1-M6-D1e` Binary shader cache: compiled SPIR-V or driver binary; restored on identical source hash. `[ ]`
 

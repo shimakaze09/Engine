@@ -1,3 +1,5 @@
+// Implements command buffer behavior for the Engine renderer system.
+
 #include "engine/renderer/command_buffer.h"
 
 #include <algorithm>
@@ -42,6 +44,7 @@ constexpr std::size_t kForwardMaxPointLights = 8U;
 constexpr std::size_t kForwardMaxSpotLights = 8U;
 constexpr std::uint32_t kInstanceModelAttrib0 = 3U;
 constexpr std::uint32_t kInstanceModelAttribCount = 4U;
+constexpr std::uint32_t kInstanceFoliageAttrib = 7U;
 constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
 constexpr std::uint64_t kDrawKeyDepthMask = 0xFFFFULL;
 constexpr float kSkyboxCubeVertices[] = {
@@ -66,11 +69,19 @@ constexpr float kSkyboxCubeVertices[] = {
 constexpr std::int32_t kSkyboxVertexCount = static_cast<std::int32_t>(
     sizeof(kSkyboxCubeVertices) / (3U * sizeof(float)));
 
+/// Stores shadow candidate data used by the engine.
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
   float distSq = 0.0F;
 };
 
+/// Stores instance attributes data used by the engine.
+struct InstanceAttributes final {
+  math::Mat4 model = math::Mat4();
+  math::Vec4 foliage = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
+};
+
+/// Enumerates sky model values used by the engine.
 enum class SkyModel : std::uint8_t {
   Hosek = 0,
   Preetham = 1,
@@ -78,13 +89,7 @@ enum class SkyModel : std::uint8_t {
   None = 3,
 };
 
-CameraState g_activeCamera{};
-int g_sceneViewportWidth = 0;
-int g_sceneViewportHeight = 0;
-RendererFrameStats g_lastFrameStats{};
-bool g_fxaaAppliedThisFrame = false;
-TextureHandle g_activeSkyboxTexture = kInvalidTextureHandle;
-
+/// Stores backend state data used by the engine.
 struct BackendState final {
   bool initialized = false;
   bool failed = false;
@@ -112,6 +117,9 @@ struct BackendState final {
   std::int32_t pbrViewLocation = -1;
   std::int32_t pbrViewProjectionLocation = -1;
   std::int32_t pbrUseInstancingLocation = -1;
+  std::int32_t pbrFoliageWindStrengthLocation = -1;
+  std::int32_t pbrFoliageWindFrequencyLocation = -1;
+  std::int32_t pbrFoliagePhaseLocation = -1;
   std::int32_t pbrFogModeLocation = -1;
   std::int32_t pbrFogStartLocation = -1;
   std::int32_t pbrFogEndLocation = -1;
@@ -250,6 +258,10 @@ struct BackendState final {
   std::int32_t gbufProjectionLoc = -1;
   std::int32_t gbufNormalMatrixLoc = -1;
   std::int32_t gbufUseInstancingLoc = -1;
+  std::int32_t gbufTimeLoc = -1;
+  std::int32_t gbufFoliageWindStrengthLoc = -1;
+  std::int32_t gbufFoliageWindFrequencyLoc = -1;
+  std::int32_t gbufFoliagePhaseLoc = -1;
   std::int32_t gbufAlbedoLoc = -1;
   std::int32_t gbufMetallicLoc = -1;
   std::int32_t gbufRoughnessLoc = -1;
@@ -313,7 +325,7 @@ struct BackendState final {
   std::uint32_t tileLightTex = 0U;
   std::vector<float> tileBuffer;
   std::uint32_t instanceMatrixBuffer = 0U;
-  std::vector<math::Mat4> instanceMatrices;
+  std::vector<InstanceAttributes> instanceAttributes;
   std::vector<StaticMeshBatch> staticMeshBatches;
 
   // ---- Bloom state ----
@@ -437,17 +449,72 @@ struct BackendState final {
   float currentExposure = 1.0F;
 };
 
-BackendState &backend_state() noexcept {
-  static BackendState state{};
-  return state;
+/// Owns renderer state for the default renderer context.
+struct RendererContext final {
+  CameraState activeCamera{};
+  int sceneViewportWidth = 0;
+  int sceneViewportHeight = 0;
+  RendererFrameStats lastFrameStats{};
+  bool fxaaAppliedThisFrame = false;
+  TextureHandle activeSkyboxTexture = kInvalidTextureHandle;
+  char shaderRootPath[260] = "assets/shaders";
+  BackendState backend{};
+};
+
+/// Returns the default renderer context used by the legacy renderer API.
+RendererContext &renderer_context() noexcept {
+  static RendererContext context{};
+  return context;
 }
 
+/// Handles backend state.
+BackendState &backend_state() noexcept {
+  return renderer_context().backend;
+}
+
+/// Builds a configured shader path from a shader file name.
+bool make_shader_path(const char *fileName, char *outPath,
+                      std::size_t outCapacity) noexcept {
+  if ((fileName == nullptr) || (outPath == nullptr) || (outCapacity == 0U)) {
+    return false;
+  }
+  const int written =
+      std::snprintf(outPath, outCapacity, "%s/%s",
+                    renderer_context().shaderRootPath, fileName);
+  return (written > 0) &&
+         (static_cast<std::size_t>(written) < outCapacity);
+}
+
+/// Loads a shader program from the configured shader root.
+ShaderProgramHandle load_configured_shader_program(
+    const char *vertexShader, const char *fragmentShader) noexcept {
+  char vertexPath[512]{};
+  char fragmentPath[512]{};
+  if (!make_shader_path(vertexShader, vertexPath, sizeof(vertexPath)) ||
+      !make_shader_path(fragmentShader, fragmentPath, sizeof(fragmentPath))) {
+    return ShaderProgramHandle{};
+  }
+  return load_shader_program(vertexPath, fragmentPath);
+}
+
+/// Resets public renderer state that can otherwise leak between runs.
+void reset_renderer_public_state() noexcept {
+  renderer_context().activeCamera = CameraState{};
+  renderer_context().sceneViewportWidth = 0;
+  renderer_context().sceneViewportHeight = 0;
+  renderer_context().lastFrameStats = RendererFrameStats{};
+  renderer_context().fxaaAppliedThisFrame = false;
+  renderer_context().activeSkyboxTexture = kInvalidTextureHandle;
+}
+
+/// Resets this object back to its reusable empty state for backend on failure.
 void reset_backend_on_failure() noexcept {
   BackendState &backend = backend_state();
   backend = BackendState{};
   backend.failed = true;
 }
 
+/// Handles resolve pbr light uniforms.
 void resolve_pbr_light_uniforms(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   const std::uint32_t prog = backend.pbrProgram;
@@ -513,6 +580,7 @@ void resolve_pbr_light_uniforms(BackendState &backend,
   }
 }
 
+/// Handles resolve pbr shadow uniforms.
 void resolve_pbr_shadow_uniforms(BackendState &backend,
                                  const RenderDevice *dev) noexcept {
   const std::uint32_t prog = backend.pbrProgram;
@@ -553,6 +621,7 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
   }
 }
 
+/// Handles upload pbr lighting uniforms.
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
@@ -631,6 +700,7 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
   }
 }
 
+/// Handles upload pbr distance fog uniforms.
 void upload_pbr_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -653,6 +723,7 @@ void upload_pbr_distance_fog_uniforms(
   }
 }
 
+/// Handles upload pbr height fog uniforms.
 void upload_pbr_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
@@ -676,6 +747,43 @@ void upload_pbr_height_fog_uniforms(
   }
 }
 
+/// Handles upload pbr foliage uniforms.
+void upload_pbr_foliage_uniforms(const BackendState &backend,
+                                 const RenderDevice *dev,
+                                 const DrawCommand &command) noexcept {
+  if (backend.pbrFoliageWindStrengthLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFoliageWindStrengthLocation,
+                           command.foliageWindStrength);
+  }
+  if (backend.pbrFoliageWindFrequencyLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFoliageWindFrequencyLocation,
+                           command.foliageWindFrequency);
+  }
+  if (backend.pbrFoliagePhaseLocation >= 0) {
+    dev->set_uniform_float(backend.pbrFoliagePhaseLocation,
+                           command.foliageWindPhase);
+  }
+}
+
+/// Handles upload gbuffer foliage uniforms.
+void upload_gbuffer_foliage_uniforms(const BackendState &backend,
+                                     const RenderDevice *dev,
+                                     const DrawCommand &command) noexcept {
+  if (backend.gbufFoliageWindStrengthLoc >= 0) {
+    dev->set_uniform_float(backend.gbufFoliageWindStrengthLoc,
+                           command.foliageWindStrength);
+  }
+  if (backend.gbufFoliageWindFrequencyLoc >= 0) {
+    dev->set_uniform_float(backend.gbufFoliageWindFrequencyLoc,
+                           command.foliageWindFrequency);
+  }
+  if (backend.gbufFoliagePhaseLoc >= 0) {
+    dev->set_uniform_float(backend.gbufFoliagePhaseLoc,
+                           command.foliageWindPhase);
+  }
+}
+
+/// Handles upload deferred distance fog uniforms.
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -698,6 +806,7 @@ void upload_deferred_distance_fog_uniforms(
   }
 }
 
+/// Handles upload deferred height fog uniforms.
 void upload_deferred_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
@@ -719,6 +828,7 @@ void upload_deferred_height_fog_uniforms(
   }
 }
 
+/// Handles bind pbr shadow uniforms.
 void bind_pbr_shadow_uniforms(const BackendState &backend,
                               const RenderDevice *dev,
                               const SceneLightData &lights, bool shadowEnabled,
@@ -809,6 +919,7 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
   }
 }
 
+/// Handles unbind pbr shadow textures.
 void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   if (dev == nullptr) {
     return;
@@ -826,6 +937,7 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   }
 }
 
+/// Destroys or releases the requested object, handle, or resource for skybox resources.
 void destroy_skybox_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.skyboxVertexBuffer != 0U) && (dev != nullptr)) {
@@ -856,6 +968,7 @@ void destroy_skybox_resources(BackendState &backend) noexcept {
   backend.hosekSkyAvailable = false;
 }
 
+/// Destroys or releases the requested object, handle, or resource for preetham sky resources.
 void destroy_preetham_sky_resources(BackendState &backend) noexcept {
   if (backend.preethamSkyShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.preethamSkyShaderHandle);
@@ -869,6 +982,7 @@ void destroy_preetham_sky_resources(BackendState &backend) noexcept {
   backend.preethamSkyTurbidityLoc = -1;
 }
 
+/// Destroys or releases the requested object, handle, or resource for hosek sky resources.
 void destroy_hosek_sky_resources(BackendState &backend) noexcept {
   if (backend.hosekSkyShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.hosekSkyShaderHandle);
@@ -883,6 +997,7 @@ void destroy_hosek_sky_resources(BackendState &backend) noexcept {
   backend.hosekSkyGroundAlbedoLoc = -1;
 }
 
+/// Creates a new object, handle, or resource for skybox geometry.
 bool create_skybox_geometry(BackendState &backend,
                             const RenderDevice *dev) noexcept {
   if ((backend.skyboxVertexArray != 0U) && (backend.skyboxVertexBuffer != 0U)) {
@@ -916,10 +1031,12 @@ bool create_skybox_geometry(BackendState &backend,
   return true;
 }
 
+/// Handles cvar string equals.
 bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
   return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
 }
 
+/// Handles skip fog color separators.
 void skip_fog_color_separators(const char *&cursor) noexcept {
   while ((*cursor == ' ') || (*cursor == '\t') || (*cursor == '\n') ||
          (*cursor == '\r') || (*cursor == ',')) {
@@ -927,6 +1044,7 @@ void skip_fog_color_separators(const char *&cursor) noexcept {
   }
 }
 
+/// Parses text into the engine representation for fog color component.
 bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
   if ((cursor == nullptr) || (valueOut == nullptr)) {
     return false;
@@ -943,6 +1061,7 @@ bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
   return true;
 }
 
+/// Handles selected sky model.
 SkyModel selected_sky_model() noexcept {
   const char *model = core::cvar_get_string("r_sky_model", "hosek");
   if (cvar_string_equals(model, "cubemap")) {
@@ -957,10 +1076,11 @@ SkyModel selected_sky_model() noexcept {
   return SkyModel::Hosek;
 }
 
+/// Handles distance fog settings from cvars.
 DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   DistanceFogSettings settings{};
   settings.mode =
-      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "off"));
+      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "exp2"));
   settings.start = core::cvar_get_float("r_fog_start", settings.start);
   settings.end = core::cvar_get_float("r_fog_end", settings.end);
   settings.density = core::cvar_get_float("r_fog_density", settings.density);
@@ -974,6 +1094,7 @@ DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   return normalize_distance_fog_settings(settings);
 }
 
+/// Handles height fog settings from cvars.
 HeightFogSettings height_fog_settings_from_cvars() noexcept {
   HeightFogSettings settings{};
   settings.enabled = core::cvar_get_bool("r_height_fog", settings.enabled);
@@ -988,16 +1109,18 @@ HeightFogSettings height_fog_settings_from_cvars() noexcept {
   return normalize_height_fog_settings(settings);
 }
 
+/// Handles active skybox gpu texture.
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   if (!backend.skyboxAvailable ||
-      (g_activeSkyboxTexture == kInvalidTextureHandle) ||
-      !is_texture_cubemap(g_activeSkyboxTexture)) {
+      (renderer_context().activeSkyboxTexture == kInvalidTextureHandle) ||
+      !is_texture_cubemap(renderer_context().activeSkyboxTexture)) {
     return 0U;
   }
 
-  return texture_gpu_id(g_activeSkyboxTexture);
+  return texture_gpu_id(renderer_context().activeSkyboxTexture);
 }
 
+/// Handles preetham sun direction.
 math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   if (lights.directionalLightCount > 0U) {
     const math::Vec3 sunDir =
@@ -1010,6 +1133,7 @@ math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
 }
 
+/// Handles prepare procedural sky draw.
 void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->enable_depth_test();
   dev->set_depth_func_less_equal();
@@ -1017,6 +1141,7 @@ void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->disable_face_culling();
 }
 
+/// Handles finish procedural sky draw.
 void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
@@ -1025,6 +1150,7 @@ void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->enable_face_culling();
 }
 
+/// Handles draw skybox.
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
                  const math::Mat4 &viewMat, const math::Mat4 &projMat,
                  std::uint32_t cubemapGpuId,
@@ -1061,6 +1187,7 @@ void draw_skybox(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+/// Handles draw preetham sky.
 void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
                        const math::Mat4 &viewMat, const math::Mat4 &projMat,
                        const SceneLightData &lights,
@@ -1101,6 +1228,7 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+/// Handles draw hosek sky.
 void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
                     const math::Mat4 &viewMat, const math::Mat4 &projMat,
                     const SceneLightData &lights,
@@ -1144,6 +1272,7 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
+/// Handles clamp u32 value.
 std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
                               std::uint32_t maxValue) noexcept {
   if (value < minValue) {
@@ -1155,6 +1284,7 @@ std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
   return value;
 }
 
+/// Handles previous power of two u32.
 std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
   std::uint32_t result = 1U;
   while ((result <= (value / 2U)) && (result < 4096U)) {
@@ -1163,6 +1293,7 @@ std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
   return result;
 }
 
+/// Handles cubemap mip size.
 int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   int size = faceSize;
   for (int mip = 0; mip < mipLevel; ++mip) {
@@ -1171,6 +1302,7 @@ int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   return size;
 }
 
+/// Handles max cubemap mip levels u32.
 std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
   std::uint32_t levels = 1U;
   while (faceSize > 1U) {
@@ -1180,11 +1312,13 @@ std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
   return levels;
 }
 
+/// Handles positive cvar u32.
 std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
   const int value = core::cvar_get_int(name, fallback);
   return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
 }
 
+/// Handles cvar reflection probe bake settings.
 ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
   ReflectionProbeBakeSettings settings{};
   settings.prefilteredFaceSize =
@@ -1197,6 +1331,7 @@ ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
   return normalize_reflection_probe_bake_settings(settings);
 }
 
+/// Handles cubemap capture views.
 void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
   const math::Vec3 origin{};
   outViews[0] = math::look_at(origin, math::Vec3(1.0F, 0.0F, 0.0F),
@@ -1213,6 +1348,7 @@ void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
                               math::Vec3(0.0F, -1.0F, 0.0F));
 }
 
+/// Destroys or releases the requested object, handle, or resource for environment prefilter resources.
 void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.prefilteredEnvironmentTexture != 0U) && (dev != nullptr)) {
@@ -1234,6 +1370,7 @@ void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
   backend.prefilteredEnvironmentMipLevels = 0;
 }
 
+/// Handles ensure prefiltered environment.
 std::uint32_t
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
                                std::uint32_t sourceCubemap,
@@ -1328,6 +1465,7 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   return prefiltered;
 }
 
+/// Destroys or releases the requested object, handle, or resource for environment irradiance resources.
 void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.irradianceEnvironmentTexture != 0U) && (dev != nullptr)) {
@@ -1348,6 +1486,7 @@ void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
   backend.irradianceEnvironmentFaceSize = 0;
 }
 
+/// Handles ensure irradiance environment.
 std::uint32_t
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
                               std::uint32_t sourceCubemap,
@@ -1426,6 +1565,7 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   return irradiance;
 }
 
+/// Destroys or releases the requested object, handle, or resource for brdf lut resources.
 void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
   if ((backend.brdfLutFbo != 0U) && (dev != nullptr)) {
@@ -1445,6 +1585,7 @@ void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   backend.brdfLutSize = 0;
 }
 
+/// Handles ensure brdf lut.
 std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
                               ReflectionProbeBakeSettings settings) noexcept {
   if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
@@ -1498,6 +1639,7 @@ std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
   return lutTexture;
 }
 
+/// Destroys or releases the requested object, handle, or resource for bloom resources.
 void destroy_bloom_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1517,6 +1659,7 @@ void destroy_bloom_resources(BackendState &b) noexcept {
   b.bloomAllocatedHeight = 0;
 }
 
+/// Handles ensure bloom resources.
 void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
     return;
@@ -1543,6 +1686,7 @@ void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   b.bloomAllocatedHeight = height;
 }
 
+/// Destroys or releases the requested object, handle, or resource for luminance resources.
 void destroy_luminance_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
   if (dev == nullptr) {
@@ -1562,6 +1706,7 @@ void destroy_luminance_resources(BackendState &b) noexcept {
   b.lumAllocatedHeight = 0;
 }
 
+/// Handles ensure luminance resources.
 void ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept {
   if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
@@ -1589,6 +1734,7 @@ void ensure_luminance_resources(BackendState &b, int width,
   b.lumAllocatedHeight = height;
 }
 
+/// Handles generate ssao kernel.
 void generate_ssao_kernel(float *kernel, int count) noexcept {
   unsigned int seed = 12345U;
   auto nextFloat = [&seed]() -> float {
@@ -1617,6 +1763,7 @@ void generate_ssao_kernel(float *kernel, int count) noexcept {
   }
 }
 
+/// Creates a new object, handle, or resource for ssao noise texture.
 std::uint32_t create_ssao_noise_texture() noexcept {
   float noise[16 * 4] = {};
   unsigned int seed = 54321U;
@@ -1633,6 +1780,7 @@ std::uint32_t create_ssao_noise_texture() noexcept {
   return render_device()->create_texture_2d_hdr(4, 4, 4, noise);
 }
 
+/// Initializes the owning system for backend.
 bool initialize_backend() noexcept {
   BackendState &backend = backend_state();
   if (backend.initialized) {
@@ -1661,8 +1809,8 @@ bool initialize_backend() noexcept {
   const RenderDevice *dev = render_device();
 
   // Load default fallback shader.
-  const ShaderProgramHandle defaultShaderHandle = load_shader_program(
-      "assets/shaders/default.vert", "assets/shaders/default.frag");
+  const ShaderProgramHandle defaultShaderHandle = load_configured_shader_program(
+      "default.vert", "default.frag");
   if (defaultShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load default shader program");
@@ -1686,7 +1834,7 @@ bool initialize_backend() noexcept {
 
   // Load PBR shader.
   const ShaderProgramHandle pbrShaderHandle =
-      load_shader_program("assets/shaders/pbr.vert", "assets/shaders/pbr.frag");
+      load_configured_shader_program("pbr.vert", "pbr.frag");
   if (pbrShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load PBR shader program");
@@ -1732,6 +1880,12 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_viewProjection");
   backend.pbrUseInstancingLocation =
       dev->uniform_location(pbrProgram, "uUseInstancing");
+  backend.pbrFoliageWindStrengthLocation =
+      dev->uniform_location(pbrProgram, "uFoliageWindStrength");
+  backend.pbrFoliageWindFrequencyLocation =
+      dev->uniform_location(pbrProgram, "uFoliageWindFrequency");
+  backend.pbrFoliagePhaseLocation =
+      dev->uniform_location(pbrProgram, "uFoliagePhase");
   backend.pbrFogModeLocation = dev->uniform_location(pbrProgram, "uFogMode");
   backend.pbrFogStartLocation = dev->uniform_location(pbrProgram, "uFogStart");
   backend.pbrFogEndLocation = dev->uniform_location(pbrProgram, "uFogEnd");
@@ -1768,8 +1922,8 @@ bool initialize_backend() noexcept {
   resolve_pbr_shadow_uniforms(backend, dev);
 
   // Load tonemap shader.
-  const ShaderProgramHandle tonemapShaderHandle = load_shader_program(
-      "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
+  const ShaderProgramHandle tonemapShaderHandle = load_configured_shader_program(
+      "fullscreen.vert", "tonemap.frag");
   if (tonemapShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load tonemap shader program");
@@ -1822,8 +1976,8 @@ bool initialize_backend() noexcept {
   // Skybox shader and cube geometry (soft-fail: clear color remains visible).
   core::cvar_register_string("r_sky_model", "hosek",
                              "Sky model: hosek, preetham, cubemap, or none");
-  const ShaderProgramHandle skyboxShader = load_shader_program(
-      "assets/shaders/skybox.vert", "assets/shaders/skybox.frag");
+  const ShaderProgramHandle skyboxShader = load_configured_shader_program(
+      "skybox.vert", "skybox.frag");
   if (skyboxShader != kInvalidShaderProgram) {
     const std::uint32_t skyboxProgram = shader_gpu_program(skyboxShader);
     if (skyboxProgram != 0U) {
@@ -1855,8 +2009,8 @@ bool initialize_backend() noexcept {
   // Preetham procedural sky (soft-fail: cubemap skybox or clear color remains).
   core::cvar_register_float("r_sky_turbidity", 3.0F,
                             "Preetham sky turbidity (1.7 clear, 10 hazy)");
-  const ShaderProgramHandle preethamShader = load_shader_program(
-      "assets/shaders/skybox.vert", "assets/shaders/preetham_sky.frag");
+  const ShaderProgramHandle preethamShader = load_configured_shader_program(
+      "skybox.vert", "preetham_sky.frag");
   if (preethamShader != kInvalidShaderProgram) {
     const std::uint32_t preethamProgram = shader_gpu_program(preethamShader);
     if (preethamProgram != 0U) {
@@ -1895,8 +2049,8 @@ bool initialize_backend() noexcept {
   // Hosek-Wilkie procedural sky (preferred over Preetham when available).
   core::cvar_register_float("r_sky_ground_albedo", 0.1F,
                             "Procedural sky ground albedo");
-  const ShaderProgramHandle hosekShader = load_shader_program(
-      "assets/shaders/skybox.vert", "assets/shaders/hosek_wilkie_sky.frag");
+  const ShaderProgramHandle hosekShader = load_configured_shader_program(
+      "skybox.vert", "hosek_wilkie_sky.frag");
   if (hosekShader != kInvalidShaderProgram) {
     const std::uint32_t hosekProgram = shader_gpu_program(hosekShader);
     if (hosekProgram != 0U) {
@@ -1942,8 +2096,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_int("r_env_prefilter_mips", 5,
                           "Prefiltered environment cubemap mip levels");
   const ShaderProgramHandle prefilterShader =
-      load_shader_program("assets/shaders/skybox.vert",
-                          "assets/shaders/prefilter_environment.frag");
+      load_configured_shader_program("skybox.vert",
+                          "prefilter_environment.frag");
   if (prefilterShader != kInvalidShaderProgram) {
     const std::uint32_t prefilterProgram = shader_gpu_program(prefilterShader);
     if (prefilterProgram != 0U) {
@@ -1984,8 +2138,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_int("r_env_irradiance_size", 32,
                           "Diffuse irradiance cubemap face size");
   const ShaderProgramHandle irradianceShader =
-      load_shader_program("assets/shaders/skybox.vert",
-                          "assets/shaders/irradiance_convolution.frag");
+      load_configured_shader_program("skybox.vert",
+                          "irradiance_convolution.frag");
   if (irradianceShader != kInvalidShaderProgram) {
     const std::uint32_t irradianceProgram =
         shader_gpu_program(irradianceShader);
@@ -2023,8 +2177,8 @@ bool initialize_backend() noexcept {
                            "Bake split-sum BRDF lookup texture");
   core::cvar_register_int("r_env_brdf_lut_size", 512,
                           "Split-sum BRDF LUT resolution");
-  const ShaderProgramHandle brdfLutShader = load_shader_program(
-      "assets/shaders/fullscreen.vert", "assets/shaders/brdf_lut.frag");
+  const ShaderProgramHandle brdfLutShader = load_configured_shader_program(
+      "fullscreen.vert", "brdf_lut.frag");
   if (brdfLutShader != kInvalidShaderProgram) {
     const std::uint32_t brdfLutProgram = shader_gpu_program(brdfLutShader);
     if (brdfLutProgram != 0U) {
@@ -2045,7 +2199,7 @@ bool initialize_backend() noexcept {
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
       "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
-  core::cvar_register_string("r_fog_mode", "off",
+  core::cvar_register_string("r_fog_mode", "exp2",
                              "Distance fog mode: off, linear, exp, exp2");
   core::cvar_register_float("r_fog_start", 25.0F,
                             "Linear distance fog start");
@@ -2055,7 +2209,7 @@ bool initialize_backend() noexcept {
                             "Exponential distance fog density");
   core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
                              "Distance fog RGB color");
-  core::cvar_register_bool("r_height_fog", false, "Enable height fog");
+  core::cvar_register_bool("r_height_fog", true, "Enable height fog");
   core::cvar_register_float("r_height_fog_base", 0.0F,
                             "Height fog base world Y");
   core::cvar_register_float("r_height_fog_density", 0.015F,
@@ -2067,8 +2221,8 @@ bool initialize_backend() noexcept {
 
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
   core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
-  const ShaderProgramHandle fxaaShader = load_shader_program(
-      "assets/shaders/fullscreen.vert", "assets/shaders/fxaa.frag");
+  const ShaderProgramHandle fxaaShader = load_configured_shader_program(
+      "fullscreen.vert", "fxaa.frag");
   if (fxaaShader != kInvalidShaderProgram) {
     const std::uint32_t fxaaProg = shader_gpu_program(fxaaShader);
     if (fxaaProg != 0U) {
@@ -2093,8 +2247,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_float("r_bloom_intensity", 0.3F, "Bloom intensity");
   {
     const ShaderProgramHandle threshShader =
-        load_shader_program("assets/shaders/fullscreen.vert",
-                            "assets/shaders/bloom_threshold.frag");
+        load_configured_shader_program("fullscreen.vert",
+                            "bloom_threshold.frag");
     if (threshShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(threshShader);
       if (prog != 0U) {
@@ -2110,8 +2264,8 @@ bool initialize_backend() noexcept {
     }
 
     const ShaderProgramHandle downShader =
-        load_shader_program("assets/shaders/fullscreen.vert",
-                            "assets/shaders/bloom_downsample.frag");
+        load_configured_shader_program("fullscreen.vert",
+                            "bloom_downsample.frag");
     if (downShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(downShader);
       if (prog != 0U) {
@@ -2125,8 +2279,8 @@ bool initialize_backend() noexcept {
       }
     }
 
-    const ShaderProgramHandle upShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/bloom_upsample.frag");
+    const ShaderProgramHandle upShader = load_configured_shader_program(
+        "fullscreen.vert", "bloom_upsample.frag");
     if (upShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(upShader);
       if (prog != 0U) {
@@ -2161,8 +2315,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_float("r_ssao_radius", 0.5F, "SSAO sample radius");
   core::cvar_register_float("r_ssao_bias", 0.025F, "SSAO depth bias");
   {
-    const ShaderProgramHandle ssaoShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/ssao.frag");
+    const ShaderProgramHandle ssaoShader = load_configured_shader_program(
+        "fullscreen.vert", "ssao.frag");
     if (ssaoShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(ssaoShader);
       if (prog != 0U) {
@@ -2186,8 +2340,8 @@ bool initialize_backend() noexcept {
       }
     }
 
-    const ShaderProgramHandle ssaoBlurShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/ssao_blur.frag");
+    const ShaderProgramHandle ssaoBlurShader = load_configured_shader_program(
+        "fullscreen.vert", "ssao_blur.frag");
     if (ssaoBlurShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(ssaoBlurShader);
       if (prog != 0U) {
@@ -2219,8 +2373,8 @@ bool initialize_backend() noexcept {
   // Load deferred rendering shaders (soft-fail: falls back to forward).
   bool deferredOk = true;
 
-  const ShaderProgramHandle gbufferShader = load_shader_program(
-      "assets/shaders/gbuffer.vert", "assets/shaders/gbuffer.frag");
+  const ShaderProgramHandle gbufferShader = load_configured_shader_program(
+      "gbuffer.vert", "gbuffer.frag");
   if (gbufferShader == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "G-Buffer shader not available — deferred path disabled");
@@ -2232,8 +2386,8 @@ bool initialize_backend() noexcept {
 
   if (deferredOk) {
     deferredLightShader =
-        load_shader_program("assets/shaders/fullscreen.vert",
-                            "assets/shaders/deferred_lighting.frag");
+        load_configured_shader_program("fullscreen.vert",
+                            "deferred_lighting.frag");
     if (deferredLightShader == kInvalidShaderProgram) {
       core::log_message(
           core::LogLevel::Warning, "renderer",
@@ -2244,8 +2398,8 @@ bool initialize_backend() noexcept {
   }
 
   if (deferredOk) {
-    gbufferDebugShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/gbuffer_debug.frag");
+    gbufferDebugShader = load_configured_shader_program(
+        "fullscreen.vert", "gbuffer_debug.frag");
     if (gbufferDebugShader == kInvalidShaderProgram) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "G-Buffer debug shader not available");
@@ -2267,6 +2421,13 @@ bool initialize_backend() noexcept {
         dev->uniform_location(gbufProg, "uNormalMatrix");
     backend.gbufUseInstancingLoc =
         dev->uniform_location(gbufProg, "uUseInstancing");
+    backend.gbufTimeLoc = dev->uniform_location(gbufProg, "uTime");
+    backend.gbufFoliageWindStrengthLoc =
+        dev->uniform_location(gbufProg, "uFoliageWindStrength");
+    backend.gbufFoliageWindFrequencyLoc =
+        dev->uniform_location(gbufProg, "uFoliageWindFrequency");
+    backend.gbufFoliagePhaseLoc =
+        dev->uniform_location(gbufProg, "uFoliagePhase");
     backend.gbufAlbedoLoc = dev->uniform_location(gbufProg, "uAlbedo");
     backend.gbufMetallicLoc = dev->uniform_location(gbufProg, "uMetallic");
     backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
@@ -2417,8 +2578,8 @@ bool initialize_backend() noexcept {
       "r_shadow_debug", false,
       "Log when shadow casters are dropped due to slot limits");
   {
-    const ShaderProgramHandle shadowShader = load_shader_program(
-        "assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
+    const ShaderProgramHandle shadowShader = load_configured_shader_program(
+        "shadow_depth.vert", "shadow_depth.frag");
     if (shadowShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(shadowShader);
       if (prog != 0U) {
@@ -2461,8 +2622,8 @@ bool initialize_backend() noexcept {
                            "Enable point light cubemap shadow maps");
   {
     const ShaderProgramHandle pointShader =
-        load_shader_program("assets/shaders/shadow_depth_point.vert",
-                            "assets/shaders/shadow_depth_point.frag");
+        load_configured_shader_program("shadow_depth_point.vert",
+                            "shadow_depth_point.frag");
     if (pointShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(pointShader);
       if (prog != 0U) {
@@ -2492,7 +2653,7 @@ bool initialize_backend() noexcept {
   }
 
   // Auto-exposure luminance shader (soft-fail: uses manual exposure).
-  core::cvar_register_bool("r_auto_exposure", false,
+  core::cvar_register_bool("r_auto_exposure", true,
                            "Enable automatic exposure adaptation");
   core::cvar_register_float("r_exposure", 1.0F, "Manual exposure value");
   core::cvar_register_float("r_auto_exposure_speed", 1.5F,
@@ -2502,8 +2663,8 @@ bool initialize_backend() noexcept {
   core::cvar_register_float("r_auto_exposure_max", 10.0F,
                             "Maximum auto-exposure value");
   {
-    const ShaderProgramHandle lumShader = load_shader_program(
-        "assets/shaders/fullscreen.vert", "assets/shaders/luminance.frag");
+    const ShaderProgramHandle lumShader = load_configured_shader_program(
+        "fullscreen.vert", "luminance.frag");
     if (lumShader != kInvalidShaderProgram) {
       const std::uint32_t prog = shader_gpu_program(lumShader);
       if (prog != 0U) {
@@ -2528,6 +2689,7 @@ bool initialize_backend() noexcept {
   return true;
 }
 
+/// Destroys or releases the requested object, handle, or resource for backend resources.
 void destroy_backend_resources(BackendState *backend) noexcept {
   if (backend == nullptr) {
     return;
@@ -2625,7 +2787,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     dev->destroy_buffer(backend->instanceMatrixBuffer);
     backend->instanceMatrixBuffer = 0U;
   }
-  backend->instanceMatrices.clear();
+  backend->instanceAttributes.clear();
   backend->staticMeshBatches.clear();
 
   // Destroy deferred shaders.
@@ -2669,10 +2831,12 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   shutdown_gpu_profiler();
 }
 
+/// Handles vec3 equal.
 bool vec3_equal(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
 }
 
+/// Handles vec3 less.
 bool vec3_less(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   if (lhs.x != rhs.x) {
     return lhs.x < rhs.x;
@@ -2683,6 +2847,7 @@ bool vec3_less(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   return lhs.z < rhs.z;
 }
 
+/// Handles materials equal.
 bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
   return vec3_equal(lhs.albedo, rhs.albedo) &&
          vec3_equal(lhs.emissive, rhs.emissive) &&
@@ -2692,6 +2857,7 @@ bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
          (lhs.normalTexture == rhs.normalTexture);
 }
 
+/// Handles material less.
 bool material_less(const Material &lhs, const Material &rhs) noexcept {
   if (!vec3_equal(lhs.albedo, rhs.albedo)) {
     return vec3_less(lhs.albedo, rhs.albedo);
@@ -2714,20 +2880,26 @@ bool material_less(const Material &lhs, const Material &rhs) noexcept {
   return lhs.normalTexture.id < rhs.normalTexture.id;
 }
 
+/// Handles draw commands instance compatible.
 bool draw_commands_instance_compatible(const DrawCommand &lhs,
                                        const DrawCommand &rhs) noexcept {
-  return (lhs.mesh == rhs.mesh) && materials_equal(lhs.material, rhs.material);
+  return (lhs.mesh == rhs.mesh) && materials_equal(lhs.material, rhs.material) &&
+         (lhs.foliageWindStrength == rhs.foliageWindStrength) &&
+         (lhs.foliageWindFrequency == rhs.foliageWindFrequency);
 }
 
+/// Handles draw key state bits.
 std::uint64_t draw_key_state_bits(const DrawCommand &command) noexcept {
   return command.sortKey.value & ~kDrawKeyDepthMask;
 }
 
+/// Returns whether can upload instance matrices.
 bool can_upload_instance_matrices(const RenderDevice *dev) noexcept {
   return (dev != nullptr) && (dev->vertex_attrib_divisor != nullptr) &&
          (dev->draw_elements_triangles_u32_instanced != nullptr);
 }
 
+/// Handles upload instance matrices.
 bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                               const GpuMesh &mesh,
                               CommandBufferView commandBufferView,
@@ -2744,49 +2916,64 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
     }
   }
 
-  backend.instanceMatrices.resize(batch.count);
+  backend.instanceAttributes.resize(batch.count);
   for (std::uint32_t i = 0U; i < batch.count; ++i) {
     const std::size_t commandIndex =
         static_cast<std::size_t>(batch.first) + static_cast<std::size_t>(i);
-    backend.instanceMatrices[i] =
-        commandBufferView.data[commandIndex].modelMatrix;
+    const DrawCommand &command = commandBufferView.data[commandIndex];
+    backend.instanceAttributes[i].model = command.modelMatrix;
+    backend.instanceAttributes[i].foliage =
+        math::Vec4(command.foliageWindPhase,
+                   static_cast<float>(command.foliageLodIndex), 0.0F, 0.0F);
   }
 
   dev->bind_vertex_array(mesh.vertexArray);
   dev->bind_array_buffer(backend.instanceMatrixBuffer);
   dev->buffer_data_array(
-      backend.instanceMatrices.data(),
-      static_cast<std::ptrdiff_t>(backend.instanceMatrices.size() *
-                                  sizeof(math::Mat4)));
+      backend.instanceAttributes.data(),
+      static_cast<std::ptrdiff_t>(backend.instanceAttributes.size() *
+                                  sizeof(InstanceAttributes)));
 
-  constexpr std::int32_t stride = static_cast<std::int32_t>(sizeof(math::Mat4));
+  constexpr std::int32_t stride =
+      static_cast<std::int32_t>(sizeof(InstanceAttributes));
   for (std::uint32_t column = 0U; column < kInstanceModelAttribCount;
        ++column) {
     const std::uint32_t attrib = kInstanceModelAttrib0 + column;
     const auto offset = reinterpret_cast<const void *>(
-        static_cast<std::uintptr_t>(sizeof(float) * 4U * column));
+        static_cast<std::uintptr_t>(offsetof(InstanceAttributes, model) +
+                                    (sizeof(float) * 4U * column)));
     dev->enable_vertex_attrib(attrib);
     dev->vertex_attrib_float(attrib, 4, stride, offset);
     dev->vertex_attrib_divisor(attrib, 1U);
   }
 
+  const auto foliageOffset = reinterpret_cast<const void *>(
+      static_cast<std::uintptr_t>(offsetof(InstanceAttributes, foliage)));
+  dev->enable_vertex_attrib(kInstanceFoliageAttrib);
+  dev->vertex_attrib_float(kInstanceFoliageAttrib, 4, stride, foliageOffset);
+  dev->vertex_attrib_divisor(kInstanceFoliageAttrib, 1U);
+
   return true;
 }
 
+/// Handles compute model matrix.
 math::Mat4 compute_model_matrix(const DrawCommand &command) noexcept {
   return command.modelMatrix;
 }
 
+/// Handles compute mvp.
 math::Mat4 compute_mvp(const math::Mat4 &model,
                        const math::Mat4 &viewProjection) noexcept {
   return math::mul(viewProjection, model);
 }
 
+/// Handles hash u64.
 std::uint64_t hash_u64(std::uint64_t hash, std::uint64_t value) noexcept {
   hash ^= value;
   return hash * kFnv1a64Prime;
 }
 
+/// Handles hash float.
 std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
   std::uint32_t bits = 0U;
   if (value != 0.0F) {
@@ -2795,12 +2982,14 @@ std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
   return hash_u64(hash, bits);
 }
 
+/// Handles hash vec3.
 std::uint64_t hash_vec3(std::uint64_t hash, const math::Vec3 &value) noexcept {
   hash = hash_float(hash, value.x);
   hash = hash_float(hash, value.y);
   return hash_float(hash, value.z);
 }
 
+/// Handles hash mat4.
 std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
   for (const math::Vec4 &column : value.columns) {
     hash = hash_float(hash, column.x);
@@ -2811,6 +3000,7 @@ std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
   return hash;
 }
 
+/// Handles directional shadow cache key.
 std::uint64_t directional_shadow_cache_key(
     CommandBufferView commandBufferView, std::size_t opaqueCount,
     const DirectionalLightData &light, const CascadeSplits &splits,
@@ -2833,12 +3023,17 @@ std::uint64_t directional_shadow_cache_key(
     hash = hash_u64(hash, command.sortKey.value);
     hash = hash_u64(hash, command.entity);
     hash = hash_u64(hash, command.mesh.id);
+    hash = hash_float(hash, command.foliageWindStrength);
+    hash = hash_float(hash, command.foliageWindFrequency);
+    hash = hash_float(hash, command.foliageWindPhase);
+    hash = hash_u64(hash, command.foliageLodIndex);
     hash = hash_mat4(hash, command.modelMatrix);
   }
 
   return hash;
 }
 
+/// Handles extract normal matrix.
 void extract_normal_matrix(const math::Mat4 &model,
                            float *normalMatrixOut) noexcept {
   if (normalMatrixOut == nullptr) {
@@ -2919,6 +3114,12 @@ void CommandBufferBuilder::sort_by_key() noexcept {
               if (!materials_equal(lhs.material, rhs.material)) {
                 return material_less(lhs.material, rhs.material);
               }
+              if (lhs.foliageWindStrength != rhs.foliageWindStrength) {
+                return lhs.foliageWindStrength < rhs.foliageWindStrength;
+              }
+              if (lhs.foliageWindFrequency != rhs.foliageWindFrequency) {
+                return lhs.foliageWindFrequency < rhs.foliageWindFrequency;
+              }
               return (lhs.sortKey.value & kDrawKeyDepthMask) <
                      (rhs.sortKey.value & kDrawKeyDepthMask);
             });
@@ -2935,6 +3136,7 @@ CommandBufferView CommandBufferBuilder::view() const noexcept {
   return commandBufferView;
 }
 
+/// Builds the requested runtime data for static mesh batches.
 std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
                                       std::size_t start, std::size_t end,
                                       StaticMeshBatch *batches,
@@ -2978,6 +3180,7 @@ std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
   return batchCount;
 }
 
+/// Flushes queued work to the backing runtime system for renderer.
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept {
@@ -2992,9 +3195,9 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   int drawableWidth = 1280;
   int drawableHeight = 720;
-  if ((g_sceneViewportWidth > 0) && (g_sceneViewportHeight > 0)) {
-    drawableWidth = g_sceneViewportWidth;
-    drawableHeight = g_sceneViewportHeight;
+  if ((renderer_context().sceneViewportWidth > 0) && (renderer_context().sceneViewportHeight > 0)) {
+    drawableWidth = renderer_context().sceneViewportWidth;
+    drawableHeight = renderer_context().sceneViewportHeight;
   } else {
     core::render_drawable_size(&drawableWidth, &drawableHeight);
   }
@@ -3033,14 +3236,14 @@ void flush_renderer(CommandBufferView commandBufferView,
   const float aspect =
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
   const math::Mat4 viewMat = math::look_at(
-      g_activeCamera.position, g_activeCamera.target, g_activeCamera.up);
-  const float fov = (g_activeCamera.fovRadians > 0.0F)
-                        ? g_activeCamera.fovRadians
+      renderer_context().activeCamera.position, renderer_context().activeCamera.target, renderer_context().activeCamera.up);
+  const float fov = (renderer_context().activeCamera.fovRadians > 0.0F)
+                        ? renderer_context().activeCamera.fovRadians
                         : kDefaultFovRadians;
   const float nearP =
-      (g_activeCamera.nearPlane > 0.0F) ? g_activeCamera.nearPlane : kNearClip;
+      (renderer_context().activeCamera.nearPlane > 0.0F) ? renderer_context().activeCamera.nearPlane : kNearClip;
   const float farP =
-      (g_activeCamera.farPlane > nearP) ? g_activeCamera.farPlane : kFarClip;
+      (renderer_context().activeCamera.farPlane > nearP) ? renderer_context().activeCamera.farPlane : kFarClip;
   const math::Mat4 projMat = math::perspective(fov, aspect, nearP, farP);
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 
@@ -3199,7 +3402,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     std::array<ShadowCandidate, kMaxSpotLights> spotCandidates{};
     std::size_t spotCandidateCount = 0U;
-    const math::Vec3 &camPos = g_activeCamera.position;
+    const math::Vec3 &camPos = renderer_context().activeCamera.position;
     for (std::size_t li = 0U; li < lights.spotLightCount; ++li) {
       if (!lights.spotLights[li].castShadow) {
         continue;
@@ -3286,7 +3489,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
     std::size_t pointCandidateCount = 0U;
-    const math::Vec3 &camPos = g_activeCamera.position;
+    const math::Vec3 &camPos = renderer_context().activeCamera.position;
     for (std::size_t li = 0U; li < lights.pointLightCount; ++li) {
       if (!lights.pointLights[li].castShadow) {
         continue;
@@ -3419,6 +3622,9 @@ void flush_renderer(CommandBufferView commandBufferView,
     if (backend.gbufProjectionLoc >= 0) {
       dev->set_uniform_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
     }
+    if (backend.gbufTimeLoc >= 0) {
+      dev->set_uniform_float(backend.gbufTimeLoc, timeSeconds);
+    }
 
     auto drawGBufferBatches = [&]() {
       std::uint32_t boundVertexArray = 0U;
@@ -3457,6 +3663,7 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->set_uniform_vec3(backend.gbufEmissiveLoc,
                                 &command.material.emissive.x);
         }
+        upload_gbuffer_foliage_uniforms(backend, dev, command);
 
         if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
             upload_instance_matrices(backend, dev, *mesh, commandBufferView,
@@ -3482,6 +3689,7 @@ void flush_renderer(CommandBufferView commandBufferView,
               static_cast<std::size_t>(batch.first) +
               static_cast<std::size_t>(local);
           const DrawCommand &singleCommand = commandBufferView.data[commandIndex];
+          upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
           const math::Mat4 model = compute_model_matrix(singleCommand);
           float normalMatrix[9] = {};
           extract_normal_matrix(model, normalMatrix);
@@ -3819,7 +4027,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       if (backend.dlCameraPosLoc >= 0) {
         dev->set_uniform_vec3(backend.dlCameraPosLoc,
-                              &g_activeCamera.position.x);
+                              &renderer_context().activeCamera.position.x);
       }
       if (backend.dlScreenSizeLoc >= 0) {
         const float screenSize[2] = {static_cast<float>(drawableWidth),
@@ -3952,7 +4160,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
       if (backend.pbrCameraPosLocation >= 0) {
         dev->set_uniform_vec3(backend.pbrCameraPosLocation,
-                              &g_activeCamera.position.x);
+                              &renderer_context().activeCamera.position.x);
       }
       if (backend.pbrViewLocation >= 0) {
         dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
@@ -3999,6 +4207,7 @@ void flush_renderer(CommandBufferView commandBufferView,
           if (backend.pbrOpacityLocation >= 0)
             dev->set_uniform_float(backend.pbrOpacityLocation,
                                    cmd.material.opacity);
+          upload_pbr_foliage_uniforms(backend, dev, cmd);
           const std::uint32_t albedoGpu =
               texture_gpu_id(cmd.material.albedoTexture);
           const bool hasTex =
@@ -4078,7 +4287,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
     if (backend.pbrCameraPosLocation >= 0) {
       dev->set_uniform_vec3(backend.pbrCameraPosLocation,
-                            &g_activeCamera.position.x);
+                            &renderer_context().activeCamera.position.x);
     }
     if (backend.pbrViewLocation >= 0) {
       dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
@@ -4111,6 +4320,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.pbrUseInstancingLocation >= 0) {
         dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
       }
+      upload_pbr_foliage_uniforms(backend, dev, command);
       if (backend.pbrModelLocation >= 0) {
         dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
       }
@@ -4184,6 +4394,7 @@ void flush_renderer(CommandBufferView commandBufferView,
           }
 
           uploadForwardMaterial(command.material, &boundAlbedoTexture);
+          upload_pbr_foliage_uniforms(backend, dev, command);
 
           if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
               upload_instance_matrices(backend, dev, *mesh, commandBufferView,
@@ -4358,7 +4569,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   // --- Auto-exposure pass: compute average luminance → adapt exposure ---
   const bool autoExposureEnabled =
       backend.autoExposureAvailable &&
-      core::cvar_get_bool("r_auto_exposure", false);
+      core::cvar_get_bool("r_auto_exposure", true);
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
     ensure_luminance_resources(backend, drawableWidth, drawableHeight);
@@ -4486,7 +4697,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   gpu_profiler_end_pass(GpuPassId::Tonemap);
 
   // --- FXAA pass (optional): finalColor → sceneColor (ping-pong) ---
-  g_fxaaAppliedThisFrame = false;
+  renderer_context().fxaaAppliedThisFrame = false;
   if (backend.fxaaProgram != 0U && core::cvar_get_bool("r_fxaa")) {
     const std::uint32_t sceneFbo =
         pass_resource_framebuffer(passRes.sceneColor);
@@ -4515,7 +4726,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
 
-    g_fxaaAppliedThisFrame = true;
+    renderer_context().fxaaAppliedThisFrame = true;
   }
 
   // --- Prepare back buffer for editor overlay (ImGui) ---
@@ -4534,12 +4745,14 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
   frameStats.gpuPointShadowMs = gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
-  g_lastFrameStats = frameStats;
+  renderer_context().lastFrameStats = frameStats;
 }
 
+/// Shuts down the owning system for renderer.
 void shutdown_renderer() noexcept {
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
+    reset_renderer_public_state();
     return;
   }
 
@@ -4551,34 +4764,61 @@ void shutdown_renderer() noexcept {
   }
 
   backend = BackendState{};
-  g_activeSkyboxTexture = kInvalidTextureHandle;
+  reset_renderer_public_state();
 }
 
+/// Sets the requested value for active camera.
 void set_active_camera(const CameraState &camera) noexcept {
-  g_activeCamera = camera;
+  renderer_context().activeCamera = camera;
 }
 
+/// Sets the virtual root used for built-in renderer shaders.
+void set_shader_root_path(const char *path) noexcept {
+  const char *source =
+      ((path != nullptr) && (path[0] != '\0')) ? path : "assets/shaders";
+  const std::size_t len = std::strlen(source);
+  const std::size_t maxCopy =
+      sizeof(renderer_context().shaderRootPath) - 1U;
+  const std::size_t copyLen = (len < maxCopy) ? len : maxCopy;
+  std::memcpy(renderer_context().shaderRootPath, source, copyLen);
+  renderer_context().shaderRootPath[copyLen] = '\0';
+  if ((copyLen > 0U) &&
+      (renderer_context().shaderRootPath[copyLen - 1U] == '/')) {
+    renderer_context().shaderRootPath[copyLen - 1U] = '\0';
+  }
+}
+
+/// Sets the requested value for scene viewport size.
 void set_scene_viewport_size(int width, int height) noexcept {
-  g_sceneViewportWidth = (width > 0) ? width : 0;
-  g_sceneViewportHeight = (height > 0) ? height : 0;
+  renderer_context().sceneViewportWidth = (width > 0) ? width : 0;
+  renderer_context().sceneViewportHeight = (height > 0) ? height : 0;
 }
 
+/// Sets the requested value for skybox texture.
 void set_skybox_texture(TextureHandle cubemap) noexcept {
-  g_activeSkyboxTexture = cubemap;
+  renderer_context().activeSkyboxTexture = cubemap;
 }
 
-TextureHandle get_skybox_texture() noexcept { return g_activeSkyboxTexture; }
+/// Returns the requested value for skybox texture.
+TextureHandle get_skybox_texture() noexcept {
+  return renderer_context().activeSkyboxTexture;
+}
 
-CameraState get_active_camera() noexcept { return g_activeCamera; }
+/// Returns the requested value for active camera.
+CameraState get_active_camera() noexcept {
+  return renderer_context().activeCamera;
+}
 
+/// Returns the requested value for scene viewport texture.
 std::uint32_t get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
-  if (g_fxaaAppliedThisFrame) {
+  if (renderer_context().fxaaAppliedThisFrame) {
     return pass_resource_gpu_texture(passRes.sceneColor);
   }
   return pass_resource_gpu_texture(passRes.finalColor);
 }
 
+/// Returns the requested value for prefiltered environment texture.
 std::uint32_t get_prefiltered_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_prefilter", true)) {
@@ -4587,6 +4827,7 @@ std::uint32_t get_prefiltered_environment_texture() noexcept {
   return backend_state().prefilteredEnvironmentTexture;
 }
 
+/// Returns the requested value for irradiance environment texture.
 std::uint32_t get_irradiance_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_irradiance", true)) {
@@ -4595,6 +4836,7 @@ std::uint32_t get_irradiance_environment_texture() noexcept {
   return backend_state().irradianceEnvironmentTexture;
 }
 
+/// Returns the requested value for brdf lut texture.
 std::uint32_t get_brdf_lut_texture() noexcept {
   if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
     return 0U;
@@ -4602,6 +4844,7 @@ std::uint32_t get_brdf_lut_texture() noexcept {
   return backend_state().brdfLutTexture;
 }
 
+/// Parses text into the engine representation for distance fog mode.
 DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
   if (cvar_string_equals(mode, "linear") || cvar_string_equals(mode, "1")) {
     return DistanceFogMode::Linear;
@@ -4617,6 +4860,7 @@ DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
   return DistanceFogMode::Off;
 }
 
+/// Parses text into the engine representation for distance fog color.
 bool parse_distance_fog_color(const char *value,
                               math::Vec3 *colorOut) noexcept {
   if ((value == nullptr) || (colorOut == nullptr)) {
@@ -4640,6 +4884,7 @@ bool parse_distance_fog_color(const char *value,
   return true;
 }
 
+/// Clamps and fills settings into a safe runtime range for distance fog settings.
 DistanceFogSettings normalize_distance_fog_settings(
     const DistanceFogSettings &settings) noexcept {
   DistanceFogSettings normalized{};
@@ -4671,6 +4916,7 @@ DistanceFogSettings normalize_distance_fog_settings(
   return normalized;
 }
 
+/// Clamps and fills settings into a safe runtime range for height fog settings.
 HeightFogSettings normalize_height_fog_settings(
     const HeightFogSettings &settings) noexcept {
   HeightFogSettings normalized{};
@@ -4690,6 +4936,7 @@ HeightFogSettings normalize_height_fog_settings(
   return normalized;
 }
 
+/// Clamps and fills settings into a safe runtime range for reflection probe bake settings.
 ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
     const ReflectionProbeBakeSettings &settings) noexcept {
   ReflectionProbeBakeSettings normalized{};
@@ -4706,13 +4953,14 @@ ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
   return normalized;
 }
 
+/// Handles bake reflection probe.
 ReflectionProbeBakeResult
 bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   ReflectionProbeBakeResult result{};
   result.settings = normalize_reflection_probe_bake_settings(request.settings);
 
   if ((request.sourceCubemap == kInvalidTextureHandle) &&
-      (g_activeSkyboxTexture == kInvalidTextureHandle)) {
+      (renderer_context().activeSkyboxTexture == kInvalidTextureHandle)) {
     return result;
   }
 
@@ -4746,8 +4994,9 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   return result;
 }
 
+/// Handles renderer get last frame stats.
 RendererFrameStats renderer_get_last_frame_stats() noexcept {
-  return g_lastFrameStats;
+  return renderer_context().lastFrameStats;
 }
 
 } // namespace engine::renderer

@@ -1,3 +1,5 @@
+// Implements editor behavior for the Engine editor tool.
+
 #include "engine/editor/editor.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -32,6 +34,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -42,6 +45,7 @@
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
+#include "engine/engine.h"
 #include "engine/editor/editor_camera.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
@@ -63,30 +67,51 @@ namespace engine::editor {
 
 namespace {
 
-bool g_editorInitialized = false;
-runtime::World *g_world = nullptr;
-std::uint32_t g_selectedEntityIndex = 0U;
+/// Enumerates play state values used by the engine.
 enum class PlayState : std::uint8_t { Stopped, Playing, Paused };
-PlayState g_playState = PlayState::Stopped;
-std::unique_ptr<char[]> g_playSnapshotBuffer{};
-std::size_t g_playSnapshotCapacity = 0U;
-std::size_t g_playSnapshotSize = 0U;
-bool g_hasPlaySnapshot = false;
-bool g_worldRestoreFailed = false;
-EditorCamera g_editorCamera{};
-ImGuizmo::OPERATION g_gizmoOp = ImGuizmo::TRANSLATE;
-bool g_gizmoWasUsing = false;
-runtime::Transform g_gizmoStartTransform{};
-CommandHistory g_commandHistory{};
-DebugCamera g_debugCamera{};
-renderer::CameraState g_frozenCameraState{};
-bool g_debugCameraActive = false;
+
+// Thumbnail cache: maps a file path to a GL texture.
+struct ThumbnailEntry final {
+  char path[512] = {};
+  GLuint textureId = 0U;
+  int width = 0;
+  int height = 0;
+};
+constexpr std::size_t kMaxThumbnails = 128U;
+
+/// Owns editor UI/session state for the currently attached runtime world.
+struct EditorSession final {
+  bool initialized = false;
+  runtime::World *world = nullptr;
+  std::uint32_t selectedEntityIndex = 0U;
+  PlayState playState = PlayState::Stopped;
+  std::unique_ptr<char[]> playSnapshotBuffer{};
+  std::size_t playSnapshotCapacity = 0U;
+  std::size_t playSnapshotSize = 0U;
+  bool hasPlaySnapshot = false;
+  bool worldRestoreFailed = false;
+  EditorCamera editorCamera{};
+  ImGuizmo::OPERATION gizmoOp = ImGuizmo::TRANSLATE;
+  bool gizmoWasUsing = false;
+  runtime::Transform gizmoStartTransform{};
+  CommandHistory commandHistory{};
+  DebugCamera debugCamera{};
+  renderer::CameraState frozenCameraState{};
+  bool debugCameraActive = false;
+  char selectedAssetPath[512] = {};
+  std::array<ThumbnailEntry, kMaxThumbnails> thumbnailCache{};
+  std::size_t thumbnailCount = 0U;
+};
+
+EditorSession g_editorSession{};
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kNameTypeName = "engine::runtime::NameComponent";
 constexpr const char *kReflectionProbeTypeName =
     "engine::runtime::ReflectionProbeComponent";
+constexpr const char *kFoliagePatchTypeName =
+    "engine::runtime::FoliagePatchComponent";
 constexpr const char *kPointLightTypeName =
     "engine::runtime::PointLightComponent";
 constexpr const char *kSpotLightTypeName =
@@ -97,36 +122,40 @@ constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
 constexpr const char *kMeshSectionLabel = "MeshComponent";
+constexpr const char *kFoliagePatchSectionLabel = "FoliagePatchComponent";
 constexpr const char *kLightSectionLabel = "LightComponent";
 constexpr const char *kReflectionProbeSectionLabel = "ReflectionProbeComponent";
 constexpr const char *kPointLightSectionLabel = "PointLightComponent";
 constexpr const char *kSpotLightSectionLabel = "SpotLightComponent";
 constexpr const char *kSpringArmSectionLabel = "SpringArmComponent";
 constexpr const char *kScriptSectionLabel = "ScriptComponent";
-constexpr const char *kScenePath = "assets/scene.json";
-char g_selectedAssetPath[512] = {};
 
-// Thumbnail cache: maps a file path to a GL texture.
-struct ThumbnailEntry final {
-  char path[512] = {};
-  GLuint textureId = 0U;
-  int width = 0;
-  int height = 0;
-};
-constexpr std::size_t kMaxThumbnails = 128U;
-ThumbnailEntry g_thumbnailCache[kMaxThumbnails] = {};
-std::size_t g_thumbnailCount = 0U;
+/// Returns the configured editor scene path.
+const char *editor_scene_path() noexcept {
+  const char *path = active_config().editorScenePath;
+  return (path != nullptr) ? path : "";
+}
 
+/// Returns the configured editor asset browser root.
+const char *editor_asset_root() noexcept {
+  const char *path = active_config().editorAssetRoot;
+  return (path != nullptr) ? path : "";
+}
+
+/// Loads the requested resource for thumbnail texture.
 GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
     return 0U;
   }
 
   // Check cache.
-  for (std::size_t i = 0U; i < g_thumbnailCount; ++i) {
-    if (std::strcmp(g_thumbnailCache[i].path, assetPath) == 0) {
-      return g_thumbnailCache[i].textureId;
+  for (std::size_t i = 0U; i < g_editorSession.thumbnailCount; ++i) {
+    if (std::strcmp(g_editorSession.thumbnailCache[i].path, assetPath) == 0) {
+      return g_editorSession.thumbnailCache[i].textureId;
     }
+  }
+  if (g_editorSession.thumbnailCount >= kMaxThumbnails) {
+    return 0U;
   }
 
   // Build the .thumbnails/<basename>.png path.
@@ -158,7 +187,9 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   std::fseek(fp, 0, SEEK_END);
   const long fileLen = std::ftell(fp);
   std::fseek(fp, 0, SEEK_SET);
-  if (fileLen <= 0) {
+  if ((fileLen <= 0) ||
+      (static_cast<unsigned long>(fileLen) >
+       static_cast<unsigned long>(std::numeric_limits<int>::max()))) {
     std::fclose(fp);
     return 0U;
   }
@@ -173,8 +204,9 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   int w = 0;
   int h = 0;
   int channels = 0;
+  const int stbSize = static_cast<int>(fileData.size());
   unsigned char *pixels = stbi_load_from_memory(
-      fileData.data(), static_cast<int>(fileData.size()), &w, &h, &channels, 4);
+      fileData.data(), stbSize, &w, &h, &channels, 4);
   if (pixels == nullptr) {
     return 0U;
   }
@@ -188,47 +220,69 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
                pixels);
   stbi_image_free(pixels);
 
-  if ((tex != 0U) && (g_thumbnailCount < kMaxThumbnails)) {
-    auto &entry = g_thumbnailCache[g_thumbnailCount];
+  if (tex != 0U) {
+    auto &entry = g_editorSession.thumbnailCache[g_editorSession.thumbnailCount];
     std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
     entry.textureId = tex;
     entry.width = w;
     entry.height = h;
-    ++g_thumbnailCount;
+    ++g_editorSession.thumbnailCount;
   }
 
   return tex;
 }
 
+/// Releases cached thumbnail GL textures owned by the editor.
+void clear_thumbnail_cache() noexcept {
+  for (std::size_t i = 0U; i < g_editorSession.thumbnailCount; ++i) {
+    if (g_editorSession.thumbnailCache[i].textureId != 0U) {
+      const GLuint tex = g_editorSession.thumbnailCache[i].textureId;
+      glDeleteTextures(1, &tex);
+    }
+    g_editorSession.thumbnailCache[i] = ThumbnailEntry{};
+  }
+  g_editorSession.thumbnailCount = 0U;
+}
+
+/// Handles world is editable.
 bool world_is_editable() noexcept {
-  return (g_world != nullptr) && !g_worldRestoreFailed &&
-         (g_playState == PlayState::Stopped) &&
-         (g_world->current_phase() == runtime::WorldPhase::Idle);
+  return (g_editorSession.world != nullptr) && !g_editorSession.worldRestoreFailed &&
+         (g_editorSession.playState == PlayState::Stopped) &&
+         (g_editorSession.world->current_phase() == runtime::WorldPhase::Idle);
 }
 
+/// Handles world can load scene.
 bool world_can_load_scene() noexcept {
-  return (g_world != nullptr) &&
-         (g_world->current_phase() == runtime::WorldPhase::Idle);
+  return (g_editorSession.world != nullptr) &&
+         (g_editorSession.world->current_phase() == runtime::WorldPhase::Idle);
 }
 
+/// Returns whether the default scene file is available on disk.
+bool default_scene_file_exists() noexcept {
+  std::error_code ec{};
+  return std::filesystem::is_regular_file(editor_scene_path(), ec) && !ec;
+}
+
+/// Stores transform edit command data used by the engine.
 struct TransformEditCommand final : EditorCommand {
   runtime::Entity entity{};
   runtime::Transform oldTransform{};
   runtime::Transform newTransform{};
 
   void execute() noexcept override {
-    if (g_world != nullptr) {
-      static_cast<void>(g_world->add_transform(entity, newTransform));
+    if (g_editorSession.world != nullptr) {
+      static_cast<void>(g_editorSession.world->add_transform(entity, newTransform));
     }
   }
 
   void undo() noexcept override {
-    if (g_world != nullptr) {
-      static_cast<void>(g_world->add_transform(entity, oldTransform));
+    if (g_editorSession.world != nullptr) {
+      static_cast<void>(g_editorSession.world->add_transform(entity, oldTransform));
     }
   }
 };
 
+/// Enumerates component edit type values used by the engine.
 enum class ComponentEditType : std::uint8_t {
   Name,
   Transform,
@@ -236,6 +290,7 @@ enum class ComponentEditType : std::uint8_t {
   Collider,
   Light,
   Mesh,
+  FoliagePatch,
   Script,
   ReflectionProbe,
   PointLight,
@@ -243,9 +298,11 @@ enum class ComponentEditType : std::uint8_t {
   SpringArm,
 };
 
+/// Handles make default entity name.
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept;
 
+/// Stores component edit snapshot data used by the engine.
 struct ComponentEditSnapshot final {
   runtime::NameComponent name{};
   runtime::Transform transform{};
@@ -253,6 +310,7 @@ struct ComponentEditSnapshot final {
   runtime::Collider collider{};
   runtime::LightComponent light{};
   runtime::MeshComponent mesh{};
+  runtime::FoliagePatchComponent foliagePatch{};
   runtime::ScriptComponent script{};
   runtime::ReflectionProbeComponent reflectionProbe{};
   runtime::PointLightComponent pointLight{};
@@ -260,48 +318,52 @@ struct ComponentEditSnapshot final {
   runtime::SpringArmComponent springArm{};
 };
 
+/// Handles capture component snapshot.
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
                                 ComponentEditSnapshot *out) noexcept {
-  if ((g_world == nullptr) || (out == nullptr)) {
+  if ((g_editorSession.world == nullptr) || (out == nullptr)) {
     return false;
   }
 
   switch (type) {
   case ComponentEditType::Name:
-    return g_world->get_name_component(entity, &out->name);
+    return g_editorSession.world->get_name_component(entity, &out->name);
   case ComponentEditType::Transform:
-    return g_world->get_transform(entity, &out->transform);
+    return g_editorSession.world->get_transform(entity, &out->transform);
   case ComponentEditType::RigidBody:
-    return g_world->get_rigid_body(entity, &out->rigidBody);
+    return g_editorSession.world->get_rigid_body(entity, &out->rigidBody);
   case ComponentEditType::Collider:
-    return g_world->get_collider(entity, &out->collider);
+    return g_editorSession.world->get_collider(entity, &out->collider);
   case ComponentEditType::Light:
-    return g_world->get_light_component(entity, &out->light);
+    return g_editorSession.world->get_light_component(entity, &out->light);
   case ComponentEditType::Mesh:
-    return g_world->get_mesh_component(entity, &out->mesh);
+    return g_editorSession.world->get_mesh_component(entity, &out->mesh);
+  case ComponentEditType::FoliagePatch:
+    return g_editorSession.world->get_foliage_patch_component(entity, &out->foliagePatch);
   case ComponentEditType::Script:
-    return g_world->get_script_component(entity, &out->script);
+    return g_editorSession.world->get_script_component(entity, &out->script);
   case ComponentEditType::ReflectionProbe:
-    return g_world->get_reflection_probe_component(entity,
+    return g_editorSession.world->get_reflection_probe_component(entity,
                                                    &out->reflectionProbe);
   case ComponentEditType::PointLight:
-    return g_world->get_point_light_component(entity, &out->pointLight);
+    return g_editorSession.world->get_point_light_component(entity, &out->pointLight);
   case ComponentEditType::SpotLight:
-    return g_world->get_spot_light_component(entity, &out->spotLight);
+    return g_editorSession.world->get_spot_light_component(entity, &out->spotLight);
   case ComponentEditType::SpringArm:
-    return g_world->get_spring_arm(entity, &out->springArm);
+    return g_editorSession.world->get_spring_arm(entity, &out->springArm);
   }
   return false;
 }
 
+/// Handles apply component snapshot.
 bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
                               bool exists,
                               const ComponentEditSnapshot &snapshot) noexcept {
-  if (g_world == nullptr) {
+  if (g_editorSession.world == nullptr) {
     return false;
   }
   const runtime::Entity resolved =
-      g_world->find_entity_by_index(entity.index);
+      g_editorSession.world->find_entity_by_index(entity.index);
   if (resolved == runtime::kInvalidEntity) {
     return false;
   }
@@ -309,59 +371,65 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
   if (!exists) {
     switch (type) {
     case ComponentEditType::Name:
-      return g_world->remove_name_component(resolved);
+      return g_editorSession.world->remove_name_component(resolved);
     case ComponentEditType::Transform:
-      return g_world->remove_transform(resolved);
+      return g_editorSession.world->remove_transform(resolved);
     case ComponentEditType::RigidBody:
-      return g_world->remove_rigid_body(resolved);
+      return g_editorSession.world->remove_rigid_body(resolved);
     case ComponentEditType::Collider:
-      return g_world->remove_collider(resolved);
+      return g_editorSession.world->remove_collider(resolved);
     case ComponentEditType::Light:
-      return g_world->remove_light_component(resolved);
+      return g_editorSession.world->remove_light_component(resolved);
     case ComponentEditType::Mesh:
-      return g_world->remove_mesh_component(resolved);
+      return g_editorSession.world->remove_mesh_component(resolved);
+    case ComponentEditType::FoliagePatch:
+      return g_editorSession.world->remove_foliage_patch_component(resolved);
     case ComponentEditType::Script:
-      return g_world->remove_script_component(resolved);
+      return g_editorSession.world->remove_script_component(resolved);
     case ComponentEditType::ReflectionProbe:
-      return g_world->remove_reflection_probe_component(resolved);
+      return g_editorSession.world->remove_reflection_probe_component(resolved);
     case ComponentEditType::PointLight:
-      return g_world->remove_point_light_component(resolved);
+      return g_editorSession.world->remove_point_light_component(resolved);
     case ComponentEditType::SpotLight:
-      return g_world->remove_spot_light_component(resolved);
+      return g_editorSession.world->remove_spot_light_component(resolved);
     case ComponentEditType::SpringArm:
-      return g_world->remove_spring_arm(resolved);
+      return g_editorSession.world->remove_spring_arm(resolved);
     }
     return false;
   }
 
   switch (type) {
   case ComponentEditType::Name:
-    return g_world->add_name_component(resolved, snapshot.name);
+    return g_editorSession.world->add_name_component(resolved, snapshot.name);
   case ComponentEditType::Transform:
-    return g_world->add_transform(resolved, snapshot.transform);
+    return g_editorSession.world->add_transform(resolved, snapshot.transform);
   case ComponentEditType::RigidBody:
-    return g_world->add_rigid_body(resolved, snapshot.rigidBody);
+    return g_editorSession.world->add_rigid_body(resolved, snapshot.rigidBody);
   case ComponentEditType::Collider:
-    return g_world->add_collider(resolved, snapshot.collider);
+    return g_editorSession.world->add_collider(resolved, snapshot.collider);
   case ComponentEditType::Light:
-    return g_world->add_light_component(resolved, snapshot.light);
+    return g_editorSession.world->add_light_component(resolved, snapshot.light);
   case ComponentEditType::Mesh:
-    return g_world->add_mesh_component(resolved, snapshot.mesh);
+    return g_editorSession.world->add_mesh_component(resolved, snapshot.mesh);
+  case ComponentEditType::FoliagePatch:
+    return g_editorSession.world->add_foliage_patch_component(resolved,
+                                                snapshot.foliagePatch);
   case ComponentEditType::Script:
-    return g_world->add_script_component(resolved, snapshot.script);
+    return g_editorSession.world->add_script_component(resolved, snapshot.script);
   case ComponentEditType::ReflectionProbe:
-    return g_world->add_reflection_probe_component(resolved,
+    return g_editorSession.world->add_reflection_probe_component(resolved,
                                                    snapshot.reflectionProbe);
   case ComponentEditType::PointLight:
-    return g_world->add_point_light_component(resolved, snapshot.pointLight);
+    return g_editorSession.world->add_point_light_component(resolved, snapshot.pointLight);
   case ComponentEditType::SpotLight:
-    return g_world->add_spot_light_component(resolved, snapshot.spotLight);
+    return g_editorSession.world->add_spot_light_component(resolved, snapshot.spotLight);
   case ComponentEditType::SpringArm:
-    return g_world->add_spring_arm(resolved, snapshot.springArm);
+    return g_editorSession.world->add_spring_arm(resolved, snapshot.springArm);
   }
   return false;
 }
 
+/// Stores component edit command data used by the engine.
 struct ComponentEditCommand final : EditorCommand {
   runtime::Entity entity{};
   ComponentEditType type = ComponentEditType::Transform;
@@ -381,6 +449,7 @@ struct ComponentEditCommand final : EditorCommand {
   }
 };
 
+/// Handles execute component add.
 void execute_component_add(runtime::Entity entity, ComponentEditType type,
                            const ComponentEditSnapshot &after) noexcept {
   ComponentEditSnapshot before{};
@@ -398,9 +467,10 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
   cmd->before = before;
   cmd->afterExists = true;
   cmd->after = after;
-  g_commandHistory.execute(cmd);
+  g_editorSession.commandHistory.execute(cmd);
 }
 
+/// Handles execute component remove.
 void execute_component_remove(runtime::Entity entity,
                               ComponentEditType type) noexcept {
   ComponentEditSnapshot before{};
@@ -419,9 +489,10 @@ void execute_component_remove(runtime::Entity entity,
   cmd->beforeExists = true;
   cmd->before = before;
   cmd->afterExists = false;
-  g_commandHistory.execute(cmd);
+  g_editorSession.commandHistory.execute(cmd);
 }
 
+/// Handles default component snapshot.
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept {
   ComponentEditSnapshot snapshot{};
@@ -438,6 +509,30 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::Mesh:
     snapshot.mesh.albedo = math::Vec3(1.0F, 1.0F, 1.0F);
     break;
+  case ComponentEditType::FoliagePatch: {
+    snapshot.foliagePatch.instanceCount = 16U;
+    snapshot.foliagePatch.density = 1.0F;
+    snapshot.foliagePatch.albedo = math::Vec3(0.22F, 0.62F, 0.24F);
+    runtime::MeshComponent sourceMesh{};
+    if ((g_editorSession.world != nullptr) &&
+        g_editorSession.world->get_mesh_component(entity, &sourceMesh)) {
+      snapshot.foliagePatch.meshAssetIds[0] = sourceMesh.meshAssetId;
+      snapshot.foliagePatch.meshAssetIds[1] = sourceMesh.meshAssetId;
+    }
+    for (std::uint32_t i = 0U; i < snapshot.foliagePatch.instanceCount; ++i) {
+      const std::uint32_t x = i % 4U;
+      const std::uint32_t z = i / 4U;
+      runtime::FoliageInstance &instance =
+          snapshot.foliagePatch.instances[i];
+      instance.offset = math::Vec3((static_cast<float>(x) - 1.5F) * 0.9F,
+                                   0.0F,
+                                   (static_cast<float>(z) - 1.5F) * 0.9F);
+      instance.scale = 0.55F + (static_cast<float>(i % 3U) * 0.08F);
+      instance.phase = static_cast<float>(i) * 0.41F;
+      instance.lodIndex = (i >= 12U) ? 1U : 0U;
+    }
+    break;
+  }
   case ComponentEditType::Transform:
   case ComponentEditType::Light:
   case ComponentEditType::Script:
@@ -450,6 +545,7 @@ ComponentEditSnapshot default_component_snapshot(
   return snapshot;
 }
 
+/// Handles make default entity name.
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept {
   if (outName == nullptr) {
@@ -460,18 +556,19 @@ void make_default_entity_name(std::uint32_t entityIndex,
   outName->name[sizeof(outName->name) - 1U] = '\0';
 }
 
+/// Handles capture play snapshot.
 bool capture_play_snapshot() noexcept {
-  if (g_world == nullptr) {
+  if (g_editorSession.world == nullptr) {
     return false;
   }
 
-  std::size_t capacity = g_playSnapshotCapacity;
+  std::size_t capacity = g_editorSession.playSnapshotCapacity;
   if (capacity < core::JsonWriter::kBufferBytes) {
     capacity = core::JsonWriter::kBufferBytes;
   }
 
   const std::size_t estimatedCapacity =
-      (g_world->alive_entity_count() * 256U) + 4096U;
+      (g_editorSession.world->alive_entity_count() * 256U) + 4096U;
   if (capacity < estimatedCapacity) {
     capacity = estimatedCapacity;
   }
@@ -483,12 +580,12 @@ bool capture_play_snapshot() noexcept {
     }
 
     std::size_t snapshotSize = 0U;
-    if (runtime::save_scene(*g_world, candidate.get(), capacity,
+    if (runtime::save_scene(*g_editorSession.world, candidate.get(), capacity,
                             &snapshotSize)) {
-      g_playSnapshotBuffer.swap(candidate);
-      g_playSnapshotCapacity = capacity;
-      g_playSnapshotSize = snapshotSize;
-      g_hasPlaySnapshot = true;
+      g_editorSession.playSnapshotBuffer.swap(candidate);
+      g_editorSession.playSnapshotCapacity = capacity;
+      g_editorSession.playSnapshotSize = snapshotSize;
+      g_editorSession.hasPlaySnapshot = true;
       return true;
     }
 
@@ -508,22 +605,23 @@ bool capture_play_snapshot() noexcept {
   return false;
 }
 
+/// Handles start play mode.
 void start_play_mode() noexcept {
-  if (g_world == nullptr) {
+  if (g_editorSession.world == nullptr) {
     return;
   }
 
-  if (g_worldRestoreFailed) {
+  if (g_editorSession.worldRestoreFailed) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "play blocked: load scene to recover from restore error");
     return;
   }
 
-  if (g_playState == PlayState::Playing) {
+  if (g_editorSession.playState == PlayState::Playing) {
     return;
   }
 
-  if (g_playState == PlayState::Stopped) {
+  if (g_editorSession.playState == PlayState::Stopped) {
     if (!capture_play_snapshot()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to capture pre-play scene snapshot");
@@ -531,55 +629,59 @@ void start_play_mode() noexcept {
     }
   }
 
-  g_playState = PlayState::Playing;
+  g_editorSession.playState = PlayState::Playing;
   core::log_message(core::LogLevel::Info, "editor", "play");
 }
 
+/// Handles pause play mode.
 void pause_play_mode() noexcept {
-  if ((g_world == nullptr) || (g_playState != PlayState::Playing)) {
+  if ((g_editorSession.world == nullptr) || (g_editorSession.playState != PlayState::Playing)) {
     return;
   }
 
-  g_playState = PlayState::Paused;
+  g_editorSession.playState = PlayState::Paused;
   core::log_message(core::LogLevel::Info, "editor", "pause");
 }
 
+/// Handles stop play mode.
 void stop_play_mode() noexcept {
-  if ((g_world == nullptr) || (g_playState == PlayState::Stopped)) {
+  if ((g_editorSession.world == nullptr) || (g_editorSession.playState == PlayState::Stopped)) {
     return;
   }
 
   bool restored = true;
 
-  if (!g_hasPlaySnapshot || (g_playSnapshotSize == 0U)) {
+  if (!g_editorSession.hasPlaySnapshot || (g_editorSession.playSnapshotSize == 0U)) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "stop requested without pre-play snapshot");
     restored = false;
-  } else if (!runtime::load_scene(*g_world, g_playSnapshotBuffer.get(),
-                                  g_playSnapshotSize)) {
+  } else if (!runtime::load_scene(*g_editorSession.world, g_editorSession.playSnapshotBuffer.get(),
+                                  g_editorSession.playSnapshotSize)) {
     core::log_message(core::LogLevel::Error, "editor",
                       "failed to restore pre-play scene snapshot");
-    runtime::reset_world(*g_world);
+    runtime::reset_world(*g_editorSession.world);
     core::log_message(core::LogLevel::Warning, "editor",
                       "world reset to empty after restore failure");
-    g_selectedEntityIndex = 0U;
+    g_editorSession.selectedEntityIndex = 0U;
     // restored stays true: world is clean and usable, just empty
   } else {
-    g_selectedEntityIndex = 0U;
+    g_editorSession.selectedEntityIndex = 0U;
   }
 
-  g_playState = PlayState::Stopped;
-  g_worldRestoreFailed = !restored;
+  g_editorSession.playState = PlayState::Stopped;
+  g_editorSession.worldRestoreFailed = !restored;
 
   core::log_message(core::LogLevel::Info, "editor", "stop");
 }
 
+/// Handles mark modified.
 void mark_modified(bool *modified, bool changed) noexcept {
   if ((modified != nullptr) && changed) {
     *modified = true;
   }
 }
 
+/// Handles draw vec2 field.
 void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -597,6 +699,7 @@ void draw_vec2_field(const char *label, math::Vec2 &value,
   ImGui::PopID();
 }
 
+/// Handles draw vec3 field.
 void draw_vec3_field(const char *label, math::Vec3 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -618,6 +721,7 @@ void draw_vec3_field(const char *label, math::Vec3 &value,
   ImGui::PopID();
 }
 
+/// Handles draw vec4 field.
 void draw_vec4_field(const char *label, math::Vec4 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -643,6 +747,7 @@ void draw_vec4_field(const char *label, math::Vec4 &value,
   ImGui::PopID();
 }
 
+/// Handles draw quat field.
 void draw_quat_field(const char *label, math::Quat &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -668,6 +773,7 @@ void draw_quat_field(const char *label, math::Quat &value,
   ImGui::PopID();
 }
 
+/// Handles draw field.
 void draw_field(const core::TypeDescriptor &desc, void *instance,
                 const core::TypeField &field, bool *modified) noexcept {
   if ((instance == nullptr) || (field.name == nullptr)) {
@@ -741,6 +847,7 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
   }
 }
 
+/// Handles draw reflected component.
 bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   if ((typeName == nullptr) || (instance == nullptr)) {
     return false;
@@ -761,6 +868,7 @@ bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   return modified;
 }
 
+/// Handles draw main menu bar.
 void draw_main_menu_bar() noexcept {
   if (!ImGui::BeginMainMenuBar()) {
     return;
@@ -768,16 +876,18 @@ void draw_main_menu_bar() noexcept {
 
   if (ImGui::BeginMenu("File")) {
     const bool canSaveScene = world_is_editable();
-    const bool canLoadScene = world_can_load_scene();
+    const bool sceneFileExists = default_scene_file_exists();
+    const bool canLoadScene = world_can_load_scene() && sceneFileExists;
 
     if (!canSaveScene) {
       ImGui::BeginDisabled();
     }
 
     if (ImGui::MenuItem("Save Scene") && canSaveScene) {
-      if (!runtime::save_scene(*g_world, kScenePath)) {
+      const char *scenePath = editor_scene_path();
+      if (!runtime::save_scene(*g_editorSession.world, scenePath)) {
         core::log_message(core::LogLevel::Error, "editor",
-                          "failed to save scene to assets/scene.json");
+                          "failed to save configured editor scene");
       }
     }
 
@@ -789,13 +899,23 @@ void draw_main_menu_bar() noexcept {
       ImGui::BeginDisabled();
     }
 
-    if (ImGui::MenuItem("Load Scene") && canLoadScene) {
-      if (!runtime::load_scene(*g_world, kScenePath)) {
+    const bool loadScenePressed = ImGui::MenuItem("Load Scene");
+    if (!sceneFileExists &&
+        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::BeginTooltip();
+      ImGui::Text("No saved scene at %s", editor_scene_path());
+      ImGui::EndTooltip();
+    }
+
+    if (loadScenePressed && canLoadScene) {
+      const char *scenePath = editor_scene_path();
+      if (!runtime::load_scene(*g_editorSession.world, scenePath)) {
         core::log_message(core::LogLevel::Error, "editor",
-                          "failed to load scene from assets/scene.json");
+                          "failed to load configured editor scene");
       } else {
-        g_selectedEntityIndex = 0U;
-        g_worldRestoreFailed = false;
+        g_editorSession.selectedEntityIndex = 0U;
+        g_editorSession.worldRestoreFailed = false;
+        g_editorSession.commandHistory.clear();
       }
     }
 
@@ -807,23 +927,23 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("Edit")) {
-    if (!g_commandHistory.can_undo()) {
+    if (!g_editorSession.commandHistory.can_undo()) {
       ImGui::BeginDisabled();
     }
     if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-      g_commandHistory.undo();
+      g_editorSession.commandHistory.undo();
     }
-    if (!g_commandHistory.can_undo()) {
+    if (!g_editorSession.commandHistory.can_undo()) {
       ImGui::EndDisabled();
     }
 
-    if (!g_commandHistory.can_redo()) {
+    if (!g_editorSession.commandHistory.can_redo()) {
       ImGui::BeginDisabled();
     }
     if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z")) {
-      g_commandHistory.redo();
+      g_editorSession.commandHistory.redo();
     }
-    if (!g_commandHistory.can_redo()) {
+    if (!g_editorSession.commandHistory.can_redo()) {
       ImGui::EndDisabled();
     }
 
@@ -833,6 +953,7 @@ void draw_main_menu_bar() noexcept {
   ImGui::EndMainMenuBar();
 }
 
+/// Handles draw remove component button.
 bool draw_remove_component_button(const char *id, bool editable) noexcept {
   if (!editable || (id == nullptr)) {
     return false;
@@ -846,8 +967,9 @@ bool draw_remove_component_button(const char *id, bool editable) noexcept {
   return removePressed;
 }
 
+/// Handles draw add component combo.
 void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
-  if (!editable || (g_world == nullptr)) {
+  if (!editable || (g_editorSession.world == nullptr)) {
     return;
   }
 
@@ -869,7 +991,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kTransformTypeName) == 0) &&
-        (g_world->get_transform_read_ptr(entity) == nullptr)) {
+        (g_editorSession.world->get_transform_read_ptr(entity) == nullptr)) {
       if (ImGui::Selectable(kTransformSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::Transform,
@@ -879,7 +1001,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kRigidBodyTypeName) == 0) &&
-        (g_world->get_rigid_body_ptr(entity) == nullptr)) {
+        (g_editorSession.world->get_rigid_body_ptr(entity) == nullptr)) {
       if (ImGui::Selectable(kRigidBodySectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::RigidBody,
@@ -889,7 +1011,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kColliderTypeName) == 0) &&
-        (g_world->get_collider_ptr(entity) == nullptr)) {
+        (g_editorSession.world->get_collider_ptr(entity) == nullptr)) {
       if (ImGui::Selectable(kColliderSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::Collider,
@@ -899,7 +1021,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kReflectionProbeTypeName) == 0) &&
-        (g_world->get_reflection_probe_component_ptr(entity) == nullptr)) {
+        (g_editorSession.world->get_reflection_probe_component_ptr(entity) == nullptr)) {
       if (ImGui::Selectable(kReflectionProbeSectionLabel)) {
         execute_component_add(entity, ComponentEditType::ReflectionProbe,
                               default_component_snapshot(
@@ -908,8 +1030,18 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
       continue;
     }
 
+    if ((std::strcmp(desc->name, kFoliagePatchTypeName) == 0) &&
+        !g_editorSession.world->has_foliage_patch_component(entity)) {
+      if (ImGui::Selectable(kFoliagePatchSectionLabel)) {
+        execute_component_add(
+            entity, ComponentEditType::FoliagePatch,
+            default_component_snapshot(entity, ComponentEditType::FoliagePatch));
+      }
+      continue;
+    }
+
     if ((std::strcmp(desc->name, kPointLightTypeName) == 0) &&
-        !g_world->has_point_light_component(entity)) {
+        !g_editorSession.world->has_point_light_component(entity)) {
       if (ImGui::Selectable(kPointLightSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::PointLight,
@@ -919,7 +1051,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kSpotLightTypeName) == 0) &&
-        !g_world->has_spot_light_component(entity)) {
+        !g_editorSession.world->has_spot_light_component(entity)) {
       if (ImGui::Selectable(kSpotLightSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::SpotLight,
@@ -929,7 +1061,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kSpringArmTypeName) == 0) &&
-        !g_world->has_spring_arm(entity)) {
+        !g_editorSession.world->has_spring_arm(entity)) {
       if (ImGui::Selectable(kSpringArmSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::SpringArm,
@@ -939,7 +1071,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
   }
 
-  if (g_world->get_mesh_component_ptr(entity) == nullptr) {
+  if (g_editorSession.world->get_mesh_component_ptr(entity) == nullptr) {
     if (ImGui::Selectable(kMeshSectionLabel)) {
       execute_component_add(
           entity, ComponentEditType::Mesh,
@@ -949,7 +1081,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
 
   {
     runtime::LightComponent tmpLight{};
-    if (!g_world->get_light_component(entity, &tmpLight)) {
+    if (!g_editorSession.world->get_light_component(entity, &tmpLight)) {
       if (ImGui::Selectable(kLightSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::Light,
@@ -960,7 +1092,7 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
 
   {
     runtime::ScriptComponent tmpScript{};
-    if (!g_world->get_script_component(entity, &tmpScript)) {
+    if (!g_editorSession.world->get_script_component(entity, &tmpScript)) {
       if (ImGui::Selectable(kScriptSectionLabel)) {
         execute_component_add(
             entity, ComponentEditType::Script,
@@ -972,6 +1104,96 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   ImGui::EndCombo();
 }
 
+/// Handles draw foliage patch fields.
+void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
+                               bool editable, bool *modified) noexcept {
+  if (!editable) {
+    ImGui::BeginDisabled();
+  }
+
+  for (std::size_t lod = 0U; lod < runtime::FoliagePatchComponent::kMaxLods;
+       ++lod) {
+    char label[32] = {};
+    std::snprintf(label, sizeof(label), "LOD %zu Mesh ID", lod);
+    mark_modified(
+        modified,
+        ImGui::InputScalar(label, ImGuiDataType_U64,
+                           &foliage.meshAssetIds[lod], nullptr, nullptr,
+                           "%llu", ImGuiInputTextFlags_None));
+  }
+
+  int instanceCount = static_cast<int>(foliage.instanceCount);
+  if (ImGui::SliderInt(
+          "Instance Count", &instanceCount, 0,
+          static_cast<int>(runtime::FoliagePatchComponent::kMaxInstances))) {
+    if (instanceCount < 0) {
+      instanceCount = 0;
+    }
+    foliage.instanceCount = static_cast<std::uint32_t>(instanceCount);
+    mark_modified(modified, true);
+  }
+
+  mark_modified(modified, ImGui::DragFloat("Density", &foliage.density, 0.05F,
+                                           0.0F, 100.0F, "%.2f"));
+  mark_modified(modified, ImGui::ColorEdit3("Albedo", &foliage.albedo.x));
+  mark_modified(modified, ImGui::SliderFloat("Roughness", &foliage.roughness,
+                                             0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, ImGui::SliderFloat("Metallic", &foliage.metallic,
+                                             0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, ImGui::SliderFloat("Opacity", &foliage.opacity, 0.0F,
+                                             1.0F, "%.2f"));
+  mark_modified(modified,
+                ImGui::DragFloat("Wind Strength", &foliage.windStrength,
+                                  0.01F, 0.0F, 5.0F, "%.2f"));
+  mark_modified(modified,
+                ImGui::DragFloat("Wind Frequency", &foliage.windFrequency,
+                                  0.05F, 0.0F, 20.0F, "%.2f"));
+
+  if (ImGui::TreeNode("Instances")) {
+    std::uint32_t visibleCount = foliage.instanceCount;
+    if (visibleCount >
+        static_cast<std::uint32_t>(runtime::FoliagePatchComponent::kMaxInstances)) {
+      visibleCount =
+          static_cast<std::uint32_t>(runtime::FoliagePatchComponent::kMaxInstances);
+    }
+    if (visibleCount > 16U) {
+      visibleCount = 16U;
+    }
+
+    for (std::uint32_t i = 0U; i < visibleCount; ++i) {
+      runtime::FoliageInstance &instance = foliage.instances[i];
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::Separator();
+      ImGui::Text("Instance %u", i);
+      draw_vec3_field("Offset", instance.offset, modified);
+      mark_modified(modified, ImGui::DragFloat("Scale", &instance.scale,
+                                               0.01F, 0.05F, 10.0F, "%.2f"));
+      mark_modified(modified, ImGui::DragFloat("Phase", &instance.phase,
+                                               0.05F, -100.0F, 100.0F,
+                                               "%.2f"));
+      int lodIndex = static_cast<int>(instance.lodIndex);
+      if (ImGui::SliderInt(
+              "LOD Index", &lodIndex, 0,
+              static_cast<int>(runtime::FoliagePatchComponent::kMaxLods - 1U))) {
+        instance.lodIndex = static_cast<std::uint32_t>(lodIndex);
+        mark_modified(modified, true);
+      }
+      ImGui::PopID();
+    }
+
+    if (foliage.instanceCount > visibleCount) {
+      ImGui::Text("%u more instances stored",
+                  foliage.instanceCount - visibleCount);
+    }
+    ImGui::TreePop();
+  }
+
+  if (!editable) {
+    ImGui::EndDisabled();
+  }
+}
+
+/// Handles draw toolbar.
 void draw_toolbar() noexcept {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {
@@ -995,11 +1217,14 @@ void draw_toolbar() noexcept {
     return;
   }
 
-  const bool hasWorld = (g_world != nullptr);
+  const bool hasWorld = (g_editorSession.world != nullptr);
   const bool canPlay =
-      hasWorld && !g_worldRestoreFailed && (g_playState != PlayState::Playing);
-  const bool canPause = hasWorld && (g_playState == PlayState::Playing);
-  const bool canStop = hasWorld && (g_playState != PlayState::Stopped);
+      hasWorld && !g_editorSession.worldRestoreFailed &&
+      (g_editorSession.playState != PlayState::Playing);
+  const bool canPause =
+      hasWorld && (g_editorSession.playState == PlayState::Playing);
+  const bool canStop =
+      hasWorld && (g_editorSession.playState != PlayState::Stopped);
 
   if (!canPlay) {
     ImGui::BeginDisabled();
@@ -1037,47 +1262,48 @@ void draw_toolbar() noexcept {
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
   ImGui::SameLine();
 
-  if (ImGui::RadioButton("T", g_gizmoOp == ImGuizmo::TRANSLATE)) {
-    g_gizmoOp = ImGuizmo::TRANSLATE;
+  if (ImGui::RadioButton("T", g_editorSession.gizmoOp == ImGuizmo::TRANSLATE)) {
+    g_editorSession.gizmoOp = ImGuizmo::TRANSLATE;
   }
   ImGui::SameLine();
-  if (ImGui::RadioButton("R", g_gizmoOp == ImGuizmo::ROTATE)) {
-    g_gizmoOp = ImGuizmo::ROTATE;
+  if (ImGui::RadioButton("R", g_editorSession.gizmoOp == ImGuizmo::ROTATE)) {
+    g_editorSession.gizmoOp = ImGuizmo::ROTATE;
   }
   ImGui::SameLine();
-  if (ImGui::RadioButton("S", g_gizmoOp == ImGuizmo::SCALE)) {
-    g_gizmoOp = ImGuizmo::SCALE;
+  if (ImGui::RadioButton("S", g_editorSession.gizmoOp == ImGuizmo::SCALE)) {
+    g_editorSession.gizmoOp = ImGuizmo::SCALE;
   }
 
   ImGui::End();
 }
 
+/// Handles draw entities panel.
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
     ImGui::End();
     return;
   }
 
-  if (g_world == nullptr) {
+  if (g_editorSession.world == nullptr) {
     ImGui::TextUnformatted("No world attached");
     ImGui::End();
     return;
   }
 
-  // Selection mutates g_selectedEntityIndex, which is editor-global state.
-  g_world->for_each_alive([](runtime::Entity entity) {
+  // Selection mutates EditorSession state.
+  g_editorSession.world->for_each_alive([](runtime::Entity entity) {
     char label[160] = {};
     runtime::NameComponent name{};
-    if (g_world->get_name_component(entity, &name) && (name.name[0] != '\0')) {
+    if (g_editorSession.world->get_name_component(entity, &name) && (name.name[0] != '\0')) {
       std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
                     entity.index);
     } else {
       std::snprintf(label, sizeof(label), "Entity [%u]", entity.index);
     }
 
-    const bool isSelected = (g_selectedEntityIndex == entity.index);
+    const bool isSelected = (g_editorSession.selectedEntityIndex == entity.index);
     if (ImGui::Selectable(label, isSelected)) {
-      g_selectedEntityIndex = entity.index;
+      g_editorSession.selectedEntityIndex = entity.index;
     }
   });
 
@@ -1088,12 +1314,12 @@ void draw_entities_panel() noexcept {
   }
 
   if (ImGui::Button("Create Entity") && editable) {
-    const runtime::Entity newEntity = g_world->create_entity();
+    const runtime::Entity newEntity = g_editorSession.world->create_entity();
     if (newEntity != runtime::kInvalidEntity) {
       runtime::NameComponent nameComponent{};
       make_default_entity_name(newEntity.index, &nameComponent);
-      static_cast<void>(g_world->add_name_component(newEntity, nameComponent));
-      g_selectedEntityIndex = newEntity.index;
+      static_cast<void>(g_editorSession.world->add_name_component(newEntity, nameComponent));
+      g_editorSession.selectedEntityIndex = newEntity.index;
     }
   }
 
@@ -1104,30 +1330,31 @@ void draw_entities_panel() noexcept {
   ImGui::End();
 }
 
+/// Handles draw inspector panel.
 void draw_inspector_panel() noexcept {
   if (!ImGui::Begin("Inspector")) {
     ImGui::End();
     return;
   }
 
-  if (g_worldRestoreFailed) {
+  if (g_editorSession.worldRestoreFailed) {
     ImGui::TextColored(ImVec4(1.0F, 0.5F, 0.2F, 1.0F),
                        "Scene restore failed on Stop.");
     ImGui::TextUnformatted("Use File -> Load Scene to recover.");
     ImGui::Separator();
   }
 
-  if ((g_world == nullptr) || (g_selectedEntityIndex == 0U)) {
+  if ((g_editorSession.world == nullptr) || (g_editorSession.selectedEntityIndex == 0U)) {
     ImGui::TextUnformatted("No entity selected");
     ImGui::End();
     return;
   }
 
   const runtime::Entity entity =
-      g_world->find_entity_by_index(g_selectedEntityIndex);
+      g_editorSession.world->find_entity_by_index(g_editorSession.selectedEntityIndex);
   if (entity == runtime::kInvalidEntity) {
     ImGui::TextUnformatted("Selected entity is no longer alive");
-    g_selectedEntityIndex = 0U;
+    g_editorSession.selectedEntityIndex = 0U;
     ImGui::End();
     return;
   }
@@ -1135,7 +1362,7 @@ void draw_inspector_panel() noexcept {
   const bool editable = world_is_editable();
   runtime::NameComponent nameComponent{};
   const bool hasNameComponent =
-      g_world->get_name_component(entity, &nameComponent);
+      g_editorSession.world->get_name_component(entity, &nameComponent);
   if (hasNameComponent) {
     bool nameChanged = false;
     bool removeNamePressed = false;
@@ -1155,7 +1382,7 @@ void draw_inspector_panel() noexcept {
     if (editable && removeNamePressed) {
       execute_component_remove(entity, ComponentEditType::Name);
     } else if (editable && nameChanged) {
-      static_cast<void>(g_world->add_name_component(entity, nameComponent));
+      static_cast<void>(g_editorSession.world->add_name_component(entity, nameComponent));
     }
   } else {
     if (!editable) {
@@ -1186,8 +1413,8 @@ void draw_inspector_panel() noexcept {
   }
 
   if (editable && deletePressed) {
-    static_cast<void>(g_world->destroy_entity(entity));
-    g_selectedEntityIndex = 0U;
+    static_cast<void>(g_editorSession.world->destroy_entity(entity));
+    g_editorSession.selectedEntityIndex = 0U;
     ImGui::End();
     return;
   }
@@ -1197,7 +1424,7 @@ void draw_inspector_panel() noexcept {
   ImGui::Separator();
 
   runtime::Transform transform{};
-  if (g_world->get_transform(entity, &transform)) {
+  if (g_editorSession.world->get_transform(entity, &transform)) {
     ImGui::PushID("TransformSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kTransformSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1220,14 +1447,14 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::Transform);
     } else if (editable && transformModified) {
-      static_cast<void>(g_world->add_transform(entity, transform));
+      static_cast<void>(g_editorSession.world->add_transform(entity, transform));
     }
   } else {
     ImGui::TextUnformatted("Transform: <none>");
   }
 
   runtime::RigidBody rigidBody{};
-  if (g_world->get_rigid_body(entity, &rigidBody)) {
+  if (g_editorSession.world->get_rigid_body(entity, &rigidBody)) {
     ImGui::PushID("RigidBodySection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kRigidBodySectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1250,14 +1477,14 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::RigidBody);
     } else if (editable && rigidBodyModified) {
-      static_cast<void>(g_world->add_rigid_body(entity, rigidBody));
+      static_cast<void>(g_editorSession.world->add_rigid_body(entity, rigidBody));
     }
   } else {
     ImGui::TextUnformatted("RigidBody: <none>");
   }
 
   runtime::Collider collider{};
-  if (g_world->get_collider(entity, &collider)) {
+  if (g_editorSession.world->get_collider(entity, &collider)) {
     ImGui::PushID("ColliderSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kColliderSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1280,14 +1507,14 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::Collider);
     } else if (editable && colliderModified) {
-      static_cast<void>(g_world->add_collider(entity, collider));
+      static_cast<void>(g_editorSession.world->add_collider(entity, collider));
     }
   } else {
     ImGui::TextUnformatted("Collider: <none>");
   }
 
   runtime::LightComponent light{};
-  if (g_world->get_light_component(entity, &light)) {
+  if (g_editorSession.world->get_light_component(entity, &light)) {
     ImGui::PushID("LightComponentSection");
     const bool lightOpen = ImGui::CollapsingHeader(
         kLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1321,14 +1548,14 @@ void draw_inspector_panel() noexcept {
     if (editable && removeLightPressed) {
       execute_component_remove(entity, ComponentEditType::Light);
     } else if (editable && lightModified) {
-      static_cast<void>(g_world->add_light_component(entity, light));
+      static_cast<void>(g_editorSession.world->add_light_component(entity, light));
     }
   } else {
     ImGui::TextUnformatted("LightComponent: <none>");
   }
 
   runtime::PointLightComponent pointLight{};
-  if (g_world->get_point_light_component(entity, &pointLight)) {
+  if (g_editorSession.world->get_point_light_component(entity, &pointLight)) {
     ImGui::PushID("PointLightComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kPointLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1352,14 +1579,14 @@ void draw_inspector_panel() noexcept {
       execute_component_remove(entity, ComponentEditType::PointLight);
     } else if (editable && pointLightModified) {
       static_cast<void>(
-          g_world->add_point_light_component(entity, pointLight));
+          g_editorSession.world->add_point_light_component(entity, pointLight));
     }
   } else {
     ImGui::TextUnformatted("PointLightComponent: <none>");
   }
 
   runtime::SpotLightComponent spotLight{};
-  if (g_world->get_spot_light_component(entity, &spotLight)) {
+  if (g_editorSession.world->get_spot_light_component(entity, &spotLight)) {
     ImGui::PushID("SpotLightComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kSpotLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1382,14 +1609,14 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SpotLight);
     } else if (editable && spotLightModified) {
-      static_cast<void>(g_world->add_spot_light_component(entity, spotLight));
+      static_cast<void>(g_editorSession.world->add_spot_light_component(entity, spotLight));
     }
   } else {
     ImGui::TextUnformatted("SpotLightComponent: <none>");
   }
 
   runtime::MeshComponent mesh{};
-  if (g_world->get_mesh_component(entity, &mesh)) {
+  if (g_editorSession.world->get_mesh_component(entity, &mesh)) {
     ImGui::PushID("MeshComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kMeshSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1424,14 +1651,37 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::Mesh);
     } else if (editable && meshModified) {
-      static_cast<void>(g_world->add_mesh_component(entity, mesh));
+      static_cast<void>(g_editorSession.world->add_mesh_component(entity, mesh));
     }
   } else {
     ImGui::TextUnformatted("MeshComponent: <none>");
   }
 
+  runtime::FoliagePatchComponent foliagePatch{};
+  if (g_editorSession.world->get_foliage_patch_component(entity, &foliagePatch)) {
+    ImGui::PushID("FoliagePatchComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kFoliagePatchSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool foliageModified = false;
+    if (sectionOpen) {
+      draw_foliage_patch_fields(foliagePatch, editable, &foliageModified);
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      execute_component_remove(entity, ComponentEditType::FoliagePatch);
+    } else if (editable && foliageModified) {
+      static_cast<void>(
+          g_editorSession.world->add_foliage_patch_component(entity, foliagePatch));
+    }
+  } else {
+    ImGui::TextUnformatted("FoliagePatchComponent: <none>");
+  }
+
   runtime::ReflectionProbeComponent reflectionProbe{};
-  if (g_world->get_reflection_probe_component(entity, &reflectionProbe)) {
+  if (g_editorSession.world->get_reflection_probe_component(entity, &reflectionProbe)) {
     ImGui::PushID("ReflectionProbeComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kReflectionProbeSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1456,14 +1706,14 @@ void draw_inspector_panel() noexcept {
       execute_component_remove(entity, ComponentEditType::ReflectionProbe);
     } else if (editable && probeModified) {
       static_cast<void>(
-          g_world->add_reflection_probe_component(entity, reflectionProbe));
+          g_editorSession.world->add_reflection_probe_component(entity, reflectionProbe));
     }
   } else {
     ImGui::TextUnformatted("ReflectionProbeComponent: <none>");
   }
 
   runtime::ScriptComponent script{};
-  if (g_world->get_script_component(entity, &script)) {
+  if (g_editorSession.world->get_script_component(entity, &script)) {
     ImGui::PushID("ScriptComponentSection");
     const bool scriptOpen = ImGui::CollapsingHeader(
         kScriptSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1493,14 +1743,14 @@ void draw_inspector_panel() noexcept {
     if (editable && removeScriptPressed) {
       execute_component_remove(entity, ComponentEditType::Script);
     } else if (editable && scriptModified) {
-      static_cast<void>(g_world->add_script_component(entity, script));
+      static_cast<void>(g_editorSession.world->add_script_component(entity, script));
     }
   } else {
     ImGui::TextUnformatted("ScriptComponent: <none>");
   }
 
   runtime::SpringArmComponent springArm{};
-  if (g_world->get_spring_arm(entity, &springArm)) {
+  if (g_editorSession.world->get_spring_arm(entity, &springArm)) {
     ImGui::PushID("SpringArmComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kSpringArmSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1523,7 +1773,7 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SpringArm);
     } else if (editable && springArmModified) {
-      static_cast<void>(g_world->add_spring_arm(entity, springArm));
+      static_cast<void>(g_editorSession.world->add_spring_arm(entity, springArm));
     }
   } else {
     ImGui::TextUnformatted("SpringArmComponent: <none>");
@@ -1534,6 +1784,7 @@ void draw_inspector_panel() noexcept {
   ImGui::End();
 }
 
+/// Handles draw profiler flame graph.
 void draw_profiler_flame_graph() noexcept {
   std::array<core::ProfileEntry, 256U> entries{};
   const std::size_t count =
@@ -1585,6 +1836,7 @@ void draw_profiler_flame_graph() noexcept {
   ImGui::Dummy(ImVec2(graphWidth, graphHeight));
 }
 
+/// Handles draw stats panel.
 void draw_stats_panel(const core::EngineStats &stats) noexcept {
   if (!ImGui::Begin("Stats")) {
     ImGui::End();
@@ -1636,6 +1888,7 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
   ImGui::End();
 }
 
+/// Handles draw in game stats overlay.
 void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   constexpr ImGuiWindowFlags kOverlayFlags =
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -1659,6 +1912,7 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   ImGui::End();
 }
 
+/// Handles draw asset tree.
 void draw_asset_tree(const std::filesystem::path &dir) noexcept {
   std::error_code ec{};
   for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
@@ -1676,9 +1930,10 @@ void draw_asset_tree(const std::filesystem::path &dir) noexcept {
     } else if (!ec) {
       const std::string relPath = entry.path().string();
       const bool isSelected =
-          (std::strcmp(g_selectedAssetPath, relPath.c_str()) == 0);
+          (std::strcmp(g_editorSession.selectedAssetPath, relPath.c_str()) == 0);
       if (ImGui::Selectable(filename.c_str(), isSelected)) {
-        std::snprintf(g_selectedAssetPath, sizeof(g_selectedAssetPath), "%s",
+        std::snprintf(g_editorSession.selectedAssetPath,
+                      sizeof(g_editorSession.selectedAssetPath), "%s",
                       relPath.c_str());
       }
     }
@@ -1874,26 +2129,27 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
 }
 
+/// Handles draw asset browser panel.
 void draw_asset_browser_panel() noexcept {
   if (!ImGui::Begin("Assets")) {
     ImGui::End();
     return;
   }
 
-  const std::filesystem::path assetsDir("assets");
+  const std::filesystem::path assetsDir(editor_asset_root());
   std::error_code ec{};
   if (std::filesystem::is_directory(assetsDir, ec) && !ec) {
     draw_asset_tree(assetsDir);
   } else {
-    ImGui::TextUnformatted("assets/ directory not found");
+    ImGui::Text("Asset directory not found: %s", editor_asset_root());
   }
 
-  if (g_selectedAssetPath[0] != '\0') {
+  if (g_editorSession.selectedAssetPath[0] != '\0') {
     ImGui::Separator();
-    ImGui::TextWrapped("Selected: %s", g_selectedAssetPath);
+    ImGui::TextWrapped("Selected: %s", g_editorSession.selectedAssetPath);
 
     // Show thumbnail if one exists for this asset.
-    const GLuint thumbTex = load_thumbnail_texture(g_selectedAssetPath);
+    const GLuint thumbTex = load_thumbnail_texture(g_editorSession.selectedAssetPath);
     if (thumbTex != 0U) {
       ImGui::Image(
           static_cast<ImTextureID>(static_cast<std::uintptr_t>(thumbTex)),
@@ -1901,12 +2157,13 @@ void draw_asset_browser_panel() noexcept {
     }
 
     // Import settings inspector for mesh assets.
-    draw_import_settings_inspector(g_selectedAssetPath);
+    draw_import_settings_inspector(g_editorSession.selectedAssetPath);
   }
 
   ImGui::End();
 }
 
+/// Handles project world to screen.
 bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
                              const ImVec2 &viewportOrigin,
                              const ImVec2 &viewportSize,
@@ -1932,21 +2189,22 @@ bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
   return true;
 }
 
+/// Handles draw selected collider overlay.
 void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
                                     const math::Mat4 &viewProjection,
                                     const ImVec2 &viewportOrigin,
                                     const ImVec2 &viewportSize) noexcept {
-  if ((g_world == nullptr) || (selectedEntity == runtime::kInvalidEntity)) {
+  if ((g_editorSession.world == nullptr) || (selectedEntity == runtime::kInvalidEntity)) {
     return;
   }
 
-  const runtime::Collider *collider = g_world->get_collider_ptr(selectedEntity);
+  const runtime::Collider *collider = g_editorSession.world->get_collider_ptr(selectedEntity);
   if (collider == nullptr) {
     return;
   }
 
   const runtime::WorldTransform *worldTransform =
-      g_world->get_world_transform_read_ptr(selectedEntity);
+      g_editorSession.world->get_world_transform_read_ptr(selectedEntity);
   if (worldTransform == nullptr) {
     return;
   }
@@ -1994,6 +2252,7 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
   }
 }
 
+/// Handles draw scene viewport panel.
 void draw_scene_viewport_panel() noexcept {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
   const bool visible = ImGui::Begin("Scene");
@@ -2021,19 +2280,19 @@ void draw_scene_viewport_panel() noexcept {
   // --- ImGuizmo gizmo rendering ---
   const bool editable = world_is_editable();
   const runtime::Entity selectedEntity =
-      (g_world != nullptr && g_selectedEntityIndex != 0U)
-          ? g_world->find_entity_by_index(g_selectedEntityIndex)
+      (g_editorSession.world != nullptr && g_editorSession.selectedEntityIndex != 0U)
+          ? g_editorSession.world->find_entity_by_index(g_editorSession.selectedEntityIndex)
           : runtime::kInvalidEntity;
 
   const bool hasTransform =
-      (selectedEntity != runtime::kInvalidEntity) && (g_world != nullptr) &&
-      (g_world->get_transform_read_ptr(selectedEntity) != nullptr);
+      (selectedEntity != runtime::kInvalidEntity) && (g_editorSession.world != nullptr) &&
+      (g_editorSession.world->get_transform_read_ptr(selectedEntity) != nullptr);
 
   if ((selectedEntity != runtime::kInvalidEntity) && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
-    const renderer::CameraState cam = (g_playState == PlayState::Playing)
+    const renderer::CameraState cam = (g_editorSession.playState == PlayState::Playing)
                                           ? renderer::get_active_camera()
-                                          : editor_camera_state(g_editorCamera);
+                                          : editor_camera_state(g_editorSession.editorCamera);
 
     constexpr float kDefaultFov = 1.0471975512F;
     constexpr float kNear = 0.1F;
@@ -2049,7 +2308,7 @@ void draw_scene_viewport_panel() noexcept {
 
   if (editable && hasTransform && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
-    const renderer::CameraState cam = editor_camera_state(g_editorCamera);
+    const renderer::CameraState cam = editor_camera_state(g_editorSession.editorCamera);
 
     constexpr float kDefaultFov = 1.0471975512F;
     constexpr float kNear = 0.1F;
@@ -2061,7 +2320,7 @@ void draw_scene_viewport_panel() noexcept {
         math::perspective(kDefaultFov, aspect, kNear, kFar);
 
     runtime::Transform transform{};
-    g_world->get_transform(selectedEntity, &transform);
+    g_editorSession.world->get_transform(selectedEntity, &transform);
     math::Mat4 modelMat = math::compose_trs(
         transform.position, transform.rotation, transform.scale);
 
@@ -2071,13 +2330,13 @@ void draw_scene_viewport_panel() noexcept {
                       regionSize.y);
 
     const bool manipulated = ImGuizmo::Manipulate(
-        &viewMat.columns[0].x, &projMat.columns[0].x, g_gizmoOp,
+        &viewMat.columns[0].x, &projMat.columns[0].x, g_editorSession.gizmoOp,
         ImGuizmo::LOCAL, &modelMat.columns[0].x);
 
     // Track gizmo drag start/end for undo.
     const bool gizmoUsing = ImGuizmo::IsUsing();
-    if (gizmoUsing && !g_gizmoWasUsing) {
-      g_gizmoStartTransform = transform;
+    if (gizmoUsing && !g_editorSession.gizmoWasUsing) {
+      g_editorSession.gizmoStartTransform = transform;
     }
 
     if (manipulated) {
@@ -2088,56 +2347,56 @@ void draw_scene_viewport_panel() noexcept {
         transform.position = newPos;
         transform.rotation = newRot;
         transform.scale = newScale;
-        static_cast<void>(g_world->add_transform(selectedEntity, transform));
+        static_cast<void>(g_editorSession.world->add_transform(selectedEntity, transform));
       }
     }
 
-    if (!gizmoUsing && g_gizmoWasUsing) {
+    if (!gizmoUsing && g_editorSession.gizmoWasUsing) {
       auto *cmd = new (std::nothrow) TransformEditCommand();
       if (cmd != nullptr) {
         cmd->entity = selectedEntity;
-        cmd->oldTransform = g_gizmoStartTransform;
-        g_world->get_transform(selectedEntity, &cmd->newTransform);
-        g_commandHistory.execute(cmd);
+        cmd->oldTransform = g_editorSession.gizmoStartTransform;
+        g_editorSession.world->get_transform(selectedEntity, &cmd->newTransform);
+        g_editorSession.commandHistory.execute(cmd);
       }
     }
-    g_gizmoWasUsing = gizmoUsing;
+    g_editorSession.gizmoWasUsing = gizmoUsing;
   }
 
   // Camera input: only when stopped/paused, viewport hovered, gizmo not active.
   const bool debugDetach = core::cvar_get_bool("debug.camera_detach", false);
-  if (debugDetach && !g_debugCameraActive) {
+  if (debugDetach && !g_editorSession.debugCameraActive) {
     // Snapshot the current camera on transition to detached mode.
-    if (g_playState == PlayState::Playing) {
-      g_frozenCameraState = renderer::get_active_camera();
+    if (g_editorSession.playState == PlayState::Playing) {
+      g_editorSession.frozenCameraState = renderer::get_active_camera();
     } else {
-      g_frozenCameraState = editor_camera_state(g_editorCamera);
+      g_editorSession.frozenCameraState = editor_camera_state(g_editorSession.editorCamera);
     }
-    g_debugCamera.position = g_frozenCameraState.position;
-    g_debugCameraActive = true;
-  } else if (!debugDetach && g_debugCameraActive) {
-    g_debugCameraActive = false;
+    g_editorSession.debugCamera.position = g_editorSession.frozenCameraState.position;
+    g_editorSession.debugCameraActive = true;
+  } else if (!debugDetach && g_editorSession.debugCameraActive) {
+    g_editorSession.debugCameraActive = false;
   }
 
-  if (g_debugCameraActive && ImGui::IsWindowHovered()) {
+  if (g_editorSession.debugCameraActive && ImGui::IsWindowHovered()) {
     // Free-fly debug camera with WASD + mouse
     const ImGuiIO &io = ImGui::GetIO();
     const bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     const float dt = io.DeltaTime;
     update_debug_camera(
-        g_debugCamera, dt, ImGui::IsKeyDown(ImGuiKey_W),
+        g_editorSession.debugCamera, dt, ImGui::IsKeyDown(ImGuiKey_W),
         ImGui::IsKeyDown(ImGuiKey_S), ImGui::IsKeyDown(ImGuiKey_A),
         ImGui::IsKeyDown(ImGuiKey_D), ImGui::IsKeyDown(ImGuiKey_E),
         ImGui::IsKeyDown(ImGuiKey_Q), io.KeyShift,
         rmbDown ? static_cast<int>(io.MouseDelta.x) : 0,
         rmbDown ? static_cast<int>(io.MouseDelta.y) : 0);
-    renderer::set_active_camera(debug_camera_state(g_debugCamera));
+    renderer::set_active_camera(debug_camera_state(g_editorSession.debugCamera));
 
     // Draw the frozen game camera frustum as wireframe.
     const float aspect =
         (regionSize.y > 0.0F) ? (regionSize.x / regionSize.y) : 1.0F;
-    draw_camera_frustum_wireframe(g_frozenCameraState, aspect);
-  } else if ((g_playState != PlayState::Playing) && ImGui::IsWindowHovered() &&
+    draw_camera_frustum_wireframe(g_editorSession.frozenCameraState, aspect);
+  } else if ((g_editorSession.playState != PlayState::Playing) && ImGui::IsWindowHovered() &&
              !ImGuizmo::IsUsing()) {
     const ImGuiIO &io = ImGui::GetIO();
     const bool altHeld = io.KeyAlt;
@@ -2146,19 +2405,20 @@ void draw_scene_viewport_panel() noexcept {
     const int scrollDelta =
         (io.MouseWheel > 0.0F) ? 1 : ((io.MouseWheel < 0.0F) ? -1 : 0);
 
-    update_editor_camera(g_editorCamera, static_cast<int>(io.MouseDelta.x),
+    update_editor_camera(g_editorSession.editorCamera, static_cast<int>(io.MouseDelta.x),
                          static_cast<int>(io.MouseDelta.y), scrollDelta,
                          altHeld && lmbDown, altHeld && mmbDown);
   }
 
   // Push editor camera when not playing (and debug camera is not active).
-  if ((g_playState != PlayState::Playing) && !g_debugCameraActive) {
-    renderer::set_active_camera(editor_camera_state(g_editorCamera));
+  if ((g_editorSession.playState != PlayState::Playing) && !g_editorSession.debugCameraActive) {
+    renderer::set_active_camera(editor_camera_state(g_editorSession.editorCamera));
   }
 
   ImGui::End();
 }
 
+/// Handles setup default dock layout.
 void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderRemoveNode(dockspaceId);
   ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
@@ -2181,6 +2441,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderFinish(dockspaceId);
 }
 
+/// Handles draw editor panels.
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   static_cast<void>(frameMs);
   static_cast<void>(utilizationPct);
@@ -2238,8 +2499,9 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
 
 } // namespace
 
+/// Initializes the owning system for editor.
 bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
-  if (g_editorInitialized) {
+  if (g_editorSession.initialized) {
     return true;
   }
 
@@ -2275,12 +2537,13 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   }
 
   // Meaningful editor testing requires a live OpenGL context.
-  g_editorInitialized = true;
+  g_editorSession.initialized = true;
   return true;
 }
 
+/// Shuts down the owning system for editor.
 void shutdown_editor() noexcept {
-  if (!g_editorInitialized) {
+  if (!g_editorSession.initialized) {
     return;
   }
 
@@ -2288,17 +2551,23 @@ void shutdown_editor() noexcept {
   ImGui_ImplSDL2_Shutdown();
   ImGui::DestroyContext();
 
-  g_editorInitialized = false;
-  g_world = nullptr;
-  g_selectedEntityIndex = 0U;
-  g_playState = PlayState::Stopped;
-  g_playSnapshotSize = 0U;
-  g_hasPlaySnapshot = false;
-  g_worldRestoreFailed = false;
+  clear_thumbnail_cache();
+  g_editorSession.commandHistory.clear();
+
+  g_editorSession.initialized = false;
+  g_editorSession.world = nullptr;
+  g_editorSession.selectedEntityIndex = 0U;
+  g_editorSession.playState = PlayState::Stopped;
+  g_editorSession.playSnapshotBuffer.reset();
+  g_editorSession.playSnapshotCapacity = 0U;
+  g_editorSession.playSnapshotSize = 0U;
+  g_editorSession.hasPlaySnapshot = false;
+  g_editorSession.worldRestoreFailed = false;
 }
 
+/// Handles editor new frame.
 void editor_new_frame() noexcept {
-  if (!g_editorInitialized) {
+  if (!g_editorSession.initialized) {
     return;
   }
 
@@ -2311,25 +2580,26 @@ void editor_new_frame() noexcept {
   const ImGuiIO &io = ImGui::GetIO();
   if (!io.WantTextInput) {
     if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      g_commandHistory.undo();
+      g_editorSession.commandHistory.undo();
     }
     if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      g_commandHistory.redo();
+      g_editorSession.commandHistory.redo();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_W)) {
-      g_gizmoOp = ImGuizmo::TRANSLATE;
+      g_editorSession.gizmoOp = ImGuizmo::TRANSLATE;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_E)) {
-      g_gizmoOp = ImGuizmo::ROTATE;
+      g_editorSession.gizmoOp = ImGuizmo::ROTATE;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_R)) {
-      g_gizmoOp = ImGuizmo::SCALE;
+      g_editorSession.gizmoOp = ImGuizmo::SCALE;
     }
   }
 }
 
+/// Handles editor render.
 void editor_render(float frameMs, float utilizationPct) noexcept {
-  if (!g_editorInitialized) {
+  if (!g_editorSession.initialized) {
     return;
   }
 
@@ -2338,41 +2608,51 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
+/// Handles editor process event.
 void editor_process_event(void *sdlEvent) noexcept {
-  if (!g_editorInitialized || (sdlEvent == nullptr)) {
+  if (!g_editorSession.initialized || (sdlEvent == nullptr)) {
     return;
   }
 
   ImGui_ImplSDL2_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
 }
 
+/// Handles editor set world.
 void editor_set_world(runtime::World *world) noexcept {
-  g_world = world;
+  if (g_editorSession.world != world) {
+    g_editorSession.commandHistory.clear();
+    g_editorSession.gizmoWasUsing = false;
+  }
+  g_editorSession.world = world;
   if (world == nullptr) {
-    g_selectedEntityIndex = 0U;
-    g_playState = PlayState::Stopped;
-    g_playSnapshotSize = 0U;
-    g_hasPlaySnapshot = false;
-    g_worldRestoreFailed = false;
+    g_editorSession.selectedEntityIndex = 0U;
+    g_editorSession.playState = PlayState::Stopped;
+    g_editorSession.playSnapshotSize = 0U;
+    g_editorSession.hasPlaySnapshot = false;
+    g_editorSession.worldRestoreFailed = false;
   }
 }
 
-bool editor_is_playing() noexcept { return g_playState == PlayState::Playing; }
+/// Handles editor is playing.
+bool editor_is_playing() noexcept { return g_editorSession.playState == PlayState::Playing; }
 
-bool editor_is_paused() noexcept { return g_playState == PlayState::Paused; }
+/// Handles editor is paused.
+bool editor_is_paused() noexcept { return g_editorSession.playState == PlayState::Paused; }
 
 namespace {
 
+/// Handles editor wants capture keyboard.
 bool editor_wants_capture_keyboard() noexcept {
-  if (!g_editorInitialized) {
+  if (!g_editorSession.initialized) {
     return false;
   }
 
   return ImGui::GetIO().WantCaptureKeyboard;
 }
 
+/// Handles editor wants capture mouse.
 bool editor_wants_capture_mouse() noexcept {
-  if (!g_editorInitialized) {
+  if (!g_editorSession.initialized) {
     return false;
   }
 

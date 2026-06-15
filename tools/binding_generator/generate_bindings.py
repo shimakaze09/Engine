@@ -13,8 +13,8 @@ Supported parameter types:
     double    - lua_Number  (luaL_checknumber)
     bool      - int         (lua_toboolean)
     string    - const char* (luaL_checkstring)
-    entity    - uint32_t    (luaL_checkinteger, entity index)
     uint32    - uint32_t    (luaL_checkinteger)
+    uint64    - uint64_t    (luaL_checkinteger)
 
 Supported return types:
     void      - no return value
@@ -23,8 +23,8 @@ Supported return types:
     double    - lua_pushnumber
     bool      - lua_pushboolean
     string    - lua_pushstring
-    entity    - lua_pushinteger (entity index)
     uint32    - lua_pushinteger
+    uint64    - lua_pushinteger
 
 Usage:
     python generate_bindings.py <input_header> [<input_header2> ...] -o <output.cpp>
@@ -55,15 +55,16 @@ TYPE_MAP = {
     'double': ('lua_Number',   'luaL_checknumber(L, {i})',      'lua_pushnumber(L, result)'),
     'bool':   ('bool',         'lua_toboolean(L, {i}) != 0',    'lua_pushboolean(L, result ? 1 : 0)'),
     'string': ('const char*',  'luaL_checkstring(L, {i})',      'lua_pushstring(L, result)'),
-    'entity': ('std::uint32_t',
-               'static_cast<std::uint32_t>(luaL_checkinteger(L, {i}))',
-               'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
     'uint32': ('std::uint32_t',
                'static_cast<std::uint32_t>(luaL_checkinteger(L, {i}))',
+               'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
+    'uint64': ('std::uint64_t',
+               'static_cast<std::uint64_t>(luaL_checkinteger(L, {i}))',
                'lua_pushinteger(L, static_cast<lua_Integer>(result))'),
 }
 
 
+# Parses text into the engine representation for params.
 def parse_params(param_str):
     """Parse 'name: type, name2: type2' into list of (name, type_key)."""
     params = []
@@ -83,6 +84,7 @@ def parse_params(param_str):
     return params
 
 
+# Parses text into the engine representation for header.
 def parse_header(path):
     """Parse a header file and return list of binding descriptors."""
     bindings = []
@@ -120,6 +122,7 @@ def parse_header(path):
     return bindings
 
 
+# Handles generate wrapper.
 def generate_wrapper(binding):
     """Generate a Lua C API wrapper function for a binding."""
     lua_name = binding['lua_name']
@@ -163,6 +166,7 @@ def generate_wrapper(binding):
     return '\n'.join(lines)
 
 
+# Handles generate registration.
 def generate_registration(bindings):
     """Generate a function that registers all bindings into an 'engine' table."""
     lines = []
@@ -176,6 +180,7 @@ def generate_registration(bindings):
     return '\n'.join(lines)
 
 
+# Handles generate output.
 def generate_output(bindings, input_headers):
     """Generate the full output .cpp file."""
     parts = []
@@ -217,6 +222,7 @@ def generate_output(bindings, input_headers):
     return '\n'.join(parts)
 
 
+# Runs this executable or test program.
 def main():
     parser = argparse.ArgumentParser(description='Lua binding generator')
     parser.add_argument('inputs', nargs='+', help='Input C++ header files')

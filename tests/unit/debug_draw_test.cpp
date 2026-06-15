@@ -1,3 +1,5 @@
+// Verifies debug draw test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 
@@ -5,6 +7,7 @@
 
 using namespace engine::core;
 
+/// Handles test init shutdown.
 static bool test_init_shutdown() noexcept {
   if (!initialize_debug_draw()) {
     return false;
@@ -13,6 +16,7 @@ static bool test_init_shutdown() noexcept {
   return true;
 }
 
+/// Handles test draw line and query.
 static bool test_draw_line_and_query() noexcept {
   initialize_debug_draw();
 
@@ -45,6 +49,7 @@ static bool test_draw_line_and_query() noexcept {
   return true;
 }
 
+/// Handles test draw sphere and query.
 static bool test_draw_sphere_and_query() noexcept {
   initialize_debug_draw();
 
@@ -70,6 +75,7 @@ static bool test_draw_sphere_and_query() noexcept {
   return true;
 }
 
+/// Handles test draw text and query.
 static bool test_draw_text_and_query() noexcept {
   initialize_debug_draw();
 
@@ -91,6 +97,7 @@ static bool test_draw_text_and_query() noexcept {
   return true;
 }
 
+/// Handles test lifetime expires after tick.
 static bool test_lifetime_expires_after_tick() noexcept {
   initialize_debug_draw();
 
@@ -110,6 +117,7 @@ static bool test_lifetime_expires_after_tick() noexcept {
   return true;
 }
 
+/// Handles test lifetime persists multiple frames.
 static bool test_lifetime_persists_multiple_frames() noexcept {
   initialize_debug_draw();
 
@@ -137,6 +145,7 @@ static bool test_lifetime_persists_multiple_frames() noexcept {
   return true;
 }
 
+/// Handles test null text ignored.
 static bool test_null_text_ignored() noexcept {
   initialize_debug_draw();
   debug_draw_text({}, nullptr);
@@ -150,6 +159,7 @@ static bool test_null_text_ignored() noexcept {
   return true;
 }
 
+/// Runs this executable or test program.
 int main() {
   struct {
     const char *name;

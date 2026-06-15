@@ -1,3 +1,5 @@
+// Implements texture loader behavior for the Engine renderer system.
+
 #include "engine/renderer/texture_loader.h"
 
 #include <array>
@@ -51,19 +53,24 @@ namespace engine::renderer {
 namespace {
 
 constexpr std::size_t kMaxTextureSlots = 512U;
+constexpr unsigned kTextureSlotBits = 10U;
+constexpr std::uint32_t kTextureSlotMask = (1U << kTextureSlotBits) - 1U;
 constexpr std::size_t kMaxPathLen = 260U;
 constexpr std::int32_t kHdrCubemapChannels = 3;
 constexpr std::int32_t kMaxCubemapFaceSize = 4096;
 constexpr double kPi = 3.14159265358979323846264338327950288;
 
+/// Stores texture slot data used by the engine.
 struct TextureSlot final {
   std::uint32_t gpuId = 0U;
+  std::uint32_t generation = 1U;
   bool occupied = false;
   bool hdr = false;
   bool cubemap = false;
   std::array<char, kMaxPathLen> path{};
 };
 
+/// Stores texture system state data used by the engine.
 struct TextureSystemState final {
   bool initialized = false;
   std::array<TextureSlot, kMaxTextureSlots> slots{};
@@ -71,6 +78,33 @@ struct TextureSystemState final {
 
 TextureSystemState g_texState{};
 
+/// Advances a generation counter, skipping zero.
+std::uint32_t next_texture_generation(std::uint32_t generation) noexcept {
+  ++generation;
+  if (generation == 0U) {
+    generation = 1U;
+  }
+  return generation;
+}
+
+/// Builds an externally visible handle for a live texture slot.
+TextureHandle make_texture_handle(std::size_t slotIndex) noexcept {
+  if ((slotIndex == 0U) || (slotIndex >= kMaxTextureSlots)) {
+    return kInvalidTextureHandle;
+  }
+
+  const TextureSlot &slot = g_texState.slots[slotIndex];
+  return TextureHandle{(slot.generation << kTextureSlotBits) |
+                       static_cast<std::uint32_t>(slotIndex)};
+}
+
+/// Resets a texture slot while preserving stale-handle invalidation.
+void reset_texture_slot(TextureSlot &slot) noexcept {
+  slot = TextureSlot{0U, next_texture_generation(slot.generation), false,
+                     false, false, {}};
+}
+
+/// Handles safe copy path.
 void safe_copy_path(char *dst, std::size_t dstSize, const char *src) noexcept {
   if ((dst == nullptr) || (src == nullptr) || (dstSize == 0U)) {
     return;
@@ -84,6 +118,7 @@ void safe_copy_path(char *dst, std::size_t dstSize, const char *src) noexcept {
   dst[i] = '\0';
 }
 
+/// Finds the matching object or resource for free texture slot.
 std::size_t find_free_texture_slot() noexcept {
   // Slot 0 is reserved as the invalid handle.
   for (std::size_t i = 1U; i < kMaxTextureSlots; ++i) {
@@ -95,19 +130,43 @@ std::size_t find_free_texture_slot() noexcept {
   return 0U;
 }
 
-TextureSlot *lookup_texture_slot(TextureHandle handle) noexcept {
+/// Handles lookup texture slot.
+TextureSlot *lookup_texture_slot(TextureHandle handle,
+                                 std::size_t *outSlotIndex = nullptr) noexcept {
   if (!g_texState.initialized || handle == kInvalidTextureHandle) {
     return nullptr;
   }
 
-  const std::uint32_t idx = handle.id;
-  if ((idx >= kMaxTextureSlots) || !g_texState.slots[idx].occupied) {
+  const std::uint32_t slotIndex = handle.id & kTextureSlotMask;
+  const std::uint32_t generation = handle.id >> kTextureSlotBits;
+  if ((slotIndex == 0U) || (slotIndex >= kMaxTextureSlots) ||
+      (generation == 0U) || !g_texState.slots[slotIndex].occupied ||
+      (g_texState.slots[slotIndex].generation != generation)) {
     return nullptr;
   }
 
-  return &g_texState.slots[idx];
+  if (outSlotIndex != nullptr) {
+    *outSlotIndex = static_cast<std::size_t>(slotIndex);
+  }
+  return &g_texState.slots[slotIndex];
 }
 
+} // namespace
+
+bool texture_input_size_fits_stb(std::size_t fileSize,
+                                 int *outStbSize) noexcept {
+  if ((outStbSize == nullptr) ||
+      (fileSize > static_cast<std::size_t>(std::numeric_limits<int>::max()))) {
+    return false;
+  }
+
+  *outStbSize = static_cast<int>(fileSize);
+  return true;
+}
+
+namespace {
+
+/// Handles clamp int.
 int clamp_int(int value, int minValue, int maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -118,6 +177,7 @@ int clamp_int(int value, int minValue, int maxValue) noexcept {
   return value;
 }
 
+/// Handles clamp float.
 float clamp_float(float value, float minValue, float maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -128,6 +188,7 @@ float clamp_float(float value, float minValue, float maxValue) noexcept {
   return value;
 }
 
+/// Handles wrap index.
 int wrap_index(int value, int count) noexcept {
   int result = value % count;
   if (result < 0) {
@@ -136,12 +197,14 @@ int wrap_index(int value, int count) noexcept {
   return result;
 }
 
+/// Stores vec3 data used by the engine.
 struct Vec3 final {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
 };
 
+/// Clamps and fills settings into a safe runtime range.
 Vec3 normalize(Vec3 value) noexcept {
   const float lenSq = value.x * value.x + value.y * value.y + value.z * value.z;
   if (lenSq <= 0.0F) {
@@ -155,6 +218,7 @@ Vec3 normalize(Vec3 value) noexcept {
   return value;
 }
 
+/// Handles cube face direction.
 Vec3 cube_face_direction(int face, float u, float v) noexcept {
   switch (face) {
   case 0:
@@ -172,6 +236,7 @@ Vec3 cube_face_direction(int face, float u, float v) noexcept {
   }
 }
 
+/// Handles sample equirect channel.
 float sample_equirect_channel(const float *pixels, int width, int height,
                               double u, double v, int channel) noexcept {
   u -= std::floor(u);
@@ -209,6 +274,7 @@ float sample_equirect_channel(const float *pixels, int width, int height,
   return cx0 + (cx1 - cx0) * ty;
 }
 
+/// Handles sample equirect direction.
 void sample_equirect_direction(const float *pixels, int width, int height,
                                Vec3 direction, float *outRgb) noexcept {
   const double theta = std::atan2(static_cast<double>(direction.z),
@@ -224,6 +290,7 @@ void sample_equirect_direction(const float *pixels, int width, int height,
   }
 }
 
+/// Handles allocate equirect cubemap faces.
 bool allocate_equirect_cubemap_faces(
     const float *pixels, int width, int height, std::int32_t faceSize,
     std::array<std::unique_ptr<float[]>, 6> &faces) noexcept {
@@ -276,16 +343,17 @@ bool allocate_equirect_cubemap_faces(
 
 } // namespace
 
+/// Initializes the owning system for texture system.
 bool initialize_texture_system() noexcept {
   if (g_texState.initialized) {
     return true;
   }
 
-  g_texState = TextureSystemState{};
   g_texState.initialized = true;
   return true;
 }
 
+/// Shuts down the owning system for texture system.
 void shutdown_texture_system() noexcept {
   if (!g_texState.initialized) {
     return;
@@ -298,12 +366,13 @@ void shutdown_texture_system() noexcept {
         dev->destroy_texture(g_texState.slots[i].gpuId);
       }
     }
-    g_texState.slots[i] = TextureSlot{};
+    reset_texture_slot(g_texState.slots[i]);
   }
 
   g_texState.initialized = false;
 }
 
+/// Loads the requested resource for texture.
 TextureHandle load_texture(const char *virtualPath) noexcept {
   if ((virtualPath == nullptr) || !g_texState.initialized) {
     return kInvalidTextureHandle;
@@ -340,11 +409,18 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   int channels = 0;
   bool isHdr = false;
   std::uint32_t gpuId = 0U;
+  int stbFileSize = 0;
+  if (!texture_input_size_fits_stb(fileSize, &stbFileSize)) {
+    core::vfs_free(fileData);
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "texture file is too large");
+    return kInvalidTextureHandle;
+  }
 
-  if (stbi_is_hdr_from_memory(fileBytes, static_cast<int>(fileSize)) != 0) {
+  if (stbi_is_hdr_from_memory(fileBytes, stbFileSize) != 0) {
     // HDR path.
     float *pixels = stbi_loadf_from_memory(
-        fileBytes, static_cast<int>(fileSize), &width, &height, &channels, 0);
+        fileBytes, stbFileSize, &width, &height, &channels, 0);
     core::vfs_free(fileData);
 
     if (pixels == nullptr) {
@@ -362,7 +438,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   } else {
     // LDR path.
     unsigned char *pixels = stbi_load_from_memory(
-        fileBytes, static_cast<int>(fileSize), &width, &height, &channels, 0);
+        fileBytes, stbFileSize, &width, &height, &channels, 0);
     core::vfs_free(fileData);
 
     if (pixels == nullptr) {
@@ -391,11 +467,10 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   slot.cubemap = false;
   safe_copy_path(slot.path.data(), slot.path.size(), virtualPath);
 
-  TextureHandle handle{};
-  handle.id = static_cast<std::uint32_t>(freeSlot);
-  return handle;
+  return make_texture_handle(freeSlot);
 }
 
+/// Loads the requested resource for hdr equirect cubemap.
 TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
                                         std::int32_t faceSize) noexcept {
   if ((virtualPath == nullptr) || !g_texState.initialized || (faceSize <= 0) ||
@@ -428,7 +503,15 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   }
 
   const auto *fileBytes = static_cast<const unsigned char *>(fileData);
-  if (stbi_is_hdr_from_memory(fileBytes, static_cast<int>(fileSize)) == 0) {
+  int stbFileSize = 0;
+  if (!texture_input_size_fits_stb(fileSize, &stbFileSize)) {
+    core::vfs_free(fileData);
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "HDR equirect texture file is too large");
+    return kInvalidTextureHandle;
+  }
+
+  if (stbi_is_hdr_from_memory(fileBytes, stbFileSize) == 0) {
     core::vfs_free(fileData);
     core::log_message(core::LogLevel::Error, "renderer",
                       "equirect cubemap import requires an HDR texture");
@@ -439,8 +522,8 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   int height = 0;
   int sourceChannels = 0;
   float *pixels =
-      stbi_loadf_from_memory(fileBytes, static_cast<int>(fileSize), &width,
-                             &height, &sourceChannels, kHdrCubemapChannels);
+      stbi_loadf_from_memory(fileBytes, stbFileSize, &width, &height,
+                             &sourceChannels, kHdrCubemapChannels);
   core::vfs_free(fileData);
 
   if ((pixels == nullptr) || (width <= 0) || (height <= 0)) {
@@ -490,29 +573,30 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   slot.cubemap = true;
   safe_copy_path(slot.path.data(), slot.path.size(), virtualPath);
 
-  TextureHandle handle{};
-  handle.id = static_cast<std::uint32_t>(freeSlot);
-  return handle;
+  return make_texture_handle(freeSlot);
 }
 
+/// Handles unload texture.
 void unload_texture(TextureHandle handle) noexcept {
   if (!g_texState.initialized || handle == kInvalidTextureHandle) {
     return;
   }
 
-  const std::uint32_t idx = handle.id;
-  if (idx >= kMaxTextureSlots || !g_texState.slots[idx].occupied) {
+  std::size_t slotIndex = 0U;
+  TextureSlot *slot = lookup_texture_slot(handle, &slotIndex);
+  if (slot == nullptr) {
     return;
   }
 
   const RenderDevice *dev = render_device();
-  if (dev != nullptr && g_texState.slots[idx].gpuId != 0U) {
-    dev->destroy_texture(g_texState.slots[idx].gpuId);
+  if (dev != nullptr && slot->gpuId != 0U) {
+    dev->destroy_texture(slot->gpuId);
   }
 
-  g_texState.slots[idx] = TextureSlot{};
+  reset_texture_slot(g_texState.slots[slotIndex]);
 }
 
+/// Handles texture gpu id.
 std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {
@@ -522,6 +606,7 @@ std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {
   return slot->gpuId;
 }
 
+/// Returns whether is texture hdr.
 bool is_texture_hdr(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {
@@ -531,6 +616,7 @@ bool is_texture_hdr(TextureHandle handle) noexcept {
   return slot->hdr;
 }
 
+/// Returns whether is texture cubemap.
 bool is_texture_cubemap(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {

@@ -1,9 +1,12 @@
+// Defines the default fragment shader used by the Engine renderer.
+
 #version 450 core
 in vec3 vNormal;
 uniform float u_time;
 uniform vec3 u_albedo;
 out vec4 outColor;
 
+/// Runs the shader entry point for this stage.
 void main() {
   const vec3 lightDirection = normalize(vec3(0.4, 1.0, 0.6));
   const float diffuse = max(dot(normalize(vNormal), lightDirection), 0.0);

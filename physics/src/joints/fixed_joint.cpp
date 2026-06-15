@@ -1,3 +1,5 @@
+// Implements fixed joint behavior for the Engine physics system.
+
 #include "joint_solvers.h"
 
 #include "engine/math/vec3.h"
@@ -6,6 +8,7 @@
 
 namespace engine::physics {
 
+/// Handles solve fixed joint.
 float solve_fixed_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                         const math::Vec3 &anchorB,
                         float &accumulatedImpulse) noexcept {

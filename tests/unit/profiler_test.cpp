@@ -1,3 +1,5 @@
+// Verifies profiler test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 
@@ -7,6 +9,7 @@ using namespace engine::core;
 
 namespace {
 
+/// Handles test init shutdown.
 bool test_init_shutdown() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -15,6 +18,7 @@ bool test_init_shutdown() noexcept {
   return true;
 }
 
+/// Handles test frame boundaries.
 bool test_frame_boundaries() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -33,6 +37,7 @@ bool test_frame_boundaries() noexcept {
   return true;
 }
 
+/// Handles test scope push pop.
 bool test_scope_push_pop() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -75,6 +80,7 @@ bool test_scope_push_pop() noexcept {
   return true;
 }
 
+/// Handles test nested scopes.
 bool test_nested_scopes() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -122,6 +128,7 @@ bool test_nested_scopes() noexcept {
   return true;
 }
 
+/// Handles test profile scope macro alias.
 bool test_profile_scope_macro_alias() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -152,6 +159,7 @@ bool test_profile_scope_macro_alias() noexcept {
   return true;
 }
 
+/// Handles test flame layout helper.
 bool test_flame_layout_helper() noexcept {
   ProfileEntry entries[4] = {};
   entries[0].name = "root_a";
@@ -191,6 +199,7 @@ bool test_flame_layout_helper() noexcept {
   return true;
 }
 
+/// Handles test double buffer.
 bool test_double_buffer() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -230,6 +239,38 @@ bool test_double_buffer() noexcept {
   return true;
 }
 
+bool test_dropped_scope_does_not_pop_parent() noexcept {
+  if (!initialize_profiler()) {
+    return false;
+  }
+
+  profiler_begin_frame();
+  constexpr std::size_t kProfilerMaxDepth = 16U;
+  for (std::size_t i = 0U; i < kProfilerMaxDepth; ++i) {
+    if (!profiler_begin_scope("depth")) {
+      shutdown_profiler();
+      return false;
+    }
+  }
+
+  {
+    ProfileScope dropped("overflow");
+  }
+
+  const bool pushedAfterDroppedScope = profiler_begin_scope("after_overflow");
+  if (pushedAfterDroppedScope) {
+    profiler_end_scope();
+  }
+  for (std::size_t i = 0U; i < kProfilerMaxDepth; ++i) {
+    profiler_end_scope();
+  }
+  profiler_end_frame();
+
+  shutdown_profiler();
+  return !pushedAfterDroppedScope;
+}
+
+/// Handles test null out.
 bool test_null_out() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -257,6 +298,7 @@ bool test_null_out() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int passed = 0;
   int failed = 0;
@@ -279,6 +321,8 @@ int main() {
   run("profile_scope_macro_alias", &test_profile_scope_macro_alias);
   run("flame_layout_helper", &test_flame_layout_helper);
   run("double_buffer", &test_double_buffer);
+  run("dropped_scope_does_not_pop_parent",
+      &test_dropped_scope_does_not_pop_parent);
   run("null_out", &test_null_out);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

@@ -1,3 +1,5 @@
+// Implements mat4 behavior for the Engine math library.
+
 #include "engine/math/mat4.h"
 
 #include <cmath>
@@ -11,10 +13,12 @@
 
 namespace engine::math {
 
+/// Handles identity.
 Mat4 identity() noexcept {
   return Mat4();
 }
 
+/// Handles mul.
 Vec4 mul(const Mat4 &lhs, const Vec4 &rhs) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 c0 = _mm_load_ps(&lhs.columns[0].x);
@@ -46,6 +50,7 @@ Vec4 mul(const Mat4 &lhs, const Vec4 &rhs) noexcept {
 #endif
 }
 
+/// Handles mul.
 Mat4 mul(const Mat4 &lhs, const Mat4 &rhs) noexcept {
   return Mat4(mul(lhs, rhs.columns[0]),
               mul(lhs, rhs.columns[1]),
@@ -53,6 +58,7 @@ Mat4 mul(const Mat4 &lhs, const Mat4 &rhs) noexcept {
               mul(lhs, rhs.columns[3]));
 }
 
+/// Handles transpose.
 Mat4 transpose(const Mat4 &value) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 c0 = _mm_load_ps(&value.columns[0].x);
@@ -92,6 +98,7 @@ Mat4 transpose(const Mat4 &value) noexcept {
 #endif
 }
 
+/// Handles inverse.
 bool inverse(const Mat4 &value, Mat4 *out) noexcept {
   if (out == nullptr) {
     return false;

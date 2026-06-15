@@ -1,3 +1,5 @@
+// Verifies thread count determinism behavior for the Engine test suite.
+
 #include "engine/core/job_system.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
@@ -17,6 +19,7 @@ constexpr std::size_t kMinChunkSize = 64U;
 constexpr std::size_t kChunkRange = 384U;
 constexpr std::size_t kMaxJobs = 512U;
 
+/// Stores update job data used by the engine.
 struct UpdateJobData final {
   engine::runtime::World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -24,6 +27,7 @@ struct UpdateJobData final {
   float deltaSeconds = 0.0F;
 };
 
+/// Handles next random.
 std::uint32_t next_random(std::uint32_t *state) {
   if (state == nullptr) {
     return 0U;
@@ -33,6 +37,7 @@ std::uint32_t next_random(std::uint32_t *state) {
   return *state;
 }
 
+/// Runs the configured command, loop, or tool for update chunk.
 void run_update_chunk(void *userData) noexcept {
   auto *jobData = static_cast<UpdateJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -46,6 +51,7 @@ void run_update_chunk(void *userData) noexcept {
       jobData->deltaSeconds));
 }
 
+/// Handles populate world.
 bool populate_world(engine::runtime::World *world,
                     engine::runtime::Entity *outFirstEntity) {
   if (world == nullptr) {
@@ -83,6 +89,7 @@ bool populate_world(engine::runtime::World *world,
   return firstSet;
 }
 
+/// Handles parallel update.
 bool parallel_update(engine::runtime::World *world, float deltaSeconds,
                      std::uint32_t randomSeed) {
   if (world == nullptr) {
@@ -181,6 +188,7 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
   return true;
 }
 
+/// Handles hash world state.
 std::uint64_t hash_world_state(engine::runtime::World *world) {
   if (world == nullptr) {
     return 0U;
@@ -214,6 +222,7 @@ std::uint64_t hash_world_state(engine::runtime::World *world) {
   return hash;
 }
 
+/// Runs the configured command, loop, or tool for with worker count.
 bool run_with_worker_count(std::uint32_t workerCount, std::uint64_t *outHash,
                            std::uint32_t *outActualWorkers) {
   if (!engine::core::initialize_job_system(workerCount)) {
@@ -268,6 +277,7 @@ bool run_with_worker_count(std::uint32_t workerCount, std::uint64_t *outHash,
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   constexpr std::array<std::uint32_t, 4U> kWorkerConfigs = {1U, 2U, 4U, 8U};
 

@@ -1,3 +1,5 @@
+// Verifies smoke test behavior for the Engine test suite.
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -7,16 +9,19 @@
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
 #include "engine/core/linear_allocator.h"
+#include "engine/core/platform.h"
 #include "engine/math/vec4.h"
 
 namespace {
 
+/// Stores write order job data used by the engine.
 struct WriteOrderJobData final {
   std::atomic<std::int32_t> *cursor = nullptr;
   std::array<std::int32_t, 4U> *order = nullptr;
   std::int32_t value = 0;
 };
 
+/// Writes order job data.
 void write_order_job(void *userData) noexcept {
   auto *data = static_cast<WriteOrderJobData *>(userData);
   if ((data == nullptr) || (data->cursor == nullptr) ||
@@ -31,10 +36,12 @@ void write_order_job(void *userData) noexcept {
   }
 }
 
+/// Handles noop job.
 void noop_job(void *) noexcept {}
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   constexpr bool kVec4LayoutOk = (alignof(engine::math::Vec4) == 16U) &&
                                  (sizeof(engine::math::Vec4) == 16U);
@@ -106,8 +113,15 @@ int main() {
     return 11;
   }
 
-  if (!engine::core::initialize_core(1024U * 1024U)) {
-    return 12;
+  engine::core::CoreConfig headlessCore{};
+  headlessCore.frameAllocatorBytes = 1024U * 1024U;
+  headlessCore.initializePlatform = false;
+  if (!engine::core::initialize_core(headlessCore)) {
+    return 26;
+  }
+  if (engine::core::is_platform_running()) {
+    engine::core::shutdown_core();
+    return 27;
   }
 
   if (!engine::core::begin_frame_graph()) {

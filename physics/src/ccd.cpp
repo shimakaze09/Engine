@@ -1,3 +1,5 @@
+// Implements ccd behavior for the Engine physics system.
+
 #include "engine/physics/ccd.h"
 
 #include "engine/core/cvar.h"
@@ -20,14 +22,10 @@
 namespace engine::physics {
 
 // ---------------------------------------------------------------------------
-// CVar: physics.ccd_threshold (default 2.0 m/s)
+// physics.ccd_threshold CVar is registered by register_physics_cvars().
 // Bodies slower than this skip CCD entirely.
 // ---------------------------------------------------------------------------
 namespace {
-
-const bool g_ccdThresholdCVar = core::cvar_register_float(
-    "physics.ccd_threshold", 2.0F,
-    "Minimum velocity magnitude (m/s) to trigger CCD");
 
 constexpr int kMaxBilateralIterations = 32;
 constexpr float kTolerance = 1e-4F;
@@ -81,12 +79,14 @@ SupportFn resolve_support(const Collider &col) noexcept {
   }
 }
 
-const void *resolve_support_data(const Collider &col,
+/// Handles resolve support data.
+const void *resolve_support_data(const PhysicsContext &context,
+                                 const Collider &col,
                                  std::uint32_t entityIndex,
                                  float *storage) noexcept {
   switch (col.shape) {
   case ColliderShape::ConvexHull:
-    return get_hull_data_ptr(entityIndex);
+    return get_hull_data_ptr(context, entityIndex);
   case ColliderShape::Sphere:
     storage[0] = col.halfExtents.x;
     return storage;
@@ -109,7 +109,8 @@ float separating_distance(const Collider &colA,
                           const math::Vec3 &posA, std::uint32_t entityIdxA,
                           const Collider &colB,
                           const math::Vec3 &posB,
-                          std::uint32_t entityIdxB) noexcept {
+                          std::uint32_t entityIdxB,
+                          const PhysicsContext &context) noexcept {
   const bool aIsSphere = (colA.shape == ColliderShape::Sphere);
   const bool bIsSphere = (colB.shape == ColliderShape::Sphere);
 
@@ -121,8 +122,8 @@ float separating_distance(const Collider &colA,
   // Use GJK for shape-accurate distance.
   alignas(16) float storA[4]{};
   alignas(16) float storB[4]{};
-  const void *dataA = resolve_support_data(colA, entityIdxA, storA);
-  const void *dataB = resolve_support_data(colB, entityIdxB, storB);
+  const void *dataA = resolve_support_data(context, colA, entityIdxA, storA);
+  const void *dataB = resolve_support_data(context, colB, entityIdxB, storB);
 
   if ((dataA != nullptr) && (dataB != nullptr)) {
     SupportFn supA = resolve_support(colA);
@@ -148,11 +149,12 @@ math::Vec3 contact_normal_between(const Collider &colA,
                                   std::uint32_t entityIdxA,
                                   const Collider &colB,
                                   const math::Vec3 &posB,
-                                  std::uint32_t entityIdxB) noexcept {
+                                  std::uint32_t entityIdxB,
+                                  const PhysicsContext &context) noexcept {
   alignas(16) float storA[4]{};
   alignas(16) float storB[4]{};
-  const void *dataA = resolve_support_data(colA, entityIdxA, storA);
-  const void *dataB = resolve_support_data(colB, entityIdxB, storB);
+  const void *dataA = resolve_support_data(context, colA, entityIdxA, storA);
+  const void *dataB = resolve_support_data(context, colB, entityIdxB, storB);
 
   if ((dataA != nullptr) && (dataB != nullptr)) {
     SupportFn supA = resolve_support(colA);
@@ -175,10 +177,12 @@ math::Vec3 contact_normal_between(const Collider &colA,
 
 } // namespace
 
+/// Handles ccd velocity threshold.
 float ccd_velocity_threshold() noexcept {
   return core::cvar_get_float("physics.ccd_threshold", 2.0F);
 }
 
+/// Handles bilateral advance ccd.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity,
                                      const RigidBody &body,
@@ -214,6 +218,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   if (count == 0U) {
     return result;
   }
+  const PhysicsContext &physicsContext = world.physics_context();
 
   const Entity *entities = nullptr;
   const Collider *colliders = nullptr;
@@ -307,7 +312,8 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       const math::Vec3 &posB = otherTransform.position;
 
       const float sep = separating_distance(collider, posA, entity.index,
-                                            other, posB, entities[i].index);
+                                            other, posB, entities[i].index,
+                                            physicsContext);
 
       if (sep <= kTolerance) {
         // Contact (or overlap) at tLo.
@@ -333,7 +339,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
           math::add(transform.position, math::mul(relVel, tLo * dt));
       bestNormal = contact_normal_between(collider, hitPosA, entity.index,
                                           other, otherTransform.position,
-                                          entities[i].index);
+                                          entities[i].index, physicsContext);
       bestContactPt =
           math::mul(math::add(hitPosA, otherTransform.position), 0.5F);
       bestHitEntity = entities[i].index;

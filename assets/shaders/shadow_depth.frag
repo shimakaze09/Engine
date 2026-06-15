@@ -1,3 +1,5 @@
+// Defines the shadow depth fragment shader used by the Engine renderer.
+
 #version 330 core
 
 // Minimal fragment shader for shadow depth pass.

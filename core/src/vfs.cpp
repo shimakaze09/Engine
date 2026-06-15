@@ -1,3 +1,5 @@
+// Implements vfs behavior for the Engine core engine.
+
 #include "engine/core/vfs.h"
 
 #include <array>
@@ -28,6 +30,7 @@ constexpr std::size_t kMaxPrefixLength = 64U;
 constexpr std::size_t kMaxOsPathLength = 260U;
 constexpr std::size_t kMaxResolvedPathLength = 512U;
 
+/// Stores mount entry data used by the engine.
 struct MountEntry final {
   char prefix[kMaxPrefixLength] = {};
   char osPath[kMaxOsPathLength] = {};
@@ -49,6 +52,49 @@ void normalize_path(char *path, std::size_t length) noexcept {
   if ((length > 0U) && (path[length - 1U] == '/')) {
     path[length - 1U] = '\0';
   }
+}
+
+bool is_ascii_alpha(char ch) noexcept {
+  return ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z'));
+}
+
+bool is_drive_designator(const char *segment) noexcept {
+  return (segment != nullptr) && is_ascii_alpha(segment[0]) &&
+         (segment[1] == ':');
+}
+
+bool is_safe_virtual_remainder(const char *remainder) noexcept {
+  if (remainder == nullptr) {
+    return false;
+  }
+  if (remainder[0] == '\0') {
+    return true;
+  }
+  if (remainder[0] == '/') {
+    return false;
+  }
+
+  const char *segment = remainder;
+  while (*segment != '\0') {
+    const char *end = segment;
+    while ((*end != '\0') && (*end != '/')) {
+      ++end;
+    }
+
+    const auto length = static_cast<std::size_t>(end - segment);
+    if (((length == 1U) && (segment[0] == '.')) ||
+        ((length == 2U) && (segment[0] == '.') && (segment[1] == '.')) ||
+        ((length >= 2U) && is_drive_designator(segment))) {
+      return false;
+    }
+
+    if (*end == '\0') {
+      break;
+    }
+    segment = end + 1;
+  }
+
+  return true;
 }
 
 // Resolve virtualPath to an OS path using the longest-prefix match.
@@ -108,6 +154,10 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
     remainder = "";
   }
 
+  if (!is_safe_virtual_remainder(remainder)) {
+    return 0U;
+  }
+
   const std::size_t osLen = std::strlen(bestMount->osPath);
   const std::size_t remLen = std::strlen(remainder);
   const bool needSlash = (remLen > 0U);
@@ -128,6 +178,7 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
 
 } // namespace
 
+/// Initializes the owning system for vfs.
 bool initialize_vfs() noexcept {
   if (g_vfsInitialized) {
     return true;
@@ -140,6 +191,7 @@ bool initialize_vfs() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for vfs.
 void shutdown_vfs() noexcept {
   if (!g_vfsInitialized) {
     return;
@@ -150,6 +202,7 @@ void shutdown_vfs() noexcept {
   g_vfsInitialized = false;
 }
 
+/// Handles mount.
 bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
   if ((virtualPrefix == nullptr) || (osDirectoryPath == nullptr)) {
     return false;
@@ -190,6 +243,7 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
   return false;
 }
 
+/// Handles unmount.
 bool unmount(const char *virtualPrefix) noexcept {
   if (virtualPrefix == nullptr) {
     return false;
@@ -203,6 +257,7 @@ bool unmount(const char *virtualPrefix) noexcept {
   return false;
 }
 
+/// Handles vfs file exists.
 bool vfs_file_exists(const char *virtualPath) noexcept {
   char osPath[kMaxResolvedPathLength] = {};
   if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
@@ -218,6 +273,7 @@ bool vfs_file_exists(const char *virtualPath) noexcept {
 #endif
 }
 
+/// Handles vfs read binary.
 bool vfs_read_binary(const char *virtualPath, void **outData,
                      std::size_t *outSize) noexcept {
   if ((outData == nullptr) || (outSize == nullptr)) {
@@ -277,6 +333,7 @@ bool vfs_read_binary(const char *virtualPath, void **outData,
   return true;
 }
 
+/// Handles vfs read text.
 bool vfs_read_text(const char *virtualPath, char **outText,
                    std::size_t *outSize) noexcept {
   if ((outText == nullptr) || (outSize == nullptr)) {
@@ -308,6 +365,7 @@ bool vfs_read_text(const char *virtualPath, char **outText,
   return true;
 }
 
+/// Handles vfs write binary.
 bool vfs_write_binary(const char *virtualPath, const void *data,
                       std::size_t size) noexcept {
   if ((data == nullptr) && (size > 0U)) {
@@ -343,15 +401,18 @@ bool vfs_write_binary(const char *virtualPath, const void *data,
   return true;
 }
 
+/// Handles vfs write text.
 bool vfs_write_text(const char *virtualPath, const char *text,
                     std::size_t size) noexcept {
   return vfs_write_binary(virtualPath, text, size);
 }
 
+/// Handles vfs free.
 void vfs_free(void *buffer) noexcept {
   delete[] static_cast<std::byte *>(buffer);
 }
 
+/// Handles vfs file mtime.
 std::int64_t vfs_file_mtime(const char *virtualPath) noexcept {
   char osPath[kMaxResolvedPathLength] = {};
   if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
@@ -376,6 +437,7 @@ std::int64_t vfs_file_mtime(const char *virtualPath) noexcept {
 #endif
 }
 
+/// Handles vfs resolve os path.
 bool vfs_resolve_os_path(const char *virtualPath, char *outBuffer,
                          std::size_t bufferCapacity) noexcept {
   return resolve(virtualPath, outBuffer, bufferCapacity) > 0U;

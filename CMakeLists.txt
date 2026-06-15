@@ -1,3 +1,5 @@
+# Configures root build build settings for the Engine repository.
+
 cmake_minimum_required(VERSION 3.28)
 
 if(POLICY CMP0174)
@@ -35,6 +37,11 @@ if(NOT ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_VALID_PLATFORMS)
 endif()
 
 message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")
+
+set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
+    "Asset directory synced for local editor/runtime builds")
+set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
+    "Build-tree asset directory used by local editor/runtime builds")
 
 find_package(SDL2 CONFIG QUIET)
 if(NOT SDL2_FOUND)
@@ -74,9 +81,17 @@ endif()
 
 find_package(OpenGL REQUIRED)
 
-# Silence OpenGL deprecation warnings on macOS (deprecated since 10.14 Mojave).
 if(APPLE)
+    foreach(_engine_sdl_target SDL2-static SDL2)
+        if(TARGET ${_engine_sdl_target})
+            target_compile_options(${_engine_sdl_target} PRIVATE -Wno-deprecated-declarations)
+        endif()
+    endforeach()
+    unset(_engine_sdl_target)
+
+    # Silence OpenGL and third-party dependency deprecation noise on macOS.
     add_compile_definitions(GL_SILENCE_DEPRECATION)
+    add_link_options(-Wl,-no_warn_duplicate_libraries)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -173,7 +188,13 @@ endif()
 #      is expected behaviour. Non-PCH headers like sparse_set.h or math types
 #      would trigger fewer TUs.
 
+find_package(Python3 COMPONENTS Interpreter QUIET)
+option(ENGINE_REQUIRE_ANALYSIS_TOOL
+    "Require cppcheck or clang-tidy and create a failing analysis target when neither is found"
+    OFF
+)
 find_program(CPPCHECK_EXE NAMES cppcheck DOC "Path to cppcheck")
+find_program(CLANG_TIDY_EXE NAMES clang-tidy DOC "Path to clang-tidy")
 if(CPPCHECK_EXE)
     add_custom_target(analysis
         COMMAND ${CPPCHECK_EXE}
@@ -196,13 +217,27 @@ if(CPPCHECK_EXE)
         VERBATIM
     )
     message(STATUS "Static analysis target 'analysis' configured (cppcheck: ${CPPCHECK_EXE})")
-else()
+elseif(CLANG_TIDY_EXE AND Python3_Interpreter_FOUND)
+    add_custom_target(analysis
+        COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/run_clang_tidy_analysis.py"
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CLANG_TIDY_EXE}"
+        "${CMAKE_BINARY_DIR}"
+        COMMENT "Running clang-tidy static analysis"
+        VERBATIM
+    )
+    message(STATUS "Static analysis target 'analysis' configured (clang-tidy: ${CLANG_TIDY_EXE})")
+elseif(ENGINE_REQUIRE_ANALYSIS_TOOL)
     add_custom_target(analysis
         COMMAND ${CMAKE_COMMAND} -E echo
-        "cppcheck not found; install cppcheck to enable the analysis target."
-        COMMENT "Static analysis target (cppcheck not available)"
+        "No static analyzer found. Install cppcheck or clang-tidy."
+        COMMAND ${CMAKE_COMMAND} -E false
+        COMMENT "Static analysis target unavailable"
     )
-    message(STATUS "cppcheck not found; local 'analysis' target is unavailable.")
+    message(WARNING "No static analyzer found; 'analysis' target will fail.")
+else()
+    message(STATUS "Static analysis target 'analysis' not configured; install cppcheck or clang-tidy, or set ENGINE_REQUIRE_ANALYSIS_TOOL=ON to require one.")
 endif()
 
 include(FetchContent)
@@ -328,12 +363,12 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(stb)
 set(ENGINE_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
 
-if(EXISTS ${CMAKE_SOURCE_DIR}/assets)
-    file(COPY ${CMAKE_SOURCE_DIR}/assets DESTINATION ${CMAKE_BINARY_DIR})
+if(EXISTS "${ENGINE_ASSET_SOURCE_DIR}")
+    file(COPY "${ENGINE_ASSET_SOURCE_DIR}/" DESTINATION "${ENGINE_ASSET_OUTPUT_DIR}")
     add_custom_target(copy_assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/assets"
-        "${CMAKE_BINARY_DIR}/assets"
+        "${ENGINE_ASSET_SOURCE_DIR}"
+        "${ENGINE_ASSET_OUTPUT_DIR}"
         COMMENT "Syncing assets to build directory"
     )
 endif()

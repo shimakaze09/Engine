@@ -13,6 +13,7 @@ local M = {}
 local MOVE_SPEED = 5.0
 local JUMP_VY = 7.0
 
+-- Handles on start.
 function M.on_start(self)
     engine.log("Player on_start, entity=" .. self)
     engine.set_restitution(self, 0.05)
@@ -21,6 +22,7 @@ function M.on_start(self)
     engine.set_metallic(self, 0.0)
 end
 
+-- Handles on update.
 function M.on_update(self, dt)
     if not engine.is_alive(self) then
         return

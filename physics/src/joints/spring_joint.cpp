@@ -1,3 +1,5 @@
+// Implements spring joint behavior for the Engine physics system.
+
 #include "joint_solvers.h"
 
 #include "engine/math/vec3.h"
@@ -6,6 +8,7 @@
 
 namespace engine::physics {
 
+/// Handles solve spring joint.
 float solve_spring_joint(JointSolveContext &ctx, float restLength,
                          float stiffness, float damping, float deltaSeconds,
                          float &accumulatedImpulse) noexcept {

@@ -1,3 +1,5 @@
+// Declares serialization keys types and APIs for the Engine runtime world.
+
 #pragma once
 
 // Shared JSON keys for component serialization.
@@ -12,6 +14,8 @@ inline constexpr const char *kJsonKeyCollider = "Collider";
 inline constexpr const char *kJsonKeyLightComponent = "LightComponent";
 inline constexpr const char *kJsonKeyReflectionProbeComponent =
     "ReflectionProbeComponent";
+inline constexpr const char *kJsonKeyFoliagePatchComponent =
+    "FoliagePatchComponent";
 inline constexpr const char *kJsonKeyNameComponent = "NameComponent";
 inline constexpr const char *kJsonKeyScriptComponent = "ScriptComponent";
 inline constexpr const char *kJsonKeyCameraComponent = "CameraComponent";

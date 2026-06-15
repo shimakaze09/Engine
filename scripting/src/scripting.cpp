@@ -1,6 +1,10 @@
+// Implements scripting behavior for the Engine Lua scripting system.
+
 #include "engine/scripting/scripting.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
+#include "deferred_mutations.h"
+#include "runtime_binding.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -8,6 +12,7 @@ extern "C" {
 #include "lualib.h"
 }
 
+#include <cstdint>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -18,7 +23,6 @@ extern "C" {
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 #include "engine/core/logging.h"
-#include "engine/core/service_locator.h"
 #include "engine/core/touch_input.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/entity_pool.h"
@@ -42,15 +46,16 @@ extern "C" {
 
 namespace engine::scripting {
 
+/// Handles register generated bindings.
 void register_generated_bindings(lua_State *L) noexcept;
+/// Handles debugger clear breakpoints.
 void debugger_clear_breakpoints() noexcept;
+/// Handles debugger add breakpoint.
 bool debugger_add_breakpoint(const char *file, int line) noexcept;
 
 namespace {
 
 lua_State *g_state = nullptr;
-runtime::World *g_world = nullptr;
-const RuntimeServices *g_services = nullptr;
 std::uint64_t g_defaultMeshAssetId = 0ULL;
 std::uint64_t g_builtinPlaneMesh = 0ULL;
 std::uint64_t g_builtinCubeMesh = 0ULL;
@@ -58,6 +63,7 @@ std::uint64_t g_builtinSphereMesh = 0ULL;
 std::uint64_t g_builtinCylinderMesh = 0ULL;
 std::uint64_t g_builtinCapsuleMesh = 0ULL;
 std::uint64_t g_builtinPyramidMesh = 0ULL;
+/// Handles k default gravity.
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
 float g_totalSeconds = 0.0F;
@@ -71,6 +77,7 @@ constexpr std::size_t kMaxEntityPools = 16U;
 runtime::EntityPool g_entityPools[kMaxEntityPools]{};
 std::size_t g_entityPoolCount = 0U;
 
+/// Handles copy c string.
 void copy_c_string(char *destination, std::size_t destinationSize,
                    const char *source) noexcept {
   if ((destination == nullptr) || (destinationSize == 0U)) {
@@ -92,6 +99,7 @@ void copy_c_string(char *destination, std::size_t destinationSize,
   destination[copyLength] = '\0';
 }
 
+/// Handles copy clone name.
 void copy_clone_name(char *destination, std::size_t destinationSize,
                      const char *source) noexcept {
   constexpr const char *kCloneSuffix = " (clone)";
@@ -144,6 +152,7 @@ bool g_entityFaulted[kMaxFaultedEntities]{};
 int g_entitySavedState[kMaxFaultedEntities]{};
 bool g_entitySavedStateInit = false;
 
+/// Handles init entity saved state.
 void init_entity_saved_state() noexcept {
   if (!g_entitySavedStateInit) {
     for (auto &ref : g_entitySavedState) {
@@ -153,6 +162,7 @@ void init_entity_saved_state() noexcept {
   }
 }
 
+/// Handles clear entity saved state.
 void clear_entity_saved_state() noexcept {
   if (g_state == nullptr) {
     return;
@@ -165,44 +175,7 @@ void clear_entity_saved_state() noexcept {
   }
 }
 
-enum class DeferredMutationType : std::uint8_t {
-  DestroyEntity,
-  SetTransform,
-  AddRigidBody,
-  AddCollider,
-  AddMeshComponent,
-  AddNameComponent,
-  AddLightComponent,
-  RemoveLightComponent,
-  AddScriptComponent,
-  RemoveScriptComponent,
-  AddPointLightComponent,
-  RemovePointLightComponent,
-  AddSpotLightComponent,
-  RemoveSpotLightComponent,
-};
-
-struct DeferredMutation final {
-  DeferredMutationType type = DeferredMutationType::DestroyEntity;
-  runtime::Entity entity{};
-  runtime::Transform transform{};
-  runtime::RigidBody rigidBody{};
-  runtime::Collider collider{};
-  runtime::MeshComponent meshComponent{};
-  runtime::NameComponent nameComponent{};
-  runtime::LightComponent lightComponent{};
-  runtime::ScriptComponent scriptComponent{};
-  runtime::PointLightComponent pointLightComponent{};
-  runtime::SpotLightComponent spotLightComponent{};
-  runtime::MovementAuthority movementAuthority =
-      runtime::MovementAuthority::None;
-  bool setMovementAuthority = false;
-};
-
-constexpr std::size_t kMaxDeferredMutations = 2048U;
-DeferredMutation g_deferredMutations[kMaxDeferredMutations]{};
-std::size_t g_deferredMutationCount = 0U;
-
+/// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept;
 
 constexpr std::size_t kMaxModuleLoadDepth = 32U;
@@ -210,6 +183,7 @@ char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
 
 constexpr std::size_t kMaxProfilerEntries = 256U;
+/// Stores profiler entry data used by the engine.
 struct ProfilerEntry final {
   char name[96] = {};
   std::uint32_t samples = 0U;
@@ -219,6 +193,7 @@ ProfilerEntry g_profilerEntries[kMaxProfilerEntries]{};
 bool g_profilerEnabled = false;
 
 constexpr std::size_t kMaxBreakpoints = 64U;
+/// Stores debug breakpoint data used by the engine.
 struct DebugBreakpoint final {
   char file[160] = {};
   int line = 0;
@@ -285,7 +260,7 @@ char g_gameState[64] = "startup";
 bool g_godModeEnabled = false;
 bool g_noclipEnabled = false;
 constexpr std::size_t kMaxPlayerControllers = 4U;
-std::uint32_t g_playerControllerEntities[kMaxPlayerControllers]{};
+runtime::Entity g_playerControllerEntities[kMaxPlayerControllers]{};
 
 // Persistent cross-scene game state (survives World resets).
 runtime::GameState g_persistentGameState{};
@@ -293,286 +268,117 @@ runtime::GameState g_persistentGameState{};
 // Player controllers (survive brief World transitions).
 runtime::PlayerControllerArray g_playerControllers{};
 
+constexpr std::uint64_t kLuaEntityIndexMask = 0xFFFFFFFFULL;
+constexpr unsigned kLuaEntityGenerationShift = 32U;
+
+void clear_player_controller_entity(runtime::Entity entity) noexcept {
+  if (entity == runtime::kInvalidEntity) {
+    return;
+  }
+
+  g_playerControllers.on_entity_destroyed(entity);
+  for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
+    if (g_playerControllerEntities[i] == entity) {
+      g_playerControllerEntities[i] = runtime::kInvalidEntity;
+    }
+  }
+}
+
+/// Handles refresh lua hook.
 void refresh_lua_hook() noexcept;
+/// Handles scripting debug hook.
 void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept;
 
-bool can_apply_mutations_now() noexcept {
-  return (g_world != nullptr) && (g_services != nullptr) &&
-         (g_services->get_current_phase(g_world) == runtime::WorldPhase::Input);
-}
-
-bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
-  if (g_deferredMutationCount >= kMaxDeferredMutations) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "deferred mutation queue overflow");
+/// Encodes a generated runtime entity into Lua's numeric handle format.
+bool encode_lua_entity_handle(runtime::Entity entity,
+                              lua_Integer *outHandle) noexcept {
+  if ((outHandle == nullptr) || (entity.index == 0U) ||
+      (entity.index > static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
+      (entity.generation == 0U)) {
     return false;
   }
 
-  g_deferredMutations[g_deferredMutationCount] = mutation;
-  ++g_deferredMutationCount;
+  const std::uint64_t encodedGeneration =
+      static_cast<std::uint64_t>(entity.generation - 1U);
+  const std::uint64_t rawHandle =
+      (encodedGeneration << kLuaEntityGenerationShift) |
+      static_cast<std::uint64_t>(entity.index);
+  if ((rawHandle == 0ULL) ||
+      (rawHandle >
+       static_cast<std::uint64_t>(std::numeric_limits<lua_Integer>::max()))) {
+    return false;
+  }
+
+  *outHandle = static_cast<lua_Integer>(rawHandle);
   return true;
 }
 
-bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
+/// Pushes a generated runtime entity as a Lua handle.
+void push_entity_handle(lua_State *state, runtime::Entity entity) noexcept {
+  lua_Integer handle = 0;
+  if (!encode_lua_entity_handle(entity, &handle)) {
+    lua_pushnil(state);
+    return;
   }
 
-  if (can_apply_mutations_now()) {
-    return g_services->destroy_entity_op(g_world, entity.index);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::DestroyEntity;
-  mutation.entity = entity;
-  return queue_deferred_mutation(mutation);
+  lua_pushinteger(state, handle);
 }
 
-bool apply_or_queue_transform(runtime::Entity entity,
-                              const runtime::Transform &transform,
-                              bool setAuthority,
-                              runtime::MovementAuthority authority) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
+/// Returns the current generated entity for an index, or invalid.
+runtime::Entity entity_from_index(std::uint32_t entityIndex) noexcept {
+  if (runtime_binding().world == nullptr) {
+    return runtime::kInvalidEntity;
   }
-
-  if (can_apply_mutations_now()) {
-    const bool transformUpdated =
-        g_services->add_transform_op(g_world, entity.index, transform);
-    if (!transformUpdated) {
-      return false;
-    }
-    return !setAuthority || g_services->set_movement_authority_op(
-                                g_world, entity.index, authority);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::SetTransform;
-  mutation.entity = entity;
-  mutation.transform = transform;
-  mutation.setMovementAuthority = setAuthority;
-  mutation.movementAuthority = authority;
-  return queue_deferred_mutation(mutation);
+  return runtime_binding().world->find_entity_by_index(entityIndex);
 }
 
-bool apply_or_queue_rigid_body(runtime::Entity entity,
-                               const runtime::RigidBody &rigidBody) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_services->add_rigid_body_op(g_world, entity.index, rigidBody);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddRigidBody;
-  mutation.entity = entity;
-  mutation.rigidBody = rigidBody;
-  return queue_deferred_mutation(mutation);
+/// Pushes the current generated entity for an index as a Lua handle.
+void push_entity_handle_from_index(lua_State *state,
+                                   std::uint32_t entityIndex) noexcept {
+  push_entity_handle(state, entity_from_index(entityIndex));
 }
 
-bool apply_or_queue_collider(runtime::Entity entity,
-                             const runtime::Collider &collider) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+/// Decodes Lua's numeric entity handle format without requiring it to be live.
+bool decode_entity_handle_value(std::uint64_t rawHandle,
+                                runtime::Entity *outEntity) noexcept {
+  if ((outEntity == nullptr) || (rawHandle == 0ULL)) {
     return false;
   }
 
-  if (can_apply_mutations_now()) {
-    return g_services->add_collider_op(g_world, entity.index, collider);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddCollider;
-  mutation.entity = entity;
-  mutation.collider = collider;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_mesh_component(
-    runtime::Entity entity, const runtime::MeshComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  const std::uint32_t entityIndex =
+      static_cast<std::uint32_t>(rawHandle & kLuaEntityIndexMask);
+  const std::uint64_t encodedGeneration =
+      rawHandle >> kLuaEntityGenerationShift;
+  if ((entityIndex == 0U) ||
+      (entityIndex > static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
+      (encodedGeneration >
+       static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max() -
+                                  1U))) {
     return false;
   }
 
-  if (can_apply_mutations_now()) {
-    return g_services->add_mesh_component_op(g_world, entity.index, component);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddMeshComponent;
-  mutation.entity = entity;
-  mutation.meshComponent = component;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_name_component(
-    runtime::Entity entity, const runtime::NameComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_services->add_name_component_op(g_world, entity.index, component);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddNameComponent;
-  mutation.entity = entity;
-  mutation.nameComponent = component;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_light_component(
-    runtime::Entity entity, const runtime::LightComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_services->add_light_component_op(g_world, entity.index, component);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddLightComponent;
-  mutation.entity = entity;
-  mutation.lightComponent = component;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_services->remove_light_component_op(g_world, entity.index);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::RemoveLightComponent;
-  mutation.entity = entity;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_script_component(
-    runtime::Entity entity,
-    const runtime::ScriptComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_services->add_script_component_op(g_world, entity.index,
-                                               component);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddScriptComponent;
-  mutation.entity = entity;
-  mutation.scriptComponent = component;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_services->remove_script_component_op(g_world, entity.index);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::RemoveScriptComponent;
-  mutation.entity = entity;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_point_light_component(
-    runtime::Entity entity,
-    const runtime::PointLightComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_world->add_point_light_component(entity, component);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddPointLightComponent;
-  mutation.entity = entity;
-  mutation.pointLightComponent = component;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_remove_point_light_component(
-    runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_world->remove_point_light_component(entity);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::RemovePointLightComponent;
-  mutation.entity = entity;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_spot_light_component(
-    runtime::Entity entity,
-    const runtime::SpotLightComponent &component) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_world->add_spot_light_component(entity, component);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::AddSpotLightComponent;
-  mutation.entity = entity;
-  mutation.spotLightComponent = component;
-  return queue_deferred_mutation(mutation);
-}
-
-bool apply_or_queue_remove_spot_light_component(
-    runtime::Entity entity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
-    return false;
-  }
-
-  if (can_apply_mutations_now()) {
-    return g_world->remove_spot_light_component(entity);
-  }
-
-  DeferredMutation mutation{};
-  mutation.type = DeferredMutationType::RemoveSpotLightComponent;
-  mutation.entity = entity;
-  return queue_deferred_mutation(mutation);
-}
-
-bool read_entity_index(lua_State *state, int index,
-                       std::uint32_t *outIndex) noexcept {
-  if ((outIndex == nullptr) || !lua_isnumber(state, index)) {
-    return false;
-  }
-
-  const lua_Integer rawIndex = lua_tointeger(state, index);
-  if ((rawIndex <= 0) ||
-      (rawIndex > static_cast<lua_Integer>(runtime::World::kMaxEntities))) {
-    return false;
-  }
-
-  *outIndex = static_cast<std::uint32_t>(rawIndex);
+  *outEntity = runtime::Entity{
+      entityIndex, static_cast<std::uint32_t>(encodedGeneration + 1ULL)};
   return true;
 }
 
+/// Decodes Lua's numeric entity handle format without requiring it to be live.
+bool decode_lua_entity_handle(lua_State *state, int index,
+                              runtime::Entity *outEntity) noexcept {
+  if ((outEntity == nullptr) || !lua_isnumber(state, index)) {
+    return false;
+  }
+
+  const lua_Integer rawHandleSigned = lua_tointeger(state, index);
+  if (rawHandleSigned <= 0) {
+    return false;
+  }
+
+  return decode_entity_handle_value(static_cast<std::uint64_t>(rawHandleSigned),
+                                    outEntity);
+}
+
+/// Reads vec3 args data.
 bool read_vec3_args(lua_State *state, int startIndex,
                     math::Vec3 *outVec) noexcept {
   if ((outVec == nullptr) || !lua_isnumber(state, startIndex) ||
@@ -588,33 +394,24 @@ bool read_vec3_args(lua_State *state, int startIndex,
   return true;
 }
 
+/// Reads entity data.
 bool read_entity(lua_State *state, int index,
                  runtime::Entity *outEntity) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (outEntity == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (outEntity == nullptr)) {
     return false;
   }
 
-  std::uint32_t entityIndex = 0U;
-  if (!read_entity_index(state, index, &entityIndex)) {
+  runtime::Entity decoded{};
+  if (!decode_lua_entity_handle(state, index, &decoded) ||
+      !runtime_binding().world->is_alive(decoded)) {
     return false;
   }
 
-  const std::uint32_t validIndex =
-      g_services->get_entity_index(g_world, entityIndex);
-  if (validIndex == 0U) {
-    return false;
-  }
-
-  const runtime::Entity resolved = g_world->find_entity_by_index(validIndex);
-  if (resolved == runtime::kInvalidEntity) {
-    return false;
-  }
-
-  *outEntity = resolved;
+  *outEntity = decoded;
   return true;
 }
 
+/// Handles module is currently loading.
 bool module_is_currently_loading(const char *path) noexcept {
   if (path == nullptr) {
     return false;
@@ -627,6 +424,7 @@ bool module_is_currently_loading(const char *path) noexcept {
   return false;
 }
 
+/// Handles profiler record sample.
 void profiler_record_sample(const char *name) noexcept {
   if ((name == nullptr) || (name[0] == '\0')) {
     name = "<anonymous>";
@@ -654,6 +452,7 @@ void profiler_record_sample(const char *name) noexcept {
   }
 }
 
+/// Handles debugger line matches.
 bool debugger_line_matches(const char *source, int line) noexcept {
   if ((source == nullptr) || (line <= 0)) {
     return false;
@@ -679,6 +478,7 @@ bool debugger_line_matches(const char *source, int line) noexcept {
   return false;
 }
 
+/// Handles debugger capture watch values.
 void debugger_capture_watch_values() noexcept {
   g_lastWatchOutput[0] = '\0';
   if ((g_state == nullptr) || (g_watchCount == 0U)) {
@@ -738,6 +538,7 @@ void debugger_capture_watch_values() noexcept {
   refresh_lua_hook();
 }
 
+/// Handles scripting debug hook.
 void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
   if ((state == nullptr) || (ar == nullptr)) {
     return;
@@ -843,6 +644,7 @@ void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
   }
 }
 
+/// Handles refresh lua hook.
 void refresh_lua_hook() noexcept {
   if (g_state == nullptr) {
     return;
@@ -873,6 +675,7 @@ void refresh_lua_hook() noexcept {
   lua_sethook(g_state, &scripting_debug_hook, mask, count);
 }
 
+/// Handles log lua error.
 void log_lua_error(const char *context) noexcept {
   if (g_state == nullptr) {
     return;
@@ -901,6 +704,7 @@ void log_lua_error(const char *context) noexcept {
   lua_pop(g_state, 2);
 }
 
+/// Handles lua engine log.
 int lua_engine_log(lua_State *state) noexcept {
   const char *message = lua_tostring(state, 1);
   if (message == nullptr) {
@@ -911,32 +715,35 @@ int lua_engine_log(lua_State *state) noexcept {
   return 0;
 }
 
+/// Handles lua engine get entity count.
 int lua_engine_get_entity_count(lua_State *state) noexcept {
-  const std::size_t count = (g_world != nullptr && g_services != nullptr)
-                                ? g_services->get_transform_count(g_world)
+  const std::size_t count = (runtime_binding().world != nullptr && runtime_binding().services != nullptr)
+                                ? runtime_binding().services->get_transform_count(runtime_binding().world)
                                 : 0U;
   lua_pushinteger(state, static_cast<lua_Integer>(count));
   return 1;
 }
 
+/// Handles lua engine spawn entity.
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
       !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
 
   // Only valid during Input; create_entity returns 0 otherwise.
-  const std::uint32_t entityIndex = g_services->create_entity_op(g_world);
+  const std::uint32_t entityIndex = runtime_binding().services->create_entity_op(runtime_binding().world);
   if (entityIndex == 0U) {
     lua_pushnil(state);
     return 1;
   }
 
-  lua_pushinteger(state, static_cast<lua_Integer>(entityIndex));
+  push_entity_handle_from_index(state, entityIndex);
   return 1;
 }
 
+/// Handles lua engine destroy entity.
 int lua_engine_destroy_entity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -944,28 +751,30 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
     return 1;
   }
 
+  clear_player_controller_entity(entity);
   const bool ok = apply_or_queue_destroy_entity(entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine is alive.
 int lua_engine_is_alive(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
 
-  std::uint32_t entityIndex = 0U;
-  if (!read_entity_index(state, 1, &entityIndex)) {
+  runtime::Entity entity{};
+  if (!decode_lua_entity_handle(state, 1, &entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
 
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIndex);
-  lua_pushboolean(state, (entity != runtime::kInvalidEntity) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().world->is_alive(entity) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine get position.
 int lua_engine_get_position(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -973,13 +782,13 @@ int lua_engine_get_position(lua_State *state) noexcept {
     return 1;
   }
 
-  if (g_services == nullptr) {
+  if (runtime_binding().services == nullptr) {
     lua_pushnil(state);
     return 1;
   }
 
   const runtime::Transform *transform =
-      g_services->get_transform_read_ptr(g_world, entity.index);
+      runtime_binding().services->get_transform_read_ptr(runtime_binding().world, entity.index);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -991,6 +800,7 @@ int lua_engine_get_position(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine set position.
 int lua_engine_set_position(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 position{};
@@ -1000,9 +810,9 @@ int lua_engine_set_position(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  if (g_services != nullptr) {
+  if (runtime_binding().services != nullptr) {
     static_cast<void>(
-        g_services->get_transform_op(g_world, entity.index, &transform));
+        runtime_binding().services->get_transform_op(runtime_binding().world, entity.index, &transform));
   }
   transform.position = position;
 
@@ -1012,6 +822,7 @@ int lua_engine_set_position(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get velocity.
 int lua_engine_get_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -1020,7 +831,7 @@ int lua_engine_get_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1031,6 +842,7 @@ int lua_engine_get_velocity(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine add rigid body.
 int lua_engine_add_rigid_body(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -1053,6 +865,7 @@ int lua_engine_add_rigid_body(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set velocity.
 int lua_engine_set_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 velocity{};
@@ -1062,7 +875,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -1075,6 +888,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set acceleration.
 int lua_engine_set_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 acceleration{};
@@ -1085,7 +899,7 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_acceleration requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -1102,6 +916,7 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set additional acceleration.
 int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 additionalAcceleration{};
@@ -1112,7 +927,7 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_additional_acceleration requires an existing "
                       "RigidBody");
@@ -1126,6 +941,7 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get angular velocity.
 int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -1134,7 +950,7 @@ int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1145,6 +961,7 @@ int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine set angular velocity.
 int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 angVel{};
@@ -1154,7 +971,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_angular_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -1167,6 +984,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set mesh.
 int lua_engine_set_mesh(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -1182,7 +1000,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
 
   runtime::MeshComponent component{};
   const runtime::MeshComponent *existing =
-      g_world->get_mesh_component_ptr(entity);
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (existing != nullptr) {
     component = *existing;
   }
@@ -1193,6 +1011,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get default mesh asset id.
 int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
   if (g_defaultMeshAssetId == 0ULL) {
     lua_pushnil(state);
@@ -1207,7 +1026,7 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // shape: "cube" | "sphere" | "cylinder" | "capsule" | "pyramid" | "plane"
 // Spawns a physics entity with the matching mesh and appropriate collider.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !can_apply_mutations_now() ||
+  if ((runtime_binding().world == nullptr) || !can_apply_mutations_now() ||
       !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
@@ -1266,7 +1085,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     colliderShape = runtime::ColliderShape::AABB;
   }
 
-  const runtime::Entity entity = g_world->create_entity();
+  const runtime::Entity entity = runtime_binding().world->create_entity();
   if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
@@ -1274,28 +1093,29 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   runtime::Transform transform{};
   transform.position = pos;
-  static_cast<void>(g_world->add_transform(entity, transform));
+  static_cast<void>(runtime_binding().world->add_transform(entity, transform));
 
   runtime::RigidBody rigidBody{};
   rigidBody.inverseMass = 1.0F;
-  static_cast<void>(g_world->add_rigid_body(entity, rigidBody));
+  static_cast<void>(runtime_binding().world->add_rigid_body(entity, rigidBody));
 
   runtime::Collider collider{};
   collider.halfExtents = halfExtents;
   collider.shape = colliderShape;
-  static_cast<void>(g_world->add_collider(entity, collider));
+  static_cast<void>(runtime_binding().world->add_collider(entity, collider));
 
   if (meshId != 0ULL) {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
     meshComp.albedo = albedo;
-    static_cast<void>(g_world->add_mesh_component(entity, meshComp));
+    static_cast<void>(runtime_binding().world->add_mesh_component(entity, meshComp));
   }
 
-  lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
+  push_entity_handle(state, entity);
   return 1;
 }
 
+/// Handles lua engine set albedo.
 int lua_engine_set_albedo(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 albedo{};
@@ -1306,7 +1126,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
 
   runtime::MeshComponent component{};
   const runtime::MeshComponent *existing =
-      g_world->get_mesh_component_ptr(entity);
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (existing != nullptr) {
     component = *existing;
   }
@@ -1317,6 +1137,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set name.
 int lua_engine_set_name(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isstring(state, 2)) {
@@ -1345,6 +1166,7 @@ int lua_engine_set_name(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get name.
 int lua_engine_get_name(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -1353,8 +1175,8 @@ int lua_engine_get_name(lua_State *state) noexcept {
   }
 
   runtime::NameComponent component{};
-  if ((g_services == nullptr) ||
-      !g_services->get_name_component_op(g_world, entity.index, &component)) {
+  if ((runtime_binding().services == nullptr) ||
+      !runtime_binding().services->get_name_component_op(runtime_binding().world, entity.index, &component)) {
     lua_pushnil(state);
     return 1;
   }
@@ -1386,6 +1208,7 @@ int lua_engine_add_capsule_collider(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine add collider.
 int lua_engine_add_collider(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
@@ -1403,6 +1226,7 @@ int lua_engine_add_collider(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set restitution.
 int lua_engine_set_restitution(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -1415,7 +1239,7 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
   }
   const float value = static_cast<float>(lua_tonumber(state, 2));
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1426,6 +1250,7 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set friction.
 int lua_engine_set_friction(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -1439,7 +1264,7 @@ int lua_engine_set_friction(lua_State *state) noexcept {
   const float staticF = static_cast<float>(lua_tonumber(state, 2));
   const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1486,7 +1311,7 @@ int lua_engine_set_collider_material(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1532,7 +1357,7 @@ int lua_engine_set_collision_layer(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1554,7 +1379,7 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -1564,16 +1389,19 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine delta time.
 int lua_engine_delta_time(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(g_deltaSeconds));
   return 1;
 }
 
+/// Handles lua engine elapsed time.
 int lua_engine_elapsed_time(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(g_totalSeconds));
   return 1;
 }
 
+/// Handles lua engine is key down.
 int lua_engine_is_key_down(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushboolean(state, 0);
@@ -1584,6 +1412,7 @@ int lua_engine_is_key_down(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine is key pressed.
 int lua_engine_is_key_pressed(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushboolean(state, 0);
@@ -1594,6 +1423,7 @@ int lua_engine_is_key_pressed(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine register action.
 int lua_engine_register_action(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushboolean(state, 0);
@@ -1609,6 +1439,7 @@ int lua_engine_register_action(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine register axis.
 int lua_engine_register_axis(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
       !lua_isnumber(state, 3)) {
@@ -1624,36 +1455,42 @@ int lua_engine_register_axis(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine is action down.
 int lua_engine_is_action_down(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushboolean(state, core::is_action_down(name) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine is action pressed.
 int lua_engine_is_action_pressed(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushboolean(state, core::is_action_pressed(name) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine get action value.
 int lua_engine_get_action_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushnumber(state, static_cast<lua_Number>(core::action_value(name)));
   return 1;
 }
 
+/// Handles lua engine get axis value.
 int lua_engine_get_axis_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushnumber(state, static_cast<lua_Number>(core::axis_value(name)));
   return 1;
 }
 
+/// Handles lua engine is gamepad connected.
 int lua_engine_is_gamepad_connected(lua_State *state) noexcept {
   static_cast<void>(state);
   lua_pushboolean(state, core::is_gamepad_connected() ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine is gamepad button down.
 int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushboolean(state, 0);
@@ -1664,6 +1501,7 @@ int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine gamepad axis value.
 int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushnumber(state, 0.0);
@@ -1849,6 +1687,11 @@ int lua_engine_load_input_config(lua_State *state) noexcept {
 static lua_State *g_touchLuaState = nullptr;
 static int g_touchCallbackRef = LUA_NOREF;
 
+static void unregister_lua_touch_callback() noexcept;
+static void unregister_lua_gesture_callback(int index) noexcept;
+static void clear_touch_gesture_callbacks(lua_State *fallbackState) noexcept;
+
+/// Handles lua touch handler.
 static void lua_touch_handler(const core::TouchEvent &event,
                               void * /*userData*/) noexcept {
   if ((g_touchLuaState == nullptr) || (g_touchCallbackRef == LUA_NOREF)) {
@@ -1888,10 +1731,16 @@ int lua_engine_on_touch(lua_State *state) noexcept {
   if ((g_touchLuaState != nullptr) && (g_touchCallbackRef != LUA_NOREF)) {
     luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
   }
+  unregister_lua_touch_callback();
   g_touchLuaState = state;
   lua_pushvalue(state, 1);
   g_touchCallbackRef = luaL_ref(state, LUA_REGISTRYINDEX);
-  core::register_touch_callback(&lua_touch_handler, nullptr);
+  if (!core::register_touch_callback(&lua_touch_handler, nullptr)) {
+    luaL_unref(state, LUA_REGISTRYINDEX, g_touchCallbackRef);
+    g_touchCallbackRef = LUA_NOREF;
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   lua_pushboolean(state, 1);
   return 1;
 }
@@ -1900,6 +1749,7 @@ int lua_engine_on_touch(lua_State *state) noexcept {
 static int g_gestureCallbackRefs[4] = {LUA_NOREF, LUA_NOREF, LUA_NOREF,
                                        LUA_NOREF};
 
+/// Handles lua gesture handler.
 static void lua_gesture_handler(const core::GestureEvent &event,
                                 void * /*userData*/) noexcept {
   if (g_touchLuaState == nullptr) {
@@ -1940,6 +1790,50 @@ static void lua_gesture_handler(const core::GestureEvent &event,
   }
 }
 
+static core::GestureType gesture_type_from_index(int index) noexcept {
+  return static_cast<core::GestureType>(index);
+}
+
+static void unregister_lua_touch_callback() noexcept {
+  while (core::unregister_touch_callback(&lua_touch_handler, nullptr)) {
+  }
+}
+
+static void unregister_lua_gesture_callback(int index) noexcept {
+  if ((index < 0) || (index >= 4)) {
+    return;
+  }
+
+  const core::GestureType type = gesture_type_from_index(index);
+  while (core::unregister_gesture_callback(type, &lua_gesture_handler,
+                                           nullptr)) {
+  }
+}
+
+static void clear_touch_gesture_callbacks(lua_State *fallbackState) noexcept {
+  unregister_lua_touch_callback();
+
+  lua_State *refState = g_touchLuaState;
+  if (refState == nullptr) {
+    refState = fallbackState;
+  }
+
+  if ((refState != nullptr) && (g_touchCallbackRef != LUA_NOREF)) {
+    luaL_unref(refState, LUA_REGISTRYINDEX, g_touchCallbackRef);
+  }
+  g_touchCallbackRef = LUA_NOREF;
+
+  for (int i = 0; i < 4; ++i) {
+    unregister_lua_gesture_callback(i);
+    if ((refState != nullptr) && (g_gestureCallbackRefs[i] != LUA_NOREF)) {
+      luaL_unref(refState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[i]);
+    }
+    g_gestureCallbackRefs[i] = LUA_NOREF;
+  }
+
+  g_touchLuaState = nullptr;
+}
+
 // engine.on_gesture(type_string, callback)
 // type_string: "tap", "swipe", "pinch", "rotate"
 int lua_engine_on_gesture(lua_State *state) noexcept {
@@ -1968,11 +1862,17 @@ int lua_engine_on_gesture(lua_State *state) noexcept {
       (g_gestureCallbackRefs[idx] != LUA_NOREF)) {
     luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
   }
+  unregister_lua_gesture_callback(idx);
   g_touchLuaState = state;
   lua_pushvalue(state, 2);
   g_gestureCallbackRefs[idx] = luaL_ref(state, LUA_REGISTRYINDEX);
-  core::register_gesture_callback(static_cast<core::GestureType>(idx),
-                                  &lua_gesture_handler, nullptr);
+  if (!core::register_gesture_callback(gesture_type_from_index(idx),
+                                       &lua_gesture_handler, nullptr)) {
+    luaL_unref(state, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
+    g_gestureCallbackRefs[idx] = LUA_NOREF;
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   lua_pushboolean(state, 1);
   return 1;
 }
@@ -1984,6 +1884,7 @@ int lua_engine_set_touch_mouse_emulation(lua_State *state) noexcept {
   return 0;
 }
 
+/// Handles lua engine set game mode.
 int lua_engine_set_game_mode(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   if (name == nullptr) {
@@ -1992,23 +1893,25 @@ int lua_engine_set_game_mode(lua_State *state) noexcept {
   }
   // Write to both legacy string and World's GameMode struct.
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
-  if (g_world != nullptr) {
-    std::snprintf(g_world->game_mode().name, runtime::GameMode::kMaxNameLength,
+  if (runtime_binding().world != nullptr) {
+    std::snprintf(runtime_binding().world->game_mode().name, runtime::GameMode::kMaxNameLength,
                   "%s", name);
   }
   lua_pushboolean(state, 1);
   return 1;
 }
 
+/// Handles lua engine get game mode.
 int lua_engine_get_game_mode(lua_State *state) noexcept {
-  if (g_world != nullptr) {
-    lua_pushstring(state, g_world->game_mode().name);
+  if (runtime_binding().world != nullptr) {
+    lua_pushstring(state, runtime_binding().world->game_mode().name);
   } else {
     lua_pushstring(state, g_gameMode);
   }
   return 1;
 }
 
+/// Handles lua engine set game state.
 int lua_engine_set_game_state(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   if (name == nullptr) {
@@ -2020,11 +1923,13 @@ int lua_engine_set_game_state(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get game state.
 int lua_engine_get_game_state(lua_State *state) noexcept {
   lua_pushstring(state, g_gameState);
   return 1;
 }
 
+/// Handles lua engine set player controller.
 int lua_engine_set_player_controller(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushboolean(state, 0);
@@ -2032,34 +1937,42 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
   }
 
   const lua_Integer player = lua_tointeger(state, 1);
-  const lua_Integer entityIndex = lua_tointeger(state, 2);
+  const lua_Integer entityHandle = lua_tointeger(state, 2);
   if ((player < 0) ||
       (player >= static_cast<lua_Integer>(kMaxPlayerControllers)) ||
-      (entityIndex < 0) ||
-      (entityIndex > static_cast<lua_Integer>(runtime::World::kMaxEntities))) {
+      (entityHandle < 0)) {
     lua_pushboolean(state, 0);
     return 1;
   }
 
-  g_playerControllerEntities[static_cast<std::size_t>(player)] =
-      static_cast<std::uint32_t>(entityIndex);
+  runtime::Entity entity = runtime::kInvalidEntity;
+  if (entityHandle != 0) {
+    if (!read_entity(state, 2, &entity)) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+  }
+
+  g_playerControllerEntities[static_cast<std::size_t>(player)] = entity;
   g_playerControllers.set_controlled_entity(
-      static_cast<std::uint8_t>(player),
-      static_cast<std::uint32_t>(entityIndex));
+      static_cast<std::uint8_t>(player), entity);
   lua_pushboolean(state, 1);
   return 1;
 }
 
+/// Handles lua engine is god mode.
 int lua_engine_is_god_mode(lua_State *state) noexcept {
   lua_pushboolean(state, g_godModeEnabled ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine is noclip.
 int lua_engine_is_noclip(lua_State *state) noexcept {
   lua_pushboolean(state, g_noclipEnabled ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine get player controller.
 int lua_engine_get_player_controller(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushnil(state);
@@ -2074,47 +1987,57 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
   }
 
   const auto idx = static_cast<std::uint8_t>(player);
-  lua_pushinteger(state, static_cast<lua_Integer>(
-                             g_playerControllers.get_controlled_entity(idx)));
+  const runtime::Entity entity = g_playerControllers.get_controlled_entity(idx);
+  if ((entity == runtime::kInvalidEntity) ||
+      (runtime_binding().world == nullptr) ||
+      !runtime_binding().world->is_alive(entity)) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
+
+  push_entity_handle(state, entity);
   return 1;
 }
 
 // --- Game Mode state transitions ---
 
 int lua_engine_game_mode_start(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().start() ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().world->game_mode().start() ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine game mode pause.
 int lua_engine_game_mode_pause(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().pause() ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().world->game_mode().pause() ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine game mode end.
 int lua_engine_game_mode_end(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().end() ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().world->game_mode().end() ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine game mode state.
 int lua_engine_game_mode_state(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushstring(state, "none");
     return 1;
   }
   using S = runtime::GameMode::State;
-  switch (g_world->game_mode().state) {
+  switch (runtime_binding().world->game_mode().state) {
   case S::WaitingToStart:
     lua_pushstring(state, "waiting_to_start");
     break;
@@ -2131,8 +2054,9 @@ int lua_engine_game_mode_state(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine game mode set rule.
 int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2142,17 +2066,18 @@ int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->game_mode().set_rule(key, value) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().world->game_mode().set_rule(key, value) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine game mode get rule.
 int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   const char *key = lua_tostring(state, 1);
-  const char *value = g_world->game_mode().get_rule(key);
+  const char *value = runtime_binding().world->game_mode().get_rule(key);
   if (value != nullptr) {
     lua_pushstring(state, value);
   } else {
@@ -2161,17 +2086,18 @@ int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine game mode max players.
 int lua_engine_game_mode_max_players(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushinteger(state, 0);
     return 1;
   }
   if (lua_gettop(state) >= 1 && lua_isnumber(state, 1)) {
     const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_world->game_mode().maxPlayers = n;
+    runtime_binding().world->game_mode().maxPlayers = n;
   }
   lua_pushinteger(state,
-                  static_cast<lua_Integer>(g_world->game_mode().maxPlayers));
+                  static_cast<lua_Integer>(runtime_binding().world->game_mode().maxPlayers));
   return 1;
 }
 
@@ -2190,6 +2116,7 @@ int lua_engine_game_state_set_number(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine game state get number.
 int lua_engine_game_state_get_number(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   lua_pushnumber(
@@ -2197,6 +2124,7 @@ int lua_engine_game_state_get_number(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine game state set string.
 int lua_engine_game_state_set_string(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   const char *value = lua_tostring(state, 2);
@@ -2208,6 +2136,7 @@ int lua_engine_game_state_set_string(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine game state get string.
 int lua_engine_game_state_get_string(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   const char *value = g_persistentGameState.get_string(key);
@@ -2219,18 +2148,21 @@ int lua_engine_game_state_get_string(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine game state has.
 int lua_engine_game_state_has(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   lua_pushboolean(state, g_persistentGameState.has(key) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine game state clear.
 int lua_engine_game_state_clear(lua_State *state) noexcept {
   static_cast<void>(state);
   g_persistentGameState.clear();
   return 0;
 }
 
+/// Handles lua engine profiler enable.
 int lua_engine_profiler_enable(lua_State *state) noexcept {
   g_profilerEnabled =
       (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
@@ -2239,6 +2171,7 @@ int lua_engine_profiler_enable(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine profiler reset.
 int lua_engine_profiler_reset(lua_State *state) noexcept {
   static_cast<void>(state);
   for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
@@ -2247,6 +2180,7 @@ int lua_engine_profiler_reset(lua_State *state) noexcept {
   return 0;
 }
 
+/// Handles lua engine profiler get count.
 int lua_engine_profiler_get_count(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   if (name == nullptr) {
@@ -2269,6 +2203,7 @@ int lua_engine_profiler_get_count(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine debugger enable.
 int lua_engine_debugger_enable(lua_State *state) noexcept {
   g_debuggerEnabled =
       (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
@@ -2277,6 +2212,7 @@ int lua_engine_debugger_enable(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine debugger add breakpoint.
 int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept {
   const char *file = lua_tostring(state, 1);
   if ((file == nullptr) || !lua_isnumber(state, 2)) {
@@ -2288,6 +2224,7 @@ int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine debugger clear breakpoints.
 int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept {
   static_cast<void>(state);
   debugger_clear_breakpoints();
@@ -2295,6 +2232,7 @@ int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine debugger add watch.
 int lua_engine_debugger_add_watch(lua_State *state) noexcept {
   const char *expr = lua_tostring(state, 1);
   if ((expr == nullptr) || (g_watchCount >= kMaxDebugWatches)) {
@@ -2308,6 +2246,7 @@ int lua_engine_debugger_add_watch(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine debugger clear watches.
 int lua_engine_debugger_clear_watches(lua_State *state) noexcept {
   static_cast<void>(state);
   g_watchCount = 0U;
@@ -2315,6 +2254,7 @@ int lua_engine_debugger_clear_watches(lua_State *state) noexcept {
   return 0;
 }
 
+/// Handles lua engine debugger last breakpoint.
 int lua_engine_debugger_last_breakpoint(lua_State *state) noexcept {
   if (g_lastBreakpointLine <= 0) {
     lua_pushnil(state);
@@ -2330,52 +2270,58 @@ int lua_engine_debugger_last_breakpoint(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine debugger last callstack.
 int lua_engine_debugger_last_callstack(lua_State *state) noexcept {
   lua_pushstring(state, g_lastCallstack);
   return 1;
 }
 
+/// Handles lua engine debugger last watch values.
 int lua_engine_debugger_last_watch_values(lua_State *state) noexcept {
   lua_pushstring(state, g_lastWatchOutput);
   return 1;
 }
 
+/// Handles lua engine set camera position.
 int lua_engine_set_camera_position(lua_State *state) noexcept {
   math::Vec3 pos{};
-  if (!read_vec3_args(state, 1, &pos) || (g_services == nullptr) ||
-      (g_services->set_camera_position == nullptr)) {
+  if (!read_vec3_args(state, 1, &pos) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->set_camera_position == nullptr)) {
     return 0;
   }
-  g_services->set_camera_position(pos.x, pos.y, pos.z);
+  runtime_binding().services->set_camera_position(pos.x, pos.y, pos.z);
   return 0;
 }
 
+/// Handles lua engine set camera target.
 int lua_engine_set_camera_target(lua_State *state) noexcept {
   math::Vec3 target{};
-  if (!read_vec3_args(state, 1, &target) || (g_services == nullptr) ||
-      (g_services->set_camera_target == nullptr)) {
+  if (!read_vec3_args(state, 1, &target) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->set_camera_target == nullptr)) {
     return 0;
   }
-  g_services->set_camera_target(target.x, target.y, target.z);
+  runtime_binding().services->set_camera_target(target.x, target.y, target.z);
   return 0;
 }
 
+/// Handles lua engine set camera up.
 int lua_engine_set_camera_up(lua_State *state) noexcept {
   math::Vec3 up{};
-  if (!read_vec3_args(state, 1, &up) || (g_services == nullptr) ||
-      (g_services->set_camera_up == nullptr)) {
+  if (!read_vec3_args(state, 1, &up) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->set_camera_up == nullptr)) {
     return 0;
   }
-  g_services->set_camera_up(up.x, up.y, up.z);
+  runtime_binding().services->set_camera_up(up.x, up.y, up.z);
   return 0;
 }
 
+/// Handles lua engine set camera fov.
 int lua_engine_set_camera_fov(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || (g_services == nullptr) ||
-      (g_services->set_camera_fov == nullptr)) {
+  if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->set_camera_fov == nullptr)) {
     return 0;
   }
-  g_services->set_camera_fov(static_cast<float>(lua_tonumber(state, 1)));
+  runtime_binding().services->set_camera_fov(static_cast<float>(lua_tonumber(state, 1)));
   return 0;
 }
 
@@ -2384,13 +2330,16 @@ int lua_engine_set_camera_fov(lua_State *state) noexcept {
 // Engine.push_camera(entityIndex, posX,posY,posZ, tgtX,tgtY,tgtZ, priority
 // [, blendSpeed])
 int lua_engine_push_camera(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->push_camera_op == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->push_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const auto entityIdx =
-      static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   const float posX = static_cast<float>(luaL_checknumber(state, 2));
   const float posY = static_cast<float>(luaL_checknumber(state, 3));
   const float posZ = static_cast<float>(luaL_checknumber(state, 4));
@@ -2403,7 +2352,7 @@ int lua_engine_push_camera(lua_State *state) noexcept {
     blendSpeed = static_cast<float>(lua_tonumber(state, 9));
   }
   const bool ok =
-      g_services->push_camera_op(g_world, entityIdx, posX, posY, posZ, tgtX,
+      runtime_binding().services->push_camera_op(runtime_binding().world, entity.index, posX, posY, posZ, tgtX,
                                  tgtY, tgtZ, priority, blendSpeed);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -2411,22 +2360,25 @@ int lua_engine_push_camera(lua_State *state) noexcept {
 
 // Engine.pop_camera(entityIndex)
 int lua_engine_pop_camera(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->pop_camera_op == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->pop_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const auto entityIdx =
-      static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  const bool ok = g_services->pop_camera_op(g_world, entityIdx);
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const bool ok = runtime_binding().services->pop_camera_op(runtime_binding().world, entity.index);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Engine.get_active_camera() -> posX,posY,posZ, tgtX,tgtY,tgtZ, fov | nil
 int lua_engine_get_active_camera(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->get_active_camera_op == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->get_active_camera_op == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2437,7 +2389,7 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
   float tgtY = 0.0F;
   float tgtZ = 0.0F;
   float fov = 0.0F;
-  if (!g_services->get_active_camera_op(g_world, &posX, &posY, &posZ, &tgtX,
+  if (!runtime_binding().services->get_active_camera_op(runtime_binding().world, &posX, &posY, &posZ, &tgtX,
                                         &tgtY, &tgtZ, &fov)) {
     lua_pushnil(state);
     return 1;
@@ -2454,8 +2406,8 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
 
 // Engine.camera_shake(amplitude, frequency, duration [, decay])
 int lua_engine_camera_shake(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->camera_shake_op == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->camera_shake_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2466,7 +2418,7 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
   if (lua_isnumber(state, 4)) {
     decay = static_cast<float>(lua_tonumber(state, 4));
   }
-  const bool ok = g_services->camera_shake_op(g_world, amplitude, frequency,
+  const bool ok = runtime_binding().services->camera_shake_op(runtime_binding().world, amplitude, frequency,
                                               duration, decay);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -2477,12 +2429,15 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
 // Engine.add_spring_arm(entityIndex, armLength, offsetX, offsetY, offsetZ
 // [, lagSpeed] [, collisionEnabled])
 int lua_engine_add_spring_arm(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const auto entityIdx =
-      static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   runtime::SpringArmComponent arm{};
   arm.armLength = static_cast<float>(luaL_checknumber(state, 2));
   arm.currentLength = arm.armLength;
@@ -2495,8 +2450,7 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     arm.collisionEnabled = (lua_toboolean(state, 7) != 0);
   }
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIdx);
-  const bool ok = g_world->add_spring_arm(entity, arm);
+  const bool ok = runtime_binding().world->add_spring_arm(entity, arm);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -2504,15 +2458,17 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
 // Engine.get_spring_arm(entityIndex) -> armLength, currentLength, offX, offY,
 // offZ, lagSpeed | nil
 int lua_engine_get_spring_arm(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
-  const auto entityIdx =
-      static_cast<std::uint32_t>(luaL_checkinteger(state, 1));
-  const runtime::Entity entity = g_world->find_entity_by_index(entityIdx);
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushnil(state);
+    return 1;
+  }
   runtime::SpringArmComponent arm{};
-  if (!g_world->get_spring_arm(entity, &arm)) {
+  if (!runtime_binding().world->get_spring_arm(entity, &arm)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2525,6 +2481,7 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
   return 6;
 }
 
+/// Handles lua engine set gravity.
 int lua_engine_set_gravity(lua_State *state) noexcept {
   float x = 0.0F;
   float y = 0.0F;
@@ -2538,18 +2495,19 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
   if (lua_isnumber(state, 3)) {
     z = static_cast<float>(lua_tonumber(state, 3));
   }
-  if ((g_services != nullptr) && (g_services->set_gravity != nullptr)) {
-    g_services->set_gravity(g_world, x, y, z);
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_gravity != nullptr)) {
+    runtime_binding().services->set_gravity(runtime_binding().world, x, y, z);
   }
   return 0;
 }
 
+/// Handles lua engine get gravity.
 int lua_engine_get_gravity(lua_State *state) noexcept {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
-  if ((g_services == nullptr) || (g_services->get_gravity == nullptr) ||
-      !g_services->get_gravity(g_world, &x, &y, &z)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->get_gravity == nullptr) ||
+      !runtime_binding().services->get_gravity(runtime_binding().world, &x, &y, &z)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2559,8 +2517,9 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine raycast.
 int lua_engine_raycast(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
@@ -2580,12 +2539,12 @@ int lua_engine_raycast(lua_State *state) noexcept {
   const float maxDist = static_cast<float>(lua_tonumber(state, 7));
 
   RuntimeRaycastHit hit{};
-  if ((g_services == nullptr) || (g_services->raycast == nullptr) ||
-      !g_services->raycast(g_world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->raycast == nullptr) ||
+      !runtime_binding().services->raycast(runtime_binding().world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(hit.entityIndex));
+  push_entity_handle_from_index(state, hit.entityIndex);
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
@@ -2598,8 +2557,8 @@ int lua_engine_raycast(lua_State *state) noexcept {
 
 // engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask]) → table of hits
 int lua_engine_raycast_all(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->raycast_all == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->raycast_all == nullptr)) {
     lua_newtable(state);
     return 1;
   }
@@ -2624,13 +2583,13 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
 
   constexpr std::size_t kMaxHits = 32U;
   RuntimeRaycastHit hits[kMaxHits]{};
-  const std::size_t count = g_services->raycast_all(
-      g_world, ox, oy, oz, dx, dy, dz, maxDist, hits, kMaxHits, mask);
+  const std::size_t count = runtime_binding().services->raycast_all(
+      runtime_binding().world, ox, oy, oz, dx, dy, dz, maxDist, hits, kMaxHits, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
     lua_createtable(state, 0, 8);
-    lua_pushinteger(state, static_cast<lua_Integer>(hits[i].entityIndex));
+    push_entity_handle_from_index(state, hits[i].entityIndex);
     lua_setfield(state, -2, "entity");
     lua_pushnumber(state, static_cast<lua_Number>(hits[i].distance));
     lua_setfield(state, -2, "distance");
@@ -2653,8 +2612,8 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
 
 // engine.overlap_sphere(cx,cy,cz, radius [, mask]) → table of entity indices
 int lua_engine_overlap_sphere(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->overlap_sphere == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->overlap_sphere == nullptr)) {
     lua_newtable(state);
     return 1;
   }
@@ -2674,12 +2633,12 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
 
   constexpr std::size_t kMaxResults = 64U;
   std::uint32_t indices[kMaxResults]{};
-  const std::size_t count = g_services->overlap_sphere(
-      g_world, cx, cy, cz, radius, indices, kMaxResults, mask);
+  const std::size_t count = runtime_binding().services->overlap_sphere(
+      runtime_binding().world, cx, cy, cz, radius, indices, kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
-    lua_pushinteger(state, static_cast<lua_Integer>(indices[i]));
+    push_entity_handle_from_index(state, indices[i]);
     lua_rawseti(state, -2, static_cast<int>(i + 1U));
   }
   return 1;
@@ -2687,8 +2646,8 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
 
 // engine.overlap_box(cx,cy,cz, hx,hy,hz [, mask]) → table of entity indices
 int lua_engine_overlap_box(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->overlap_box == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->overlap_box == nullptr)) {
     lua_newtable(state);
     return 1;
   }
@@ -2711,12 +2670,12 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
 
   constexpr std::size_t kMaxResults = 64U;
   std::uint32_t indices[kMaxResults]{};
-  const std::size_t count = g_services->overlap_box(
-      g_world, cx, cy, cz, hx, hy, hz, indices, kMaxResults, mask);
+  const std::size_t count = runtime_binding().services->overlap_box(
+      runtime_binding().world, cx, cy, cz, hx, hy, hz, indices, kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
-    lua_pushinteger(state, static_cast<lua_Integer>(indices[i]));
+    push_entity_handle_from_index(state, indices[i]);
     lua_rawseti(state, -2, static_cast<int>(i + 1U));
   }
   return 1;
@@ -2724,8 +2683,8 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
 
 // engine.sweep_sphere(ox,oy,oz, radius, dx,dy,dz, max_dist [, mask])
 int lua_engine_sweep_sphere(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->sweep_sphere == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->sweep_sphere == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2750,12 +2709,12 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
           : 0xFFFFFFFFU;
 
   RuntimeRaycastHit hit{};
-  if (!g_services->sweep_sphere(g_world, ox, oy, oz, radius, dx, dy, dz,
+  if (!runtime_binding().services->sweep_sphere(runtime_binding().world, ox, oy, oz, radius, dx, dy, dz,
                                 maxDist, &hit, mask)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(hit.entityIndex));
+  push_entity_handle_from_index(state, hit.entityIndex);
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
@@ -2768,8 +2727,8 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
 
 // engine.sweep_box(cx,cy,cz, hx,hy,hz, dx,dy,dz, max_dist [, mask])
 int lua_engine_sweep_box(lua_State *state) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->sweep_box == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->sweep_box == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -2797,12 +2756,12 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
           : 0xFFFFFFFFU;
 
   RuntimeRaycastHit hit{};
-  if (!g_services->sweep_box(g_world, cx, cy, cz, hx, hy, hz, dx, dy, dz,
+  if (!runtime_binding().services->sweep_box(runtime_binding().world, cx, cy, cz, hx, hy, hz, dx, dy, dz,
                              maxDist, &hit, mask)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(hit.entityIndex));
+  push_entity_handle_from_index(state, hit.entityIndex);
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
@@ -2813,30 +2772,32 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   return 8;
 }
 
+/// Handles lua engine add distance joint.
 int lua_engine_add_distance_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_distance_joint == nullptr)) {
+      (runtime_binding().services == nullptr) || (runtime_binding().services->add_distance_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const float dist = lua_isnumber(state, 3)
                          ? static_cast<float>(lua_tonumber(state, 3))
                          : 1.0F;
-  const std::uint32_t id = g_services->add_distance_joint(
-      g_world, entityA.index, entityB.index, dist);
+  const std::uint32_t id = runtime_binding().services->add_distance_joint(
+      runtime_binding().world, entityA.index, entityB.index, dist);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
 
+/// Handles lua engine remove joint.
 int lua_engine_remove_joint(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->remove_joint != nullptr)) {
-    g_services->remove_joint(
-        g_world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->remove_joint != nullptr)) {
+    runtime_binding().services->remove_joint(
+        runtime_binding().world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
   }
   return 0;
 }
@@ -2847,7 +2808,7 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_hinge_joint == nullptr)) {
+      (runtime_binding().services == nullptr) || (runtime_binding().services->add_hinge_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
@@ -2857,8 +2818,8 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
   const auto ax = static_cast<float>(luaL_optnumber(state, 6, 0.0));
   const auto ay = static_cast<float>(luaL_optnumber(state, 7, 1.0));
   const auto az = static_cast<float>(luaL_optnumber(state, 8, 0.0));
-  const std::uint32_t id = g_services->add_hinge_joint(
-      g_world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
+  const std::uint32_t id = runtime_binding().services->add_hinge_joint(
+      runtime_binding().world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2868,16 +2829,16 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) ||
-      (g_services->add_ball_socket_joint == nullptr)) {
+      (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->add_ball_socket_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const auto px = static_cast<float>(luaL_optnumber(state, 3, 0.0));
   const auto py = static_cast<float>(luaL_optnumber(state, 4, 0.0));
   const auto pz = static_cast<float>(luaL_optnumber(state, 5, 0.0));
-  const std::uint32_t id = g_services->add_ball_socket_joint(
-      g_world, entityA.index, entityB.index, px, py, pz);
+  const std::uint32_t id = runtime_binding().services->add_ball_socket_joint(
+      runtime_binding().world, entityA.index, entityB.index, px, py, pz);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2887,15 +2848,15 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_slider_joint == nullptr)) {
+      (runtime_binding().services == nullptr) || (runtime_binding().services->add_slider_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const auto ax = static_cast<float>(luaL_optnumber(state, 3, 1.0));
   const auto ay = static_cast<float>(luaL_optnumber(state, 4, 0.0));
   const auto az = static_cast<float>(luaL_optnumber(state, 5, 0.0));
-  const std::uint32_t id = g_services->add_slider_joint(
-      g_world, entityA.index, entityB.index, ax, ay, az);
+  const std::uint32_t id = runtime_binding().services->add_slider_joint(
+      runtime_binding().world, entityA.index, entityB.index, ax, ay, az);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2905,15 +2866,15 @@ int lua_engine_add_spring_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_spring_joint == nullptr)) {
+      (runtime_binding().services == nullptr) || (runtime_binding().services->add_spring_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const auto rest = static_cast<float>(luaL_optnumber(state, 3, 1.0));
   const auto stiff = static_cast<float>(luaL_optnumber(state, 4, 100.0));
   const auto damp = static_cast<float>(luaL_optnumber(state, 5, 1.0));
-  const std::uint32_t id = g_services->add_spring_joint(
-      g_world, entityA.index, entityB.index, rest, stiff, damp);
+  const std::uint32_t id = runtime_binding().services->add_spring_joint(
+      runtime_binding().world, entityA.index, entityB.index, rest, stiff, damp);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2923,12 +2884,12 @@ int lua_engine_add_fixed_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
-      (g_services == nullptr) || (g_services->add_fixed_joint == nullptr)) {
+      (runtime_binding().services == nullptr) || (runtime_binding().services->add_fixed_joint == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   const std::uint32_t id =
-      g_services->add_fixed_joint(g_world, entityA.index, entityB.index);
+      runtime_binding().services->add_fixed_joint(runtime_binding().world, entityA.index, entityB.index);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
@@ -2938,31 +2899,33 @@ int lua_engine_set_joint_limits(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->set_joint_limits != nullptr)) {
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_joint_limits != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
     const auto minL = static_cast<float>(luaL_optnumber(state, 2, 0.0));
     const auto maxL = static_cast<float>(luaL_optnumber(state, 3, 0.0));
-    g_services->set_joint_limits(g_world, id, minL, maxL);
+    runtime_binding().services->set_joint_limits(runtime_binding().world, id, minL, maxL);
   }
   return 0;
 }
 
+/// Handles lua engine wake body.
 int lua_engine_wake_body(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     return 0;
   }
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->wake_body != nullptr)) {
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->wake_body != nullptr)) {
     const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_services->wake_body(g_world, idx);
+    runtime_binding().services->wake_body(runtime_binding().world, idx);
   }
   return 0;
 }
 
+/// Handles lua engine is sleeping.
 int lua_engine_is_sleeping(lua_State *state) noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -2970,20 +2933,22 @@ int lua_engine_is_sleeping(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if ((g_services == nullptr) || (g_services->is_sleeping == nullptr)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->is_sleeping == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
   const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  lua_pushboolean(state, g_services->is_sleeping(g_world, idx) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->is_sleeping(runtime_binding().world, idx) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine frame count.
 int lua_engine_frame_count(lua_State *state) noexcept {
   lua_pushinteger(state, static_cast<lua_Integer>(g_frameIndex));
   return 1;
 }
 
+/// Handles lua engine load sound.
 int lua_engine_load_sound(lua_State *state) noexcept {
   if (!lua_isstring(state, 1)) {
     lua_pushinteger(state, 0);
@@ -2994,28 +2959,30 @@ int lua_engine_load_sound(lua_State *state) noexcept {
     lua_pushinteger(state, 0);
     return 1;
   }
-  if ((g_services == nullptr) || (g_services->load_sound == nullptr)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->load_sound == nullptr)) {
     lua_pushinteger(state, 0);
     return 1;
   }
   lua_pushinteger(state,
-                  static_cast<lua_Integer>(g_services->load_sound(path)));
+                  static_cast<lua_Integer>(runtime_binding().services->load_sound(path)));
   return 1;
 }
 
+/// Handles lua engine unload sound.
 int lua_engine_unload_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->unload_sound != nullptr)) {
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->unload_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_services->unload_sound(id);
+    runtime_binding().services->unload_sound(id);
   }
   return 0;
 }
 
+/// Handles lua engine play sound.
 int lua_engine_play_sound(lua_State *state) noexcept {
-  if ((g_services == nullptr) || (g_services->play_sound == nullptr)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->play_sound == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3036,37 +3003,40 @@ int lua_engine_play_sound(lua_State *state) noexcept {
   if (lua_gettop(state) >= 4) {
     loop = lua_toboolean(state, 4) != 0;
   }
-  const bool ok = g_services->play_sound(id, volume, pitch, loop);
+  const bool ok = runtime_binding().services->play_sound(id, volume, pitch, loop);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine stop sound.
 int lua_engine_stop_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->stop_sound != nullptr)) {
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    g_services->stop_sound(id);
+    runtime_binding().services->stop_sound(id);
   }
   return 0;
 }
 
+/// Handles lua engine stop all sounds.
 int lua_engine_stop_all_sounds(lua_State *state) noexcept {
   static_cast<void>(state);
-  if ((g_services != nullptr) && (g_services->stop_all_sounds != nullptr)) {
-    g_services->stop_all_sounds();
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_all_sounds != nullptr)) {
+    runtime_binding().services->stop_all_sounds();
   }
   return 0;
 }
 
+/// Handles lua engine set master volume.
 int lua_engine_set_master_volume(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_master_volume != nullptr)) {
     const auto vol = static_cast<float>(lua_tonumber(state, 1));
-    g_services->set_master_volume(vol);
+    runtime_binding().services->set_master_volume(vol);
   }
   return 0;
 }
@@ -3079,7 +3049,7 @@ int lua_engine_get_rotation(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Transform *transform = g_world->get_transform_read_ptr(entity);
+  const runtime::Transform *transform = runtime_binding().world->get_transform_read_ptr(entity);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3091,6 +3061,7 @@ int lua_engine_get_rotation(lua_State *state) noexcept {
   return 4;
 }
 
+/// Handles lua engine set rotation.
 int lua_engine_set_rotation(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -3108,7 +3079,7 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   const float qw = static_cast<float>(lua_tonumber(state, 5));
 
   runtime::Transform transform{};
-  static_cast<void>(g_world->get_transform(entity, &transform));
+  static_cast<void>(runtime_binding().world->get_transform(entity, &transform));
   transform.rotation = math::Quat(qx, qy, qz, qw);
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -3117,13 +3088,14 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get scale.
 int lua_engine_get_scale(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Transform *transform = g_world->get_transform_read_ptr(entity);
+  const runtime::Transform *transform = runtime_binding().world->get_transform_read_ptr(entity);
   if (transform == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3134,6 +3106,7 @@ int lua_engine_get_scale(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine set scale.
 int lua_engine_set_scale(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 scale{};
@@ -3143,7 +3116,7 @@ int lua_engine_set_scale(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  static_cast<void>(g_world->get_transform(entity, &transform));
+  static_cast<void>(runtime_binding().world->get_transform(entity, &transform));
   transform.scale = scale;
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -3161,7 +3134,7 @@ int lua_engine_get_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3169,6 +3142,7 @@ int lua_engine_get_inverse_mass(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set inverse mass.
 int lua_engine_set_inverse_mass(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -3176,7 +3150,7 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   runtime::RigidBody rigidBody{};
-  if (!g_world->get_rigid_body(entity, &rigidBody)) {
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3195,7 +3169,7 @@ int lua_engine_get_half_extents(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3205,6 +3179,7 @@ int lua_engine_get_half_extents(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine set half extents.
 int lua_engine_set_half_extents(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
@@ -3214,7 +3189,7 @@ int lua_engine_set_half_extents(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3223,6 +3198,7 @@ int lua_engine_set_half_extents(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get restitution.
 int lua_engine_get_restitution(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -3230,7 +3206,7 @@ int lua_engine_get_restitution(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3238,6 +3214,7 @@ int lua_engine_get_restitution(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get friction.
 int lua_engine_get_friction(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -3245,7 +3222,7 @@ int lua_engine_get_friction(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!g_world->get_collider(entity, &collider)) {
+  if (!runtime_binding().world->get_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3262,7 +3239,7 @@ int lua_engine_get_albedo(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3273,13 +3250,14 @@ int lua_engine_get_albedo(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine get mesh.
 int lua_engine_get_mesh(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3288,6 +3266,7 @@ int lua_engine_get_mesh(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set roughness.
 int lua_engine_set_roughness(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -3295,7 +3274,7 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!g_world->get_mesh_component(entity, &mesh)) {
+  if (!runtime_binding().world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3304,13 +3283,14 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get roughness.
 int lua_engine_get_roughness(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3319,6 +3299,7 @@ int lua_engine_get_roughness(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set metallic.
 int lua_engine_set_metallic(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -3326,7 +3307,7 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!g_world->get_mesh_component(entity, &mesh)) {
+  if (!runtime_binding().world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3335,13 +3316,14 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get metallic.
 int lua_engine_get_metallic(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3350,6 +3332,7 @@ int lua_engine_get_metallic(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set opacity.
 int lua_engine_set_opacity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -3357,7 +3340,7 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!g_world->get_mesh_component(entity, &mesh)) {
+  if (!runtime_binding().world->get_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3366,13 +3349,14 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get opacity.
 int lua_engine_get_opacity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = g_world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -3402,6 +3386,7 @@ int lua_engine_add_light(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine remove light.
 int lua_engine_remove_light(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -3413,16 +3398,18 @@ int lua_engine_remove_light(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine has light.
 int lua_engine_has_light(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_world->has_light_component(entity) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().world->has_light_component(entity) ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine set light color.
 int lua_engine_set_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 color{};
@@ -3431,7 +3418,7 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!runtime_binding().world->get_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3441,6 +3428,7 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get light color.
 int lua_engine_get_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -3448,7 +3436,7 @@ int lua_engine_get_light_color(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!runtime_binding().world->get_light_component(entity, &light)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3458,6 +3446,7 @@ int lua_engine_get_light_color(lua_State *state) noexcept {
   return 3;
 }
 
+/// Handles lua engine set light intensity.
 int lua_engine_set_light_intensity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -3465,7 +3454,7 @@ int lua_engine_set_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!runtime_binding().world->get_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3475,6 +3464,7 @@ int lua_engine_set_light_intensity(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine get light intensity.
 int lua_engine_get_light_intensity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -3482,7 +3472,7 @@ int lua_engine_get_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!runtime_binding().world->get_light_component(entity, &light)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3490,6 +3480,7 @@ int lua_engine_get_light_intensity(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine set light direction.
 int lua_engine_set_light_direction(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 dir{};
@@ -3498,7 +3489,7 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!g_world->get_light_component(entity, &light)) {
+  if (!runtime_binding().world->get_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3544,7 +3535,7 @@ static int lua_engine_get_point_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::PointLightComponent comp{};
-  if (!g_world->get_point_light_component(entity, &comp)) {
+  if (!runtime_binding().world->get_point_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3567,7 +3558,7 @@ static int lua_engine_set_point_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!g_world->has_point_light_component(entity)) {
+  if (!runtime_binding().world->has_point_light_component(entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3641,7 +3632,7 @@ static int lua_engine_get_spot_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpotLightComponent comp{};
-  if (!g_world->get_spot_light_component(entity, &comp)) {
+  if (!runtime_binding().world->get_spot_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -3670,7 +3661,7 @@ static int lua_engine_set_spot_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!g_world->has_spot_light_component(entity)) {
+  if (!runtime_binding().world->has_spot_light_component(entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -3713,6 +3704,7 @@ static int g_collisionHandlers[kMaxCollisionHandlers] = {
     LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF,
     LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
 
+/// Handles lua engine on collision register.
 int lua_engine_on_collision_register(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1)) {
     lua_pushnil(state);
@@ -3730,6 +3722,7 @@ int lua_engine_on_collision_register(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine remove collision handler.
 int lua_engine_remove_collision_handler(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
@@ -3753,6 +3746,7 @@ static constexpr std::size_t kMaxTimerRefs = runtime::TimerManager::kMaxTimers;
 static int g_timerLuaRefs[kMaxTimerRefs];
 static bool g_timerRefsInit = false;
 
+/// Handles ensure timer refs init.
 void ensure_timer_refs_init() noexcept {
   if (!g_timerRefsInit) {
     for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
@@ -3762,13 +3756,19 @@ void ensure_timer_refs_init() noexcept {
   }
 }
 
+/// Handles lua timer callback.
 void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   (void)userData;
   if ((g_state == nullptr) || (id == runtime::kInvalidTimerId) ||
-      (id > kMaxTimerRefs)) {
+      (runtime_binding().world == nullptr)) {
     return;
   }
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  auto &timerManager = runtime_binding().world->timer_manager();
+  const std::size_t slot = timerManager.slot_for_id(id);
+  if (slot >= kMaxTimerRefs) {
+    return;
+  }
+  const bool wasRepeating = timerManager.entry_at(slot).repeat;
   const int ref = g_timerLuaRefs[slot];
   if (ref == LUA_NOREF) {
     return;
@@ -3781,23 +3781,25 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   } else {
     lua_pop(g_state, 1);
   }
-  // For one-shots the TimerManager already deactivated the slot.
-  // Check if it's no longer active and release the ref.
-  if (g_world != nullptr) {
-    const auto &entry = g_world->timer_manager().entry_at(slot);
-    if (!entry.active) {
+  if (runtime_binding().world != nullptr) {
+    auto &currentTimerManager = runtime_binding().world->timer_manager();
+    const bool stillCurrent =
+        (currentTimerManager.slot_for_id(id) == slot) &&
+        currentTimerManager.entry_at(slot).active;
+    if (!wasRepeating || !stillCurrent) {
       luaL_unref(g_state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
       g_timerLuaRefs[slot] = LUA_NOREF;
     }
   }
 }
 
+/// Handles rewire lua timer callbacks.
 void rewire_lua_timer_callbacks() noexcept {
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     return;
   }
   ensure_timer_refs_init();
-  auto &timerManager = g_world->timer_manager();
+  auto &timerManager = runtime_binding().world->timer_manager();
   for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
     auto &entry = timerManager.entry_at_mut(i);
     if (entry.active && (entry.callback == nullptr) &&
@@ -3808,67 +3810,86 @@ void rewire_lua_timer_callbacks() noexcept {
   }
 }
 
+/// Handles lua engine set timeout.
 int lua_engine_set_timeout(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushnil(state);
     return 1;
   }
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   ensure_timer_refs_init();
   const float secs = static_cast<float>(lua_tonumber(state, 2));
   const runtime::TimerId id =
-      g_world->timer_manager().set_timeout(secs, lua_timer_callback, nullptr);
+      runtime_binding().world->timer_manager().set_timeout(secs, lua_timer_callback, nullptr);
   if (id == runtime::kInvalidTimerId) {
     lua_pushnil(state);
     return 1;
   }
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  const std::size_t slot =
+      runtime_binding().world->timer_manager().slot_for_id(id);
+  if (slot >= kMaxTimerRefs) {
+    runtime_binding().world->timer_manager().cancel(id);
+    lua_pushnil(state);
+    return 1;
+  }
   lua_pushvalue(state, 1);
   g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
 
+/// Handles lua engine set interval.
 int lua_engine_set_interval(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushnil(state);
     return 1;
   }
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
     return 1;
   }
   ensure_timer_refs_init();
   const float secs = static_cast<float>(lua_tonumber(state, 2));
   const runtime::TimerId id =
-      g_world->timer_manager().set_interval(secs, lua_timer_callback, nullptr);
+      runtime_binding().world->timer_manager().set_interval(secs, lua_timer_callback, nullptr);
   if (id == runtime::kInvalidTimerId) {
     lua_pushnil(state);
     return 1;
   }
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  const std::size_t slot =
+      runtime_binding().world->timer_manager().slot_for_id(id);
+  if (slot >= kMaxTimerRefs) {
+    runtime_binding().world->timer_manager().cancel(id);
+    lua_pushnil(state);
+    return 1;
+  }
   lua_pushvalue(state, 1);
   g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
   lua_pushinteger(state, static_cast<lua_Integer>(id));
   return 1;
 }
 
+/// Handles lua engine cancel timer.
 int lua_engine_cancel_timer(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
-  if (g_world == nullptr) {
+  if (runtime_binding().world == nullptr) {
     return 0;
   }
   const auto id = static_cast<runtime::TimerId>(lua_tointeger(state, 1));
-  if ((id == runtime::kInvalidTimerId) || (id > kMaxTimerRefs)) {
+  if (id == runtime::kInvalidTimerId) {
     return 0;
   }
-  g_world->timer_manager().cancel(id);
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  auto &timerManager = runtime_binding().world->timer_manager();
+  const std::size_t slot = timerManager.slot_for_id(id);
+  if (slot >= kMaxTimerRefs) {
+    return 0;
+  }
+  timerManager.cancel(id);
   if (g_timerLuaRefs[slot] != LUA_NOREF) {
     luaL_unref(state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
     g_timerLuaRefs[slot] = LUA_NOREF;
@@ -3884,6 +3905,7 @@ enum class WaitMode : std::uint8_t {
   Frames,
 };
 
+/// Stores coroutine entry data used by the engine.
 struct CoroutineEntry final {
   lua_State *thread = nullptr;
   int threadRef = LUA_NOREF;
@@ -3898,6 +3920,7 @@ struct CoroutineEntry final {
 static char kWaitFramesTag;
 static char kWaitConditionTag;
 
+/// Owns the coroutine scheduler behavior and state.
 class CoroutineScheduler final {
 public:
   static constexpr std::size_t kCapacity = 32U;
@@ -3982,6 +4005,7 @@ public:
 
 static CoroutineScheduler g_coroutineScheduler;
 
+/// Handles lua engine start coroutine.
 int lua_engine_start_coroutine(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1)) {
     lua_pushnil(state);
@@ -4034,6 +4058,7 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine wait.
 int lua_engine_wait(lua_State *state) noexcept {
   // Yield with the sleep duration so the scheduler can parse it.
   const float secs = lua_isnumber(state, 1)
@@ -4043,6 +4068,7 @@ int lua_engine_wait(lua_State *state) noexcept {
   return lua_yield(state, 1);
 }
 
+/// Handles lua engine wait frames.
 int lua_engine_wait_frames(lua_State *state) noexcept {
   const int n =
       lua_isinteger(state, 1) ? static_cast<int>(lua_tointeger(state, 1)) : 1;
@@ -4051,6 +4077,7 @@ int lua_engine_wait_frames(lua_State *state) noexcept {
   return lua_yield(state, 2);
 }
 
+/// Handles lua engine wait until.
 int lua_engine_wait_until(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1)) {
     return luaL_error(state, "wait_until expects a function");
@@ -4063,7 +4090,7 @@ int lua_engine_wait_until(lua_State *state) noexcept {
 // --- Entity lifecycle completeness ---
 
 int lua_engine_find_by_name(lua_State *state) noexcept {
-  if (g_world == nullptr || !lua_isstring(state, 1)) {
+  if (runtime_binding().world == nullptr || !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4073,18 +4100,19 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity found = g_world->find_entity_by_name(searchName);
+  const runtime::Entity found = runtime_binding().world->find_entity_by_name(searchName);
 
   if (found == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(found.index));
+  push_entity_handle(state, found);
   return 1;
 }
 
+/// Handles lua engine clone entity.
 int lua_engine_clone_entity(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !can_apply_mutations_now()) {
+  if ((runtime_binding().world == nullptr) || !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -4094,7 +4122,7 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity newEntity = g_world->create_entity();
+  const runtime::Entity newEntity = runtime_binding().world->create_entity();
   if (newEntity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
@@ -4102,43 +4130,43 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
 
   // Copy Transform.
   runtime::Transform transform{};
-  if (g_world->get_transform(source, &transform)) {
-    static_cast<void>(g_world->add_transform(newEntity, transform));
+  if (runtime_binding().world->get_transform(source, &transform)) {
+    static_cast<void>(runtime_binding().world->add_transform(newEntity, transform));
   }
 
   // Copy RigidBody.
   runtime::RigidBody rigidBody{};
-  if (g_world->get_rigid_body(source, &rigidBody)) {
-    static_cast<void>(g_world->add_rigid_body(newEntity, rigidBody));
+  if (runtime_binding().world->get_rigid_body(source, &rigidBody)) {
+    static_cast<void>(runtime_binding().world->add_rigid_body(newEntity, rigidBody));
   }
 
   // Copy Collider.
   runtime::Collider collider{};
-  if (g_world->get_collider(source, &collider)) {
-    static_cast<void>(g_world->add_collider(newEntity, collider));
+  if (runtime_binding().world->get_collider(source, &collider)) {
+    static_cast<void>(runtime_binding().world->add_collider(newEntity, collider));
   }
 
   // Copy MeshComponent.
   runtime::MeshComponent mesh{};
-  if (g_world->get_mesh_component(source, &mesh)) {
-    static_cast<void>(g_world->add_mesh_component(newEntity, mesh));
+  if (runtime_binding().world->get_mesh_component(source, &mesh)) {
+    static_cast<void>(runtime_binding().world->add_mesh_component(newEntity, mesh));
   }
 
   // Copy NameComponent with "(clone)" suffix.
   runtime::NameComponent name{};
-  if (g_world->get_name_component(source, &name)) {
+  if (runtime_binding().world->get_name_component(source, &name)) {
     runtime::NameComponent cloneName{};
     copy_clone_name(cloneName.name, sizeof(cloneName.name), name.name);
-    static_cast<void>(g_world->add_name_component(newEntity, cloneName));
+    static_cast<void>(runtime_binding().world->add_name_component(newEntity, cloneName));
   }
 
   // Copy LightComponent.
   runtime::LightComponent light{};
-  if (g_world->get_light_component(source, &light)) {
-    static_cast<void>(g_world->add_light_component(newEntity, light));
+  if (runtime_binding().world->get_light_component(source, &light)) {
+    static_cast<void>(runtime_binding().world->add_light_component(newEntity, light));
   }
 
-  lua_pushinteger(state, static_cast<lua_Integer>(newEntity.index));
+  push_entity_handle(state, newEntity);
   return 1;
 }
 
@@ -4148,8 +4176,9 @@ enum class SceneOp : std::uint8_t { None, Load, New };
 static SceneOp g_pendingSceneOp = SceneOp::None;
 static char g_pendingScenePath[512] = {};
 
+/// Handles lua engine save scene.
 int lua_engine_save_scene(lua_State *state) noexcept {
-  if (g_world == nullptr || !lua_isstring(state, 1)) {
+  if (runtime_binding().world == nullptr || !lua_isstring(state, 1)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -4158,13 +4187,14 @@ int lua_engine_save_scene(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = (g_services != nullptr) && (g_services->save_scene != nullptr)
-                      ? g_services->save_scene(g_world, path)
+  const bool ok = (runtime_binding().services != nullptr) && (runtime_binding().services->save_scene != nullptr)
+                      ? runtime_binding().services->save_scene(runtime_binding().world, path)
                       : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine load scene.
 int lua_engine_load_scene(lua_State *state) noexcept {
   if (!lua_isstring(state, 1)) {
     return 0;
@@ -4179,6 +4209,7 @@ int lua_engine_load_scene(lua_State *state) noexcept {
   return 0;
 }
 
+/// Handles lua engine new scene.
 int lua_engine_new_scene(lua_State *state) noexcept {
   static_cast<void>(state);
   g_pendingSceneOp = SceneOp::New;
@@ -4188,7 +4219,7 @@ int lua_engine_new_scene(lua_State *state) noexcept {
 // --- Prefab bindings ---
 
 int lua_engine_save_prefab(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isinteger(state, 1) ||
+  if ((runtime_binding().world == nullptr) || !lua_isinteger(state, 1) ||
       !lua_isstring(state, 2)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -4204,15 +4235,16 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
     return 1;
   }
   const bool ok =
-      (g_services != nullptr) && (g_services->save_prefab != nullptr)
-          ? g_services->save_prefab(g_world, entity.index, path)
+      (runtime_binding().services != nullptr) && (runtime_binding().services->save_prefab != nullptr)
+          ? runtime_binding().services->save_prefab(runtime_binding().world, entity.index, path)
           : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
+/// Handles lua engine instantiate.
 int lua_engine_instantiate(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isstring(state, 1)) {
+  if ((runtime_binding().world == nullptr) || !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4222,14 +4254,14 @@ int lua_engine_instantiate(lua_State *state) noexcept {
     return 1;
   }
   const std::uint32_t entityIndex =
-      ((g_services != nullptr) && (g_services->instantiate_prefab != nullptr))
-          ? g_services->instantiate_prefab(g_world, path)
+      ((runtime_binding().services != nullptr) && (runtime_binding().services->instantiate_prefab != nullptr))
+          ? runtime_binding().services->instantiate_prefab(runtime_binding().world, path)
           : 0U;
   if (entityIndex == 0U) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(entityIndex));
+  push_entity_handle_from_index(state, entityIndex);
   return 1;
 }
 
@@ -4238,7 +4270,7 @@ int lua_engine_instantiate(lua_State *state) noexcept {
 // engine.load_asset_async(path [, priority]) → handle_index or nil
 // priority: 0=Low, 1=Normal, 2=High, 3=Immediate (default=Normal)
 int lua_engine_load_asset_async(lua_State *state) noexcept {
-  if ((g_services == nullptr) || (g_services->load_asset_async == nullptr)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->load_asset_async == nullptr)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4262,7 +4294,7 @@ int lua_engine_load_asset_async(lua_State *state) noexcept {
       priority = static_cast<std::uint8_t>(p);
     }
   }
-  const std::uint32_t handle = g_services->load_asset_async(path, priority);
+  const std::uint32_t handle = runtime_binding().services->load_asset_async(path, priority);
   if (handle == 0xFFFFFFFFU) {
     lua_pushnil(state);
     return 1;
@@ -4273,7 +4305,7 @@ int lua_engine_load_asset_async(lua_State *state) noexcept {
 
 // engine.is_asset_ready(handle_index) → boolean
 int lua_engine_is_asset_ready(lua_State *state) noexcept {
-  if ((g_services == nullptr) || (g_services->is_asset_ready == nullptr)) {
+  if ((runtime_binding().services == nullptr) || (runtime_binding().services->is_asset_ready == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -4283,7 +4315,7 @@ int lua_engine_is_asset_ready(lua_State *state) noexcept {
   }
   const std::uint32_t handleIndex =
       static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  lua_pushboolean(state, g_services->is_asset_ready(handleIndex) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->is_asset_ready(handleIndex) ? 1 : 0);
   return 1;
 }
 
@@ -4291,7 +4323,7 @@ int lua_engine_is_asset_ready(lua_State *state) noexcept {
 
 // engine.pool_create(count) → pool_id or nil
 int lua_engine_pool_create(lua_State *state) noexcept {
-  if ((g_world == nullptr) || !lua_isinteger(state, 1)) {
+  if ((runtime_binding().world == nullptr) || !lua_isinteger(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -4309,7 +4341,7 @@ int lua_engine_pool_create(lua_State *state) noexcept {
   }
 
   runtime::EntityPool &pool = g_entityPools[g_entityPoolCount];
-  if (!pool.init(g_world, static_cast<std::size_t>(count))) {
+  if (!pool.init(runtime_binding().world, static_cast<std::size_t>(count))) {
     lua_pushnil(state);
     return 1;
   }
@@ -4340,7 +4372,7 @@ int lua_engine_pool_spawn(lua_State *state) noexcept {
     return 1;
   }
 
-  lua_pushinteger(state, static_cast<lua_Integer>(entity.index));
+  push_entity_handle(state, entity);
   return 1;
 }
 
@@ -4392,8 +4424,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
           (currentMtime != mod.mtime)) {
         // Save per-entity state before replacing the old module.
         init_entity_saved_state();
-        if ((g_world != nullptr) && (mod.registryRef != LUA_NOREF)) {
-          g_world->for_each<runtime::ScriptComponent>(
+        if ((runtime_binding().world != nullptr) && (mod.registryRef != LUA_NOREF)) {
+          runtime_binding().world->for_each<runtime::ScriptComponent>(
               [&mod](runtime::Entity entity,
                      const runtime::ScriptComponent &sc) noexcept {
                 if (std::strcmp(sc.scriptPath, mod.path) != 0) {
@@ -4527,11 +4559,11 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   return ref;
 }
 
-// Call module.funcName(entityIndex [, dt]) — returns false on missing/error.
+// Call module.funcName(entity [, dt]) - returns false on missing/error.
 // Call a function on a module table, with optional fallback name.
-// If entityIndex > 0, marks entity as faulted on error.
+// If entity is valid, marks entity as faulted on error.
 bool call_module_function(int moduleRef, const char *funcName,
-                          const char *fallbackName, std::uint32_t entityIndex,
+                          const char *fallbackName, runtime::Entity entity,
                           bool hasDt, float dt) noexcept {
   if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
     return false;
@@ -4563,7 +4595,7 @@ bool call_module_function(int moduleRef, const char *funcName,
   // Remove table so it doesn't interfere with the pcall argument count.
   lua_remove(g_state, -2);
 
-  lua_pushinteger(g_state, static_cast<lua_Integer>(entityIndex));
+  push_entity_handle(g_state, entity);
   int nargs = 1;
   if (hasDt) {
     lua_pushnumber(g_state, static_cast<lua_Number>(dt));
@@ -4573,14 +4605,15 @@ bool call_module_function(int moduleRef, const char *funcName,
   refresh_lua_hook(); // Reset instruction counter per callback.
   if (lua_pcall(g_state, nargs, 0, 0) != LUA_OK) {
     log_lua_error(funcName);
-    if ((entityIndex > 0U) && (entityIndex < kMaxFaultedEntities)) {
-      g_entityFaulted[entityIndex] = true;
+    if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
+      g_entityFaulted[entity.index] = true;
     }
     return false;
   }
   return true;
 }
 
+/// Handles lua engine add script component.
 int lua_engine_add_script_component(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -4605,6 +4638,7 @@ int lua_engine_add_script_component(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles lua engine remove script component.
 int lua_engine_remove_script_component(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -4663,6 +4697,7 @@ int lua_engine_restore(lua_State *state) noexcept {
   return 1;
 }
 
+/// Handles register engine bindings.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -5247,31 +5282,33 @@ void cmd_god(const char *const * /*args*/, int /*argCount*/,
   core::console_print(g_godModeEnabled ? "God mode ON" : "God mode OFF");
 }
 
+/// Handles cmd noclip.
 void cmd_noclip(const char *const * /*args*/, int /*argCount*/,
                 void * /*userData*/) noexcept {
   g_noclipEnabled = !g_noclipEnabled;
   core::console_print(g_noclipEnabled ? "Noclip ON" : "Noclip OFF");
 }
 
+/// Handles cmd spawn.
 void cmd_spawn(const char *const *args, int argCount,
                void * /*userData*/) noexcept {
   if (argCount < 2) {
     core::console_print("Usage: spawn <prefab> [x y z]");
     return;
   }
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->instantiate_prefab == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->instantiate_prefab == nullptr)) {
     core::console_print("Cannot spawn: world not ready");
     return;
   }
   const std::uint32_t entityIndex =
-      g_services->instantiate_prefab(g_world, args[1]);
+      runtime_binding().services->instantiate_prefab(runtime_binding().world, args[1]);
   if (entityIndex == 0U) {
     core::console_print("Spawn failed (prefab not found?)");
     return;
   }
   // Optionally set position if x y z provided.
-  if ((argCount >= 5) && (g_services->add_transform_op != nullptr)) {
+  if ((argCount >= 5) && (runtime_binding().services->add_transform_op != nullptr)) {
     runtime::Transform t{};
     t.position.x = static_cast<float>(std::atof(args[2]));
     t.position.y = static_cast<float>(std::atof(args[3]));
@@ -5279,33 +5316,34 @@ void cmd_spawn(const char *const *args, int argCount,
     t.scale = {1.0F, 1.0F, 1.0F};
     t.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
     // Overwrite the transform that was loaded from the prefab.
-    g_services->add_transform_op(g_world, entityIndex, t);
+    runtime_binding().services->add_transform_op(runtime_binding().world, entityIndex, t);
   }
   char buf[64] = {};
   std::snprintf(buf, sizeof(buf), "Spawned entity %u", entityIndex);
   core::console_print(buf);
 }
 
+/// Handles cmd kill all.
 void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
                   void * /*userData*/) noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_services->destroy_entity_op == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->destroy_entity_op == nullptr)) {
     core::console_print("Cannot kill_all: world not ready");
     return;
   }
   std::size_t destroyed = 0U;
-  g_world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
+  runtime_binding().world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
     // Skip player controller entities.
     for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-      if (g_playerControllerEntities[i] == entity.index) {
+      if (g_playerControllerEntities[i] == entity) {
         return;
       }
       if (g_playerControllers.get_controlled_entity(
-              static_cast<std::uint8_t>(i)) == entity.index) {
+              static_cast<std::uint8_t>(i)) == entity) {
         return;
       }
     }
-    g_services->destroy_entity_op(g_world, entity.index);
+    runtime_binding().services->destroy_entity_op(runtime_binding().world, entity.index);
     ++destroyed;
   });
   char buf[64] = {};
@@ -5313,6 +5351,7 @@ void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
   core::console_print(buf);
 }
 
+/// Handles register debug commands.
 void register_debug_commands() noexcept {
   core::console_register_command("god", cmd_god, nullptr,
                                  "Toggle god mode (invincibility)");
@@ -5326,76 +5365,94 @@ void register_debug_commands() noexcept {
 
 } // namespace
 
+/// Handles bindable delta time.
 float bindable_delta_time() noexcept { return g_deltaSeconds; }
 
+/// Handles bindable elapsed time.
 float bindable_elapsed_time() noexcept { return g_totalSeconds; }
 
+/// Handles bindable frame count.
 int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
 
+/// Handles bindable get entity count.
 int bindable_get_entity_count() noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr)) {
+  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr)) {
     return 0;
   }
-  return static_cast<int>(g_services->get_transform_count(g_world));
+  return static_cast<int>(runtime_binding().services->get_transform_count(runtime_binding().world));
 }
 
+/// Handles bindable is god mode.
 bool bindable_is_god_mode() noexcept { return g_godModeEnabled; }
 
+/// Handles bindable is noclip.
 bool bindable_is_noclip() noexcept { return g_noclipEnabled; }
 
+/// Handles bindable is gamepad connected.
 bool bindable_is_gamepad_connected() noexcept {
   return core::is_gamepad_connected();
 }
 
+/// Handles bindable is key down.
 bool bindable_is_key_down(int scancode) noexcept {
   return core::is_key_down(scancode);
 }
 
+/// Handles bindable is key pressed.
 bool bindable_is_key_pressed(int scancode) noexcept {
   return core::is_key_pressed(scancode);
 }
 
+/// Handles bindable is gamepad button down.
 bool bindable_is_gamepad_button_down(int button) noexcept {
   return core::is_gamepad_button_down(button);
 }
 
+/// Handles bindable is action down.
 bool bindable_is_action_down(const char *name) noexcept {
   return (name != nullptr) ? core::is_action_down(name) : false;
 }
 
+/// Handles bindable is action pressed.
 bool bindable_is_action_pressed(const char *name) noexcept {
   return (name != nullptr) ? core::is_action_pressed(name) : false;
 }
 
+/// Handles bindable get action value.
 float bindable_get_action_value(const char *name) noexcept {
   return (name != nullptr) ? core::action_value(name) : 0.0F;
 }
 
+/// Handles bindable get axis value.
 float bindable_get_axis_value(const char *name) noexcept {
   return (name != nullptr) ? core::axis_value(name) : 0.0F;
 }
 
+/// Handles bindable set game mode.
 bool bindable_set_game_mode(const char *name) noexcept {
   if (name == nullptr) {
     return false;
   }
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
-  if (g_world != nullptr) {
-    std::snprintf(g_world->game_mode().name, runtime::GameMode::kMaxNameLength,
+  if (runtime_binding().world != nullptr) {
+    std::snprintf(runtime_binding().world->game_mode().name, runtime::GameMode::kMaxNameLength,
                   "%s", name);
   }
   return true;
 }
 
+/// Handles bindable get game state.
 const char *bindable_get_game_state() noexcept { return g_gameState; }
 
+/// Handles bindable get game mode.
 const char *bindable_get_game_mode() noexcept {
-  if (g_world != nullptr) {
-    return g_world->game_mode().name;
+  if (runtime_binding().world != nullptr) {
+    return runtime_binding().world->game_mode().name;
   }
   return g_gameMode;
 }
 
+/// Handles bindable set game state.
 bool bindable_set_game_state(const char *name) noexcept {
   if (name == nullptr) {
     return false;
@@ -5404,43 +5461,51 @@ bool bindable_set_game_state(const char *name) noexcept {
   return true;
 }
 
-bool bindable_is_alive(std::uint32_t entity) noexcept {
-  if (g_world == nullptr) {
+/// Handles bindable is alive.
+bool bindable_is_alive(std::uint64_t entity) noexcept {
+  if (runtime_binding().world == nullptr) {
     return false;
   }
-  const runtime::Entity resolved = g_world->find_entity_by_index(entity);
-  return resolved != runtime::kInvalidEntity;
+  runtime::Entity decoded{};
+  return decode_entity_handle_value(entity, &decoded) &&
+         runtime_binding().world->is_alive(decoded);
 }
 
-bool bindable_has_light(std::uint32_t entity) noexcept {
-  if (g_world == nullptr) {
+/// Handles bindable has light.
+bool bindable_has_light(std::uint64_t entity) noexcept {
+  if (runtime_binding().world == nullptr) {
     return false;
   }
-  const runtime::Entity resolved = g_world->find_entity_by_index(entity);
-  if (resolved == runtime::kInvalidEntity) {
+  runtime::Entity decoded{};
+  if (!decode_entity_handle_value(entity, &decoded) ||
+      !runtime_binding().world->is_alive(decoded)) {
     return false;
   }
-  return g_world->has_light_component(resolved);
+  return runtime_binding().world->has_light_component(decoded);
 }
 
+/// Handles bindable set camera fov.
 void bindable_set_camera_fov(float fov) noexcept {
-  if ((g_services != nullptr) && (g_services->set_camera_fov != nullptr)) {
-    g_services->set_camera_fov(fov);
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_camera_fov != nullptr)) {
+    runtime_binding().services->set_camera_fov(fov);
   }
 }
 
+/// Handles bindable set master volume.
 void bindable_set_master_volume(float volume) noexcept {
-  if ((g_services != nullptr) && (g_services->set_master_volume != nullptr)) {
-    g_services->set_master_volume(volume);
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_master_volume != nullptr)) {
+    runtime_binding().services->set_master_volume(volume);
   }
 }
 
+/// Handles bindable stop all sounds.
 void bindable_stop_all_sounds() noexcept {
-  if ((g_services != nullptr) && (g_services->stop_all_sounds != nullptr)) {
-    g_services->stop_all_sounds();
+  if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_all_sounds != nullptr)) {
+    runtime_binding().services->stop_all_sounds();
   }
 }
 
+/// Initializes the owning system for scripting.
 bool initialize_scripting() noexcept {
   if (g_state != nullptr) {
     return true;
@@ -5481,7 +5546,10 @@ bool initialize_scripting() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for scripting.
 void shutdown_scripting() noexcept {
+  clear_touch_gesture_callbacks(g_state);
+
   if (g_state != nullptr) {
     // Release persist table.
     if (g_persistRef != LUA_NOREF) {
@@ -5498,8 +5566,8 @@ void shutdown_scripting() noexcept {
         g_timerLuaRefs[i] = LUA_NOREF;
       }
     }
-    if (g_world != nullptr) {
-      g_world->timer_manager().clear();
+    if (runtime_binding().world != nullptr) {
+      runtime_binding().world->timer_manager().clear();
     }
     // Release collision handler refs.
     for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
@@ -5516,7 +5584,7 @@ void shutdown_scripting() noexcept {
     g_state = nullptr;
   }
 
-  g_world = nullptr;
+  clear_runtime_binding();
   g_defaultMeshAssetId = 0ULL;
   g_builtinPlaneMesh = 0ULL;
   g_builtinCubeMesh = 0ULL;
@@ -5524,7 +5592,7 @@ void shutdown_scripting() noexcept {
   g_builtinCylinderMesh = 0ULL;
   g_builtinCapsuleMesh = 0ULL;
   g_builtinPyramidMesh = 0ULL;
-  g_deferredMutationCount = 0U;
+  clear_deferred_mutations();
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
   g_moduleLoadDepth = 0U;
@@ -5554,29 +5622,19 @@ void shutdown_scripting() noexcept {
   std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", "default");
   std::snprintf(g_gameState, sizeof(g_gameState), "%s", "startup");
   for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-    g_playerControllerEntities[i] = 0U;
+    g_playerControllerEntities[i] = runtime::kInvalidEntity;
   }
   g_playerControllers.reset();
   // Note: g_persistentGameState is NOT cleared here — it persists across
   // scene resets. The GameMode is reset via World's own reset path.
 }
 
-void bind_runtime_world(runtime::World *world) noexcept {
-  g_world = world;
-  // Also register/update in the global service locator.
-  core::global_service_locator().register_service<runtime::World>(world);
-}
-
-void bind_runtime_services(const RuntimeServices *services) noexcept {
-  g_services = services;
-  core::global_service_locator().register_service<RuntimeServices>(
-      const_cast<RuntimeServices *>(services));
-}
-
+/// Sets the requested value for default mesh asset id.
 void set_default_mesh_asset_id(std::uint64_t assetId) noexcept {
   g_defaultMeshAssetId = assetId;
 }
 
+/// Sets the requested value for builtin mesh ids.
 void set_builtin_mesh_ids(std::uint64_t planeMesh, std::uint64_t cubeMesh,
                           std::uint64_t sphereMesh, std::uint64_t cylinderMesh,
                           std::uint64_t capsuleMesh,
@@ -5589,6 +5647,7 @@ void set_builtin_mesh_ids(std::uint64_t planeMesh, std::uint64_t cubeMesh,
   g_builtinPyramidMesh = pyramidMesh;
 }
 
+/// Sets the requested value for frame time.
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
   g_deltaSeconds = deltaSeconds;
   g_totalSeconds = totalSeconds;
@@ -5597,6 +5656,7 @@ void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
   }
 }
 
+/// Loads the requested resource for script.
 bool load_script(const char *path) noexcept {
   if (g_state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -5625,6 +5685,7 @@ bool load_script(const char *path) noexcept {
   return true;
 }
 
+/// Handles call script function.
 bool call_script_function(const char *name) noexcept {
   if (g_state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -5652,6 +5713,7 @@ bool call_script_function(const char *name) noexcept {
   return true;
 }
 
+/// Handles call script function float.
 bool call_script_function_float(const char *name, float arg) noexcept {
   if (g_state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -5680,6 +5742,7 @@ bool call_script_function_float(const char *name, float arg) noexcept {
   return true;
 }
 
+/// Handles dispatch physics callbacks.
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept {
   if ((g_state == nullptr) || (pairData == nullptr) || (pairCount == 0U)) {
@@ -5687,8 +5750,8 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
   }
 
   for (std::size_t i = 0U; i < pairCount; ++i) {
-    const lua_Integer eA = static_cast<lua_Integer>(pairData[i * 2U]);
-    const lua_Integer eB = static_cast<lua_Integer>(pairData[i * 2U + 1U]);
+    const std::uint32_t entityIndexA = pairData[i * 2U];
+    const std::uint32_t entityIndexB = pairData[i * 2U + 1U];
 
     // Call all registered handlers.
     for (std::size_t h = 0U; h < kMaxCollisionHandlers; ++h) {
@@ -5700,8 +5763,8 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
         lua_pop(g_state, 1);
         continue;
       }
-      lua_pushinteger(g_state, eA);
-      lua_pushinteger(g_state, eB);
+      push_entity_handle_from_index(g_state, entityIndexA);
+      push_entity_handle_from_index(g_state, entityIndexB);
       if (lua_pcall(g_state, 2, 0, 0) != LUA_OK) {
         log_lua_error("on_collision_handler");
       }
@@ -5710,8 +5773,8 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
     // Also call the legacy global on_collision for backward compatibility.
     lua_getglobal(g_state, "on_collision");
     if (lua_isfunction(g_state, -1)) {
-      lua_pushinteger(g_state, eA);
-      lua_pushinteger(g_state, eB);
+      push_entity_handle_from_index(g_state, entityIndexA);
+      push_entity_handle_from_index(g_state, entityIndexB);
       if (lua_pcall(g_state, 2, 0, 0) != LUA_OK) {
         log_lua_error("on_collision");
       }
@@ -5722,6 +5785,7 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
 }
 
 namespace {
+/// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     return 0;
@@ -5755,106 +5819,14 @@ std::int64_t get_file_mtime(const char *path) noexcept {
 }
 } // anonymous namespace
 
+/// Sets the requested value for frame index.
 void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
 }
 
-void flush_deferred_mutations() noexcept {
-  if ((g_world == nullptr) || (g_services == nullptr) ||
-      (g_deferredMutationCount == 0U) || !can_apply_mutations_now()) {
-    return;
-  }
-
-  const std::size_t count = g_deferredMutationCount;
-  g_deferredMutationCount = 0U;
-  for (std::size_t i = 0U; i < count; ++i) {
-    const DeferredMutation &mutation = g_deferredMutations[i];
-    switch (mutation.type) {
-    case DeferredMutationType::DestroyEntity:
-      static_cast<void>(
-          g_services->destroy_entity_op(g_world, mutation.entity.index));
-      break;
-    case DeferredMutationType::SetTransform: {
-      const bool transformUpdated = g_services->add_transform_op(
-          g_world, mutation.entity.index, mutation.transform);
-      if (transformUpdated && mutation.setMovementAuthority) {
-        static_cast<void>(g_services->set_movement_authority_op(
-            g_world, mutation.entity.index, mutation.movementAuthority));
-      }
-      break;
-    }
-    case DeferredMutationType::AddRigidBody:
-      static_cast<void>(g_services->add_rigid_body_op(
-          g_world, mutation.entity.index, mutation.rigidBody));
-      break;
-    case DeferredMutationType::AddCollider:
-      static_cast<void>(g_services->add_collider_op(
-          g_world, mutation.entity.index, mutation.collider));
-      break;
-    case DeferredMutationType::AddMeshComponent:
-      static_cast<void>(g_services->add_mesh_component_op(
-          g_world, mutation.entity.index, mutation.meshComponent));
-      break;
-    case DeferredMutationType::AddNameComponent:
-      static_cast<void>(g_services->add_name_component_op(
-          g_world, mutation.entity.index, mutation.nameComponent));
-      break;
-    case DeferredMutationType::AddLightComponent:
-      static_cast<void>(g_services->add_light_component_op(
-          g_world, mutation.entity.index, mutation.lightComponent));
-      break;
-    case DeferredMutationType::RemoveLightComponent:
-      static_cast<void>(g_services->remove_light_component_op(
-          g_world, mutation.entity.index));
-      break;
-    case DeferredMutationType::AddScriptComponent:
-      static_cast<void>(g_services->add_script_component_op(
-          g_world, mutation.entity.index, mutation.scriptComponent));
-      break;
-    case DeferredMutationType::RemoveScriptComponent:
-      static_cast<void>(g_services->remove_script_component_op(
-          g_world, mutation.entity.index));
-      break;
-    case DeferredMutationType::AddPointLightComponent: {
-      const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->add_point_light_component(
-            resolved, mutation.pointLightComponent));
-      }
-      break;
-    }
-    case DeferredMutationType::RemovePointLightComponent: {
-      const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->remove_point_light_component(resolved));
-      }
-      break;
-    }
-    case DeferredMutationType::AddSpotLightComponent: {
-      const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->add_spot_light_component(
-            resolved, mutation.spotLightComponent));
-      }
-      break;
-    }
-    case DeferredMutationType::RemoveSpotLightComponent: {
-      const runtime::Entity resolved =
-          g_world->find_entity_by_index(mutation.entity.index);
-      if (resolved != runtime::kInvalidEntity) {
-        static_cast<void>(g_world->remove_spot_light_component(resolved));
-      }
-      break;
-    }
-    }
-  }
-}
-
+/// Handles tick timers.
 void tick_timers() noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
   ensure_timer_refs_init();
@@ -5862,9 +5834,10 @@ void tick_timers() noexcept {
   // The TimerManager uses accumulated elapsed time internally. We sync it to
   // the scripting layer's g_totalSeconds so that tests which jump total time
   // work correctly. Pass the delta as (totalSeconds - previous elapsed).
-  g_world->timer_manager().tick(g_deltaSeconds);
+  runtime_binding().world->timer_manager().tick(g_deltaSeconds);
 }
 
+/// Handles tick coroutines.
 void tick_coroutines() noexcept {
   if (g_state == nullptr) {
     return;
@@ -5903,31 +5876,38 @@ void tick_coroutines() noexcept {
   }
 }
 
+/// Handles clear coroutines.
 void clear_coroutines() noexcept {
   for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
     g_coroutineScheduler.release_entry(g_coroutineScheduler.m_entries[i]);
   }
 }
 
+/// Returns whether has pending scene op.
 bool has_pending_scene_op() noexcept {
   return g_pendingSceneOp != SceneOp::None;
 }
 
+/// Handles pending scene op is load.
 bool pending_scene_op_is_load() noexcept {
   return g_pendingSceneOp == SceneOp::Load;
 }
 
+/// Handles pending scene op is new.
 bool pending_scene_op_is_new() noexcept {
   return g_pendingSceneOp == SceneOp::New;
 }
 
+/// Returns the requested value for pending scene path.
 const char *get_pending_scene_path() noexcept { return g_pendingScenePath; }
 
+/// Handles clear pending scene op.
 void clear_pending_scene_op() noexcept {
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
 }
 
+/// Handles watch script file.
 void watch_script_file(const char *path) noexcept {
   if (path == nullptr) {
     return;
@@ -5936,6 +5916,7 @@ void watch_script_file(const char *path) noexcept {
   g_watchedMtime = get_file_mtime(path);
 }
 
+/// Handles check script reload.
 void check_script_reload() noexcept {
   if (g_watchedPath[0] == '\0') {
     return;
@@ -5952,12 +5933,13 @@ void check_script_reload() noexcept {
   }
 }
 
+/// Handles dispatch entity scripts start.
 void dispatch_entity_scripts_start() noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
 
-  g_world->for_each<runtime::ScriptComponent>(
+  runtime_binding().world->for_each<runtime::ScriptComponent>(
       [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
@@ -5968,16 +5950,17 @@ void dispatch_entity_scripts_start() noexcept {
         }
         // Mark begin_play done so dispatch_entity_scripts_begin_play does
         // not fire on_start a second time for the same entity this frame.
-        g_world->mark_begin_play_done(entity);
+        runtime_binding().world->mark_begin_play_done(entity);
         const int ref = get_or_load_entity_script_module(sc.scriptPath);
         if (ref == LUA_NOREF) {
           return;
         }
-        call_module_function(ref, "on_begin_play", "on_start", entity.index,
+        call_module_function(ref, "on_begin_play", "on_start", entity,
                              false, 0.0F);
       });
 }
 
+/// Handles dispatch entity scripts begin play.
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
@@ -5997,11 +5980,12 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
     if (ref == LUA_NOREF) {
       return;
     }
-    call_module_function(ref, "on_begin_play", "on_start", entity.index, false,
+    call_module_function(ref, "on_begin_play", "on_start", entity, false,
                          0.0F);
   });
 }
 
+/// Handles dispatch entity scripts end play.
 void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
@@ -6018,12 +6002,13 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
       return;
     }
     static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                           entity.index, false, 0.0F));
+                                           entity, false, 0.0F));
   });
 }
 
+/// Handles dispatch entity scripts update.
 void dispatch_entity_scripts_update(float dt) noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
 
@@ -6034,7 +6019,7 @@ void dispatch_entity_scripts_update(float dt) noexcept {
 
     const char *reloadedPath = g_entityScriptModules[i].path;
     const int moduleRef = g_entityScriptModules[i].registryRef;
-    g_world->for_each<runtime::ScriptComponent>(
+    runtime_binding().world->for_each<runtime::ScriptComponent>(
         [reloadedPath, moduleRef](runtime::Entity entity,
                                   const runtime::ScriptComponent &sc) noexcept {
           if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
@@ -6046,15 +6031,15 @@ void dispatch_entity_scripts_update(float dt) noexcept {
           }
 
           static_cast<void>(call_module_function(
-              moduleRef, "on_reload", nullptr, entity.index, false, 0.0F));
+              moduleRef, "on_reload", nullptr, entity, false, 0.0F));
           static_cast<void>(call_module_function(moduleRef, "on_begin_play",
-                                                 "on_start", entity.index,
+                                                 "on_start", entity,
                                                  false, 0.0F));
         });
     g_entityScriptModules[i].reloaded = false;
   }
 
-  g_world->for_each<runtime::ScriptComponent>(
+  runtime_binding().world->for_each<runtime::ScriptComponent>(
       [dt](runtime::Entity entity,
            const runtime::ScriptComponent &sc) noexcept {
         if (sc.scriptPath[0] == '\0') {
@@ -6068,17 +6053,18 @@ void dispatch_entity_scripts_update(float dt) noexcept {
         if (ref == LUA_NOREF) {
           return;
         }
-        call_module_function(ref, "on_tick", "on_update", entity.index, true,
+        call_module_function(ref, "on_tick", "on_update", entity, true,
                              dt);
       });
 }
 
+/// Handles dispatch entity scripts end.
 void dispatch_entity_scripts_end() noexcept {
-  if ((g_state == nullptr) || (g_world == nullptr)) {
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
 
-  g_world->for_each<runtime::ScriptComponent>(
+  runtime_binding().world->for_each<runtime::ScriptComponent>(
       [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
@@ -6088,10 +6074,11 @@ void dispatch_entity_scripts_end() noexcept {
           return;
         }
         static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                               entity.index, false, 0.0F));
+                                               entity, false, 0.0F));
       });
 }
 
+/// Handles clear entity script modules.
 void clear_entity_script_modules() noexcept {
   if (g_state == nullptr) {
     return;
@@ -6110,12 +6097,14 @@ void clear_entity_script_modules() noexcept {
   g_entityScriptModuleCount = 0U;
 }
 
+/// Handles debugger clear breakpoints.
 void debugger_clear_breakpoints() noexcept {
   for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
     g_breakpoints[i] = DebugBreakpoint{};
   }
 }
 
+/// Handles debugger add breakpoint.
 bool debugger_add_breakpoint(const char *file, int line) noexcept {
   if ((file == nullptr) || (line <= 0)) {
     return false;
@@ -6139,17 +6128,22 @@ void set_sandbox_enabled(bool enabled) noexcept {
   refresh_lua_hook();
 }
 
+/// Returns whether is sandbox enabled.
 bool is_sandbox_enabled() noexcept { return g_sandboxEnabled; }
 
+/// Sets the requested value for instruction limit.
 void set_instruction_limit(int limit) noexcept {
   g_instructionLimit = limit;
   refresh_lua_hook();
 }
 
+/// Returns the requested value for instruction limit.
 int get_instruction_limit() noexcept { return g_instructionLimit; }
 
+/// Sets the requested value for memory limit.
 void set_memory_limit(std::size_t limit) noexcept { g_memoryLimit = limit; }
 
+/// Returns the requested value for memory limit.
 std::size_t get_memory_limit() noexcept { return g_memoryLimit; }
 
 } // namespace engine::scripting

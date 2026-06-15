@@ -1,3 +1,5 @@
+// Implements vec4 behavior for the Engine math library.
+
 #include "engine/math/vec4.h"
 
 #include <cmath>
@@ -12,6 +14,7 @@
 
 namespace engine::math {
 
+/// Adds a value or component to the target system.
 Vec4 add(const Vec4 &lhs, const Vec4 &rhs) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 a = _mm_load_ps(&lhs.x);
@@ -24,6 +27,7 @@ Vec4 add(const Vec4 &lhs, const Vec4 &rhs) noexcept {
 #endif
 }
 
+/// Handles sub.
 Vec4 sub(const Vec4 &lhs, const Vec4 &rhs) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 a = _mm_load_ps(&lhs.x);
@@ -36,6 +40,7 @@ Vec4 sub(const Vec4 &lhs, const Vec4 &rhs) noexcept {
 #endif
 }
 
+/// Handles mul.
 Vec4 mul(const Vec4 &lhs, float scalar) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 a = _mm_load_ps(&lhs.x);
@@ -48,6 +53,7 @@ Vec4 mul(const Vec4 &lhs, float scalar) noexcept {
 #endif
 }
 
+/// Handles div.
 Vec4 div(const Vec4 &lhs, float scalar) noexcept {
   const float inv = (scalar != 0.0F) ? (1.0F / scalar) : 0.0F;
 #if ENGINE_MATH_SSE2
@@ -61,6 +67,7 @@ Vec4 div(const Vec4 &lhs, float scalar) noexcept {
 #endif
 }
 
+/// Handles dot.
 float dot(const Vec4 &lhs, const Vec4 &rhs) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 a = _mm_load_ps(&lhs.x);
@@ -77,14 +84,17 @@ float dot(const Vec4 &lhs, const Vec4 &rhs) noexcept {
 #endif
 }
 
+/// Handles length sq.
 float length_sq(const Vec4 &value) noexcept {
   return dot(value, value);
 }
 
+/// Handles length.
 float length(const Vec4 &value) noexcept {
   return std::sqrt(length_sq(value));
 }
 
+/// Clamps and fills settings into a safe runtime range.
 Vec4 normalize(const Vec4 &value) noexcept {
   const float len = length(value);
   if (len <= 0.0F) {
@@ -94,6 +104,7 @@ Vec4 normalize(const Vec4 &value) noexcept {
   return div(value, len);
 }
 
+/// Handles lerp.
 Vec4 lerp(const Vec4 &from, const Vec4 &to, float t) noexcept {
 #if ENGINE_MATH_SSE2
   __m128 a = _mm_load_ps(&from.x);

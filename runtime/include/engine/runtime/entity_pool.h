@@ -1,3 +1,5 @@
+// Declares entity pool types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <cstddef>
@@ -16,13 +18,16 @@ class EntityPool final {
 public:
   static constexpr std::size_t kMaxPoolSize = 1024U;
 
+  /// Handles init.
   inline bool init(World *world, std::size_t count) noexcept {
     if (m_world != nullptr) {
+      /// Handles log message.
       core::log_message(core::LogLevel::Error, "entity_pool",
                         "pool already initialised");
       return false;
     }
     if ((world == nullptr) || (count == 0U) || (count > kMaxPoolSize)) {
+      /// Handles log message.
       core::log_message(core::LogLevel::Error, "entity_pool",
                         "invalid pool parameters");
       return false;
@@ -33,6 +38,7 @@ public:
     for (std::size_t i = 0U; i < count; ++i) {
       const Entity entity = world->create_entity();
       if (entity == kInvalidEntity) {
+        /// Handles log message.
         core::log_message(core::LogLevel::Error, "entity_pool",
                           "failed to pre-allocate entity");
         for (std::size_t j = 0U; j < i; ++j) {
@@ -50,6 +56,7 @@ public:
     return true;
   }
 
+  /// Handles acquire.
   inline Entity acquire() noexcept {
     if (m_freeCount == 0U) {
       return kInvalidEntity;
@@ -60,6 +67,7 @@ public:
     return m_entities[slotIndex];
   }
 
+  /// Handles release.
   inline bool release(Entity entity) noexcept {
     for (std::size_t i = 0U; i < m_capacity; ++i) {
       if ((m_entities[i].index == entity.index) && m_inUse[i]) {
@@ -81,8 +89,11 @@ public:
     return false;
   }
 
+  /// Handles available.
   inline std::size_t available() const noexcept { return m_freeCount; }
+  /// Handles capacity.
   inline std::size_t capacity() const noexcept { return m_capacity; }
+  /// Handles initialised.
   inline bool initialised() const noexcept { return m_world != nullptr; }
 
 private:

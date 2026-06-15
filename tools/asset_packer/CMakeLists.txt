@@ -1,3 +1,5 @@
+# Configures tools build settings for the Engine repository.
+
 engine_add_executable_target(asset_packer
     SOURCES
     main.cpp

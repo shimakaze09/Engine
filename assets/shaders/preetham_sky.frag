@@ -1,3 +1,5 @@
+// Defines the preetham sky fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec3 vTexCoord;
@@ -9,6 +11,7 @@ out vec4 FragColor;
 
 const float PI = 3.14159265359;
 
+/// Handles perez.
 float perez(float theta, float gamma, float A, float B, float C, float D,
             float E) {
   float cosTheta = max(cos(theta), 0.01);
@@ -17,6 +20,7 @@ float perez(float theta, float gamma, float A, float B, float C, float D,
          (1.0 + C * exp(D * gamma) + E * cosGamma * cosGamma);
 }
 
+/// Handles xy y to rgb.
 vec3 xyY_to_rgb(float x, float y, float Y) {
   y = max(y, 0.0001);
   float X = (x / y) * Y;
@@ -29,6 +33,7 @@ vec3 xyY_to_rgb(float x, float y, float Y) {
   return max(rgb, vec3(0.0));
 }
 
+/// Handles preetham sky.
 vec3 preetham_sky(vec3 direction, vec3 sunDirection, float turbidity) {
   float T = clamp(turbidity, 1.7, 10.0);
   vec3 sunDir = normalize(sunDirection);
@@ -92,6 +97,7 @@ vec3 preetham_sky(vec3 direction, vec3 sunDirection, float turbidity) {
   return sky;
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
   vec3 direction = normalize(vTexCoord);
   vec3 skyColor = preetham_sky(direction, u_sunDirection, u_turbidity);

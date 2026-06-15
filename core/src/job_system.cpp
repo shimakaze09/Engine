@@ -1,3 +1,5 @@
+// Implements job system behavior for the Engine core engine.
+
 #include "engine/core/job_system.h"
 
 #include "engine/core/logging.h"
@@ -26,6 +28,7 @@ constexpr std::uint32_t kIndexMask = (1U << kIndexBits) - 1U;
 
 thread_local std::uint32_t g_threadIndex = 0U;
 
+/// Stores alignas data used by the engine.
 struct alignas(64) ThreadStats final {
   std::atomic<std::uint64_t> jobsExecuted = 0U;
   std::atomic<std::uint64_t> busyNanoseconds = 0U;
@@ -34,6 +37,7 @@ struct alignas(64) ThreadStats final {
       cacheLinePad{};
 };
 
+/// Stores job node data used by the engine.
 struct JobNode final {
   Job job{};
   std::atomic<std::uint32_t> remainingDependencies = 0U;
@@ -43,24 +47,29 @@ struct JobNode final {
   bool active = false;
 };
 
+/// Stores dependency edge data used by the engine.
 struct DependencyEdge final {
   std::uint32_t dependentIndex = kInvalidIndex;
   std::uint32_t nextEdge = kInvalidIndex;
 };
 
+/// Handles encode handle id.
 std::uint32_t encode_handle_id(std::uint32_t index,
                                std::uint32_t generation) noexcept {
   return (generation << kIndexBits) | index;
 }
 
+/// Handles decode handle index.
 std::uint32_t decode_handle_index(JobHandle handle) noexcept {
   return handle.id & kIndexMask;
 }
 
+/// Handles decode handle generation.
 std::uint32_t decode_handle_generation(JobHandle handle) noexcept {
   return handle.id >> kIndexBits;
 }
 
+/// Owns the job system behavior and state.
 class JobSystem final {
 public:
   bool initialize(std::uint32_t requestedWorkers) noexcept {
@@ -652,42 +661,56 @@ JobSystem g_jobSystem;
 
 } // namespace
 
+/// Initializes the owning system for job system.
 bool initialize_job_system(std::uint32_t workerCount) noexcept {
   return g_jobSystem.initialize(workerCount);
 }
 
+/// Shuts down the owning system for job system.
 void shutdown_job_system() noexcept { g_jobSystem.shutdown(); }
 
+/// Returns whether is job system initialized.
 bool is_job_system_initialized() noexcept {
   return g_jobSystem.is_initialized();
 }
 
+/// Begins the requested operation or profiling range for frame graph.
 bool begin_frame_graph() noexcept { return g_jobSystem.begin_graph(); }
 
+/// Ends the requested operation or profiling range for frame graph.
 bool end_frame_graph() noexcept { return g_jobSystem.end_graph(); }
 
+/// Submits work to the owning buffer or system.
 JobHandle submit(Job job) noexcept { return g_jobSystem.submit_job(job); }
 
+/// Adds a value or component to the target system for dependency.
 bool add_dependency(JobHandle prerequisite, JobHandle dependent) noexcept {
   return g_jobSystem.add_dependency(prerequisite, dependent);
 }
 
+/// Handles wait.
 void wait(JobHandle handle) noexcept { g_jobSystem.wait_for_handle(handle); }
 
+/// Returns whether is valid handle.
 bool is_valid_handle(JobHandle handle) noexcept {
   return g_jobSystem.is_valid_handle(handle);
 }
 
+/// Returns whether is completed.
 bool is_completed(JobHandle handle) noexcept {
   return g_jobSystem.is_completed(handle);
 }
 
+/// Handles worker count.
 std::uint32_t worker_count() noexcept { return g_jobSystem.worker_count(); }
 
+/// Handles thread count.
 std::uint32_t thread_count() noexcept { return g_jobSystem.thread_count(); }
 
+/// Handles current thread index.
 std::uint32_t current_thread_index() noexcept { return g_threadIndex; }
 
+/// Handles consume job stats.
 JobSystemStats consume_job_stats() noexcept {
   return g_jobSystem.consume_stats();
 }

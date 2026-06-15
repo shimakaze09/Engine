@@ -1,3 +1,5 @@
+// Declares reflect types types and APIs for the Engine runtime world.
+
 #pragma once
 
 namespace engine::runtime {

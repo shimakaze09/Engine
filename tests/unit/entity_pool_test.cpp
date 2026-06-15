@@ -1,3 +1,5 @@
+// Verifies entity pool test behavior for the Engine test suite.
+
 #include "engine/runtime/entity_pool.h"
 #include "engine/runtime/world.h"
 
@@ -9,6 +11,7 @@ namespace {
 
 using namespace engine::runtime;
 
+/// Handles test pool init.
 bool test_pool_init() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world) {
@@ -38,6 +41,7 @@ bool test_pool_init() {
   return true;
 }
 
+/// Handles test pool acquire release.
 bool test_pool_acquire_release() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -81,6 +85,7 @@ bool test_pool_acquire_release() {
   return true;
 }
 
+/// Handles test pool handle reuse.
 bool test_pool_handle_reuse() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -140,6 +145,7 @@ bool test_pool_handle_reuse() {
   return true;
 }
 
+/// Handles test pool double init.
 bool test_pool_double_init() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -155,6 +161,7 @@ bool test_pool_double_init() {
   return true;
 }
 
+/// Handles test pool release unknown.
 bool test_pool_release_unknown() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -173,6 +180,7 @@ bool test_pool_release_unknown() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   struct TestCase {
     const char *name;

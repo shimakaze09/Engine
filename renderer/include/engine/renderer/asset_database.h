@@ -1,3 +1,5 @@
+// Declares asset database types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <array>
@@ -14,6 +16,7 @@ namespace engine::renderer {
 
 enum class AssetState : std::uint8_t { Unloaded, Loading, Ready, Failed };
 
+/// Stores mesh asset record data used by the engine.
 struct MeshAssetRecord final {
   AssetId id = kInvalidAssetId;
   MeshHandle runtimeMesh = kInvalidMeshHandle;
@@ -25,6 +28,7 @@ struct MeshAssetRecord final {
   bool requestedResident = false;
 };
 
+/// Stores texture asset record data used by the engine.
 struct TextureAssetRecord final {
   AssetId id = kInvalidAssetId;
   TextureHandle runtimeTexture = kInvalidTextureHandle;
@@ -36,6 +40,7 @@ struct TextureAssetRecord final {
   bool requestedResident = false;
 };
 
+/// Stores asset database data used by the engine.
 struct AssetDatabase final {
   static constexpr std::size_t kMaxMeshAssets = 4096U;
   std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets{};
@@ -52,48 +57,69 @@ struct AssetDatabase final {
   std::uint64_t currentFrame = 0ULL;
 };
 
+/// Handles advance asset database frame.
 void advance_asset_database_frame(AssetDatabase *database) noexcept;
 
+/// Handles make asset id from path.
 AssetId make_asset_id_from_path(const char *path) noexcept;
+/// Handles make asset id from file.
 AssetId make_asset_id_from_file(const char *path) noexcept;
+/// Handles register mesh asset.
 bool register_mesh_asset(AssetDatabase *database, AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept;
+/// Handles mesh asset state.
 AssetState mesh_asset_state(const AssetDatabase *database, AssetId id) noexcept;
+/// Sets the requested value for mesh asset state.
 bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
                           MeshHandle runtimeMesh) noexcept;
+/// Handles mesh asset requested resident.
 bool mesh_asset_requested_resident(const AssetDatabase *database,
                                    AssetId id) noexcept;
+/// Handles resolve mesh asset.
 MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
+/// Handles retain mesh asset.
 bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
+/// Handles release mesh asset.
 bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
+/// Handles clear asset database.
 void clear_asset_database(AssetDatabase *database) noexcept;
 
 // Texture asset management.
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept;
+/// Handles texture asset state.
 AssetState texture_asset_state(const AssetDatabase *database,
                                AssetId id) noexcept;
+/// Sets the requested value for texture asset state.
 bool set_texture_asset_state(AssetDatabase *database, AssetId id,
                              AssetState state,
                              TextureHandle runtimeTexture) noexcept;
+/// Handles resolve texture asset.
 TextureHandle resolve_texture_asset(AssetDatabase *database,
                                     AssetId id) noexcept;
+/// Handles retain texture asset.
 bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept;
+/// Handles release texture asset.
 bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept;
 
 // Metadata management.
 bool register_asset_metadata(AssetDatabase *database,
                              const AssetMetadata &metadata) noexcept;
+/// Finds the matching object or resource for asset metadata.
 const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
                                          AssetId id) noexcept;
+/// Adds a value or component to the target system for asset tag.
 bool add_asset_tag(AssetDatabase *database, AssetId id,
                    const char *tag) noexcept;
+/// Handles asset has tag.
 bool asset_has_tag(const AssetDatabase *database, AssetId id,
                    const char *tag) noexcept;
+/// Handles query assets by tag.
 std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
                                 AssetId *outIds, std::size_t maxIds) noexcept;
+/// Handles query assets by type.
 std::size_t query_assets_by_type(const AssetDatabase *database,
                                  AssetTypeTag typeTag, AssetId *outIds,
                                  std::size_t maxIds) noexcept;
@@ -102,6 +128,7 @@ std::size_t query_assets_by_type(const AssetDatabase *database,
 std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
                              AssetId *outIds, std::size_t maxIds) noexcept;
 
+/// Adds a value or component to the target system for asset dependency.
 bool add_asset_dependency(AssetDatabase *database, AssetId id,
                           AssetId depId) noexcept;
 

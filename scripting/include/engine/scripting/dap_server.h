@@ -1,11 +1,15 @@
+// Declares dap server types and APIs for the Engine Lua scripting system.
+
 #pragma once
 
 #include <cstdint>
 
+/// Stores lua state data used by the engine.
 struct lua_State;
 
 namespace engine::scripting {
 
+/// Enumerates dap step mode values used by the engine.
 enum class DapStepMode : std::uint8_t {
   Continue,
   Next,

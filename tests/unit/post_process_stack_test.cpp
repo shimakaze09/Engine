@@ -1,3 +1,5 @@
+// Verifies post process stack test behavior for the Engine test suite.
+
 #include <cstddef>
 
 #ifdef _MSC_VER
@@ -88,6 +90,7 @@ int verify_stack_capacity() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = verify_default_stack();
   if (result != 0)

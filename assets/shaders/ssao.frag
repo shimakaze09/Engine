@@ -1,3 +1,5 @@
+// Defines the ssao fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -13,6 +15,7 @@ uniform float u_bias;
 
 out float outAO;
 
+/// Handles reconstruct view pos.
 vec3 reconstructViewPos(vec2 uv, float depth) {
     float z = depth * 2.0 - 1.0;
     vec4 clip = vec4(uv * 2.0 - 1.0, z, 1.0);
@@ -20,6 +23,7 @@ vec3 reconstructViewPos(vec2 uv, float depth) {
     return view.xyz / view.w;
 }
 
+/// Runs the shader entry point for this stage.
 void main() {
     float depth = texture(u_gBufferDepth, vTexCoord).r;
     if (depth >= 1.0) { outAO = 1.0; return; }

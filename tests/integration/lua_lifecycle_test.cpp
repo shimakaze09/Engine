@@ -1,8 +1,11 @@
+// Verifies lua lifecycle test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -11,6 +14,7 @@ namespace {
 
 constexpr const char *kTempScriptPath = "lua_lifecycle_test.lua";
 
+/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -24,10 +28,12 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+/// Removes a value or component from the target system for script file.
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kTempScriptPath));
 }
 
+/// Writes script file data.
 bool write_script_file(const char *contents) noexcept {
   if (contents == nullptr) {
     return false;
@@ -45,11 +51,13 @@ bool write_script_file(const char *contents) noexcept {
 // Minimal RuntimeServices wiring so scripting dispatch works.
 engine::runtime::World *g_testWorld = nullptr;
 
+/// Returns the requested value for phase.
 engine::runtime::WorldPhase get_phase(engine::runtime::World *w) noexcept {
   return (w != nullptr) ? w->current_phase()
                         : engine::runtime::WorldPhase::Input;
 }
 
+/// Creates a new object, handle, or resource for entity.
 std::uint32_t create_entity(engine::runtime::World *w) noexcept {
   if (w == nullptr) {
     return 0U;
@@ -57,6 +65,7 @@ std::uint32_t create_entity(engine::runtime::World *w) noexcept {
   return w->create_entity().index;
 }
 
+/// Destroys or releases the requested object, handle, or resource for entity.
 bool destroy_entity(engine::runtime::World *w, std::uint32_t idx) noexcept {
   if (w == nullptr) {
     return false;
@@ -65,6 +74,7 @@ bool destroy_entity(engine::runtime::World *w, std::uint32_t idx) noexcept {
   return w->destroy_entity(e);
 }
 
+/// Adds a value or component to the target system for transform.
 bool add_transform(engine::runtime::World *w, std::uint32_t idx,
                    const engine::runtime::Transform &t) noexcept {
   if (w == nullptr) {
@@ -74,10 +84,12 @@ bool add_transform(engine::runtime::World *w, std::uint32_t idx,
   return w->add_transform(e, t);
 }
 
+/// Returns the requested value for transform count.
 std::uint32_t get_transform_count(engine::runtime::World *w) noexcept {
   return (w != nullptr) ? static_cast<std::uint32_t>(w->transform_count()) : 0U;
 }
 
+/// Builds the requested runtime data for test services.
 engine::scripting::RuntimeServices build_test_services() noexcept {
   engine::scripting::RuntimeServices svc{};
   svc.get_current_phase = &get_phase;
@@ -90,6 +102,7 @@ engine::scripting::RuntimeServices build_test_services() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   remove_script_file();
 
@@ -136,9 +149,10 @@ int main() {
   }
 
   g_testWorld = world.get();
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   auto svc = build_test_services();
-  engine::scripting::bind_runtime_services(&svc);
+  engine::scripting::bind_runtime_services(&svc, serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   int failures = 0;

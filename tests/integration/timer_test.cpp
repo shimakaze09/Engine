@@ -1,3 +1,5 @@
+// Verifies timer test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <memory>
 #include <new>
@@ -12,18 +14,22 @@ int g_timeoutFired = 0;
 int g_intervalFired = 0;
 int g_cancelTargetFired = 0;
 
+/// Handles on timeout.
 void on_timeout(engine::runtime::TimerId /*id*/, void * /*ud*/) noexcept {
   ++g_timeoutFired;
 }
 
+/// Handles on interval.
 void on_interval(engine::runtime::TimerId /*id*/, void * /*ud*/) noexcept {
   ++g_intervalFired;
 }
 
+/// Handles on cancel target.
 void on_cancel_target(engine::runtime::TimerId /*id*/, void * /*ud*/) noexcept {
   ++g_cancelTargetFired;
 }
 
+/// Handles test timeout fires once.
 bool test_timeout_fires_once() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -67,6 +73,7 @@ bool test_timeout_fires_once() noexcept {
   return true;
 }
 
+/// Handles test interval fires repeatedly.
 bool test_interval_fires_repeatedly() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -109,6 +116,7 @@ bool test_interval_fires_repeatedly() noexcept {
   return true;
 }
 
+/// Handles test cancel prevents fire.
 bool test_cancel_prevents_fire() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -132,6 +140,60 @@ bool test_cancel_prevents_fire() noexcept {
   return true;
 }
 
+/// Handles test stale timer ids cannot affect reused slots.
+bool test_stale_timer_ids_do_not_cancel_reused_slots() noexcept {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return false;
+  }
+  auto &tm = world->timer_manager();
+
+  g_timeoutFired = 0;
+  g_cancelTargetFired = 0;
+
+  const auto cancelledId = tm.set_timeout(1.0F, on_timeout, nullptr);
+  if (cancelledId == engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  tm.cancel(cancelledId);
+
+  const auto replacementAfterCancel =
+      tm.set_timeout(0.1F, on_cancel_target, nullptr);
+  if ((replacementAfterCancel == engine::runtime::kInvalidTimerId) ||
+      (replacementAfterCancel == cancelledId)) {
+    return false;
+  }
+  tm.cancel(cancelledId);
+  tm.tick(0.2F);
+  if ((g_timeoutFired != 0) || (g_cancelTargetFired != 1)) {
+    return false;
+  }
+
+  g_timeoutFired = 0;
+  g_cancelTargetFired = 0;
+
+  const auto firedId = tm.set_timeout(0.1F, on_timeout, nullptr);
+  if (firedId == engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  tm.tick(0.2F);
+  if (g_timeoutFired != 1) {
+    return false;
+  }
+
+  const auto replacementAfterFire =
+      tm.set_timeout(0.1F, on_cancel_target, nullptr);
+  if ((replacementAfterFire == engine::runtime::kInvalidTimerId) ||
+      (replacementAfterFire == firedId)) {
+    return false;
+  }
+  tm.cancel(firedId);
+  tm.tick(0.2F);
+  return g_cancelTargetFired == 1;
+}
+
+/// Handles test clear removes all.
 bool test_clear_removes_all() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -163,6 +225,7 @@ bool test_clear_removes_all() noexcept {
   return true;
 }
 
+/// Handles test snapshot restore.
 bool test_snapshot_restore() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -234,6 +297,7 @@ bool test_snapshot_restore() noexcept {
   return true;
 }
 
+/// Handles test restore preserves slots and rewires callbacks.
 bool test_restore_preserves_slots_and_rewires_callbacks() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -259,7 +323,10 @@ bool test_restore_preserves_slots_and_rewires_callbacks() noexcept {
     return false;
   }
 
-  const std::size_t slot = static_cast<std::size_t>(id - 1U);
+  const std::size_t slot = restored.slot_for_id(id);
+  if (slot == engine::runtime::TimerManager::kInvalidTimerSlot) {
+    return false;
+  }
   if (!restored.entry_at(slot).active ||
       (restored.entry_at(slot).callback != nullptr)) {
     return false;
@@ -272,6 +339,7 @@ bool test_restore_preserves_slots_and_rewires_callbacks() noexcept {
   return g_timeoutFired == 1;
 }
 
+/// Handles test null callback rejected.
 bool test_null_callback_rejected() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -288,6 +356,7 @@ bool test_null_callback_rejected() noexcept {
   return true;
 }
 
+/// Handles test timer per world.
 bool test_timer_per_world() noexcept {
   // Two separate worlds have independent timer managers.
   std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
@@ -319,6 +388,7 @@ bool test_timer_per_world() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int failures = 0;
 
@@ -334,6 +404,8 @@ int main() {
   run("test_timeout_fires_once", test_timeout_fires_once);
   run("test_interval_fires_repeatedly", test_interval_fires_repeatedly);
   run("test_cancel_prevents_fire", test_cancel_prevents_fire);
+  run("test_stale_timer_ids_do_not_cancel_reused_slots",
+      test_stale_timer_ids_do_not_cancel_reused_slots);
   run("test_clear_removes_all", test_clear_removes_all);
   run("test_snapshot_restore", test_snapshot_restore);
   run("test_restore_preserves_slots_and_rewires_callbacks",

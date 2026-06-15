@@ -1,3 +1,5 @@
+// Declares physics types types and APIs for the Engine physics system.
+
 #pragma once
 
 // Convenience header for the physics module.

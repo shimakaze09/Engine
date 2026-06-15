@@ -1,3 +1,5 @@
+// Declares command buffer types and APIs for the Engine renderer system.
+
 #pragma once
 
 #include <array>
@@ -10,9 +12,11 @@
 
 namespace engine::renderer {
 
+/// Stores mesh handle data used by the engine.
 struct MeshHandle final {
   std::uint32_t id = 0U;
 
+  /// Compares values for equality.
   friend constexpr bool operator==(const MeshHandle &,
                                    const MeshHandle &) = default;
 };
@@ -36,23 +40,35 @@ struct DrawCommand final {
   std::uint32_t entity = 0U;
   MeshHandle mesh = kInvalidMeshHandle;
   Material material{};
+  float foliageWindStrength = 0.0F;
+  float foliageWindFrequency = 1.0F;
+  float foliageWindPhase = 0.0F;
+  std::uint32_t foliageLodIndex = 0U;
   math::Mat4 modelMatrix = math::Mat4();
 };
 
+/// Stores command buffer view data used by the engine.
 struct CommandBufferView final {
   const DrawCommand *data = nullptr;
   std::uint32_t count = 0U;
 };
 
+/// Owns the command buffer builder behavior and state.
 class CommandBufferBuilder final {
 public:
   static constexpr std::size_t kMaxDrawCommands = 16384U;
 
+  /// Resets this object back to its reusable empty state.
   void reset() noexcept;
+  /// Submits work to the owning buffer or system.
   bool submit(const DrawCommand &command) noexcept;
+  /// Handles append from.
   bool append_from(const CommandBufferBuilder &other) noexcept;
+  /// Handles sort by key.
   void sort_by_key() noexcept;
+  /// Handles command count.
   std::size_t command_count() const noexcept;
+  /// Handles view.
   CommandBufferView view() const noexcept;
 
 private:
@@ -60,17 +76,20 @@ private:
   std::size_t m_commandCount = 0U;
 };
 
+/// Stores static mesh batch data used by the engine.
 struct StaticMeshBatch final {
   std::uint32_t first = 0U;
   std::uint32_t count = 0U;
 };
 
+/// Builds the requested runtime data for static mesh batches.
 std::size_t build_static_mesh_batches(CommandBufferView commandBufferView,
                                       std::size_t start,
                                       std::size_t end,
                                       StaticMeshBatch *batches,
                                       std::size_t batchCapacity) noexcept;
 
+/// Stores gpu mesh registry data used by the engine.
 struct GpuMeshRegistry;
 
 // Scene light data collected from ECS each frame.
@@ -78,12 +97,14 @@ static constexpr std::size_t kMaxDirectionalLights = 4U;
 static constexpr std::size_t kMaxPointLights = 128U;
 static constexpr std::size_t kMaxSpotLights = 64U;
 
+/// Stores directional light data used by the engine.
 struct DirectionalLightData final {
   math::Vec3 direction{};
   math::Vec3 color{};
   float intensity = 0.0F;
 };
 
+/// Stores point light data used by the engine.
 struct PointLightData final {
   math::Vec3 position{};
   math::Vec3 color{};
@@ -92,6 +113,7 @@ struct PointLightData final {
   bool castShadow = false;
 };
 
+/// Stores spot light data used by the engine.
 struct SpotLightData final {
   math::Vec3 position{};
   math::Vec3 direction{};
@@ -103,6 +125,7 @@ struct SpotLightData final {
   bool castShadow = false;
 };
 
+/// Stores scene light data used by the engine.
 struct SceneLightData final {
   std::array<DirectionalLightData, kMaxDirectionalLights> directionalLights{};
   std::size_t directionalLightCount = 0U;
@@ -112,6 +135,7 @@ struct SceneLightData final {
   std::size_t spotLightCount = 0U;
 };
 
+/// Stores reflection probe bake settings data used by the engine.
 struct ReflectionProbeBakeSettings final {
   std::uint32_t prefilteredFaceSize = 128U;
   std::uint32_t prefilteredMipLevels = 5U;
@@ -119,11 +143,13 @@ struct ReflectionProbeBakeSettings final {
   std::uint32_t brdfLutSize = 512U;
 };
 
+/// Stores reflection probe bake request data used by the engine.
 struct ReflectionProbeBakeRequest final {
   TextureHandle sourceCubemap = kInvalidTextureHandle;
   ReflectionProbeBakeSettings settings{};
 };
 
+/// Stores reflection probe bake result data used by the engine.
 struct ReflectionProbeBakeResult final {
   std::uint32_t sourceCubemapTexture = 0U;
   std::uint32_t prefilteredEnvironmentTexture = 0U;
@@ -133,6 +159,7 @@ struct ReflectionProbeBakeResult final {
   bool baked = false;
 };
 
+/// Enumerates distance fog mode values used by the engine.
 enum class DistanceFogMode : std::uint8_t {
   Off = 0,
   Linear = 1,
@@ -140,22 +167,25 @@ enum class DistanceFogMode : std::uint8_t {
   Exp2 = 3,
 };
 
+/// Stores distance fog settings data used by the engine.
 struct DistanceFogSettings final {
-  DistanceFogMode mode = DistanceFogMode::Off;
+  DistanceFogMode mode = DistanceFogMode::Exp2;
   float start = 25.0F;
   float end = 150.0F;
   float density = 0.01F;
   math::Vec3 color = math::Vec3(0.55F, 0.65F, 0.75F);
 };
 
+/// Stores height fog settings data used by the engine.
 struct HeightFogSettings final {
-  bool enabled = false;
+  bool enabled = true;
   float baseHeight = 0.0F;
   float density = 0.015F;
   float falloff = 0.08F;
   std::int32_t stepCount = 8;
 };
 
+/// Stores renderer frame stats data used by the engine.
 struct RendererFrameStats final {
   std::uint32_t drawCalls = 0U;
   std::uint64_t triangleCount = 0U;
@@ -171,10 +201,15 @@ struct RendererFrameStats final {
   float gpuAutoExposureMs = 0.0F;
 };
 
+/// Flushes queued work to the backing runtime system for renderer.
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept;
+/// Shuts down the owning system for renderer.
 void shutdown_renderer() noexcept;
+
+/// Sets the virtual root used for built-in renderer shaders.
+void set_shader_root_path(const char *path) noexcept;
 
 // Optional scene viewport override from editor UI. When set to positive
 // values, flush_renderer uses this size for projection and pass resources
@@ -183,25 +218,36 @@ void set_scene_viewport_size(int width, int height) noexcept;
 
 /// Sets the active skybox cubemap. Pass kInvalidTextureHandle to disable it.
 void set_skybox_texture(TextureHandle cubemap) noexcept;
+/// Returns the requested value for skybox texture.
 TextureHandle get_skybox_texture() noexcept;
 
 /// Returns the GPU texture ID of the tonemapped scene (final color).
 /// Valid after the first flush_renderer call. Returns 0 if not yet available.
 std::uint32_t get_scene_viewport_texture() noexcept;
+/// Returns the requested value for prefiltered environment texture.
 std::uint32_t get_prefiltered_environment_texture() noexcept;
+/// Returns the requested value for irradiance environment texture.
 std::uint32_t get_irradiance_environment_texture() noexcept;
+/// Returns the requested value for brdf lut texture.
 std::uint32_t get_brdf_lut_texture() noexcept;
+/// Clamps and fills settings into a safe runtime range for reflection probe bake settings.
 ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
     const ReflectionProbeBakeSettings &settings) noexcept;
+/// Handles bake reflection probe.
 ReflectionProbeBakeResult
 bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept;
+/// Parses text into the engine representation for distance fog mode.
 DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept;
+/// Parses text into the engine representation for distance fog color.
 bool parse_distance_fog_color(const char *value,
                               math::Vec3 *colorOut) noexcept;
+/// Clamps and fills settings into a safe runtime range for distance fog settings.
 DistanceFogSettings
 normalize_distance_fog_settings(const DistanceFogSettings &settings) noexcept;
+/// Clamps and fills settings into a safe runtime range for height fog settings.
 HeightFogSettings
 normalize_height_fog_settings(const HeightFogSettings &settings) noexcept;
+/// Handles renderer get last frame stats.
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
 } // namespace engine::renderer

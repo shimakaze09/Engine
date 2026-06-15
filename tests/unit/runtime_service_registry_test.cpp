@@ -1,3 +1,5 @@
+// Verifies runtime service registry test behavior for the Engine test suite.
+
 #include <cstdio>
 #include <memory>
 #include <new>
@@ -17,6 +19,7 @@ namespace {
 
 int g_failed = 0;
 
+/// Handles check.
 void check(bool condition, const char *name) noexcept {
   if (!condition) {
     ++g_failed;
@@ -24,11 +27,29 @@ void check(bool condition, const char *name) noexcept {
   }
 }
 
+template <std::size_t Index> struct FillerService final {};
+
+template <std::size_t Index>
+bool register_filler_service(engine::core::ServiceLocator &loc) noexcept {
+  static FillerService<Index> service{};
+  return loc.register_service<FillerService<Index>>(&service);
+}
+
+template <std::size_t Count>
+bool register_filler_services(engine::core::ServiceLocator &loc) noexcept {
+  if constexpr (Count == 0U) {
+    return true;
+  } else {
+    return register_filler_services<Count - 1U>(loc) &&
+           register_filler_service<Count>(loc);
+  }
+}
+
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
-  auto &loc = engine::core::global_service_locator();
-  loc.clear();
+  engine::core::ServiceLocator loc{};
 
   std::unique_ptr<engine::runtime::World> world(
       new (std::nothrow) engine::runtime::World());
@@ -68,7 +89,7 @@ int main() {
   rendererService.device = renderDevice.get();
 
   check(engine::runtime::register_engine_subsystem_services(
-            world.get(), &physicsService, &audioService, &assetService,
+            loc, world.get(), &physicsService, &audioService, &assetService,
             &rendererService),
         "register subsystem services");
 
@@ -107,12 +128,30 @@ int main() {
             &rendererService,
         "renderer service registered");
 
-  engine::runtime::unregister_engine_subsystem_services();
+  engine::runtime::unregister_engine_subsystem_services(loc);
   check(loc.get_service<engine::runtime::EngineRendererService>() == nullptr,
         "renderer service removed");
   check(loc.get_service<engine::runtime::World>() == nullptr,
         "world removed");
 
-  loc.clear();
+  engine::core::ServiceLocator fullLoc{};
+  check(register_filler_services<engine::core::ServiceLocator::kMaxServices -
+                                 1U>(fullLoc),
+        "filled locator to one free slot");
+  check(fullLoc.count() == engine::core::ServiceLocator::kMaxServices - 1U,
+        "filled locator count");
+  check(!engine::runtime::register_engine_subsystem_services(
+            fullLoc, world.get(), &physicsService, &audioService,
+            &assetService, &rendererService),
+        "register subsystem services fails when locator fills");
+  check(fullLoc.count() == engine::core::ServiceLocator::kMaxServices - 1U,
+        "rollback restores service count");
+  check(fullLoc.get_service<engine::runtime::World>() == nullptr,
+        "rollback removes partial world service");
+  check(fullLoc.get_service<engine::physics::PhysicsWorldView>() == nullptr,
+        "rollback removes partial physics world view service");
+  check(fullLoc.get_service<FillerService<1U>>() != nullptr,
+        "rollback preserves existing filler service");
+
   return g_failed == 0 ? 0 : 1;
 }

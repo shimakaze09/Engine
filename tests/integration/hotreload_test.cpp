@@ -9,6 +9,7 @@
 #include <thread>
 
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -17,6 +18,7 @@ namespace {
 
 static const char *kTempScript = "hotreload_test.lua";
 
+/// Writes script data.
 bool write_script(const char *code) noexcept {
   FILE *f = nullptr;
 #ifdef _WIN32
@@ -34,6 +36,7 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
+/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
 // -----------------------------------------------------------------------
@@ -46,7 +49,8 @@ bool test_persist_restore() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   const char *code =
       "engine.persist('health', 42)\n"
@@ -90,7 +94,8 @@ bool test_state_survives_reload() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   // First version: persist some state.
   const char *v1 = "engine.persist('score', 100)\n"
@@ -141,7 +146,8 @@ bool test_error_recovery() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   // First version: define a working function.
   const char *v1 = "function greet() return 'hello' end\n";
@@ -191,7 +197,8 @@ bool test_persist_table() noexcept {
   if (!world) {
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   const char *code =
       "engine.persist('data', {x=1, y=2, z=3})\n"
@@ -219,6 +226,7 @@ bool test_persist_table() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int failures = 0;
 

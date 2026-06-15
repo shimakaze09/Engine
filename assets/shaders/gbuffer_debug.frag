@@ -1,3 +1,5 @@
+// Defines the gbuffer debug fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec2 vTexCoord;
@@ -12,6 +14,7 @@ uniform sampler2D uGBufferDepth;
 // 0 = albedo, 1 = normals, 2 = metallic, 3 = roughness, 4 = emissive, 5 = AO, 6 = depth
 uniform int uDebugMode;
 
+/// Runs the shader entry point for this stage.
 void main() {
     vec4 albedoMetallic = texture(uGBufferAlbedo, vTexCoord);
     vec4 normalRoughness = texture(uGBufferNormal, vTexCoord);

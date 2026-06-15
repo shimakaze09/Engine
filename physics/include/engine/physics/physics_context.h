@@ -1,3 +1,5 @@
+// Declares physics context types and APIs for the Engine physics system.
+
 #pragma once
 
 // Physics-side types that were previously nested inside runtime::World.
@@ -6,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include "engine/core/entity.h"
 #include "engine/math/component_types.h"
@@ -27,7 +30,10 @@ static constexpr std::size_t kMaxPhysicsJoints = 4096U;
 static constexpr std::size_t kMaxCollisionPairs = 1024U;
 static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
 static constexpr std::size_t kMaxColliders = ENGINE_MAX_ENTITIES;
+static constexpr std::size_t kMaxConvexHulls = 256U;
+static constexpr std::size_t kMaxHeightfields = 16U;
 
+/// Enumerates joint type values used by the engine.
 enum class JointType : std::uint8_t {
   Distance = 0,
   Hinge = 1,
@@ -37,6 +43,7 @@ enum class JointType : std::uint8_t {
   Fixed = 5,
 };
 
+/// Stores physics joint slot data used by the engine.
 struct PhysicsJointSlot final {
   Entity entityA = kInvalidEntity;
   Entity entityB = kInvalidEntity;
@@ -66,7 +73,28 @@ struct PhysicsJointSlot final {
   float accumulatedImpulse = 0.0F;
 };
 
+/// Stores large shape payloads owned by a physics context.
+struct PhysicsShapeStore final {
+  std::array<ConvexHullData, kMaxConvexHulls> convexHullData{};
+  std::array<std::uint32_t, kMaxConvexHulls> convexHullEntityIndex{};
+  std::size_t convexHullCount = 0U;
+
+  std::array<HeightfieldData, kMaxHeightfields> heightfieldData{};
+  std::array<std::uint32_t, kMaxHeightfields> heightfieldEntityIndex{};
+  std::size_t heightfieldCount = 0U;
+};
+
+/// Stores physics context data used by the engine.
 struct PhysicsContext final {
+  PhysicsContext() noexcept;
+  /// Copies context data and deep-copies owned shape payloads.
+  PhysicsContext(const PhysicsContext &other) noexcept;
+  /// Copies context data and deep-copies owned shape payloads.
+  PhysicsContext &operator=(const PhysicsContext &other) noexcept;
+  PhysicsContext(PhysicsContext &&other) noexcept = default;
+  PhysicsContext &operator=(PhysicsContext &&other) noexcept = default;
+  ~PhysicsContext() = default;
+
   math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
   std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
   std::size_t jointCount = 0U;
@@ -84,6 +112,9 @@ struct PhysicsContext final {
   // O(1) broadphase neighbor dedupe using per-collider generation stamps.
   std::array<std::uint32_t, kMaxColliders> testedStamps{};
   std::uint32_t testedGeneration = 1U;
+
+  // Heap-backed so large heightfield buffers do not inflate World stack size.
+  std::unique_ptr<PhysicsShapeStore> shapeStore;
 };
 
 } // namespace engine::physics

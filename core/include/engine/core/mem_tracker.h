@@ -1,3 +1,5 @@
+// Declares mem tracker types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstddef>

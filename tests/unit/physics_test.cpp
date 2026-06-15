@@ -1,9 +1,13 @@
+// Verifies physics test behavior for the Engine test suite.
+
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <new>
 
+#include "engine/core/cvar.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
@@ -16,12 +20,72 @@ namespace {
 
 std::size_t g_dispatchedPairCount = 0U;
 
+/// Handles test collision dispatch.
 void test_collision_dispatch(const std::uint32_t *pairs,
                              std::size_t pairCount) noexcept {
   static_cast<void>(pairs);
   g_dispatchedPairCount = pairCount;
 }
 
+int check_physics_cvars_register_after_core_cvars() {
+  if (!engine::core::initialize_cvars()) {
+    return 1000;
+  }
+
+  if (engine::core::cvar_get_int("physics.solver_iterations", -1) != -1) {
+    engine::core::shutdown_cvars();
+    return 1001;
+  }
+  if (!engine::physics::register_physics_cvars()) {
+    engine::core::shutdown_cvars();
+    return 1002;
+  }
+  if (engine::core::cvar_get_int("physics.solver_iterations", -1) != 8) {
+    engine::core::shutdown_cvars();
+    return 1003;
+  }
+  if (engine::core::cvar_get_float("physics.ccd_threshold", -1.0F) != 2.0F) {
+    engine::core::shutdown_cvars();
+    return 1004;
+  }
+
+  if (!engine::core::cvar_set_int("physics.solver_iterations", 12)) {
+    engine::core::shutdown_cvars();
+    return 1005;
+  }
+  if (!engine::physics::register_physics_cvars()) {
+    engine::core::shutdown_cvars();
+    return 1006;
+  }
+  if (engine::core::cvar_get_int("physics.solver_iterations", -1) != 12) {
+    engine::core::shutdown_cvars();
+    return 1007;
+  }
+
+  engine::core::CVarInfo infos[32] = {};
+  const std::size_t count = engine::core::cvar_get_all(infos, 32U);
+  std::size_t solverCount = 0U;
+  std::size_t ccdCount = 0U;
+  for (std::size_t i = 0U; i < count; ++i) {
+    if ((infos[i].name != nullptr) &&
+        (std::strcmp(infos[i].name, "physics.solver_iterations") == 0)) {
+      ++solverCount;
+    }
+    if ((infos[i].name != nullptr) &&
+        (std::strcmp(infos[i].name, "physics.ccd_threshold") == 0)) {
+      ++ccdCount;
+    }
+  }
+  if ((solverCount != 1U) || (ccdCount != 1U)) {
+    engine::core::shutdown_cvars();
+    return 1008;
+  }
+
+  engine::core::shutdown_cvars();
+  return 0;
+}
+
+/// Handles check gravity step.
 int check_gravity_step() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -69,6 +133,7 @@ int check_gravity_step() {
   return 0;
 }
 
+/// Handles check overlap resolution.
 int check_overlap_resolution() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -141,6 +206,7 @@ int check_overlap_resolution() {
   return stillOverlapping ? 18 : 0;
 }
 
+/// Handles check static body immovable.
 int check_static_body_immovable() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -223,6 +289,7 @@ int check_static_body_immovable() {
   return dynamicMoved ? 0 : 29;
 }
 
+/// Handles check angular velocity integration.
 int check_angular_velocity_integration() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -274,6 +341,7 @@ int check_angular_velocity_integration() {
   return 0;
 }
 
+/// Handles check angular impulse from collision.
 int check_angular_impulse_from_collision() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -346,6 +414,7 @@ int check_angular_impulse_from_collision() {
   return 0;
 }
 
+/// Handles check zero inverse inertia prevents rotation.
 int check_zero_inverse_inertia_prevents_rotation() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -397,6 +466,7 @@ int check_zero_inverse_inertia_prevents_rotation() {
   return 0;
 }
 
+/// Handles check high restitution bounce.
 int check_high_restitution_bounce() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -471,6 +541,7 @@ int check_high_restitution_bounce() {
   return 0;
 }
 
+/// Handles check zero restitution no bounce.
 int check_zero_restitution_no_bounce() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -545,6 +616,7 @@ int check_zero_restitution_no_bounce() {
   return 0;
 }
 
+/// Handles check friction slows sliding.
 int check_friction_slows_sliding() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -623,6 +695,7 @@ int check_friction_slows_sliding() {
   return 0;
 }
 
+/// Handles check raycast hits aabb.
 int check_raycast_hits_aabb() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -675,6 +748,7 @@ int check_raycast_hits_aabb() {
   return 0;
 }
 
+/// Handles check raycast hits sphere.
 int check_raycast_hits_sphere() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -726,6 +800,7 @@ int check_raycast_hits_sphere() {
   return 0;
 }
 
+/// Handles check raycast misses.
 int check_raycast_misses() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -769,6 +844,7 @@ int check_raycast_misses() {
   return 0;
 }
 
+/// Handles check raycast returns closest.
 int check_raycast_returns_closest() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -823,6 +899,7 @@ int check_raycast_returns_closest() {
   return 0;
 }
 
+/// Handles check distance joint maintains distance.
 int check_distance_joint_maintains_distance() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -909,6 +986,7 @@ int check_distance_joint_maintains_distance() {
   return 0;
 }
 
+/// Handles check ccd catches fast projectile.
 int check_ccd_catches_fast_projectile() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -986,6 +1064,94 @@ int check_ccd_catches_fast_projectile() {
   return 0;
 }
 
+int run_speculative_timestep_case(float deltaSeconds, float *outVelocityX) {
+  if (outVelocityX == nullptr) {
+    return 1010;
+  }
+
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 1011;
+  }
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity moving = world->create_entity();
+  const engine::runtime::Entity wall = world->create_entity();
+  if ((moving == engine::runtime::kInvalidEntity) ||
+      (wall == engine::runtime::kInvalidEntity)) {
+    return 1012;
+  }
+
+  engine::runtime::Transform movingT{};
+  movingT.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform wallT{};
+  wallT.position = engine::math::Vec3(1.2F, 0.0F, 0.0F);
+
+  engine::runtime::Collider box{};
+  box.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  box.restitution = 0.0F;
+
+  engine::runtime::RigidBody movingBody{};
+  movingBody.inverseMass = 1.0F;
+  movingBody.velocity = engine::math::Vec3(10.0F, 0.0F, 0.0F);
+  engine::runtime::RigidBody wallBody{};
+  wallBody.inverseMass = 0.0F;
+
+  if (!world->add_transform(moving, movingT) ||
+      !world->add_transform(wall, wallT)) {
+    return 1013;
+  }
+  if (!world->add_collider(moving, box) || !world->add_collider(wall, box)) {
+    return 1014;
+  }
+  if (!world->add_rigid_body(moving, movingBody) ||
+      !world->add_rigid_body(wall, wallBody)) {
+    return 1015;
+  }
+
+  world->begin_update_phase();
+  if (!engine::runtime::resolve_collisions(*world, deltaSeconds)) {
+    world->end_frame_phase();
+    return 1016;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::RigidBody outBody{};
+  if (!world->get_rigid_body(moving, &outBody)) {
+    return 1017;
+  }
+
+  *outVelocityX = outBody.velocity.x;
+  return 0;
+}
+
+int check_resolve_collisions_uses_delta_seconds() {
+  float shortDtVelocity = 0.0F;
+  int result = run_speculative_timestep_case(0.01F, &shortDtVelocity);
+  if (result != 0) {
+    return result;
+  }
+
+  float longDtVelocity = 0.0F;
+  result = run_speculative_timestep_case(0.1F, &longDtVelocity);
+  if (result != 0) {
+    return result;
+  }
+
+  if (std::fabs(shortDtVelocity - 10.0F) > 0.001F) {
+    return 1018;
+  }
+  if (!(longDtVelocity < 9.0F)) {
+    return 1019;
+  }
+
+  return 0;
+}
+
 // --- Sleep tests ---
 
 int check_body_falls_asleep() {
@@ -1054,6 +1220,7 @@ int check_body_falls_asleep() {
   return 0;
 }
 
+/// Handles check collision wakes body.
 int check_collision_wakes_body() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1128,6 +1295,7 @@ int check_collision_wakes_body() {
   return 0;
 }
 
+/// Handles check wake body api.
 int check_wake_body_api() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1183,6 +1351,7 @@ int check_wake_body_api() {
   return 0;
 }
 
+/// Handles check bridge phase misuse rejected.
 int check_bridge_phase_misuse_rejected() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1235,6 +1404,7 @@ int check_bridge_phase_misuse_rejected() {
   return 0;
 }
 
+/// Handles check multi world physics isolation.
 int check_multi_world_physics_isolation() {
   std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
                                                      engine::runtime::World());
@@ -1299,6 +1469,7 @@ int check_multi_world_physics_isolation() {
   return 0;
 }
 
+/// Handles check collision bookkeeping scale.
 int check_collision_bookkeeping_scale() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1745,7 +1916,7 @@ int check_convex_hull_vs_aabb_collision() {
   }
 
   // Assign hull data to the entity.
-  if (!engine::runtime::set_convex_hull_data(hullEnt, hull)) {
+  if (!engine::runtime::set_convex_hull_data(*world, hullEnt, hull)) {
     return 416;
   }
 
@@ -1826,7 +1997,7 @@ int check_raycast_hits_convex_hull() {
     return 434;
   }
 
-  if (!engine::runtime::set_convex_hull_data(ent, hull)) {
+  if (!engine::runtime::set_convex_hull_data(*world, ent, hull)) {
     return 435;
   }
 
@@ -1915,7 +2086,7 @@ int check_heightfield_vs_sphere_collision() {
     return 444;
   }
 
-  if (!engine::runtime::set_heightfield_data(terrain, hf)) {
+  if (!engine::runtime::set_heightfield_data(*world, terrain, hf)) {
     return 445;
   }
 
@@ -1987,7 +2158,7 @@ int check_raycast_hits_heightfield() {
   if (!world->add_collider(terrain, terrainCol)) {
     return 453;
   }
-  if (!engine::runtime::set_heightfield_data(terrain, hf)) {
+  if (!engine::runtime::set_heightfield_data(*world, terrain, hf)) {
     return 454;
   }
 
@@ -2016,10 +2187,181 @@ int check_raycast_hits_heightfield() {
   return 0;
 }
 
+/// Checks non-primitive collider payloads stay scoped to their World.
+int check_shape_payload_world_isolation() {
+  std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
+                                                     engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> worldB(new (std::nothrow)
+                                                     engine::runtime::World());
+  if ((worldA == nullptr) || (worldB == nullptr)) {
+    return 500;
+  }
+
+  worldA->end_frame_phase();
+  worldB->end_frame_phase();
+
+  const engine::runtime::Entity entityA = worldA->create_entity();
+  const engine::runtime::Entity entityB = worldB->create_entity();
+  if ((entityA == engine::runtime::kInvalidEntity) ||
+      (entityB == engine::runtime::kInvalidEntity)) {
+    return 501;
+  }
+  if (entityA.index != entityB.index) {
+    return 502;
+  }
+
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, hull)) {
+    return 503;
+  }
+  if (!engine::runtime::set_convex_hull_data(*worldA, entityA, hull)) {
+    return 504;
+  }
+  if (engine::runtime::get_convex_hull_data(*worldA, entityA) == nullptr) {
+    return 505;
+  }
+  if (engine::runtime::get_convex_hull_data(*worldB, entityB) != nullptr) {
+    return 506;
+  }
+
+  engine::physics::HeightfieldData hf{};
+  hf.rows = 2U;
+  hf.columns = 2U;
+  hf.spacingX = 1.0F;
+  hf.spacingZ = 1.0F;
+  if (!engine::runtime::set_heightfield_data(*worldB, entityB, hf)) {
+    return 507;
+  }
+  if (engine::runtime::get_heightfield_data(*worldB, entityB) == nullptr) {
+    return 508;
+  }
+  if (engine::runtime::get_heightfield_data(*worldA, entityA) != nullptr) {
+    return 509;
+  }
+
+  return 0;
+}
+
+int check_invalid_shape_payloads_rejected() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 520;
+  }
+  world->end_frame_phase();
+  const engine::runtime::Entity entity = world->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 521;
+  }
+
+  engine::physics::ConvexHullData invalidHull{};
+  if (engine::runtime::set_convex_hull_data(*world, entity, invalidHull)) {
+    return 522;
+  }
+  if (engine::runtime::get_convex_hull_data(*world, entity) != nullptr) {
+    return 523;
+  }
+
+  invalidHull.vertexCount = engine::physics::ConvexHullData::kMaxVertices + 1U;
+  invalidHull.planeCount = 1U;
+  if (engine::runtime::set_convex_hull_data(*world, entity, invalidHull)) {
+    return 524;
+  }
+
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData validHull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, validHull)) {
+    return 525;
+  }
+  if (!engine::runtime::set_convex_hull_data(*world, entity, validHull)) {
+    return 526;
+  }
+  invalidHull = validHull;
+  invalidHull.planeCount = engine::physics::ConvexHullData::kMaxPlanes + 1U;
+  if (engine::runtime::set_convex_hull_data(*world, entity, invalidHull)) {
+    return 527;
+  }
+  if (engine::runtime::get_convex_hull_data(*world, entity) == nullptr) {
+    return 528;
+  }
+
+  engine::physics::HeightfieldData invalidHeightfield{};
+  invalidHeightfield.rows = 1U;
+  invalidHeightfield.columns = 2U;
+  if (engine::runtime::set_heightfield_data(*world, entity,
+                                            invalidHeightfield)) {
+    return 529;
+  }
+  if (engine::runtime::get_heightfield_data(*world, entity) != nullptr) {
+    return 530;
+  }
+
+  invalidHeightfield.rows = 2U;
+  invalidHeightfield.columns =
+      engine::physics::HeightfieldData::kMaxResolution + 1U;
+  if (engine::runtime::set_heightfield_data(*world, entity,
+                                            invalidHeightfield)) {
+    return 531;
+  }
+
+  invalidHeightfield.columns = 2U;
+  invalidHeightfield.spacingX = 0.0F;
+  if (engine::runtime::set_heightfield_data(*world, entity,
+                                            invalidHeightfield)) {
+    return 532;
+  }
+
+  engine::physics::HeightfieldData validHeightfield{};
+  validHeightfield.rows = 2U;
+  validHeightfield.columns = 2U;
+  validHeightfield.spacingX = 1.0F;
+  validHeightfield.spacingZ = 1.0F;
+  if (!engine::runtime::set_heightfield_data(*world, entity,
+                                             validHeightfield)) {
+    return 533;
+  }
+  invalidHeightfield = validHeightfield;
+  invalidHeightfield.spacingZ = -1.0F;
+  if (engine::runtime::set_heightfield_data(*world, entity,
+                                            invalidHeightfield)) {
+    return 534;
+  }
+  if (engine::runtime::get_heightfield_data(*world, entity) == nullptr) {
+    return 535;
+  }
+
+  return 0;
+}
+
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
-  int result = check_gravity_step();
+  int result = check_physics_cvars_register_after_core_cvars();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_gravity_step();
   if (result != 0) {
     return result;
   }
@@ -2090,6 +2432,11 @@ int main() {
   }
 
   result = check_ccd_catches_fast_projectile();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_resolve_collisions_uses_delta_seconds();
   if (result != 0) {
     return result;
   }
@@ -2165,6 +2512,16 @@ int main() {
   }
 
   result = check_raycast_hits_heightfield();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_shape_payload_world_isolation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_invalid_shape_payloads_rejected();
   if (result != 0) {
     return result;
   }

@@ -1,7 +1,10 @@
+// Declares spring arm update types and APIs for the Engine runtime world.
+
 #pragma once
 
 namespace engine::runtime {
 
+/// Owns the world behavior and state.
 class World;
 
 /// Iterate all SpringArmComponents, compute camera boom positions from entity

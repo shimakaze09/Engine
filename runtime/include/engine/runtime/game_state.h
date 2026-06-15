@@ -1,3 +1,5 @@
+// Declares game state types and APIs for the Engine runtime world.
+
 #pragma once
 
 #include <array>
@@ -16,6 +18,7 @@ struct GameState final {
   static constexpr std::size_t kMaxKeyLength = 32U;
   static constexpr std::size_t kMaxStringLength = 64U;
 
+  /// Stores entry data used by the engine.
   struct Entry final {
     char key[kMaxKeyLength] = {};
     float numericValue = 0.0F;
@@ -42,6 +45,7 @@ struct GameState final {
       return false;
     }
     Entry &e = entries[entryCount];
+    /// Handles snprintf.
     std::snprintf(e.key, kMaxKeyLength, "%s", key);
     e.numericValue = value;
     e.isNumeric = true;
@@ -59,6 +63,7 @@ struct GameState final {
     if (existing != nullptr) {
       existing->isNumeric = false;
       existing->numericValue = 0.0F;
+      /// Handles snprintf.
       std::snprintf(existing->stringValue, kMaxStringLength, "%s",
                     value ? value : "");
       return true;
@@ -67,9 +72,11 @@ struct GameState final {
       return false;
     }
     Entry &e = entries[entryCount];
+    /// Handles snprintf.
     std::snprintf(e.key, kMaxKeyLength, "%s", key);
     e.isNumeric = false;
     e.numericValue = 0.0F;
+    /// Handles snprintf.
     std::snprintf(e.stringValue, kMaxStringLength, "%s", value ? value : "");
     ++entryCount;
     return true;
@@ -128,7 +135,9 @@ struct GameState final {
     entryCount = 0U;
   }
 
+/// Finds the matching object or resource for entry.
 private:
+  /// Finds the matching object or resource for entry.
   Entry *find_entry(const char *key) noexcept {
     if ((key == nullptr) || (key[0] == '\0')) {
       return nullptr;
@@ -141,6 +150,7 @@ private:
     return nullptr;
   }
 
+  /// Finds the matching object or resource for entry.
   const Entry *find_entry(const char *key) const noexcept {
     if ((key == nullptr) || (key[0] == '\0')) {
       return nullptr;

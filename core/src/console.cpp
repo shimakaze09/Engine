@@ -1,3 +1,5 @@
+// Implements console behavior for the Engine core engine.
+
 #include "engine/core/console.h"
 
 #include "engine/core/cvar.h"
@@ -5,6 +7,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 
 namespace engine::core {
 
@@ -40,23 +43,78 @@ std::size_t g_commandCount = 0U;
 std::array<OutputLine, kMaxOutputLines> g_outputBuf{};
 std::size_t g_outputHead = 0U; // oldest entry
 std::size_t g_outputCount = 0U;
+std::mutex g_mutex{};
+
+struct CommandInfoSnapshot final {
+  char names[kMaxCommands][kMaxNameLen] = {};
+  char descriptions[kMaxCommands][kMaxDescLen] = {};
+};
+
+thread_local CommandInfoSnapshot g_commandInfoSnapshot{};
+
+bool register_command_unlocked(const char *name, ConsoleCommandFn fn,
+                               void *userData,
+                               const char *description) noexcept {
+  if ((name == nullptr) || (fn == nullptr) || (description == nullptr)) {
+    return false;
+  }
+  if (g_commandCount >= kMaxCommands) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < g_commandCount; ++i) {
+    if (g_commands[i].used && std::strcmp(g_commands[i].name, name) == 0) {
+      return false;
+    }
+  }
+
+  CommandEntry &entry = g_commands[g_commandCount++];
+  std::snprintf(entry.name, kMaxNameLen - 1U + 1U, "%s", name);
+  std::snprintf(entry.desc, kMaxDescLen - 1U + 1U, "%s", description);
+  entry.fn = fn;
+  entry.userData = userData;
+  entry.used = true;
+  return true;
+}
+
+void print_unlocked(const char *text) noexcept {
+  const std::size_t slot = (g_outputHead + g_outputCount) % kMaxOutputLines;
+  std::snprintf(g_outputBuf[slot].text, kMaxLineLen - 1U + 1U, "%s", text);
+  g_outputBuf[slot].text[kMaxLineLen - 1U] = '\0';
+
+  if (g_outputCount < kMaxOutputLines) {
+    ++g_outputCount;
+  } else {
+    g_outputHead = (g_outputHead + 1U) % kMaxOutputLines;
+  }
+}
 
 // ---- built-in command handlers ----
 
 void builtin_help(const char *const * /*args*/, int /*argCount*/,
                   void * /*userData*/) noexcept {
-  console_print("Registered commands:");
-  for (std::size_t i = 0U; i < g_commandCount; ++i) {
-    if (!g_commands[i].used) {
-      continue;
+  CommandEntry commands[kMaxCommands] = {};
+  std::size_t commandCount = 0U;
+
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (std::size_t i = 0U; i < g_commandCount; ++i) {
+      if (!g_commands[i].used) {
+        continue;
+      }
+      commands[commandCount++] = g_commands[i];
     }
+  }
+
+  console_print("Registered commands:");
+  for (std::size_t i = 0U; i < commandCount; ++i) {
     char buf[kMaxLineLen] = {};
-    std::snprintf(buf, sizeof(buf), "  %-20s  %s", g_commands[i].name,
-                  g_commands[i].desc);
+    std::snprintf(buf, sizeof(buf), "  %-20.63s  %.127s", commands[i].name,
+                  commands[i].desc);
     console_print(buf);
   }
 }
 
+/// Handles builtin set.
 void builtin_set(const char *const *args, int argCount,
                  void * /*userData*/) noexcept {
   if (argCount < 3) {
@@ -75,6 +133,7 @@ void builtin_set(const char *const *args, int argCount,
   console_print(buf);
 }
 
+/// Handles builtin get.
 void builtin_get(const char *const *args, int argCount,
                  void * /*userData*/) noexcept {
   if (argCount < 2) {
@@ -155,6 +214,7 @@ int tokenize(char *lineBuf, const char *const **outArgs, const char **argPtrs,
 // ---- public API ----
 
 bool initialize_console() noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
   if (g_initialized) {
     return true;
   }
@@ -166,16 +226,18 @@ bool initialize_console() noexcept {
   g_initialized = true;
 
   // register built-ins
-  console_register_command("help", builtin_help, nullptr,
-                           "List all registered commands");
-  console_register_command("set", builtin_set, nullptr,
-                           "Set a CVar: set <name> <value>");
-  console_register_command("get", builtin_get, nullptr,
-                           "Get a CVar value: get <name>");
+  static_cast<void>(register_command_unlocked(
+      "help", builtin_help, nullptr, "List all registered commands"));
+  static_cast<void>(register_command_unlocked(
+      "set", builtin_set, nullptr, "Set a CVar: set <name> <value>"));
+  static_cast<void>(register_command_unlocked(
+      "get", builtin_get, nullptr, "Get a CVar value: get <name>"));
   return true;
 }
 
+/// Shuts down the owning system for console.
 void shutdown_console() noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
   g_commands = {};
   g_commandCount = 0U;
   g_outputBuf = {};
@@ -184,30 +246,15 @@ void shutdown_console() noexcept {
   g_initialized = false;
 }
 
+/// Handles console register command.
 bool console_register_command(const char *name, ConsoleCommandFn fn,
                               void *userData,
                               const char *description) noexcept {
-  if ((name == nullptr) || (fn == nullptr) || (description == nullptr)) {
-    return false;
-  }
-  if (g_commandCount >= kMaxCommands) {
-    return false;
-  }
-  // duplicate check
-  for (std::size_t i = 0U; i < g_commandCount; ++i) {
-    if (g_commands[i].used && std::strcmp(g_commands[i].name, name) == 0) {
-      return false;
-    }
-  }
-  CommandEntry &e = g_commands[g_commandCount++];
-  std::snprintf(e.name, kMaxNameLen - 1U + 1U, "%s", name);
-  std::snprintf(e.desc, kMaxDescLen - 1U + 1U, "%s", description);
-  e.fn = fn;
-  e.userData = userData;
-  e.used = true;
-  return true;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return register_command_unlocked(name, fn, userData, description);
 }
 
+/// Handles console execute.
 bool console_execute(const char *line) noexcept {
   if (line == nullptr) {
     return false;
@@ -229,12 +276,22 @@ bool console_execute(const char *line) noexcept {
   std::snprintf(echo, sizeof(echo), "> %s", line);
   console_print(echo);
 
-  // Find and dispatch
-  for (std::size_t i = 0U; i < g_commandCount; ++i) {
-    if (g_commands[i].used && std::strcmp(g_commands[i].name, args[0]) == 0) {
-      g_commands[i].fn(args, argCount, g_commands[i].userData);
-      return true;
+  ConsoleCommandFn fn = nullptr;
+  void *userData = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (std::size_t i = 0U; i < g_commandCount; ++i) {
+      if (g_commands[i].used && std::strcmp(g_commands[i].name, args[0]) == 0) {
+        fn = g_commands[i].fn;
+        userData = g_commands[i].userData;
+        break;
+      }
     }
+  }
+
+  if (fn != nullptr) {
+    fn(args, argCount, userData);
+    return true;
   }
 
   char notfound[kMaxLineLen] = {};
@@ -243,27 +300,26 @@ bool console_execute(const char *line) noexcept {
   return false;
 }
 
+/// Handles console print.
 void console_print(const char *text) noexcept {
   if (text == nullptr) {
     return;
   }
 
-  const std::size_t slot = (g_outputHead + g_outputCount) % kMaxOutputLines;
-  std::snprintf(g_outputBuf[slot].text, kMaxLineLen - 1U + 1U, "%s", text);
-  g_outputBuf[slot].text[kMaxLineLen - 1U] = '\0';
-
-  if (g_outputCount < kMaxOutputLines) {
-    ++g_outputCount;
-  } else {
-    // Ring buffer full — overwrite oldest
-    g_outputHead = (g_outputHead + 1U) % kMaxOutputLines;
-  }
+  std::lock_guard<std::mutex> lock(g_mutex);
+  print_unlocked(text);
 }
 
-std::size_t console_output_line_count() noexcept { return g_outputCount; }
+/// Handles console output line count.
+std::size_t console_output_line_count() noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_outputCount;
+}
 
+/// Handles console get output line.
 bool console_get_output_line(std::size_t index, char *outBuf,
                              std::size_t bufCapacity) noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
   if ((outBuf == nullptr) || (bufCapacity == 0U) || (index >= g_outputCount)) {
     return false;
   }
@@ -273,19 +329,27 @@ bool console_get_output_line(std::size_t index, char *outBuf,
   return true;
 }
 
+/// Handles console get commands.
 std::size_t console_get_commands(ConsoleCommandInfo *out,
                                  std::size_t maxEntries) noexcept {
   if (out == nullptr) {
     return 0U;
   }
+  std::lock_guard<std::mutex> lock(g_mutex);
   std::size_t written = 0U;
   for (std::size_t i = 0U; (i < g_commandCount) && (written < maxEntries);
        ++i) {
     if (!g_commands[i].used) {
       continue;
     }
-    out[written].name = g_commands[i].name;
-    out[written].description = g_commands[i].desc;
+    std::snprintf(g_commandInfoSnapshot.names[written],
+                  sizeof(g_commandInfoSnapshot.names[written]), "%s",
+                  g_commands[i].name);
+    std::snprintf(g_commandInfoSnapshot.descriptions[written],
+                  sizeof(g_commandInfoSnapshot.descriptions[written]), "%s",
+                  g_commands[i].desc);
+    out[written].name = g_commandInfoSnapshot.names[written];
+    out[written].description = g_commandInfoSnapshot.descriptions[written];
     ++written;
   }
   return written;

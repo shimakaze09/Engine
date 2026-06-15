@@ -1,5 +1,8 @@
+// Implements main behavior for the Engine editor application entry point.
+
 #include "engine/engine.h"
 
+/// Runs this executable or test program.
 int main() {
   if (!engine::bootstrap()) {
     return 1;

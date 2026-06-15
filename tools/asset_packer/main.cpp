@@ -1,3 +1,5 @@
+// Implements main behavior for the Engine tooling.
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -49,17 +51,20 @@
 
 namespace {
 
+/// Stores primitive data used by the engine.
 struct PrimitiveData final {
   std::vector<float> interleavedVertices{};
   std::vector<std::uint32_t> indices{};
   bool hasUVs = false;
 };
 
+/// Stores dependency digest data used by the engine.
 struct DependencyDigest final {
   std::string path{};
   std::uint64_t hash = 0ULL;
 };
 
+/// Stores import settings data used by the engine.
 struct ImportSettings final {
   int meshIndex = 0;
   int primitiveIndex = 0;
@@ -71,6 +76,7 @@ struct ImportSettings final {
 constexpr std::uint64_t kFnv64Offset = 1469598103934665603ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
+/// Handles print usage.
 void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
@@ -78,6 +84,7 @@ void print_usage() {
                "[--force]\n");
 }
 
+/// Handles file exists.
 bool file_exists(const char *path) {
   if (path == nullptr) {
     return false;
@@ -99,6 +106,7 @@ bool file_exists(const char *path) {
   return true;
 }
 
+/// Handles hash file contents.
 std::uint64_t hash_file_contents(const char *path, bool *ok) {
   if (ok != nullptr) {
     *ok = false;
@@ -140,6 +148,7 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
   return hash;
 }
 
+/// Builds the requested runtime data for dependency digests.
 bool build_dependency_digests(const std::vector<std::string> &dependencyPaths,
                               std::vector<DependencyDigest> *outDigests) {
   if (outDigests == nullptr) {
@@ -165,6 +174,7 @@ bool build_dependency_digests(const std::vector<std::string> &dependencyPaths,
   return true;
 }
 
+/// Handles hash import settings.
 std::uint64_t hash_import_settings(const ImportSettings &settings) {
   std::uint64_t hash = kFnv64Offset;
   auto feed = [&](const void *data, std::size_t size) {
@@ -182,6 +192,7 @@ std::uint64_t hash_import_settings(const ImportSettings &settings) {
   return hash;
 }
 
+/// Handles sort dependency digests.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
   std::sort(digests.begin(), digests.end(),
             [](const DependencyDigest &a, const DependencyDigest &b) {
@@ -189,6 +200,7 @@ void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
             });
 }
 
+/// Reads import settings from meta data.
 bool read_import_settings_from_meta(const char *outputPath,
                                     ImportSettings *outSettings) {
   if ((outputPath == nullptr) || (outSettings == nullptr)) {
@@ -293,6 +305,7 @@ bool read_import_settings_from_meta(const char *outputPath,
   return true;
 }
 
+/// Handles apply scale to primitive.
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
   if ((data == nullptr) || (scaleFactor == 1.0F)) {
     return;
@@ -310,6 +323,7 @@ void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
   }
 }
 
+/// Handles make cookstamp path.
 bool make_cookstamp_path(const char *outputPath, char *outPath,
                          std::size_t outPathSize) {
   if ((outputPath == nullptr) || (outPath == nullptr) || (outPathSize == 0U)) {
@@ -320,6 +334,7 @@ bool make_cookstamp_path(const char *outputPath, char *outPath,
   return (written > 0) && (written < static_cast<int>(outPathSize));
 }
 
+/// Writes cook stamp data.
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash) {
@@ -355,6 +370,7 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   return true;
 }
 
+/// Reads cook stamp data.
 bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
                      std::vector<DependencyDigest> *outDependencies,
                      std::uint64_t *outImportSettingsHash) {
@@ -413,6 +429,7 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   return true;
 }
 
+/// Handles dependency digests equal.
 bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
                               const std::vector<DependencyDigest> &b) {
   if (a.size() != b.size()) {
@@ -428,6 +445,7 @@ bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
   return true;
 }
 
+/// Returns whether should repack.
 bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
                    std::uint64_t importSettingsHash) {
@@ -454,6 +472,7 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
   return !dependency_digests_equal(previousDependencies, dependencies);
 }
 
+/// Finds the matching object or resource for attribute accessor.
 const cgltf_accessor *find_attribute_accessor(const cgltf_primitive *primitive,
                                               cgltf_attribute_type type) {
   if (primitive == nullptr) {
@@ -470,6 +489,7 @@ const cgltf_accessor *find_attribute_accessor(const cgltf_primitive *primitive,
   return nullptr;
 }
 
+/// Handles extract primitive.
 bool extract_primitive(const cgltf_primitive *primitive,
                        PrimitiveData *outData) {
   if ((primitive == nullptr) || (outData == nullptr)) {
@@ -562,6 +582,7 @@ bool extract_primitive(const cgltf_primitive *primitive,
   return true;
 }
 
+/// Writes mesh file data.
 bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   if (outputPath == nullptr) {
     return false;
@@ -632,6 +653,7 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   return true;
 }
 
+/// Writes metadata file data.
 bool write_metadata_file(const char *inputPath, const char *outputPath,
                          const PrimitiveData &data, std::uint64_t sourceHash,
                          const std::vector<DependencyDigest> &dependencies,
@@ -663,6 +685,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   const std::size_t vertexCount =
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
+  const std::string escapedInputPath =
+      engine::tools::escape_json_string(inputPath);
+  const std::string escapedOutputPath =
+      engine::tools::escape_json_string(outputPath);
 
   // Compute output file size.
   std::uint64_t outputFileSize = 0ULL;
@@ -698,7 +724,8 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
       "  \"indexCount\": %zu,\n"
       "  \"tags\": [],\n"
       "  \"dependencies\": [\n",
-      static_cast<unsigned long long>(sourceHash), inputPath, outputPath,
+      static_cast<unsigned long long>(sourceHash), escapedInputPath.c_str(),
+      escapedOutputPath.c_str(),
       data.hasUVs ? engine::core::kMeshAssetVersion2
                   : engine::core::kMeshAssetVersion,
       static_cast<unsigned long long>(sourceHash),
@@ -706,9 +733,11 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
 
   for (std::size_t i = 0U; i < dependencies.size(); ++i) {
     const DependencyDigest &dependency = dependencies[i];
+    const std::string escapedDependencyPath =
+        engine::tools::escape_json_string(dependency.path.c_str());
     written += std::fprintf(
         metadataFile, "    { \"path\": \"%s\", \"hash\": \"%016llx\" }%s\n",
-        dependency.path.c_str(),
+        escapedDependencyPath.c_str(),
         static_cast<unsigned long long>(dependency.hash),
         (i + 1U < dependencies.size()) ? "," : "");
   }
@@ -734,6 +763,7 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   return written > 0;
 }
 
+/// Handles cook and write convex hull.
 bool cook_and_write_convex_hull(const char *outputPath,
                                 const PrimitiveData &data) {
   if (outputPath == nullptr) {
@@ -828,6 +858,7 @@ bool cook_and_write_convex_hull(const char *outputPath,
   return true;
 }
 
+/// Handles ensure directory exists.
 bool ensure_directory_exists(const char *dirPath) {
   if (dirPath == nullptr) {
     return false;
@@ -874,15 +905,24 @@ static void build_checksum_path(const char *thumbPath, char *checksumPath,
 // Read stored checksum from sidecar file. Returns false if file not found.
 static bool read_thumbnail_checksum(const char *checksumPath,
                                     std::uint64_t *outHash) noexcept {
+  if ((checksumPath == nullptr) || (outHash == nullptr)) {
+    return false;
+  }
+
   FILE *f = std::fopen(checksumPath, "r");
   if (f == nullptr) {
     return false;
   }
-  const int scanned =
-      std::fscanf(f, "%llu", // NOLINT
-                  reinterpret_cast<unsigned long long *>(outHash));
+
+  unsigned long long parsedHash = 0ULL;
+  const int scanned = std::fscanf(f, "%llu", &parsedHash); // NOLINT
   std::fclose(f);
-  return scanned == 1;
+  if (scanned != 1) {
+    return false;
+  }
+
+  *outHash = static_cast<std::uint64_t>(parsedHash);
+  return true;
 }
 
 // Write checksum to sidecar file.
@@ -1068,6 +1108,7 @@ void build_thumbnail_path(const char *outputPath, char *thumbPath,
   std::snprintf(thumbPath, thumbPathSize, "%s/%s.png", thumbDir, basename);
 }
 
+/// Handles generate mesh thumbnail.
 bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
                              const PrimitiveData &data) {
   if (outputPath == nullptr) {
@@ -1334,6 +1375,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   return true;
 }
 
+/// Handles hash path to asset id.
 std::uint64_t hash_path_to_asset_id(const char *path) {
   if (path == nullptr) {
     return 0ULL;
@@ -1489,6 +1531,7 @@ void extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
 
 } // namespace
 
+/// Runs this executable or test program.
 int main(int argc, char **argv) {
   if (argc < 3) {
     print_usage();

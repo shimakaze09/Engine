@@ -1,6 +1,9 @@
+// Verifies engine stats test behavior for the Engine test suite.
+
 #include "engine/core/engine_stats.h"
 #include "engine/core/platform.h"
 
+/// Runs this executable or test program.
 int main() {
   using namespace engine::core;
 

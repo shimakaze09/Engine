@@ -1,3 +1,5 @@
+# Configures physics build settings for the Engine repository.
+
 engine_add_module_library(engine_physics
     SOURCES
     src/physics.cpp

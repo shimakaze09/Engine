@@ -1,3 +1,5 @@
+// Verifies manifold test behavior for the Engine test suite.
+
 #include <cstdio>
 
 #include "engine/math/vec3.h"
@@ -151,6 +153,7 @@ int test_manifold_reset() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   struct TestCase {
     const char *name;

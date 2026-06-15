@@ -1,3 +1,5 @@
+// Declares console types and APIs for the Engine core engine.
+
 #pragma once
 
 #include <cstddef>
@@ -17,12 +19,15 @@ namespace engine::core {
 typedef void (*ConsoleCommandFn)(const char *const *args, int argCount,
                                  void *userData) noexcept;
 
+/// Stores console command info data used by the engine.
 struct ConsoleCommandInfo final {
   const char *name = nullptr;
   const char *description = nullptr;
 };
 
+/// Initializes the owning system for console.
 bool initialize_console() noexcept;
+/// Shuts down the owning system for console.
 void shutdown_console() noexcept;
 
 // Register a command.  Returns false on duplicate name or capacity exceeded.

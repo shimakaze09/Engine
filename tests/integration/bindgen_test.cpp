@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -14,6 +15,7 @@ namespace {
 
 static const char *kTempScript = "bindgen_test.lua";
 
+/// Writes script data.
 bool write_script(const char *code) noexcept {
   FILE *f = nullptr;
 #ifdef _WIN32
@@ -31,8 +33,10 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
+/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
+/// Handles test generated bindings.
 bool test_generated_bindings() noexcept {
   if (!engine::scripting::initialize_scripting()) {
     return false;
@@ -44,7 +48,8 @@ bool test_generated_bindings() noexcept {
     engine::scripting::shutdown_scripting();
     return false;
   }
-  engine::runtime::bind_scripting_runtime(world.get());
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_frame_time(0.016F, 1.0F);
   engine::scripting::set_frame_index(60U);
@@ -119,6 +124,7 @@ bool test_generated_bindings() noexcept {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   std::printf("  bindgen_test::generated_bindings ... ");
   const bool ok = test_generated_bindings();

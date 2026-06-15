@@ -1,7 +1,8 @@
+// Implements scripting bridge behavior for the Engine runtime world.
+
 #include "engine/runtime/scripting_bridge.h"
 
 #include "engine/audio/audio.h"
-#include "engine/core/service_locator.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_query.h"
@@ -16,24 +17,28 @@ namespace engine {
 
 namespace {
 
+/// Handles scripting set camera position.
 void scripting_set_camera_position(float x, float y, float z) noexcept {
   renderer::CameraState camera = renderer::get_active_camera();
   camera.position = math::Vec3(x, y, z);
   renderer::set_active_camera(camera);
 }
 
+/// Handles scripting set camera target.
 void scripting_set_camera_target(float x, float y, float z) noexcept {
   renderer::CameraState camera = renderer::get_active_camera();
   camera.target = math::Vec3(x, y, z);
   renderer::set_active_camera(camera);
 }
 
+/// Handles scripting set camera up.
 void scripting_set_camera_up(float x, float y, float z) noexcept {
   renderer::CameraState camera = renderer::get_active_camera();
   camera.up = math::Vec3(x, y, z);
   renderer::set_active_camera(camera);
 }
 
+/// Handles scripting set camera fov.
 void scripting_set_camera_fov(float fovRadians) noexcept {
   renderer::CameraState camera = renderer::get_active_camera();
   camera.fovRadians = fovRadians;
@@ -52,17 +57,27 @@ bool scripting_push_camera(runtime::World *world, std::uint32_t entityIndex,
   entry.position = math::Vec3(posX, posY, posZ);
   entry.target = math::Vec3(tgtX, tgtY, tgtZ);
   entry.blendSpeed = blendSpeed;
-  return world->camera_manager().push_camera(entityIndex, entry, priority);
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  if (entity == runtime::kInvalidEntity) {
+    return false;
+  }
+  return world->camera_manager().push_camera(entity, entry, priority);
 }
 
+/// Handles scripting pop camera.
 bool scripting_pop_camera(runtime::World *world,
                           std::uint32_t entityIndex) noexcept {
   if (world == nullptr) {
     return false;
   }
-  return world->camera_manager().pop_camera(entityIndex);
+  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
+  if (entity == runtime::kInvalidEntity) {
+    return false;
+  }
+  return world->camera_manager().pop_camera(entity);
 }
 
+/// Handles scripting get active camera.
 bool scripting_get_active_camera(runtime::World *world, float *outPosX,
                                  float *outPosY, float *outPosZ, float *outTgtX,
                                  float *outTgtY, float *outTgtZ,
@@ -84,6 +99,7 @@ bool scripting_get_active_camera(runtime::World *world, float *outPosX,
   return true;
 }
 
+/// Handles scripting camera shake.
 bool scripting_camera_shake(runtime::World *world, float amplitude,
                             float frequency, float duration,
                             float decay) noexcept {
@@ -94,6 +110,7 @@ bool scripting_camera_shake(runtime::World *world, float amplitude,
                                            decay);
 }
 
+/// Handles scripting set gravity.
 void scripting_set_gravity(runtime::World *world, float x, float y,
                            float z) noexcept {
   if (world == nullptr) {
@@ -103,6 +120,7 @@ void scripting_set_gravity(runtime::World *world, float x, float y,
   runtime::set_gravity(*world, x, y, z);
 }
 
+/// Handles scripting get gravity.
 bool scripting_get_gravity(runtime::World *world, float *outX, float *outY,
                            float *outZ) noexcept {
   if ((world == nullptr) || (outX == nullptr) || (outY == nullptr) ||
@@ -113,6 +131,7 @@ bool scripting_get_gravity(runtime::World *world, float *outX, float *outY,
   return runtime::get_gravity(*world, outX, outY, outZ);
 }
 
+/// Handles scripting raycast.
 bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
                        float dx, float dy, float dz, float maxDistance,
                        scripting::RuntimeRaycastHit *outHit) noexcept {
@@ -137,6 +156,7 @@ bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
   return true;
 }
 
+/// Handles scripting raycast all.
 std::size_t scripting_raycast_all(runtime::World *world, float ox, float oy,
                                   float oz, float dx, float dy, float dz,
                                   float maxDistance,
@@ -165,6 +185,7 @@ std::size_t scripting_raycast_all(runtime::World *world, float ox, float oy,
   return count;
 }
 
+/// Handles scripting overlap sphere.
 std::size_t scripting_overlap_sphere(runtime::World *world, float cx, float cy,
                                      float cz, float radius,
                                      std::uint32_t *outEntityIndices,
@@ -177,6 +198,7 @@ std::size_t scripting_overlap_sphere(runtime::World *world, float cx, float cy,
                                  outEntityIndices, maxResults, mask);
 }
 
+/// Handles scripting overlap box.
 std::size_t scripting_overlap_box(runtime::World *world, float cx, float cy,
                                   float cz, float hx, float hy, float hz,
                                   std::uint32_t *outEntityIndices,
@@ -190,6 +212,7 @@ std::size_t scripting_overlap_box(runtime::World *world, float cx, float cy,
                               maxResults, mask);
 }
 
+/// Handles scripting sweep sphere.
 bool scripting_sweep_sphere(runtime::World *world, float ox, float oy, float oz,
                             float radius, float dx, float dy, float dz,
                             float maxDistance,
@@ -214,6 +237,7 @@ bool scripting_sweep_sphere(runtime::World *world, float ox, float oy, float oz,
   return true;
 }
 
+/// Handles scripting sweep box.
 bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
                          float hx, float hy, float hz, float dx, float dy,
                          float dz, float maxDistance,
@@ -239,6 +263,7 @@ bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
   return true;
 }
 
+/// Handles scripting add distance joint.
 std::uint32_t scripting_add_distance_joint(runtime::World *world,
                                            std::uint32_t entityIndexA,
                                            std::uint32_t entityIndexB,
@@ -253,6 +278,7 @@ std::uint32_t scripting_add_distance_joint(runtime::World *world,
       runtime::add_distance_joint(*world, entityA, entityB, distance));
 }
 
+/// Handles scripting remove joint.
 void scripting_remove_joint(runtime::World *world,
                             std::uint32_t jointId) noexcept {
   if (world == nullptr) {
@@ -261,6 +287,7 @@ void scripting_remove_joint(runtime::World *world,
   runtime::remove_joint(*world, static_cast<physics::JointId>(jointId));
 }
 
+/// Handles scripting add hinge joint.
 std::uint32_t scripting_add_hinge_joint(runtime::World *world,
                                         std::uint32_t entityIndexA,
                                         std::uint32_t entityIndexB,
@@ -278,6 +305,7 @@ std::uint32_t scripting_add_hinge_joint(runtime::World *world,
       runtime::add_hinge_joint(*world, entityA, entityB, pivot, axis));
 }
 
+/// Handles scripting add ball socket joint.
 std::uint32_t scripting_add_ball_socket_joint(runtime::World *world,
                                               std::uint32_t entityIndexA,
                                               std::uint32_t entityIndexB,
@@ -293,6 +321,7 @@ std::uint32_t scripting_add_ball_socket_joint(runtime::World *world,
       runtime::add_ball_socket_joint(*world, entityA, entityB, pivot));
 }
 
+/// Handles scripting add slider joint.
 std::uint32_t scripting_add_slider_joint(runtime::World *world,
                                          std::uint32_t entityIndexA,
                                          std::uint32_t entityIndexB,
@@ -308,6 +337,7 @@ std::uint32_t scripting_add_slider_joint(runtime::World *world,
       runtime::add_slider_joint(*world, entityA, entityB, axis));
 }
 
+/// Handles scripting add spring joint.
 std::uint32_t scripting_add_spring_joint(runtime::World *world,
                                          std::uint32_t entityIndexA,
                                          std::uint32_t entityIndexB,
@@ -322,6 +352,7 @@ std::uint32_t scripting_add_spring_joint(runtime::World *world,
       *world, entityA, entityB, restLength, stiffness, damping));
 }
 
+/// Handles scripting add fixed joint.
 std::uint32_t scripting_add_fixed_joint(runtime::World *world,
                                         std::uint32_t entityIndexA,
                                         std::uint32_t entityIndexB) noexcept {
@@ -334,6 +365,7 @@ std::uint32_t scripting_add_fixed_joint(runtime::World *world,
       runtime::add_fixed_joint(*world, entityA, entityB));
 }
 
+/// Handles scripting set joint limits.
 void scripting_set_joint_limits(runtime::World *world, std::uint32_t jointId,
                                 float minLimit, float maxLimit) noexcept {
   if (world == nullptr) {
@@ -343,6 +375,7 @@ void scripting_set_joint_limits(runtime::World *world, std::uint32_t jointId,
                             minLimit, maxLimit);
 }
 
+/// Handles scripting wake body.
 void scripting_wake_body(runtime::World *world,
                          std::uint32_t entityIndex) noexcept {
   if ((world == nullptr) || (entityIndex == 0U)) {
@@ -352,6 +385,7 @@ void scripting_wake_body(runtime::World *world,
   runtime::wake_body(*world, world->find_entity_by_index(entityIndex));
 }
 
+/// Handles scripting is sleeping.
 bool scripting_is_sleeping(runtime::World *world,
                            std::uint32_t entityIndex) noexcept {
   if ((world == nullptr) || (entityIndex == 0U)) {
@@ -361,14 +395,17 @@ bool scripting_is_sleeping(runtime::World *world,
   return runtime::is_sleeping(*world, world->find_entity_by_index(entityIndex));
 }
 
+/// Handles scripting load sound.
 std::uint32_t scripting_load_sound(const char *path) noexcept {
   return audio::load_sound(path).id;
 }
 
+/// Handles scripting unload sound.
 void scripting_unload_sound(std::uint32_t soundId) noexcept {
   audio::unload_sound(audio::SoundHandle{soundId});
 }
 
+/// Handles scripting play sound.
 bool scripting_play_sound(std::uint32_t soundId, float volume, float pitch,
                           bool loop) noexcept {
   audio::PlayParams params{};
@@ -378,21 +415,26 @@ bool scripting_play_sound(std::uint32_t soundId, float volume, float pitch,
   return audio::play_sound(audio::SoundHandle{soundId}, params);
 }
 
+/// Handles scripting stop sound.
 void scripting_stop_sound(std::uint32_t soundId) noexcept {
   audio::stop_sound(audio::SoundHandle{soundId});
 }
 
+/// Handles scripting stop all sounds.
 void scripting_stop_all_sounds() noexcept { audio::stop_all(); }
 
+/// Handles scripting set master volume.
 void scripting_set_master_volume(float volume) noexcept {
   audio::set_master_volume(volume);
 }
 
+/// Handles scripting save scene.
 bool scripting_save_scene(const runtime::World *world,
                           const char *path) noexcept {
   return (world != nullptr) && runtime::save_scene(*world, path);
 }
 
+/// Handles scripting save prefab.
 bool scripting_save_prefab(const runtime::World *world,
                            std::uint32_t entityIndex,
                            const char *path) noexcept {
@@ -405,6 +447,7 @@ bool scripting_save_prefab(const runtime::World *world,
          runtime::save_prefab(*world, entity, path);
 }
 
+/// Handles scripting instantiate prefab.
 std::uint32_t scripting_instantiate_prefab(runtime::World *world,
                                            const char *path) noexcept {
   if (world == nullptr) {
@@ -424,6 +467,7 @@ scripting_get_current_phase(runtime::World *world) noexcept {
   return world->current_phase();
 }
 
+/// Handles scripting get entity index.
 std::uint32_t scripting_get_entity_index(runtime::World *world,
                                          std::uint32_t entityIndex) noexcept {
   if (world == nullptr) {
@@ -433,6 +477,7 @@ std::uint32_t scripting_get_entity_index(runtime::World *world,
   return (entity != runtime::kInvalidEntity) ? entity.index : 0U;
 }
 
+/// Handles scripting get transform count.
 std::uint32_t scripting_get_transform_count(runtime::World *world) noexcept {
   if (world == nullptr) {
     return 0U;
@@ -442,6 +487,7 @@ std::uint32_t scripting_get_transform_count(runtime::World *world) noexcept {
   return static_cast<std::uint32_t>(count);
 }
 
+/// Handles scripting create entity op.
 std::uint32_t scripting_create_entity_op(runtime::World *world) noexcept {
   if (world == nullptr) {
     return 0U;
@@ -450,6 +496,7 @@ std::uint32_t scripting_create_entity_op(runtime::World *world) noexcept {
   return entity.index;
 }
 
+/// Handles scripting get transform read ptr.
 const runtime::Transform *
 scripting_get_transform_read_ptr(runtime::World *world,
                                  std::uint32_t entityIndex) noexcept {
@@ -460,6 +507,7 @@ scripting_get_transform_read_ptr(runtime::World *world,
   return world->get_transform_read_ptr(entity);
 }
 
+/// Handles scripting get transform op.
 bool scripting_get_transform_op(runtime::World *world,
                                 std::uint32_t entityIndex,
                                 runtime::Transform *outTransform) noexcept {
@@ -470,6 +518,7 @@ bool scripting_get_transform_op(runtime::World *world,
   return world->get_transform(entity, outTransform);
 }
 
+/// Handles scripting get rigid body op.
 bool scripting_get_rigid_body_op(runtime::World *world,
                                  std::uint32_t entityIndex,
                                  runtime::RigidBody *outRigidBody) noexcept {
@@ -480,6 +529,7 @@ bool scripting_get_rigid_body_op(runtime::World *world,
   return world->get_rigid_body(entity, outRigidBody);
 }
 
+/// Handles scripting get mesh component ptr.
 const runtime::MeshComponent *
 scripting_get_mesh_component_ptr(runtime::World *world,
                                  std::uint32_t entityIndex) noexcept {
@@ -490,6 +540,7 @@ scripting_get_mesh_component_ptr(runtime::World *world,
   return world->get_mesh_component_ptr(entity);
 }
 
+/// Handles scripting get mesh component op.
 bool scripting_get_mesh_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     runtime::MeshComponent *outComponent) noexcept {
@@ -500,6 +551,7 @@ bool scripting_get_mesh_component_op(
   return world->get_mesh_component(entity, outComponent);
 }
 
+/// Handles scripting get name component op.
 bool scripting_get_name_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     runtime::NameComponent *outComponent) noexcept {
@@ -510,6 +562,7 @@ bool scripting_get_name_component_op(
   return world->get_name_component(entity, outComponent);
 }
 
+/// Handles scripting get collider op.
 bool scripting_get_collider_op(runtime::World *world, std::uint32_t entityIndex,
                                runtime::Collider *outCollider) noexcept {
   if ((world == nullptr) || (outCollider == nullptr)) {
@@ -529,6 +582,7 @@ bool scripting_destroy_entity_op(runtime::World *world,
   return world->destroy_entity(entity);
 }
 
+/// Handles scripting add transform op.
 bool scripting_add_transform_op(runtime::World *world,
                                 std::uint32_t entityIndex,
                                 const runtime::Transform &transform) noexcept {
@@ -539,6 +593,7 @@ bool scripting_add_transform_op(runtime::World *world,
   return world->add_transform(entity, transform);
 }
 
+/// Handles scripting set movement authority op.
 bool scripting_set_movement_authority_op(
     runtime::World *world, std::uint32_t entityIndex,
     runtime::MovementAuthority authority) noexcept {
@@ -549,6 +604,7 @@ bool scripting_set_movement_authority_op(
   return world->set_movement_authority(entity, authority);
 }
 
+/// Handles scripting add rigid body op.
 bool scripting_add_rigid_body_op(runtime::World *world,
                                  std::uint32_t entityIndex,
                                  const runtime::RigidBody &rigidBody) noexcept {
@@ -559,6 +615,7 @@ bool scripting_add_rigid_body_op(runtime::World *world,
   return world->add_rigid_body(entity, rigidBody);
 }
 
+/// Handles scripting add collider op.
 bool scripting_add_collider_op(runtime::World *world, std::uint32_t entityIndex,
                                const runtime::Collider &collider) noexcept {
   if (world == nullptr) {
@@ -568,6 +625,7 @@ bool scripting_add_collider_op(runtime::World *world, std::uint32_t entityIndex,
   return world->add_collider(entity, collider);
 }
 
+/// Handles scripting add mesh component op.
 bool scripting_add_mesh_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     const runtime::MeshComponent &component) noexcept {
@@ -578,6 +636,7 @@ bool scripting_add_mesh_component_op(
   return world->add_mesh_component(entity, component);
 }
 
+/// Handles scripting add name component op.
 bool scripting_add_name_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     const runtime::NameComponent &component) noexcept {
@@ -588,6 +647,7 @@ bool scripting_add_name_component_op(
   return world->add_name_component(entity, component);
 }
 
+/// Handles scripting add light component op.
 bool scripting_add_light_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     const runtime::LightComponent &component) noexcept {
@@ -598,6 +658,7 @@ bool scripting_add_light_component_op(
   return world->add_light_component(entity, component);
 }
 
+/// Handles scripting remove light component op.
 bool scripting_remove_light_component_op(runtime::World *world,
                                          std::uint32_t entityIndex) noexcept {
   if (world == nullptr) {
@@ -607,6 +668,7 @@ bool scripting_remove_light_component_op(runtime::World *world,
   return world->remove_light_component(entity);
 }
 
+/// Handles scripting add script component op.
 bool scripting_add_script_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     const runtime::ScriptComponent &component) noexcept {
@@ -617,6 +679,7 @@ bool scripting_add_script_component_op(
   return world->add_script_component(entity, component);
 }
 
+/// Handles scripting remove script component op.
 bool scripting_remove_script_component_op(runtime::World *world,
                                           std::uint32_t entityIndex) noexcept {
   if (world == nullptr) {
@@ -690,15 +753,16 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
 
 namespace runtime {
 
-void bind_scripting_runtime(World *world) noexcept {
-  scripting::bind_runtime_world(world);
-  scripting::bind_runtime_services(&kScriptingRuntimeServices);
-  // Register in the global service locator so subsystems can discover services
-  // without direct global pointers.
-  auto &loc = core::global_service_locator();
-  loc.register_service<World>(world);
-  loc.register_service<scripting::RuntimeServices>(
-      const_cast<scripting::RuntimeServices *>(&kScriptingRuntimeServices));
+/// Binds scripting runtime pointers into an explicit service locator.
+void bind_scripting_runtime(World *world, core::ServiceLocator &locator) noexcept {
+  scripting::bind_runtime_world(world, locator);
+  scripting::bind_runtime_services(&kScriptingRuntimeServices, locator);
+}
+
+/// Clears scripting runtime bindings from an explicit service locator.
+void unbind_scripting_runtime(core::ServiceLocator &locator) noexcept {
+  scripting::bind_runtime_world(nullptr, locator);
+  scripting::bind_runtime_services(nullptr, locator);
 }
 
 } // namespace runtime

@@ -1,3 +1,5 @@
+// Verifies command buffer test behavior for the Engine test suite.
+
 #include "engine/core/cvar.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
@@ -7,6 +9,7 @@
 
 namespace {
 
+/// Handles make command.
 engine::renderer::DrawCommand make_command(std::uint64_t sortKey,
                                            std::uint32_t entity) noexcept {
   engine::renderer::DrawCommand command{};
@@ -16,6 +19,7 @@ engine::renderer::DrawCommand make_command(std::uint64_t sortKey,
   return command;
 }
 
+/// Handles check submit sort and reset.
 int check_submit_sort_and_reset() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();
@@ -49,6 +53,7 @@ int check_submit_sort_and_reset() {
   return 0;
 }
 
+/// Handles check append and capacity.
 int check_append_and_capacity() {
   static engine::renderer::CommandBufferBuilder left;
   static engine::renderer::CommandBufferBuilder right;
@@ -97,6 +102,7 @@ int check_append_and_capacity() {
   return 0;
 }
 
+/// Handles check static mesh batches.
 int check_static_mesh_batches() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();
@@ -149,9 +155,42 @@ int check_static_mesh_batches() {
     return 95;
   }
 
+  builder.reset();
+  engine::renderer::DrawCommand foliageA = make_command(1U, 4U);
+  foliageA.mesh.id = 33U;
+  foliageA.material.albedo = engine::math::Vec3(0.1F, 0.6F, 0.2F);
+  foliageA.foliageWindStrength = 0.25F;
+  foliageA.foliageWindFrequency = 1.5F;
+  foliageA.foliageWindPhase = 0.0F;
+  foliageA.foliageLodIndex = 0U;
+  engine::renderer::DrawCommand foliageB = foliageA;
+  foliageB.entity = 5U;
+  foliageB.foliageWindPhase = 1.0F;
+  foliageB.foliageLodIndex = 1U;
+  engine::renderer::DrawCommand foliageC = foliageA;
+  foliageC.entity = 6U;
+  foliageC.foliageWindStrength = 0.5F;
+  if (!builder.submit(foliageA) || !builder.submit(foliageB) ||
+      !builder.submit(foliageC)) {
+    return 96;
+  }
+
+  builder.sort_by_key();
+  const std::size_t foliageBatchCount =
+      engine::renderer::build_static_mesh_batches(builder.view(), 0U,
+                                                  builder.command_count(),
+                                                  batches, 4U);
+  if (foliageBatchCount != 2U) {
+    return 97;
+  }
+  if ((batches[0].count != 2U) || (batches[1].count != 1U)) {
+    return 98;
+  }
+
   return 0;
 }
 
+/// Handles check camera state.
 int check_camera_state() {
   engine::renderer::CameraState camera{};
   camera.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
@@ -179,6 +218,39 @@ int check_camera_state() {
   return 0;
 }
 
+/// Verifies renderer shutdown clears public singleton state even when cold.
+int check_shutdown_resets_public_renderer_state() {
+  engine::renderer::CameraState camera{};
+  camera.position = engine::math::Vec3(8.0F, 9.0F, 10.0F);
+  camera.target = engine::math::Vec3(11.0F, 12.0F, 13.0F);
+  camera.fovRadians = 0.5F;
+  engine::renderer::set_active_camera(camera);
+  engine::renderer::set_skybox_texture(engine::renderer::TextureHandle{77U});
+
+  engine::renderer::shutdown_renderer();
+
+  const engine::renderer::CameraState resetCamera =
+      engine::renderer::get_active_camera();
+  if ((resetCamera.position.x != 0.0F) || (resetCamera.position.y != 2.0F) ||
+      (resetCamera.position.z != 5.0F)) {
+    return 34;
+  }
+  if ((resetCamera.target.x != 0.0F) || (resetCamera.target.y != 0.0F) ||
+      (resetCamera.target.z != 0.0F)) {
+    return 35;
+  }
+  if (resetCamera.fovRadians != 1.0471975512F) {
+    return 36;
+  }
+  if (engine::renderer::get_skybox_texture() !=
+      engine::renderer::kInvalidTextureHandle) {
+    return 37;
+  }
+
+  return 0;
+}
+
+/// Handles check environment texture getters.
 int check_environment_texture_getters() {
   engine::core::shutdown_cvars();
   if (!engine::core::initialize_cvars()) {
@@ -241,6 +313,7 @@ int check_environment_texture_getters() {
   return 0;
 }
 
+/// Handles check reflection probe bake settings.
 int check_reflection_probe_bake_settings() {
   engine::renderer::ReflectionProbeBakeSettings settings{};
   settings.prefilteredFaceSize = 130U;
@@ -276,8 +349,18 @@ int check_reflection_probe_bake_settings() {
   return 0;
 }
 
+/// Handles check distance fog settings.
 int check_distance_fog_settings() {
   using engine::renderer::DistanceFogMode;
+
+  const engine::renderer::DistanceFogSettings defaultDistanceFog{};
+  if (defaultDistanceFog.mode != DistanceFogMode::Exp2) {
+    return 70;
+  }
+  const engine::renderer::HeightFogSettings defaultHeightFog{};
+  if (!defaultHeightFog.enabled) {
+    return 84;
+  }
 
   if (engine::renderer::parse_distance_fog_mode("linear") !=
       DistanceFogMode::Linear) {
@@ -359,6 +442,7 @@ int check_distance_fog_settings() {
 
 } // namespace
 
+/// Runs this executable or test program.
 int main() {
   int result = check_submit_sort_and_reset();
   if (result != 0) {
@@ -373,6 +457,10 @@ int main() {
     return result;
   }
   result = check_camera_state();
+  if (result != 0) {
+    return result;
+  }
+  result = check_shutdown_resets_public_renderer_state();
   if (result != 0) {
     return result;
   }

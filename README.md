@@ -21,6 +21,10 @@ The repository is not production-complete yet. Game authors primarily work throu
 - Maintain predictable runtime behavior (no exceptions, no RTTI, explicit error paths)
 - Keep module dependencies explicit and strictly downward
 
+## Source commenting standard
+
+Every tracked source, script, shader, build, and test file should start with a short file-level comment explaining its role. Every class, struct, enum, and function added or changed in future work should also keep a concise purpose comment close to its declaration or definition. Update the comment when behavior changes.
+
 ## Current verified state
 
 The engine has strong foundations, but it is still being delivered milestone by milestone.

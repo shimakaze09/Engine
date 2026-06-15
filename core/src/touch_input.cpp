@@ -1,3 +1,5 @@
+// Implements touch input behavior for the Engine core engine.
+
 #include "engine/core/touch_input.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
@@ -87,6 +89,7 @@ float g_prevTwoFingerDist = 0.0F;
 float g_prevTwoFingerAngle = 0.0F;
 bool g_twoFingerTracking = false;
 
+/// Handles fire touch callbacks.
 void fire_touch_callbacks(const TouchEvent &event) noexcept {
   for (const auto &entry : g_touchCallbacks) {
     if (entry.occupied && (entry.callback != nullptr)) {
@@ -95,6 +98,7 @@ void fire_touch_callbacks(const TouchEvent &event) noexcept {
   }
 }
 
+/// Handles fire gesture callbacks.
 void fire_gesture_callbacks(const GestureEvent &event) noexcept {
   const auto idx = static_cast<std::size_t>(event.type);
   if (idx >= kGestureTypeCount) {
@@ -107,6 +111,7 @@ void fire_gesture_callbacks(const GestureEvent &event) noexcept {
   }
 }
 
+/// Finds the matching object or resource for touch.
 ActiveTouch *find_touch(std::int64_t touchId) noexcept {
   for (auto &t : g_touches) {
     if (t.active && (t.touchId == touchId)) {
@@ -116,6 +121,7 @@ ActiveTouch *find_touch(std::int64_t touchId) noexcept {
   return nullptr;
 }
 
+/// Finds the matching object or resource for empty touch.
 ActiveTouch *find_empty_touch() noexcept {
   for (auto &t : g_touches) {
     if (!t.active) {
@@ -125,6 +131,7 @@ ActiveTouch *find_empty_touch() noexcept {
   return nullptr;
 }
 
+/// Finds the matching object or resource for timing.
 TouchTiming *find_timing(std::int64_t touchId) noexcept {
   for (auto &t : g_touchTimings) {
     if (t.active && (t.touchId == touchId)) {
@@ -134,16 +141,19 @@ TouchTiming *find_timing(std::int64_t touchId) noexcept {
   return nullptr;
 }
 
+/// Handles distance.
 float distance(float x1, float y1, float x2, float y2) noexcept {
   const float dx = x2 - x1;
   const float dy = y2 - y1;
   return std::sqrt(dx * dx + dy * dy);
 }
 
+/// Handles angle between.
 float angle_between(float x1, float y1, float x2, float y2) noexcept {
   return std::atan2(y2 - y1, x2 - x1);
 }
 
+/// Handles try recognize tap.
 void try_recognize_tap(const ActiveTouch &touch) noexcept {
   const TouchTiming *timing = find_timing(touch.touchId);
   if (timing == nullptr) {
@@ -164,6 +174,7 @@ void try_recognize_tap(const ActiveTouch &touch) noexcept {
   }
 }
 
+/// Handles try recognize swipe.
 void try_recognize_swipe(const ActiveTouch &touch) noexcept {
   const TouchTiming *timing = find_timing(touch.touchId);
   if (timing == nullptr) {
@@ -199,6 +210,7 @@ void try_recognize_swipe(const ActiveTouch &touch) noexcept {
   fire_gesture_callbacks(ge);
 }
 
+/// Advances this system for the current frame or tick for two finger gestures.
 void update_two_finger_gestures() noexcept {
   // Find the first two active touches.
   const ActiveTouch *t1 = nullptr;
@@ -282,6 +294,7 @@ bool initialize_touch_input() noexcept {
   return true;
 }
 
+/// Shuts down the owning system for touch input.
 void shutdown_touch_input() noexcept {
   g_touchInitialized = false;
   g_touches = {};
@@ -308,7 +321,10 @@ void touch_process_event(const void *nativeEvent) noexcept {
     const float y = event->tfinger.y;
     const float pressure = event->tfinger.pressure;
 
-    ActiveTouch *slot = find_empty_touch();
+    ActiveTouch *slot = find_touch(fingerId);
+    if (slot == nullptr) {
+      slot = find_empty_touch();
+    }
     if (slot != nullptr) {
       slot->touchId = fingerId;
       slot->x = x;
@@ -321,13 +337,19 @@ void touch_process_event(const void *nativeEvent) noexcept {
     }
 
     // Record timing for gesture recognition.
-    for (auto &timing : g_touchTimings) {
-      if (!timing.active) {
-        timing.touchId = fingerId;
-        timing.framesBegan = g_frameCounter;
-        timing.active = true;
-        break;
+    TouchTiming *timing = find_timing(fingerId);
+    if (timing == nullptr) {
+      for (auto &candidate : g_touchTimings) {
+        if (!candidate.active) {
+          timing = &candidate;
+          break;
+        }
       }
+    }
+    if (timing != nullptr) {
+      timing->touchId = fingerId;
+      timing->framesBegan = g_frameCounter;
+      timing->active = true;
     }
 
     TouchEvent te{};
@@ -439,8 +461,10 @@ void touch_process_event(const void *nativeEvent) noexcept {
   }
 }
 
+/// Converts touch begin frame into the target representation.
 void touch_begin_frame() noexcept { /* Nothing needed currently. */ }
 
+/// Converts touch end frame into the target representation.
 void touch_end_frame() noexcept { ++g_frameCounter; }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +481,7 @@ std::uint32_t active_touch_count() noexcept {
   return count;
 }
 
+/// Returns the requested value for active touch.
 bool get_active_touch(std::uint32_t index, TouchEvent *outTouch) noexcept {
   if (outTouch == nullptr) {
     return false;
@@ -500,6 +525,7 @@ bool register_touch_callback(TouchCallback cb, void *userData) noexcept {
   return false;
 }
 
+/// Handles unregister touch callback.
 bool unregister_touch_callback(TouchCallback cb, void *userData) noexcept {
   for (auto &entry : g_touchCallbacks) {
     if (entry.occupied && (entry.callback == cb) &&
@@ -511,6 +537,7 @@ bool unregister_touch_callback(TouchCallback cb, void *userData) noexcept {
   return false;
 }
 
+/// Handles register gesture callback.
 bool register_gesture_callback(GestureType type, GestureCallback cb,
                                void *userData) noexcept {
   if (cb == nullptr) {
@@ -533,6 +560,7 @@ bool register_gesture_callback(GestureType type, GestureCallback cb,
   return false;
 }
 
+/// Handles unregister gesture callback.
 bool unregister_gesture_callback(GestureType type, GestureCallback cb,
                                  void *userData) noexcept {
   const auto idx = static_cast<std::size_t>(type);
@@ -557,6 +585,7 @@ void set_touch_mouse_emulation(bool enabled) noexcept {
   g_mouseEmulation = enabled;
 }
 
+/// Returns whether is touch mouse emulation enabled.
 bool is_touch_mouse_emulation_enabled() noexcept { return g_mouseEmulation; }
 
 } // namespace engine::core

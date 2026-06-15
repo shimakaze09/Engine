@@ -1,3 +1,5 @@
+// Defines the gbuffer fragment shader used by the Engine renderer.
+
 #version 330 core
 
 in vec3 vWorldPos;
@@ -15,6 +17,7 @@ uniform float uRoughness;
 uniform float uAO;
 uniform vec3 uEmissive;
 
+/// Runs the shader entry point for this stage.
 void main() {
     vec3 N = normalize(vNormal);
 
