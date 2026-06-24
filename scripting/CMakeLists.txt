@@ -21,6 +21,7 @@ engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
     src/collision_bindings.cpp
+    src/coroutine_bindings.cpp
     src/deferred_mutations.cpp
     src/persist_bindings.cpp
     src/runtime_binding.cpp

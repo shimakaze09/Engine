@@ -4,6 +4,7 @@
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
 #include "collision_bindings.h"
+#include "coroutine_bindings.h"
 #include "deferred_mutations.h"
 #include "persist_bindings.h"
 #include "runtime_binding.h"
@@ -3492,194 +3493,10 @@ static int lua_engine_remove_spot_light(lua_State *state) noexcept {
   return 1;
 }
 
-// --- Coroutine scheduler ---
-
-enum class WaitMode : std::uint8_t {
-  Time,
-  Condition,
-  Frames,
-};
-
-/// Stores coroutine entry data used by the engine.
-struct CoroutineEntry final {
-  lua_State *thread = nullptr;
-  int threadRef = LUA_NOREF;
-  int conditionRef = LUA_NOREF;
-  float wakeAt = 0.0F;
-  std::uint32_t wakeAtFrame = 0U;
-  WaitMode mode = WaitMode::Time;
-  bool active = false;
-};
-
-// Tags used to distinguish yield types (address-only, value irrelevant).
-static char kWaitFramesTag;
-static char kWaitConditionTag;
-
-/// Owns the coroutine scheduler behavior and state.
-class CoroutineScheduler final {
-public:
-  static constexpr std::size_t kCapacity = 32U;
-
-  // Parse yield results from a coroutine that just called lua_yield.
-  // Sets entry mode / wakeAt / conditionRef / wakeAtFrame.
-  void parse_yield(lua_State *thread, int nresults,
-                   CoroutineEntry &entry) noexcept {
-    // Default: wake next tick (Time mode, wake now).
-    entry.mode = WaitMode::Time;
-    entry.wakeAt = g_totalSeconds;
-    entry.wakeAtFrame = 0U;
-    if (entry.conditionRef != LUA_NOREF && g_state != nullptr) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
-      entry.conditionRef = LUA_NOREF;
-    }
-
-    if (nresults >= 2 && lua_islightuserdata(thread, -1)) {
-      void *tag = lua_touserdata(thread, -1);
-      if (tag == static_cast<void *>(&kWaitFramesTag)) {
-        const auto frames =
-            static_cast<std::uint32_t>(lua_tointeger(thread, -2));
-        entry.mode = WaitMode::Frames;
-        entry.wakeAtFrame = g_frameIndex + frames;
-      } else if (tag == static_cast<void *>(&kWaitConditionTag)) {
-        // Condition function is at -2. Store a registry ref.
-        lua_pushvalue(thread, -2);
-        entry.conditionRef = luaL_ref(thread, LUA_REGISTRYINDEX);
-        entry.mode = WaitMode::Condition;
-      }
-      lua_pop(thread, nresults);
-    } else if (nresults >= 1 && lua_isnumber(thread, -1)) {
-      const float secs = static_cast<float>(lua_tonumber(thread, -1));
-      entry.wakeAt = g_totalSeconds + secs;
-      lua_pop(thread, nresults);
-    } else if (nresults > 0) {
-      lua_pop(thread, nresults);
-    }
-  }
-
-  // Check whether a condition-mode coroutine should be woken.
-  bool check_condition(int condRef) noexcept {
-    if (g_state == nullptr || condRef == LUA_NOREF) {
-      return false;
-    }
-    lua_rawgeti(g_state, LUA_REGISTRYINDEX, condRef);
-    if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-      log_lua_error("wait_until condition");
-      return true; // Wake on error so the coroutine can be resumed/faulted.
-    }
-    const bool result = lua_toboolean(g_state, -1) != 0;
-    lua_pop(g_state, 1);
-    return result;
-  }
-
-  // Returns true if the entry should be woken this tick.
-  bool should_wake(const CoroutineEntry &entry) noexcept {
-    switch (entry.mode) {
-    case WaitMode::Time:
-      return g_totalSeconds >= entry.wakeAt;
-    case WaitMode::Frames:
-      return g_frameIndex >= entry.wakeAtFrame;
-    case WaitMode::Condition:
-      return check_condition(entry.conditionRef);
-    }
-    return false;
-  }
-
-  // Release a single entry (unref thread + condition).
-  void release_entry(CoroutineEntry &entry) noexcept {
-    if (entry.conditionRef != LUA_NOREF && g_state != nullptr) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
-    }
-    if (entry.threadRef != LUA_NOREF && g_state != nullptr) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.threadRef);
-    }
-    entry = CoroutineEntry{};
-  }
-
-  CoroutineEntry m_entries[kCapacity]{};
-};
-
-static CoroutineScheduler g_coroutineScheduler;
-
 /// Handles lua engine start coroutine.
 int lua_engine_start_coroutine(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1)) {
-    lua_pushnil(state);
-    return 1;
-  }
-  for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-    if (!g_coroutineScheduler.m_entries[i].active) {
-      lua_State *thread = lua_newthread(state);
-      if (thread == nullptr) {
-        lua_pushnil(state);
-        return 1;
-      }
-      // Root the thread in the registry so GC won't collect it.
-      const int threadRef = luaL_ref(state, LUA_REGISTRYINDEX);
-
-      // Move the function onto the new thread's stack.
-      lua_pushvalue(state, 1);
-      lua_xmove(state, thread, 1);
-
-      int nresults = 0;
-      const int status = lua_resume(thread, state, 0, &nresults);
-      if (status == LUA_OK) {
-        // Coroutine finished immediately; release the thread ref.
-        luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
-        lua_pushinteger(state, static_cast<lua_Integer>(i));
-        return 1;
-      }
-      if (status == LUA_YIELD) {
-        auto &entry = g_coroutineScheduler.m_entries[i];
-        entry.thread = thread;
-        entry.threadRef = threadRef;
-        entry.active = true;
-        g_coroutineScheduler.parse_yield(thread, nresults, entry);
-        lua_pushinteger(state, static_cast<lua_Integer>(i));
-        return 1;
-      }
-      // Error: move error from thread to parent state for logging.
-      luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
-      if (lua_isstring(thread, -1)) {
-        lua_xmove(thread, g_state, 1);
-      } else {
-        lua_pushstring(g_state, "start_coroutine error (non-string)");
-      }
-      log_lua_error("start_coroutine");
-      lua_pushnil(state);
-      return 1;
-    }
-  }
-  lua_pushnil(state);
-  return 1;
-}
-
-/// Handles lua engine wait.
-int lua_engine_wait(lua_State *state) noexcept {
-  // Yield with the sleep duration so the scheduler can parse it.
-  const float secs = lua_isnumber(state, 1)
-                         ? static_cast<float>(lua_tonumber(state, 1))
-                         : 0.0F;
-  lua_pushnumber(state, static_cast<lua_Number>(secs));
-  return lua_yield(state, 1);
-}
-
-/// Handles lua engine wait frames.
-int lua_engine_wait_frames(lua_State *state) noexcept {
-  const int n =
-      lua_isinteger(state, 1) ? static_cast<int>(lua_tointeger(state, 1)) : 1;
-  lua_pushinteger(state, static_cast<lua_Integer>(n > 0 ? n : 1));
-  lua_pushlightuserdata(state, static_cast<void *>(&kWaitFramesTag));
-  return lua_yield(state, 2);
-}
-
-/// Handles lua engine wait until.
-int lua_engine_wait_until(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1)) {
-    return luaL_error(state, "wait_until expects a function");
-  }
-  lua_pushvalue(state, 1);
-  lua_pushlightuserdata(state, static_cast<void *>(&kWaitConditionTag));
-  return lua_yield(state, 2);
+  return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
+                             log_lua_error);
 }
 
 // --- Entity lifecycle completeness ---
@@ -5124,10 +4941,7 @@ void shutdown_scripting() noexcept {
     clear_entity_saved_state();
     clear_lua_timer_bindings(g_state);
     clear_collision_handlers(g_state);
-    // Mark all coroutines inactive and release refs.
-    for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-      g_coroutineScheduler.release_entry(g_coroutineScheduler.m_entries[i]);
-    }
+    clear_lua_coroutines(g_state);
     lua_close(g_state);
     g_state = nullptr;
   }
@@ -5344,48 +5158,13 @@ void tick_timers() noexcept {
 
 /// Handles tick coroutines.
 void tick_coroutines() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-  for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-    auto &entry = g_coroutineScheduler.m_entries[i];
-    if (!entry.active) {
-      continue;
-    }
-    if (!g_coroutineScheduler.should_wake(entry)) {
-      continue;
-    }
-    // Release condition ref before resume (no longer needed).
-    if (entry.conditionRef != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
-      entry.conditionRef = LUA_NOREF;
-    }
-    refresh_lua_hook(); // Reset instruction counter per coroutine resume.
-    int nresults = 0;
-    const int status = lua_resume(entry.thread, g_state, 0, &nresults);
-    if (status == LUA_OK) {
-      g_coroutineScheduler.release_entry(entry);
-    } else if (status == LUA_YIELD) {
-      g_coroutineScheduler.parse_yield(entry.thread, nresults, entry);
-    } else {
-      // Error: move the error message from the thread stack to g_state
-      // so that log_lua_error can read it (it reads from g_state).
-      if (lua_isstring(entry.thread, -1)) {
-        lua_xmove(entry.thread, g_state, 1);
-      } else {
-        lua_pushstring(g_state, "coroutine error (non-string)");
-      }
-      log_lua_error("coroutine");
-      g_coroutineScheduler.release_entry(entry);
-    }
-  }
+  tick_lua_coroutines(g_state, g_totalSeconds, g_frameIndex, log_lua_error,
+                      refresh_lua_hook);
 }
 
 /// Handles clear coroutines.
 void clear_coroutines() noexcept {
-  for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-    g_coroutineScheduler.release_entry(g_coroutineScheduler.m_entries[i]);
-  }
+  clear_lua_coroutines(g_state);
 }
 
 /// Returns whether has pending scene op.
