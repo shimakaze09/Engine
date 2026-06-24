@@ -5,6 +5,7 @@
 #include "engine/scripting/dap_server.h"
 #include "collision_bindings.h"
 #include "coroutine_bindings.h"
+#include "debug_bindings.h"
 #include "deferred_mutations.h"
 #include "game_bindings.h"
 #include "persist_bindings.h"
@@ -50,11 +51,6 @@ namespace engine::scripting {
 
 /// Handles register generated bindings.
 void register_generated_bindings(lua_State *L) noexcept;
-/// Handles debugger clear breakpoints.
-void debugger_clear_breakpoints() noexcept;
-/// Handles debugger add breakpoint.
-bool debugger_add_breakpoint(const char *file, int line) noexcept;
-
 namespace {
 
 lua_State *g_state = nullptr;
@@ -184,46 +180,6 @@ constexpr std::size_t kMaxModuleLoadDepth = 32U;
 char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
 
-constexpr std::size_t kMaxProfilerEntries = 256U;
-/// Stores profiler entry data used by the engine.
-struct ProfilerEntry final {
-  char name[96] = {};
-  std::uint32_t samples = 0U;
-  bool occupied = false;
-};
-ProfilerEntry g_profilerEntries[kMaxProfilerEntries]{};
-bool g_profilerEnabled = false;
-
-constexpr std::size_t kMaxBreakpoints = 64U;
-/// Stores debug breakpoint data used by the engine.
-struct DebugBreakpoint final {
-  char file[160] = {};
-  int line = 0;
-  bool active = false;
-};
-DebugBreakpoint g_breakpoints[kMaxBreakpoints]{};
-
-constexpr std::size_t kMaxDebugWatches = 32U;
-char g_watchExprs[kMaxDebugWatches][96]{};
-std::size_t g_watchCount = 0U;
-char g_lastWatchOutput[1024] = {};
-char g_lastCallstack[2048] = {};
-char g_lastBreakpointFile[160] = {};
-int g_lastBreakpointLine = 0;
-std::uint32_t g_breakpointHitCount = 0U;
-bool g_debuggerEnabled = false;
-
-// DAP debugger stepping state.
-DapStepMode g_dapStepMode = DapStepMode::Continue;
-int g_dapStepDepth = 0;
-
-// --- Sandbox state ---
-bool g_sandboxEnabled = true;
-
-// CPU instruction limit per protected call. Default 1M instructions.
-constexpr int kDefaultInstructionLimit = 1000000;
-int g_instructionLimit = kDefaultInstructionLimit;
-
 // Memory limit for the Lua allocator (bytes). Default 64MB.
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
 std::size_t g_memoryLimit = kDefaultMemoryLimit;
@@ -262,9 +218,6 @@ constexpr unsigned kLuaEntityGenerationShift = 32U;
 
 /// Handles refresh lua hook.
 void refresh_lua_hook() noexcept;
-/// Handles scripting debug hook.
-void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept;
-
 /// Encodes a generated runtime entity into Lua's numeric handle format.
 bool encode_lua_entity_handle(runtime::Entity entity,
                               lua_Integer *outHandle) noexcept {
@@ -400,255 +353,9 @@ bool module_is_currently_loading(const char *path) noexcept {
   return false;
 }
 
-/// Handles profiler record sample.
-void profiler_record_sample(const char *name) noexcept {
-  if ((name == nullptr) || (name[0] == '\0')) {
-    name = "<anonymous>";
-  }
-
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    if (!g_profilerEntries[i].occupied) {
-      continue;
-    }
-    if (std::strcmp(g_profilerEntries[i].name, name) == 0) {
-      ++g_profilerEntries[i].samples;
-      return;
-    }
-  }
-
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    if (g_profilerEntries[i].occupied) {
-      continue;
-    }
-    std::snprintf(g_profilerEntries[i].name, sizeof(g_profilerEntries[i].name),
-                  "%s", name);
-    g_profilerEntries[i].samples = 1U;
-    g_profilerEntries[i].occupied = true;
-    return;
-  }
-}
-
-/// Handles debugger line matches.
-bool debugger_line_matches(const char *source, int line) noexcept {
-  if ((source == nullptr) || (line <= 0)) {
-    return false;
-  }
-
-  const char *normalizedSource = source;
-  if (normalizedSource[0] == '@') {
-    ++normalizedSource;
-  }
-
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    if (!g_breakpoints[i].active || (g_breakpoints[i].line != line)) {
-      continue;
-    }
-    const char *bp = g_breakpoints[i].file;
-    const std::size_t srcLen = std::strlen(normalizedSource);
-    const std::size_t bpLen = std::strlen(bp);
-    if ((bpLen > 0U) && (srcLen >= bpLen) &&
-        (std::strcmp(normalizedSource + (srcLen - bpLen), bp) == 0)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// Handles debugger capture watch values.
-void debugger_capture_watch_values() noexcept {
-  g_lastWatchOutput[0] = '\0';
-  if ((g_state == nullptr) || (g_watchCount == 0U)) {
-    return;
-  }
-
-  lua_sethook(g_state, nullptr, 0, 0);
-
-  std::size_t writeOffset = 0U;
-  for (std::size_t i = 0U; i < g_watchCount; ++i) {
-    const char *expr = g_watchExprs[i];
-    char chunk[160] = {};
-    std::snprintf(chunk, sizeof(chunk), "return (%s)", expr);
-
-    const int loadStatus = luaL_loadstring(g_state, chunk);
-    if (loadStatus != LUA_OK) {
-      lua_pop(g_state, 1);
-      continue;
-    }
-
-    const int callStatus = lua_pcall(g_state, 0, 1, 0);
-    const char *value = "<error>";
-    char valueBuffer[128] = {};
-    if (callStatus == LUA_OK) {
-      if (lua_isnumber(g_state, -1)) {
-        std::snprintf(valueBuffer, sizeof(valueBuffer), "%g",
-                      static_cast<double>(lua_tonumber(g_state, -1)));
-        value = valueBuffer;
-      } else if (lua_isboolean(g_state, -1)) {
-        value = lua_toboolean(g_state, -1) ? "true" : "false";
-      } else if (lua_isstring(g_state, -1)) {
-        value = lua_tostring(g_state, -1);
-      } else if (lua_isnil(g_state, -1)) {
-        value = "nil";
-      } else {
-        value = luaL_typename(g_state, -1);
-      }
-      lua_pop(g_state, 1);
-    } else {
-      lua_pop(g_state, 1);
-    }
-
-    if (writeOffset < (sizeof(g_lastWatchOutput) - 1U)) {
-      const int written =
-          std::snprintf(g_lastWatchOutput + writeOffset,
-                        sizeof(g_lastWatchOutput) - writeOffset, "%s%s=%s",
-                        (writeOffset == 0U) ? "" : "; ", expr, value);
-      if (written > 0) {
-        const std::size_t delta = static_cast<std::size_t>(written);
-        writeOffset = (writeOffset + delta < sizeof(g_lastWatchOutput))
-                          ? (writeOffset + delta)
-                          : (sizeof(g_lastWatchOutput) - 1U);
-      }
-    }
-  }
-
-  refresh_lua_hook();
-}
-
-/// Handles scripting debug hook.
-void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
-  if ((state == nullptr) || (ar == nullptr)) {
-    return;
-  }
-
-  // Instruction-count sandbox limit — fires after g_instructionLimit ops.
-  if (g_sandboxEnabled && ar->event == LUA_HOOKCOUNT) {
-    luaL_error(state, "CPU instruction limit exceeded (%d instructions)",
-               g_instructionLimit);
-    return; // Unreachable (luaL_error longjmps).
-  }
-
-  if (g_profilerEnabled && (ar->event == LUA_HOOKCALL)) {
-    if (lua_getinfo(state, "n", ar) != 0) {
-      profiler_record_sample((ar->name != nullptr) ? ar->name : "<anonymous>");
-    }
-  }
-
-  if (!g_debuggerEnabled) {
-    return;
-  }
-
-  // Stepping: on return event, if stepping out, switch to step-in
-  // so we stop on the next line after the return.
-  if (g_dapStepMode == DapStepMode::StepOut && ar->event == LUA_HOOKRET) {
-    lua_Debug check{};
-    int depth = 0;
-    while (lua_getstack(state, depth, &check) != 0) {
-      ++depth;
-    }
-    // Current depth includes the returning frame; after return
-    // we'll be at depth-1. If that's <= the step depth, stop next line.
-    if (depth - 1 <= g_dapStepDepth) {
-      g_dapStepMode = DapStepMode::StepIn;
-    }
-    return;
-  }
-
-  if (ar->event != LUA_HOOKLINE) {
-    return;
-  }
-
-  if (lua_getinfo(state, "Sln", ar) == 0) {
-    return;
-  }
-
-  bool shouldStop = false;
-  const char *reason = "breakpoint";
-
-  if (debugger_line_matches(ar->source, ar->currentline)) {
-    shouldStop = true;
-    reason = "breakpoint";
-  } else if (g_dapStepMode == DapStepMode::StepIn) {
-    shouldStop = true;
-    reason = "step";
-  } else if (g_dapStepMode == DapStepMode::Next) {
-    // Stop only if at the same or lesser call depth.
-    lua_Debug check{};
-    int depth = 0;
-    while (lua_getstack(state, depth, &check) != 0) {
-      ++depth;
-    }
-    if (depth <= g_dapStepDepth) {
-      shouldStop = true;
-      reason = "step";
-    }
-  }
-
-  if (!shouldStop) {
-    return;
-  }
-
-  const char *source = (ar->source != nullptr) ? ar->source : "";
-  if (source[0] == '@') {
-    ++source;
-  }
-  std::snprintf(g_lastBreakpointFile, sizeof(g_lastBreakpointFile), "%s",
-                source);
-  g_lastBreakpointLine = ar->currentline;
-  ++g_breakpointHitCount;
-
-  luaL_traceback(state, state, "breakpoint", 1);
-  const char *trace = lua_tostring(state, -1);
-  if (trace != nullptr) {
-    std::snprintf(g_lastCallstack, sizeof(g_lastCallstack), "%s", trace);
-  }
-  lua_pop(state, 1);
-  debugger_capture_watch_values();
-
-  // If a DAP client is connected, pause and process DAP messages.
-  if (dap_has_client()) {
-    // Record current depth for step-over/step-out.
-    lua_Debug depthCheck{};
-    int currentDepth = 0;
-    while (lua_getstack(state, currentDepth, &depthCheck) != 0) {
-      ++currentDepth;
-    }
-    // Block until continue/step command.
-    g_dapStepMode = dap_on_stopped(state, source, ar->currentline, reason);
-    g_dapStepDepth = currentDepth;
-    // Re-enable hooks after processing (eval disables them).
-    refresh_lua_hook();
-  }
-}
-
 /// Handles refresh lua hook.
 void refresh_lua_hook() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-
-  int mask = 0;
-  int count = 0;
-  if (g_profilerEnabled) {
-    mask |= LUA_MASKCALL;
-  }
-  if (g_debuggerEnabled) {
-    mask |= LUA_MASKLINE;
-    // Enable call/return hooks for stepping modes.
-    if (g_dapStepMode != DapStepMode::Continue) {
-      mask |= LUA_MASKCALL | LUA_MASKRET;
-    }
-  }
-  if (g_sandboxEnabled && g_instructionLimit > 0) {
-    mask |= LUA_MASKCOUNT;
-    count = g_instructionLimit;
-  }
-
-  if (mask == 0) {
-    lua_sethook(g_state, nullptr, 0, 0);
-    return;
-  }
-
-  lua_sethook(g_state, &scripting_debug_hook, mask, count);
+  refresh_debug_lua_hook();
 }
 
 /// Handles log lua error.
@@ -1725,126 +1432,6 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
   }
 
   push_entity_handle(state, entity);
-  return 1;
-}
-
-/// Handles lua engine profiler enable.
-int lua_engine_profiler_enable(lua_State *state) noexcept {
-  g_profilerEnabled =
-      (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
-  refresh_lua_hook();
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine profiler reset.
-int lua_engine_profiler_reset(lua_State *state) noexcept {
-  static_cast<void>(state);
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    g_profilerEntries[i] = ProfilerEntry{};
-  }
-  return 0;
-}
-
-/// Handles lua engine profiler get count.
-int lua_engine_profiler_get_count(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  if (name == nullptr) {
-    lua_pushinteger(state, 0);
-    return 1;
-  }
-
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    if (!g_profilerEntries[i].occupied) {
-      continue;
-    }
-    if (std::strcmp(g_profilerEntries[i].name, name) == 0) {
-      lua_pushinteger(state,
-                      static_cast<lua_Integer>(g_profilerEntries[i].samples));
-      return 1;
-    }
-  }
-
-  lua_pushinteger(state, 0);
-  return 1;
-}
-
-/// Handles lua engine debugger enable.
-int lua_engine_debugger_enable(lua_State *state) noexcept {
-  g_debuggerEnabled =
-      (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
-  refresh_lua_hook();
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine debugger add breakpoint.
-int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept {
-  const char *file = lua_tostring(state, 1);
-  if ((file == nullptr) || !lua_isnumber(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const int line = static_cast<int>(lua_tointeger(state, 2));
-  lua_pushboolean(state, debugger_add_breakpoint(file, line) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine debugger clear breakpoints.
-int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept {
-  static_cast<void>(state);
-  debugger_clear_breakpoints();
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine debugger add watch.
-int lua_engine_debugger_add_watch(lua_State *state) noexcept {
-  const char *expr = lua_tostring(state, 1);
-  if ((expr == nullptr) || (g_watchCount >= kMaxDebugWatches)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  std::snprintf(g_watchExprs[g_watchCount], sizeof(g_watchExprs[0]), "%s",
-                expr);
-  ++g_watchCount;
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine debugger clear watches.
-int lua_engine_debugger_clear_watches(lua_State *state) noexcept {
-  static_cast<void>(state);
-  g_watchCount = 0U;
-  g_lastWatchOutput[0] = '\0';
-  return 0;
-}
-
-/// Handles lua engine debugger last breakpoint.
-int lua_engine_debugger_last_breakpoint(lua_State *state) noexcept {
-  if (g_lastBreakpointLine <= 0) {
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_newtable(state);
-  lua_pushstring(state, g_lastBreakpointFile);
-  lua_setfield(state, -2, "file");
-  lua_pushinteger(state, static_cast<lua_Integer>(g_lastBreakpointLine));
-  lua_setfield(state, -2, "line");
-  lua_pushinteger(state, static_cast<lua_Integer>(g_breakpointHitCount));
-  lua_setfield(state, -2, "hits");
-  return 1;
-}
-
-/// Handles lua engine debugger last callstack.
-int lua_engine_debugger_last_callstack(lua_State *state) noexcept {
-  lua_pushstring(state, g_lastCallstack);
-  return 1;
-}
-
-/// Handles lua engine debugger last watch values.
-int lua_engine_debugger_last_watch_values(lua_State *state) noexcept {
-  lua_pushstring(state, g_lastWatchOutput);
   return 1;
 }
 
@@ -4632,6 +4219,7 @@ bool initialize_scripting() noexcept {
                       "failed to create Lua state");
     return false;
   }
+  set_debug_lua_state(g_state);
 
   // Open only safe libraries. io, os, debug, and package are excluded to
   // prevent untrusted game scripts from accessing the file system or executing
@@ -4653,7 +4241,7 @@ bool initialize_scripting() noexcept {
 
   // Install sandboxed memory allocator. io/os/debug libraries are already
   // excluded (only base, coroutine, table, string, math, utf8 are opened).
-  if (g_sandboxEnabled) {
+  if (debug_sandbox_enabled()) {
     lua_setallocf(g_state, sandbox_alloc, nullptr);
   }
 
@@ -4691,20 +4279,8 @@ void shutdown_scripting() noexcept {
   for (std::size_t i = 0U; i < kMaxFaultedEntities; ++i) {
     g_entityFaulted[i] = false;
   }
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    g_profilerEntries[i] = ProfilerEntry{};
-  }
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    g_breakpoints[i] = DebugBreakpoint{};
-  }
-  g_watchCount = 0U;
-  g_lastWatchOutput[0] = '\0';
-  g_lastCallstack[0] = '\0';
-  g_lastBreakpointFile[0] = '\0';
-  g_lastBreakpointLine = 0;
-  g_breakpointHitCount = 0U;
-  g_profilerEnabled = false;
-  g_debuggerEnabled = false;
+  reset_debug_bindings();
+  set_debug_lua_state(nullptr);
   g_godModeEnabled = false;
   g_noclipEnabled = false;
   for (std::size_t i = 0U; i < kMaxEntityPools; ++i) {
@@ -5104,48 +4680,24 @@ void clear_entity_script_modules() noexcept {
   g_entityScriptModuleCount = 0U;
 }
 
-/// Handles debugger clear breakpoints.
-void debugger_clear_breakpoints() noexcept {
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    g_breakpoints[i] = DebugBreakpoint{};
-  }
-}
-
-/// Handles debugger add breakpoint.
-bool debugger_add_breakpoint(const char *file, int line) noexcept {
-  if ((file == nullptr) || (line <= 0)) {
-    return false;
-  }
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    if (!g_breakpoints[i].active) {
-      std::snprintf(g_breakpoints[i].file, sizeof(g_breakpoints[i].file), "%s",
-                    file);
-      g_breakpoints[i].line = line;
-      g_breakpoints[i].active = true;
-      return true;
-    }
-  }
-  return false;
-}
-
 // --- Sandbox configuration ---
 
 void set_sandbox_enabled(bool enabled) noexcept {
-  g_sandboxEnabled = enabled;
+  set_debug_sandbox_enabled(enabled);
   refresh_lua_hook();
 }
 
 /// Returns whether is sandbox enabled.
-bool is_sandbox_enabled() noexcept { return g_sandboxEnabled; }
+bool is_sandbox_enabled() noexcept { return debug_sandbox_enabled(); }
 
 /// Sets the requested value for instruction limit.
 void set_instruction_limit(int limit) noexcept {
-  g_instructionLimit = limit;
+  set_debug_instruction_limit(limit);
   refresh_lua_hook();
 }
 
 /// Returns the requested value for instruction limit.
-int get_instruction_limit() noexcept { return g_instructionLimit; }
+int get_instruction_limit() noexcept { return debug_instruction_limit(); }
 
 /// Sets the requested value for memory limit.
 void set_memory_limit(std::size_t limit) noexcept { g_memoryLimit = limit; }
