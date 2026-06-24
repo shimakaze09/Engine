@@ -25,6 +25,7 @@ engine_add_module_library(engine_scripting
     src/persist_bindings.cpp
     src/runtime_binding.cpp
     src/timer_bindings.cpp
+    src/touch_bindings.cpp
     src/dap_server.cpp
     ${ENGINE_BINDGEN_OUTPUT}
     PUBLIC_INCLUDE_DIRS
