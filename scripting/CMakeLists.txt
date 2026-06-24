@@ -20,8 +20,10 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/collision_bindings.cpp
     src/deferred_mutations.cpp
     src/runtime_binding.cpp
+    src/timer_bindings.cpp
     src/dap_server.cpp
     ${ENGINE_BINDGEN_OUTPUT}
     PUBLIC_INCLUDE_DIRS
