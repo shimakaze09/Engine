@@ -122,7 +122,17 @@ void debugger_capture_watch_values(lua_State *state) noexcept {
   for (std::size_t i = 0U; i < g_watchCount; ++i) {
     const char *expr = g_watchExprs[i];
     char chunk[160] = {};
-    std::snprintf(chunk, sizeof(chunk), "return (%s)", expr);
+    constexpr const char kWatchPrefix[] = "return (";
+    constexpr std::size_t kWatchPrefixLength = sizeof(kWatchPrefix) - 1U;
+    std::memcpy(chunk, kWatchPrefix, kWatchPrefixLength);
+    std::size_t exprLength = 0U;
+    while ((exprLength < (sizeof(g_watchExprs[0]) - 1U)) &&
+           (expr[exprLength] != '\0')) {
+      ++exprLength;
+    }
+    std::memcpy(chunk + kWatchPrefixLength, expr, exprLength);
+    chunk[kWatchPrefixLength + exprLength] = ')';
+    chunk[kWatchPrefixLength + exprLength + 1U] = '\0';
 
     const int loadStatus = luaL_loadstring(state, chunk);
     if (loadStatus != LUA_OK) {
