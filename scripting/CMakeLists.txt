@@ -22,6 +22,7 @@ engine_add_module_library(engine_scripting
     src/scripting.cpp
     src/collision_bindings.cpp
     src/deferred_mutations.cpp
+    src/persist_bindings.cpp
     src/runtime_binding.cpp
     src/timer_bindings.cpp
     src/dap_server.cpp

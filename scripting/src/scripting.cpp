@@ -5,6 +5,7 @@
 #include "engine/scripting/dap_server.h"
 #include "collision_bindings.h"
 #include "deferred_mutations.h"
+#include "persist_bindings.h"
 #include "runtime_binding.h"
 #include "timer_bindings.h"
 
@@ -216,9 +217,6 @@ bool g_debuggerEnabled = false;
 // DAP debugger stepping state.
 DapStepMode g_dapStepMode = DapStepMode::Continue;
 int g_dapStepDepth = 0;
-
-// Persist table for hot-reload state preservation (registry reference).
-int g_persistRef = LUA_NOREF;
 
 // --- Sandbox state ---
 bool g_sandboxEnabled = true;
@@ -4472,33 +4470,6 @@ int lua_engine_require(lua_State *state) noexcept {
   return 1;
 }
 
-// engine.persist(key, value) — store a value that survives hot-reload.
-int lua_engine_persist(lua_State *state) noexcept {
-  const char *key = luaL_checkstring(state, 1);
-  if (g_persistRef == LUA_NOREF) {
-    lua_newtable(state);
-    g_persistRef = luaL_ref(state, LUA_REGISTRYINDEX);
-  }
-  lua_rawgeti(state, LUA_REGISTRYINDEX, g_persistRef);
-  lua_pushvalue(state, 2); // value (may be nil to clear)
-  lua_setfield(state, -2, key);
-  lua_pop(state, 1); // pop persist table
-  return 0;
-}
-
-// engine.restore(key) — retrieve a value saved with engine.persist.
-int lua_engine_restore(lua_State *state) noexcept {
-  const char *key = luaL_checkstring(state, 1);
-  if (g_persistRef == LUA_NOREF) {
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_rawgeti(state, LUA_REGISTRYINDEX, g_persistRef);
-  lua_getfield(state, -1, key);
-  lua_remove(state, -2); // remove persist table, leave value
-  return 1;
-}
-
 /// Handles register engine bindings.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
@@ -5353,11 +5324,7 @@ void shutdown_scripting() noexcept {
   clear_touch_gesture_callbacks(g_state);
 
   if (g_state != nullptr) {
-    // Release persist table.
-    if (g_persistRef != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, g_persistRef);
-      g_persistRef = LUA_NOREF;
-    }
+    clear_persist_bindings(g_state);
     // Release saved entity state refs.
     clear_entity_saved_state();
     clear_lua_timer_bindings(g_state);
