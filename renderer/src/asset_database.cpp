@@ -182,6 +182,35 @@ bool register_mesh_asset(AssetDatabase *database, AssetId id,
   return true;
 }
 
+/// Marks a mesh asset as requested and loading without queuing a sync load.
+bool request_mesh_asset_streaming_load(AssetDatabase *database, AssetId id,
+                                       const char *sourcePath) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return false;
+  }
+
+  const std::size_t slot = find_mesh_asset_insert_slot(database, id);
+  if (slot == database->meshAssets.size()) {
+    return false;
+  }
+
+  database->occupied[slot] = true;
+  MeshAssetRecord &record = database->meshAssets[slot];
+  if (record.id == kInvalidAssetId) {
+    record.id = id;
+  }
+  if ((sourcePath != nullptr) && (sourcePath[0] != '\0')) {
+    write_source_path(&record.sourcePath, sourcePath);
+  }
+  record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
+  record.requestedResident = true;
+  if (record.state != AssetState::Ready) {
+    record.runtimeMesh = kInvalidMeshHandle;
+    record.state = AssetState::Loading;
+  }
+  return true;
+}
+
 /// Handles mesh asset state.
 AssetState mesh_asset_state(const AssetDatabase *database,
                             AssetId id) noexcept {

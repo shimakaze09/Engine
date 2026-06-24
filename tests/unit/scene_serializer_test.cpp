@@ -14,6 +14,10 @@
 
 namespace {
 
+constexpr const char *kRoundTripName = "Player \"One\" \\ Path";
+constexpr const char *kRoundTripScriptPath =
+    "assets\\scripts\\hero \"one\".lua";
+
 /// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
@@ -113,9 +117,16 @@ int build_source_scene(const char *path) {
   }
 
   engine::runtime::NameComponent secondName{};
-  std::snprintf(secondName.name, sizeof(secondName.name), "%s", "Player");
+  std::snprintf(secondName.name, sizeof(secondName.name), "%s",
+                kRoundTripName);
   if (!world->add_name_component(second, secondName)) {
     return 10;
+  }
+  engine::runtime::ScriptComponent secondScript{};
+  std::snprintf(secondScript.scriptPath, sizeof(secondScript.scriptPath), "%s",
+                kRoundTripScriptPath);
+  if (!world->add_script_component(second, secondScript)) {
+    return 12;
   }
 
   engine::runtime::Collider thirdCollider{};
@@ -201,9 +212,16 @@ int build_source_buffer(
   }
 
   engine::runtime::NameComponent secondName{};
-  std::snprintf(secondName.name, sizeof(secondName.name), "%s", "Player");
+  std::snprintf(secondName.name, sizeof(secondName.name), "%s",
+                kRoundTripName);
   if (!world->add_name_component(second, secondName)) {
     return 51;
+  }
+  engine::runtime::ScriptComponent secondScript{};
+  std::snprintf(secondScript.scriptPath, sizeof(secondScript.scriptPath), "%s",
+                kRoundTripScriptPath);
+  if (!world->add_script_component(second, secondScript)) {
+    return 53;
   }
 
   engine::runtime::Collider thirdCollider{};
@@ -262,6 +280,7 @@ int verify_loaded_scene(const char *path) {
   bool foundColliderValue = false;
   bool foundMeshValue = false;
   bool foundNameValue = false;
+  bool foundScriptValue = false;
   bool foundReflectionProbeValue = false;
 
   for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
@@ -296,8 +315,14 @@ int verify_loaded_scene(const char *path) {
 
     engine::runtime::NameComponent name{};
     if (world->get_name_component(entity, &name)
-        && (std::strcmp(name.name, "Player") == 0)) {
+        && (std::strcmp(name.name, kRoundTripName) == 0)) {
       foundNameValue = true;
+    }
+
+    engine::runtime::ScriptComponent script{};
+    if (world->get_script_component(entity, &script) &&
+        (std::strcmp(script.scriptPath, kRoundTripScriptPath) == 0)) {
+      foundScriptValue = true;
     }
 
     engine::runtime::ReflectionProbeComponent probe{};
@@ -349,6 +374,10 @@ int verify_loaded_scene(const char *path) {
     return 60;
   }
 
+  if (!foundScriptValue) {
+    return 67;
+  }
+
   if (world->reflection_probe_count() != 1U) {
     return 78;
   }
@@ -380,6 +409,7 @@ int verify_loaded_scene_from_buffer(
   bool foundColliderValue = false;
   bool foundMeshValue = false;
   bool foundNameValue = false;
+  bool foundScriptValue = false;
   bool foundReflectionProbeValue = false;
 
   for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
@@ -414,8 +444,14 @@ int verify_loaded_scene_from_buffer(
 
     engine::runtime::NameComponent name{};
     if (world->get_name_component(entity, &name)
-        && (std::strcmp(name.name, "Player") == 0)) {
+        && (std::strcmp(name.name, kRoundTripName) == 0)) {
       foundNameValue = true;
+    }
+
+    engine::runtime::ScriptComponent script{};
+    if (world->get_script_component(entity, &script) &&
+        (std::strcmp(script.scriptPath, kRoundTripScriptPath) == 0)) {
+      foundScriptValue = true;
     }
 
     engine::runtime::ReflectionProbeComponent probe{};
@@ -465,6 +501,10 @@ int verify_loaded_scene_from_buffer(
 
   if (!foundNameValue) {
     return 61;
+  }
+
+  if (!foundScriptValue) {
+    return 68;
   }
 
   if (world->reflection_probe_count() != 1U) {

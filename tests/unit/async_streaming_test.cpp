@@ -5,22 +5,20 @@
 #include "engine/renderer/asset_streaming.h"
 
 
-#include <cstdio>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <thread>
 
+#include "../test_harness.h"
+
 using namespace engine::renderer;
 
-static int g_failures = 0;
+static engine::tests::TestContext g_tests;
 
 #define CHECK(cond, msg)                                                       \
   do {                                                                         \
-    if (!(cond)) {                                                             \
-      std::fprintf(stderr, "FAIL: %s (line %d)\n", (msg), __LINE__);           \
-      ++g_failures;                                                            \
-    }                                                                          \
+    g_tests.check((cond), (msg));                                              \
   } while (false)
 
 /// Handles make id.
@@ -273,7 +271,5 @@ int main() {
   test_pending_count();
   test_load_callback_is_async();
 
-  std::printf("\n%s (%d failure(s))\n",
-              g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);
-  return g_failures == 0 ? 0 : 1;
+  return g_tests.finish("Async Streaming Unit Tests");
 }

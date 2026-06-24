@@ -700,51 +700,90 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
   }
 }
 
+struct DistanceFogUniformLocations final {
+  int mode = -1;
+  int start = -1;
+  int end = -1;
+  int density = -1;
+  int color = -1;
+};
+
+struct HeightFogUniformLocations final {
+  int enabled = -1;
+  int baseHeight = -1;
+  int density = -1;
+  int falloff = -1;
+  int stepCount = -1;
+};
+
+void upload_distance_fog_uniforms(
+    const RenderDevice *dev, const DistanceFogUniformLocations &locations,
+    const DistanceFogSettings &settings) noexcept {
+  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
+  if (locations.mode >= 0) {
+    dev->set_uniform_int(locations.mode, static_cast<std::int32_t>(fog.mode));
+  }
+  if (locations.start >= 0) {
+    dev->set_uniform_float(locations.start, fog.start);
+  }
+  if (locations.end >= 0) {
+    dev->set_uniform_float(locations.end, fog.end);
+  }
+  if (locations.density >= 0) {
+    dev->set_uniform_float(locations.density, fog.density);
+  }
+  if (locations.color >= 0) {
+    dev->set_uniform_vec3(locations.color, &fog.color.x);
+  }
+}
+
+void upload_height_fog_uniforms(
+    const RenderDevice *dev, const HeightFogUniformLocations &locations,
+    const HeightFogSettings &settings) noexcept {
+  const HeightFogSettings fog = normalize_height_fog_settings(settings);
+  if (locations.enabled >= 0) {
+    dev->set_uniform_int(locations.enabled, fog.enabled ? 1 : 0);
+  }
+  if (locations.baseHeight >= 0) {
+    dev->set_uniform_float(locations.baseHeight, fog.baseHeight);
+  }
+  if (locations.density >= 0) {
+    dev->set_uniform_float(locations.density, fog.density);
+  }
+  if (locations.falloff >= 0) {
+    dev->set_uniform_float(locations.falloff, fog.falloff);
+  }
+  if (locations.stepCount >= 0) {
+    dev->set_uniform_int(locations.stepCount, fog.stepCount);
+  }
+}
+
 /// Handles upload pbr distance fog uniforms.
 void upload_pbr_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
-  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
-  if (backend.pbrFogModeLocation >= 0) {
-    dev->set_uniform_int(backend.pbrFogModeLocation,
-                         static_cast<std::int32_t>(fog.mode));
-  }
-  if (backend.pbrFogStartLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFogStartLocation, fog.start);
-  }
-  if (backend.pbrFogEndLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFogEndLocation, fog.end);
-  }
-  if (backend.pbrFogDensityLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFogDensityLocation, fog.density);
-  }
-  if (backend.pbrFogColorLocation >= 0) {
-    dev->set_uniform_vec3(backend.pbrFogColorLocation, &fog.color.x);
-  }
+  upload_distance_fog_uniforms(
+      dev,
+      DistanceFogUniformLocations{backend.pbrFogModeLocation,
+                                  backend.pbrFogStartLocation,
+                                  backend.pbrFogEndLocation,
+                                  backend.pbrFogDensityLocation,
+                                  backend.pbrFogColorLocation},
+      settings);
 }
 
 /// Handles upload pbr height fog uniforms.
 void upload_pbr_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
-  const HeightFogSettings fog = normalize_height_fog_settings(settings);
-  if (backend.pbrHeightFogEnabledLocation >= 0) {
-    dev->set_uniform_int(backend.pbrHeightFogEnabledLocation,
-                         fog.enabled ? 1 : 0);
-  }
-  if (backend.pbrHeightFogBaseHeightLocation >= 0) {
-    dev->set_uniform_float(backend.pbrHeightFogBaseHeightLocation,
-                           fog.baseHeight);
-  }
-  if (backend.pbrHeightFogDensityLocation >= 0) {
-    dev->set_uniform_float(backend.pbrHeightFogDensityLocation, fog.density);
-  }
-  if (backend.pbrHeightFogFalloffLocation >= 0) {
-    dev->set_uniform_float(backend.pbrHeightFogFalloffLocation, fog.falloff);
-  }
-  if (backend.pbrHeightFogStepCountLocation >= 0) {
-    dev->set_uniform_int(backend.pbrHeightFogStepCountLocation, fog.stepCount);
-  }
+  upload_height_fog_uniforms(
+      dev,
+      HeightFogUniformLocations{backend.pbrHeightFogEnabledLocation,
+                                backend.pbrHeightFogBaseHeightLocation,
+                                backend.pbrHeightFogDensityLocation,
+                                backend.pbrHeightFogFalloffLocation,
+                                backend.pbrHeightFogStepCountLocation},
+      settings);
 }
 
 /// Handles upload pbr foliage uniforms.
@@ -787,45 +826,26 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
-  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
-  if (backend.dlFogModeLoc >= 0) {
-    dev->set_uniform_int(backend.dlFogModeLoc,
-                         static_cast<std::int32_t>(fog.mode));
-  }
-  if (backend.dlFogStartLoc >= 0) {
-    dev->set_uniform_float(backend.dlFogStartLoc, fog.start);
-  }
-  if (backend.dlFogEndLoc >= 0) {
-    dev->set_uniform_float(backend.dlFogEndLoc, fog.end);
-  }
-  if (backend.dlFogDensityLoc >= 0) {
-    dev->set_uniform_float(backend.dlFogDensityLoc, fog.density);
-  }
-  if (backend.dlFogColorLoc >= 0) {
-    dev->set_uniform_vec3(backend.dlFogColorLoc, &fog.color.x);
-  }
+  upload_distance_fog_uniforms(
+      dev,
+      DistanceFogUniformLocations{backend.dlFogModeLoc, backend.dlFogStartLoc,
+                                  backend.dlFogEndLoc, backend.dlFogDensityLoc,
+                                  backend.dlFogColorLoc},
+      settings);
 }
 
 /// Handles upload deferred height fog uniforms.
 void upload_deferred_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
-  const HeightFogSettings fog = normalize_height_fog_settings(settings);
-  if (backend.dlHeightFogEnabledLoc >= 0) {
-    dev->set_uniform_int(backend.dlHeightFogEnabledLoc, fog.enabled ? 1 : 0);
-  }
-  if (backend.dlHeightFogBaseHeightLoc >= 0) {
-    dev->set_uniform_float(backend.dlHeightFogBaseHeightLoc, fog.baseHeight);
-  }
-  if (backend.dlHeightFogDensityLoc >= 0) {
-    dev->set_uniform_float(backend.dlHeightFogDensityLoc, fog.density);
-  }
-  if (backend.dlHeightFogFalloffLoc >= 0) {
-    dev->set_uniform_float(backend.dlHeightFogFalloffLoc, fog.falloff);
-  }
-  if (backend.dlHeightFogStepCountLoc >= 0) {
-    dev->set_uniform_int(backend.dlHeightFogStepCountLoc, fog.stepCount);
-  }
+  upload_height_fog_uniforms(
+      dev,
+      HeightFogUniformLocations{backend.dlHeightFogEnabledLoc,
+                                backend.dlHeightFogBaseHeightLoc,
+                                backend.dlHeightFogDensityLoc,
+                                backend.dlHeightFogFalloffLoc,
+                                backend.dlHeightFogStepCountLoc},
+      settings);
 }
 
 /// Handles bind pbr shadow uniforms.
@@ -1034,31 +1054,6 @@ bool create_skybox_geometry(BackendState &backend,
 /// Handles cvar string equals.
 bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
   return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
-}
-
-/// Handles skip fog color separators.
-void skip_fog_color_separators(const char *&cursor) noexcept {
-  while ((*cursor == ' ') || (*cursor == '\t') || (*cursor == '\n') ||
-         (*cursor == '\r') || (*cursor == ',')) {
-    ++cursor;
-  }
-}
-
-/// Parses text into the engine representation for fog color component.
-bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
-  if ((cursor == nullptr) || (valueOut == nullptr)) {
-    return false;
-  }
-
-  skip_fog_color_separators(cursor);
-  char *end = nullptr;
-  const float value = std::strtof(cursor, &end);
-  if ((end == cursor) || !std::isfinite(value)) {
-    return false;
-  }
-  *valueOut = value;
-  cursor = end;
-  return true;
 }
 
 /// Handles selected sky model.
@@ -1272,27 +1267,6 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
-/// Handles clamp u32 value.
-std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
-                              std::uint32_t maxValue) noexcept {
-  if (value < minValue) {
-    return minValue;
-  }
-  if (value > maxValue) {
-    return maxValue;
-  }
-  return value;
-}
-
-/// Handles previous power of two u32.
-std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
-  std::uint32_t result = 1U;
-  while ((result <= (value / 2U)) && (result < 4096U)) {
-    result *= 2U;
-  }
-  return result;
-}
-
 /// Handles cubemap mip size.
 int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   int size = faceSize;
@@ -1300,16 +1274,6 @@ int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
     size = std::max(1, size / 2);
   }
   return size;
-}
-
-/// Handles max cubemap mip levels u32.
-std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
-  std::uint32_t levels = 1U;
-  while (faceSize > 1U) {
-    faceSize /= 2U;
-    ++levels;
-  }
-  return levels;
 }
 
 /// Handles positive cvar u32.
@@ -4842,115 +4806,6 @@ std::uint32_t get_brdf_lut_texture() noexcept {
     return 0U;
   }
   return backend_state().brdfLutTexture;
-}
-
-/// Parses text into the engine representation for distance fog mode.
-DistanceFogMode parse_distance_fog_mode(const char *mode) noexcept {
-  if (cvar_string_equals(mode, "linear") || cvar_string_equals(mode, "1")) {
-    return DistanceFogMode::Linear;
-  }
-  if (cvar_string_equals(mode, "exp") || cvar_string_equals(mode, "2") ||
-      cvar_string_equals(mode, "exponential")) {
-    return DistanceFogMode::Exp;
-  }
-  if (cvar_string_equals(mode, "exp2") || cvar_string_equals(mode, "3") ||
-      cvar_string_equals(mode, "exponential2")) {
-    return DistanceFogMode::Exp2;
-  }
-  return DistanceFogMode::Off;
-}
-
-/// Parses text into the engine representation for distance fog color.
-bool parse_distance_fog_color(const char *value,
-                              math::Vec3 *colorOut) noexcept {
-  if ((value == nullptr) || (colorOut == nullptr)) {
-    return false;
-  }
-
-  const char *cursor = value;
-  math::Vec3 parsed{};
-  if (!parse_fog_color_component(cursor, &parsed.x) ||
-      !parse_fog_color_component(cursor, &parsed.y) ||
-      !parse_fog_color_component(cursor, &parsed.z)) {
-    return false;
-  }
-
-  skip_fog_color_separators(cursor);
-  if (*cursor != '\0') {
-    return false;
-  }
-
-  *colorOut = math::clamp(parsed, 0.0F, 1.0F);
-  return true;
-}
-
-/// Clamps and fills settings into a safe runtime range for distance fog settings.
-DistanceFogSettings normalize_distance_fog_settings(
-    const DistanceFogSettings &settings) noexcept {
-  DistanceFogSettings normalized{};
-  switch (settings.mode) {
-  case DistanceFogMode::Linear:
-  case DistanceFogMode::Exp:
-  case DistanceFogMode::Exp2:
-    normalized.mode = settings.mode;
-    break;
-  case DistanceFogMode::Off:
-  default:
-    normalized.mode = DistanceFogMode::Off;
-    break;
-  }
-
-  normalized.start =
-      std::isfinite(settings.start) ? std::max(0.0F, settings.start) : 25.0F;
-  const float requestedEnd =
-      std::isfinite(settings.end) ? settings.end : 150.0F;
-  normalized.end = std::max(normalized.start + 0.001F, requestedEnd);
-  normalized.density = std::isfinite(settings.density)
-                           ? std::max(0.0F, settings.density)
-                           : 0.01F;
-  normalized.color = ((std::isfinite(settings.color.x) &&
-                       std::isfinite(settings.color.y) &&
-                       std::isfinite(settings.color.z))
-                          ? math::clamp(settings.color, 0.0F, 1.0F)
-                          : math::Vec3(0.55F, 0.65F, 0.75F));
-  return normalized;
-}
-
-/// Clamps and fills settings into a safe runtime range for height fog settings.
-HeightFogSettings normalize_height_fog_settings(
-    const HeightFogSettings &settings) noexcept {
-  HeightFogSettings normalized{};
-  normalized.enabled = settings.enabled;
-  normalized.baseHeight =
-      std::isfinite(settings.baseHeight) ? settings.baseHeight : 0.0F;
-  normalized.density = std::isfinite(settings.density)
-                           ? std::clamp(settings.density, 0.0F, 1.0F)
-                           : 0.015F;
-  normalized.falloff = std::isfinite(settings.falloff)
-                           ? std::clamp(settings.falloff, 0.001F, 4.0F)
-                           : 0.08F;
-  normalized.stepCount = std::clamp(settings.stepCount, 1, 64);
-  if (normalized.density <= 0.0F) {
-    normalized.enabled = false;
-  }
-  return normalized;
-}
-
-/// Clamps and fills settings into a safe runtime range for reflection probe bake settings.
-ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
-    const ReflectionProbeBakeSettings &settings) noexcept {
-  ReflectionProbeBakeSettings normalized{};
-  normalized.prefilteredFaceSize = previous_power_of_two_u32(
-      clamp_u32_value(settings.prefilteredFaceSize, 16U, 1024U));
-  const std::uint32_t maxMips =
-      max_cubemap_mip_levels_u32(normalized.prefilteredFaceSize);
-  normalized.prefilteredMipLevels =
-      clamp_u32_value(settings.prefilteredMipLevels, 1U, maxMips);
-  normalized.irradianceFaceSize = previous_power_of_two_u32(
-      clamp_u32_value(settings.irradianceFaceSize, 8U, 256U));
-  normalized.brdfLutSize = previous_power_of_two_u32(
-      clamp_u32_value(settings.brdfLutSize, 64U, 1024U));
-  return normalized;
 }
 
 /// Handles bake reflection probe.

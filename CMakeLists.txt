@@ -364,7 +364,6 @@ FetchContent_MakeAvailable(stb)
 set(ENGINE_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
 
 if(EXISTS "${ENGINE_ASSET_SOURCE_DIR}")
-    file(COPY "${ENGINE_ASSET_SOURCE_DIR}/" DESTINATION "${ENGINE_ASSET_OUTPUT_DIR}")
     add_custom_target(copy_assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${ENGINE_ASSET_SOURCE_DIR}"

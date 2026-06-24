@@ -33,6 +33,84 @@ constexpr bool is_hex_digit(char value) noexcept {
          ((value >= 'A') && (value <= 'F'));
 }
 
+/// Converts a single hex digit to its numeric value.
+std::uint32_t hex_value(char value) noexcept {
+  if ((value >= '0') && (value <= '9')) {
+    return static_cast<std::uint32_t>(value - '0');
+  }
+  if ((value >= 'a') && (value <= 'f')) {
+    return static_cast<std::uint32_t>(value - 'a') + 10U;
+  }
+  if ((value >= 'A') && (value <= 'F')) {
+    return static_cast<std::uint32_t>(value - 'A') + 10U;
+  }
+  return 0U;
+}
+
+/// Parses four validated JSON unicode escape hex digits.
+std::uint32_t parse_hex_quad(const char *cursor) noexcept {
+  return (hex_value(cursor[0]) << 12U) | (hex_value(cursor[1]) << 8U) |
+         (hex_value(cursor[2]) << 4U) | hex_value(cursor[3]);
+}
+
+/// Appends one byte while preserving null-termination room.
+void append_decoded_byte(char *out, std::size_t outCapacity,
+                         std::size_t *outLength, char value) noexcept {
+  if ((out == nullptr) || (outLength == nullptr) || (outCapacity == 0U)) {
+    return;
+  }
+  if (*outLength + 1U < outCapacity) {
+    out[*outLength] = value;
+  }
+  ++(*outLength);
+}
+
+/// Appends a decoded code point as UTF-8.
+bool append_utf8(char *out, std::size_t outCapacity, std::size_t *outLength,
+                 std::uint32_t codepoint) noexcept {
+  if ((codepoint >= 0xD800U) && (codepoint <= 0xDFFFU)) {
+    return false;
+  }
+  if (codepoint > 0x10FFFFU) {
+    return false;
+  }
+
+  if (codepoint <= 0x7FU) {
+    append_decoded_byte(out, outCapacity, outLength,
+                        static_cast<char>(codepoint));
+    return true;
+  }
+  if (codepoint <= 0x7FFU) {
+    append_decoded_byte(out, outCapacity, outLength,
+                        static_cast<char>(0xC0U | (codepoint >> 6U)));
+    append_decoded_byte(out, outCapacity, outLength,
+                        static_cast<char>(0x80U | (codepoint & 0x3FU)));
+    return true;
+  }
+  if (codepoint <= 0xFFFFU) {
+    append_decoded_byte(out, outCapacity, outLength,
+                        static_cast<char>(0xE0U | (codepoint >> 12U)));
+    append_decoded_byte(
+        out, outCapacity, outLength,
+        static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+    append_decoded_byte(out, outCapacity, outLength,
+                        static_cast<char>(0x80U | (codepoint & 0x3FU)));
+    return true;
+  }
+
+  append_decoded_byte(out, outCapacity, outLength,
+                      static_cast<char>(0xF0U | (codepoint >> 18U)));
+  append_decoded_byte(
+      out, outCapacity, outLength,
+      static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3FU)));
+  append_decoded_byte(
+      out, outCapacity, outLength,
+      static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+  append_decoded_byte(out, outCapacity, outLength,
+                      static_cast<char>(0x80U | (codepoint & 0x3FU)));
+  return true;
+}
+
 /// Handles skip whitespace.
 void skip_whitespace(const char *&cursor, const char *end) noexcept {
   while ((cursor < end) && is_whitespace(*cursor)) {
@@ -1137,6 +1215,136 @@ bool JsonParser::as_string(const JsonValue &value, const char **outBegin,
 
   *outBegin = value.begin;
   *outLength = static_cast<std::size_t>(value.end - value.begin);
+  return true;
+}
+
+bool JsonParser::copy_string(const JsonValue &value, char *out,
+                             std::size_t outCapacity) const noexcept {
+  if ((out == nullptr) || (outCapacity == 0U) ||
+      (value.type != JsonValue::Type::String) || (value.begin == nullptr) ||
+      (value.end == nullptr) || (value.end < value.begin)) {
+    return false;
+  }
+
+  out[0] = '\0';
+  std::size_t outLength = 0U;
+  const char *cursor = value.begin;
+  while (cursor < value.end) {
+    const char ch = *cursor;
+    if (ch != '\\') {
+      if (static_cast<unsigned char>(ch) < 0x20U) {
+        out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] = '\0';
+        return false;
+      }
+      append_decoded_byte(out, outCapacity, &outLength, ch);
+      ++cursor;
+      continue;
+    }
+
+    ++cursor;
+    if (cursor >= value.end) {
+      out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] = '\0';
+      return false;
+    }
+
+    switch (*cursor) {
+    case '"':
+      append_decoded_byte(out, outCapacity, &outLength, '"');
+      ++cursor;
+      break;
+    case '\\':
+      append_decoded_byte(out, outCapacity, &outLength, '\\');
+      ++cursor;
+      break;
+    case '/':
+      append_decoded_byte(out, outCapacity, &outLength, '/');
+      ++cursor;
+      break;
+    case 'b':
+      append_decoded_byte(out, outCapacity, &outLength, '\b');
+      ++cursor;
+      break;
+    case 'f':
+      append_decoded_byte(out, outCapacity, &outLength, '\f');
+      ++cursor;
+      break;
+    case 'n':
+      append_decoded_byte(out, outCapacity, &outLength, '\n');
+      ++cursor;
+      break;
+    case 'r':
+      append_decoded_byte(out, outCapacity, &outLength, '\r');
+      ++cursor;
+      break;
+    case 't':
+      append_decoded_byte(out, outCapacity, &outLength, '\t');
+      ++cursor;
+      break;
+    case 'u': {
+      if ((value.end - cursor) < 5) {
+        out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+            '\0';
+        return false;
+      }
+      for (std::size_t i = 1U; i <= 4U; ++i) {
+        if (!is_hex_digit(cursor[i])) {
+          out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+              '\0';
+          return false;
+        }
+      }
+
+      std::uint32_t codepoint = parse_hex_quad(cursor + 1);
+      cursor += 5;
+      if ((codepoint >= 0xD800U) && (codepoint <= 0xDBFFU)) {
+        if (((value.end - cursor) < 6) || (cursor[0] != '\\') ||
+            (cursor[1] != 'u')) {
+          out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+              '\0';
+          return false;
+        }
+        for (std::size_t i = 2U; i < 6U; ++i) {
+          if (!is_hex_digit(cursor[i])) {
+            out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+                '\0';
+            return false;
+          }
+        }
+        const std::uint32_t low = parse_hex_quad(cursor + 2);
+        if ((low < 0xDC00U) || (low > 0xDFFFU)) {
+          out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+              '\0';
+          return false;
+        }
+        codepoint =
+            0x10000U + (((codepoint - 0xD800U) << 10U) | (low - 0xDC00U));
+        cursor += 6;
+      } else if ((codepoint >= 0xDC00U) && (codepoint <= 0xDFFFU)) {
+        out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+            '\0';
+        return false;
+      }
+
+      if (codepoint == 0U) {
+        out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+            '\0';
+        return false;
+      }
+
+      if (!append_utf8(out, outCapacity, &outLength, codepoint)) {
+        out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] =
+            '\0';
+        return false;
+      }
+      break;
+    }
+    default:
+      out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] = '\0';
+      return false;
+    }
+  }
+
+  out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] = '\0';
   return true;
 }
 

@@ -6,6 +6,7 @@
 #include <new>
 
 #include "engine/runtime/camera_manager.h"
+#include "engine/runtime/spring_arm_update.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -15,6 +16,11 @@ using namespace engine::runtime;
 
 constexpr Entity kOwnerA{1U, 1U};
 constexpr Entity kOwnerB{2U, 1U};
+
+/// Returns whether two floats are close enough for camera tests.
+bool nearly(float lhs, float rhs) noexcept {
+  return std::fabs(lhs - rhs) <= 0.0001F;
+}
 
 /// Handles test push pop camera.
 bool test_push_pop_camera() noexcept {
@@ -297,6 +303,42 @@ bool test_spring_arm_crud() noexcept {
   return true;
 }
 
+/// Handles test spring arm updates camera position.
+bool test_spring_arm_updates_camera_position() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity entity = world->create_entity();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  Transform transform{};
+  transform.position = math::Vec3(1.0F, 2.0F, 3.0F);
+  if (!world->add_transform(entity, transform)) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.armLength = 8.0F;
+  arm.currentLength = 8.0F;
+  arm.offset = math::Vec3(0.0F, 2.0F, 0.0F);
+  arm.lagSpeed = 100.0F;
+  if (!world->add_spring_arm(entity, arm)) {
+    return false;
+  }
+
+  update_spring_arm_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) || (active->ownerEntity != entity)) {
+    return false;
+  }
+
+  return nearly(active->target.x, 1.0F) && nearly(active->target.y, 4.0F) &&
+         nearly(active->target.z, 3.0F) &&
+         nearly(active->position.x, 1.0F) &&
+         nearly(active->position.y, 4.0F) &&
+         nearly(active->position.z, 11.0F);
+}
+
 /// Handles test clear.
 bool test_clear() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
@@ -338,6 +380,8 @@ int main() {
       test_camera_shake_nonzero_during_and_zero_after);
   run("test_multiple_shakes_additive", test_multiple_shakes_additive);
   run("test_spring_arm_crud", test_spring_arm_crud);
+  run("test_spring_arm_updates_camera_position",
+      test_spring_arm_updates_camera_position);
   run("test_destroyed_owner_removes_camera", test_destroyed_owner_removes_camera);
   run("test_clear", test_clear);
 

@@ -4,14 +4,14 @@
 
 #include <cstdio>
 
-static int g_passed = 0;
-static int g_failed = 0;
+#include "../test_harness.h"
+
+static engine::tests::TestContext g_tests;
 
 #define TEST_ASSERT(cond)                                                      \
   do {                                                                         \
     if (!(cond)) {                                                             \
-      std::printf("  FAIL: %s (line %d)\n", #cond, __LINE__);                  \
-      ++g_failed;                                                              \
+      g_tests.check(false, #cond);                                             \
       return;                                                                  \
     }                                                                          \
   } while (false)
@@ -19,8 +19,9 @@ static int g_failed = 0;
 #define RUN_TEST(fn)                                                           \
   do {                                                                         \
     std::printf("[ RUN  ] %s\n", #fn);                                         \
+    const int failuresBefore = g_tests.failed();                               \
     fn();                                                                      \
-    if (g_failed == before_##fn) {                                             \
+    if (g_tests.failed() == failuresBefore) {                                  \
       std::printf("[  OK  ] %s\n", #fn);                                       \
     }                                                                          \
   } while (false)
@@ -41,7 +42,7 @@ static void test_double_init_and_shutdown() {
   }
   // Double shutdown is safe.
   shutdown_audio();
-  ++g_passed;
+  g_tests.check(true, "double init and shutdown");
 }
 
 /// Handles test load without init.
@@ -50,7 +51,7 @@ static void test_load_without_init() {
   // System not initialized — should return invalid.
   const SoundHandle h = load_sound("nonexistent.wav");
   TEST_ASSERT(h == kInvalidSound);
-  ++g_passed;
+  g_tests.check(true, "load without init");
 }
 
 /// Handles test unload invalid.
@@ -59,7 +60,7 @@ static void test_unload_invalid() {
   // Should not crash.
   unload_sound(kInvalidSound);
   unload_sound(SoundHandle{999U});
-  ++g_passed;
+  g_tests.check(true, "unload invalid");
 }
 
 /// Handles test play invalid.
@@ -68,7 +69,7 @@ static void test_play_invalid() {
   PlayParams params{};
   TEST_ASSERT(!play_sound(kInvalidSound, params));
   TEST_ASSERT(!play_sound(SoundHandle{999U}, params));
-  ++g_passed;
+  g_tests.check(true, "play invalid");
 }
 
 /// Handles test stop without init.
@@ -77,7 +78,7 @@ static void test_stop_without_init() {
   // Should not crash.
   stop_sound(kInvalidSound);
   stop_all();
-  ++g_passed;
+  g_tests.check(true, "stop without init");
 }
 
 /// Handles test set master volume without init.
@@ -85,7 +86,7 @@ static void test_set_master_volume_without_init() {
   using namespace engine::audio;
   // Should not crash.
   set_master_volume(0.5F);
-  ++g_passed;
+  g_tests.check(true, "set master volume without init");
 }
 
 /// Handles test update without init.
@@ -93,26 +94,18 @@ static void test_update_without_init() {
   using namespace engine::audio;
   // Should not crash.
   update_audio();
-  ++g_passed;
+  g_tests.check(true, "update without init");
 }
 
 /// Runs this executable or test program.
 int main() {
-  int before_test_double_init_and_shutdown = g_failed;
   RUN_TEST(test_double_init_and_shutdown);
-  int before_test_load_without_init = g_failed;
   RUN_TEST(test_load_without_init);
-  int before_test_unload_invalid = g_failed;
   RUN_TEST(test_unload_invalid);
-  int before_test_play_invalid = g_failed;
   RUN_TEST(test_play_invalid);
-  int before_test_stop_without_init = g_failed;
   RUN_TEST(test_stop_without_init);
-  int before_test_set_master_volume_without_init = g_failed;
   RUN_TEST(test_set_master_volume_without_init);
-  int before_test_update_without_init = g_failed;
   RUN_TEST(test_update_without_init);
 
-  std::printf("\nAudio tests: %d passed, %d failed\n", g_passed, g_failed);
-  return (g_failed > 0) ? 1 : 0;
+  return g_tests.finish("Audio tests");
 }

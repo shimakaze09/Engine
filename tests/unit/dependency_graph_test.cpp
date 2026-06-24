@@ -348,16 +348,6 @@ int main() {
     dependentPath += ".mesh";
     const std::string dependencyPath = "textures\\diffuse\tmain.png";
 
-    const std::string escapedDependent =
-        engine::tools::escape_json_string(dependentPath.c_str());
-    if (escapedDependent !=
-        "meshes\\\\boss \\\"alpha\\\"\\nframe\\u0001.mesh") {
-      return 100;
-    }
-    if (engine::tools::escape_json_string(nullptr) != "") {
-      return 101;
-    }
-
     Graph graph{};
     engine::tools::register_asset_path(&graph, 1000ULL,
                                        dependentPath.c_str());
@@ -367,44 +357,44 @@ int main() {
 
     char tempPath[512] = {};
     if (!make_temp_graph_path(tempPath, sizeof(tempPath))) {
-      return 102;
+      return 100;
     }
 
     if (!engine::tools::write_dependency_graph_json(&graph, tempPath)) {
-      return 103;
+      return 101;
     }
 
     std::string json{};
     if (!read_text_file(tempPath, &json)) {
       std::remove(tempPath);
-      return 104;
+      return 102;
     }
     if (json.find("meshes\\\\boss \\\"alpha\\\"\\nframe\\u0001.mesh") ==
         std::string::npos) {
       std::remove(tempPath);
-      return 105;
+      return 103;
     }
     if (json.find("textures\\\\diffuse\\tmain.png") == std::string::npos) {
       std::remove(tempPath);
-      return 106;
+      return 104;
     }
 
     Graph loaded{};
     if (!engine::tools::read_dependency_graph_json(&loaded, tempPath)) {
       std::remove(tempPath);
-      return 107;
+      return 105;
     }
     std::remove(tempPath);
 
     auto dependentIt = loaded.assetPaths.find(1000ULL);
     if ((dependentIt == loaded.assetPaths.end()) ||
         (dependentIt->second != dependentPath)) {
-      return 108;
+      return 106;
     }
     auto dependencyIt = loaded.assetPaths.find(2000ULL);
     if ((dependencyIt == loaded.assetPaths.end()) ||
         (dependencyIt->second != dependencyPath)) {
-      return 109;
+      return 107;
     }
   }
 

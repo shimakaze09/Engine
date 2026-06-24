@@ -68,6 +68,9 @@ AssetId make_asset_id_from_file(const char *path) noexcept;
 bool register_mesh_asset(AssetDatabase *database, AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept;
+/// Marks a mesh asset as requested and loading without queuing a sync load.
+bool request_mesh_asset_streaming_load(AssetDatabase *database, AssetId id,
+                                       const char *sourcePath) noexcept;
 /// Handles mesh asset state.
 AssetState mesh_asset_state(const AssetDatabase *database, AssetId id) noexcept;
 /// Sets the requested value for mesh asset state.

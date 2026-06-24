@@ -158,7 +158,9 @@ GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently r
 - `cppcheck`
 - `clang-tidy`
 
-Sanitizer, coverage, and automated performance-threshold gates are still separate follow-up work.
+Sanitizer, coverage, and automated performance-threshold gates are wired in CI;
+remaining follow-up work includes coverage trend reporting and broader
+GPU-path automation.
 
 ## Lua gameplay scripting
 

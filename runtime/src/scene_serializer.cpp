@@ -937,21 +937,12 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 
     core::JsonValue nameValue{};
     if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
-      const char *nameBegin = nullptr;
-      std::size_t nameLength = 0U;
-      if (!parser.as_string(nameValue, &nameBegin, &nameLength)) {
+      NameComponent nameComponent{};
+      if (!parser.copy_string(nameValue, nameComponent.name,
+                              sizeof(nameComponent.name))) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to parse name component string");
       }
-
-      NameComponent nameComponent{};
-      const std::size_t maxLength = sizeof(nameComponent.name) - 1U;
-      const std::size_t copyLength =
-          (nameLength > maxLength) ? maxLength : nameLength;
-      if ((copyLength > 0U) && (nameBegin != nullptr)) {
-        std::memcpy(nameComponent.name, nameBegin, copyLength);
-      }
-      nameComponent.name[copyLength] = '\0';
 
       if (!targetWorld.add_name_component(entity, nameComponent)) {
         targetWorld.destroy_entity(entity);
@@ -962,20 +953,12 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue scriptValue{};
     if (parser.get_object_field(components, kJsonKeyScriptComponent,
                                        &scriptValue)) {
-      const char *pathBegin = nullptr;
-      std::size_t pathLength = 0U;
-      if (!parser.as_string(scriptValue, &pathBegin, &pathLength)) {
+      ScriptComponent scriptComp{};
+      if (!parser.copy_string(scriptValue, scriptComp.scriptPath,
+                              sizeof(scriptComp.scriptPath))) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to parse ScriptComponent path");
       }
-
-      ScriptComponent scriptComp{};
-      const std::size_t maxLen = sizeof(scriptComp.scriptPath) - 1U;
-      const std::size_t copyLen = (pathLength > maxLen) ? maxLen : pathLength;
-      if ((copyLen > 0U) && (pathBegin != nullptr)) {
-        std::memcpy(scriptComp.scriptPath, pathBegin, copyLen);
-      }
-      scriptComp.scriptPath[copyLen] = '\0';
 
       if (!targetWorld.add_script_component(entity, scriptComp)) {
         targetWorld.destroy_entity(entity);

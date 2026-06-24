@@ -1,6 +1,5 @@
 // Verifies runtime service registry test behavior for the Engine test suite.
 
-#include <cstdio>
 #include <memory>
 #include <new>
 
@@ -14,17 +13,15 @@
 #include "engine/renderer/render_device.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
+#include "../test_harness.h"
 
 namespace {
 
-int g_failed = 0;
+engine::tests::TestContext g_tests;
 
 /// Handles check.
 void check(bool condition, const char *name) noexcept {
-  if (!condition) {
-    ++g_failed;
-    std::fprintf(stderr, "FAIL: %s\n", name);
-  }
+  g_tests.check(condition, name);
 }
 
 template <std::size_t Index> struct FillerService final {};
@@ -69,7 +66,7 @@ int main() {
   check(commandBuffer != nullptr, "command buffer allocated");
   check(meshRegistry != nullptr, "mesh registry allocated");
   check(renderDevice != nullptr, "render device allocated");
-  if (g_failed != 0) {
+  if (g_tests.failed() != 0) {
     return 1;
   }
 
@@ -153,5 +150,24 @@ int main() {
   check(fullLoc.get_service<FillerService<1U>>() != nullptr,
         "rollback preserves existing filler service");
 
-  return g_failed == 0 ? 0 : 1;
+  engine::core::ServiceLocator optionalLoc{};
+  check(engine::runtime::register_engine_subsystem_services(
+            optionalLoc, world.get(), nullptr, nullptr, nullptr, nullptr),
+        "register null optional subsystem services");
+  check(optionalLoc.count() == 3U,
+        "world physics services registered for null optionals");
+  check(optionalLoc.get_service<engine::runtime::World>() == world.get(),
+        "world kept when optionals null");
+  check(optionalLoc.get_service<engine::physics::PhysicsWorldView>() !=
+            nullptr,
+        "physics world view kept when optionals null");
+  check(optionalLoc.get_service<engine::physics::PhysicsContext>() != nullptr,
+        "physics context kept when optionals null");
+  check(optionalLoc.get_service<engine::runtime::EngineAudioService>() ==
+            nullptr,
+        "null audio service not registered");
+  engine::runtime::unregister_engine_subsystem_services(optionalLoc);
+  check(optionalLoc.count() == 0U, "optional services unregister cleanly");
+
+  return g_tests.finish("Runtime service registry tests");
 }
