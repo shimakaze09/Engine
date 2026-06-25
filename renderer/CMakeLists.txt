@@ -5,6 +5,9 @@ engine_add_module_library(engine_renderer
     src/asset_database.cpp
     src/asset_manager.cpp
     src/asset_streaming.cpp
+    src/command_buffer_builder.cpp
+    src/command_buffer_context.cpp
+    src/command_buffer_math.cpp
     src/command_buffer.cpp
     src/gpu_profiler.cpp
     src/light_culling.cpp
@@ -14,6 +17,7 @@ engine_add_module_library(engine_renderer
     src/post_process_stack.cpp
     src/render_settings.cpp
     src/render_device_gl.cpp
+    src/render_settings.cpp
     src/shader_system.cpp
     src/shadow_map.cpp
     src/texture_loader.cpp

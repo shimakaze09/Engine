@@ -20,8 +20,21 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/cheat_bindings.cpp
+    src/collision_bindings.cpp
+    src/coroutine_bindings.cpp
+    src/debug_bindings.cpp
     src/deferred_mutations.cpp
+    src/entity_handle.cpp
+    src/entity_pool_bindings.cpp
+    src/entity_script_bindings.cpp
+    src/game_bindings.cpp
+    src/input_bindings.cpp
+    src/lua_state.cpp
+    src/persist_bindings.cpp
     src/runtime_binding.cpp
+    src/scene_bindings.cpp
+    src/timer_bindings.cpp
     src/touch_bindings.cpp
     src/dap_server.cpp
     ${ENGINE_BINDGEN_OUTPUT}

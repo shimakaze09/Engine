@@ -1,23 +1,21 @@
-// Implements renderer setting parsing and normalization helpers.
+// Implements renderer settings parsing and normalization helpers.
 
 #include "engine/renderer/command_buffer.h"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
-#include "engine/math/vec3.h"
-
 namespace engine::renderer {
-
 namespace {
 
+/// Compares nullable c strings for exact equality.
 bool string_equals(const char *lhs, const char *rhs) noexcept {
   return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
 }
 
+/// Skips separators between serialized fog color components.
 void skip_fog_color_separators(const char *&cursor) noexcept {
   while ((*cursor == ' ') || (*cursor == '\t') || (*cursor == '\n') ||
          (*cursor == '\r') || (*cursor == ',')) {
@@ -25,6 +23,7 @@ void skip_fog_color_separators(const char *&cursor) noexcept {
   }
 }
 
+/// Parses one serialized fog color component.
 bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
   if ((cursor == nullptr) || (valueOut == nullptr)) {
     return false;
@@ -41,6 +40,7 @@ bool parse_fog_color_component(const char *&cursor, float *valueOut) noexcept {
   return true;
 }
 
+/// Clamps a uint32 value into the requested inclusive range.
 std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
                               std::uint32_t maxValue) noexcept {
   if (value < minValue) {
@@ -52,6 +52,7 @@ std::uint32_t clamp_u32_value(std::uint32_t value, std::uint32_t minValue,
   return value;
 }
 
+/// Returns the greatest power of two not greater than the input value.
 std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
   std::uint32_t result = 1U;
   while ((result <= (value / 2U)) && (result < 4096U)) {
@@ -60,6 +61,7 @@ std::uint32_t previous_power_of_two_u32(std::uint32_t value) noexcept {
   return result;
 }
 
+/// Returns the number of mip levels needed for a cubemap face size.
 std::uint32_t max_cubemap_mip_levels_u32(std::uint32_t faceSize) noexcept {
   std::uint32_t levels = 1U;
   while (faceSize > 1U) {

@@ -3,8 +3,21 @@
 #include "engine/scripting/scripting.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
+#include "collision_bindings.h"
+#include "cheat_bindings.h"
+#include "coroutine_bindings.h"
+#include "debug_bindings.h"
 #include "deferred_mutations.h"
+#include "entity_handle.h"
+#include "entity_pool_bindings.h"
+#include "entity_script_bindings.h"
+#include "game_bindings.h"
+#include "input_bindings.h"
+#include "lua_state.h"
+#include "persist_bindings.h"
 #include "runtime_binding.h"
+#include "scene_bindings.h"
+#include "timer_bindings.h"
 #include "touch_bindings.h"
 
 extern "C" {
@@ -16,19 +29,12 @@ extern "C" {
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <limits>
 
-#include "engine/core/console.h"
 #include "engine/core/input.h"
-#include "engine/core/input_map.h"
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
-#include "engine/runtime/entity_pool.h"
-#include "engine/runtime/game_mode.h"
-#include "engine/runtime/game_state.h"
-#include "engine/runtime/player_controller.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -48,14 +54,8 @@ namespace engine::scripting {
 
 /// Handles register generated bindings.
 void register_generated_bindings(lua_State *L) noexcept;
-/// Handles debugger clear breakpoints.
-void debugger_clear_breakpoints() noexcept;
-/// Handles debugger add breakpoint.
-bool debugger_add_breakpoint(const char *file, int line) noexcept;
-
 namespace {
 
-lua_State *g_state = nullptr;
 std::uint64_t g_defaultMeshAssetId = 0ULL;
 std::uint64_t g_builtinPlaneMesh = 0ULL;
 std::uint64_t g_builtinCubeMesh = 0ULL;
@@ -71,11 +71,6 @@ std::uint32_t g_frameIndex = 0U;
 char g_watchedPath[512] = {};
 std::int64_t g_watchedMtime = 0;
 constexpr float kMaxScriptAcceleration = 500.0F;
-
-// Entity pool storage for Lua pool_create / pool_spawn / pool_release.
-constexpr std::size_t kMaxEntityPools = 16U;
-runtime::EntityPool g_entityPools[kMaxEntityPools]{};
-std::size_t g_entityPoolCount = 0U;
 
 /// Handles copy c string.
 void copy_c_string(char *destination, std::size_t destinationSize,
@@ -130,100 +125,11 @@ void copy_clone_name(char *destination, std::size_t destinationSize,
   }
 }
 
-// --- Entity script module registry ---
-struct EntityScriptModule final {
-  char path[128] = {};
-  int registryRef = LUA_NOREF;
-  std::int64_t mtime = 0;
-  bool reloaded = false;
-};
-constexpr std::size_t kMaxEntityScriptModules = 32U;
-EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
-std::size_t g_entityScriptModuleCount = 0U;
-
-// Per-entity faulted tracking: if a lifecycle callback errors, skip future
-// calls for that entity to avoid cascading log spam.
-constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
-bool g_entityFaulted[kMaxFaultedEntities]{};
-
-// Per-entity saved state for hot-reload (Lua registry references).
-// Before reload, on_save_state(entity) is called; return value stored here.
-// After reload, on_restore_state(entity, state) is called to hand it back.
-int g_entitySavedState[kMaxFaultedEntities]{};
-bool g_entitySavedStateInit = false;
-
-/// Handles init entity saved state.
-void init_entity_saved_state() noexcept {
-  if (!g_entitySavedStateInit) {
-    for (auto &ref : g_entitySavedState) {
-      ref = LUA_NOREF;
-    }
-    g_entitySavedStateInit = true;
-  }
-}
-
-/// Handles clear entity saved state.
-void clear_entity_saved_state() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-  for (auto &ref : g_entitySavedState) {
-    if (ref != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, ref);
-      ref = LUA_NOREF;
-    }
-  }
-}
-
 /// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept;
 
-constexpr std::size_t kMaxModuleLoadDepth = 32U;
-char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
-std::size_t g_moduleLoadDepth = 0U;
-
-constexpr std::size_t kMaxProfilerEntries = 256U;
-/// Stores profiler entry data used by the engine.
-struct ProfilerEntry final {
-  char name[96] = {};
-  std::uint32_t samples = 0U;
-  bool occupied = false;
-};
-ProfilerEntry g_profilerEntries[kMaxProfilerEntries]{};
-bool g_profilerEnabled = false;
-
-constexpr std::size_t kMaxBreakpoints = 64U;
-/// Stores debug breakpoint data used by the engine.
-struct DebugBreakpoint final {
-  char file[160] = {};
-  int line = 0;
-  bool active = false;
-};
-DebugBreakpoint g_breakpoints[kMaxBreakpoints]{};
-
-constexpr std::size_t kMaxDebugWatches = 32U;
-char g_watchExprs[kMaxDebugWatches][96]{};
-std::size_t g_watchCount = 0U;
-char g_lastWatchOutput[1024] = {};
-char g_lastCallstack[2048] = {};
-char g_lastBreakpointFile[160] = {};
-int g_lastBreakpointLine = 0;
-std::uint32_t g_breakpointHitCount = 0U;
-bool g_debuggerEnabled = false;
-
-// DAP debugger stepping state.
-DapStepMode g_dapStepMode = DapStepMode::Continue;
-int g_dapStepDepth = 0;
-
-// Persist table for hot-reload state preservation (registry reference).
-int g_persistRef = LUA_NOREF;
-
-// --- Sandbox state ---
-bool g_sandboxEnabled = true;
-
-// CPU instruction limit per protected call. Default 1M instructions.
-constexpr int kDefaultInstructionLimit = 1000000;
-int g_instructionLimit = kDefaultInstructionLimit;
+/// Returns the Lua state owned by the scripting context.
+lua_State *lua_state() noexcept { return current_lua_state(); }
 
 // Memory limit for the Lua allocator (bytes). Default 64MB.
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
@@ -255,128 +161,8 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   return newPtr;
 }
 
-char g_gameMode[64] = "default";
-char g_gameState[64] = "startup";
-bool g_godModeEnabled = false;
-bool g_noclipEnabled = false;
-constexpr std::size_t kMaxPlayerControllers = 4U;
-runtime::Entity g_playerControllerEntities[kMaxPlayerControllers]{};
-
-// Persistent cross-scene game state (survives World resets).
-runtime::GameState g_persistentGameState{};
-
-// Player controllers (survive brief World transitions).
-runtime::PlayerControllerArray g_playerControllers{};
-
-constexpr std::uint64_t kLuaEntityIndexMask = 0xFFFFFFFFULL;
-constexpr unsigned kLuaEntityGenerationShift = 32U;
-
-void clear_player_controller_entity(runtime::Entity entity) noexcept {
-  if (entity == runtime::kInvalidEntity) {
-    return;
-  }
-
-  g_playerControllers.on_entity_destroyed(entity);
-  for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-    if (g_playerControllerEntities[i] == entity) {
-      g_playerControllerEntities[i] = runtime::kInvalidEntity;
-    }
-  }
-}
-
 /// Handles refresh lua hook.
 void refresh_lua_hook() noexcept;
-/// Handles scripting debug hook.
-void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept;
-
-/// Encodes a generated runtime entity into Lua's numeric handle format.
-bool encode_lua_entity_handle(runtime::Entity entity,
-                              lua_Integer *outHandle) noexcept {
-  if ((outHandle == nullptr) || (entity.index == 0U) ||
-      (entity.index > static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
-      (entity.generation == 0U)) {
-    return false;
-  }
-
-  const std::uint64_t encodedGeneration =
-      static_cast<std::uint64_t>(entity.generation - 1U);
-  const std::uint64_t rawHandle =
-      (encodedGeneration << kLuaEntityGenerationShift) |
-      static_cast<std::uint64_t>(entity.index);
-  if ((rawHandle == 0ULL) ||
-      (rawHandle >
-       static_cast<std::uint64_t>(std::numeric_limits<lua_Integer>::max()))) {
-    return false;
-  }
-
-  *outHandle = static_cast<lua_Integer>(rawHandle);
-  return true;
-}
-
-/// Pushes a generated runtime entity as a Lua handle.
-void push_entity_handle(lua_State *state, runtime::Entity entity) noexcept {
-  lua_Integer handle = 0;
-  if (!encode_lua_entity_handle(entity, &handle)) {
-    lua_pushnil(state);
-    return;
-  }
-
-  lua_pushinteger(state, handle);
-}
-
-/// Returns the current generated entity for an index, or invalid.
-runtime::Entity entity_from_index(std::uint32_t entityIndex) noexcept {
-  if (runtime_binding().world == nullptr) {
-    return runtime::kInvalidEntity;
-  }
-  return runtime_binding().world->find_entity_by_index(entityIndex);
-}
-
-/// Pushes the current generated entity for an index as a Lua handle.
-void push_entity_handle_from_index(lua_State *state,
-                                   std::uint32_t entityIndex) noexcept {
-  push_entity_handle(state, entity_from_index(entityIndex));
-}
-
-/// Decodes Lua's numeric entity handle format without requiring it to be live.
-bool decode_entity_handle_value(std::uint64_t rawHandle,
-                                runtime::Entity *outEntity) noexcept {
-  if ((outEntity == nullptr) || (rawHandle == 0ULL)) {
-    return false;
-  }
-
-  const std::uint32_t entityIndex =
-      static_cast<std::uint32_t>(rawHandle & kLuaEntityIndexMask);
-  const std::uint64_t encodedGeneration =
-      rawHandle >> kLuaEntityGenerationShift;
-  if ((entityIndex == 0U) ||
-      (entityIndex > static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
-      (encodedGeneration >
-       static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max() -
-                                  1U))) {
-    return false;
-  }
-
-  *outEntity = runtime::Entity{
-      entityIndex, static_cast<std::uint32_t>(encodedGeneration + 1ULL)};
-  return true;
-}
-
-/// Decodes Lua's numeric entity handle format without requiring it to be live.
-bool decode_lua_entity_handle(lua_State *state, int index,
-                              runtime::Entity *outEntity) noexcept {
-  if ((outEntity == nullptr) || !lua_isnumber(state, index)) {
-    return false;
-  }
-
-  const lua_Integer rawHandleSigned = lua_tointeger(state, index);
-  if (rawHandleSigned <= 0) {
-    return false;
-  }
-
-  return decode_entity_handle_value(static_cast<std::uint64_t>(rawHandleSigned),
-                                    outEntity);
-}
 
 /// Reads vec3 args data.
 bool read_vec3_args(lua_State *state, int startIndex,
@@ -394,301 +180,26 @@ bool read_vec3_args(lua_State *state, int startIndex,
   return true;
 }
 
-/// Reads entity data.
-bool read_entity(lua_State *state, int index,
-                 runtime::Entity *outEntity) noexcept {
-  if ((runtime_binding().world == nullptr) || (outEntity == nullptr)) {
-    return false;
-  }
-
-  runtime::Entity decoded{};
-  if (!decode_lua_entity_handle(state, index, &decoded) ||
-      !runtime_binding().world->is_alive(decoded)) {
-    return false;
-  }
-
-  *outEntity = decoded;
-  return true;
-}
-
-/// Handles module is currently loading.
-bool module_is_currently_loading(const char *path) noexcept {
-  if (path == nullptr) {
-    return false;
-  }
-  for (std::size_t i = 0U; i < g_moduleLoadDepth; ++i) {
-    if (std::strcmp(g_moduleLoadStack[i], path) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// Handles profiler record sample.
-void profiler_record_sample(const char *name) noexcept {
-  if ((name == nullptr) || (name[0] == '\0')) {
-    name = "<anonymous>";
-  }
-
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    if (!g_profilerEntries[i].occupied) {
-      continue;
-    }
-    if (std::strcmp(g_profilerEntries[i].name, name) == 0) {
-      ++g_profilerEntries[i].samples;
-      return;
-    }
-  }
-
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    if (g_profilerEntries[i].occupied) {
-      continue;
-    }
-    std::snprintf(g_profilerEntries[i].name, sizeof(g_profilerEntries[i].name),
-                  "%s", name);
-    g_profilerEntries[i].samples = 1U;
-    g_profilerEntries[i].occupied = true;
-    return;
-  }
-}
-
-/// Handles debugger line matches.
-bool debugger_line_matches(const char *source, int line) noexcept {
-  if ((source == nullptr) || (line <= 0)) {
-    return false;
-  }
-
-  const char *normalizedSource = source;
-  if (normalizedSource[0] == '@') {
-    ++normalizedSource;
-  }
-
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    if (!g_breakpoints[i].active || (g_breakpoints[i].line != line)) {
-      continue;
-    }
-    const char *bp = g_breakpoints[i].file;
-    const std::size_t srcLen = std::strlen(normalizedSource);
-    const std::size_t bpLen = std::strlen(bp);
-    if ((bpLen > 0U) && (srcLen >= bpLen) &&
-        (std::strcmp(normalizedSource + (srcLen - bpLen), bp) == 0)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// Handles debugger capture watch values.
-void debugger_capture_watch_values() noexcept {
-  g_lastWatchOutput[0] = '\0';
-  if ((g_state == nullptr) || (g_watchCount == 0U)) {
-    return;
-  }
-
-  lua_sethook(g_state, nullptr, 0, 0);
-
-  std::size_t writeOffset = 0U;
-  for (std::size_t i = 0U; i < g_watchCount; ++i) {
-    const char *expr = g_watchExprs[i];
-    char chunk[160] = {};
-    std::snprintf(chunk, sizeof(chunk), "return (%s)", expr);
-
-    const int loadStatus = luaL_loadstring(g_state, chunk);
-    if (loadStatus != LUA_OK) {
-      lua_pop(g_state, 1);
-      continue;
-    }
-
-    const int callStatus = lua_pcall(g_state, 0, 1, 0);
-    const char *value = "<error>";
-    char valueBuffer[128] = {};
-    if (callStatus == LUA_OK) {
-      if (lua_isnumber(g_state, -1)) {
-        std::snprintf(valueBuffer, sizeof(valueBuffer), "%g",
-                      static_cast<double>(lua_tonumber(g_state, -1)));
-        value = valueBuffer;
-      } else if (lua_isboolean(g_state, -1)) {
-        value = lua_toboolean(g_state, -1) ? "true" : "false";
-      } else if (lua_isstring(g_state, -1)) {
-        value = lua_tostring(g_state, -1);
-      } else if (lua_isnil(g_state, -1)) {
-        value = "nil";
-      } else {
-        value = luaL_typename(g_state, -1);
-      }
-      lua_pop(g_state, 1);
-    } else {
-      lua_pop(g_state, 1);
-    }
-
-    if (writeOffset < (sizeof(g_lastWatchOutput) - 1U)) {
-      const int written =
-          std::snprintf(g_lastWatchOutput + writeOffset,
-                        sizeof(g_lastWatchOutput) - writeOffset, "%s%s=%s",
-                        (writeOffset == 0U) ? "" : "; ", expr, value);
-      if (written > 0) {
-        const std::size_t delta = static_cast<std::size_t>(written);
-        writeOffset = (writeOffset + delta < sizeof(g_lastWatchOutput))
-                          ? (writeOffset + delta)
-                          : (sizeof(g_lastWatchOutput) - 1U);
-      }
-    }
-  }
-
-  refresh_lua_hook();
-}
-
-/// Handles scripting debug hook.
-void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
-  if ((state == nullptr) || (ar == nullptr)) {
-    return;
-  }
-
-  // Instruction-count sandbox limit — fires after g_instructionLimit ops.
-  if (g_sandboxEnabled && ar->event == LUA_HOOKCOUNT) {
-    luaL_error(state, "CPU instruction limit exceeded (%d instructions)",
-               g_instructionLimit);
-    return; // Unreachable (luaL_error longjmps).
-  }
-
-  if (g_profilerEnabled && (ar->event == LUA_HOOKCALL)) {
-    if (lua_getinfo(state, "n", ar) != 0) {
-      profiler_record_sample((ar->name != nullptr) ? ar->name : "<anonymous>");
-    }
-  }
-
-  if (!g_debuggerEnabled) {
-    return;
-  }
-
-  // Stepping: on return event, if stepping out, switch to step-in
-  // so we stop on the next line after the return.
-  if (g_dapStepMode == DapStepMode::StepOut && ar->event == LUA_HOOKRET) {
-    lua_Debug check{};
-    int depth = 0;
-    while (lua_getstack(state, depth, &check) != 0) {
-      ++depth;
-    }
-    // Current depth includes the returning frame; after return
-    // we'll be at depth-1. If that's <= the step depth, stop next line.
-    if (depth - 1 <= g_dapStepDepth) {
-      g_dapStepMode = DapStepMode::StepIn;
-    }
-    return;
-  }
-
-  if (ar->event != LUA_HOOKLINE) {
-    return;
-  }
-
-  if (lua_getinfo(state, "Sln", ar) == 0) {
-    return;
-  }
-
-  bool shouldStop = false;
-  const char *reason = "breakpoint";
-
-  if (debugger_line_matches(ar->source, ar->currentline)) {
-    shouldStop = true;
-    reason = "breakpoint";
-  } else if (g_dapStepMode == DapStepMode::StepIn) {
-    shouldStop = true;
-    reason = "step";
-  } else if (g_dapStepMode == DapStepMode::Next) {
-    // Stop only if at the same or lesser call depth.
-    lua_Debug check{};
-    int depth = 0;
-    while (lua_getstack(state, depth, &check) != 0) {
-      ++depth;
-    }
-    if (depth <= g_dapStepDepth) {
-      shouldStop = true;
-      reason = "step";
-    }
-  }
-
-  if (!shouldStop) {
-    return;
-  }
-
-  const char *source = (ar->source != nullptr) ? ar->source : "";
-  if (source[0] == '@') {
-    ++source;
-  }
-  std::snprintf(g_lastBreakpointFile, sizeof(g_lastBreakpointFile), "%s",
-                source);
-  g_lastBreakpointLine = ar->currentline;
-  ++g_breakpointHitCount;
-
-  luaL_traceback(state, state, "breakpoint", 1);
-  const char *trace = lua_tostring(state, -1);
-  if (trace != nullptr) {
-    std::snprintf(g_lastCallstack, sizeof(g_lastCallstack), "%s", trace);
-  }
-  lua_pop(state, 1);
-  debugger_capture_watch_values();
-
-  // If a DAP client is connected, pause and process DAP messages.
-  if (dap_has_client()) {
-    // Record current depth for step-over/step-out.
-    lua_Debug depthCheck{};
-    int currentDepth = 0;
-    while (lua_getstack(state, currentDepth, &depthCheck) != 0) {
-      ++currentDepth;
-    }
-    // Block until continue/step command.
-    g_dapStepMode = dap_on_stopped(state, source, ar->currentline, reason);
-    g_dapStepDepth = currentDepth;
-    // Re-enable hooks after processing (eval disables them).
-    refresh_lua_hook();
-  }
-}
-
 /// Handles refresh lua hook.
 void refresh_lua_hook() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-
-  int mask = 0;
-  int count = 0;
-  if (g_profilerEnabled) {
-    mask |= LUA_MASKCALL;
-  }
-  if (g_debuggerEnabled) {
-    mask |= LUA_MASKLINE;
-    // Enable call/return hooks for stepping modes.
-    if (g_dapStepMode != DapStepMode::Continue) {
-      mask |= LUA_MASKCALL | LUA_MASKRET;
-    }
-  }
-  if (g_sandboxEnabled && g_instructionLimit > 0) {
-    mask |= LUA_MASKCOUNT;
-    count = g_instructionLimit;
-  }
-
-  if (mask == 0) {
-    lua_sethook(g_state, nullptr, 0, 0);
-    return;
-  }
-
-  lua_sethook(g_state, &scripting_debug_hook, mask, count);
+  refresh_debug_lua_hook();
 }
 
 /// Handles log lua error.
 void log_lua_error(const char *context) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     return;
   }
 
-  const char *message = lua_tostring(g_state, -1);
+  const char *message = lua_tostring(state, -1);
   if (message == nullptr) {
     message = "unknown lua error";
   }
 
   // Attach traceback so logs include script file and line diagnostics.
-  luaL_traceback(g_state, g_state, message, 1);
-  const char *trace = lua_tostring(g_state, -1);
+  luaL_traceback(state, state, message, 1);
+  const char *trace = lua_tostring(state, -1);
   if (trace == nullptr) {
     trace = message;
   }
@@ -701,7 +212,7 @@ void log_lua_error(const char *context) noexcept {
     std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", trace);
   }
   core::log_message(core::LogLevel::Error, "scripting", logBuffer);
-  lua_pop(g_state, 2);
+  lua_pop(state, 2);
 }
 
 /// Handles lua engine log.
@@ -1401,329 +912,6 @@ int lua_engine_elapsed_time(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine is key down.
-int lua_engine_is_key_down(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const int scancode = static_cast<int>(lua_tointeger(state, 1));
-  lua_pushboolean(state, core::is_key_down(scancode) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine is key pressed.
-int lua_engine_is_key_pressed(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const int scancode = static_cast<int>(lua_tointeger(state, 1));
-  lua_pushboolean(state, core::is_key_pressed(scancode) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine register action.
-int lua_engine_register_action(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  const char *name = lua_tostring(state, 1);
-  const int key = static_cast<int>(lua_tointeger(state, 2));
-  const int mouseButton =
-      lua_isnumber(state, 3) ? static_cast<int>(lua_tointeger(state, 3)) : -1;
-  const bool ok = core::register_action(name, key, mouseButton);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine register axis.
-int lua_engine_register_axis(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  const char *name = lua_tostring(state, 1);
-  const int negativeKey = static_cast<int>(lua_tointeger(state, 2));
-  const int positiveKey = static_cast<int>(lua_tointeger(state, 3));
-  const bool ok = core::register_axis(name, negativeKey, positiveKey);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine is action down.
-int lua_engine_is_action_down(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushboolean(state, core::is_action_down(name) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine is action pressed.
-int lua_engine_is_action_pressed(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushboolean(state, core::is_action_pressed(name) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine get action value.
-int lua_engine_get_action_value(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushnumber(state, static_cast<lua_Number>(core::action_value(name)));
-  return 1;
-}
-
-/// Handles lua engine get axis value.
-int lua_engine_get_axis_value(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushnumber(state, static_cast<lua_Number>(core::axis_value(name)));
-  return 1;
-}
-
-/// Handles lua engine is gamepad connected.
-int lua_engine_is_gamepad_connected(lua_State *state) noexcept {
-  static_cast<void>(state);
-  lua_pushboolean(state, core::is_gamepad_connected() ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine is gamepad button down.
-int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const int button = static_cast<int>(lua_tointeger(state, 1));
-  lua_pushboolean(state, core::is_gamepad_button_down(button) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine gamepad axis value.
-int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    lua_pushnumber(state, 0.0);
-    return 1;
-  }
-  const int axis = static_cast<int>(lua_tointeger(state, 1));
-  const int deadzone =
-      lua_isnumber(state, 2) ? static_cast<int>(lua_tointeger(state, 2)) : 8000;
-  lua_pushnumber(
-      state, static_cast<lua_Number>(core::gamepad_axis_value(axis, deadzone)));
-  return 1;
-}
-
-// ---------------------------------------------------------------------------
-// InputMapper bindings (P1-M2-C)
-// ---------------------------------------------------------------------------
-
-// engine.add_input_action(name, {bindings...})
-// Each binding: {type=0..3, code=N [, axisThreshold=0.5, axisScale=1]}
-int lua_engine_add_input_action(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_istable(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *name = lua_tostring(state, 1);
-  core::InputBinding bindings[core::kMaxBindingsPerAction]{};
-  std::uint32_t count = 0U;
-  const int tableLen = static_cast<int>(lua_rawlen(state, 2));
-  for (int i = 1; i <= tableLen && count < core::kMaxBindingsPerAction; ++i) {
-    lua_rawgeti(state, 2, i);
-    if (lua_istable(state, -1)) {
-      lua_getfield(state, -1, "type");
-      bindings[count].type =
-          static_cast<core::InputBindingType>(lua_tointeger(state, -1));
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "code");
-      bindings[count].code = static_cast<int>(lua_tointeger(state, -1));
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "axis_threshold");
-      if (lua_isnumber(state, -1)) {
-        bindings[count].axisThreshold =
-            static_cast<float>(lua_tonumber(state, -1));
-      }
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "axis_scale");
-      if (lua_isnumber(state, -1)) {
-        bindings[count].axisScale = static_cast<float>(lua_tonumber(state, -1));
-      }
-      lua_pop(state, 1);
-      ++count;
-    }
-    lua_pop(state, 1);
-  }
-  const bool ok = core::add_input_action(name, bindings, count);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-// engine.add_input_axis(name, {sources...})
-int lua_engine_add_input_axis(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_istable(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *name = lua_tostring(state, 1);
-  core::InputAxisSource sources[core::kMaxSourcesPerAxis]{};
-  std::uint32_t count = 0U;
-  const int tableLen = static_cast<int>(lua_rawlen(state, 2));
-  for (int i = 1; i <= tableLen && count < core::kMaxSourcesPerAxis; ++i) {
-    lua_rawgeti(state, 2, i);
-    if (lua_istable(state, -1)) {
-      lua_getfield(state, -1, "type");
-      sources[count].type =
-          static_cast<core::AxisSourceType>(lua_tointeger(state, -1));
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "negative_key");
-      sources[count].negativeKey = static_cast<int>(lua_tointeger(state, -1));
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "positive_key");
-      sources[count].positiveKey = static_cast<int>(lua_tointeger(state, -1));
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "axis_index");
-      sources[count].axisIndex = static_cast<int>(lua_tointeger(state, -1));
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "scale");
-      if (lua_isnumber(state, -1)) {
-        sources[count].scale = static_cast<float>(lua_tonumber(state, -1));
-      }
-      lua_pop(state, 1);
-      lua_getfield(state, -1, "dead_zone");
-      if (lua_isnumber(state, -1)) {
-        sources[count].deadZone = static_cast<float>(lua_tonumber(state, -1));
-      }
-      lua_pop(state, 1);
-      ++count;
-    }
-    lua_pop(state, 1);
-  }
-  const bool ok = core::add_input_axis(name, sources, count);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-// engine.is_mapped_action_down(name)
-int lua_engine_is_mapped_action_down(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushboolean(state, core::is_mapped_action_down(name) ? 1 : 0);
-  return 1;
-}
-
-// engine.is_mapped_action_pressed(name)
-int lua_engine_is_mapped_action_pressed(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushboolean(state, core::is_mapped_action_pressed(name) ? 1 : 0);
-  return 1;
-}
-
-// engine.mapped_axis_value(name)
-int lua_engine_mapped_axis_value(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushnumber(state, static_cast<lua_Number>(core::mapped_axis_value(name)));
-  return 1;
-}
-
-// engine.rebind_action(actionName, bindingIndex, {type=N, code=N})
-int lua_engine_rebind_action(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_istable(state, 3)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *name = lua_tostring(state, 1);
-  const auto bindingIdx = static_cast<std::uint32_t>(lua_tointeger(state, 2));
-  core::InputBinding binding{};
-  lua_getfield(state, 3, "type");
-  binding.type = static_cast<core::InputBindingType>(lua_tointeger(state, -1));
-  lua_pop(state, 1);
-  lua_getfield(state, 3, "code");
-  binding.code = static_cast<int>(lua_tointeger(state, -1));
-  lua_pop(state, 1);
-  lua_getfield(state, 3, "axis_threshold");
-  if (lua_isnumber(state, -1)) {
-    binding.axisThreshold = static_cast<float>(lua_tonumber(state, -1));
-  }
-  lua_pop(state, 1);
-  lua_getfield(state, 3, "axis_scale");
-  if (lua_isnumber(state, -1)) {
-    binding.axisScale = static_cast<float>(lua_tonumber(state, -1));
-  }
-  lua_pop(state, 1);
-  const bool ok = core::rebind_action(name, bindingIdx, binding);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-// engine.save_input_config(path)
-int lua_engine_save_input_config(lua_State *state) noexcept {
-  const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, core::save_input_bindings(path) ? 1 : 0);
-  return 1;
-}
-
-// engine.load_input_config(path)
-int lua_engine_load_input_config(lua_State *state) noexcept {
-  const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, core::load_input_bindings(path) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine set game mode.
-int lua_engine_set_game_mode(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  if (name == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  // Write to both legacy string and World's GameMode struct.
-  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
-  if (runtime_binding().world != nullptr) {
-    std::snprintf(runtime_binding().world->game_mode().name, runtime::GameMode::kMaxNameLength,
-                  "%s", name);
-  }
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine get game mode.
-int lua_engine_get_game_mode(lua_State *state) noexcept {
-  if (runtime_binding().world != nullptr) {
-    lua_pushstring(state, runtime_binding().world->game_mode().name);
-  } else {
-    lua_pushstring(state, g_gameMode);
-  }
-  return 1;
-}
-
-/// Handles lua engine set game state.
-int lua_engine_set_game_state(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  if (name == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  std::snprintf(g_gameState, sizeof(g_gameState), "%s", name);
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine get game state.
-int lua_engine_get_game_state(lua_State *state) noexcept {
-  lua_pushstring(state, g_gameState);
-  return 1;
-}
-
 /// Handles lua engine set player controller.
 int lua_engine_set_player_controller(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2)) {
@@ -1733,8 +921,9 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
 
   const lua_Integer player = lua_tointeger(state, 1);
   const lua_Integer entityHandle = lua_tointeger(state, 2);
-  if ((player < 0) ||
-      (player >= static_cast<lua_Integer>(kMaxPlayerControllers)) ||
+  const auto maxPlayerIndex =
+      static_cast<lua_Integer>(std::numeric_limits<std::uint8_t>::max());
+  if ((player < 0) || (player > maxPlayerIndex) ||
       (entityHandle < 0)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -1748,22 +937,11 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
     }
   }
 
-  g_playerControllerEntities[static_cast<std::size_t>(player)] = entity;
-  g_playerControllers.set_controlled_entity(
-      static_cast<std::uint8_t>(player), entity);
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine is god mode.
-int lua_engine_is_god_mode(lua_State *state) noexcept {
-  lua_pushboolean(state, g_godModeEnabled ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine is noclip.
-int lua_engine_is_noclip(lua_State *state) noexcept {
-  lua_pushboolean(state, g_noclipEnabled ? 1 : 0);
+  lua_pushboolean(state,
+                  set_player_controller_entity(
+                      static_cast<std::uint8_t>(player), entity)
+                      ? 1
+                      : 0);
   return 1;
 }
 
@@ -1775,14 +953,15 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
   }
 
   const lua_Integer player = lua_tointeger(state, 1);
-  if ((player < 0) ||
-      (player >= static_cast<lua_Integer>(kMaxPlayerControllers))) {
+  const auto maxPlayerIndex =
+      static_cast<lua_Integer>(std::numeric_limits<std::uint8_t>::max());
+  if ((player < 0) || (player > maxPlayerIndex)) {
     lua_pushnil(state);
     return 1;
   }
 
   const auto idx = static_cast<std::uint8_t>(player);
-  const runtime::Entity entity = g_playerControllers.get_controlled_entity(idx);
+  const runtime::Entity entity = get_player_controller_entity(idx);
   if ((entity == runtime::kInvalidEntity) ||
       (runtime_binding().world == nullptr) ||
       !runtime_binding().world->is_alive(entity)) {
@@ -1791,289 +970,6 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
   }
 
   push_entity_handle(state, entity);
-  return 1;
-}
-
-// --- Game Mode state transitions ---
-
-int lua_engine_game_mode_start(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, runtime_binding().world->game_mode().start() ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine game mode pause.
-int lua_engine_game_mode_pause(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, runtime_binding().world->game_mode().pause() ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine game mode end.
-int lua_engine_game_mode_end(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, runtime_binding().world->game_mode().end() ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine game mode state.
-int lua_engine_game_mode_state(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushstring(state, "none");
-    return 1;
-  }
-  using S = runtime::GameMode::State;
-  switch (runtime_binding().world->game_mode().state) {
-  case S::WaitingToStart:
-    lua_pushstring(state, "waiting_to_start");
-    break;
-  case S::InProgress:
-    lua_pushstring(state, "in_progress");
-    break;
-  case S::Paused:
-    lua_pushstring(state, "paused");
-    break;
-  case S::Ended:
-    lua_pushstring(state, "ended");
-    break;
-  }
-  return 1;
-}
-
-/// Handles lua engine game mode set rule.
-int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *key = lua_tostring(state, 1);
-  const char *value = lua_tostring(state, 2);
-  if (key == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, runtime_binding().world->game_mode().set_rule(key, value) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine game mode get rule.
-int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushnil(state);
-    return 1;
-  }
-  const char *key = lua_tostring(state, 1);
-  const char *value = runtime_binding().world->game_mode().get_rule(key);
-  if (value != nullptr) {
-    lua_pushstring(state, value);
-  } else {
-    lua_pushnil(state);
-  }
-  return 1;
-}
-
-/// Handles lua engine game mode max players.
-int lua_engine_game_mode_max_players(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushinteger(state, 0);
-    return 1;
-  }
-  if (lua_gettop(state) >= 1 && lua_isnumber(state, 1)) {
-    const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().world->game_mode().maxPlayers = n;
-  }
-  lua_pushinteger(state,
-                  static_cast<lua_Integer>(runtime_binding().world->game_mode().maxPlayers));
-  return 1;
-}
-
-// --- Persistent GameState ---
-
-int lua_engine_game_state_set_number(lua_State *state) noexcept {
-  const char *key = lua_tostring(state, 1);
-  if ((key == nullptr) || !lua_isnumber(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, g_persistentGameState.set_number(
-                             key, static_cast<float>(lua_tonumber(state, 2)))
-                             ? 1
-                             : 0);
-  return 1;
-}
-
-/// Handles lua engine game state get number.
-int lua_engine_game_state_get_number(lua_State *state) noexcept {
-  const char *key = lua_tostring(state, 1);
-  lua_pushnumber(
-      state, static_cast<lua_Number>(g_persistentGameState.get_number(key)));
-  return 1;
-}
-
-/// Handles lua engine game state set string.
-int lua_engine_game_state_set_string(lua_State *state) noexcept {
-  const char *key = lua_tostring(state, 1);
-  const char *value = lua_tostring(state, 2);
-  if (key == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, g_persistentGameState.set_string(key, value) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine game state get string.
-int lua_engine_game_state_get_string(lua_State *state) noexcept {
-  const char *key = lua_tostring(state, 1);
-  const char *value = g_persistentGameState.get_string(key);
-  if (value != nullptr) {
-    lua_pushstring(state, value);
-  } else {
-    lua_pushnil(state);
-  }
-  return 1;
-}
-
-/// Handles lua engine game state has.
-int lua_engine_game_state_has(lua_State *state) noexcept {
-  const char *key = lua_tostring(state, 1);
-  lua_pushboolean(state, g_persistentGameState.has(key) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine game state clear.
-int lua_engine_game_state_clear(lua_State *state) noexcept {
-  static_cast<void>(state);
-  g_persistentGameState.clear();
-  return 0;
-}
-
-/// Handles lua engine profiler enable.
-int lua_engine_profiler_enable(lua_State *state) noexcept {
-  g_profilerEnabled =
-      (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
-  refresh_lua_hook();
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine profiler reset.
-int lua_engine_profiler_reset(lua_State *state) noexcept {
-  static_cast<void>(state);
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    g_profilerEntries[i] = ProfilerEntry{};
-  }
-  return 0;
-}
-
-/// Handles lua engine profiler get count.
-int lua_engine_profiler_get_count(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  if (name == nullptr) {
-    lua_pushinteger(state, 0);
-    return 1;
-  }
-
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    if (!g_profilerEntries[i].occupied) {
-      continue;
-    }
-    if (std::strcmp(g_profilerEntries[i].name, name) == 0) {
-      lua_pushinteger(state,
-                      static_cast<lua_Integer>(g_profilerEntries[i].samples));
-      return 1;
-    }
-  }
-
-  lua_pushinteger(state, 0);
-  return 1;
-}
-
-/// Handles lua engine debugger enable.
-int lua_engine_debugger_enable(lua_State *state) noexcept {
-  g_debuggerEnabled =
-      (lua_gettop(state) >= 1) && (lua_toboolean(state, 1) != 0);
-  refresh_lua_hook();
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine debugger add breakpoint.
-int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept {
-  const char *file = lua_tostring(state, 1);
-  if ((file == nullptr) || !lua_isnumber(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const int line = static_cast<int>(lua_tointeger(state, 2));
-  lua_pushboolean(state, debugger_add_breakpoint(file, line) ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine debugger clear breakpoints.
-int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept {
-  static_cast<void>(state);
-  debugger_clear_breakpoints();
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine debugger add watch.
-int lua_engine_debugger_add_watch(lua_State *state) noexcept {
-  const char *expr = lua_tostring(state, 1);
-  if ((expr == nullptr) || (g_watchCount >= kMaxDebugWatches)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  std::snprintf(g_watchExprs[g_watchCount], sizeof(g_watchExprs[0]), "%s",
-                expr);
-  ++g_watchCount;
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-/// Handles lua engine debugger clear watches.
-int lua_engine_debugger_clear_watches(lua_State *state) noexcept {
-  static_cast<void>(state);
-  g_watchCount = 0U;
-  g_lastWatchOutput[0] = '\0';
-  return 0;
-}
-
-/// Handles lua engine debugger last breakpoint.
-int lua_engine_debugger_last_breakpoint(lua_State *state) noexcept {
-  if (g_lastBreakpointLine <= 0) {
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_newtable(state);
-  lua_pushstring(state, g_lastBreakpointFile);
-  lua_setfield(state, -2, "file");
-  lua_pushinteger(state, static_cast<lua_Integer>(g_lastBreakpointLine));
-  lua_setfield(state, -2, "line");
-  lua_pushinteger(state, static_cast<lua_Integer>(g_breakpointHitCount));
-  lua_setfield(state, -2, "hits");
-  return 1;
-}
-
-/// Handles lua engine debugger last callstack.
-int lua_engine_debugger_last_callstack(lua_State *state) noexcept {
-  lua_pushstring(state, g_lastCallstack);
-  return 1;
-}
-
-/// Handles lua engine debugger last watch values.
-int lua_engine_debugger_last_watch_values(lua_State *state) noexcept {
-  lua_pushstring(state, g_lastWatchOutput);
   return 1;
 }
 
@@ -3492,394 +2388,10 @@ static int lua_engine_remove_spot_light(lua_State *state) noexcept {
   return 1;
 }
 
-// --- Collision handlers (registered, multi-listener) ---
-
-static constexpr std::size_t kMaxCollisionHandlers = 8U;
-static int g_collisionHandlers[kMaxCollisionHandlers] = {
-    LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF,
-    LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
-
-/// Handles lua engine on collision register.
-int lua_engine_on_collision_register(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1)) {
-    lua_pushnil(state);
-    return 1;
-  }
-  for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
-    if (g_collisionHandlers[i] == LUA_NOREF) {
-      lua_pushvalue(state, 1);
-      g_collisionHandlers[i] = luaL_ref(state, LUA_REGISTRYINDEX);
-      lua_pushinteger(state, static_cast<lua_Integer>(i));
-      return 1;
-    }
-  }
-  lua_pushnil(state);
-  return 1;
-}
-
-/// Handles lua engine remove collision handler.
-int lua_engine_remove_collision_handler(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    return 0;
-  }
-  const auto id = static_cast<std::size_t>(lua_tointeger(state, 1));
-  if (id < kMaxCollisionHandlers) {
-    if (g_collisionHandlers[id] != LUA_NOREF) {
-      luaL_unref(state, LUA_REGISTRYINDEX, g_collisionHandlers[id]);
-      g_collisionHandlers[id] = LUA_NOREF;
-    }
-  }
-  return 0;
-}
-
-// --- Timer system ---
-// Lua function references are stored parallel to the per-World TimerManager
-// slots. The C++ TimerManager handles tick/fire scheduling; the scripting
-// layer keeps Lua refs and invokes them via pcall on callback.
-
-static constexpr std::size_t kMaxTimerRefs = runtime::TimerManager::kMaxTimers;
-static int g_timerLuaRefs[kMaxTimerRefs];
-static bool g_timerRefsInit = false;
-
-/// Handles ensure timer refs init.
-void ensure_timer_refs_init() noexcept {
-  if (!g_timerRefsInit) {
-    for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
-      g_timerLuaRefs[i] = LUA_NOREF;
-    }
-    g_timerRefsInit = true;
-  }
-}
-
-/// Handles lua timer callback.
-void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
-  (void)userData;
-  if ((g_state == nullptr) || (id == runtime::kInvalidTimerId) ||
-      (runtime_binding().world == nullptr)) {
-    return;
-  }
-  auto &timerManager = runtime_binding().world->timer_manager();
-  const std::size_t slot = timerManager.slot_for_id(id);
-  if (slot >= kMaxTimerRefs) {
-    return;
-  }
-  const bool wasRepeating = timerManager.entry_at(slot).repeat;
-  const int ref = g_timerLuaRefs[slot];
-  if (ref == LUA_NOREF) {
-    return;
-  }
-  lua_rawgeti(g_state, LUA_REGISTRYINDEX, ref);
-  if (lua_isfunction(g_state, -1)) {
-    if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
-      log_lua_error("timer");
-    }
-  } else {
-    lua_pop(g_state, 1);
-  }
-  if (runtime_binding().world != nullptr) {
-    auto &currentTimerManager = runtime_binding().world->timer_manager();
-    const bool stillCurrent =
-        (currentTimerManager.slot_for_id(id) == slot) &&
-        currentTimerManager.entry_at(slot).active;
-    if (!wasRepeating || !stillCurrent) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
-      g_timerLuaRefs[slot] = LUA_NOREF;
-    }
-  }
-}
-
-/// Handles rewire lua timer callbacks.
-void rewire_lua_timer_callbacks() noexcept {
-  if (runtime_binding().world == nullptr) {
-    return;
-  }
-  ensure_timer_refs_init();
-  auto &timerManager = runtime_binding().world->timer_manager();
-  for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
-    auto &entry = timerManager.entry_at_mut(i);
-    if (entry.active && (entry.callback == nullptr) &&
-        (g_timerLuaRefs[i] != LUA_NOREF)) {
-      entry.callback = lua_timer_callback;
-      entry.userData = nullptr;
-    }
-  }
-}
-
-/// Handles lua engine set timeout.
-int lua_engine_set_timeout(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1) || !lua_isnumber(state, 2)) {
-    lua_pushnil(state);
-    return 1;
-  }
-  if (runtime_binding().world == nullptr) {
-    lua_pushnil(state);
-    return 1;
-  }
-  ensure_timer_refs_init();
-  const float secs = static_cast<float>(lua_tonumber(state, 2));
-  const runtime::TimerId id =
-      runtime_binding().world->timer_manager().set_timeout(secs, lua_timer_callback, nullptr);
-  if (id == runtime::kInvalidTimerId) {
-    lua_pushnil(state);
-    return 1;
-  }
-  const std::size_t slot =
-      runtime_binding().world->timer_manager().slot_for_id(id);
-  if (slot >= kMaxTimerRefs) {
-    runtime_binding().world->timer_manager().cancel(id);
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_pushvalue(state, 1);
-  g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
-}
-
-/// Handles lua engine set interval.
-int lua_engine_set_interval(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1) || !lua_isnumber(state, 2)) {
-    lua_pushnil(state);
-    return 1;
-  }
-  if (runtime_binding().world == nullptr) {
-    lua_pushnil(state);
-    return 1;
-  }
-  ensure_timer_refs_init();
-  const float secs = static_cast<float>(lua_tonumber(state, 2));
-  const runtime::TimerId id =
-      runtime_binding().world->timer_manager().set_interval(secs, lua_timer_callback, nullptr);
-  if (id == runtime::kInvalidTimerId) {
-    lua_pushnil(state);
-    return 1;
-  }
-  const std::size_t slot =
-      runtime_binding().world->timer_manager().slot_for_id(id);
-  if (slot >= kMaxTimerRefs) {
-    runtime_binding().world->timer_manager().cancel(id);
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_pushvalue(state, 1);
-  g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
-}
-
-/// Handles lua engine cancel timer.
-int lua_engine_cancel_timer(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    return 0;
-  }
-  if (runtime_binding().world == nullptr) {
-    return 0;
-  }
-  const auto id = static_cast<runtime::TimerId>(lua_tointeger(state, 1));
-  if (id == runtime::kInvalidTimerId) {
-    return 0;
-  }
-  auto &timerManager = runtime_binding().world->timer_manager();
-  const std::size_t slot = timerManager.slot_for_id(id);
-  if (slot >= kMaxTimerRefs) {
-    return 0;
-  }
-  timerManager.cancel(id);
-  if (g_timerLuaRefs[slot] != LUA_NOREF) {
-    luaL_unref(state, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
-    g_timerLuaRefs[slot] = LUA_NOREF;
-  }
-  return 0;
-}
-
-// --- Coroutine scheduler ---
-
-enum class WaitMode : std::uint8_t {
-  Time,
-  Condition,
-  Frames,
-};
-
-/// Stores coroutine entry data used by the engine.
-struct CoroutineEntry final {
-  lua_State *thread = nullptr;
-  int threadRef = LUA_NOREF;
-  int conditionRef = LUA_NOREF;
-  float wakeAt = 0.0F;
-  std::uint32_t wakeAtFrame = 0U;
-  WaitMode mode = WaitMode::Time;
-  bool active = false;
-};
-
-// Tags used to distinguish yield types (address-only, value irrelevant).
-static char kWaitFramesTag;
-static char kWaitConditionTag;
-
-/// Owns the coroutine scheduler behavior and state.
-class CoroutineScheduler final {
-public:
-  static constexpr std::size_t kCapacity = 32U;
-
-  // Parse yield results from a coroutine that just called lua_yield.
-  // Sets entry mode / wakeAt / conditionRef / wakeAtFrame.
-  void parse_yield(lua_State *thread, int nresults,
-                   CoroutineEntry &entry) noexcept {
-    // Default: wake next tick (Time mode, wake now).
-    entry.mode = WaitMode::Time;
-    entry.wakeAt = g_totalSeconds;
-    entry.wakeAtFrame = 0U;
-    if (entry.conditionRef != LUA_NOREF && g_state != nullptr) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
-      entry.conditionRef = LUA_NOREF;
-    }
-
-    if (nresults >= 2 && lua_islightuserdata(thread, -1)) {
-      void *tag = lua_touserdata(thread, -1);
-      if (tag == static_cast<void *>(&kWaitFramesTag)) {
-        const auto frames =
-            static_cast<std::uint32_t>(lua_tointeger(thread, -2));
-        entry.mode = WaitMode::Frames;
-        entry.wakeAtFrame = g_frameIndex + frames;
-      } else if (tag == static_cast<void *>(&kWaitConditionTag)) {
-        // Condition function is at -2. Store a registry ref.
-        lua_pushvalue(thread, -2);
-        entry.conditionRef = luaL_ref(thread, LUA_REGISTRYINDEX);
-        entry.mode = WaitMode::Condition;
-      }
-      lua_pop(thread, nresults);
-    } else if (nresults >= 1 && lua_isnumber(thread, -1)) {
-      const float secs = static_cast<float>(lua_tonumber(thread, -1));
-      entry.wakeAt = g_totalSeconds + secs;
-      lua_pop(thread, nresults);
-    } else if (nresults > 0) {
-      lua_pop(thread, nresults);
-    }
-  }
-
-  // Check whether a condition-mode coroutine should be woken.
-  bool check_condition(int condRef) noexcept {
-    if (g_state == nullptr || condRef == LUA_NOREF) {
-      return false;
-    }
-    lua_rawgeti(g_state, LUA_REGISTRYINDEX, condRef);
-    if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-      log_lua_error("wait_until condition");
-      return true; // Wake on error so the coroutine can be resumed/faulted.
-    }
-    const bool result = lua_toboolean(g_state, -1) != 0;
-    lua_pop(g_state, 1);
-    return result;
-  }
-
-  // Returns true if the entry should be woken this tick.
-  bool should_wake(const CoroutineEntry &entry) noexcept {
-    switch (entry.mode) {
-    case WaitMode::Time:
-      return g_totalSeconds >= entry.wakeAt;
-    case WaitMode::Frames:
-      return g_frameIndex >= entry.wakeAtFrame;
-    case WaitMode::Condition:
-      return check_condition(entry.conditionRef);
-    }
-    return false;
-  }
-
-  // Release a single entry (unref thread + condition).
-  void release_entry(CoroutineEntry &entry) noexcept {
-    if (entry.conditionRef != LUA_NOREF && g_state != nullptr) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
-    }
-    if (entry.threadRef != LUA_NOREF && g_state != nullptr) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.threadRef);
-    }
-    entry = CoroutineEntry{};
-  }
-
-  CoroutineEntry m_entries[kCapacity]{};
-};
-
-static CoroutineScheduler g_coroutineScheduler;
-
 /// Handles lua engine start coroutine.
 int lua_engine_start_coroutine(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1)) {
-    lua_pushnil(state);
-    return 1;
-  }
-  for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-    if (!g_coroutineScheduler.m_entries[i].active) {
-      lua_State *thread = lua_newthread(state);
-      if (thread == nullptr) {
-        lua_pushnil(state);
-        return 1;
-      }
-      // Root the thread in the registry so GC won't collect it.
-      const int threadRef = luaL_ref(state, LUA_REGISTRYINDEX);
-
-      // Move the function onto the new thread's stack.
-      lua_pushvalue(state, 1);
-      lua_xmove(state, thread, 1);
-
-      int nresults = 0;
-      const int status = lua_resume(thread, state, 0, &nresults);
-      if (status == LUA_OK) {
-        // Coroutine finished immediately; release the thread ref.
-        luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
-        lua_pushinteger(state, static_cast<lua_Integer>(i));
-        return 1;
-      }
-      if (status == LUA_YIELD) {
-        auto &entry = g_coroutineScheduler.m_entries[i];
-        entry.thread = thread;
-        entry.threadRef = threadRef;
-        entry.active = true;
-        g_coroutineScheduler.parse_yield(thread, nresults, entry);
-        lua_pushinteger(state, static_cast<lua_Integer>(i));
-        return 1;
-      }
-      // Error: move error from thread to parent state for logging.
-      luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
-      if (lua_isstring(thread, -1)) {
-        lua_xmove(thread, g_state, 1);
-      } else {
-        lua_pushstring(g_state, "start_coroutine error (non-string)");
-      }
-      log_lua_error("start_coroutine");
-      lua_pushnil(state);
-      return 1;
-    }
-  }
-  lua_pushnil(state);
-  return 1;
-}
-
-/// Handles lua engine wait.
-int lua_engine_wait(lua_State *state) noexcept {
-  // Yield with the sleep duration so the scheduler can parse it.
-  const float secs = lua_isnumber(state, 1)
-                         ? static_cast<float>(lua_tonumber(state, 1))
-                         : 0.0F;
-  lua_pushnumber(state, static_cast<lua_Number>(secs));
-  return lua_yield(state, 1);
-}
-
-/// Handles lua engine wait frames.
-int lua_engine_wait_frames(lua_State *state) noexcept {
-  const int n =
-      lua_isinteger(state, 1) ? static_cast<int>(lua_tointeger(state, 1)) : 1;
-  lua_pushinteger(state, static_cast<lua_Integer>(n > 0 ? n : 1));
-  lua_pushlightuserdata(state, static_cast<void *>(&kWaitFramesTag));
-  return lua_yield(state, 2);
-}
-
-/// Handles lua engine wait until.
-int lua_engine_wait_until(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1)) {
-    return luaL_error(state, "wait_until expects a function");
-  }
-  lua_pushvalue(state, 1);
-  lua_pushlightuserdata(state, static_cast<void *>(&kWaitConditionTag));
-  return lua_yield(state, 2);
+  return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
+                             log_lua_error);
 }
 
 // --- Entity lifecycle completeness ---
@@ -3963,52 +2475,6 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
 
   push_entity_handle(state, newEntity);
   return 1;
-}
-
-// --- Scene management from Lua (deferred load/new, immediate save) ---
-
-enum class SceneOp : std::uint8_t { None, Load, New };
-static SceneOp g_pendingSceneOp = SceneOp::None;
-static char g_pendingScenePath[512] = {};
-
-/// Handles lua engine save scene.
-int lua_engine_save_scene(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr || !lua_isstring(state, 1)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const bool ok = (runtime_binding().services != nullptr) && (runtime_binding().services->save_scene != nullptr)
-                      ? runtime_binding().services->save_scene(runtime_binding().world, path)
-                      : false;
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine load scene.
-int lua_engine_load_scene(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1)) {
-    return 0;
-  }
-  const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
-    return 0;
-  }
-  std::snprintf(g_pendingScenePath, sizeof(g_pendingScenePath), "%s", path);
-  g_pendingScenePath[sizeof(g_pendingScenePath) - 1U] = '\0';
-  g_pendingSceneOp = SceneOp::Load;
-  return 0;
-}
-
-/// Handles lua engine new scene.
-int lua_engine_new_scene(lua_State *state) noexcept {
-  static_cast<void>(state);
-  g_pendingSceneOp = SceneOp::New;
-  return 0;
 }
 
 // --- Prefab bindings ---
@@ -4114,300 +2580,6 @@ int lua_engine_is_asset_ready(lua_State *state) noexcept {
   return 1;
 }
 
-// --- Entity pool Lua bindings ---
-
-// engine.pool_create(count) → pool_id or nil
-int lua_engine_pool_create(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !lua_isinteger(state, 1)) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  const lua_Integer count = lua_tointeger(state, 1);
-  if ((count <= 0) ||
-      (static_cast<std::size_t>(count) > runtime::EntityPool::kMaxPoolSize)) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  if (g_entityPoolCount >= kMaxEntityPools) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  runtime::EntityPool &pool = g_entityPools[g_entityPoolCount];
-  if (!pool.init(runtime_binding().world, static_cast<std::size_t>(count))) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  const std::size_t poolId = g_entityPoolCount;
-  ++g_entityPoolCount;
-  lua_pushinteger(state, static_cast<lua_Integer>(poolId));
-  return 1;
-}
-
-// engine.pool_spawn(pool_id) → entity_index or nil
-int lua_engine_pool_spawn(lua_State *state) noexcept {
-  if (!lua_isinteger(state, 1)) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  const lua_Integer poolId = lua_tointeger(state, 1);
-  if ((poolId < 0) || (static_cast<std::size_t>(poolId) >= g_entityPoolCount)) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  const runtime::Entity entity =
-      g_entityPools[static_cast<std::size_t>(poolId)].acquire();
-  if (entity == runtime::kInvalidEntity) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  push_entity_handle(state, entity);
-  return 1;
-}
-
-// engine.pool_release(pool_id, entity_index) → bool
-int lua_engine_pool_release(lua_State *state) noexcept {
-  if (!lua_isinteger(state, 1) || !lua_isinteger(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  const lua_Integer poolId = lua_tointeger(state, 1);
-  if ((poolId < 0) || (static_cast<std::size_t>(poolId) >= g_entityPoolCount)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  runtime::Entity entity{};
-  if (!read_entity(state, 2, &entity)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  const bool ok =
-      g_entityPools[static_cast<std::size_t>(poolId)].release(entity);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-// Find an already-loaded entity script module by path, or load it fresh.
-// Returns LUA_NOREF on failure. Must be called after log_lua_error is defined.
-int get_or_load_entity_script_module(const char *path) noexcept {
-  if ((g_state == nullptr) || (path == nullptr) || (path[0] == '\0')) {
-    return LUA_NOREF;
-  }
-
-  if (module_is_currently_loading(path)) {
-    char msg[256] = {};
-    std::snprintf(msg, sizeof(msg), "circular module dependency detected: %s",
-                  path);
-    core::log_message(core::LogLevel::Error, "scripting", msg);
-    return LUA_NOREF;
-  }
-
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
-      EntityScriptModule &mod = g_entityScriptModules[i];
-      const std::int64_t currentMtime = get_file_mtime(path);
-      if ((currentMtime != 0) && (mod.mtime != 0) &&
-          (currentMtime != mod.mtime)) {
-        // Save per-entity state before replacing the old module.
-        init_entity_saved_state();
-        if ((runtime_binding().world != nullptr) && (mod.registryRef != LUA_NOREF)) {
-          runtime_binding().world->for_each<runtime::ScriptComponent>(
-              [&mod](runtime::Entity entity,
-                     const runtime::ScriptComponent &sc) noexcept {
-                if (std::strcmp(sc.scriptPath, mod.path) != 0) {
-                  return;
-                }
-                if (entity.index >= kMaxFaultedEntities) {
-                  return;
-                }
-                // Call on_save_state(entity_id) on old module.
-                lua_rawgeti(g_state, LUA_REGISTRYINDEX, mod.registryRef);
-                if (!lua_istable(g_state, -1)) {
-                  lua_pop(g_state, 1);
-                  return;
-                }
-                lua_getfield(g_state, -1, "on_save_state");
-                if (!lua_isfunction(g_state, -1)) {
-                  lua_pop(g_state, 2);
-                  return;
-                }
-                lua_remove(g_state, -2); // remove module table
-                lua_pushinteger(g_state,
-                                static_cast<lua_Integer>(entity.index));
-                refresh_lua_hook();
-                if (lua_pcall(g_state, 1, 1, 0) != LUA_OK) {
-                  log_lua_error("on_save_state");
-                  return;
-                }
-                if (lua_istable(g_state, -1)) {
-                  if (g_entitySavedState[entity.index] != LUA_NOREF) {
-                    luaL_unref(g_state, LUA_REGISTRYINDEX,
-                               g_entitySavedState[entity.index]);
-                  }
-                  g_entitySavedState[entity.index] =
-                      luaL_ref(g_state, LUA_REGISTRYINDEX);
-                } else {
-                  lua_pop(g_state, 1);
-                }
-              });
-        }
-
-        if (luaL_loadfile(g_state, path) != LUA_OK) {
-          log_lua_error("reload entity script");
-          return mod.registryRef;
-        }
-
-        refresh_lua_hook(); // Reset instruction counter.
-
-        if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-          log_lua_error("reload entity script");
-          return mod.registryRef;
-        }
-
-        if (!lua_istable(g_state, -1)) {
-          core::log_message(core::LogLevel::Error, "scripting",
-                            "entity script must return a module table");
-          lua_pop(g_state, 1);
-          return mod.registryRef;
-        }
-
-        const int newRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
-        if (mod.registryRef != LUA_NOREF) {
-          luaL_unref(g_state, LUA_REGISTRYINDEX, mod.registryRef);
-        }
-        mod.registryRef = newRef;
-        mod.mtime = currentMtime;
-        mod.reloaded = true;
-
-        char logBuf[256] = {};
-        std::snprintf(logBuf, sizeof(logBuf), "hot-reloaded entity script: %s",
-                      path);
-        core::log_message(core::LogLevel::Info, "scripting", logBuf);
-      }
-
-      return mod.registryRef;
-    }
-  }
-
-  if (g_entityScriptModuleCount >= kMaxEntityScriptModules) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "entity script module limit reached");
-    return LUA_NOREF;
-  }
-
-  if (g_moduleLoadDepth >= kMaxModuleLoadDepth) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "module load stack overflow");
-    return LUA_NOREF;
-  }
-  std::snprintf(g_moduleLoadStack[g_moduleLoadDepth],
-                sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
-  ++g_moduleLoadDepth;
-
-  if (luaL_loadfile(g_state, path) != LUA_OK) {
-    log_lua_error("load entity script");
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  refresh_lua_hook(); // Reset instruction counter.
-
-  if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-    log_lua_error("exec entity script");
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  if (!lua_istable(g_state, -1)) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "entity script must return a module table");
-    lua_pop(g_state, 1);
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  const int ref = luaL_ref(g_state, LUA_REGISTRYINDEX);
-  EntityScriptModule &mod = g_entityScriptModules[g_entityScriptModuleCount];
-  const std::size_t maxPath = sizeof(mod.path) - 1U;
-  const std::size_t pathLen = std::strlen(path);
-  const std::size_t copyLen = (pathLen > maxPath) ? maxPath : pathLen;
-  std::memcpy(mod.path, path, copyLen);
-  mod.path[copyLen] = '\0';
-  mod.registryRef = ref;
-  mod.mtime = get_file_mtime(path);
-  mod.reloaded = false;
-  ++g_entityScriptModuleCount;
-
-  char logBuf[256] = {};
-  std::snprintf(logBuf, sizeof(logBuf), "loaded entity script: %s", path);
-  core::log_message(core::LogLevel::Info, "scripting", logBuf);
-  --g_moduleLoadDepth;
-  return ref;
-}
-
-// Call module.funcName(entity [, dt]) - returns false on missing/error.
-// Call a function on a module table, with optional fallback name.
-// If entity is valid, marks entity as faulted on error.
-bool call_module_function(int moduleRef, const char *funcName,
-                          const char *fallbackName, runtime::Entity entity,
-                          bool hasDt, float dt) noexcept {
-  if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
-    return false;
-  }
-
-  lua_rawgeti(g_state, LUA_REGISTRYINDEX, moduleRef);
-  if (!lua_istable(g_state, -1)) {
-    lua_pop(g_state, 1);
-    return false;
-  }
-
-  lua_getfield(g_state, -1, funcName);
-  if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 1);
-    // Try fallback name if provided.
-    if (fallbackName != nullptr) {
-      lua_getfield(g_state, -1, fallbackName);
-      if (!lua_isfunction(g_state, -1)) {
-        lua_pop(g_state, 2);
-        return false;
-      }
-    } else {
-      lua_pop(g_state, 1);
-      return false;
-    }
-  }
-
-  // Stack: ... | table | func
-  // Remove table so it doesn't interfere with the pcall argument count.
-  lua_remove(g_state, -2);
-
-  push_entity_handle(g_state, entity);
-  int nargs = 1;
-  if (hasDt) {
-    lua_pushnumber(g_state, static_cast<lua_Number>(dt));
-    nargs = 2;
-  }
-
-  refresh_lua_hook(); // Reset instruction counter per callback.
-  if (lua_pcall(g_state, nargs, 0, 0) != LUA_OK) {
-    log_lua_error(funcName);
-    if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-      g_entityFaulted[entity.index] = true;
-    }
-    return false;
-  }
-  return true;
-}
-
 /// Handles lua engine add script component.
 int lua_engine_add_script_component(lua_State *state) noexcept {
   runtime::Entity entity{};
@@ -4446,416 +2618,430 @@ int lua_engine_remove_script_component(lua_State *state) noexcept {
   return 1;
 }
 
-// engine.require(path) — load a Lua module file and return its table.
-// The module is cached by path (same cache used by entity scripts).
-// Suitable for shared utility scripts that don't need entity lifecycle hooks.
-// Returns nil on failure.
-int lua_engine_require(lua_State *state) noexcept {
-  const char *path = lua_tostring(state, 1);
-  if ((path == nullptr) || (path[0] == '\0')) {
-    lua_pushnil(state);
-    return 1;
-  }
-  const int ref = get_or_load_entity_script_module(path);
-  if (ref == LUA_NOREF) {
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_rawgeti(state, LUA_REGISTRYINDEX, ref);
-  return 1;
-}
-
-// engine.persist(key, value) — store a value that survives hot-reload.
-int lua_engine_persist(lua_State *state) noexcept {
-  const char *key = luaL_checkstring(state, 1);
-  if (g_persistRef == LUA_NOREF) {
-    lua_newtable(state);
-    g_persistRef = luaL_ref(state, LUA_REGISTRYINDEX);
-  }
-  lua_rawgeti(state, LUA_REGISTRYINDEX, g_persistRef);
-  lua_pushvalue(state, 2); // value (may be nil to clear)
-  lua_setfield(state, -2, key);
-  lua_pop(state, 1); // pop persist table
-  return 0;
-}
-
-// engine.restore(key) — retrieve a value saved with engine.persist.
-int lua_engine_restore(lua_State *state) noexcept {
-  const char *key = luaL_checkstring(state, 1);
-  if (g_persistRef == LUA_NOREF) {
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_rawgeti(state, LUA_REGISTRYINDEX, g_persistRef);
-  lua_getfield(state, -1, key);
-  lua_remove(state, -2); // remove persist table, leave value
-  return 1;
-}
-
-struct LuaIntegerConstant final {
-  const char *name = nullptr;
-  lua_Integer value = 0;
-};
-
-static const luaL_Reg kEngineBindings[] = {
-    {"log", &lua_engine_log},
-    {"get_entity_count", &lua_engine_get_entity_count},
-    {"spawn_entity", &lua_engine_spawn_entity},
-    {"destroy_entity", &lua_engine_destroy_entity},
-    {"is_alive", &lua_engine_is_alive},
-    {"get_position", &lua_engine_get_position},
-    {"set_position", &lua_engine_set_position},
-    {"get_velocity", &lua_engine_get_velocity},
-    {"add_rigid_body", &lua_engine_add_rigid_body},
-    {"set_velocity", &lua_engine_set_velocity},
-    {"set_acceleration", &lua_engine_set_acceleration},
-    {"set_additional_acceleration", &lua_engine_set_additional_acceleration},
-    {"get_angular_velocity", &lua_engine_get_angular_velocity},
-    {"set_angular_velocity", &lua_engine_set_angular_velocity},
-    {"set_mesh", &lua_engine_set_mesh},
-    {"get_default_mesh_asset_id", &lua_engine_get_default_mesh_asset_id},
-    {"spawn_shape", &lua_engine_spawn_shape},
-    {"set_albedo", &lua_engine_set_albedo},
-    {"set_name", &lua_engine_set_name},
-    {"get_name", &lua_engine_get_name},
-    {"add_collider", &lua_engine_add_collider},
-    {"add_capsule_collider", &lua_engine_add_capsule_collider},
-    {"set_restitution", &lua_engine_set_restitution},
-    {"set_friction", &lua_engine_set_friction},
-    {"create_physics_material", &lua_engine_create_physics_material},
-    {"set_collider_material", &lua_engine_set_collider_material},
-    {"set_collision_layer", &lua_engine_set_collision_layer},
-    {"set_collision_mask", &lua_engine_set_collision_mask},
-    {"delta_time", &lua_engine_delta_time},
-    {"elapsed_time", &lua_engine_elapsed_time},
-    {"is_key_down", &lua_engine_is_key_down},
-    {"is_key_pressed", &lua_engine_is_key_pressed},
-    {"register_action", &lua_engine_register_action},
-    {"register_axis", &lua_engine_register_axis},
-    {"is_action_down", &lua_engine_is_action_down},
-    {"is_action_pressed", &lua_engine_is_action_pressed},
-    {"action_value", &lua_engine_get_action_value},
-    {"axis_value", &lua_engine_get_axis_value},
-    {"is_gamepad_connected", &lua_engine_is_gamepad_connected},
-    {"is_gamepad_button_down", &lua_engine_is_gamepad_button_down},
-    {"gamepad_axis_value", &lua_engine_gamepad_axis_value},
-    {"add_input_action", &lua_engine_add_input_action},
-    {"add_input_axis", &lua_engine_add_input_axis},
-    {"is_mapped_action_down", &lua_engine_is_mapped_action_down},
-    {"is_mapped_action_pressed", &lua_engine_is_mapped_action_pressed},
-    {"mapped_axis_value", &lua_engine_mapped_axis_value},
-    {"rebind_action", &lua_engine_rebind_action},
-    {"save_input_config", &lua_engine_save_input_config},
-    {"load_input_config", &lua_engine_load_input_config},
-    {"on_touch", &lua_engine_on_touch},
-    {"on_gesture", &lua_engine_on_gesture},
-    {"set_touch_mouse_emulation", &lua_engine_set_touch_mouse_emulation},
-    {"set_game_mode", &lua_engine_set_game_mode},
-    {"get_game_mode", &lua_engine_get_game_mode},
-    {"set_game_state", &lua_engine_set_game_state},
-    {"get_game_state", &lua_engine_get_game_state},
-    {"set_player_controller", &lua_engine_set_player_controller},
-    {"get_player_controller", &lua_engine_get_player_controller},
-    {"game_mode_start", &lua_engine_game_mode_start},
-    {"game_mode_pause", &lua_engine_game_mode_pause},
-    {"game_mode_end", &lua_engine_game_mode_end},
-    {"game_mode_state", &lua_engine_game_mode_state},
-    {"game_mode_set_rule", &lua_engine_game_mode_set_rule},
-    {"game_mode_get_rule", &lua_engine_game_mode_get_rule},
-    {"game_mode_max_players", &lua_engine_game_mode_max_players},
-    {"game_state_set_number", &lua_engine_game_state_set_number},
-    {"game_state_get_number", &lua_engine_game_state_get_number},
-    {"game_state_set_string", &lua_engine_game_state_set_string},
-    {"game_state_get_string", &lua_engine_game_state_get_string},
-    {"game_state_has", &lua_engine_game_state_has},
-    {"game_state_clear", &lua_engine_game_state_clear},
-    {"is_god_mode", &lua_engine_is_god_mode},
-    {"is_noclip", &lua_engine_is_noclip},
-    {"profiler_enable", &lua_engine_profiler_enable},
-    {"profiler_reset", &lua_engine_profiler_reset},
-    {"profiler_get_count", &lua_engine_profiler_get_count},
-    {"debugger_enable", &lua_engine_debugger_enable},
-    {"debugger_add_breakpoint", &lua_engine_debugger_add_breakpoint},
-    {"debugger_clear_breakpoints", &lua_engine_debugger_clear_breakpoints},
-    {"debugger_add_watch", &lua_engine_debugger_add_watch},
-    {"debugger_clear_watches", &lua_engine_debugger_clear_watches},
-    {"debugger_last_breakpoint", &lua_engine_debugger_last_breakpoint},
-    {"debugger_last_callstack", &lua_engine_debugger_last_callstack},
-    {"debugger_last_watch_values", &lua_engine_debugger_last_watch_values},
-    {"set_camera_position", &lua_engine_set_camera_position},
-    {"set_camera_target", &lua_engine_set_camera_target},
-    {"set_camera_up", &lua_engine_set_camera_up},
-    {"set_camera_fov", &lua_engine_set_camera_fov},
-    {"push_camera", &lua_engine_push_camera},
-    {"pop_camera", &lua_engine_pop_camera},
-    {"get_active_camera", &lua_engine_get_active_camera},
-    {"camera_shake", &lua_engine_camera_shake},
-    {"add_spring_arm", &lua_engine_add_spring_arm},
-    {"get_spring_arm", &lua_engine_get_spring_arm},
-    {"set_gravity", &lua_engine_set_gravity},
-    {"get_gravity", &lua_engine_get_gravity},
-    {"raycast", &lua_engine_raycast},
-    {"raycast_all", &lua_engine_raycast_all},
-    {"overlap_sphere", &lua_engine_overlap_sphere},
-    {"overlap_box", &lua_engine_overlap_box},
-    {"sweep_sphere", &lua_engine_sweep_sphere},
-    {"sweep_box", &lua_engine_sweep_box},
-    {"add_distance_joint", &lua_engine_add_distance_joint},
-    {"add_hinge_joint", &lua_engine_add_hinge_joint},
-    {"add_ball_socket_joint", &lua_engine_add_ball_socket_joint},
-    {"add_slider_joint", &lua_engine_add_slider_joint},
-    {"add_spring_joint", &lua_engine_add_spring_joint},
-    {"add_fixed_joint", &lua_engine_add_fixed_joint},
-    {"set_joint_limits", &lua_engine_set_joint_limits},
-    {"remove_joint", &lua_engine_remove_joint},
-    {"wake_body", &lua_engine_wake_body},
-    {"is_sleeping", &lua_engine_is_sleeping},
-    {"frame_count", &lua_engine_frame_count},
-    {"load_sound", &lua_engine_load_sound},
-    {"unload_sound", &lua_engine_unload_sound},
-    {"play_sound", &lua_engine_play_sound},
-    {"stop_sound", &lua_engine_stop_sound},
-    {"stop_all_sounds", &lua_engine_stop_all_sounds},
-    {"set_master_volume", &lua_engine_set_master_volume},
-    {"get_rotation", &lua_engine_get_rotation},
-    {"set_rotation", &lua_engine_set_rotation},
-    {"get_scale", &lua_engine_get_scale},
-    {"set_scale", &lua_engine_set_scale},
-    {"get_inverse_mass", &lua_engine_get_inverse_mass},
-    {"set_inverse_mass", &lua_engine_set_inverse_mass},
-    {"get_half_extents", &lua_engine_get_half_extents},
-    {"set_half_extents", &lua_engine_set_half_extents},
-    {"get_restitution", &lua_engine_get_restitution},
-    {"get_friction", &lua_engine_get_friction},
-    {"get_albedo", &lua_engine_get_albedo},
-    {"get_mesh", &lua_engine_get_mesh},
-    {"set_roughness", &lua_engine_set_roughness},
-    {"get_roughness", &lua_engine_get_roughness},
-    {"set_metallic", &lua_engine_set_metallic},
-    {"get_metallic", &lua_engine_get_metallic},
-    {"set_opacity", &lua_engine_set_opacity},
-    {"get_opacity", &lua_engine_get_opacity},
-    {"add_light", &lua_engine_add_light},
-    {"remove_light", &lua_engine_remove_light},
-    {"has_light", &lua_engine_has_light},
-    {"set_light_color", &lua_engine_set_light_color},
-    {"get_light_color", &lua_engine_get_light_color},
-    {"set_light_intensity", &lua_engine_set_light_intensity},
-    {"get_light_intensity", &lua_engine_get_light_intensity},
-    {"set_light_direction", &lua_engine_set_light_direction},
-    {"add_point_light", &lua_engine_add_point_light},
-    {"get_point_light", &lua_engine_get_point_light},
-    {"set_point_light", &lua_engine_set_point_light},
-    {"remove_point_light", &lua_engine_remove_point_light},
-    {"add_spot_light", &lua_engine_add_spot_light},
-    {"get_spot_light", &lua_engine_get_spot_light},
-    {"set_spot_light", &lua_engine_set_spot_light},
-    {"remove_spot_light", &lua_engine_remove_spot_light},
-    {"on_collision_handler", &lua_engine_on_collision_register},
-    {"remove_collision_handler", &lua_engine_remove_collision_handler},
-    {"set_timeout", &lua_engine_set_timeout},
-    {"set_interval", &lua_engine_set_interval},
-    {"cancel_timer", &lua_engine_cancel_timer},
-    {"start_coroutine", &lua_engine_start_coroutine},
-    {"wait", &lua_engine_wait},
-    {"wait_frames", &lua_engine_wait_frames},
-    {"wait_until", &lua_engine_wait_until},
-    {"find_entity_by_name", &lua_engine_find_by_name},
-    {"clone_entity", &lua_engine_clone_entity},
-    {"save_scene", &lua_engine_save_scene},
-    {"load_scene", &lua_engine_load_scene},
-    {"new_scene", &lua_engine_new_scene},
-    {"save_prefab", &lua_engine_save_prefab},
-    {"instantiate", &lua_engine_instantiate},
-    {"load_asset_async", &lua_engine_load_asset_async},
-    {"is_asset_ready", &lua_engine_is_asset_ready},
-    {"pool_create", &lua_engine_pool_create},
-    {"pool_spawn", &lua_engine_pool_spawn},
-    {"pool_release", &lua_engine_pool_release},
-    {"add_script_component", &lua_engine_add_script_component},
-    {"remove_script_component", &lua_engine_remove_script_component},
-    {"require", &lua_engine_require},
-    {nullptr, nullptr},
-};
-
-static const LuaIntegerConstant kEngineConstants[] = {
-    {"KEY_A", static_cast<lua_Integer>(core::kKey_A)},
-    {"KEY_B", static_cast<lua_Integer>(core::kKey_B)},
-    {"KEY_C", static_cast<lua_Integer>(core::kKey_C)},
-    {"KEY_D", static_cast<lua_Integer>(core::kKey_D)},
-    {"KEY_E", static_cast<lua_Integer>(core::kKey_E)},
-    {"KEY_F", static_cast<lua_Integer>(core::kKey_F)},
-    {"KEY_G", static_cast<lua_Integer>(core::kKey_G)},
-    {"KEY_H", static_cast<lua_Integer>(core::kKey_H)},
-    {"KEY_I", static_cast<lua_Integer>(core::kKey_I)},
-    {"KEY_J", static_cast<lua_Integer>(core::kKey_J)},
-    {"KEY_K", static_cast<lua_Integer>(core::kKey_K)},
-    {"KEY_L", static_cast<lua_Integer>(core::kKey_L)},
-    {"KEY_M", static_cast<lua_Integer>(core::kKey_M)},
-    {"KEY_N", static_cast<lua_Integer>(core::kKey_N)},
-    {"KEY_O", static_cast<lua_Integer>(core::kKey_O)},
-    {"KEY_P", static_cast<lua_Integer>(core::kKey_P)},
-    {"KEY_Q", static_cast<lua_Integer>(core::kKey_Q)},
-    {"KEY_R", static_cast<lua_Integer>(core::kKey_R)},
-    {"KEY_S", static_cast<lua_Integer>(core::kKey_S)},
-    {"KEY_T", static_cast<lua_Integer>(core::kKey_T)},
-    {"KEY_U", static_cast<lua_Integer>(core::kKey_U)},
-    {"KEY_V", static_cast<lua_Integer>(core::kKey_V)},
-    {"KEY_W", static_cast<lua_Integer>(core::kKey_W)},
-    {"KEY_X", static_cast<lua_Integer>(core::kKey_X)},
-    {"KEY_Y", static_cast<lua_Integer>(core::kKey_Y)},
-    {"KEY_Z", static_cast<lua_Integer>(core::kKey_Z)},
-    {"KEY_0", static_cast<lua_Integer>(core::kKey_0)},
-    {"KEY_1", static_cast<lua_Integer>(core::kKey_1)},
-    {"KEY_2", static_cast<lua_Integer>(core::kKey_2)},
-    {"KEY_3", static_cast<lua_Integer>(core::kKey_3)},
-    {"KEY_4", static_cast<lua_Integer>(core::kKey_4)},
-    {"KEY_5", static_cast<lua_Integer>(core::kKey_5)},
-    {"KEY_6", static_cast<lua_Integer>(core::kKey_6)},
-    {"KEY_7", static_cast<lua_Integer>(core::kKey_7)},
-    {"KEY_8", static_cast<lua_Integer>(core::kKey_8)},
-    {"KEY_9", static_cast<lua_Integer>(core::kKey_9)},
-    {"KEY_SPACE", static_cast<lua_Integer>(core::kKey_Space)},
-    {"KEY_RETURN", static_cast<lua_Integer>(core::kKey_Return)},
-    {"KEY_ESCAPE", static_cast<lua_Integer>(core::kKey_Escape)},
-    {"KEY_UP", static_cast<lua_Integer>(core::kKey_Up)},
-    {"KEY_DOWN", static_cast<lua_Integer>(core::kKey_Down)},
-    {"KEY_LEFT", static_cast<lua_Integer>(core::kKey_Left)},
-    {"KEY_RIGHT", static_cast<lua_Integer>(core::kKey_Right)},
-    {"KEY_LSHIFT", static_cast<lua_Integer>(core::kKey_LShift)},
-    {"KEY_LCTRL", static_cast<lua_Integer>(core::kKey_LCtrl)},
-    {"KEY_LALT", static_cast<lua_Integer>(core::kKey_LAlt)},
-};
-
-static const luaL_Reg kEnginePostGeneratedBindings[] = {
-    {"persist", &lua_engine_persist},
-    {"restore", &lua_engine_restore},
-    {nullptr, nullptr},
-};
-
-void register_lua_functions(lua_State *state,
-                            const luaL_Reg *bindings) noexcept {
-  for (const luaL_Reg *binding = bindings; binding->name != nullptr;
-       ++binding) {
-    lua_pushcfunction(state, binding->func);
-    lua_setfield(state, -2, binding->name);
-  }
-}
-
-void register_lua_integer_constants(
-    lua_State *state, const LuaIntegerConstant *constants,
-    std::size_t constantCount) noexcept {
-  for (std::size_t i = 0U; i < constantCount; ++i) {
-    lua_pushinteger(state, constants[i].value);
-    lua_setfield(state, -2, constants[i].name);
-  }
-}
-
 /// Handles register engine bindings.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
-  register_lua_functions(state, kEngineBindings);
-  register_lua_integer_constants(
-      state, kEngineConstants,
-      sizeof(kEngineConstants) / sizeof(kEngineConstants[0]));
+  lua_pushcfunction(state, &lua_engine_log);
+  lua_setfield(state, -2, "log");
+
+  lua_pushcfunction(state, &lua_engine_get_entity_count);
+  lua_setfield(state, -2, "get_entity_count");
+
+  lua_pushcfunction(state, &lua_engine_spawn_entity);
+  lua_setfield(state, -2, "spawn_entity");
+
+  lua_pushcfunction(state, &lua_engine_destroy_entity);
+  lua_setfield(state, -2, "destroy_entity");
+
+  lua_pushcfunction(state, &lua_engine_is_alive);
+  lua_setfield(state, -2, "is_alive");
+
+  lua_pushcfunction(state, &lua_engine_get_position);
+  lua_setfield(state, -2, "get_position");
+
+  lua_pushcfunction(state, &lua_engine_set_position);
+  lua_setfield(state, -2, "set_position");
+
+  lua_pushcfunction(state, &lua_engine_get_velocity);
+  lua_setfield(state, -2, "get_velocity");
+
+  lua_pushcfunction(state, &lua_engine_add_rigid_body);
+  lua_setfield(state, -2, "add_rigid_body");
+
+  lua_pushcfunction(state, &lua_engine_set_velocity);
+  lua_setfield(state, -2, "set_velocity");
+
+  lua_pushcfunction(state, &lua_engine_set_acceleration);
+  lua_setfield(state, -2, "set_acceleration");
+
+  lua_pushcfunction(state, &lua_engine_set_additional_acceleration);
+  lua_setfield(state, -2, "set_additional_acceleration");
+
+  lua_pushcfunction(state, &lua_engine_get_angular_velocity);
+  lua_setfield(state, -2, "get_angular_velocity");
+
+  lua_pushcfunction(state, &lua_engine_set_angular_velocity);
+  lua_setfield(state, -2, "set_angular_velocity");
+
+  lua_pushcfunction(state, &lua_engine_set_mesh);
+  lua_setfield(state, -2, "set_mesh");
+
+  lua_pushcfunction(state, &lua_engine_get_default_mesh_asset_id);
+  lua_setfield(state, -2, "get_default_mesh_asset_id");
+
+  lua_pushcfunction(state, &lua_engine_spawn_shape);
+  lua_setfield(state, -2, "spawn_shape");
+
+  lua_pushcfunction(state, &lua_engine_set_albedo);
+  lua_setfield(state, -2, "set_albedo");
+
+  lua_pushcfunction(state, &lua_engine_set_name);
+  lua_setfield(state, -2, "set_name");
+
+  lua_pushcfunction(state, &lua_engine_get_name);
+  lua_setfield(state, -2, "get_name");
+
+  lua_pushcfunction(state, &lua_engine_add_collider);
+  lua_setfield(state, -2, "add_collider");
+
+  lua_pushcfunction(state, &lua_engine_add_capsule_collider);
+  lua_setfield(state, -2, "add_capsule_collider");
+
+  lua_pushcfunction(state, &lua_engine_set_restitution);
+  lua_setfield(state, -2, "set_restitution");
+
+  lua_pushcfunction(state, &lua_engine_set_friction);
+  lua_setfield(state, -2, "set_friction");
+
+  // Physics materials (P1-M3-C1d).
+  lua_pushcfunction(state, &lua_engine_create_physics_material);
+  lua_setfield(state, -2, "create_physics_material");
+  lua_pushcfunction(state, &lua_engine_set_collider_material);
+  lua_setfield(state, -2, "set_collider_material");
+
+  // Collision layers/masks (P1-M3-C2c).
+  lua_pushcfunction(state, &lua_engine_set_collision_layer);
+  lua_setfield(state, -2, "set_collision_layer");
+  lua_pushcfunction(state, &lua_engine_set_collision_mask);
+  lua_setfield(state, -2, "set_collision_mask");
+
+  lua_pushcfunction(state, &lua_engine_delta_time);
+  lua_setfield(state, -2, "delta_time");
+
+  lua_pushcfunction(state, &lua_engine_elapsed_time);
+  lua_setfield(state, -2, "elapsed_time");
+
+  register_input_bindings(state);
+
+  // Touch/gesture bindings (P1-M2-C3e).
+  lua_pushcfunction(state, &lua_engine_on_touch);
+  lua_setfield(state, -2, "on_touch");
+  lua_pushcfunction(state, &lua_engine_on_gesture);
+  lua_setfield(state, -2, "on_gesture");
+  lua_pushcfunction(state, &lua_engine_set_touch_mouse_emulation);
+  lua_setfield(state, -2, "set_touch_mouse_emulation");
+
+  lua_pushcfunction(state, &lua_engine_set_game_mode);
+  lua_setfield(state, -2, "set_game_mode");
+  lua_pushcfunction(state, &lua_engine_get_game_mode);
+  lua_setfield(state, -2, "get_game_mode");
+  lua_pushcfunction(state, &lua_engine_set_game_state);
+  lua_setfield(state, -2, "set_game_state");
+  lua_pushcfunction(state, &lua_engine_get_game_state);
+  lua_setfield(state, -2, "get_game_state");
+  lua_pushcfunction(state, &lua_engine_set_player_controller);
+  lua_setfield(state, -2, "set_player_controller");
+  lua_pushcfunction(state, &lua_engine_get_player_controller);
+  lua_setfield(state, -2, "get_player_controller");
+
+  // Game mode state transitions and rules.
+  lua_pushcfunction(state, &lua_engine_game_mode_start);
+  lua_setfield(state, -2, "game_mode_start");
+  lua_pushcfunction(state, &lua_engine_game_mode_pause);
+  lua_setfield(state, -2, "game_mode_pause");
+  lua_pushcfunction(state, &lua_engine_game_mode_end);
+  lua_setfield(state, -2, "game_mode_end");
+  lua_pushcfunction(state, &lua_engine_game_mode_state);
+  lua_setfield(state, -2, "game_mode_state");
+  lua_pushcfunction(state, &lua_engine_game_mode_set_rule);
+  lua_setfield(state, -2, "game_mode_set_rule");
+  lua_pushcfunction(state, &lua_engine_game_mode_get_rule);
+  lua_setfield(state, -2, "game_mode_get_rule");
+  lua_pushcfunction(state, &lua_engine_game_mode_max_players);
+  lua_setfield(state, -2, "game_mode_max_players");
+
+  // Persistent game state (survives scene transitions).
+  lua_pushcfunction(state, &lua_engine_game_state_set_number);
+  lua_setfield(state, -2, "game_state_set_number");
+  lua_pushcfunction(state, &lua_engine_game_state_get_number);
+  lua_setfield(state, -2, "game_state_get_number");
+  lua_pushcfunction(state, &lua_engine_game_state_set_string);
+  lua_setfield(state, -2, "game_state_set_string");
+  lua_pushcfunction(state, &lua_engine_game_state_get_string);
+  lua_setfield(state, -2, "game_state_get_string");
+  lua_pushcfunction(state, &lua_engine_game_state_has);
+  lua_setfield(state, -2, "game_state_has");
+  lua_pushcfunction(state, &lua_engine_game_state_clear);
+  lua_setfield(state, -2, "game_state_clear");
+
+  register_cheat_status_bindings(state);
+
+  lua_pushcfunction(state, &lua_engine_profiler_enable);
+  lua_setfield(state, -2, "profiler_enable");
+  lua_pushcfunction(state, &lua_engine_profiler_reset);
+  lua_setfield(state, -2, "profiler_reset");
+  lua_pushcfunction(state, &lua_engine_profiler_get_count);
+  lua_setfield(state, -2, "profiler_get_count");
+
+  lua_pushcfunction(state, &lua_engine_debugger_enable);
+  lua_setfield(state, -2, "debugger_enable");
+  lua_pushcfunction(state, &lua_engine_debugger_add_breakpoint);
+  lua_setfield(state, -2, "debugger_add_breakpoint");
+  lua_pushcfunction(state, &lua_engine_debugger_clear_breakpoints);
+  lua_setfield(state, -2, "debugger_clear_breakpoints");
+  lua_pushcfunction(state, &lua_engine_debugger_add_watch);
+  lua_setfield(state, -2, "debugger_add_watch");
+  lua_pushcfunction(state, &lua_engine_debugger_clear_watches);
+  lua_setfield(state, -2, "debugger_clear_watches");
+  lua_pushcfunction(state, &lua_engine_debugger_last_breakpoint);
+  lua_setfield(state, -2, "debugger_last_breakpoint");
+  lua_pushcfunction(state, &lua_engine_debugger_last_callstack);
+  lua_setfield(state, -2, "debugger_last_callstack");
+  lua_pushcfunction(state, &lua_engine_debugger_last_watch_values);
+  lua_setfield(state, -2, "debugger_last_watch_values");
+
+  lua_pushcfunction(state, &lua_engine_set_camera_position);
+  lua_setfield(state, -2, "set_camera_position");
+
+  lua_pushcfunction(state, &lua_engine_set_camera_target);
+  lua_setfield(state, -2, "set_camera_target");
+
+  lua_pushcfunction(state, &lua_engine_set_camera_up);
+  lua_setfield(state, -2, "set_camera_up");
+
+  lua_pushcfunction(state, &lua_engine_set_camera_fov);
+  lua_setfield(state, -2, "set_camera_fov");
+
+  // Camera manager bindings (P1-M2-E).
+  lua_pushcfunction(state, &lua_engine_push_camera);
+  lua_setfield(state, -2, "push_camera");
+  lua_pushcfunction(state, &lua_engine_pop_camera);
+  lua_setfield(state, -2, "pop_camera");
+  lua_pushcfunction(state, &lua_engine_get_active_camera);
+  lua_setfield(state, -2, "get_active_camera");
+  lua_pushcfunction(state, &lua_engine_camera_shake);
+  lua_setfield(state, -2, "camera_shake");
+
+  // Spring arm bindings (P1-M2-E).
+  lua_pushcfunction(state, &lua_engine_add_spring_arm);
+  lua_setfield(state, -2, "add_spring_arm");
+  lua_pushcfunction(state, &lua_engine_get_spring_arm);
+  lua_setfield(state, -2, "get_spring_arm");
+
+  lua_pushcfunction(state, &lua_engine_set_gravity);
+  lua_setfield(state, -2, "set_gravity");
+
+  lua_pushcfunction(state, &lua_engine_get_gravity);
+  lua_setfield(state, -2, "get_gravity");
+
+  lua_pushcfunction(state, &lua_engine_raycast);
+  lua_setfield(state, -2, "raycast");
+
+  lua_pushcfunction(state, &lua_engine_raycast_all);
+  lua_setfield(state, -2, "raycast_all");
+
+  lua_pushcfunction(state, &lua_engine_overlap_sphere);
+  lua_setfield(state, -2, "overlap_sphere");
+
+  lua_pushcfunction(state, &lua_engine_overlap_box);
+  lua_setfield(state, -2, "overlap_box");
+
+  lua_pushcfunction(state, &lua_engine_sweep_sphere);
+  lua_setfield(state, -2, "sweep_sphere");
+
+  lua_pushcfunction(state, &lua_engine_sweep_box);
+  lua_setfield(state, -2, "sweep_box");
+
+  lua_pushcfunction(state, &lua_engine_add_distance_joint);
+  lua_setfield(state, -2, "add_distance_joint");
+
+  lua_pushcfunction(state, &lua_engine_add_hinge_joint);
+  lua_setfield(state, -2, "add_hinge_joint");
+
+  lua_pushcfunction(state, &lua_engine_add_ball_socket_joint);
+  lua_setfield(state, -2, "add_ball_socket_joint");
+
+  lua_pushcfunction(state, &lua_engine_add_slider_joint);
+  lua_setfield(state, -2, "add_slider_joint");
+
+  lua_pushcfunction(state, &lua_engine_add_spring_joint);
+  lua_setfield(state, -2, "add_spring_joint");
+
+  lua_pushcfunction(state, &lua_engine_add_fixed_joint);
+  lua_setfield(state, -2, "add_fixed_joint");
+
+  lua_pushcfunction(state, &lua_engine_set_joint_limits);
+  lua_setfield(state, -2, "set_joint_limits");
+
+  lua_pushcfunction(state, &lua_engine_remove_joint);
+  lua_setfield(state, -2, "remove_joint");
+
+  lua_pushcfunction(state, &lua_engine_wake_body);
+  lua_setfield(state, -2, "wake_body");
+
+  lua_pushcfunction(state, &lua_engine_is_sleeping);
+  lua_setfield(state, -2, "is_sleeping");
+
+  lua_pushcfunction(state, &lua_engine_frame_count);
+  lua_setfield(state, -2, "frame_count");
+
+  lua_pushcfunction(state, &lua_engine_load_sound);
+  lua_setfield(state, -2, "load_sound");
+
+  lua_pushcfunction(state, &lua_engine_unload_sound);
+  lua_setfield(state, -2, "unload_sound");
+
+  lua_pushcfunction(state, &lua_engine_play_sound);
+  lua_setfield(state, -2, "play_sound");
+
+  lua_pushcfunction(state, &lua_engine_stop_sound);
+  lua_setfield(state, -2, "stop_sound");
+
+  lua_pushcfunction(state, &lua_engine_stop_all_sounds);
+  lua_setfield(state, -2, "stop_all_sounds");
+
+  lua_pushcfunction(state, &lua_engine_set_master_volume);
+  lua_setfield(state, -2, "set_master_volume");
+
+  // Transform: rotation and scale
+  lua_pushcfunction(state, &lua_engine_get_rotation);
+  lua_setfield(state, -2, "get_rotation");
+  lua_pushcfunction(state, &lua_engine_set_rotation);
+  lua_setfield(state, -2, "set_rotation");
+  lua_pushcfunction(state, &lua_engine_get_scale);
+  lua_setfield(state, -2, "get_scale");
+  lua_pushcfunction(state, &lua_engine_set_scale);
+  lua_setfield(state, -2, "set_scale");
+
+  // RigidBody: inverse mass
+  lua_pushcfunction(state, &lua_engine_get_inverse_mass);
+  lua_setfield(state, -2, "get_inverse_mass");
+  lua_pushcfunction(state, &lua_engine_set_inverse_mass);
+  lua_setfield(state, -2, "set_inverse_mass");
+
+  // Collider: getters
+  lua_pushcfunction(state, &lua_engine_get_half_extents);
+  lua_setfield(state, -2, "get_half_extents");
+  lua_pushcfunction(state, &lua_engine_set_half_extents);
+  lua_setfield(state, -2, "set_half_extents");
+  lua_pushcfunction(state, &lua_engine_get_restitution);
+  lua_setfield(state, -2, "get_restitution");
+  lua_pushcfunction(state, &lua_engine_get_friction);
+  lua_setfield(state, -2, "get_friction");
+
+  // MeshComponent: material
+  lua_pushcfunction(state, &lua_engine_get_albedo);
+  lua_setfield(state, -2, "get_albedo");
+  lua_pushcfunction(state, &lua_engine_get_mesh);
+  lua_setfield(state, -2, "get_mesh");
+  lua_pushcfunction(state, &lua_engine_set_roughness);
+  lua_setfield(state, -2, "set_roughness");
+  lua_pushcfunction(state, &lua_engine_get_roughness);
+  lua_setfield(state, -2, "get_roughness");
+  lua_pushcfunction(state, &lua_engine_set_metallic);
+  lua_setfield(state, -2, "set_metallic");
+  lua_pushcfunction(state, &lua_engine_get_metallic);
+  lua_setfield(state, -2, "get_metallic");
+  lua_pushcfunction(state, &lua_engine_set_opacity);
+  lua_setfield(state, -2, "set_opacity");
+  lua_pushcfunction(state, &lua_engine_get_opacity);
+  lua_setfield(state, -2, "get_opacity");
+
+  // LightComponent
+  lua_pushcfunction(state, &lua_engine_add_light);
+  lua_setfield(state, -2, "add_light");
+  lua_pushcfunction(state, &lua_engine_remove_light);
+  lua_setfield(state, -2, "remove_light");
+  lua_pushcfunction(state, &lua_engine_has_light);
+  lua_setfield(state, -2, "has_light");
+  lua_pushcfunction(state, &lua_engine_set_light_color);
+  lua_setfield(state, -2, "set_light_color");
+  lua_pushcfunction(state, &lua_engine_get_light_color);
+  lua_setfield(state, -2, "get_light_color");
+  lua_pushcfunction(state, &lua_engine_set_light_intensity);
+  lua_setfield(state, -2, "set_light_intensity");
+  lua_pushcfunction(state, &lua_engine_get_light_intensity);
+  lua_setfield(state, -2, "get_light_intensity");
+  lua_pushcfunction(state, &lua_engine_set_light_direction);
+  lua_setfield(state, -2, "set_light_direction");
+
+  // PointLightComponent
+  lua_pushcfunction(state, &lua_engine_add_point_light);
+  lua_setfield(state, -2, "add_point_light");
+  lua_pushcfunction(state, &lua_engine_get_point_light);
+  lua_setfield(state, -2, "get_point_light");
+  lua_pushcfunction(state, &lua_engine_set_point_light);
+  lua_setfield(state, -2, "set_point_light");
+  lua_pushcfunction(state, &lua_engine_remove_point_light);
+  lua_setfield(state, -2, "remove_point_light");
+
+  // SpotLightComponent
+  lua_pushcfunction(state, &lua_engine_add_spot_light);
+  lua_setfield(state, -2, "add_spot_light");
+  lua_pushcfunction(state, &lua_engine_get_spot_light);
+  lua_setfield(state, -2, "get_spot_light");
+  lua_pushcfunction(state, &lua_engine_set_spot_light);
+  lua_setfield(state, -2, "set_spot_light");
+  lua_pushcfunction(state, &lua_engine_remove_spot_light);
+  lua_setfield(state, -2, "remove_spot_light");
+
+  // Collision handlers
+  lua_pushcfunction(state, &lua_engine_on_collision_register);
+  lua_setfield(state, -2, "on_collision_handler");
+  lua_pushcfunction(state, &lua_engine_remove_collision_handler);
+  lua_setfield(state, -2, "remove_collision_handler");
+
+  // Timers
+  lua_pushcfunction(state, &lua_engine_set_timeout);
+  lua_setfield(state, -2, "set_timeout");
+  lua_pushcfunction(state, &lua_engine_set_interval);
+  lua_setfield(state, -2, "set_interval");
+  lua_pushcfunction(state, &lua_engine_cancel_timer);
+  lua_setfield(state, -2, "cancel_timer");
+
+  // Coroutines
+  lua_pushcfunction(state, &lua_engine_start_coroutine);
+  lua_setfield(state, -2, "start_coroutine");
+  lua_pushcfunction(state, &lua_engine_wait);
+  lua_setfield(state, -2, "wait");
+  lua_pushcfunction(state, &lua_engine_wait_frames);
+  lua_setfield(state, -2, "wait_frames");
+  lua_pushcfunction(state, &lua_engine_wait_until);
+  lua_setfield(state, -2, "wait_until");
+
+  // Entity lifecycle completeness
+  lua_pushcfunction(state, &lua_engine_find_by_name);
+  lua_setfield(state, -2, "find_entity_by_name");
+  lua_pushcfunction(state, &lua_engine_clone_entity);
+  lua_setfield(state, -2, "clone_entity");
+
+  register_scene_bindings(state);
+
+  // Prefab system
+  lua_pushcfunction(state, &lua_engine_save_prefab);
+  lua_setfield(state, -2, "save_prefab");
+  lua_pushcfunction(state, &lua_engine_instantiate);
+  lua_setfield(state, -2, "instantiate");
+
+  // Async asset streaming (P1-M4-C2c)
+  lua_pushcfunction(state, &lua_engine_load_asset_async);
+  lua_setfield(state, -2, "load_asset_async");
+  lua_pushcfunction(state, &lua_engine_is_asset_ready);
+  lua_setfield(state, -2, "is_asset_ready");
+
+  register_entity_pool_bindings(state);
+
+  // Per-entity scripts (ScriptComponent)
+  lua_pushcfunction(state, &lua_engine_add_script_component);
+  lua_setfield(state, -2, "add_script_component");
+  lua_pushcfunction(state, &lua_engine_remove_script_component);
+  lua_setfield(state, -2, "remove_script_component");
+
+  // Utility module loader — load a Lua file as a shared module (cached).
+  lua_pushcfunction(state, &lua_engine_require);
+  lua_setfield(state, -2, "require");
 
   // Generated bindings override a curated subset of manual wrappers.
   register_generated_bindings(state);
 
   // Hot-reload state preservation.
-  register_lua_functions(state, kEnginePostGeneratedBindings);
+  lua_pushcfunction(state, &lua_engine_persist);
+  lua_setfield(state, -2, "persist");
+  lua_pushcfunction(state, &lua_engine_restore);
+  lua_setfield(state, -2, "restore");
 
   lua_setglobal(state, "engine");
-}
-
-// ---- Console cheat commands ----
-
-void cmd_god(const char *const * /*args*/, int /*argCount*/,
-             void * /*userData*/) noexcept {
-  g_godModeEnabled = !g_godModeEnabled;
-  core::console_print(g_godModeEnabled ? "God mode ON" : "God mode OFF");
-}
-
-/// Handles cmd noclip.
-void cmd_noclip(const char *const * /*args*/, int /*argCount*/,
-                void * /*userData*/) noexcept {
-  g_noclipEnabled = !g_noclipEnabled;
-  core::console_print(g_noclipEnabled ? "Noclip ON" : "Noclip OFF");
-}
-
-/// Handles cmd spawn.
-void cmd_spawn(const char *const *args, int argCount,
-               void * /*userData*/) noexcept {
-  if (argCount < 2) {
-    core::console_print("Usage: spawn <prefab> [x y z]");
-    return;
-  }
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->instantiate_prefab == nullptr)) {
-    core::console_print("Cannot spawn: world not ready");
-    return;
-  }
-  const std::uint32_t entityIndex =
-      runtime_binding().services->instantiate_prefab(runtime_binding().world, args[1]);
-  if (entityIndex == 0U) {
-    core::console_print("Spawn failed (prefab not found?)");
-    return;
-  }
-  // Optionally set position if x y z provided.
-  if ((argCount >= 5) && (runtime_binding().services->add_transform_op != nullptr)) {
-    runtime::Transform t{};
-    t.position.x = static_cast<float>(std::atof(args[2]));
-    t.position.y = static_cast<float>(std::atof(args[3]));
-    t.position.z = static_cast<float>(std::atof(args[4]));
-    t.scale = {1.0F, 1.0F, 1.0F};
-    t.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
-    // Overwrite the transform that was loaded from the prefab.
-    runtime_binding().services->add_transform_op(runtime_binding().world, entityIndex, t);
-  }
-  char buf[64] = {};
-  std::snprintf(buf, sizeof(buf), "Spawned entity %u", entityIndex);
-  core::console_print(buf);
-}
-
-/// Handles cmd kill all.
-void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
-                  void * /*userData*/) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->destroy_entity_op == nullptr)) {
-    core::console_print("Cannot kill_all: world not ready");
-    return;
-  }
-  std::size_t destroyed = 0U;
-  runtime_binding().world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
-    // Skip player controller entities.
-    for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-      if (g_playerControllerEntities[i] == entity) {
-        return;
-      }
-      if (g_playerControllers.get_controlled_entity(
-              static_cast<std::uint8_t>(i)) == entity) {
-        return;
-      }
-    }
-    runtime_binding().services->destroy_entity_op(runtime_binding().world, entity.index);
-    ++destroyed;
-  });
-  char buf[64] = {};
-  std::snprintf(buf, sizeof(buf), "Destroyed %zu entities", destroyed);
-  core::console_print(buf);
-}
-
-/// Handles register debug commands.
-void register_debug_commands() noexcept {
-  core::console_register_command("god", cmd_god, nullptr,
-                                 "Toggle god mode (invincibility)");
-  core::console_register_command("noclip", cmd_noclip, nullptr,
-                                 "Toggle noclip (no collision)");
-  core::console_register_command("spawn", cmd_spawn, nullptr,
-                                 "Spawn a prefab: spawn <path> [x y z]");
-  core::console_register_command("kill_all", cmd_kill_all, nullptr,
-                                 "Destroy all entities except player");
 }
 
 } // namespace
@@ -4876,12 +3062,6 @@ int bindable_get_entity_count() noexcept {
   }
   return static_cast<int>(runtime_binding().services->get_transform_count(runtime_binding().world));
 }
-
-/// Handles bindable is god mode.
-bool bindable_is_god_mode() noexcept { return g_godModeEnabled; }
-
-/// Handles bindable is noclip.
-bool bindable_is_noclip() noexcept { return g_noclipEnabled; }
 
 /// Handles bindable is gamepad connected.
 bool bindable_is_gamepad_connected() noexcept {
@@ -4921,39 +3101,6 @@ float bindable_get_action_value(const char *name) noexcept {
 /// Handles bindable get axis value.
 float bindable_get_axis_value(const char *name) noexcept {
   return (name != nullptr) ? core::axis_value(name) : 0.0F;
-}
-
-/// Handles bindable set game mode.
-bool bindable_set_game_mode(const char *name) noexcept {
-  if (name == nullptr) {
-    return false;
-  }
-  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
-  if (runtime_binding().world != nullptr) {
-    std::snprintf(runtime_binding().world->game_mode().name, runtime::GameMode::kMaxNameLength,
-                  "%s", name);
-  }
-  return true;
-}
-
-/// Handles bindable get game state.
-const char *bindable_get_game_state() noexcept { return g_gameState; }
-
-/// Handles bindable get game mode.
-const char *bindable_get_game_mode() noexcept {
-  if (runtime_binding().world != nullptr) {
-    return runtime_binding().world->game_mode().name;
-  }
-  return g_gameMode;
-}
-
-/// Handles bindable set game state.
-bool bindable_set_game_state(const char *name) noexcept {
-  if (name == nullptr) {
-    return false;
-  }
-  std::snprintf(g_gameState, sizeof(g_gameState), "%s", name);
-  return true;
 }
 
 /// Handles bindable is alive.
@@ -5002,39 +3149,43 @@ void bindable_stop_all_sounds() noexcept {
 
 /// Initializes the owning system for scripting.
 bool initialize_scripting() noexcept {
-  if (g_state != nullptr) {
+  if (lua_state() != nullptr) {
     return true;
   }
 
-  g_state = luaL_newstate();
-  if (g_state == nullptr) {
+  lua_State *state = initialize_lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "failed to create Lua state");
     return false;
   }
+  set_debug_lua_state(state);
+  configure_entity_script_bindings(
+      state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
+                                          &refresh_lua_hook, &get_file_mtime});
 
   // Open only safe libraries. io, os, debug, and package are excluded to
   // prevent untrusted game scripts from accessing the file system or executing
   // arbitrary system commands.
-  luaL_requiref(g_state, LUA_GNAME, luaopen_base, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_COLIBNAME, luaopen_coroutine, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_TABLIBNAME, luaopen_table, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_STRLIBNAME, luaopen_string, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_MATHLIBNAME, luaopen_math, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
-  lua_pop(g_state, 1);
-  register_engine_bindings(g_state);
-  register_debug_commands();
+  luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_STRLIBNAME, luaopen_string, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
+  lua_pop(state, 1);
+  register_engine_bindings(state);
+  register_cheat_commands();
 
   // Install sandboxed memory allocator. io/os/debug libraries are already
   // excluded (only base, coroutine, table, string, math, utf8 are opened).
-  if (g_sandboxEnabled) {
-    lua_setallocf(g_state, sandbox_alloc, nullptr);
+  if (debug_sandbox_enabled()) {
+    lua_setallocf(state, sandbox_alloc, nullptr);
   }
 
   refresh_lua_hook();
@@ -5043,40 +3194,16 @@ bool initialize_scripting() noexcept {
 
 /// Shuts down the owning system for scripting.
 void shutdown_scripting() noexcept {
-  clear_touch_gesture_callbacks(g_state);
+  lua_State *state = lua_state();
+  clear_touch_gesture_callbacks(state);
 
-  if (g_state != nullptr) {
-    // Release persist table.
-    if (g_persistRef != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, g_persistRef);
-      g_persistRef = LUA_NOREF;
-    }
-    // Release saved entity state refs.
-    clear_entity_saved_state();
-    // Release all timer Lua refs before closing.
-    ensure_timer_refs_init();
-    for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
-      if (g_timerLuaRefs[i] != LUA_NOREF) {
-        luaL_unref(g_state, LUA_REGISTRYINDEX, g_timerLuaRefs[i]);
-        g_timerLuaRefs[i] = LUA_NOREF;
-      }
-    }
-    if (runtime_binding().world != nullptr) {
-      runtime_binding().world->timer_manager().clear();
-    }
-    // Release collision handler refs.
-    for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
-      if (g_collisionHandlers[i] != LUA_NOREF) {
-        luaL_unref(g_state, LUA_REGISTRYINDEX, g_collisionHandlers[i]);
-        g_collisionHandlers[i] = LUA_NOREF;
-      }
-    }
-    // Mark all coroutines inactive and release refs.
-    for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-      g_coroutineScheduler.release_entry(g_coroutineScheduler.m_entries[i]);
-    }
-    lua_close(g_state);
-    g_state = nullptr;
+  if (state != nullptr) {
+    clear_persist_bindings(state);
+    reset_entity_script_bindings();
+    clear_lua_timer_bindings(state);
+    clear_collision_handlers(state);
+    clear_lua_coroutines(state);
+    shutdown_lua_state();
   }
 
   clear_runtime_binding();
@@ -5088,40 +3215,12 @@ void shutdown_scripting() noexcept {
   g_builtinCapsuleMesh = 0ULL;
   g_builtinPyramidMesh = 0ULL;
   clear_deferred_mutations();
-  g_pendingSceneOp = SceneOp::None;
-  g_pendingScenePath[0] = '\0';
-  g_moduleLoadDepth = 0U;
-  for (std::size_t i = 0U; i < kMaxFaultedEntities; ++i) {
-    g_entityFaulted[i] = false;
-  }
-  for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {
-    g_profilerEntries[i] = ProfilerEntry{};
-  }
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    g_breakpoints[i] = DebugBreakpoint{};
-  }
-  g_watchCount = 0U;
-  g_lastWatchOutput[0] = '\0';
-  g_lastCallstack[0] = '\0';
-  g_lastBreakpointFile[0] = '\0';
-  g_lastBreakpointLine = 0;
-  g_breakpointHitCount = 0U;
-  g_profilerEnabled = false;
-  g_debuggerEnabled = false;
-  g_godModeEnabled = false;
-  g_noclipEnabled = false;
-  for (std::size_t i = 0U; i < kMaxEntityPools; ++i) {
-    g_entityPools[i] = runtime::EntityPool{};
-  }
-  g_entityPoolCount = 0U;
-  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", "default");
-  std::snprintf(g_gameState, sizeof(g_gameState), "%s", "startup");
-  for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-    g_playerControllerEntities[i] = runtime::kInvalidEntity;
-  }
-  g_playerControllers.reset();
-  // Note: g_persistentGameState is NOT cleared here — it persists across
-  // scene resets. The GameMode is reset via World's own reset path.
+  reset_scene_bindings();
+  reset_debug_bindings();
+  set_debug_lua_state(nullptr);
+  reset_cheat_bindings();
+  reset_entity_pool_bindings();
+  reset_game_bindings();
 }
 
 /// Sets the requested value for default mesh asset id.
@@ -5153,7 +3252,8 @@ void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
 
 /// Loads the requested resource for script.
 bool load_script(const char *path) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "scripting not initialized");
     return false;
@@ -5165,14 +3265,14 @@ bool load_script(const char *path) noexcept {
     return false;
   }
 
-  if (luaL_loadfile(g_state, path) != LUA_OK) {
+  if (luaL_loadfile(state, path) != LUA_OK) {
     log_lua_error("load_script");
     return false;
   }
 
   refresh_lua_hook(); // Reset instruction counter for this invocation.
 
-  if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("load_script");
     return false;
   }
@@ -5182,7 +3282,8 @@ bool load_script(const char *path) noexcept {
 
 /// Handles call script function.
 bool call_script_function(const char *name) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "scripting not initialized");
     return false;
@@ -5194,13 +3295,13 @@ bool call_script_function(const char *name) noexcept {
     return false;
   }
 
-  lua_getglobal(g_state, name);
-  if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 1);
+  lua_getglobal(state, name);
+  if (!lua_isfunction(state, -1)) {
+    lua_pop(state, 1);
     return false;
   }
 
-  if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("call_script_function");
     return false;
   }
@@ -5210,7 +3311,8 @@ bool call_script_function(const char *name) noexcept {
 
 /// Handles call script function float.
 bool call_script_function_float(const char *name, float arg) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "scripting not initialized");
     return false;
@@ -5222,14 +3324,14 @@ bool call_script_function_float(const char *name, float arg) noexcept {
     return false;
   }
 
-  lua_getglobal(g_state, name);
-  if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 1);
+  lua_getglobal(state, name);
+  if (!lua_isfunction(state, -1)) {
+    lua_pop(state, 1);
     return false;
   }
 
-  lua_pushnumber(g_state, static_cast<lua_Number>(arg));
-  if (lua_pcall(g_state, 1, 0, 0) != LUA_OK) {
+  lua_pushnumber(state, static_cast<lua_Number>(arg));
+  if (lua_pcall(state, 1, 0, 0) != LUA_OK) {
     log_lua_error("call_script_function_float");
     return false;
   }
@@ -5240,43 +3342,8 @@ bool call_script_function_float(const char *name, float arg) noexcept {
 /// Handles dispatch physics callbacks.
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept {
-  if ((g_state == nullptr) || (pairData == nullptr) || (pairCount == 0U)) {
-    return;
-  }
-
-  for (std::size_t i = 0U; i < pairCount; ++i) {
-    const std::uint32_t entityIndexA = pairData[i * 2U];
-    const std::uint32_t entityIndexB = pairData[i * 2U + 1U];
-
-    // Call all registered handlers.
-    for (std::size_t h = 0U; h < kMaxCollisionHandlers; ++h) {
-      if (g_collisionHandlers[h] == LUA_NOREF) {
-        continue;
-      }
-      lua_rawgeti(g_state, LUA_REGISTRYINDEX, g_collisionHandlers[h]);
-      if (!lua_isfunction(g_state, -1)) {
-        lua_pop(g_state, 1);
-        continue;
-      }
-      push_entity_handle_from_index(g_state, entityIndexA);
-      push_entity_handle_from_index(g_state, entityIndexB);
-      if (lua_pcall(g_state, 2, 0, 0) != LUA_OK) {
-        log_lua_error("on_collision_handler");
-      }
-    }
-
-    // Also call the legacy global on_collision for backward compatibility.
-    lua_getglobal(g_state, "on_collision");
-    if (lua_isfunction(g_state, -1)) {
-      push_entity_handle_from_index(g_state, entityIndexA);
-      push_entity_handle_from_index(g_state, entityIndexB);
-      if (lua_pcall(g_state, 2, 0, 0) != LUA_OK) {
-        log_lua_error("on_collision");
-      }
-    } else {
-      lua_pop(g_state, 1);
-    }
-  }
+  dispatch_collision_handlers(lua_state(), pairData, pairCount,
+                              push_entity_handle_from_index, log_lua_error);
 }
 
 namespace {
@@ -5321,85 +3388,18 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
 
 /// Handles tick timers.
 void tick_timers() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-  ensure_timer_refs_init();
-  rewire_lua_timer_callbacks();
-  // The TimerManager uses accumulated elapsed time internally. We sync it to
-  // the scripting layer's g_totalSeconds so that tests which jump total time
-  // work correctly. Pass the delta as (totalSeconds - previous elapsed).
-  runtime_binding().world->timer_manager().tick(g_deltaSeconds);
+  tick_lua_timers(lua_state(), g_deltaSeconds);
 }
 
 /// Handles tick coroutines.
 void tick_coroutines() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-  for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-    auto &entry = g_coroutineScheduler.m_entries[i];
-    if (!entry.active) {
-      continue;
-    }
-    if (!g_coroutineScheduler.should_wake(entry)) {
-      continue;
-    }
-    // Release condition ref before resume (no longer needed).
-    if (entry.conditionRef != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, entry.conditionRef);
-      entry.conditionRef = LUA_NOREF;
-    }
-    refresh_lua_hook(); // Reset instruction counter per coroutine resume.
-    int nresults = 0;
-    const int status = lua_resume(entry.thread, g_state, 0, &nresults);
-    if (status == LUA_OK) {
-      g_coroutineScheduler.release_entry(entry);
-    } else if (status == LUA_YIELD) {
-      g_coroutineScheduler.parse_yield(entry.thread, nresults, entry);
-    } else {
-      // Error: move the error message from the thread stack to g_state
-      // so that log_lua_error can read it (it reads from g_state).
-      if (lua_isstring(entry.thread, -1)) {
-        lua_xmove(entry.thread, g_state, 1);
-      } else {
-        lua_pushstring(g_state, "coroutine error (non-string)");
-      }
-      log_lua_error("coroutine");
-      g_coroutineScheduler.release_entry(entry);
-    }
-  }
+  tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
+                      refresh_lua_hook);
 }
 
 /// Handles clear coroutines.
 void clear_coroutines() noexcept {
-  for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
-    g_coroutineScheduler.release_entry(g_coroutineScheduler.m_entries[i]);
-  }
-}
-
-/// Returns whether has pending scene op.
-bool has_pending_scene_op() noexcept {
-  return g_pendingSceneOp != SceneOp::None;
-}
-
-/// Handles pending scene op is load.
-bool pending_scene_op_is_load() noexcept {
-  return g_pendingSceneOp == SceneOp::Load;
-}
-
-/// Handles pending scene op is new.
-bool pending_scene_op_is_new() noexcept {
-  return g_pendingSceneOp == SceneOp::New;
-}
-
-/// Returns the requested value for pending scene path.
-const char *get_pending_scene_path() noexcept { return g_pendingScenePath; }
-
-/// Handles clear pending scene op.
-void clear_pending_scene_op() noexcept {
-  g_pendingSceneOp = SceneOp::None;
-  g_pendingScenePath[0] = '\0';
+  clear_lua_coroutines(lua_state());
 }
 
 /// Handles watch script file.
@@ -5428,212 +3428,24 @@ void check_script_reload() noexcept {
   }
 }
 
-/// Handles dispatch entity scripts start.
-void dispatch_entity_scripts_start() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        if ((entity.index < kMaxFaultedEntities) &&
-            g_entityFaulted[entity.index]) {
-          return;
-        }
-        // Mark begin_play done so dispatch_entity_scripts_begin_play does
-        // not fire on_start a second time for the same entity this frame.
-        runtime_binding().world->mark_begin_play_done(entity);
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        call_module_function(ref, "on_begin_play", "on_start", entity,
-                             false, 0.0F);
-      });
-}
-
-/// Handles dispatch entity scripts begin play.
-void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
-    return;
-  }
-
-  world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
-    world->mark_begin_play_done(entity);
-    // Only dispatch if entity has a ScriptComponent.
-    const auto *sc = world->get_script_component_ptr(entity);
-    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
-      return;
-    }
-    if ((entity.index < kMaxFaultedEntities) && g_entityFaulted[entity.index]) {
-      return;
-    }
-    const int ref = get_or_load_entity_script_module(sc->scriptPath);
-    if (ref == LUA_NOREF) {
-      return;
-    }
-    call_module_function(ref, "on_begin_play", "on_start", entity, false,
-                         0.0F);
-  });
-}
-
-/// Handles dispatch entity scripts end play.
-void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
-    return;
-  }
-
-  world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
-    const auto *sc = world->get_script_component_ptr(entity);
-    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
-      return;
-    }
-    // Fire EndPlay even for faulted entities (best effort cleanup).
-    const int ref = get_or_load_entity_script_module(sc->scriptPath);
-    if (ref == LUA_NOREF) {
-      return;
-    }
-    static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                           entity, false, 0.0F));
-  });
-}
-
-/// Handles dispatch entity scripts update.
-void dispatch_entity_scripts_update(float dt) noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (!g_entityScriptModules[i].reloaded) {
-      continue;
-    }
-
-    const char *reloadedPath = g_entityScriptModules[i].path;
-    const int moduleRef = g_entityScriptModules[i].registryRef;
-    runtime_binding().world->for_each<runtime::ScriptComponent>(
-        [reloadedPath, moduleRef](runtime::Entity entity,
-                                  const runtime::ScriptComponent &sc) noexcept {
-          if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
-            return;
-          }
-          // Clear faulted state on reload.
-          if (entity.index < kMaxFaultedEntities) {
-            g_entityFaulted[entity.index] = false;
-          }
-
-          static_cast<void>(call_module_function(
-              moduleRef, "on_reload", nullptr, entity, false, 0.0F));
-          static_cast<void>(call_module_function(moduleRef, "on_begin_play",
-                                                 "on_start", entity,
-                                                 false, 0.0F));
-        });
-    g_entityScriptModules[i].reloaded = false;
-  }
-
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [dt](runtime::Entity entity,
-           const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        if ((entity.index < kMaxFaultedEntities) &&
-            g_entityFaulted[entity.index]) {
-          return;
-        }
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        call_module_function(ref, "on_tick", "on_update", entity, true,
-                             dt);
-      });
-}
-
-/// Handles dispatch entity scripts end.
-void dispatch_entity_scripts_end() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                               entity, false, 0.0F));
-      });
-}
-
-/// Handles clear entity script modules.
-void clear_entity_script_modules() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (g_entityScriptModules[i].registryRef != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX,
-                 g_entityScriptModules[i].registryRef);
-      g_entityScriptModules[i].registryRef = LUA_NOREF;
-    }
-    g_entityScriptModules[i].path[0] = '\0';
-    g_entityScriptModules[i].mtime = 0;
-    g_entityScriptModules[i].reloaded = false;
-  }
-  g_entityScriptModuleCount = 0U;
-}
-
-/// Handles debugger clear breakpoints.
-void debugger_clear_breakpoints() noexcept {
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    g_breakpoints[i] = DebugBreakpoint{};
-  }
-}
-
-/// Handles debugger add breakpoint.
-bool debugger_add_breakpoint(const char *file, int line) noexcept {
-  if ((file == nullptr) || (line <= 0)) {
-    return false;
-  }
-  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
-    if (!g_breakpoints[i].active) {
-      std::snprintf(g_breakpoints[i].file, sizeof(g_breakpoints[i].file), "%s",
-                    file);
-      g_breakpoints[i].line = line;
-      g_breakpoints[i].active = true;
-      return true;
-    }
-  }
-  return false;
-}
-
 // --- Sandbox configuration ---
 
 void set_sandbox_enabled(bool enabled) noexcept {
-  g_sandboxEnabled = enabled;
+  set_debug_sandbox_enabled(enabled);
   refresh_lua_hook();
 }
 
 /// Returns whether is sandbox enabled.
-bool is_sandbox_enabled() noexcept { return g_sandboxEnabled; }
+bool is_sandbox_enabled() noexcept { return debug_sandbox_enabled(); }
 
 /// Sets the requested value for instruction limit.
 void set_instruction_limit(int limit) noexcept {
-  g_instructionLimit = limit;
+  set_debug_instruction_limit(limit);
   refresh_lua_hook();
 }
 
 /// Returns the requested value for instruction limit.
-int get_instruction_limit() noexcept { return g_instructionLimit; }
+int get_instruction_limit() noexcept { return debug_instruction_limit(); }
 
 /// Sets the requested value for memory limit.
 void set_memory_limit(std::size_t limit) noexcept { g_memoryLimit = limit; }

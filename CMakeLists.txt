@@ -189,6 +189,16 @@ endif()
 #      would trigger fewer TUs.
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_custom_target(source_comment_audit
+        COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/check_source_comments.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Checking source file-level comments"
+        VERBATIM
+    )
+endif()
+
 option(ENGINE_REQUIRE_ANALYSIS_TOOL
     "Require cppcheck or clang-tidy and create a failing analysis target when neither is found"
     OFF

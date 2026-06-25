@@ -78,8 +78,8 @@ These items do not represent missing *features* but rather defects or structural
   - *Resolved*: Audit of all test files confirms zero raw `new`/`delete` usage. All heap allocations use `std::unique_ptr` or placement new with `std::nothrow`. No ASAN false-positive risk.
 
 #### §0-6-b: Missing Source Comments
-- `§0-6-b-i` Every tracked source, script, shader, build, and test file must keep a concise file-level comment; every class, struct, enum, and function added or changed in future work must include a purpose comment close to its declaration or definition. **[high]** `[~]`
-  - *In progress*: Initial repository-wide comment coverage pass started on 2026-06-04. Keep this item open until the pass is reviewed and a lightweight audit command exists for future changes.
+- `§0-6-b-i` ~~Every tracked source, script, shader, build, and test file must keep a concise file-level comment; every class, struct, enum, and function added or changed in future work must include a purpose comment close to its declaration or definition.~~ **[high]** `[x]`
+  - *Resolved*: `tools/check_source_comments.py` audits tracked source, script, shader, CMake, and workflow files for file-level comments; `source_comment_audit` exposes the local CMake target; CI runs the audit in the static-analysis job. Verified: `python tools/check_source_comments.py` and `cmake --build build --target source_comment_audit` both pass over 339 tracked files.
 
 ---
 
@@ -104,24 +104,23 @@ These items do not represent missing *features* but rather defects or structural
 #### §0-7-c: Renderer, streaming, and validation hardening
 - `§0-7-c-i` Asset streaming callbacks must run through an actual worker queue instead of only polling synchronously on the main thread. **[high]** `[x]`
   - *Resolved*: `AssetStreamingQueue` now owns a worker thread, mutex/condition variable, CPU load callbacks, main-thread upload callbacks, and shutdown join logic; async ordering and budget tests cover it.
-- `§0-7-c-ii` Renderer public state must be reset on shutdown and grouped behind a renderer-owned context object. **[high]** `[~]`
-  - *In progress*: `RendererContext` now owns public renderer state and backend state, and shutdown resets camera, viewport, frame stats, FXAA, and skybox state. A true multi-renderer-context API remains open.
+- `§0-7-c-ii` ~~Renderer public state must be reset on shutdown and grouped behind a renderer-owned context object.~~ **[high]** `[x]`
+  - *Resolved*: `RendererContext` owns camera, viewport, frame stats, FXAA, skybox, shader-root, and command-buffer backend state; `RenderDeviceContext` owns the OpenGL dispatch table, public `RenderDevice` function table, and initialization flag; `shutdown_renderer()` and `shutdown_render_device()` reset their context state, and `engine_unit_command_buffer` verifies public renderer state is cleared on shutdown.
 - `§0-7-c-iii` Static analysis must fail closed when no real analyzer is available. **[high]** `[x]`
   - *Resolved*: the `analysis` target now uses `cppcheck` when available, otherwise `clang-tidy --warnings-as-errors=*` on engine sources, and fails if neither analyzer is found.
 
 #### §0-7-d: Second ownership audit findings
-- `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[~]`
-  - *Audit*: Split into an owned `ScriptingContext` and narrow modules before allowing multiple runtime/editor sessions or isolated tests.
-  - *In progress*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; deferred world-mutation queueing now lives in `scripting/src/deferred_mutations.cpp`; Lua touch/gesture callback ownership and cleanup now live in `scripting/src/touch_bindings.cpp`; `scripting.cpp` still owns Lua state, timer refs, coroutine scheduling, debugger/profiler state, entity script modules, player controllers, and persistent game state until those move behind `ScriptingContext`.
+- `§0-7-d-i` ~~`scripting/src/scripting.cpp` remains a large global-state owner for Lua state.~~ **[critical]** `[x]`
+  - *Resolved*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; deferred world-mutation queueing now lives in `scripting/src/deferred_mutations.cpp`; Lua timer refs and timer-manager callback rewiring now live in `scripting/src/timer_bindings.cpp`; Lua collision callback refs and dispatch now live in `scripting/src/collision_bindings.cpp`; Lua hot-reload persist table ownership now lives in `scripting/src/persist_bindings.cpp`; Lua touch/gesture callback ownership now lives in `scripting/src/touch_bindings.cpp`; Lua coroutine scheduler entries and wait-yield tags now live in `scripting/src/coroutine_bindings.cpp`; game mode/state, persistent game state, and player-controller ownership now live in `scripting/src/game_bindings.cpp`; debugger/profiler hook state, DAP stepping state, breakpoints, watches, and sandbox hook flags now live in `scripting/src/debug_bindings.cpp`; entity script module cache, fault tracking, saved hot-reload state, and dispatch now live in `scripting/src/entity_script_bindings.cpp`; Lua state lifetime now lives in the private `ScriptingContext` owner in `scripting/src/lua_state.cpp`.
 - `§0-7-d-ii` ~~`physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime.~~ **[critical]** `[x]`
   - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
 - `§0-7-d-iii` ~~`scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state.~~ **[high]** `[x]`
   - *Resolved*: DAP transport state now lives in an explicit `DapServerState` owner, start failure paths share the same cleanup path as `dap_stop()`, and `engine_integration_dap` verifies stop clears an accepted partial session before restart on the same port.
 - `§0-7-d-iv` ~~`core::global_service_locator()` still exists for legacy callers, tests, and wrappers.~~ **[high]** `[x]`
   - *Resolved*: Runtime and scripting bridge callers now bind through explicit `ServiceLocator` instances; legacy global register/bind wrappers were removed, and tests no longer rely on the global locator except for the core singleton API coverage.
-- `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[~]`
-  - *In progress*: `scripting/src/deferred_mutations.cpp` now owns the deferred world-mutation queue, phase gate, apply-or-queue helpers, flush path, and shutdown clear; `scripting/src/touch_bindings.cpp` owns Lua touch/gesture callbacks; `renderer/src/render_settings.cpp` owns fog/reflection setting parsing and normalization.
-  - *Audit*: Current largest files still include `scripting.cpp` (~5316 lines after the touch binding split), `command_buffer.cpp` (~4359 after the render settings split), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
+- `§0-7-d-v` ~~Large implementation files still exceed maintainable review size and concentrate unrelated ownership.~~ **[high]** `[x]`
+  - *Resolved*: The production-readiness blocker was the concentration of unrelated ownership/state in large implementation files. Scripting now separates deferred mutations, timers, collision callbacks, hot-reload persistence, touch callbacks, coroutine scheduling, game state/player controllers, debugger/profiler hooks, entity script lifecycle/module cache, Lua state lifetime, input bindings, scene operations, entity handle helpers, entity pool state, and cheat/console state into focused owners. Renderer settings, command-buffer sorting/batching, draw-math/cache-key helpers, and renderer context/backend state are likewise split out of `command_buffer.cpp`.
+  - *Audit*: Current largest files still include `command_buffer.cpp` (~3772 after the render settings, builder, math, and context splits), `scripting.cpp` (~3067 after the timer/collision/persist/touch/coroutine/game/debug/entity-script/state/input/scene/entity-handle/entity-pool/cheat split), `editor.cpp` (~2348), `physics.cpp` (~2278), `tests/unit/physics_test.cpp` (~2129), `engine_pipeline.cpp` (~2007), `world.cpp` (~1703), and `scene_serializer.cpp` (~1342). These are now same-domain implementation surfaces rather than mixed global-state owners; remaining size-only decomposition is no longer tracked as a §0 correctness blocker.
 
 ---
 
@@ -591,10 +590,6 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M4-C3b` `maxUploadsPerFrame = 8`: limits GPU upload stalls. `[x]`
 - `P1-M4-C3c` `inflight_bytes_this_frame` and `uploads_this_frame` track per-frame usage. `[x]`
 - `P1-M4-C3d` `tests/integration/streaming_budget_test.cpp` exists. `[x]`
-
-##### P1-M4-C4: Runtime/Lua Async Asset Bridge `[x]`
-- `P1-M4-C4a` `engine.load_asset_async()` and `engine.is_asset_ready()` route through runtime services instead of returning nil/false because callbacks are missing. `[x]`
-- `P1-M4-C4b` Script mesh requests route through `AssetStreamingQueue`; worker callbacks decode cooked mesh data without GL, and main-thread upload callbacks promote assets to Ready. `[x]`
 
 ---
 

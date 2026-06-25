@@ -13,10 +13,8 @@ extern "C" {
 #include "engine/core/touch_input.h"
 
 namespace engine::scripting {
-
 namespace {
 
-// Lua callback registry refs for touch/gesture.
 lua_State *g_touchLuaState = nullptr;
 int g_touchCallbackRef = LUA_NOREF;
 int g_gestureCallbackRefs[4] = {LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
@@ -30,11 +28,13 @@ void lua_touch_handler(const core::TouchEvent &event,
   if ((g_touchLuaState == nullptr) || (g_touchCallbackRef == LUA_NOREF)) {
     return;
   }
+
   lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
   if (!lua_isfunction(g_touchLuaState, -1)) {
     lua_pop(g_touchLuaState, 1);
     return;
   }
+
   lua_newtable(g_touchLuaState);
   lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.touchId));
   lua_setfield(g_touchLuaState, -2, "id");
@@ -60,15 +60,18 @@ void lua_gesture_handler(const core::GestureEvent &event,
   if (g_touchLuaState == nullptr) {
     return;
   }
+
   const int idx = static_cast<int>(event.type);
   if ((idx < 0) || (idx >= 4) || (g_gestureCallbackRefs[idx] == LUA_NOREF)) {
     return;
   }
+
   lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
   if (!lua_isfunction(g_touchLuaState, -1)) {
     lua_pop(g_touchLuaState, 1);
     return;
   }
+
   lua_newtable(g_touchLuaState);
   lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.type));
   lua_setfield(g_touchLuaState, -2, "type");
@@ -110,20 +113,19 @@ void unregister_lua_gesture_callback(int index) noexcept {
   }
 
   const core::GestureType type = gesture_type_from_index(index);
-  while (core::unregister_gesture_callback(type, &lua_gesture_handler,
-                                           nullptr)) {
+  while (
+      core::unregister_gesture_callback(type, &lua_gesture_handler, nullptr)) {
   }
 }
 
 } // namespace
 
-// engine.on_touch(callback)
 int lua_engine_on_touch(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  // Release old ref if any.
+
   if ((g_touchLuaState != nullptr) && (g_touchCallbackRef != LUA_NOREF)) {
     luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
   }
@@ -137,6 +139,7 @@ int lua_engine_on_touch(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+
   lua_pushboolean(state, 1);
   return 1;
 }
@@ -165,13 +168,12 @@ void clear_touch_gesture_callbacks(lua_State *fallbackState) noexcept {
   g_touchLuaState = nullptr;
 }
 
-// engine.on_gesture(type_string, callback)
-// type_string: "tap", "swipe", "pinch", "rotate"
 int lua_engine_on_gesture(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_isfunction(state, 2)) {
     lua_pushboolean(state, 0);
     return 1;
   }
+
   const char *typeStr = lua_tostring(state, 1);
   int idx = -1;
   if (std::strcmp(typeStr, "tap") == 0) {
@@ -188,7 +190,6 @@ int lua_engine_on_gesture(lua_State *state) noexcept {
     return 1;
   }
 
-  // Release old ref.
   if ((g_touchLuaState != nullptr) &&
       (g_gestureCallbackRefs[idx] != LUA_NOREF)) {
     luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
@@ -204,11 +205,11 @@ int lua_engine_on_gesture(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+
   lua_pushboolean(state, 1);
   return 1;
 }
 
-// engine.set_touch_mouse_emulation(enabled)
 int lua_engine_set_touch_mouse_emulation(lua_State *state) noexcept {
   const bool enabled = lua_toboolean(state, 1) != 0;
   core::set_touch_mouse_emulation(enabled);
