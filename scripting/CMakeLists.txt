@@ -30,6 +30,7 @@ engine_add_module_library(engine_scripting
     src/lua_state.cpp
     src/persist_bindings.cpp
     src/runtime_binding.cpp
+    src/scene_bindings.cpp
     src/timer_bindings.cpp
     src/touch_bindings.cpp
     src/dap_server.cpp

@@ -13,6 +13,7 @@
 #include "lua_state.h"
 #include "persist_bindings.h"
 #include "runtime_binding.h"
+#include "scene_bindings.h"
 #include "timer_bindings.h"
 #include "touch_bindings.h"
 
@@ -2604,52 +2605,6 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
   return 1;
 }
 
-// --- Scene management from Lua (deferred load/new, immediate save) ---
-
-enum class SceneOp : std::uint8_t { None, Load, New };
-static SceneOp g_pendingSceneOp = SceneOp::None;
-static char g_pendingScenePath[512] = {};
-
-/// Handles lua engine save scene.
-int lua_engine_save_scene(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr || !lua_isstring(state, 1)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const bool ok = (runtime_binding().services != nullptr) && (runtime_binding().services->save_scene != nullptr)
-                      ? runtime_binding().services->save_scene(runtime_binding().world, path)
-                      : false;
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine load scene.
-int lua_engine_load_scene(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1)) {
-    return 0;
-  }
-  const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
-    return 0;
-  }
-  std::snprintf(g_pendingScenePath, sizeof(g_pendingScenePath), "%s", path);
-  g_pendingScenePath[sizeof(g_pendingScenePath) - 1U] = '\0';
-  g_pendingSceneOp = SceneOp::Load;
-  return 0;
-}
-
-/// Handles lua engine new scene.
-int lua_engine_new_scene(lua_State *state) noexcept {
-  static_cast<void>(state);
-  g_pendingSceneOp = SceneOp::New;
-  return 0;
-}
-
 // --- Prefab bindings ---
 
 int lua_engine_save_prefab(lua_State *state) noexcept {
@@ -3264,13 +3219,7 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_clone_entity);
   lua_setfield(state, -2, "clone_entity");
 
-  // Scene management
-  lua_pushcfunction(state, &lua_engine_save_scene);
-  lua_setfield(state, -2, "save_scene");
-  lua_pushcfunction(state, &lua_engine_load_scene);
-  lua_setfield(state, -2, "load_scene");
-  lua_pushcfunction(state, &lua_engine_new_scene);
-  lua_setfield(state, -2, "new_scene");
+  register_scene_bindings(state);
 
   // Prefab system
   lua_pushcfunction(state, &lua_engine_save_prefab);
@@ -3573,8 +3522,7 @@ void shutdown_scripting() noexcept {
   g_builtinCapsuleMesh = 0ULL;
   g_builtinPyramidMesh = 0ULL;
   clear_deferred_mutations();
-  g_pendingSceneOp = SceneOp::None;
-  g_pendingScenePath[0] = '\0';
+  reset_scene_bindings();
   reset_debug_bindings();
   set_debug_lua_state(nullptr);
   g_godModeEnabled = false;
@@ -3763,30 +3711,6 @@ void tick_coroutines() noexcept {
 /// Handles clear coroutines.
 void clear_coroutines() noexcept {
   clear_lua_coroutines(lua_state());
-}
-
-/// Returns whether has pending scene op.
-bool has_pending_scene_op() noexcept {
-  return g_pendingSceneOp != SceneOp::None;
-}
-
-/// Handles pending scene op is load.
-bool pending_scene_op_is_load() noexcept {
-  return g_pendingSceneOp == SceneOp::Load;
-}
-
-/// Handles pending scene op is new.
-bool pending_scene_op_is_new() noexcept {
-  return g_pendingSceneOp == SceneOp::New;
-}
-
-/// Returns the requested value for pending scene path.
-const char *get_pending_scene_path() noexcept { return g_pendingScenePath; }
-
-/// Handles clear pending scene op.
-void clear_pending_scene_op() noexcept {
-  g_pendingSceneOp = SceneOp::None;
-  g_pendingScenePath[0] = '\0';
 }
 
 /// Handles watch script file.
