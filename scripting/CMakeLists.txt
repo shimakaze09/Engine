@@ -20,6 +20,7 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/cheat_bindings.cpp
     src/collision_bindings.cpp
     src/coroutine_bindings.cpp
     src/debug_bindings.cpp

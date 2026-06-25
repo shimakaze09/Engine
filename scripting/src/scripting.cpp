@@ -4,6 +4,7 @@
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
 #include "collision_bindings.h"
+#include "cheat_bindings.h"
 #include "coroutine_bindings.h"
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
@@ -28,11 +29,9 @@ extern "C" {
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <limits>
 
-#include "engine/core/console.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
@@ -161,9 +160,6 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   }
   return newPtr;
 }
-
-bool g_godModeEnabled = false;
-bool g_noclipEnabled = false;
 
 /// Handles refresh lua hook.
 void refresh_lua_hook() noexcept;
@@ -946,18 +942,6 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
                       static_cast<std::uint8_t>(player), entity)
                       ? 1
                       : 0);
-  return 1;
-}
-
-/// Handles lua engine is god mode.
-int lua_engine_is_god_mode(lua_State *state) noexcept {
-  lua_pushboolean(state, g_godModeEnabled ? 1 : 0);
-  return 1;
-}
-
-/// Handles lua engine is noclip.
-int lua_engine_is_noclip(lua_State *state) noexcept {
-  lua_pushboolean(state, g_noclipEnabled ? 1 : 0);
   return 1;
 }
 
@@ -2781,10 +2765,7 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_game_state_clear);
   lua_setfield(state, -2, "game_state_clear");
 
-  lua_pushcfunction(state, &lua_engine_is_god_mode);
-  lua_setfield(state, -2, "is_god_mode");
-  lua_pushcfunction(state, &lua_engine_is_noclip);
-  lua_setfield(state, -2, "is_noclip");
+  register_cheat_status_bindings(state);
 
   lua_pushcfunction(state, &lua_engine_profiler_enable);
   lua_setfield(state, -2, "profiler_enable");
@@ -3063,88 +3044,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setglobal(state, "engine");
 }
 
-// ---- Console cheat commands ----
-
-void cmd_god(const char *const * /*args*/, int /*argCount*/,
-             void * /*userData*/) noexcept {
-  g_godModeEnabled = !g_godModeEnabled;
-  core::console_print(g_godModeEnabled ? "God mode ON" : "God mode OFF");
-}
-
-/// Handles cmd noclip.
-void cmd_noclip(const char *const * /*args*/, int /*argCount*/,
-                void * /*userData*/) noexcept {
-  g_noclipEnabled = !g_noclipEnabled;
-  core::console_print(g_noclipEnabled ? "Noclip ON" : "Noclip OFF");
-}
-
-/// Handles cmd spawn.
-void cmd_spawn(const char *const *args, int argCount,
-               void * /*userData*/) noexcept {
-  if (argCount < 2) {
-    core::console_print("Usage: spawn <prefab> [x y z]");
-    return;
-  }
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->instantiate_prefab == nullptr)) {
-    core::console_print("Cannot spawn: world not ready");
-    return;
-  }
-  const std::uint32_t entityIndex =
-      runtime_binding().services->instantiate_prefab(runtime_binding().world, args[1]);
-  if (entityIndex == 0U) {
-    core::console_print("Spawn failed (prefab not found?)");
-    return;
-  }
-  // Optionally set position if x y z provided.
-  if ((argCount >= 5) && (runtime_binding().services->add_transform_op != nullptr)) {
-    runtime::Transform t{};
-    t.position.x = static_cast<float>(std::atof(args[2]));
-    t.position.y = static_cast<float>(std::atof(args[3]));
-    t.position.z = static_cast<float>(std::atof(args[4]));
-    t.scale = {1.0F, 1.0F, 1.0F};
-    t.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
-    // Overwrite the transform that was loaded from the prefab.
-    runtime_binding().services->add_transform_op(runtime_binding().world, entityIndex, t);
-  }
-  char buf[64] = {};
-  std::snprintf(buf, sizeof(buf), "Spawned entity %u", entityIndex);
-  core::console_print(buf);
-}
-
-/// Handles cmd kill all.
-void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
-                  void * /*userData*/) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->destroy_entity_op == nullptr)) {
-    core::console_print("Cannot kill_all: world not ready");
-    return;
-  }
-  std::size_t destroyed = 0U;
-  runtime_binding().world->for_each_alive([&destroyed](runtime::Entity entity) noexcept {
-    if (is_player_controller_entity(entity)) {
-      return;
-    }
-    runtime_binding().services->destroy_entity_op(runtime_binding().world, entity.index);
-    ++destroyed;
-  });
-  char buf[64] = {};
-  std::snprintf(buf, sizeof(buf), "Destroyed %zu entities", destroyed);
-  core::console_print(buf);
-}
-
-/// Handles register debug commands.
-void register_debug_commands() noexcept {
-  core::console_register_command("god", cmd_god, nullptr,
-                                 "Toggle god mode (invincibility)");
-  core::console_register_command("noclip", cmd_noclip, nullptr,
-                                 "Toggle noclip (no collision)");
-  core::console_register_command("spawn", cmd_spawn, nullptr,
-                                 "Spawn a prefab: spawn <path> [x y z]");
-  core::console_register_command("kill_all", cmd_kill_all, nullptr,
-                                 "Destroy all entities except player");
-}
-
 } // namespace
 
 /// Handles bindable delta time.
@@ -3163,12 +3062,6 @@ int bindable_get_entity_count() noexcept {
   }
   return static_cast<int>(runtime_binding().services->get_transform_count(runtime_binding().world));
 }
-
-/// Handles bindable is god mode.
-bool bindable_is_god_mode() noexcept { return g_godModeEnabled; }
-
-/// Handles bindable is noclip.
-bool bindable_is_noclip() noexcept { return g_noclipEnabled; }
 
 /// Handles bindable is gamepad connected.
 bool bindable_is_gamepad_connected() noexcept {
@@ -3287,7 +3180,7 @@ bool initialize_scripting() noexcept {
   luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(state, 1);
   register_engine_bindings(state);
-  register_debug_commands();
+  register_cheat_commands();
 
   // Install sandboxed memory allocator. io/os/debug libraries are already
   // excluded (only base, coroutine, table, string, math, utf8 are opened).
@@ -3325,8 +3218,7 @@ void shutdown_scripting() noexcept {
   reset_scene_bindings();
   reset_debug_bindings();
   set_debug_lua_state(nullptr);
-  g_godModeEnabled = false;
-  g_noclipEnabled = false;
+  reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
 }
