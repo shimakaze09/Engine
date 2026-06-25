@@ -9,6 +9,7 @@
 #include "deferred_mutations.h"
 #include "entity_script_bindings.h"
 #include "game_bindings.h"
+#include "lua_state.h"
 #include "persist_bindings.h"
 #include "runtime_binding.h"
 #include "timer_bindings.h"
@@ -54,7 +55,6 @@ namespace engine::scripting {
 void register_generated_bindings(lua_State *L) noexcept;
 namespace {
 
-lua_State *g_state = nullptr;
 std::uint64_t g_defaultMeshAssetId = 0ULL;
 std::uint64_t g_builtinPlaneMesh = 0ULL;
 std::uint64_t g_builtinCubeMesh = 0ULL;
@@ -131,6 +131,9 @@ void copy_clone_name(char *destination, std::size_t destinationSize,
 
 /// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept;
+
+/// Returns the Lua state owned by the scripting context.
+lua_State *lua_state() noexcept { return current_lua_state(); }
 
 // Memory limit for the Lua allocator (bytes). Default 64MB.
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
@@ -299,18 +302,19 @@ void refresh_lua_hook() noexcept {
 
 /// Handles log lua error.
 void log_lua_error(const char *context) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     return;
   }
 
-  const char *message = lua_tostring(g_state, -1);
+  const char *message = lua_tostring(state, -1);
   if (message == nullptr) {
     message = "unknown lua error";
   }
 
   // Attach traceback so logs include script file and line diagnostics.
-  luaL_traceback(g_state, g_state, message, 1);
-  const char *trace = lua_tostring(g_state, -1);
+  luaL_traceback(state, state, message, 1);
+  const char *trace = lua_tostring(state, -1);
   if (trace == nullptr) {
     trace = message;
   }
@@ -323,7 +327,7 @@ void log_lua_error(const char *context) noexcept {
     std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", trace);
   }
   core::log_message(core::LogLevel::Error, "scripting", logBuffer);
-  lua_pop(g_state, 2);
+  lua_pop(state, 2);
 }
 
 /// Handles lua engine log.
@@ -3917,44 +3921,43 @@ void bindable_stop_all_sounds() noexcept {
 
 /// Initializes the owning system for scripting.
 bool initialize_scripting() noexcept {
-  if (g_state != nullptr) {
+  if (lua_state() != nullptr) {
     return true;
   }
 
-  g_state = luaL_newstate();
-  if (g_state == nullptr) {
+  lua_State *state = initialize_lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "failed to create Lua state");
     return false;
   }
-  set_debug_lua_state(g_state);
+  set_debug_lua_state(state);
   configure_entity_script_bindings(
-      g_state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
-                                            &refresh_lua_hook,
-                                            &get_file_mtime});
+      state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
+                                          &refresh_lua_hook, &get_file_mtime});
 
   // Open only safe libraries. io, os, debug, and package are excluded to
   // prevent untrusted game scripts from accessing the file system or executing
   // arbitrary system commands.
-  luaL_requiref(g_state, LUA_GNAME, luaopen_base, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_COLIBNAME, luaopen_coroutine, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_TABLIBNAME, luaopen_table, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_STRLIBNAME, luaopen_string, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_MATHLIBNAME, luaopen_math, 1);
-  lua_pop(g_state, 1);
-  luaL_requiref(g_state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
-  lua_pop(g_state, 1);
-  register_engine_bindings(g_state);
+  luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_STRLIBNAME, luaopen_string, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
+  lua_pop(state, 1);
+  register_engine_bindings(state);
   register_debug_commands();
 
   // Install sandboxed memory allocator. io/os/debug libraries are already
   // excluded (only base, coroutine, table, string, math, utf8 are opened).
   if (debug_sandbox_enabled()) {
-    lua_setallocf(g_state, sandbox_alloc, nullptr);
+    lua_setallocf(state, sandbox_alloc, nullptr);
   }
 
   refresh_lua_hook();
@@ -3963,16 +3966,16 @@ bool initialize_scripting() noexcept {
 
 /// Shuts down the owning system for scripting.
 void shutdown_scripting() noexcept {
-  clear_touch_gesture_callbacks(g_state);
+  lua_State *state = lua_state();
+  clear_touch_gesture_callbacks(state);
 
-  if (g_state != nullptr) {
-    clear_persist_bindings(g_state);
+  if (state != nullptr) {
+    clear_persist_bindings(state);
     reset_entity_script_bindings();
-    clear_lua_timer_bindings(g_state);
-    clear_collision_handlers(g_state);
-    clear_lua_coroutines(g_state);
-    lua_close(g_state);
-    g_state = nullptr;
+    clear_lua_timer_bindings(state);
+    clear_collision_handlers(state);
+    clear_lua_coroutines(state);
+    shutdown_lua_state();
   }
 
   clear_runtime_binding();
@@ -4026,7 +4029,8 @@ void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
 
 /// Loads the requested resource for script.
 bool load_script(const char *path) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "scripting not initialized");
     return false;
@@ -4038,14 +4042,14 @@ bool load_script(const char *path) noexcept {
     return false;
   }
 
-  if (luaL_loadfile(g_state, path) != LUA_OK) {
+  if (luaL_loadfile(state, path) != LUA_OK) {
     log_lua_error("load_script");
     return false;
   }
 
   refresh_lua_hook(); // Reset instruction counter for this invocation.
 
-  if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("load_script");
     return false;
   }
@@ -4055,7 +4059,8 @@ bool load_script(const char *path) noexcept {
 
 /// Handles call script function.
 bool call_script_function(const char *name) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "scripting not initialized");
     return false;
@@ -4067,13 +4072,13 @@ bool call_script_function(const char *name) noexcept {
     return false;
   }
 
-  lua_getglobal(g_state, name);
-  if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 1);
+  lua_getglobal(state, name);
+  if (!lua_isfunction(state, -1)) {
+    lua_pop(state, 1);
     return false;
   }
 
-  if (lua_pcall(g_state, 0, 0, 0) != LUA_OK) {
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("call_script_function");
     return false;
   }
@@ -4083,7 +4088,8 @@ bool call_script_function(const char *name) noexcept {
 
 /// Handles call script function float.
 bool call_script_function_float(const char *name, float arg) noexcept {
-  if (g_state == nullptr) {
+  lua_State *state = lua_state();
+  if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "scripting not initialized");
     return false;
@@ -4095,14 +4101,14 @@ bool call_script_function_float(const char *name, float arg) noexcept {
     return false;
   }
 
-  lua_getglobal(g_state, name);
-  if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 1);
+  lua_getglobal(state, name);
+  if (!lua_isfunction(state, -1)) {
+    lua_pop(state, 1);
     return false;
   }
 
-  lua_pushnumber(g_state, static_cast<lua_Number>(arg));
-  if (lua_pcall(g_state, 1, 0, 0) != LUA_OK) {
+  lua_pushnumber(state, static_cast<lua_Number>(arg));
+  if (lua_pcall(state, 1, 0, 0) != LUA_OK) {
     log_lua_error("call_script_function_float");
     return false;
   }
@@ -4113,7 +4119,7 @@ bool call_script_function_float(const char *name, float arg) noexcept {
 /// Handles dispatch physics callbacks.
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept {
-  dispatch_collision_handlers(g_state, pairData, pairCount,
+  dispatch_collision_handlers(lua_state(), pairData, pairCount,
                               push_entity_handle_from_index, log_lua_error);
 }
 
@@ -4159,18 +4165,18 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
 
 /// Handles tick timers.
 void tick_timers() noexcept {
-  tick_lua_timers(g_state, g_deltaSeconds);
+  tick_lua_timers(lua_state(), g_deltaSeconds);
 }
 
 /// Handles tick coroutines.
 void tick_coroutines() noexcept {
-  tick_lua_coroutines(g_state, g_totalSeconds, g_frameIndex, log_lua_error,
+  tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
                       refresh_lua_hook);
 }
 
 /// Handles clear coroutines.
 void clear_coroutines() noexcept {
-  clear_lua_coroutines(g_state);
+  clear_lua_coroutines(lua_state());
 }
 
 /// Returns whether has pending scene op.
