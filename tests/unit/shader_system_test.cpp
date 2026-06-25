@@ -2,7 +2,10 @@
 
 #include "engine/renderer/shader_system.h"
 
+#include "engine/renderer/material.h"
+
 #include <cstdio>
+#include <cstring>
 
 static int g_passed = 0;
 static int g_failed = 0;
@@ -28,6 +31,18 @@ static int g_failed = 0;
 // --------------------------------------------------------------------------
 // Tests — no GL context available, so we test the registry bookkeeping only.
 // --------------------------------------------------------------------------
+
+/// Returns whether the selected material shader defines contain a name.
+static bool has_selected_define(
+    const engine::renderer::MaterialShaderVariantSelection &selection,
+    const char *name) {
+  for (std::size_t i = 0U; i < selection.defineCount; ++i) {
+    if (std::strcmp(selection.defines[i].name, name) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /// Handles test init shutdown.
 static void test_init_shutdown() {
@@ -83,6 +98,46 @@ static void test_variant_key_distinguishes_values() {
   TEST_ASSERT(enabledKey.value != 0U);
   TEST_ASSERT(disabledKey.value != 0U);
   TEST_ASSERT(!(enabledKey == disabledKey));
+  ++g_passed;
+}
+
+/// Handles test material shader define selection default material.
+static void test_material_shader_define_selection_default_material() {
+  using namespace engine::renderer;
+
+  const Material material{};
+  const MaterialShaderVariantSelection selection =
+      select_material_shader_defines(material, false);
+
+  TEST_ASSERT(selection.defineCount == 0U);
+  ++g_passed;
+}
+
+/// Handles test material shader define selection feature flags.
+static void test_material_shader_define_selection_feature_flags() {
+  using namespace engine::renderer;
+
+  Material material{};
+  material.albedoTexture = TextureHandle{1U};
+  material.normalTexture = TextureHandle{2U};
+  material.emissive = engine::math::Vec3(0.2F, 0.0F, 0.0F);
+  material.opacity = 0.5F;
+
+  const MaterialShaderVariantSelection selection =
+      select_material_shader_defines(material, true);
+
+  TEST_ASSERT(selection.defineCount == 5U);
+  TEST_ASSERT(has_selected_define(selection, "HAS_ALBEDO_TEXTURE"));
+  TEST_ASSERT(has_selected_define(selection, "HAS_NORMAL_MAP"));
+  TEST_ASSERT(has_selected_define(selection, "HAS_EMISSIVE"));
+  TEST_ASSERT(has_selected_define(selection, "MATERIAL_TRANSLUCENT"));
+  TEST_ASSERT(has_selected_define(selection, "SKINNED"));
+
+  const ShaderVariantDesc desc{"assets/shaders/pbr.vert",
+                               "assets/shaders/pbr.frag",
+                               selection.defines,
+                               selection.defineCount};
+  TEST_ASSERT(shader_variant_key(desc).value != 0U);
   ++g_passed;
 }
 
@@ -169,6 +224,10 @@ int main() {
   RUN_TEST(test_variant_key_order_independent);
   int before_test_variant_key_distinguishes_values = g_failed;
   RUN_TEST(test_variant_key_distinguishes_values);
+  int before_test_material_shader_define_selection_default_material = g_failed;
+  RUN_TEST(test_material_shader_define_selection_default_material);
+  int before_test_material_shader_define_selection_feature_flags = g_failed;
+  RUN_TEST(test_material_shader_define_selection_feature_flags);
   int before_test_variant_invalid_descriptors = g_failed;
   RUN_TEST(test_variant_invalid_descriptors);
   int before_test_load_without_init_returns_invalid = g_failed;

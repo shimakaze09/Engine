@@ -9,6 +9,8 @@ namespace engine::renderer {
 
 /// Stores render device data used by the engine.
 struct RenderDevice;
+/// Stores material data used by the engine.
+struct Material;
 
 /// Stores shader program handle data used by the engine.
 struct ShaderProgramHandle final {
@@ -44,6 +46,14 @@ struct ShaderVariantDesc final {
   std::size_t defineCount = 0U;
 };
 
+inline constexpr std::size_t kMaxMaterialShaderDefines = 5U;
+
+/// Stores shader defines selected from material properties.
+struct MaterialShaderVariantSelection final {
+  ShaderDefine defines[kMaxMaterialShaderDefines] = {};
+  std::size_t defineCount = 0U;
+};
+
 /// Initializes the owning system for shader system.
 bool initialize_shader_system() noexcept;
 /// Shuts down the owning system for shader system.
@@ -61,6 +71,10 @@ ShaderVariantKey shader_variant_key(const ShaderVariantDesc &desc) noexcept;
 /// Loads a shader variant, compiling and caching it when the key is absent.
 ShaderProgramHandle load_shader_variant(
     const ShaderVariantDesc &desc) noexcept;
+
+/// Selects shader defines required by a material and mesh skinning state.
+MaterialShaderVariantSelection select_material_shader_defines(
+    const Material &material, bool skinned) noexcept;
 
 /// Destroys or releases the requested object, handle, or resource for shader program.
 void destroy_shader_program(ShaderProgramHandle handle) noexcept;
