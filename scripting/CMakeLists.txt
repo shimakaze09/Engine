@@ -25,6 +25,7 @@ engine_add_module_library(engine_scripting
     src/debug_bindings.cpp
     src/deferred_mutations.cpp
     src/entity_handle.cpp
+    src/entity_pool_bindings.cpp
     src/entity_script_bindings.cpp
     src/game_bindings.cpp
     src/input_bindings.cpp
