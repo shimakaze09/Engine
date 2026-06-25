@@ -7,6 +7,7 @@
 #include "coroutine_bindings.h"
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
+#include "entity_script_bindings.h"
 #include "game_bindings.h"
 #include "persist_bindings.h"
 #include "runtime_binding.h"
@@ -128,57 +129,8 @@ void copy_clone_name(char *destination, std::size_t destinationSize,
   }
 }
 
-// --- Entity script module registry ---
-struct EntityScriptModule final {
-  char path[128] = {};
-  int registryRef = LUA_NOREF;
-  std::int64_t mtime = 0;
-  bool reloaded = false;
-};
-constexpr std::size_t kMaxEntityScriptModules = 32U;
-EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
-std::size_t g_entityScriptModuleCount = 0U;
-
-// Per-entity faulted tracking: if a lifecycle callback errors, skip future
-// calls for that entity to avoid cascading log spam.
-constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
-bool g_entityFaulted[kMaxFaultedEntities]{};
-
-// Per-entity saved state for hot-reload (Lua registry references).
-// Before reload, on_save_state(entity) is called; return value stored here.
-// After reload, on_restore_state(entity, state) is called to hand it back.
-int g_entitySavedState[kMaxFaultedEntities]{};
-bool g_entitySavedStateInit = false;
-
-/// Handles init entity saved state.
-void init_entity_saved_state() noexcept {
-  if (!g_entitySavedStateInit) {
-    for (auto &ref : g_entitySavedState) {
-      ref = LUA_NOREF;
-    }
-    g_entitySavedStateInit = true;
-  }
-}
-
-/// Handles clear entity saved state.
-void clear_entity_saved_state() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-  for (auto &ref : g_entitySavedState) {
-    if (ref != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, ref);
-      ref = LUA_NOREF;
-    }
-  }
-}
-
 /// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept;
-
-constexpr std::size_t kMaxModuleLoadDepth = 32U;
-char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
-std::size_t g_moduleLoadDepth = 0U;
 
 // Memory limit for the Lua allocator (bytes). Default 64MB.
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
@@ -338,19 +290,6 @@ bool read_entity(lua_State *state, int index,
 
   *outEntity = decoded;
   return true;
-}
-
-/// Handles module is currently loading.
-bool module_is_currently_loading(const char *path) noexcept {
-  if (path == nullptr) {
-    return false;
-  }
-  for (std::size_t i = 0U; i < g_moduleLoadDepth; ++i) {
-    if (std::strcmp(g_moduleLoadStack[i], path) == 0) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /// Handles refresh lua hook.
@@ -3170,218 +3109,6 @@ int lua_engine_pool_release(lua_State *state) noexcept {
   return 1;
 }
 
-// Find an already-loaded entity script module by path, or load it fresh.
-// Returns LUA_NOREF on failure. Must be called after log_lua_error is defined.
-int get_or_load_entity_script_module(const char *path) noexcept {
-  if ((g_state == nullptr) || (path == nullptr) || (path[0] == '\0')) {
-    return LUA_NOREF;
-  }
-
-  if (module_is_currently_loading(path)) {
-    char msg[256] = {};
-    std::snprintf(msg, sizeof(msg), "circular module dependency detected: %s",
-                  path);
-    core::log_message(core::LogLevel::Error, "scripting", msg);
-    return LUA_NOREF;
-  }
-
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
-      EntityScriptModule &mod = g_entityScriptModules[i];
-      const std::int64_t currentMtime = get_file_mtime(path);
-      if ((currentMtime != 0) && (mod.mtime != 0) &&
-          (currentMtime != mod.mtime)) {
-        // Save per-entity state before replacing the old module.
-        init_entity_saved_state();
-        if ((runtime_binding().world != nullptr) && (mod.registryRef != LUA_NOREF)) {
-          runtime_binding().world->for_each<runtime::ScriptComponent>(
-              [&mod](runtime::Entity entity,
-                     const runtime::ScriptComponent &sc) noexcept {
-                if (std::strcmp(sc.scriptPath, mod.path) != 0) {
-                  return;
-                }
-                if (entity.index >= kMaxFaultedEntities) {
-                  return;
-                }
-                // Call on_save_state(entity_id) on old module.
-                lua_rawgeti(g_state, LUA_REGISTRYINDEX, mod.registryRef);
-                if (!lua_istable(g_state, -1)) {
-                  lua_pop(g_state, 1);
-                  return;
-                }
-                lua_getfield(g_state, -1, "on_save_state");
-                if (!lua_isfunction(g_state, -1)) {
-                  lua_pop(g_state, 2);
-                  return;
-                }
-                lua_remove(g_state, -2); // remove module table
-                lua_pushinteger(g_state,
-                                static_cast<lua_Integer>(entity.index));
-                refresh_lua_hook();
-                if (lua_pcall(g_state, 1, 1, 0) != LUA_OK) {
-                  log_lua_error("on_save_state");
-                  return;
-                }
-                if (lua_istable(g_state, -1)) {
-                  if (g_entitySavedState[entity.index] != LUA_NOREF) {
-                    luaL_unref(g_state, LUA_REGISTRYINDEX,
-                               g_entitySavedState[entity.index]);
-                  }
-                  g_entitySavedState[entity.index] =
-                      luaL_ref(g_state, LUA_REGISTRYINDEX);
-                } else {
-                  lua_pop(g_state, 1);
-                }
-              });
-        }
-
-        if (luaL_loadfile(g_state, path) != LUA_OK) {
-          log_lua_error("reload entity script");
-          return mod.registryRef;
-        }
-
-        refresh_lua_hook(); // Reset instruction counter.
-
-        if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-          log_lua_error("reload entity script");
-          return mod.registryRef;
-        }
-
-        if (!lua_istable(g_state, -1)) {
-          core::log_message(core::LogLevel::Error, "scripting",
-                            "entity script must return a module table");
-          lua_pop(g_state, 1);
-          return mod.registryRef;
-        }
-
-        const int newRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
-        if (mod.registryRef != LUA_NOREF) {
-          luaL_unref(g_state, LUA_REGISTRYINDEX, mod.registryRef);
-        }
-        mod.registryRef = newRef;
-        mod.mtime = currentMtime;
-        mod.reloaded = true;
-
-        char logBuf[256] = {};
-        std::snprintf(logBuf, sizeof(logBuf), "hot-reloaded entity script: %s",
-                      path);
-        core::log_message(core::LogLevel::Info, "scripting", logBuf);
-      }
-
-      return mod.registryRef;
-    }
-  }
-
-  if (g_entityScriptModuleCount >= kMaxEntityScriptModules) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "entity script module limit reached");
-    return LUA_NOREF;
-  }
-
-  if (g_moduleLoadDepth >= kMaxModuleLoadDepth) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "module load stack overflow");
-    return LUA_NOREF;
-  }
-  std::snprintf(g_moduleLoadStack[g_moduleLoadDepth],
-                sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
-  ++g_moduleLoadDepth;
-
-  if (luaL_loadfile(g_state, path) != LUA_OK) {
-    log_lua_error("load entity script");
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  refresh_lua_hook(); // Reset instruction counter.
-
-  if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-    log_lua_error("exec entity script");
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  if (!lua_istable(g_state, -1)) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "entity script must return a module table");
-    lua_pop(g_state, 1);
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  const int ref = luaL_ref(g_state, LUA_REGISTRYINDEX);
-  EntityScriptModule &mod = g_entityScriptModules[g_entityScriptModuleCount];
-  const std::size_t maxPath = sizeof(mod.path) - 1U;
-  const std::size_t pathLen = std::strlen(path);
-  const std::size_t copyLen = (pathLen > maxPath) ? maxPath : pathLen;
-  std::memcpy(mod.path, path, copyLen);
-  mod.path[copyLen] = '\0';
-  mod.registryRef = ref;
-  mod.mtime = get_file_mtime(path);
-  mod.reloaded = false;
-  ++g_entityScriptModuleCount;
-
-  char logBuf[256] = {};
-  std::snprintf(logBuf, sizeof(logBuf), "loaded entity script: %s", path);
-  core::log_message(core::LogLevel::Info, "scripting", logBuf);
-  --g_moduleLoadDepth;
-  return ref;
-}
-
-// Call module.funcName(entity [, dt]) - returns false on missing/error.
-// Call a function on a module table, with optional fallback name.
-// If entity is valid, marks entity as faulted on error.
-bool call_module_function(int moduleRef, const char *funcName,
-                          const char *fallbackName, runtime::Entity entity,
-                          bool hasDt, float dt) noexcept {
-  if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
-    return false;
-  }
-
-  lua_rawgeti(g_state, LUA_REGISTRYINDEX, moduleRef);
-  if (!lua_istable(g_state, -1)) {
-    lua_pop(g_state, 1);
-    return false;
-  }
-
-  lua_getfield(g_state, -1, funcName);
-  if (!lua_isfunction(g_state, -1)) {
-    lua_pop(g_state, 1);
-    // Try fallback name if provided.
-    if (fallbackName != nullptr) {
-      lua_getfield(g_state, -1, fallbackName);
-      if (!lua_isfunction(g_state, -1)) {
-        lua_pop(g_state, 2);
-        return false;
-      }
-    } else {
-      lua_pop(g_state, 1);
-      return false;
-    }
-  }
-
-  // Stack: ... | table | func
-  // Remove table so it doesn't interfere with the pcall argument count.
-  lua_remove(g_state, -2);
-
-  push_entity_handle(g_state, entity);
-  int nargs = 1;
-  if (hasDt) {
-    lua_pushnumber(g_state, static_cast<lua_Number>(dt));
-    nargs = 2;
-  }
-
-  refresh_lua_hook(); // Reset instruction counter per callback.
-  if (lua_pcall(g_state, nargs, 0, 0) != LUA_OK) {
-    log_lua_error(funcName);
-    if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-      g_entityFaulted[entity.index] = true;
-    }
-    return false;
-  }
-  return true;
-}
-
 /// Handles lua engine add script component.
 int lua_engine_add_script_component(lua_State *state) noexcept {
   runtime::Entity entity{};
@@ -3417,25 +3144,6 @@ int lua_engine_remove_script_component(lua_State *state) noexcept {
 
   lua_pushboolean(state,
                   apply_or_queue_remove_script_component(entity) ? 1 : 0);
-  return 1;
-}
-
-// engine.require(path) — load a Lua module file and return its table.
-// The module is cached by path (same cache used by entity scripts).
-// Suitable for shared utility scripts that don't need entity lifecycle hooks.
-// Returns nil on failure.
-int lua_engine_require(lua_State *state) noexcept {
-  const char *path = lua_tostring(state, 1);
-  if ((path == nullptr) || (path[0] == '\0')) {
-    lua_pushnil(state);
-    return 1;
-  }
-  const int ref = get_or_load_entity_script_module(path);
-  if (ref == LUA_NOREF) {
-    lua_pushnil(state);
-    return 1;
-  }
-  lua_rawgeti(state, LUA_REGISTRYINDEX, ref);
   return 1;
 }
 
@@ -4220,6 +3928,10 @@ bool initialize_scripting() noexcept {
     return false;
   }
   set_debug_lua_state(g_state);
+  configure_entity_script_bindings(
+      g_state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
+                                            &refresh_lua_hook,
+                                            &get_file_mtime});
 
   // Open only safe libraries. io, os, debug, and package are excluded to
   // prevent untrusted game scripts from accessing the file system or executing
@@ -4255,8 +3967,7 @@ void shutdown_scripting() noexcept {
 
   if (g_state != nullptr) {
     clear_persist_bindings(g_state);
-    // Release saved entity state refs.
-    clear_entity_saved_state();
+    reset_entity_script_bindings();
     clear_lua_timer_bindings(g_state);
     clear_collision_handlers(g_state);
     clear_lua_coroutines(g_state);
@@ -4275,10 +3986,6 @@ void shutdown_scripting() noexcept {
   clear_deferred_mutations();
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
-  g_moduleLoadDepth = 0U;
-  for (std::size_t i = 0U; i < kMaxFaultedEntities; ++i) {
-    g_entityFaulted[i] = false;
-  }
   reset_debug_bindings();
   set_debug_lua_state(nullptr);
   g_godModeEnabled = false;
@@ -4514,170 +4221,6 @@ void check_script_reload() noexcept {
                         "hot-reload failed; keeping previous version");
     }
   }
-}
-
-/// Handles dispatch entity scripts start.
-void dispatch_entity_scripts_start() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        if ((entity.index < kMaxFaultedEntities) &&
-            g_entityFaulted[entity.index]) {
-          return;
-        }
-        // Mark begin_play done so dispatch_entity_scripts_begin_play does
-        // not fire on_start a second time for the same entity this frame.
-        runtime_binding().world->mark_begin_play_done(entity);
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        call_module_function(ref, "on_begin_play", "on_start", entity,
-                             false, 0.0F);
-      });
-}
-
-/// Handles dispatch entity scripts begin play.
-void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
-    return;
-  }
-
-  world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
-    world->mark_begin_play_done(entity);
-    // Only dispatch if entity has a ScriptComponent.
-    const auto *sc = world->get_script_component_ptr(entity);
-    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
-      return;
-    }
-    if ((entity.index < kMaxFaultedEntities) && g_entityFaulted[entity.index]) {
-      return;
-    }
-    const int ref = get_or_load_entity_script_module(sc->scriptPath);
-    if (ref == LUA_NOREF) {
-      return;
-    }
-    call_module_function(ref, "on_begin_play", "on_start", entity, false,
-                         0.0F);
-  });
-}
-
-/// Handles dispatch entity scripts end play.
-void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
-    return;
-  }
-
-  world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
-    const auto *sc = world->get_script_component_ptr(entity);
-    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
-      return;
-    }
-    // Fire EndPlay even for faulted entities (best effort cleanup).
-    const int ref = get_or_load_entity_script_module(sc->scriptPath);
-    if (ref == LUA_NOREF) {
-      return;
-    }
-    static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                           entity, false, 0.0F));
-  });
-}
-
-/// Handles dispatch entity scripts update.
-void dispatch_entity_scripts_update(float dt) noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (!g_entityScriptModules[i].reloaded) {
-      continue;
-    }
-
-    const char *reloadedPath = g_entityScriptModules[i].path;
-    const int moduleRef = g_entityScriptModules[i].registryRef;
-    runtime_binding().world->for_each<runtime::ScriptComponent>(
-        [reloadedPath, moduleRef](runtime::Entity entity,
-                                  const runtime::ScriptComponent &sc) noexcept {
-          if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
-            return;
-          }
-          // Clear faulted state on reload.
-          if (entity.index < kMaxFaultedEntities) {
-            g_entityFaulted[entity.index] = false;
-          }
-
-          static_cast<void>(call_module_function(
-              moduleRef, "on_reload", nullptr, entity, false, 0.0F));
-          static_cast<void>(call_module_function(moduleRef, "on_begin_play",
-                                                 "on_start", entity,
-                                                 false, 0.0F));
-        });
-    g_entityScriptModules[i].reloaded = false;
-  }
-
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [dt](runtime::Entity entity,
-           const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        if ((entity.index < kMaxFaultedEntities) &&
-            g_entityFaulted[entity.index]) {
-          return;
-        }
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        call_module_function(ref, "on_tick", "on_update", entity, true,
-                             dt);
-      });
-}
-
-/// Handles dispatch entity scripts end.
-void dispatch_entity_scripts_end() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
-
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                               entity, false, 0.0F));
-      });
-}
-
-/// Handles clear entity script modules.
-void clear_entity_script_modules() noexcept {
-  if (g_state == nullptr) {
-    return;
-  }
-
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (g_entityScriptModules[i].registryRef != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX,
-                 g_entityScriptModules[i].registryRef);
-      g_entityScriptModules[i].registryRef = LUA_NOREF;
-    }
-    g_entityScriptModules[i].path[0] = '\0';
-    g_entityScriptModules[i].mtime = 0;
-    g_entityScriptModules[i].reloaded = false;
-  }
-  g_entityScriptModuleCount = 0U;
 }
 
 // --- Sandbox configuration ---
