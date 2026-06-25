@@ -39,8 +39,7 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -154,11 +153,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install cppcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq cppcheck
+        run: bash .github/scripts/install-linux-deps.sh cppcheck
 
       - name: Install Linux dependencies
         run: |
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -205,11 +204,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install clang-tidy
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy
+        run: bash .github/scripts/install-linux-deps.sh clang-tidy
 
       - name: Install Linux dependencies
         run: |
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -266,8 +265,7 @@ jobs:
 
       - name: Install Linux dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -296,8 +294,7 @@ jobs:
 
       - name: Install Linux dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -338,8 +335,7 @@ jobs:
 
       - name: Install Linux dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -380,8 +376,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
@@ -449,8 +444,7 @@ jobs:
 
       - name: Install Linux dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
+          bash .github/scripts/install-linux-deps.sh \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
