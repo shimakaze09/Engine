@@ -13,6 +13,7 @@ engine_add_module_library(engine_renderer
     src/pass_resources.cpp
     src/post_process_stack.cpp
     src/render_device_gl.cpp
+    src/render_settings.cpp
     src/shader_system.cpp
     src/shadow_map.cpp
     src/texture_loader.cpp
