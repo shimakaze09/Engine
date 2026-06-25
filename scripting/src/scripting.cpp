@@ -5,6 +5,7 @@
 #include "engine/scripting/dap_server.h"
 #include "deferred_mutations.h"
 #include "runtime_binding.h"
+#include "touch_bindings.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -23,7 +24,6 @@ extern "C" {
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 #include "engine/core/logging.h"
-#include "engine/core/touch_input.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/entity_pool.h"
 #include "engine/runtime/game_mode.h"
@@ -1677,211 +1677,6 @@ int lua_engine_load_input_config(lua_State *state) noexcept {
   }
   lua_pushboolean(state, core::load_input_bindings(path) ? 1 : 0);
   return 1;
-}
-
-// ---------------------------------------------------------------------------
-// Touch input bindings (P1-M2-C3e)
-// ---------------------------------------------------------------------------
-
-// Lua callback registry refs for touch/gesture.
-static lua_State *g_touchLuaState = nullptr;
-static int g_touchCallbackRef = LUA_NOREF;
-
-static void unregister_lua_touch_callback() noexcept;
-static void unregister_lua_gesture_callback(int index) noexcept;
-static void clear_touch_gesture_callbacks(lua_State *fallbackState) noexcept;
-
-/// Handles lua touch handler.
-static void lua_touch_handler(const core::TouchEvent &event,
-                              void * /*userData*/) noexcept {
-  if ((g_touchLuaState == nullptr) || (g_touchCallbackRef == LUA_NOREF)) {
-    return;
-  }
-  lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
-  if (!lua_isfunction(g_touchLuaState, -1)) {
-    lua_pop(g_touchLuaState, 1);
-    return;
-  }
-  lua_newtable(g_touchLuaState);
-  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.touchId));
-  lua_setfield(g_touchLuaState, -2, "id");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.x));
-  lua_setfield(g_touchLuaState, -2, "x");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.y));
-  lua_setfield(g_touchLuaState, -2, "y");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.pressure));
-  lua_setfield(g_touchLuaState, -2, "pressure");
-  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.phase));
-  lua_setfield(g_touchLuaState, -2, "phase");
-  if (lua_pcall(g_touchLuaState, 1, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(g_touchLuaState, -1);
-    core::log_message(core::LogLevel::Error, "Scripting",
-                      err ? err : "touch callback error");
-    lua_pop(g_touchLuaState, 1);
-  }
-}
-
-// engine.on_touch(callback)
-int lua_engine_on_touch(lua_State *state) noexcept {
-  if (!lua_isfunction(state, 1)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  // Release old ref if any.
-  if ((g_touchLuaState != nullptr) && (g_touchCallbackRef != LUA_NOREF)) {
-    luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_touchCallbackRef);
-  }
-  unregister_lua_touch_callback();
-  g_touchLuaState = state;
-  lua_pushvalue(state, 1);
-  g_touchCallbackRef = luaL_ref(state, LUA_REGISTRYINDEX);
-  if (!core::register_touch_callback(&lua_touch_handler, nullptr)) {
-    luaL_unref(state, LUA_REGISTRYINDEX, g_touchCallbackRef);
-    g_touchCallbackRef = LUA_NOREF;
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-// Per-gesture-type Lua callback refs.
-static int g_gestureCallbackRefs[4] = {LUA_NOREF, LUA_NOREF, LUA_NOREF,
-                                       LUA_NOREF};
-
-/// Handles lua gesture handler.
-static void lua_gesture_handler(const core::GestureEvent &event,
-                                void * /*userData*/) noexcept {
-  if (g_touchLuaState == nullptr) {
-    return;
-  }
-  const int idx = static_cast<int>(event.type);
-  if ((idx < 0) || (idx >= 4) || (g_gestureCallbackRefs[idx] == LUA_NOREF)) {
-    return;
-  }
-  lua_rawgeti(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
-  if (!lua_isfunction(g_touchLuaState, -1)) {
-    lua_pop(g_touchLuaState, 1);
-    return;
-  }
-  lua_newtable(g_touchLuaState);
-  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.type));
-  lua_setfield(g_touchLuaState, -2, "type");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.tapX));
-  lua_setfield(g_touchLuaState, -2, "tap_x");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.tapY));
-  lua_setfield(g_touchLuaState, -2, "tap_y");
-  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.tapCount));
-  lua_setfield(g_touchLuaState, -2, "tap_count");
-  lua_pushinteger(g_touchLuaState, static_cast<lua_Integer>(event.swipeDir));
-  lua_setfield(g_touchLuaState, -2, "swipe_dir");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.swipeVelocity));
-  lua_setfield(g_touchLuaState, -2, "swipe_velocity");
-  lua_pushnumber(g_touchLuaState, static_cast<lua_Number>(event.pinchScale));
-  lua_setfield(g_touchLuaState, -2, "pinch_scale");
-  lua_pushnumber(g_touchLuaState,
-                 static_cast<lua_Number>(event.rotationRadians));
-  lua_setfield(g_touchLuaState, -2, "rotation");
-  if (lua_pcall(g_touchLuaState, 1, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(g_touchLuaState, -1);
-    core::log_message(core::LogLevel::Error, "Scripting",
-                      err ? err : "gesture callback error");
-    lua_pop(g_touchLuaState, 1);
-  }
-}
-
-static core::GestureType gesture_type_from_index(int index) noexcept {
-  return static_cast<core::GestureType>(index);
-}
-
-static void unregister_lua_touch_callback() noexcept {
-  while (core::unregister_touch_callback(&lua_touch_handler, nullptr)) {
-  }
-}
-
-static void unregister_lua_gesture_callback(int index) noexcept {
-  if ((index < 0) || (index >= 4)) {
-    return;
-  }
-
-  const core::GestureType type = gesture_type_from_index(index);
-  while (core::unregister_gesture_callback(type, &lua_gesture_handler,
-                                           nullptr)) {
-  }
-}
-
-static void clear_touch_gesture_callbacks(lua_State *fallbackState) noexcept {
-  unregister_lua_touch_callback();
-
-  lua_State *refState = g_touchLuaState;
-  if (refState == nullptr) {
-    refState = fallbackState;
-  }
-
-  if ((refState != nullptr) && (g_touchCallbackRef != LUA_NOREF)) {
-    luaL_unref(refState, LUA_REGISTRYINDEX, g_touchCallbackRef);
-  }
-  g_touchCallbackRef = LUA_NOREF;
-
-  for (int i = 0; i < 4; ++i) {
-    unregister_lua_gesture_callback(i);
-    if ((refState != nullptr) && (g_gestureCallbackRefs[i] != LUA_NOREF)) {
-      luaL_unref(refState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[i]);
-    }
-    g_gestureCallbackRefs[i] = LUA_NOREF;
-  }
-
-  g_touchLuaState = nullptr;
-}
-
-// engine.on_gesture(type_string, callback)
-// type_string: "tap", "swipe", "pinch", "rotate"
-int lua_engine_on_gesture(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_isfunction(state, 2)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const char *typeStr = lua_tostring(state, 1);
-  int idx = -1;
-  if (std::strcmp(typeStr, "tap") == 0) {
-    idx = 0;
-  } else if (std::strcmp(typeStr, "swipe") == 0) {
-    idx = 1;
-  } else if (std::strcmp(typeStr, "pinch") == 0) {
-    idx = 2;
-  } else if (std::strcmp(typeStr, "rotate") == 0) {
-    idx = 3;
-  }
-  if (idx < 0) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  // Release old ref.
-  if ((g_touchLuaState != nullptr) &&
-      (g_gestureCallbackRefs[idx] != LUA_NOREF)) {
-    luaL_unref(g_touchLuaState, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
-  }
-  unregister_lua_gesture_callback(idx);
-  g_touchLuaState = state;
-  lua_pushvalue(state, 2);
-  g_gestureCallbackRefs[idx] = luaL_ref(state, LUA_REGISTRYINDEX);
-  if (!core::register_gesture_callback(gesture_type_from_index(idx),
-                                       &lua_gesture_handler, nullptr)) {
-    luaL_unref(state, LUA_REGISTRYINDEX, g_gestureCallbackRefs[idx]);
-    g_gestureCallbackRefs[idx] = LUA_NOREF;
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, 1);
-  return 1;
-}
-
-// engine.set_touch_mouse_emulation(enabled)
-int lua_engine_set_touch_mouse_emulation(lua_State *state) noexcept {
-  const bool enabled = lua_toboolean(state, 1) != 0;
-  core::set_touch_mouse_emulation(enabled);
-  return 0;
 }
 
 /// Handles lua engine set game mode.
@@ -4697,579 +4492,279 @@ int lua_engine_restore(lua_State *state) noexcept {
   return 1;
 }
 
+struct LuaIntegerConstant final {
+  const char *name = nullptr;
+  lua_Integer value = 0;
+};
+
+static const luaL_Reg kEngineBindings[] = {
+    {"log", &lua_engine_log},
+    {"get_entity_count", &lua_engine_get_entity_count},
+    {"spawn_entity", &lua_engine_spawn_entity},
+    {"destroy_entity", &lua_engine_destroy_entity},
+    {"is_alive", &lua_engine_is_alive},
+    {"get_position", &lua_engine_get_position},
+    {"set_position", &lua_engine_set_position},
+    {"get_velocity", &lua_engine_get_velocity},
+    {"add_rigid_body", &lua_engine_add_rigid_body},
+    {"set_velocity", &lua_engine_set_velocity},
+    {"set_acceleration", &lua_engine_set_acceleration},
+    {"set_additional_acceleration", &lua_engine_set_additional_acceleration},
+    {"get_angular_velocity", &lua_engine_get_angular_velocity},
+    {"set_angular_velocity", &lua_engine_set_angular_velocity},
+    {"set_mesh", &lua_engine_set_mesh},
+    {"get_default_mesh_asset_id", &lua_engine_get_default_mesh_asset_id},
+    {"spawn_shape", &lua_engine_spawn_shape},
+    {"set_albedo", &lua_engine_set_albedo},
+    {"set_name", &lua_engine_set_name},
+    {"get_name", &lua_engine_get_name},
+    {"add_collider", &lua_engine_add_collider},
+    {"add_capsule_collider", &lua_engine_add_capsule_collider},
+    {"set_restitution", &lua_engine_set_restitution},
+    {"set_friction", &lua_engine_set_friction},
+    {"create_physics_material", &lua_engine_create_physics_material},
+    {"set_collider_material", &lua_engine_set_collider_material},
+    {"set_collision_layer", &lua_engine_set_collision_layer},
+    {"set_collision_mask", &lua_engine_set_collision_mask},
+    {"delta_time", &lua_engine_delta_time},
+    {"elapsed_time", &lua_engine_elapsed_time},
+    {"is_key_down", &lua_engine_is_key_down},
+    {"is_key_pressed", &lua_engine_is_key_pressed},
+    {"register_action", &lua_engine_register_action},
+    {"register_axis", &lua_engine_register_axis},
+    {"is_action_down", &lua_engine_is_action_down},
+    {"is_action_pressed", &lua_engine_is_action_pressed},
+    {"action_value", &lua_engine_get_action_value},
+    {"axis_value", &lua_engine_get_axis_value},
+    {"is_gamepad_connected", &lua_engine_is_gamepad_connected},
+    {"is_gamepad_button_down", &lua_engine_is_gamepad_button_down},
+    {"gamepad_axis_value", &lua_engine_gamepad_axis_value},
+    {"add_input_action", &lua_engine_add_input_action},
+    {"add_input_axis", &lua_engine_add_input_axis},
+    {"is_mapped_action_down", &lua_engine_is_mapped_action_down},
+    {"is_mapped_action_pressed", &lua_engine_is_mapped_action_pressed},
+    {"mapped_axis_value", &lua_engine_mapped_axis_value},
+    {"rebind_action", &lua_engine_rebind_action},
+    {"save_input_config", &lua_engine_save_input_config},
+    {"load_input_config", &lua_engine_load_input_config},
+    {"on_touch", &lua_engine_on_touch},
+    {"on_gesture", &lua_engine_on_gesture},
+    {"set_touch_mouse_emulation", &lua_engine_set_touch_mouse_emulation},
+    {"set_game_mode", &lua_engine_set_game_mode},
+    {"get_game_mode", &lua_engine_get_game_mode},
+    {"set_game_state", &lua_engine_set_game_state},
+    {"get_game_state", &lua_engine_get_game_state},
+    {"set_player_controller", &lua_engine_set_player_controller},
+    {"get_player_controller", &lua_engine_get_player_controller},
+    {"game_mode_start", &lua_engine_game_mode_start},
+    {"game_mode_pause", &lua_engine_game_mode_pause},
+    {"game_mode_end", &lua_engine_game_mode_end},
+    {"game_mode_state", &lua_engine_game_mode_state},
+    {"game_mode_set_rule", &lua_engine_game_mode_set_rule},
+    {"game_mode_get_rule", &lua_engine_game_mode_get_rule},
+    {"game_mode_max_players", &lua_engine_game_mode_max_players},
+    {"game_state_set_number", &lua_engine_game_state_set_number},
+    {"game_state_get_number", &lua_engine_game_state_get_number},
+    {"game_state_set_string", &lua_engine_game_state_set_string},
+    {"game_state_get_string", &lua_engine_game_state_get_string},
+    {"game_state_has", &lua_engine_game_state_has},
+    {"game_state_clear", &lua_engine_game_state_clear},
+    {"is_god_mode", &lua_engine_is_god_mode},
+    {"is_noclip", &lua_engine_is_noclip},
+    {"profiler_enable", &lua_engine_profiler_enable},
+    {"profiler_reset", &lua_engine_profiler_reset},
+    {"profiler_get_count", &lua_engine_profiler_get_count},
+    {"debugger_enable", &lua_engine_debugger_enable},
+    {"debugger_add_breakpoint", &lua_engine_debugger_add_breakpoint},
+    {"debugger_clear_breakpoints", &lua_engine_debugger_clear_breakpoints},
+    {"debugger_add_watch", &lua_engine_debugger_add_watch},
+    {"debugger_clear_watches", &lua_engine_debugger_clear_watches},
+    {"debugger_last_breakpoint", &lua_engine_debugger_last_breakpoint},
+    {"debugger_last_callstack", &lua_engine_debugger_last_callstack},
+    {"debugger_last_watch_values", &lua_engine_debugger_last_watch_values},
+    {"set_camera_position", &lua_engine_set_camera_position},
+    {"set_camera_target", &lua_engine_set_camera_target},
+    {"set_camera_up", &lua_engine_set_camera_up},
+    {"set_camera_fov", &lua_engine_set_camera_fov},
+    {"push_camera", &lua_engine_push_camera},
+    {"pop_camera", &lua_engine_pop_camera},
+    {"get_active_camera", &lua_engine_get_active_camera},
+    {"camera_shake", &lua_engine_camera_shake},
+    {"add_spring_arm", &lua_engine_add_spring_arm},
+    {"get_spring_arm", &lua_engine_get_spring_arm},
+    {"set_gravity", &lua_engine_set_gravity},
+    {"get_gravity", &lua_engine_get_gravity},
+    {"raycast", &lua_engine_raycast},
+    {"raycast_all", &lua_engine_raycast_all},
+    {"overlap_sphere", &lua_engine_overlap_sphere},
+    {"overlap_box", &lua_engine_overlap_box},
+    {"sweep_sphere", &lua_engine_sweep_sphere},
+    {"sweep_box", &lua_engine_sweep_box},
+    {"add_distance_joint", &lua_engine_add_distance_joint},
+    {"add_hinge_joint", &lua_engine_add_hinge_joint},
+    {"add_ball_socket_joint", &lua_engine_add_ball_socket_joint},
+    {"add_slider_joint", &lua_engine_add_slider_joint},
+    {"add_spring_joint", &lua_engine_add_spring_joint},
+    {"add_fixed_joint", &lua_engine_add_fixed_joint},
+    {"set_joint_limits", &lua_engine_set_joint_limits},
+    {"remove_joint", &lua_engine_remove_joint},
+    {"wake_body", &lua_engine_wake_body},
+    {"is_sleeping", &lua_engine_is_sleeping},
+    {"frame_count", &lua_engine_frame_count},
+    {"load_sound", &lua_engine_load_sound},
+    {"unload_sound", &lua_engine_unload_sound},
+    {"play_sound", &lua_engine_play_sound},
+    {"stop_sound", &lua_engine_stop_sound},
+    {"stop_all_sounds", &lua_engine_stop_all_sounds},
+    {"set_master_volume", &lua_engine_set_master_volume},
+    {"get_rotation", &lua_engine_get_rotation},
+    {"set_rotation", &lua_engine_set_rotation},
+    {"get_scale", &lua_engine_get_scale},
+    {"set_scale", &lua_engine_set_scale},
+    {"get_inverse_mass", &lua_engine_get_inverse_mass},
+    {"set_inverse_mass", &lua_engine_set_inverse_mass},
+    {"get_half_extents", &lua_engine_get_half_extents},
+    {"set_half_extents", &lua_engine_set_half_extents},
+    {"get_restitution", &lua_engine_get_restitution},
+    {"get_friction", &lua_engine_get_friction},
+    {"get_albedo", &lua_engine_get_albedo},
+    {"get_mesh", &lua_engine_get_mesh},
+    {"set_roughness", &lua_engine_set_roughness},
+    {"get_roughness", &lua_engine_get_roughness},
+    {"set_metallic", &lua_engine_set_metallic},
+    {"get_metallic", &lua_engine_get_metallic},
+    {"set_opacity", &lua_engine_set_opacity},
+    {"get_opacity", &lua_engine_get_opacity},
+    {"add_light", &lua_engine_add_light},
+    {"remove_light", &lua_engine_remove_light},
+    {"has_light", &lua_engine_has_light},
+    {"set_light_color", &lua_engine_set_light_color},
+    {"get_light_color", &lua_engine_get_light_color},
+    {"set_light_intensity", &lua_engine_set_light_intensity},
+    {"get_light_intensity", &lua_engine_get_light_intensity},
+    {"set_light_direction", &lua_engine_set_light_direction},
+    {"add_point_light", &lua_engine_add_point_light},
+    {"get_point_light", &lua_engine_get_point_light},
+    {"set_point_light", &lua_engine_set_point_light},
+    {"remove_point_light", &lua_engine_remove_point_light},
+    {"add_spot_light", &lua_engine_add_spot_light},
+    {"get_spot_light", &lua_engine_get_spot_light},
+    {"set_spot_light", &lua_engine_set_spot_light},
+    {"remove_spot_light", &lua_engine_remove_spot_light},
+    {"on_collision_handler", &lua_engine_on_collision_register},
+    {"remove_collision_handler", &lua_engine_remove_collision_handler},
+    {"set_timeout", &lua_engine_set_timeout},
+    {"set_interval", &lua_engine_set_interval},
+    {"cancel_timer", &lua_engine_cancel_timer},
+    {"start_coroutine", &lua_engine_start_coroutine},
+    {"wait", &lua_engine_wait},
+    {"wait_frames", &lua_engine_wait_frames},
+    {"wait_until", &lua_engine_wait_until},
+    {"find_entity_by_name", &lua_engine_find_by_name},
+    {"clone_entity", &lua_engine_clone_entity},
+    {"save_scene", &lua_engine_save_scene},
+    {"load_scene", &lua_engine_load_scene},
+    {"new_scene", &lua_engine_new_scene},
+    {"save_prefab", &lua_engine_save_prefab},
+    {"instantiate", &lua_engine_instantiate},
+    {"load_asset_async", &lua_engine_load_asset_async},
+    {"is_asset_ready", &lua_engine_is_asset_ready},
+    {"pool_create", &lua_engine_pool_create},
+    {"pool_spawn", &lua_engine_pool_spawn},
+    {"pool_release", &lua_engine_pool_release},
+    {"add_script_component", &lua_engine_add_script_component},
+    {"remove_script_component", &lua_engine_remove_script_component},
+    {"require", &lua_engine_require},
+    {nullptr, nullptr},
+};
+
+static const LuaIntegerConstant kEngineConstants[] = {
+    {"KEY_A", static_cast<lua_Integer>(core::kKey_A)},
+    {"KEY_B", static_cast<lua_Integer>(core::kKey_B)},
+    {"KEY_C", static_cast<lua_Integer>(core::kKey_C)},
+    {"KEY_D", static_cast<lua_Integer>(core::kKey_D)},
+    {"KEY_E", static_cast<lua_Integer>(core::kKey_E)},
+    {"KEY_F", static_cast<lua_Integer>(core::kKey_F)},
+    {"KEY_G", static_cast<lua_Integer>(core::kKey_G)},
+    {"KEY_H", static_cast<lua_Integer>(core::kKey_H)},
+    {"KEY_I", static_cast<lua_Integer>(core::kKey_I)},
+    {"KEY_J", static_cast<lua_Integer>(core::kKey_J)},
+    {"KEY_K", static_cast<lua_Integer>(core::kKey_K)},
+    {"KEY_L", static_cast<lua_Integer>(core::kKey_L)},
+    {"KEY_M", static_cast<lua_Integer>(core::kKey_M)},
+    {"KEY_N", static_cast<lua_Integer>(core::kKey_N)},
+    {"KEY_O", static_cast<lua_Integer>(core::kKey_O)},
+    {"KEY_P", static_cast<lua_Integer>(core::kKey_P)},
+    {"KEY_Q", static_cast<lua_Integer>(core::kKey_Q)},
+    {"KEY_R", static_cast<lua_Integer>(core::kKey_R)},
+    {"KEY_S", static_cast<lua_Integer>(core::kKey_S)},
+    {"KEY_T", static_cast<lua_Integer>(core::kKey_T)},
+    {"KEY_U", static_cast<lua_Integer>(core::kKey_U)},
+    {"KEY_V", static_cast<lua_Integer>(core::kKey_V)},
+    {"KEY_W", static_cast<lua_Integer>(core::kKey_W)},
+    {"KEY_X", static_cast<lua_Integer>(core::kKey_X)},
+    {"KEY_Y", static_cast<lua_Integer>(core::kKey_Y)},
+    {"KEY_Z", static_cast<lua_Integer>(core::kKey_Z)},
+    {"KEY_0", static_cast<lua_Integer>(core::kKey_0)},
+    {"KEY_1", static_cast<lua_Integer>(core::kKey_1)},
+    {"KEY_2", static_cast<lua_Integer>(core::kKey_2)},
+    {"KEY_3", static_cast<lua_Integer>(core::kKey_3)},
+    {"KEY_4", static_cast<lua_Integer>(core::kKey_4)},
+    {"KEY_5", static_cast<lua_Integer>(core::kKey_5)},
+    {"KEY_6", static_cast<lua_Integer>(core::kKey_6)},
+    {"KEY_7", static_cast<lua_Integer>(core::kKey_7)},
+    {"KEY_8", static_cast<lua_Integer>(core::kKey_8)},
+    {"KEY_9", static_cast<lua_Integer>(core::kKey_9)},
+    {"KEY_SPACE", static_cast<lua_Integer>(core::kKey_Space)},
+    {"KEY_RETURN", static_cast<lua_Integer>(core::kKey_Return)},
+    {"KEY_ESCAPE", static_cast<lua_Integer>(core::kKey_Escape)},
+    {"KEY_UP", static_cast<lua_Integer>(core::kKey_Up)},
+    {"KEY_DOWN", static_cast<lua_Integer>(core::kKey_Down)},
+    {"KEY_LEFT", static_cast<lua_Integer>(core::kKey_Left)},
+    {"KEY_RIGHT", static_cast<lua_Integer>(core::kKey_Right)},
+    {"KEY_LSHIFT", static_cast<lua_Integer>(core::kKey_LShift)},
+    {"KEY_LCTRL", static_cast<lua_Integer>(core::kKey_LCtrl)},
+    {"KEY_LALT", static_cast<lua_Integer>(core::kKey_LAlt)},
+};
+
+static const luaL_Reg kEnginePostGeneratedBindings[] = {
+    {"persist", &lua_engine_persist},
+    {"restore", &lua_engine_restore},
+    {nullptr, nullptr},
+};
+
+void register_lua_functions(lua_State *state,
+                            const luaL_Reg *bindings) noexcept {
+  for (const luaL_Reg *binding = bindings; binding->name != nullptr;
+       ++binding) {
+    lua_pushcfunction(state, binding->func);
+    lua_setfield(state, -2, binding->name);
+  }
+}
+
+void register_lua_integer_constants(
+    lua_State *state, const LuaIntegerConstant *constants,
+    std::size_t constantCount) noexcept {
+  for (std::size_t i = 0U; i < constantCount; ++i) {
+    lua_pushinteger(state, constants[i].value);
+    lua_setfield(state, -2, constants[i].name);
+  }
+}
+
 /// Handles register engine bindings.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
-  lua_pushcfunction(state, &lua_engine_log);
-  lua_setfield(state, -2, "log");
-
-  lua_pushcfunction(state, &lua_engine_get_entity_count);
-  lua_setfield(state, -2, "get_entity_count");
-
-  lua_pushcfunction(state, &lua_engine_spawn_entity);
-  lua_setfield(state, -2, "spawn_entity");
-
-  lua_pushcfunction(state, &lua_engine_destroy_entity);
-  lua_setfield(state, -2, "destroy_entity");
-
-  lua_pushcfunction(state, &lua_engine_is_alive);
-  lua_setfield(state, -2, "is_alive");
-
-  lua_pushcfunction(state, &lua_engine_get_position);
-  lua_setfield(state, -2, "get_position");
-
-  lua_pushcfunction(state, &lua_engine_set_position);
-  lua_setfield(state, -2, "set_position");
-
-  lua_pushcfunction(state, &lua_engine_get_velocity);
-  lua_setfield(state, -2, "get_velocity");
-
-  lua_pushcfunction(state, &lua_engine_add_rigid_body);
-  lua_setfield(state, -2, "add_rigid_body");
-
-  lua_pushcfunction(state, &lua_engine_set_velocity);
-  lua_setfield(state, -2, "set_velocity");
-
-  lua_pushcfunction(state, &lua_engine_set_acceleration);
-  lua_setfield(state, -2, "set_acceleration");
-
-  lua_pushcfunction(state, &lua_engine_set_additional_acceleration);
-  lua_setfield(state, -2, "set_additional_acceleration");
-
-  lua_pushcfunction(state, &lua_engine_get_angular_velocity);
-  lua_setfield(state, -2, "get_angular_velocity");
-
-  lua_pushcfunction(state, &lua_engine_set_angular_velocity);
-  lua_setfield(state, -2, "set_angular_velocity");
-
-  lua_pushcfunction(state, &lua_engine_set_mesh);
-  lua_setfield(state, -2, "set_mesh");
-
-  lua_pushcfunction(state, &lua_engine_get_default_mesh_asset_id);
-  lua_setfield(state, -2, "get_default_mesh_asset_id");
-
-  lua_pushcfunction(state, &lua_engine_spawn_shape);
-  lua_setfield(state, -2, "spawn_shape");
-
-  lua_pushcfunction(state, &lua_engine_set_albedo);
-  lua_setfield(state, -2, "set_albedo");
-
-  lua_pushcfunction(state, &lua_engine_set_name);
-  lua_setfield(state, -2, "set_name");
-
-  lua_pushcfunction(state, &lua_engine_get_name);
-  lua_setfield(state, -2, "get_name");
-
-  lua_pushcfunction(state, &lua_engine_add_collider);
-  lua_setfield(state, -2, "add_collider");
-
-  lua_pushcfunction(state, &lua_engine_add_capsule_collider);
-  lua_setfield(state, -2, "add_capsule_collider");
-
-  lua_pushcfunction(state, &lua_engine_set_restitution);
-  lua_setfield(state, -2, "set_restitution");
-
-  lua_pushcfunction(state, &lua_engine_set_friction);
-  lua_setfield(state, -2, "set_friction");
-
-  // Physics materials (P1-M3-C1d).
-  lua_pushcfunction(state, &lua_engine_create_physics_material);
-  lua_setfield(state, -2, "create_physics_material");
-  lua_pushcfunction(state, &lua_engine_set_collider_material);
-  lua_setfield(state, -2, "set_collider_material");
-
-  // Collision layers/masks (P1-M3-C2c).
-  lua_pushcfunction(state, &lua_engine_set_collision_layer);
-  lua_setfield(state, -2, "set_collision_layer");
-  lua_pushcfunction(state, &lua_engine_set_collision_mask);
-  lua_setfield(state, -2, "set_collision_mask");
-
-  lua_pushcfunction(state, &lua_engine_delta_time);
-  lua_setfield(state, -2, "delta_time");
-
-  lua_pushcfunction(state, &lua_engine_elapsed_time);
-  lua_setfield(state, -2, "elapsed_time");
-
-  lua_pushcfunction(state, &lua_engine_is_key_down);
-  lua_setfield(state, -2, "is_key_down");
-
-  lua_pushcfunction(state, &lua_engine_is_key_pressed);
-  lua_setfield(state, -2, "is_key_pressed");
-
-  lua_pushcfunction(state, &lua_engine_register_action);
-  lua_setfield(state, -2, "register_action");
-  lua_pushcfunction(state, &lua_engine_register_axis);
-  lua_setfield(state, -2, "register_axis");
-  lua_pushcfunction(state, &lua_engine_is_action_down);
-  lua_setfield(state, -2, "is_action_down");
-  lua_pushcfunction(state, &lua_engine_is_action_pressed);
-  lua_setfield(state, -2, "is_action_pressed");
-  lua_pushcfunction(state, &lua_engine_get_action_value);
-  lua_setfield(state, -2, "action_value");
-  lua_pushcfunction(state, &lua_engine_get_axis_value);
-  lua_setfield(state, -2, "axis_value");
-
-  lua_pushcfunction(state, &lua_engine_is_gamepad_connected);
-  lua_setfield(state, -2, "is_gamepad_connected");
-  lua_pushcfunction(state, &lua_engine_is_gamepad_button_down);
-  lua_setfield(state, -2, "is_gamepad_button_down");
-  lua_pushcfunction(state, &lua_engine_gamepad_axis_value);
-  lua_setfield(state, -2, "gamepad_axis_value");
-
-  // InputMapper bindings (P1-M2-C).
-  lua_pushcfunction(state, &lua_engine_add_input_action);
-  lua_setfield(state, -2, "add_input_action");
-  lua_pushcfunction(state, &lua_engine_add_input_axis);
-  lua_setfield(state, -2, "add_input_axis");
-  lua_pushcfunction(state, &lua_engine_is_mapped_action_down);
-  lua_setfield(state, -2, "is_mapped_action_down");
-  lua_pushcfunction(state, &lua_engine_is_mapped_action_pressed);
-  lua_setfield(state, -2, "is_mapped_action_pressed");
-  lua_pushcfunction(state, &lua_engine_mapped_axis_value);
-  lua_setfield(state, -2, "mapped_axis_value");
-  lua_pushcfunction(state, &lua_engine_rebind_action);
-  lua_setfield(state, -2, "rebind_action");
-  lua_pushcfunction(state, &lua_engine_save_input_config);
-  lua_setfield(state, -2, "save_input_config");
-  lua_pushcfunction(state, &lua_engine_load_input_config);
-  lua_setfield(state, -2, "load_input_config");
-
-  // Touch/gesture bindings (P1-M2-C3e).
-  lua_pushcfunction(state, &lua_engine_on_touch);
-  lua_setfield(state, -2, "on_touch");
-  lua_pushcfunction(state, &lua_engine_on_gesture);
-  lua_setfield(state, -2, "on_gesture");
-  lua_pushcfunction(state, &lua_engine_set_touch_mouse_emulation);
-  lua_setfield(state, -2, "set_touch_mouse_emulation");
-
-  lua_pushcfunction(state, &lua_engine_set_game_mode);
-  lua_setfield(state, -2, "set_game_mode");
-  lua_pushcfunction(state, &lua_engine_get_game_mode);
-  lua_setfield(state, -2, "get_game_mode");
-  lua_pushcfunction(state, &lua_engine_set_game_state);
-  lua_setfield(state, -2, "set_game_state");
-  lua_pushcfunction(state, &lua_engine_get_game_state);
-  lua_setfield(state, -2, "get_game_state");
-  lua_pushcfunction(state, &lua_engine_set_player_controller);
-  lua_setfield(state, -2, "set_player_controller");
-  lua_pushcfunction(state, &lua_engine_get_player_controller);
-  lua_setfield(state, -2, "get_player_controller");
-
-  // Game mode state transitions and rules.
-  lua_pushcfunction(state, &lua_engine_game_mode_start);
-  lua_setfield(state, -2, "game_mode_start");
-  lua_pushcfunction(state, &lua_engine_game_mode_pause);
-  lua_setfield(state, -2, "game_mode_pause");
-  lua_pushcfunction(state, &lua_engine_game_mode_end);
-  lua_setfield(state, -2, "game_mode_end");
-  lua_pushcfunction(state, &lua_engine_game_mode_state);
-  lua_setfield(state, -2, "game_mode_state");
-  lua_pushcfunction(state, &lua_engine_game_mode_set_rule);
-  lua_setfield(state, -2, "game_mode_set_rule");
-  lua_pushcfunction(state, &lua_engine_game_mode_get_rule);
-  lua_setfield(state, -2, "game_mode_get_rule");
-  lua_pushcfunction(state, &lua_engine_game_mode_max_players);
-  lua_setfield(state, -2, "game_mode_max_players");
-
-  // Persistent game state (survives scene transitions).
-  lua_pushcfunction(state, &lua_engine_game_state_set_number);
-  lua_setfield(state, -2, "game_state_set_number");
-  lua_pushcfunction(state, &lua_engine_game_state_get_number);
-  lua_setfield(state, -2, "game_state_get_number");
-  lua_pushcfunction(state, &lua_engine_game_state_set_string);
-  lua_setfield(state, -2, "game_state_set_string");
-  lua_pushcfunction(state, &lua_engine_game_state_get_string);
-  lua_setfield(state, -2, "game_state_get_string");
-  lua_pushcfunction(state, &lua_engine_game_state_has);
-  lua_setfield(state, -2, "game_state_has");
-  lua_pushcfunction(state, &lua_engine_game_state_clear);
-  lua_setfield(state, -2, "game_state_clear");
-
-  lua_pushcfunction(state, &lua_engine_is_god_mode);
-  lua_setfield(state, -2, "is_god_mode");
-  lua_pushcfunction(state, &lua_engine_is_noclip);
-  lua_setfield(state, -2, "is_noclip");
-
-  lua_pushcfunction(state, &lua_engine_profiler_enable);
-  lua_setfield(state, -2, "profiler_enable");
-  lua_pushcfunction(state, &lua_engine_profiler_reset);
-  lua_setfield(state, -2, "profiler_reset");
-  lua_pushcfunction(state, &lua_engine_profiler_get_count);
-  lua_setfield(state, -2, "profiler_get_count");
-
-  lua_pushcfunction(state, &lua_engine_debugger_enable);
-  lua_setfield(state, -2, "debugger_enable");
-  lua_pushcfunction(state, &lua_engine_debugger_add_breakpoint);
-  lua_setfield(state, -2, "debugger_add_breakpoint");
-  lua_pushcfunction(state, &lua_engine_debugger_clear_breakpoints);
-  lua_setfield(state, -2, "debugger_clear_breakpoints");
-  lua_pushcfunction(state, &lua_engine_debugger_add_watch);
-  lua_setfield(state, -2, "debugger_add_watch");
-  lua_pushcfunction(state, &lua_engine_debugger_clear_watches);
-  lua_setfield(state, -2, "debugger_clear_watches");
-  lua_pushcfunction(state, &lua_engine_debugger_last_breakpoint);
-  lua_setfield(state, -2, "debugger_last_breakpoint");
-  lua_pushcfunction(state, &lua_engine_debugger_last_callstack);
-  lua_setfield(state, -2, "debugger_last_callstack");
-  lua_pushcfunction(state, &lua_engine_debugger_last_watch_values);
-  lua_setfield(state, -2, "debugger_last_watch_values");
-
-  lua_pushcfunction(state, &lua_engine_set_camera_position);
-  lua_setfield(state, -2, "set_camera_position");
-
-  lua_pushcfunction(state, &lua_engine_set_camera_target);
-  lua_setfield(state, -2, "set_camera_target");
-
-  lua_pushcfunction(state, &lua_engine_set_camera_up);
-  lua_setfield(state, -2, "set_camera_up");
-
-  lua_pushcfunction(state, &lua_engine_set_camera_fov);
-  lua_setfield(state, -2, "set_camera_fov");
-
-  // Camera manager bindings (P1-M2-E).
-  lua_pushcfunction(state, &lua_engine_push_camera);
-  lua_setfield(state, -2, "push_camera");
-  lua_pushcfunction(state, &lua_engine_pop_camera);
-  lua_setfield(state, -2, "pop_camera");
-  lua_pushcfunction(state, &lua_engine_get_active_camera);
-  lua_setfield(state, -2, "get_active_camera");
-  lua_pushcfunction(state, &lua_engine_camera_shake);
-  lua_setfield(state, -2, "camera_shake");
-
-  // Spring arm bindings (P1-M2-E).
-  lua_pushcfunction(state, &lua_engine_add_spring_arm);
-  lua_setfield(state, -2, "add_spring_arm");
-  lua_pushcfunction(state, &lua_engine_get_spring_arm);
-  lua_setfield(state, -2, "get_spring_arm");
-
-  lua_pushcfunction(state, &lua_engine_set_gravity);
-  lua_setfield(state, -2, "set_gravity");
-
-  lua_pushcfunction(state, &lua_engine_get_gravity);
-  lua_setfield(state, -2, "get_gravity");
-
-  lua_pushcfunction(state, &lua_engine_raycast);
-  lua_setfield(state, -2, "raycast");
-
-  lua_pushcfunction(state, &lua_engine_raycast_all);
-  lua_setfield(state, -2, "raycast_all");
-
-  lua_pushcfunction(state, &lua_engine_overlap_sphere);
-  lua_setfield(state, -2, "overlap_sphere");
-
-  lua_pushcfunction(state, &lua_engine_overlap_box);
-  lua_setfield(state, -2, "overlap_box");
-
-  lua_pushcfunction(state, &lua_engine_sweep_sphere);
-  lua_setfield(state, -2, "sweep_sphere");
-
-  lua_pushcfunction(state, &lua_engine_sweep_box);
-  lua_setfield(state, -2, "sweep_box");
-
-  lua_pushcfunction(state, &lua_engine_add_distance_joint);
-  lua_setfield(state, -2, "add_distance_joint");
-
-  lua_pushcfunction(state, &lua_engine_add_hinge_joint);
-  lua_setfield(state, -2, "add_hinge_joint");
-
-  lua_pushcfunction(state, &lua_engine_add_ball_socket_joint);
-  lua_setfield(state, -2, "add_ball_socket_joint");
-
-  lua_pushcfunction(state, &lua_engine_add_slider_joint);
-  lua_setfield(state, -2, "add_slider_joint");
-
-  lua_pushcfunction(state, &lua_engine_add_spring_joint);
-  lua_setfield(state, -2, "add_spring_joint");
-
-  lua_pushcfunction(state, &lua_engine_add_fixed_joint);
-  lua_setfield(state, -2, "add_fixed_joint");
-
-  lua_pushcfunction(state, &lua_engine_set_joint_limits);
-  lua_setfield(state, -2, "set_joint_limits");
-
-  lua_pushcfunction(state, &lua_engine_remove_joint);
-  lua_setfield(state, -2, "remove_joint");
-
-  lua_pushcfunction(state, &lua_engine_wake_body);
-  lua_setfield(state, -2, "wake_body");
-
-  lua_pushcfunction(state, &lua_engine_is_sleeping);
-  lua_setfield(state, -2, "is_sleeping");
-
-  lua_pushcfunction(state, &lua_engine_frame_count);
-  lua_setfield(state, -2, "frame_count");
-
-  lua_pushcfunction(state, &lua_engine_load_sound);
-  lua_setfield(state, -2, "load_sound");
-
-  lua_pushcfunction(state, &lua_engine_unload_sound);
-  lua_setfield(state, -2, "unload_sound");
-
-  lua_pushcfunction(state, &lua_engine_play_sound);
-  lua_setfield(state, -2, "play_sound");
-
-  lua_pushcfunction(state, &lua_engine_stop_sound);
-  lua_setfield(state, -2, "stop_sound");
-
-  lua_pushcfunction(state, &lua_engine_stop_all_sounds);
-  lua_setfield(state, -2, "stop_all_sounds");
-
-  lua_pushcfunction(state, &lua_engine_set_master_volume);
-  lua_setfield(state, -2, "set_master_volume");
-
-  // Key scancode constants (values match SDL_SCANCODE_* for the SDL2 backend).
-  lua_pushinteger(state, core::kKey_A);
-  lua_setfield(state, -2, "KEY_A");
-  lua_pushinteger(state, core::kKey_B);
-  lua_setfield(state, -2, "KEY_B");
-  lua_pushinteger(state, core::kKey_C);
-  lua_setfield(state, -2, "KEY_C");
-  lua_pushinteger(state, core::kKey_D);
-  lua_setfield(state, -2, "KEY_D");
-  lua_pushinteger(state, core::kKey_E);
-  lua_setfield(state, -2, "KEY_E");
-  lua_pushinteger(state, core::kKey_F);
-  lua_setfield(state, -2, "KEY_F");
-  lua_pushinteger(state, core::kKey_G);
-  lua_setfield(state, -2, "KEY_G");
-  lua_pushinteger(state, core::kKey_H);
-  lua_setfield(state, -2, "KEY_H");
-  lua_pushinteger(state, core::kKey_I);
-  lua_setfield(state, -2, "KEY_I");
-  lua_pushinteger(state, core::kKey_J);
-  lua_setfield(state, -2, "KEY_J");
-  lua_pushinteger(state, core::kKey_K);
-  lua_setfield(state, -2, "KEY_K");
-  lua_pushinteger(state, core::kKey_L);
-  lua_setfield(state, -2, "KEY_L");
-  lua_pushinteger(state, core::kKey_M);
-  lua_setfield(state, -2, "KEY_M");
-  lua_pushinteger(state, core::kKey_N);
-  lua_setfield(state, -2, "KEY_N");
-  lua_pushinteger(state, core::kKey_O);
-  lua_setfield(state, -2, "KEY_O");
-  lua_pushinteger(state, core::kKey_P);
-  lua_setfield(state, -2, "KEY_P");
-  lua_pushinteger(state, core::kKey_Q);
-  lua_setfield(state, -2, "KEY_Q");
-  lua_pushinteger(state, core::kKey_R);
-  lua_setfield(state, -2, "KEY_R");
-  lua_pushinteger(state, core::kKey_S);
-  lua_setfield(state, -2, "KEY_S");
-  lua_pushinteger(state, core::kKey_T);
-  lua_setfield(state, -2, "KEY_T");
-  lua_pushinteger(state, core::kKey_U);
-  lua_setfield(state, -2, "KEY_U");
-  lua_pushinteger(state, core::kKey_V);
-  lua_setfield(state, -2, "KEY_V");
-  lua_pushinteger(state, core::kKey_W);
-  lua_setfield(state, -2, "KEY_W");
-  lua_pushinteger(state, core::kKey_X);
-  lua_setfield(state, -2, "KEY_X");
-  lua_pushinteger(state, core::kKey_Y);
-  lua_setfield(state, -2, "KEY_Y");
-  lua_pushinteger(state, core::kKey_Z);
-  lua_setfield(state, -2, "KEY_Z");
-  lua_pushinteger(state, core::kKey_0);
-  lua_setfield(state, -2, "KEY_0");
-  lua_pushinteger(state, core::kKey_1);
-  lua_setfield(state, -2, "KEY_1");
-  lua_pushinteger(state, core::kKey_2);
-  lua_setfield(state, -2, "KEY_2");
-  lua_pushinteger(state, core::kKey_3);
-  lua_setfield(state, -2, "KEY_3");
-  lua_pushinteger(state, core::kKey_4);
-  lua_setfield(state, -2, "KEY_4");
-  lua_pushinteger(state, core::kKey_5);
-  lua_setfield(state, -2, "KEY_5");
-  lua_pushinteger(state, core::kKey_6);
-  lua_setfield(state, -2, "KEY_6");
-  lua_pushinteger(state, core::kKey_7);
-  lua_setfield(state, -2, "KEY_7");
-  lua_pushinteger(state, core::kKey_8);
-  lua_setfield(state, -2, "KEY_8");
-  lua_pushinteger(state, core::kKey_9);
-  lua_setfield(state, -2, "KEY_9");
-  lua_pushinteger(state, core::kKey_Space);
-  lua_setfield(state, -2, "KEY_SPACE");
-  lua_pushinteger(state, core::kKey_Return);
-  lua_setfield(state, -2, "KEY_RETURN");
-  lua_pushinteger(state, core::kKey_Escape);
-  lua_setfield(state, -2, "KEY_ESCAPE");
-  lua_pushinteger(state, core::kKey_Up);
-  lua_setfield(state, -2, "KEY_UP");
-  lua_pushinteger(state, core::kKey_Down);
-  lua_setfield(state, -2, "KEY_DOWN");
-  lua_pushinteger(state, core::kKey_Left);
-  lua_setfield(state, -2, "KEY_LEFT");
-  lua_pushinteger(state, core::kKey_Right);
-  lua_setfield(state, -2, "KEY_RIGHT");
-  lua_pushinteger(state, core::kKey_LShift);
-  lua_setfield(state, -2, "KEY_LSHIFT");
-  lua_pushinteger(state, core::kKey_LCtrl);
-  lua_setfield(state, -2, "KEY_LCTRL");
-  lua_pushinteger(state, core::kKey_LAlt);
-  lua_setfield(state, -2, "KEY_LALT");
-
-  // Transform: rotation and scale
-  lua_pushcfunction(state, &lua_engine_get_rotation);
-  lua_setfield(state, -2, "get_rotation");
-  lua_pushcfunction(state, &lua_engine_set_rotation);
-  lua_setfield(state, -2, "set_rotation");
-  lua_pushcfunction(state, &lua_engine_get_scale);
-  lua_setfield(state, -2, "get_scale");
-  lua_pushcfunction(state, &lua_engine_set_scale);
-  lua_setfield(state, -2, "set_scale");
-
-  // RigidBody: inverse mass
-  lua_pushcfunction(state, &lua_engine_get_inverse_mass);
-  lua_setfield(state, -2, "get_inverse_mass");
-  lua_pushcfunction(state, &lua_engine_set_inverse_mass);
-  lua_setfield(state, -2, "set_inverse_mass");
-
-  // Collider: getters
-  lua_pushcfunction(state, &lua_engine_get_half_extents);
-  lua_setfield(state, -2, "get_half_extents");
-  lua_pushcfunction(state, &lua_engine_set_half_extents);
-  lua_setfield(state, -2, "set_half_extents");
-  lua_pushcfunction(state, &lua_engine_get_restitution);
-  lua_setfield(state, -2, "get_restitution");
-  lua_pushcfunction(state, &lua_engine_get_friction);
-  lua_setfield(state, -2, "get_friction");
-
-  // MeshComponent: material
-  lua_pushcfunction(state, &lua_engine_get_albedo);
-  lua_setfield(state, -2, "get_albedo");
-  lua_pushcfunction(state, &lua_engine_get_mesh);
-  lua_setfield(state, -2, "get_mesh");
-  lua_pushcfunction(state, &lua_engine_set_roughness);
-  lua_setfield(state, -2, "set_roughness");
-  lua_pushcfunction(state, &lua_engine_get_roughness);
-  lua_setfield(state, -2, "get_roughness");
-  lua_pushcfunction(state, &lua_engine_set_metallic);
-  lua_setfield(state, -2, "set_metallic");
-  lua_pushcfunction(state, &lua_engine_get_metallic);
-  lua_setfield(state, -2, "get_metallic");
-  lua_pushcfunction(state, &lua_engine_set_opacity);
-  lua_setfield(state, -2, "set_opacity");
-  lua_pushcfunction(state, &lua_engine_get_opacity);
-  lua_setfield(state, -2, "get_opacity");
-
-  // LightComponent
-  lua_pushcfunction(state, &lua_engine_add_light);
-  lua_setfield(state, -2, "add_light");
-  lua_pushcfunction(state, &lua_engine_remove_light);
-  lua_setfield(state, -2, "remove_light");
-  lua_pushcfunction(state, &lua_engine_has_light);
-  lua_setfield(state, -2, "has_light");
-  lua_pushcfunction(state, &lua_engine_set_light_color);
-  lua_setfield(state, -2, "set_light_color");
-  lua_pushcfunction(state, &lua_engine_get_light_color);
-  lua_setfield(state, -2, "get_light_color");
-  lua_pushcfunction(state, &lua_engine_set_light_intensity);
-  lua_setfield(state, -2, "set_light_intensity");
-  lua_pushcfunction(state, &lua_engine_get_light_intensity);
-  lua_setfield(state, -2, "get_light_intensity");
-  lua_pushcfunction(state, &lua_engine_set_light_direction);
-  lua_setfield(state, -2, "set_light_direction");
-
-  // PointLightComponent
-  lua_pushcfunction(state, &lua_engine_add_point_light);
-  lua_setfield(state, -2, "add_point_light");
-  lua_pushcfunction(state, &lua_engine_get_point_light);
-  lua_setfield(state, -2, "get_point_light");
-  lua_pushcfunction(state, &lua_engine_set_point_light);
-  lua_setfield(state, -2, "set_point_light");
-  lua_pushcfunction(state, &lua_engine_remove_point_light);
-  lua_setfield(state, -2, "remove_point_light");
-
-  // SpotLightComponent
-  lua_pushcfunction(state, &lua_engine_add_spot_light);
-  lua_setfield(state, -2, "add_spot_light");
-  lua_pushcfunction(state, &lua_engine_get_spot_light);
-  lua_setfield(state, -2, "get_spot_light");
-  lua_pushcfunction(state, &lua_engine_set_spot_light);
-  lua_setfield(state, -2, "set_spot_light");
-  lua_pushcfunction(state, &lua_engine_remove_spot_light);
-  lua_setfield(state, -2, "remove_spot_light");
-
-  // Collision handlers
-  lua_pushcfunction(state, &lua_engine_on_collision_register);
-  lua_setfield(state, -2, "on_collision_handler");
-  lua_pushcfunction(state, &lua_engine_remove_collision_handler);
-  lua_setfield(state, -2, "remove_collision_handler");
-
-  // Timers
-  lua_pushcfunction(state, &lua_engine_set_timeout);
-  lua_setfield(state, -2, "set_timeout");
-  lua_pushcfunction(state, &lua_engine_set_interval);
-  lua_setfield(state, -2, "set_interval");
-  lua_pushcfunction(state, &lua_engine_cancel_timer);
-  lua_setfield(state, -2, "cancel_timer");
-
-  // Coroutines
-  lua_pushcfunction(state, &lua_engine_start_coroutine);
-  lua_setfield(state, -2, "start_coroutine");
-  lua_pushcfunction(state, &lua_engine_wait);
-  lua_setfield(state, -2, "wait");
-  lua_pushcfunction(state, &lua_engine_wait_frames);
-  lua_setfield(state, -2, "wait_frames");
-  lua_pushcfunction(state, &lua_engine_wait_until);
-  lua_setfield(state, -2, "wait_until");
-
-  // Entity lifecycle completeness
-  lua_pushcfunction(state, &lua_engine_find_by_name);
-  lua_setfield(state, -2, "find_entity_by_name");
-  lua_pushcfunction(state, &lua_engine_clone_entity);
-  lua_setfield(state, -2, "clone_entity");
-
-  // Scene management
-  lua_pushcfunction(state, &lua_engine_save_scene);
-  lua_setfield(state, -2, "save_scene");
-  lua_pushcfunction(state, &lua_engine_load_scene);
-  lua_setfield(state, -2, "load_scene");
-  lua_pushcfunction(state, &lua_engine_new_scene);
-  lua_setfield(state, -2, "new_scene");
-
-  // Prefab system
-  lua_pushcfunction(state, &lua_engine_save_prefab);
-  lua_setfield(state, -2, "save_prefab");
-  lua_pushcfunction(state, &lua_engine_instantiate);
-  lua_setfield(state, -2, "instantiate");
-
-  // Async asset streaming (P1-M4-C2c)
-  lua_pushcfunction(state, &lua_engine_load_asset_async);
-  lua_setfield(state, -2, "load_asset_async");
-  lua_pushcfunction(state, &lua_engine_is_asset_ready);
-  lua_setfield(state, -2, "is_asset_ready");
-
-  // Entity pooling
-  lua_pushcfunction(state, &lua_engine_pool_create);
-  lua_setfield(state, -2, "pool_create");
-  lua_pushcfunction(state, &lua_engine_pool_spawn);
-  lua_setfield(state, -2, "pool_spawn");
-  lua_pushcfunction(state, &lua_engine_pool_release);
-  lua_setfield(state, -2, "pool_release");
-
-  // Per-entity scripts (ScriptComponent)
-  lua_pushcfunction(state, &lua_engine_add_script_component);
-  lua_setfield(state, -2, "add_script_component");
-  lua_pushcfunction(state, &lua_engine_remove_script_component);
-  lua_setfield(state, -2, "remove_script_component");
-
-  // Utility module loader — load a Lua file as a shared module (cached).
-  lua_pushcfunction(state, &lua_engine_require);
-  lua_setfield(state, -2, "require");
+  register_lua_functions(state, kEngineBindings);
+  register_lua_integer_constants(
+      state, kEngineConstants,
+      sizeof(kEngineConstants) / sizeof(kEngineConstants[0]));
 
   // Generated bindings override a curated subset of manual wrappers.
   register_generated_bindings(state);
 
   // Hot-reload state preservation.
-  lua_pushcfunction(state, &lua_engine_persist);
-  lua_setfield(state, -2, "persist");
-  lua_pushcfunction(state, &lua_engine_restore);
-  lua_setfield(state, -2, "restore");
+  register_lua_functions(state, kEnginePostGeneratedBindings);
 
   lua_setglobal(state, "engine");
 }

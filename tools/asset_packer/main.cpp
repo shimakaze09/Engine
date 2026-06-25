@@ -106,6 +106,35 @@ bool file_exists(const char *path) {
   return true;
 }
 
+/// Writes a complete text buffer to a file.
+bool write_text_file(const char *path, const char *text,
+                     std::size_t textSize) {
+  if ((path == nullptr) || (text == nullptr)) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+
+  const bool ok = (std::fwrite(text, 1U, textSize, file) == textSize);
+  std::fclose(file);
+  return ok;
+}
+
+void format_hex_u64(std::uint64_t value, char (&out)[17]) noexcept {
+  std::snprintf(out, 17U, "%016llx",
+                static_cast<unsigned long long>(value));
+}
+
 /// Handles hash file contents.
 std::uint64_t hash_file_contents(const char *path, bool *ok) {
   if (ok != nullptr) {
@@ -670,25 +699,9 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
     return false;
   }
 
-  FILE *metadataFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&metadataFile, metadataPath, "wb") != 0) {
-    metadataFile = nullptr;
-  }
-#else
-  metadataFile = std::fopen(metadataPath, "wb");
-#endif
-  if (metadataFile == nullptr) {
-    return false;
-  }
-
   const std::size_t vertexCount =
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
-  const std::string escapedInputPath =
-      engine::tools::escape_json_string(inputPath);
-  const std::string escapedOutputPath =
-      engine::tools::escape_json_string(outputPath);
 
   // Compute output file size.
   std::uint64_t outputFileSize = 0ULL;
@@ -708,59 +721,55 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
     }
   }
 
-  int written = std::fprintf(
-      metadataFile,
-      "{\n"
-      "  \"schemaVersion\": 2,\n"
-      "  \"assetId\": \"%016llx\",\n"
-      "  \"typeTag\": \"mesh\",\n"
-      "  \"source\": \"%s\",\n"
-      "  \"output\": \"%s\",\n"
-      "  \"assetFormat\": \"engine.mesh\",\n"
-      "  \"assetFormatVersion\": %u,\n"
-      "  \"sourceContentHash\": \"%016llx\",\n"
-      "  \"fileSize\": %llu,\n"
-      "  \"vertexCount\": %zu,\n"
-      "  \"indexCount\": %zu,\n"
-      "  \"tags\": [],\n"
-      "  \"dependencies\": [\n",
-      static_cast<unsigned long long>(sourceHash), escapedInputPath.c_str(),
-      escapedOutputPath.c_str(),
-      data.hasUVs ? engine::core::kMeshAssetVersion2
-                  : engine::core::kMeshAssetVersion,
-      static_cast<unsigned long long>(sourceHash),
-      static_cast<unsigned long long>(outputFileSize), vertexCount, indexCount);
+  char sourceHashText[17] = {};
+  format_hex_u64(sourceHash, sourceHashText);
 
-  for (std::size_t i = 0U; i < dependencies.size(); ++i) {
-    const DependencyDigest &dependency = dependencies[i];
-    const std::string escapedDependencyPath =
-        engine::tools::escape_json_string(dependency.path.c_str());
-    written += std::fprintf(
-        metadataFile, "    { \"path\": \"%s\", \"hash\": \"%016llx\" }%s\n",
-        escapedDependencyPath.c_str(),
-        static_cast<unsigned long long>(dependency.hash),
-        (i + 1U < dependencies.size()) ? "," : "");
+  engine::core::JsonWriter writer{};
+  writer.begin_object();
+  writer.write_uint("schemaVersion", 2U);
+  writer.write_string("assetId", sourceHashText);
+  writer.write_string("typeTag", "mesh");
+  writer.write_string("source", inputPath);
+  writer.write_string("output", outputPath);
+  writer.write_string("assetFormat", "engine.mesh");
+  writer.write_uint("assetFormatVersion",
+                    data.hasUVs ? engine::core::kMeshAssetVersion2
+                                : engine::core::kMeshAssetVersion);
+  writer.write_string("sourceContentHash", sourceHashText);
+  writer.write_uint64("fileSize", outputFileSize);
+  writer.write_uint64("vertexCount", static_cast<std::uint64_t>(vertexCount));
+  writer.write_uint64("indexCount", static_cast<std::uint64_t>(indexCount));
+  writer.begin_array("tags");
+  writer.end_array();
+  writer.begin_array("dependencies");
+  for (const DependencyDigest &dependency : dependencies) {
+    char dependencyHashText[17] = {};
+    format_hex_u64(dependency.hash, dependencyHashText);
+    writer.begin_object();
+    writer.write_string("path", dependency.path.c_str());
+    writer.write_string("hash", dependencyHashText);
+    writer.end_object();
   }
+  writer.end_array();
 
-  written += std::fprintf(
-      metadataFile,
-      "  ],\n"
-      "  \"importSettings\": {\n"
-      "    \"meshIndex\": %d,\n"
-      "    \"primitiveIndex\": %d,\n"
-      "    \"scaleFactor\": %.6g,\n"
-      "    \"upAxis\": %d,\n"
-      "    \"generateNormals\": %s,\n"
-      "    \"interleavedLayout\": \"%s\"\n"
-      "  }\n"
-      "}\n",
-      importSettings.meshIndex, importSettings.primitiveIndex,
-      static_cast<double>(importSettings.scaleFactor), importSettings.upAxis,
-      importSettings.generateNormals ? "true" : "false",
-      data.hasUVs ? "position_normal_texcoord" : "position_normal");
+  writer.write_key("importSettings");
+  writer.begin_object();
+  writer.write_uint64("meshIndex",
+                      static_cast<std::uint64_t>(importSettings.meshIndex));
+  writer.write_uint64(
+      "primitiveIndex",
+      static_cast<std::uint64_t>(importSettings.primitiveIndex));
+  writer.write_float("scaleFactor", importSettings.scaleFactor);
+  writer.write_uint64("upAxis", static_cast<std::uint64_t>(importSettings.upAxis));
+  writer.write_bool("generateNormals", importSettings.generateNormals);
+  writer.write_string("interleavedLayout",
+                      data.hasUVs ? "position_normal_texcoord"
+                                  : "position_normal");
+  writer.end_object();
+  writer.end_object();
 
-  std::fclose(metadataFile);
-  return written > 0;
+  return writer.ok() &&
+         write_text_file(metadataPath, writer.result(), writer.result_size());
 }
 
 /// Handles cook and write convex hull.

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 
 #include "engine/core/mesh_asset.h"
@@ -198,6 +199,44 @@ int check_null_out_param() {
 // --- v2 format tests ---
 
 constexpr const char *kV2ValidPath = "mesh_loader_v2_valid.mesh";
+constexpr const char *kCpuDecodePath = "mesh_loader_cpu_decode.mesh";
+
+/// Handles check cpu decode valid mesh.
+int check_cpu_decode_valid_mesh() {
+  remove_file(kCpuDecodePath);
+
+  engine::core::MeshAssetHeader header{};
+  header.magic = engine::core::kMeshAssetMagic;
+  header.version = engine::core::kMeshAssetVersion;
+  header.vertexCount = 1U;
+  header.indexCount = 0U;
+
+  const std::array<float, 6U> vertexData = {0.0F, 0.0F, 0.0F,
+                                            0.0F, 1.0F, 0.0F};
+  if (!write_mesh_file(kCpuDecodePath, header, vertexData.data(),
+                       vertexData.size() * sizeof(float))) {
+    remove_file(kCpuDecodePath);
+    return 91;
+  }
+
+  engine::renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 0ULL;
+  const bool loaded = engine::renderer::load_mesh_data_from_file(
+      kCpuDecodePath, &meshData, &sizeBytes);
+  remove_file(kCpuDecodePath);
+  if (!loaded) {
+    return 92;
+  }
+  if ((meshData.vertexCount != 1U) || (meshData.indexCount != 0U) ||
+      (meshData.vertexFloatCount != vertexData.size()) || meshData.hasUVs ||
+      (meshData.vertices == nullptr)) {
+    return 93;
+  }
+  const std::uint64_t expectedSize =
+      static_cast<std::uint64_t>(sizeof(header) +
+                                 vertexData.size() * sizeof(float));
+  return (sizeBytes == expectedSize) ? 0 : 94;
+}
 
 /// Handles check v2 bad version accepted.
 int check_v2_bad_version_accepted() {
@@ -288,5 +327,5 @@ int main() {
     return result;
   }
 
-  return 0;
+  return check_cpu_decode_valid_mesh();
 }

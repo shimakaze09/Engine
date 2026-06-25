@@ -22,6 +22,7 @@ engine_add_module_library(engine_scripting
     src/scripting.cpp
     src/deferred_mutations.cpp
     src/runtime_binding.cpp
+    src/touch_bindings.cpp
     src/dap_server.cpp
     ${ENGINE_BINDGEN_OUTPUT}
     PUBLIC_INCLUDE_DIRS

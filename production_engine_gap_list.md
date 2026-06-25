@@ -112,7 +112,7 @@ These items do not represent missing *features* but rather defects or structural
 #### §0-7-d: Second ownership audit findings
 - `§0-7-d-i` `scripting/src/scripting.cpp` remains a 5K+ line global-state owner for Lua state, timers, deferred mutations, debugger/profiler state, entity script modules, player controllers, and persistent game state. **[critical]** `[~]`
   - *Audit*: Split into an owned `ScriptingContext` and narrow modules before allowing multiple runtime/editor sessions or isolated tests.
-  - *In progress*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; deferred world-mutation queueing now lives in `scripting/src/deferred_mutations.cpp`; `scripting.cpp` still owns Lua state, timer refs, coroutine scheduling, debugger/profiler state, entity script modules, player controllers, and persistent game state until those move behind `ScriptingContext`.
+  - *In progress*: Runtime binding pointers and service-locator registration now live in `scripting/src/runtime_binding.cpp`; deferred world-mutation queueing now lives in `scripting/src/deferred_mutations.cpp`; Lua touch/gesture callback ownership and cleanup now live in `scripting/src/touch_bindings.cpp`; `scripting.cpp` still owns Lua state, timer refs, coroutine scheduling, debugger/profiler state, entity script modules, player controllers, and persistent game state until those move behind `ScriptingContext`.
 - `§0-7-d-ii` ~~`physics/src/physics.cpp` stores convex hull and heightfield data in process-global arrays keyed by entity index, outside `World`/`PhysicsContext` lifetime.~~ **[critical]** `[x]`
   - *Resolved*: Convex hull and heightfield payloads now live in `PhysicsContext`, runtime setters require the owning `World&`, and `engine_unit_physics` verifies same-index entities in separate worlds do not share shape payloads.
 - `§0-7-d-iii` ~~`scripting/src/dap_server.cpp` owns listen/client sockets, sequence numbers, and receive buffers as file-static state.~~ **[high]** `[x]`
@@ -120,8 +120,8 @@ These items do not represent missing *features* but rather defects or structural
 - `§0-7-d-iv` ~~`core::global_service_locator()` still exists for legacy callers, tests, and wrappers.~~ **[high]** `[x]`
   - *Resolved*: Runtime and scripting bridge callers now bind through explicit `ServiceLocator` instances; legacy global register/bind wrappers were removed, and tests no longer rely on the global locator except for the core singleton API coverage.
 - `§0-7-d-v` Large implementation files still exceed maintainable review size and concentrate unrelated ownership. **[high]** `[~]`
-  - *In progress*: `scripting/src/deferred_mutations.cpp` now owns the deferred world-mutation queue, phase gate, apply-or-queue helpers, flush path, and shutdown clear; `engine_unit_scripting` verifies queued mutations are discarded across scripting shutdown/reinitialization.
-  - *Audit*: Current largest files still include `scripting.cpp` (~5963 lines after the deferred mutation split), `command_buffer.cpp` (~4509), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
+  - *In progress*: `scripting/src/deferred_mutations.cpp` now owns the deferred world-mutation queue, phase gate, apply-or-queue helpers, flush path, and shutdown clear; `scripting/src/touch_bindings.cpp` owns Lua touch/gesture callbacks; `renderer/src/render_settings.cpp` owns fog/reflection setting parsing and normalization.
+  - *Audit*: Current largest files still include `scripting.cpp` (~5316 lines after the touch binding split), `command_buffer.cpp` (~4359 after the render settings split), `editor.cpp` (~2341), `physics.cpp` (~2147), `engine_pipeline.cpp` (~1790), `world.cpp` (~1702), and `scene_serializer.cpp` (~1320).
 
 ---
 
@@ -591,6 +591,10 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 - `P1-M4-C3b` `maxUploadsPerFrame = 8`: limits GPU upload stalls. `[x]`
 - `P1-M4-C3c` `inflight_bytes_this_frame` and `uploads_this_frame` track per-frame usage. `[x]`
 - `P1-M4-C3d` `tests/integration/streaming_budget_test.cpp` exists. `[x]`
+
+##### P1-M4-C4: Runtime/Lua Async Asset Bridge `[x]`
+- `P1-M4-C4a` `engine.load_asset_async()` and `engine.is_asset_ready()` route through runtime services instead of returning nil/false because callbacks are missing. `[x]`
+- `P1-M4-C4b` Script mesh requests route through `AssetStreamingQueue`; worker callbacks decode cooked mesh data without GL, and main-thread upload callbacks promote assets to Ready. `[x]`
 
 ---
 

@@ -12,6 +12,7 @@ engine_add_module_library(engine_renderer
     src/mesh_loader.cpp
     src/pass_resources.cpp
     src/post_process_stack.cpp
+    src/render_settings.cpp
     src/render_device_gl.cpp
     src/shader_system.cpp
     src/shadow_map.cpp

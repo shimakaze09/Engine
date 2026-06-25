@@ -142,6 +142,25 @@ int main() {
     return 17;
   }
 
+  constexpr engine::renderer::AssetId kStreamingAssetId = 78ULL;
+  if (!engine::renderer::request_mesh_asset_streaming_load(
+          database.get(), kStreamingAssetId, "assets/streamed.mesh")) {
+    return 28;
+  }
+  if (!engine::renderer::mesh_asset_requested_resident(database.get(),
+                                                       kStreamingAssetId)) {
+    return 29;
+  }
+  if (engine::renderer::mesh_asset_state(database.get(), kStreamingAssetId) !=
+      engine::renderer::AssetState::Loading) {
+    return 30;
+  }
+  if (engine::renderer::resolve_mesh_asset(database.get(),
+                                           kStreamingAssetId) !=
+      engine::renderer::kInvalidMeshHandle) {
+    return 31;
+  }
+
   const char *tempA = "asset_db_hash_a.tmp";
   const char *tempB = "asset_db_hash_b.tmp";
   if (!write_temp_file(tempA, "mesh-v1") ||

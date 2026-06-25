@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include "engine/renderer/command_buffer.h"
 
@@ -27,6 +28,17 @@ struct GpuMeshRegistry final {
   std::array<bool, kMaxSlots> occupied{};
 };
 
+/// CPU-side mesh payload decoded from a cooked mesh asset file.
+struct CpuMeshData final {
+  std::unique_ptr<float[]> vertices{};
+  std::unique_ptr<std::uint32_t[]> indices{};
+  std::uint32_t vertexCount = 0U;
+  std::uint32_t indexCount = 0U;
+  std::size_t vertexFloatCount = 0U;
+  std::size_t strideFloats = 6U;
+  bool hasUVs = false;
+};
+
 // Returns slot index (same as MeshHandle::id) or 0 on failure.
 std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
                                 const GpuMesh &mesh) noexcept;
@@ -36,6 +48,12 @@ const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
 
 /// Loads the requested resource for mesh from file.
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept;
+/// Decodes a cooked mesh file without touching GPU state.
+bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
+                              std::uint64_t *outSizeBytes = nullptr) noexcept;
+/// Uploads decoded CPU mesh data to the current render context.
+bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
+                             GpuMesh *outMesh) noexcept;
 /// Handles unload mesh.
 void unload_mesh(GpuMesh *mesh) noexcept;
 

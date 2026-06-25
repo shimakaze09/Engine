@@ -1,6 +1,5 @@
 // Verifies game mode test behavior for the Engine test suite.
 
-#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -9,18 +8,13 @@
 #include "engine/runtime/game_state.h"
 #include "engine/runtime/player_controller.h"
 #include "engine/runtime/world.h"
+#include "../test_harness.h"
 
-static int g_testsPassed = 0;
-static int g_testsFailed = 0;
+static engine::tests::TestContext g_tests;
 
 /// Handles check.
 static void check(bool condition, const char *name) noexcept {
-  if (condition) {
-    ++g_testsPassed;
-  } else {
-    ++g_testsFailed;
-    std::fprintf(stderr, "FAIL: %s\n", name);
-  }
+  g_tests.check(condition, name);
 }
 
 /// Handles test game mode owned by world.
@@ -288,7 +282,5 @@ int main() {
   test_player_controller_array();
   test_game_state_persists_across_worlds();
 
-  std::fprintf(stdout, "GameMode/GameState tests: %d passed, %d failed\n",
-               g_testsPassed, g_testsFailed);
-  return (g_testsFailed == 0) ? 0 : 1;
+  return g_tests.finish("GameMode/GameState tests");
 }

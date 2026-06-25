@@ -61,20 +61,43 @@ bool checked_add(std::size_t lhs, std::size_t rhs,
   return true;
 }
 
-/// Stores mesh blob data used by the engine.
-struct MeshBlob final {
-  core::MeshAssetHeader header{};
-  std::unique_ptr<float[]> vertices{};
-  std::unique_ptr<std::uint32_t[]> indices{};
-  std::size_t vertexFloatCount = 0U;
-  std::size_t indexCount = 0U;
-  std::size_t strideFloats = kVertexStrideV1Floats;
-};
+/// Handles delete mesh resources.
+void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
+  if ((mesh == nullptr) || (dev == nullptr)) {
+    return;
+  }
 
-/// Loads the requested resource for mesh blob.
-bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
-  if ((path == nullptr) || (outBlob == nullptr)) {
+  if (mesh->indexBuffer != 0U) {
+    dev->destroy_buffer(mesh->indexBuffer);
+    mesh->indexBuffer = 0U;
+  }
+
+  if (mesh->vertexBuffer != 0U) {
+    dev->destroy_buffer(mesh->vertexBuffer);
+    mesh->vertexBuffer = 0U;
+  }
+
+  if (mesh->vertexArray != 0U) {
+    dev->destroy_vertex_array(mesh->vertexArray);
+    mesh->vertexArray = 0U;
+  }
+
+  mesh->vertexCount = 0U;
+  mesh->indexCount = 0U;
+}
+
+} // namespace
+
+/// Decodes a cooked mesh file without touching GPU state.
+bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
+                              std::uint64_t *outSizeBytes) noexcept {
+  if ((path == nullptr) || (outData == nullptr)) {
     return false;
+  }
+
+  *outData = CpuMeshData{};
+  if (outSizeBytes != nullptr) {
+    *outSizeBytes = 0ULL;
   }
 
   FILE *file = nullptr;
@@ -163,10 +186,7 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   }
 
   // Heap allocation here is intentional: mesh data is variable-size and may
-  // exceed the frame allocator budget (up to 32 MB for large meshes).
-  // This function is called only during asset loading transitions, never in the
-  // draw-call hot path.  maxTransitions in update_asset_manager bounds the
-  // per-frame cost.
+  // exceed the frame allocator budget. This function performs CPU IO only.
   std::unique_ptr<float[]> vertices{};
   if (vertexFloatCount > 0U) {
     vertices.reset(new (std::nothrow) float[vertexFloatCount]);
@@ -197,41 +217,19 @@ bool load_mesh_blob(const char *path, MeshBlob *outBlob) noexcept {
   }
 
   std::fclose(file);
-  outBlob->header = header;
-  outBlob->vertexFloatCount = vertexFloatCount;
-  outBlob->indexCount = indexCount;
-  outBlob->strideFloats = strideFloats;
-  outBlob->vertices = std::move(vertices);
-  outBlob->indices = std::move(indices);
+
+  outData->vertexCount = header.vertexCount;
+  outData->indexCount = header.indexCount;
+  outData->vertexFloatCount = vertexFloatCount;
+  outData->strideFloats = strideFloats;
+  outData->hasUVs = isV2;
+  outData->vertices = std::move(vertices);
+  outData->indices = std::move(indices);
+  if (outSizeBytes != nullptr) {
+    *outSizeBytes = static_cast<std::uint64_t>(expectedSize);
+  }
   return true;
 }
-
-/// Handles delete mesh resources.
-void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
-  if ((mesh == nullptr) || (dev == nullptr)) {
-    return;
-  }
-
-  if (mesh->indexBuffer != 0U) {
-    dev->destroy_buffer(mesh->indexBuffer);
-    mesh->indexBuffer = 0U;
-  }
-
-  if (mesh->vertexBuffer != 0U) {
-    dev->destroy_buffer(mesh->vertexBuffer);
-    mesh->vertexBuffer = 0U;
-  }
-
-  if (mesh->vertexArray != 0U) {
-    dev->destroy_vertex_array(mesh->vertexArray);
-    mesh->vertexArray = 0U;
-  }
-
-  mesh->vertexCount = 0U;
-  mesh->indexCount = 0U;
-}
-
-} // namespace
 
 // Precondition: caller must own the GL context before calling this function.
 // Context acquisition and release are the engine loop's responsibility;
@@ -243,32 +241,44 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
 
   *outMesh = GpuMesh{};
 
-  MeshBlob meshBlob{};
-  if (!load_mesh_blob(path, &meshBlob)) {
+  CpuMeshData meshData{};
+  if (!load_mesh_data_from_file(path, &meshData)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to read mesh asset");
     return false;
   }
+
+  return upload_mesh_data_to_gpu(meshData, outMesh);
+}
+
+// Precondition: caller must own the GL context before calling this function.
+bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
+                             GpuMesh *outMesh) noexcept {
+  if ((outMesh == nullptr) || (meshData.vertexCount == 0U) ||
+      (meshData.vertices == nullptr)) {
+    return false;
+  }
+
+  *outMesh = GpuMesh{};
 
   if (!initialize_render_device()) {
     return false;
   }
 
   const RenderDevice *dev = render_device();
-  const bool hasUVs = (meshBlob.header.version == core::kMeshAssetVersion2);
   const std::int32_t stride =
-      static_cast<std::int32_t>(meshBlob.strideFloats * sizeof(float));
+      static_cast<std::int32_t>(meshData.strideFloats * sizeof(float));
 
   GpuMesh mesh{};
-  mesh.hasUVs = hasUVs;
+  mesh.hasUVs = meshData.hasUVs;
   mesh.vertexArray = dev->create_vertex_array();
   dev->bind_vertex_array(mesh.vertexArray);
 
   mesh.vertexBuffer = dev->create_buffer();
   dev->bind_array_buffer(mesh.vertexBuffer);
   dev->buffer_data_array(
-      meshBlob.vertices.get(),
-      static_cast<std::ptrdiff_t>(meshBlob.vertexFloatCount * sizeof(float)));
+      meshData.vertices.get(),
+      static_cast<std::ptrdiff_t>(meshData.vertexFloatCount * sizeof(float)));
 
   dev->enable_vertex_attrib(0U);
   dev->vertex_attrib_float(0U, 3, stride, nullptr);
@@ -277,26 +287,28 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   dev->vertex_attrib_float(1U, 3, stride,
                            reinterpret_cast<const void *>(sizeof(float) * 3U));
 
-  if (hasUVs) {
+  if (meshData.hasUVs) {
     dev->enable_vertex_attrib(2U);
     dev->vertex_attrib_float(
         2U, 2, stride, reinterpret_cast<const void *>(sizeof(float) * 6U));
   }
 
-  if (meshBlob.indexCount > 0U) {
+  if (meshData.indexCount > 0U) {
     mesh.indexBuffer = dev->create_buffer();
     dev->bind_element_buffer(mesh.indexBuffer);
-    dev->buffer_data_element(meshBlob.indices.get(),
-                             static_cast<std::ptrdiff_t>(
-                                 meshBlob.indexCount * sizeof(std::uint32_t)));
+    dev->buffer_data_element(
+        meshData.indices.get(),
+        static_cast<std::ptrdiff_t>(static_cast<std::size_t>(
+                                        meshData.indexCount) *
+                                    sizeof(std::uint32_t)));
   }
 
   dev->bind_vertex_array(0U);
   dev->bind_array_buffer(0U);
   dev->bind_element_buffer(0U);
 
-  mesh.vertexCount = meshBlob.header.vertexCount;
-  mesh.indexCount = meshBlob.header.indexCount;
+  mesh.vertexCount = meshData.vertexCount;
+  mesh.indexCount = meshData.indexCount;
   *outMesh = mesh;
   return true;
 }

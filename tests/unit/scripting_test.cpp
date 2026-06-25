@@ -5,10 +5,15 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/cvar.h"
 #include "engine/core/touch_input.h"
 #include "engine/core/service_locator.h"
+#include "engine/renderer/asset_database.h"
+#include "engine/renderer/asset_manager.h"
+#include "engine/renderer/asset_streaming.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scripting_bridge.h"
+#include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
@@ -83,6 +88,24 @@ int main() {
   }
 
   engine::core::ServiceLocator serviceLocator{};
+  std::unique_ptr<engine::renderer::AssetDatabase> scriptAssetDatabase(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  std::unique_ptr<engine::renderer::AssetManager> scriptAssetManager(
+      new (std::nothrow) engine::renderer::AssetManager());
+  if ((scriptAssetDatabase == nullptr) || (scriptAssetManager == nullptr)) {
+    engine::scripting::shutdown_scripting();
+    return 3;
+  }
+  engine::renderer::clear_asset_database(scriptAssetDatabase.get());
+  engine::renderer::clear_asset_manager(scriptAssetManager.get());
+  engine::runtime::EngineAssetDatabaseService scriptAssetService{};
+  scriptAssetService.database = scriptAssetDatabase.get();
+  scriptAssetService.manager = scriptAssetManager.get();
+  if (!serviceLocator.register_service<engine::runtime::EngineAssetDatabaseService>(
+          &scriptAssetService)) {
+    engine::scripting::shutdown_scripting();
+    return 3;
+  }
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   constexpr std::uint32_t kDefaultMeshAssetId = 777U;
   engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
@@ -142,6 +165,121 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 5;
   }
+
+  const char *asyncAssetScript =
+      "function request_asset()\n"
+      "    local h = engine.load_asset_async('assets/missing_async.mesh', 2)\n"
+      "    if h == nil then\n"
+      "        error('load_asset_async returned nil')\n"
+      "    end\n"
+      "    if engine.is_asset_ready(h) then\n"
+      "        error('missing asset should not be ready before update')\n"
+      "    end\n"
+      "end\n";
+  if (!write_script_file(asyncAssetScript) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("request_asset")) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 116;
+  }
+
+  const engine::renderer::AssetId asyncAssetId =
+      engine::renderer::make_asset_id_from_path("assets/missing_async.mesh");
+  if (!engine::renderer::mesh_asset_requested_resident(
+          scriptAssetDatabase.get(), asyncAssetId)) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 117;
+  }
+  if (engine::renderer::pending_asset_request_count(
+          scriptAssetManager.get()) == 0U) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 118;
+  }
+
+  engine::core::initialize_cvars();
+  std::unique_ptr<engine::renderer::AssetStreamingQueue> scriptStreamingQueue(
+      new (std::nothrow) engine::renderer::AssetStreamingQueue());
+  if (scriptStreamingQueue == nullptr) {
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 119;
+  }
+  if (!engine::renderer::initialize_asset_streaming(
+          scriptStreamingQueue.get())) {
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 120;
+  }
+  scriptAssetService.streamingQueue = scriptStreamingQueue.get();
+  engine::renderer::clear_asset_manager(scriptAssetManager.get());
+
+  const char *streamingAssetScript =
+      "function request_streaming_asset()\n"
+      "    local h = engine.load_asset_async('assets/streamed_async.mesh', 3)\n"
+      "    if h == nil then\n"
+      "        error('streaming load_asset_async returned nil')\n"
+      "    end\n"
+      "    if engine.is_asset_ready(h) then\n"
+      "        error('streaming asset should not be ready before update')\n"
+      "    end\n"
+      "end\n";
+  if (!write_script_file(streamingAssetScript) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("request_streaming_asset")) {
+    scriptAssetService.streamingQueue = nullptr;
+    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 121;
+  }
+
+  const engine::renderer::AssetId streamingAssetId =
+      engine::renderer::make_asset_id_from_path("assets/streamed_async.mesh");
+  if (!engine::renderer::mesh_asset_requested_resident(
+          scriptAssetDatabase.get(), streamingAssetId)) {
+    scriptAssetService.streamingQueue = nullptr;
+    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 122;
+  }
+  if (engine::renderer::mesh_asset_state(scriptAssetDatabase.get(),
+                                         streamingAssetId) !=
+      engine::renderer::AssetState::Loading) {
+    scriptAssetService.streamingQueue = nullptr;
+    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 123;
+  }
+  if (engine::renderer::pending_asset_request_count(
+          scriptAssetManager.get()) != 0U) {
+    scriptAssetService.streamingQueue = nullptr;
+    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 124;
+  }
+  if (engine::renderer::pending_load_count(scriptStreamingQueue.get()) != 1U) {
+    scriptAssetService.streamingQueue = nullptr;
+    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::core::shutdown_cvars();
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 125;
+  }
+  scriptAssetService.streamingQueue = nullptr;
+  engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+  engine::core::shutdown_cvars();
 
   // Assumes a fresh World so the first spawned entity is index 1.
   const engine::runtime::Entity spawned = world->find_entity_by_index(1U);

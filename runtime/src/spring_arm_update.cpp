@@ -28,7 +28,7 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
                            transform.position.y + arm.offset.y,
                            transform.position.z + arm.offset.z);
 
-    // Camera sits behind the entity along its local -Z axis.
+    // Camera sits behind the entity along its local +Z axis.
     const math::Vec3 localBack(0.0F, 0.0F, 1.0F);
     const math::Vec3 armDir =
         math::normalize(math::rotate_vector(localBack, transform.rotation));
