@@ -104,8 +104,8 @@ These items do not represent missing *features* but rather defects or structural
 #### §0-7-c: Renderer, streaming, and validation hardening
 - `§0-7-c-i` Asset streaming callbacks must run through an actual worker queue instead of only polling synchronously on the main thread. **[high]** `[x]`
   - *Resolved*: `AssetStreamingQueue` now owns a worker thread, mutex/condition variable, CPU load callbacks, main-thread upload callbacks, and shutdown join logic; async ordering and budget tests cover it.
-- `§0-7-c-ii` Renderer public state must be reset on shutdown and grouped behind a renderer-owned context object. **[high]** `[~]`
-  - *In progress*: `RendererContext` now owns public renderer state and backend state, and shutdown resets camera, viewport, frame stats, FXAA, and skybox state. A true multi-renderer-context API remains open.
+- `§0-7-c-ii` ~~Renderer public state must be reset on shutdown and grouped behind a renderer-owned context object.~~ **[high]** `[x]`
+  - *Resolved*: `RendererContext` owns camera, viewport, frame stats, FXAA, skybox, shader-root, and command-buffer backend state; `RenderDeviceContext` owns the OpenGL dispatch table, public `RenderDevice` function table, and initialization flag; `shutdown_renderer()` and `shutdown_render_device()` reset their context state, and `engine_unit_command_buffer` verifies public renderer state is cleared on shutdown.
 - `§0-7-c-iii` Static analysis must fail closed when no real analyzer is available. **[high]** `[x]`
   - *Resolved*: the `analysis` target now uses `cppcheck` when available, otherwise `clang-tidy --warnings-as-errors=*` on engine sources, and fails if neither analyzer is found.
 

@@ -420,9 +420,26 @@ struct GlTable final {
   GlGetQueryObjectui64vProc getQueryObjectui64v = nullptr;
 };
 
-bool g_deviceInitialized = false;
-GlTable g_gl{};
-RenderDevice g_device{};
+/// Owns the OpenGL-backed render device state.
+struct RenderDeviceContext final {
+  bool initialized = false;
+  GlTable gl{};
+  RenderDevice device{};
+};
+
+/// Returns the default OpenGL render device context.
+RenderDeviceContext &render_device_context() noexcept {
+  static RenderDeviceContext context{};
+  return context;
+}
+
+/// Returns the loaded OpenGL dispatch table.
+GlTable &gl_table() noexcept { return render_device_context().gl; }
+
+/// Returns the public render-device function table.
+RenderDevice &render_device_state() noexcept {
+  return render_device_context().device;
+}
 
 /// Loads the requested resource for proc.
 template <typename T> bool load_proc(T *out, const char *name) noexcept {
@@ -432,68 +449,68 @@ template <typename T> bool load_proc(T *out, const char *name) noexcept {
 
 /// Loads the requested resource for all gl functions.
 bool load_all_gl_functions() noexcept {
-  return load_proc(&g_gl.createShader, "glCreateShader") &&
-         load_proc(&g_gl.shaderSource, "glShaderSource") &&
-         load_proc(&g_gl.compileShader, "glCompileShader") &&
-         load_proc(&g_gl.getShaderiv, "glGetShaderiv") &&
-         load_proc(&g_gl.getShaderInfoLog, "glGetShaderInfoLog") &&
-         load_proc(&g_gl.deleteShader, "glDeleteShader") &&
-         load_proc(&g_gl.createProgram, "glCreateProgram") &&
-         load_proc(&g_gl.attachShader, "glAttachShader") &&
-         load_proc(&g_gl.linkProgram, "glLinkProgram") &&
-         load_proc(&g_gl.getProgramiv, "glGetProgramiv") &&
-         load_proc(&g_gl.getProgramInfoLog, "glGetProgramInfoLog") &&
-         load_proc(&g_gl.deleteProgram, "glDeleteProgram") &&
-         load_proc(&g_gl.useProgram, "glUseProgram") &&
-         load_proc(&g_gl.getUniformLocation, "glGetUniformLocation") &&
-         load_proc(&g_gl.uniformMatrix4fv, "glUniformMatrix4fv") &&
-         load_proc(&g_gl.uniformMatrix3fv, "glUniformMatrix3fv") &&
-         load_proc(&g_gl.uniform1f, "glUniform1f") &&
-         load_proc(&g_gl.uniform3fv, "glUniform3fv") &&
-         load_proc(&g_gl.uniform2fv, "glUniform2fv") &&
-         load_proc(&g_gl.genVertexArrays, "glGenVertexArrays") &&
-         load_proc(&g_gl.bindVertexArray, "glBindVertexArray") &&
-         load_proc(&g_gl.deleteVertexArrays, "glDeleteVertexArrays") &&
-         load_proc(&g_gl.genBuffers, "glGenBuffers") &&
-         load_proc(&g_gl.bindBuffer, "glBindBuffer") &&
-         load_proc(&g_gl.bufferData, "glBufferData") &&
-         load_proc(&g_gl.deleteBuffers, "glDeleteBuffers") &&
-         load_proc(&g_gl.enableVertexAttribArray,
+  return load_proc(&gl_table().createShader, "glCreateShader") &&
+         load_proc(&gl_table().shaderSource, "glShaderSource") &&
+         load_proc(&gl_table().compileShader, "glCompileShader") &&
+         load_proc(&gl_table().getShaderiv, "glGetShaderiv") &&
+         load_proc(&gl_table().getShaderInfoLog, "glGetShaderInfoLog") &&
+         load_proc(&gl_table().deleteShader, "glDeleteShader") &&
+         load_proc(&gl_table().createProgram, "glCreateProgram") &&
+         load_proc(&gl_table().attachShader, "glAttachShader") &&
+         load_proc(&gl_table().linkProgram, "glLinkProgram") &&
+         load_proc(&gl_table().getProgramiv, "glGetProgramiv") &&
+         load_proc(&gl_table().getProgramInfoLog, "glGetProgramInfoLog") &&
+         load_proc(&gl_table().deleteProgram, "glDeleteProgram") &&
+         load_proc(&gl_table().useProgram, "glUseProgram") &&
+         load_proc(&gl_table().getUniformLocation, "glGetUniformLocation") &&
+         load_proc(&gl_table().uniformMatrix4fv, "glUniformMatrix4fv") &&
+         load_proc(&gl_table().uniformMatrix3fv, "glUniformMatrix3fv") &&
+         load_proc(&gl_table().uniform1f, "glUniform1f") &&
+         load_proc(&gl_table().uniform3fv, "glUniform3fv") &&
+         load_proc(&gl_table().uniform2fv, "glUniform2fv") &&
+         load_proc(&gl_table().genVertexArrays, "glGenVertexArrays") &&
+         load_proc(&gl_table().bindVertexArray, "glBindVertexArray") &&
+         load_proc(&gl_table().deleteVertexArrays, "glDeleteVertexArrays") &&
+         load_proc(&gl_table().genBuffers, "glGenBuffers") &&
+         load_proc(&gl_table().bindBuffer, "glBindBuffer") &&
+         load_proc(&gl_table().bufferData, "glBufferData") &&
+         load_proc(&gl_table().deleteBuffers, "glDeleteBuffers") &&
+         load_proc(&gl_table().enableVertexAttribArray,
                    "glEnableVertexAttribArray") &&
-         load_proc(&g_gl.vertexAttribPointer, "glVertexAttribPointer") &&
-         load_proc(&g_gl.vertexAttribDivisor, "glVertexAttribDivisor") &&
-         load_proc(&g_gl.drawArrays, "glDrawArrays") &&
-         load_proc(&g_gl.drawElements, "glDrawElements") &&
-         load_proc(&g_gl.drawElementsInstanced, "glDrawElementsInstanced") &&
-         load_proc(&g_gl.viewport, "glViewport") &&
-         load_proc(&g_gl.enable, "glEnable") &&
-         load_proc(&g_gl.disable, "glDisable") &&
-         load_proc(&g_gl.clearColor, "glClearColor") &&
-         load_proc(&g_gl.clear, "glClear") &&
-         load_proc(&g_gl.uniform1i, "glUniform1i") &&
-         load_proc(&g_gl.uniform4fv, "glUniform4fv") &&
-         load_proc(&g_gl.genTextures, "glGenTextures") &&
-         load_proc(&g_gl.deleteTextures, "glDeleteTextures") &&
-         load_proc(&g_gl.bindTexture, "glBindTexture") &&
-         load_proc(&g_gl.activeTexture, "glActiveTexture") &&
-         load_proc(&g_gl.texImage2D, "glTexImage2D") &&
-         load_proc(&g_gl.texParameteri, "glTexParameteri") &&
-         load_proc(&g_gl.generateMipmap, "glGenerateMipmap") &&
-         load_proc(&g_gl.genFramebuffers, "glGenFramebuffers") &&
-         load_proc(&g_gl.deleteFramebuffers, "glDeleteFramebuffers") &&
-         load_proc(&g_gl.bindFramebuffer, "glBindFramebuffer") &&
-         load_proc(&g_gl.framebufferTexture2D, "glFramebufferTexture2D") &&
-         load_proc(&g_gl.checkFramebufferStatus, "glCheckFramebufferStatus") &&
-         load_proc(&g_gl.drawBuffers, "glDrawBuffers") &&
-         load_proc(&g_gl.blitFramebuffer, "glBlitFramebuffer") &&
-         load_proc(&g_gl.texSubImage2D, "glTexSubImage2D") &&
-         load_proc(&g_gl.blendFunc, "glBlendFunc") &&
-         load_proc(&g_gl.depthMask, "glDepthMask") &&
-         load_proc(&g_gl.depthFunc, "glDepthFunc") &&
-         load_proc(&g_gl.genQueries, "glGenQueries") &&
-         load_proc(&g_gl.deleteQueries, "glDeleteQueries") &&
-         load_proc(&g_gl.queryCounter, "glQueryCounter") &&
-         load_proc(&g_gl.getQueryObjectui64v, "glGetQueryObjectui64v");
+         load_proc(&gl_table().vertexAttribPointer, "glVertexAttribPointer") &&
+         load_proc(&gl_table().vertexAttribDivisor, "glVertexAttribDivisor") &&
+         load_proc(&gl_table().drawArrays, "glDrawArrays") &&
+         load_proc(&gl_table().drawElements, "glDrawElements") &&
+         load_proc(&gl_table().drawElementsInstanced, "glDrawElementsInstanced") &&
+         load_proc(&gl_table().viewport, "glViewport") &&
+         load_proc(&gl_table().enable, "glEnable") &&
+         load_proc(&gl_table().disable, "glDisable") &&
+         load_proc(&gl_table().clearColor, "glClearColor") &&
+         load_proc(&gl_table().clear, "glClear") &&
+         load_proc(&gl_table().uniform1i, "glUniform1i") &&
+         load_proc(&gl_table().uniform4fv, "glUniform4fv") &&
+         load_proc(&gl_table().genTextures, "glGenTextures") &&
+         load_proc(&gl_table().deleteTextures, "glDeleteTextures") &&
+         load_proc(&gl_table().bindTexture, "glBindTexture") &&
+         load_proc(&gl_table().activeTexture, "glActiveTexture") &&
+         load_proc(&gl_table().texImage2D, "glTexImage2D") &&
+         load_proc(&gl_table().texParameteri, "glTexParameteri") &&
+         load_proc(&gl_table().generateMipmap, "glGenerateMipmap") &&
+         load_proc(&gl_table().genFramebuffers, "glGenFramebuffers") &&
+         load_proc(&gl_table().deleteFramebuffers, "glDeleteFramebuffers") &&
+         load_proc(&gl_table().bindFramebuffer, "glBindFramebuffer") &&
+         load_proc(&gl_table().framebufferTexture2D, "glFramebufferTexture2D") &&
+         load_proc(&gl_table().checkFramebufferStatus, "glCheckFramebufferStatus") &&
+         load_proc(&gl_table().drawBuffers, "glDrawBuffers") &&
+         load_proc(&gl_table().blitFramebuffer, "glBlitFramebuffer") &&
+         load_proc(&gl_table().texSubImage2D, "glTexSubImage2D") &&
+         load_proc(&gl_table().blendFunc, "glBlendFunc") &&
+         load_proc(&gl_table().depthMask, "glDepthMask") &&
+         load_proc(&gl_table().depthFunc, "glDepthFunc") &&
+         load_proc(&gl_table().genQueries, "glGenQueries") &&
+         load_proc(&gl_table().deleteQueries, "glDeleteQueries") &&
+         load_proc(&gl_table().queryCounter, "glQueryCounter") &&
+         load_proc(&gl_table().getQueryObjectui64v, "glGetQueryObjectui64v");
 }
 
 // --- Device function implementations ---
@@ -502,29 +519,29 @@ std::uint32_t gl_create_shader(std::uint32_t stage,
                                const char *source) noexcept {
   const GLenum glStage =
       (stage == kShaderStageVertex) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
-  const GLuint shader = g_gl.createShader(glStage);
+  const GLuint shader = gl_table().createShader(glStage);
   if (shader == 0U) {
     return 0U;
   }
 
   const char *sources[] = {source};
   const GLint len = static_cast<GLint>(std::strlen(source));
-  g_gl.shaderSource(shader, 1, sources, &len);
-  g_gl.compileShader(shader);
+  gl_table().shaderSource(shader, 1, sources, &len);
+  gl_table().compileShader(shader);
 
   GLint compiled = 0;
-  g_gl.getShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+  gl_table().getShaderiv(shader, GL_COMPILE_STATUS, &compiled);
   if (compiled != static_cast<GLint>(GL_TRUE)) {
     std::array<char, 1024U> log{};
     GLsizei written = 0;
-    g_gl.getShaderInfoLog(shader, static_cast<GLsizei>(log.size()), &written,
+    gl_table().getShaderInfoLog(shader, static_cast<GLsizei>(log.size()), &written,
                           log.data());
     char msg[1200] = {};
     const char *label = (stage == kShaderStageVertex) ? "vertex" : "fragment";
     std::snprintf(msg, sizeof(msg), "%s shader compile failed: %s", label,
                   log.data());
     core::log_message(core::LogLevel::Error, "renderer", msg);
-    g_gl.deleteShader(shader);
+    gl_table().deleteShader(shader);
     return 0U;
   }
 
@@ -534,33 +551,33 @@ std::uint32_t gl_create_shader(std::uint32_t stage,
 /// Handles gl destroy shader.
 void gl_destroy_shader(std::uint32_t shader) noexcept {
   if (shader != 0U) {
-    g_gl.deleteShader(static_cast<GLuint>(shader));
+    gl_table().deleteShader(static_cast<GLuint>(shader));
   }
 }
 
 /// Handles gl link program.
 std::uint32_t gl_link_program(std::uint32_t vertShader,
                               std::uint32_t fragShader) noexcept {
-  const GLuint program = g_gl.createProgram();
+  const GLuint program = gl_table().createProgram();
   if (program == 0U) {
     return 0U;
   }
 
-  g_gl.attachShader(program, static_cast<GLuint>(vertShader));
-  g_gl.attachShader(program, static_cast<GLuint>(fragShader));
-  g_gl.linkProgram(program);
+  gl_table().attachShader(program, static_cast<GLuint>(vertShader));
+  gl_table().attachShader(program, static_cast<GLuint>(fragShader));
+  gl_table().linkProgram(program);
 
   GLint linked = 0;
-  g_gl.getProgramiv(program, GL_LINK_STATUS, &linked);
+  gl_table().getProgramiv(program, GL_LINK_STATUS, &linked);
   if (linked != static_cast<GLint>(GL_TRUE)) {
     std::array<char, 1024U> log{};
     GLsizei written = 0;
-    g_gl.getProgramInfoLog(program, static_cast<GLsizei>(log.size()), &written,
+    gl_table().getProgramInfoLog(program, static_cast<GLsizei>(log.size()), &written,
                            log.data());
     char msg[1200] = {};
     std::snprintf(msg, sizeof(msg), "shader link failed: %s", log.data());
     core::log_message(core::LogLevel::Error, "renderer", msg);
-    g_gl.deleteProgram(program);
+    gl_table().deleteProgram(program);
     return 0U;
   }
 
@@ -570,51 +587,51 @@ std::uint32_t gl_link_program(std::uint32_t vertShader,
 /// Handles gl destroy program.
 void gl_destroy_program(std::uint32_t program) noexcept {
   if (program != 0U) {
-    g_gl.deleteProgram(static_cast<GLuint>(program));
+    gl_table().deleteProgram(static_cast<GLuint>(program));
   }
 }
 
 /// Handles gl bind program.
 void gl_bind_program(std::uint32_t program) noexcept {
-  g_gl.useProgram(static_cast<GLuint>(program));
+  gl_table().useProgram(static_cast<GLuint>(program));
 }
 
 /// Handles gl uniform location.
 std::int32_t gl_uniform_location(std::uint32_t program,
                                  const char *name) noexcept {
   return static_cast<std::int32_t>(
-      g_gl.getUniformLocation(static_cast<GLuint>(program), name));
+      gl_table().getUniformLocation(static_cast<GLuint>(program), name));
 }
 
 /// Handles gl set uniform mat4.
 void gl_set_uniform_mat4(std::int32_t loc, const float *value) noexcept {
-  g_gl.uniformMatrix4fv(static_cast<GLint>(loc), 1, GL_FALSE, value);
+  gl_table().uniformMatrix4fv(static_cast<GLint>(loc), 1, GL_FALSE, value);
 }
 
 /// Handles gl set uniform mat3.
 void gl_set_uniform_mat3(std::int32_t loc, const float *value) noexcept {
-  g_gl.uniformMatrix3fv(static_cast<GLint>(loc), 1, GL_FALSE, value);
+  gl_table().uniformMatrix3fv(static_cast<GLint>(loc), 1, GL_FALSE, value);
 }
 
 /// Handles gl set uniform float.
 void gl_set_uniform_float(std::int32_t loc, float value) noexcept {
-  g_gl.uniform1f(static_cast<GLint>(loc), value);
+  gl_table().uniform1f(static_cast<GLint>(loc), value);
 }
 
 /// Handles gl set uniform vec3.
 void gl_set_uniform_vec3(std::int32_t loc, const float *value) noexcept {
-  g_gl.uniform3fv(static_cast<GLint>(loc), 1, value);
+  gl_table().uniform3fv(static_cast<GLint>(loc), 1, value);
 }
 
 /// Handles gl set uniform vec2.
 void gl_set_uniform_vec2(std::int32_t loc, const float *value) noexcept {
-  g_gl.uniform2fv(static_cast<GLint>(loc), 1, value);
+  gl_table().uniform2fv(static_cast<GLint>(loc), 1, value);
 }
 
 /// Handles gl create vertex array.
 std::uint32_t gl_create_vertex_array() noexcept {
   GLuint vao = 0U;
-  g_gl.genVertexArrays(1, &vao);
+  gl_table().genVertexArrays(1, &vao);
   return static_cast<std::uint32_t>(vao);
 }
 
@@ -622,19 +639,19 @@ std::uint32_t gl_create_vertex_array() noexcept {
 void gl_destroy_vertex_array(std::uint32_t vao) noexcept {
   if (vao != 0U) {
     const GLuint id = static_cast<GLuint>(vao);
-    g_gl.deleteVertexArrays(1, &id);
+    gl_table().deleteVertexArrays(1, &id);
   }
 }
 
 /// Handles gl bind vertex array.
 void gl_bind_vertex_array(std::uint32_t vao) noexcept {
-  g_gl.bindVertexArray(static_cast<GLuint>(vao));
+  gl_table().bindVertexArray(static_cast<GLuint>(vao));
 }
 
 /// Handles gl create buffer.
 std::uint32_t gl_create_buffer() noexcept {
   GLuint buf = 0U;
-  g_gl.genBuffers(1, &buf);
+  gl_table().genBuffers(1, &buf);
   return static_cast<std::uint32_t>(buf);
 }
 
@@ -642,40 +659,40 @@ std::uint32_t gl_create_buffer() noexcept {
 void gl_destroy_buffer(std::uint32_t buffer) noexcept {
   if (buffer != 0U) {
     const GLuint id = static_cast<GLuint>(buffer);
-    g_gl.deleteBuffers(1, &id);
+    gl_table().deleteBuffers(1, &id);
   }
 }
 
 /// Handles gl bind array buffer.
 void gl_bind_array_buffer(std::uint32_t buffer) noexcept {
-  g_gl.bindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(buffer));
+  gl_table().bindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(buffer));
 }
 
 /// Handles gl bind element buffer.
 void gl_bind_element_buffer(std::uint32_t buffer) noexcept {
-  g_gl.bindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(buffer));
+  gl_table().bindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(buffer));
 }
 
 /// Handles gl buffer data array.
 void gl_buffer_data_array(const void *data, std::ptrdiff_t sizeBytes) noexcept {
-  g_gl.bufferData(GL_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
+  gl_table().bufferData(GL_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
 }
 
 /// Handles gl buffer data element.
 void gl_buffer_data_element(const void *data,
                             std::ptrdiff_t sizeBytes) noexcept {
-  g_gl.bufferData(GL_ELEMENT_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
+  gl_table().bufferData(GL_ELEMENT_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
 }
 
 /// Handles gl enable vertex attrib.
 void gl_enable_vertex_attrib(std::uint32_t index) noexcept {
-  g_gl.enableVertexAttribArray(static_cast<GLuint>(index));
+  gl_table().enableVertexAttribArray(static_cast<GLuint>(index));
 }
 
 /// Handles gl vertex attrib float.
 void gl_vertex_attrib_float(std::uint32_t index, std::int32_t components,
                             std::int32_t stride, const void *offset) noexcept {
-  g_gl.vertexAttribPointer(static_cast<GLuint>(index),
+  gl_table().vertexAttribPointer(static_cast<GLuint>(index),
                            static_cast<GLint>(components), GL_FLOAT, GL_FALSE,
                            static_cast<GLsizei>(stride), offset);
 }
@@ -683,26 +700,26 @@ void gl_vertex_attrib_float(std::uint32_t index, std::int32_t components,
 /// Handles gl vertex attrib divisor.
 void gl_vertex_attrib_divisor(std::uint32_t index,
                               std::uint32_t divisor) noexcept {
-  g_gl.vertexAttribDivisor(static_cast<GLuint>(index),
+  gl_table().vertexAttribDivisor(static_cast<GLuint>(index),
                            static_cast<GLuint>(divisor));
 }
 
 /// Handles gl draw arrays triangles.
 void gl_draw_arrays_triangles(std::int32_t first, std::int32_t count) noexcept {
-  g_gl.drawArrays(GL_TRIANGLES, static_cast<GLint>(first),
+  gl_table().drawArrays(GL_TRIANGLES, static_cast<GLint>(first),
                   static_cast<GLsizei>(count));
 }
 
 /// Handles gl draw elements triangles u32.
 void gl_draw_elements_triangles_u32(std::int32_t count) noexcept {
-  g_gl.drawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT,
+  gl_table().drawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT,
                     nullptr);
 }
 
 /// Handles gl draw elements triangles u32 instanced.
 void gl_draw_elements_triangles_u32_instanced(
     std::int32_t count, std::int32_t instanceCount) noexcept {
-  g_gl.drawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(count),
+  gl_table().drawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(count),
                              GL_UNSIGNED_INT, nullptr,
                              static_cast<GLsizei>(instanceCount));
 }
@@ -710,41 +727,41 @@ void gl_draw_elements_triangles_u32_instanced(
 /// Handles gl set viewport.
 void gl_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
                      std::int32_t h) noexcept {
-  g_gl.viewport(static_cast<GLint>(x), static_cast<GLint>(y),
+  gl_table().viewport(static_cast<GLint>(x), static_cast<GLint>(y),
                 static_cast<GLsizei>(w), static_cast<GLsizei>(h));
 }
 
 /// Handles gl enable depth test.
-void gl_enable_depth_test() noexcept { g_gl.enable(GL_DEPTH_TEST); }
+void gl_enable_depth_test() noexcept { gl_table().enable(GL_DEPTH_TEST); }
 
 /// Handles gl disable depth test.
-void gl_disable_depth_test() noexcept { g_gl.disable(GL_DEPTH_TEST); }
+void gl_disable_depth_test() noexcept { gl_table().disable(GL_DEPTH_TEST); }
 
 /// Handles gl set depth func less.
-void gl_set_depth_func_less() noexcept { g_gl.depthFunc(GL_LESS); }
+void gl_set_depth_func_less() noexcept { gl_table().depthFunc(GL_LESS); }
 
 /// Handles gl set depth func less equal.
-void gl_set_depth_func_less_equal() noexcept { g_gl.depthFunc(GL_LEQUAL); }
+void gl_set_depth_func_less_equal() noexcept { gl_table().depthFunc(GL_LEQUAL); }
 
 /// Handles gl set clear color.
 void gl_set_clear_color(float r, float g, float b, float a) noexcept {
-  g_gl.clearColor(r, g, b, a);
+  gl_table().clearColor(r, g, b, a);
 }
 
 /// Handles gl clear color depth.
 void gl_clear_color_depth() noexcept {
-  g_gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  gl_table().clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 // --- Uniform additional ---
 
 void gl_set_uniform_int(std::int32_t loc, std::int32_t value) noexcept {
-  g_gl.uniform1i(static_cast<GLint>(loc), static_cast<GLint>(value));
+  gl_table().uniform1i(static_cast<GLint>(loc), static_cast<GLint>(value));
 }
 
 /// Handles gl set uniform vec4.
 void gl_set_uniform_vec4(std::int32_t loc, const float *value) noexcept {
-  g_gl.uniform4fv(static_cast<GLint>(loc), 1, value);
+  gl_table().uniform4fv(static_cast<GLint>(loc), 1, value);
 }
 
 // --- Textures ---
@@ -753,12 +770,12 @@ std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
                                    std::int32_t channels,
                                    const void *data) noexcept {
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
 
-  g_gl.bindTexture(GL_TEXTURE_2D, tex);
+  gl_table().bindTexture(GL_TEXTURE_2D, tex);
 
   GLenum format = GL_RGBA;
   GLint internalFormat = GL_RGBA;
@@ -770,18 +787,18 @@ std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
     internalFormat = GL_RGB;
   }
 
-  g_gl.texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
+  gl_table().texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
                   static_cast<GLsizei>(height), 0, format, GL_UNSIGNED_BYTE,
                   data);
 
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                      GL_LINEAR_MIPMAP_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  g_gl.generateMipmap(GL_TEXTURE_2D);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl_table().generateMipmap(GL_TEXTURE_2D);
 
-  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  gl_table().bindTexture(GL_TEXTURE_2D, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -790,12 +807,12 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
                                        std::int32_t channels,
                                        const float *data) noexcept {
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
 
-  g_gl.bindTexture(GL_TEXTURE_2D, tex);
+  gl_table().bindTexture(GL_TEXTURE_2D, tex);
 
   GLenum format = GL_RGBA;
   GLint internalFormat = GL_RGBA16F;
@@ -807,15 +824,15 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
     internalFormat = GL_RGB16F;
   }
 
-  g_gl.texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
+  gl_table().texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
                   static_cast<GLsizei>(height), 0, format, GL_FLOAT, data);
 
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  gl_table().bindTexture(GL_TEXTURE_2D, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -828,7 +845,7 @@ std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
   }
 
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
@@ -840,22 +857,22 @@ std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
     internalFormat = GL_RGB16F;
   }
 
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, tex);
   for (int face = 0; face < 6; ++face) {
     const float *pixels = (facePixels != nullptr) ? facePixels[face] : nullptr;
-    g_gl.texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
+    gl_table().texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
                     0, internalFormat, static_cast<GLsizei>(faceSize),
                     static_cast<GLsizei>(faceSize), 0, format, GL_FLOAT,
                     pixels);
   }
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
                      GL_LINEAR_MIPMAP_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  g_gl.generateMipmap(GL_TEXTURE_CUBE_MAP);
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  gl_table().generateMipmap(GL_TEXTURE_CUBE_MAP);
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -867,32 +884,32 @@ std::uint32_t gl_create_cubemap_hdr_empty(std::int32_t faceSize,
   }
 
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
 
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, tex);
   for (std::int32_t mip = 0; mip < mipLevels; ++mip) {
     std::int32_t mipSize = faceSize;
     for (std::int32_t step = 0; step < mip; ++step) {
       mipSize = std::max<std::int32_t>(1, mipSize / 2);
     }
     for (int face = 0; face < 6; ++face) {
-      g_gl.texImage2D(
+      gl_table().texImage2D(
           static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), mip,
           GL_RGB16F, static_cast<GLsizei>(mipSize),
           static_cast<GLsizei>(mipSize), 0, GL_RGB, GL_FLOAT, nullptr);
     }
   }
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
                      (mipLevels > 1) ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, mipLevels - 1);
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, mipLevels - 1);
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -900,19 +917,19 @@ std::uint32_t gl_create_cubemap_hdr_empty(std::int32_t faceSize,
 std::uint32_t gl_create_depth_texture(std::int32_t width,
                                       std::int32_t height) noexcept {
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
 
-  g_gl.bindTexture(GL_TEXTURE_2D, tex);
-  g_gl.texImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
+  gl_table().bindTexture(GL_TEXTURE_2D, tex);
+  gl_table().texImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
                   static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
                   GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  gl_table().bindTexture(GL_TEXTURE_2D, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -920,52 +937,52 @@ std::uint32_t gl_create_depth_texture(std::int32_t width,
 void gl_destroy_texture(std::uint32_t id) noexcept {
   if (id != 0U) {
     const GLuint tex = static_cast<GLuint>(id);
-    g_gl.deleteTextures(1, &tex);
+    gl_table().deleteTextures(1, &tex);
   }
 }
 
 /// Handles gl bind texture.
 void gl_bind_texture(std::int32_t unit, std::uint32_t id) noexcept {
-  g_gl.activeTexture(
+  gl_table().activeTexture(
       static_cast<GLenum>(GL_TEXTURE0 + static_cast<GLenum>(unit)));
-  g_gl.bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(id));
+  gl_table().bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(id));
 }
 
 // --- Cubemap textures (point light shadows) ---
 
 std::uint32_t gl_create_depth_cubemap(std::int32_t faceSize) noexcept {
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, tex);
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, tex);
   for (int i = 0; i < 6; ++i) {
-    g_gl.texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i), 0,
+    gl_table().texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i), 0,
                     GL_DEPTH_COMPONENT24, faceSize, faceSize, 0,
                     GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
   }
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  g_gl.texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
 /// Handles gl bind texture cubemap.
 void gl_bind_texture_cubemap(std::int32_t unit, std::uint32_t id) noexcept {
-  g_gl.activeTexture(
+  gl_table().activeTexture(
       static_cast<GLenum>(GL_TEXTURE0 + static_cast<GLenum>(unit)));
-  g_gl.bindTexture(GL_TEXTURE_CUBE_MAP, static_cast<GLuint>(id));
+  gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, static_cast<GLuint>(id));
 }
 
 /// Handles gl framebuffer cubemap face.
 void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
                                  std::int32_t face) noexcept {
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
-  g_gl.framebufferTexture2D(
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+  gl_table().framebufferTexture2D(
       GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
       static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
       static_cast<GLuint>(cubeTex), 0);
@@ -976,8 +993,8 @@ void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
                                            std::uint32_t cubeTex,
                                            std::int32_t face,
                                            std::int32_t mipLevel) noexcept {
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
-  g_gl.framebufferTexture2D(
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+  gl_table().framebufferTexture2D(
       GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
       static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
       static_cast<GLuint>(cubeTex), static_cast<GLint>(mipLevel));
@@ -988,24 +1005,24 @@ void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
 std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
                                     std::uint32_t depthTex) noexcept {
   GLuint fbo = 0U;
-  g_gl.genFramebuffers(1, &fbo);
+  gl_table().genFramebuffers(1, &fbo);
   if (fbo == 0U) {
     return 0U;
   }
 
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, fbo);
 
   if (colorTex != 0U) {
-    g_gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+    gl_table().framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                               GL_TEXTURE_2D, static_cast<GLuint>(colorTex), 0);
   }
 
   if (depthTex != 0U) {
-    g_gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+    gl_table().framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                               GL_TEXTURE_2D, static_cast<GLuint>(depthTex), 0);
   }
 
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, 0U);
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);
   return static_cast<std::uint32_t>(fbo);
 }
 
@@ -1013,18 +1030,18 @@ std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
 void gl_destroy_framebuffer(std::uint32_t fbo) noexcept {
   if (fbo != 0U) {
     const GLuint id = static_cast<GLuint>(fbo);
-    g_gl.deleteFramebuffers(1, &id);
+    gl_table().deleteFramebuffers(1, &id);
   }
 }
 
 /// Handles gl bind framebuffer.
 void gl_bind_framebuffer(std::uint32_t fbo) noexcept {
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
 }
 
 /// Handles gl check framebuffer complete.
 bool gl_check_framebuffer_complete() noexcept {
-  return g_gl.checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+  return gl_table().checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
 /// Handles gl blit depth.
@@ -1034,12 +1051,12 @@ void gl_blit_depth(std::uint32_t srcFbo, std::uint32_t dstFbo,
     return;
   }
 
-  g_gl.bindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(srcFbo));
-  g_gl.bindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(dstFbo));
-  g_gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height,
+  gl_table().bindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(srcFbo));
+  gl_table().bindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(dstFbo));
+  gl_table().blitFramebuffer(0, 0, width, height, 0, 0, width, height,
                        GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-  g_gl.bindFramebuffer(GL_READ_FRAMEBUFFER, 0U);
-  g_gl.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0U);
+  gl_table().bindFramebuffer(GL_READ_FRAMEBUFFER, 0U);
+  gl_table().bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0U);
 }
 
 /// Handles gl create framebuffer mrt.
@@ -1051,32 +1068,32 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
   }
 
   GLuint fbo = 0U;
-  g_gl.genFramebuffers(1, &fbo);
+  gl_table().genFramebuffers(1, &fbo);
   if (fbo == 0U) {
     return 0U;
   }
 
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, fbo);
 
   constexpr GLenum kAttachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1,
                                      GL_COLOR_ATTACHMENT2,
                                      GL_COLOR_ATTACHMENT3};
   for (std::int32_t i = 0; i < colorCount; ++i) {
     if (colorTextures[i] != 0U) {
-      g_gl.framebufferTexture2D(GL_FRAMEBUFFER, kAttachments[i], GL_TEXTURE_2D,
+      gl_table().framebufferTexture2D(GL_FRAMEBUFFER, kAttachments[i], GL_TEXTURE_2D,
                                 static_cast<GLuint>(colorTextures[i]), 0);
     }
   }
 
   if (depthTex != 0U) {
-    g_gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+    gl_table().framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                               GL_TEXTURE_2D, static_cast<GLuint>(depthTex), 0);
   }
 
   // Activate all color attachments for MRT output.
-  g_gl.drawBuffers(static_cast<GLsizei>(colorCount), kAttachments);
+  gl_table().drawBuffers(static_cast<GLsizei>(colorCount), kAttachments);
 
-  g_gl.bindFramebuffer(GL_FRAMEBUFFER, 0U);
+  gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);
   return static_cast<std::uint32_t>(fbo);
 }
 
@@ -1084,24 +1101,24 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
 std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
                                         const float *data) noexcept {
   GLuint tex = 0U;
-  g_gl.genTextures(1, &tex);
+  gl_table().genTextures(1, &tex);
   if (tex == 0U) {
     return 0U;
   }
 
-  g_gl.bindTexture(GL_TEXTURE_2D, tex);
-  g_gl.texImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(GL_R32F),
+  gl_table().bindTexture(GL_TEXTURE_2D, tex);
+  gl_table().texImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(GL_R32F),
                   static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
                   GL_RED, GL_FLOAT, data);
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                      static_cast<GLint>(GL_NEAREST));
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
                      static_cast<GLint>(GL_NEAREST));
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
                      static_cast<GLint>(GL_CLAMP_TO_EDGE));
-  g_gl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+  gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
                      static_cast<GLint>(GL_CLAMP_TO_EDGE));
-  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  gl_table().bindTexture(GL_TEXTURE_2D, 0U);
   return static_cast<std::uint32_t>(tex);
 }
 
@@ -1112,41 +1129,41 @@ void gl_update_texture_2d_r32f(std::uint32_t texId, std::int32_t width,
   if (texId == 0U) {
     return;
   }
-  g_gl.bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texId));
-  g_gl.texSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width),
+  gl_table().bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texId));
+  gl_table().texSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width),
                      static_cast<GLsizei>(height), GL_RED, GL_FLOAT, data);
-  g_gl.bindTexture(GL_TEXTURE_2D, 0U);
+  gl_table().bindTexture(GL_TEXTURE_2D, 0U);
 }
 
 // --- Blend ---
 
-void gl_enable_blending() noexcept { g_gl.enable(GL_BLEND); }
+void gl_enable_blending() noexcept { gl_table().enable(GL_BLEND); }
 
 /// Handles gl disable blending.
-void gl_disable_blending() noexcept { g_gl.disable(GL_BLEND); }
+void gl_disable_blending() noexcept { gl_table().disable(GL_BLEND); }
 
 /// Handles gl set blend func alpha.
 void gl_set_blend_func_alpha() noexcept {
-  g_gl.blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  gl_table().blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 // --- Face culling ---
 
-void gl_enable_face_culling() noexcept { g_gl.enable(GL_CULL_FACE); }
+void gl_enable_face_culling() noexcept { gl_table().enable(GL_CULL_FACE); }
 
 /// Handles gl disable face culling.
-void gl_disable_face_culling() noexcept { g_gl.disable(GL_CULL_FACE); }
+void gl_disable_face_culling() noexcept { gl_table().disable(GL_CULL_FACE); }
 
 // --- Depth mask ---
 
 void gl_set_depth_mask(bool write) noexcept {
-  g_gl.depthMask(write ? GL_TRUE : static_cast<GLboolean>(GL_FALSE));
+  gl_table().depthMask(write ? GL_TRUE : static_cast<GLboolean>(GL_FALSE));
 }
 
 /// Handles gl create query.
 std::uint32_t gl_create_query() noexcept {
   GLuint query = 0U;
-  g_gl.genQueries(1, &query);
+  gl_table().genQueries(1, &query);
   return static_cast<std::uint32_t>(query);
 }
 
@@ -1157,7 +1174,7 @@ void gl_destroy_query(std::uint32_t query) noexcept {
   }
 
   const GLuint id = static_cast<GLuint>(query);
-  g_gl.deleteQueries(1, &id);
+  gl_table().deleteQueries(1, &id);
 }
 
 /// Handles gl query counter timestamp.
@@ -1166,7 +1183,7 @@ void gl_query_counter_timestamp(std::uint32_t query) noexcept {
     return;
   }
 
-  g_gl.queryCounter(static_cast<GLuint>(query), GL_TIMESTAMP);
+  gl_table().queryCounter(static_cast<GLuint>(query), GL_TIMESTAMP);
 }
 
 /// Handles gl query result available.
@@ -1176,7 +1193,7 @@ bool gl_query_result_available(std::uint32_t query) noexcept {
   }
 
   GLuint64 available = 0U;
-  g_gl.getQueryObjectui64v(static_cast<GLuint>(query),
+  gl_table().getQueryObjectui64v(static_cast<GLuint>(query),
                            GL_QUERY_RESULT_AVAILABLE, &available);
   return available != 0U;
 }
@@ -1188,7 +1205,7 @@ std::uint64_t gl_query_result_u64(std::uint32_t query) noexcept {
   }
 
   GLuint64 value = 0U;
-  g_gl.getQueryObjectui64v(static_cast<GLuint>(query), GL_QUERY_RESULT, &value);
+  gl_table().getQueryObjectui64v(static_cast<GLuint>(query), GL_QUERY_RESULT, &value);
   return static_cast<std::uint64_t>(value);
 }
 
@@ -1196,7 +1213,7 @@ std::uint64_t gl_query_result_u64(std::uint32_t query) noexcept {
 
 /// Initializes the owning system for render device.
 bool initialize_render_device() noexcept {
-  if (g_deviceInitialized) {
+  if (render_device_context().initialized) {
     return true;
   }
 
@@ -1206,91 +1223,91 @@ bool initialize_render_device() noexcept {
     return false;
   }
 
-  g_device.create_shader = &gl_create_shader;
-  g_device.destroy_shader = &gl_destroy_shader;
-  g_device.link_program = &gl_link_program;
-  g_device.destroy_program = &gl_destroy_program;
-  g_device.bind_program = &gl_bind_program;
-  g_device.uniform_location = &gl_uniform_location;
-  g_device.set_uniform_mat4 = &gl_set_uniform_mat4;
-  g_device.set_uniform_mat3 = &gl_set_uniform_mat3;
-  g_device.set_uniform_float = &gl_set_uniform_float;
-  g_device.set_uniform_vec3 = &gl_set_uniform_vec3;
-  g_device.set_uniform_vec2 = &gl_set_uniform_vec2;
-  g_device.create_vertex_array = &gl_create_vertex_array;
-  g_device.destroy_vertex_array = &gl_destroy_vertex_array;
-  g_device.bind_vertex_array = &gl_bind_vertex_array;
-  g_device.create_buffer = &gl_create_buffer;
-  g_device.destroy_buffer = &gl_destroy_buffer;
-  g_device.bind_array_buffer = &gl_bind_array_buffer;
-  g_device.bind_element_buffer = &gl_bind_element_buffer;
-  g_device.buffer_data_array = &gl_buffer_data_array;
-  g_device.buffer_data_element = &gl_buffer_data_element;
-  g_device.enable_vertex_attrib = &gl_enable_vertex_attrib;
-  g_device.vertex_attrib_float = &gl_vertex_attrib_float;
-  g_device.vertex_attrib_divisor = &gl_vertex_attrib_divisor;
-  g_device.draw_arrays_triangles = &gl_draw_arrays_triangles;
-  g_device.draw_elements_triangles_u32 = &gl_draw_elements_triangles_u32;
-  g_device.draw_elements_triangles_u32_instanced =
+  render_device_state().create_shader = &gl_create_shader;
+  render_device_state().destroy_shader = &gl_destroy_shader;
+  render_device_state().link_program = &gl_link_program;
+  render_device_state().destroy_program = &gl_destroy_program;
+  render_device_state().bind_program = &gl_bind_program;
+  render_device_state().uniform_location = &gl_uniform_location;
+  render_device_state().set_uniform_mat4 = &gl_set_uniform_mat4;
+  render_device_state().set_uniform_mat3 = &gl_set_uniform_mat3;
+  render_device_state().set_uniform_float = &gl_set_uniform_float;
+  render_device_state().set_uniform_vec3 = &gl_set_uniform_vec3;
+  render_device_state().set_uniform_vec2 = &gl_set_uniform_vec2;
+  render_device_state().create_vertex_array = &gl_create_vertex_array;
+  render_device_state().destroy_vertex_array = &gl_destroy_vertex_array;
+  render_device_state().bind_vertex_array = &gl_bind_vertex_array;
+  render_device_state().create_buffer = &gl_create_buffer;
+  render_device_state().destroy_buffer = &gl_destroy_buffer;
+  render_device_state().bind_array_buffer = &gl_bind_array_buffer;
+  render_device_state().bind_element_buffer = &gl_bind_element_buffer;
+  render_device_state().buffer_data_array = &gl_buffer_data_array;
+  render_device_state().buffer_data_element = &gl_buffer_data_element;
+  render_device_state().enable_vertex_attrib = &gl_enable_vertex_attrib;
+  render_device_state().vertex_attrib_float = &gl_vertex_attrib_float;
+  render_device_state().vertex_attrib_divisor = &gl_vertex_attrib_divisor;
+  render_device_state().draw_arrays_triangles = &gl_draw_arrays_triangles;
+  render_device_state().draw_elements_triangles_u32 = &gl_draw_elements_triangles_u32;
+  render_device_state().draw_elements_triangles_u32_instanced =
       &gl_draw_elements_triangles_u32_instanced;
-  g_device.set_uniform_int = &gl_set_uniform_int;
-  g_device.set_uniform_vec4 = &gl_set_uniform_vec4;
-  g_device.create_texture_2d = &gl_create_texture_2d;
-  g_device.create_texture_2d_hdr = &gl_create_texture_2d_hdr;
-  g_device.create_cubemap_hdr = &gl_create_cubemap_hdr;
-  g_device.create_cubemap_hdr_empty = &gl_create_cubemap_hdr_empty;
-  g_device.create_depth_texture = &gl_create_depth_texture;
-  g_device.destroy_texture = &gl_destroy_texture;
-  g_device.bind_texture = &gl_bind_texture;
-  g_device.create_depth_cubemap = &gl_create_depth_cubemap;
-  g_device.bind_texture_cubemap = &gl_bind_texture_cubemap;
-  g_device.framebuffer_cubemap_face = &gl_framebuffer_cubemap_face;
-  g_device.framebuffer_cubemap_color_face_mip =
+  render_device_state().set_uniform_int = &gl_set_uniform_int;
+  render_device_state().set_uniform_vec4 = &gl_set_uniform_vec4;
+  render_device_state().create_texture_2d = &gl_create_texture_2d;
+  render_device_state().create_texture_2d_hdr = &gl_create_texture_2d_hdr;
+  render_device_state().create_cubemap_hdr = &gl_create_cubemap_hdr;
+  render_device_state().create_cubemap_hdr_empty = &gl_create_cubemap_hdr_empty;
+  render_device_state().create_depth_texture = &gl_create_depth_texture;
+  render_device_state().destroy_texture = &gl_destroy_texture;
+  render_device_state().bind_texture = &gl_bind_texture;
+  render_device_state().create_depth_cubemap = &gl_create_depth_cubemap;
+  render_device_state().bind_texture_cubemap = &gl_bind_texture_cubemap;
+  render_device_state().framebuffer_cubemap_face = &gl_framebuffer_cubemap_face;
+  render_device_state().framebuffer_cubemap_color_face_mip =
       &gl_framebuffer_cubemap_color_face_mip;
-  g_device.create_framebuffer = &gl_create_framebuffer;
-  g_device.create_framebuffer_mrt = &gl_create_framebuffer_mrt;
-  g_device.destroy_framebuffer = &gl_destroy_framebuffer;
-  g_device.bind_framebuffer = &gl_bind_framebuffer;
-  g_device.check_framebuffer_complete = &gl_check_framebuffer_complete;
-  g_device.blit_depth = &gl_blit_depth;
-  g_device.enable_blending = &gl_enable_blending;
-  g_device.disable_blending = &gl_disable_blending;
-  g_device.set_blend_func_alpha = &gl_set_blend_func_alpha;
-  g_device.enable_face_culling = &gl_enable_face_culling;
-  g_device.disable_face_culling = &gl_disable_face_culling;
-  g_device.set_depth_mask = &gl_set_depth_mask;
-  g_device.create_query = &gl_create_query;
-  g_device.destroy_query = &gl_destroy_query;
-  g_device.query_counter_timestamp = &gl_query_counter_timestamp;
-  g_device.query_result_available = &gl_query_result_available;
-  g_device.query_result_u64 = &gl_query_result_u64;
-  g_device.set_viewport = &gl_set_viewport;
-  g_device.enable_depth_test = &gl_enable_depth_test;
-  g_device.disable_depth_test = &gl_disable_depth_test;
-  g_device.set_depth_func_less = &gl_set_depth_func_less;
-  g_device.set_depth_func_less_equal = &gl_set_depth_func_less_equal;
-  g_device.set_clear_color = &gl_set_clear_color;
-  g_device.clear_color_depth = &gl_clear_color_depth;
-  g_device.create_texture_2d_r32f = &gl_create_texture_2d_r32f;
-  g_device.update_texture_2d_r32f = &gl_update_texture_2d_r32f;
+  render_device_state().create_framebuffer = &gl_create_framebuffer;
+  render_device_state().create_framebuffer_mrt = &gl_create_framebuffer_mrt;
+  render_device_state().destroy_framebuffer = &gl_destroy_framebuffer;
+  render_device_state().bind_framebuffer = &gl_bind_framebuffer;
+  render_device_state().check_framebuffer_complete = &gl_check_framebuffer_complete;
+  render_device_state().blit_depth = &gl_blit_depth;
+  render_device_state().enable_blending = &gl_enable_blending;
+  render_device_state().disable_blending = &gl_disable_blending;
+  render_device_state().set_blend_func_alpha = &gl_set_blend_func_alpha;
+  render_device_state().enable_face_culling = &gl_enable_face_culling;
+  render_device_state().disable_face_culling = &gl_disable_face_culling;
+  render_device_state().set_depth_mask = &gl_set_depth_mask;
+  render_device_state().create_query = &gl_create_query;
+  render_device_state().destroy_query = &gl_destroy_query;
+  render_device_state().query_counter_timestamp = &gl_query_counter_timestamp;
+  render_device_state().query_result_available = &gl_query_result_available;
+  render_device_state().query_result_u64 = &gl_query_result_u64;
+  render_device_state().set_viewport = &gl_set_viewport;
+  render_device_state().enable_depth_test = &gl_enable_depth_test;
+  render_device_state().disable_depth_test = &gl_disable_depth_test;
+  render_device_state().set_depth_func_less = &gl_set_depth_func_less;
+  render_device_state().set_depth_func_less_equal = &gl_set_depth_func_less_equal;
+  render_device_state().set_clear_color = &gl_set_clear_color;
+  render_device_state().clear_color_depth = &gl_clear_color_depth;
+  render_device_state().create_texture_2d_r32f = &gl_create_texture_2d_r32f;
+  render_device_state().update_texture_2d_r32f = &gl_update_texture_2d_r32f;
 
-  g_deviceInitialized = true;
+  render_device_context().initialized = true;
   return true;
 }
 
 /// Shuts down the owning system for render device.
 void shutdown_render_device() noexcept {
-  g_device = RenderDevice{};
-  g_gl = GlTable{};
-  g_deviceInitialized = false;
+  render_device_state() = RenderDevice{};
+  gl_table() = GlTable{};
+  render_device_context().initialized = false;
 }
 
 /// Handles render device.
 const RenderDevice *render_device() noexcept {
-  if (!g_deviceInitialized) {
+  if (!render_device_context().initialized) {
     return nullptr;
   }
-  return &g_device;
+  return &render_device_state();
 }
 
 } // namespace engine::renderer
