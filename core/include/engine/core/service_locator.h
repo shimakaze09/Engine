@@ -30,7 +30,7 @@ class ServiceLocator final {
 public:
   static constexpr std::size_t kMaxServices = 64U;
 
-  // Register a service pointer. Overwrites if already registered.
+  // Register a service pointer. A null pointer removes that service type.
   // Returns false if the registry is full and the type is new.
   template <typename T> bool register_service(T *service) noexcept {
     return register_raw(type_id<T>(), static_cast<void *>(service));

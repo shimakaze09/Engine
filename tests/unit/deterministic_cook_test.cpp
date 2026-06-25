@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "engine/core/json.h"
 #include "engine/core/mesh_asset.h"
-#include "dependency_graph.h"
 
 // ---- Inline reimplementation of packer primitives for isolated testing ----
 
@@ -121,63 +121,59 @@ write_metadata_to_string(const char *inputPath, const char *outputPath,
   const std::size_t vertexCount =
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
-  const std::string escapedInputPath =
-      engine::tools::escape_json_string(inputPath);
-  const std::string escapedOutputPath =
-      engine::tools::escape_json_string(outputPath);
 
-  char buf[4096] = {};
-  int pos = std::snprintf(
-      buf, sizeof(buf),
-      "{\n"
-      "  \"schemaVersion\": 2,\n"
-      "  \"assetId\": \"%016llx\",\n"
-      "  \"typeTag\": \"mesh\",\n"
-      "  \"source\": \"%s\",\n"
-      "  \"output\": \"%s\",\n"
-      "  \"assetFormat\": \"engine.mesh\",\n"
-      "  \"assetFormatVersion\": %u,\n"
-      "  \"sourceContentHash\": \"%016llx\",\n"
-      "  \"fileSize\": 0,\n"
-      "  \"vertexCount\": %zu,\n"
-      "  \"indexCount\": %zu,\n"
-      "  \"tags\": [],\n"
-      "  \"dependencies\": [\n",
-      static_cast<unsigned long long>(sourceHash), escapedInputPath.c_str(),
-      escapedOutputPath.c_str(),
-      data.hasUVs ? engine::core::kMeshAssetVersion2
-                  : engine::core::kMeshAssetVersion,
-      static_cast<unsigned long long>(sourceHash), vertexCount, indexCount);
+  char sourceHashText[17] = {};
+  std::snprintf(sourceHashText, sizeof(sourceHashText), "%016llx",
+                static_cast<unsigned long long>(sourceHash));
 
-  for (std::size_t i = 0U; i < dependencies.size(); ++i) {
-    const DependencyDigest &dep = dependencies[i];
-    const std::string escapedDependencyPath =
-        engine::tools::escape_json_string(dep.path.c_str());
-    pos += std::snprintf(buf + pos, sizeof(buf) - static_cast<std::size_t>(pos),
-                         "    { \"path\": \"%s\", \"hash\": \"%016llx\" }%s\n",
-                         escapedDependencyPath.c_str(),
-                         static_cast<unsigned long long>(dep.hash),
-                         (i + 1U < dependencies.size()) ? "," : "");
+  engine::core::JsonWriter writer{};
+  writer.begin_object();
+  writer.write_uint("schemaVersion", 2U);
+  writer.write_string("assetId", sourceHashText);
+  writer.write_string("typeTag", "mesh");
+  writer.write_string("source", inputPath);
+  writer.write_string("output", outputPath);
+  writer.write_string("assetFormat", "engine.mesh");
+  writer.write_uint("assetFormatVersion",
+                    data.hasUVs ? engine::core::kMeshAssetVersion2
+                                : engine::core::kMeshAssetVersion);
+  writer.write_string("sourceContentHash", sourceHashText);
+  writer.write_uint64("fileSize", 0ULL);
+  writer.write_uint64("vertexCount", static_cast<std::uint64_t>(vertexCount));
+  writer.write_uint64("indexCount", static_cast<std::uint64_t>(indexCount));
+  writer.begin_array("tags");
+  writer.end_array();
+  writer.begin_array("dependencies");
+  for (const DependencyDigest &dep : dependencies) {
+    char dependencyHashText[17] = {};
+    std::snprintf(dependencyHashText, sizeof(dependencyHashText), "%016llx",
+                  static_cast<unsigned long long>(dep.hash));
+    writer.begin_object();
+    writer.write_string("path", dep.path.c_str());
+    writer.write_string("hash", dependencyHashText);
+    writer.end_object();
   }
+  writer.end_array();
 
-  pos += std::snprintf(
-      buf + pos, sizeof(buf) - static_cast<std::size_t>(pos),
-      "  ],\n"
-      "  \"importSettings\": {\n"
-      "    \"meshIndex\": %d,\n"
-      "    \"primitiveIndex\": %d,\n"
-      "    \"scaleFactor\": %.6g,\n"
-      "    \"upAxis\": %d,\n"
-      "    \"generateNormals\": %s,\n"
-      "    \"interleavedLayout\": \"%s\"\n"
-      "  }\n"
-      "}\n",
-      importSettings.meshIndex, importSettings.primitiveIndex,
-      static_cast<double>(importSettings.scaleFactor), importSettings.upAxis,
-      importSettings.generateNormals ? "true" : "false",
-      data.hasUVs ? "position_normal_texcoord" : "position_normal");
+  writer.write_key("importSettings");
+  writer.begin_object();
+  writer.write_uint64("meshIndex",
+                      static_cast<std::uint64_t>(importSettings.meshIndex));
+  writer.write_uint64(
+      "primitiveIndex",
+      static_cast<std::uint64_t>(importSettings.primitiveIndex));
+  writer.write_float("scaleFactor", importSettings.scaleFactor);
+  writer.write_uint64("upAxis",
+                      static_cast<std::uint64_t>(importSettings.upAxis));
+  writer.write_bool("generateNormals", importSettings.generateNormals);
+  writer.write_string("interleavedLayout",
+                      data.hasUVs ? "position_normal_texcoord"
+                                  : "position_normal");
+  writer.end_object();
+  writer.end_object();
 
-  return std::string(buf, static_cast<std::size_t>(pos));
+  return writer.ok() ? std::string(writer.result(), writer.result_size())
+                     : std::string{};
 }
 
 // Write cookstamp to string (same logic as write_cook_stamp).

@@ -698,51 +698,90 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
   }
 }
 
+struct DistanceFogUniformLocations final {
+  int mode = -1;
+  int start = -1;
+  int end = -1;
+  int density = -1;
+  int color = -1;
+};
+
+struct HeightFogUniformLocations final {
+  int enabled = -1;
+  int baseHeight = -1;
+  int density = -1;
+  int falloff = -1;
+  int stepCount = -1;
+};
+
+void upload_distance_fog_uniforms(
+    const RenderDevice *dev, const DistanceFogUniformLocations &locations,
+    const DistanceFogSettings &settings) noexcept {
+  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
+  if (locations.mode >= 0) {
+    dev->set_uniform_int(locations.mode, static_cast<std::int32_t>(fog.mode));
+  }
+  if (locations.start >= 0) {
+    dev->set_uniform_float(locations.start, fog.start);
+  }
+  if (locations.end >= 0) {
+    dev->set_uniform_float(locations.end, fog.end);
+  }
+  if (locations.density >= 0) {
+    dev->set_uniform_float(locations.density, fog.density);
+  }
+  if (locations.color >= 0) {
+    dev->set_uniform_vec3(locations.color, &fog.color.x);
+  }
+}
+
+void upload_height_fog_uniforms(
+    const RenderDevice *dev, const HeightFogUniformLocations &locations,
+    const HeightFogSettings &settings) noexcept {
+  const HeightFogSettings fog = normalize_height_fog_settings(settings);
+  if (locations.enabled >= 0) {
+    dev->set_uniform_int(locations.enabled, fog.enabled ? 1 : 0);
+  }
+  if (locations.baseHeight >= 0) {
+    dev->set_uniform_float(locations.baseHeight, fog.baseHeight);
+  }
+  if (locations.density >= 0) {
+    dev->set_uniform_float(locations.density, fog.density);
+  }
+  if (locations.falloff >= 0) {
+    dev->set_uniform_float(locations.falloff, fog.falloff);
+  }
+  if (locations.stepCount >= 0) {
+    dev->set_uniform_int(locations.stepCount, fog.stepCount);
+  }
+}
+
 /// Handles upload pbr distance fog uniforms.
 void upload_pbr_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
-  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
-  if (backend.pbrFogModeLocation >= 0) {
-    dev->set_uniform_int(backend.pbrFogModeLocation,
-                         static_cast<std::int32_t>(fog.mode));
-  }
-  if (backend.pbrFogStartLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFogStartLocation, fog.start);
-  }
-  if (backend.pbrFogEndLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFogEndLocation, fog.end);
-  }
-  if (backend.pbrFogDensityLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFogDensityLocation, fog.density);
-  }
-  if (backend.pbrFogColorLocation >= 0) {
-    dev->set_uniform_vec3(backend.pbrFogColorLocation, &fog.color.x);
-  }
+  upload_distance_fog_uniforms(
+      dev,
+      DistanceFogUniformLocations{backend.pbrFogModeLocation,
+                                  backend.pbrFogStartLocation,
+                                  backend.pbrFogEndLocation,
+                                  backend.pbrFogDensityLocation,
+                                  backend.pbrFogColorLocation},
+      settings);
 }
 
 /// Handles upload pbr height fog uniforms.
 void upload_pbr_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
-  const HeightFogSettings fog = normalize_height_fog_settings(settings);
-  if (backend.pbrHeightFogEnabledLocation >= 0) {
-    dev->set_uniform_int(backend.pbrHeightFogEnabledLocation,
-                         fog.enabled ? 1 : 0);
-  }
-  if (backend.pbrHeightFogBaseHeightLocation >= 0) {
-    dev->set_uniform_float(backend.pbrHeightFogBaseHeightLocation,
-                           fog.baseHeight);
-  }
-  if (backend.pbrHeightFogDensityLocation >= 0) {
-    dev->set_uniform_float(backend.pbrHeightFogDensityLocation, fog.density);
-  }
-  if (backend.pbrHeightFogFalloffLocation >= 0) {
-    dev->set_uniform_float(backend.pbrHeightFogFalloffLocation, fog.falloff);
-  }
-  if (backend.pbrHeightFogStepCountLocation >= 0) {
-    dev->set_uniform_int(backend.pbrHeightFogStepCountLocation, fog.stepCount);
-  }
+  upload_height_fog_uniforms(
+      dev,
+      HeightFogUniformLocations{backend.pbrHeightFogEnabledLocation,
+                                backend.pbrHeightFogBaseHeightLocation,
+                                backend.pbrHeightFogDensityLocation,
+                                backend.pbrHeightFogFalloffLocation,
+                                backend.pbrHeightFogStepCountLocation},
+      settings);
 }
 
 /// Handles upload pbr foliage uniforms.
@@ -785,45 +824,26 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
-  const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
-  if (backend.dlFogModeLoc >= 0) {
-    dev->set_uniform_int(backend.dlFogModeLoc,
-                         static_cast<std::int32_t>(fog.mode));
-  }
-  if (backend.dlFogStartLoc >= 0) {
-    dev->set_uniform_float(backend.dlFogStartLoc, fog.start);
-  }
-  if (backend.dlFogEndLoc >= 0) {
-    dev->set_uniform_float(backend.dlFogEndLoc, fog.end);
-  }
-  if (backend.dlFogDensityLoc >= 0) {
-    dev->set_uniform_float(backend.dlFogDensityLoc, fog.density);
-  }
-  if (backend.dlFogColorLoc >= 0) {
-    dev->set_uniform_vec3(backend.dlFogColorLoc, &fog.color.x);
-  }
+  upload_distance_fog_uniforms(
+      dev,
+      DistanceFogUniformLocations{backend.dlFogModeLoc, backend.dlFogStartLoc,
+                                  backend.dlFogEndLoc, backend.dlFogDensityLoc,
+                                  backend.dlFogColorLoc},
+      settings);
 }
 
 /// Handles upload deferred height fog uniforms.
 void upload_deferred_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
-  const HeightFogSettings fog = normalize_height_fog_settings(settings);
-  if (backend.dlHeightFogEnabledLoc >= 0) {
-    dev->set_uniform_int(backend.dlHeightFogEnabledLoc, fog.enabled ? 1 : 0);
-  }
-  if (backend.dlHeightFogBaseHeightLoc >= 0) {
-    dev->set_uniform_float(backend.dlHeightFogBaseHeightLoc, fog.baseHeight);
-  }
-  if (backend.dlHeightFogDensityLoc >= 0) {
-    dev->set_uniform_float(backend.dlHeightFogDensityLoc, fog.density);
-  }
-  if (backend.dlHeightFogFalloffLoc >= 0) {
-    dev->set_uniform_float(backend.dlHeightFogFalloffLoc, fog.falloff);
-  }
-  if (backend.dlHeightFogStepCountLoc >= 0) {
-    dev->set_uniform_int(backend.dlHeightFogStepCountLoc, fog.stepCount);
-  }
+  upload_height_fog_uniforms(
+      dev,
+      HeightFogUniformLocations{backend.dlHeightFogEnabledLoc,
+                                backend.dlHeightFogBaseHeightLoc,
+                                backend.dlHeightFogDensityLoc,
+                                backend.dlHeightFogFalloffLoc,
+                                backend.dlHeightFogStepCountLoc},
+      settings);
 }
 
 /// Handles bind pbr shadow uniforms.

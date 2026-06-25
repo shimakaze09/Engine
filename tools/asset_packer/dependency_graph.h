@@ -112,9 +112,6 @@ std::size_t topological_sort(const DependencyGraph *graph,
 bool write_dependency_graph_json(const DependencyGraph *graph,
                                  const char *path) noexcept;
 
-/// Escape raw UTF-8 bytes for safe JSON string content.
-std::string escape_json_string(const char *text);
-
 /// Deserialize graph from JSON file at `path`.
 bool read_dependency_graph_json(DependencyGraph *graph,
                                 const char *path) noexcept;

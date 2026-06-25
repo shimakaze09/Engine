@@ -2,11 +2,15 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
+
 #include "engine/audio/audio.h"
 #include "engine/core/service_locator.h"
 #include "engine/physics/physics_world_view.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
+#include "engine/renderer/asset_streaming.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
@@ -38,8 +42,21 @@ struct EngineAudioService final {
 
 /// Stores engine asset database service data used by the engine.
 struct EngineAssetDatabaseService final {
+  /// Stores Lua-visible async/preload handles for runtime asset requests.
+  struct ScriptAssetLoadHandle final {
+    renderer::AssetId assetId = renderer::kInvalidAssetId;
+    renderer::LoadHandle streamingHandle = renderer::kInvalidLoadHandle;
+    std::uint16_t generation = 0U;
+    bool occupied = false;
+  };
+
+  static constexpr std::size_t kMaxScriptAssetLoadHandles = 1024U;
+
   renderer::AssetDatabase *database = nullptr;
   renderer::AssetManager *manager = nullptr;
+  renderer::AssetStreamingQueue *streamingQueue = nullptr;
+  std::array<ScriptAssetLoadHandle, kMaxScriptAssetLoadHandles>
+      scriptLoadHandles{};
 };
 
 /// Stores engine renderer service data used by the engine.

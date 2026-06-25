@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <new>
+#include <utility>
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -37,6 +39,7 @@
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
+#include "engine/renderer/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
@@ -54,6 +57,44 @@
 namespace engine {
 
 namespace runtime {
+
+/// Lets the editor process one native event before deciding whether gameplay
+/// input should see it.
+InputEventRoute process_editor_input_event(const EditorBridge *bridge,
+                                           void *nativeEvent) noexcept {
+  if (nativeEvent == nullptr) {
+    return InputEventRoute::Gameplay;
+  }
+
+  auto *event = static_cast<SDL_Event *>(nativeEvent);
+  if ((bridge != nullptr) && (bridge->process_event != nullptr)) {
+    bridge->process_event(event);
+  }
+
+  if (event->type == SDL_QUIT) {
+    return InputEventRoute::QuitRequested;
+  }
+
+  const bool keyboardEvent =
+      (event->type == SDL_KEYDOWN) || (event->type == SDL_KEYUP) ||
+      (event->type == SDL_TEXTINPUT) || (event->type == SDL_TEXTEDITING);
+  const bool mouseEvent = (event->type == SDL_MOUSEMOTION) ||
+                          (event->type == SDL_MOUSEBUTTONDOWN) ||
+                          (event->type == SDL_MOUSEBUTTONUP) ||
+                          (event->type == SDL_MOUSEWHEEL);
+  const bool captureKeyboard = (bridge != nullptr) &&
+                               (bridge->wants_capture_keyboard != nullptr) &&
+                               bridge->wants_capture_keyboard();
+  const bool captureMouse = (bridge != nullptr) &&
+                            (bridge->wants_capture_mouse != nullptr) &&
+                            bridge->wants_capture_mouse();
+
+  if ((keyboardEvent && captureKeyboard) || (mouseEvent && captureMouse)) {
+    return InputEventRoute::EditorCaptured;
+  }
+
+  return InputEventRoute::Gameplay;
+}
 
 /// Processes a queued script scene operation, if one exists.
 bool process_pending_scene_op(World &world) noexcept {
@@ -679,36 +720,17 @@ void process_input_events_with_editor() noexcept {
 
   SDL_Event event{};
   while (SDL_PollEvent(&event) != 0) {
-    core::input_process_event(&event);
-
-    if ((bridge != nullptr) && (bridge->process_event != nullptr)) {
-      bridge->process_event(&event);
-    }
-
-    if (event.type == SDL_QUIT) {
+    const runtime::InputEventRoute route =
+        runtime::process_editor_input_event(bridge, &event);
+    if (route == runtime::InputEventRoute::QuitRequested) {
       core::request_platform_quit();
       continue;
     }
-
-    const bool keyboardEvent =
-        (event.type == SDL_KEYDOWN) || (event.type == SDL_KEYUP) ||
-        (event.type == SDL_TEXTINPUT) || (event.type == SDL_TEXTEDITING);
-    const bool mouseEvent = (event.type == SDL_MOUSEMOTION) ||
-                            (event.type == SDL_MOUSEBUTTONDOWN) ||
-                            (event.type == SDL_MOUSEBUTTONUP) ||
-                            (event.type == SDL_MOUSEWHEEL);
-    const bool captureKeyboard = (bridge != nullptr) &&
-                                 (bridge->wants_capture_keyboard != nullptr) &&
-                                 bridge->wants_capture_keyboard();
-    const bool captureMouse = (bridge != nullptr) &&
-                              (bridge->wants_capture_mouse != nullptr) &&
-                              bridge->wants_capture_mouse();
-    const bool editorCapturesInput =
-        (keyboardEvent && captureKeyboard) || (mouseEvent && captureMouse);
-
-    if (editorCapturesInput) {
+    if (route == runtime::InputEventRoute::EditorCaptured) {
       continue;
     }
+
+    core::input_process_event(&event);
   }
 
   core::end_input_frame();
@@ -837,6 +859,200 @@ struct BootstrapMeshIds final {
   renderer::AssetId capsule = renderer::kInvalidAssetId;
   renderer::AssetId pyramid = renderer::kInvalidAssetId;
 };
+
+/// CPU mesh payloads loaded by the streaming worker and consumed on the render thread.
+struct StreamingMeshTransferSlot final {
+  renderer::AssetId assetId = renderer::kInvalidAssetId;
+  renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 0ULL;
+  bool occupied = false;
+};
+
+/// Stores callback state for runtime mesh streaming.
+struct RuntimeAssetStreamingState final {
+  renderer::AssetDatabase *database = nullptr;
+  renderer::GpuMeshRegistry *meshRegistry = nullptr;
+  std::array<StreamingMeshTransferSlot, renderer::AssetStreamingQueue::kMaxRequests>
+      meshTransfers{};
+  std::mutex mutex{};
+};
+
+/// Stores a CPU-side mesh payload for main-thread upload.
+bool store_streamed_mesh_data(RuntimeAssetStreamingState *state,
+                              renderer::AssetId assetId,
+                              renderer::CpuMeshData &&meshData,
+                              std::uint64_t sizeBytes) noexcept {
+  if ((state == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(state->mutex);
+  std::size_t freeSlot = state->meshTransfers.size();
+  for (std::size_t i = 0U; i < state->meshTransfers.size(); ++i) {
+    StreamingMeshTransferSlot &slot = state->meshTransfers[i];
+    if (slot.occupied && (slot.assetId == assetId)) {
+      slot.meshData = std::move(meshData);
+      slot.sizeBytes = sizeBytes;
+      return true;
+    }
+    if (!slot.occupied && (freeSlot == state->meshTransfers.size())) {
+      freeSlot = i;
+    }
+  }
+
+  if (freeSlot == state->meshTransfers.size()) {
+    return false;
+  }
+
+  StreamingMeshTransferSlot &slot = state->meshTransfers[freeSlot];
+  slot.assetId = assetId;
+  slot.meshData = std::move(meshData);
+  slot.sizeBytes = sizeBytes;
+  slot.occupied = true;
+  return true;
+}
+
+/// Takes a CPU-side mesh payload loaded by the streaming worker.
+bool take_streamed_mesh_data(RuntimeAssetStreamingState *state,
+                             renderer::AssetId assetId,
+                             renderer::CpuMeshData *outMeshData,
+                             std::uint64_t *outSizeBytes) noexcept {
+  if ((state == nullptr) || (assetId == renderer::kInvalidAssetId) ||
+      (outMeshData == nullptr)) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(state->mutex);
+  for (StreamingMeshTransferSlot &slot : state->meshTransfers) {
+    if (!slot.occupied || (slot.assetId != assetId)) {
+      continue;
+    }
+
+    *outMeshData = std::move(slot.meshData);
+    if (outSizeBytes != nullptr) {
+      *outSizeBytes = slot.sizeBytes;
+    }
+    slot = StreamingMeshTransferSlot{};
+    return true;
+  }
+  return false;
+}
+
+/// Clears any CPU-side mesh payloads not consumed by upload.
+void clear_streamed_mesh_data(RuntimeAssetStreamingState *state) noexcept {
+  if (state == nullptr) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(state->mutex);
+  for (StreamingMeshTransferSlot &slot : state->meshTransfers) {
+    slot = StreamingMeshTransferSlot{};
+  }
+}
+
+/// Worker-thread CPU load callback for runtime asset streaming.
+bool runtime_streaming_load_mesh(renderer::AssetId assetId, const char *path,
+                                 std::uint64_t *outSizeBytes,
+                                 void *userData) noexcept {
+  auto *state = static_cast<RuntimeAssetStreamingState *>(userData);
+  renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 0ULL;
+  if (!renderer::load_mesh_data_from_file(path, &meshData, &sizeBytes)) {
+    return false;
+  }
+
+  if (!store_streamed_mesh_data(state, assetId, std::move(meshData),
+                                sizeBytes)) {
+    return false;
+  }
+
+  if (outSizeBytes != nullptr) {
+    *outSizeBytes = sizeBytes;
+  }
+  return true;
+}
+
+/// Main-thread GPU upload callback for runtime asset streaming.
+bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
+                                   void *userData) noexcept {
+  auto *state = static_cast<RuntimeAssetStreamingState *>(userData);
+  if ((state == nullptr) || (state->database == nullptr) ||
+      (state->meshRegistry == nullptr)) {
+    return false;
+  }
+
+  renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 0ULL;
+  if (!take_streamed_mesh_data(state, assetId, &meshData, &sizeBytes)) {
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Failed,
+        renderer::kInvalidMeshHandle));
+    return false;
+  }
+
+  if (!renderer::mesh_asset_requested_resident(state->database, assetId) ||
+      (renderer::mesh_asset_state(state->database, assetId) !=
+       renderer::AssetState::Loading)) {
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Unloaded,
+        renderer::kInvalidMeshHandle));
+    return true;
+  }
+
+  renderer::GpuMesh mesh{};
+  if (!renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Failed,
+        renderer::kInvalidMeshHandle));
+    return false;
+  }
+
+  const std::uint32_t meshSlot =
+      renderer::register_gpu_mesh(state->meshRegistry, mesh);
+  if (meshSlot == 0U) {
+    renderer::unload_mesh(&mesh);
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Failed,
+        renderer::kInvalidMeshHandle));
+    core::log_message(core::LogLevel::Error, "assets",
+                      "mesh registry is full; streamed asset upload failed");
+    return false;
+  }
+
+  if (!renderer::set_mesh_asset_state(state->database, assetId,
+                                      renderer::AssetState::Ready,
+                                      renderer::MeshHandle{meshSlot})) {
+    renderer::unload_mesh(&state->meshRegistry->meshes[meshSlot]);
+    state->meshRegistry->occupied[meshSlot] = false;
+    return false;
+  }
+
+  static_cast<void>(sizeBytes);
+  return true;
+}
+
+/// Mirrors terminal streaming failures into the asset database on the main thread.
+void sync_streaming_failures(runtime::EngineAssetDatabaseService *service) noexcept {
+  if ((service == nullptr) || (service->database == nullptr) ||
+      (service->streamingQueue == nullptr)) {
+    return;
+  }
+
+  for (const auto &handle : service->scriptLoadHandles) {
+    if (!handle.occupied || !handle.streamingHandle.valid() ||
+        (handle.assetId == renderer::kInvalidAssetId)) {
+      continue;
+    }
+
+    if (renderer::get_load_state(service->streamingQueue,
+                                 handle.streamingHandle) ==
+        renderer::LoadingState::Failed) {
+      static_cast<void>(renderer::set_mesh_asset_state(
+          service->database, handle.assetId, renderer::AssetState::Failed,
+          renderer::kInvalidMeshHandle));
+    }
+  }
+}
 
 /// Loads the requested resource for bootstrap meshes.
 bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
@@ -1178,6 +1394,8 @@ struct EnginePipeline::Impl final {
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
   std::unique_ptr<renderer::AssetDatabase> assetDatabase;
   std::unique_ptr<renderer::AssetManager> assetManager;
+  std::unique_ptr<renderer::AssetStreamingQueue> assetStreamingQueue;
+  std::unique_ptr<RuntimeAssetStreamingState> assetStreamingState;
   std::unique_ptr<FrameContext> frameContext;
   BootstrapMeshIds meshIds{};
   runtime::EnginePhysicsService physicsService{};
@@ -1247,16 +1465,26 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   meshRegistry.reset(new (std::nothrow) renderer::GpuMeshRegistry());
   assetDatabase.reset(new (std::nothrow) renderer::AssetDatabase());
   assetManager.reset(new (std::nothrow) renderer::AssetManager());
+  assetStreamingQueue.reset(new (std::nothrow) renderer::AssetStreamingQueue());
+  assetStreamingState.reset(new (std::nothrow) RuntimeAssetStreamingState());
 
   if (!world || !commandBuffer || !meshRegistry || !assetDatabase ||
-      !assetManager) {
+      !assetManager || !assetStreamingQueue || !assetStreamingState) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate runtime frame state");
     return false;
   }
   renderer::clear_asset_database(assetDatabase.get());
   renderer::clear_asset_manager(assetManager.get());
+  if (!renderer::initialize_asset_streaming(assetStreamingQueue.get())) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to initialize runtime asset streaming queue");
+    return false;
+  }
 
+  assetDatabaseService = runtime::EngineAssetDatabaseService{};
+  assetStreamingState->database = assetDatabase.get();
+  assetStreamingState->meshRegistry = meshRegistry.get();
   physicsService.world = world.get();
   physicsService.worldView = static_cast<physics::PhysicsWorldView *>(world.get());
   physicsService.context = &world->physics_context();
@@ -1269,6 +1497,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   audioService.set_master_volume = &audio::set_master_volume;
   assetDatabaseService.database = assetDatabase.get();
   assetDatabaseService.manager = assetManager.get();
+  assetDatabaseService.streamingQueue = assetStreamingQueue.get();
   rendererService.commandBuffer = commandBuffer.get();
   rendererService.meshRegistry = meshRegistry.get();
   rendererService.device = renderer::render_device();
@@ -1381,6 +1610,8 @@ void EnginePipeline::Impl::teardown() noexcept {
   runtime::unbind_scripting_runtime(serviceLocator);
   serviceRegistry.unregister_services();
 
+  renderer::shutdown_asset_streaming(assetStreamingQueue.get());
+  clear_streamed_mesh_data(assetStreamingState.get());
   renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
                                    meshRegistry.get());
 }
@@ -1502,10 +1733,21 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
 
 void EnginePipeline::Impl::stage_assets() noexcept {
   bool updatedAssets = true;
+  if (assetStreamingQueue != nullptr) {
+    renderer::begin_streaming_frame(assetStreamingQueue.get());
+  }
+
   if (!core::make_render_context_current()) {
     core::log_message(core::LogLevel::Warning, "assets",
                       "skipping asset transitions: OpenGL context unavailable");
   } else {
+    if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
+      static_cast<void>(renderer::update_asset_streaming(
+          assetStreamingQueue.get(), &runtime_streaming_load_mesh,
+          &runtime_streaming_upload_mesh, assetStreamingState.get()));
+    }
+    sync_streaming_failures(&assetDatabaseService);
+
     updatedAssets = renderer::update_asset_manager(
         assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
     core::release_render_context();
@@ -1943,7 +2185,8 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
     const std::size_t readyMeshComponentCount =
         count_ready_mesh_components(*world, assetDatabase.get());
     const std::size_t pendingAssetRequests =
-        renderer::pending_asset_request_count(assetManager.get());
+        renderer::pending_asset_request_count(assetManager.get()) +
+        renderer::pending_load_count(assetStreamingQueue.get());
 
     char diagnostics[640] = {};
     std::snprintf(

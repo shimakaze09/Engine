@@ -164,6 +164,9 @@ public:
   /// Handles as string.
   bool as_string(const JsonValue &value, const char **outBegin,
                  std::size_t *outLength) const noexcept;
+  /// Copies a decoded string value into a null-terminated output buffer.
+  bool copy_string(const JsonValue &value, char *out,
+                   std::size_t outCapacity) const noexcept;
 
 /// Pushes an item onto the owning stack or queue for scratch.
 private:

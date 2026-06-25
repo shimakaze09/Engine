@@ -1,20 +1,13 @@
 // Verifies service locator test behavior for the Engine test suite.
 
-#include <cstdio>
-
 #include "engine/core/service_locator.h"
+#include "../test_harness.h"
 
-static int g_testsPassed = 0;
-static int g_testsFailed = 0;
+static engine::tests::TestContext g_tests;
 
 /// Handles check.
 static void check(bool condition, const char *name) noexcept {
-  if (condition) {
-    ++g_testsPassed;
-  } else {
-    ++g_testsFailed;
-    std::fprintf(stderr, "FAIL: %s\n", name);
-  }
+  g_tests.check(condition, name);
 }
 
 /// Stores audio system data used by the engine.
@@ -150,11 +143,19 @@ static bool test_type_safety() noexcept {
 /// Handles test register null service.
 static bool test_register_null_service() noexcept {
   engine::core::ServiceLocator loc;
-  // Registering a null pointer is legal (clears the pointer for that type).
+  // Registering a null pointer is legal and leaves the type unregistered.
   check(loc.register_service<AudioSystem>(nullptr), "register null succeeds");
-  check(loc.count() == 1U, "count is 1");
+  check(loc.count() == 0U, "count is 0");
   check(loc.get_service<AudioSystem>() == nullptr,
         "get returns nullptr for null-registered");
+  check(!loc.has_service<AudioSystem>(), "has false for null-registered");
+
+  AudioSystem audio;
+  check(loc.register_service<AudioSystem>(&audio), "register non-null");
+  check(loc.count() == 1U, "count is 1 after non-null register");
+  check(loc.register_service<AudioSystem>(nullptr), "register null clears");
+  check(loc.count() == 0U, "count is 0 after null clears");
+  check(!loc.has_service<AudioSystem>(), "has false after null clears");
   return true;
 }
 
@@ -169,7 +170,5 @@ int main() {
   test_type_safety();
   test_register_null_service();
 
-  std::fprintf(stdout, "ServiceLocator tests: %d passed, %d failed\n",
-               g_testsPassed, g_testsFailed);
-  return (g_testsFailed == 0) ? 0 : 1;
+  return g_tests.finish("ServiceLocator tests");
 }

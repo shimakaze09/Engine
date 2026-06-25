@@ -657,18 +657,10 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     NameComponent nameComponent{};
     core::JsonValue nameValue{};
     if (parser.get_object_field(componentValue, "name", &nameValue)) {
-      const char *namePtr = nullptr;
-      std::size_t nameLen = 0U;
-      if (!parser.as_string(nameValue, &namePtr, &nameLen) ||
-          (namePtr == nullptr)) {
+      if (!parser.copy_string(nameValue, nameComponent.name,
+                              sizeof(nameComponent.name))) {
         return failComponent("instantiate_prefab: invalid NameComponent name");
       }
-      const std::size_t copyLen =
-          (nameLen < sizeof(nameComponent.name) - 1U)
-              ? nameLen
-              : (sizeof(nameComponent.name) - 1U);
-      std::memcpy(nameComponent.name, namePtr, copyLen);
-      nameComponent.name[copyLen] = '\0';
     }
     if (!world.add_name_component(entity, nameComponent)) {
       return failComponent("instantiate_prefab: failed to add NameComponent");
@@ -789,31 +781,26 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   core::JsonValue scriptValue{};
   if (parser.get_object_field(componentsVal, kJsonKeyScriptComponent,
                               &scriptValue)) {
-    const char *pathPtr = nullptr;
-    std::size_t pathLen = 0U;
+    ScriptComponent script{};
     bool gotPath = false;
 
     if (scriptValue.type == core::JsonValue::Type::String) {
-      gotPath = parser.as_string(scriptValue, &pathPtr, &pathLen);
+      gotPath = parser.copy_string(scriptValue, script.scriptPath,
+                                   sizeof(script.scriptPath));
     } else if (scriptValue.type == core::JsonValue::Type::Object) {
       core::JsonValue pathValue{};
       if (parser.get_object_field(scriptValue, "scriptPath", &pathValue)) {
-        gotPath = parser.as_string(pathValue, &pathPtr, &pathLen);
+        gotPath = parser.copy_string(pathValue, script.scriptPath,
+                                     sizeof(script.scriptPath));
       }
     } else {
       return failComponent("instantiate_prefab: invalid ScriptComponent");
     }
 
-    if (!gotPath || (pathPtr == nullptr) || (pathLen == 0U)) {
+    if (!gotPath || (script.scriptPath[0] == '\0')) {
       return failComponent("instantiate_prefab: invalid ScriptComponent path");
     }
 
-    ScriptComponent script{};
-    const std::size_t copyLen = (pathLen < sizeof(script.scriptPath) - 1U)
-                                    ? pathLen
-                                    : (sizeof(script.scriptPath) - 1U);
-    std::memcpy(script.scriptPath, pathPtr, copyLen);
-    script.scriptPath[copyLen] = '\0';
     if (!world.add_script_component(entity, script)) {
       return failComponent("instantiate_prefab: failed to add ScriptComponent");
     }

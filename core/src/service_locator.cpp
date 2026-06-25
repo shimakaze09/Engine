@@ -13,6 +13,11 @@ bool ServiceLocator::register_raw(TypeId id, void *service) noexcept {
     return false;
   }
 
+  if (service == nullptr) {
+    static_cast<void>(remove_raw(id));
+    return true;
+  }
+
   // Check for existing entry to overwrite.
   for (std::size_t i = 0U; i < m_count; ++i) {
     if (m_entries[i].typeId == id) {

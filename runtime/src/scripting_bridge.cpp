@@ -3,19 +3,132 @@
 #include "engine/runtime/scripting_bridge.h"
 
 #include "engine/audio/audio.h"
+#include "engine/core/logging.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_query.h"
+#include "engine/renderer/asset_database.h"
+#include "engine/renderer/asset_manager.h"
+#include "engine/renderer/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/scene_serializer.h"
+#include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
 namespace engine {
 
 namespace {
+
+constexpr std::uint32_t kInvalidScriptAssetHandle = 0xFFFFFFFFU;
+constexpr std::uint32_t kScriptAssetHandleSlotMask = 0xFFFFU;
+constexpr std::uint32_t kScriptAssetHandleGenerationShift = 16U;
+
+runtime::EngineAssetDatabaseService *g_scriptingAssetDatabaseService = nullptr;
+
+/// Encodes a runtime asset load handle for Lua.
+std::uint32_t encode_script_asset_handle(std::uint32_t slot,
+                                         std::uint16_t generation) noexcept {
+  if (slot >=
+      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+    return kInvalidScriptAssetHandle;
+  }
+  return (static_cast<std::uint32_t>(generation)
+          << kScriptAssetHandleGenerationShift) |
+         slot;
+}
+
+/// Decodes a Lua-facing runtime asset load handle.
+bool decode_script_asset_handle(std::uint32_t handle,
+                                std::uint32_t *outSlot,
+                                std::uint16_t *outGeneration) noexcept {
+  if ((handle == kInvalidScriptAssetHandle) || (outSlot == nullptr) ||
+      (outGeneration == nullptr)) {
+    return false;
+  }
+
+  const std::uint32_t slot = handle & kScriptAssetHandleSlotMask;
+  if (slot >=
+      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+    return false;
+  }
+
+  *outSlot = slot;
+  *outGeneration =
+      static_cast<std::uint16_t>(handle >> kScriptAssetHandleGenerationShift);
+  return true;
+}
+
+/// Finds an existing Lua handle slot for an asset id.
+std::uint32_t find_script_asset_handle_slot(
+    const runtime::EngineAssetDatabaseService *service,
+    renderer::AssetId assetId) noexcept {
+  if ((service == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+    return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
+  }
+
+  for (std::uint32_t i = 0U;
+       i < runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
+       ++i) {
+    const auto &handle = service->scriptLoadHandles[i];
+    if (handle.occupied && (handle.assetId == assetId)) {
+      return i;
+    }
+  }
+
+  return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
+}
+
+/// Allocates or reuses a Lua handle slot for a runtime asset request.
+std::uint32_t allocate_script_asset_handle_slot(
+    runtime::EngineAssetDatabaseService *service,
+    renderer::AssetId assetId) noexcept {
+  if ((service == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+    return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
+  }
+
+  const std::uint32_t existing =
+      find_script_asset_handle_slot(service, assetId);
+  if (existing <
+      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+    return existing;
+  }
+
+  for (std::uint32_t i = 0U;
+       i < runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
+       ++i) {
+    auto &handle = service->scriptLoadHandles[i];
+    if (!handle.occupied) {
+      handle.occupied = true;
+      handle.assetId = assetId;
+      handle.streamingHandle = renderer::kInvalidLoadHandle;
+      ++handle.generation;
+      if (handle.generation == 0U) {
+        handle.generation = 1U;
+      }
+      return i;
+    }
+  }
+
+  return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
+}
+
+/// Maps Lua asset priority values to renderer streaming priorities.
+renderer::LoadPriority script_asset_priority(std::uint8_t priority) noexcept {
+  switch (priority) {
+  case 0:
+    return renderer::LoadPriority::Low;
+  case 2:
+    return renderer::LoadPriority::High;
+  case 3:
+    return renderer::LoadPriority::Immediate;
+  case 1:
+  default:
+    return renderer::LoadPriority::Normal;
+  }
+}
 
 /// Handles scripting set camera position.
 void scripting_set_camera_position(float x, float y, float z) noexcept {
@@ -458,6 +571,108 @@ std::uint32_t scripting_instantiate_prefab(runtime::World *world,
   return entity.index;
 }
 
+/// Queues a mesh asset load through runtime-owned asset services.
+std::uint32_t scripting_load_asset_async(const char *path,
+                                         std::uint8_t priority) noexcept {
+  if ((path == nullptr) || (path[0] == '\0') ||
+      (g_scriptingAssetDatabaseService == nullptr) ||
+      (g_scriptingAssetDatabaseService->database == nullptr)) {
+    return kInvalidScriptAssetHandle;
+  }
+
+  const renderer::AssetId assetId = renderer::make_asset_id_from_path(path);
+  if (assetId == renderer::kInvalidAssetId) {
+    return kInvalidScriptAssetHandle;
+  }
+
+  const bool alreadyReady =
+      renderer::mesh_asset_state(g_scriptingAssetDatabaseService->database,
+                                 assetId) == renderer::AssetState::Ready;
+
+  const std::uint32_t slot = allocate_script_asset_handle_slot(
+      g_scriptingAssetDatabaseService, assetId);
+  if (slot >=
+      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "load_asset_async: no free runtime asset handles");
+    return kInvalidScriptAssetHandle;
+  }
+
+  auto &scriptHandle =
+      g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
+  scriptHandle.streamingHandle = renderer::kInvalidLoadHandle;
+
+  if (g_scriptingAssetDatabaseService->streamingQueue != nullptr) {
+    if (!renderer::request_mesh_asset_streaming_load(
+            g_scriptingAssetDatabaseService->database, assetId, path)) {
+      scriptHandle.occupied = false;
+      scriptHandle.assetId = renderer::kInvalidAssetId;
+      return kInvalidScriptAssetHandle;
+    }
+
+    if (!alreadyReady) {
+      const renderer::LoadHandle streamingHandle = renderer::load_asset_async(
+          g_scriptingAssetDatabaseService->streamingQueue, assetId, path,
+          script_asset_priority(priority));
+      if (!streamingHandle.valid()) {
+        static_cast<void>(renderer::set_mesh_asset_state(
+            g_scriptingAssetDatabaseService->database, assetId,
+            renderer::AssetState::Failed, renderer::kInvalidMeshHandle));
+        scriptHandle.occupied = false;
+        scriptHandle.assetId = renderer::kInvalidAssetId;
+        return kInvalidScriptAssetHandle;
+      }
+      scriptHandle.streamingHandle = streamingHandle;
+    }
+
+    return encode_script_asset_handle(slot, scriptHandle.generation);
+  }
+
+  if ((g_scriptingAssetDatabaseService->manager == nullptr) ||
+      !renderer::queue_mesh_load(g_scriptingAssetDatabaseService->manager,
+                                 g_scriptingAssetDatabaseService->database,
+                                 assetId, path)) {
+    auto &handle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
+    handle.occupied = false;
+    handle.assetId = renderer::kInvalidAssetId;
+    return kInvalidScriptAssetHandle;
+  }
+
+  return encode_script_asset_handle(slot, scriptHandle.generation);
+}
+
+/// Returns whether a Lua-facing runtime asset load handle is ready.
+bool scripting_is_asset_ready(std::uint32_t handleIndex) noexcept {
+  if ((g_scriptingAssetDatabaseService == nullptr) ||
+      (g_scriptingAssetDatabaseService->database == nullptr)) {
+    return false;
+  }
+
+  std::uint32_t slot = 0U;
+  std::uint16_t generation = 0U;
+  if (!decode_script_asset_handle(handleIndex, &slot, &generation)) {
+    return false;
+  }
+
+  const auto &handle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
+  if (!handle.occupied || (handle.generation != generation) ||
+      (handle.assetId == renderer::kInvalidAssetId)) {
+    return false;
+  }
+
+  const bool databaseReady =
+      renderer::mesh_asset_state(g_scriptingAssetDatabaseService->database,
+                                 handle.assetId) == renderer::AssetState::Ready;
+  if ((g_scriptingAssetDatabaseService->streamingQueue != nullptr) &&
+      handle.streamingHandle.valid()) {
+    return databaseReady &&
+           renderer::is_load_ready(g_scriptingAssetDatabaseService->streamingQueue,
+                                   handle.streamingHandle);
+  }
+
+  return databaseReady;
+}
+
 // World query operations needed by Lua bindings
 runtime::WorldPhase
 scripting_get_current_phase(runtime::World *world) noexcept {
@@ -747,6 +962,8 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_save_scene,
     &scripting_save_prefab,
     &scripting_instantiate_prefab,
+    &scripting_load_asset_async,
+    &scripting_is_asset_ready,
 };
 
 } // namespace
@@ -756,11 +973,14 @@ namespace runtime {
 /// Binds scripting runtime pointers into an explicit service locator.
 void bind_scripting_runtime(World *world, core::ServiceLocator &locator) noexcept {
   scripting::bind_runtime_world(world, locator);
+  g_scriptingAssetDatabaseService =
+      locator.get_service<runtime::EngineAssetDatabaseService>();
   scripting::bind_runtime_services(&kScriptingRuntimeServices, locator);
 }
 
 /// Clears scripting runtime bindings from an explicit service locator.
 void unbind_scripting_runtime(core::ServiceLocator &locator) noexcept {
+  g_scriptingAssetDatabaseService = nullptr;
   scripting::bind_runtime_world(nullptr, locator);
   scripting::bind_runtime_services(nullptr, locator);
 }

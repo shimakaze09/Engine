@@ -11,6 +11,9 @@
 namespace {
 
 constexpr const char *kPrefabPath = "prefab_test_temp.json";
+constexpr const char *kPrefabSourceName = "Prefab \"Source\" \\ Name";
+constexpr const char *kPrefabScriptPath =
+    "assets\\scripts\\prefab \"source\".lua";
 
 /// Removes a value or component from the target system for prefab file.
 void remove_prefab_file() noexcept {
@@ -154,17 +157,17 @@ int main() {
   }
 
   engine::runtime::NameComponent nameComp{};
-  constexpr const char *kPrefabSourceName = "PrefabSource";
-  const std::size_t nameLength = std::strlen(kPrefabSourceName);
-  const std::size_t copyLength = (nameLength < (sizeof(nameComp.name) - 1U))
-                                     ? nameLength
-                                     : (sizeof(nameComp.name) - 1U);
-  if (copyLength > 0U) {
-    std::memcpy(nameComp.name, kPrefabSourceName, copyLength);
-  }
-  nameComp.name[copyLength] = '\0';
+  std::snprintf(nameComp.name, sizeof(nameComp.name), "%s",
+                kPrefabSourceName);
   if (!world->add_name_component(src, nameComp)) {
     return 6;
+  }
+
+  engine::runtime::ScriptComponent scriptComp{};
+  std::snprintf(scriptComp.scriptPath, sizeof(scriptComp.scriptPath), "%s",
+                kPrefabScriptPath);
+  if (!world->add_script_component(src, scriptComp)) {
+    return 32;
   }
 
   engine::runtime::MeshComponent mesh{};
@@ -280,9 +283,20 @@ int main() {
     remove_prefab_file();
     return 18;
   }
-  if (std::strcmp(instName.name, "PrefabSource") != 0) {
+  if (std::strcmp(instName.name, kPrefabSourceName) != 0) {
     remove_prefab_file();
     return 19;
+  }
+
+  // Verify ScriptComponent.
+  engine::runtime::ScriptComponent instScript{};
+  if (!world->get_script_component(inst, &instScript)) {
+    remove_prefab_file();
+    return 42;
+  }
+  if (std::strcmp(instScript.scriptPath, kPrefabScriptPath) != 0) {
+    remove_prefab_file();
+    return 43;
   }
 
   // Verify MeshComponent.

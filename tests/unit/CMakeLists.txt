@@ -330,6 +330,8 @@ engine_add_test_executable(engine_unit_dependency_graph
     ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/tools/asset_packer
+    PRIVATE_DEPS
+    engine_core
 )
 
 if(WIN32)
@@ -359,9 +361,6 @@ engine_add_test_executable(engine_unit_lru_cache
 engine_add_test_executable(engine_unit_deterministic_cook
     SOURCES
     deterministic_cook_test.cpp
-    ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
-    PRIVATE_INCLUDE_DIRS
-    ${CMAKE_SOURCE_DIR}/tools/asset_packer
     PRIVATE_DEPS
     engine_core
 )
