@@ -6,6 +6,7 @@ engine_add_module_library(engine_renderer
     src/asset_manager.cpp
     src/asset_streaming.cpp
     src/command_buffer_builder.cpp
+    src/command_buffer_math.cpp
     src/command_buffer.cpp
     src/gpu_profiler.cpp
     src/light_culling.cpp
