@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engine UI Runtime"
+  short_description: "Runtime UI workflow for Engine"
+  default_prompt: "Use $engine-ui-runtime to implement the next runtime UI task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engine Production Ops"
+  short_description: "Ship-readiness workflow for Engine"
+  default_prompt: "Use $engine-production-ops to implement the next production operations task."

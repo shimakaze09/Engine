@@ -1,3 +1,17 @@
+# Engine TODO
+
+This is the active production-readiness TODO for the Engine repository. It includes the full production gap tracker, including completed, partial, and open items, so status history remains tracked with the project.
+
+## Related Codex Skills
+
+These project-local skills live under `.codex/skills/` and were created from the largest open lanes in this tracker:
+
+- `$engine-production-ops`: P1-M12 and P1-M13 production workflow, commandlets, migrations, packaging, diagnostics, safe mode, compliance, and release QA.
+- `$engine-animation-work`: P1-M7 animation data, glTF skin/clip loading, blending, state machines, root motion, events, skinning, and IK.
+- `$engine-ui-runtime`: P1-M11 runtime UI canvas, layout, font rendering, widgets, input routing, tweens, localization, accessibility, and Lua UI bindings.
+
+---
+
 # Production Engine Gap List — Combined Master Document
 
 > **Consolidated from**: earlier milestone and checklist trackers. This file is

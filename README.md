@@ -47,8 +47,7 @@ Verified working areas in the current tree include:
 The engine is no longer forward-only; the deferred path is active behind
 `r_deferred` with forward fallback/transparency. Large roadmap items such as
 full animation production, game UI runtime, platform packaging, project
-workflow/commandlets, and release operations remain open in
-`production_engine_gap_list.md`.
+workflow/commandlets, and release operations remain open in `TODO.md`.
 
 ## Tech stack
 
