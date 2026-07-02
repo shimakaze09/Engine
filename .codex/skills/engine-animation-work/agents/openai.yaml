@@ -1,0 +1,4 @@
+interface:
+  display_name: "Engine Animation Work"
+  short_description: "Animation-system workflow for Engine"
+  default_prompt: "Use $engine-animation-work to implement the next animation system task."
