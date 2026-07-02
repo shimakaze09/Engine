@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: build
+
+Index:
+  Background: Build
+
+Diagnostics:
+  ClangTidy:
+    Add: []

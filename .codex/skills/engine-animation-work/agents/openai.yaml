@@ -1,3 +1,5 @@
+# Configures the Codex agent prompt for Engine animation work.
+
 interface:
   display_name: "Engine Animation Work"
   short_description: "Animation-system workflow for Engine"
