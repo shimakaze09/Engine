@@ -825,7 +825,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 **Goal**: Full skeletal animation pipeline — loading, blending, state machine, root motion, events, IK.
 **Dependencies**: P1-M5 (skinned mesh rendering).
-**Status**: Entirely not started. No animation headers found in any module.
+**Status**: Partial. Tooling now parses glTF skins into a `Skeleton` struct; clip loading, compression, runtime playback, blending, state machines, root motion, events, and GPU skinning remain open.
 
 > **Exit Criteria** *(all must pass before P1-M7 is closed)*:
 > 1. Skeleton + clip loaded from glTF, compressed, decompressed with < 0.001 error.
@@ -837,8 +837,8 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 ---
 
-#### P1-M7-A: Skeleton and Clip Loading from glTF `[ ]`
-- `P1-M7-A-a` Parse glTF `skin` (joints, inverse bind matrices) → `Skeleton` struct. `[ ]`
+#### P1-M7-A: Skeleton and Clip Loading from glTF `[~]`
+- `P1-M7-A-a` Parse glTF `skin` (joints, inverse bind matrices) → `Skeleton` struct. `[x]` — *Added asset-packer `Skeleton`/`SkeletonJoint` data and deterministic cgltf skin parsing with unit coverage for parent indices, root selection, fallback joint names, identity defaults, inverse bind decoding, and malformed accessor rejection.*
 - `P1-M7-A-b` Parse glTF `animation` channels (translation/rotation/scale per joint) → `AnimClip`. `[ ]`
 - `P1-M7-A-c` Quantized clip storage (16-bit fixed-point positions, quaternion compression). `[ ]`
 - `P1-M7-A-d` `AssetTypeTag::Animation`; loaded via async asset pipeline. `[ ]`

@@ -19,7 +19,6 @@
 #include <sys/types.h>
 #endif
 
-#define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
 
 #if defined(__clang__) || defined(__GNUC__)
@@ -48,6 +47,7 @@
 #include "engine/physics/convex_hull.h"
 
 #include "dependency_graph.h"
+#include "skeleton_import.h"
 
 namespace {
 
@@ -1690,6 +1690,21 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: glTF has no mesh primitives\n");
     cgltf_free(data);
     return 4;
+  }
+
+  if (data->skins_count > 0U) {
+    engine::tools::Skeleton skeleton{};
+    engine::tools::SkeletonImportResult skeletonResult =
+        engine::tools::SkeletonImportResult::Ok;
+    if (!engine::tools::parse_gltf_skeleton(data, 0U, &skeleton,
+                                            &skeletonResult)) {
+      std::fprintf(stderr, "error: failed to import glTF skin: %s\n",
+                   engine::tools::skeleton_import_result_message(
+                       skeletonResult));
+      cgltf_free(data);
+      return 14;
+    }
+    std::printf("parsed skeleton: %zu joints\n", skeleton.joints.size());
   }
 
   // Select mesh and primitive from import settings (bounds-checked).

@@ -463,6 +463,20 @@ engine_add_test_executable(engine_unit_foliage_patch_component
     engine_runtime
 )
 
+# ---- P1-M7-A: Animation Skeleton Import ----
+
+if(ENGINE_BUILD_TOOLS)
+    engine_add_test_executable(engine_unit_skeleton_import
+        SOURCES
+        skeleton_import_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/skeleton_import.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+    )
+endif()
+
 # ---- P1-M12-A: Platform Paths ----
 
 engine_add_test_executable(engine_unit_platform_paths
