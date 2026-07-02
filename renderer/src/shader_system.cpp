@@ -10,6 +10,7 @@
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
+#include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
@@ -24,6 +25,7 @@ constexpr std::size_t kMaxDefineNameLength = 48U;
 constexpr std::size_t kMaxDefineValueLength = 64U;
 constexpr std::uint64_t kFnvOffset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
+constexpr const char *kEnabledDefineValue = "1";
 
 /// Stores copied shader define strings for reloadable variants.
 struct ShaderDefineCopy final {
@@ -73,6 +75,24 @@ struct ShaderEntry final {
 ShaderEntry g_entries[kMaxShaderPrograms] = {};
 ShaderVariantEntry g_variants[kMaxShaderVariants] = {};
 bool g_initialized = false;
+
+/// Adds one enabled material shader define to the selection.
+void append_material_shader_define(MaterialShaderVariantSelection &selection,
+                                   const char *name) noexcept {
+  if (selection.defineCount >= kMaxMaterialShaderDefines) {
+    return;
+  }
+
+  selection.defines[selection.defineCount] = ShaderDefine{name,
+                                                          kEnabledDefineValue};
+  ++selection.defineCount;
+}
+
+/// Returns whether any emissive channel contributes light.
+bool has_emissive_value(const math::Vec3 &emissive) noexcept {
+  return (emissive.x != 0.0F) || (emissive.y != 0.0F) ||
+         (emissive.z != 0.0F);
+}
 
 /// Returns the effective value used for valueless shader defines.
 const char *normalized_define_value(const ShaderDefine &define) noexcept {
@@ -513,6 +533,30 @@ ShaderProgramHandle load_shader_variant(const ShaderVariantDesc &desc) noexcept 
   g_variants[variantSlot].key = key;
   g_variants[variantSlot].handle = handle;
   return handle;
+}
+
+/// Selects shader defines required by a material and mesh skinning state.
+MaterialShaderVariantSelection select_material_shader_defines(
+    const Material &material, bool skinned) noexcept {
+  MaterialShaderVariantSelection selection{};
+
+  if (material.albedoTexture != kInvalidTextureHandle) {
+    append_material_shader_define(selection, "HAS_ALBEDO_TEXTURE");
+  }
+  if (material.normalTexture != kInvalidTextureHandle) {
+    append_material_shader_define(selection, "HAS_NORMAL_MAP");
+  }
+  if (has_emissive_value(material.emissive)) {
+    append_material_shader_define(selection, "HAS_EMISSIVE");
+  }
+  if (material.opacity < 1.0F) {
+    append_material_shader_define(selection, "MATERIAL_TRANSLUCENT");
+  }
+  if (skinned) {
+    append_material_shader_define(selection, "SKINNED");
+  }
+
+  return selection;
 }
 
 /// Destroys or releases the requested object, handle, or resource for shader program.
