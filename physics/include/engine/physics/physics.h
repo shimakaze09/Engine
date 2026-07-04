@@ -3,6 +3,7 @@
 #pragma once
 
 #include "engine/physics/collider.h"
+#include "engine/physics/physics_types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,21 +27,21 @@ using CollisionDispatchFn = void (*)(const std::uint32_t *pairs,
                                      std::size_t pairCount) noexcept;
 
 /// Sets the requested value for convex hull payload data.
-bool set_convex_hull_data(PhysicsContext &context, std::uint32_t entityIndex,
+bool set_convex_hull_data(PhysicsContext &context, Entity entity,
                           const ConvexHullData &hull) noexcept;
 /// Returns convex hull payload data from the requested context.
 const ConvexHullData *
-get_convex_hull_data(const PhysicsContext &context,
-                     std::uint32_t entityIndex) noexcept;
+get_convex_hull_data(const PhysicsContext &context, Entity entity) noexcept;
 /// Returns convex hull payload data for support-function callers.
 const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
-                                        std::uint32_t entityIndex) noexcept;
+                                        Entity entity) noexcept;
+/// Removes non-primitive shape payload data for an entity.
+void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept;
 /// Sets the requested value for heightfield payload data.
-bool set_heightfield_data(PhysicsContext &context, std::uint32_t entityIndex,
+bool set_heightfield_data(PhysicsContext &context, Entity entity,
                           const HeightfieldData &heightfield) noexcept;
 /// Returns heightfield payload data from the requested context.
 const HeightfieldData *
-get_heightfield_data(const PhysicsContext &context,
-                     std::uint32_t entityIndex) noexcept;
+get_heightfield_data(const PhysicsContext &context, Entity entity) noexcept;
 
 } // namespace engine::physics

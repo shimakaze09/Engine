@@ -81,12 +81,11 @@ SupportFn resolve_support(const Collider &col) noexcept {
 
 /// Handles resolve support data.
 const void *resolve_support_data(const PhysicsContext &context,
-                                 const Collider &col,
-                                 std::uint32_t entityIndex,
-                                 float *storage) noexcept {
+                                  const Collider &col,
+                                  Entity entity, float *storage) noexcept {
   switch (col.shape) {
   case ColliderShape::ConvexHull:
-    return get_hull_data_ptr(context, entityIndex);
+    return get_hull_data_ptr(context, entity);
   case ColliderShape::Sphere:
     storage[0] = col.halfExtents.x;
     return storage;
@@ -106,10 +105,9 @@ const void *resolve_support_data(const PhysicsContext &context,
 // Uses GJK for shape-aware distance; falls back to AABB when GJK data
 // is unavailable (e.g. missing hull).
 float separating_distance(const Collider &colA,
-                          const math::Vec3 &posA, std::uint32_t entityIdxA,
-                          const Collider &colB,
-                          const math::Vec3 &posB,
-                          std::uint32_t entityIdxB,
+                          const math::Vec3 &posA, Entity entityA,
+                          const Collider &colB, const math::Vec3 &posB,
+                          Entity entityB,
                           const PhysicsContext &context) noexcept {
   const bool aIsSphere = (colA.shape == ColliderShape::Sphere);
   const bool bIsSphere = (colB.shape == ColliderShape::Sphere);
@@ -122,8 +120,8 @@ float separating_distance(const Collider &colA,
   // Use GJK for shape-accurate distance.
   alignas(16) float storA[4]{};
   alignas(16) float storB[4]{};
-  const void *dataA = resolve_support_data(context, colA, entityIdxA, storA);
-  const void *dataB = resolve_support_data(context, colB, entityIdxB, storB);
+  const void *dataA = resolve_support_data(context, colA, entityA, storA);
+  const void *dataB = resolve_support_data(context, colB, entityB, storB);
 
   if ((dataA != nullptr) && (dataB != nullptr)) {
     SupportFn supA = resolve_support(colA);
@@ -146,15 +144,15 @@ float separating_distance(const Collider &colA,
 // Uses GJK/EPA for shape-accurate normal; falls back to center-to-center.
 math::Vec3 contact_normal_between(const Collider &colA,
                                   const math::Vec3 &posA,
-                                  std::uint32_t entityIdxA,
+                                  Entity entityA,
                                   const Collider &colB,
                                   const math::Vec3 &posB,
-                                  std::uint32_t entityIdxB,
+                                  Entity entityB,
                                   const PhysicsContext &context) noexcept {
   alignas(16) float storA[4]{};
   alignas(16) float storB[4]{};
-  const void *dataA = resolve_support_data(context, colA, entityIdxA, storA);
-  const void *dataB = resolve_support_data(context, colB, entityIdxB, storB);
+  const void *dataA = resolve_support_data(context, colA, entityA, storA);
+  const void *dataB = resolve_support_data(context, colB, entityB, storB);
 
   if ((dataA != nullptr) && (dataB != nullptr)) {
     SupportFn supA = resolve_support(colA);
@@ -311,8 +309,8 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       // Position of B (assumed stationary in relative frame at otherPos).
       const math::Vec3 &posB = otherTransform.position;
 
-      const float sep = separating_distance(collider, posA, entity.index,
-                                            other, posB, entities[i].index,
+      const float sep = separating_distance(collider, posA, entity, other, posB,
+                                            entities[i],
                                             physicsContext);
 
       if (sep <= kTolerance) {
@@ -337,9 +335,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
 
       const math::Vec3 hitPosA =
           math::add(transform.position, math::mul(relVel, tLo * dt));
-      bestNormal = contact_normal_between(collider, hitPosA, entity.index,
-                                          other, otherTransform.position,
-                                          entities[i].index, physicsContext);
+      bestNormal = contact_normal_between(collider, hitPosA, entity, other,
+                                          otherTransform.position, entities[i],
+                                          physicsContext);
       bestContactPt =
           math::mul(math::add(hitPosA, otherTransform.position), 0.5F);
       bestHitEntity = entities[i].index;

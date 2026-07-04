@@ -2252,6 +2252,82 @@ int check_shape_payload_world_isolation() {
   return 0;
 }
 
+int check_shape_payloads_do_not_survive_entity_reuse() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 540;
+  }
+  world->end_frame_phase();
+
+  const engine::runtime::Entity entity = world->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 541;
+  }
+
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, hull)) {
+    return 542;
+  }
+  if (!engine::runtime::set_convex_hull_data(*world, entity, hull)) {
+    return 543;
+  }
+
+  engine::physics::HeightfieldData heightfield{};
+  heightfield.rows = 2U;
+  heightfield.columns = 2U;
+  heightfield.spacingX = 1.0F;
+  heightfield.spacingZ = 1.0F;
+  if (!engine::runtime::set_heightfield_data(*world, entity, heightfield)) {
+    return 544;
+  }
+
+  if (!world->destroy_entity(entity)) {
+    return 545;
+  }
+  if (engine::runtime::get_convex_hull_data(*world, entity) != nullptr) {
+    return 546;
+  }
+  if (engine::runtime::get_heightfield_data(*world, entity) != nullptr) {
+    return 547;
+  }
+  if (engine::runtime::set_convex_hull_data(*world, entity, hull)) {
+    return 548;
+  }
+  if (engine::runtime::set_heightfield_data(*world, entity, heightfield)) {
+    return 549;
+  }
+
+  const engine::runtime::Entity reused = world->create_entity();
+  if (reused == engine::runtime::kInvalidEntity) {
+    return 550;
+  }
+  if (reused.index != entity.index) {
+    return 551;
+  }
+  if (reused.generation == entity.generation) {
+    return 552;
+  }
+  if (engine::runtime::get_convex_hull_data(*world, reused) != nullptr) {
+    return 553;
+  }
+  if (engine::runtime::get_heightfield_data(*world, reused) != nullptr) {
+    return 554;
+  }
+
+  return 0;
+}
+
 int check_invalid_shape_payloads_rejected() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -2517,6 +2593,11 @@ int main() {
   }
 
   result = check_shape_payload_world_isolation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_shape_payloads_do_not_survive_entity_reuse();
   if (result != 0) {
     return result;
   }

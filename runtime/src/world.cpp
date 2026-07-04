@@ -167,6 +167,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
 
   m_cameraManager.on_entity_destroyed(entity);
 
+  physics::remove_shape_payloads(m_physicsContext, entity);
   static_cast<void>(m_transforms.remove(entity));
   static_cast<void>(m_worldTransforms.remove(entity));
   static_cast<void>(m_rigidBodies.remove(entity));
@@ -496,7 +497,11 @@ bool World::remove_collider(Entity entity) noexcept {
     return false;
   }
 
-  return m_colliders.remove(entity);
+  const bool removed = m_colliders.remove(entity);
+  if (removed) {
+    physics::remove_shape_payloads(m_physicsContext, entity);
+  }
+  return removed;
 }
 
 bool World::get_collider(Entity entity, Collider *outCollider) const noexcept {

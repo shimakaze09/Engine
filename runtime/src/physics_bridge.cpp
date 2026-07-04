@@ -250,27 +250,37 @@ bool is_sleeping(const World &world, Entity entity) noexcept {
 /// Sets the requested value for convex hull data.
 bool set_convex_hull_data(World &world, Entity entity,
                           const physics::ConvexHullData &hull) noexcept {
-  return physics::set_convex_hull_data(world.physics_context(), entity.index,
-                                       hull);
+  if (!world.is_alive(entity)) {
+    return false;
+  }
+  return physics::set_convex_hull_data(world.physics_context(), entity, hull);
 }
 
 /// Returns the requested value for convex hull data.
 const physics::ConvexHullData *get_convex_hull_data(
     const World &world, Entity entity) noexcept {
-  return physics::get_convex_hull_data(world.physics_context(), entity.index);
+  if (!world.is_alive(entity)) {
+    return nullptr;
+  }
+  return physics::get_convex_hull_data(world.physics_context(), entity);
 }
 
 /// Sets the requested value for heightfield data.
 bool set_heightfield_data(World &world, Entity entity,
                           const physics::HeightfieldData &hf) noexcept {
-  return physics::set_heightfield_data(world.physics_context(), entity.index,
-                                       hf);
+  if (!world.is_alive(entity)) {
+    return false;
+  }
+  return physics::set_heightfield_data(world.physics_context(), entity, hf);
 }
 
 /// Returns the requested value for heightfield data.
 const physics::HeightfieldData *get_heightfield_data(
     const World &world, Entity entity) noexcept {
-  return physics::get_heightfield_data(world.physics_context(), entity.index);
+  if (!world.is_alive(entity)) {
+    return nullptr;
+  }
+  return physics::get_heightfield_data(world.physics_context(), entity);
 }
 
 // ------ Physics Queries (P1-M3-D) -------------------------------------------

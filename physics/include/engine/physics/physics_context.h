@@ -76,11 +76,11 @@ struct PhysicsJointSlot final {
 /// Stores large shape payloads owned by a physics context.
 struct PhysicsShapeStore final {
   std::array<ConvexHullData, kMaxConvexHulls> convexHullData{};
-  std::array<std::uint32_t, kMaxConvexHulls> convexHullEntityIndex{};
+  std::array<Entity, kMaxConvexHulls> convexHullEntity{};
   std::size_t convexHullCount = 0U;
 
   std::array<HeightfieldData, kMaxHeightfields> heightfieldData{};
-  std::array<std::uint32_t, kMaxHeightfields> heightfieldEntityIndex{};
+  std::array<Entity, kMaxHeightfields> heightfieldEntity{};
   std::size_t heightfieldCount = 0U;
 };
 
