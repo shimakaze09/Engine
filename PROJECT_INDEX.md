@@ -9,9 +9,13 @@ architecture changes.
 
 Engine is a C++20 game engine with an editor application, runtime ECS/world,
 OpenGL renderer, physics simulation, Lua scripting, audio playback, asset
-tooling, and CI coverage. The project is still productionizing. Current open
-lanes include full animation, runtime UI, platform packaging, production
-operations, advanced audio, editor completion, and save/streaming systems.
+tooling, and CI coverage. The project is still productionizing, but the
+current tree already has deterministic ECS/runtime tests, a decomposed frame
+pipeline, async asset streaming, deferred/forward rendering, editor play
+controls, and Lua integration. Current open lanes tracked in `TODO.md` include
+full animation, runtime UI, platform packaging/project workflow, release
+operations, advanced audio, editor completion, and save-game/content streaming
+systems.
 
 ## Tech Stack
 
@@ -73,35 +77,45 @@ ctest --test-dir build --output-on-failure -R engine_bench_
 - `ENGINE_REQUIRE_ANALYSIS_TOOL`: make `analysis` fail when no analyzer exists.
 - `ENGINE_ASSET_SOURCE_DIR` and `ENGINE_ASSET_OUTPUT_DIR`: local asset sync.
 
+CMake helper macros in `cmake/EngineHelpers.cmake` define the common static
+module library, executable, and CTest executable patterns. Module libraries are
+static and use explicit public/private include and link dependency lists.
+
 ## Module Map
 
 - `app`: `engine_editor_app` entry point; links `engine_runtime` and whole-archives
   `engine_editor` so the editor bridge registers before bootstrap.
-- `core`: bootstrap, platform paths, logging, cvars, console, event bus, input,
-  touch, VFS, JSON, jobs, allocators, profiler, memory tracker, reflection, and
-  service locator.
+- `core`: bootstrap, platform/window paths, logging, cvars, console, event bus,
+  input, input maps, touch, VFS, JSON, jobs/frame graph, allocators, profiler,
+  memory tracker, reflection, entity handles, and service locator.
 - `math`: vectors, matrices, quaternions, transforms, bounds, rays, spheres, and
   shared component POD types.
-- `physics`: rigid bodies, colliders, convex hulls, CCD, contacts, queries,
-  joints, materials, and `PhysicsWorldView` so physics does not depend on
-  runtime.
+- `physics`: rigid bodies, colliders, convex hulls, heightfields, CCD,
+  speculative contacts, contact manifolds, queries, joints, materials, and
+  `PhysicsWorldView` so physics does not depend on runtime.
 - `scripting`: Lua runtime, generated binding pipeline, entity scripts,
-  timers, coroutines, sandboxing, hot reload, DAP debugger, and runtime binding
-  owner modules.
+  timers, coroutines, input/touch/game/scene bindings, sandboxing, hot reload,
+  profiler/debugger hooks, DAP debugger, and runtime binding owner modules.
 - `renderer`: asset database/manager/streaming, mesh and texture loading,
   shader variants, render device table, command buffers, deferred/forward
-  passes, shadows, post-processing, light culling, GPU profiler, and caches.
+  passes, skybox/environment maps, reflection probe baking, distance/height
+  fog, shadows, post-processing, light culling, GPU profiler, and caches.
 - `audio`: miniaudio-backed sound loading, playback, stop, volume, pitch, loop,
   and frame update.
 - `runtime`: public `engine::bootstrap/run/shutdown`, `EnginePipeline`, World
   ECS, physics bridge, scripting bridge, render preparation, scene/prefab
-  serialization, services, timers, cameras, game mode/state, and entity pool.
+  serialization, services, timers, cameras, spring arms, player controllers,
+  game mode/state, and entity pool.
 - `editor`: ImGui editor integration, editor/debug cameras, command history,
   play/pause/stop controls, gizmos, thumbnails, and editor-runtime bridge.
 - `tools`: asset packer, dependency graph, glTF mesh import, glTF skeleton skin
-  parsing, binding generator, source comment audit, and CI helper scripts.
+  parsing, glTF animation clip parsing, binding generator, source comment
+  audit, and CI helper scripts.
 - `assets`: sample Lua scripts, sample mesh, and GLSL shader assets.
-- `tests`: unit, integration, smoke, benchmark, and sanitizer suppressions.
+- `tests`: unit, integration, smoke, benchmark, performance baselines, and
+  sanitizer suppressions.
+- `.github/workflows`: CI build/test/static-analysis/sanitizer/coverage and
+  benchmark automation plus platform dependency setup scripts.
 
 ## Dependency Graph
 
@@ -141,6 +155,11 @@ Actual target relationships from CMake:
   `runtime/src/engine_pipeline.cpp` own the decomposed frame loop stages.
 - `runtime/include/engine/runtime/world.h` is the central ECS/world API and
   implements `physics::PhysicsWorldView`.
+- `runtime/include/engine/runtime/camera_manager.h`,
+  `spring_arm_update.h`, `game_mode.h`, `game_state.h`, and
+  `player_controller.h` provide gameplay-facing camera and state scaffolding.
+- `runtime::process_editor_input_event` routes SDL events through the editor
+  bridge before gameplay input mutates core input state.
 
 ## Editor Entry Points
 
@@ -154,14 +173,20 @@ Actual target relationships from CMake:
 ## Renderer Pipeline Summary
 
 - Render frontend data is prepared in runtime render-prep code and submitted
-  through renderer command buffers.
+  through fixed-capacity renderer command buffers.
+- Command buffers sort by packed draw keys and support static mesh/foliage
+  batching without heap allocation in the builder.
 - `RenderDevice` is a backend function table; current implementation is OpenGL
   in `renderer/src/render_device_gl.cpp`.
 - Deferred path uses G-buffer shader assets, deferred lighting, tiled light
   culling, and forward fallback/transparency.
+- Environment rendering includes skybox cubemaps, prefiltered environment
+  maps, irradiance maps, BRDF LUT handling, reflection probe bake settings,
+  distance fog, and height fog normalization.
 - Post-processing stack includes bloom, SSAO, auto exposure, tone mapping, and
   FXAA.
 - Shadow support includes directional cascades, spot maps, and point cubemaps.
+- Editor scene rendering can read back the tonemapped scene viewport texture.
 - Asset systems include mesh/texture loading, metadata, dependency tracking,
   async streaming, and LRU eviction.
 
@@ -172,7 +197,8 @@ Actual target relationships from CMake:
 - Physics steps through runtime bridge calls, using `PhysicsWorldView` instead
   of a runtime dependency.
 - Broadphase, collision detection, speculative contacts, CCD, manifold storage,
-  solver, and joints are CPU-testable.
+  solver, sleep/wake behavior, materials, collision layers, and joints are
+  CPU-testable.
 - Convex hull and heightfield shape payloads live in `PhysicsContext`, scoped to
   the owning world.
 
@@ -184,8 +210,12 @@ Actual target relationships from CMake:
   ownership-heavy behavior into focused binding modules.
 - Runtime integration is through `runtime/src/scripting_bridge.cpp` and explicit
   service registration, not global runtime ownership.
-- Lua systems include entity lifecycle callbacks, timers, coroutines, scene
-  operations, input, physics callbacks, sandbox limits, hot reload, and DAP.
+- Generated bindings cover frame time, input/action queries, game mode/state,
+  entity liveness/light queries, camera FOV, and audio controls.
+- Hand-written Lua systems include entity lifecycle callbacks, timers,
+  coroutines, async asset requests, scene operations, input/touch hooks,
+  physics callbacks, sandbox limits, hot reload, profiler/debugger APIs, and
+  DAP transport.
 
 ## Asset Pipeline Summary
 
@@ -195,22 +225,45 @@ Actual target relationships from CMake:
   convex hull sidecars.
 - New animation groundwork: `tools/asset_packer/skeleton_import.*` parses glTF
   skins into `Skeleton` data with joint parent indices and inverse bind
-  matrices.
+  matrices, and `tools/asset_packer/animation_import.*` parses transform
+  animation channels into `AnimClip` tracks.
 - Renderer asset metadata tracks type tags, paths, tags, dependencies, import
   settings, checksums, size, and modification times.
+- `AssetStreamingQueue` owns worker threads for CPU-side loading and performs
+  budgeted main-thread upload transitions.
 - Shader assets live under `assets/shaders/`; Lua sample scripts live under
   `assets/`.
 
 ## Test Map
 
 - `tests/unit`: focused module tests for core, math, physics, renderer, runtime,
-  scripting, editor command history, audio, tooling, and new skeleton import.
+  scripting, editor command history, audio, tooling, platform paths, engine
+  pipeline routing, environment rendering helpers, fog normalization, skeleton
+  import, and animation clip import.
 - `tests/integration`: cross-module ECS, lifecycle, determinism, scripting,
-  coroutine, sandbox, hot reload, DAP, asset streaming, and dependency tests.
+  coroutine, sandbox, hot reload, generated bindings, DAP, camera/game mode,
+  asset streaming, and dependency tests.
 - `tests/smoke`: `engine_smoke` high-level boot path, labelled `gpu`.
-- `tests/benchmark`: ECS, physics, and instancing performance targets.
+- `tests/benchmark`: ECS, physics, and instancing performance targets with
+  `tests/benchmark/perf_baseline.json`.
 - CI runs build matrix, non-GPU CTest, determinism comparison, source comment
   audit, cppcheck, clang-tidy, Werror, sanitizers, coverage, and benchmarks.
+
+## Known Risks
+
+- `build/compile_commands.json` exists locally and `.clangd` uses it, but it is
+  generated state; rerun CMake after CMake graph, compiler, or option changes.
+- GPU-labelled smoke/integration tests depend on graphics context availability;
+  prefer CPU-verifiable renderer tests for CI-safe coverage.
+- Runtime/ECS, serialization, Lua API, physics, and render-prep changes are
+  determinism-sensitive and should be paired with focused tests.
+- Large same-domain implementation files remain in renderer, scripting, editor,
+  physics, pipeline, world, and serialization areas; keep future edits narrow
+  and avoid mixing ownership changes with feature work.
+- Public headers should continue avoiding SDL/OpenGL/Lua/ImGui/ImGuizmo type
+  leaks; inspect new headers for module-boundary drift.
+- `TODO.md` is the source of truth for open production lanes and associated
+  project-local Codex skills.
 
 ## Suggested Reading Order
 
@@ -231,10 +284,12 @@ For runtime/ECS:
 
 1. `runtime/include/engine/runtime/world.h`
 2. `runtime/src/world.cpp`
-3. `runtime/src/scene_serializer.cpp`
-4. `runtime/src/prefab_serializer.cpp`
-5. `tests/unit/runtime_world_test.cpp`
-6. ECS integration and stress tests
+3. `runtime/include/engine/runtime/engine_pipeline.h`
+4. `runtime/src/engine_pipeline.cpp`
+5. `runtime/src/scene_serializer.cpp`
+6. `runtime/src/prefab_serializer.cpp`
+7. `tests/unit/runtime_world_test.cpp`
+8. ECS integration and stress tests
 
 For renderer:
 
@@ -244,8 +299,9 @@ For renderer:
 4. `renderer/src/render_device_gl.cpp`
 5. `renderer/src/shader_system.cpp`
 6. `renderer/src/mesh_loader.cpp`
-7. Renderer unit tests
-8. `assets/shaders/`
+7. `renderer/src/post_process_stack.cpp`
+8. Renderer unit tests
+9. `assets/shaders/`
 
 For scripting:
 
@@ -269,6 +325,9 @@ For animation work:
 1. `.codex/skills/engine-animation-work/SKILL.md`
 2. `tools/asset_packer/skeleton_import.h`
 3. `tools/asset_packer/skeleton_import.cpp`
-4. `tests/unit/skeleton_import_test.cpp`
-5. Renderer shader variant tests and skinned shader assets when adding GPU
+4. `tools/asset_packer/animation_import.h`
+5. `tools/asset_packer/animation_import.cpp`
+6. `tests/unit/skeleton_import_test.cpp`
+7. `tests/unit/animation_import_test.cpp`
+8. Renderer shader variant tests and skinned shader assets when adding GPU
    skinning
