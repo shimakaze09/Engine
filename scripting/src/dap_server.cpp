@@ -2,7 +2,8 @@
 // Implements a subset of the DAP specification over TCP with JSON messages.
 // https://microsoft.github.io/debug-adapter-protocol/
 
-#include "engine/scripting/dap_server.h"
+#include "dap_server_internal.h"
+
 #include "engine/scripting/scripting.h"
 
 extern "C" {

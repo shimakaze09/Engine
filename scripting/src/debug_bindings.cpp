@@ -2,7 +2,7 @@
 
 #include "debug_bindings.h"
 
-#include "engine/scripting/dap_server.h"
+#include "dap_server_internal.h"
 
 extern "C" {
 #include "lauxlib.h"
