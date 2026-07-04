@@ -47,8 +47,8 @@ static bool big_upload(AssetId /*id*/, void * /*userData*/) noexcept {
   return true;
 }
 
-// --- Budget enforcement: 20 loads × 64 MB each, 256 MB budget → spreads
-//     across multiple frames. ---
+// --- Budget enforcement: 20 loads × 64 MB each. The worker pool should spread
+//     work across frames instead of promoting the entire queue at once. ---
 static void test_budget_spreading() noexcept {
   engine::core::initialize_cvars();
 
@@ -95,8 +95,7 @@ static void test_budget_spreading() noexcept {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
-  // With 20 × 64 MB and 256 MB budget, should take at least 5 frames
-  // (4 per frame × 5 frames = 20).
+  // The 256 MB budget should keep requests spread across frames.
   CHECK(frameCount >= 5U, "takes multiple frames due to budget");
 
   // Verify all loaded.
@@ -108,7 +107,7 @@ static void test_budget_spreading() noexcept {
   }
   CHECK(totalReady == kLoadCount, "all 20 eventually loaded");
 
-  // No single frame should have processed all 20 (budget prevents it).
+  // No single frame should have processed all 20.
   bool anyFrameWithAll = false;
   for (std::size_t f = 0U; f < frameCount; ++f) {
     if (readyPerFrame[f] >= kLoadCount) {
@@ -144,7 +143,8 @@ static void test_upload_limit() noexcept {
         load_asset_async(queue.get(), make_id(i), path, LoadPriority::Normal);
   }
 
-  // First frame: all 10 should load (budget is huge), but only 2 upload.
+  // First frame: the worker pool can schedule loads, but only 2 completed
+  // uploads can be promoted.
   begin_streaming_frame(queue.get());
   const std::size_t readyFrame1 =
       update_asset_streaming(queue.get(), &big_load, &big_upload, nullptr);

@@ -5,6 +5,7 @@
 #include "engine/renderer/asset_streaming.h"
 
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -37,6 +38,35 @@ static bool ok_load(AssetId, const char *, std::uint64_t *outSz,
 
 /// Handles ok upload.
 static bool ok_upload(AssetId, void *) noexcept { return true; }
+
+struct ConcurrentLoadProbe final {
+  std::atomic<int> active{0};
+  std::atomic<int> maxActive{0};
+};
+
+/// Records the highest value observed for a concurrent counter.
+static void record_max(std::atomic<int> *target, int value) noexcept {
+  int observed = target->load(std::memory_order_relaxed);
+  while ((observed < value) &&
+         !target->compare_exchange_weak(observed, value,
+                                        std::memory_order_relaxed)) {
+  }
+}
+
+/// Handles a slow load while tracking callback concurrency.
+static bool concurrent_load(AssetId, const char *, std::uint64_t *outSz,
+                            void *userData) noexcept {
+  auto *probe = static_cast<ConcurrentLoadProbe *>(userData);
+  const int active =
+      probe->active.fetch_add(1, std::memory_order_relaxed) + 1;
+  record_max(&probe->maxActive, active);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  probe->active.fetch_sub(1, std::memory_order_relaxed);
+  if (outSz != nullptr) {
+    *outSz = 1024ULL;
+  }
+  return true;
+}
 
 /// Advances the streaming queue until a handle reaches a terminal state.
 static void pump_until_terminal(AssetStreamingQueue *queue, LoadHandle handle,
@@ -183,7 +213,8 @@ static void test_release_reuses_terminal_slots() noexcept {
   CHECK(!full.valid(), "full terminal queue rejects new request");
 
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    CHECK(release_load(queue.get(), LoadHandle{i}), "release terminal slot");
+    CHECK(release_load(queue.get(), LoadHandle{i, queue->requests[i].generation}),
+          "release terminal slot");
   }
   CHECK(queue->count == 0U, "all terminal slots released");
 
@@ -192,6 +223,61 @@ static void test_release_reuses_terminal_slots() noexcept {
                        "reused.mesh", LoadPriority::Normal);
   CHECK(reused.valid(), "released terminal slots can be reused");
   CHECK(cancel_load(queue.get(), reused), "cleanup reused queued request");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
+static void test_stale_handles_do_not_alias_reused_slots() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  LoadHandle original =
+      load_asset_async(queue.get(), make_id(0), "original.mesh",
+                       LoadPriority::Normal);
+  pump_until_terminal(queue.get(), original, &ok_load, &ok_upload, nullptr);
+  CHECK(is_load_ready(queue.get(), original), "original request ready");
+  CHECK(release_load(queue.get(), original), "release original request");
+
+  LoadHandle reused =
+      load_asset_async(queue.get(), make_id(1), "reused.mesh",
+                       LoadPriority::Normal);
+  CHECK(reused.valid(), "reused request valid");
+  CHECK(reused.index == original.index, "released slot reused");
+  CHECK(reused.generation != original.generation, "generation changed");
+
+  CHECK(!is_load_ready(queue.get(), original), "stale handle not ready");
+  CHECK(get_load_state(queue.get(), original) == LoadingState::Failed,
+        "stale handle reports failed state");
+  CHECK(!update_load_priority(queue.get(), original, LoadPriority::Immediate),
+        "stale handle cannot update priority");
+  CHECK(!cancel_load(queue.get(), original), "stale handle cannot cancel");
+  CHECK(!release_load(queue.get(), original), "stale handle cannot release");
+  wait_for_load(queue.get(), original);
+
+  CHECK(cancel_load(queue.get(), reused), "current reused handle still works");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
+static void test_upload_cap_clamps_non_positive_values() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  engine::core::cvar_set_int("asset.max_uploads_per_frame", -1);
+  begin_streaming_frame(queue.get());
+  CHECK(queue->maxUploadsPerFrame == 8U, "negative upload cap uses default");
+
+  engine::core::cvar_set_int("asset.max_uploads_per_frame", 0);
+  begin_streaming_frame(queue.get());
+  CHECK(queue->maxUploadsPerFrame == 8U, "zero upload cap uses default");
+
+  engine::core::cvar_set_int("asset.max_uploads_per_frame", 3);
+  begin_streaming_frame(queue.get());
+  CHECK(queue->maxUploadsPerFrame == 3U, "positive upload cap applied");
 
   shutdown_asset_streaming(queue.get());
   engine::core::shutdown_cvars();
@@ -258,6 +344,59 @@ static void test_load_callback_is_async() noexcept {
   engine::core::shutdown_cvars();
 }
 
+static void test_worker_pool_runs_concurrent_loads() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  ConcurrentLoadProbe probe{};
+  LoadHandle handles[AssetStreamingQueue::kWorkerCount]{};
+  for (std::size_t i = 0U; i < AssetStreamingQueue::kWorkerCount; ++i) {
+    handles[i] =
+        load_asset_async(queue.get(), make_id(i), "pool.mesh",
+                         LoadPriority::Normal);
+    CHECK(handles[i].valid(), "worker pool test handle valid");
+  }
+
+  begin_streaming_frame(queue.get());
+  static_cast<void>(
+      update_asset_streaming(queue.get(), &concurrent_load, &ok_upload,
+                             &probe));
+
+  for (std::size_t wait = 0U; wait < 200U; ++wait) {
+    if (probe.maxActive.load(std::memory_order_relaxed) >= 2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK(probe.maxActive.load(std::memory_order_relaxed) >= 2,
+        "worker pool runs load callbacks concurrently");
+
+  bool allReady = false;
+  for (std::size_t frame = 0U; frame < 128U; ++frame) {
+    begin_streaming_frame(queue.get());
+    static_cast<void>(
+        update_asset_streaming(queue.get(), &concurrent_load, &ok_upload,
+                               &probe));
+
+    allReady = true;
+    for (LoadHandle handle : handles) {
+      if (!is_load_ready(queue.get(), handle)) {
+        allReady = false;
+        break;
+      }
+    }
+    if (allReady) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK(allReady, "worker pool requests eventually ready");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
@@ -268,8 +407,11 @@ int main() {
   test_load_failure();
   test_release_terminal_requests();
   test_release_reuses_terminal_slots();
+  test_stale_handles_do_not_alias_reused_slots();
+  test_upload_cap_clamps_non_positive_values();
   test_pending_count();
   test_load_callback_is_async();
+  test_worker_pool_runs_concurrent_loads();
 
   return g_tests.finish("Async Streaming Unit Tests");
 }

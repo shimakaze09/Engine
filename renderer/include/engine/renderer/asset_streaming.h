@@ -34,6 +34,7 @@ enum class LoadingState : std::uint8_t {
 /// block with wait().
 struct LoadHandle final {
   std::uint32_t index = 0xFFFFFFFFU;
+  std::uint32_t generation = 0U;
 
   static constexpr std::uint32_t kInvalid = 0xFFFFFFFFU;
 
@@ -62,11 +63,12 @@ struct LoadRequest final {
   LoadPriority priority = LoadPriority::Normal;
   LoadingState state = LoadingState::Queued;
   std::uint64_t loadedSizeBytes = 0ULL;
+  std::uint32_t generation = 1U;
   bool loadInProgress = false;
   bool occupied = false;
 };
 
-/// Fixed-capacity streaming queue processed by a background IO thread.
+/// Fixed-capacity streaming queue processed by a background IO worker pool.
 struct AssetStreamingQueue final {
   AssetStreamingQueue() noexcept = default;
   ~AssetStreamingQueue() noexcept;
@@ -75,6 +77,7 @@ struct AssetStreamingQueue final {
   AssetStreamingQueue &operator=(const AssetStreamingQueue &) = delete;
 
   static constexpr std::size_t kMaxRequests = 1024U;
+  static constexpr std::size_t kWorkerCount = 4U;
   LoadRequest requests[kMaxRequests]{};
   std::size_t count = 0U;
 
@@ -92,7 +95,7 @@ struct AssetStreamingQueue final {
 
   mutable std::mutex mutex{};
   mutable std::condition_variable stateChanged{};
-  std::thread workerThread{};
+  std::array<std::thread, kWorkerCount> workerThreads{};
   bool workerRunning = false;
   bool workerStopRequested = false;
 };
@@ -141,18 +144,20 @@ void wait_for_load(const AssetStreamingQueue *queue,
 
 // ---- Per-frame processing ----
 
-/// Called once per frame on the main thread.  Processes the highest-priority
-/// queued requests up to the streaming budget, advances Loading→Uploading
-/// for completed IO, and performs GPU uploads (Uploading→Ready) up to
-/// maxUploadsPerFrame.
+/// Called once per frame on the main thread. Performs GPU uploads from
+/// Uploading to Ready up to maxUploadsPerFrame, then schedules the
+/// highest-priority queued requests while the worker pool and frame budget
+/// allow more work.
 ///
 /// @param loadCallback   Called for each request that needs file IO.  Should
 ///                       read the asset file into CPU memory and return true
-///                       on success.  May be nullptr for budget-only tests.
+///                       on success.  May run concurrently on streaming worker
+///                       threads.  May be nullptr for budget-only tests.
 /// @param uploadCallback Called for each request that needs GPU upload.  Should
 ///                       upload to GL and return true on success.  May be
 ///                       nullptr for budget-only tests.
-/// @param userData       Forwarded to both callbacks.
+/// @param userData       Forwarded to both callbacks. Must be safe for
+///                       concurrent load callbacks when loadCallback is used.
 /// @return Number of requests that transitioned to Ready this frame.
 std::size_t update_asset_streaming(
     AssetStreamingQueue *queue,

@@ -150,7 +150,7 @@ static void test_priority_ordering() noexcept {
   auto queue = std::make_unique<AssetStreamingQueue>();
   initialize_asset_streaming(queue.get());
 
-  // Set budget to only allow 1 load per frame (1 byte budget).
+  // Set budget low enough to allow one conservative load slot per frame.
   engine::core::cvar_set_int("asset.streaming_budget_mb", 1);
   engine::core::cvar_set_int("asset.max_uploads_per_frame", 1024);
 

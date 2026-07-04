@@ -15,6 +15,8 @@ namespace engine::renderer {
 
 namespace {
 
+constexpr std::uint64_t kUnknownLoadBudgetBytes = 64ULL * 1024ULL * 1024ULL;
+
 /// Writes path data.
 void write_path(std::array<char, 260U> *out, const char *src) noexcept {
   out->fill('\0');
@@ -40,6 +42,28 @@ std::uint32_t find_free_request(const AssetStreamingQueue *queue) noexcept {
   return LoadHandle::kInvalid;
 }
 
+/// Returns the next non-zero generation for a reused request slot.
+std::uint32_t next_generation(std::uint32_t generation) noexcept {
+  ++generation;
+  return generation == 0U ? 1U : generation;
+}
+
+/// Clears one request slot while invalidating handles that reference it.
+void reset_request_unlocked(AssetStreamingQueue *queue,
+                            std::uint32_t index) noexcept {
+  const std::uint32_t generation =
+      next_generation(queue->requests[index].generation);
+  queue->requests[index] = LoadRequest{};
+  queue->requests[index].generation = generation;
+}
+
+/// Checks whether a handle still references the current request generation.
+bool is_current_handle_unlocked(const AssetStreamingQueue *queue,
+                                LoadHandle handle) noexcept {
+  return handle.valid() && (handle.index < AssetStreamingQueue::kMaxRequests) &&
+         (queue->requests[handle.index].generation == handle.generation);
+}
+
 /// Sort-stable selection of the highest-priority Queued request.
 std::uint32_t
 pick_highest_priority_queued(const AssetStreamingQueue *queue) noexcept {
@@ -60,22 +84,56 @@ pick_highest_priority_queued(const AssetStreamingQueue *queue) noexcept {
   return best;
 }
 
-/// Returns whether a load job is already active.
-bool has_active_load_unlocked(const AssetStreamingQueue *queue) noexcept {
+/// Counts load jobs already assigned to the worker pool.
+std::size_t active_load_count_unlocked(
+    const AssetStreamingQueue *queue) noexcept {
+  std::size_t count = 0U;
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     const LoadRequest &req = queue->requests[i];
     if (req.occupied &&
         ((req.state == LoadingState::Loading) || req.loadInProgress)) {
-      return true;
+      ++count;
     }
   }
-  return false;
+  return count;
+}
+
+/// Counts loaded bytes waiting for main-thread upload.
+std::uint64_t pending_upload_bytes_unlocked(
+    const AssetStreamingQueue *queue) noexcept {
+  std::uint64_t bytes = 0ULL;
+  for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
+    const LoadRequest &req = queue->requests[i];
+    if (req.occupied && (req.state == LoadingState::Uploading)) {
+      bytes += req.loadedSizeBytes;
+    }
+  }
+  return bytes;
+}
+
+/// Computes how many worker loads can be admitted before their sizes are known.
+std::size_t budgeted_load_slots(std::uint64_t streamingBudgetBytes,
+                                std::uint64_t pendingUploadBytes) noexcept {
+  if (pendingUploadBytes >= streamingBudgetBytes) {
+    return 0U;
+  }
+
+  const std::uint64_t availableBytes = streamingBudgetBytes - pendingUploadBytes;
+  std::size_t slots =
+      static_cast<std::size_t>(availableBytes / kUnknownLoadBudgetBytes);
+  if (slots == 0U) {
+    slots = 1U;
+  }
+  if (slots > AssetStreamingQueue::kWorkerCount) {
+    slots = AssetStreamingQueue::kWorkerCount;
+  }
+  return slots;
 }
 
 /// Resets queue request state while the queue mutex is already held.
 void reset_requests_unlocked(AssetStreamingQueue *queue) noexcept {
   for (std::size_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    queue->requests[i] = LoadRequest{};
+    reset_request_unlocked(queue, static_cast<std::uint32_t>(i));
   }
   queue->count = 0U;
   queue->inflight_bytes_this_frame = 0ULL;
@@ -191,7 +249,9 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
     queue->workerRunning = true;
   }
 
-  queue->workerThread = std::thread(streaming_worker_main, queue);
+  for (std::thread &workerThread : queue->workerThreads) {
+    workerThread = std::thread(streaming_worker_main, queue);
+  }
   return true;
 }
 
@@ -207,8 +267,10 @@ void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept {
   }
   queue->stateChanged.notify_all();
 
-  if (queue->workerThread.joinable()) {
-    queue->workerThread.join();
+  for (std::thread &workerThread : queue->workerThreads) {
+    if (workerThread.joinable()) {
+      workerThread.join();
+    }
   }
 
   {
@@ -241,7 +303,7 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
           static_cast<std::uint8_t>(queue->requests[i].priority)) {
         queue->requests[i].priority = priority;
       }
-      return LoadHandle{i};
+      return LoadHandle{i, queue->requests[i].generation};
     }
   }
 
@@ -261,7 +323,7 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
   ++queue->count;
   queue->stateChanged.notify_all();
 
-  return LoadHandle{slot};
+  return LoadHandle{slot, req.generation};
 }
 
 /// Advances this system for the current frame or tick for load priority.
@@ -270,11 +332,11 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
-  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
-    return false;
-  }
 
   std::lock_guard<std::mutex> lock(queue->mutex);
+  if (!is_current_handle_unlocked(queue, handle)) {
+    return false;
+  }
   LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied || (req.state != LoadingState::Queued)) {
     return false; // Can only update priority while still queued.
@@ -289,11 +351,11 @@ bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
-  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
-    return false;
-  }
 
   std::lock_guard<std::mutex> lock(queue->mutex);
+  if (!is_current_handle_unlocked(queue, handle)) {
+    return false;
+  }
   LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied) {
     return false;
@@ -302,7 +364,7 @@ bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
     return false;
   }
 
-  req = LoadRequest{};
+  reset_request_unlocked(queue, handle.index);
   if (queue->count > 0U) {
     --queue->count;
   }
@@ -314,11 +376,11 @@ bool release_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
-  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
-    return false;
-  }
 
   std::lock_guard<std::mutex> lock(queue->mutex);
+  if (!is_current_handle_unlocked(queue, handle)) {
+    return false;
+  }
   LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied) {
     return false;
@@ -327,7 +389,7 @@ bool release_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
     return false;
   }
 
-  req = LoadRequest{};
+  reset_request_unlocked(queue, handle.index);
   if (queue->count > 0U) {
     --queue->count;
   }
@@ -342,10 +404,10 @@ bool is_load_ready(const AssetStreamingQueue *queue,
   if ((queue == nullptr) || !handle.valid()) {
     return false;
   }
-  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+  std::lock_guard<std::mutex> lock(queue->mutex);
+  if (!is_current_handle_unlocked(queue, handle)) {
     return false;
   }
-  std::lock_guard<std::mutex> lock(queue->mutex);
   const LoadRequest &req = queue->requests[handle.index];
   return req.occupied && (req.state == LoadingState::Ready);
 }
@@ -356,10 +418,10 @@ LoadingState get_load_state(const AssetStreamingQueue *queue,
   if ((queue == nullptr) || !handle.valid()) {
     return LoadingState::Failed;
   }
-  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
+  std::lock_guard<std::mutex> lock(queue->mutex);
+  if (!is_current_handle_unlocked(queue, handle)) {
     return LoadingState::Failed;
   }
-  std::lock_guard<std::mutex> lock(queue->mutex);
   const LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied) {
     return LoadingState::Failed;
@@ -373,12 +435,15 @@ void wait_for_load(const AssetStreamingQueue *queue,
   if ((queue == nullptr) || !handle.valid()) {
     return;
   }
-  if (handle.index >= AssetStreamingQueue::kMaxRequests) {
-    return;
-  }
 
   std::unique_lock<std::mutex> lock(queue->mutex);
+  if (!is_current_handle_unlocked(queue, handle)) {
+    return;
+  }
   queue->stateChanged.wait(lock, [&]() noexcept {
+    if (!is_current_handle_unlocked(queue, handle)) {
+      return true;
+    }
     const LoadRequest &request = queue->requests[handle.index];
     return !request.occupied || (request.state == LoadingState::Ready) ||
            (request.state == LoadingState::Failed);
@@ -400,8 +465,10 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
   queue->streamingBudgetBytes =
       static_cast<std::uint64_t>(budgetMb > 0 ? budgetMb : 256) * 1024ULL *
       1024ULL;
-  queue->maxUploadsPerFrame = static_cast<std::uint32_t>(
-      engine::core::cvar_get_int("asset.max_uploads_per_frame", 8));
+  const int uploadsPerFrame =
+      engine::core::cvar_get_int("asset.max_uploads_per_frame", 8);
+  queue->maxUploadsPerFrame =
+      uploadsPerFrame > 0 ? static_cast<std::uint32_t>(uploadsPerFrame) : 8U;
 
   queue->inflight_bytes_this_frame = 0ULL;
   queue->uploads_this_frame = 0U;
@@ -424,22 +491,9 @@ std::size_t update_asset_streaming(
     queue->loadCallback = loadCallback;
     queue->uploadCallback = uploadCallback;
     queue->callbackUserData = userData;
-
-    // Phase 1: schedule one queued request for the worker. The loaded byte
-    // size is only known after CPU IO finishes, so scheduling is conservative
-    // and never runs load callbacks on the frame thread.
-    if ((queue->inflight_bytes_this_frame < queue->streamingBudgetBytes) &&
-        !has_active_load_unlocked(queue)) {
-      const std::uint32_t idx = pick_highest_priority_queued(queue);
-      if (idx != LoadHandle::kInvalid) {
-        LoadRequest &req = queue->requests[idx];
-        req.state = LoadingState::Loading;
-        queue->stateChanged.notify_all();
-      }
-    }
   }
 
-  // Phase 2: Promote Uploading → Ready up to maxUploadsPerFrame.
+  // Phase 1: Promote Uploading -> Ready up to maxUploadsPerFrame.
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     AssetId assetId = kInvalidAssetId;
     AssetUploadCallback callback = nullptr;
@@ -483,6 +537,36 @@ std::size_t update_asset_streaming(
       }
     }
     queue->stateChanged.notify_all();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+
+    // Phase 2: schedule queued requests for idle workers. The loaded byte size
+    // is only known after CPU IO finishes, so the budget gate uses bytes that
+    // are already loaded and waiting for upload.
+    std::size_t activeLoads = active_load_count_unlocked(queue);
+    const std::uint64_t pendingUploadBytes =
+        pending_upload_bytes_unlocked(queue);
+    const std::size_t budgetedLoads =
+        budgeted_load_slots(queue->streamingBudgetBytes, pendingUploadBytes);
+    bool scheduledAny = false;
+
+    while (activeLoads < budgetedLoads) {
+      const std::uint32_t idx = pick_highest_priority_queued(queue);
+      if (idx == LoadHandle::kInvalid) {
+        break;
+      }
+
+      LoadRequest &req = queue->requests[idx];
+      req.state = LoadingState::Loading;
+      ++activeLoads;
+      scheduledAny = true;
+    }
+
+    if (scheduledAny) {
+      queue->stateChanged.notify_all();
+    }
   }
 
   // Completed/failed requests remain observable until callers retire their
