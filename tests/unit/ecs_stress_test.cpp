@@ -4,9 +4,8 @@
 // iteration loop exceeds the threshold the test fails, providing a regression
 // signal for hot-path regressions.
 //
-// World capacity is capped at 16384 entities (see world.h).  The "50k+"
-// phased-todo item requires raising kMaxEntities and verifying the heap
-// allocation path still holds; that cap raise is tracked separately.
+// World capacity defaults to 65536 entities, and the 50k integration stress
+// test covers the raised-capacity path.
 
 #include <chrono>
 #include <cstdio>

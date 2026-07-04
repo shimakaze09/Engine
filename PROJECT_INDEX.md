@@ -212,19 +212,6 @@ Actual target relationships from CMake:
 - CI runs build matrix, non-GPU CTest, determinism comparison, source comment
   audit, cppcheck, clang-tidy, Werror, sanitizers, coverage, and benchmarks.
 
-## Known Risks
-
-- `renderer/CMakeLists.txt` currently lists `src/render_settings.cpp` twice.
-- `PROJECT_INDEX.md` was missing before this index pass.
-- `cmake --build build --target source_comment_audit` currently reports
-  missing file-level comments in `.codex/skills/*/agents/openai.yaml`.
-- P1-M7 animation is only started: skeleton skin parsing exists, while clip
-  loading, compression, blending, state machines, root motion, animation events,
-  skinning shaders, and IK remain open.
-- P1-M11 runtime UI and P1-M13 production operations remain large open lanes.
-- Many editor workflows are partial: all-types inspector, complete undo/redo,
-  hierarchy, asset browser, prefab overrides, and editor Lua APIs.
-
 ## Suggested Reading Order
 
 For general work:
