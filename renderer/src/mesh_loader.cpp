@@ -68,22 +68,68 @@ void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
   }
 
   if (mesh->indexBuffer != 0U) {
-    dev->destroy_buffer(mesh->indexBuffer);
+    if (dev->destroy_buffer != nullptr) {
+      dev->destroy_buffer(mesh->indexBuffer);
+    }
     mesh->indexBuffer = 0U;
   }
 
   if (mesh->vertexBuffer != 0U) {
-    dev->destroy_buffer(mesh->vertexBuffer);
+    if (dev->destroy_buffer != nullptr) {
+      dev->destroy_buffer(mesh->vertexBuffer);
+    }
     mesh->vertexBuffer = 0U;
   }
 
   if (mesh->vertexArray != 0U) {
-    dev->destroy_vertex_array(mesh->vertexArray);
+    if (dev->destroy_vertex_array != nullptr) {
+      dev->destroy_vertex_array(mesh->vertexArray);
+    }
     mesh->vertexArray = 0U;
   }
 
   mesh->vertexCount = 0U;
   mesh->indexCount = 0U;
+}
+
+bool mesh_upload_device_ready(const RenderDevice *dev) noexcept {
+  return (dev != nullptr) && (dev->create_vertex_array != nullptr) &&
+         (dev->destroy_vertex_array != nullptr) &&
+         (dev->bind_vertex_array != nullptr) &&
+         (dev->create_buffer != nullptr) && (dev->destroy_buffer != nullptr) &&
+         (dev->bind_array_buffer != nullptr) &&
+         (dev->bind_element_buffer != nullptr) &&
+         (dev->buffer_data_array != nullptr) &&
+         (dev->buffer_data_element != nullptr) &&
+         (dev->enable_vertex_attrib != nullptr) &&
+         (dev->vertex_attrib_float != nullptr);
+}
+
+void unbind_mesh_upload_state(const RenderDevice *dev) noexcept {
+  if (dev == nullptr) {
+    return;
+  }
+  if (dev->bind_vertex_array != nullptr) {
+    dev->bind_vertex_array(0U);
+  }
+  if (dev->bind_array_buffer != nullptr) {
+    dev->bind_array_buffer(0U);
+  }
+  if (dev->bind_element_buffer != nullptr) {
+    dev->bind_element_buffer(0U);
+  }
+}
+
+bool fail_mesh_upload(const RenderDevice *dev, GpuMesh *mesh,
+                      GpuMesh *outMesh) noexcept {
+  unbind_mesh_upload_state(dev);
+  delete_mesh_resources(dev, mesh);
+  if (outMesh != nullptr) {
+    *outMesh = GpuMesh{};
+  }
+  core::log_message(core::LogLevel::Error, "renderer",
+                    "failed to create mesh GPU resources");
+  return false;
 }
 
 } // namespace
@@ -266,15 +312,24 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
   }
 
   const RenderDevice *dev = render_device();
+  if (!mesh_upload_device_ready(dev)) {
+    return false;
+  }
   const std::int32_t stride =
       static_cast<std::int32_t>(meshData.strideFloats * sizeof(float));
 
   GpuMesh mesh{};
   mesh.hasUVs = meshData.hasUVs;
   mesh.vertexArray = dev->create_vertex_array();
+  if (mesh.vertexArray == 0U) {
+    return fail_mesh_upload(dev, &mesh, outMesh);
+  }
   dev->bind_vertex_array(mesh.vertexArray);
 
   mesh.vertexBuffer = dev->create_buffer();
+  if (mesh.vertexBuffer == 0U) {
+    return fail_mesh_upload(dev, &mesh, outMesh);
+  }
   dev->bind_array_buffer(mesh.vertexBuffer);
   dev->buffer_data_array(
       meshData.vertices.get(),
@@ -294,7 +349,13 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
   }
 
   if (meshData.indexCount > 0U) {
+    if (meshData.indices == nullptr) {
+      return fail_mesh_upload(dev, &mesh, outMesh);
+    }
     mesh.indexBuffer = dev->create_buffer();
+    if (mesh.indexBuffer == 0U) {
+      return fail_mesh_upload(dev, &mesh, outMesh);
+    }
     dev->bind_element_buffer(mesh.indexBuffer);
     dev->buffer_data_element(
         meshData.indices.get(),
@@ -303,9 +364,7 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                                     sizeof(std::uint32_t)));
   }
 
-  dev->bind_vertex_array(0U);
-  dev->bind_array_buffer(0U);
-  dev->bind_element_buffer(0U);
+  unbind_mesh_upload_state(dev);
 
   mesh.vertexCount = meshData.vertexCount;
   mesh.indexCount = meshData.indexCount;
@@ -322,11 +381,19 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
     return false;
   }
 
+  *outMesh = GpuMesh{};
+
   if (!initialize_render_device()) {
     return false;
   }
 
   const RenderDevice *dev = render_device();
+  if (!mesh_upload_device_ready(dev)) {
+    return false;
+  }
+  if ((indexCount > 0U) && (indices == nullptr)) {
+    return false;
+  }
   const std::size_t strideFloats =
       hasUVs ? kVertexStrideV2Floats : kVertexStrideV1Floats;
   const std::int32_t stride =
@@ -335,9 +402,15 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
   GpuMesh mesh{};
   mesh.hasUVs = hasUVs;
   mesh.vertexArray = dev->create_vertex_array();
+  if (mesh.vertexArray == 0U) {
+    return fail_mesh_upload(dev, &mesh, outMesh);
+  }
   dev->bind_vertex_array(mesh.vertexArray);
 
   mesh.vertexBuffer = dev->create_buffer();
+  if (mesh.vertexBuffer == 0U) {
+    return fail_mesh_upload(dev, &mesh, outMesh);
+  }
   dev->bind_array_buffer(mesh.vertexBuffer);
   dev->buffer_data_array(
       vertices,
@@ -358,14 +431,15 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
 
   if ((indexCount > 0U) && (indices != nullptr)) {
     mesh.indexBuffer = dev->create_buffer();
+    if (mesh.indexBuffer == 0U) {
+      return fail_mesh_upload(dev, &mesh, outMesh);
+    }
     dev->bind_element_buffer(mesh.indexBuffer);
     dev->buffer_data_element(indices, static_cast<std::ptrdiff_t>(
                                           indexCount * sizeof(std::uint32_t)));
   }
 
-  dev->bind_vertex_array(0U);
-  dev->bind_array_buffer(0U);
-  dev->bind_element_buffer(0U);
+  unbind_mesh_upload_state(dev);
 
   mesh.vertexCount = vertexCount;
   mesh.indexCount = indexCount;

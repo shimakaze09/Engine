@@ -63,6 +63,7 @@ struct ShaderVariantEntry final {
 /// Stores shader entry data used by the engine.
 struct ShaderEntry final {
   bool active = false;
+  std::uint32_t generation = 1U;
   char vertPath[kMaxPathLength] = {};
   char fragPath[kMaxPathLength] = {};
   ShaderDefineCopy defines[kMaxShaderDefines] = {};
@@ -75,6 +76,27 @@ struct ShaderEntry final {
 ShaderEntry g_entries[kMaxShaderPrograms] = {};
 ShaderVariantEntry g_variants[kMaxShaderVariants] = {};
 bool g_initialized = false;
+
+std::uint32_t next_generation(std::uint32_t generation) noexcept {
+  ++generation;
+  return generation == 0U ? 1U : generation;
+}
+
+void reset_shader_entry(std::size_t index) noexcept {
+  const std::uint32_t generation = next_generation(g_entries[index].generation);
+  g_entries[index] = ShaderEntry{};
+  g_entries[index].generation = generation;
+}
+
+bool is_current_handle(ShaderProgramHandle handle) noexcept {
+  if ((handle.id == 0U) || (handle.id > kMaxShaderPrograms) ||
+      !g_initialized) {
+    return false;
+  }
+
+  const ShaderEntry &entry = g_entries[handle.id - 1U];
+  return entry.active && (entry.generation == handle.generation);
+}
 
 /// Adds one enabled material shader define to the selection.
 void append_material_shader_define(MaterialShaderVariantSelection &selection,
@@ -403,6 +425,9 @@ ShaderProgramHandle load_shader_program_internal(
   }
 
   ShaderEntry &entry = g_entries[slot];
+  const std::uint32_t generation = entry.generation;
+  entry = ShaderEntry{};
+  entry.generation = generation;
   safe_copy_path(entry.vertPath, vertPath);
   safe_copy_path(entry.fragPath, fragPath);
   if (defineCount > 0U) {
@@ -411,12 +436,13 @@ ShaderProgramHandle load_shader_program_internal(
   entry.active = true;
 
   if (!try_reload_entry(entry)) {
-    entry = ShaderEntry{};
+    reset_shader_entry(slot);
     return kInvalidShaderProgram;
   }
 
   // Handle id is slot + 1 so that 0 remains invalid.
-  return ShaderProgramHandle{static_cast<std::uint32_t>(slot + 1U)};
+  return ShaderProgramHandle{static_cast<std::uint32_t>(slot + 1U),
+                             entry.generation};
 }
 
 } // namespace
@@ -427,8 +453,8 @@ bool initialize_shader_system() noexcept {
     return true;
   }
 
-  for (auto &e : g_entries) {
-    e = ShaderEntry{};
+  for (std::size_t i = 0U; i < kMaxShaderPrograms; ++i) {
+    reset_shader_entry(i);
   }
   for (auto &variant : g_variants) {
     variant = ShaderVariantEntry{};
@@ -445,11 +471,12 @@ void shutdown_shader_system() noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  for (auto &e : g_entries) {
+  for (std::size_t i = 0U; i < kMaxShaderPrograms; ++i) {
+    ShaderEntry &e = g_entries[i];
     if (e.active && (e.gpuProgram != 0U) && (dev != nullptr)) {
       dev->destroy_program(e.gpuProgram);
     }
-    e = ShaderEntry{};
+    reset_shader_entry(i);
   }
   for (auto &variant : g_variants) {
     variant = ShaderVariantEntry{};
@@ -561,7 +588,7 @@ MaterialShaderVariantSelection select_material_shader_defines(
 
 /// Destroys or releases the requested object, handle, or resource for shader program.
 void destroy_shader_program(ShaderProgramHandle handle) noexcept {
-  if ((handle.id == 0U) || (handle.id > kMaxShaderPrograms) || !g_initialized) {
+  if (!is_current_handle(handle)) {
     return;
   }
 
@@ -576,17 +603,17 @@ void destroy_shader_program(ShaderProgramHandle handle) noexcept {
   }
 
   remove_variants_for_handle(handle);
-  entry = ShaderEntry{};
+  reset_shader_entry(handle.id - 1U);
 }
 
 /// Handles shader gpu program.
 std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
-  if ((handle.id == 0U) || (handle.id > kMaxShaderPrograms) || !g_initialized) {
+  if (!is_current_handle(handle)) {
     return 0U;
   }
 
   const ShaderEntry &entry = g_entries[handle.id - 1U];
-  return entry.active ? entry.gpuProgram : 0U;
+  return entry.gpuProgram;
 }
 
 /// Handles check shader reload.

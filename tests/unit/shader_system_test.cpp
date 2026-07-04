@@ -2,13 +2,54 @@
 
 #include "engine/renderer/shader_system.h"
 
+#include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
+#include "engine/renderer/render_device.h"
 
 #include <cstdio>
 #include <cstring>
 
 static int g_passed = 0;
 static int g_failed = 0;
+
+namespace engine::renderer {
+
+namespace {
+
+RenderDevice g_fakeDevice{};
+std::uint32_t g_nextShader = 1U;
+std::uint32_t g_nextProgram = 100U;
+
+std::uint32_t fake_create_shader(std::uint32_t, const char *) noexcept {
+  return g_nextShader++;
+}
+
+void fake_destroy_shader(std::uint32_t) noexcept {}
+
+std::uint32_t fake_link_program(std::uint32_t, std::uint32_t) noexcept {
+  return g_nextProgram++;
+}
+
+void fake_destroy_program(std::uint32_t) noexcept {}
+
+void configure_fake_render_device() noexcept {
+  g_fakeDevice = RenderDevice{};
+  g_fakeDevice.create_shader = &fake_create_shader;
+  g_fakeDevice.destroy_shader = &fake_destroy_shader;
+  g_fakeDevice.link_program = &fake_link_program;
+  g_fakeDevice.destroy_program = &fake_destroy_program;
+}
+
+} // namespace
+
+bool initialize_render_device() noexcept { return true; }
+
+void shutdown_render_device() noexcept {}
+
+const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
+
+} // namespace engine::renderer
 
 #define TEST_ASSERT(cond)                                                      \
   do {                                                                         \
@@ -42,6 +83,46 @@ static bool has_selected_define(
     }
   }
   return false;
+}
+
+static bool write_shader_test_file(const char *path) noexcept {
+  static constexpr const char *kSource = "#version 330 core\nvoid main() {}\n";
+  return engine::core::vfs_write_text(path, kSource, std::strlen(kSource));
+}
+
+static bool setup_shader_files() noexcept {
+  if (!engine::core::initialize_logging()) {
+    return false;
+  }
+  if (!engine::core::initialize_vfs()) {
+    engine::core::shutdown_logging();
+    return false;
+  }
+  if (!engine::core::mount("shader_test", ".")) {
+    engine::core::shutdown_vfs();
+    engine::core::shutdown_logging();
+    return false;
+  }
+
+  if (!write_shader_test_file("shader_test/_shader_a.vert") ||
+      !write_shader_test_file("shader_test/_shader_a.frag") ||
+      !write_shader_test_file("shader_test/_shader_b.vert") ||
+      !write_shader_test_file("shader_test/_shader_b.frag")) {
+    engine::core::shutdown_vfs();
+    engine::core::shutdown_logging();
+    return false;
+  }
+
+  return true;
+}
+
+static void teardown_shader_files() noexcept {
+  std::remove("_shader_a.vert");
+  std::remove("_shader_a.frag");
+  std::remove("_shader_b.vert");
+  std::remove("_shader_b.frag");
+  engine::core::shutdown_vfs();
+  engine::core::shutdown_logging();
 }
 
 /// Handles test init shutdown.
@@ -208,6 +289,37 @@ static void test_destroy_invalid_handle() {
   ++g_passed;
 }
 
+static void test_stale_handle_rejected_after_slot_reuse() {
+  using namespace engine::renderer;
+  TEST_ASSERT(setup_shader_files());
+  configure_fake_render_device();
+  TEST_ASSERT(initialize_shader_system());
+
+  const ShaderProgramHandle first = load_shader_program(
+      "shader_test/_shader_a.vert", "shader_test/_shader_a.frag");
+  TEST_ASSERT(first != kInvalidShaderProgram);
+  const std::uint32_t firstProgram = shader_gpu_program(first);
+  TEST_ASSERT(firstProgram != 0U);
+
+  destroy_shader_program(first);
+  TEST_ASSERT(shader_gpu_program(first) == 0U);
+
+  const ShaderProgramHandle second = load_shader_program(
+      "shader_test/_shader_b.vert", "shader_test/_shader_b.frag");
+  TEST_ASSERT(second != kInvalidShaderProgram);
+  TEST_ASSERT(second.id == first.id);
+  TEST_ASSERT(second.generation != first.generation);
+  TEST_ASSERT(shader_gpu_program(second) != 0U);
+
+  destroy_shader_program(first);
+  TEST_ASSERT(shader_gpu_program(second) != 0U);
+
+  destroy_shader_program(second);
+  shutdown_shader_system();
+  teardown_shader_files();
+  ++g_passed;
+}
+
 /// Handles test check reload without init.
 static void test_check_reload_without_init() {
   using namespace engine::renderer;
@@ -238,6 +350,8 @@ int main() {
   RUN_TEST(test_gpu_program_invalid_handle);
   int before_test_destroy_invalid_handle = g_failed;
   RUN_TEST(test_destroy_invalid_handle);
+  int before_test_stale_handle_rejected_after_slot_reuse = g_failed;
+  RUN_TEST(test_stale_handle_rejected_after_slot_reuse);
   int before_test_check_reload_without_init = g_failed;
   RUN_TEST(test_check_reload_without_init);
 

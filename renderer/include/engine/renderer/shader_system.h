@@ -15,6 +15,7 @@ struct Material;
 /// Stores shader program handle data used by the engine.
 struct ShaderProgramHandle final {
   std::uint32_t id = 0U;
+  std::uint32_t generation = 0U;
 
   /// Compares values for equality.
   friend constexpr bool operator==(const ShaderProgramHandle &,

@@ -7,6 +7,7 @@
 
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/mesh_loader.h"
+#include "engine/renderer/render_device.h"
 
 namespace {
 
@@ -17,6 +18,63 @@ constexpr const char *kOversizedVertexPath =
 constexpr const char *kOversizedIndexPath =
     "mesh_loader_oversized_indices.mesh";
 constexpr const char *kFileSizeMismatchPath = "mesh_loader_size_mismatch.mesh";
+
+engine::renderer::RenderDevice g_fakeDevice{};
+std::uint32_t g_fakeVertexArray = 1U;
+std::uint32_t g_fakeVertexBuffer = 2U;
+std::uint32_t g_fakeIndexBuffer = 3U;
+std::uint32_t g_createBufferCalls = 0U;
+std::uint32_t g_destroyBufferCalls = 0U;
+std::uint32_t g_destroyVertexArrayCalls = 0U;
+
+std::uint32_t fake_create_vertex_array() noexcept {
+  return g_fakeVertexArray;
+}
+
+std::uint32_t fake_create_buffer() noexcept {
+  ++g_createBufferCalls;
+  return g_createBufferCalls == 1U ? g_fakeVertexBuffer : g_fakeIndexBuffer;
+}
+
+void fake_destroy_vertex_array(std::uint32_t) noexcept {
+  ++g_destroyVertexArrayCalls;
+}
+
+void fake_destroy_buffer(std::uint32_t) noexcept { ++g_destroyBufferCalls; }
+
+void fake_bind_vertex_array(std::uint32_t) noexcept {}
+
+void fake_bind_buffer(std::uint32_t) noexcept {}
+
+void fake_buffer_data(const void *, std::ptrdiff_t) noexcept {}
+
+void fake_enable_vertex_attrib(std::uint32_t) noexcept {}
+
+void fake_vertex_attrib_float(std::uint32_t, std::int32_t, std::int32_t,
+                              const void *) noexcept {}
+
+void configure_fake_render_device(std::uint32_t vertexArray,
+                                  std::uint32_t vertexBuffer,
+                                  std::uint32_t indexBuffer) noexcept {
+  g_fakeDevice = engine::renderer::RenderDevice{};
+  g_fakeDevice.create_vertex_array = &fake_create_vertex_array;
+  g_fakeDevice.destroy_vertex_array = &fake_destroy_vertex_array;
+  g_fakeDevice.bind_vertex_array = &fake_bind_vertex_array;
+  g_fakeDevice.create_buffer = &fake_create_buffer;
+  g_fakeDevice.destroy_buffer = &fake_destroy_buffer;
+  g_fakeDevice.bind_array_buffer = &fake_bind_buffer;
+  g_fakeDevice.bind_element_buffer = &fake_bind_buffer;
+  g_fakeDevice.buffer_data_array = &fake_buffer_data;
+  g_fakeDevice.buffer_data_element = &fake_buffer_data;
+  g_fakeDevice.enable_vertex_attrib = &fake_enable_vertex_attrib;
+  g_fakeDevice.vertex_attrib_float = &fake_vertex_attrib_float;
+  g_fakeVertexArray = vertexArray;
+  g_fakeVertexBuffer = vertexBuffer;
+  g_fakeIndexBuffer = indexBuffer;
+  g_createBufferCalls = 0U;
+  g_destroyBufferCalls = 0U;
+  g_destroyVertexArrayCalls = 0U;
+}
 
 /// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
@@ -278,7 +336,95 @@ int check_v2_file_size_validation() {
   return loaded ? 82 : 0;
 }
 
+int check_gpu_upload_rejects_zero_vertex_array() {
+  configure_fake_render_device(0U, 2U, 3U);
+
+  const float vertices[6] = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  engine::renderer::GpuMesh mesh{};
+  mesh.vertexArray = 99U;
+  mesh.vertexBuffer = 99U;
+  mesh.indexBuffer = 99U;
+  mesh.vertexCount = 99U;
+  mesh.indexCount = 99U;
+  mesh.hasUVs = true;
+  if (engine::renderer::build_gpu_mesh_from_data(vertices, 1U, nullptr, 0U,
+                                                 false, &mesh)) {
+    return 101;
+  }
+  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
+      (mesh.indexBuffer != 0U) || (mesh.vertexCount != 0U) ||
+      (mesh.indexCount != 0U)) {
+    return 102;
+  }
+  return (g_destroyVertexArrayCalls == 0U && g_destroyBufferCalls == 0U) ? 0
+                                                                         : 103;
+}
+
+int check_gpu_upload_cleans_vertex_buffer_failure() {
+  configure_fake_render_device(1U, 0U, 3U);
+
+  const float vertices[6] = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  engine::renderer::GpuMesh mesh{};
+  if (engine::renderer::build_gpu_mesh_from_data(vertices, 1U, nullptr, 0U,
+                                                 false, &mesh)) {
+    return 111;
+  }
+  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
+      (mesh.indexBuffer != 0U)) {
+    return 112;
+  }
+  return (g_destroyVertexArrayCalls == 1U && g_destroyBufferCalls == 0U) ? 0
+                                                                         : 113;
+}
+
+int check_gpu_upload_cleans_index_buffer_failure() {
+  configure_fake_render_device(1U, 2U, 0U);
+
+  const float vertices[6] = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  const std::uint32_t indices[3] = {0U, 0U, 0U};
+  engine::renderer::GpuMesh mesh{};
+  if (engine::renderer::build_gpu_mesh_from_data(vertices, 1U, indices, 3U,
+                                                 false, &mesh)) {
+    return 121;
+  }
+  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
+      (mesh.indexBuffer != 0U)) {
+    return 122;
+  }
+  return (g_destroyVertexArrayCalls == 1U && g_destroyBufferCalls == 1U) ? 0
+                                                                         : 123;
+}
+
+int check_gpu_upload_rejects_missing_indices() {
+  configure_fake_render_device(1U, 2U, 3U);
+
+  const float vertices[6] = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  engine::renderer::GpuMesh mesh{};
+  if (engine::renderer::build_gpu_mesh_from_data(vertices, 1U, nullptr, 3U,
+                                                 false, &mesh)) {
+    return 131;
+  }
+  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
+      (mesh.indexBuffer != 0U)) {
+    return 132;
+  }
+  return (g_createBufferCalls == 0U && g_destroyVertexArrayCalls == 0U &&
+          g_destroyBufferCalls == 0U)
+             ? 0
+             : 133;
+}
+
 } // namespace
+
+namespace engine::renderer {
+
+bool initialize_render_device() noexcept { return true; }
+
+void shutdown_render_device() noexcept {}
+
+const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
+
+} // namespace engine::renderer
 
 /// Runs this executable or test program.
 int main() {
@@ -323,6 +469,26 @@ int main() {
   }
 
   result = check_v2_file_size_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_gpu_upload_rejects_zero_vertex_array();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_gpu_upload_cleans_vertex_buffer_failure();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_gpu_upload_cleans_index_buffer_failure();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_gpu_upload_rejects_missing_indices();
   if (result != 0) {
     return result;
   }
