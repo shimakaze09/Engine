@@ -46,6 +46,7 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 
+#include "animation_import.h"
 #include "dependency_graph.h"
 #include "skeleton_import.h"
 
@@ -1705,6 +1706,23 @@ int main(int argc, char **argv) {
       return 14;
     }
     std::printf("parsed skeleton: %zu joints\n", skeleton.joints.size());
+
+    if (data->animations_count > 0U) {
+      engine::tools::AnimClip clip{};
+      engine::tools::AnimationImportResult animationResult =
+          engine::tools::AnimationImportResult::Ok;
+      if (!engine::tools::parse_gltf_animation(data, 0U, 0U, &clip,
+                                               &animationResult)) {
+        std::fprintf(stderr, "error: failed to import glTF animation: %s\n",
+                     engine::tools::animation_import_result_message(
+                         animationResult));
+        cgltf_free(data);
+        return 15;
+      }
+      std::printf("parsed animation: %s (%zu tracks, %.3fs)\n",
+                  clip.name.c_str(), clip.tracks.size(),
+                  static_cast<double>(clip.durationSeconds));
+    }
   }
 
   // Select mesh and primitive from import settings (bounds-checked).

@@ -825,7 +825,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 **Goal**: Full skeletal animation pipeline — loading, blending, state machine, root motion, events, IK.
 **Dependencies**: P1-M5 (skinned mesh rendering).
-**Status**: Partial. Tooling now parses glTF skins into a `Skeleton` struct; clip loading, compression, runtime playback, blending, state machines, root motion, events, and GPU skinning remain open.
+**Status**: Partial. Tooling now parses glTF skins into a `Skeleton` struct and glTF transform animation channels into an `AnimClip`; compression, runtime playback, blending, state machines, root motion, events, and GPU skinning remain open.
 
 > **Exit Criteria** *(all must pass before P1-M7 is closed)*:
 > 1. Skeleton + clip loaded from glTF, compressed, decompressed with < 0.001 error.
@@ -839,7 +839,7 @@ Everything in Phase 1 must be complete before a game can be shipped on any platf
 
 #### P1-M7-A: Skeleton and Clip Loading from glTF `[~]`
 - `P1-M7-A-a` Parse glTF `skin` (joints, inverse bind matrices) → `Skeleton` struct. `[x]` — *Added asset-packer `Skeleton`/`SkeletonJoint` data and deterministic cgltf skin parsing with unit coverage for parent indices, root selection, fallback joint names, identity defaults, inverse bind decoding, and malformed accessor rejection.*
-- `P1-M7-A-b` Parse glTF `animation` channels (translation/rotation/scale per joint) → `AnimClip`. `[ ]`
+- `P1-M7-A-b` Parse glTF `animation` channels (translation/rotation/scale per joint) → `AnimClip`. `[x]` — *Added asset-packer `AnimClip`/`AnimTrack` data and deterministic cgltf animation parsing for translation, rotation, scale, linear/step/cubic-spline interpolation, per-joint target mapping, clip duration, and malformed accessor rejection.*
 - `P1-M7-A-c` Quantized clip storage (16-bit fixed-point positions, quaternion compression). `[ ]`
 - `P1-M7-A-d` `AssetTypeTag::Animation`; loaded via async asset pipeline. `[ ]`
 
@@ -1986,7 +1986,7 @@ The following are confirmed implemented — not gaps. Evidence: public header AP
 
 **Largest remaining P1 gaps by work volume** (in order):
 1. Production operations and compatibility (P1-M13) — zero implementation; project workflow, commandlets, migrations, validation, diagnostics, signing, compliance, hardware QA, and editor recovery missing (~55 atomic tasks).
-2. Animation system (P1-M7) — zero implementation; entire subsystem missing (~20 atomic tasks).
+2. Animation system (P1-M7) — tool import groundwork is started; runtime playback, compression, blending, state machines, root motion, events, GPU skinning, and IK remain missing (~18 atomic tasks).
 3. Game UI runtime (P1-M11) — zero implementation; entire subsystem missing (~15 atomic tasks).
 4. Platform / packaging (P1-M12) — platform path helpers started; file dialogs, quality settings, packaging, config, and crash reporting remain (~14 atomic tasks).
 5. Audio advanced features (P1-M8 A/B/C/D) — only basic playback exists (~15 atomic tasks).

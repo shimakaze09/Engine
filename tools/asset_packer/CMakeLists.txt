@@ -3,6 +3,8 @@
 engine_add_executable_target(asset_packer
     SOURCES
     main.cpp
+    animation_import.cpp
+    animation_import.h
     cgltf_impl.cpp
     dependency_graph.cpp
     dependency_graph.h

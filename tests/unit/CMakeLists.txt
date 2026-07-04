@@ -483,6 +483,17 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
         ${ENGINE_CGLTF_INCLUDE_DIR}
     )
+
+    engine_add_test_executable(engine_unit_animation_import
+        SOURCES
+        animation_import_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/animation_import.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${CMAKE_SOURCE_DIR}/math/include
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+    )
 endif()
 
 # ---- P1-M12-A: Platform Paths ----
