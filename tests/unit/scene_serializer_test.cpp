@@ -714,6 +714,94 @@ int verify_point_spot_light_parse_failures_reject_scene() {
   return 0;
 }
 
+/// Point and spot lights round-trip exactly through the reflection path
+/// (REVIEW_FINDINGS S7 moved them off the hand-written JSON blocks).
+int verify_point_spot_light_scene_round_trip() {
+  std::unique_ptr<engine::runtime::World> source(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (source == nullptr) {
+    return 122;
+  }
+
+  const engine::runtime::Entity entity = source->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 123;
+  }
+
+  engine::runtime::PointLightComponent point{};
+  point.color = engine::math::Vec3(0.25F, 0.5F, 0.75F);
+  point.intensity = 2.5F;
+  point.radius = 12.0F;
+  if (!source->add_point_light_component(entity, point)) {
+    return 124;
+  }
+
+  engine::runtime::SpotLightComponent spot{};
+  spot.color = engine::math::Vec3(1.0F, 0.5F, 0.25F);
+  spot.direction = engine::math::Vec3(0.0F, -1.0F, 0.0F);
+  spot.intensity = 3.5F;
+  spot.radius = 20.0F;
+  spot.innerConeAngle = 0.25F;
+  spot.outerConeAngle = 0.5F;
+  if (!source->add_spot_light_component(entity, spot)) {
+    return 125;
+  }
+
+  std::array<char, engine::core::JsonWriter::kBufferBytes> buffer{};
+  std::size_t size = 0U;
+  if (!engine::runtime::save_scene(*source, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 126;
+  }
+
+  std::unique_ptr<engine::runtime::World> loaded(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (loaded == nullptr) {
+    return 127;
+  }
+  if (!engine::runtime::load_scene(*loaded, buffer.data(), size)) {
+    return 128;
+  }
+  if (loaded->alive_entity_count() != 1U) {
+    return 129;
+  }
+
+  engine::runtime::Entity loadedEntity = engine::runtime::kInvalidEntity;
+  loaded->for_each_alive(
+      [&](engine::runtime::Entity alive) noexcept { loadedEntity = alive; });
+
+  engine::runtime::PointLightComponent loadedPoint{};
+  if (!loaded->get_point_light_component(loadedEntity, &loadedPoint)) {
+    return 130;
+  }
+  if (!nearly_equal(loadedPoint.color.x, 0.25F) ||
+      !nearly_equal(loadedPoint.color.y, 0.5F) ||
+      !nearly_equal(loadedPoint.color.z, 0.75F) ||
+      !nearly_equal(loadedPoint.intensity, 2.5F) ||
+      !nearly_equal(loadedPoint.radius, 12.0F)) {
+    return 131;
+  }
+
+  engine::runtime::SpotLightComponent loadedSpot{};
+  if (!loaded->get_spot_light_component(loadedEntity, &loadedSpot)) {
+    return 132;
+  }
+  if (!nearly_equal(loadedSpot.color.x, 1.0F) ||
+      !nearly_equal(loadedSpot.color.y, 0.5F) ||
+      !nearly_equal(loadedSpot.color.z, 0.25F) ||
+      !nearly_equal(loadedSpot.direction.x, 0.0F) ||
+      !nearly_equal(loadedSpot.direction.y, -1.0F) ||
+      !nearly_equal(loadedSpot.direction.z, 0.0F) ||
+      !nearly_equal(loadedSpot.intensity, 3.5F) ||
+      !nearly_equal(loadedSpot.radius, 20.0F) ||
+      !nearly_equal(loadedSpot.innerConeAngle, 0.25F) ||
+      !nearly_equal(loadedSpot.outerConeAngle, 0.5F)) {
+    return 133;
+  }
+
+  return 0;
+}
+
 /// Malformed foliage fields must reject the scene (shared strict reader —
 /// scene and prefab serializers now use one implementation, REVIEW_FINDINGS S5).
 int verify_foliage_parse_failures_reject_scene() {
@@ -831,6 +919,13 @@ int main() {
   }
 
   result = verify_foliage_parse_failures_reject_scene();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_point_spot_light_scene_round_trip();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

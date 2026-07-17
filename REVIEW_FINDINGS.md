@@ -165,8 +165,20 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   lines). Pure refactor — same pairs, same order, same failure semantics;
   exercised by every load_scene round-trip test. 85/85 headless green.*
 
-- `[ ]` **S7: Split-brained serialization: 4 components via reflection, rest hand-written JSON.**
-  Finish the reflection migration or document why specific types are excluded.
+- `[x]` **S7: Split-brained serialization: 4 components via reflection, rest hand-written JSON.**
+  *Fixed 2026-07-17: PointLight and SpotLight migrated onto the reflection
+  path (their reflect_types.cpp descriptors already matched the hand-written
+  JSON field names and order, so the format is byte-identical); the two hand
+  readers deleted. Descriptor plumbing deduplicated into
+  `SceneComponentDescriptors` + `find_scene_descriptors` (was two 5-lookup
+  blocks + a 7-ref parameter list). Remaining hand-written types are now
+  documented in scene_serializer.cpp with concrete reasons: MeshComponent
+  (64-bit id — no Uint64 field kind — plus legacy "meshId" fallback),
+  LightComponent (enum clamp on load), Foliage/Name/Script (array/string
+  fields, zero-field descriptors documented in reflect_types.cpp). New exact
+  round-trip test for point/spot through the reflected path; the existing
+  malformed-reject tests pin strictness unchanged. 85/85 headless green;
+  determinism + thread-count determinism pass.*
 
 - `[x]` **S8: `build_pyramid_mesh` local `cross3`/`norm3` lambdas duplicate `math::`.**
   *Fixed 2026-07-17 with A2: pyramid face normals now use
@@ -194,7 +206,9 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   script verified every original non-blank line landed exactly once.
   85/85 headless green; GPU paths are covered by the zero-diff motion +
   `engine_unit_command_buffer` shutdown-state test (headless CI cannot
-  execute GL). Comment ratchet 1702 → 1666. Residual: `flush_renderer`
+  execute GL). Comment ratchet unchanged at 1702 — an interim 1666 reading
+  was an artifact: the checker scans git-tracked files only, and the moved
+  filler comments sat in the not-yet-added new TUs. Residual: `flush_renderer`
   itself is still one ~1,570-line function — function-level staging of the
   flush is opportunistic follow-up under A3's spirit, not tracked here.*
 

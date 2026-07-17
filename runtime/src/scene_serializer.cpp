@@ -38,6 +38,10 @@ constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
 constexpr const char *kReflectionProbeTypeName =
     "engine::runtime::ReflectionProbeComponent";
+constexpr const char *kPointLightTypeName =
+    "engine::runtime::PointLightComponent";
+constexpr const char *kSpotLightTypeName =
+    "engine::runtime::SpotLightComponent";
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
@@ -320,71 +324,18 @@ bool read_light_component(const core::JsonParser &parser,
   return true;
 }
 
-bool read_point_light_component(const core::JsonParser &parser,
-                                const core::JsonValue &lightObject,
-                                PointLightComponent *outComponent) noexcept {
-  if ((outComponent == nullptr) ||
-      (lightObject.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  PointLightComponent component{};
-  core::JsonValue value{};
-  if (parser.get_object_field(lightObject, "color", &value) &&
-      !read_vec3(parser, value, &component.color)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "intensity", &value) &&
-      !parser.as_float(value, &component.intensity)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "radius", &value) &&
-      !parser.as_float(value, &component.radius)) {
-    return false;
-  }
-
-  *outComponent = component;
-  return true;
-}
-
-bool read_spot_light_component(const core::JsonParser &parser,
-                               const core::JsonValue &lightObject,
-                               SpotLightComponent *outComponent) noexcept {
-  if ((outComponent == nullptr) ||
-      (lightObject.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  SpotLightComponent component{};
-  core::JsonValue value{};
-  if (parser.get_object_field(lightObject, "color", &value) &&
-      !read_vec3(parser, value, &component.color)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "direction", &value) &&
-      !read_vec3(parser, value, &component.direction)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "intensity", &value) &&
-      !parser.as_float(value, &component.intensity)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "radius", &value) &&
-      !parser.as_float(value, &component.radius)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "innerConeAngle", &value) &&
-      !parser.as_float(value, &component.innerConeAngle)) {
-    return false;
-  }
-  if (parser.get_object_field(lightObject, "outerConeAngle", &value) &&
-      !parser.as_float(value, &component.outerConeAngle)) {
-    return false;
-  }
-
-  *outComponent = component;
-  return true;
-}
+// Reflection-path coverage (S7): Transform, RigidBody, Collider, SpringArm,
+// ReflectionProbe, PointLight, and SpotLight serialize through the field
+// descriptors registered in reflect_types.cpp. The remaining component types
+// stay hand-written deliberately:
+//  - MeshComponent: meshAssetId is 64-bit (reflection has no Uint64 field
+//    kind) and the reader keeps a legacy "meshId" fallback for scenes
+//    authored before asset ids.
+//  - LightComponent: `type` is an enum that must clamp to a valid LightType
+//    on load rather than round-tripping arbitrary integers.
+//  - FoliagePatchComponent, NameComponent, ScriptComponent: fixed-size
+//    arrays and bounded strings; reflection has no array/string field kinds
+//    (their zero-field descriptors are documented in reflect_types.cpp).
 
 /// Handles log scene error.
 bool log_scene_error(const char *message) noexcept {
@@ -395,15 +346,53 @@ bool log_scene_error(const char *message) noexcept {
   return false;
 }
 
+/// Bundles the reflection descriptors used by scene component serialization.
+struct SceneComponentDescriptors final {
+  const core::TypeDescriptor *transform = nullptr;
+  const core::TypeDescriptor *rigidBody = nullptr;
+  const core::TypeDescriptor *collider = nullptr;
+  const core::TypeDescriptor *springArm = nullptr;
+  const core::TypeDescriptor *reflectionProbe = nullptr;
+  const core::TypeDescriptor *pointLight = nullptr;
+  const core::TypeDescriptor *spotLight = nullptr;
+};
+
+/// Looks up every reflected scene-component descriptor; logs and fails when
+/// any registration is missing.
+bool find_scene_descriptors(SceneComponentDescriptors *outDescs) noexcept {
+  if (outDescs == nullptr) {
+    return false;
+  }
+  ensure_runtime_reflection_registered();
+  const core::TypeRegistry &registry = core::global_type_registry();
+  outDescs->transform = registry.find_type(kTransformTypeName);
+  outDescs->rigidBody = registry.find_type(kRigidBodyTypeName);
+  outDescs->collider = registry.find_type(kColliderTypeName);
+  outDescs->springArm = registry.find_type(kSpringArmTypeName);
+  outDescs->reflectionProbe = registry.find_type(kReflectionProbeTypeName);
+  outDescs->pointLight = registry.find_type(kPointLightTypeName);
+  outDescs->spotLight = registry.find_type(kSpotLightTypeName);
+  if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
+      (outDescs->collider == nullptr) || (outDescs->springArm == nullptr) ||
+      (outDescs->reflectionProbe == nullptr) ||
+      (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr)) {
+    return log_scene_error("missing runtime reflection descriptors");
+  }
+  return true;
+}
+
 /// Handles deserialize scene entities.
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
-                                const core::TypeDescriptor &transformDesc,
-                                const core::TypeDescriptor &rigidBodyDesc,
-                                const core::TypeDescriptor &colliderDesc,
-                                const core::TypeDescriptor &springArmDesc,
-                                const core::TypeDescriptor &reflectionProbeDesc,
+                                const SceneComponentDescriptors &descs,
                                 World &targetWorld) noexcept {
+  const core::TypeDescriptor &transformDesc = *descs.transform;
+  const core::TypeDescriptor &rigidBodyDesc = *descs.rigidBody;
+  const core::TypeDescriptor &colliderDesc = *descs.collider;
+  const core::TypeDescriptor &springArmDesc = *descs.springArm;
+  const core::TypeDescriptor &reflectionProbeDesc = *descs.reflectionProbe;
+  const core::TypeDescriptor &pointLightDesc = *descs.pointLight;
+  const core::TypeDescriptor &spotLightDesc = *descs.spotLight;
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
     core::JsonValue entityValue{};
@@ -514,7 +503,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue plVal{};
     if (parser.get_object_field(components, "PointLightComponent", &plVal)) {
       PointLightComponent pc{};
-      if (!read_point_light_component(parser, plVal, &pc) ||
+      if (!read_reflected_component(parser, plVal, pointLightDesc, &pc) ||
           !targetWorld.add_point_light_component(entity, pc)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load PointLightComponent component");
@@ -525,7 +514,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue slVal{};
     if (parser.get_object_field(components, "SpotLightComponent", &slVal)) {
       SpotLightComponent sc{};
-      if (!read_spot_light_component(parser, slVal, &sc) ||
+      if (!read_reflected_component(parser, slVal, spotLightDesc, &sc) ||
           !targetWorld.add_spot_light_component(entity, sc)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load SpotLightComponent component");
@@ -679,25 +668,15 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
-  ensure_runtime_reflection_registered();
-  const core::TypeRegistry &registry = core::global_type_registry();
-  const core::TypeDescriptor *transformDesc =
-      registry.find_type(kTransformTypeName);
-  const core::TypeDescriptor *rigidBodyDesc =
-      registry.find_type(kRigidBodyTypeName);
-  const core::TypeDescriptor *colliderDesc =
-      registry.find_type(kColliderTypeName);
-  const core::TypeDescriptor *springArmDesc =
-      registry.find_type(kSpringArmTypeName);
-  const core::TypeDescriptor *reflectionProbeDesc =
-      registry.find_type(kReflectionProbeTypeName);
-  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
-      (colliderDesc == nullptr) || (springArmDesc == nullptr) ||
-      (reflectionProbeDesc == nullptr)) {
-    core::log_message(core::LogLevel::Error, kSceneLogChannel,
-                      "missing runtime reflection descriptors");
+  SceneComponentDescriptors descs{};
+  if (!find_scene_descriptors(&descs)) {
     return false;
   }
+  const core::TypeDescriptor *transformDesc = descs.transform;
+  const core::TypeDescriptor *rigidBodyDesc = descs.rigidBody;
+  const core::TypeDescriptor *colliderDesc = descs.collider;
+  const core::TypeDescriptor *springArmDesc = descs.springArm;
+  const core::TypeDescriptor *reflectionProbeDesc = descs.reflectionProbe;
 
   core::JsonWriter &writer = *outWriter;
   writer.reset();
@@ -773,26 +752,19 @@ bool serialize_scene_to_writer(const World &world,
     }
 
     PointLightComponent pointLight{};
-    if (world.get_point_light_component(entity, &pointLight)) {
-      writer.write_key("PointLightComponent");
-      writer.begin_object();
-      write_vec3(writer, "color", pointLight.color);
-      writer.write_float("intensity", pointLight.intensity);
-      writer.write_float("radius", pointLight.radius);
-      writer.end_object();
+    if (world.get_point_light_component(entity, &pointLight) &&
+        !write_reflected_component(writer, "PointLightComponent",
+                                   *descs.pointLight, &pointLight)) {
+      writeFailed = true;
+      return;
     }
 
     SpotLightComponent spotLight{};
-    if (world.get_spot_light_component(entity, &spotLight)) {
-      writer.write_key("SpotLightComponent");
-      writer.begin_object();
-      write_vec3(writer, "color", spotLight.color);
-      write_vec3(writer, "direction", spotLight.direction);
-      writer.write_float("intensity", spotLight.intensity);
-      writer.write_float("radius", spotLight.radius);
-      writer.write_float("innerConeAngle", spotLight.innerConeAngle);
-      writer.write_float("outerConeAngle", spotLight.outerConeAngle);
-      writer.end_object();
+    if (world.get_spot_light_component(entity, &spotLight) &&
+        !write_reflected_component(writer, "SpotLightComponent",
+                                   *descs.spotLight, &spotLight)) {
+      writeFailed = true;
+      return;
     }
 
     ReflectionProbeComponent reflectionProbe{};
@@ -1000,23 +972,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
-  ensure_runtime_reflection_registered();
-  const core::TypeRegistry &registry = core::global_type_registry();
-  const core::TypeDescriptor *transformDesc =
-      registry.find_type(kTransformTypeName);
-  const core::TypeDescriptor *rigidBodyDesc =
-      registry.find_type(kRigidBodyTypeName);
-  const core::TypeDescriptor *colliderDesc =
-      registry.find_type(kColliderTypeName);
-  const core::TypeDescriptor *springArmDesc =
-      registry.find_type(kSpringArmTypeName);
-  const core::TypeDescriptor *reflectionProbeDesc =
-      registry.find_type(kReflectionProbeTypeName);
-  if ((transformDesc == nullptr) || (rigidBodyDesc == nullptr) ||
-      (colliderDesc == nullptr) || (springArmDesc == nullptr) ||
-      (reflectionProbeDesc == nullptr)) {
-    core::log_message(core::LogLevel::Error, kSceneLogChannel,
-                      "missing runtime reflection descriptors");
+  SceneComponentDescriptors descs{};
+  if (!find_scene_descriptors(&descs)) {
     return false;
   }
 
@@ -1027,10 +984,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
-  if (!deserialize_scene_entities(parser, entities, *transformDesc,
-                                  *rigidBodyDesc, *colliderDesc, *springArmDesc,
-                                  *reflectionProbeDesc,
-                                  *stagedWorld)) {
+  if (!deserialize_scene_entities(parser, entities, descs, *stagedWorld)) {
     return false;
   }
 
