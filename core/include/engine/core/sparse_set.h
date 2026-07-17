@@ -1,4 +1,5 @@
-// Declares sparse set types and APIs for the Engine core engine.
+// Fixed-capacity sparse-set component storage keyed by entity index, with
+// optional generation validation when the entity type carries a generation.
 
 #pragma once
 
@@ -15,9 +16,17 @@ concept HasIndexMember = requires(T value) {
   { value.index } -> std::convertible_to<std::uint32_t>;
 };
 
+template <typename T>
+concept HasGenerationMember = requires(T value) {
+  { value.generation } -> std::convertible_to<std::uint32_t>;
+};
+
+/// Dense component storage with O(1) add/remove/lookup by entity index.
+/// When EntityType has a generation member, lookups reject handles whose
+/// generation differs from the stored entity, so stale handles miss instead
+/// of aliasing a recycled index.
 template <typename EntityType, typename Component, std::size_t MaxEntities,
           std::size_t MaxComponents, std::size_t StateCount = 1U>
-/// Owns the sparse set behavior and state.
 class SparseSet final {
 public:
   static constexpr std::int32_t kMissingIndex = -1;
@@ -27,31 +36,37 @@ public:
 
   SparseSet() noexcept { m_sparse.fill(kMissingIndex); }
 
-  /// Handles clear.
+  /// Removes every entry and resets the sparse index mapping.
   void clear() noexcept {
-    /// Handles fill.
     m_sparse.fill(kMissingIndex);
     m_count = 0U;
   }
 
-  /// Adds a value or component to the target system.
+  /// Inserts or overwrites the component for an entity across all states.
+  /// A slot held under an older generation of the same index is adopted:
+  /// distinct generations of one index cannot both be alive, so the newer
+  /// entity owns the slot and the stale data is replaced.
   bool add(EntityType entity, const Component &component) noexcept {
-    const std::int32_t existingIndex = sparse_index(entity);
-    if (existingIndex != kMissingIndex) {
+    if (!is_entity_in_range(entity)) {
+      return false;
+    }
+
+    const std::int32_t rawIndex = m_sparse[entity_index(entity)];
+    if (rawIndex != kMissingIndex) {
+      const std::size_t slot = static_cast<std::size_t>(rawIndex);
+      m_entities[slot] = entity;
       for (std::size_t state = 0U; state < StateCount; ++state) {
-        m_components[state][static_cast<std::size_t>(existingIndex)] =
-            component;
+        m_components[state][slot] = component;
       }
       return true;
     }
 
-    if (!is_entity_in_range(entity) || (m_count >= MaxComponents)) {
+    if (m_count >= MaxComponents) {
       return false;
     }
 
     const std::size_t newIndex = m_count;
     m_entities[newIndex] = entity;
-    /// Handles entity index.
     m_sparse[entity_index(entity)] = static_cast<std::int32_t>(newIndex);
     for (std::size_t state = 0U; state < StateCount; ++state) {
       m_components[state][newIndex] = component;
@@ -61,7 +76,7 @@ public:
     return true;
   }
 
-  /// Removes a value or component from the target system.
+  /// Removes the entity's component with swap-and-pop; rejects stale handles.
   bool remove(EntityType entity) noexcept {
     const std::int32_t removeIndex = sparse_index(entity);
     if (removeIndex == kMissingIndex) {
@@ -78,23 +93,21 @@ public:
 
       const EntityType movedEntity = m_entities[lastSlot];
       m_entities[removeSlot] = movedEntity;
-      /// Handles entity index.
       m_sparse[entity_index(movedEntity)] =
           static_cast<std::int32_t>(removeSlot);
     }
 
-    /// Handles entity index.
     m_sparse[entity_index(entity)] = kMissingIndex;
     --m_count;
     return true;
   }
 
-  /// Handles contains.
+  /// Returns whether a live entry exists for this exact entity handle.
   bool contains(EntityType entity) const noexcept {
     return sparse_index(entity) != kMissingIndex;
   }
 
-  /// Returns the requested value.
+  /// Copies the entity's component for one state; false on miss.
   bool get(EntityType entity, Component *out,
            std::size_t stateIndex = 0U) const noexcept {
     if ((out == nullptr) || (stateIndex >= StateCount)) {
@@ -110,7 +123,7 @@ public:
     return true;
   }
 
-  /// Returns the requested value for ptr.
+  /// Returns a mutable pointer to the entity's component or nullptr on miss.
   Component *get_ptr(EntityType entity, std::size_t stateIndex = 0U) noexcept {
     if (stateIndex >= StateCount) {
       return nullptr;
@@ -124,7 +137,7 @@ public:
     return &m_components[stateIndex][static_cast<std::size_t>(index)];
   }
 
-  /// Returns the requested value for ptr.
+  /// Returns a const pointer to the entity's component or nullptr on miss.
   const Component *get_ptr(EntityType entity,
                            std::size_t stateIndex = 0U) const noexcept {
     if (stateIndex >= StateCount) {
@@ -139,16 +152,16 @@ public:
     return &m_components[stateIndex][static_cast<std::size_t>(index)];
   }
 
-  /// Handles count.
+  /// Returns the number of live entries.
   std::size_t count() const noexcept { return m_count; }
 
-  /// Handles entity at.
+  /// Returns the entity stored at a dense slot (slot must be < count()).
   EntityType entity_at(std::size_t denseIndex) const noexcept {
     assert(denseIndex < m_count && "SparseSet::entity_at: index out of range");
     return m_entities[denseIndex];
   }
 
-  /// Handles component at.
+  /// Returns the component stored at a dense slot (bounds asserted).
   Component &component_at(std::size_t denseIndex,
                           std::size_t stateIndex = 0U) noexcept {
     assert(denseIndex < m_count &&
@@ -158,7 +171,7 @@ public:
     return m_components[stateIndex][denseIndex];
   }
 
-  /// Handles component at.
+  /// Returns the component stored at a dense slot (bounds asserted).
   const Component &component_at(std::size_t denseIndex,
                                 std::size_t stateIndex = 0U) const noexcept {
     assert(denseIndex < m_count &&
@@ -168,10 +181,10 @@ public:
     return m_components[stateIndex][denseIndex];
   }
 
-  /// Handles entity data.
+  /// Returns the dense entity array for range iteration.
   const EntityType *entity_data() const noexcept { return m_entities.data(); }
 
-  /// Handles component data.
+  /// Returns the dense component array for one state, or nullptr.
   Component *component_data(std::size_t stateIndex = 0U) noexcept {
     if (stateIndex >= StateCount) {
       return nullptr;
@@ -180,7 +193,7 @@ public:
     return m_components[stateIndex].data();
   }
 
-  /// Handles component data.
+  /// Returns the dense component array for one state, or nullptr.
   const Component *component_data(std::size_t stateIndex = 0U) const noexcept {
     if (stateIndex >= StateCount) {
       return nullptr;
@@ -189,26 +202,37 @@ public:
     return m_components[stateIndex].data();
   }
 
-/// Handles entity index.
 private:
-  /// Handles entity index.
+  /// Extracts the sparse array index from an entity handle.
   static std::uint32_t entity_index(EntityType entity) noexcept {
     return static_cast<std::uint32_t>(entity.index);
   }
 
-  /// Returns whether is entity in range.
+  /// Index 0 is reserved as the invalid entity across the engine.
   bool is_entity_in_range(EntityType entity) const noexcept {
     const std::uint32_t index = entity_index(entity);
     return (index > 0U) && (index <= static_cast<std::uint32_t>(MaxEntities));
   }
 
-  /// Handles sparse index.
+  /// Resolves an entity to its dense slot; kMissingIndex when absent or, for
+  /// generation-carrying entity types, when the stored generation differs.
   std::int32_t sparse_index(EntityType entity) const noexcept {
     if (!is_entity_in_range(entity)) {
       return kMissingIndex;
     }
 
-    return m_sparse[entity_index(entity)];
+    const std::int32_t denseIndex = m_sparse[entity_index(entity)];
+    if constexpr (HasGenerationMember<EntityType>) {
+      if (denseIndex != kMissingIndex) {
+        const std::size_t slot = static_cast<std::size_t>(denseIndex);
+        if (static_cast<std::uint32_t>(m_entities[slot].generation) !=
+            static_cast<std::uint32_t>(entity.generation)) {
+          return kMissingIndex;
+        }
+      }
+    }
+
+    return denseIndex;
   }
 
   std::array<std::array<Component, MaxComponents>, StateCount> m_components{};
