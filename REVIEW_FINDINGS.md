@@ -147,10 +147,16 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   layout iterated by other modules); both documented at their definitions.
   Forcing them into the map template would cost more than the duplication.*
 
-- `[ ]` **S5: Scene vs prefab serializer helper duplication.**
-  `prefab_serializer.cpp` re-implements file IO helpers, vec3/quat read/write, and
-  ~200 lines of foliage-patch serialization from `scene_serializer.cpp`. Extract a
-  shared internal header (pattern already proven by `serialization_keys.h`).
+- `[x]` **S5: Scene vs prefab serializer helper duplication.**
+  *Fixed 2026-07-17: new module-internal `runtime/src/serialization_util.{h,cpp}`
+  (src-header pattern) owns file IO, vec2/3/4 + quat array read/write, and the
+  foliage-patch read/write pair; both serializers migrated. Semantics unified
+  on the STRICT variants: reads reject present-but-malformed fields (scene
+  foliage reads were lenient) and float arrays must have exact element counts
+  (prefab reads tolerated oversized arrays) — intentional, matching the
+  error-handling policy; both writers always emitted exact shapes so
+  well-formed files are unaffected. New scene test pins malformed-foliage
+  rejection. 85/85 headless green; comment ratchet 1706 → 1702.*
 
 - `[ ]` **S6: `copy_world_contents` is another hand-maintained 13-component list.**
   `runtime/src/scene_serializer.cpp`. Collapses once S1 lands (iterate component
