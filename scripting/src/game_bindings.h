@@ -57,4 +57,9 @@ void clear_player_controller_entity(core::Entity entity) noexcept;
 /// Resets transient game binding state while preserving persistent game state.
 void reset_game_bindings() noexcept;
 
+/// Handles Lua engine.set_player_controller(player, entity).
+int lua_engine_set_player_controller(lua_State *state) noexcept;
+/// Handles Lua engine.get_player_controller(player).
+int lua_engine_get_player_controller(lua_State *state) noexcept;
+
 } // namespace engine::scripting

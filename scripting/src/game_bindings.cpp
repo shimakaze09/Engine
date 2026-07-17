@@ -2,6 +2,8 @@
 
 #include "game_bindings.h"
 
+#include "entity_handle.h"
+
 extern "C" {
 #include "lua.h"
 }
@@ -293,6 +295,67 @@ const char *bindable_get_game_mode() noexcept {
 
 bool bindable_set_game_state(const char *name) noexcept {
   return set_game_state_name(name);
+}
+
+/// Handles lua engine set player controller.
+int lua_engine_set_player_controller(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  const lua_Integer player = lua_tointeger(state, 1);
+  const lua_Integer entityHandle = lua_tointeger(state, 2);
+  const auto maxPlayerIndex =
+      static_cast<lua_Integer>(std::numeric_limits<std::uint8_t>::max());
+  if ((player < 0) || (player > maxPlayerIndex) ||
+      (entityHandle < 0)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  runtime::Entity entity = runtime::kInvalidEntity;
+  if (entityHandle != 0) {
+    if (!read_entity(state, 2, &entity)) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+  }
+
+  lua_pushboolean(state,
+                  set_player_controller_entity(
+                      static_cast<std::uint8_t>(player), entity)
+                      ? 1
+                      : 0);
+  return 1;
+}
+
+/// Handles lua engine get player controller.
+int lua_engine_get_player_controller(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const lua_Integer player = lua_tointeger(state, 1);
+  const auto maxPlayerIndex =
+      static_cast<lua_Integer>(std::numeric_limits<std::uint8_t>::max());
+  if ((player < 0) || (player > maxPlayerIndex)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const auto idx = static_cast<std::uint8_t>(player);
+  const runtime::Entity entity = get_player_controller_entity(idx);
+  if ((entity == runtime::kInvalidEntity) ||
+      (runtime_binding().world == nullptr) ||
+      !runtime_binding().world->is_alive(entity)) {
+    lua_pushinteger(state, 0);
+    return 1;
+  }
+
+  push_entity_handle(state, entity);
+  return 1;
 }
 
 } // namespace engine::scripting

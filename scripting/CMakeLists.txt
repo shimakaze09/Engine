@@ -20,6 +20,15 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/asset_bindings.cpp
+    src/audio_bindings.cpp
+    src/binding_util.cpp
+    src/body_bindings.cpp
+    src/camera_bindings.cpp
+    src/entity_lifecycle_bindings.cpp
+    src/light_bindings.cpp
+    src/mesh_material_bindings.cpp
+    src/physics_bindings.cpp
     src/cheat_bindings.cpp
     src/collision_bindings.cpp
     src/coroutine_bindings.cpp
