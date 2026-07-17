@@ -280,9 +280,9 @@ Actual target relationships from CMake:
   tracks the ratchet).
 - Public headers should continue avoiding SDL/OpenGL/Lua/ImGui/ImGuizmo type
   leaks; inspect new headers for module-boundary drift.
-- `TODO.md` is the source of truth for open production lanes and associated
-  project-local Codex skills; `REVIEW_FINDINGS.md` is the active tracker for
-  the production-hardening fix campaign.
+- `TODO.md` is the source of truth for open production lanes;
+  `REVIEW_FINDINGS.md` is the active tracker for the production-hardening
+  fix campaign.
 
 ## Suggested Reading Order
 
@@ -341,12 +341,11 @@ For physics:
 
 For animation work:
 
-1. `.codex/skills/engine-animation-work/SKILL.md`
-2. `tools/asset_packer/skeleton_import.h`
-3. `tools/asset_packer/skeleton_import.cpp`
-4. `tools/asset_packer/animation_import.h`
-5. `tools/asset_packer/animation_import.cpp`
-6. `tests/unit/skeleton_import_test.cpp`
-7. `tests/unit/animation_import_test.cpp`
-8. Renderer shader variant tests and skinned shader assets when adding GPU
+1. `tools/asset_packer/skeleton_import.h`
+2. `tools/asset_packer/skeleton_import.cpp`
+3. `tools/asset_packer/animation_import.h`
+4. `tools/asset_packer/animation_import.cpp`
+5. `tests/unit/skeleton_import_test.cpp`
+6. `tests/unit/animation_import_test.cpp`
+7. Renderer shader variant tests and skinned shader assets when adding GPU
    skinning
