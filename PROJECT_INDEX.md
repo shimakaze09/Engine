@@ -15,7 +15,9 @@ pipeline, async asset streaming, deferred/forward rendering, editor play
 controls, and Lua integration. Current open lanes tracked in `TODO.md` include
 full animation, runtime UI, platform packaging/project workflow, release
 operations, advanced audio, editor completion, and save-game/content streaming
-systems.
+systems. A production-hardening campaign (bug/perf/duplication/architecture
+findings from the 2026-07-17 full-codebase review) is tracked separately in
+`REVIEW_FINDINGS.md`.
 
 ## Tech Stack
 
@@ -78,8 +80,10 @@ ctest --test-dir build --output-on-failure -R engine_bench_
 - `ENGINE_ASSET_SOURCE_DIR` and `ENGINE_ASSET_OUTPUT_DIR`: local asset sync.
 
 CMake helper macros in `cmake/EngineHelpers.cmake` define the common static
-module library, executable, and CTest executable patterns. Module libraries are
-static and use explicit public/private include and link dependency lists.
+module library, header-only (INTERFACE) library, executable, and CTest
+executable patterns. Module libraries are static and use explicit
+public/private include and link dependency lists; `engine_math` is header-only
+via `engine_add_header_library`.
 
 ## Module Map
 
@@ -87,9 +91,12 @@ static and use explicit public/private include and link dependency lists.
   `engine_editor` so the editor bridge registers before bootstrap.
 - `core`: bootstrap, platform/window paths, logging, cvars, console, event bus,
   input, input maps, touch, VFS, JSON, jobs/frame graph, allocators, profiler,
-  memory tracker, reflection, entity handles, and service locator.
+  memory tracker, reflection, entity handles, service locator, and shared
+  data-structure/utility headers (`sparse_set.h`, `fixed_hash_table.h`,
+  `hash.h` FNV-1a, `string_util.h` bounded copy).
 - `math`: vectors, matrices, quaternions, transforms, bounds, rays, spheres, and
-  shared component POD types.
+  shared component POD types; header-only — every function is inline in the
+  public headers, with SSE2 paths in `math_detail.h` (no `math/src/`).
 - `physics`: rigid bodies, colliders, convex hulls, heightfields, CCD,
   speculative contacts, contact manifolds, queries, joints, materials, and
   `PhysicsWorldView` so physics does not depend on runtime.
@@ -97,9 +104,10 @@ static and use explicit public/private include and link dependency lists.
   timers, coroutines, input/touch/game/scene bindings, sandboxing, hot reload,
   profiler/debugger hooks, DAP debugger, and runtime binding owner modules.
 - `renderer`: asset database/manager/streaming, mesh and texture loading,
-  shader variants, render device table, command buffers, deferred/forward
-  passes, skybox/environment maps, reflection probe baking, distance/height
-  fog, shadows, post-processing, light culling, GPU profiler, and caches.
+  procedural mesh primitives (`mesh_primitives.h`), shader variants, render
+  device table, command buffers, deferred/forward passes, skybox/environment
+  maps, reflection probe baking, distance/height fog, shadows, post-processing,
+  light culling, GPU profiler, and caches.
 - `audio`: miniaudio-backed sound loading, playback, stop, volume, pitch, loop,
   and frame update.
 - `runtime`: public `engine::bootstrap/run/shutdown`, `EnginePipeline`, World
@@ -110,7 +118,8 @@ static and use explicit public/private include and link dependency lists.
   play/pause/stop controls, gizmos, thumbnails, and editor-runtime bridge.
 - `tools`: asset packer, dependency graph, glTF mesh import, glTF skeleton skin
   parsing, glTF animation clip parsing, binding generator, source comment
-  audit, and CI helper scripts.
+  presence audit (`check_source_comments.py`), comment quality audit
+  (`check_comment_quality.py`), and CI helper scripts.
 - `assets`: sample Lua scripts, sample mesh, and GLSL shader assets.
 - `tests`: unit, integration, smoke, benchmark, performance baselines, and
   sanitizer suppressions.
@@ -132,7 +141,7 @@ app
 Actual target relationships from CMake:
 
 - `engine_core` depends on SDL2 and Threads.
-- `engine_math` depends on `engine_core`.
+- `engine_math` is a header-only INTERFACE library that depends on `engine_core`.
 - `engine_physics` publicly depends on `engine_math` and privately on
   `engine_core`.
 - `engine_scripting` depends on `engine_core`, `engine_math`, `engine_lua`, and
@@ -239,7 +248,8 @@ Actual target relationships from CMake:
 - `tests/unit`: focused module tests for core, math, physics, renderer, runtime,
   scripting, editor command history, audio, tooling, platform paths, engine
   pipeline routing, environment rendering helpers, fog normalization, skeleton
-  import, and animation clip import.
+  import, animation clip import, sparse-set and fixed-hash-table storage,
+  world name lookup, and job-handle generation wraparound.
 - `tests/integration`: cross-module ECS, lifecycle, determinism, scripting,
   coroutine, sandbox, hot reload, generated bindings, DAP, camera/game mode,
   asset streaming, and dependency tests.
@@ -257,13 +267,19 @@ Actual target relationships from CMake:
   prefer CPU-verifiable renderer tests for CI-safe coverage.
 - Runtime/ECS, serialization, Lua API, physics, and render-prep changes are
   determinism-sensitive and should be paired with focused tests.
-- Large same-domain implementation files remain in renderer, scripting, editor,
-  physics, pipeline, world, and serialization areas; keep future edits narrow
-  and avoid mixing ownership changes with feature work.
+- Large same-domain implementation files remain in renderer
+  (`command_buffer.cpp`), scripting, editor, and physics; their decomposition
+  is tracked as findings A1/A3/A4 in `REVIEW_FINDINGS.md`. Keep future edits
+  narrow and avoid mixing ownership changes with feature work.
+- Roughly 1,700 machine-generated filler doc comments (`/// Handles foo.`)
+  remain in headers and some are factually wrong; trust implementations over
+  header comments until finding C1 lands (`tools/check_comment_quality.py`
+  tracks the ratchet).
 - Public headers should continue avoiding SDL/OpenGL/Lua/ImGui/ImGuizmo type
   leaks; inspect new headers for module-boundary drift.
 - `TODO.md` is the source of truth for open production lanes and associated
-  project-local Codex skills.
+  project-local Codex skills; `REVIEW_FINDINGS.md` is the active tracker for
+  the production-hardening fix campaign.
 
 ## Suggested Reading Order
 

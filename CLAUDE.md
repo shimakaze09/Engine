@@ -49,8 +49,10 @@ cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=cl
 
 ## Layout cheat sheet
 
-- `core/` logging, cvars, input, VFS, job system, event bus, allocators, SparseSet
-- `math/` Vec/Mat/Quat/Transform (NOTE: currently out-of-line — see REVIEW_FINDINGS P1)
+- `core/` logging, cvars, input, VFS, job system, event bus, allocators, SparseSet,
+  FixedHashTable, FNV-1a hash, bounded string copy
+- `math/` Vec/Mat/Quat/Transform — header-only INTERFACE lib, all functions inline
+  (SSE2 paths in `math_detail.h`); there is no `math/src/`
 - `physics/` bodies, colliders, CCD, solver, queries, joints; `PhysicsWorldView`
   interface keeps physics independent of runtime
 - `renderer/` assets/streaming, shaders, command buffers, GL backend, post stack
