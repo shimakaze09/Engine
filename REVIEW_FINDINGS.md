@@ -197,8 +197,16 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   (3,456 lines) monoliths.** Lower priority than A1; split opportunistically when
   touching those areas.
 
-- `[ ]` **A4: `resolve_collisions` in `physics/src/physics.cpp` is ~1,090 lines.**
-  Extract per-shape-pair narrow-phase functions.
+- `[x]` **A4: `resolve_collisions` in `physics/src/physics.cpp` is ~1,090 lines.**
+  *Fixed 2026-07-17: eight per-shape-pair functions (heightfield, convex/GJK,
+  capsule×{capsule,sphere,AABB}, sphere×sphere, AABB×{sphere,AABB}) take a
+  `PairContext` computed once per broadphase candidate; the shared
+  record/wake/static-skip prologue (8 copies, 3 of them inlined clones of
+  `maybe_wake_pair`) is now one `record_pair_and_wake`. resolve_collisions
+  is ~230 lines of broadphase + dispatch. Math moved verbatim — 85/85
+  headless green, determinism + thread-count determinism pass 3×, and A/B
+  Release benchmark shows no cost (median 6.351 → 6.352 ms @1000 bodies;
+  baseline gate 13.80).*
 
 - `[x]` **A5: Dead/vestigial code.**
   *Fixed 2026-07-17: WorldPhase aliases removed (5 call sites migrated to
