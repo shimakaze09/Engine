@@ -181,11 +181,22 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
 
 ## P3 — Architecture / file organization
 
-- `[ ]` **A1: `renderer/src/command_buffer.cpp` is a 4,163-line god file.**
-  Contains sky (3 models), IBL prefiltering, bloom, SSAO, luminance, shadow binding,
-  and full GL frame orchestration; `initialize_backend` ~900 lines, `flush_renderer`
-  ~1,570 lines. Decompose in same spirit as EnginePipeline's 13 named stages.
-  Suggested split: sky.cpp, ibl.cpp, post_resources.cpp, frame_flush.cpp.
+- `[x]` **A1: `renderer/src/command_buffer.cpp` is a 4,163-line god file.**
+  *Fixed 2026-07-17: split along the suggested seams using the private
+  src-header pattern — `command_buffer_sky.{h,cpp}` (skybox + Preetham/Hosek
+  + shared cube geometry, 341), `command_buffer_ibl.{h,cpp}` (prefilter/
+  irradiance/BRDF LUT + public bake entry points, 446),
+  `command_buffer_post_resources.{h,cpp}` (bloom/luminance mip chains +
+  SSAO data, 178), `command_buffer_flush.cpp` (flush_renderer + its
+  upload/bind helpers, 2,063), leaving command_buffer.cpp at 1,303
+  (initialize_backend, destroy, public state API). `initialize_backend`
+  exported via command_buffer_context.h. Pure code motion — the split
+  script verified every original non-blank line landed exactly once.
+  85/85 headless green; GPU paths are covered by the zero-diff motion +
+  `engine_unit_command_buffer` shutdown-state test (headless CI cannot
+  execute GL). Comment ratchet 1702 → 1666. Residual: `flush_renderer`
+  itself is still one ~1,570-line function — function-level staging of the
+  flush is opportunistic follow-up under A3's spirit, not tracked here.*
 
 - `[x]` **A2: Procedural mesh builders live in `runtime/src/engine_pipeline.cpp` (~350 lines).**
   *Fixed 2026-07-17: moved to `renderer/mesh_primitives.{h,cpp}` with a public

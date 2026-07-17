@@ -267,10 +267,13 @@ Actual target relationships from CMake:
   prefer CPU-verifiable renderer tests for CI-safe coverage.
 - Runtime/ECS, serialization, Lua API, physics, and render-prep changes are
   determinism-sensitive and should be paired with focused tests.
-- Large same-domain implementation files remain in renderer
-  (`command_buffer.cpp`), scripting, editor, and physics; their decomposition
-  is tracked as findings A1/A3/A4 in `REVIEW_FINDINGS.md`. Keep future edits
-  narrow and avoid mixing ownership changes with feature work.
+- Large same-domain implementation files remain in scripting
+  (`scripting.cpp`) and editor (`editor.cpp`); their opportunistic split is
+  finding A3 in `REVIEW_FINDINGS.md`. The renderer command-buffer god file
+  was split (A1) into context/builder/math/sky/ibl/post-resources/flush
+  translation units; `command_buffer_flush.cpp` remains large but is one
+  same-domain pass driver. Keep future edits narrow and avoid mixing
+  ownership changes with feature work.
 - Roughly 1,700 machine-generated filler doc comments (`/// Handles foo.`)
   remain in headers and some are factually wrong; trust implementations over
   header comments until finding C1 lands (`tools/check_comment_quality.py`
