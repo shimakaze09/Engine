@@ -8,6 +8,27 @@ engine_add_test_executable(engine_unit_foundation
     engine_math
 )
 
+engine_add_test_executable(engine_unit_job_handle_generation
+    SOURCES
+    job_handle_generation_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_sparse_set
+    SOURCES
+    sparse_set_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_fixed_hash_table
+    SOURCES
+    fixed_hash_table_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_math
     SOURCES
     math_test.cpp
@@ -81,6 +102,13 @@ engine_add_test_executable(engine_unit_scene_serializer
 engine_add_test_executable(engine_unit_runtime_world
     SOURCES
     runtime_world_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_world_name_lookup
+    SOURCES
+    world_name_lookup_test.cpp
     PRIVATE_DEPS
     engine_runtime
 )
@@ -188,6 +216,7 @@ engine_add_test_executable(engine_unit_texture_loader_handles
     ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
     engine_core
+    engine_math
 )
 
 engine_add_test_executable(engine_unit_prefab

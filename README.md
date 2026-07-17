@@ -25,6 +25,8 @@ The repository is not production-complete yet. Game authors primarily work throu
 
 Every tracked source, script, shader, build, and test file should start with a short file-level comment explaining its role. Every class, struct, enum, and function added or changed in future work should also keep a concise purpose comment close to its declaration or definition. Update the comment when behavior changes.
 
+Two audit tools enforce this: `tools/check_source_comments.py` checks comment presence (wired into CI), and `tools/check_comment_quality.py` flags machine-generated filler patterns (its finding count is a ratchet that must only decrease; see `REVIEW_FINDINGS.md` C1).
+
 ## Current verified state
 
 The engine has strong foundations, but it is still being delivered milestone by milestone.
@@ -48,6 +50,10 @@ The engine is no longer forward-only; the deferred path is active behind
 `r_deferred` with forward fallback/transparency. Large roadmap items such as
 full animation production, game UI runtime, platform packaging, project
 workflow/commandlets, and release operations remain open in `TODO.md`.
+
+A production-hardening campaign is in progress on top of these foundations:
+`REVIEW_FINDINGS.md` tracks the remaining bug, performance, duplication, and
+architecture findings from the 2026-07 full-codebase review.
 
 ## Tech stack
 
@@ -74,7 +80,7 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 - `editor/`: editor integration, camera, command history
 - `assets/`: scripts, shaders, and sample content
 - `tests/`: unit, integration, smoke, and benchmark tests
-- `tools/asset_packer/`: glTF/GLB to engine mesh conversion utility
+- `tools/`: asset packer (glTF/GLB → `.mesh`), Lua binding generator, source-comment audits, CI helpers
 - `.github/workflows/`: CI definitions
 
 ## Build prerequisites
@@ -149,16 +155,20 @@ Some tests are labeled `gpu`; CI excludes those where headless execution is requ
 
 ## Continuous integration
 
-GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently runs:
+GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently
+runs ten jobs:
 
-- Windows, Linux, and macOS builds in Debug and Release
-- CTest runs with headless-safe filtering
+- Windows, Linux, and macOS builds in Debug and Release, with headless-safe CTest filtering
 - Cross-platform determinism hash comparison
-- `cppcheck`
-- `clang-tidy`
+- `cppcheck` static analysis (plus the source comment audit)
+- `clang-tidy` with warnings-as-errors
+- A dedicated `-Werror` build check
+- ASAN/UBSAN and TSAN sanitizer lanes
+- Coverage with a minimum-threshold gate
+- Benchmark runs gated against `tests/benchmark/perf_baseline.json`
+- A final quality gate that requires all of the above
 
-Sanitizer, coverage, and automated performance-threshold gates are wired in CI;
-remaining follow-up work includes coverage trend reporting and broader
+Remaining follow-up work includes coverage trend reporting and broader
 GPU-path automation.
 
 ## Lua gameplay scripting

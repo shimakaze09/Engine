@@ -13,6 +13,7 @@ engine_add_module_library(engine_runtime
     src/reflect_types.cpp
     src/scene_serializer.cpp
     src/scripting_bridge.cpp
+    src/serialization_util.cpp
     src/service_registry.cpp
     src/timer_manager.cpp
     src/world.cpp
@@ -27,4 +28,5 @@ engine_add_module_library(engine_runtime
     engine_audio
     ${ENGINE_SDL2_TARGET}
     OpenGL::GL
+    PCH src/pch.h
 )

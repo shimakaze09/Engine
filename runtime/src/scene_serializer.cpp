@@ -19,6 +19,7 @@
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
+#include "serialization_util.h"
 
 namespace engine::runtime {
 
@@ -40,245 +41,8 @@ constexpr const char *kReflectionProbeTypeName =
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
-/// Handles open file for read.
-bool open_file_for_read(const char *path, FILE **outFile) noexcept {
-  if ((path == nullptr) || (outFile == nullptr)) {
-    return false;
-  }
-
-  *outFile = nullptr;
-#ifdef _WIN32
-  return fopen_s(outFile, path, "rb") == 0;
-#else
-  *outFile = std::fopen(path, "rb");
-  return *outFile != nullptr;
-#endif
-}
-
-/// Handles open file for write.
-bool open_file_for_write(const char *path, FILE **outFile) noexcept {
-  if ((path == nullptr) || (outFile == nullptr)) {
-    return false;
-  }
-
-  *outFile = nullptr;
-#ifdef _WIN32
-  return fopen_s(outFile, path, "wb") == 0;
-#else
-  *outFile = std::fopen(path, "wb");
-  return *outFile != nullptr;
-#endif
-}
-
-/// Reads text file data.
-bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
-                    std::size_t *outSize) noexcept {
-  if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
-    return false;
-  }
-
-  outBuffer->reset();
-  *outSize = 0U;
-
-  FILE *file = nullptr;
-  if (!open_file_for_read(path, &file) || (file == nullptr)) {
-    return false;
-  }
-
-  if (std::fseek(file, 0, SEEK_END) != 0) {
-    std::fclose(file);
-    return false;
-  }
-
-  const long fileLength = std::ftell(file);
-  if (fileLength <= 0L) {
-    std::fclose(file);
-    return false;
-  }
-
-  if (std::fseek(file, 0, SEEK_SET) != 0) {
-    std::fclose(file);
-    return false;
-  }
-
-  const std::size_t fileSize = static_cast<std::size_t>(fileLength);
-  std::unique_ptr<char[]> buffer(new (std::nothrow) char[fileSize + 1U]);
-  if (buffer == nullptr) {
-    std::fclose(file);
-    return false;
-  }
-
-  const std::size_t readCount = std::fread(buffer.get(), 1U, fileSize, file);
-  const bool hitError = std::ferror(file) != 0;
-  std::fclose(file);
-
-  if (hitError || (readCount != fileSize)) {
-    return false;
-  }
-
-  buffer[fileSize] = '\0';
-  *outSize = fileSize;
-  outBuffer->swap(buffer);
-  return true;
-}
-
-/// Writes text file data.
-bool write_text_file(const char *path, const char *text,
-                     std::size_t size) noexcept {
-  if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-  if (!open_file_for_write(path, &file) || (file == nullptr)) {
-    return false;
-  }
-
-  const std::size_t written = std::fwrite(text, 1U, size, file);
-  std::fclose(file);
-  return written == size;
-}
-
-/// Writes vec2 data.
-void write_vec2(core::JsonWriter &writer, const char *key,
-                const math::Vec2 &value) noexcept {
-  writer.begin_array(key);
-  writer.write_float_value(value.x);
-  writer.write_float_value(value.y);
-  writer.end_array();
-}
-
-/// Writes vec3 data.
-void write_vec3(core::JsonWriter &writer, const char *key,
-                const math::Vec3 &value) noexcept {
-  writer.begin_array(key);
-  writer.write_float_value(value.x);
-  writer.write_float_value(value.y);
-  writer.write_float_value(value.z);
-  writer.end_array();
-}
-
-/// Writes vec4 data.
-void write_vec4(core::JsonWriter &writer, const char *key,
-                const math::Vec4 &value) noexcept {
-  writer.begin_array(key);
-  writer.write_float_value(value.x);
-  writer.write_float_value(value.y);
-  writer.write_float_value(value.z);
-  writer.write_float_value(value.w);
-  writer.end_array();
-}
-
-/// Writes quat data.
-void write_quat(core::JsonWriter &writer, const char *key,
-                const math::Quat &value) noexcept {
-  writer.begin_array(key);
-  writer.write_float_value(value.x);
-  writer.write_float_value(value.y);
-  writer.write_float_value(value.z);
-  writer.write_float_value(value.w);
-  writer.end_array();
-}
-
-/// Reads float array data.
-bool read_float_array(const core::JsonParser &parser,
-                      const core::JsonValue &arrayValue, float *outValues,
-                      std::size_t expectedCount) noexcept {
-  if ((outValues == nullptr) ||
-      (arrayValue.type != core::JsonValue::Type::Array)) {
-    return false;
-  }
-
-  if (parser.array_size(arrayValue) != expectedCount) {
-    return false;
-  }
-
-  for (std::size_t i = 0U; i < expectedCount; ++i) {
-    core::JsonValue element{};
-    if (!parser.get_array_element(arrayValue, i, &element)) {
-      return false;
-    }
-
-    if (!parser.as_float(element, &outValues[i])) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/// Reads vec2 data.
-bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,
-               math::Vec2 *outVec) noexcept {
-  if (outVec == nullptr) {
-    return false;
-  }
-
-  float fields[2] = {};
-  if (!read_float_array(parser, value, fields, 2U)) {
-    return false;
-  }
-
-  outVec->x = fields[0];
-  outVec->y = fields[1];
-  return true;
-}
-
-/// Reads vec3 data.
-bool read_vec3(const core::JsonParser &parser, const core::JsonValue &value,
-               math::Vec3 *outVec) noexcept {
-  if (outVec == nullptr) {
-    return false;
-  }
-
-  float fields[3] = {};
-  if (!read_float_array(parser, value, fields, 3U)) {
-    return false;
-  }
-
-  outVec->x = fields[0];
-  outVec->y = fields[1];
-  outVec->z = fields[2];
-  return true;
-}
-
-/// Reads vec4 data.
-bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
-               math::Vec4 *outVec) noexcept {
-  if (outVec == nullptr) {
-    return false;
-  }
-
-  float fields[4] = {};
-  if (!read_float_array(parser, value, fields, 4U)) {
-    return false;
-  }
-
-  outVec->x = fields[0];
-  outVec->y = fields[1];
-  outVec->z = fields[2];
-  outVec->w = fields[3];
-  return true;
-}
-
-/// Reads quat data.
-bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
-               math::Quat *outQuat) noexcept {
-  if (outQuat == nullptr) {
-    return false;
-  }
-
-  float fields[4] = {};
-  if (!read_float_array(parser, value, fields, 4U)) {
-    return false;
-  }
-
-  outQuat->x = fields[0];
-  outQuat->y = fields[1];
-  outQuat->z = fields[2];
-  outQuat->w = fields[3];
-  return true;
-}
+// File IO and vec/quat/foliage JSON helpers are shared with the prefab
+// serializer via serialization_util.h.
 
 /// Writes reflected component data.
 bool write_reflected_component(core::JsonWriter &writer,
@@ -505,159 +269,6 @@ bool read_mesh_component(const core::JsonParser &parser,
   core::JsonValue opacityValue{};
   if (parser.get_object_field(meshObject, "opacity", &opacityValue)) {
     static_cast<void>(parser.as_float(opacityValue, &component.opacity));
-  }
-
-  *outComponent = component;
-  return true;
-}
-
-/// Writes foliage patch component data.
-void write_foliage_patch_component(
-    core::JsonWriter &writer,
-    const FoliagePatchComponent &component) noexcept {
-  writer.write_key(kJsonKeyFoliagePatchComponent);
-  writer.begin_object();
-
-  writer.begin_array("meshAssetIds");
-  for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
-    writer.write_uint64_value(component.meshAssetIds[i]);
-  }
-  writer.end_array();
-
-  const std::uint32_t instanceCount =
-      (component.instanceCount >
-       static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances))
-          ? static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)
-          : component.instanceCount;
-  writer.write_uint("instanceCount", instanceCount);
-  writer.write_float("density", component.density);
-  write_vec3(writer, "albedo", component.albedo);
-  writer.write_float("roughness", component.roughness);
-  writer.write_float("metallic", component.metallic);
-  writer.write_float("opacity", component.opacity);
-  writer.write_float("windStrength", component.windStrength);
-  writer.write_float("windFrequency", component.windFrequency);
-
-  writer.begin_array("instances");
-  for (std::uint32_t i = 0U; i < instanceCount; ++i) {
-    const FoliageInstance &instance = component.instances[i];
-    writer.begin_object();
-    write_vec3(writer, "offset", instance.offset);
-    writer.write_float("scale", instance.scale);
-    writer.write_float("phase", instance.phase);
-    writer.write_uint("lodIndex", instance.lodIndex);
-    writer.end_object();
-  }
-  writer.end_array();
-
-  writer.end_object();
-}
-
-/// Reads foliage patch component data.
-bool read_foliage_patch_component(
-    const core::JsonParser &parser, const core::JsonValue &foliageObject,
-    FoliagePatchComponent *outComponent) noexcept {
-  if ((outComponent == nullptr) ||
-      (foliageObject.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  FoliagePatchComponent component{};
-  core::JsonValue value{};
-
-  if (parser.get_object_field(foliageObject, "meshAssetIds", &value) &&
-      (value.type == core::JsonValue::Type::Array)) {
-    const std::size_t meshCount = parser.array_size(value);
-    const std::size_t count =
-        (meshCount < FoliagePatchComponent::kMaxLods)
-            ? meshCount
-            : FoliagePatchComponent::kMaxLods;
-    for (std::size_t i = 0U; i < count; ++i) {
-      core::JsonValue element{};
-      if (!parser.get_array_element(value, i, &element) ||
-          !parser.as_uint64(element, &component.meshAssetIds[i])) {
-        return false;
-      }
-    }
-  }
-
-  if (parser.get_object_field(foliageObject, "density", &value)) {
-    static_cast<void>(parser.as_float(value, &component.density));
-  }
-  if (parser.get_object_field(foliageObject, "albedo", &value) &&
-      !read_vec3(parser, value, &component.albedo)) {
-    return false;
-  }
-  if (parser.get_object_field(foliageObject, "roughness", &value)) {
-    static_cast<void>(parser.as_float(value, &component.roughness));
-  }
-  if (parser.get_object_field(foliageObject, "metallic", &value)) {
-    static_cast<void>(parser.as_float(value, &component.metallic));
-  }
-  if (parser.get_object_field(foliageObject, "opacity", &value)) {
-    static_cast<void>(parser.as_float(value, &component.opacity));
-  }
-  if (parser.get_object_field(foliageObject, "windStrength", &value)) {
-    static_cast<void>(parser.as_float(value, &component.windStrength));
-  }
-  if (parser.get_object_field(foliageObject, "windFrequency", &value)) {
-    static_cast<void>(parser.as_float(value, &component.windFrequency));
-  }
-
-  std::uint32_t requestedCount =
-      static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
-  if (parser.get_object_field(foliageObject, "instanceCount", &value)) {
-    static_cast<void>(parser.as_uint(value, &requestedCount));
-  }
-
-  core::JsonValue instancesValue{};
-  if (parser.get_object_field(foliageObject, "instances", &instancesValue) &&
-      (instancesValue.type == core::JsonValue::Type::Array)) {
-    const std::size_t arrayCount = parser.array_size(instancesValue);
-    std::size_t clampedCount = arrayCount;
-    if (clampedCount > FoliagePatchComponent::kMaxInstances) {
-      clampedCount = FoliagePatchComponent::kMaxInstances;
-    }
-    std::uint32_t count = static_cast<std::uint32_t>(clampedCount);
-    if (count > requestedCount) {
-      count = requestedCount;
-    }
-    if (count >
-        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
-      count = static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
-    }
-
-    for (std::uint32_t i = 0U; i < count; ++i) {
-      core::JsonValue instanceValue{};
-      if (!parser.get_array_element(instancesValue, i, &instanceValue) ||
-          (instanceValue.type != core::JsonValue::Type::Object)) {
-        return false;
-      }
-
-      FoliageInstance instance{};
-      if (parser.get_object_field(instanceValue, "offset", &value) &&
-          !read_vec3(parser, value, &instance.offset)) {
-        return false;
-      }
-      if (parser.get_object_field(instanceValue, "scale", &value)) {
-        static_cast<void>(parser.as_float(value, &instance.scale));
-      }
-      if (parser.get_object_field(instanceValue, "phase", &value)) {
-        static_cast<void>(parser.as_float(value, &instance.phase));
-      }
-      if (parser.get_object_field(instanceValue, "lodIndex", &value)) {
-        static_cast<void>(parser.as_uint(value, &instance.lodIndex));
-      }
-      component.instances[i] = instance;
-    }
-    component.instanceCount = count;
-  } else {
-    if (requestedCount >
-        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
-      requestedCount =
-          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
-    }
-    component.instanceCount = requestedCount;
   }
 
   *outComponent = component;
@@ -982,6 +593,23 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
   return true;
 }
 
+/// Copies one component type between worlds through the World get/add pair.
+/// Returns true when the source entity has no such component or the copy
+/// succeeded; false only when a present component fails to add.
+template <typename Component>
+bool copy_component(
+    const World &sourceWorld, World &targetWorld, Entity sourceEntity,
+    Entity targetEntity,
+    bool (World::*getComponent)(Entity, Component *) const noexcept,
+    bool (World::*addComponent)(Entity, const Component &) noexcept) noexcept {
+  Component component{};
+  if ((sourceWorld.*getComponent)(sourceEntity, &component) &&
+      !(targetWorld.*addComponent)(targetEntity, component)) {
+    return false;
+  }
+  return true;
+}
+
 /// Handles copy world contents.
 bool copy_world_contents(const World &sourceWorld,
                          World &targetWorld) noexcept {
@@ -1000,91 +628,29 @@ bool copy_world_contents(const World &sourceWorld,
       return;
     }
 
-    Transform transform{};
-    if (sourceWorld.get_transform(sourceEntity, &transform) &&
-        !targetWorld.add_transform(targetEntity, transform)) {
-      success = false;
-      return;
-    }
-
-    RigidBody rigidBody{};
-    if (sourceWorld.get_rigid_body(sourceEntity, &rigidBody) &&
-        !targetWorld.add_rigid_body(targetEntity, rigidBody)) {
-      success = false;
-      return;
-    }
-
-    Collider collider{};
-    if (sourceWorld.get_collider(sourceEntity, &collider) &&
-        !targetWorld.add_collider(targetEntity, collider)) {
-      success = false;
-      return;
-    }
-
-    MeshComponent mesh{};
-    if (sourceWorld.get_mesh_component(sourceEntity, &mesh) &&
-        !targetWorld.add_mesh_component(targetEntity, mesh)) {
-      success = false;
-      return;
-    }
-
-    FoliagePatchComponent foliage{};
-    if (sourceWorld.get_foliage_patch_component(sourceEntity, &foliage) &&
-        !targetWorld.add_foliage_patch_component(targetEntity, foliage)) {
-      success = false;
-      return;
-    }
-
-    LightComponent light{};
-    if (sourceWorld.get_light_component(sourceEntity, &light) &&
-        !targetWorld.add_light_component(targetEntity, light)) {
-      success = false;
-      return;
-    }
-
-    PointLightComponent pointLight{};
-    if (sourceWorld.get_point_light_component(sourceEntity, &pointLight) &&
-        !targetWorld.add_point_light_component(targetEntity, pointLight)) {
-      success = false;
-      return;
-    }
-
-    SpotLightComponent spotLight{};
-    if (sourceWorld.get_spot_light_component(sourceEntity, &spotLight) &&
-        !targetWorld.add_spot_light_component(targetEntity, spotLight)) {
-      success = false;
-      return;
-    }
-
-    ReflectionProbeComponent reflectionProbe{};
-    if (sourceWorld.get_reflection_probe_component(sourceEntity,
-                                                   &reflectionProbe) &&
-        !targetWorld.add_reflection_probe_component(targetEntity,
-                                                   reflectionProbe)) {
-      success = false;
-      return;
-    }
-
-    NameComponent name{};
-    if (sourceWorld.get_name_component(sourceEntity, &name) &&
-        !targetWorld.add_name_component(targetEntity, name)) {
-      success = false;
-      return;
-    }
-
-    ScriptComponent script{};
-    if (sourceWorld.get_script_component(sourceEntity, &script) &&
-        !targetWorld.add_script_component(targetEntity, script)) {
-      success = false;
-      return;
-    }
-
-    SpringArmComponent springArm{};
-    if (sourceWorld.get_spring_arm(sourceEntity, &springArm) &&
-        !targetWorld.add_spring_arm(targetEntity, springArm)) {
-      success = false;
-      return;
-    }
+    // One line per copyable component type; copy_component supplies the
+    // guard/copy body once.
+    const auto copy = [&](auto getComponent, auto addComponent) noexcept {
+      return copy_component(sourceWorld, targetWorld, sourceEntity,
+                            targetEntity, getComponent, addComponent);
+    };
+    success =
+        copy(&World::get_transform, &World::add_transform) &&
+        copy(&World::get_rigid_body, &World::add_rigid_body) &&
+        copy(&World::get_collider, &World::add_collider) &&
+        copy(&World::get_mesh_component, &World::add_mesh_component) &&
+        copy(&World::get_foliage_patch_component,
+             &World::add_foliage_patch_component) &&
+        copy(&World::get_light_component, &World::add_light_component) &&
+        copy(&World::get_point_light_component,
+             &World::add_point_light_component) &&
+        copy(&World::get_spot_light_component,
+             &World::add_spot_light_component) &&
+        copy(&World::get_reflection_probe_component,
+             &World::add_reflection_probe_component) &&
+        copy(&World::get_name_component, &World::add_name_component) &&
+        copy(&World::get_script_component, &World::add_script_component) &&
+        copy(&World::get_spring_arm, &World::add_spring_arm);
   });
 
   // Copy timer timing metadata (callbacks must be re-wired by caller).
@@ -1107,7 +673,7 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
-  if (world.current_phase() != WorldPhase::Idle) {
+  if (world.current_phase() != WorldPhase::Input) {
     core::log_message(core::LogLevel::Warning, kSceneLogChannel,
                       "save_scene requires world Idle phase");
     return false;
@@ -1390,7 +956,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
-  if (world.current_phase() != WorldPhase::Idle) {
+  if (world.current_phase() != WorldPhase::Input) {
     core::log_message(core::LogLevel::Warning, kSceneLogChannel,
                       "load_scene requires world Idle phase");
     return false;

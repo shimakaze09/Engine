@@ -41,10 +41,92 @@ bool write_temp_file(const char *path, const char *contents) {
   return ok;
 }
 
+/// Verifies unregister_mesh_asset frees slots for reuse without breaking
+/// probe chains (regression coverage for unbounded slot growth).
+int verify_mesh_slot_reclamation() {
+  using engine::renderer::AssetDatabase;
+  using engine::renderer::AssetId;
+  using engine::renderer::AssetState;
+  using engine::renderer::MeshHandle;
+
+  std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
+  if (database == nullptr) {
+    return 200;
+  }
+  engine::renderer::clear_asset_database(database.get());
+
+  // Ids spaced exactly kMaxMeshAssets apart share a home slot, forcing one
+  // probe chain through every record.
+  constexpr AssetId kBase = 11ULL;
+  const AssetId first = kBase;
+  const AssetId second = kBase + AssetDatabase::kMaxMeshAssets;
+  const AssetId third = kBase + 2ULL * AssetDatabase::kMaxMeshAssets;
+
+  for (const AssetId id : {first, second, third}) {
+    if (!engine::renderer::register_mesh_asset(database.get(), id,
+                                               "assets/chain.mesh",
+                                               MeshHandle{7U})) {
+      return 201;
+    }
+  }
+
+  // A referenced record (register leaves refCount=1, live mesh) must refuse.
+  if (engine::renderer::unregister_mesh_asset(database.get(), second)) {
+    return 202;
+  }
+
+  // Drop the reference and GPU handle, then unregister the chain's middle.
+  if (!engine::renderer::release_mesh_asset(database.get(), second)) {
+    return 203;
+  }
+  if (!engine::renderer::set_mesh_asset_state(
+          database.get(), second, AssetState::Unloaded,
+          engine::renderer::kInvalidMeshHandle)) {
+    return 204;
+  }
+  if (!engine::renderer::unregister_mesh_asset(database.get(), second)) {
+    return 205;
+  }
+
+  // The record after the tombstone must still resolve through the chain.
+  if (engine::renderer::mesh_asset_state(database.get(), third) !=
+      AssetState::Ready) {
+    return 206;
+  }
+  if (engine::renderer::mesh_asset_state(database.get(), second) !=
+      AssetState::Unloaded) {
+    return 207; // unregistered id must read as absent/unloaded
+  }
+
+  // The freed slot must be reusable by a new asset.
+  const AssetId fresh = kBase + 3ULL * AssetDatabase::kMaxMeshAssets;
+  if (!engine::renderer::register_mesh_asset(database.get(), fresh,
+                                             "assets/fresh.mesh",
+                                             MeshHandle{9U})) {
+    return 208;
+  }
+  if (engine::renderer::mesh_asset_state(database.get(), fresh) !=
+      AssetState::Ready) {
+    return 209;
+  }
+
+  // Double unregister reports failure.
+  if (engine::renderer::unregister_mesh_asset(database.get(), second)) {
+    return 210;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  const int reclamation = verify_mesh_slot_reclamation();
+  if (reclamation != 0) {
+    std::fprintf(stderr, "mesh slot reclamation failed: %d\n", reclamation);
+    return reclamation;
+  }
   std::unique_ptr<engine::renderer::AssetDatabase> database(
       new (std::nothrow) engine::renderer::AssetDatabase());
   if (database == nullptr) {

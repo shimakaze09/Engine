@@ -45,6 +45,9 @@ struct AssetDatabase final {
   static constexpr std::size_t kMaxMeshAssets = 4096U;
   std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets{};
   std::array<bool, kMaxMeshAssets> occupied{};
+  // Slots freed by unregister_mesh_asset: not occupied (iteration skips them)
+  // but probe chains continue through them; inserts reuse them.
+  std::array<bool, kMaxMeshAssets> meshTombstoned{};
 
   static constexpr std::size_t kMaxTextureAssets = 512U;
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets{};
@@ -87,6 +90,20 @@ bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 /// Handles clear asset database.
 void clear_asset_database(AssetDatabase *database) noexcept;
+
+// Low-level mesh slot access shared by the database and the asset manager.
+/// Returns the record slot for an id, or kMaxMeshAssets when absent.
+std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
+                                        AssetId id) noexcept;
+/// Finds the id's slot or claims an empty/tombstoned one (occupied is set and
+/// the id written for fresh claims). Returns kMaxMeshAssets when full.
+std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
+                                         AssetId id) noexcept;
+/// Frees a mesh record slot for reuse. Requires refCount == 0 and no live
+/// runtimeMesh (unload first); the slot becomes a tombstone so probe chains
+/// stay intact. Fixes unbounded slot growth over long content-streaming
+/// sessions.
+bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 
 // Texture asset management.
 bool register_texture_asset(AssetDatabase *database, AssetId id,

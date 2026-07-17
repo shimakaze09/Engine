@@ -18,14 +18,16 @@ These project-local skills live under `.codex/skills/` and were created from the
 > the **single source of truth** for gap analysis, milestone definitions, exit
 > criteria, and completion status. No separate phased TODO or milestone
 > markdown file is tracked in this checkout; stale external copies must not be
-> used for status decisions.
+> used for status decisions. Bug/perf/duplication/architecture findings from
+> the 2026-07-17 full-codebase review live in `REVIEW_FINDINGS.md`, which is
+> the active tracker for the production-hardening campaign.
 >
 > **Status codes**: `[x]` = production-ready (API complete, tests pass, meets 7-point completion standard), `[~]` = partial/prototype (header exists, implementation or tests incomplete), `[ ]` = not started (no implementation found).
 > **Priority**: **[critical]** = Phase 1 ship blocker · **[high]** = Phase 2 competitive parity · **[low]** = Phase 3 cutting-edge.
 > **Verification basis**: Direct review of all public headers under `core/`, `renderer/`, `physics/`, `scripting/`, `runtime/`, `audio/`, `editor/`, `tools/`; full read of `.github/workflows/ci.yml`; directory listing of `tests/unit/`, `tests/integration/`, `tests/benchmark/`.
-> **Codebase inventory**: 8 modules (core: 24 headers, math: 10, physics: 10, scripting: 3, renderer: 17, audio: 1, runtime: 19, editor: 4), 78 test source files (55 unit, 19 integration, 1 smoke, 3 benchmark), CI: 9 jobs.
+> **Codebase inventory**: 8 modules (core: 27 headers, math: 11, physics: 10, scripting: 3, renderer: 18, audio: 1, runtime: 19, editor: 4), 88 test source files (65 unit, 19 integration, 1 smoke, 3 benchmark), CI: 10 jobs (build matrix, determinism-check, static-analysis, clang-tidy, werror-check, sanitizers, tsan, coverage, benchmarks, quality-gate).
 > **Third-party dependencies**: SDL2 2.30.11, Lua 5.4.6, ImGui (pinned docking snapshot), ImGuizmo (pinned master snapshot), cgltf 1.14, stb (pinned master snapshot), miniaudio 0.11.21, OpenGL 4.5+.
-> **Last reviewed**: 2026-05-20 (after P1-M6-C1 static mesh instancing implementation).
+> **Last reviewed**: 2026-07-17 (documentation refresh during the production-hardening campaign; correctness/perf/structure findings from the 2026-07-17 full-codebase review are tracked in `REVIEW_FINDINGS.md`, not in this file).
 
 ---
 
@@ -134,7 +136,7 @@ These items do not represent missing *features* but rather defects or structural
   - *Resolved*: Runtime and scripting bridge callers now bind through explicit `ServiceLocator` instances; legacy global register/bind wrappers were removed, and tests no longer rely on the global locator except for the core singleton API coverage.
 - `§0-7-d-v` ~~Large implementation files still exceed maintainable review size and concentrate unrelated ownership.~~ **[high]** `[x]`
   - *Resolved*: The production-readiness blocker was the concentration of unrelated ownership/state in large implementation files. Scripting now separates deferred mutations, timers, collision callbacks, hot-reload persistence, touch callbacks, coroutine scheduling, game state/player controllers, debugger/profiler hooks, entity script lifecycle/module cache, Lua state lifetime, input bindings, scene operations, entity handle helpers, entity pool state, and cheat/console state into focused owners. Renderer settings, command-buffer sorting/batching, draw-math/cache-key helpers, and renderer context/backend state are likewise split out of `command_buffer.cpp`.
-  - *Audit*: Current largest files still include `command_buffer.cpp` (~3772 after the render settings, builder, math, and context splits), `scripting.cpp` (~3067 after the timer/collision/persist/touch/coroutine/game/debug/entity-script/state/input/scene/entity-handle/entity-pool/cheat split), `editor.cpp` (~2348), `physics.cpp` (~2278), `tests/unit/physics_test.cpp` (~2129), `engine_pipeline.cpp` (~2007), `world.cpp` (~1703), and `scene_serializer.cpp` (~1342). These are now same-domain implementation surfaces rather than mixed global-state owners; remaining size-only decomposition is no longer tracked as a §0 correctness blocker.
+  - *Audit (refreshed 2026-07-17)*: Current largest files are `command_buffer.cpp` (4163), `scripting.cpp` (3462, after the timer/collision/persist/touch/coroutine/game/debug/entity-script/state/input/scene/entity-handle/entity-pool/cheat split), `editor.cpp` (2682), `tests/unit/physics_test.cpp` (2611), `physics.cpp` (2583), `engine_pipeline.cpp` (1946), `world.cpp` (1651, after the S1 boilerplate collapse), and `scene_serializer.cpp` (1537). These are same-domain implementation surfaces rather than mixed global-state owners; remaining size-only decomposition is no longer tracked as a §0 correctness blocker — it is tracked as findings A1/A3/A4 in `REVIEW_FINDINGS.md`.
 
 ---
 

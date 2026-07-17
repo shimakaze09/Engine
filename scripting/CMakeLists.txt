@@ -48,6 +48,7 @@ engine_add_module_library(engine_scripting
     engine_lua
     PRIVATE_DEPS
     engine_physics
+    PCH src/pch.h
 )
 
 if(WIN32)

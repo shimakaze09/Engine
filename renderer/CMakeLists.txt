@@ -13,6 +13,7 @@ engine_add_module_library(engine_renderer
     src/light_culling.cpp
     src/lru_cache.cpp
     src/mesh_loader.cpp
+    src/mesh_primitives.cpp
     src/pass_resources.cpp
     src/post_process_stack.cpp
     src/render_settings.cpp

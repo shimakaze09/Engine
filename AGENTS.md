@@ -272,6 +272,13 @@ Run source comment audit when available:
 cmake --build build --target source_comment_audit
 ```
 
+Run the comment quality audit (flags machine-generated filler comments; the
+finding count is a ratchet that must only decrease — see `REVIEW_FINDINGS.md` C1):
+
+```powershell
+python tools/check_comment_quality.py
+```
+
 ## Codex Index Workflow
 
 When asked to index the project, do not modify source code unless explicitly requested.

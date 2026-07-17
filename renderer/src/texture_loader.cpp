@@ -13,7 +13,9 @@
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
+#include "engine/math/vec3.h"
 #include "engine/renderer/render_device.h"
 
 #ifdef __clang__
@@ -104,18 +106,9 @@ void reset_texture_slot(TextureSlot &slot) noexcept {
                      false, false, {}};
 }
 
-/// Handles safe copy path.
+/// Copies a texture VFS path into a fixed-size slot field.
 void safe_copy_path(char *dst, std::size_t dstSize, const char *src) noexcept {
-  if ((dst == nullptr) || (src == nullptr) || (dstSize == 0U)) {
-    return;
-  }
-
-  std::size_t i = 0U;
-  while ((i + 1U) < dstSize && src[i] != '\0') {
-    dst[i] = src[i];
-    ++i;
-  }
-  dst[i] = '\0';
+  core::copy_string(dst, dstSize, src);
 }
 
 /// Finds the matching object or resource for free texture slot.
@@ -197,42 +190,23 @@ int wrap_index(int value, int count) noexcept {
   return result;
 }
 
-/// Stores vec3 data used by the engine.
-struct Vec3 final {
-  float x = 0.0F;
-  float y = 0.0F;
-  float z = 0.0F;
-};
+using math::Vec3;
 
-/// Clamps and fills settings into a safe runtime range.
-Vec3 normalize(Vec3 value) noexcept {
-  const float lenSq = value.x * value.x + value.y * value.y + value.z * value.z;
-  if (lenSq <= 0.0F) {
-    return {};
-  }
-
-  const float invLen = 1.0F / std::sqrt(lenSq);
-  value.x *= invLen;
-  value.y *= invLen;
-  value.z *= invLen;
-  return value;
-}
-
-/// Handles cube face direction.
+/// Unit direction through a cubemap texel for equirect resampling.
 Vec3 cube_face_direction(int face, float u, float v) noexcept {
   switch (face) {
   case 0:
-    return normalize({1.0F, -v, -u});
+    return math::normalize(Vec3(1.0F, -v, -u));
   case 1:
-    return normalize({-1.0F, -v, u});
+    return math::normalize(Vec3(-1.0F, -v, u));
   case 2:
-    return normalize({u, 1.0F, v});
+    return math::normalize(Vec3(u, 1.0F, v));
   case 3:
-    return normalize({u, -1.0F, -v});
+    return math::normalize(Vec3(u, -1.0F, -v));
   case 4:
-    return normalize({u, -v, 1.0F});
+    return math::normalize(Vec3(u, -v, 1.0F));
   default:
-    return normalize({-u, -v, -1.0F});
+    return math::normalize(Vec3(-u, -v, -1.0F));
   }
 }
 

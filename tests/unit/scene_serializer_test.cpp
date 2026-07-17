@@ -714,6 +714,45 @@ int verify_point_spot_light_parse_failures_reject_scene() {
   return 0;
 }
 
+/// Malformed foliage fields must reject the scene (shared strict reader —
+/// scene and prefab serializers now use one implementation, REVIEW_FINDINGS S5).
+int verify_foliage_parse_failures_reject_scene() {
+  constexpr const char *kBadFoliageDensityScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"density\":\"thick\"}}}]}";
+  std::unique_ptr<engine::runtime::World> densityWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (densityWorld == nullptr) {
+    return 116;
+  }
+  if (engine::runtime::load_scene(*densityWorld, kBadFoliageDensityScene,
+                                  std::strlen(kBadFoliageDensityScene))) {
+    return 117;
+  }
+  if (densityWorld->alive_entity_count() != 0U) {
+    return 118;
+  }
+
+  constexpr const char *kBadFoliageInstanceScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"instanceCount\":1,"
+      "\"instances\":[{\"scale\":\"big\"}]}}}]}";
+  std::unique_ptr<engine::runtime::World> instanceWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (instanceWorld == nullptr) {
+    return 119;
+  }
+  if (engine::runtime::load_scene(*instanceWorld, kBadFoliageInstanceScene,
+                                  std::strlen(kBadFoliageInstanceScene))) {
+    return 120;
+  }
+  if (instanceWorld->alive_entity_count() != 0U) {
+    return 121;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -785,6 +824,13 @@ int main() {
   }
 
   result = verify_point_spot_light_parse_failures_reject_scene();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_foliage_parse_failures_reject_scene();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

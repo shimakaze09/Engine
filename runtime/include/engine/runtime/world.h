@@ -10,6 +10,7 @@
 #include <type_traits>
 
 #include "engine/core/entity.h"
+#include "engine/core/fixed_hash_table.h"
 #include "engine/core/sparse_set.h"
 #include "engine/math/component_types.h"
 #include "engine/math/mat4.h"
@@ -152,7 +153,7 @@ struct SpringArmComponent final {
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,
                                   void *userData) noexcept;
 
-/// Enumerates world phase values used by the engine.
+/// Frame phases the world moves through; mutation is gated on Input.
 enum class WorldPhase : std::uint8_t {
   Input,
   BeginPlay,
@@ -161,10 +162,6 @@ enum class WorldPhase : std::uint8_t {
   RenderSubmission,
   Render,
   EndPlay,
-  // Compatibility aliases for legacy call sites.
-  Idle = Input,
-  Update = Simulation,
-  RenderPrep = RenderSubmission,
 };
 
 /// Owns the world behavior and state.
@@ -477,9 +474,15 @@ public:
   // Mark entity as having received its begin_play callback.
   void mark_begin_play_done(Entity entity) noexcept;
 
+  // Number of alive entities that have not yet received begin_play; lets the
+  // frame loop skip the BeginPlay phase entirely on quiet frames.
+  std::size_t begin_play_pending_count() const noexcept {
+    return m_beginPlayPendingCount;
+  }
+
   // Iterate alive entities that have NOT yet received begin_play.
   template <typename Fn> void for_each_needs_begin_play(Fn &&fn) noexcept {
-    if (m_aliveEntityCount == 0U) {
+    if ((m_aliveEntityCount == 0U) || (m_beginPlayPendingCount == 0U)) {
       return;
     }
     std::size_t visited = 0U;
@@ -631,25 +634,63 @@ private:
   bool queue_deferred_destroy(Entity entity) noexcept;
   /// Flushes queued work to the backing runtime system for deferred destroys.
   void flush_deferred_destroys() noexcept;
-  /// Handles insert persistent index.
+  /// Maps a persistent id to its entity index; false when the table is full.
   bool insert_persistent_index(PersistentId persistentId,
                                std::uint32_t entityIndex) noexcept;
-  /// Finds the matching object or resource for persistent index.
+  /// Returns the entity index for a persistent id, or 0 when unmapped.
   std::uint32_t find_persistent_index(PersistentId persistentId) const noexcept;
-  /// Handles erase persistent index.
+  /// Unmaps a persistent id; rebuilds the table when tombstones pile up.
   void erase_persistent_index(PersistentId persistentId) noexcept;
+  /// Rebuilds the persistent-id table from the alive entity arrays.
+  void rebuild_persistent_index() noexcept;
   /// Resets this object back to its reusable empty state for transform cache.
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
   /// Handles propagate world transforms.
   bool propagate_world_transforms() noexcept;
   /// Handles query state index.
   std::size_t query_state_index() const noexcept;
-  /// Handles hash name string.
-  std::uint32_t hash_name_string(const char *name) const noexcept;
-  /// Handles name lookup insert.
-  bool name_lookup_insert(std::uint32_t nameHash, const char *name,
+  // Shared guard/log/dispatch bodies behind the per-component add/remove/get
+  // wrappers. Defined in world.cpp; every instantiation lives there.
+  /// Phase + liveness guard used by component mutators with extra logic.
+  bool check_component_mutation(Entity entity, const char *label) noexcept;
+  /// Phase + liveness guarded SparseSet insert; logs failures under `label`.
+  template <typename Set, typename Component>
+  bool add_component_checked(Set &set, Entity entity,
+                             const Component &component,
+                             const char *label) noexcept;
+  /// Phase + liveness guarded SparseSet remove; logs failures under `label`.
+  template <typename Set>
+  bool remove_component_checked(Set &set, Entity entity,
+                                const char *label) noexcept;
+  /// Liveness-guarded SparseSet copy-out; logs failures under `label`.
+  template <typename Set, typename Component>
+  bool get_component_checked(const Set &set, Entity entity, Component *out,
+                             const char *label) const noexcept;
+  /// Liveness-guarded SparseSet pointer lookup (silent on miss).
+  template <typename Set>
+  auto *get_component_ptr_checked(Set &set, Entity entity) noexcept {
+    if (!is_valid_entity(entity)) {
+      return static_cast<decltype(set.get_ptr(entity))>(nullptr);
+    }
+    return set.get_ptr(entity);
+  }
+  /// Liveness-guarded const SparseSet pointer lookup (silent on miss).
+  template <typename Set>
+  auto *get_component_ptr_checked(const Set &set, Entity entity) const noexcept {
+    if (!is_valid_entity(entity)) {
+      return static_cast<decltype(set.get_ptr(entity))>(nullptr);
+    }
+    return set.get_ptr(entity);
+  }
+
+  /// Inserts one name-lookup entry (reuses tombstoned slots). Entities that
+  /// share a name each keep their own entry.
+  bool name_lookup_insert(std::uint32_t nameHash,
                           std::uint32_t entityIndex) noexcept;
-  /// Handles rebuild name lookup.
+  /// Tombstones the lookup entry for one entity's name, if present.
+  void name_lookup_erase(std::uint32_t nameHash,
+                         std::uint32_t entityIndex) noexcept;
+  /// Rebuilds the lookup from live name components (clears tombstones).
   void rebuild_name_lookup() noexcept;
 
   /// Handles component count.
@@ -877,17 +918,19 @@ private:
     }
   }
 
-  WorldPhase m_phase = WorldPhase::Idle;
+  WorldPhase m_phase = WorldPhase::Input;
   std::uint32_t m_nextEntityIndex = 1U;
   PersistentId m_nextPersistentId = 1U;
   std::array<std::uint32_t, kMaxEntities + 1U> m_entityGenerations{};
   std::array<PersistentId, kMaxEntities + 1U> m_entityPersistentIds{};
   std::array<MovementAuthority, kMaxEntities + 1U> m_movementAuthorities{};
-  std::array<PersistentId, kPersistentIndexCapacity> m_persistentIndexKeys{};
-  std::array<std::uint32_t, kPersistentIndexCapacity> m_persistentIndexValues{};
-  std::array<std::uint8_t, kPersistentIndexCapacity> m_persistentIndexState{};
+  core::FixedHashTable<PersistentId, std::uint32_t, kPersistentIndexCapacity>
+      m_persistentIndex{};
   std::array<bool, kMaxEntities + 1U> m_entityAlive{};
   std::array<bool, kMaxEntities + 1U> m_entityBeginPlayFired{};
+  // Alive entities whose begin_play has not fired yet (kept in sync by
+  // create/destroy/mark_begin_play_done).
+  std::size_t m_beginPlayPendingCount = 0U;
   std::array<std::uint32_t, kMaxEntities> m_freeEntityIndices{};
   std::size_t m_freeEntityCount = 0U;
   std::size_t m_aliveEntityCount = 0U;
@@ -935,6 +978,9 @@ private:
   std::array<std::uint32_t, kNameLookupCapacity> m_nameLookupHashes{};
   std::array<std::uint32_t, kNameLookupCapacity> m_nameLookupEntityIndices{};
   std::array<std::uint8_t, kNameLookupCapacity> m_nameLookupState{};
+  // Tombstones accumulated by erases; a rebuild resets them so probe chains
+  // stay short after heavy name churn.
+  std::size_t m_nameLookupTombstones = 0U;
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
   SpringArmSet m_springArms{};

@@ -40,6 +40,24 @@ function(engine_add_module_library target)
     endif()
 endfunction()
 
+function(engine_add_header_library target)
+    set(options)
+    set(oneValueArgs)
+    set(multiValueArgs PUBLIC_INCLUDE_DIRS PUBLIC_DEPS)
+    cmake_parse_arguments(ENGINE_HDR "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    add_library(${target} INTERFACE)
+    engine_set_cxx20(${target} INTERFACE)
+
+    if(ENGINE_HDR_PUBLIC_INCLUDE_DIRS)
+        target_include_directories(${target} INTERFACE ${ENGINE_HDR_PUBLIC_INCLUDE_DIRS})
+    endif()
+
+    if(ENGINE_HDR_PUBLIC_DEPS)
+        target_link_libraries(${target} INTERFACE ${ENGINE_HDR_PUBLIC_DEPS})
+    endif()
+endfunction()
+
 function(engine_add_executable_target target)
     set(options)
     set(oneValueArgs RUNTIME_OUTPUT_DIRECTORY)

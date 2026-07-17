@@ -2,40 +2,24 @@
 
 #include "engine/runtime/world.h"
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 #include "engine/math/transform.h"
 #include "engine/runtime/reflect_types.h"
 
 #include <array>
 #include <cassert>
+#include <cstdio>
 #include <cstring>
 
 namespace engine::runtime {
 
 namespace {
 
-constexpr std::uint32_t kNameHashOffset = 2166136261U;
-constexpr std::uint32_t kNameHashPrime = 16777619U;
-
 constexpr std::uint8_t kNameSlotEmpty = 0U;
 constexpr std::uint8_t kNameSlotOccupied = 1U;
 constexpr std::uint8_t kNameSlotTombstone = 2U;
-
-/// Handles copy bounded c string.
-void copy_bounded_c_string(char *dst, std::size_t dstCapacity,
-                           const char *src) noexcept {
-  if ((dst == nullptr) || (dstCapacity == 0U)) {
-    return;
-  }
-
-  std::size_t i = 0U;
-  if (src != nullptr) {
-    for (; (i + 1U) < dstCapacity && src[i] != '\0'; ++i) {
-      dst[i] = src[i];
-    }
-  }
-  dst[i] = '\0';
-}
 
 /// Handles world transform from local.
 WorldTransform world_transform_from_local(const Transform &local) noexcept {
@@ -47,36 +31,84 @@ WorldTransform world_transform_from_local(const Transform &local) noexcept {
   return world;
 }
 
+/// Formats and logs one world component-API failure.
+void log_component_error(const char *label, const char *reason) noexcept {
+  char message[128] = {};
+  std::snprintf(message, sizeof(message), "%s %s", label, reason);
+  core::log_message(core::LogLevel::Error, "world", message);
+}
+
 } // namespace
 
+template <typename Set, typename Component>
+bool World::add_component_checked(Set &set, Entity entity,
+                                  const Component &component,
+                                  const char *label) noexcept {
+  if (!is_mutation_phase()) {
+    log_component_error(label, "requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    log_component_error(label, "requires a live entity");
+    return false;
+  }
+
+  return set.add(entity, component);
+}
+
+template <typename Set>
+bool World::remove_component_checked(Set &set, Entity entity,
+                                     const char *label) noexcept {
+  if (!is_mutation_phase()) {
+    log_component_error(label, "requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    log_component_error(label, "requires a live entity");
+    return false;
+  }
+
+  return set.remove(entity);
+}
+
+template <typename Set, typename Component>
+bool World::get_component_checked(const Set &set, Entity entity,
+                                  Component *out,
+                                  const char *label) const noexcept {
+  if (out == nullptr) {
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    log_component_error(label, "on stale or dead entity");
+    return false;
+  }
+
+  return set.get(entity, out);
+}
+
+bool World::check_component_mutation(Entity entity,
+                                     const char *label) noexcept {
+  if (!is_mutation_phase()) {
+    log_component_error(label, "requires Input phase");
+    return false;
+  }
+
+  if (!is_valid_entity(entity)) {
+    log_component_error(label, "requires a live entity");
+    return false;
+  }
+
+  return true;
+}
+
 World::World() noexcept {
+  // Every member carries a correct default initializer (arrays zero-init,
+  // SparseSets and the persistent-id table self-initialize); only the
+  // reflection registry needs explicit setup.
   ensure_runtime_reflection_registered();
-  m_entityGenerations.fill(0U);
-  m_entityPersistentIds.fill(kInvalidPersistentId);
-  m_movementAuthorities.fill(MovementAuthority::None);
-  m_persistentIndexKeys.fill(kInvalidPersistentId);
-  m_persistentIndexValues.fill(0U);
-  m_persistentIndexState.fill(0U);
-  m_entityAlive.fill(false);
-  m_aliveEntityCount = 0U;
-  m_transforms.clear();
-  m_worldTransforms.clear();
-  m_transformNodes.fill(TransformNode{});
-  m_transformActiveIndices.fill(0U);
-  m_transformActiveCount = 0U;
-  m_transformRoots.fill(0U);
-  m_transformQueueIndices.fill(0U);
-  m_transformQueueInheritedDirty.fill(false);
-  m_rigidBodies.clear();
-  m_colliders.clear();
-  m_meshComponents.clear();
-  m_nameComponents.clear();
-  m_nameLookupHashes.fill(0U);
-  m_nameLookupEntityIndices.fill(0U);
-  m_nameLookupState.fill(kNameSlotEmpty);
-  m_scriptComponents.clear();
-  m_reflectionProbes.clear();
-  m_foliagePatches.clear();
 }
 
 Entity World::create_entity() noexcept {
@@ -154,6 +186,8 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     return kInvalidEntity;
   }
   ++m_aliveEntityCount;
+  m_entityBeginPlayFired[index] = false;
+  ++m_beginPlayPendingCount;
   return Entity{index, m_entityGenerations[index]};
 }
 
@@ -184,6 +218,9 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   const std::uint32_t index = entity.index;
   erase_persistent_index(m_entityPersistentIds[index]);
   m_entityAlive[index] = false;
+  if (!m_entityBeginPlayFired[index] && (m_beginPlayPendingCount > 0U)) {
+    --m_beginPlayPendingCount;
+  }
   m_entityBeginPlayFired[index] = false;
   m_entityPersistentIds[index] = kInvalidPersistentId;
   m_movementAuthorities[index] = MovementAuthority::None;
@@ -202,8 +239,8 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
     ++m_freeEntityCount;
   }
 
-  if (hadName) {
-    rebuild_name_lookup();
+  if (hadName && (removedName.name[0] != '\0')) {
+    name_lookup_erase(core::fnv1a_32(removedName.name), index);
   }
 
   return true;
@@ -308,37 +345,30 @@ std::size_t World::alive_entity_count() const noexcept {
 }
 
 bool World::add_transform(Entity entity, const Transform &transform) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_transform requires Input phase");
+  if (!check_component_mutation(entity, "add_transform")) {
     return false;
   }
 
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_transform requires a live entity");
-    return false;
-  }
-
+  const bool hadTransform = m_transforms.contains(entity);
   if (!m_transforms.add(entity, transform)) {
     return false;
   }
 
   const WorldTransform world = world_transform_from_local(transform);
   m_transformNodes[entity.index].cacheValid = false;
-  return m_worldTransforms.add(entity, world);
+  if (!m_worldTransforms.add(entity, world)) {
+    // Keep the two sets consistent: a fresh insert that cannot get its world
+    // transform must not leave a local transform behind.
+    if (!hadTransform) {
+      static_cast<void>(m_transforms.remove(entity));
+    }
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_transform(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_transform requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_transform requires a live entity");
+  if (!check_component_mutation(entity, "remove_transform")) {
     return false;
   }
 
@@ -388,24 +418,12 @@ World::get_transform_write_ptr(Entity entity,
 
 const WorldTransform *
 World::get_world_transform_read_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_worldTransforms.get_ptr(entity);
+  return get_component_ptr_checked(m_worldTransforms, entity);
 }
 
 bool World::set_movement_authority(Entity entity,
                                    MovementAuthority authority) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "set_movement_authority requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "set_movement_authority requires a live entity");
+  if (!check_component_mutation(entity, "set_movement_authority")) {
     return false;
   }
 
@@ -422,78 +440,24 @@ MovementAuthority World::movement_authority(Entity entity) const noexcept {
 }
 
 bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_rigid_body requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_rigid_body requires a live entity");
-    return false;
-  }
-
-  return m_rigidBodies.add(entity, rigidBody);
+  return add_component_checked(m_rigidBodies, entity, rigidBody, "add_rigid_body");
 }
 
 bool World::remove_rigid_body(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_rigid_body requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_rigid_body requires a live entity");
-    return false;
-  }
-
-  return m_rigidBodies.remove(entity);
+  return remove_component_checked(m_rigidBodies, entity, "remove_rigid_body");
 }
 
 bool World::get_rigid_body(Entity entity,
                            RigidBody *outRigidBody) const noexcept {
-  if (outRigidBody == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_rigid_body on stale or dead entity");
-    return false;
-  }
-
-  return m_rigidBodies.get(entity, outRigidBody);
+  return get_component_checked(m_rigidBodies, entity, outRigidBody, "get_rigid_body");
 }
 
 bool World::add_collider(Entity entity, const Collider &collider) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_collider requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_collider requires a live entity");
-    return false;
-  }
-
-  return m_colliders.add(entity, collider);
+  return add_component_checked(m_colliders, entity, collider, "add_collider");
 }
 
 bool World::remove_collider(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_collider requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_collider requires a live entity");
+  if (!check_component_mutation(entity, "remove_collider")) {
     return false;
   }
 
@@ -505,95 +469,35 @@ bool World::remove_collider(Entity entity) noexcept {
 }
 
 bool World::get_collider(Entity entity, Collider *outCollider) const noexcept {
-  if (outCollider == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_collider on stale or dead entity");
-    return false;
-  }
-
-  return m_colliders.get(entity, outCollider);
+  return get_component_checked(m_colliders, entity, outCollider, "get_collider");
 }
 
 bool World::add_mesh_component(Entity entity,
                                const MeshComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_mesh_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_mesh_component requires a live entity");
-    return false;
-  }
-
-  return m_meshComponents.add(entity, component);
+  return add_component_checked(m_meshComponents, entity, component, "add_mesh_component");
 }
 
 bool World::remove_mesh_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_mesh_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_mesh_component requires a live entity");
-    return false;
-  }
-
-  return m_meshComponents.remove(entity);
+  return remove_component_checked(m_meshComponents, entity, "remove_mesh_component");
 }
 
 bool World::get_mesh_component(Entity entity,
                                MeshComponent *outComponent) const noexcept {
-  if (outComponent == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_mesh_component on stale or dead entity");
-    return false;
-  }
-
-  return m_meshComponents.get(entity, outComponent);
+  return get_component_checked(m_meshComponents, entity, outComponent, "get_mesh_component");
 }
 
 MeshComponent *World::get_mesh_component_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_meshComponents.get_ptr(entity);
+  return get_component_ptr_checked(m_meshComponents, entity);
 }
 
 const MeshComponent *
 World::get_mesh_component_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_meshComponents.get_ptr(entity);
+  return get_component_ptr_checked(m_meshComponents, entity);
 }
 
 bool World::add_foliage_patch_component(
     Entity entity, const FoliagePatchComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_foliage_patch_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_foliage_patch_component requires a live entity");
+  if (!check_component_mutation(entity, "add_foliage_patch_component")) {
     return false;
   }
 
@@ -617,34 +521,12 @@ bool World::add_foliage_patch_component(
 }
 
 bool World::remove_foliage_patch_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_foliage_patch_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_foliage_patch_component requires a live entity");
-    return false;
-  }
-
-  return m_foliagePatches.remove(entity);
+  return remove_component_checked(m_foliagePatches, entity, "remove_foliage_patch_component");
 }
 
 bool World::get_foliage_patch_component(
     Entity entity, FoliagePatchComponent *outComponent) const noexcept {
-  if (outComponent == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_foliage_patch_component on stale or dead entity");
-    return false;
-  }
-
-  return m_foliagePatches.get(entity, outComponent);
+  return get_component_checked(m_foliagePatches, entity, outComponent, "get_foliage_patch_component");
 }
 
 bool World::has_foliage_patch_component(Entity entity) const noexcept {
@@ -672,94 +554,71 @@ Entity World::foliage_patch_entity_at(std::size_t index) const noexcept {
 
 FoliagePatchComponent *
 World::get_foliage_patch_component_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-  return m_foliagePatches.get_ptr(entity);
+  return get_component_ptr_checked(m_foliagePatches, entity);
 }
 
 const FoliagePatchComponent *
 World::get_foliage_patch_component_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-  return m_foliagePatches.get_ptr(entity);
+  return get_component_ptr_checked(m_foliagePatches, entity);
 }
 
 bool World::add_name_component(Entity entity,
                                const NameComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_name_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_name_component requires a live entity");
+  if (!check_component_mutation(entity, "add_name_component")) {
     return false;
   }
 
   NameComponent safe{};
-  copy_bounded_c_string(safe.name, sizeof(safe.name), component.name);
+  core::copy_string(safe.name, sizeof(safe.name), component.name);
+
+  // A re-add overwrites the previous name; drop its lookup entry first.
+  NameComponent previous{};
+  const bool hadName = m_nameComponents.get(entity, &previous);
 
   const bool ok = m_nameComponents.add(entity, safe);
   if (ok) {
-    rebuild_name_lookup();
+    if (hadName && (previous.name[0] != '\0') &&
+        (std::strcmp(previous.name, safe.name) != 0)) {
+      name_lookup_erase(core::fnv1a_32(previous.name), entity.index);
+    }
+    if (safe.name[0] != '\0') {
+      if (!name_lookup_insert(core::fnv1a_32(safe.name), entity.index)) {
+        core::log_message(
+            core::LogLevel::Warning, "world",
+            "name lookup table overflow; name lookup may miss entries");
+      }
+    }
   }
   return ok;
 }
 
 bool World::remove_name_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_name_component requires Input phase");
+  if (!check_component_mutation(entity, "remove_name_component")) {
     return false;
   }
 
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_name_component requires a live entity");
-    return false;
-  }
+  NameComponent previous{};
+  const bool hadName = m_nameComponents.get(entity, &previous);
 
   const bool ok = m_nameComponents.remove(entity);
-  if (ok) {
-    rebuild_name_lookup();
+  if (ok && hadName && (previous.name[0] != '\0')) {
+    name_lookup_erase(core::fnv1a_32(previous.name), entity.index);
   }
   return ok;
 }
 
 bool World::get_name_component(Entity entity,
                                NameComponent *outComponent) const noexcept {
-  if (outComponent == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_name_component on stale or dead entity");
-    return false;
-  }
-
-  return m_nameComponents.get(entity, outComponent);
+  return get_component_checked(m_nameComponents, entity, outComponent, "get_name_component");
 }
 
 NameComponent *World::get_name_component_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_nameComponents.get_ptr(entity);
+  return get_component_ptr_checked(m_nameComponents, entity);
 }
 
 const NameComponent *
 World::get_name_component_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_nameComponents.get_ptr(entity);
+  return get_component_ptr_checked(m_nameComponents, entity);
 }
 
 Entity World::find_entity_by_name(const char *name) const noexcept {
@@ -767,7 +626,7 @@ Entity World::find_entity_by_name(const char *name) const noexcept {
     return kInvalidEntity;
   }
 
-  const std::uint32_t nameHash = hash_name_string(name);
+  const std::uint32_t nameHash = core::fnv1a_32(name);
   std::size_t slot = static_cast<std::size_t>(nameHash) %
                      static_cast<std::size_t>(kNameLookupCapacity);
   for (std::size_t probe = 0U; probe < kNameLookupCapacity; ++probe) {
@@ -796,50 +655,16 @@ Entity World::find_entity_by_name(const char *name) const noexcept {
 
 bool World::add_light_component(Entity entity,
                                 const LightComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_light_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_light_component requires a live entity");
-    return false;
-  }
-
-  return m_lightComponents.add(entity, component);
+  return add_component_checked(m_lightComponents, entity, component, "add_light_component");
 }
 
 bool World::remove_light_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_light_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_light_component requires a live entity");
-    return false;
-  }
-
-  return m_lightComponents.remove(entity);
+  return remove_component_checked(m_lightComponents, entity, "remove_light_component");
 }
 
 bool World::get_light_component(Entity entity,
                                 LightComponent *outComponent) const noexcept {
-  if (outComponent == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_light_component on stale or dead entity");
-    return false;
-  }
-
-  return m_lightComponents.get(entity, outComponent);
+  return get_component_checked(m_lightComponents, entity, outComponent, "get_light_component");
 }
 
 bool World::has_light_component(Entity entity) const noexcept {
@@ -870,43 +695,16 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_point_light_component(
     Entity entity, const PointLightComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(
-        core::LogLevel::Error, "world",
-        "add_point_light_component called outside mutation phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_point_light_component: invalid entity");
-    return false;
-  }
-  return m_pointLights.add(entity, component);
+  return add_component_checked(m_pointLights, entity, component, "add_point_light_component");
 }
 
 bool World::remove_point_light_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_point_light_component outside mutation phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    return false;
-  }
-  return m_pointLights.remove(entity);
+  return remove_component_checked(m_pointLights, entity, "remove_point_light_component");
 }
 
 bool World::get_point_light_component(
     Entity entity, PointLightComponent *outComponent) const noexcept {
-  if ((outComponent == nullptr) || !is_valid_entity(entity)) {
-    return false;
-  }
-  const auto *ptr = m_pointLights.get_ptr(entity);
-  if (ptr == nullptr) {
-    return false;
-  }
-  *outComponent = *ptr;
-  return true;
+  return get_component_checked(m_pointLights, entity, outComponent, "get_point_light_component");
 }
 
 bool World::has_point_light_component(Entity entity) const noexcept {
@@ -934,42 +732,16 @@ Entity World::point_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_spot_light_component(
     Entity entity, const SpotLightComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_spot_light_component called outside mutation phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_spot_light_component: invalid entity");
-    return false;
-  }
-  return m_spotLights.add(entity, component);
+  return add_component_checked(m_spotLights, entity, component, "add_spot_light_component");
 }
 
 bool World::remove_spot_light_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_spot_light_component outside mutation phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    return false;
-  }
-  return m_spotLights.remove(entity);
+  return remove_component_checked(m_spotLights, entity, "remove_spot_light_component");
 }
 
 bool World::get_spot_light_component(
     Entity entity, SpotLightComponent *outComponent) const noexcept {
-  if ((outComponent == nullptr) || !is_valid_entity(entity)) {
-    return false;
-  }
-  const auto *ptr = m_spotLights.get_ptr(entity);
-  if (ptr == nullptr) {
-    return false;
-  }
-  *outComponent = *ptr;
-  return true;
+  return get_component_checked(m_spotLights, entity, outComponent, "get_spot_light_component");
 }
 
 bool World::has_spot_light_component(Entity entity) const noexcept {
@@ -997,31 +769,11 @@ Entity World::spot_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_reflection_probe_component(
     Entity entity, const ReflectionProbeComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(
-        core::LogLevel::Error, "world",
-        "add_reflection_probe_component called outside mutation phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_reflection_probe_component: invalid entity");
-    return false;
-  }
-  return m_reflectionProbes.add(entity, component);
+  return add_component_checked(m_reflectionProbes, entity, component, "add_reflection_probe_component");
 }
 
 bool World::remove_reflection_probe_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(
-        core::LogLevel::Error, "world",
-        "remove_reflection_probe_component outside mutation phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    return false;
-  }
-  return m_reflectionProbes.remove(entity);
+  return remove_component_checked(m_reflectionProbes, entity, "remove_reflection_probe_component");
 }
 
 bool World::get_reflection_probe_component(
@@ -1062,129 +814,57 @@ Entity World::reflection_probe_entity_at(std::size_t index) const noexcept {
 
 ReflectionProbeComponent *
 World::get_reflection_probe_component_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-  return m_reflectionProbes.get_ptr(entity);
+  return get_component_ptr_checked(m_reflectionProbes, entity);
 }
 
 const ReflectionProbeComponent *
 World::get_reflection_probe_component_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-  return m_reflectionProbes.get_ptr(entity);
+  return get_component_ptr_checked(m_reflectionProbes, entity);
 }
 
 bool World::add_script_component(Entity entity,
                                  const ScriptComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_script_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_script_component requires a live entity");
+  if (!check_component_mutation(entity, "add_script_component")) {
     return false;
   }
 
   ScriptComponent safe{};
-  copy_bounded_c_string(safe.scriptPath, sizeof(safe.scriptPath),
+  core::copy_string(safe.scriptPath, sizeof(safe.scriptPath),
                         component.scriptPath);
 
   return m_scriptComponents.add(entity, safe);
 }
 
 bool World::remove_script_component(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_script_component requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_script_component requires a live entity");
-    return false;
-  }
-
-  return m_scriptComponents.remove(entity);
+  return remove_component_checked(m_scriptComponents, entity, "remove_script_component");
 }
 
 bool World::get_script_component(Entity entity,
                                  ScriptComponent *outComponent) const noexcept {
-  if (outComponent == nullptr) {
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_script_component on stale or dead entity");
-    return false;
-  }
-
-  return m_scriptComponents.get(entity, outComponent);
+  return get_component_checked(m_scriptComponents, entity, outComponent, "get_script_component");
 }
 
 ScriptComponent *World::get_script_component_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_scriptComponents.get_ptr(entity);
+  return get_component_ptr_checked(m_scriptComponents, entity);
 }
 
 const ScriptComponent *
 World::get_script_component_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_scriptComponents.get_ptr(entity);
+  return get_component_ptr_checked(m_scriptComponents, entity);
 }
 
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_spring_arm requires Input phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "add_spring_arm requires a live entity");
-    return false;
-  }
-  return m_springArms.add(entity, component);
+  return add_component_checked(m_springArms, entity, component, "add_spring_arm");
 }
 
 bool World::remove_spring_arm(Entity entity) noexcept {
-  if (!is_mutation_phase()) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_spring_arm requires Input phase");
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "remove_spring_arm requires a live entity");
-    return false;
-  }
-  return m_springArms.remove(entity);
+  return remove_component_checked(m_springArms, entity, "remove_spring_arm");
 }
 
 bool World::get_spring_arm(Entity entity,
                            SpringArmComponent *outComponent) const noexcept {
-  if (outComponent == nullptr) {
-    return false;
-  }
-  if (!is_valid_entity(entity)) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "get_spring_arm on stale or dead entity");
-    return false;
-  }
-  return m_springArms.get(entity, outComponent);
+  return get_component_checked(m_springArms, entity, outComponent, "get_spring_arm");
 }
 
 bool World::has_spring_arm(Entity entity) const noexcept {
@@ -1195,18 +875,12 @@ bool World::has_spring_arm(Entity entity) const noexcept {
 }
 
 SpringArmComponent *World::get_spring_arm_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-  return m_springArms.get_ptr(entity);
+  return get_component_ptr_checked(m_springArms, entity);
 }
 
 const SpringArmComponent *
 World::get_spring_arm_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-  return m_springArms.get_ptr(entity);
+  return get_component_ptr_checked(m_springArms, entity);
 }
 
 bool World::get_collider_range(std::size_t startIndex, std::size_t count,
@@ -1358,6 +1032,10 @@ void World::mark_begin_play_done(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     return;
   }
+  if (!m_entityBeginPlayFired[entity.index] &&
+      (m_beginPlayPendingCount > 0U)) {
+    --m_beginPlayPendingCount;
+  }
   m_entityBeginPlayFired[entity.index] = true;
 }
 
@@ -1402,31 +1080,18 @@ bool World::update_transforms(float deltaSeconds) noexcept {
 bool World::update_transforms_range(std::size_t startIndex, std::size_t count,
                                     float deltaSeconds) noexcept {
   static_cast<void>(deltaSeconds);
-  if (m_phase != WorldPhase::Simulation) {
-    return false;
-  }
 
-  const std::size_t transformCount = m_transforms.count();
-  if (startIndex > transformCount) {
-    return false;
-  }
-
-  if (count == 0U) {
-    return true;
-  }
-
-  const std::size_t remaining = transformCount - startIndex;
-  const std::size_t clampedCount = (count > remaining) ? remaining : count;
-
+  // Same contract as the other range APIs: an out-of-bounds range is an
+  // error, not a request to clamp.
   const Entity *entities = nullptr;
   const Transform *readState = nullptr;
   Transform *writeState = nullptr;
-  if (!get_transform_update_range(startIndex, clampedCount, &entities,
-                                  &readState, &writeState)) {
+  if (!get_transform_update_range(startIndex, count, &entities, &readState,
+                                  &writeState)) {
     return false;
   }
 
-  for (std::size_t i = 0U; i < clampedCount; ++i) {
+  for (std::size_t i = 0U; i < count; ++i) {
     writeState[i] = readState[i];
   }
 
@@ -1561,59 +1226,28 @@ const physics::PhysicsContext &World::physics_context() const noexcept {
 }
 
 RigidBody *World::get_rigid_body_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_rigidBodies.get_ptr(entity);
+  return get_component_ptr_checked(m_rigidBodies, entity);
 }
 
 const RigidBody *World::get_rigid_body_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_rigidBodies.get_ptr(entity);
+  return get_component_ptr_checked(m_rigidBodies, entity);
 }
 
 const Collider *World::get_collider_ptr(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_colliders.get_ptr(entity);
+  return get_component_ptr_checked(m_colliders, entity);
 }
 
 Collider *World::get_collider_ptr(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
-    return nullptr;
-  }
-
-  return m_colliders.get_ptr(entity);
+  return get_component_ptr_checked(m_colliders, entity);
 }
 
 std::size_t World::query_state_index() const noexcept {
   return m_readStateIndex;
 }
 
-std::uint32_t World::hash_name_string(const char *name) const noexcept {
-  std::uint32_t hash = kNameHashOffset;
-  if (name == nullptr) {
-    return hash;
-  }
-
-  for (const unsigned char *p = reinterpret_cast<const unsigned char *>(name);
-       *p != 0U; ++p) {
-    hash ^= static_cast<std::uint32_t>(*p);
-    hash *= kNameHashPrime;
-  }
-
-  return hash;
-}
-
-bool World::name_lookup_insert(std::uint32_t nameHash, const char *name,
+bool World::name_lookup_insert(std::uint32_t nameHash,
                                std::uint32_t entityIndex) noexcept {
-  if ((name == nullptr) || (name[0] == '\0') || (entityIndex == 0U)) {
+  if (entityIndex == 0U) {
     return false;
   }
 
@@ -1624,6 +1258,9 @@ bool World::name_lookup_insert(std::uint32_t nameHash, const char *name,
     if (m_nameLookupState[slot] == kNameSlotEmpty) {
       const std::size_t writeSlot =
           (tombstone != kNameLookupCapacity) ? tombstone : slot;
+      if (writeSlot == tombstone) {
+        --m_nameLookupTombstones;
+      }
       m_nameLookupState[writeSlot] = kNameSlotOccupied;
       m_nameLookupHashes[writeSlot] = nameHash;
       m_nameLookupEntityIndices[writeSlot] = entityIndex;
@@ -1634,18 +1271,13 @@ bool World::name_lookup_insert(std::uint32_t nameHash, const char *name,
       if (tombstone == kNameLookupCapacity) {
         tombstone = slot;
       }
-    } else if (m_nameLookupHashes[slot] == nameHash) {
-      const Entity existing =
-          find_entity_by_index(m_nameLookupEntityIndices[slot]);
-      if (existing != kInvalidEntity) {
-        NameComponent existingName{};
-        if (m_nameComponents.get(existing, &existingName) &&
-            (std::strcmp(existingName.name, name) == 0)) {
-          m_nameLookupEntityIndices[slot] = entityIndex;
-          return true;
-        }
-      }
+    } else if ((m_nameLookupHashes[slot] == nameHash) &&
+               (m_nameLookupEntityIndices[slot] == entityIndex)) {
+      // Same entity re-registered under the same hash; keep its slot.
+      return true;
     }
+    // Entities sharing a name each keep their own slot so erasing one does
+    // not orphan the others; lookups skip entries whose entity died.
 
     slot = (slot + 1U) % kNameLookupCapacity;
   }
@@ -1653,10 +1285,40 @@ bool World::name_lookup_insert(std::uint32_t nameHash, const char *name,
   return false;
 }
 
+void World::name_lookup_erase(std::uint32_t nameHash,
+                              std::uint32_t entityIndex) noexcept {
+  std::size_t slot = static_cast<std::size_t>(nameHash) %
+                     static_cast<std::size_t>(kNameLookupCapacity);
+  for (std::size_t probe = 0U; probe < kNameLookupCapacity; ++probe) {
+    if (m_nameLookupState[slot] == kNameSlotEmpty) {
+      return;
+    }
+
+    if ((m_nameLookupState[slot] == kNameSlotOccupied) &&
+        (m_nameLookupHashes[slot] == nameHash) &&
+        (m_nameLookupEntityIndices[slot] == entityIndex)) {
+      m_nameLookupState[slot] = kNameSlotTombstone;
+      m_nameLookupHashes[slot] = 0U;
+      m_nameLookupEntityIndices[slot] = 0U;
+      ++m_nameLookupTombstones;
+
+      // Rebuild once tombstones dominate so misses stay cheap: a probe stops
+      // at the first empty slot, and churn erodes empty slots over time.
+      if (m_nameLookupTombstones > (kNameLookupCapacity / 4U)) {
+        rebuild_name_lookup();
+      }
+      return;
+    }
+
+    slot = (slot + 1U) % kNameLookupCapacity;
+  }
+}
+
 void World::rebuild_name_lookup() noexcept {
   m_nameLookupHashes.fill(0U);
   m_nameLookupEntityIndices.fill(0U);
   m_nameLookupState.fill(kNameSlotEmpty);
+  m_nameLookupTombstones = 0U;
 
   const std::size_t count = m_nameComponents.count();
   for (std::size_t i = 0U; i < count; ++i) {
@@ -1670,8 +1332,8 @@ void World::rebuild_name_lookup() noexcept {
       continue;
     }
 
-    const std::uint32_t hash = hash_name_string(nameComponent.name);
-    if (!name_lookup_insert(hash, nameComponent.name, entity.index)) {
+    const std::uint32_t hash = core::fnv1a_32(nameComponent.name);
+    if (!name_lookup_insert(hash, entity.index)) {
       core::log_message(
           core::LogLevel::Warning, "world",
           "name lookup table overflow; name lookup may miss entries");
@@ -1704,49 +1366,7 @@ bool World::insert_persistent_index(PersistentId persistentId,
     return false;
   }
 
-  const std::size_t capacity = m_persistentIndexState.size();
-  if (capacity == 0U) {
-    return false;
-  }
-
-  const std::size_t base =
-      (static_cast<std::size_t>(persistentId) * 2654435761U) % capacity;
-  std::size_t tombstone = capacity;
-
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    const std::uint8_t state = m_persistentIndexState[slot];
-
-    if (state == 1U) {
-      if (m_persistentIndexKeys[slot] == persistentId) {
-        m_persistentIndexValues[slot] = entityIndex;
-        return true;
-      }
-      continue;
-    }
-
-    if (state == 2U) {
-      if (tombstone == capacity) {
-        tombstone = slot;
-      }
-      continue;
-    }
-
-    const std::size_t target = (tombstone != capacity) ? tombstone : slot;
-    m_persistentIndexState[target] = 1U;
-    m_persistentIndexKeys[target] = persistentId;
-    m_persistentIndexValues[target] = entityIndex;
-    return true;
-  }
-
-  if (tombstone != capacity) {
-    m_persistentIndexState[tombstone] = 1U;
-    m_persistentIndexKeys[tombstone] = persistentId;
-    m_persistentIndexValues[tombstone] = entityIndex;
-    return true;
-  }
-
-  return false;
+  return m_persistentIndex.insert(persistentId, entityIndex);
 }
 
 std::uint32_t
@@ -1755,26 +1375,8 @@ World::find_persistent_index(PersistentId persistentId) const noexcept {
     return 0U;
   }
 
-  const std::size_t capacity = m_persistentIndexState.size();
-  if (capacity == 0U) {
-    return 0U;
-  }
-
-  const std::size_t base =
-      (static_cast<std::size_t>(persistentId) * 2654435761U) % capacity;
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    const std::uint8_t state = m_persistentIndexState[slot];
-    if (state == 0U) {
-      return 0U;
-    }
-
-    if ((state == 1U) && (m_persistentIndexKeys[slot] == persistentId)) {
-      return m_persistentIndexValues[slot];
-    }
-  }
-
-  return 0U;
+  const std::uint32_t *entityIndex = m_persistentIndex.find(persistentId);
+  return (entityIndex != nullptr) ? *entityIndex : 0U;
 }
 
 void World::erase_persistent_index(PersistentId persistentId) noexcept {
@@ -1782,25 +1384,29 @@ void World::erase_persistent_index(PersistentId persistentId) noexcept {
     return;
   }
 
-  const std::size_t capacity = m_persistentIndexState.size();
-  if (capacity == 0U) {
-    return;
+  static_cast<void>(m_persistentIndex.erase(persistentId));
+
+  // Entity churn accumulates tombstones; rebuild from the alive arrays once
+  // they dominate so lookup misses stay cheap.
+  if (m_persistentIndex.tombstone_count() > (kPersistentIndexCapacity / 4U)) {
+    rebuild_persistent_index();
   }
+}
 
-  const std::size_t base =
-      (static_cast<std::size_t>(persistentId) * 2654435761U) % capacity;
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    const std::uint8_t state = m_persistentIndexState[slot];
-    if (state == 0U) {
-      return;
+void World::rebuild_persistent_index() noexcept {
+  m_persistentIndex.clear();
+
+  std::size_t visited = 0U;
+  for (std::uint32_t index = 1U;
+       (index < m_nextEntityIndex) && (visited < m_aliveEntityCount);
+       ++index) {
+    if (!m_entityAlive[index]) {
+      continue;
     }
-
-    if ((state == 1U) && (m_persistentIndexKeys[slot] == persistentId)) {
-      m_persistentIndexState[slot] = 2U;
-      m_persistentIndexKeys[slot] = kInvalidPersistentId;
-      m_persistentIndexValues[slot] = 0U;
-      return;
+    ++visited;
+    if (m_entityPersistentIds[index] != kInvalidPersistentId) {
+      static_cast<void>(
+          m_persistentIndex.insert(m_entityPersistentIds[index], index));
     }
   }
 }

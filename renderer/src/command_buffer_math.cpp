@@ -4,16 +4,14 @@
 
 #include <cstring>
 
+#include "engine/core/hash.h"
+
 namespace engine::renderer {
 namespace {
 
-constexpr std::uint64_t kFnv1a64Offset = 14695981039346656037ULL;
-constexpr std::uint64_t kFnv1a64Prime = 1099511628211ULL;
-
 /// Appends one integer value to an FNV-1a hash.
 std::uint64_t hash_u64(std::uint64_t hash, std::uint64_t value) noexcept {
-  hash ^= value;
-  return hash * kFnv1a64Prime;
+  return core::fnv1a_64_append_u64(hash, value);
 }
 
 /// Appends one finite float value to an FNV-1a hash.
@@ -58,7 +56,7 @@ std::uint64_t directional_shadow_cache_key(
     CommandBufferView commandBufferView, std::size_t opaqueCount,
     const DirectionalLightData &light, const CascadeSplits &splits,
     const std::array<math::Mat4, kShadowCascadeCount> &matrices) noexcept {
-  std::uint64_t hash = kFnv1a64Offset;
+  std::uint64_t hash = core::kFnv1a64Offset;
   hash = hash_u64(hash, static_cast<std::uint64_t>(opaqueCount));
   hash = hash_vec3(hash, light.direction);
   hash = hash_vec3(hash, light.color);

@@ -12,6 +12,7 @@
 #include "engine/core/logging.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
+#include "serialization_util.h"
 
 namespace engine::runtime {
 
@@ -19,296 +20,9 @@ namespace {
 
 constexpr const char *kPrefabLogChannel = "prefab";
 constexpr std::uint32_t kPrefabVersion = 1U;
-[[maybe_unused]] constexpr std::size_t kReadBufferInit = 64U * 1024U;
 
-/// Handles prefab open write.
-bool prefab_open_write(const char *path, FILE **outFile) noexcept {
-  if ((path == nullptr) || (outFile == nullptr)) {
-    return false;
-  }
-  *outFile = nullptr;
-#ifdef _WIN32
-  return fopen_s(outFile, path, "wb") == 0;
-#else
-  *outFile = std::fopen(path, "wb");
-  return *outFile != nullptr;
-#endif
-}
-
-/// Handles prefab read file.
-bool prefab_read_file(const char *path, std::unique_ptr<char[]> *outBuf,
-                      std::size_t *outSize) noexcept {
-  if ((path == nullptr) || (outBuf == nullptr) || (outSize == nullptr)) {
-    return false;
-  }
-  outBuf->reset();
-  *outSize = 0U;
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  if (std::fseek(file, 0, SEEK_END) != 0) {
-    std::fclose(file);
-    return false;
-  }
-  const long len = std::ftell(file);
-  if (len <= 0L) {
-    std::fclose(file);
-    return false;
-  }
-  if (std::fseek(file, 0, SEEK_SET) != 0) {
-    std::fclose(file);
-    return false;
-  }
-
-  const std::size_t sz = static_cast<std::size_t>(len);
-  std::unique_ptr<char[]> buf(new (std::nothrow) char[sz + 1U]);
-  if (buf == nullptr) {
-    std::fclose(file);
-    return false;
-  }
-
-  const std::size_t read = std::fread(buf.get(), 1U, sz, file);
-  const bool err = std::ferror(file) != 0;
-  std::fclose(file);
-  if (err || (read != sz)) {
-    return false;
-  }
-
-  buf[sz] = '\0';
-  *outSize = sz;
-  outBuf->swap(buf);
-  return true;
-}
-
-/// Writes vec3 arr data.
-void write_vec3_arr(core::JsonWriter &w, const char *key,
-                    const math::Vec3 &v) noexcept {
-  w.begin_array(key);
-  w.write_float_value(v.x);
-  w.write_float_value(v.y);
-  w.write_float_value(v.z);
-  w.end_array();
-}
-
-/// Writes quat arr data.
-void write_quat_arr(core::JsonWriter &w, const char *key,
-                    const math::Quat &q) noexcept {
-  w.begin_array(key);
-  w.write_float_value(q.x);
-  w.write_float_value(q.y);
-  w.write_float_value(q.z);
-  w.write_float_value(q.w);
-  w.end_array();
-}
-
-/// Reads vec3 data.
-bool read_vec3(const core::JsonParser &p, const core::JsonValue &v,
-               math::Vec3 *out) noexcept {
-  if ((out == nullptr) || (v.type != core::JsonValue::Type::Array)) {
-    return false;
-  }
-  float f[3] = {};
-  for (std::size_t i = 0U; i < 3U; ++i) {
-    core::JsonValue el{};
-    if (!p.get_array_element(v, i, &el) || !p.as_float(el, &f[i])) {
-      return false;
-    }
-  }
-  *out = math::Vec3(f[0], f[1], f[2]);
-  return true;
-}
-
-/// Reads quat data.
-bool read_quat(const core::JsonParser &p, const core::JsonValue &v,
-               math::Quat *out) noexcept {
-  if ((out == nullptr) || (v.type != core::JsonValue::Type::Array)) {
-    return false;
-  }
-  float f[4] = {};
-  for (std::size_t i = 0U; i < 4U; ++i) {
-    core::JsonValue el{};
-    if (!p.get_array_element(v, i, &el) || !p.as_float(el, &f[i])) {
-      return false;
-    }
-  }
-  *out = math::Quat(f[0], f[1], f[2], f[3]);
-  return true;
-}
-
-/// Writes foliage patch data.
-void write_foliage_patch(core::JsonWriter &w,
-                         const FoliagePatchComponent &foliage) noexcept {
-  w.write_key(kJsonKeyFoliagePatchComponent);
-  w.begin_object();
-
-  w.begin_array("meshAssetIds");
-  for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
-    w.write_uint64_value(foliage.meshAssetIds[i]);
-  }
-  w.end_array();
-
-  const std::uint32_t instanceCount =
-      (foliage.instanceCount >
-       static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances))
-          ? static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)
-          : foliage.instanceCount;
-  w.write_uint("instanceCount", instanceCount);
-  w.write_float("density", foliage.density);
-  write_vec3_arr(w, "albedo", foliage.albedo);
-  w.write_float("roughness", foliage.roughness);
-  w.write_float("metallic", foliage.metallic);
-  w.write_float("opacity", foliage.opacity);
-  w.write_float("windStrength", foliage.windStrength);
-  w.write_float("windFrequency", foliage.windFrequency);
-
-  w.begin_array("instances");
-  for (std::uint32_t i = 0U; i < instanceCount; ++i) {
-    const FoliageInstance &instance = foliage.instances[i];
-    w.begin_object();
-    write_vec3_arr(w, "offset", instance.offset);
-    w.write_float("scale", instance.scale);
-    w.write_float("phase", instance.phase);
-    w.write_uint("lodIndex", instance.lodIndex);
-    w.end_object();
-  }
-  w.end_array();
-
-  w.end_object();
-}
-
-/// Reads foliage patch data.
-bool read_foliage_patch(const core::JsonParser &p, const core::JsonValue &v,
-                        FoliagePatchComponent *out) noexcept {
-  if ((out == nullptr) || (v.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  FoliagePatchComponent foliage{};
-  core::JsonValue field{};
-  if (p.get_object_field(v, "meshAssetIds", &field) &&
-      (field.type == core::JsonValue::Type::Array)) {
-    const std::size_t count = p.array_size(field);
-    const std::size_t capped =
-        (count < FoliagePatchComponent::kMaxLods)
-            ? count
-            : FoliagePatchComponent::kMaxLods;
-    for (std::size_t i = 0U; i < capped; ++i) {
-      core::JsonValue element{};
-      if (!p.get_array_element(field, i, &element) ||
-          !p.as_uint64(element, &foliage.meshAssetIds[i])) {
-        return false;
-      }
-    }
-  }
-
-  if (p.get_object_field(v, "density", &field)) {
-    if (!p.as_float(field, &foliage.density)) {
-      return false;
-    }
-  }
-  if (p.get_object_field(v, "albedo", &field)) {
-    if (!read_vec3(p, field, &foliage.albedo)) {
-      return false;
-    }
-  }
-  if (p.get_object_field(v, "roughness", &field)) {
-    if (!p.as_float(field, &foliage.roughness)) {
-      return false;
-    }
-  }
-  if (p.get_object_field(v, "metallic", &field)) {
-    if (!p.as_float(field, &foliage.metallic)) {
-      return false;
-    }
-  }
-  if (p.get_object_field(v, "opacity", &field)) {
-    if (!p.as_float(field, &foliage.opacity)) {
-      return false;
-    }
-  }
-  if (p.get_object_field(v, "windStrength", &field)) {
-    if (!p.as_float(field, &foliage.windStrength)) {
-      return false;
-    }
-  }
-  if (p.get_object_field(v, "windFrequency", &field)) {
-    if (!p.as_float(field, &foliage.windFrequency)) {
-      return false;
-    }
-  }
-
-  std::uint32_t requestedCount =
-      static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
-  if (p.get_object_field(v, "instanceCount", &field)) {
-    if (!p.as_uint(field, &requestedCount)) {
-      return false;
-    }
-  }
-
-  core::JsonValue instances{};
-  if (p.get_object_field(v, "instances", &instances) &&
-      (instances.type == core::JsonValue::Type::Array)) {
-    std::size_t count = p.array_size(instances);
-    if (count > FoliagePatchComponent::kMaxInstances) {
-      count = FoliagePatchComponent::kMaxInstances;
-    }
-    if (count > requestedCount) {
-      count = requestedCount;
-    }
-
-    for (std::size_t i = 0U; i < count; ++i) {
-      core::JsonValue instanceValue{};
-      if (!p.get_array_element(instances, i, &instanceValue) ||
-          (instanceValue.type != core::JsonValue::Type::Object)) {
-        return false;
-      }
-
-      FoliageInstance instance{};
-      if (p.get_object_field(instanceValue, "offset", &field)) {
-        if (!read_vec3(p, field, &instance.offset)) {
-          return false;
-        }
-      }
-      if (p.get_object_field(instanceValue, "scale", &field)) {
-        if (!p.as_float(field, &instance.scale)) {
-          return false;
-        }
-      }
-      if (p.get_object_field(instanceValue, "phase", &field)) {
-        if (!p.as_float(field, &instance.phase)) {
-          return false;
-        }
-      }
-      if (p.get_object_field(instanceValue, "lodIndex", &field)) {
-        if (!p.as_uint(field, &instance.lodIndex)) {
-          return false;
-        }
-      }
-      foliage.instances[i] = instance;
-    }
-    foliage.instanceCount = static_cast<std::uint32_t>(count);
-  } else {
-    if (requestedCount >
-        static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
-      requestedCount =
-          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
-    }
-    foliage.instanceCount = requestedCount;
-  }
-
-  *out = foliage;
-  return true;
-}
+// File IO and vec/quat/foliage JSON helpers are shared with the scene
+// serializer via serialization_util.h.
 
 } // namespace
 
@@ -331,9 +45,9 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_transform(entity, &transform)) {
     w.write_key(kJsonKeyTransform);
     w.begin_object();
-    write_vec3_arr(w, "position", transform.position);
-    write_quat_arr(w, "rotation", transform.rotation);
-    write_vec3_arr(w, "scale", transform.scale);
+    write_vec3(w, "position", transform.position);
+    write_quat(w, "rotation", transform.rotation);
+    write_vec3(w, "scale", transform.scale);
     w.end_object();
   }
 
@@ -342,9 +56,9 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_rigid_body(entity, &rigidBody)) {
     w.write_key(kJsonKeyRigidBody);
     w.begin_object();
-    write_vec3_arr(w, "velocity", rigidBody.velocity);
-    write_vec3_arr(w, "acceleration", rigidBody.acceleration);
-    write_vec3_arr(w, "angularVelocity", rigidBody.angularVelocity);
+    write_vec3(w, "velocity", rigidBody.velocity);
+    write_vec3(w, "acceleration", rigidBody.acceleration);
+    write_vec3(w, "angularVelocity", rigidBody.angularVelocity);
     w.write_float("inverseMass", rigidBody.inverseMass);
     w.write_float("inverseInertia", rigidBody.inverseInertia);
     w.end_object();
@@ -355,7 +69,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_collider(entity, &collider)) {
     w.write_key(kJsonKeyCollider);
     w.begin_object();
-    write_vec3_arr(w, "halfExtents", collider.halfExtents);
+    write_vec3(w, "halfExtents", collider.halfExtents);
     w.write_float("restitution", collider.restitution);
     w.write_float("staticFriction", collider.staticFriction);
     w.write_float("dynamicFriction", collider.dynamicFriction);
@@ -380,7 +94,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_key("MeshComponent");
     w.begin_object();
     w.write_uint64("meshAssetId", mesh.meshAssetId);
-    write_vec3_arr(w, "albedo", mesh.albedo);
+    write_vec3(w, "albedo", mesh.albedo);
     w.write_float("roughness", mesh.roughness);
     w.write_float("metallic", mesh.metallic);
     w.write_float("opacity", mesh.opacity);
@@ -390,7 +104,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // FoliagePatchComponent
   FoliagePatchComponent foliage{};
   if (world.get_foliage_patch_component(entity, &foliage)) {
-    write_foliage_patch(w, foliage);
+    write_foliage_patch_component(w, foliage);
   }
 
   // LightComponent
@@ -398,8 +112,8 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_light_component(entity, &light)) {
     w.write_key(kJsonKeyLightComponent);
     w.begin_object();
-    write_vec3_arr(w, "color", light.color);
-    write_vec3_arr(w, "direction", light.direction);
+    write_vec3(w, "color", light.color);
+    write_vec3(w, "direction", light.direction);
     w.write_float("intensity", light.intensity);
     w.write_uint("type", static_cast<std::uint32_t>(light.type));
     w.end_object();
@@ -410,7 +124,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_point_light_component(entity, &pointLight)) {
     w.write_key("PointLightComponent");
     w.begin_object();
-    write_vec3_arr(w, "color", pointLight.color);
+    write_vec3(w, "color", pointLight.color);
     w.write_float("intensity", pointLight.intensity);
     w.write_float("radius", pointLight.radius);
     w.end_object();
@@ -421,8 +135,8 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_spot_light_component(entity, &spotLight)) {
     w.write_key("SpotLightComponent");
     w.begin_object();
-    write_vec3_arr(w, "color", spotLight.color);
-    write_vec3_arr(w, "direction", spotLight.direction);
+    write_vec3(w, "color", spotLight.color);
+    write_vec3(w, "direction", spotLight.direction);
     w.write_float("intensity", spotLight.intensity);
     w.write_float("radius", spotLight.radius);
     w.write_float("innerConeAngle", spotLight.innerConeAngle);
@@ -435,7 +149,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (world.get_reflection_probe_component(entity, &reflectionProbe)) {
     w.write_key(kJsonKeyReflectionProbeComponent);
     w.begin_object();
-    write_vec3_arr(w, "boxExtents", reflectionProbe.boxExtents);
+    write_vec3(w, "boxExtents", reflectionProbe.boxExtents);
     w.write_float("radius", reflectionProbe.radius);
     w.write_float("intensity", reflectionProbe.intensity);
     w.write_uint("prefilteredResolution",
@@ -466,7 +180,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   }
 
   FILE *file = nullptr;
-  if (!prefab_open_write(path, &file) || (file == nullptr)) {
+  if (!open_file_for_write(path, &file) || (file == nullptr)) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
                       "save_prefab: failed to open file for writing");
     return false;
@@ -494,7 +208,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   std::unique_ptr<char[]> buf;
   std::size_t sz = 0U;
-  if (!prefab_read_file(path, &buf, &sz)) {
+  if (!read_text_file(path, &buf, &sz)) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
                       "instantiate_prefab: failed to read file");
     return kInvalidEntity;
@@ -688,7 +402,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     FoliagePatchComponent foliage{};
-    if (!read_foliage_patch(parser, componentValue, &foliage) ||
+    if (!read_foliage_patch_component(parser, componentValue, &foliage) ||
         !world.add_foliage_patch_component(entity, foliage)) {
       return failComponent(
           "instantiate_prefab: failed to add FoliagePatchComponent");

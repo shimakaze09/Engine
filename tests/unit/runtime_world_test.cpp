@@ -371,11 +371,69 @@ int verify_variadic_for_each() {
   return 0;
 }
 
+/// Verifies begin_play_pending_count tracks create/mark/destroy exactly.
+int verify_begin_play_pending_count() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 120;
+  }
+
+  if (world->begin_play_pending_count() != 0U) {
+    return 121;
+  }
+
+  const engine::runtime::Entity first = world->create_entity();
+  const engine::runtime::Entity second = world->create_entity();
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity)) {
+    return 122;
+  }
+  if (world->begin_play_pending_count() != 2U) {
+    return 123;
+  }
+
+  world->mark_begin_play_done(first);
+  if (world->begin_play_pending_count() != 1U) {
+    return 124;
+  }
+
+  // Marking twice must not double-decrement.
+  world->mark_begin_play_done(first);
+  if (world->begin_play_pending_count() != 1U) {
+    return 125;
+  }
+
+  // Destroying an entity that never fired begin_play clears its pending slot.
+  if (!world->destroy_entity(second)) {
+    return 126;
+  }
+  if (world->begin_play_pending_count() != 0U) {
+    return 127;
+  }
+
+  // A recycled index starts pending again.
+  const engine::runtime::Entity third = world->create_entity();
+  if (third == engine::runtime::kInvalidEntity) {
+    return 128;
+  }
+  if (world->begin_play_pending_count() != 1U) {
+    return 129;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
   int result = verify_persistent_id_index();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_begin_play_pending_count();
   if (result != 0) {
     return result;
   }

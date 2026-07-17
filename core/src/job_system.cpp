@@ -25,6 +25,15 @@ constexpr std::size_t kMaxEdges = 65536U;
 constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFU;
 constexpr std::uint32_t kIndexBits = 13U;
 constexpr std::uint32_t kIndexMask = (1U << kIndexBits) - 1U;
+// A handle packs (generation << kIndexBits) | index into 32 bits, so only
+// this many generation bits survive the round trip. The live generation
+// counter must stay within this width or every encoded handle would fail
+// validation once the counter passes it.
+constexpr std::uint32_t kGenerationBits = 32U - kIndexBits;
+constexpr std::uint32_t kGenerationMask = (1U << kGenerationBits) - 1U;
+
+static_assert(kMaxJobs <= (1ULL << kIndexBits),
+              "job indices must fit the handle index bits");
 
 thread_local std::uint32_t g_threadIndex = 0U;
 
@@ -104,6 +113,12 @@ public:
     wait_for_all_jobs();
 
     m_running.store(false, std::memory_order_release);
+    {
+      // Synchronize with the worker wait predicate: a worker that evaluated
+      // the predicate before the store is guaranteed to be inside wait()
+      // once this lock is acquired, so the notify below cannot be lost.
+      std::lock_guard<std::mutex> lock(m_queueMutex);
+    }
     m_workAvailable.notify_all();
 
     for (std::uint32_t i = 0U; i < m_workerCount; ++i) {
@@ -288,6 +303,9 @@ public:
         continue;
       }
 
+      // Timed wait (not predicate wait): this thread must also wake to steal
+      // newly readied jobs, which signal m_workAvailable rather than
+      // m_completed — and with zero workers it is the only executor.
       std::unique_lock<std::mutex> lock(m_completionMutex);
       m_completed.wait_for(lock, std::chrono::milliseconds(1));
     }
@@ -460,7 +478,9 @@ private:
 
     m_pendingJobs.store(0U, std::memory_order_release);
 
-    ++m_generation;
+    // Wrap within the handle-encodable width (skipping 0) so stored and
+    // decoded generations always compare equal for live handles.
+    m_generation = (m_generation + 1U) & kGenerationMask;
     if (m_generation == 0U) {
       m_generation = 1U;
     }
@@ -614,16 +634,28 @@ private:
   void worker_loop(std::uint32_t threadIndex) noexcept {
     g_threadIndex = threadIndex;
 
-    while (m_running.load(std::memory_order_acquire) ||
-           (m_pendingJobs.load(std::memory_order_acquire) != 0U)) {
+    // Event-driven: sleep until work is pushed or shutdown begins. The wait
+    // predicate re-checks queue state under m_queueMutex — the same mutex
+    // every push holds — so wakeups cannot be lost.
+    for (;;) {
       std::uint32_t nodeIndex = kInvalidIndex;
-      if (pop_ready_job(&nodeIndex)) {
-        execute_job(nodeIndex);
-        continue;
+      {
+        std::unique_lock<std::mutex> lock(m_queueMutex);
+        m_workAvailable.wait(lock, [this]() noexcept {
+          return (m_queueCount > 0U) ||
+                 !m_running.load(std::memory_order_acquire);
+        });
+
+        if (m_queueCount == 0U) {
+          return; // Shutdown with no work left.
+        }
+
+        nodeIndex = m_readyQueue[m_queueHead];
+        m_queueHead = (m_queueHead + 1U) % m_readyQueue.size();
+        --m_queueCount;
       }
 
-      std::unique_lock<std::mutex> lock(m_sleepMutex);
-      m_workAvailable.wait_for(lock, std::chrono::milliseconds(1));
+      execute_job(nodeIndex);
     }
   }
 
@@ -649,9 +681,9 @@ private:
   bool m_graphDispatched = false;
 
   std::mutex m_graphMutex;
-  // Lock order: m_graphMutex -> m_queueMutex.
+  // Lock order: m_graphMutex -> m_queueMutex. Workers block on m_queueMutex
+  // via m_workAvailable; pushes hold it, so predicate checks are race-free.
   std::mutex m_queueMutex;
-  std::mutex m_sleepMutex;
   std::mutex m_completionMutex;
   std::condition_variable m_workAvailable;
   std::condition_variable m_completed;

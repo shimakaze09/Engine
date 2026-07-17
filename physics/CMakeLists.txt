@@ -22,4 +22,5 @@ engine_add_module_library(engine_physics
     engine_math
     PRIVATE_DEPS
     engine_core
+    PCH src/pch.h
 )

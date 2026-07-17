@@ -33,6 +33,7 @@ extern "C" {
 #include <limits>
 
 #include "engine/core/input.h"
+#include "engine/core/string_util.h"
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/scripting_bridge.h"
@@ -68,31 +69,16 @@ constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 float g_deltaSeconds = 0.0F;
 float g_totalSeconds = 0.0F;
 std::uint32_t g_frameIndex = 0U;
-char g_watchedPath[512] = {};
-std::int64_t g_watchedMtime = 0;
+/// One hot-reload watch entry: a script path and its last known mtime.
+struct WatchedScript final {
+  char path[512] = {};
+  std::int64_t mtime = 0;
+};
+
+constexpr std::size_t kMaxWatchedScripts = 16U;
+WatchedScript g_watchedScripts[kMaxWatchedScripts] = {};
+std::size_t g_watchedScriptCount = 0U;
 constexpr float kMaxScriptAcceleration = 500.0F;
-
-/// Handles copy c string.
-void copy_c_string(char *destination, std::size_t destinationSize,
-                   const char *source) noexcept {
-  if ((destination == nullptr) || (destinationSize == 0U)) {
-    return;
-  }
-
-  destination[0] = '\0';
-  if (source == nullptr) {
-    return;
-  }
-
-  const std::size_t sourceLength = std::strlen(source);
-  const std::size_t copyLength = (sourceLength < (destinationSize - 1U))
-                                     ? sourceLength
-                                     : (destinationSize - 1U);
-  if (copyLength > 0U) {
-    std::memcpy(destination, source, copyLength);
-  }
-  destination[copyLength] = '\0';
-}
 
 /// Handles copy clone name.
 void copy_clone_name(char *destination, std::size_t destinationSize,
@@ -3402,26 +3388,46 @@ void clear_coroutines() noexcept {
   clear_lua_coroutines(lua_state());
 }
 
-/// Handles watch script file.
+/// Adds a script to the hot-reload watch table (or refreshes its mtime when
+/// already watched). Watching a new file no longer drops earlier watches;
+/// the table is capped and overflow is logged.
 void watch_script_file(const char *path) noexcept {
-  if (path == nullptr) {
+  if ((path == nullptr) || (path[0] == '\0')) {
     return;
   }
-  copy_c_string(g_watchedPath, sizeof(g_watchedPath), path);
-  g_watchedMtime = get_file_mtime(path);
+
+  for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
+    if (std::strcmp(g_watchedScripts[i].path, path) == 0) {
+      g_watchedScripts[i].mtime = get_file_mtime(path);
+      return;
+    }
+  }
+
+  if (g_watchedScriptCount >= kMaxWatchedScripts) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "script watch table full; hot reload not tracking file");
+    return;
+  }
+
+  WatchedScript &entry = g_watchedScripts[g_watchedScriptCount];
+  core::copy_string(entry.path, sizeof(entry.path), path);
+  entry.mtime = get_file_mtime(path);
+  ++g_watchedScriptCount;
 }
 
-/// Handles check script reload.
+/// Polls every watched script and reloads the ones whose mtime changed.
 void check_script_reload() noexcept {
-  if (g_watchedPath[0] == '\0') {
-    return;
-  }
-  const std::int64_t mtime = get_file_mtime(g_watchedPath);
-  if ((mtime != 0) && (mtime != g_watchedMtime)) {
-    g_watchedMtime = mtime;
+  for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
+    WatchedScript &entry = g_watchedScripts[i];
+    const std::int64_t mtime = get_file_mtime(entry.path);
+    if ((mtime == 0) || (mtime == entry.mtime)) {
+      continue;
+    }
+
+    entry.mtime = mtime;
     core::log_message(core::LogLevel::Info, "scripting",
                       "hot-reloading script");
-    if (!load_script(g_watchedPath)) {
+    if (!load_script(entry.path)) {
       core::log_message(core::LogLevel::Warning, "scripting",
                         "hot-reload failed; keeping previous version");
     }
