@@ -100,10 +100,14 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   destroy-before-fire, index recycling). 84/84 headless green; lifecycle and
   Lua-lifecycle integration tests confirm dispatch semantics unchanged.*
 
-- `[ ]` **P5: Asset database slots never reclaimed (fills monotonically).**
-  `renderer/src/asset_database.cpp` — `occupied[slot]=false` only on full clear;
-  open addressing has no tombstones so per-slot free would corrupt probe chains.
-  Needs deliberate design (tombstones or slot free-list + rehash).
+- `[x]` **P5: Asset database slots never reclaimed (fills monotonically).**
+  *Fixed 2026-07-17: mesh slots gained tombstones (`meshTombstoned[]`) and a
+  public `unregister_mesh_asset` (refused while refCount > 0 or a GPU mesh is
+  live), so probe chains survive deletion and slots are reusable. Probe logic
+  centralized in `find/claim_mesh_asset_record_slot`; asset_manager.cpp's
+  duplicated slot finders deleted in the process. Forced-collision chain
+  reclamation covered in the asset database test. Texture/metadata tables can
+  adopt the same pattern when reclamation is needed there.*
 
 ## P2 — Duplication (structure)
 
@@ -133,10 +137,15 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   keys). Exact hash algorithms preserved — asset-hash and deterministic-cook
   tests confirm ids unchanged. 84/84 headless green.*
 
-- `[ ]` **S4: Three hand-rolled open-addressing hash tables with divergent semantics.**
-  Name lookup + persistent-ID index (both in `world.cpp`, different state-constant
-  conventions) + asset database (`renderer/src/asset_database.cpp`). Introduce one
-  fixed-capacity `core::FixedHashTable` template; migrate. Coordinates with P2/P5.
+- `[x]` **S4: Three hand-rolled open-addressing hash tables with divergent semantics.**
+  *Fixed 2026-07-17 (scoped): new `core::FixedHashTable<Key,Value,Capacity>`
+  (tombstone deletion, owner-driven rebuild signal) with its own unit test;
+  World's persistent-id index migrated onto it (~110 lines -> 3 wrappers, plus
+  a tombstone-threshold rebuild the old code lacked). Deliberately NOT
+  migrated: the name lookup (multiset semantics — entities sharing a name each
+  own an entry) and the asset database (records-in-slots is a public struct
+  layout iterated by other modules); both documented at their definitions.
+  Forcing them into the map template would cost more than the duplication.*
 
 - `[ ]` **S5: Scene vs prefab serializer helper duplication.**
   `prefab_serializer.cpp` re-implements file IO helpers, vec3/quat read/write, and
@@ -150,8 +159,9 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
 - `[ ]` **S7: Split-brained serialization: 4 components via reflection, rest hand-written JSON.**
   Finish the reflection migration or document why specific types are excluded.
 
-- `[ ]` **S8: `build_pyramid_mesh` local `cross3`/`norm3` lambdas duplicate `math::`.**
-  Also fixed by moving builders out (A2).
+- `[x]` **S8: `build_pyramid_mesh` local `cross3`/`norm3` lambdas duplicate `math::`.**
+  *Fixed 2026-07-17 with A2: pyramid face normals now use
+  `math::cross`/`math::normalize` over `math::Vec3`.*
 
 - `[x]` **S9: `texture_loader.cpp` defines a local `Vec3`/`normalize` duplicating
   `engine_math`.**
@@ -168,9 +178,11 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   ~1,570 lines. Decompose in same spirit as EnginePipeline's 13 named stages.
   Suggested split: sky.cpp, ibl.cpp, post_resources.cpp, frame_flush.cpp.
 
-- `[ ]` **A2: Procedural mesh builders live in `runtime/src/engine_pipeline.cpp` (~350 lines).**
-  Move plane/cube/sphere/cylinder/capsule/pyramid to renderer `mesh_primitives.*`.
-  Note: builtin "plane" is generated at y=+0.5 — review whether intentional.
+- `[x]` **A2: Procedural mesh builders live in `runtime/src/engine_pipeline.cpp` (~350 lines).**
+  *Fixed 2026-07-17: moved to `renderer/mesh_primitives.{h,cpp}` with a public
+  header; behavior-preserving. The plane's y=+0.5 offset is kept and now
+  documented (aligns with the unit cube's top face) — change it deliberately
+  if a ground-level plane is wanted.*
 
 - `[ ]` **A3: `editor/src/editor.cpp` (2,682 lines) and `scripting/src/scripting.cpp`
   (3,456 lines) monoliths.** Lower priority than A1; split opportunistically when
@@ -179,18 +191,19 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
 - `[ ]` **A4: `resolve_collisions` in `physics/src/physics.cpp` is ~1,090 lines.**
   Extract per-shape-pair narrow-phase functions.
 
-- `[ ]` **A5: Dead/vestigial code.**
-  Unreachable tombstone branch in `name_lookup_insert` (dies with P2);
-  `WorldPhase` legacy aliases Idle/Update/RenderPrep used interchangeably with new
-  names — pick one set, migrate call sites; `World()` ctor redundantly clears a
-  subset of already-default-initialized members.
+- `[x]` **A5: Dead/vestigial code.**
+  *Fixed 2026-07-17: WorldPhase aliases removed (5 call sites migrated to
+  canonical names); World() ctor reduced to reflection registration (all
+  members carry correct default initializers); the name-lookup tombstone
+  branch became live code with P2.*
 
 - `[ ]` **A6: PCH only in core+renderer; scripting/runtime/physics equally heavy.**
   Extend `PCH` usage via `engine_add_module_library` for build-time wins.
 
-- `[ ]` **A7: Script hot-reload watches exactly one file (`g_watchedPath`).**
-  Entity script modules not covered by the mtime watcher; `watch_script_file`
-  silently replaces the previous watch. Extend to a small watch table.
+- `[x]` **A7: Script hot-reload watches exactly one file (`g_watchedPath`).**
+  *Fixed 2026-07-17: 16-entry watch table with path dedup and logged overflow;
+  check_script_reload polls every entry. Registering a new watch no longer
+  drops the previous one.*
 
 ## P4 — Comment noise
 
@@ -204,7 +217,7 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   checks are complementary.
   *Ratchet: 1878 findings at campaign start → 1856 after sparse_set.h cleanup
   → 1720 after math header rewrite → 1713 after S2/S3 → 1711 after S1/S9
-  (2026-07-17). Total must only go down.*
+  → 1706 after A2/S4/P5/A5/A7 (2026-07-17). Total must only go down.*
 
 ## Verification protocol (per fix)
 
