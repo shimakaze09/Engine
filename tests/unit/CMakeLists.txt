@@ -22,6 +22,13 @@ engine_add_test_executable(engine_unit_sparse_set
     engine_core
 )
 
+engine_add_test_executable(engine_unit_fixed_hash_table
+    SOURCES
+    fixed_hash_table_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_math
     SOURCES
     math_test.cpp

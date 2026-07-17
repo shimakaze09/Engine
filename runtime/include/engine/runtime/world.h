@@ -10,6 +10,7 @@
 #include <type_traits>
 
 #include "engine/core/entity.h"
+#include "engine/core/fixed_hash_table.h"
 #include "engine/core/sparse_set.h"
 #include "engine/math/component_types.h"
 #include "engine/math/mat4.h"
@@ -637,13 +638,15 @@ private:
   bool queue_deferred_destroy(Entity entity) noexcept;
   /// Flushes queued work to the backing runtime system for deferred destroys.
   void flush_deferred_destroys() noexcept;
-  /// Handles insert persistent index.
+  /// Maps a persistent id to its entity index; false when the table is full.
   bool insert_persistent_index(PersistentId persistentId,
                                std::uint32_t entityIndex) noexcept;
-  /// Finds the matching object or resource for persistent index.
+  /// Returns the entity index for a persistent id, or 0 when unmapped.
   std::uint32_t find_persistent_index(PersistentId persistentId) const noexcept;
-  /// Handles erase persistent index.
+  /// Unmaps a persistent id; rebuilds the table when tombstones pile up.
   void erase_persistent_index(PersistentId persistentId) noexcept;
+  /// Rebuilds the persistent-id table from the alive entity arrays.
+  void rebuild_persistent_index() noexcept;
   /// Resets this object back to its reusable empty state for transform cache.
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
   /// Handles propagate world transforms.
@@ -925,9 +928,8 @@ private:
   std::array<std::uint32_t, kMaxEntities + 1U> m_entityGenerations{};
   std::array<PersistentId, kMaxEntities + 1U> m_entityPersistentIds{};
   std::array<MovementAuthority, kMaxEntities + 1U> m_movementAuthorities{};
-  std::array<PersistentId, kPersistentIndexCapacity> m_persistentIndexKeys{};
-  std::array<std::uint32_t, kPersistentIndexCapacity> m_persistentIndexValues{};
-  std::array<std::uint8_t, kPersistentIndexCapacity> m_persistentIndexState{};
+  core::FixedHashTable<PersistentId, std::uint32_t, kPersistentIndexCapacity>
+      m_persistentIndex{};
   std::array<bool, kMaxEntities + 1U> m_entityAlive{};
   std::array<bool, kMaxEntities + 1U> m_entityBeginPlayFired{};
   // Alive entities whose begin_play has not fired yet (kept in sync by

@@ -109,9 +109,7 @@ World::World() noexcept {
   m_entityGenerations.fill(0U);
   m_entityPersistentIds.fill(kInvalidPersistentId);
   m_movementAuthorities.fill(MovementAuthority::None);
-  m_persistentIndexKeys.fill(kInvalidPersistentId);
-  m_persistentIndexValues.fill(0U);
-  m_persistentIndexState.fill(0U);
+  m_persistentIndex.clear();
   m_entityAlive.fill(false);
   m_aliveEntityCount = 0U;
   m_transforms.clear();
@@ -1389,49 +1387,7 @@ bool World::insert_persistent_index(PersistentId persistentId,
     return false;
   }
 
-  const std::size_t capacity = m_persistentIndexState.size();
-  if (capacity == 0U) {
-    return false;
-  }
-
-  const std::size_t base =
-      (static_cast<std::size_t>(persistentId) * 2654435761U) % capacity;
-  std::size_t tombstone = capacity;
-
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    const std::uint8_t state = m_persistentIndexState[slot];
-
-    if (state == 1U) {
-      if (m_persistentIndexKeys[slot] == persistentId) {
-        m_persistentIndexValues[slot] = entityIndex;
-        return true;
-      }
-      continue;
-    }
-
-    if (state == 2U) {
-      if (tombstone == capacity) {
-        tombstone = slot;
-      }
-      continue;
-    }
-
-    const std::size_t target = (tombstone != capacity) ? tombstone : slot;
-    m_persistentIndexState[target] = 1U;
-    m_persistentIndexKeys[target] = persistentId;
-    m_persistentIndexValues[target] = entityIndex;
-    return true;
-  }
-
-  if (tombstone != capacity) {
-    m_persistentIndexState[tombstone] = 1U;
-    m_persistentIndexKeys[tombstone] = persistentId;
-    m_persistentIndexValues[tombstone] = entityIndex;
-    return true;
-  }
-
-  return false;
+  return m_persistentIndex.insert(persistentId, entityIndex);
 }
 
 std::uint32_t
@@ -1440,26 +1396,8 @@ World::find_persistent_index(PersistentId persistentId) const noexcept {
     return 0U;
   }
 
-  const std::size_t capacity = m_persistentIndexState.size();
-  if (capacity == 0U) {
-    return 0U;
-  }
-
-  const std::size_t base =
-      (static_cast<std::size_t>(persistentId) * 2654435761U) % capacity;
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    const std::uint8_t state = m_persistentIndexState[slot];
-    if (state == 0U) {
-      return 0U;
-    }
-
-    if ((state == 1U) && (m_persistentIndexKeys[slot] == persistentId)) {
-      return m_persistentIndexValues[slot];
-    }
-  }
-
-  return 0U;
+  const std::uint32_t *entityIndex = m_persistentIndex.find(persistentId);
+  return (entityIndex != nullptr) ? *entityIndex : 0U;
 }
 
 void World::erase_persistent_index(PersistentId persistentId) noexcept {
@@ -1467,25 +1405,29 @@ void World::erase_persistent_index(PersistentId persistentId) noexcept {
     return;
   }
 
-  const std::size_t capacity = m_persistentIndexState.size();
-  if (capacity == 0U) {
-    return;
+  static_cast<void>(m_persistentIndex.erase(persistentId));
+
+  // Entity churn accumulates tombstones; rebuild from the alive arrays once
+  // they dominate so lookup misses stay cheap.
+  if (m_persistentIndex.tombstone_count() > (kPersistentIndexCapacity / 4U)) {
+    rebuild_persistent_index();
   }
+}
 
-  const std::size_t base =
-      (static_cast<std::size_t>(persistentId) * 2654435761U) % capacity;
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    const std::uint8_t state = m_persistentIndexState[slot];
-    if (state == 0U) {
-      return;
+void World::rebuild_persistent_index() noexcept {
+  m_persistentIndex.clear();
+
+  std::size_t visited = 0U;
+  for (std::uint32_t index = 1U;
+       (index < m_nextEntityIndex) && (visited < m_aliveEntityCount);
+       ++index) {
+    if (!m_entityAlive[index]) {
+      continue;
     }
-
-    if ((state == 1U) && (m_persistentIndexKeys[slot] == persistentId)) {
-      m_persistentIndexState[slot] = 2U;
-      m_persistentIndexKeys[slot] = kInvalidPersistentId;
-      m_persistentIndexValues[slot] = 0U;
-      return;
+    ++visited;
+    if (m_entityPersistentIds[index] != kInvalidPersistentId) {
+      static_cast<void>(
+          m_persistentIndex.insert(m_entityPersistentIds[index], index));
     }
   }
 }

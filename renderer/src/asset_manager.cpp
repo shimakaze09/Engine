@@ -12,55 +12,10 @@ namespace engine::renderer {
 
 namespace {
 
-/// Handles hashed slot.
-std::size_t hashed_slot(AssetId id, std::size_t capacity) noexcept {
-  if ((capacity == 0U) || (id == kInvalidAssetId)) {
-    return 0U;
-  }
-
-  return static_cast<std::size_t>(id) % capacity;
-}
-
-/// Finds the matching object or resource for record slot.
+/// Resolves an id to its record slot via the database's shared probe logic.
 std::size_t find_record_slot(const AssetDatabase *database,
                              AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return database != nullptr ? database->meshAssets.size() : 0U;
-  }
-
-  const std::size_t capacity = database->meshAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->occupied[slot]) {
-      return database->meshAssets.size();
-    }
-
-    if (database->meshAssets[slot].id == id) {
-      return slot;
-    }
-  }
-
-  return database->meshAssets.size();
-}
-
-/// Finds the matching object or resource for record insert slot.
-std::size_t find_record_insert_slot(const AssetDatabase *database,
-                                    AssetId id) noexcept {
-  if (database == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t capacity = database->meshAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->occupied[slot] || (database->meshAssets[slot].id == id)) {
-      return slot;
-    }
-  }
-
-  return database->meshAssets.size();
+  return find_mesh_asset_record_slot(database, id);
 }
 
 /// Copies a mesh source path into a record field (zero-fills the tail so
@@ -149,16 +104,9 @@ bool ensure_record(AssetDatabase *database,
     return false;
   }
 
-  std::size_t slot = find_record_slot(database, id);
+  const std::size_t slot = claim_mesh_asset_record_slot(database, id);
   if (slot == database->meshAssets.size()) {
-    slot = find_record_insert_slot(database, id);
-    if (slot == database->meshAssets.size()) {
-      return false;
-    }
-
-    database->occupied[slot] = true;
-    database->meshAssets[slot] = MeshAssetRecord{};
-    database->meshAssets[slot].id = id;
+    return false;
   }
 
   MeshAssetRecord &record = database->meshAssets[slot];
