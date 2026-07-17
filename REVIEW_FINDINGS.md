@@ -158,9 +158,12 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   well-formed files are unaffected. New scene test pins malformed-foliage
   rejection. 85/85 headless green; comment ratchet 1706 → 1702.*
 
-- `[ ]` **S6: `copy_world_contents` is another hand-maintained 13-component list.**
-  `runtime/src/scene_serializer.cpp`. Collapses once S1 lands (iterate component
-  types generically).
+- `[x]` **S6: `copy_world_contents` is another hand-maintained 13-component list.**
+  *Fixed 2026-07-17: `copy_component<T>` template takes the World get/add
+  member-pointer pair, so the guard/copy body exists once and each component
+  type is a single declarative line in the fold (12 blocks × 7 lines → 12
+  lines). Pure refactor — same pairs, same order, same failure semantics;
+  exercised by every load_scene round-trip test. 85/85 headless green.*
 
 - `[ ]` **S7: Split-brained serialization: 4 components via reflection, rest hand-written JSON.**
   Finish the reflection migration or document why specific types are excluded.

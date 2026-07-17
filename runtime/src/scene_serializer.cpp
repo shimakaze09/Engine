@@ -593,6 +593,23 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
   return true;
 }
 
+/// Copies one component type between worlds through the World get/add pair.
+/// Returns true when the source entity has no such component or the copy
+/// succeeded; false only when a present component fails to add.
+template <typename Component>
+bool copy_component(
+    const World &sourceWorld, World &targetWorld, Entity sourceEntity,
+    Entity targetEntity,
+    bool (World::*getComponent)(Entity, Component *) const noexcept,
+    bool (World::*addComponent)(Entity, const Component &) noexcept) noexcept {
+  Component component{};
+  if ((sourceWorld.*getComponent)(sourceEntity, &component) &&
+      !(targetWorld.*addComponent)(targetEntity, component)) {
+    return false;
+  }
+  return true;
+}
+
 /// Handles copy world contents.
 bool copy_world_contents(const World &sourceWorld,
                          World &targetWorld) noexcept {
@@ -611,91 +628,29 @@ bool copy_world_contents(const World &sourceWorld,
       return;
     }
 
-    Transform transform{};
-    if (sourceWorld.get_transform(sourceEntity, &transform) &&
-        !targetWorld.add_transform(targetEntity, transform)) {
-      success = false;
-      return;
-    }
-
-    RigidBody rigidBody{};
-    if (sourceWorld.get_rigid_body(sourceEntity, &rigidBody) &&
-        !targetWorld.add_rigid_body(targetEntity, rigidBody)) {
-      success = false;
-      return;
-    }
-
-    Collider collider{};
-    if (sourceWorld.get_collider(sourceEntity, &collider) &&
-        !targetWorld.add_collider(targetEntity, collider)) {
-      success = false;
-      return;
-    }
-
-    MeshComponent mesh{};
-    if (sourceWorld.get_mesh_component(sourceEntity, &mesh) &&
-        !targetWorld.add_mesh_component(targetEntity, mesh)) {
-      success = false;
-      return;
-    }
-
-    FoliagePatchComponent foliage{};
-    if (sourceWorld.get_foliage_patch_component(sourceEntity, &foliage) &&
-        !targetWorld.add_foliage_patch_component(targetEntity, foliage)) {
-      success = false;
-      return;
-    }
-
-    LightComponent light{};
-    if (sourceWorld.get_light_component(sourceEntity, &light) &&
-        !targetWorld.add_light_component(targetEntity, light)) {
-      success = false;
-      return;
-    }
-
-    PointLightComponent pointLight{};
-    if (sourceWorld.get_point_light_component(sourceEntity, &pointLight) &&
-        !targetWorld.add_point_light_component(targetEntity, pointLight)) {
-      success = false;
-      return;
-    }
-
-    SpotLightComponent spotLight{};
-    if (sourceWorld.get_spot_light_component(sourceEntity, &spotLight) &&
-        !targetWorld.add_spot_light_component(targetEntity, spotLight)) {
-      success = false;
-      return;
-    }
-
-    ReflectionProbeComponent reflectionProbe{};
-    if (sourceWorld.get_reflection_probe_component(sourceEntity,
-                                                   &reflectionProbe) &&
-        !targetWorld.add_reflection_probe_component(targetEntity,
-                                                   reflectionProbe)) {
-      success = false;
-      return;
-    }
-
-    NameComponent name{};
-    if (sourceWorld.get_name_component(sourceEntity, &name) &&
-        !targetWorld.add_name_component(targetEntity, name)) {
-      success = false;
-      return;
-    }
-
-    ScriptComponent script{};
-    if (sourceWorld.get_script_component(sourceEntity, &script) &&
-        !targetWorld.add_script_component(targetEntity, script)) {
-      success = false;
-      return;
-    }
-
-    SpringArmComponent springArm{};
-    if (sourceWorld.get_spring_arm(sourceEntity, &springArm) &&
-        !targetWorld.add_spring_arm(targetEntity, springArm)) {
-      success = false;
-      return;
-    }
+    // One line per copyable component type; copy_component supplies the
+    // guard/copy body once.
+    const auto copy = [&](auto getComponent, auto addComponent) noexcept {
+      return copy_component(sourceWorld, targetWorld, sourceEntity,
+                            targetEntity, getComponent, addComponent);
+    };
+    success =
+        copy(&World::get_transform, &World::add_transform) &&
+        copy(&World::get_rigid_body, &World::add_rigid_body) &&
+        copy(&World::get_collider, &World::add_collider) &&
+        copy(&World::get_mesh_component, &World::add_mesh_component) &&
+        copy(&World::get_foliage_patch_component,
+             &World::add_foliage_patch_component) &&
+        copy(&World::get_light_component, &World::add_light_component) &&
+        copy(&World::get_point_light_component,
+             &World::add_point_light_component) &&
+        copy(&World::get_spot_light_component,
+             &World::add_spot_light_component) &&
+        copy(&World::get_reflection_probe_component,
+             &World::add_reflection_probe_component) &&
+        copy(&World::get_name_component, &World::add_name_component) &&
+        copy(&World::get_script_component, &World::add_script_component) &&
+        copy(&World::get_spring_arm, &World::add_spring_arm);
   });
 
   // Copy timer timing metadata (callbacks must be re-wired by caller).
