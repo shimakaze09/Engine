@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 
 namespace engine::renderer {
 
@@ -62,7 +63,8 @@ std::size_t find_record_insert_slot(const AssetDatabase *database,
   return database->meshAssets.size();
 }
 
-/// Handles copy source path.
+/// Copies a mesh source path into a record field (zero-fills the tail so
+/// records stay byte-comparable).
 void copy_source_path(std::array<char, 260U> *outPath,
                       const char *sourcePath) noexcept {
   if (outPath == nullptr) {
@@ -70,18 +72,7 @@ void copy_source_path(std::array<char, 260U> *outPath,
   }
 
   outPath->fill('\0');
-  if (sourcePath == nullptr) {
-    return;
-  }
-
-  const std::size_t maxCopy = outPath->size() - 1U;
-  const std::size_t sourceLength = std::strlen(sourcePath);
-  const std::size_t copyLength =
-      (sourceLength > maxCopy) ? maxCopy : sourceLength;
-  if (copyLength > 0U) {
-    std::memcpy(outPath->data(), sourcePath, copyLength);
-  }
-  (*outPath)[copyLength] = '\0';
+  core::copy_string(outPath->data(), outPath->size(), sourcePath);
 }
 
 /// Returns whether has source path.

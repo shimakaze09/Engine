@@ -33,6 +33,7 @@ extern "C" {
 #include <limits>
 
 #include "engine/core/input.h"
+#include "engine/core/string_util.h"
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/scripting_bridge.h"
@@ -71,28 +72,6 @@ std::uint32_t g_frameIndex = 0U;
 char g_watchedPath[512] = {};
 std::int64_t g_watchedMtime = 0;
 constexpr float kMaxScriptAcceleration = 500.0F;
-
-/// Handles copy c string.
-void copy_c_string(char *destination, std::size_t destinationSize,
-                   const char *source) noexcept {
-  if ((destination == nullptr) || (destinationSize == 0U)) {
-    return;
-  }
-
-  destination[0] = '\0';
-  if (source == nullptr) {
-    return;
-  }
-
-  const std::size_t sourceLength = std::strlen(source);
-  const std::size_t copyLength = (sourceLength < (destinationSize - 1U))
-                                     ? sourceLength
-                                     : (destinationSize - 1U);
-  if (copyLength > 0U) {
-    std::memcpy(destination, source, copyLength);
-  }
-  destination[copyLength] = '\0';
-}
 
 /// Handles copy clone name.
 void copy_clone_name(char *destination, std::size_t destinationSize,
@@ -3407,7 +3386,7 @@ void watch_script_file(const char *path) noexcept {
   if (path == nullptr) {
     return;
   }
-  copy_c_string(g_watchedPath, sizeof(g_watchedPath), path);
+  core::copy_string(g_watchedPath, sizeof(g_watchedPath), path);
   g_watchedMtime = get_file_mtime(path);
 }
 

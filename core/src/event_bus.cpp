@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstring>
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
 
 namespace engine::core {
@@ -113,17 +114,6 @@ struct EmitDepthScope final {
   }
 };
 
-/// Computes a 32-bit FNV-1a hash.
-std::uint32_t fnv1a_hash(const char *str) noexcept {
-  std::uint32_t hash = 2166136261U;
-  while (*str != '\0') {
-    hash ^= static_cast<std::uint32_t>(static_cast<unsigned char>(*str));
-    hash *= 16777619U;
-    ++str;
-  }
-  return hash;
-}
-
 /// Finds the matching object or resource for channel slot.
 ChannelSlot *find_channel_slot(const char *name, std::uint32_t hash) noexcept {
   for (auto &slot : g_channelSlots) {
@@ -137,7 +127,7 @@ ChannelSlot *find_channel_slot(const char *name, std::uint32_t hash) noexcept {
 
 /// Finds an existing channel slot or creates one when capacity allows.
 ChannelSlot *find_or_create_channel_slot(const char *name) noexcept {
-  const std::uint32_t hash = fnv1a_hash(name);
+  const std::uint32_t hash = fnv1a_32(name);
   if (auto *slot = find_channel_slot(name, hash)) {
     return slot;
   }
@@ -294,7 +284,7 @@ bool unsubscribe_channel(const char *channelName, ChannelHandler handler,
   if (channelName == nullptr) {
     return false;
   }
-  const std::uint32_t hash = fnv1a_hash(channelName);
+  const std::uint32_t hash = fnv1a_32(channelName);
   auto *slot = find_channel_slot(channelName, hash);
   if (slot == nullptr) {
     return false;
@@ -320,7 +310,7 @@ void emit_channel(const char *channelName, const void *data,
   if (channelName == nullptr) {
     return;
   }
-  const std::uint32_t hash = fnv1a_hash(channelName);
+  const std::uint32_t hash = fnv1a_32(channelName);
   auto *slot = find_channel_slot(channelName, hash);
   if (slot == nullptr) {
     return;

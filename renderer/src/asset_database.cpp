@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/core/hash.h"
+
 namespace engine::renderer {
 
 /// Handles advance asset database frame.
@@ -16,9 +18,6 @@ void advance_asset_database_frame(AssetDatabase *database) noexcept {
 }
 
 namespace {
-
-constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
-constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
 /// Handles hashed slot.
 std::size_t hashed_slot(AssetId id, std::size_t capacity) noexcept {
@@ -101,15 +100,16 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
     return kInvalidAssetId;
   }
 
-  std::uint64_t hash = kFnv64Offset;
+  std::uint64_t hash = core::kFnv1a64Offset;
   for (const unsigned char *cursor =
            reinterpret_cast<const unsigned char *>(path);
        *cursor != 0U; ++cursor) {
+    // Canonicalize separators so the same asset hashes identically on every
+    // platform.
     const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
                                  ? static_cast<unsigned char>('/')
                                  : *cursor;
-    hash ^= static_cast<std::uint64_t>(ch);
-    hash *= kFnv64Prime;
+    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(ch));
   }
 
   if (hash == kInvalidAssetId) {
@@ -137,7 +137,7 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
     return make_asset_id_from_path(path);
   }
 
-  std::uint64_t hash = kFnv64Offset;
+  std::uint64_t hash = core::kFnv1a64Offset;
   unsigned char buffer[4096] = {};
   while (true) {
     const std::size_t bytesRead = std::fread(buffer, 1U, sizeof(buffer), file);
@@ -145,8 +145,7 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
       break;
     }
     for (std::size_t i = 0U; i < bytesRead; ++i) {
-      hash ^= static_cast<std::uint64_t>(buffer[i]);
-      hash *= kFnv64Prime;
+      hash = core::fnv1a_64_append(hash, buffer[i]);
     }
   }
 

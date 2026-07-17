@@ -8,7 +8,9 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
@@ -23,8 +25,6 @@ constexpr std::size_t kMaxShaderVariants = kMaxShaderPrograms;
 constexpr std::size_t kMaxShaderDefines = 16U;
 constexpr std::size_t kMaxDefineNameLength = 48U;
 constexpr std::size_t kMaxDefineValueLength = 64U;
-constexpr std::uint64_t kFnvOffset = 14695981039346656037ULL;
-constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 constexpr const char *kEnabledDefineValue = "1";
 
 /// Stores copied shader define strings for reloadable variants.
@@ -33,24 +33,9 @@ struct ShaderDefineCopy final {
   char value[kMaxDefineValueLength] = {};
 };
 
-/// Copies a null-terminated string into a fixed-size destination.
-void safe_copy_string(char *dst, std::size_t dstSize,
-                      const char *src) noexcept {
-  if ((dst == nullptr) || (dstSize == 0U)) {
-    return;
-  }
-
-  std::size_t i = 0U;
-  while ((i < dstSize - 1U) && (src[i] != '\0')) {
-    dst[i] = src[i];
-    ++i;
-  }
-  dst[i] = '\0';
-}
-
 /// Copies a shader VFS path into a registry entry.
 void safe_copy_path(char *dst, const char *src) noexcept {
-  safe_copy_string(dst, kMaxPathLength, src);
+  core::copy_string(dst, kMaxPathLength, src);
 }
 
 /// Stores one cached shader variant key and its compiled program handle.
@@ -190,18 +175,12 @@ bool validate_shader_variant_desc(const ShaderVariantDesc &desc) noexcept {
   return true;
 }
 
-/// Adds one byte to an FNV-1a hash.
-void hash_byte(std::uint64_t &hash, std::uint8_t value) noexcept {
-  hash ^= value;
-  hash *= kFnvPrime;
-}
-
 /// Adds a null-terminated string plus a separator to an FNV-1a hash.
 void hash_string(std::uint64_t &hash, const char *text) noexcept {
   for (std::size_t i = 0U; text[i] != '\0'; ++i) {
-    hash_byte(hash, static_cast<std::uint8_t>(text[i]));
+    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(text[i]));
   }
-  hash_byte(hash, 0U);
+  hash = core::fnv1a_64_append(hash, 0U);
 }
 
 /// Sorts shader define pointers so a define set has an order-independent key.
@@ -224,9 +203,9 @@ void copy_shader_defines(ShaderEntry &entry, const ShaderDefine *defines,
                          std::size_t defineCount) noexcept {
   entry.defineCount = defineCount;
   for (std::size_t i = 0U; i < defineCount; ++i) {
-    safe_copy_string(entry.defines[i].name, kMaxDefineNameLength,
+    core::copy_string(entry.defines[i].name, kMaxDefineNameLength,
                      defines[i].name);
-    safe_copy_string(entry.defines[i].value, kMaxDefineValueLength,
+    core::copy_string(entry.defines[i].value, kMaxDefineValueLength,
                      normalized_define_value(defines[i]));
   }
 }
@@ -509,7 +488,7 @@ ShaderVariantKey shader_variant_key(const ShaderVariantDesc &desc) noexcept {
   }
   sort_shader_defines(sorted, desc.defineCount);
 
-  std::uint64_t hash = kFnvOffset;
+  std::uint64_t hash = core::kFnv1a64Offset;
   hash_string(hash, desc.vertPath);
   hash_string(hash, desc.fragPath);
   for (std::size_t i = 0U; i < desc.defineCount; ++i) {
