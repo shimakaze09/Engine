@@ -218,9 +218,20 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   documented (aligns with the unit cube's top face) — change it deliberately
   if a ground-level plane is wanted.*
 
-- `[ ]` **A3: `editor/src/editor.cpp` (2,682 lines) and `scripting/src/scripting.cpp`
-  (3,456 lines) monoliths.** Lower priority than A1; split opportunistically when
-  touching those areas.
+- `[x]` **A3: `editor/src/editor.cpp` (2,682 lines) and `scripting/src/scripting.cpp`
+  (3,456 lines) monoliths.**
+  *Fixed 2026-07-17 in two commits. scripting.cpp → 711 lines (lifecycle +
+  registration glue) plus nine domain TUs on the established xxx_bindings
+  pattern (entity lifecycle, body, mesh/material, physics, lights, camera,
+  audio, asset/prefab, shared binding_util); player-controller wrappers
+  joined game_bindings. editor.cpp → 338 lines (public API + panel
+  orchestration) plus editor_session.{h,cpp} (state behind editor_session(),
+  renderer backend_state() precedent), editor_commands.{h,cpp} (undoable
+  edit commands + snapshots), and five panel TUs (main/inspector/
+  diagnostics/assets/viewport). Pure code motion via the coverage-verified
+  splitter scripts; 85/85 headless green both halves (Lua integration
+  suites exercise the full engine table; command-history test covers the
+  editor commands).*
 
 - `[x]` **A4: `resolve_collisions` in `physics/src/physics.cpp` is ~1,090 lines.**
   *Fixed 2026-07-17: eight per-shape-pair functions (heightfield, convex/GJK,
