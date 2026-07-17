@@ -206,8 +206,13 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
   members carry correct default initializers); the name-lookup tombstone
   branch became live code with P2.*
 
-- `[ ]` **A6: PCH only in core+renderer; scripting/runtime/physics equally heavy.**
-  Extend `PCH` usage via `engine_add_module_library` for build-time wins.
+- `[x]` **A6: PCH only in core+renderer; scripting/runtime/physics equally heavy.**
+  *Fixed 2026-07-17: src/pch.h added to all three via the existing PCH helper
+  arg. scripting precompiles the Lua C API (12/18 TUs; still banned from
+  public headers), physics precompiles <cmath>+Vec3 (no runtime headers —
+  PhysicsWorldView boundary), runtime precompiles logging+world.h (9/15 TUs
+  already included it). Measured: clean rebuild of the three modules
+  16.3 s → 13.9 s (-15%). 85/85 headless green.*
 
 - `[x]` **A7: Script hot-reload watches exactly one file (`g_watchedPath`).**
   *Fixed 2026-07-17: 16-entry watch table with path dedup and logged overflow;
