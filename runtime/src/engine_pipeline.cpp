@@ -1640,8 +1640,10 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     scripting::dispatch_entity_scripts_start();
   }
 
-  // Fire BeginPlay for entities that haven't received it yet.
-  if (playState == LoopPlayState::Playing) {
+  // Fire BeginPlay for entities that haven't received it yet. Skip the phase
+  // entirely on frames with no pending entities (the common case).
+  if ((playState == LoopPlayState::Playing) &&
+      (world->begin_play_pending_count() > 0U)) {
     world->begin_begin_play_phase();
     scripting::dispatch_entity_scripts_begin_play(world.get());
     scripting::flush_deferred_mutations();

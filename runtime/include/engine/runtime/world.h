@@ -477,9 +477,15 @@ public:
   // Mark entity as having received its begin_play callback.
   void mark_begin_play_done(Entity entity) noexcept;
 
+  // Number of alive entities that have not yet received begin_play; lets the
+  // frame loop skip the BeginPlay phase entirely on quiet frames.
+  std::size_t begin_play_pending_count() const noexcept {
+    return m_beginPlayPendingCount;
+  }
+
   // Iterate alive entities that have NOT yet received begin_play.
   template <typename Fn> void for_each_needs_begin_play(Fn &&fn) noexcept {
-    if (m_aliveEntityCount == 0U) {
+    if ((m_aliveEntityCount == 0U) || (m_beginPlayPendingCount == 0U)) {
       return;
     }
     std::size_t visited = 0U;
@@ -644,12 +650,48 @@ private:
   bool propagate_world_transforms() noexcept;
   /// Handles query state index.
   std::size_t query_state_index() const noexcept;
-  /// Handles hash name string.
-  std::uint32_t hash_name_string(const char *name) const noexcept;
-  /// Handles name lookup insert.
-  bool name_lookup_insert(std::uint32_t nameHash, const char *name,
+  // Shared guard/log/dispatch bodies behind the per-component add/remove/get
+  // wrappers. Defined in world.cpp; every instantiation lives there.
+  /// Phase + liveness guard used by component mutators with extra logic.
+  bool check_component_mutation(Entity entity, const char *label) noexcept;
+  /// Phase + liveness guarded SparseSet insert; logs failures under `label`.
+  template <typename Set, typename Component>
+  bool add_component_checked(Set &set, Entity entity,
+                             const Component &component,
+                             const char *label) noexcept;
+  /// Phase + liveness guarded SparseSet remove; logs failures under `label`.
+  template <typename Set>
+  bool remove_component_checked(Set &set, Entity entity,
+                                const char *label) noexcept;
+  /// Liveness-guarded SparseSet copy-out; logs failures under `label`.
+  template <typename Set, typename Component>
+  bool get_component_checked(const Set &set, Entity entity, Component *out,
+                             const char *label) const noexcept;
+  /// Liveness-guarded SparseSet pointer lookup (silent on miss).
+  template <typename Set>
+  auto *get_component_ptr_checked(Set &set, Entity entity) noexcept {
+    if (!is_valid_entity(entity)) {
+      return static_cast<decltype(set.get_ptr(entity))>(nullptr);
+    }
+    return set.get_ptr(entity);
+  }
+  /// Liveness-guarded const SparseSet pointer lookup (silent on miss).
+  template <typename Set>
+  auto *get_component_ptr_checked(const Set &set, Entity entity) const noexcept {
+    if (!is_valid_entity(entity)) {
+      return static_cast<decltype(set.get_ptr(entity))>(nullptr);
+    }
+    return set.get_ptr(entity);
+  }
+
+  /// Inserts one name-lookup entry (reuses tombstoned slots). Entities that
+  /// share a name each keep their own entry.
+  bool name_lookup_insert(std::uint32_t nameHash,
                           std::uint32_t entityIndex) noexcept;
-  /// Handles rebuild name lookup.
+  /// Tombstones the lookup entry for one entity's name, if present.
+  void name_lookup_erase(std::uint32_t nameHash,
+                         std::uint32_t entityIndex) noexcept;
+  /// Rebuilds the lookup from live name components (clears tombstones).
   void rebuild_name_lookup() noexcept;
 
   /// Handles component count.
@@ -888,6 +930,9 @@ private:
   std::array<std::uint8_t, kPersistentIndexCapacity> m_persistentIndexState{};
   std::array<bool, kMaxEntities + 1U> m_entityAlive{};
   std::array<bool, kMaxEntities + 1U> m_entityBeginPlayFired{};
+  // Alive entities whose begin_play has not fired yet (kept in sync by
+  // create/destroy/mark_begin_play_done).
+  std::size_t m_beginPlayPendingCount = 0U;
   std::array<std::uint32_t, kMaxEntities> m_freeEntityIndices{};
   std::size_t m_freeEntityCount = 0U;
   std::size_t m_aliveEntityCount = 0U;
@@ -935,6 +980,9 @@ private:
   std::array<std::uint32_t, kNameLookupCapacity> m_nameLookupHashes{};
   std::array<std::uint32_t, kNameLookupCapacity> m_nameLookupEntityIndices{};
   std::array<std::uint8_t, kNameLookupCapacity> m_nameLookupState{};
+  // Tombstones accumulated by erases; a rebuild resets them so probe chains
+  // stay short after heavy name churn.
+  std::size_t m_nameLookupTombstones = 0U;
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
   SpringArmSet m_springArms{};
