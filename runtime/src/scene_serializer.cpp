@@ -1107,7 +1107,7 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
-  if (world.current_phase() != WorldPhase::Idle) {
+  if (world.current_phase() != WorldPhase::Input) {
     core::log_message(core::LogLevel::Warning, kSceneLogChannel,
                       "save_scene requires world Idle phase");
     return false;
@@ -1390,7 +1390,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
-  if (world.current_phase() != WorldPhase::Idle) {
+  if (world.current_phase() != WorldPhase::Input) {
     core::log_message(core::LogLevel::Warning, kSceneLogChannel,
                       "load_scene requires world Idle phase");
     return false;

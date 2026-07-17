@@ -105,31 +105,10 @@ bool World::check_component_mutation(Entity entity,
 }
 
 World::World() noexcept {
+  // Every member carries a correct default initializer (arrays zero-init,
+  // SparseSets and the persistent-id table self-initialize); only the
+  // reflection registry needs explicit setup.
   ensure_runtime_reflection_registered();
-  m_entityGenerations.fill(0U);
-  m_entityPersistentIds.fill(kInvalidPersistentId);
-  m_movementAuthorities.fill(MovementAuthority::None);
-  m_persistentIndex.clear();
-  m_entityAlive.fill(false);
-  m_aliveEntityCount = 0U;
-  m_transforms.clear();
-  m_worldTransforms.clear();
-  m_transformNodes.fill(TransformNode{});
-  m_transformActiveIndices.fill(0U);
-  m_transformActiveCount = 0U;
-  m_transformRoots.fill(0U);
-  m_transformQueueIndices.fill(0U);
-  m_transformQueueInheritedDirty.fill(false);
-  m_rigidBodies.clear();
-  m_colliders.clear();
-  m_meshComponents.clear();
-  m_nameComponents.clear();
-  m_nameLookupHashes.fill(0U);
-  m_nameLookupEntityIndices.fill(0U);
-  m_nameLookupState.fill(kNameSlotEmpty);
-  m_scriptComponents.clear();
-  m_reflectionProbes.clear();
-  m_foliagePatches.clear();
 }
 
 Entity World::create_entity() noexcept {

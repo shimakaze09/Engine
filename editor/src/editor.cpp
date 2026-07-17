@@ -248,13 +248,13 @@ void clear_thumbnail_cache() noexcept {
 bool world_is_editable() noexcept {
   return (g_editorSession.world != nullptr) && !g_editorSession.worldRestoreFailed &&
          (g_editorSession.playState == PlayState::Stopped) &&
-         (g_editorSession.world->current_phase() == runtime::WorldPhase::Idle);
+         (g_editorSession.world->current_phase() == runtime::WorldPhase::Input);
 }
 
 /// Handles world can load scene.
 bool world_can_load_scene() noexcept {
   return (g_editorSession.world != nullptr) &&
-         (g_editorSession.world->current_phase() == runtime::WorldPhase::Idle);
+         (g_editorSession.world->current_phase() == runtime::WorldPhase::Input);
 }
 
 /// Returns whether the default scene file is available on disk.

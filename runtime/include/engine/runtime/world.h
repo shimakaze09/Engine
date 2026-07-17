@@ -153,7 +153,7 @@ struct SpringArmComponent final {
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,
                                   void *userData) noexcept;
 
-/// Enumerates world phase values used by the engine.
+/// Frame phases the world moves through; mutation is gated on Input.
 enum class WorldPhase : std::uint8_t {
   Input,
   BeginPlay,
@@ -162,10 +162,6 @@ enum class WorldPhase : std::uint8_t {
   RenderSubmission,
   Render,
   EndPlay,
-  // Compatibility aliases for legacy call sites.
-  Idle = Input,
-  Update = Simulation,
-  RenderPrep = RenderSubmission,
 };
 
 /// Owns the world behavior and state.
@@ -922,7 +918,7 @@ private:
     }
   }
 
-  WorldPhase m_phase = WorldPhase::Idle;
+  WorldPhase m_phase = WorldPhase::Input;
   std::uint32_t m_nextEntityIndex = 1U;
   PersistentId m_nextPersistentId = 1U;
   std::array<std::uint32_t, kMaxEntities + 1U> m_entityGenerations{};
