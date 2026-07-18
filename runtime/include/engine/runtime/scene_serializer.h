@@ -6,7 +6,6 @@
 
 namespace engine::runtime {
 
-/// Owns the world behavior and state.
 class World;
 
 /// Saves the requested resource for scene.

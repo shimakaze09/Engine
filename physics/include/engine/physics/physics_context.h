@@ -43,7 +43,7 @@ enum class JointType : std::uint8_t {
   Fixed = 5,
 };
 
-/// Stores physics joint slot data used by the engine.
+/// One joint's type, bodies, parameters, and warm-start impulse.
 struct PhysicsJointSlot final {
   Entity entityA = kInvalidEntity;
   Entity entityB = kInvalidEntity;
@@ -84,7 +84,8 @@ struct PhysicsShapeStore final {
   std::size_t heightfieldCount = 0U;
 };
 
-/// Stores physics context data used by the engine.
+/// World-owned physics storage: gravity, joints, pair/stamp scratch,
+/// and hull/heightfield payloads.
 struct PhysicsContext final {
   PhysicsContext() noexcept;
   /// Copies context data and deep-copies owned shape payloads.

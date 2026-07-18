@@ -83,7 +83,7 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept;
 inline constexpr std::size_t kMaxSpotShadowLights = 4U;
 inline constexpr int kSpotShadowMapResolution = 512;
 
-/// Stores spot shadow data used by the engine.
+/// One spot light's shadow map: texture, FBO, and light matrix.
 struct SpotShadowData final {
   math::Mat4 lightViewProjection{};
   std::uint32_t depthTexture = 0U;
@@ -92,7 +92,7 @@ struct SpotShadowData final {
   float farPlane = 0.0F;
 };
 
-/// Stores spot shadow state data used by the engine.
+/// All spot shadow maps plus their allocation state.
 struct SpotShadowState final {
   SpotShadowData slots[kMaxSpotShadowLights]{};
   bool initialized = false;
@@ -115,7 +115,7 @@ void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept;
 inline constexpr std::size_t kMaxPointShadowLights = 4U;
 inline constexpr int kPointShadowMapResolution = 512;
 
-/// Stores point shadow data used by the engine.
+/// One point light's cube shadow map and far plane.
 struct PointShadowData final {
   math::Mat4 faceViewProjections[6]{};
   std::uint32_t depthCubemap = 0U;
@@ -124,7 +124,7 @@ struct PointShadowData final {
   float farPlane = 0.0F;
 };
 
-/// Stores point shadow state data used by the engine.
+/// All point shadow cubemaps plus their allocation state.
 struct PointShadowState final {
   PointShadowData slots[kMaxPointShadowLights]{};
   bool initialized = false;

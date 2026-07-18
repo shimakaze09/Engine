@@ -7,7 +7,7 @@
 
 namespace engine::editor {
 
-/// Stores editor camera data used by the engine.
+/// Orbit/pan/zoom camera state for the editor viewport.
 struct EditorCamera final {
   math::Vec3 target = math::Vec3(0.0F, 0.0F, 0.0F);
   float yaw = 0.0F;      // radians

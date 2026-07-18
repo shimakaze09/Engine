@@ -72,12 +72,11 @@ public:
   /// Clear all cameras and shakes.
   void clear() noexcept;
 
-  /// Handles camera count.
+  /// Number of stacked cameras.
   std::size_t camera_count() const noexcept;
-  /// Handles shake count.
+  /// Number of active shakes.
   std::size_t shake_count() const noexcept;
 
-/// Handles noise1d.
 private:
   /// Simple Perlin-like noise hash for shake offsets.
   static float noise1d(float t) noexcept;

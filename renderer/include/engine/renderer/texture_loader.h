@@ -7,11 +7,10 @@
 
 namespace engine::renderer {
 
-/// Stores texture handle data used by the engine.
+/// Opaque id of a loaded texture (0 = invalid).
 struct TextureHandle final {
   std::uint32_t id = 0U;
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const TextureHandle &,
                                    const TextureHandle &) = default;
 };
@@ -31,9 +30,9 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
 /// Validates texture input size before calling stb's int-length APIs.
 bool texture_input_size_fits_stb(std::size_t fileSize,
                                  int *outStbSize) noexcept;
-/// Handles unload texture.
+/// Releases the texture's GL object; the handle becomes stale.
 void unload_texture(TextureHandle handle) noexcept;
-/// Handles texture gpu id.
+/// GL texture id behind the handle (0 when stale).
 std::uint32_t texture_gpu_id(TextureHandle handle) noexcept;
 /// Returns whether is texture hdr.
 bool is_texture_hdr(TextureHandle handle) noexcept;

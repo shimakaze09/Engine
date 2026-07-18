@@ -6,7 +6,7 @@
 
 namespace engine::physics {
 
-/// Stores physics material data used by the engine.
+/// Surface response: static/dynamic friction, restitution, density.
 struct PhysicsMaterial final {
   float staticFriction = 0.5F;
   float dynamicFriction = 0.3F;

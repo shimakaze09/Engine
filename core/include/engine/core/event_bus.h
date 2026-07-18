@@ -47,15 +47,13 @@ void emit_raw(EventTypeId typeId, const void *eventData) noexcept;
 // Typed convenience wrappers — Handler is a NTTP to avoid function-pointer
 // casts.  Usage: subscribe<MyEvent, my_handler>(userData);
 namespace detail {
-/// Handles void.
 template <typename E, void (*Handler)(const E &, void *) noexcept>
-/// Handles event trampoline.
+/// Casts the type-erased payload back to Event for the typed callback.
 void event_trampoline(const void *data, void *userData) noexcept {
   Handler(*static_cast<const E *>(data), userData);
 }
 } // namespace detail
 
-/// Handles void.
 template <typename E, void (*Handler)(const E &, void *) noexcept>
 /// Registers a subscriber or callback.
 bool subscribe(void *userData = nullptr) noexcept {
@@ -63,7 +61,6 @@ bool subscribe(void *userData = nullptr) noexcept {
                        &detail::event_trampoline<E, Handler>, userData);
 }
 
-/// Handles void.
 template <typename E, void (*Handler)(const E &, void *) noexcept>
 /// Removes a subscriber or callback.
 bool unsubscribe(void *userData = nullptr) noexcept {

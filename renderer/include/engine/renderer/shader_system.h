@@ -7,17 +7,14 @@
 
 namespace engine::renderer {
 
-/// Stores render device data used by the engine.
 struct RenderDevice;
-/// Stores material data used by the engine.
 struct Material;
 
-/// Stores shader program handle data used by the engine.
+/// Opaque id of a linked shader program (0 = invalid).
 struct ShaderProgramHandle final {
   std::uint32_t id = 0U;
   std::uint32_t generation = 0U;
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const ShaderProgramHandle &,
                                    const ShaderProgramHandle &) = default;
 };
@@ -34,7 +31,6 @@ struct ShaderDefine final {
 struct ShaderVariantKey final {
   std::uint64_t value = 0U;
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const ShaderVariantKey &,
                                    const ShaderVariantKey &) = default;
 };

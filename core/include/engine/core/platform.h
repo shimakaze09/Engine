@@ -22,36 +22,36 @@ bool initialize_platform(const PlatformConfig &config) noexcept;
 void shutdown_platform() noexcept;
 /// Returns whether is platform running.
 bool is_platform_running() noexcept;
-/// Handles request platform quit.
+/// Requests the platform loop to exit after the current frame.
 void request_platform_quit() noexcept;
-/// Handles make render context current.
+/// Makes the GL context current on this thread; false when headless.
 bool make_render_context_current() noexcept;
-/// Handles release render context.
+/// Releases the GL context from this thread.
 void release_render_context() noexcept;
-/// Handles swap render buffers.
+/// Swaps the window's front/back buffers.
 void swap_render_buffers() noexcept;
-/// Returns the requested value for gl proc address.
+/// GL function loader (wraps SDL_GL_GetProcAddress).
 void *get_gl_proc_address(const char *name) noexcept;
-/// Handles render drawable size.
+/// Drawable size in pixels (may differ from window size on HiDPI).
 void render_drawable_size(int *outWidth, int *outHeight) noexcept;
-/// Returns the requested value for sdl window.
+/// Underlying SDL_Window* (opaque; platform/editor glue only).
 void *get_sdl_window() noexcept;
-/// Returns the requested value for sdl gl context.
+/// Underlying SDL_GLContext (opaque; platform/editor glue only).
 void *get_sdl_gl_context() noexcept;
-/// Handles process memory bytes.
+/// Resident memory of the process in bytes (0 when unsupported).
 std::size_t process_memory_bytes() noexcept;
 
-/// Handles platform get save dir.
+/// Per-user save directory using the engine's default org/app names.
 bool platform_get_save_dir(char *outBuffer,
                            std::size_t bufferCapacity) noexcept;
-/// Handles platform get save dir.
+/// Per-user save directory for an explicit org/app pair.
 bool platform_get_save_dir(const char *organizationName,
                            const char *applicationName, char *outBuffer,
                            std::size_t bufferCapacity) noexcept;
-/// Handles platform get app dir.
+/// Directory containing the running executable.
 bool platform_get_app_dir(char *outBuffer,
                           std::size_t bufferCapacity) noexcept;
-/// Handles platform get temp dir.
+/// OS temp directory.
 bool platform_get_temp_dir(char *outBuffer,
                            std::size_t bufferCapacity) noexcept;
 

@@ -16,10 +16,10 @@ void shutdown_vfs() noexcept;
 // Example: mount("assets", "d:/dev/Engine/assets")
 // Virtual path "assets/main.lua" resolves to "d:/dev/Engine/assets/main.lua".
 bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept;
-/// Handles unmount.
+/// Removes a mount; false when the prefix is unknown.
 bool unmount(const char *virtualPrefix) noexcept;
 
-/// Handles vfs file exists.
+/// True when the virtual path resolves to an existing file.
 bool vfs_file_exists(const char *virtualPath) noexcept;
 
 // Read entire file into a heap-allocated buffer. Caller must call vfs_free().
@@ -33,12 +33,12 @@ bool vfs_read_text(const char *virtualPath,
                    char **outText,
                    std::size_t *outSize) noexcept;
 
-/// Handles vfs write binary.
+/// Writes bytes to the resolved path; false on IO failure.
 bool vfs_write_binary(const char *virtualPath,
                       const void *data,
                       std::size_t size) noexcept;
 
-/// Handles vfs write text.
+/// Writes text to the resolved path; false on IO failure.
 bool vfs_write_text(const char *virtualPath,
                     const char *text,
                     std::size_t size) noexcept;

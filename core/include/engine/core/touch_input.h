@@ -40,7 +40,7 @@ enum class GestureType : std::uint8_t { Tap, Swipe, Pinch, Rotate };
 /// Enumerates swipe direction values used by the engine.
 enum class SwipeDirection : std::uint8_t { Left, Right, Up, Down };
 
-/// Stores gesture event data used by the engine.
+/// Recognized gesture payload (tap/swipe/pinch/rotate).
 struct GestureEvent final {
   GestureType type = GestureType::Tap;
 
@@ -93,20 +93,20 @@ void touch_end_frame() noexcept;
 
 // Query active touches.
 std::uint32_t active_touch_count() noexcept;
-/// Returns the requested value for active touch.
+/// Copies the active touch at index; false out of range.
 bool get_active_touch(std::uint32_t index, TouchEvent *outTouch) noexcept;
 
 // Callback registration.
 bool register_touch_callback(TouchCallback cb,
                              void *userData = nullptr) noexcept;
-/// Handles unregister touch callback.
+/// Removes a touch callback registration; false when not found.
 bool unregister_touch_callback(TouchCallback cb,
                                void *userData = nullptr) noexcept;
 
-/// Handles register gesture callback.
+/// Registers a callback for one gesture type; false when full.
 bool register_gesture_callback(GestureType type, GestureCallback cb,
                                void *userData = nullptr) noexcept;
-/// Handles unregister gesture callback.
+/// Removes a gesture callback registration; false when not found.
 bool unregister_gesture_callback(GestureType type, GestureCallback cb,
                                  void *userData = nullptr) noexcept;
 

@@ -22,7 +22,7 @@ enum class GpuPassId : std::uint8_t {
   Count = 11U,
 };
 
-/// Stores gpu profiler debug stats data used by the engine.
+/// Query-pool bookkeeping counters for debugging the GPU profiler.
 struct GpuProfilerDebugStats final {
   std::uint64_t beginMarksScene = 0U;
   std::uint64_t endMarksScene = 0U;
@@ -36,15 +36,15 @@ struct GpuProfilerDebugStats final {
 bool initialize_gpu_profiler() noexcept;
 /// Shuts down the owning system for gpu profiler.
 void shutdown_gpu_profiler() noexcept;
-/// Handles gpu profiler begin frame.
+/// Rotates timestamp query buffers at frame start.
 void gpu_profiler_begin_frame() noexcept;
-/// Handles gpu profiler begin pass.
+/// Issues the begin timestamp for a pass.
 void gpu_profiler_begin_pass(GpuPassId pass) noexcept;
-/// Handles gpu profiler end pass.
+/// Issues the end timestamp for a pass.
 void gpu_profiler_end_pass(GpuPassId pass) noexcept;
-/// Handles gpu profiler pass ms.
+/// Latest resolved pass duration in ms (0 until results land).
 float gpu_profiler_pass_ms(GpuPassId pass) noexcept;
-/// Handles gpu profiler debug stats.
+/// Snapshot of the profiler bookkeeping counters.
 GpuProfilerDebugStats gpu_profiler_debug_stats() noexcept;
 
 } // namespace engine::renderer

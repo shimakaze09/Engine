@@ -10,7 +10,6 @@
 
 namespace engine::physics {
 
-/// Stores physics context data used by the engine.
 struct PhysicsContext;
 
 /// Registers physics runtime CVars. Call after core::initialize_cvars().

@@ -8,7 +8,6 @@ namespace engine::runtime {
 
 using engine::core::Entity;
 
-/// Owns the world behavior and state.
 class World;
 
 // Save a single entity and all its components to a JSON prefab file.

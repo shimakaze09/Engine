@@ -6,18 +6,17 @@
 
 namespace engine::audio {
 
-/// Stores sound handle data used by the engine.
+/// Opaque id of a loaded sound (0 = invalid; generation-encoded).
 struct SoundHandle final {
   std::uint32_t id = 0U;
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const SoundHandle &,
                                    const SoundHandle &) = default;
 };
 
 inline constexpr SoundHandle kInvalidSound{};
 
-/// Stores play params data used by the engine.
+/// Playback settings: volume, pitch, and looping.
 struct PlayParams final {
   float volume = 1.0F;
   float pitch = 1.0F;
@@ -34,14 +33,14 @@ void update_audio() noexcept;
 
 // Load a sound from a VFS path (.wav, .mp3, .ogg, .flac).
 SoundHandle load_sound(const char *virtualPath) noexcept;
-/// Handles unload sound.
+/// Releases the sound's slot; the handle becomes stale.
 void unload_sound(SoundHandle handle) noexcept;
 
-/// Handles play sound.
+/// Starts playback with the given params; false for stale handles.
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept;
-/// Handles stop sound.
+/// Stops all playback of this sound.
 void stop_sound(SoundHandle handle) noexcept;
-/// Handles stop all.
+/// Stops every playing sound.
 void stop_all() noexcept;
 
 /// Sets the requested value for master volume.

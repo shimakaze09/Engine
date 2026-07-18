@@ -8,22 +8,20 @@
 
 namespace engine::core {
 
-/// Owns the linear allocator behavior and state.
+/// Bump allocator over a fixed buffer; reset frees everything at once.
 class LinearAllocator final {
-/// Handles init.
 public:
-    /// Handles init.
     void init(void* memory, std::size_t capacityBytes) noexcept;
-    /// Handles allocate.
+    /// Bump-allocates sizeBytes at alignment; nullptr when exhausted.
     void* allocate(std::size_t sizeBytes, std::size_t alignment) noexcept;
     /// Resets this object back to its reusable empty state.
     void reset() noexcept;
 
-    /// Handles capacity.
+    /// Total buffer capacity in bytes.
     std::size_t capacity() const noexcept;
-    /// Handles bytes used.
+    /// Bytes handed out since the last reset.
     std::size_t bytes_used() const noexcept;
-    /// Handles allocation count.
+    /// Allocations served since the last reset.
     std::size_t allocation_count() const noexcept;
 
 private:
@@ -33,7 +31,7 @@ private:
     std::size_t m_allocationCount = 0;
 };
 
-/// Handles make allocator.
+/// Wraps the LinearAllocator in the type-erased Allocator interface.
 Allocator make_allocator(LinearAllocator* allocator) noexcept;
 
 } // namespace engine::core

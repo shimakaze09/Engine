@@ -20,7 +20,7 @@ struct EngineConfig final {
   const char *editorAssetRoot = "assets";
 };
 
-/// Handles bootstrap.
+/// Boots the engine with the default configuration.
 bool bootstrap() noexcept;
 /// Boots the engine with explicit app/runtime configuration.
 bool bootstrap(const EngineConfig &config) noexcept;

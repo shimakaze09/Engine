@@ -26,7 +26,7 @@ struct GameMode final {
   static constexpr std::size_t kMaxValueLength = 64U;
   static constexpr std::size_t kMaxNameLength = 64U;
 
-  /// Stores rule data used by the engine.
+  /// One named rule string (fixed-size key/value pair).
   struct Rule final {
     char key[kMaxKeyLength] = {};
     char value[kMaxValueLength] = {};
@@ -47,7 +47,6 @@ struct GameMode final {
     // Overwrite existing.
     for (std::size_t i = 0U; i < ruleCount; ++i) {
       if (std::strcmp(rules[i].key, key) == 0) {
-        /// Handles snprintf.
         std::snprintf(rules[i].value, kMaxValueLength, "%s",
                       value ? value : "");
         return true;
@@ -56,9 +55,7 @@ struct GameMode final {
     if (ruleCount >= kMaxRules) {
       return false;
     }
-    /// Handles snprintf.
     std::snprintf(rules[ruleCount].key, kMaxKeyLength, "%s", key);
-    /// Handles snprintf.
     std::snprintf(rules[ruleCount].value, kMaxValueLength, "%s",
                   value ? value : "");
     ++ruleCount;
@@ -80,7 +77,6 @@ struct GameMode final {
 
   // Reset to default state.
   void reset() noexcept {
-    /// Handles snprintf.
     std::snprintf(name, kMaxNameLength, "%s", "default");
     state = State::WaitingToStart;
     maxPlayers = 1U;

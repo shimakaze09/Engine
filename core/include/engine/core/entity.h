@@ -9,12 +9,11 @@
 
 namespace engine::core {
 
-/// Stores entity data used by the engine.
+/// Generation-checked entity handle; index 0 is the invalid sentinel.
 struct Entity final {
   std::uint32_t index = 0U;
   std::uint32_t generation = 0U;
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const Entity &, const Entity &) = default;
 };
 

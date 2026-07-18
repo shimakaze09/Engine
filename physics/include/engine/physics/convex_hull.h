@@ -43,15 +43,15 @@ GjkResult gjk_epa(const void *shapeA, const math::Vec3 &centerA,
 math::Vec3 support_convex_hull(const void *data, const math::Vec3 &center,
                                const math::Vec3 &dir) noexcept;
 
-/// Handles support sphere.
+/// GJK support point for a sphere (data = float radius).
 math::Vec3 support_sphere(const void *data, const math::Vec3 &center,
                           const math::Vec3 &dir) noexcept;
 
-/// Handles support capsule.
+/// GJK support point for a capsule (data = {radius, halfHeight}).
 math::Vec3 support_capsule(const void *data, const math::Vec3 &center,
                            const math::Vec3 &dir) noexcept;
 
-/// Handles support aabb.
+/// GJK support point for an AABB (data = Vec3 half extents).
 math::Vec3 support_aabb(const void *data, const math::Vec3 &center,
                         const math::Vec3 &dir) noexcept;
 

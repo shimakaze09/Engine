@@ -17,20 +17,18 @@
 
 namespace engine::runtime {
 
-/// Owns the world behavior and state.
 class World;
 
-/// Stores engine physics service data used by the engine.
+/// Function-pointer physics service registered for scripts/tools.
 struct EnginePhysicsService final {
   World *world = nullptr;
   physics::PhysicsWorldView *worldView = nullptr;
   physics::PhysicsContext *context = nullptr;
 };
 
-/// Stores engine audio service data used by the engine.
+/// Function-pointer audio service registered for scripts/tools.
 struct EngineAudioService final {
   void (*update)() noexcept = nullptr;
-  /// Handles sound handle.
   audio::SoundHandle (*load_sound)(const char *path) noexcept = nullptr;
   void (*unload_sound)(audio::SoundHandle handle) noexcept = nullptr;
   bool (*play_sound)(audio::SoundHandle handle,
@@ -40,7 +38,7 @@ struct EngineAudioService final {
   void (*set_master_volume)(float volume) noexcept = nullptr;
 };
 
-/// Stores engine asset database service data used by the engine.
+/// Asset database/manager service exposed through the locator.
 struct EngineAssetDatabaseService final {
   /// Stores Lua-visible async/preload handles for runtime asset requests.
   struct ScriptAssetLoadHandle final {
@@ -59,7 +57,7 @@ struct EngineAssetDatabaseService final {
       scriptLoadHandles{};
 };
 
-/// Stores engine renderer service data used by the engine.
+/// Renderer service exposed through the locator.
 struct EngineRendererService final {
   renderer::CommandBufferBuilder *commandBuffer = nullptr;
   renderer::GpuMeshRegistry *meshRegistry = nullptr;

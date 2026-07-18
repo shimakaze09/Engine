@@ -19,7 +19,7 @@ using engine::core::kInvalidEntity;
 using engine::core::kInvalidPersistentId;
 using engine::core::PersistentId;
 
-/// Stores transform data used by the engine.
+/// Local TRS plus optional parent persistent id (ECS component POD).
 struct Transform final {
   Vec3 position = Vec3(0.0F, 0.0F, 0.0F);
   Quat rotation = Quat();
@@ -27,7 +27,7 @@ struct Transform final {
   PersistentId parentId = kInvalidPersistentId;
 };
 
-/// Stores rigid body data used by the engine.
+/// Linear/angular velocities, inverse mass/inertia, and sleep state.
 struct RigidBody final {
   Vec3 velocity = Vec3(0.0F, 0.0F, 0.0F);
   Vec3 acceleration = Vec3(0.0F, 0.0F, 0.0F);
@@ -47,7 +47,7 @@ enum class ColliderShape : std::uint8_t {
   Heightfield = 4,
 };
 
-/// Stores collider data used by the engine.
+/// Shape + half extents + material/filter fields for collision.
 struct Collider final {
   Vec3 halfExtents = Vec3(0.5F, 0.5F, 0.5F);
   float restitution = 0.3F;

@@ -9,13 +9,13 @@ namespace engine::core {
 using AllocateFunction = void* (*)(void* context, std::size_t sizeBytes, std::size_t alignment) noexcept;
 using ResetFunction = void (*)(void* context) noexcept;
 
-/// Stores allocator data used by the engine.
+/// Type-erased allocation function plus user data (no ownership).
 struct Allocator final {
     void* context = nullptr;
     AllocateFunction allocateFunction = nullptr;
     ResetFunction resetFunction = nullptr;
 
-    /// Handles allocate bytes.
+    /// Allocates sizeBytes at the given alignment; nullptr on failure.
     void* allocate_bytes(std::size_t sizeBytes, std::size_t alignment) const noexcept {
         if (allocateFunction == nullptr) {
             return nullptr;

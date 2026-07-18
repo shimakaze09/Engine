@@ -71,9 +71,9 @@ std::size_t lru_evict_to_budget(LruCache *cache, std::uint64_t targetBytes,
 
 /// Query helpers.
 std::size_t lru_count(const LruCache *cache) noexcept;
-/// Handles lru total size.
+/// Sum of tracked sizes across all nodes.
 std::uint64_t lru_total_size(const LruCache *cache) noexcept;
-/// Handles lru contains.
+/// True when the id has a node in the cache.
 bool lru_contains(const LruCache *cache, AssetId id) noexcept;
 
 /// Update the ref count for an asset already in the cache.

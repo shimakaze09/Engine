@@ -6,18 +6,17 @@
 
 namespace engine::renderer {
 
-/// Stores pass resource id data used by the engine.
+/// Identifies one render-target resource owned by PassResources.
 struct PassResourceId final {
   std::uint32_t id = 0U;
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const PassResourceId &,
                                    const PassResourceId &) = default;
 };
 
 inline constexpr PassResourceId kInvalidPassResource{};
 
-/// Stores pass resources data used by the engine.
+/// Frame render targets (scene color/depth, G-buffer, post chains).
 struct PassResources final {
   // Scene pass writes:
   PassResourceId sceneColor; // RGBA16F
@@ -41,14 +40,14 @@ struct PassResources final {
 bool initialize_pass_resources(int width, int height) noexcept;
 /// Shuts down the owning system for pass resources.
 void shutdown_pass_resources() noexcept;
-/// Handles resize pass resources.
+/// Recreates size-dependent targets for the new drawable size.
 void resize_pass_resources(int width, int height) noexcept;
 
-/// Returns the requested value for pass resources.
+/// Current pass-resource set.
 const PassResources &get_pass_resources() noexcept;
-/// Handles pass resource gpu texture.
+/// GL texture id backing the resource (0 when absent).
 std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept;
-/// Handles pass resource framebuffer.
+/// GL framebuffer id whose color attachment is the resource.
 std::uint32_t
 pass_resource_framebuffer(PassResourceId colorAttachment) noexcept;
 

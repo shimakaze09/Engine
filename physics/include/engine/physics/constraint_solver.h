@@ -11,7 +11,6 @@
 
 namespace engine::physics {
 
-/// Owns the physics world view behavior and state.
 class PhysicsWorldView;
 
 // ------ Contact Manifold ---------------------------------------------------
@@ -25,7 +24,7 @@ struct ManifoldContact final {
   std::uint32_t featureId = 0U;
 };
 
-/// Stores contact manifold data used by the engine.
+/// Persistent contact set for one body pair (4 warm-started points).
 struct ContactManifold final {
   static constexpr std::size_t kMaxContacts = 4U;
   std::uint32_t entityIndexA = 0U;
@@ -48,20 +47,21 @@ JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept;
 
-/// Adds a value or component to the target system for ball socket joint.
+/// Creates a ball-socket joint at pivot; kInvalidJointId on failure.
 JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
                               Entity entityB, const math::Vec3 &pivot) noexcept;
 
-/// Adds a value or component to the target system for slider joint.
+/// Creates a slider joint along axis; kInvalidJointId on failure.
 JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, const math::Vec3 &axis) noexcept;
 
-/// Adds a value or component to the target system for spring joint.
+/// Creates a spring joint (rest length, stiffness, damping);
+/// kInvalidJointId on failure.
 JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, float restLength, float stiffness,
                          float damping) noexcept;
 
-/// Adds a value or component to the target system for fixed joint.
+/// Creates a fixed joint; kInvalidJointId on failure.
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept;
 
