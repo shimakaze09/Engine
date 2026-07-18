@@ -23,7 +23,6 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
-/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
@@ -49,7 +48,6 @@ struct LoadOrder final {
   std::size_t count = 0U;
 };
 
-/// Handles recording load.
 static bool recording_load(AssetId id, const char *path,
                            std::uint64_t *outSizeBytes,
                            void *userData) noexcept {

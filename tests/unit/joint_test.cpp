@@ -38,7 +38,6 @@ Entity make_body(World &w, const math::Vec3 &pos) noexcept {
   return e;
 }
 
-/// Handles vec distance.
 float vec_distance(const math::Vec3 &a, const math::Vec3 &b) noexcept {
   const math::Vec3 d = math::sub(a, b);
   return std::sqrt(math::dot(d, d));

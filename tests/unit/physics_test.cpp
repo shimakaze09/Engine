@@ -20,7 +20,6 @@ namespace {
 
 std::size_t g_dispatchedPairCount = 0U;
 
-/// Handles test collision dispatch.
 void test_collision_dispatch(const std::uint32_t *pairs,
                              std::size_t pairCount) noexcept {
   static_cast<void>(pairs);
@@ -85,7 +84,6 @@ int check_physics_cvars_register_after_core_cvars() {
   return 0;
 }
 
-/// Handles check gravity step.
 int check_gravity_step() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -133,7 +131,6 @@ int check_gravity_step() {
   return 0;
 }
 
-/// Handles check overlap resolution.
 int check_overlap_resolution() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -206,7 +203,6 @@ int check_overlap_resolution() {
   return stillOverlapping ? 18 : 0;
 }
 
-/// Handles check static body immovable.
 int check_static_body_immovable() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -289,7 +285,6 @@ int check_static_body_immovable() {
   return dynamicMoved ? 0 : 29;
 }
 
-/// Handles check angular velocity integration.
 int check_angular_velocity_integration() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -341,7 +336,6 @@ int check_angular_velocity_integration() {
   return 0;
 }
 
-/// Handles check angular impulse from collision.
 int check_angular_impulse_from_collision() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -414,7 +408,6 @@ int check_angular_impulse_from_collision() {
   return 0;
 }
 
-/// Handles check zero inverse inertia prevents rotation.
 int check_zero_inverse_inertia_prevents_rotation() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -466,7 +459,6 @@ int check_zero_inverse_inertia_prevents_rotation() {
   return 0;
 }
 
-/// Handles check high restitution bounce.
 int check_high_restitution_bounce() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -541,7 +533,6 @@ int check_high_restitution_bounce() {
   return 0;
 }
 
-/// Handles check zero restitution no bounce.
 int check_zero_restitution_no_bounce() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -616,7 +607,6 @@ int check_zero_restitution_no_bounce() {
   return 0;
 }
 
-/// Handles check friction slows sliding.
 int check_friction_slows_sliding() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -695,7 +685,6 @@ int check_friction_slows_sliding() {
   return 0;
 }
 
-/// Handles check raycast hits aabb.
 int check_raycast_hits_aabb() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -748,7 +737,6 @@ int check_raycast_hits_aabb() {
   return 0;
 }
 
-/// Handles check raycast hits sphere.
 int check_raycast_hits_sphere() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -800,7 +788,6 @@ int check_raycast_hits_sphere() {
   return 0;
 }
 
-/// Handles check raycast misses.
 int check_raycast_misses() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -844,7 +831,6 @@ int check_raycast_misses() {
   return 0;
 }
 
-/// Handles check raycast returns closest.
 int check_raycast_returns_closest() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -899,7 +885,6 @@ int check_raycast_returns_closest() {
   return 0;
 }
 
-/// Handles check distance joint maintains distance.
 int check_distance_joint_maintains_distance() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -986,7 +971,6 @@ int check_distance_joint_maintains_distance() {
   return 0;
 }
 
-/// Handles check ccd catches fast projectile.
 int check_ccd_catches_fast_projectile() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1220,7 +1204,6 @@ int check_body_falls_asleep() {
   return 0;
 }
 
-/// Handles check collision wakes body.
 int check_collision_wakes_body() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1295,7 +1278,6 @@ int check_collision_wakes_body() {
   return 0;
 }
 
-/// Handles check wake body api.
 int check_wake_body_api() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1351,7 +1333,6 @@ int check_wake_body_api() {
   return 0;
 }
 
-/// Handles check bridge phase misuse rejected.
 int check_bridge_phase_misuse_rejected() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1404,7 +1385,6 @@ int check_bridge_phase_misuse_rejected() {
   return 0;
 }
 
-/// Handles check multi world physics isolation.
 int check_multi_world_physics_isolation() {
   std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
                                                      engine::runtime::World());
@@ -1469,7 +1449,6 @@ int check_multi_world_physics_isolation() {
   return 0;
 }
 
-/// Handles check collision bookkeeping scale.
 int check_collision_bookkeeping_scale() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());

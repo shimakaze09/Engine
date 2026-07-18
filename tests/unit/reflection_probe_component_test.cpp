@@ -8,12 +8,10 @@
 
 namespace {
 
-/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) noexcept {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
-/// Handles verify reflection probe crud.
 int verify_reflection_probe_crud() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -94,7 +92,6 @@ int verify_reflection_probe_crud() {
   return 0;
 }
 
-/// Handles verify reflection probe query and destroy.
 int verify_reflection_probe_query_and_destroy() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());

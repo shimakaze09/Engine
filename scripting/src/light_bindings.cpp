@@ -52,7 +52,6 @@ int lua_engine_add_light(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine remove light.
 int lua_engine_remove_light(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -64,7 +63,6 @@ int lua_engine_remove_light(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine has light.
 int lua_engine_has_light(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -75,7 +73,6 @@ int lua_engine_has_light(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set light color.
 int lua_engine_set_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 color{};
@@ -94,7 +91,6 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get light color.
 int lua_engine_get_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -112,7 +108,6 @@ int lua_engine_get_light_color(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine set light intensity.
 int lua_engine_set_light_intensity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -130,7 +125,6 @@ int lua_engine_set_light_intensity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get light intensity.
 int lua_engine_get_light_intensity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -146,7 +140,6 @@ int lua_engine_get_light_intensity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set light direction.
 int lua_engine_set_light_direction(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 dir{};

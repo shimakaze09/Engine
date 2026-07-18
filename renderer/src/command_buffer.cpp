@@ -61,7 +61,6 @@ ShaderProgramHandle load_configured_shader_program(
   return load_shader_program(vertexPath, fragmentPath);
 }
 
-/// Handles resolve pbr light uniforms.
 void resolve_pbr_light_uniforms(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   const std::uint32_t prog = backend.pbrProgram;
@@ -127,7 +126,6 @@ void resolve_pbr_light_uniforms(BackendState &backend,
   }
 }
 
-/// Handles resolve pbr shadow uniforms.
 void resolve_pbr_shadow_uniforms(BackendState &backend,
                                  const RenderDevice *dev) noexcept {
   const std::uint32_t prog = backend.pbrProgram;
@@ -1276,17 +1274,14 @@ void set_skybox_texture(TextureHandle cubemap) noexcept {
   renderer_context().activeSkyboxTexture = cubemap;
 }
 
-/// Returns the requested value for skybox texture.
 TextureHandle get_skybox_texture() noexcept {
   return renderer_context().activeSkyboxTexture;
 }
 
-/// Returns the requested value for active camera.
 CameraState get_active_camera() noexcept {
   return renderer_context().activeCamera;
 }
 
-/// Returns the requested value for scene viewport texture.
 std::uint32_t get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
   if (renderer_context().fxaaAppliedThisFrame) {
@@ -1295,7 +1290,6 @@ std::uint32_t get_scene_viewport_texture() noexcept {
   return pass_resource_gpu_texture(passRes.finalColor);
 }
 
-/// Handles renderer get last frame stats.
 RendererFrameStats renderer_get_last_frame_stats() noexcept {
   return renderer_context().lastFrameStats;
 }

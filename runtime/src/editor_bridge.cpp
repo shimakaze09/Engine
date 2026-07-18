@@ -15,7 +15,6 @@ void set_editor_bridge(const EditorBridge *bridge) noexcept {
   g_editorBridge = bridge;
 }
 
-/// Handles editor bridge.
 const EditorBridge *editor_bridge() noexcept {
   return g_editorBridge;
 }

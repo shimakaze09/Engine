@@ -8,7 +8,6 @@
 
 namespace engine::editor {
 
-/// Stores transform edit command data used by the engine.
 struct TransformEditCommand final : EditorCommand {
   runtime::Entity entity{};
   runtime::Transform oldTransform{};

@@ -15,7 +15,6 @@
 
 namespace engine::renderer {
 
-/// Handles shadow cascade resolution.
 int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
   if (cascadeIndex >= kShadowCascadeCount) {
     return kShadowCascadeResolutions[kShadowCascadeCount - 1U];
@@ -23,7 +22,6 @@ int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
   return kShadowCascadeResolutions[cascadeIndex];
 }
 
-/// Handles compute cascade splits.
 CascadeSplits compute_cascade_splits(float nearClip, float farClip,
                                      float lambda) noexcept {
   CascadeSplits splits{};
@@ -45,7 +43,6 @@ namespace {
 
 constexpr float kShadowEpsilon = 1.0e-6F;
 
-/// Handles snap to grid.
 float snap_to_grid(float value, float step) noexcept {
   if (step <= kShadowEpsilon) {
     return value;
@@ -53,7 +50,6 @@ float snap_to_grid(float value, float step) noexcept {
   return std::floor((value / step) + 0.5F) * step;
 }
 
-/// Handles choose light up.
 math::Vec3 choose_light_up(const math::Vec3 &lightDir) noexcept {
   return (std::abs(lightDir.y) > 0.99F) ? math::Vec3(1.0F, 0.0F, 0.0F)
                                         : math::Vec3(0.0F, 1.0F, 0.0F);
@@ -83,7 +79,6 @@ void extract_frustum_corners(const math::Mat4 &invViewProj,
 
 } // namespace
 
-/// Handles compute cascade matrix.
 math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
                                   const math::Vec3 &lightDir, float cascadeNear,
@@ -219,7 +214,6 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
   return math::mul(lightProj, lightView);
 }
 
-/// Handles snap to texel.
 math::Mat4 snap_to_texel(const math::Mat4 &lightViewProj,
                          int shadowMapSize) noexcept {
   const int safeShadowMapSize =

@@ -135,7 +135,6 @@ struct GameState final {
     entryCount = 0U;
   }
 
-/// Finds the matching object or resource for entry.
 private:
   /// Finds the matching object or resource for entry.
   Entry *find_entry(const char *key) noexcept {

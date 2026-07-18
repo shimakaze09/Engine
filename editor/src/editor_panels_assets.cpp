@@ -287,7 +287,6 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
 }
 
-/// Handles draw asset browser panel.
 
 } // namespace
 
@@ -324,6 +323,5 @@ void draw_asset_browser_panel() noexcept {
   ImGui::End();
 }
 
-/// Handles project world to screen.
 
 } // namespace engine::editor

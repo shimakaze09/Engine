@@ -20,7 +20,6 @@ constexpr std::size_t kMaxEventTypes = 64U;
 constexpr std::size_t kMaxSubscribersPerType = 16U;
 [[maybe_unused]] constexpr std::uint32_t kMaxEmitDepth = 64U;
 
-/// Stores typed subscriber data used by the engine.
 struct TypedSubscriber final {
   RawEventHandler handler = nullptr;
   void *userData = nullptr;
@@ -31,7 +30,6 @@ constexpr std::size_t kTypedSnapshotBytes =
 static_assert(kTypedSnapshotBytes <= 1024U,
               "typed emit snapshot must remain bounded");
 
-/// Stores typed slot data used by the engine.
 struct TypedSlot final {
   EventTypeId typeId = nullptr;
   std::array<TypedSubscriber, kMaxSubscribersPerType> subscribers{};
@@ -77,7 +75,6 @@ constexpr std::size_t kMaxChannels = 64U;
 constexpr std::size_t kMaxSubscribersPerChannel = 16U;
 constexpr std::size_t kMaxChannelNameLength = 64U;
 
-/// Stores channel subscriber data used by the engine.
 struct ChannelSubscriber final {
   ChannelHandler handler = nullptr;
   void *userData = nullptr;
@@ -88,7 +85,6 @@ constexpr std::size_t kChannelSnapshotBytes =
 static_assert(kChannelSnapshotBytes <= 1024U,
               "channel emit snapshot must remain bounded");
 
-/// Stores channel slot data used by the engine.
 struct ChannelSlot final {
   char name[kMaxChannelNameLength] = {};
   std::uint32_t nameHash = 0U;
@@ -100,7 +96,6 @@ struct ChannelSlot final {
 std::array<ChannelSlot, kMaxChannels> g_channelSlots{};
 thread_local std::uint32_t g_emitDepth = 0U;
 
-/// Stores emit depth scope data used by the engine.
 struct EmitDepthScope final {
   EmitDepthScope() noexcept {
     assert(g_emitDepth < kMaxEmitDepth);

@@ -33,10 +33,8 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
-/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
-/// Handles test generated bindings.
 bool test_generated_bindings() noexcept {
   if (!engine::scripting::initialize_scripting()) {
     return false;

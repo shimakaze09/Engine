@@ -54,7 +54,6 @@ void destroy_bloom_resources(BackendState &b) noexcept {
   b.bloomAllocatedHeight = 0;
 }
 
-/// Handles ensure bloom resources.
 void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
     return;
@@ -101,7 +100,6 @@ void destroy_luminance_resources(BackendState &b) noexcept {
   b.lumAllocatedHeight = 0;
 }
 
-/// Handles ensure luminance resources.
 void ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept {
   if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
@@ -129,7 +127,6 @@ void ensure_luminance_resources(BackendState &b, int width,
   b.lumAllocatedHeight = height;
 }
 
-/// Handles generate ssao kernel.
 void generate_ssao_kernel(float *kernel, int count) noexcept {
   unsigned int seed = 12345U;
   auto nextFloat = [&seed]() -> float {

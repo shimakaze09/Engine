@@ -46,7 +46,6 @@ void shutdown_logging() noexcept {
   g_loggingInitialized.store(false, std::memory_order_release);
 }
 
-/// Handles log message.
 void log_message(LogLevel level,
                  const char *channel,
                  const char *message) noexcept {
@@ -77,7 +76,6 @@ void log_message(LogLevel level,
   }
 }
 
-/// Handles log frame metrics.
 void log_frame_metrics(std::uint32_t frameIndex,
                        double frameMs,
                        std::size_t frameBytes,

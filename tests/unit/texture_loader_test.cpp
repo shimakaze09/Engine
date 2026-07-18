@@ -10,7 +10,6 @@
 
 namespace {
 
-/// Handles check init shutdown.
 int check_init_shutdown() {
   const bool initOk = engine::renderer::initialize_texture_system();
   if (!initOk) {
@@ -27,7 +26,6 @@ int check_init_shutdown() {
   return 0;
 }
 
-/// Handles check null path.
 int check_null_path() {
   const bool initOk = engine::renderer::initialize_texture_system();
   if (!initOk) {
@@ -45,7 +43,6 @@ int check_null_path() {
   return 0;
 }
 
-/// Handles check invalid handle.
 int check_invalid_handle() {
   const bool initOk = engine::renderer::initialize_texture_system();
   if (!initOk) {
@@ -80,7 +77,6 @@ int check_invalid_handle() {
   return 0;
 }
 
-/// Handles check load before init.
 int check_load_before_init() {
   // Loading before init should return invalid.
   engine::renderer::shutdown_texture_system();
@@ -120,7 +116,6 @@ int check_stb_input_size_validation() {
   return 0;
 }
 
-/// Handles check texture asset database.
 int check_texture_asset_database() {
   // Basic texture asset database test.
   // TextureAssetRecord is already compiled into asset_database;
@@ -141,7 +136,6 @@ int check_texture_asset_database() {
   return 0;
 }
 
-/// Handles check cubemap invalid args.
 int check_cubemap_invalid_args() {
   const bool initOk = engine::renderer::initialize_texture_system();
   if (!initOk) {
@@ -166,7 +160,6 @@ int check_cubemap_invalid_args() {
   return 0;
 }
 
-/// Handles check skybox assignment.
 int check_skybox_assignment() {
   engine::renderer::TextureHandle handle{};
   handle.id = 123U;

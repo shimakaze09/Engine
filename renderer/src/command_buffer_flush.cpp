@@ -52,13 +52,11 @@ constexpr std::uint32_t kInstanceModelAttribCount = 4U;
 constexpr std::uint32_t kInstanceFoliageAttrib = 7U;
 constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
 
-/// Stores shadow candidate data used by the engine.
 struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
   float distSq = 0.0F;
 };
 
-/// Handles upload pbr lighting uniforms.
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
@@ -195,7 +193,6 @@ void upload_height_fog_uniforms(
   }
 }
 
-/// Handles upload pbr distance fog uniforms.
 void upload_pbr_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -209,7 +206,6 @@ void upload_pbr_distance_fog_uniforms(
       settings);
 }
 
-/// Handles upload pbr height fog uniforms.
 void upload_pbr_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
@@ -223,7 +219,6 @@ void upload_pbr_height_fog_uniforms(
       settings);
 }
 
-/// Handles upload pbr foliage uniforms.
 void upload_pbr_foliage_uniforms(const BackendState &backend,
                                  const RenderDevice *dev,
                                  const DrawCommand &command) noexcept {
@@ -241,7 +236,6 @@ void upload_pbr_foliage_uniforms(const BackendState &backend,
   }
 }
 
-/// Handles upload gbuffer foliage uniforms.
 void upload_gbuffer_foliage_uniforms(const BackendState &backend,
                                      const RenderDevice *dev,
                                      const DrawCommand &command) noexcept {
@@ -259,7 +253,6 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
   }
 }
 
-/// Handles upload deferred distance fog uniforms.
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {
@@ -271,7 +264,6 @@ void upload_deferred_distance_fog_uniforms(
       settings);
 }
 
-/// Handles upload deferred height fog uniforms.
 void upload_deferred_height_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const HeightFogSettings &settings) noexcept {
@@ -285,7 +277,6 @@ void upload_deferred_height_fog_uniforms(
       settings);
 }
 
-/// Handles bind pbr shadow uniforms.
 void bind_pbr_shadow_uniforms(const BackendState &backend,
                               const RenderDevice *dev,
                               const SceneLightData &lights, bool shadowEnabled,
@@ -376,7 +367,6 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
   }
 }
 
-/// Handles unbind pbr shadow textures.
 void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   if (dev == nullptr) {
     return;
@@ -394,7 +384,6 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   }
 }
 
-/// Handles distance fog settings from cvars.
 DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   DistanceFogSettings settings{};
   settings.mode =
@@ -412,7 +401,6 @@ DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   return normalize_distance_fog_settings(settings);
 }
 
-/// Handles height fog settings from cvars.
 HeightFogSettings height_fog_settings_from_cvars() noexcept {
   HeightFogSettings settings{};
   settings.enabled = core::cvar_get_bool("r_height_fog", settings.enabled);
@@ -433,7 +421,6 @@ bool can_upload_instance_matrices(const RenderDevice *dev) noexcept {
          (dev->draw_elements_triangles_u32_instanced != nullptr);
 }
 
-/// Handles upload instance matrices.
 bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                               const GpuMesh &mesh,
                               CommandBufferView commandBufferView,

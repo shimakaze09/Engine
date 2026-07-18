@@ -111,7 +111,6 @@ bool append_utf8(char *out, std::size_t outCapacity, std::size_t *outLength,
   return true;
 }
 
-/// Handles skip whitespace.
 void skip_whitespace(const char *&cursor, const char *end) noexcept {
   while ((cursor < end) && is_whitespace(*cursor)) {
     ++cursor;

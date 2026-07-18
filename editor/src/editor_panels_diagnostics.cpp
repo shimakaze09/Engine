@@ -122,7 +122,6 @@ void draw_profiler_flame_graph() noexcept {
   ImGui::Dummy(ImVec2(graphWidth, graphHeight));
 }
 
-/// Handles draw stats panel.
 
 } // namespace
 
@@ -177,7 +176,6 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
   ImGui::End();
 }
 
-/// Handles draw in game stats overlay.
 
 void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   constexpr ImGuiWindowFlags kOverlayFlags =
@@ -202,6 +200,5 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   ImGui::End();
 }
 
-/// Handles draw asset tree.
 
 } // namespace engine::editor

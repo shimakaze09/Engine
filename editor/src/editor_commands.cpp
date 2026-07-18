@@ -102,7 +102,6 @@ bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
   return false;
 }
 
-/// Handles apply component snapshot.
 
 bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
                               bool exists,
@@ -177,7 +176,6 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
   return false;
 }
 
-/// Stores component edit command data used by the engine.
 
 void execute_component_add(runtime::Entity entity, ComponentEditType type,
                            const ComponentEditSnapshot &after) noexcept {
@@ -199,7 +197,6 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
   editor_session().commandHistory.execute(cmd);
 }
 
-/// Handles execute component remove.
 
 void execute_component_remove(runtime::Entity entity,
                               ComponentEditType type) noexcept {
@@ -222,7 +219,6 @@ void execute_component_remove(runtime::Entity entity,
   editor_session().commandHistory.execute(cmd);
 }
 
-/// Handles default component snapshot.
 
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept {
@@ -276,7 +272,6 @@ ComponentEditSnapshot default_component_snapshot(
   return snapshot;
 }
 
-/// Handles make default entity name.
 
 void make_default_entity_name(std::uint32_t entityIndex,
                               runtime::NameComponent *outName) noexcept {
@@ -288,6 +283,5 @@ void make_default_entity_name(std::uint32_t entityIndex,
   outName->name[sizeof(outName->name) - 1U] = '\0';
 }
 
-/// Handles capture play snapshot.
 
 } // namespace engine::editor

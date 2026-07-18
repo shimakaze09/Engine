@@ -97,7 +97,6 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderFinish(dockspaceId);
 }
 
-/// Handles draw editor panels.
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   static_cast<void>(frameMs);
   static_cast<void>(utilizationPct);
@@ -221,7 +220,6 @@ void shutdown_editor() noexcept {
   editor_session().worldRestoreFailed = false;
 }
 
-/// Handles editor new frame.
 void editor_new_frame() noexcept {
   if (!editor_session().initialized) {
     return;
@@ -253,7 +251,6 @@ void editor_new_frame() noexcept {
   }
 }
 
-/// Handles editor render.
 void editor_render(float frameMs, float utilizationPct) noexcept {
   if (!editor_session().initialized) {
     return;
@@ -264,7 +261,6 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-/// Handles editor process event.
 void editor_process_event(void *sdlEvent) noexcept {
   if (!editor_session().initialized || (sdlEvent == nullptr)) {
     return;
@@ -273,7 +269,6 @@ void editor_process_event(void *sdlEvent) noexcept {
   ImGui_ImplSDL2_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
 }
 
-/// Handles editor set world.
 void editor_set_world(runtime::World *world) noexcept {
   if (editor_session().world != world) {
     editor_session().commandHistory.clear();
@@ -289,15 +284,12 @@ void editor_set_world(runtime::World *world) noexcept {
   }
 }
 
-/// Handles editor is playing.
 bool editor_is_playing() noexcept { return editor_session().playState == PlayState::Playing; }
 
-/// Handles editor is paused.
 bool editor_is_paused() noexcept { return editor_session().playState == PlayState::Paused; }
 
 namespace {
 
-/// Handles editor wants capture keyboard.
 bool editor_wants_capture_keyboard() noexcept {
   if (!editor_session().initialized) {
     return false;
@@ -306,7 +298,6 @@ bool editor_wants_capture_keyboard() noexcept {
   return ImGui::GetIO().WantCaptureKeyboard;
 }
 
-/// Handles editor wants capture mouse.
 bool editor_wants_capture_mouse() noexcept {
   if (!editor_session().initialized) {
     return false;

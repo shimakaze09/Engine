@@ -6,7 +6,6 @@
 
 namespace engine::runtime {
 
-/// Handles ensure runtime reflection registered.
 void ensure_runtime_reflection_registered() noexcept {
   // Intentionally empty: calling this symbol forces this translation unit
   // to link so static registration blocks execute.

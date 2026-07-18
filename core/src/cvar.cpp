@@ -24,7 +24,6 @@ union CVarValue final {
   char str[kMaxStringValLen];
 };
 
-/// Stores cvar entry data used by the engine.
 struct CVarEntry final {
   char name[kMaxNameLen] = {};
   char desc[kMaxDescLen] = {};
@@ -106,7 +105,6 @@ bool cvar_register_bool(const char *name, bool defaultValue,
   return true;
 }
 
-/// Handles cvar register int.
 bool cvar_register_int(const char *name, int defaultValue,
                        const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -129,7 +127,6 @@ bool cvar_register_int(const char *name, int defaultValue,
   return true;
 }
 
-/// Handles cvar register float.
 bool cvar_register_float(const char *name, float defaultValue,
                          const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -152,7 +149,6 @@ bool cvar_register_float(const char *name, float defaultValue,
   return true;
 }
 
-/// Handles cvar register string.
 bool cvar_register_string(const char *name, const char *defaultValue,
                           const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -188,7 +184,6 @@ bool cvar_get_bool(const char *name, bool fallback) noexcept {
   return g_entries[idx].value.b;
 }
 
-/// Handles cvar get int.
 int cvar_get_int(const char *name, int fallback) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   const int idx = find_cvar_unlocked(name);
@@ -198,7 +193,6 @@ int cvar_get_int(const char *name, int fallback) noexcept {
   return g_entries[idx].value.i;
 }
 
-/// Handles cvar get float.
 float cvar_get_float(const char *name, float fallback) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   const int idx = find_cvar_unlocked(name);
@@ -208,7 +202,6 @@ float cvar_get_float(const char *name, float fallback) noexcept {
   return g_entries[idx].value.f;
 }
 
-/// Handles cvar get string.
 const char *cvar_get_string(const char *name, const char *fallback) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   const int idx = find_cvar_unlocked(name);
@@ -232,7 +225,6 @@ bool cvar_set_bool(const char *name, bool value) noexcept {
   return true;
 }
 
-/// Handles cvar set int.
 bool cvar_set_int(const char *name, int value) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   const int idx = find_cvar_unlocked(name);
@@ -243,7 +235,6 @@ bool cvar_set_int(const char *name, int value) noexcept {
   return true;
 }
 
-/// Handles cvar set float.
 bool cvar_set_float(const char *name, float value) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   const int idx = find_cvar_unlocked(name);
@@ -254,7 +245,6 @@ bool cvar_set_float(const char *name, float value) noexcept {
   return true;
 }
 
-/// Handles cvar set string.
 bool cvar_set_string(const char *name, const char *value) noexcept {
   if (value == nullptr) {
     return false;
@@ -270,7 +260,6 @@ bool cvar_set_string(const char *name, const char *value) noexcept {
   return true;
 }
 
-/// Handles cvar set from string.
 bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   if ((name == nullptr) || (valueStr == nullptr)) {
     return false;
@@ -314,7 +303,6 @@ bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   }
 }
 
-/// Handles cvar get all.
 std::size_t cvar_get_all(CVarInfo *out, std::size_t maxEntries) noexcept {
   if (out == nullptr) {
     return 0U;

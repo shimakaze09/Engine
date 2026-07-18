@@ -7,12 +7,10 @@
 
 namespace {
 
-/// Stores pointer sized item data used by the engine.
 struct PointerSizedItem final {
   void *data = nullptr;
 };
 
-/// Stores two pointer item data used by the engine.
 struct TwoPointerItem final {
   void *a = nullptr;
   void *b = nullptr;

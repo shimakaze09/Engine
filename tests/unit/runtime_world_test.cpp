@@ -8,12 +8,10 @@
 
 namespace {
 
-/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
-/// Handles verify persistent id index.
 int verify_persistent_id_index() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -58,7 +56,6 @@ int verify_persistent_id_index() {
   return 0;
 }
 
-/// Handles verify hierarchical transform propagation.
 int verify_hierarchical_transform_propagation() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -166,7 +163,6 @@ int verify_hierarchical_transform_propagation() {
   return 0;
 }
 
-/// Handles verify transform cycle is stable.
 int verify_transform_cycle_is_stable() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -214,7 +210,6 @@ int verify_transform_cycle_is_stable() {
   return 0;
 }
 
-/// Handles verify persistent index tombstones.
 int verify_persistent_index_tombstones() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -275,7 +270,6 @@ int verify_persistent_index_tombstones() {
   return 0;
 }
 
-/// Handles verify variadic for each.
 int verify_variadic_for_each() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());

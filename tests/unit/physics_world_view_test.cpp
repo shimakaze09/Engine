@@ -22,7 +22,6 @@ using engine::physics::Transform;
 
 // Minimal concrete implementation to verify the interface compiles and links.
 class StubPhysicsWorld final : public PhysicsWorldView {
-/// Handles transform count.
 public:
   std::size_t transform_count() const noexcept override { return 0U; }
 
@@ -106,7 +105,6 @@ int check_interface_instantiation() {
   return 0;
 }
 
-/// Handles check simulation token invalid.
 int check_simulation_token_invalid() {
   StubPhysicsWorld stub;
   stub.m_inSimulation = false;
@@ -118,7 +116,6 @@ int check_simulation_token_invalid() {
   return 0;
 }
 
-/// Handles check simulation token valid.
 int check_simulation_token_valid() {
   StubPhysicsWorld stub;
   stub.m_inSimulation = true;
@@ -130,7 +127,6 @@ int check_simulation_token_valid() {
   return 0;
 }
 
-/// Handles check physics context accessible.
 int check_physics_context_accessible() {
   StubPhysicsWorld stub;
   PhysicsWorldView &view = stub;
@@ -150,7 +146,6 @@ int check_physics_context_accessible() {
 
 using TestFn = int (*)();
 
-/// Stores test entry data used by the engine.
 struct TestEntry {
   const char *name;
   TestFn fn;

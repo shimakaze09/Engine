@@ -42,7 +42,6 @@ bool g_inputInitialized = false;
 std::array<bool, kMaxScancodes> g_keyState{};
 std::array<bool, kMaxScancodes> g_prevKeyState{};
 
-/// Stores mouse state internal data used by the engine.
 struct MouseStateInternal final {
   int x = 0;
   int y = 0;
@@ -55,7 +54,6 @@ struct MouseStateInternal final {
 
 MouseStateInternal g_mouse{};
 
-/// Stores gamepad state internal data used by the engine.
 struct GamepadStateInternal final {
   bool connected = false;
   std::array<bool, kMaxGamepadButtons> buttons{};
@@ -64,7 +62,6 @@ struct GamepadStateInternal final {
 
 GamepadStateInternal g_gamepad{};
 
-/// Stores action binding data used by the engine.
 struct ActionBinding final {
   char name[kMaxActionNameLength + 1U] = {};
   KeyScancode key = -1;
@@ -72,7 +69,6 @@ struct ActionBinding final {
   bool occupied = false;
 };
 
-/// Stores axis binding data used by the engine.
 struct AxisBinding final {
   char name[kMaxActionNameLength + 1U] = {};
   KeyScancode negativeKey = -1;
@@ -153,7 +149,6 @@ void begin_input_frame() noexcept {
   touch_begin_frame();
 }
 
-/// Handles input process event.
 void input_process_event(const void *nativeEvent) noexcept {
   if (nativeEvent == nullptr) {
     return;
@@ -270,7 +265,6 @@ bool is_key_released(KeyScancode scancode) noexcept {
   return !g_keyState[idx] && g_prevKeyState[idx];
 }
 
-/// Handles mouse state.
 MouseState mouse_state() noexcept {
   MouseState state{};
   state.x = g_mouse.x;
@@ -301,7 +295,6 @@ bool is_mouse_button_pressed(int button) noexcept {
   return g_mouse.buttons[idx] && !g_mouse.prevButtons[idx];
 }
 
-/// Handles register action.
 bool register_action(const char *name, KeyScancode key,
                      int mouseButton) noexcept {
   if (name == nullptr) {
@@ -370,12 +363,10 @@ bool is_action_pressed(const char *name) noexcept {
   return false;
 }
 
-/// Handles action value.
 float action_value(const char *name) noexcept {
   return is_action_down(name) ? 1.0F : 0.0F;
 }
 
-/// Handles register axis.
 bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept {
   if (name == nullptr) {
@@ -408,7 +399,6 @@ bool register_axis(const char *name, KeyScancode negativeKey,
   return false;
 }
 
-/// Handles axis value.
 float axis_value(const char *name) noexcept {
   const AxisBinding *axis = find_axis(name);
   if (axis == nullptr) {
@@ -438,7 +428,6 @@ bool is_gamepad_button_down(int button) noexcept {
   return g_gamepad.buttons[static_cast<std::size_t>(button)];
 }
 
-/// Handles gamepad axis value.
 float gamepad_axis_value(int axis, int deadzone) noexcept {
   if ((axis < 0) || (axis >= kMaxGamepadAxes) || !g_gamepad.connected) {
     return 0.0F;

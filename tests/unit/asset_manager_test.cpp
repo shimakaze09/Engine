@@ -7,7 +7,6 @@
 
 namespace {
 
-/// Handles verify failed load sets failed state.
 int verify_failed_load_sets_failed_state() {
   std::unique_ptr<engine::renderer::AssetManager> manager(
       new (std::nothrow) engine::renderer::AssetManager());
@@ -50,7 +49,6 @@ int verify_failed_load_sets_failed_state() {
   return 0;
 }
 
-/// Handles verify release during pending load unloads.
 int verify_release_during_pending_load_unloads() {
   std::unique_ptr<engine::renderer::AssetManager> manager(
       new (std::nothrow) engine::renderer::AssetManager());
@@ -87,7 +85,6 @@ int verify_release_during_pending_load_unloads() {
   return 0;
 }
 
-/// Handles verify unload clears registry slot.
 int verify_unload_clears_registry_slot() {
   std::unique_ptr<engine::renderer::AssetManager> manager(
       new (std::nothrow) engine::renderer::AssetManager());
@@ -139,7 +136,6 @@ int verify_unload_clears_registry_slot() {
   return 0;
 }
 
-/// Handles verify auto unload from release intent.
 int verify_auto_unload_from_release_intent() {
   std::unique_ptr<engine::renderer::AssetManager> manager(
       new (std::nothrow) engine::renderer::AssetManager());

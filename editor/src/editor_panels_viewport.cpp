@@ -96,7 +96,6 @@ bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
   return true;
 }
 
-/// Handles draw selected collider overlay.
 void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
                                     const math::Mat4 &viewProjection,
                                     const ImVec2 &viewportOrigin,
@@ -159,7 +158,6 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
   }
 }
 
-/// Handles draw scene viewport panel.
 
 } // namespace
 
@@ -328,6 +326,5 @@ void draw_scene_viewport_panel() noexcept {
   ImGui::End();
 }
 
-/// Handles setup default dock layout.
 
 } // namespace engine::editor

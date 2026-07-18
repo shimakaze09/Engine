@@ -57,7 +57,6 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine instantiate.
 int lua_engine_instantiate(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || !lua_isstring(state, 1)) {
     lua_pushnil(state);
@@ -134,7 +133,6 @@ int lua_engine_is_asset_ready(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine add script component.
 int lua_engine_add_script_component(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -159,7 +157,6 @@ int lua_engine_add_script_component(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine remove script component.
 int lua_engine_remove_script_component(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {

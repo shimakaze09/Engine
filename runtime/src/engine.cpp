@@ -27,7 +27,6 @@ EngineConfig g_activeConfig{};
 
 } // namespace
 
-/// Handles bootstrap.
 bool bootstrap() noexcept {
   EngineConfig config{};
   config.core.frameAllocatorBytes = kFrameAllocatorBytes;

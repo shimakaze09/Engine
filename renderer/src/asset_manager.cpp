@@ -94,7 +94,6 @@ bool pop_request(AssetManager *manager, AssetRequest *outRequest) noexcept {
   return true;
 }
 
-/// Handles ensure record.
 bool ensure_record(AssetDatabase *database,
                    AssetId id,
                    const char *sourcePath,
@@ -118,7 +117,6 @@ bool ensure_record(AssetDatabase *database,
   return true;
 }
 
-/// Handles unload registry mesh.
 void unload_registry_mesh(GpuMeshRegistry *registry,
                           MeshHandle handle) noexcept {
   if ((registry == nullptr) || (handle == kInvalidMeshHandle)) {
@@ -139,7 +137,6 @@ void unload_registry_mesh(GpuMeshRegistry *registry,
   registry->meshes[meshId] = GpuMesh{};
 }
 
-/// Handles unload record mesh.
 void unload_record_mesh(MeshAssetRecord *record,
                         GpuMeshRegistry *registry) noexcept {
   if (record == nullptr) {
@@ -150,7 +147,6 @@ void unload_record_mesh(MeshAssetRecord *record,
   record->runtimeMesh = kInvalidMeshHandle;
 }
 
-/// Handles sync requested residency.
 void sync_requested_residency(AssetManager *manager,
                               AssetDatabase *database) noexcept {
   if ((manager == nullptr) || (database == nullptr)) {
@@ -193,7 +189,6 @@ void sync_requested_residency(AssetManager *manager,
   }
 }
 
-/// Handles process load like request.
 bool process_load_like_request(AssetDatabase *database,
                                GpuMeshRegistry *registry,
                                const AssetRequest &request,
@@ -268,7 +263,6 @@ bool process_load_like_request(AssetDatabase *database,
 
 } // namespace
 
-/// Handles clear asset manager.
 void clear_asset_manager(AssetManager *manager) noexcept {
   if (manager == nullptr) {
     return;
@@ -280,7 +274,6 @@ void clear_asset_manager(AssetManager *manager) noexcept {
   manager->droppedRequests = 0U;
 }
 
-/// Handles pending asset request count.
 std::size_t pending_asset_request_count(const AssetManager *manager) noexcept {
   if (manager == nullptr) {
     return 0U;
@@ -289,7 +282,6 @@ std::size_t pending_asset_request_count(const AssetManager *manager) noexcept {
   return manager->requestCount;
 }
 
-/// Handles queue mesh load.
 bool queue_mesh_load(AssetManager *manager,
                      AssetDatabase *database,
                      AssetId id,
@@ -322,7 +314,6 @@ bool queue_mesh_load(AssetManager *manager,
   return push_request(manager, AssetRequestType::Load, id, sourcePath);
 }
 
-/// Handles queue mesh unload.
 bool queue_mesh_unload(AssetManager *manager,
                        AssetDatabase *database,
                        AssetId id) noexcept {
@@ -351,7 +342,6 @@ bool queue_mesh_unload(AssetManager *manager,
   return push_request(manager, AssetRequestType::Unload, id, nullptr);
 }
 
-/// Handles queue mesh reload.
 bool queue_mesh_reload(AssetManager *manager,
                        AssetDatabase *database,
                        AssetId id,

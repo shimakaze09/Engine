@@ -19,7 +19,6 @@ namespace {
 
 engine::tests::TestContext g_tests;
 
-/// Handles check.
 void check(bool condition, const char *name) noexcept {
   g_tests.check(condition, name);
 }

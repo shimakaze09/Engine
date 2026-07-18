@@ -24,7 +24,6 @@ constexpr std::uint32_t kGBufferDepthSlot = 7U;
 constexpr std::uint32_t kSsaoTextureSlot = 8U;
 constexpr std::uint32_t kSsaoBlurTextureSlot = 9U;
 
-/// Stores pass resource state data used by the engine.
 struct PassResourceState final {
   bool initialized = false;
   int width = 0;
@@ -299,7 +298,6 @@ void shutdown_pass_resources() noexcept {
   g_state = PassResourceState{};
 }
 
-/// Handles resize pass resources.
 void resize_pass_resources(int width, int height) noexcept {
   if (!g_state.initialized) {
     return;
@@ -324,10 +322,8 @@ void resize_pass_resources(int width, int height) noexcept {
   g_state = next;
 }
 
-/// Returns the requested value for pass resources.
 const PassResources &get_pass_resources() noexcept { return g_state.resources; }
 
-/// Handles pass resource gpu texture.
 std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kSceneColorSlot) {
     return g_state.sceneColorTexture;
@@ -359,7 +355,6 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   return 0U;
 }
 
-/// Handles pass resource framebuffer.
 std::uint32_t
 pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
   if (colorAttachment.id == kSceneColorSlot) {

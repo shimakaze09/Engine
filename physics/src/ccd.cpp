@@ -79,7 +79,6 @@ SupportFn resolve_support(const Collider &col) noexcept {
   }
 }
 
-/// Handles resolve support data.
 const void *resolve_support_data(const PhysicsContext &context,
                                   const Collider &col,
                                   Entity entity, float *storage) noexcept {
@@ -175,12 +174,10 @@ math::Vec3 contact_normal_between(const Collider &colA,
 
 } // namespace
 
-/// Handles ccd velocity threshold.
 float ccd_velocity_threshold() noexcept {
   return core::cvar_get_float("physics.ccd_threshold", 2.0F);
 }
 
-/// Handles bilateral advance ccd.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity,
                                      const RigidBody &body,

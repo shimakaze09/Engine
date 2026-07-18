@@ -6,11 +6,11 @@ struct lua_State;
 
 namespace engine::scripting {
 
-/// Handles Lua engine.on_touch(callback).
+/// Lua binding: Lua engine.on_touch(callback).
 int lua_engine_on_touch(lua_State *state) noexcept;
-/// Handles Lua engine.on_gesture(type, callback).
+/// Lua binding: Lua engine.on_gesture(type, callback).
 int lua_engine_on_gesture(lua_State *state) noexcept;
-/// Handles Lua engine.set_touch_mouse_emulation(enabled).
+/// Lua binding: Lua engine.set_touch_mouse_emulation(enabled).
 int lua_engine_set_touch_mouse_emulation(lua_State *state) noexcept;
 
 /// Releases Lua registry refs and unregisters touch/gesture callbacks.

@@ -77,7 +77,6 @@ void mark_modified(bool *modified, bool changed) noexcept {
   }
 }
 
-/// Handles draw vec2 field.
 void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -95,7 +94,6 @@ void draw_vec2_field(const char *label, math::Vec2 &value,
   ImGui::PopID();
 }
 
-/// Handles draw vec3 field.
 void draw_vec3_field(const char *label, math::Vec3 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -117,7 +115,6 @@ void draw_vec3_field(const char *label, math::Vec3 &value,
   ImGui::PopID();
 }
 
-/// Handles draw vec4 field.
 void draw_vec4_field(const char *label, math::Vec4 &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -143,7 +140,6 @@ void draw_vec4_field(const char *label, math::Vec4 &value,
   ImGui::PopID();
 }
 
-/// Handles draw quat field.
 void draw_quat_field(const char *label, math::Quat &value,
                      bool *modified) noexcept {
   constexpr ImGuiInputTextFlags kCommitFlags = ImGuiInputTextFlags_None;
@@ -169,7 +165,6 @@ void draw_quat_field(const char *label, math::Quat &value,
   ImGui::PopID();
 }
 
-/// Handles draw field.
 void draw_field(const core::TypeDescriptor &desc, void *instance,
                 const core::TypeField &field, bool *modified) noexcept {
   if ((instance == nullptr) || (field.name == nullptr)) {
@@ -243,7 +238,6 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
   }
 }
 
-/// Handles draw reflected component.
 bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   if ((typeName == nullptr) || (instance == nullptr)) {
     return false;
@@ -264,7 +258,6 @@ bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   return modified;
 }
 
-/// Handles draw main menu bar.
 
 bool draw_remove_component_button(const char *id, bool editable) noexcept {
   if (!editable || (id == nullptr)) {
@@ -279,7 +272,6 @@ bool draw_remove_component_button(const char *id, bool editable) noexcept {
   return removePressed;
 }
 
-/// Handles draw add component combo.
 void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   if (!editable || (editor_session().world == nullptr)) {
     return;
@@ -416,7 +408,6 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   ImGui::EndCombo();
 }
 
-/// Handles draw foliage patch fields.
 void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
                                bool editable, bool *modified) noexcept {
   if (!editable) {
@@ -505,7 +496,6 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
   }
 }
 
-/// Handles draw toolbar.
 
 } // namespace
 
@@ -962,6 +952,5 @@ void draw_inspector_panel() noexcept {
   ImGui::End();
 }
 
-/// Handles draw profiler flame graph.
 
 } // namespace engine::editor

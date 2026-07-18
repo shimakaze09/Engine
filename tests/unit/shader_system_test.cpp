@@ -125,7 +125,6 @@ static void teardown_shader_files() noexcept {
   engine::core::shutdown_logging();
 }
 
-/// Handles test init shutdown.
 static void test_init_shutdown() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -137,7 +136,6 @@ static void test_init_shutdown() {
   ++g_passed;
 }
 
-/// Handles test variant key order independent.
 static void test_variant_key_order_independent() {
   using namespace engine::renderer;
 
@@ -159,7 +157,6 @@ static void test_variant_key_order_independent() {
   ++g_passed;
 }
 
-/// Handles test variant key distinguishes values.
 static void test_variant_key_distinguishes_values() {
   using namespace engine::renderer;
 
@@ -182,7 +179,6 @@ static void test_variant_key_distinguishes_values() {
   ++g_passed;
 }
 
-/// Handles test material shader define selection default material.
 static void test_material_shader_define_selection_default_material() {
   using namespace engine::renderer;
 
@@ -194,7 +190,6 @@ static void test_material_shader_define_selection_default_material() {
   ++g_passed;
 }
 
-/// Handles test material shader define selection feature flags.
 static void test_material_shader_define_selection_feature_flags() {
   using namespace engine::renderer;
 
@@ -222,7 +217,6 @@ static void test_material_shader_define_selection_feature_flags() {
   ++g_passed;
 }
 
-/// Handles test variant invalid descriptors.
 static void test_variant_invalid_descriptors() {
   using namespace engine::renderer;
 
@@ -247,7 +241,6 @@ static void test_variant_invalid_descriptors() {
   ++g_passed;
 }
 
-/// Handles test load without init returns invalid.
 static void test_load_without_init_returns_invalid() {
   using namespace engine::renderer;
   // System not initialized — should return invalid.
@@ -257,7 +250,6 @@ static void test_load_without_init_returns_invalid() {
   ++g_passed;
 }
 
-/// Handles test load null paths.
 static void test_load_null_paths() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -268,7 +260,6 @@ static void test_load_null_paths() {
   ++g_passed;
 }
 
-/// Handles test gpu program invalid handle.
 static void test_gpu_program_invalid_handle() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -278,7 +269,6 @@ static void test_gpu_program_invalid_handle() {
   ++g_passed;
 }
 
-/// Handles test destroy invalid handle.
 static void test_destroy_invalid_handle() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
@@ -320,7 +310,6 @@ static void test_stale_handle_rejected_after_slot_reuse() {
   ++g_passed;
 }
 
-/// Handles test check reload without init.
 static void test_check_reload_without_init() {
   using namespace engine::renderer;
   // Should not crash when system is not initialized.

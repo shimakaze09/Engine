@@ -25,7 +25,6 @@ using namespace engine::core;
 
 namespace {
 
-/// Handles test init shutdown.
 bool test_init_shutdown() noexcept {
   if (!initialize_input()) {
     return false;
@@ -34,7 +33,6 @@ bool test_init_shutdown() noexcept {
   return true;
 }
 
-/// Handles test key state defaults.
 bool test_key_state_defaults() noexcept {
   if (!initialize_input()) {
     return false;
@@ -57,7 +55,6 @@ bool test_key_state_defaults() noexcept {
   return true;
 }
 
-/// Handles test mouse state defaults.
 bool test_mouse_state_defaults() noexcept {
   if (!initialize_input()) {
     return false;
@@ -87,7 +84,6 @@ bool test_mouse_state_defaults() noexcept {
   return true;
 }
 
-/// Handles test action register.
 bool test_action_register() noexcept {
   if (!initialize_input()) {
     return false;
@@ -123,7 +119,6 @@ bool test_action_register() noexcept {
   return true;
 }
 
-/// Handles test action overwrite.
 bool test_action_overwrite() noexcept {
   if (!initialize_input()) {
     return false;
@@ -142,7 +137,6 @@ bool test_action_overwrite() noexcept {
   return true;
 }
 
-/// Handles test max actions.
 bool test_max_actions() noexcept {
   if (!initialize_input()) {
     return false;
@@ -167,7 +161,6 @@ bool test_max_actions() noexcept {
   return true;
 }
 
-/// Handles test axis register and rebind.
 bool test_axis_register_and_rebind() noexcept {
   if (!initialize_input()) {
     return false;
@@ -192,7 +185,6 @@ bool test_axis_register_and_rebind() noexcept {
   return true;
 }
 
-/// Handles test axis value from key events.
 bool test_axis_value_from_key_events() noexcept {
   if (!initialize_input()) {
     return false;
@@ -242,7 +234,6 @@ bool test_axis_value_from_key_events() noexcept {
   return true;
 }
 
-/// Handles test gamepad axis deadzone.
 bool test_gamepad_axis_deadzone() noexcept {
   if (!initialize_input()) {
     return false;
@@ -272,7 +263,6 @@ bool test_gamepad_axis_deadzone() noexcept {
   return true;
 }
 
-/// Handles test gamepad button state.
 bool test_gamepad_button_state() noexcept {
   if (!initialize_input()) {
     return false;
@@ -302,7 +292,6 @@ bool test_gamepad_button_state() noexcept {
   return true;
 }
 
-/// Handles test bounds check.
 bool test_bounds_check() noexcept {
   if (!initialize_input()) {
     return false;

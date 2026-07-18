@@ -31,7 +31,6 @@ enum class DeferredMutationType : std::uint8_t {
   RemoveSpotLightComponent,
 };
 
-/// Stores deferred mutation data used by the engine.
 struct DeferredMutation final {
   DeferredMutationType type = DeferredMutationType::DestroyEntity;
   runtime::Entity entity{};

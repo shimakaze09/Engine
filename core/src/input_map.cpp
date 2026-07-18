@@ -56,7 +56,6 @@ InputAxisMapping *find_mapped_axis(const char *name) noexcept {
   return nullptr;
 }
 
-/// Handles evaluate binding.
 bool evaluate_binding(const InputBinding &binding) noexcept {
   switch (binding.type) {
   case InputBindingType::Key:
@@ -78,7 +77,6 @@ bool evaluate_binding(const InputBinding &binding) noexcept {
   return false;
 }
 
-/// Handles evaluate axis source.
 float evaluate_axis_source(const InputAxisSource &src) noexcept {
   switch (src.type) {
   case AxisSourceType::KeyPair: {
@@ -119,7 +117,6 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
-/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -261,7 +258,6 @@ bool add_input_action(const char *name, const InputBinding *bindings,
   return false;
 }
 
-/// Adds a value or component to the target system for input axis.
 bool add_input_axis(const char *name, const InputAxisSource *sources,
                     std::uint32_t count) noexcept {
   if (name == nullptr) {
@@ -308,7 +304,6 @@ bool add_input_axis(const char *name, const InputAxisSource *sources,
   return false;
 }
 
-/// Removes a value or component from the target system for input action.
 bool remove_input_action(const char *name) noexcept {
   InputAction *a = find_mapped_action(name);
   if (a == nullptr) {
@@ -318,7 +313,6 @@ bool remove_input_action(const char *name) noexcept {
   return true;
 }
 
-/// Removes a value or component from the target system for input axis.
 bool remove_input_axis(const char *name) noexcept {
   InputAxisMapping *a = find_mapped_axis(name);
   if (a == nullptr) {
@@ -388,7 +382,6 @@ bool is_mapped_action_pressed(const char *name) noexcept {
   return false;
 }
 
-/// Handles mapped axis value.
 float mapped_axis_value(const char *name) noexcept {
   const InputAxisMapping *a = find_mapped_axis(name);
   if (a == nullptr) {
@@ -439,7 +432,6 @@ void input_mapper_begin_frame() noexcept {
   g_mouseDeltaY = 0.0F;
 }
 
-/// Handles input mapper process event.
 void input_mapper_process_event(const void *nativeEvent) noexcept {
   if (nativeEvent == nullptr) {
     return;
@@ -452,7 +444,6 @@ void input_mapper_process_event(const void *nativeEvent) noexcept {
   g_mouseDeltaY = static_cast<float>(ms.deltaY);
 }
 
-/// Handles input mapper end frame.
 void input_mapper_end_frame() noexcept {
   // Evaluate all mapped actions and record their current state.
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {

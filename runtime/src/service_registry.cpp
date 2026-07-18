@@ -9,7 +9,6 @@ namespace engine::runtime {
 
 namespace {
 
-/// Handles register pointer.
 template <typename T>
 bool register_pointer(core::ServiceLocator &locator, T *ptr) noexcept {
   return locator.register_service<T>(ptr);

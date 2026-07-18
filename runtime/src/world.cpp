@@ -21,7 +21,6 @@ constexpr std::uint8_t kNameSlotEmpty = 0U;
 constexpr std::uint8_t kNameSlotOccupied = 1U;
 constexpr std::uint8_t kNameSlotTombstone = 2U;
 
-/// Handles world transform from local.
 WorldTransform world_transform_from_local(const Transform &local) noexcept {
   WorldTransform world{};
   world.position = local.position;

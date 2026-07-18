@@ -33,12 +33,10 @@ namespace engine::scripting {
 
 namespace {
 
-/// Handles k default gravity.
 constexpr math::Vec3 kDefaultGravity(0.0F, -9.8F, 0.0F);
 
 constexpr float kMaxScriptAcceleration = 500.0F;
 
-/// Handles lua engine get position.
 int lua_engine_get_position(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -64,7 +62,6 @@ int lua_engine_get_position(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine set position.
 int lua_engine_set_position(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 position{};
@@ -86,7 +83,6 @@ int lua_engine_set_position(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get velocity.
 int lua_engine_get_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -106,7 +102,6 @@ int lua_engine_get_velocity(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine add rigid body.
 int lua_engine_add_rigid_body(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -129,7 +124,6 @@ int lua_engine_add_rigid_body(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set velocity.
 int lua_engine_set_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 velocity{};
@@ -152,7 +146,6 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set acceleration.
 int lua_engine_set_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 acceleration{};
@@ -180,7 +173,6 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set additional acceleration.
 int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 additionalAcceleration{};
@@ -205,7 +197,6 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get angular velocity.
 int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -225,7 +216,6 @@ int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine set angular velocity.
 int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 angVel{};
@@ -248,7 +238,6 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine wake body.
 int lua_engine_wake_body(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     return 0;
@@ -263,7 +252,6 @@ int lua_engine_wake_body(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine is sleeping.
 int lua_engine_is_sleeping(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
@@ -300,7 +288,6 @@ int lua_engine_get_rotation(lua_State *state) noexcept {
   return 4;
 }
 
-/// Handles lua engine set rotation.
 int lua_engine_set_rotation(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -327,7 +314,6 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get scale.
 int lua_engine_get_scale(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -345,7 +331,6 @@ int lua_engine_get_scale(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine set scale.
 int lua_engine_set_scale(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 scale{};
@@ -381,7 +366,6 @@ int lua_engine_get_inverse_mass(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set inverse mass.
 int lua_engine_set_inverse_mass(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {

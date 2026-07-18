@@ -33,7 +33,6 @@ namespace engine::scripting {
 
 namespace {
 
-/// Handles lua engine set camera position.
 int lua_engine_set_camera_position(lua_State *state) noexcept {
   math::Vec3 pos{};
   if (!read_vec3_args(state, 1, &pos) || (runtime_binding().services == nullptr) ||
@@ -44,7 +43,6 @@ int lua_engine_set_camera_position(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine set camera target.
 int lua_engine_set_camera_target(lua_State *state) noexcept {
   math::Vec3 target{};
   if (!read_vec3_args(state, 1, &target) || (runtime_binding().services == nullptr) ||
@@ -55,7 +53,6 @@ int lua_engine_set_camera_target(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine set camera up.
 int lua_engine_set_camera_up(lua_State *state) noexcept {
   math::Vec3 up{};
   if (!read_vec3_args(state, 1, &up) || (runtime_binding().services == nullptr) ||
@@ -66,7 +63,6 @@ int lua_engine_set_camera_up(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine set camera fov.
 int lua_engine_set_camera_fov(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
       (runtime_binding().services->set_camera_fov == nullptr)) {

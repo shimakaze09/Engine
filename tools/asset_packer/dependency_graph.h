@@ -39,11 +39,8 @@ inline void clear_dependency_graph(DependencyGraph *graph) noexcept {
   if (graph == nullptr) {
     return;
   }
-  /// Handles clear.
   graph->dependencies.clear();
-  /// Handles clear.
   graph->dependents.clear();
-  /// Handles clear.
   graph->assetPaths.clear();
 }
 

@@ -19,13 +19,11 @@ namespace {
 constexpr std::uint64_t kFnv64Offset = 1469598103934665603ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
-/// Stores dependency digest data used by the engine.
 struct DependencyDigest final {
   std::string path{};
   std::uint64_t hash = 0ULL;
 };
 
-/// Stores import settings data used by the engine.
 struct ImportSettings final {
   int meshIndex = 0;
   int primitiveIndex = 0;
@@ -34,14 +32,12 @@ struct ImportSettings final {
   bool generateNormals = false;
 };
 
-/// Stores primitive data used by the engine.
 struct PrimitiveData final {
   std::vector<float> interleavedVertices{};
   std::vector<std::uint32_t> indices{};
   bool hasUVs = false;
 };
 
-/// Handles hash import settings.
 std::uint64_t hash_import_settings(const ImportSettings &settings) {
   std::uint64_t hash = kFnv64Offset;
   auto feed = [&](const void *data, std::size_t size) {
@@ -59,7 +55,6 @@ std::uint64_t hash_import_settings(const ImportSettings &settings) {
   return hash;
 }
 
-/// Handles sort dependency digests.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
   std::sort(digests.begin(), digests.end(),
             [](const DependencyDigest &a, const DependencyDigest &b) {
@@ -196,7 +191,6 @@ write_cookstamp_to_string(std::uint64_t sourceHash,
   return std::string(buf, static_cast<std::size_t>(pos));
 }
 
-/// Handles make test triangle.
 PrimitiveData make_test_triangle() {
   PrimitiveData data{};
   data.hasUVs = false;
@@ -240,7 +234,6 @@ static int test_mesh_binary_determinism() noexcept {
   return 0;
 }
 
-/// Handles test metadata determinism.
 static int test_metadata_determinism() noexcept {
   PrimitiveData data = make_test_triangle();
   ImportSettings settings{};
@@ -303,7 +296,6 @@ static int test_metadata_json_escaping() noexcept {
   return 0;
 }
 
-/// Handles test cookstamp determinism.
 static int test_cookstamp_determinism() noexcept {
   std::vector<DependencyDigest> deps = {{"b_dep.png", 0x2222ULL},
                                         {"a_dep.png", 0x1111ULL}};
@@ -325,7 +317,6 @@ static int test_cookstamp_determinism() noexcept {
   return 0;
 }
 
-/// Handles test dependency sort determinism.
 static int test_dependency_sort_determinism() noexcept {
   // Two different initial orderings should produce identical sorted output.
   std::vector<DependencyDigest> deps1 = {
@@ -358,7 +349,6 @@ static int test_dependency_sort_determinism() noexcept {
   return 0;
 }
 
-/// Handles test import settings hash determinism.
 static int test_import_settings_hash_determinism() noexcept {
   ImportSettings s1{};
   s1.scaleFactor = 2.5F;

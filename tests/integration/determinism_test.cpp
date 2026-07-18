@@ -16,7 +16,6 @@ constexpr int kStepCount = 240;
 constexpr float kStepSeconds = 1.0F / 60.0F;
 constexpr std::uint64_t kExpectedHash = 0ULL;
 
-/// Handles populate world.
 bool populate_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
     return false;

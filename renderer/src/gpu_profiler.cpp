@@ -16,14 +16,12 @@ namespace {
 constexpr std::size_t kPassCount = static_cast<std::size_t>(GpuPassId::Count);
 constexpr std::size_t kFrameLag = 2U;
 
-/// Stores query range data used by the engine.
 struct QueryRange final {
   std::uint32_t beginQuery = 0U;
   std::uint32_t endQuery = 0U;
   bool submitted = false;
 };
 
-/// Stores gpu profiler state data used by the engine.
 struct GpuProfilerState final {
   bool initialized = false;
   bool supported = false;
@@ -36,13 +34,11 @@ struct GpuProfilerState final {
 
 GpuProfilerState g_gpuProfiler{};
 
-/// Handles pass index.
 std::size_t pass_index(GpuPassId pass) noexcept {
   const std::size_t idx = static_cast<std::size_t>(pass);
   return (idx < kPassCount) ? idx : 0U;
 }
 
-/// Handles query range ready.
 bool query_range_ready(const RenderDevice *dev,
                        const QueryRange &range) noexcept {
   if ((dev == nullptr) || !range.submitted ||
@@ -54,7 +50,6 @@ bool query_range_ready(const RenderDevice *dev,
          dev->query_result_available(range.endQuery);
 }
 
-/// Handles resolve read frame.
 void resolve_read_frame(const RenderDevice *dev) noexcept {
   if ((dev == nullptr) || (dev->query_result_u64 == nullptr)) {
     return;
@@ -144,7 +139,6 @@ void shutdown_gpu_profiler() noexcept {
   g_gpuProfiler = GpuProfilerState{};
 }
 
-/// Handles gpu profiler begin frame.
 void gpu_profiler_begin_frame() noexcept {
   if (!g_gpuProfiler.initialized) {
     static_cast<void>(initialize_gpu_profiler());
@@ -166,7 +160,6 @@ void gpu_profiler_begin_frame() noexcept {
   }
 }
 
-/// Handles gpu profiler begin pass.
 void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
   if (pass == GpuPassId::Scene) {
     ++g_gpuProfiler.debugStats.beginMarksScene;
@@ -190,7 +183,6 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
   dev->query_counter_timestamp(range.beginQuery);
 }
 
-/// Handles gpu profiler end pass.
 void gpu_profiler_end_pass(GpuPassId pass) noexcept {
   if (pass == GpuPassId::Scene) {
     ++g_gpuProfiler.debugStats.endMarksScene;
@@ -215,12 +207,10 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
   range.submitted = true;
 }
 
-/// Handles gpu profiler pass ms.
 float gpu_profiler_pass_ms(GpuPassId pass) noexcept {
   return g_gpuProfiler.passDurationsMs[pass_index(pass)];
 }
 
-/// Handles gpu profiler debug stats.
 GpuProfilerDebugStats gpu_profiler_debug_stats() noexcept {
   return g_gpuProfiler.debugStats;
 }

@@ -11,12 +11,10 @@
 
 namespace {
 
-/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) noexcept {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
-/// Handles make test foliage.
 engine::runtime::FoliagePatchComponent make_test_foliage() noexcept {
   engine::runtime::FoliagePatchComponent foliage{};
   foliage.meshAssetIds[0] = 11U;
@@ -48,7 +46,6 @@ engine::runtime::FoliagePatchComponent make_test_foliage() noexcept {
   return foliage;
 }
 
-/// Handles verify foliage crud.
 int verify_foliage_crud() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -120,7 +117,6 @@ int verify_foliage_crud() {
   return 0;
 }
 
-/// Handles verify foliage scene round trip.
 int verify_foliage_scene_round_trip() {
   std::unique_ptr<engine::runtime::World> source(new (std::nothrow)
                                                      engine::runtime::World());

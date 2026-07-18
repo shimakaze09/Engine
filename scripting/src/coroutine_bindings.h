@@ -11,11 +11,11 @@ namespace engine::scripting {
 using CoroutineLogLuaErrorFn = void (*)(const char *context) noexcept;
 using CoroutineRefreshHookFn = void (*)() noexcept;
 
-/// Handles Lua engine.wait(seconds).
+/// Lua binding: Lua engine.wait(seconds).
 int lua_engine_wait(lua_State *state) noexcept;
-/// Handles Lua engine.wait_frames(frame_count).
+/// Lua binding: Lua engine.wait_frames(frame_count).
 int lua_engine_wait_frames(lua_State *state) noexcept;
-/// Handles Lua engine.wait_until(callback).
+/// Lua binding: Lua engine.wait_until(callback).
 int lua_engine_wait_until(lua_State *state) noexcept;
 
 /// Starts a Lua coroutine using the supplied scheduler clock.

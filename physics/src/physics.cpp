@@ -131,7 +131,6 @@ const ConvexHullData *find_hull_data(const PhysicsContext &context,
   return nullptr;
 }
 
-/// Handles allocate hull data.
 ConvexHullData *allocate_hull_data(PhysicsContext &context,
                                    Entity entity) noexcept {
   ConvexHullData *existing = find_hull_data(context, entity);
@@ -177,7 +176,6 @@ const HeightfieldData *find_heightfield_data(const PhysicsContext &context,
   return nullptr;
 }
 
-/// Handles allocate heightfield data.
 HeightfieldData *allocate_heightfield_data(PhysicsContext &context,
                                            Entity entity) noexcept {
   HeightfieldData *existing = find_heightfield_data(context, entity);
@@ -266,7 +264,6 @@ bool set_convex_hull_data(PhysicsContext &context, Entity entity,
   return true;
 }
 
-/// Returns the requested value for convex hull data impl.
 const ConvexHullData *
 get_convex_hull_data(const PhysicsContext &context, Entity entity) noexcept {
   return find_hull_data(context, entity);
@@ -292,7 +289,6 @@ bool set_heightfield_data(PhysicsContext &context, Entity entity,
   return true;
 }
 
-/// Returns the requested value for heightfield data impl.
 const HeightfieldData *
 get_heightfield_data(const PhysicsContext &context, Entity entity) noexcept {
   return find_heightfield_data(context, entity);
@@ -310,14 +306,12 @@ constexpr std::uint8_t kSleepFramesRequired = 60U;
 constexpr float kAngularDampingPerSecond = 1.8F;
 constexpr float kMaxAngularSpeed = 3.0F;
 
-/// Handles axis overlap.
 float axis_overlap(float aMin, float aMax, float bMin, float bMax) noexcept {
   const float left = std::max(aMin, bMin);
   const float right = std::min(aMax, bMax);
   return right - left;
 }
 
-/// Handles sign or positive.
 float sign_or_positive(float value) noexcept {
   return (value < 0.0F) ? -1.0F : 1.0F;
 }
@@ -340,7 +334,6 @@ void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
   *generation = 1U;
 }
 
-/// Handles make pair key.
 std::uint64_t make_pair_key(std::uint32_t idxA, std::uint32_t idxB) noexcept {
   const std::uint32_t lo = std::min(idxA, idxB);
   const std::uint32_t hi = std::max(idxA, idxB);
@@ -348,7 +341,6 @@ std::uint64_t make_pair_key(std::uint32_t idxA, std::uint32_t idxB) noexcept {
          static_cast<std::uint64_t>(hi);
 }
 
-/// Handles insert pair key.
 bool insert_pair_key(PhysicsContext &ctx, std::uint64_t key) noexcept {
   const std::uint32_t generation = ctx.pairHashGeneration;
   const std::size_t bucketCount = ctx.pairHashStamps.size();
@@ -372,7 +364,6 @@ bool insert_pair_key(PhysicsContext &ctx, std::uint64_t key) noexcept {
   return false;
 }
 
-/// Handles record collision pair.
 void record_collision_pair(PhysicsWorldView &world, std::uint32_t idxA,
                            std::uint32_t idxB) noexcept {
   PhysicsContext &ctx = world.physics_context();
@@ -828,7 +819,6 @@ void resolve_speculative_contact(RigidBody *bodyA, RigidBody *bodyB,
   }
 }
 
-/// Handles apply velocity impulse.
 void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
@@ -921,7 +911,6 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
 
 } // namespace
 
-/// Returns the requested value for hull data ptr.
 const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
                                         Entity entity) noexcept {
   return find_hull_data(context, entity);
@@ -931,12 +920,10 @@ const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
 bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept;
 
-/// Handles step physics.
 bool step_physics(PhysicsWorldView &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
 }
 
-/// Handles step physics range.
 bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept {
   const PhysicsContext &physicsCtx = world.physics_context();
@@ -1746,7 +1733,6 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
 
 } // namespace
 
-/// Handles resolve collisions.
 bool resolve_collisions(PhysicsWorldView &world,
                         float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
@@ -2064,7 +2050,6 @@ void set_gravity(PhysicsWorldView &world, float x, float y, float z) noexcept {
   world.physics_context().gravity = engine::math::Vec3(x, y, z);
 }
 
-/// Returns the requested value for gravity.
 engine::math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept {
   return world.physics_context().gravity;
 }
@@ -2075,7 +2060,6 @@ void set_collision_dispatch(PhysicsWorldView &world,
   world.physics_context().collisionDispatch = fn;
 }
 
-/// Handles dispatch collision callbacks.
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if ((ctx.collisionDispatch != nullptr) && (ctx.collisionPairCount > 0U)) {
@@ -2086,7 +2070,6 @@ void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
 
 namespace {
 
-/// Handles aabb hit normal.
 engine::math::Vec3 aabb_hit_normal(const engine::math::Vec3 &hitPoint,
                                    const engine::math::Vec3 &center,
                                    const engine::math::Vec3 &halfExt) noexcept {
@@ -2247,7 +2230,6 @@ bool ray_intersects_convex_hull(const engine::math::Ray &ray,
 
 } // namespace
 
-/// Handles raycast.
 bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
@@ -2343,7 +2325,6 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
   return hit;
 }
 
-/// Handles raycast all.
 std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits,
@@ -2446,7 +2427,6 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
   return hitCount;
 }
 
-/// Adds a value or component to the target system for distance joint.
 JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
                            Entity entityB, float distance) noexcept {
   PhysicsContext &ctx = world.physics_context();
@@ -2467,7 +2447,6 @@ JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
   return kInvalidJointId;
 }
 
-/// Removes a value or component from the target system for joint.
 void remove_joint(PhysicsWorldView &world, JointId id) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if (id >= kMaxPhysicsJoints) {
@@ -2480,7 +2459,6 @@ void remove_joint(PhysicsWorldView &world, JointId id) noexcept {
   }
 }
 
-/// Handles wake body.
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept {
   RigidBody *body = world.get_rigid_body_ptr(entity);
   if (body != nullptr) {

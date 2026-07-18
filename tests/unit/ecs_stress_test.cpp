@@ -25,7 +25,6 @@ namespace {
 // via profiler benchmarks.
 constexpr double kThresholdMs = 500.0;
 
-/// Handles bench create and iterate.
 bool bench_create_and_iterate() noexcept {
   auto world = std::unique_ptr<World>(new (std::nothrow) World());
   if (!world) {

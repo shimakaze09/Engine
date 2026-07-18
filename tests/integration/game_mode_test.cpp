@@ -12,12 +12,10 @@
 
 static engine::tests::TestContext g_tests;
 
-/// Handles check.
 static void check(bool condition, const char *name) noexcept {
   g_tests.check(condition, name);
 }
 
-/// Handles test game mode owned by world.
 static bool test_game_mode_owned_by_world() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -33,7 +31,6 @@ static bool test_game_mode_owned_by_world() noexcept {
   return true;
 }
 
-/// Handles test game mode state transitions.
 static bool test_game_mode_state_transitions() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -70,7 +67,6 @@ static bool test_game_mode_state_transitions() noexcept {
   return true;
 }
 
-/// Handles test game mode invalid transitions.
 static bool test_game_mode_invalid_transitions() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -88,7 +84,6 @@ static bool test_game_mode_invalid_transitions() noexcept {
   return true;
 }
 
-/// Handles test game mode rules.
 static bool test_game_mode_rules() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -121,7 +116,6 @@ static bool test_game_mode_rules() noexcept {
   return true;
 }
 
-/// Handles test game mode reset.
 static bool test_game_mode_reset() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -144,7 +138,6 @@ static bool test_game_mode_reset() noexcept {
   return true;
 }
 
-/// Handles test game state numbers.
 static bool test_game_state_numbers() noexcept {
   engine::runtime::GameState gs;
   check(gs.set_number("score", 42.0F), "set_number score");
@@ -163,7 +156,6 @@ static bool test_game_state_numbers() noexcept {
   return true;
 }
 
-/// Handles test game state strings.
 static bool test_game_state_strings() noexcept {
   engine::runtime::GameState gs;
   check(gs.set_string("checkpoint", "level3_start"), "set_string");
@@ -183,7 +175,6 @@ static bool test_game_state_strings() noexcept {
   return true;
 }
 
-/// Handles test game state remove and clear.
 static bool test_game_state_remove_and_clear() noexcept {
   engine::runtime::GameState gs;
   gs.set_number("a", 1.0F);
@@ -204,7 +195,6 @@ static bool test_game_state_remove_and_clear() noexcept {
   return true;
 }
 
-/// Handles test player controller array.
 static bool test_player_controller_array() noexcept {
   engine::runtime::PlayerControllerArray pca;
   constexpr engine::runtime::Entity kEntityA{42U, 1U};
@@ -244,7 +234,6 @@ static bool test_player_controller_array() noexcept {
   return true;
 }
 
-/// Handles test game state persists across worlds.
 static bool test_game_state_persists_across_worlds() noexcept {
   // GameState is separate from World — verify it survives World
   // reconstruction.

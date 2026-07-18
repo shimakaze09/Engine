@@ -297,7 +297,6 @@ bool bindable_set_game_state(const char *name) noexcept {
   return set_game_state_name(name);
 }
 
-/// Handles lua engine set player controller.
 int lua_engine_set_player_controller(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushboolean(state, 0);
@@ -330,7 +329,6 @@ int lua_engine_set_player_controller(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get player controller.
 int lua_engine_get_player_controller(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushnil(state);

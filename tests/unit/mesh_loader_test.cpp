@@ -76,7 +76,6 @@ void configure_fake_render_device(std::uint32_t vertexArray,
   g_destroyVertexArrayCalls = 0U;
 }
 
-/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -91,7 +90,6 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
-/// Removes a value or component from the target system for file.
 void remove_file(const char *path) noexcept {
   if (path != nullptr) {
     static_cast<void>(std::remove(path));
@@ -121,7 +119,6 @@ bool write_mesh_file(const char *path,
   return ok;
 }
 
-/// Handles check bad magic.
 int check_bad_magic() {
   remove_file(kBadMagicPath);
 
@@ -145,7 +142,6 @@ int check_bad_magic() {
   return loaded ? 12 : 0;
 }
 
-/// Handles check bad version.
 int check_bad_version() {
   remove_file(kBadVersionPath);
 
@@ -169,7 +165,6 @@ int check_bad_version() {
   return loaded ? 22 : 0;
 }
 
-/// Handles check oversized vertex count.
 int check_oversized_vertex_count() {
   remove_file(kOversizedVertexPath);
 
@@ -191,7 +186,6 @@ int check_oversized_vertex_count() {
   return loaded ? 32 : 0;
 }
 
-/// Handles check oversized index count.
 int check_oversized_index_count() {
   remove_file(kOversizedIndexPath);
 
@@ -213,7 +207,6 @@ int check_oversized_index_count() {
   return loaded ? 42 : 0;
 }
 
-/// Handles check file size mismatch.
 int check_file_size_mismatch() {
   remove_file(kFileSizeMismatchPath);
 
@@ -240,14 +233,12 @@ int check_file_size_mismatch() {
   return loaded ? 52 : 0;
 }
 
-/// Handles check empty path.
 int check_empty_path() {
   engine::renderer::GpuMesh mesh{};
   const bool loaded = engine::renderer::load_mesh_from_file(nullptr, &mesh);
   return loaded ? 61 : 0;
 }
 
-/// Handles check null out param.
 int check_null_out_param() {
   const bool loaded =
       engine::renderer::load_mesh_from_file("somepath", nullptr);
@@ -259,7 +250,6 @@ int check_null_out_param() {
 constexpr const char *kV2ValidPath = "mesh_loader_v2_valid.mesh";
 constexpr const char *kCpuDecodePath = "mesh_loader_cpu_decode.mesh";
 
-/// Handles check cpu decode valid mesh.
 int check_cpu_decode_valid_mesh() {
   remove_file(kCpuDecodePath);
 
@@ -296,7 +286,6 @@ int check_cpu_decode_valid_mesh() {
   return (sizeBytes == expectedSize) ? 0 : 94;
 }
 
-/// Handles check v2 bad version accepted.
 int check_v2_bad_version_accepted() {
   // Verify that v2 files (which have version=2) are accepted by the loader.
   // This creates a minimal v2 binary blob and checks that the version
@@ -307,7 +296,6 @@ int check_v2_bad_version_accepted() {
   return 0;
 }
 
-/// Handles check v2 file size validation.
 int check_v2_file_size_validation() {
   // v2 format: 8 floats per vertex. Create a header claiming v2 with
   // 1 vertex but provide only 6 floats instead of 8.

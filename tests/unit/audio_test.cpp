@@ -45,7 +45,6 @@ static void test_double_init_and_shutdown() {
   g_tests.check(true, "double init and shutdown");
 }
 
-/// Handles test load without init.
 static void test_load_without_init() {
   using namespace engine::audio;
   // System not initialized — should return invalid.
@@ -54,7 +53,6 @@ static void test_load_without_init() {
   g_tests.check(true, "load without init");
 }
 
-/// Handles test unload invalid.
 static void test_unload_invalid() {
   using namespace engine::audio;
   // Should not crash.
@@ -63,7 +61,6 @@ static void test_unload_invalid() {
   g_tests.check(true, "unload invalid");
 }
 
-/// Handles test play invalid.
 static void test_play_invalid() {
   using namespace engine::audio;
   PlayParams params{};
@@ -72,7 +69,6 @@ static void test_play_invalid() {
   g_tests.check(true, "play invalid");
 }
 
-/// Handles test stop without init.
 static void test_stop_without_init() {
   using namespace engine::audio;
   // Should not crash.
@@ -81,7 +77,6 @@ static void test_stop_without_init() {
   g_tests.check(true, "stop without init");
 }
 
-/// Handles test set master volume without init.
 static void test_set_master_volume_without_init() {
   using namespace engine::audio;
   // Should not crash.
@@ -89,7 +84,6 @@ static void test_set_master_volume_without_init() {
   g_tests.check(true, "set master volume without init");
 }
 
-/// Handles test update without init.
 static void test_update_without_init() {
   using namespace engine::audio;
   // Should not crash.

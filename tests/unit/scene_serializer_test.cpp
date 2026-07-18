@@ -18,7 +18,6 @@ constexpr const char *kRoundTripName = "Player \"One\" \\ Path";
 constexpr const char *kRoundTripScriptPath =
     "assets\\scripts\\hero \"one\".lua";
 
-/// Handles nearly equal.
 bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
@@ -262,7 +261,6 @@ int build_source_buffer(
   return 0;
 }
 
-/// Handles verify loaded scene.
 int verify_loaded_scene(const char *path) {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -389,7 +387,6 @@ int verify_loaded_scene(const char *path) {
   return 0;
 }
 
-/// Handles verify loaded scene from buffer.
 int verify_loaded_scene_from_buffer(
     const std::array<char, engine::core::JsonWriter::kBufferBytes> &buffer,
     std::size_t size) {
@@ -518,7 +515,6 @@ int verify_loaded_scene_from_buffer(
   return 0;
 }
 
-/// Handles verify scene version in buffer.
 int verify_scene_version_in_buffer(
     const std::array<char, engine::core::JsonWriter::kBufferBytes> &buffer,
     std::size_t size) {
@@ -550,7 +546,6 @@ int verify_scene_version_in_buffer(
   return 0;
 }
 
-/// Handles verify duplicate persistent id fails.
 int verify_duplicate_persistent_id_fails() {
   constexpr const char *kDuplicateScene =
       "{\"version\":2,\"entities\":["
@@ -571,7 +566,6 @@ int verify_duplicate_persistent_id_fails() {
   return 0;
 }
 
-/// Handles verify large scene round trip.
 int verify_large_scene_round_trip(const char *path) {
   constexpr std::uint32_t kLargeEntityCount = 5000U;
 

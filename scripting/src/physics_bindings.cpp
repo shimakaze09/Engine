@@ -56,7 +56,6 @@ int lua_engine_add_capsule_collider(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine add collider.
 int lua_engine_add_collider(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
@@ -74,7 +73,6 @@ int lua_engine_add_collider(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set restitution.
 int lua_engine_set_restitution(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -98,7 +96,6 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set friction.
 int lua_engine_set_friction(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -237,7 +234,6 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set gravity.
 int lua_engine_set_gravity(lua_State *state) noexcept {
   float x = 0.0F;
   float y = 0.0F;
@@ -257,7 +253,6 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine get gravity.
 int lua_engine_get_gravity(lua_State *state) noexcept {
   float x = 0.0F;
   float y = 0.0F;
@@ -273,7 +268,6 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine raycast.
 int lua_engine_raycast(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
@@ -528,7 +522,6 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   return 8;
 }
 
-/// Handles lua engine add distance joint.
 int lua_engine_add_distance_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
@@ -546,7 +539,6 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine remove joint.
 int lua_engine_remove_joint(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
@@ -681,7 +673,6 @@ int lua_engine_get_half_extents(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine set half extents.
 int lua_engine_set_half_extents(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 halfExtents{};
@@ -700,7 +691,6 @@ int lua_engine_set_half_extents(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get restitution.
 int lua_engine_get_restitution(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -716,7 +706,6 @@ int lua_engine_get_restitution(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get friction.
 int lua_engine_get_friction(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {

@@ -41,7 +41,6 @@ std::uint64_t g_builtinCylinderMesh = 0ULL;
 std::uint64_t g_builtinCapsuleMesh = 0ULL;
 std::uint64_t g_builtinPyramidMesh = 0ULL;
 
-/// Handles lua engine set mesh.
 int lua_engine_set_mesh(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -68,7 +67,6 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get default mesh asset id.
 int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
   if (g_defaultMeshAssetId == 0ULL) {
     lua_pushnil(state);
@@ -172,7 +170,6 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set albedo.
 int lua_engine_set_albedo(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 albedo{};
@@ -211,7 +208,6 @@ int lua_engine_get_albedo(lua_State *state) noexcept {
   return 3;
 }
 
-/// Handles lua engine get mesh.
 int lua_engine_get_mesh(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -227,7 +223,6 @@ int lua_engine_get_mesh(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set roughness.
 int lua_engine_set_roughness(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -244,7 +239,6 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get roughness.
 int lua_engine_get_roughness(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -260,7 +254,6 @@ int lua_engine_get_roughness(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set metallic.
 int lua_engine_set_metallic(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -277,7 +270,6 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get metallic.
 int lua_engine_get_metallic(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -293,7 +285,6 @@ int lua_engine_get_metallic(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set opacity.
 int lua_engine_set_opacity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -310,7 +301,6 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get opacity.
 int lua_engine_get_opacity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {

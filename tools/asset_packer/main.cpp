@@ -52,20 +52,17 @@
 
 namespace {
 
-/// Stores primitive data used by the engine.
 struct PrimitiveData final {
   std::vector<float> interleavedVertices{};
   std::vector<std::uint32_t> indices{};
   bool hasUVs = false;
 };
 
-/// Stores dependency digest data used by the engine.
 struct DependencyDigest final {
   std::string path{};
   std::uint64_t hash = 0ULL;
 };
 
-/// Stores import settings data used by the engine.
 struct ImportSettings final {
   int meshIndex = 0;
   int primitiveIndex = 0;
@@ -77,7 +74,6 @@ struct ImportSettings final {
 constexpr std::uint64_t kFnv64Offset = 1469598103934665603ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
-/// Handles print usage.
 void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
@@ -85,7 +81,6 @@ void print_usage() {
                "[--force]\n");
 }
 
-/// Handles file exists.
 bool file_exists(const char *path) {
   if (path == nullptr) {
     return false;
@@ -136,7 +131,6 @@ void format_hex_u64(std::uint64_t value, char (&out)[17]) noexcept {
                 static_cast<unsigned long long>(value));
 }
 
-/// Handles hash file contents.
 std::uint64_t hash_file_contents(const char *path, bool *ok) {
   if (ok != nullptr) {
     *ok = false;
@@ -204,7 +198,6 @@ bool build_dependency_digests(const std::vector<std::string> &dependencyPaths,
   return true;
 }
 
-/// Handles hash import settings.
 std::uint64_t hash_import_settings(const ImportSettings &settings) {
   std::uint64_t hash = kFnv64Offset;
   auto feed = [&](const void *data, std::size_t size) {
@@ -222,7 +215,6 @@ std::uint64_t hash_import_settings(const ImportSettings &settings) {
   return hash;
 }
 
-/// Handles sort dependency digests.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
   std::sort(digests.begin(), digests.end(),
             [](const DependencyDigest &a, const DependencyDigest &b) {
@@ -335,7 +327,6 @@ bool read_import_settings_from_meta(const char *outputPath,
   return true;
 }
 
-/// Handles apply scale to primitive.
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
   if ((data == nullptr) || (scaleFactor == 1.0F)) {
     return;
@@ -353,7 +344,6 @@ void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
   }
 }
 
-/// Handles make cookstamp path.
 bool make_cookstamp_path(const char *outputPath, char *outPath,
                          std::size_t outPathSize) {
   if ((outputPath == nullptr) || (outPath == nullptr) || (outPathSize == 0U)) {
@@ -459,7 +449,6 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   return true;
 }
 
-/// Handles dependency digests equal.
 bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
                               const std::vector<DependencyDigest> &b) {
   if (a.size() != b.size()) {
@@ -519,7 +508,6 @@ const cgltf_accessor *find_attribute_accessor(const cgltf_primitive *primitive,
   return nullptr;
 }
 
-/// Handles extract primitive.
 bool extract_primitive(const cgltf_primitive *primitive,
                        PrimitiveData *outData) {
   if ((primitive == nullptr) || (outData == nullptr)) {
@@ -773,7 +761,6 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
          write_text_file(metadataPath, writer.result(), writer.result_size());
 }
 
-/// Handles cook and write convex hull.
 bool cook_and_write_convex_hull(const char *outputPath,
                                 const PrimitiveData &data) {
   if (outputPath == nullptr) {
@@ -868,7 +855,6 @@ bool cook_and_write_convex_hull(const char *outputPath,
   return true;
 }
 
-/// Handles ensure directory exists.
 bool ensure_directory_exists(const char *dirPath) {
   if (dirPath == nullptr) {
     return false;
@@ -1118,7 +1104,6 @@ void build_thumbnail_path(const char *outputPath, char *thumbPath,
   std::snprintf(thumbPath, thumbPathSize, "%s/%s.png", thumbDir, basename);
 }
 
-/// Handles generate mesh thumbnail.
 bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
                              const PrimitiveData &data) {
   if (outputPath == nullptr) {
@@ -1385,7 +1370,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   return true;
 }
 
-/// Handles hash path to asset id.
 std::uint64_t hash_path_to_asset_id(const char *path) {
   if (path == nullptr) {
     return 0ULL;

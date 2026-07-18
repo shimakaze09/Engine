@@ -191,14 +191,12 @@ void clear_thumbnail_cache() noexcept {
   editor_session().thumbnailCount = 0U;
 }
 
-/// Handles world is editable.
 bool world_is_editable() noexcept {
   return (editor_session().world != nullptr) && !editor_session().worldRestoreFailed &&
          (editor_session().playState == PlayState::Stopped) &&
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
 }
 
-/// Handles world can load scene.
 bool world_can_load_scene() noexcept {
   return (editor_session().world != nullptr) &&
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
@@ -258,7 +256,6 @@ bool capture_play_snapshot() noexcept {
   return false;
 }
 
-/// Handles start play mode.
 void start_play_mode() noexcept {
   if (editor_session().world == nullptr) {
     return;
@@ -286,7 +283,6 @@ void start_play_mode() noexcept {
   core::log_message(core::LogLevel::Info, "editor", "play");
 }
 
-/// Handles pause play mode.
 void pause_play_mode() noexcept {
   if ((editor_session().world == nullptr) || (editor_session().playState != PlayState::Playing)) {
     return;
@@ -296,7 +292,6 @@ void pause_play_mode() noexcept {
   core::log_message(core::LogLevel::Info, "editor", "pause");
 }
 
-/// Handles stop play mode.
 void stop_play_mode() noexcept {
   if ((editor_session().world == nullptr) || (editor_session().playState == PlayState::Stopped)) {
     return;
@@ -327,6 +322,5 @@ void stop_play_mode() noexcept {
   core::log_message(core::LogLevel::Info, "editor", "stop");
 }
 
-/// Handles mark modified.
 
 } // namespace engine::editor

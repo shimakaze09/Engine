@@ -13,19 +13,16 @@ constexpr std::size_t kMaxLines = 1024U;
 constexpr std::size_t kMaxSpheres = 512U;
 constexpr std::size_t kMaxTexts = 256U;
 
-/// Stores line store data used by the engine.
 struct LineStore final {
   std::array<DebugLine, kMaxLines> entries{};
   std::size_t count = 0U;
 };
 
-/// Stores sphere store data used by the engine.
 struct SphereStore final {
   std::array<DebugSphere, kMaxSpheres> entries{};
   std::size_t count = 0U;
 };
 
-/// Stores text store data used by the engine.
 struct TextStore final {
   std::array<DebugText, kMaxTexts> entries{};
   std::size_t count = 0U;
@@ -38,7 +35,6 @@ TextStore g_texts{};
 
 // Compact-remove entries with lifeFrames == 0 from the front T[] store.
 template <typename T, std::size_t N>
-/// Handles compact.
 void compact(std::array<T, N> &arr, std::size_t &count) noexcept {
   std::size_t write = 0U;
   for (std::size_t read = 0U; read < count; ++read) {
@@ -74,7 +70,6 @@ void shutdown_debug_draw() noexcept {
   g_initialized = false;
 }
 
-/// Handles debug draw line.
 void debug_draw_line(DebugVec3 from, DebugVec3 to, DebugColor color,
                      std::uint32_t lifeFrames) noexcept {
   if (g_lines.count >= kMaxLines) {
@@ -87,7 +82,6 @@ void debug_draw_line(DebugVec3 from, DebugVec3 to, DebugColor color,
   l.lifeFrames = (lifeFrames > 0U) ? lifeFrames : 1U;
 }
 
-/// Handles debug draw sphere.
 void debug_draw_sphere(DebugVec3 center, float radius, DebugColor color,
                        std::uint32_t lifeFrames) noexcept {
   if (g_spheres.count >= kMaxSpheres) {
@@ -100,7 +94,6 @@ void debug_draw_sphere(DebugVec3 center, float radius, DebugColor color,
   s.lifeFrames = (lifeFrames > 0U) ? lifeFrames : 1U;
 }
 
-/// Handles debug draw text.
 void debug_draw_text(DebugVec3 position, const char *text, DebugColor color,
                      std::uint32_t lifeFrames) noexcept {
   if ((text == nullptr) || (g_texts.count >= kMaxTexts)) {
@@ -113,7 +106,6 @@ void debug_draw_text(DebugVec3 position, const char *text, DebugColor color,
   t.lifeFrames = (lifeFrames > 0U) ? lifeFrames : 1U;
 }
 
-/// Handles debug draw tick.
 void debug_draw_tick() noexcept {
   // Decrement lifetimes
   for (std::size_t i = 0U; i < g_lines.count; ++i) {
@@ -137,7 +129,6 @@ void debug_draw_tick() noexcept {
   compact(g_texts.entries, g_texts.count);
 }
 
-/// Handles debug draw get lines.
 std::size_t debug_draw_get_lines(DebugLine *out,
                                  std::size_t maxEntries) noexcept {
   if (out == nullptr) {
@@ -151,7 +142,6 @@ std::size_t debug_draw_get_lines(DebugLine *out,
   return n;
 }
 
-/// Handles debug draw get spheres.
 std::size_t debug_draw_get_spheres(DebugSphere *out,
                                    std::size_t maxEntries) noexcept {
   if (out == nullptr) {
@@ -165,7 +155,6 @@ std::size_t debug_draw_get_spheres(DebugSphere *out,
   return n;
 }
 
-/// Handles debug draw get texts.
 std::size_t debug_draw_get_texts(DebugText *out,
                                  std::size_t maxEntries) noexcept {
   if (out == nullptr) {

@@ -337,7 +337,6 @@ bool read_light_component(const core::JsonParser &parser,
 //    arrays and bounded strings; reflection has no array/string field kinds
 //    (their zero-field descriptors are documented in reflect_types.cpp).
 
-/// Handles log scene error.
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel, message);
@@ -381,7 +380,6 @@ bool find_scene_descriptors(SceneComponentDescriptors *outDescs) noexcept {
   return true;
 }
 
-/// Handles deserialize scene entities.
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
                                 const SceneComponentDescriptors &descs,
@@ -599,7 +597,6 @@ bool copy_component(
   return true;
 }
 
-/// Handles copy world contents.
 bool copy_world_contents(const World &sourceWorld,
                          World &targetWorld) noexcept {
   bool success = true;
@@ -655,7 +652,6 @@ bool copy_world_contents(const World &sourceWorld,
   return success;
 }
 
-/// Handles serialize scene to writer.
 bool serialize_scene_to_writer(const World &world,
                                core::JsonWriter *outWriter) noexcept {
   if (outWriter == nullptr) {

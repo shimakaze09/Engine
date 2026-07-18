@@ -14,7 +14,6 @@
 
 namespace {
 
-/// Stores write order job data used by the engine.
 struct WriteOrderJobData final {
   std::atomic<std::int32_t> *cursor = nullptr;
   std::array<std::int32_t, 4U> *order = nullptr;
@@ -36,7 +35,6 @@ void write_order_job(void *userData) noexcept {
   }
 }
 
-/// Handles noop job.
 void noop_job(void *) noexcept {}
 
 } // namespace

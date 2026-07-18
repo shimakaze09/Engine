@@ -59,12 +59,10 @@ static_assert(sizeof(kSkyboxCubeVertices) / (3U * sizeof(float)) ==
                   static_cast<std::size_t>(kSkyboxVertexCount),
               "kSkyboxVertexCount must match the cube vertex array");
 
-/// Handles cvar string equals.
 bool cvar_string_equals(const char *lhs, const char *rhs) noexcept {
   return (lhs != nullptr) && (rhs != nullptr) && (std::strcmp(lhs, rhs) == 0);
 }
 
-/// Handles preetham sun direction.
 math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   if (lights.directionalLightCount > 0U) {
     const math::Vec3 sunDir =
@@ -77,7 +75,6 @@ math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
 }
 
-/// Handles prepare procedural sky draw.
 void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->enable_depth_test();
   dev->set_depth_func_less_equal();
@@ -85,7 +82,6 @@ void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->disable_face_culling();
 }
 
-/// Handles finish procedural sky draw.
 void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
@@ -190,7 +186,6 @@ bool create_skybox_geometry(BackendState &backend,
   return true;
 }
 
-/// Handles selected sky model.
 SkyModel selected_sky_model() noexcept {
   const char *model = core::cvar_get_string("r_sky_model", "hosek");
   if (cvar_string_equals(model, "cubemap")) {
@@ -205,7 +200,6 @@ SkyModel selected_sky_model() noexcept {
   return SkyModel::Hosek;
 }
 
-/// Handles active skybox gpu texture.
 std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   if (!backend.skyboxAvailable ||
       (renderer_context().activeSkyboxTexture == kInvalidTextureHandle) ||
@@ -216,7 +210,6 @@ std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
   return texture_gpu_id(renderer_context().activeSkyboxTexture);
 }
 
-/// Handles draw skybox.
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
                  const math::Mat4 &viewMat, const math::Mat4 &projMat,
                  std::uint32_t cubemapGpuId,
@@ -253,7 +246,6 @@ void draw_skybox(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
-/// Handles draw preetham sky.
 void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
                        const math::Mat4 &viewMat, const math::Mat4 &projMat,
                        const SceneLightData &lights,
@@ -294,7 +286,6 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
       static_cast<std::uint64_t>(kSkyboxVertexCount) / 3ULL;
 }
 
-/// Handles draw hosek sky.
 void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
                     const math::Mat4 &viewMat, const math::Mat4 &projMat,
                     const SceneLightData &lights,

@@ -548,14 +548,12 @@ std::uint32_t gl_create_shader(std::uint32_t stage,
   return static_cast<std::uint32_t>(shader);
 }
 
-/// Handles gl destroy shader.
 void gl_destroy_shader(std::uint32_t shader) noexcept {
   if (shader != 0U) {
     gl_table().deleteShader(static_cast<GLuint>(shader));
   }
 }
 
-/// Handles gl link program.
 std::uint32_t gl_link_program(std::uint32_t vertShader,
                               std::uint32_t fragShader) noexcept {
   const GLuint program = gl_table().createProgram();
@@ -584,58 +582,48 @@ std::uint32_t gl_link_program(std::uint32_t vertShader,
   return static_cast<std::uint32_t>(program);
 }
 
-/// Handles gl destroy program.
 void gl_destroy_program(std::uint32_t program) noexcept {
   if (program != 0U) {
     gl_table().deleteProgram(static_cast<GLuint>(program));
   }
 }
 
-/// Handles gl bind program.
 void gl_bind_program(std::uint32_t program) noexcept {
   gl_table().useProgram(static_cast<GLuint>(program));
 }
 
-/// Handles gl uniform location.
 std::int32_t gl_uniform_location(std::uint32_t program,
                                  const char *name) noexcept {
   return static_cast<std::int32_t>(
       gl_table().getUniformLocation(static_cast<GLuint>(program), name));
 }
 
-/// Handles gl set uniform mat4.
 void gl_set_uniform_mat4(std::int32_t loc, const float *value) noexcept {
   gl_table().uniformMatrix4fv(static_cast<GLint>(loc), 1, GL_FALSE, value);
 }
 
-/// Handles gl set uniform mat3.
 void gl_set_uniform_mat3(std::int32_t loc, const float *value) noexcept {
   gl_table().uniformMatrix3fv(static_cast<GLint>(loc), 1, GL_FALSE, value);
 }
 
-/// Handles gl set uniform float.
 void gl_set_uniform_float(std::int32_t loc, float value) noexcept {
   gl_table().uniform1f(static_cast<GLint>(loc), value);
 }
 
-/// Handles gl set uniform vec3.
 void gl_set_uniform_vec3(std::int32_t loc, const float *value) noexcept {
   gl_table().uniform3fv(static_cast<GLint>(loc), 1, value);
 }
 
-/// Handles gl set uniform vec2.
 void gl_set_uniform_vec2(std::int32_t loc, const float *value) noexcept {
   gl_table().uniform2fv(static_cast<GLint>(loc), 1, value);
 }
 
-/// Handles gl create vertex array.
 std::uint32_t gl_create_vertex_array() noexcept {
   GLuint vao = 0U;
   gl_table().genVertexArrays(1, &vao);
   return static_cast<std::uint32_t>(vao);
 }
 
-/// Handles gl destroy vertex array.
 void gl_destroy_vertex_array(std::uint32_t vao) noexcept {
   if (vao != 0U) {
     const GLuint id = static_cast<GLuint>(vao);
@@ -643,19 +631,16 @@ void gl_destroy_vertex_array(std::uint32_t vao) noexcept {
   }
 }
 
-/// Handles gl bind vertex array.
 void gl_bind_vertex_array(std::uint32_t vao) noexcept {
   gl_table().bindVertexArray(static_cast<GLuint>(vao));
 }
 
-/// Handles gl create buffer.
 std::uint32_t gl_create_buffer() noexcept {
   GLuint buf = 0U;
   gl_table().genBuffers(1, &buf);
   return static_cast<std::uint32_t>(buf);
 }
 
-/// Handles gl destroy buffer.
 void gl_destroy_buffer(std::uint32_t buffer) noexcept {
   if (buffer != 0U) {
     const GLuint id = static_cast<GLuint>(buffer);
@@ -663,33 +648,27 @@ void gl_destroy_buffer(std::uint32_t buffer) noexcept {
   }
 }
 
-/// Handles gl bind array buffer.
 void gl_bind_array_buffer(std::uint32_t buffer) noexcept {
   gl_table().bindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(buffer));
 }
 
-/// Handles gl bind element buffer.
 void gl_bind_element_buffer(std::uint32_t buffer) noexcept {
   gl_table().bindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLuint>(buffer));
 }
 
-/// Handles gl buffer data array.
 void gl_buffer_data_array(const void *data, std::ptrdiff_t sizeBytes) noexcept {
   gl_table().bufferData(GL_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
 }
 
-/// Handles gl buffer data element.
 void gl_buffer_data_element(const void *data,
                             std::ptrdiff_t sizeBytes) noexcept {
   gl_table().bufferData(GL_ELEMENT_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
 }
 
-/// Handles gl enable vertex attrib.
 void gl_enable_vertex_attrib(std::uint32_t index) noexcept {
   gl_table().enableVertexAttribArray(static_cast<GLuint>(index));
 }
 
-/// Handles gl vertex attrib float.
 void gl_vertex_attrib_float(std::uint32_t index, std::int32_t components,
                             std::int32_t stride, const void *offset) noexcept {
   gl_table().vertexAttribPointer(static_cast<GLuint>(index),
@@ -697,26 +676,22 @@ void gl_vertex_attrib_float(std::uint32_t index, std::int32_t components,
                            static_cast<GLsizei>(stride), offset);
 }
 
-/// Handles gl vertex attrib divisor.
 void gl_vertex_attrib_divisor(std::uint32_t index,
                               std::uint32_t divisor) noexcept {
   gl_table().vertexAttribDivisor(static_cast<GLuint>(index),
                            static_cast<GLuint>(divisor));
 }
 
-/// Handles gl draw arrays triangles.
 void gl_draw_arrays_triangles(std::int32_t first, std::int32_t count) noexcept {
   gl_table().drawArrays(GL_TRIANGLES, static_cast<GLint>(first),
                   static_cast<GLsizei>(count));
 }
 
-/// Handles gl draw elements triangles u32.
 void gl_draw_elements_triangles_u32(std::int32_t count) noexcept {
   gl_table().drawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT,
                     nullptr);
 }
 
-/// Handles gl draw elements triangles u32 instanced.
 void gl_draw_elements_triangles_u32_instanced(
     std::int32_t count, std::int32_t instanceCount) noexcept {
   gl_table().drawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(count),
@@ -724,31 +699,24 @@ void gl_draw_elements_triangles_u32_instanced(
                              static_cast<GLsizei>(instanceCount));
 }
 
-/// Handles gl set viewport.
 void gl_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
                      std::int32_t h) noexcept {
   gl_table().viewport(static_cast<GLint>(x), static_cast<GLint>(y),
                 static_cast<GLsizei>(w), static_cast<GLsizei>(h));
 }
 
-/// Handles gl enable depth test.
 void gl_enable_depth_test() noexcept { gl_table().enable(GL_DEPTH_TEST); }
 
-/// Handles gl disable depth test.
 void gl_disable_depth_test() noexcept { gl_table().disable(GL_DEPTH_TEST); }
 
-/// Handles gl set depth func less.
 void gl_set_depth_func_less() noexcept { gl_table().depthFunc(GL_LESS); }
 
-/// Handles gl set depth func less equal.
 void gl_set_depth_func_less_equal() noexcept { gl_table().depthFunc(GL_LEQUAL); }
 
-/// Handles gl set clear color.
 void gl_set_clear_color(float r, float g, float b, float a) noexcept {
   gl_table().clearColor(r, g, b, a);
 }
 
-/// Handles gl clear color depth.
 void gl_clear_color_depth() noexcept {
   gl_table().clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -759,7 +727,6 @@ void gl_set_uniform_int(std::int32_t loc, std::int32_t value) noexcept {
   gl_table().uniform1i(static_cast<GLint>(loc), static_cast<GLint>(value));
 }
 
-/// Handles gl set uniform vec4.
 void gl_set_uniform_vec4(std::int32_t loc, const float *value) noexcept {
   gl_table().uniform4fv(static_cast<GLint>(loc), 1, value);
 }
@@ -802,7 +769,6 @@ std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl create texture 2d hdr.
 std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
                                        std::int32_t channels,
                                        const float *data) noexcept {
@@ -836,7 +802,6 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl create cubemap hdr.
 std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
                                     std::int32_t channels,
                                     const float *const facePixels[6]) noexcept {
@@ -876,7 +841,6 @@ std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl create cubemap hdr empty.
 std::uint32_t gl_create_cubemap_hdr_empty(std::int32_t faceSize,
                                           std::int32_t mipLevels) noexcept {
   if ((faceSize <= 0) || (mipLevels <= 0)) {
@@ -913,7 +877,6 @@ std::uint32_t gl_create_cubemap_hdr_empty(std::int32_t faceSize,
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl create depth texture.
 std::uint32_t gl_create_depth_texture(std::int32_t width,
                                       std::int32_t height) noexcept {
   GLuint tex = 0U;
@@ -933,7 +896,6 @@ std::uint32_t gl_create_depth_texture(std::int32_t width,
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl destroy texture.
 void gl_destroy_texture(std::uint32_t id) noexcept {
   if (id != 0U) {
     const GLuint tex = static_cast<GLuint>(id);
@@ -941,7 +903,6 @@ void gl_destroy_texture(std::uint32_t id) noexcept {
   }
 }
 
-/// Handles gl bind texture.
 void gl_bind_texture(std::int32_t unit, std::uint32_t id) noexcept {
   gl_table().activeTexture(
       static_cast<GLenum>(GL_TEXTURE0 + static_cast<GLenum>(unit)));
@@ -971,14 +932,12 @@ std::uint32_t gl_create_depth_cubemap(std::int32_t faceSize) noexcept {
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl bind texture cubemap.
 void gl_bind_texture_cubemap(std::int32_t unit, std::uint32_t id) noexcept {
   gl_table().activeTexture(
       static_cast<GLenum>(GL_TEXTURE0 + static_cast<GLenum>(unit)));
   gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, static_cast<GLuint>(id));
 }
 
-/// Handles gl framebuffer cubemap face.
 void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
                                  std::int32_t face) noexcept {
   gl_table().bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
@@ -988,7 +947,6 @@ void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
       static_cast<GLuint>(cubeTex), 0);
 }
 
-/// Handles gl framebuffer cubemap color face mip.
 void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
                                            std::uint32_t cubeTex,
                                            std::int32_t face,
@@ -1026,7 +984,6 @@ std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
   return static_cast<std::uint32_t>(fbo);
 }
 
-/// Handles gl destroy framebuffer.
 void gl_destroy_framebuffer(std::uint32_t fbo) noexcept {
   if (fbo != 0U) {
     const GLuint id = static_cast<GLuint>(fbo);
@@ -1034,17 +991,14 @@ void gl_destroy_framebuffer(std::uint32_t fbo) noexcept {
   }
 }
 
-/// Handles gl bind framebuffer.
 void gl_bind_framebuffer(std::uint32_t fbo) noexcept {
   gl_table().bindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(fbo));
 }
 
-/// Handles gl check framebuffer complete.
 bool gl_check_framebuffer_complete() noexcept {
   return gl_table().checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
-/// Handles gl blit depth.
 void gl_blit_depth(std::uint32_t srcFbo, std::uint32_t dstFbo,
                    std::int32_t width, std::int32_t height) noexcept {
   if ((srcFbo == 0U) || (dstFbo == 0U) || (width <= 0) || (height <= 0)) {
@@ -1059,7 +1013,6 @@ void gl_blit_depth(std::uint32_t srcFbo, std::uint32_t dstFbo,
   gl_table().bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0U);
 }
 
-/// Handles gl create framebuffer mrt.
 std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
                                         std::int32_t colorCount,
                                         std::uint32_t depthTex) noexcept {
@@ -1097,7 +1050,6 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
   return static_cast<std::uint32_t>(fbo);
 }
 
-/// Handles gl create texture 2d r32f.
 std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
                                         const float *data) noexcept {
   GLuint tex = 0U;
@@ -1122,7 +1074,6 @@ std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
   return static_cast<std::uint32_t>(tex);
 }
 
-/// Handles gl update texture 2d r32f.
 void gl_update_texture_2d_r32f(std::uint32_t texId, std::int32_t width,
                                std::int32_t height,
                                const float *data) noexcept {
@@ -1139,10 +1090,8 @@ void gl_update_texture_2d_r32f(std::uint32_t texId, std::int32_t width,
 
 void gl_enable_blending() noexcept { gl_table().enable(GL_BLEND); }
 
-/// Handles gl disable blending.
 void gl_disable_blending() noexcept { gl_table().disable(GL_BLEND); }
 
-/// Handles gl set blend func alpha.
 void gl_set_blend_func_alpha() noexcept {
   gl_table().blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -1151,7 +1100,6 @@ void gl_set_blend_func_alpha() noexcept {
 
 void gl_enable_face_culling() noexcept { gl_table().enable(GL_CULL_FACE); }
 
-/// Handles gl disable face culling.
 void gl_disable_face_culling() noexcept { gl_table().disable(GL_CULL_FACE); }
 
 // --- Depth mask ---
@@ -1160,14 +1108,12 @@ void gl_set_depth_mask(bool write) noexcept {
   gl_table().depthMask(write ? GL_TRUE : static_cast<GLboolean>(GL_FALSE));
 }
 
-/// Handles gl create query.
 std::uint32_t gl_create_query() noexcept {
   GLuint query = 0U;
   gl_table().genQueries(1, &query);
   return static_cast<std::uint32_t>(query);
 }
 
-/// Handles gl destroy query.
 void gl_destroy_query(std::uint32_t query) noexcept {
   if (query == 0U) {
     return;
@@ -1177,7 +1123,6 @@ void gl_destroy_query(std::uint32_t query) noexcept {
   gl_table().deleteQueries(1, &id);
 }
 
-/// Handles gl query counter timestamp.
 void gl_query_counter_timestamp(std::uint32_t query) noexcept {
   if (query == 0U) {
     return;
@@ -1186,7 +1131,6 @@ void gl_query_counter_timestamp(std::uint32_t query) noexcept {
   gl_table().queryCounter(static_cast<GLuint>(query), GL_TIMESTAMP);
 }
 
-/// Handles gl query result available.
 bool gl_query_result_available(std::uint32_t query) noexcept {
   if (query == 0U) {
     return false;
@@ -1198,7 +1142,6 @@ bool gl_query_result_available(std::uint32_t query) noexcept {
   return available != 0U;
 }
 
-/// Handles gl query result u64.
 std::uint64_t gl_query_result_u64(std::uint32_t query) noexcept {
   if (query == 0U) {
     return 0U;
@@ -1302,7 +1245,6 @@ void shutdown_render_device() noexcept {
   render_device_context().initialized = false;
 }
 
-/// Handles render device.
 const RenderDevice *render_device() noexcept {
   if (!render_device_context().initialized) {
     return nullptr;

@@ -10,7 +10,6 @@ namespace engine::core {
 
 namespace {
 
-/// Stores tag counters data used by the engine.
 struct TagCounters {
   std::atomic<std::int64_t> currentBytes{0};
   std::atomic<std::uint64_t> totalAllocated{0};
@@ -21,7 +20,6 @@ std::array<TagCounters, kMemTagCount> g_tagCounters{};
 
 } // namespace
 
-/// Handles mem tracker init.
 void mem_tracker_init() noexcept {
   for (auto &c : g_tagCounters) {
     c.currentBytes.store(0, std::memory_order_relaxed);
@@ -30,7 +28,6 @@ void mem_tracker_init() noexcept {
   }
 }
 
-/// Handles mem tracker alloc.
 void mem_tracker_alloc(MemTag tag, std::size_t bytes) noexcept {
   const auto idx = static_cast<std::size_t>(tag);
   if (idx >= kMemTagCount) {
@@ -42,7 +39,6 @@ void mem_tracker_alloc(MemTag tag, std::size_t bytes) noexcept {
                                               std::memory_order_relaxed);
 }
 
-/// Handles mem tracker free.
 void mem_tracker_free(MemTag tag, std::size_t bytes) noexcept {
   const auto idx = static_cast<std::size_t>(tag);
   if (idx >= kMemTagCount) {
@@ -54,7 +50,6 @@ void mem_tracker_free(MemTag tag, std::size_t bytes) noexcept {
                                           std::memory_order_relaxed);
 }
 
-/// Handles mem tracker snapshot.
 std::size_t mem_tracker_snapshot(MemTagSnapshot *out,
                                  std::size_t maxEntries) noexcept {
   if (out == nullptr) {
@@ -74,7 +69,6 @@ std::size_t mem_tracker_snapshot(MemTagSnapshot *out,
   return count;
 }
 
-/// Handles mem tracker current bytes.
 std::int64_t mem_tracker_current_bytes(MemTag tag) noexcept {
   const auto idx = static_cast<std::size_t>(tag);
   if (idx >= kMemTagCount) {
@@ -83,7 +77,6 @@ std::int64_t mem_tracker_current_bytes(MemTag tag) noexcept {
   return g_tagCounters[idx].currentBytes.load(std::memory_order_relaxed);
 }
 
-/// Handles mem tag name.
 const char *mem_tag_name(MemTag tag) noexcept {
   switch (tag) {
   case MemTag::Physics:

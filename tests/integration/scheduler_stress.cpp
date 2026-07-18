@@ -11,13 +11,11 @@ namespace {
 
 constexpr std::size_t kJobCount = 1500U;
 
-/// Stores stress job data used by the engine.
 struct StressJobData final {
   std::uint32_t jobIndex = 0U;
   std::uint64_t *output = nullptr;
 };
 
-/// Handles stress job.
 void stress_job(void *userData) noexcept {
   auto *data = static_cast<StressJobData *>(userData);
   if ((data == nullptr) || (data->output == nullptr)) {
@@ -44,7 +42,6 @@ void stress_job(void *userData) noexcept {
   *data->output = value;
 }
 
-/// Handles completion job.
 void completion_job(void *) noexcept {}
 
 /// Runs the configured command, loop, or tool for stress round.

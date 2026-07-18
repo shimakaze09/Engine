@@ -127,7 +127,6 @@ private:
 
 /// Owns the json parser behavior and state.
 class JsonParser final {
-/// Parses text into the engine representation.
 public:
   /// Parses text into the engine representation.
   bool parse(const char *input, std::size_t length) noexcept;
@@ -168,7 +167,6 @@ public:
   bool copy_string(const JsonValue &value, char *out,
                    std::size_t outCapacity) const noexcept;
 
-/// Pushes an item onto the owning stack or queue for scratch.
 private:
   /// Pushes an item onto the owning stack or queue for scratch.
   const JsonValue *push_scratch(const JsonValue &value) const noexcept;

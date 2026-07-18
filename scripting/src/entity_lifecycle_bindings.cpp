@@ -34,7 +34,6 @@ namespace engine::scripting {
 
 namespace {
 
-/// Handles copy clone name.
 void copy_clone_name(char *destination, std::size_t destinationSize,
                      const char *source) noexcept {
   constexpr const char *kCloneSuffix = " (clone)";
@@ -65,7 +64,6 @@ void copy_clone_name(char *destination, std::size_t destinationSize,
   }
 }
 
-/// Handles lua engine log.
 int lua_engine_log(lua_State *state) noexcept {
   const char *message = lua_tostring(state, 1);
   if (message == nullptr) {
@@ -76,7 +74,6 @@ int lua_engine_log(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine get entity count.
 int lua_engine_get_entity_count(lua_State *state) noexcept {
   const std::size_t count = (runtime_binding().world != nullptr && runtime_binding().services != nullptr)
                                 ? runtime_binding().services->get_transform_count(runtime_binding().world)
@@ -85,7 +82,6 @@ int lua_engine_get_entity_count(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine spawn entity.
 int lua_engine_spawn_entity(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
       !can_apply_mutations_now()) {
@@ -104,7 +100,6 @@ int lua_engine_spawn_entity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine destroy entity.
 int lua_engine_destroy_entity(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -118,7 +113,6 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine is alive.
 int lua_engine_is_alive(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);
@@ -135,7 +129,6 @@ int lua_engine_is_alive(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine set name.
 int lua_engine_set_name(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isstring(state, 2)) {
@@ -164,7 +157,6 @@ int lua_engine_set_name(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine get name.
 int lua_engine_get_name(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -204,7 +196,6 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine clone entity.
 int lua_engine_clone_entity(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || !can_apply_mutations_now()) {
     lua_pushnil(state);

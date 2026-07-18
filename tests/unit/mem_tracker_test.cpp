@@ -6,7 +6,6 @@
 
 using namespace engine::core;
 
-/// Handles test init zeroes.
 static bool test_init_zeroes() noexcept {
   mem_tracker_init();
   for (std::size_t i = 0U; i < kMemTagCount; ++i) {
@@ -17,7 +16,6 @@ static bool test_init_zeroes() noexcept {
   return true;
 }
 
-/// Handles test alloc and free.
 static bool test_alloc_and_free() noexcept {
   mem_tracker_init();
   mem_tracker_alloc(MemTag::Physics, 1024U);
@@ -35,7 +33,6 @@ static bool test_alloc_and_free() noexcept {
   return true;
 }
 
-/// Handles test multiple tags.
 static bool test_multiple_tags() noexcept {
   mem_tracker_init();
   mem_tracker_alloc(MemTag::Renderer, 2048U);
@@ -58,7 +55,6 @@ static bool test_multiple_tags() noexcept {
   return true;
 }
 
-/// Handles test snapshot.
 static bool test_snapshot() noexcept {
   mem_tracker_init();
   mem_tracker_alloc(MemTag::Scripting, 100U);
@@ -84,7 +80,6 @@ static bool test_snapshot() noexcept {
   return true;
 }
 
-/// Handles test tag names.
 static bool test_tag_names() noexcept {
   if (mem_tag_name(MemTag::Physics) == nullptr) {
     return false;
@@ -110,7 +105,6 @@ static bool test_tag_names() noexcept {
   return true;
 }
 
-/// Handles test invalid tag.
 static bool test_invalid_tag() noexcept {
   mem_tracker_init();
   // Should not crash with out-of-range tag
@@ -122,7 +116,6 @@ static bool test_invalid_tag() noexcept {
   return true;
 }
 
-/// Handles test null snapshot.
 static bool test_null_snapshot() noexcept {
   if (mem_tracker_snapshot(nullptr, 10U) != 0U) {
     return false;

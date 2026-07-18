@@ -14,17 +14,14 @@ namespace {
 
 using Clock = std::chrono::high_resolution_clock;
 
-/// Stores bench entity data used by the engine.
 struct BenchEntity final {
   std::uint32_t index = 0U;
 };
 
-/// Stores bench transform data used by the engine.
 struct BenchTransform final {
   engine::math::Vec3 position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
 };
 
-/// Stores bench rigid body data used by the engine.
 struct BenchRigidBody final {
   engine::math::Vec3 velocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
 };

@@ -32,7 +32,6 @@ namespace engine::scripting {
 
 namespace {
 
-/// Handles lua engine load sound.
 int lua_engine_load_sound(lua_State *state) noexcept {
   if (!lua_isstring(state, 1)) {
     lua_pushinteger(state, 0);
@@ -52,7 +51,6 @@ int lua_engine_load_sound(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine unload sound.
 int lua_engine_unload_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
@@ -64,7 +62,6 @@ int lua_engine_unload_sound(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine play sound.
 int lua_engine_play_sound(lua_State *state) noexcept {
   if ((runtime_binding().services == nullptr) || (runtime_binding().services->play_sound == nullptr)) {
     lua_pushboolean(state, 0);
@@ -92,7 +89,6 @@ int lua_engine_play_sound(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles lua engine stop sound.
 int lua_engine_stop_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
@@ -104,7 +100,6 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine stop all sounds.
 int lua_engine_stop_all_sounds(lua_State *state) noexcept {
   static_cast<void>(state);
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_all_sounds != nullptr)) {
@@ -113,7 +108,6 @@ int lua_engine_stop_all_sounds(lua_State *state) noexcept {
   return 0;
 }
 
-/// Handles lua engine set master volume.
 int lua_engine_set_master_volume(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;

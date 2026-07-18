@@ -78,7 +78,6 @@ std::size_t find_matching_contact(const ContactManifold &m,
   return bestIdx;
 }
 
-/// Stores extended manifold data used by the engine.
 struct ExtendedManifold final {
   ManifoldContact contacts[ContactManifold::kMaxContacts + 1U]{};
   std::size_t contactCount = 0U;
@@ -179,7 +178,6 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
 
 } // namespace
 
-/// Handles manifold add contact.
 std::size_t manifold_add_contact(std::uint32_t entityIndexA,
                                  std::uint32_t entityIndexB,
                                  const math::Vec3 &pointOnA,
@@ -238,7 +236,6 @@ std::size_t manifold_add_contact(std::uint32_t entityIndexA,
   return static_cast<std::size_t>(m - g_manifolds);
 }
 
-/// Handles manifold evict stale.
 void manifold_evict_stale(std::uint32_t frameNumber) noexcept {
   std::size_t writeIdx = 0U;
   for (std::size_t i = 0U; i < g_manifoldCount; ++i) {
@@ -252,10 +249,8 @@ void manifold_evict_stale(std::uint32_t frameNumber) noexcept {
   g_manifoldCount = writeIdx;
 }
 
-/// Handles manifold count.
 std::size_t manifold_count() noexcept { return g_manifoldCount; }
 
-/// Handles manifold reset.
 void manifold_reset() noexcept {
   for (std::size_t i = 0U; i < g_manifoldCount; ++i) {
     g_manifolds[i] = ContactManifold{};
@@ -263,7 +258,6 @@ void manifold_reset() noexcept {
   g_manifoldCount = 0U;
 }
 
-/// Handles manifold get.
 const ContactManifold *manifold_get(std::size_t index) noexcept {
   if (index >= g_manifoldCount) {
     return nullptr;

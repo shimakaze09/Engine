@@ -28,7 +28,7 @@ void set_engine_integer(lua_State *state, const char *name,
   lua_setfield(state, -2, name);
 }
 
-/// Handles Lua engine.is_key_down(scancode).
+/// Lua binding: Lua engine.is_key_down(scancode).
 int lua_engine_is_key_down(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushboolean(state, 0);
@@ -39,7 +39,7 @@ int lua_engine_is_key_down(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.is_key_pressed(scancode).
+/// Lua binding: Lua engine.is_key_pressed(scancode).
 int lua_engine_is_key_pressed(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushboolean(state, 0);
@@ -50,7 +50,7 @@ int lua_engine_is_key_pressed(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.register_action(name, key[, mouse_button]).
+/// Lua binding: Lua engine.register_action(name, key[, mouse_button]).
 int lua_engine_register_action(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_isnumber(state, 2)) {
     lua_pushboolean(state, 0);
@@ -66,7 +66,7 @@ int lua_engine_register_action(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.register_axis(name, negative_key, positive_key).
+/// Lua binding: Lua engine.register_axis(name, negative_key, positive_key).
 int lua_engine_register_axis(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
       !lua_isnumber(state, 3)) {
@@ -82,42 +82,42 @@ int lua_engine_register_axis(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.is_action_down(name).
+/// Lua binding: Lua engine.is_action_down(name).
 int lua_engine_is_action_down(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushboolean(state, core::is_action_down(name) ? 1 : 0);
   return 1;
 }
 
-/// Handles Lua engine.is_action_pressed(name).
+/// Lua binding: Lua engine.is_action_pressed(name).
 int lua_engine_is_action_pressed(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushboolean(state, core::is_action_pressed(name) ? 1 : 0);
   return 1;
 }
 
-/// Handles Lua engine.action_value(name).
+/// Lua binding: Lua engine.action_value(name).
 int lua_engine_get_action_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushnumber(state, static_cast<lua_Number>(core::action_value(name)));
   return 1;
 }
 
-/// Handles Lua engine.axis_value(name).
+/// Lua binding: Lua engine.axis_value(name).
 int lua_engine_get_axis_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushnumber(state, static_cast<lua_Number>(core::axis_value(name)));
   return 1;
 }
 
-/// Handles Lua engine.is_gamepad_connected().
+/// Lua binding: Lua engine.is_gamepad_connected().
 int lua_engine_is_gamepad_connected(lua_State *state) noexcept {
   static_cast<void>(state);
   lua_pushboolean(state, core::is_gamepad_connected() ? 1 : 0);
   return 1;
 }
 
-/// Handles Lua engine.is_gamepad_button_down(button).
+/// Lua binding: Lua engine.is_gamepad_button_down(button).
 int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushboolean(state, 0);
@@ -128,7 +128,7 @@ int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.gamepad_axis_value(axis[, deadzone]).
+/// Lua binding: Lua engine.gamepad_axis_value(axis[, deadzone]).
 int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     lua_pushnumber(state, 0.0);
@@ -142,7 +142,7 @@ int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.add_input_action(name, bindings).
+/// Lua binding: Lua engine.add_input_action(name, bindings).
 int lua_engine_add_input_action(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_istable(state, 2)) {
     lua_pushboolean(state, 0);
@@ -182,7 +182,7 @@ int lua_engine_add_input_action(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.add_input_axis(name, sources).
+/// Lua binding: Lua engine.add_input_axis(name, sources).
 int lua_engine_add_input_axis(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_istable(state, 2)) {
     lua_pushboolean(state, 0);
@@ -227,28 +227,28 @@ int lua_engine_add_input_axis(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.is_mapped_action_down(name).
+/// Lua binding: Lua engine.is_mapped_action_down(name).
 int lua_engine_is_mapped_action_down(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushboolean(state, core::is_mapped_action_down(name) ? 1 : 0);
   return 1;
 }
 
-/// Handles Lua engine.is_mapped_action_pressed(name).
+/// Lua binding: Lua engine.is_mapped_action_pressed(name).
 int lua_engine_is_mapped_action_pressed(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushboolean(state, core::is_mapped_action_pressed(name) ? 1 : 0);
   return 1;
 }
 
-/// Handles Lua engine.mapped_axis_value(name).
+/// Lua binding: Lua engine.mapped_axis_value(name).
 int lua_engine_mapped_axis_value(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   lua_pushnumber(state, static_cast<lua_Number>(core::mapped_axis_value(name)));
   return 1;
 }
 
-/// Handles Lua engine.rebind_action(name, binding_index, binding).
+/// Lua binding: Lua engine.rebind_action(name, binding_index, binding).
 int lua_engine_rebind_action(lua_State *state) noexcept {
   if (!lua_isstring(state, 1) || !lua_isnumber(state, 2) ||
       !lua_istable(state, 3)) {
@@ -279,7 +279,7 @@ int lua_engine_rebind_action(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.save_input_config(path).
+/// Lua binding: Lua engine.save_input_config(path).
 int lua_engine_save_input_config(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
   if (path == nullptr) {
@@ -290,7 +290,7 @@ int lua_engine_save_input_config(lua_State *state) noexcept {
   return 1;
 }
 
-/// Handles Lua engine.load_input_config(path).
+/// Lua binding: Lua engine.load_input_config(path).
 int lua_engine_load_input_config(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
   if (path == nullptr) {

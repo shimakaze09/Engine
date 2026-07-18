@@ -63,7 +63,6 @@ extern "C" {
 
 namespace engine::scripting {
 
-/// Handles register generated bindings.
 void register_generated_bindings(lua_State *L) noexcept;
 namespace {
 
@@ -81,7 +80,6 @@ constexpr std::size_t kMaxWatchedScripts = 16U;
 WatchedScript g_watchedScripts[kMaxWatchedScripts] = {};
 std::size_t g_watchedScriptCount = 0U;
 
-/// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept;
 
 /// Returns the Lua state owned by the scripting context.
@@ -117,33 +115,27 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   return newPtr;
 }
 
-/// Handles refresh lua hook.
 void refresh_lua_hook() noexcept;
 
-/// Handles refresh lua hook.
 void refresh_lua_hook() noexcept {
   refresh_debug_lua_hook();
 }
 
-/// Handles lua engine delta time.
 int lua_engine_delta_time(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(g_deltaSeconds));
   return 1;
 }
 
-/// Handles lua engine elapsed time.
 int lua_engine_elapsed_time(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(g_totalSeconds));
   return 1;
 }
 
-/// Handles lua engine frame count.
 int lua_engine_frame_count(lua_State *state) noexcept {
   lua_pushinteger(state, static_cast<lua_Integer>(g_frameIndex));
   return 1;
 }
 
-/// Handles lua engine start coroutine.
 int lua_engine_start_coroutine(lua_State *state) noexcept {
   return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
                              log_lua_error);
@@ -151,7 +143,6 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
 
 // --- Entity lifecycle completeness ---
 
-/// Handles register engine bindings.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -304,16 +295,12 @@ void register_engine_bindings(lua_State *state) noexcept {
 } // namespace
 
 
-/// Handles bindable delta time.
 float bindable_delta_time() noexcept { return g_deltaSeconds; }
 
-/// Handles bindable elapsed time.
 float bindable_elapsed_time() noexcept { return g_totalSeconds; }
 
-/// Handles bindable frame count.
 int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
 
-/// Handles bindable get entity count.
 int bindable_get_entity_count() noexcept {
   if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr)) {
     return 0;
@@ -321,47 +308,38 @@ int bindable_get_entity_count() noexcept {
   return static_cast<int>(runtime_binding().services->get_transform_count(runtime_binding().world));
 }
 
-/// Handles bindable is gamepad connected.
 bool bindable_is_gamepad_connected() noexcept {
   return core::is_gamepad_connected();
 }
 
-/// Handles bindable is key down.
 bool bindable_is_key_down(int scancode) noexcept {
   return core::is_key_down(scancode);
 }
 
-/// Handles bindable is key pressed.
 bool bindable_is_key_pressed(int scancode) noexcept {
   return core::is_key_pressed(scancode);
 }
 
-/// Handles bindable is gamepad button down.
 bool bindable_is_gamepad_button_down(int button) noexcept {
   return core::is_gamepad_button_down(button);
 }
 
-/// Handles bindable is action down.
 bool bindable_is_action_down(const char *name) noexcept {
   return (name != nullptr) ? core::is_action_down(name) : false;
 }
 
-/// Handles bindable is action pressed.
 bool bindable_is_action_pressed(const char *name) noexcept {
   return (name != nullptr) ? core::is_action_pressed(name) : false;
 }
 
-/// Handles bindable get action value.
 float bindable_get_action_value(const char *name) noexcept {
   return (name != nullptr) ? core::action_value(name) : 0.0F;
 }
 
-/// Handles bindable get axis value.
 float bindable_get_axis_value(const char *name) noexcept {
   return (name != nullptr) ? core::axis_value(name) : 0.0F;
 }
 
-/// Handles bindable is alive.
 bool bindable_is_alive(std::uint64_t entity) noexcept {
   if (runtime_binding().world == nullptr) {
     return false;
@@ -371,7 +349,6 @@ bool bindable_is_alive(std::uint64_t entity) noexcept {
          runtime_binding().world->is_alive(decoded);
 }
 
-/// Handles bindable has light.
 bool bindable_has_light(std::uint64_t entity) noexcept {
   if (runtime_binding().world == nullptr) {
     return false;
@@ -384,21 +361,18 @@ bool bindable_has_light(std::uint64_t entity) noexcept {
   return runtime_binding().world->has_light_component(decoded);
 }
 
-/// Handles bindable set camera fov.
 void bindable_set_camera_fov(float fov) noexcept {
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_camera_fov != nullptr)) {
     runtime_binding().services->set_camera_fov(fov);
   }
 }
 
-/// Handles bindable set master volume.
 void bindable_set_master_volume(float volume) noexcept {
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_master_volume != nullptr)) {
     runtime_binding().services->set_master_volume(volume);
   }
 }
 
-/// Handles bindable stop all sounds.
 void bindable_stop_all_sounds() noexcept {
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_all_sounds != nullptr)) {
     runtime_binding().services->stop_all_sounds();
@@ -515,7 +489,6 @@ bool load_script(const char *path) noexcept {
   return true;
 }
 
-/// Handles call script function.
 bool call_script_function(const char *name) noexcept {
   lua_State *state = lua_state();
   if (state == nullptr) {
@@ -544,7 +517,6 @@ bool call_script_function(const char *name) noexcept {
   return true;
 }
 
-/// Handles call script function float.
 bool call_script_function_float(const char *name, float arg) noexcept {
   lua_State *state = lua_state();
   if (state == nullptr) {
@@ -574,7 +546,6 @@ bool call_script_function_float(const char *name, float arg) noexcept {
   return true;
 }
 
-/// Handles dispatch physics callbacks.
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept {
   dispatch_collision_handlers(lua_state(), pairData, pairCount,
@@ -582,7 +553,6 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
 }
 
 namespace {
-/// Returns the requested value for file mtime.
 std::int64_t get_file_mtime(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     return 0;
@@ -621,18 +591,15 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
 }
 
-/// Handles tick timers.
 void tick_timers() noexcept {
   tick_lua_timers(lua_state(), g_deltaSeconds);
 }
 
-/// Handles tick coroutines.
 void tick_coroutines() noexcept {
   tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
                       refresh_lua_hook);
 }
 
-/// Handles clear coroutines.
 void clear_coroutines() noexcept {
   clear_lua_coroutines(lua_state());
 }
@@ -699,13 +666,11 @@ void set_instruction_limit(int limit) noexcept {
   refresh_lua_hook();
 }
 
-/// Returns the requested value for instruction limit.
 int get_instruction_limit() noexcept { return debug_instruction_limit(); }
 
 /// Sets the requested value for memory limit.
 void set_memory_limit(std::size_t limit) noexcept { g_memoryLimit = limit; }
 
-/// Returns the requested value for memory limit.
 std::size_t get_memory_limit() noexcept { return g_memoryLimit; }
 
 } // namespace engine::scripting

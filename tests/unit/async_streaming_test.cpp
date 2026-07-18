@@ -22,12 +22,10 @@ static engine::tests::TestContext g_tests;
     g_tests.check((cond), (msg));                                              \
   } while (false)
 
-/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U);
 }
 
-/// Handles ok load.
 static bool ok_load(AssetId, const char *, std::uint64_t *outSz,
                     void *) noexcept {
   if (outSz != nullptr) {
@@ -36,7 +34,6 @@ static bool ok_load(AssetId, const char *, std::uint64_t *outSz,
   return true;
 }
 
-/// Handles ok upload.
 static bool ok_upload(AssetId, void *) noexcept { return true; }
 
 struct ConcurrentLoadProbe final {
@@ -53,7 +50,6 @@ static void record_max(std::atomic<int> *target, int value) noexcept {
   }
 }
 
-/// Handles a slow load while tracking callback concurrency.
 static bool concurrent_load(AssetId, const char *, std::uint64_t *outSz,
                             void *userData) noexcept {
   auto *probe = static_cast<ConcurrentLoadProbe *>(userData);

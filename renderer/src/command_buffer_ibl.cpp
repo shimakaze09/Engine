@@ -38,7 +38,6 @@ namespace engine::renderer {
 
 namespace {
 
-/// Handles cubemap mip size.
 int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   int size = faceSize;
   for (int mip = 0; mip < mipLevel; ++mip) {
@@ -47,13 +46,11 @@ int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   return size;
 }
 
-/// Handles positive cvar u32.
 std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
   const int value = core::cvar_get_int(name, fallback);
   return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
 }
 
-/// Handles cubemap capture views.
 void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
   const math::Vec3 origin{};
   outViews[0] = math::look_at(origin, math::Vec3(1.0F, 0.0F, 0.0F),
@@ -72,7 +69,6 @@ void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
 
 } // namespace
 
-/// Handles cvar reflection probe bake settings.
 ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
   ReflectionProbeBakeSettings settings{};
   settings.prefilteredFaceSize =
@@ -107,7 +103,6 @@ void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
   backend.prefilteredEnvironmentMipLevels = 0;
 }
 
-/// Handles ensure prefiltered environment.
 std::uint32_t
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
                                std::uint32_t sourceCubemap,
@@ -223,7 +218,6 @@ void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
   backend.irradianceEnvironmentFaceSize = 0;
 }
 
-/// Handles ensure irradiance environment.
 std::uint32_t
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
                               std::uint32_t sourceCubemap,
@@ -322,7 +316,6 @@ void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   backend.brdfLutSize = 0;
 }
 
-/// Handles ensure brdf lut.
 std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
                               ReflectionProbeBakeSettings settings) noexcept {
   if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
@@ -376,7 +369,6 @@ std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
   return lutTexture;
 }
 
-/// Returns the requested value for prefiltered environment texture.
 std::uint32_t get_prefiltered_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_prefilter", true)) {
@@ -385,7 +377,6 @@ std::uint32_t get_prefiltered_environment_texture() noexcept {
   return backend_state().prefilteredEnvironmentTexture;
 }
 
-/// Returns the requested value for irradiance environment texture.
 std::uint32_t get_irradiance_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_irradiance", true)) {
@@ -394,7 +385,6 @@ std::uint32_t get_irradiance_environment_texture() noexcept {
   return backend_state().irradianceEnvironmentTexture;
 }
 
-/// Returns the requested value for brdf lut texture.
 std::uint32_t get_brdf_lut_texture() noexcept {
   if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
     return 0U;
@@ -402,7 +392,6 @@ std::uint32_t get_brdf_lut_texture() noexcept {
   return backend_state().brdfLutTexture;
 }
 
-/// Handles bake reflection probe.
 ReflectionProbeBakeResult
 bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   ReflectionProbeBakeResult result{};

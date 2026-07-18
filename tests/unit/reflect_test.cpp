@@ -9,7 +9,6 @@
 
 namespace {
 
-/// Stores local reflect data used by the engine.
 struct LocalReflect final {
   std::int32_t id = 0;
   bool enabled = false;

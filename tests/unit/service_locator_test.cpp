@@ -5,28 +5,23 @@
 
 static engine::tests::TestContext g_tests;
 
-/// Handles check.
 static void check(bool condition, const char *name) noexcept {
   g_tests.check(condition, name);
 }
 
-/// Stores audio system data used by the engine.
 struct AudioSystem final {
   int sampleRate = 44100;
 };
 
-/// Stores physics world data used by the engine.
 struct PhysicsWorld final {
   float gravity = -9.8F;
 };
 
-/// Stores renderer data used by the engine.
 struct Renderer final {
   int width = 1920;
   int height = 1080;
 };
 
-/// Handles test register and retrieve.
 static bool test_register_and_retrieve() noexcept {
   engine::core::ServiceLocator loc;
   AudioSystem audio;
@@ -43,7 +38,6 @@ static bool test_register_and_retrieve() noexcept {
   return true;
 }
 
-/// Handles test get unregistered returns null.
 static bool test_get_unregistered_returns_null() noexcept {
   engine::core::ServiceLocator loc;
   check(loc.get_service<AudioSystem>() == nullptr,
@@ -52,7 +46,6 @@ static bool test_get_unregistered_returns_null() noexcept {
   return true;
 }
 
-/// Handles test overwrite.
 static bool test_overwrite() noexcept {
   engine::core::ServiceLocator loc;
   AudioSystem audio1;
@@ -71,7 +64,6 @@ static bool test_overwrite() noexcept {
   return true;
 }
 
-/// Handles test multiple types.
 static bool test_multiple_types() noexcept {
   engine::core::ServiceLocator loc;
   AudioSystem audio;
@@ -89,7 +81,6 @@ static bool test_multiple_types() noexcept {
   return true;
 }
 
-/// Handles test remove.
 static bool test_remove() noexcept {
   engine::core::ServiceLocator loc;
   AudioSystem audio;
@@ -108,7 +99,6 @@ static bool test_remove() noexcept {
   return true;
 }
 
-/// Handles test clear.
 static bool test_clear() noexcept {
   engine::core::ServiceLocator loc;
   AudioSystem audio;
@@ -124,7 +114,6 @@ static bool test_clear() noexcept {
   return true;
 }
 
-/// Handles test type safety.
 static bool test_type_safety() noexcept {
   // Verify that different types produce different TypeIds.
   engine::core::TypeId idAudio = engine::core::type_id<AudioSystem>();
@@ -140,7 +129,6 @@ static bool test_type_safety() noexcept {
   return true;
 }
 
-/// Handles test register null service.
 static bool test_register_null_service() noexcept {
   engine::core::ServiceLocator loc;
   // Registering a null pointer is legal and leaves the type unregistered.

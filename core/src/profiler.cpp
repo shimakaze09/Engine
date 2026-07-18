@@ -15,7 +15,6 @@ using TimePoint = Clock::time_point;
 constexpr std::size_t kMaxEntries = 256U;
 constexpr std::size_t kMaxDepth = 16U;
 
-/// Stores internal entry data used by the engine.
 struct InternalEntry final {
   const char *name = nullptr;
   TimePoint start{};
@@ -24,7 +23,6 @@ struct InternalEntry final {
   std::uint32_t parentIndex = 0xFFFFFFFFU;
 };
 
-/// Stores frame buffer data used by the engine.
 struct FrameBuffer final {
   std::array<InternalEntry, kMaxEntries> entries{};
   std::size_t count = 0U;
@@ -62,20 +60,17 @@ void shutdown_profiler() noexcept {
   g_scopeDepth = 0U;
 }
 
-/// Handles profiler begin frame.
 void profiler_begin_frame() noexcept {
   g_writeBuffer.count = 0U;
   g_writeBuffer.frameStart = Clock::now();
   g_scopeDepth = 0U;
 }
 
-/// Handles profiler end frame.
 void profiler_end_frame() noexcept {
   g_writeBuffer.frameEnd = Clock::now();
   g_readBuffer = g_writeBuffer;
 }
 
-/// Handles profiler begin scope.
 bool profiler_begin_scope(const char *name) noexcept {
   if (g_writeBuffer.count >= kMaxEntries) {
     return false;
@@ -101,7 +96,6 @@ bool profiler_begin_scope(const char *name) noexcept {
   return true;
 }
 
-/// Handles profiler end scope.
 void profiler_end_scope() noexcept {
   if (g_scopeDepth == 0U) {
     return;
@@ -123,7 +117,6 @@ ProfileScope::~ProfileScope() noexcept {
   }
 }
 
-/// Handles profiler get entries.
 std::size_t profiler_get_entries(ProfileEntry *out,
                                  std::size_t maxEntries) noexcept {
   if ((out == nullptr) || (maxEntries == 0U)) {
@@ -145,14 +138,12 @@ std::size_t profiler_get_entries(ProfileEntry *out,
   return count;
 }
 
-/// Handles profiler frame time ms.
 float profiler_frame_time_ms() noexcept {
   const auto duration = std::chrono::duration<float, std::milli>(
       g_readBuffer.frameEnd - g_readBuffer.frameStart);
   return duration.count();
 }
 
-/// Handles profiler compute flame starts.
 bool profiler_compute_flame_starts(const ProfileEntry *entries,
                                    std::size_t count, float *outStartMs,
                                    std::uint32_t *outMaxDepth) noexcept {

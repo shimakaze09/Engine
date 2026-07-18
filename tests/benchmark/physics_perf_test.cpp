@@ -34,7 +34,6 @@ bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
   return true;
 }
 
-/// Handles setup world.
 bool setup_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
     return false;

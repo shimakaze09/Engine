@@ -62,7 +62,6 @@ constexpr std::int32_t kHdrCubemapChannels = 3;
 constexpr std::int32_t kMaxCubemapFaceSize = 4096;
 constexpr double kPi = 3.14159265358979323846264338327950288;
 
-/// Stores texture slot data used by the engine.
 struct TextureSlot final {
   std::uint32_t gpuId = 0U;
   std::uint32_t generation = 1U;
@@ -72,7 +71,6 @@ struct TextureSlot final {
   std::array<char, kMaxPathLen> path{};
 };
 
-/// Stores texture system state data used by the engine.
 struct TextureSystemState final {
   bool initialized = false;
   std::array<TextureSlot, kMaxTextureSlots> slots{};
@@ -123,7 +121,6 @@ std::size_t find_free_texture_slot() noexcept {
   return 0U;
 }
 
-/// Handles lookup texture slot.
 TextureSlot *lookup_texture_slot(TextureHandle handle,
                                  std::size_t *outSlotIndex = nullptr) noexcept {
   if (!g_texState.initialized || handle == kInvalidTextureHandle) {
@@ -159,7 +156,6 @@ bool texture_input_size_fits_stb(std::size_t fileSize,
 
 namespace {
 
-/// Handles clamp int.
 int clamp_int(int value, int minValue, int maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -170,7 +166,6 @@ int clamp_int(int value, int minValue, int maxValue) noexcept {
   return value;
 }
 
-/// Handles clamp float.
 float clamp_float(float value, float minValue, float maxValue) noexcept {
   if (value < minValue) {
     return minValue;
@@ -181,7 +176,6 @@ float clamp_float(float value, float minValue, float maxValue) noexcept {
   return value;
 }
 
-/// Handles wrap index.
 int wrap_index(int value, int count) noexcept {
   int result = value % count;
   if (result < 0) {
@@ -210,7 +204,6 @@ Vec3 cube_face_direction(int face, float u, float v) noexcept {
   }
 }
 
-/// Handles sample equirect channel.
 float sample_equirect_channel(const float *pixels, int width, int height,
                               double u, double v, int channel) noexcept {
   u -= std::floor(u);
@@ -248,7 +241,6 @@ float sample_equirect_channel(const float *pixels, int width, int height,
   return cx0 + (cx1 - cx0) * ty;
 }
 
-/// Handles sample equirect direction.
 void sample_equirect_direction(const float *pixels, int width, int height,
                                Vec3 direction, float *outRgb) noexcept {
   const double theta = std::atan2(static_cast<double>(direction.z),
@@ -264,7 +256,6 @@ void sample_equirect_direction(const float *pixels, int width, int height,
   }
 }
 
-/// Handles allocate equirect cubemap faces.
 bool allocate_equirect_cubemap_faces(
     const float *pixels, int width, int height, std::int32_t faceSize,
     std::array<std::unique_ptr<float[]>, 6> &faces) noexcept {
@@ -550,7 +541,6 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   return make_texture_handle(freeSlot);
 }
 
-/// Handles unload texture.
 void unload_texture(TextureHandle handle) noexcept {
   if (!g_texState.initialized || handle == kInvalidTextureHandle) {
     return;
@@ -570,7 +560,6 @@ void unload_texture(TextureHandle handle) noexcept {
   reset_texture_slot(g_texState.slots[slotIndex]);
 }
 
-/// Handles texture gpu id.
 std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {

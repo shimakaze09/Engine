@@ -153,7 +153,6 @@ void draw_main_menu_bar() noexcept {
   ImGui::EndMainMenuBar();
 }
 
-/// Handles draw remove component button.
 
 void draw_toolbar() noexcept {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -238,7 +237,6 @@ void draw_toolbar() noexcept {
   ImGui::End();
 }
 
-/// Handles draw entities panel.
 
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
@@ -292,6 +290,5 @@ void draw_entities_panel() noexcept {
   ImGui::End();
 }
 
-/// Handles draw inspector panel.
 
 } // namespace engine::editor
