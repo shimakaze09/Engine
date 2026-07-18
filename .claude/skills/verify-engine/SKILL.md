@@ -45,10 +45,10 @@ python tools/check_source_comments.py
 python tools/check_comment_quality.py --summary
 ```
 
-The quality checker's total must not INCREASE relative to the count noted in
-REVIEW_FINDINGS.md C1 progress (ratchet down only).
+Both audits must report ZERO findings (CI enforces this).
 
 ## 5. Bookkeeping
 
-Update the relevant status marker in `REVIEW_FINDINGS.md` in the same commit.
-New behavior requires a new/extended test per AGENTS.md.
+If the change affects module structure, build commands, test layout, or
+roadmap status, update `CLAUDE.md` in the same commit.
+New behavior requires a new/extended test per CLAUDE.md.
