@@ -835,6 +835,83 @@ int verify_foliage_parse_failures_reject_scene() {
   return 0;
 }
 
+/// MeshComponent.materialAssetId round-trips exactly and stays zero for
+/// scenes authored before material assets existed (key absent).
+int verify_mesh_material_reference_round_trip() {
+  std::unique_ptr<engine::runtime::World> source(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (source == nullptr) {
+    return 134;
+  }
+
+  const engine::runtime::Entity entity = source->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 135;
+  }
+
+  engine::runtime::MeshComponent mesh{};
+  mesh.meshAssetId = 42ULL;
+  mesh.materialAssetId = 0xABCDEF0123456789ULL;
+  if (!source->add_mesh_component(entity, mesh)) {
+    return 136;
+  }
+
+  std::array<char, engine::core::JsonWriter::kBufferBytes> buffer{};
+  std::size_t size = 0U;
+  if (!engine::runtime::save_scene(*source, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 137;
+  }
+
+  std::unique_ptr<engine::runtime::World> loaded(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (loaded == nullptr) {
+    return 138;
+  }
+  if (!engine::runtime::load_scene(*loaded, buffer.data(), size)) {
+    return 139;
+  }
+
+  engine::runtime::Entity loadedEntity = engine::runtime::kInvalidEntity;
+  loaded->for_each_alive(
+      [&](engine::runtime::Entity alive) noexcept { loadedEntity = alive; });
+  engine::runtime::MeshComponent loadedMesh{};
+  if (!loaded->get_mesh_component(loadedEntity, &loadedMesh)) {
+    return 140;
+  }
+  if ((loadedMesh.meshAssetId != 42ULL) ||
+      (loadedMesh.materialAssetId != 0xABCDEF0123456789ULL)) {
+    return 141;
+  }
+
+  // Pre-material scene JSON (no materialAssetId key) must load as zero.
+  constexpr const char *kLegacyScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"MeshComponent\":{\"meshAssetId\":7}}}]}";
+  std::unique_ptr<engine::runtime::World> legacy(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (legacy == nullptr) {
+    return 142;
+  }
+  if (!engine::runtime::load_scene(*legacy, kLegacyScene,
+                                   std::strlen(kLegacyScene))) {
+    return 143;
+  }
+  engine::runtime::Entity legacyEntity = engine::runtime::kInvalidEntity;
+  legacy->for_each_alive(
+      [&](engine::runtime::Entity alive) noexcept { legacyEntity = alive; });
+  engine::runtime::MeshComponent legacyMesh{};
+  if (!legacy->get_mesh_component(legacyEntity, &legacyMesh)) {
+    return 144;
+  }
+  if ((legacyMesh.meshAssetId != 7ULL) ||
+      (legacyMesh.materialAssetId != 0ULL)) {
+    return 145;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -920,6 +997,13 @@ int main() {
   }
 
   result = verify_point_spot_light_scene_round_trip();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_mesh_material_reference_round_trip();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

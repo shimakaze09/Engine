@@ -196,10 +196,22 @@ void render_prep_chunk_job(void *userData) noexcept {
             renderer::DrawCommand command{};
             command.entity = entities[i].index;
             command.mesh = runtimeMesh;
-            command.material.albedo = meshComponent->albedo;
-            command.material.roughness = meshComponent->roughness;
-            command.material.metallic = meshComponent->metallic;
-            command.material.opacity = meshComponent->opacity;
+            // Material asset reference wins; inline fields are the fallback
+            // (also used when the referenced material is not resolvable).
+            const renderer::Material *materialParams =
+                (meshComponent->materialAssetId != 0ULL)
+                    ? renderer::find_material_params(
+                          jobData->assetDatabase,
+                          meshComponent->materialAssetId)
+                    : nullptr;
+            if (materialParams != nullptr) {
+              command.material = *materialParams;
+            } else {
+              command.material.albedo = meshComponent->albedo;
+              command.material.roughness = meshComponent->roughness;
+              command.material.metallic = meshComponent->metallic;
+              command.material.opacity = meshComponent->opacity;
+            }
             command.modelMatrix = transforms[i].matrix;
             command.sortKey.value =
                 build_draw_sort_key(command.material, runtimeMesh, center, vp);

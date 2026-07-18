@@ -94,6 +94,10 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_key("MeshComponent");
     w.begin_object();
     w.write_uint64("meshAssetId", mesh.meshAssetId);
+    // Written only when set so pre-material prefabs stay byte-identical.
+    if (mesh.materialAssetId != 0ULL) {
+      w.write_uint64("materialAssetId", mesh.materialAssetId);
+    }
     write_vec3(w, "albedo", mesh.albedo);
     w.write_float("roughness", mesh.roughness);
     w.write_float("metallic", mesh.metallic);
@@ -386,6 +390,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   if (hasComponent) {
     MeshComponent mesh{};
     if (!readUint64Field(componentValue, "meshAssetId", &mesh.meshAssetId) ||
+        !readUint64Field(componentValue, "materialAssetId",
+                         &mesh.materialAssetId) ||
         !readVec3Field(componentValue, "albedo", &mesh.albedo) ||
         !readFloatField(componentValue, "roughness", &mesh.roughness) ||
         !readFloatField(componentValue, "metallic", &mesh.metallic) ||

@@ -106,8 +106,11 @@ struct ScriptComponent final {
 };
 
 // Renderer-facing component; keep minimal to avoid bloating draw commands.
+// When materialAssetId is set (non-zero) render prep uses the resolved
+// material asset's parameters; the inline fields below are the fallback.
 struct MeshComponent final {
   std::uint64_t meshAssetId = 0ULL;
+  std::uint64_t materialAssetId = 0ULL;
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
   float roughness = 0.5F;
   float metallic = 0.0F;

@@ -8,6 +8,7 @@
 
 #include "engine/renderer/asset_metadata.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/material.h"
 #include "engine/renderer/texture_loader.h"
 
 namespace engine::renderer {
@@ -40,7 +41,18 @@ struct TextureAssetRecord final {
   bool requestedResident = false;
 };
 
-/// Fixed-slot asset tables (meshes with tombstones, textures, metadata).
+/// One material slot: id, source path, and the fully resolved parameters
+/// (parent-chain overrides are baked at load time so render prep reads a
+/// flat record).
+struct MaterialAssetRecord final {
+  AssetId id = kInvalidAssetId;
+  std::array<char, 260U> sourcePath{};
+  Material params{};
+  AssetState state = AssetState::Unloaded;
+};
+
+/// Fixed-slot asset tables (meshes with tombstones, textures, materials,
+/// metadata).
 struct AssetDatabase final {
   static constexpr std::size_t kMaxMeshAssets = 4096U;
   std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets{};
@@ -52,6 +64,10 @@ struct AssetDatabase final {
   static constexpr std::size_t kMaxTextureAssets = 512U;
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets{};
   std::array<bool, kMaxTextureAssets> textureOccupied{};
+
+  static constexpr std::size_t kMaxMaterialAssets = 1024U;
+  std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets{};
+  std::array<bool, kMaxMaterialAssets> materialOccupied{};
 
   static constexpr std::size_t kMaxMetadata = 4096U;
   std::array<AssetMetadata, kMaxMetadata> metadata{};
@@ -104,6 +120,21 @@ std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
 /// stay intact. Fixes unbounded slot growth over long content-streaming
 /// sessions.
 bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
+
+// Material asset management. Materials are CPU parameter blocks; records
+// hold parent-resolved values, so lookups are flat and mutation-free
+// (safe from parallel render-prep jobs).
+/// Inserts or updates a material record; false when the table is full.
+bool register_material_asset(AssetDatabase *database, AssetId id,
+                             const char *sourcePath,
+                             const Material &params) noexcept;
+/// Resolved parameters for the id, or nullptr when absent (no access
+/// stamps are touched — safe to call from parallel jobs).
+const Material *find_material_params(const AssetDatabase *database,
+                                     AssetId id) noexcept;
+/// Lifecycle state for the material id (Unloaded when unknown).
+AssetState material_asset_state(const AssetDatabase *database,
+                                AssetId id) noexcept;
 
 // Texture asset management.
 bool register_texture_asset(AssetDatabase *database, AssetId id,
