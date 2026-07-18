@@ -542,3 +542,10 @@ engine_add_test_executable(engine_unit_engine_pipeline
     PRIVATE_DEPS
     engine_runtime
 )
+
+engine_add_test_executable(engine_unit_material_asset
+    SOURCES
+    material_asset_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)

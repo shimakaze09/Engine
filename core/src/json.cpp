@@ -1091,6 +1091,27 @@ std::size_t JsonParser::array_size(const JsonValue &array) const noexcept {
   return count;
 }
 
+bool JsonParser::as_float_array(const JsonValue &value, float *outValues,
+                                std::size_t expectedCount) const noexcept {
+  if ((outValues == nullptr) || (value.type != JsonValue::Type::Array)) {
+    return false;
+  }
+
+  if (array_size(value) != expectedCount) {
+    return false;
+  }
+
+  for (std::size_t i = 0U; i < expectedCount; ++i) {
+    JsonValue element{};
+    if (!get_array_element(value, i, &element) ||
+        !as_float(element, &outValues[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool JsonParser::as_float(const JsonValue &value,
                           float *outValue) const noexcept {
   if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||

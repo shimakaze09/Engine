@@ -253,6 +253,14 @@ bool read_mesh_component(const core::JsonParser &parser,
     }
   }
 
+  core::JsonValue materialIdValue{};
+  if (parser.get_object_field(meshObject, "materialAssetId",
+                              &materialIdValue)) {
+    if (!parser.as_uint64(materialIdValue, &component.materialAssetId)) {
+      return false;
+    }
+  }
+
   core::JsonValue albedoValue{};
   if (parser.get_object_field(meshObject, "albedo", &albedoValue)) {
     if (!read_vec3(parser, albedoValue, &component.albedo)) {
@@ -724,6 +732,10 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_key("MeshComponent");
       writer.begin_object();
       writer.write_uint64(kMeshAssetIdKey, mesh.meshAssetId);
+      // Written only when set so pre-material scenes stay byte-identical.
+      if (mesh.materialAssetId != 0ULL) {
+        writer.write_uint64("materialAssetId", mesh.materialAssetId);
+      }
       write_vec3(writer, "albedo", mesh.albedo);
       writer.write_float("roughness", mesh.roughness);
       writer.write_float("metallic", mesh.metallic);

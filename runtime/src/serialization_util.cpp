@@ -146,27 +146,7 @@ void write_quat(core::JsonWriter &writer, const char *key,
 bool read_float_array(const core::JsonParser &parser,
                       const core::JsonValue &arrayValue, float *outValues,
                       std::size_t expectedCount) noexcept {
-  if ((outValues == nullptr) ||
-      (arrayValue.type != core::JsonValue::Type::Array)) {
-    return false;
-  }
-
-  if (parser.array_size(arrayValue) != expectedCount) {
-    return false;
-  }
-
-  for (std::size_t i = 0U; i < expectedCount; ++i) {
-    core::JsonValue element{};
-    if (!parser.get_array_element(arrayValue, i, &element)) {
-      return false;
-    }
-
-    if (!parser.as_float(element, &outValues[i])) {
-      return false;
-    }
-  }
-
-  return true;
+  return parser.as_float_array(arrayValue, outValues, expectedCount);
 }
 
 bool read_vec2(const core::JsonParser &parser, const core::JsonValue &value,

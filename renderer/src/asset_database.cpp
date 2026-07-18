@@ -376,6 +376,11 @@ void clear_asset_database(AssetDatabase *database) noexcept {
     database->textureAssets[i] = TextureAssetRecord{};
   }
 
+  for (std::size_t i = 0U; i < database->materialAssets.size(); ++i) {
+    database->materialOccupied[i] = false;
+    database->materialAssets[i] = MaterialAssetRecord{};
+  }
+
   for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
     database->metadataOccupied[i] = false;
     database->metadata[i] = AssetMetadata{};
@@ -428,7 +433,91 @@ std::size_t find_texture_insert_slot(const AssetDatabase *database,
   return capacity;
 }
 
+/// Returns the occupied material slot for an id, or capacity when absent.
+std::size_t find_material_slot(const AssetDatabase *database,
+                               AssetId id) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return database != nullptr ? database->materialAssets.size() : 0U;
+  }
+
+  const std::size_t capacity = database->materialAssets.size();
+  const std::size_t base = hashed_slot(id, capacity);
+  for (std::size_t probe = 0U; probe < capacity; ++probe) {
+    const std::size_t slot = (base + probe) % capacity;
+    if (!database->materialOccupied[slot]) {
+      return capacity;
+    }
+    if (database->materialAssets[slot].id == id) {
+      return slot;
+    }
+  }
+
+  return capacity;
+}
+
+/// Finds the id's material slot or the first free one for insertion.
+std::size_t find_material_insert_slot(const AssetDatabase *database,
+                                      AssetId id) noexcept {
+  if (database == nullptr) {
+    return 0U;
+  }
+
+  const std::size_t capacity = database->materialAssets.size();
+  const std::size_t base = hashed_slot(id, capacity);
+  for (std::size_t probe = 0U; probe < capacity; ++probe) {
+    const std::size_t slot = (base + probe) % capacity;
+    if (!database->materialOccupied[slot] ||
+        (database->materialAssets[slot].id == id)) {
+      return slot;
+    }
+  }
+
+  return capacity;
+}
+
 } // namespace
+
+bool register_material_asset(AssetDatabase *database, AssetId id,
+                             const char *sourcePath,
+                             const Material &params) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return false;
+  }
+
+  const std::size_t slot = find_material_insert_slot(database, id);
+  if (slot == database->materialAssets.size()) {
+    return false;
+  }
+
+  database->materialOccupied[slot] = true;
+  MaterialAssetRecord &record = database->materialAssets[slot];
+  record.id = id;
+  record.params = params;
+  record.state = AssetState::Ready;
+  write_source_path(&record.sourcePath, sourcePath);
+  return true;
+}
+
+const Material *find_material_params(const AssetDatabase *database,
+                                     AssetId id) noexcept {
+  const std::size_t slot = find_material_slot(database, id);
+  if ((database == nullptr) || (slot == database->materialAssets.size()) ||
+      (database->materialAssets[slot].state != AssetState::Ready)) {
+    return nullptr;
+  }
+
+  return &database->materialAssets[slot].params;
+}
+
+AssetState material_asset_state(const AssetDatabase *database,
+                                AssetId id) noexcept {
+  const std::size_t slot = find_material_slot(database, id);
+  if ((database == nullptr) || (slot == database->materialAssets.size())) {
+    return AssetState::Unloaded;
+  }
+
+  return database->materialAssets[slot].state;
+}
 
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,

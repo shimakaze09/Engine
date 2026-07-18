@@ -180,9 +180,13 @@ architecture splits, comment quality — all closed, quality CI-enforced).
 
 Open — Phase 1 ship blockers:
 
-- **P1-M6 residuals**: shader binary cache; material instances + JSON
-  material assets (`AssetTypeTag::Material`); `SceneCaptureComponent`
-  (render-to-texture, multiple captures).
+- **P1-M6 residuals**: shader binary cache; `SceneCaptureComponent`
+  (render-to-texture, multiple captures). Done 2026-07-18: material
+  instances + JSON material assets — `material_loader` resolves
+  parent-chain overrides at load into flat `AssetDatabase` records
+  (`AssetTypeTag::Material`), referenced by
+  `MeshComponent.materialAssetId` and applied during render prep (inline
+  PBR fields remain the fallback).
 - **P1-M7 Animation**: clip quantization + async animation assets (import of
   glTF skins/clips already lands in asset_packer); pose blending (crossfade,
   1D/2D blend spaces, additive, masked); state machine (JSON, hot reload,

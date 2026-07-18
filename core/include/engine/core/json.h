@@ -151,6 +151,10 @@ public:
 
   /// Numeric value as float; false for non-numbers.
   bool as_float(const JsonValue &value, float *outValue) const noexcept;
+  /// Reads exactly expectedCount floats from a JSON array; the element
+  /// count must match exactly and every element must be a number.
+  bool as_float_array(const JsonValue &value, float *outValues,
+                      std::size_t expectedCount) const noexcept;
   /// Numeric value as uint32; false for non-numbers or out of range.
   bool as_uint(const JsonValue &value, std::uint32_t *outValue) const noexcept;
   /// Numeric value as uint64; false for non-numbers or out of range.
