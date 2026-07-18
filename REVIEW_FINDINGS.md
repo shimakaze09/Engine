@@ -265,17 +265,20 @@ Status codes: `[ ]` open · `[~]` in progress · `[x]` fixed+verified · `[-]` r
 
 ## P4 — Comment noise
 
-- `[ ]` **C1: ~1,300 machine-generated filler comments; some factually wrong.**
-  Patterns: `/// Handles <name>.` tautologies; wrong docs (`normalize()` documented
-  as "Clamps and fills settings into a safe runtime range"); doc comments inside
-  function bodies, on `private:`, on ctor init-lists (`/// Handles x.`).
-  Fix: `tools/check_comment_quality.py` (added by this campaign) detects the
-  patterns; clean up mechanically, then wire the checker into CI so they can't
-  come back. `tools/check_source_comments.py` enforces presence only — the two
-  checks are complementary.
-  *Ratchet: 1878 findings at campaign start → 1856 after sparse_set.h cleanup
-  → 1720 after math header rewrite → 1713 after S2/S3 → 1711 after S1/S9
-  → 1706 after A2/S4/P5/A5/A7 (2026-07-17). Total must only go down.*
+- `[x]` **C1: ~1,300 machine-generated filler comments; some factually wrong.**
+  *Fixed 2026-07-17 in three commits: (1) 1,112 filler comments deleted in
+  implementation/test/tool files and private src headers, with the 63
+  `/// Handles Lua engine.X(...)` comments rewritten to
+  `/// Lua binding: engine.X(...)` to keep their signature info; (2) the 525
+  public-header findings resolved by hand — 426 replaced with real contract
+  comments (phase/liveness requirements, failure modes, ranges, ownership)
+  and 99 pure-noise placements deleted; (3) `check_comment_quality.py` wired
+  into the CI static-analysis job next to the presence audit, so findings
+  fail CI and cannot return.
+  Ratchet history: 1878 at campaign start → 1856 (sparse_set cleanup)
+  → 1720 (math rewrite) → 1713 (S2/S3) → 1711 (S1/S9) → 1706 (A2/S4/P5/
+  A5/A7) → 1702 (S5) → **0**. `check_source_comments.py` (presence) and
+  `check_comment_quality.py` (quality) both run in CI and both pass.*
 
 ## Verification protocol (per fix)
 

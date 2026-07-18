@@ -274,10 +274,9 @@ Actual target relationships from CMake:
   translation units; `command_buffer_flush.cpp` remains large but is one
   same-domain pass driver. Keep future edits narrow and avoid mixing
   ownership changes with feature work.
-- Roughly 1,700 machine-generated filler doc comments (`/// Handles foo.`)
-  remain in headers and some are factually wrong; trust implementations over
-  header comments until finding C1 lands (`tools/check_comment_quality.py`
-  tracks the ratchet).
+- Comment quality is CI-enforced: `tools/check_source_comments.py` (presence)
+  and `tools/check_comment_quality.py` (no filler patterns) both run in the
+  static-analysis job and must stay at zero findings.
 - Public headers should continue avoiding SDL/OpenGL/Lua/ImGui/ImGuizmo type
   leaks; inspect new headers for module-boundary drift.
 - `TODO.md` is the source of truth for open production lanes;
