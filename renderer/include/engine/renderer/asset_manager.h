@@ -14,14 +14,14 @@ namespace engine::renderer {
 /// Enumerates asset request type values used by the engine.
 enum class AssetRequestType : std::uint8_t { Load, Unload, Reload };
 
-/// Stores asset request data used by the engine.
+/// One queued load/unload/reload transition for an asset id.
 struct AssetRequest final {
   AssetRequestType type = AssetRequestType::Load;
   AssetId id = kInvalidAssetId;
   std::array<char, 260U> sourcePath{};
 };
 
-/// Stores asset manager data used by the engine.
+/// Fixed queue of asset transitions applied by update_asset_manager.
 struct AssetManager final {
   static constexpr std::size_t kMaxQueuedRequests = 1024U;
 
@@ -31,21 +31,21 @@ struct AssetManager final {
   std::uint32_t droppedRequests = 0U;
 };
 
-/// Handles clear asset manager.
+/// Drops all pending requests.
 void clear_asset_manager(AssetManager *manager) noexcept;
-/// Handles pending asset request count.
+/// Number of queued transitions.
 std::size_t pending_asset_request_count(const AssetManager *manager) noexcept;
 
-/// Handles queue mesh load.
+/// Queues a mesh load; false when the queue is full.
 bool queue_mesh_load(AssetManager *manager,
                      AssetDatabase *database,
                      AssetId id,
                      const char *sourcePath) noexcept;
-/// Handles queue mesh unload.
+/// Queues a mesh unload; false when the queue is full.
 bool queue_mesh_unload(AssetManager *manager,
                        AssetDatabase *database,
                        AssetId id) noexcept;
-/// Handles queue mesh reload.
+/// Queues a mesh reload (unload + load); false when the queue is full.
 bool queue_mesh_reload(AssetManager *manager,
                        AssetDatabase *database,
                        AssetId id,

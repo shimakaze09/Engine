@@ -22,7 +22,6 @@ int g_gestureCallbackRefs[4] = {LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
 void unregister_lua_touch_callback() noexcept;
 void unregister_lua_gesture_callback(int index) noexcept;
 
-/// Handles lua touch handler.
 void lua_touch_handler(const core::TouchEvent &event,
                        void * /*userData*/) noexcept {
   if ((g_touchLuaState == nullptr) || (g_touchCallbackRef == LUA_NOREF)) {
@@ -54,7 +53,6 @@ void lua_touch_handler(const core::TouchEvent &event,
   }
 }
 
-/// Handles lua gesture handler.
 void lua_gesture_handler(const core::GestureEvent &event,
                          void * /*userData*/) noexcept {
   if (g_touchLuaState == nullptr) {

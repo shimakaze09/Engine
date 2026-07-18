@@ -4,10 +4,9 @@
 
 namespace engine::runtime {
 
-/// Owns the world behavior and state.
 class World;
 
-/// Stores editor bridge data used by the engine.
+/// Function-pointer bridge the runtime uses to reach the editor.
 struct EditorBridge final {
   bool (*initialize)(void *sdlWindow, void *glContext) noexcept = nullptr;
   void (*shutdown)() noexcept = nullptr;
@@ -23,7 +22,7 @@ struct EditorBridge final {
 
 /// Sets the requested value for editor bridge.
 void set_editor_bridge(const EditorBridge *bridge) noexcept;
-/// Handles editor bridge.
+/// Registered bridge instance, or nullptr when no editor is linked.
 const EditorBridge *editor_bridge() noexcept;
 
 } // namespace engine::runtime

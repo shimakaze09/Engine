@@ -8,7 +8,6 @@
 
 namespace engine::physics {
 
-/// Handles solve hinge joint.
 float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                         const math::Vec3 &anchorB, const math::Vec3 &axis,
                         bool hasLimits, float minAngle, float maxAngle,

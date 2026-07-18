@@ -8,7 +8,6 @@
 
 namespace engine::physics {
 
-/// Handles solve distance joint.
 float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
                            float &accumulatedImpulse) noexcept {
   if ((ctx.tA == nullptr) || (ctx.tB == nullptr)) {

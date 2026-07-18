@@ -8,7 +8,6 @@
 
 namespace engine::physics {
 
-/// Handles solve slider joint.
 float solve_slider_joint(JointSolveContext &ctx, const math::Vec3 &axis,
                          bool hasLimits, float minDist, float maxDist,
                          float &accumulatedImpulse) noexcept {

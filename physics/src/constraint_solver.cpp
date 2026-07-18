@@ -27,7 +27,6 @@ static JointId allocate_joint(PhysicsWorldView &world) noexcept {
   return kInvalidJointId;
 }
 
-/// Adds a value or component to the target system for hinge joint.
 JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept {
@@ -56,7 +55,6 @@ JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
   return id;
 }
 
-/// Adds a value or component to the target system for ball socket joint.
 JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
                               Entity entityB,
                               const math::Vec3 &pivot) noexcept {
@@ -83,7 +81,6 @@ JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
   return id;
 }
 
-/// Adds a value or component to the target system for slider joint.
 JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, const math::Vec3 &axis) noexcept {
   const JointId id = allocate_joint(world);
@@ -103,7 +100,6 @@ JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
   return id;
 }
 
-/// Adds a value or component to the target system for spring joint.
 JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, float restLength, float stiffness,
                          float damping) noexcept {
@@ -126,7 +122,6 @@ JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
   return id;
 }
 
-/// Adds a value or component to the target system for fixed joint.
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept {
   const JointId id = allocate_joint(world);

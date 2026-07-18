@@ -149,7 +149,6 @@ struct UpdateChunkJobData final {
   float deltaSeconds = 0.0F;
 };
 
-/// Stores physics chunk job data used by the engine.
 struct PhysicsChunkJobData final {
   runtime::World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -158,19 +157,16 @@ struct PhysicsChunkJobData final {
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
-/// Stores world phase job data used by the engine.
 struct WorldPhaseJobData final {
   runtime::World *world = nullptr;
 };
 
-/// Stores resolve collisions job data used by the engine.
 struct ResolveCollisionsJobData final {
   runtime::World *world = nullptr;
   float deltaSeconds = 0.0F;
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
-/// Stores frame context data used by the engine.
 struct FrameContext final {
   runtime::RenderPrepPipelineContext renderPrepPipeline{};
   std::array<UpdateChunkJobData, kMaxChunkJobs> updateJobData{};
@@ -186,7 +182,6 @@ struct FrameContext final {
 // Utility helpers
 // ---------------------------------------------------------------------------
 
-/// Handles resolve mesh asset path.
 bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
   if ((outPath == nullptr) || (outCapacity == 0U)) {
     return false;
@@ -200,7 +195,6 @@ bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
 }
 
 
-/// Handles register builtin mesh.
 renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                         renderer::AssetDatabase *database,
                                         const renderer::GpuMesh &mesh,
@@ -241,7 +235,6 @@ void update_chunk_job(void *userData) noexcept {
       jobData->startIndex, jobData->count, jobData->deltaSeconds));
 }
 
-/// Handles physics chunk job.
 void physics_chunk_job(void *userData) noexcept {
   auto *jobData = static_cast<PhysicsChunkJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -254,7 +247,6 @@ void physics_chunk_job(void *userData) noexcept {
   }
 }
 
-/// Handles resolve collisions job.
 void resolve_collisions_job(void *userData) noexcept {
   auto *jobData = static_cast<ResolveCollisionsJobData *>(userData);
   if ((jobData == nullptr) || (jobData->world == nullptr)) {
@@ -266,7 +258,6 @@ void resolve_collisions_job(void *userData) noexcept {
   }
 }
 
-/// Handles commit update phase job.
 void commit_update_phase_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
@@ -306,7 +297,6 @@ void end_frame_phase_job(void *userData) noexcept {
   }
 }
 
-/// Handles link dependency.
 bool link_dependency(core::JobHandle prerequisite,
                      core::JobHandle dependent) noexcept {
   if (!core::is_valid_handle(prerequisite) ||
@@ -344,7 +334,6 @@ core::JobHandle submit_world_phase_job(FrameContext *frameContext,
 
 enum class LoopPlayState : std::uint8_t { Stopped, Playing, Paused };
 
-/// Handles query editor play state.
 LoopPlayState query_editor_play_state() noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if (bridge == nullptr) {
@@ -362,7 +351,6 @@ LoopPlayState query_editor_play_state() noexcept {
   return LoopPlayState::Stopped;
 }
 
-/// Handles process input events with editor.
 void process_input_events_with_editor() noexcept {
   core::begin_input_frame();
 
@@ -407,7 +395,6 @@ const char *world_phase_to_string(runtime::WorldPhase phase) noexcept {
   }
 }
 
-/// Handles vec3 has motion.
 bool vec3_has_motion(const math::Vec3 &value) noexcept {
   constexpr float kEpsilon = 0.0001F;
   return (value.x > kEpsilon) || (value.x < -kEpsilon) ||
@@ -415,7 +402,6 @@ bool vec3_has_motion(const math::Vec3 &value) noexcept {
          (value.z > kEpsilon) || (value.z < -kEpsilon);
 }
 
-/// Handles count moving rigid bodies.
 std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::RigidBody>(
@@ -428,7 +414,6 @@ std::size_t count_moving_rigid_bodies(const runtime::World &world) noexcept {
   return count;
 }
 
-/// Handles count mesh components.
 std::size_t count_mesh_components(const runtime::World &world) noexcept {
   std::size_t count = 0U;
   world.for_each<runtime::MeshComponent>(
@@ -438,7 +423,6 @@ std::size_t count_mesh_components(const runtime::World &world) noexcept {
   return count;
 }
 
-/// Handles count ready mesh components.
 std::size_t
 count_ready_mesh_components(const runtime::World &world,
                             const renderer::AssetDatabase *assets) noexcept {
@@ -458,14 +442,12 @@ count_ready_mesh_components(const runtime::World &world,
   return count;
 }
 
-/// Stores mesh asset state counts data used by the engine.
 struct MeshAssetStateCounts final {
   std::size_t ready = 0U;
   std::size_t loading = 0U;
   std::size_t failed = 0U;
 };
 
-/// Handles count mesh asset states.
 MeshAssetStateCounts
 count_mesh_asset_states(const renderer::AssetDatabase *assets) noexcept {
   MeshAssetStateCounts counts{};
@@ -1059,6 +1041,8 @@ struct EnginePipeline::Impl final {
   // --- Timing state ---
   Clock::time_point previousTick{};
   Clock::time_point frameStart{};
+  // Last time the frame-metrics trace line was written (rate-limited).
+  Clock::time_point lastMetricsLogTime{};
   double accumulator = 0.0;
   double simulationTimeSeconds = 0.0;
 
@@ -1805,17 +1789,25 @@ void EnginePipeline::Impl::stage_render() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_diagnostics() noexcept {
-  std::size_t threadFrameBytes = 0U;
-  std::size_t threadFrameAllocs = 0U;
-  for (std::size_t i = 0U; i < frameThreadCount; ++i) {
-    threadFrameBytes += core::thread_frame_allocator_bytes_used(i);
-    threadFrameAllocs += core::thread_frame_allocator_allocation_count(i);
-  }
+  // The stats panel/overlay surface these values live; keep the console
+  // traces at ~1 Hz so per-frame printf calls cannot throttle the loop.
+  const auto now = Clock::now();
+  const bool logTraceThisFrame =
+      (now - lastMetricsLogTime) >= std::chrono::seconds(1);
+  if (logTraceThisFrame) {
+    lastMetricsLogTime = now;
+    std::size_t threadFrameBytes = 0U;
+    std::size_t threadFrameAllocs = 0U;
+    for (std::size_t i = 0U; i < frameThreadCount; ++i) {
+      threadFrameBytes += core::thread_frame_allocator_bytes_used(i);
+      threadFrameAllocs += core::thread_frame_allocator_allocation_count(i);
+    }
 
-  core::log_frame_metrics(frameIndex, frameMs,
-                          core::frame_allocator_bytes_used() + threadFrameBytes,
-                          core::frame_allocator_allocation_count() +
-                              threadFrameAllocs);
+    core::log_frame_metrics(
+        frameIndex, frameMs,
+        core::frame_allocator_bytes_used() + threadFrameBytes,
+        core::frame_allocator_allocation_count() + threadFrameAllocs);
+  }
 
   const std::size_t aliveCount = world->alive_entity_count();
   const std::size_t spawnedCount = (aliveCount >= previousAliveCount)
@@ -1883,14 +1875,17 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
   core::set_engine_stats(frameStats);
 
-  char jobMessage[192] = {};
-  std::snprintf(jobMessage, sizeof(jobMessage),
-                "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
-                static_cast<unsigned long long>(jobStats.jobsExecuted),
-                static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
-                utilizationPct,
-                static_cast<unsigned long long>(jobStats.queueContentionCount));
-  core::log_message(core::LogLevel::Trace, "jobs", jobMessage);
+  if (logTraceThisFrame) {
+    char jobMessage[192] = {};
+    std::snprintf(
+        jobMessage, sizeof(jobMessage),
+        "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
+        static_cast<unsigned long long>(jobStats.jobsExecuted),
+        static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
+        utilizationPct,
+        static_cast<unsigned long long>(jobStats.queueContentionCount));
+    core::log_message(core::LogLevel::Trace, "jobs", jobMessage);
+  }
 }
 
 // ---------------------------------------------------------------------------

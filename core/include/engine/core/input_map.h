@@ -18,7 +18,7 @@ enum class InputBindingType : std::uint8_t {
   GamepadAxis
 };
 
-/// Stores input binding data used by the engine.
+/// One physical binding: type (key/mouse/gamepad) plus its code.
 struct InputBinding final {
   InputBindingType type = InputBindingType::Key;
   int code = -1;
@@ -37,7 +37,7 @@ inline constexpr std::size_t kMaxInputNameLen = 63U;
 using ActionCallback = void (*)(const char *actionName, bool pressed,
                                 void *userData) noexcept;
 
-/// Stores input action data used by the engine.
+/// Named action: up to 8 bindings and an optional callback.
 struct InputAction final {
   char name[kMaxInputNameLen + 1U] = {};
   InputBinding bindings[kMaxBindingsPerAction] = {};
@@ -58,7 +58,7 @@ enum class AxisSourceType : std::uint8_t {
   MouseDeltaY
 };
 
-/// Stores input axis source data used by the engine.
+/// One axis source (key pair, gamepad axis, or mouse delta).
 struct InputAxisSource final {
   AxisSourceType type = AxisSourceType::KeyPair;
   int negativeKey = -1;
@@ -78,7 +78,7 @@ inline constexpr std::size_t kMaxSourcesPerAxis = 8U;
 using AxisCallback = void (*)(const char *axisName, float value,
                               void *userData) noexcept;
 
-/// Stores input axis mapping data used by the engine.
+/// Named axis: up to 8 sources and an optional callback.
 struct InputAxisMapping final {
   char name[kMaxInputNameLen + 1U] = {};
   InputAxisSource sources[kMaxSourcesPerAxis] = {};
@@ -102,12 +102,12 @@ void shutdown_input_mapper() noexcept;
 
 bool add_input_action(const char *name, const InputBinding *bindings,
                       std::uint32_t count) noexcept;
-/// Adds a value or component to the target system for input axis.
+/// Registers a named axis with its sources; false on duplicate/full.
 bool add_input_axis(const char *name, const InputAxisSource *sources,
                     std::uint32_t count) noexcept;
-/// Removes a value or component from the target system for input action.
+/// Unregisters the named action; false when unknown.
 bool remove_input_action(const char *name) noexcept;
-/// Removes a value or component from the target system for input axis.
+/// Unregisters the named axis; false when unknown.
 bool remove_input_axis(const char *name) noexcept;
 
 // ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ bool set_axis_callback(const char *name, AxisCallback cb,
 bool is_mapped_action_down(const char *name) noexcept;
 /// Returns whether is mapped action pressed.
 bool is_mapped_action_pressed(const char *name) noexcept;
-/// Handles mapped axis value.
+/// Combined value of the mapped axis in [-1, 1].
 float mapped_axis_value(const char *name) noexcept;
 
 // ---------------------------------------------------------------------------
@@ -142,9 +142,9 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
 // ---------------------------------------------------------------------------
 
 void input_mapper_process_event(const void *nativeEvent) noexcept;
-/// Handles input mapper begin frame.
+/// Starts an input frame (captures pressed-edge state).
 void input_mapper_begin_frame() noexcept;
-/// Handles input mapper end frame.
+/// Ends the input frame (clears per-frame edges).
 void input_mapper_end_frame() noexcept;
 
 // ---------------------------------------------------------------------------

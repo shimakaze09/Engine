@@ -10,7 +10,7 @@ namespace engine::renderer {
 inline constexpr std::uint32_t kShaderStageVertex = 0U;
 inline constexpr std::uint32_t kShaderStageFragment = 1U;
 
-/// Stores render device data used by the engine.
+/// Function table over the GL backend; null entries mean unsupported.
 struct RenderDevice final {
   // Shader — compile source, return handle (0 on failure, logs errors).
   std::uint32_t (*create_shader)(std::uint32_t stage,
@@ -76,19 +76,15 @@ struct RenderDevice final {
   std::uint32_t (*create_texture_2d)(std::int32_t width, std::int32_t height,
                                      std::int32_t channels,
                                      const void *data) noexcept = nullptr;
-  /// Handles uint32 t.
   std::uint32_t (*create_texture_2d_hdr)(std::int32_t width,
                                          std::int32_t height,
                                          std::int32_t channels,
                                          const float *data) noexcept = nullptr;
-  /// Handles uint32 t.
   std::uint32_t (*create_cubemap_hdr)(
       std::int32_t faceSize, std::int32_t channels,
       const float *const facePixels[6]) noexcept = nullptr;
-  /// Handles uint32 t.
   std::uint32_t (*create_cubemap_hdr_empty)(
       std::int32_t faceSize, std::int32_t mipLevels) noexcept = nullptr;
-  /// Handles uint32 t.
   std::uint32_t (*create_depth_texture)(std::int32_t width,
                                         std::int32_t height) noexcept = nullptr;
   void (*destroy_texture)(std::uint32_t id) noexcept = nullptr;
@@ -108,7 +104,6 @@ struct RenderDevice final {
   // Framebuffers.
   std::uint32_t (*create_framebuffer)(
       std::uint32_t colorTex, std::uint32_t depthTex) noexcept = nullptr;
-  /// Handles uint32 t.
   std::uint32_t (*create_framebuffer_mrt)(
       const std::uint32_t *colorTextures, std::int32_t colorCount,
       std::uint32_t depthTex) noexcept = nullptr;
@@ -144,7 +139,6 @@ struct RenderDevice final {
   void (*destroy_query)(std::uint32_t query) noexcept = nullptr;
   void (*query_counter_timestamp)(std::uint32_t query) noexcept = nullptr;
   bool (*query_result_available)(std::uint32_t query) noexcept = nullptr;
-  /// Handles uint64 t.
   std::uint64_t (*query_result_u64)(std::uint32_t query) noexcept = nullptr;
 
   // State.
@@ -163,7 +157,7 @@ struct RenderDevice final {
 bool initialize_render_device() noexcept;
 /// Shuts down the owning system for render device.
 void shutdown_render_device() noexcept;
-/// Handles render device.
+/// Active device table, or nullptr before initialization.
 const RenderDevice *render_device() noexcept;
 
 } // namespace engine::renderer

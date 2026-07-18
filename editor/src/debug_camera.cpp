@@ -16,7 +16,6 @@ namespace {
 
 constexpr float kSpeedBoost = 3.0F;
 
-/// Handles camera forward.
 math::Vec3 camera_forward(float yaw, float pitch) noexcept {
   const float cy = std::cos(yaw);
   const float sy = std::sin(yaw);
@@ -25,7 +24,6 @@ math::Vec3 camera_forward(float yaw, float pitch) noexcept {
   return math::Vec3(cp * sy, sp, cp * cy);
 }
 
-/// Handles camera right.
 math::Vec3 camera_right(float yaw) noexcept {
   const float cy = std::cos(yaw);
   const float sy = std::sin(yaw);
@@ -78,7 +76,6 @@ void update_debug_camera(DebugCamera &camera, float dt, bool forward, bool back,
   }
 }
 
-/// Handles debug camera state.
 renderer::CameraState debug_camera_state(const DebugCamera &camera) noexcept {
   const math::Vec3 fwd = camera_forward(camera.yaw, camera.pitch);
 
@@ -89,7 +86,6 @@ renderer::CameraState debug_camera_state(const DebugCamera &camera) noexcept {
   return state;
 }
 
-/// Handles draw camera frustum wireframe.
 void draw_camera_frustum_wireframe(const renderer::CameraState &frozenCamera,
                                    float aspectRatio) noexcept {
   // Compute view and projection matrices, then extract frustum corners.

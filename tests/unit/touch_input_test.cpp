@@ -56,7 +56,6 @@ void touch_cb(const TouchEvent &event, void *userData) noexcept {
   state->lastY = event.y;
 }
 
-/// Stores gesture cbstate data used by the engine.
 struct GestureCBState {
   int tapCount = 0;
   int swipeCount = 0;
@@ -66,7 +65,6 @@ struct GestureCBState {
   float lastPinchScale = 1.0F;
 };
 
-/// Handles tap cb.
 void tap_cb(const GestureEvent &event, void *userData) noexcept {
   auto *state = static_cast<GestureCBState *>(userData);
   if (event.type == GestureType::Tap) {
@@ -74,7 +72,6 @@ void tap_cb(const GestureEvent &event, void *userData) noexcept {
   }
 }
 
-/// Handles swipe cb.
 void swipe_cb(const GestureEvent &event, void *userData) noexcept {
   auto *state = static_cast<GestureCBState *>(userData);
   if (event.type == GestureType::Swipe) {
@@ -83,7 +80,6 @@ void swipe_cb(const GestureEvent &event, void *userData) noexcept {
   }
 }
 
-/// Handles pinch cb.
 void pinch_cb(const GestureEvent &event, void *userData) noexcept {
   auto *state = static_cast<GestureCBState *>(userData);
   if (event.type == GestureType::Pinch) {
@@ -92,7 +88,6 @@ void pinch_cb(const GestureEvent &event, void *userData) noexcept {
   }
 }
 
-/// Handles init all.
 bool init_all() noexcept {
   if (!initialize_input()) {
     return false;
@@ -121,7 +116,6 @@ void sim_finger_down(SDL_FingerID fingerId, float x, float y) noexcept {
   input_process_event(&ev);
 }
 
-/// Handles sim finger move.
 void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
                      float dy) noexcept {
   SDL_Event ev{};
@@ -135,7 +129,6 @@ void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
   input_process_event(&ev);
 }
 
-/// Handles sim finger up.
 void sim_finger_up(SDL_FingerID fingerId, float x, float y) noexcept {
   SDL_Event ev{};
   ev.type = SDL_FINGERUP;
@@ -197,7 +190,6 @@ bool test_touch_lifecycle() noexcept {
   return true;
 }
 
-/// Handles test multi touch.
 bool test_multi_touch() noexcept {
   if (!init_all()) {
     return false;
@@ -289,7 +281,6 @@ bool test_duplicate_finger_down_reuses_touch() noexcept {
   return true;
 }
 
-/// Handles test tap gesture.
 bool test_tap_gesture() noexcept {
   if (!init_all()) {
     return false;
@@ -316,7 +307,6 @@ bool test_tap_gesture() noexcept {
   return true;
 }
 
-/// Handles test swipe gesture.
 bool test_swipe_gesture() noexcept {
   if (!init_all()) {
     return false;
@@ -351,7 +341,6 @@ bool test_swipe_gesture() noexcept {
   return true;
 }
 
-/// Handles test pinch gesture.
 bool test_pinch_gesture() noexcept {
   if (!init_all()) {
     return false;
@@ -390,7 +379,6 @@ bool test_pinch_gesture() noexcept {
   return true;
 }
 
-/// Handles test mouse emulation.
 bool test_mouse_emulation() noexcept {
   if (!init_all()) {
     return false;
@@ -422,7 +410,6 @@ bool test_mouse_emulation() noexcept {
   return true;
 }
 
-/// Handles test callback register unregister.
 bool test_callback_register_unregister() noexcept {
   if (!init_all()) {
     return false;
@@ -464,7 +451,6 @@ bool test_callback_register_unregister() noexcept {
   return true;
 }
 
-/// Handles test null edge cases.
 bool test_null_edge_cases() noexcept {
   if (!init_all()) {
     return false;

@@ -8,7 +8,6 @@
 
 namespace engine::physics {
 
-/// Handles solve spring joint.
 float solve_spring_joint(JointSolveContext &ctx, float restLength,
                          float stiffness, float damping, float deltaSeconds,
                          float &accumulatedImpulse) noexcept {

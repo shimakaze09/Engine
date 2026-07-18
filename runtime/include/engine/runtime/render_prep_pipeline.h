@@ -14,7 +14,7 @@
 
 namespace engine::runtime {
 
-/// Stores render prep chunk job data used by the engine.
+/// Inputs for one render-prep chunk job (world span -> local buffer).
 struct RenderPrepChunkJobData final {
   const World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -27,7 +27,7 @@ struct RenderPrepChunkJobData final {
   math::Mat4 viewProjection{};
 };
 
-/// Stores merge commands job data used by the engine.
+/// Inputs for the merge job combining per-thread buffers.
 struct MergeCommandsJobData final {
   renderer::CommandBufferBuilder *merged = nullptr;
   renderer::CommandBufferBuilder *localBuffers = nullptr;
@@ -35,7 +35,7 @@ struct MergeCommandsJobData final {
   std::atomic<bool> *frameGraphFailed = nullptr;
 };
 
-/// Stores render prep pipeline context data used by the engine.
+/// Preallocated buffers and job bookkeeping for render prep.
 struct RenderPrepPipelineContext final {
   static constexpr std::size_t kMaxFrameThreads = 16U;
   static constexpr std::size_t kMaxChunkJobs = 1024U;

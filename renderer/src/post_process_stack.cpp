@@ -11,7 +11,6 @@ namespace {
 PostProcessStack g_stack{};
 bool g_initialized = false;
 
-/// Stores pass cvar binding data used by the engine.
 struct PassCVarBinding final {
   PostProcessPassId id;
   const char *cvarName;
@@ -38,7 +37,6 @@ void initialize_post_process_stack() noexcept {
   g_initialized = true;
 }
 
-/// Returns the requested value for post process stack.
 const PostProcessStack &get_post_process_stack() noexcept { return g_stack; }
 
 /// Returns whether is post process pass enabled.
@@ -58,7 +56,6 @@ bool is_post_process_pass_enabled(PostProcessPassId id) noexcept {
   return true; // No CVar bound → always enabled.
 }
 
-/// Handles post process pass name.
 const char *post_process_pass_name(PostProcessPassId id) noexcept {
   switch (id) {
   case PostProcessPassId::Bloom:

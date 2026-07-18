@@ -13,9 +13,9 @@ using PushEntityHandleFromIndexFn =
     void (*)(lua_State *state, std::uint32_t entityIndex) noexcept;
 using LogLuaErrorFn = void (*)(const char *context) noexcept;
 
-/// Handles Lua engine.on_collision_register(callback).
+/// Lua binding: Lua engine.on_collision_register(callback).
 int lua_engine_on_collision_register(lua_State *state) noexcept;
-/// Handles Lua engine.remove_collision_handler(handler_id).
+/// Lua binding: Lua engine.remove_collision_handler(handler_id).
 int lua_engine_remove_collision_handler(lua_State *state) noexcept;
 
 /// Releases all registered Lua collision callback refs.

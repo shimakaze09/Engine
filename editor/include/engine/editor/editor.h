@@ -3,7 +3,6 @@
 #pragma once
 
 namespace engine::runtime {
-/// Owns the world behavior and state.
 class World;
 }
 
@@ -13,17 +12,17 @@ namespace engine::editor {
 bool initialize_editor(void *sdlWindow, void *glContext) noexcept;
 /// Shuts down the owning system for editor.
 void shutdown_editor() noexcept;
-/// Handles editor new frame.
+/// Starts an ImGui frame (call before any panel draws).
 void editor_new_frame() noexcept;
-/// Handles editor render.
+/// Draws all editor panels and renders the ImGui frame.
 void editor_render(float frameMs, float utilizationPct) noexcept;
-/// Handles editor process event.
+/// Feeds one SDL event to ImGui (and gizmo) input.
 void editor_process_event(void *sdlEvent) noexcept;
-/// Handles editor set world.
+/// Attaches or detaches the runtime world the editor edits.
 void editor_set_world(runtime::World *world) noexcept;
-/// Handles editor is playing.
+/// True while play mode is active.
 bool editor_is_playing() noexcept;
-/// Handles editor is paused.
+/// True while play mode is paused.
 bool editor_is_paused() noexcept;
 
 } // namespace engine::editor

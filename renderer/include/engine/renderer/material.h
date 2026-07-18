@@ -9,7 +9,7 @@
 
 namespace engine::renderer {
 
-/// Stores material data used by the engine.
+/// PBR constants for a draw (albedo, roughness, metallic, opacity).
 struct Material final {
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
   math::Vec3 emissive = math::Vec3(0.0F, 0.0F, 0.0F);

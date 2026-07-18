@@ -34,7 +34,6 @@ struct CallbackState {
   char lastName[64] = {};
 };
 
-/// Handles action cb.
 void action_cb(const char *name, bool pressed, void *userData) noexcept {
   auto *state = static_cast<CallbackState *>(userData);
   if (pressed) {
@@ -52,13 +51,11 @@ void action_cb(const char *name, bool pressed, void *userData) noexcept {
   }
 }
 
-/// Stores axis state data used by the engine.
 struct AxisState {
   float lastValue = 0.0F;
   int callCount = 0;
 };
 
-/// Handles axis cb.
 void axis_cb(const char * /*name*/, float value, void *userData) noexcept {
   auto *state = static_cast<AxisState *>(userData);
   state->lastValue = value;
@@ -91,7 +88,6 @@ void sim_key_down(KeyScancode key) noexcept {
   input_process_event(&ev);
 }
 
-/// Handles sim key up.
 void sim_key_up(KeyScancode key) noexcept {
   SDL_Event ev{};
   ev.type = SDL_KEYUP;
@@ -147,7 +143,6 @@ bool test_add_action_and_poll() noexcept {
   return true;
 }
 
-/// Handles test action pressed detection.
 bool test_action_pressed_detection() noexcept {
   if (!init_all()) {
     return false;
@@ -181,7 +176,6 @@ bool test_action_pressed_detection() noexcept {
   return true;
 }
 
-/// Handles test action callback.
 bool test_action_callback() noexcept {
   if (!init_all()) {
     return false;
@@ -223,7 +217,6 @@ bool test_action_callback() noexcept {
   return true;
 }
 
-/// Handles test multi binding action.
 bool test_multi_binding_action() noexcept {
   if (!init_all()) {
     return false;
@@ -261,7 +254,6 @@ bool test_multi_binding_action() noexcept {
   return true;
 }
 
-/// Handles test axis key pair.
 bool test_axis_key_pair() noexcept {
   if (!init_all()) {
     return false;
@@ -309,7 +301,6 @@ bool test_axis_key_pair() noexcept {
   return true;
 }
 
-/// Handles test axis callback.
 bool test_axis_callback() noexcept {
   if (!init_all()) {
     return false;
@@ -343,7 +334,6 @@ bool test_axis_callback() noexcept {
   return true;
 }
 
-/// Handles test remove action.
 bool test_remove_action() noexcept {
   if (!init_all()) {
     return false;
@@ -375,7 +365,6 @@ bool test_remove_action() noexcept {
   return true;
 }
 
-/// Handles test rebind action.
 bool test_rebind_action() noexcept {
   if (!init_all()) {
     return false;
@@ -420,7 +409,6 @@ bool test_rebind_action() noexcept {
   return true;
 }
 
-/// Handles test save load roundtrip.
 bool test_save_load_roundtrip() noexcept {
   if (!init_all()) {
     return false;
@@ -493,7 +481,6 @@ bool test_save_load_roundtrip() noexcept {
   return true;
 }
 
-/// Handles test null and edge cases.
 bool test_null_and_edge_cases() noexcept {
   if (!init_all()) {
     return false;

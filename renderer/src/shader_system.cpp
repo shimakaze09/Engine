@@ -45,7 +45,6 @@ struct ShaderVariantEntry final {
   ShaderProgramHandle handle{};
 };
 
-/// Stores shader entry data used by the engine.
 struct ShaderEntry final {
   bool active = false;
   std::uint32_t generation = 1U;
@@ -293,7 +292,6 @@ void remove_variants_for_handle(ShaderProgramHandle handle) noexcept {
   }
 }
 
-/// Handles compile program from source.
 std::uint32_t compile_program_from_source(const char *vertSource,
                                           const char *fragSource,
                                           const ShaderDefineCopy *defines,
@@ -340,7 +338,6 @@ std::uint32_t compile_program_from_source(const char *vertSource,
   return program;
 }
 
-/// Handles try reload entry.
 bool try_reload_entry(ShaderEntry &entry) noexcept {
   char *vertSource = nullptr;
   std::size_t vertSize = 0U;
@@ -585,7 +582,6 @@ void destroy_shader_program(ShaderProgramHandle handle) noexcept {
   reset_shader_entry(handle.id - 1U);
 }
 
-/// Handles shader gpu program.
 std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
   if (!is_current_handle(handle)) {
     return 0U;
@@ -595,7 +591,6 @@ std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
   return entry.gpuProgram;
 }
 
-/// Handles check shader reload.
 void check_shader_reload() noexcept {
   if (!g_initialized) {
     return;

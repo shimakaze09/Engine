@@ -38,10 +38,9 @@ struct LoadHandle final {
 
   static constexpr std::uint32_t kInvalid = 0xFFFFFFFFU;
 
-  /// Handles valid.
+  /// True for handles returned by a successful load_asset_async.
   [[nodiscard]] bool valid() const noexcept { return index != kInvalid; }
 
-  /// Compares values for equality.
   friend constexpr bool operator==(const LoadHandle &,
                                    const LoadHandle &) = default;
 };

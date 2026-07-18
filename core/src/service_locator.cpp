@@ -68,7 +68,6 @@ void ServiceLocator::clear() noexcept {
   m_count = 0U;
 }
 
-/// Handles global service locator.
 ServiceLocator &global_service_locator() noexcept {
   static ServiceLocator instance;
   return instance;

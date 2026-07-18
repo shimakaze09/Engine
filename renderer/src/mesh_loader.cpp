@@ -31,7 +31,6 @@ bool read_exact(FILE *file, void *data, std::size_t sizeBytes) noexcept {
   return std::fread(data, 1U, sizeBytes, file) == sizeBytes;
 }
 
-/// Handles checked mul.
 bool checked_mul(std::size_t lhs, std::size_t rhs,
                  std::size_t *outResult) noexcept {
   if (outResult == nullptr) {
@@ -46,7 +45,6 @@ bool checked_mul(std::size_t lhs, std::size_t rhs,
   return true;
 }
 
-/// Handles checked add.
 bool checked_add(std::size_t lhs, std::size_t rhs,
                  std::size_t *outResult) noexcept {
   if (outResult == nullptr) {
@@ -61,7 +59,6 @@ bool checked_add(std::size_t lhs, std::size_t rhs,
   return true;
 }
 
-/// Handles delete mesh resources.
 void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
   if ((mesh == nullptr) || (dev == nullptr)) {
     return;
@@ -467,7 +464,6 @@ void unload_mesh(GpuMesh *mesh) noexcept {
   }
 }
 
-/// Handles register gpu mesh.
 std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
                                 const GpuMesh &mesh) noexcept {
   if (registry == nullptr) {
@@ -485,7 +481,6 @@ std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
   return 0U;
 }
 
-/// Handles lookup gpu mesh.
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
                                renderer::MeshHandle handle) noexcept {
   if (registry == nullptr) {

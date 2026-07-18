@@ -6,27 +6,27 @@ struct lua_State;
 
 namespace engine::scripting {
 
-/// Handles Lua engine.profiler_enable(enabled).
+/// Lua binding: Lua engine.profiler_enable(enabled).
 int lua_engine_profiler_enable(lua_State *state) noexcept;
-/// Handles Lua engine.profiler_reset().
+/// Lua binding: Lua engine.profiler_reset().
 int lua_engine_profiler_reset(lua_State *state) noexcept;
-/// Handles Lua engine.profiler_get_count(name).
+/// Lua binding: Lua engine.profiler_get_count(name).
 int lua_engine_profiler_get_count(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_enable(enabled).
+/// Lua binding: Lua engine.debugger_enable(enabled).
 int lua_engine_debugger_enable(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_add_breakpoint(file, line).
+/// Lua binding: Lua engine.debugger_add_breakpoint(file, line).
 int lua_engine_debugger_add_breakpoint(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_clear_breakpoints().
+/// Lua binding: Lua engine.debugger_clear_breakpoints().
 int lua_engine_debugger_clear_breakpoints(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_add_watch(expr).
+/// Lua binding: Lua engine.debugger_add_watch(expr).
 int lua_engine_debugger_add_watch(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_clear_watches().
+/// Lua binding: Lua engine.debugger_clear_watches().
 int lua_engine_debugger_clear_watches(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_last_breakpoint().
+/// Lua binding: Lua engine.debugger_last_breakpoint().
 int lua_engine_debugger_last_breakpoint(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_last_callstack().
+/// Lua binding: Lua engine.debugger_last_callstack().
 int lua_engine_debugger_last_callstack(lua_State *state) noexcept;
-/// Handles Lua engine.debugger_last_watch_values().
+/// Lua binding: Lua engine.debugger_last_watch_values().
 int lua_engine_debugger_last_watch_values(lua_State *state) noexcept;
 
 /// Sets the Lua state that owns debugger/profiler hooks.

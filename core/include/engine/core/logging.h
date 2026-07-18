@@ -20,9 +20,9 @@ enum class LogLevel : std::uint8_t {
 bool initialize_logging() noexcept;
 /// Shuts down the owning system for logging.
 void shutdown_logging() noexcept;
-/// Handles log message.
+/// Writes one log line (level + channel + message) to the sinks.
 void log_message(LogLevel level, const char* channel, const char* message) noexcept;
-/// Handles log frame metrics.
+/// Logs the per-frame timing/metrics line.
 void log_frame_metrics(
     std::uint32_t frameIndex,
     double frameMs,

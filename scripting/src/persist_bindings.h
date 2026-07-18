@@ -6,9 +6,9 @@ struct lua_State;
 
 namespace engine::scripting {
 
-/// Handles Lua engine.persist(key, value).
+/// Lua binding: Lua engine.persist(key, value).
 int lua_engine_persist(lua_State *state) noexcept;
-/// Handles Lua engine.restore(key).
+/// Lua binding: Lua engine.restore(key).
 int lua_engine_restore(lua_State *state) noexcept;
 
 /// Releases the Lua persist table registry ref.

@@ -8,7 +8,6 @@
 
 namespace engine::physics {
 
-/// Handles solve fixed joint.
 float solve_fixed_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                         const math::Vec3 &anchorB,
                         float &accumulatedImpulse) noexcept {

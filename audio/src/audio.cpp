@@ -50,7 +50,6 @@ constexpr std::uint32_t kSoundGenerationMask =
 static_assert(kMaxSounds < (1U << kSoundSlotBits),
               "slot tokens (slot + 1) must fit the handle slot bits");
 
-/// Stores sound entry data used by the engine.
 struct SoundEntry final {
   bool active = false;
   std::uint32_t generation = 1U;
@@ -59,7 +58,6 @@ struct SoundEntry final {
   void *fileData = nullptr;
 };
 
-/// Stores audio state data used by the engine.
 struct AudioState final {
   bool initialized = false;
   ma_engine engine{};
@@ -230,7 +228,6 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   return make_sound_handle(slot);
 }
 
-/// Handles unload sound.
 void unload_sound(SoundHandle handle) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
@@ -246,7 +243,6 @@ void unload_sound(SoundHandle handle) noexcept {
   reset_sound_entry(*entry);
 }
 
-/// Handles play sound.
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
@@ -264,7 +260,6 @@ bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   return res == MA_SUCCESS;
 }
 
-/// Handles stop sound.
 void stop_sound(SoundHandle handle) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry != nullptr) {
@@ -272,7 +267,6 @@ void stop_sound(SoundHandle handle) noexcept {
   }
 }
 
-/// Handles stop all.
 void stop_all() noexcept {
   if (!g_audio.initialized) {
     return;

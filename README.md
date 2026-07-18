@@ -25,7 +25,7 @@ The repository is not production-complete yet. Game authors primarily work throu
 
 Every tracked source, script, shader, build, and test file should start with a short file-level comment explaining its role. Every class, struct, enum, and function added or changed in future work should also keep a concise purpose comment close to its declaration or definition. Update the comment when behavior changes.
 
-Two audit tools enforce this: `tools/check_source_comments.py` checks comment presence (wired into CI), and `tools/check_comment_quality.py` flags machine-generated filler patterns (its finding count is a ratchet that must only decrease; see `REVIEW_FINDINGS.md` C1).
+Two audit tools enforce this in CI: `tools/check_source_comments.py` checks comment presence, and `tools/check_comment_quality.py` flags machine-generated filler patterns; both must report zero findings.
 
 ## Current verified state
 
@@ -49,11 +49,10 @@ Verified working areas in the current tree include:
 The engine is no longer forward-only; the deferred path is active behind
 `r_deferred` with forward fallback/transparency. Large roadmap items such as
 full animation production, game UI runtime, platform packaging, project
-workflow/commandlets, and release operations remain open in `TODO.md`.
-
-A production-hardening campaign is in progress on top of these foundations:
-`REVIEW_FINDINGS.md` tracks the remaining bug, performance, duplication, and
-architecture findings from the 2026-07 full-codebase review.
+workflow/commandlets, and release operations remain open in the roadmap
+section of `CLAUDE.md`, the single project document for contributor rules,
+the repository map, and roadmap status. The 2026-07 production-hardening
+campaign (27 correctness/performance/structure findings) is complete.
 
 ## Tech stack
 

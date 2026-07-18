@@ -8,7 +8,6 @@
 
 namespace {
 
-/// Handles nearly equal.
 bool nearly_equal(float a, float b) { return std::fabs(a - b) <= 0.0001F; }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +69,6 @@ int verify_point_light_crud() {
   return 0;
 }
 
-/// Handles verify point light double add.
 int verify_point_light_double_add() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -108,7 +106,6 @@ int verify_point_light_double_add() {
   return 0;
 }
 
-/// Handles verify point light invalid entity.
 int verify_point_light_invalid_entity() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -214,7 +211,6 @@ int verify_spot_light_crud() {
   return 0;
 }
 
-/// Handles verify spot light double add.
 int verify_spot_light_double_add() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -252,7 +248,6 @@ int verify_spot_light_double_add() {
   return 0;
 }
 
-/// Handles verify spot light invalid entity.
 int verify_spot_light_invalid_entity() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());

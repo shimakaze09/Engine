@@ -15,7 +15,6 @@
 static int g_passed = 0;
 static int g_failed = 0;
 
-/// Handles check.
 static void check(bool condition, const char *name) noexcept {
   if (condition) {
     ++g_passed;
@@ -84,7 +83,6 @@ static float run_bullet_vs_wall(float speed) noexcept {
   return result.position.x;
 }
 
-/// Handles test bullet 100 no tunnel.
 static void test_bullet_100_no_tunnel() noexcept {
   const float x = run_bullet_vs_wall(100.0F);
   // Wall near edge at x = 5.0 - 0.02 = 4.98. Bullet radius = 0.1.
@@ -92,7 +90,6 @@ static void test_bullet_100_no_tunnel() noexcept {
   check(x < 5.0F, "Bullet at 100m/s doesn't tunnel through wall");
 }
 
-/// Handles test bullet 300 no tunnel.
 static void test_bullet_300_no_tunnel() noexcept {
   const float x = run_bullet_vs_wall(300.0F);
   // At 300 m/s, 1/60s = 5m travel. Wall is at x=5.
@@ -100,7 +97,6 @@ static void test_bullet_300_no_tunnel() noexcept {
   check(x < 5.0F, "Bullet at 300m/s doesn't tunnel through wall");
 }
 
-/// Handles test slow body normal integration.
 static void test_slow_body_normal_integration() noexcept {
   auto world = std::unique_ptr<engine::runtime::World>(
       new (std::nothrow) engine::runtime::World());
@@ -142,7 +138,6 @@ static void test_slow_body_normal_integration() noexcept {
   check(err < 0.01F, "Slow body integrates normally (no CCD)");
 }
 
-/// Handles test ccd velocity reflects on hit.
 static void test_ccd_velocity_reflects_on_hit() noexcept {
   auto world = std::unique_ptr<engine::runtime::World>(
       new (std::nothrow) engine::runtime::World());

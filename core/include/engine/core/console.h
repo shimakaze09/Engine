@@ -19,7 +19,7 @@ namespace engine::core {
 typedef void (*ConsoleCommandFn)(const char *const *args, int argCount,
                                  void *userData) noexcept;
 
-/// Stores console command info data used by the engine.
+/// Registered command: name, help text, and handler.
 struct ConsoleCommandInfo final {
   const char *name = nullptr;
   const char *description = nullptr;

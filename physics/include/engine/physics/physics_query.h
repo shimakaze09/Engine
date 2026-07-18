@@ -10,7 +10,6 @@
 
 namespace engine::physics {
 
-/// Owns the physics world view behavior and state.
 class PhysicsWorldView;
 
 // ------ Sweep Result --------------------------------------------------------
@@ -38,7 +37,8 @@ std::size_t overlap_sphere(const PhysicsWorldView &world,
                            std::size_t maxResults,
                            std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
-/// Handles overlap box.
+/// Collects entity indices overlapping the AABB (mask-filtered);
+/// returns the count.
 std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
                         const math::Vec3 &halfExtents,
                         std::uint32_t *outEntityIndices, std::size_t maxResults,
@@ -49,7 +49,7 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
                   SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
-/// Handles sweep box.
+/// Sweeps an AABB along direction; earliest hit within maxDistance.
 bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, SweepHit *outHit,

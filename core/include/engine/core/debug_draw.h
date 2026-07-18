@@ -16,14 +16,14 @@
 
 namespace engine::core {
 
-/// Stores debug vec3 data used by the engine.
+/// Position payload for debug primitives (module-local vector type).
 struct DebugVec3 final {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
 };
 
-/// Stores debug color data used by the engine.
+/// RGBA color for debug primitives.
 struct DebugColor final {
   float r = 1.0F;
   float g = 1.0F;
@@ -31,7 +31,7 @@ struct DebugColor final {
   float a = 1.0F;
 };
 
-/// Stores debug line data used by the engine.
+/// Line segment queued for debug rendering.
 struct DebugLine final {
   DebugVec3 from{};
   DebugVec3 to{};
@@ -39,7 +39,7 @@ struct DebugLine final {
   std::uint32_t lifeFrames = 1U;
 };
 
-/// Stores debug sphere data used by the engine.
+/// Wire sphere queued for debug rendering.
 struct DebugSphere final {
   DebugVec3 center{};
   float radius = 1.0F;
@@ -47,7 +47,7 @@ struct DebugSphere final {
   std::uint32_t lifeFrames = 1U;
 };
 
-/// Stores debug text data used by the engine.
+/// 2D text label queued for debug rendering.
 struct DebugText final {
   DebugVec3 position{};
   char text[128] = {};
@@ -76,10 +76,10 @@ void debug_draw_tick() noexcept;
 // Query current live entries.  Returns the number of entries written to `out`.
 std::size_t debug_draw_get_lines(DebugLine *out,
                                  std::size_t maxEntries) noexcept;
-/// Handles debug draw get spheres.
+/// Copies queued spheres into out; returns the count copied.
 std::size_t debug_draw_get_spheres(DebugSphere *out,
                                    std::size_t maxEntries) noexcept;
-/// Handles debug draw get texts.
+/// Copies queued text labels into out; returns the count copied.
 std::size_t debug_draw_get_texts(DebugText *out,
                                  std::size_t maxEntries) noexcept;
 

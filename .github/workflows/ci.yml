@@ -157,6 +157,9 @@ jobs:
       - name: Audit source comments
         run: python3 tools/check_source_comments.py
 
+      - name: Audit comment quality
+        run: python3 tools/check_comment_quality.py
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 

@@ -64,7 +64,6 @@ void update_editor_camera(EditorCamera &camera, int deltaX, int deltaY,
   }
 }
 
-/// Handles editor camera state.
 renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept {
   const float cosPitch = std::cos(camera.pitch);
   const float sinPitch = std::sin(camera.pitch);

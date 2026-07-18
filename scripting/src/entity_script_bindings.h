@@ -28,7 +28,7 @@ struct EntityScriptBindingCallbacks final {
 void configure_entity_script_bindings(
     lua_State *state, const EntityScriptBindingCallbacks &callbacks) noexcept;
 
-/// Handles Lua engine.require(path).
+/// Lua binding: Lua engine.require(path).
 int lua_engine_require(lua_State *state) noexcept;
 
 /// Clears cached entity script modules and hot-reload state.

@@ -21,7 +21,6 @@ constexpr double kMaxSimMs = 16.0;
 constexpr double kMaxSimMs = 24.0;
 #endif
 
-/// Handles populate world.
 bool populate_world(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
     return false;

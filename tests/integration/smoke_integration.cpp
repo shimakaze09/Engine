@@ -28,7 +28,6 @@ constexpr std::size_t kMaxJobs = 512U;
 engine::runtime::World g_worldA;
 engine::runtime::World g_worldB;
 
-/// Stores update job data used by the engine.
 struct UpdateJobData final {
   engine::runtime::World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -36,7 +35,6 @@ struct UpdateJobData final {
   float deltaSeconds = 0.0F;
 };
 
-/// Handles next random.
 std::uint32_t next_random(std::uint32_t *state) {
   if (state == nullptr) {
     return 0U;
@@ -60,7 +58,6 @@ void run_update_chunk(void *userData) noexcept {
       jobData->deltaSeconds));
 }
 
-/// Handles populate world.
 bool populate_world(engine::runtime::World *world,
                     engine::runtime::Entity *outFirstEntity) {
   if (world == nullptr) {
@@ -98,7 +95,6 @@ bool populate_world(engine::runtime::World *world,
   return firstSet;
 }
 
-/// Handles verify query iteration contract.
 bool verify_query_iteration_contract() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -143,7 +139,6 @@ bool verify_query_iteration_contract() {
   return (transformVelocityMatches == 1U) && (velocityMatches == 1U);
 }
 
-/// Handles verify entity generation reuse.
 bool verify_entity_generation_reuse() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -189,7 +184,6 @@ bool verify_entity_generation_reuse() {
   return recycled.generation != entity.generation;
 }
 
-/// Handles verify deferred destroy commit.
 bool verify_deferred_destroy_commit() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -239,7 +233,6 @@ bool verify_deferred_destroy_commit() {
          (recycled.generation != entity.generation);
 }
 
-/// Handles verify transform range overflow guard.
 bool verify_transform_range_overflow_guard() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -257,24 +250,29 @@ bool verify_transform_range_overflow_guard() {
     return false;
   }
 
+  // Post-B5 contract: every transform range API rejects out-of-bounds
+  // ranges instead of clamping (update_transforms_range used to clamp).
+  // Exact ranges must still succeed so a blanket failure cannot pass.
   world->begin_update_phase();
-  if (!world->update_transforms_range(
-          0U, std::numeric_limits<std::size_t>::max(), kStepSeconds)) {
-    return false;
-  }
+  const bool acceptedOversizedUpdate = world->update_transforms_range(
+      0U, std::numeric_limits<std::size_t>::max(), kStepSeconds);
+  const bool acceptedExactUpdate =
+      world->update_transforms_range(0U, 1U, kStepSeconds);
   world->commit_update_phase();
 
   const engine::runtime::Entity *entities = nullptr;
   const engine::runtime::Transform *transforms = nullptr;
   world->begin_render_prep_phase();
-  const bool acceptedOversizedRange = world->read_transform_range(
+  const bool acceptedOversizedRead = world->read_transform_range(
       0U, std::numeric_limits<std::size_t>::max(), &entities, &transforms);
+  const bool acceptedExactRead =
+      world->read_transform_range(0U, 1U, &entities, &transforms);
   world->end_frame_phase();
 
-  return !acceptedOversizedRange;
+  return !acceptedOversizedUpdate && acceptedExactUpdate &&
+         !acceptedOversizedRead && acceptedExactRead;
 }
 
-/// Handles parallel update.
 bool parallel_update(engine::runtime::World *world, float deltaSeconds,
                      std::uint32_t randomSeed) {
   if (world == nullptr) {
@@ -373,7 +371,6 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
   return true;
 }
 
-/// Handles hash world state.
 std::uint64_t hash_world_state(engine::runtime::World *world) {
   if (world == nullptr) {
     return 0U;

@@ -7,7 +7,11 @@ engine_add_module_library(engine_renderer
     src/asset_streaming.cpp
     src/command_buffer_builder.cpp
     src/command_buffer_context.cpp
+    src/command_buffer_flush.cpp
+    src/command_buffer_ibl.cpp
     src/command_buffer_math.cpp
+    src/command_buffer_post_resources.cpp
+    src/command_buffer_sky.cpp
     src/command_buffer.cpp
     src/gpu_profiler.cpp
     src/light_culling.cpp

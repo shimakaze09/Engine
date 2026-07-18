@@ -10,7 +10,6 @@
 
 namespace engine::renderer {
 
-/// Handles advance asset database frame.
 void advance_asset_database_frame(AssetDatabase *database) noexcept {
   if (database != nullptr) {
     ++database->currentFrame;
@@ -19,7 +18,6 @@ void advance_asset_database_frame(AssetDatabase *database) noexcept {
 
 namespace {
 
-/// Handles hashed slot.
 std::size_t hashed_slot(AssetId id, std::size_t capacity) noexcept {
   if ((capacity == 0U) || (id == kInvalidAssetId)) {
     return 0U;
@@ -58,7 +56,6 @@ void write_source_path(std::array<char, 260U> *outPath,
 
 } // namespace
 
-/// Handles make asset id from path.
 AssetId make_asset_id_from_path(const char *path) noexcept {
   if (path == nullptr) {
     return kInvalidAssetId;
@@ -83,7 +80,6 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
   return hash;
 }
 
-/// Handles make asset id from file.
 AssetId make_asset_id_from_file(const char *path) noexcept {
   if (path == nullptr) {
     return kInvalidAssetId;
@@ -120,7 +116,6 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
   return hash;
 }
 
-/// Handles register mesh asset.
 std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
                                         AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -253,7 +248,6 @@ bool request_mesh_asset_streaming_load(AssetDatabase *database, AssetId id,
   return true;
 }
 
-/// Handles mesh asset state.
 AssetState mesh_asset_state(const AssetDatabase *database,
                             AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -295,7 +289,6 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
   return true;
 }
 
-/// Handles mesh asset requested resident.
 bool mesh_asset_requested_resident(const AssetDatabase *database,
                                    AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -310,7 +303,6 @@ bool mesh_asset_requested_resident(const AssetDatabase *database,
   return database->meshAssets[slot].requestedResident;
 }
 
-/// Handles resolve mesh asset.
 MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return kInvalidMeshHandle;
@@ -330,7 +322,6 @@ MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   return record.runtimeMesh;
 }
 
-/// Handles retain mesh asset.
 bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -347,7 +338,6 @@ bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-/// Handles release mesh asset.
 bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -370,7 +360,6 @@ bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-/// Handles clear asset database.
 void clear_asset_database(AssetDatabase *database) noexcept {
   if (database == nullptr) {
     return;
@@ -441,7 +430,6 @@ std::size_t find_texture_insert_slot(const AssetDatabase *database,
 
 } // namespace
 
-/// Handles register texture asset.
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept {
@@ -466,7 +454,6 @@ bool register_texture_asset(AssetDatabase *database, AssetId id,
   return true;
 }
 
-/// Handles texture asset state.
 AssetState texture_asset_state(const AssetDatabase *database,
                                AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -510,7 +497,6 @@ bool set_texture_asset_state(AssetDatabase *database, AssetId id,
   return true;
 }
 
-/// Handles resolve texture asset.
 TextureHandle resolve_texture_asset(AssetDatabase *database,
                                     AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -531,7 +517,6 @@ TextureHandle resolve_texture_asset(AssetDatabase *database,
   return record.runtimeTexture;
 }
 
-/// Handles retain texture asset.
 bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -548,7 +533,6 @@ bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-/// Handles release texture asset.
 bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -619,7 +603,6 @@ std::size_t find_metadata_insert_slot(const AssetDatabase *database,
 
 } // namespace
 
-/// Handles register asset metadata.
 bool register_asset_metadata(AssetDatabase *database,
                              const AssetMetadata &metadata) noexcept {
   if ((database == nullptr) || (metadata.assetId == kInvalidAssetId) ||
@@ -654,7 +637,6 @@ const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
   return &database->metadata[slot];
 }
 
-/// Adds a value or component to the target system for asset tag.
 bool add_asset_tag(AssetDatabase *database, AssetId id,
                    const char *tag) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
@@ -669,7 +651,6 @@ bool add_asset_tag(AssetDatabase *database, AssetId id,
   return asset_metadata_add_tag(&database->metadata[slot], tag);
 }
 
-/// Handles asset has tag.
 bool asset_has_tag(const AssetDatabase *database, AssetId id,
                    const char *tag) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
@@ -684,7 +665,6 @@ bool asset_has_tag(const AssetDatabase *database, AssetId id,
   return asset_metadata_has_tag(&database->metadata[slot], tag);
 }
 
-/// Handles query assets by tag.
 std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
                                 AssetId *outIds, std::size_t maxIds) noexcept {
   if ((database == nullptr) || (tag == nullptr) || (outIds == nullptr) ||
@@ -708,7 +688,6 @@ std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
   return count;
 }
 
-/// Handles query assets by type.
 std::size_t query_assets_by_type(const AssetDatabase *database,
                                  AssetTypeTag typeTag, AssetId *outIds,
                                  std::size_t maxIds) noexcept {
@@ -754,7 +733,6 @@ std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
   return count;
 }
 
-/// Adds a value or component to the target system for asset dependency.
 bool add_asset_dependency(AssetDatabase *database, AssetId id,
                           AssetId depId) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId) ||

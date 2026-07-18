@@ -6,7 +6,6 @@
 #include <cstdint>
 
 namespace engine::runtime {
-/// Owns the world behavior and state.
 class World;
 } // namespace engine::runtime
 
@@ -44,7 +43,7 @@ bool call_script_function_float(const char *name, float arg) noexcept;
 
 // Debugger breakpoint controls (used by DAP transport).
 void debugger_clear_breakpoints() noexcept;
-/// Handles debugger add breakpoint.
+/// Adds a DAP breakpoint; false when the breakpoint table is full.
 bool debugger_add_breakpoint(const char *file, int line) noexcept;
 
 // Dispatch Lua on_collision(entityA, entityB) for each pair in pairData.
@@ -72,13 +71,13 @@ void clear_coroutines() noexcept;
 
 // Scene operation query — engine.cpp polls these after each fixed-step batch.
 bool has_pending_scene_op() noexcept;
-/// Handles pending scene op is load.
+/// True when the pending op is a scene load.
 bool pending_scene_op_is_load() noexcept;
-/// Handles pending scene op is new.
+/// True when the pending op is a new-scene request.
 bool pending_scene_op_is_new() noexcept;
-/// Returns the requested value for pending scene path.
+/// Path argument of the pending scene op ("" when none).
 const char *get_pending_scene_path() noexcept;
-/// Handles clear pending scene op.
+/// Drops the pending scene op without applying it.
 void clear_pending_scene_op() noexcept;
 
 // Begin watching a Lua script file for changes (hot-reload).
@@ -123,12 +122,12 @@ bool is_sandbox_enabled() noexcept;
 
 // CPU instruction limit per protected Lua call (0 = unlimited).
 void set_instruction_limit(int limit) noexcept;
-/// Returns the requested value for instruction limit.
+/// Current per-call Lua instruction cap (0 = unlimited).
 int get_instruction_limit() noexcept;
 
 // Memory limit for the Lua allocator in bytes (0 = unlimited).
 void set_memory_limit(std::size_t limit) noexcept;
-/// Returns the requested value for memory limit.
+/// Current Lua allocator byte cap (0 = unlimited).
 std::size_t get_memory_limit() noexcept;
 
 } // namespace engine::scripting

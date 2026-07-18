@@ -346,7 +346,6 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
   return true;
 }
 
-/// Handles cancel load.
 bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
     return false;
@@ -412,7 +411,6 @@ bool is_load_ready(const AssetStreamingQueue *queue,
   return req.occupied && (req.state == LoadingState::Ready);
 }
 
-/// Returns the requested value for load state.
 LoadingState get_load_state(const AssetStreamingQueue *queue,
                             LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
@@ -429,7 +427,6 @@ LoadingState get_load_state(const AssetStreamingQueue *queue,
   return req.state;
 }
 
-/// Handles wait for load.
 void wait_for_load(const AssetStreamingQueue *queue,
                    LoadHandle handle) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
@@ -575,7 +572,6 @@ std::size_t update_asset_streaming(
   return readyCount;
 }
 
-/// Handles pending load count.
 std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept {
   if (queue == nullptr) {
     return 0U;

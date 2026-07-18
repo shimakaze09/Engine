@@ -52,7 +52,6 @@ bool wants_mouse_capture() noexcept { return g_editorCaptureMouse; }
 /// Returns no capture for input routing tests.
 bool wants_no_capture() noexcept { return false; }
 
-/// Handles check construction destruction.
 int check_construction_destruction() {
   engine::EnginePipeline pipeline;
   // Without engine::bootstrap(), initialize() should fail gracefully.
@@ -236,7 +235,6 @@ int check_editor_processed_quit_event_routes_to_quit() {
 
 using TestFn = int (*)();
 
-/// Stores test entry data used by the engine.
 struct TestEntry {
   const char *name;
   TestFn fn;

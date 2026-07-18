@@ -9,7 +9,6 @@
 
 namespace engine::physics {
 
-/// Owns the physics world view behavior and state.
 class PhysicsWorldView;
 
 /// Result of a CCD sweep for a single body.

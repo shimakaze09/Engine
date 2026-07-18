@@ -5,6 +5,13 @@ engine_add_module_library(engine_editor
     src/command_history.cpp
     src/debug_camera.cpp
     src/editor.cpp
+    src/editor_commands.cpp
+    src/editor_panels_assets.cpp
+    src/editor_panels_diagnostics.cpp
+    src/editor_panels_inspector.cpp
+    src/editor_panels_main.cpp
+    src/editor_panels_viewport.cpp
+    src/editor_session.cpp
     src/editor_camera.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include

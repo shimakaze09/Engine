@@ -9,7 +9,6 @@ using namespace engine::core;
 
 namespace {
 
-/// Handles test init shutdown.
 bool test_init_shutdown() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -18,7 +17,6 @@ bool test_init_shutdown() noexcept {
   return true;
 }
 
-/// Handles test frame boundaries.
 bool test_frame_boundaries() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -37,7 +35,6 @@ bool test_frame_boundaries() noexcept {
   return true;
 }
 
-/// Handles test scope push pop.
 bool test_scope_push_pop() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -80,7 +77,6 @@ bool test_scope_push_pop() noexcept {
   return true;
 }
 
-/// Handles test nested scopes.
 bool test_nested_scopes() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -128,7 +124,6 @@ bool test_nested_scopes() noexcept {
   return true;
 }
 
-/// Handles test profile scope macro alias.
 bool test_profile_scope_macro_alias() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -159,7 +154,6 @@ bool test_profile_scope_macro_alias() noexcept {
   return true;
 }
 
-/// Handles test flame layout helper.
 bool test_flame_layout_helper() noexcept {
   ProfileEntry entries[4] = {};
   entries[0].name = "root_a";
@@ -199,7 +193,6 @@ bool test_flame_layout_helper() noexcept {
   return true;
 }
 
-/// Handles test double buffer.
 bool test_double_buffer() noexcept {
   if (!initialize_profiler()) {
     return false;
@@ -270,7 +263,6 @@ bool test_dropped_scope_does_not_pop_parent() noexcept {
   return !pushedAfterDroppedScope;
 }
 
-/// Handles test null out.
 bool test_null_out() noexcept {
   if (!initialize_profiler()) {
     return false;

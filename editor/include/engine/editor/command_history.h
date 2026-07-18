@@ -8,13 +8,12 @@ namespace engine::editor {
 
 // Abstract editor command.
 struct EditorCommand {
-  /// Handles editor command.
   virtual ~EditorCommand() = default;  // OK to have vtable here (editor only)
-  /// Handles execute.
+  /// Applies the edit.
   virtual void execute() noexcept = 0;
-  /// Handles undo.
+  /// Reverts the edit.
   virtual void undo() noexcept = 0;
-  /// Handles redo.
+  /// Re-applies after an undo (defaults to execute()).
   virtual void redo() noexcept { execute(); }
 };
 
@@ -34,15 +33,15 @@ public:
   // Execute a command and push it on the undo stack. Clears redo stack.
   // Takes ownership of the command pointer (must be allocated with new(nothrow)).
   void execute(EditorCommand *cmd) noexcept;
-  /// Handles undo.
+  /// Undoes the most recent command; no-op when empty.
   void undo() noexcept;
-  /// Handles redo.
+  /// Re-executes the most recently undone command; no-op when none.
   void redo() noexcept;
   /// Returns whether can undo.
   bool can_undo() const noexcept;
   /// Returns whether can redo.
   bool can_redo() const noexcept;
-  /// Handles clear.
+  /// Drops all undo/redo history.
   void clear() noexcept;
 
 private:

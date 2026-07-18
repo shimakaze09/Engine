@@ -73,7 +73,7 @@ struct PlayerControllerArray final {
     return &controllers[playerIndex];
   }
 
-  /// Returns the requested value.
+  /// Controller state for the player index; nullptr out of range.
   PlayerController *get(std::uint8_t playerIndex) noexcept {
     if (playerIndex >= kMaxPlayers) {
       return nullptr;

@@ -15,7 +15,6 @@ struct LoadTracker {
   std::vector<engine::renderer::AssetId> loadOrder{};
 };
 
-/// Handles tracking load callback.
 bool tracking_load_callback(engine::renderer::AssetDatabase *db,
                             engine::renderer::AssetId id, void *userData) {
   (void)db;
@@ -27,7 +26,6 @@ bool tracking_load_callback(engine::renderer::AssetDatabase *db,
   return true;
 }
 
-/// Handles failing load callback.
 bool failing_load_callback(engine::renderer::AssetDatabase * /*db*/,
                            engine::renderer::AssetId id, void *userData) {
   // Fail on a specific asset.

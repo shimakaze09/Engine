@@ -14,7 +14,6 @@ namespace {
 
 constexpr const char *kTempScriptPath = "lua_lifecycle_test.lua";
 
-/// Handles open file for write.
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;
@@ -28,7 +27,6 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
-/// Removes a value or component from the target system for script file.
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kTempScriptPath));
 }
@@ -51,7 +49,6 @@ bool write_script_file(const char *contents) noexcept {
 // Minimal RuntimeServices wiring so scripting dispatch works.
 engine::runtime::World *g_testWorld = nullptr;
 
-/// Returns the requested value for phase.
 engine::runtime::WorldPhase get_phase(engine::runtime::World *w) noexcept {
   return (w != nullptr) ? w->current_phase()
                         : engine::runtime::WorldPhase::Input;
@@ -74,7 +71,6 @@ bool destroy_entity(engine::runtime::World *w, std::uint32_t idx) noexcept {
   return w->destroy_entity(e);
 }
 
-/// Adds a value or component to the target system for transform.
 bool add_transform(engine::runtime::World *w, std::uint32_t idx,
                    const engine::runtime::Transform &t) noexcept {
   if (w == nullptr) {
@@ -84,7 +80,6 @@ bool add_transform(engine::runtime::World *w, std::uint32_t idx,
   return w->add_transform(e, t);
 }
 
-/// Returns the requested value for transform count.
 std::uint32_t get_transform_count(engine::runtime::World *w) noexcept {
   return (w != nullptr) ? static_cast<std::uint32_t>(w->transform_count()) : 0U;
 }

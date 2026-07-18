@@ -18,7 +18,7 @@ void shutdown_input() noexcept;
 
 // Called once per frame around the platform event loop.
 void begin_input_frame() noexcept;
-/// Handles input process event.
+/// Feeds one native (SDL) event into keyboard/mouse state.
 void input_process_event(const void *nativeEvent) noexcept;
 /// Ends the requested operation or profiling range for input frame.
 void end_input_frame() noexcept;
@@ -42,7 +42,7 @@ struct MouseState final {
   bool buttons[5] = {};
 };
 
-/// Handles mouse state.
+/// Current mouse position and button state.
 MouseState mouse_state() noexcept;
 /// Returns whether is mouse button down.
 bool is_mouse_button_down(int button) noexcept;
@@ -54,20 +54,20 @@ bool is_mouse_button_pressed(int button) noexcept;
 inline constexpr std::size_t kMaxActions = 64U;
 inline constexpr std::size_t kMaxAxes = 64U;
 
-/// Handles register action.
+/// Binds a named action to a key (and optional mouse button).
 bool register_action(const char *name, KeyScancode key,
                      int mouseButton = -1) noexcept;
 /// Returns whether is action down.
 bool is_action_down(const char *name) noexcept;
 /// Returns whether is action pressed.
 bool is_action_pressed(const char *name) noexcept;
-/// Handles action value.
+/// 1 when the action is held, else 0.
 float action_value(const char *name) noexcept;
 
-/// Handles register axis.
+/// Binds a named axis to a negative/positive key pair.
 bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept;
-/// Handles axis value.
+/// Axis value in [-1, 1] from the bound key pair.
 float axis_value(const char *name) noexcept;
 
 // ----- Gamepad ------------------------------------------------------------
@@ -85,7 +85,7 @@ struct KeyEvent final {
   bool down = false;
 };
 
-/// Stores mouse move event data used by the engine.
+/// Mouse move event payload (position + delta).
 struct MouseMoveEvent final {
   int x = 0;
   int y = 0;
@@ -93,7 +93,7 @@ struct MouseMoveEvent final {
   int deltaY = 0;
 };
 
-/// Stores mouse button event data used by the engine.
+/// Mouse button event payload.
 struct MouseButtonEvent final {
   int button = 0;
   bool down = false;

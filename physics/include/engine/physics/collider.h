@@ -18,7 +18,7 @@ struct ConvexHullData final {
   static constexpr std::size_t kMaxPlanes = 64U;
   static constexpr std::size_t kMaxVertices = 128U;
 
-  /// Stores plane data used by the engine.
+  /// Plane as unit normal + signed distance (hull face representation).
   struct Plane final {
     math::Vec3 normal{};
     float distance = 0.0F;

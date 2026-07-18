@@ -25,14 +25,14 @@ enum class AssetTypeTag : std::uint8_t {
   Material
 };
 
-/// Stores mesh import settings data used by the engine.
+/// Mesh import options (scale, up axis, normal generation).
 struct MeshImportSettings final {
   float scaleFactor = 1.0F;
   std::uint8_t upAxis = 1U; // 0=X, 1=Y, 2=Z
   bool generateNormals = false;
 };
 
-/// Stores texture import settings data used by the engine.
+/// Texture import options (format, mips, sRGB).
 struct TextureImportSettings final {
   std::uint8_t format = 0U; // 0=auto
   bool generateMips = true;
@@ -62,7 +62,7 @@ struct AssetMetadata final {
   TextureImportSettings textureSettings{};
 };
 
-/// Handles asset metadata has tag.
+/// True when the metadata carries the tag.
 inline bool asset_metadata_has_tag(const AssetMetadata *metadata,
                                    const char *tag) noexcept {
   if ((metadata == nullptr) || (tag == nullptr)) {
@@ -76,7 +76,7 @@ inline bool asset_metadata_has_tag(const AssetMetadata *metadata,
   return false;
 }
 
-/// Handles asset metadata add tag.
+/// Adds a tag (bounded copy); false when full or args are invalid.
 inline bool asset_metadata_add_tag(AssetMetadata *metadata,
                                    const char *tag) noexcept {
   if ((metadata == nullptr) || (tag == nullptr) ||
@@ -91,9 +91,7 @@ inline bool asset_metadata_add_tag(AssetMetadata *metadata,
                                   ? (AssetMetadata::kMaxTagLength - 1U)
                                   : len;
   auto &dest = metadata->tags[metadata->tagCount];
-  /// Handles fill.
   dest.fill('\0');
-  /// Handles memcpy.
   std::memcpy(dest.data(), tag, copyLen);
   dest[copyLen] = '\0';
   ++metadata->tagCount;
@@ -106,7 +104,6 @@ inline void write_metadata_path(std::array<char, 260U> *outPath,
   if (outPath == nullptr) {
     return;
   }
-  /// Handles fill.
   outPath->fill('\0');
   if (path == nullptr) {
     return;
@@ -115,13 +112,12 @@ inline void write_metadata_path(std::array<char, 260U> *outPath,
   const std::size_t srcLen = std::strlen(path);
   const std::size_t copyLen = (srcLen > maxCopy) ? maxCopy : srcLen;
   if (copyLen > 0U) {
-    /// Handles memcpy.
     std::memcpy(outPath->data(), path, copyLen);
   }
   (*outPath)[copyLen] = '\0';
 }
 
-/// Handles asset metadata add dependency.
+/// Records a dependency id; false when full or arguments are invalid.
 inline bool asset_metadata_add_dependency(AssetMetadata *metadata,
                                           AssetId depId) noexcept {
   if ((metadata == nullptr) || (depId == kInvalidAssetId) ||
@@ -139,7 +135,7 @@ inline bool asset_metadata_add_dependency(AssetMetadata *metadata,
   return true;
 }
 
-/// Handles asset metadata has dependency.
+/// True when depId is recorded as a dependency.
 inline bool asset_metadata_has_dependency(const AssetMetadata *metadata,
                                           AssetId depId) noexcept {
   if ((metadata == nullptr) || (depId == kInvalidAssetId)) {

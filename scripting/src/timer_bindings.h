@@ -6,11 +6,11 @@ struct lua_State;
 
 namespace engine::scripting {
 
-/// Handles Lua engine.set_timeout(callback, seconds).
+/// Lua binding: Lua engine.set_timeout(callback, seconds).
 int lua_engine_set_timeout(lua_State *state) noexcept;
-/// Handles Lua engine.set_interval(callback, seconds).
+/// Lua binding: Lua engine.set_interval(callback, seconds).
 int lua_engine_set_interval(lua_State *state) noexcept;
-/// Handles Lua engine.cancel_timer(timer_id).
+/// Lua binding: Lua engine.cancel_timer(timer_id).
 int lua_engine_cancel_timer(lua_State *state) noexcept;
 
 /// Releases Lua timer refs and clears the bound world's timers.

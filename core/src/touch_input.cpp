@@ -89,7 +89,6 @@ float g_prevTwoFingerDist = 0.0F;
 float g_prevTwoFingerAngle = 0.0F;
 bool g_twoFingerTracking = false;
 
-/// Handles fire touch callbacks.
 void fire_touch_callbacks(const TouchEvent &event) noexcept {
   for (const auto &entry : g_touchCallbacks) {
     if (entry.occupied && (entry.callback != nullptr)) {
@@ -98,7 +97,6 @@ void fire_touch_callbacks(const TouchEvent &event) noexcept {
   }
 }
 
-/// Handles fire gesture callbacks.
 void fire_gesture_callbacks(const GestureEvent &event) noexcept {
   const auto idx = static_cast<std::size_t>(event.type);
   if (idx >= kGestureTypeCount) {
@@ -141,19 +139,16 @@ TouchTiming *find_timing(std::int64_t touchId) noexcept {
   return nullptr;
 }
 
-/// Handles distance.
 float distance(float x1, float y1, float x2, float y2) noexcept {
   const float dx = x2 - x1;
   const float dy = y2 - y1;
   return std::sqrt(dx * dx + dy * dy);
 }
 
-/// Handles angle between.
 float angle_between(float x1, float y1, float x2, float y2) noexcept {
   return std::atan2(y2 - y1, x2 - x1);
 }
 
-/// Handles try recognize tap.
 void try_recognize_tap(const ActiveTouch &touch) noexcept {
   const TouchTiming *timing = find_timing(touch.touchId);
   if (timing == nullptr) {
@@ -174,7 +169,6 @@ void try_recognize_tap(const ActiveTouch &touch) noexcept {
   }
 }
 
-/// Handles try recognize swipe.
 void try_recognize_swipe(const ActiveTouch &touch) noexcept {
   const TouchTiming *timing = find_timing(touch.touchId);
   if (timing == nullptr) {
@@ -481,7 +475,6 @@ std::uint32_t active_touch_count() noexcept {
   return count;
 }
 
-/// Returns the requested value for active touch.
 bool get_active_touch(std::uint32_t index, TouchEvent *outTouch) noexcept {
   if (outTouch == nullptr) {
     return false;
@@ -525,7 +518,6 @@ bool register_touch_callback(TouchCallback cb, void *userData) noexcept {
   return false;
 }
 
-/// Handles unregister touch callback.
 bool unregister_touch_callback(TouchCallback cb, void *userData) noexcept {
   for (auto &entry : g_touchCallbacks) {
     if (entry.occupied && (entry.callback == cb) &&
@@ -537,7 +529,6 @@ bool unregister_touch_callback(TouchCallback cb, void *userData) noexcept {
   return false;
 }
 
-/// Handles register gesture callback.
 bool register_gesture_callback(GestureType type, GestureCallback cb,
                                void *userData) noexcept {
   if (cb == nullptr) {
@@ -560,7 +551,6 @@ bool register_gesture_callback(GestureType type, GestureCallback cb,
   return false;
 }
 
-/// Handles unregister gesture callback.
 bool unregister_gesture_callback(GestureType type, GestureCallback cb,
                                  void *userData) noexcept {
   const auto idx = static_cast<std::size_t>(type);

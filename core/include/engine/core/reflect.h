@@ -36,9 +36,8 @@ struct TypeDescriptor final {
   // O(fieldCount) string lookup; migrate to field IDs if this becomes hot.
   const TypeField *find_field(const char *fieldName) const noexcept;
 
-  /// Handles field ptr.
   template <typename T>
-  /// Handles field ptr.
+  /// Typed pointer to the field inside instance (nullptr on size mismatch).
   T *field_ptr(void *instance, const TypeField &field) const noexcept {
     if (instance == nullptr) {
       return nullptr;
@@ -53,9 +52,8 @@ struct TypeDescriptor final {
                                  + field.offset);
   }
 
-  /// Handles field ptr.
   template <typename T>
-  /// Handles field ptr.
+  /// Const-typed pointer to the field inside instance.
   const T *field_ptr(const void *instance,
                      const TypeField &field) const noexcept {
     if (instance == nullptr) {
@@ -78,17 +76,17 @@ struct TypeRegistry final {
   std::array<TypeDescriptor, kMaxTypes> types{};
   std::size_t typeCount = 0U;
 
-  /// Handles register type.
+  /// Registers a type by name; mutable descriptor (nullptr when full).
   TypeDescriptor *register_type(const char *name, std::size_t size) noexcept;
   // O(typeCount) string lookup; migrate to type IDs if this becomes hot.
   const TypeDescriptor *find_type(const char *name) const noexcept;
-  /// Handles type count.
+  /// Number of registered types.
   std::size_t type_count() const noexcept;
-  /// Handles type at.
+  /// Descriptor at index (registration order); nullptr out of range.
   const TypeDescriptor *type_at(std::size_t index) const noexcept;
 };
 
-/// Handles global type registry.
+/// Process-wide registry populated by static REFLECT_TYPE blocks.
 TypeRegistry &global_type_registry() noexcept;
 
 #define ENGINE_REFLECT_CONCAT_IMPL(lhs, rhs) lhs##rhs

@@ -47,7 +47,6 @@ static bool test_cvar_register_and_get() noexcept {
   return true;
 }
 
-/// Handles test cvar set.
 static bool test_cvar_set() noexcept {
   initialize_cvars();
 
@@ -96,7 +95,6 @@ static bool test_cvar_set() noexcept {
   return true;
 }
 
-/// Handles test cvar set from string.
 static bool test_cvar_set_from_string() noexcept {
   initialize_cvars();
 
@@ -135,7 +133,6 @@ static bool test_cvar_set_from_string() noexcept {
   return true;
 }
 
-/// Handles test cvar duplicate rejected.
 static bool test_cvar_duplicate_rejected() noexcept {
   initialize_cvars();
   cvar_register_int("dup", 1, "d");
@@ -151,7 +148,6 @@ static bool test_cvar_duplicate_rejected() noexcept {
   return true;
 }
 
-/// Handles test cvar enumerate.
 static bool test_cvar_enumerate() noexcept {
   initialize_cvars();
   cvar_register_bool("enum.a", true, "d");
@@ -227,7 +223,6 @@ static bool test_console_basic_execute() noexcept {
   return true;
 }
 
-/// Handles test console unknown command.
 static bool test_console_unknown_command() noexcept {
   initialize_cvars();
   initialize_console();
@@ -244,7 +239,6 @@ static bool test_console_unknown_command() noexcept {
   return true;
 }
 
-/// Handles test console set get cvar.
 static bool test_console_set_get_cvar() noexcept {
   initialize_cvars();
   cvar_register_int("console.test.i", 0, "console set/get test");
@@ -272,7 +266,6 @@ static bool test_console_set_get_cvar() noexcept {
   return true;
 }
 
-/// Handles test console custom command.
 static bool test_console_custom_command() noexcept {
   initialize_cvars();
   initialize_console();
@@ -307,7 +300,6 @@ static bool test_console_custom_command() noexcept {
   return true;
 }
 
-/// Handles test console output ring buffer.
 static bool test_console_output_ring_buffer() noexcept {
   initialize_cvars();
   initialize_console();

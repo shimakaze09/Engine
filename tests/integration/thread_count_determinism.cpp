@@ -19,7 +19,6 @@ constexpr std::size_t kMinChunkSize = 64U;
 constexpr std::size_t kChunkRange = 384U;
 constexpr std::size_t kMaxJobs = 512U;
 
-/// Stores update job data used by the engine.
 struct UpdateJobData final {
   engine::runtime::World *world = nullptr;
   std::size_t startIndex = 0U;
@@ -27,7 +26,6 @@ struct UpdateJobData final {
   float deltaSeconds = 0.0F;
 };
 
-/// Handles next random.
 std::uint32_t next_random(std::uint32_t *state) {
   if (state == nullptr) {
     return 0U;
@@ -51,7 +49,6 @@ void run_update_chunk(void *userData) noexcept {
       jobData->deltaSeconds));
 }
 
-/// Handles populate world.
 bool populate_world(engine::runtime::World *world,
                     engine::runtime::Entity *outFirstEntity) {
   if (world == nullptr) {
@@ -89,7 +86,6 @@ bool populate_world(engine::runtime::World *world,
   return firstSet;
 }
 
-/// Handles parallel update.
 bool parallel_update(engine::runtime::World *world, float deltaSeconds,
                      std::uint32_t randomSeed) {
   if (world == nullptr) {
@@ -188,7 +184,6 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
   return true;
 }
 
-/// Handles hash world state.
 std::uint64_t hash_world_state(engine::runtime::World *world) {
   if (world == nullptr) {
     return 0U;

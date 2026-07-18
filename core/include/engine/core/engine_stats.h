@@ -7,7 +7,7 @@
 
 namespace engine::core {
 
-/// Stores engine stats data used by the engine.
+/// Frame-level engine counters shown by the stats overlay.
 struct EngineStats final {
   float fps = 0.0F;
   float frameTimeMs = 0.0F;
@@ -24,7 +24,7 @@ struct EngineStats final {
 void reset_engine_stats() noexcept;
 /// Sets the requested value for engine stats.
 void set_engine_stats(const EngineStats &stats) noexcept;
-/// Returns the requested value for engine stats.
+/// Snapshot of the current stats (thread-safe).
 EngineStats get_engine_stats() noexcept;
 
 } // namespace engine::core

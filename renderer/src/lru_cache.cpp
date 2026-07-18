@@ -29,7 +29,6 @@ std::uint32_t find_free_slot(const LruCache *cache) noexcept {
   return LruNode::kInvalidIndex;
 }
 
-/// Handles unlink node.
 void unlink_node(LruCache *cache, std::uint32_t idx) noexcept {
   LruNode &node = cache->nodes[idx];
   const std::uint32_t p = node.prev;
@@ -68,7 +67,6 @@ void push_to_tail(LruCache *cache, std::uint32_t idx) noexcept {
 
 } // namespace
 
-/// Handles clear lru cache.
 void clear_lru_cache(LruCache *cache) noexcept {
   if (cache == nullptr) {
     return;
@@ -82,7 +80,6 @@ void clear_lru_cache(LruCache *cache) noexcept {
   cache->totalSizeBytes = 0ULL;
 }
 
-/// Handles lru touch.
 bool lru_touch(LruCache *cache, AssetId id, std::uint64_t accessFrame,
                std::uint64_t sizeBytes, std::uint32_t refCount) noexcept {
   if ((cache == nullptr) || (id == kInvalidAssetId)) {
@@ -125,7 +122,6 @@ bool lru_touch(LruCache *cache, AssetId id, std::uint64_t accessFrame,
   return true;
 }
 
-/// Handles lru remove.
 bool lru_remove(LruCache *cache, AssetId id) noexcept {
   if ((cache == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -143,7 +139,6 @@ bool lru_remove(LruCache *cache, AssetId id) noexcept {
   return true;
 }
 
-/// Handles lru evict one.
 AssetId lru_evict_one(LruCache *cache) noexcept {
   if ((cache == nullptr) || (cache->head == LruNode::kInvalidIndex)) {
     return kInvalidAssetId;
@@ -167,7 +162,6 @@ AssetId lru_evict_one(LruCache *cache) noexcept {
   return kInvalidAssetId; // All assets are protected.
 }
 
-/// Handles lru evict to budget.
 std::size_t lru_evict_to_budget(LruCache *cache, std::uint64_t targetBytes,
                                 EvictionCallback callback,
                                 void *userData) noexcept {
@@ -189,17 +183,14 @@ std::size_t lru_evict_to_budget(LruCache *cache, std::uint64_t targetBytes,
   return evicted;
 }
 
-/// Handles lru count.
 std::size_t lru_count(const LruCache *cache) noexcept {
   return (cache != nullptr) ? cache->count : 0U;
 }
 
-/// Handles lru total size.
 std::uint64_t lru_total_size(const LruCache *cache) noexcept {
   return (cache != nullptr) ? cache->totalSizeBytes : 0ULL;
 }
 
-/// Handles lru contains.
 bool lru_contains(const LruCache *cache, AssetId id) noexcept {
   if ((cache == nullptr) || (id == kInvalidAssetId)) {
     return false;
@@ -207,7 +198,6 @@ bool lru_contains(const LruCache *cache, AssetId id) noexcept {
   return find_node_index(cache, id) != LruNode::kInvalidIndex;
 }
 
-/// Handles lru set ref count.
 bool lru_set_ref_count(LruCache *cache, AssetId id,
                        std::uint32_t refCount) noexcept {
   if ((cache == nullptr) || (id == kInvalidAssetId)) {

@@ -12,30 +12,29 @@ bool initialize_profiler() noexcept;
 /// Shuts down the owning system for profiler.
 void shutdown_profiler() noexcept;
 
-/// Handles profiler begin frame.
+/// Clears the frame's scope entries and stamps the frame start.
 void profiler_begin_frame() noexcept;
-/// Handles profiler end frame.
+/// Stamps the frame end used by profiler_frame_time_ms().
 void profiler_end_frame() noexcept;
 
 /// Begins a profiler scope. Returns false if the scope was not recorded.
 bool profiler_begin_scope(const char *name) noexcept;
-/// Handles profiler end scope.
+/// Closes the innermost open scope.
 void profiler_end_scope() noexcept;
 
-/// Stores profile scope data used by the engine.
+/// RAII helper: opens a named scope for the enclosing block.
 struct ProfileScope final {
-  /// Handles profile scope.
+  /// Opens the named scope.
   explicit ProfileScope(const char *name) noexcept;
   ~ProfileScope() noexcept;
   ProfileScope(const ProfileScope &) = delete;
-  /// Handles operator=.
   ProfileScope &operator=(const ProfileScope &) = delete;
 
 private:
   bool m_active = false;
 };
 
-/// Stores profile entry data used by the engine.
+/// One recorded scope: name, timing, depth, and parent index.
 struct ProfileEntry final {
   const char *name = nullptr;
   float durationMs = 0.0F;
@@ -43,12 +42,12 @@ struct ProfileEntry final {
   std::uint32_t parentIndex = 0xFFFFFFFFU;
 };
 
-/// Handles profiler get entries.
+/// Copies this frame's entries into out; returns the count.
 std::size_t profiler_get_entries(ProfileEntry *out,
                                  std::size_t maxEntries) noexcept;
-/// Handles profiler frame time ms.
+/// Duration of the last completed frame in milliseconds.
 float profiler_frame_time_ms() noexcept;
-/// Handles profiler compute flame starts.
+/// Computes flame-graph start offsets for entries; false on bad input.
 bool profiler_compute_flame_starts(const ProfileEntry *entries,
                                    std::size_t count, float *outStartMs,
                                    std::uint32_t *outMaxDepth) noexcept;

@@ -198,7 +198,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   return true;
 }
 
-/// Handles instantiate prefab.
 Entity instantiate_prefab(World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,

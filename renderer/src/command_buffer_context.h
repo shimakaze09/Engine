@@ -408,4 +408,10 @@ void reset_renderer_public_state() noexcept;
 /// Marks backend initialization as failed while clearing partial state.
 void reset_backend_on_failure() noexcept;
 
+/// Lazily creates every backend GPU resource (shaders and their uniform
+/// locations, sky geometry, SSAO sampling data). Returns immediately once
+/// initialized, so the frame flush may call it every frame; returns false
+/// after recording failure when the device or a required shader is missing.
+bool initialize_backend() noexcept;
+
 } // namespace engine::renderer

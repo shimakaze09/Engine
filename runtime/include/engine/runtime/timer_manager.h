@@ -84,7 +84,7 @@ public:
 
   /// Direct read access (for scripting bridge inspection).
   const Entry &entry_at(std::size_t index) const noexcept;
-  /// Handles entry at mut.
+  /// Mutable timer slot at dense index (internal restore path).
   Entry &entry_at_mut(std::size_t index) noexcept;
 
 private:

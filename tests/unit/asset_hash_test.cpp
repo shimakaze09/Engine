@@ -7,7 +7,6 @@
 #include <set>
 #include <string>
 
-/// Handles test 100k hash no collisions.
 static int test_100k_hash_no_collisions() {
   constexpr std::size_t kPathCount = 100000U;
   std::set<engine::renderer::AssetId> ids{};
@@ -52,7 +51,6 @@ static int test_100k_hash_no_collisions() {
   return 0;
 }
 
-/// Handles test deterministic hash.
 static int test_deterministic_hash() {
   const char *path = "assets/meshes/test_model.mesh";
   const engine::renderer::AssetId id1 =
@@ -68,7 +66,6 @@ static int test_deterministic_hash() {
   return 0;
 }
 
-/// Handles test invalid path returns invalid id.
 static int test_invalid_path_returns_invalid_id() {
   const engine::renderer::AssetId id =
       engine::renderer::make_asset_id_from_path(nullptr);

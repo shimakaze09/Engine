@@ -11,7 +11,7 @@
 
 namespace engine::renderer {
 
-/// Stores gpu mesh data used by the engine.
+/// Uploaded mesh: VAO/VBO/EBO ids and index count.
 struct GpuMesh final {
   std::uint32_t vertexArray = 0U;
   std::uint32_t vertexBuffer = 0U;
@@ -21,7 +21,7 @@ struct GpuMesh final {
   bool hasUVs = false;
 };
 
-/// Stores gpu mesh registry data used by the engine.
+/// Fixed table mapping MeshHandle to uploaded GpuMesh slots.
 struct GpuMeshRegistry final {
   static constexpr std::size_t kMaxSlots = 4096U;
   std::array<GpuMesh, kMaxSlots> meshes{};
@@ -42,7 +42,7 @@ struct CpuMeshData final {
 // Returns slot index (same as MeshHandle::id) or 0 on failure.
 std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
                                 const GpuMesh &mesh) noexcept;
-/// Handles lookup gpu mesh.
+/// Registry entry for a handle; nullptr when stale or absent.
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
                                renderer::MeshHandle handle) noexcept;
 
@@ -54,7 +54,7 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
 /// Uploads decoded CPU mesh data to the current render context.
 bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                              GpuMesh *outMesh) noexcept;
-/// Handles unload mesh.
+/// Deletes the mesh's GL buffers and clears the struct.
 void unload_mesh(GpuMesh *mesh) noexcept;
 
 // Direct GPU upload from in-memory vertex/index data (no file I/O).

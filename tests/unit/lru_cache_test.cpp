@@ -20,7 +20,6 @@ static int g_failures = 0;
     }                                                                          \
   } while (false)
 
-/// Handles make id.
 static AssetId make_id(std::uint64_t n) noexcept {
   return static_cast<AssetId>(n + 1U); // Avoid kInvalidAssetId (0).
 }

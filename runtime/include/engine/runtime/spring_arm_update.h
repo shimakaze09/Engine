@@ -4,7 +4,6 @@
 
 namespace engine::runtime {
 
-/// Owns the world behavior and state.
 class World;
 
 /// Iterate all SpringArmComponents, compute camera boom positions from entity

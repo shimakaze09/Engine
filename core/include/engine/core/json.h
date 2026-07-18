@@ -9,7 +9,7 @@
 
 namespace engine::core {
 
-/// Stores json value data used by the engine.
+/// Parsed JSON node handle; navigate it through JsonParser accessors.
 struct JsonValue final {
   /// Enumerates type values used by the engine.
   enum class Type : std::uint8_t { Null, Bool, Number, String, Array, Object };
@@ -19,7 +19,7 @@ struct JsonValue final {
   const char *end = nullptr;
 };
 
-/// Owns the json writer behavior and state.
+/// Appends JSON into a fixed buffer; failure is sticky (check ok()).
 class JsonWriter final {
 public:
   static constexpr std::size_t kBufferBytes = 256U * 1024U;
@@ -29,10 +29,8 @@ public:
   ~JsonWriter() noexcept;
 
   JsonWriter(const JsonWriter &) = delete;
-  /// Handles operator=.
   JsonWriter &operator=(const JsonWriter &) = delete;
   JsonWriter(JsonWriter &&) = delete;
-  /// Handles operator=.
   JsonWriter &operator=(JsonWriter &&) = delete;
 
   /// Resets this object back to its reusable empty state.
@@ -74,20 +72,20 @@ public:
   /// Writes string value data.
   void write_string_value(const char *value) noexcept;
 
-  /// Handles failed.
+  /// True once any append overflowed or was malformed (sticky).
   bool failed() const noexcept;
-  /// Handles ok.
+  /// True when the document is complete and no append failed.
   bool ok() const noexcept;
-  /// Handles result.
+  /// Null-terminated JSON text (valid until reset).
   const char *result() const noexcept;
-  /// Handles result size.
+  /// Byte length of result(), excluding the terminator.
   std::size_t result_size() const noexcept;
 
 private:
   /// Enumerates container kind values used by the engine.
   enum class ContainerKind : std::uint8_t { Object, Array };
 
-  /// Stores container state data used by the engine.
+  /// Tracks one open object/array while writing (comma placement).
   struct ContainerState final {
     ContainerKind kind = ContainerKind::Object;
     bool firstElement = true;
@@ -96,21 +94,21 @@ private:
 
   /// Begins the requested operation or profiling range for value.
   bool begin_value() noexcept;
-  /// Handles ensure capacity.
+  /// Grows usage bookkeeping; false (sticky failure) on overflow.
   bool ensure_capacity(std::size_t additionalBytes) noexcept;
-  /// Handles append char.
+  /// Appends one raw character.
   bool append_char(char value) noexcept;
-  /// Handles append bytes.
+  /// Appends `size` raw bytes.
   bool append_bytes(const char *value, std::size_t size) noexcept;
-  /// Handles append cstr.
+  /// Appends a raw null-terminated string (no escaping).
   bool append_cstr(const char *value) noexcept;
-  /// Handles append escaped.
+  /// Appends a string with JSON escaping applied.
   bool append_escaped(const char *value) noexcept;
-  /// Handles append float.
+  /// Appends a float in round-trip-stable decimal form.
   bool append_float(float value) noexcept;
-  /// Handles append uint.
+  /// Appends an unsigned 32-bit integer.
   bool append_uint(std::uint32_t value) noexcept;
-  /// Handles append uint64.
+  /// Appends an unsigned 64-bit integer.
   bool append_uint64(std::uint64_t value) noexcept;
   /// Pushes an item onto the owning stack or queue for container.
   bool push_container(ContainerKind kind) noexcept;
@@ -125,50 +123,48 @@ private:
   bool m_failed = false;
 };
 
-/// Owns the json parser behavior and state.
+/// Parses JSON into fixed storage; query values via JsonValue handles.
 class JsonParser final {
-/// Parses text into the engine representation.
 public:
   /// Parses text into the engine representation.
   bool parse(const char *input, std::size_t length) noexcept;
-  /// Handles root.
+  /// Root value of the last successful parse, or nullptr.
   const JsonValue *root() const noexcept;
 
   // Pointer-returning navigation helpers are transient: do not keep returned
   // pointers across additional pointer-returning navigation calls.
   const JsonValue *get_object_field(const JsonValue &object,
                                     const char *fieldName) const noexcept;
-  /// Returns the requested value for object field.
+  /// Finds a field by name in an object; false when missing.
   bool get_object_field(const JsonValue &object, const char *fieldName,
                         JsonValue *outValue) const noexcept;
 
-  /// Returns the requested value for array element.
+  /// Element at index, or nullptr out of range.
   const JsonValue *get_array_element(const JsonValue &array,
                                      std::size_t index) const noexcept;
-  /// Returns the requested value for array element.
+  /// Copies the element at index; false out of range.
   bool get_array_element(const JsonValue &array, std::size_t index,
                          JsonValue *outValue) const noexcept;
 
-  /// Handles array size.
+  /// Number of elements in an array value (0 for non-arrays).
   std::size_t array_size(const JsonValue &array) const noexcept;
 
-  /// Handles as float.
+  /// Numeric value as float; false for non-numbers.
   bool as_float(const JsonValue &value, float *outValue) const noexcept;
-  /// Handles as uint.
+  /// Numeric value as uint32; false for non-numbers or out of range.
   bool as_uint(const JsonValue &value, std::uint32_t *outValue) const noexcept;
-  /// Handles as uint64.
+  /// Numeric value as uint64; false for non-numbers or out of range.
   bool as_uint64(const JsonValue &value,
                  std::uint64_t *outValue) const noexcept;
-  /// Handles as bool.
+  /// Boolean value; false for non-booleans.
   bool as_bool(const JsonValue &value, bool *outValue) const noexcept;
-  /// Handles as string.
+  /// Unescaped string view (begin + length); false for non-strings.
   bool as_string(const JsonValue &value, const char **outBegin,
                  std::size_t *outLength) const noexcept;
   /// Copies a decoded string value into a null-terminated output buffer.
   bool copy_string(const JsonValue &value, char *out,
                    std::size_t outCapacity) const noexcept;
 
-/// Pushes an item onto the owning stack or queue for scratch.
 private:
   /// Pushes an item onto the owning stack or queue for scratch.
   const JsonValue *push_scratch(const JsonValue &value) const noexcept;

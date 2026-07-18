@@ -64,10 +64,8 @@ bool write_script(const char *code) noexcept {
   return true;
 }
 
-/// Removes a value or component from the target system for script.
 void remove_script() noexcept { std::remove(kTempScript); }
 
-/// Handles close socket safe.
 void close_socket_safe(SocketHandle s) noexcept {
   if (s == kInvalidSocket) {
     return;
@@ -125,7 +123,6 @@ bool connect_to_dap_server(SocketHandle *outSock) noexcept {
   return false;
 }
 
-/// Handles send all.
 bool send_all(SocketHandle s, const char *data, std::size_t len) noexcept {
   std::size_t sent = 0U;
   while (sent < len) {
@@ -142,7 +139,6 @@ bool send_all(SocketHandle s, const char *data, std::size_t len) noexcept {
   return true;
 }
 
-/// Handles send dap request.
 bool send_dap_request(SocketHandle s, int seq, const char *command,
                       const char *argumentsJson) noexcept {
   char body[2048] = {};
@@ -169,7 +165,6 @@ bool send_dap_request(SocketHandle s, int seq, const char *command,
          send_all(s, body, std::strlen(body));
 }
 
-/// Handles try extract dap message.
 bool try_extract_dap_message(std::string *buffer,
                              std::string *outBody) noexcept {
   const std::size_t headerEnd = buffer->find("\r\n\r\n");
@@ -205,7 +200,6 @@ bool try_extract_dap_message(std::string *buffer,
   return true;
 }
 
-/// Handles recv dap message.
 bool recv_dap_message(SocketHandle s, std::string *buffer, std::string *outBody,
                       int timeoutMs) noexcept {
   auto deadline =
@@ -252,7 +246,6 @@ bool recv_dap_message(SocketHandle s, std::string *buffer, std::string *outBody,
   return false;
 }
 
-/// Stores client result data used by the engine.
 struct ClientResult {
   bool connected = false;
   bool stoppedEventSeen = false;
@@ -457,7 +450,6 @@ bool test_dap_rejects_overflowing_content_length() noexcept {
       "Content-Length: 999999999999999999999999999999\r\n\r\n{}");
 }
 
-/// Handles test dap breakpoint pause.
 bool test_dap_breakpoint_pause() noexcept {
   if (!engine::scripting::initialize_scripting()) {
     return false;
