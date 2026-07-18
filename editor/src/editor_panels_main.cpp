@@ -189,7 +189,9 @@ void draw_toolbar() noexcept {
   if (!canPlay) {
     ImGui::BeginDisabled();
   }
-  if (ImGui::Button("\xE2\x96\xB6 Play") && canPlay) {
+  // Plain-text labels: the default ImGui font has no glyphs for the
+  // media-control symbols (they render as "?").
+  if (ImGui::Button("Play") && canPlay) {
     start_play_mode();
   }
   if (!canPlay) {
@@ -200,7 +202,7 @@ void draw_toolbar() noexcept {
   if (!canPause) {
     ImGui::BeginDisabled();
   }
-  if (ImGui::Button("\xE2\x8F\xB8 Pause") && canPause) {
+  if (ImGui::Button("Pause") && canPause) {
     pause_play_mode();
   }
   if (!canPause) {
@@ -211,7 +213,7 @@ void draw_toolbar() noexcept {
   if (!canStop) {
     ImGui::BeginDisabled();
   }
-  if (ImGui::Button("\xE2\x8F\xB9 Stop") && canStop) {
+  if (ImGui::Button("Stop") && canStop) {
     stop_play_mode();
   }
   if (!canStop) {

@@ -174,6 +174,9 @@ void draw_scene_viewport_panel() noexcept {
   const ImVec2 regionSize = ImGui::GetContentRegionAvail();
   const ImVec2 cursorScreenPos = ImGui::GetCursorScreenPos();
 
+  editor_session().sceneViewportScreenPos = cursorScreenPos;
+  editor_session().sceneViewportScreenSize = regionSize;
+
   renderer::set_scene_viewport_size(static_cast<int>(regionSize.x),
                                     static_cast<int>(regionSize.y));
 

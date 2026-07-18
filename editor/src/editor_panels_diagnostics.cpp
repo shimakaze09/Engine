@@ -183,8 +183,17 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
       ImGuiWindowFlags_NoNav;
 
+  // Anchor inside the Scene panel's image when its rect is known; the old
+  // fixed position sat on top of the docked Entities panel.
+  ImVec2 overlayPos(12.0F, 44.0F);
+  const EditorSession &session = editor_session();
+  if ((session.sceneViewportScreenSize.x > 0.0F) &&
+      (session.sceneViewportScreenSize.y > 0.0F)) {
+    overlayPos = ImVec2(session.sceneViewportScreenPos.x + 12.0F,
+                        session.sceneViewportScreenPos.y + 12.0F);
+  }
   ImGui::SetNextWindowBgAlpha(0.40F);
-  ImGui::SetNextWindowPos(ImVec2(12.0F, 44.0F), ImGuiCond_Always);
+  ImGui::SetNextWindowPos(overlayPos, ImGuiCond_Always);
   if (!ImGui::Begin("##InGameStatsOverlay", nullptr, kOverlayFlags)) {
     ImGui::End();
     return;

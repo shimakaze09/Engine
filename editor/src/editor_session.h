@@ -77,6 +77,10 @@ struct EditorSession final {
   char selectedAssetPath[512] = {};
   std::array<ThumbnailEntry, kMaxThumbnails> thumbnailCache{};
   std::size_t thumbnailCount = 0U;
+  // Screen rect of the Scene panel's image, recorded each frame by the
+  // viewport panel so overlays can anchor inside the rendered scene.
+  ImVec2 sceneViewportScreenPos{};
+  ImVec2 sceneViewportScreenSize{};
 };
 
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";

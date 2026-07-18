@@ -1041,6 +1041,8 @@ struct EnginePipeline::Impl final {
   // --- Timing state ---
   Clock::time_point previousTick{};
   Clock::time_point frameStart{};
+  // Last time the frame-metrics trace line was written (rate-limited).
+  Clock::time_point lastMetricsLogTime{};
   double accumulator = 0.0;
   double simulationTimeSeconds = 0.0;
 
@@ -1787,17 +1789,25 @@ void EnginePipeline::Impl::stage_render() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_diagnostics() noexcept {
-  std::size_t threadFrameBytes = 0U;
-  std::size_t threadFrameAllocs = 0U;
-  for (std::size_t i = 0U; i < frameThreadCount; ++i) {
-    threadFrameBytes += core::thread_frame_allocator_bytes_used(i);
-    threadFrameAllocs += core::thread_frame_allocator_allocation_count(i);
-  }
+  // The stats panel/overlay surface these values live; keep the console
+  // traces at ~1 Hz so per-frame printf calls cannot throttle the loop.
+  const auto now = Clock::now();
+  const bool logTraceThisFrame =
+      (now - lastMetricsLogTime) >= std::chrono::seconds(1);
+  if (logTraceThisFrame) {
+    lastMetricsLogTime = now;
+    std::size_t threadFrameBytes = 0U;
+    std::size_t threadFrameAllocs = 0U;
+    for (std::size_t i = 0U; i < frameThreadCount; ++i) {
+      threadFrameBytes += core::thread_frame_allocator_bytes_used(i);
+      threadFrameAllocs += core::thread_frame_allocator_allocation_count(i);
+    }
 
-  core::log_frame_metrics(frameIndex, frameMs,
-                          core::frame_allocator_bytes_used() + threadFrameBytes,
-                          core::frame_allocator_allocation_count() +
-                              threadFrameAllocs);
+    core::log_frame_metrics(
+        frameIndex, frameMs,
+        core::frame_allocator_bytes_used() + threadFrameBytes,
+        core::frame_allocator_allocation_count() + threadFrameAllocs);
+  }
 
   const std::size_t aliveCount = world->alive_entity_count();
   const std::size_t spawnedCount = (aliveCount >= previousAliveCount)
@@ -1865,14 +1875,17 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
   core::set_engine_stats(frameStats);
 
-  char jobMessage[192] = {};
-  std::snprintf(jobMessage, sizeof(jobMessage),
-                "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
-                static_cast<unsigned long long>(jobStats.jobsExecuted),
-                static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
-                utilizationPct,
-                static_cast<unsigned long long>(jobStats.queueContentionCount));
-  core::log_message(core::LogLevel::Trace, "jobs", jobMessage);
+  if (logTraceThisFrame) {
+    char jobMessage[192] = {};
+    std::snprintf(
+        jobMessage, sizeof(jobMessage),
+        "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
+        static_cast<unsigned long long>(jobStats.jobsExecuted),
+        static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
+        utilizationPct,
+        static_cast<unsigned long long>(jobStats.queueContentionCount));
+    core::log_message(core::LogLevel::Trace, "jobs", jobMessage);
+  }
 }
 
 // ---------------------------------------------------------------------------
