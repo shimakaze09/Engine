@@ -250,21 +250,27 @@ bool verify_transform_range_overflow_guard() {
     return false;
   }
 
+  // Post-B5 contract: every transform range API rejects out-of-bounds
+  // ranges instead of clamping (update_transforms_range used to clamp).
+  // Exact ranges must still succeed so a blanket failure cannot pass.
   world->begin_update_phase();
-  if (!world->update_transforms_range(
-          0U, std::numeric_limits<std::size_t>::max(), kStepSeconds)) {
-    return false;
-  }
+  const bool acceptedOversizedUpdate = world->update_transforms_range(
+      0U, std::numeric_limits<std::size_t>::max(), kStepSeconds);
+  const bool acceptedExactUpdate =
+      world->update_transforms_range(0U, 1U, kStepSeconds);
   world->commit_update_phase();
 
   const engine::runtime::Entity *entities = nullptr;
   const engine::runtime::Transform *transforms = nullptr;
   world->begin_render_prep_phase();
-  const bool acceptedOversizedRange = world->read_transform_range(
+  const bool acceptedOversizedRead = world->read_transform_range(
       0U, std::numeric_limits<std::size_t>::max(), &entities, &transforms);
+  const bool acceptedExactRead =
+      world->read_transform_range(0U, 1U, &entities, &transforms);
   world->end_frame_phase();
 
-  return !acceptedOversizedRange;
+  return !acceptedOversizedUpdate && acceptedExactUpdate &&
+         !acceptedOversizedRead && acceptedExactRead;
 }
 
 bool parallel_update(engine::runtime::World *world, float deltaSeconds,
