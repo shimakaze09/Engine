@@ -97,6 +97,8 @@ constexpr const char *kSpotLightTypeName =
     "engine::runtime::SpotLightComponent";
 constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
+constexpr const char *kSceneCaptureTypeName =
+    "engine::runtime::SceneCaptureComponent";
 constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";
@@ -107,6 +109,7 @@ constexpr const char *kReflectionProbeSectionLabel = "ReflectionProbeComponent";
 constexpr const char *kPointLightSectionLabel = "PointLightComponent";
 constexpr const char *kSpotLightSectionLabel = "SpotLightComponent";
 constexpr const char *kSpringArmSectionLabel = "SpringArmComponent";
+constexpr const char *kSceneCaptureSectionLabel = "SceneCaptureComponent";
 constexpr const char *kScriptSectionLabel = "ScriptComponent";
 
 /// Returns the process-wide editor session state.

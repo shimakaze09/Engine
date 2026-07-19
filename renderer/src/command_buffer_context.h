@@ -25,6 +25,18 @@ struct InstanceAttributes final {
   math::Vec4 foliage = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 };
 
+/// GL objects backing one scene-capture render target slot.
+struct SceneCaptureTarget final {
+  std::uint32_t colorTexture = 0U;
+  std::uint32_t depthTexture = 0U;
+  std::uint32_t framebuffer = 0U;
+  // Stable external texture-system handle materials can reference; keeps
+  // pointing at colorTexture across lazy target (re)creation.
+  TextureHandle textureHandle = kInvalidTextureHandle;
+  int width = 0;
+  int height = 0;
+};
+
 /// Owns private GPU backend state for command buffer rendering.
 struct BackendState final {
   bool initialized = false;
@@ -382,6 +394,9 @@ struct BackendState final {
 
   // Temporal adaptation.
   float currentExposure = 1.0F;
+
+  // Scene capture render targets (slot i backs capture request i).
+  std::array<SceneCaptureTarget, kMaxSceneCaptures> sceneCaptureTargets{};
 };
 
 /// Owns renderer state for the default renderer context.
@@ -393,6 +408,8 @@ struct RendererContext final {
   bool fxaaAppliedThisFrame = false;
   TextureHandle activeSkyboxTexture = kInvalidTextureHandle;
   char shaderRootPath[260] = "assets/shaders";
+  std::array<SceneCaptureRequest, kMaxSceneCaptures> sceneCaptureRequests{};
+  std::size_t sceneCaptureRequestCount = 0U;
   BackendState backend{};
 };
 

@@ -20,6 +20,8 @@ void reset_renderer_public_state() noexcept {
   renderer_context().lastFrameStats = RendererFrameStats{};
   renderer_context().fxaaAppliedThisFrame = false;
   renderer_context().activeSkyboxTexture = kInvalidTextureHandle;
+  renderer_context().sceneCaptureRequests = {};
+  renderer_context().sceneCaptureRequestCount = 0U;
 }
 
 void reset_backend_on_failure() noexcept {

@@ -196,12 +196,26 @@ architecture splits, comment quality — all closed, quality CI-enforced).
 
 Open — Phase 1 ship blockers:
 
-- **P1-M6 residuals**: `SceneCaptureComponent` (render-to-texture,
-  multiple captures). The shader binary cache was CUT 2026-07-19: it is
-  GL-specific work that the planned RHI migration (below) discards —
-  bgfx/modern APIs bring their own pipeline caching. Done 2026-07-18:
-  material instances + JSON material assets — `material_loader` resolves
-  parent-chain overrides at load into flat `AssetDatabase` records
+- **P1-M6 residuals**: CLOSED 2026-07-19 — `SceneCaptureComponent`
+  (render-to-texture) landed: up to 8 enabled captures per frame render
+  the forward-lit scene from the owning entity's world transform (-Z
+  forward) into per-slot LDR targets inside `flush_renderer`
+  (`command_buffer_capture.cpp` owns request storage + GL slots;
+  captures skip sky/shadows/post by design). Runtime gathers requests in
+  `stage_render`; textures come back via
+  `renderer::get_scene_capture_texture(slot)`. Serialized in scene +
+  prefab JSON through the reflection path; editable in the inspector
+  (with a live preview image). Capture-to-material binding:
+  `MeshComponent.sceneCaptureSourceId` names the capture entity's
+  persistent id, resolved during render prep to a stable external
+  `TextureHandle` (`texture_loader` external registrations alias
+  renderer-owned GL ids and are never destroyed by the texture system)
+  and applied as the mesh's albedo texture.
+  The shader binary cache was CUT 2026-07-19: it is GL-specific work
+  that the planned RHI migration (below) discards — bgfx/modern APIs
+  bring their own pipeline caching. Done 2026-07-18: material instances
+  + JSON material assets — `material_loader` resolves parent-chain
+  overrides at load into flat `AssetDatabase` records
   (`AssetTypeTag::Material`), referenced by
   `MeshComponent.materialAssetId` and applied during render prep (inline
   PBR fields remain the fallback).

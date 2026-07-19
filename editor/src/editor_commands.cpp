@@ -98,6 +98,9 @@ bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
     return editor_session().world->get_spot_light_component(entity, &out->spotLight);
   case ComponentEditType::SpringArm:
     return editor_session().world->get_spring_arm(entity, &out->springArm);
+  case ComponentEditType::SceneCapture:
+    return editor_session().world->get_scene_capture_component(
+        entity, &out->sceneCapture);
   }
   return false;
 }
@@ -141,6 +144,8 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
       return editor_session().world->remove_spot_light_component(resolved);
     case ComponentEditType::SpringArm:
       return editor_session().world->remove_spring_arm(resolved);
+    case ComponentEditType::SceneCapture:
+      return editor_session().world->remove_scene_capture_component(resolved);
     }
     return false;
   }
@@ -172,6 +177,9 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
     return editor_session().world->add_spot_light_component(resolved, snapshot.spotLight);
   case ComponentEditType::SpringArm:
     return editor_session().world->add_spring_arm(resolved, snapshot.springArm);
+  case ComponentEditType::SceneCapture:
+    return editor_session().world->add_scene_capture_component(
+        resolved, snapshot.sceneCapture);
   }
   return false;
 }
@@ -267,6 +275,7 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::PointLight:
   case ComponentEditType::SpotLight:
   case ComponentEditType::SpringArm:
+  case ComponentEditType::SceneCapture:
     break;
   }
   return snapshot;

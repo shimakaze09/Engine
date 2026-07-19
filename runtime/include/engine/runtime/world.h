@@ -97,6 +97,19 @@ struct ReflectionProbeComponent final {
   bool needsBake = true;
 };
 
+/// Renders the scene from this entity each frame into an offscreen texture
+/// (render-to-texture). View position/orientation come from the entity's
+/// world transform (looks along the rotated -Z axis); the renderer clamps
+/// the resolution into its supported range.
+struct SceneCaptureComponent final {
+  std::uint32_t width = 256U;
+  std::uint32_t height = 256U;
+  float fovRadians = 1.0471975512F; // 60 degrees
+  float nearPlane = 0.1F;
+  float farPlane = 100.0F;
+  bool enabled = true;
+};
+
 // Attaches a Lua script file to an entity.
 // The script must return a module table with optional on_start(self) and
 // on_update(self, dt) functions. Multiple entities may share the same file.
@@ -108,6 +121,9 @@ struct ScriptComponent final {
 // Renderer-facing component; keep minimal to avoid bloating draw commands.
 // When materialAssetId is set (non-zero) render prep uses the resolved
 // material asset's parameters; the inline fields below are the fallback.
+// sceneCaptureSourceId names the persistent id of an entity carrying an
+// enabled SceneCaptureComponent; when resolvable, that capture's output
+// becomes this mesh's albedo texture (overriding any material texture).
 struct MeshComponent final {
   std::uint64_t meshAssetId = 0ULL;
   std::uint64_t materialAssetId = 0ULL;
@@ -115,6 +131,7 @@ struct MeshComponent final {
   float roughness = 0.5F;
   float metallic = 0.0F;
   float opacity = 1.0F;
+  std::uint32_t sceneCaptureSourceId = 0U;
 };
 
 /// One foliage instance: offset from the patch origin, scale, wind
@@ -185,6 +202,7 @@ public:
   static constexpr std::size_t kMaxPointLightComponents = 128U;
   static constexpr std::size_t kMaxSpotLightComponents = 64U;
   static constexpr std::size_t kMaxReflectionProbeComponents = 64U;
+  static constexpr std::size_t kMaxSceneCaptureComponents = 8U;
   static constexpr std::size_t kMaxFoliagePatchComponents = 128U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
@@ -464,6 +482,40 @@ public:
   const ReflectionProbeComponent *
   get_reflection_probe_component_ptr(Entity entity) const noexcept;
 
+  /// Adds or replaces the entity's scene capture. Requires the Input phase
+  /// and a live entity; logs and returns false otherwise or when full.
+  bool add_scene_capture_component(
+      Entity entity, const SceneCaptureComponent &component) noexcept;
+  /// Removes the entity's scene capture component. Requires the Input phase and a live
+  /// entity; logs and returns false otherwise or when the component is absent.
+  bool remove_scene_capture_component(Entity entity) noexcept;
+  /// Copies the entity's scene capture into the out parameter; logs and
+  /// returns false for stale/dead entities or when absent.
+  bool get_scene_capture_component(
+      Entity entity, SceneCaptureComponent *outComponent) const noexcept;
+  /// Returns whether has scene capture component.
+  bool has_scene_capture_component(Entity entity) const noexcept;
+  /// Number of live scene capture components.
+  std::size_t scene_capture_count() const noexcept;
+  /// Dense-storage scene capture at `index` (0..count-1); nullptr out of range.
+  const SceneCaptureComponent *
+  scene_capture_at(std::size_t index) const noexcept;
+  /// Entity owning the dense scene capture slot at `index`; kInvalidEntity
+  /// when out of range.
+  Entity scene_capture_entity_at(std::size_t index) const noexcept;
+  /// Renderer capture slot for the entity's enabled scene capture: its index
+  /// among enabled captures in dense order (the request order the runtime
+  /// submits). -1 when absent or disabled.
+  std::int32_t scene_capture_slot_for_entity(Entity entity) const noexcept;
+  /// Pointer to the entity's scene capture component, or nullptr when the handle is
+  /// stale or the component is absent (no logging).
+  SceneCaptureComponent *
+  get_scene_capture_component_ptr(Entity entity) noexcept;
+  /// Pointer to the entity's scene capture component, or nullptr when the handle is
+  /// stale or the component is absent (no logging).
+  const SceneCaptureComponent *
+  get_scene_capture_component_ptr(Entity entity) const noexcept;
+
   /// Adds or replaces the entity's spring arm. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when storage is full.
   bool add_spring_arm(Entity entity,
@@ -665,6 +717,9 @@ private:
   using ReflectionProbeSet =
       core::SparseSet<Entity, ReflectionProbeComponent, kMaxEntities,
                       kMaxReflectionProbeComponents>;
+  using SceneCaptureSet =
+      core::SparseSet<Entity, SceneCaptureComponent, kMaxEntities,
+                      kMaxSceneCaptureComponents>;
   using FoliagePatchSet =
       core::SparseSet<Entity, FoliagePatchComponent, kMaxEntities,
                       kMaxFoliagePatchComponents>;
@@ -682,6 +737,7 @@ private:
            std::is_same_v<C, PointLightComponent> ||
            std::is_same_v<C, SpotLightComponent> ||
            std::is_same_v<C, ReflectionProbeComponent> ||
+           std::is_same_v<C, SceneCaptureComponent> ||
            std::is_same_v<C, FoliagePatchComponent>;
   }
 
@@ -781,6 +837,8 @@ private:
       return m_spotLights.count();
     } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
       return m_reflectionProbes.count();
+    } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
+      return m_sceneCaptures.count();
     } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
       return m_foliagePatches.count();
     } else {
@@ -821,6 +879,8 @@ private:
       return m_spotLights.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
       return m_reflectionProbes.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
+      return m_sceneCaptures.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
       return m_foliagePatches.get_ptr(entity);
     } else {
@@ -966,6 +1026,10 @@ private:
         fn(m_reflectionProbes.entity_at(i),
            m_reflectionProbes.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
+      for (std::size_t i = 0U; i < m_sceneCaptures.count(); ++i) {
+        fn(m_sceneCaptures.entity_at(i), m_sceneCaptures.component_at(i));
+      }
     } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
       for (std::size_t i = 0U; i < m_foliagePatches.count(); ++i) {
         fn(m_foliagePatches.entity_at(i), m_foliagePatches.component_at(i));
@@ -1041,6 +1105,7 @@ private:
   PointLightSet m_pointLights{};
   SpotLightSet m_spotLights{};
   ReflectionProbeSet m_reflectionProbes{};
+  SceneCaptureSet m_sceneCaptures{};
   FoliagePatchSet m_foliagePatches{};
   physics::PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};

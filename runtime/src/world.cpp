@@ -211,6 +211,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_pointLights.remove(entity));
   static_cast<void>(m_spotLights.remove(entity));
   static_cast<void>(m_reflectionProbes.remove(entity));
+  static_cast<void>(m_sceneCaptures.remove(entity));
   static_cast<void>(m_foliagePatches.remove(entity));
   static_cast<void>(m_springArms.remove(entity));
 
@@ -819,6 +820,73 @@ World::get_reflection_probe_component_ptr(Entity entity) noexcept {
 const ReflectionProbeComponent *
 World::get_reflection_probe_component_ptr(Entity entity) const noexcept {
   return get_component_ptr_checked(m_reflectionProbes, entity);
+}
+
+bool World::add_scene_capture_component(
+    Entity entity, const SceneCaptureComponent &component) noexcept {
+  return add_component_checked(m_sceneCaptures, entity, component, "add_scene_capture_component");
+}
+
+bool World::remove_scene_capture_component(Entity entity) noexcept {
+  return remove_component_checked(m_sceneCaptures, entity, "remove_scene_capture_component");
+}
+
+bool World::get_scene_capture_component(
+    Entity entity, SceneCaptureComponent *outComponent) const noexcept {
+  return get_component_checked(m_sceneCaptures, entity, outComponent, "get_scene_capture_component");
+}
+
+bool World::has_scene_capture_component(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_sceneCaptures.contains(entity);
+}
+
+std::size_t World::scene_capture_count() const noexcept {
+  return m_sceneCaptures.count();
+}
+
+const SceneCaptureComponent *
+World::scene_capture_at(std::size_t index) const noexcept {
+  if (index >= m_sceneCaptures.count()) {
+    return nullptr;
+  }
+  return &m_sceneCaptures.component_at(index);
+}
+
+Entity World::scene_capture_entity_at(std::size_t index) const noexcept {
+  if (index >= m_sceneCaptures.count()) {
+    return Entity{};
+  }
+  return m_sceneCaptures.entity_at(index);
+}
+
+std::int32_t
+World::scene_capture_slot_for_entity(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return -1;
+  }
+
+  std::int32_t enabledSlot = 0;
+  for (std::size_t i = 0U; i < m_sceneCaptures.count(); ++i) {
+    const SceneCaptureComponent &capture = m_sceneCaptures.component_at(i);
+    if (!capture.enabled) {
+      continue;
+    }
+    if (m_sceneCaptures.entity_at(i) == entity) {
+      return enabledSlot;
+    }
+    ++enabledSlot;
+  }
+  return -1;
+}
+
+SceneCaptureComponent *
+World::get_scene_capture_component_ptr(Entity entity) noexcept {
+  return get_component_ptr_checked(m_sceneCaptures, entity);
+}
+
+const SceneCaptureComponent *
+World::get_scene_capture_component_ptr(Entity entity) const noexcept {
+  return get_component_ptr_checked(m_sceneCaptures, entity);
 }
 
 bool World::add_script_component(Entity entity,

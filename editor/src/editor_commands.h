@@ -40,6 +40,7 @@ enum class ComponentEditType : std::uint8_t {
   PointLight,
   SpotLight,
   SpringArm,
+  SceneCapture,
 };
 
 /// Union-of-components value captured before/after an inspector edit.
@@ -56,6 +57,7 @@ struct ComponentEditSnapshot final {
   runtime::PointLightComponent pointLight{};
   runtime::SpotLightComponent spotLight{};
   runtime::SpringArmComponent springArm{};
+  runtime::SceneCaptureComponent sceneCapture{};
 };
 
 /// Fills a snapshot from the entity's current component of `type`; false

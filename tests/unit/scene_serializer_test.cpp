@@ -137,6 +137,7 @@ int build_source_scene(const char *path) {
   engine::runtime::MeshComponent thirdMesh{};
   thirdMesh.meshAssetId = 7U;
   thirdMesh.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
+  thirdMesh.sceneCaptureSourceId = 9U;
   if (!world->add_mesh_component(third, thirdMesh)) {
     return 8;
   }
@@ -152,6 +153,17 @@ int build_source_scene(const char *path) {
   thirdProbe.needsBake = false;
   if (!world->add_reflection_probe_component(third, thirdProbe)) {
     return 11;
+  }
+
+  engine::runtime::SceneCaptureComponent thirdCapture{};
+  thirdCapture.width = 320U;
+  thirdCapture.height = 180U;
+  thirdCapture.fovRadians = 0.9F;
+  thirdCapture.nearPlane = 0.25F;
+  thirdCapture.farPlane = 60.0F;
+  thirdCapture.enabled = false;
+  if (!world->add_scene_capture_component(third, thirdCapture)) {
+    return 13;
   }
 
   if (!engine::runtime::save_scene(*world, path)) {
@@ -232,6 +244,7 @@ int build_source_buffer(
   engine::runtime::MeshComponent thirdMesh{};
   thirdMesh.meshAssetId = 7U;
   thirdMesh.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
+  thirdMesh.sceneCaptureSourceId = 9U;
   if (!world->add_mesh_component(third, thirdMesh)) {
     return 38;
   }
@@ -247,6 +260,17 @@ int build_source_buffer(
   thirdProbe.needsBake = false;
   if (!world->add_reflection_probe_component(third, thirdProbe)) {
     return 52;
+  }
+
+  engine::runtime::SceneCaptureComponent thirdCapture{};
+  thirdCapture.width = 320U;
+  thirdCapture.height = 180U;
+  thirdCapture.fovRadians = 0.9F;
+  thirdCapture.nearPlane = 0.25F;
+  thirdCapture.farPlane = 60.0F;
+  thirdCapture.enabled = false;
+  if (!world->add_scene_capture_component(third, thirdCapture)) {
+    return 54;
   }
 
   if (!engine::runtime::save_scene(
@@ -280,6 +304,7 @@ int verify_loaded_scene(const char *path) {
   bool foundNameValue = false;
   bool foundScriptValue = false;
   bool foundReflectionProbeValue = false;
+  bool foundSceneCaptureValue = false;
 
   for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
                                      engine::runtime::World::kMaxEntities);
@@ -306,7 +331,8 @@ int verify_loaded_scene(const char *path) {
     engine::runtime::MeshComponent mesh{};
     if (world->get_mesh_component(entity, &mesh)) {
       ++meshCount;
-      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F)) {
+      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F) &&
+          (mesh.sceneCaptureSourceId == 9U)) {
         foundMeshValue = true;
       }
     }
@@ -333,6 +359,15 @@ int verify_loaded_scene(const char *path) {
           (probe.irradianceResolution == 64U) &&
           (probe.mipLevels == 6U) && probe.boxProjection &&
           !probe.needsBake;
+    }
+
+    engine::runtime::SceneCaptureComponent capture{};
+    if (world->get_scene_capture_component(entity, &capture)) {
+      foundSceneCaptureValue =
+          (capture.width == 320U) && (capture.height == 180U) &&
+          nearly_equal(capture.fovRadians, 0.9F) &&
+          nearly_equal(capture.nearPlane, 0.25F) &&
+          nearly_equal(capture.farPlane, 60.0F) && !capture.enabled;
     }
   }
 
@@ -384,6 +419,14 @@ int verify_loaded_scene(const char *path) {
     return 79;
   }
 
+  if (world->scene_capture_count() != 1U) {
+    return 90;
+  }
+
+  if (!foundSceneCaptureValue) {
+    return 91;
+  }
+
   return 0;
 }
 
@@ -408,6 +451,7 @@ int verify_loaded_scene_from_buffer(
   bool foundNameValue = false;
   bool foundScriptValue = false;
   bool foundReflectionProbeValue = false;
+  bool foundSceneCaptureValue = false;
 
   for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
                                      engine::runtime::World::kMaxEntities);
@@ -434,7 +478,8 @@ int verify_loaded_scene_from_buffer(
     engine::runtime::MeshComponent mesh{};
     if (world->get_mesh_component(entity, &mesh)) {
       ++meshCount;
-      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F)) {
+      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F) &&
+          (mesh.sceneCaptureSourceId == 9U)) {
         foundMeshValue = true;
       }
     }
@@ -461,6 +506,15 @@ int verify_loaded_scene_from_buffer(
           (probe.irradianceResolution == 64U) &&
           (probe.mipLevels == 6U) && probe.boxProjection &&
           !probe.needsBake;
+    }
+
+    engine::runtime::SceneCaptureComponent capture{};
+    if (world->get_scene_capture_component(entity, &capture)) {
+      foundSceneCaptureValue =
+          (capture.width == 320U) && (capture.height == 180U) &&
+          nearly_equal(capture.fovRadians, 0.9F) &&
+          nearly_equal(capture.nearPlane, 0.25F) &&
+          nearly_equal(capture.farPlane, 60.0F) && !capture.enabled;
     }
   }
 
@@ -510,6 +564,14 @@ int verify_loaded_scene_from_buffer(
 
   if (!foundReflectionProbeValue) {
     return 88;
+  }
+
+  if (world->scene_capture_count() != 1U) {
+    return 92;
+  }
+
+  if (!foundSceneCaptureValue) {
+    return 93;
   }
 
   return 0;

@@ -491,6 +491,15 @@ engine_add_test_executable(engine_unit_reflection_probe_component
     engine_runtime
 )
 
+# ---- P1-M6 residual: Scene capture (render-to-texture) ----
+
+engine_add_test_executable(engine_unit_scene_capture_component
+    SOURCES
+    scene_capture_component_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M6-C: Static/Foliage Instancing ----
 
 engine_add_test_executable(engine_unit_foliage_patch_component
