@@ -152,6 +152,77 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_asset_browser_panel();
 }
 
+/// Applies the editor's visual theme: neutral dark palette, one restrained
+/// accent hue, soft rounding, and roomier spacing than ImGui's defaults.
+void apply_editor_style() noexcept {
+  ImGui::StyleColorsDark();
+  ImGuiStyle &style = ImGui::GetStyle();
+
+  style.WindowRounding = 4.0F;
+  style.ChildRounding = 4.0F;
+  style.FrameRounding = 3.0F;
+  style.PopupRounding = 3.0F;
+  style.GrabRounding = 3.0F;
+  style.TabRounding = 3.0F;
+  style.ScrollbarRounding = 6.0F;
+  style.WindowPadding = ImVec2(10.0F, 8.0F);
+  style.FramePadding = ImVec2(8.0F, 4.0F);
+  style.ItemSpacing = ImVec2(8.0F, 5.0F);
+  style.ItemInnerSpacing = ImVec2(6.0F, 4.0F);
+  style.IndentSpacing = 18.0F;
+  style.ScrollbarSize = 12.0F;
+  style.GrabMinSize = 10.0F;
+  style.WindowBorderSize = 1.0F;
+  style.FrameBorderSize = 0.0F;
+  style.TabBarBorderSize = 1.0F;
+  style.WindowMenuButtonPosition = ImGuiDir_None;
+
+  ImVec4 *colors = style.Colors;
+  const ImVec4 bg(0.106F, 0.113F, 0.125F, 1.0F);
+  const ImVec4 bgDark(0.082F, 0.086F, 0.094F, 1.0F);
+  const ImVec4 bgLight(0.145F, 0.153F, 0.169F, 1.0F);
+  const ImVec4 frame(0.175F, 0.184F, 0.204F, 1.0F);
+  const ImVec4 accent(0.257F, 0.469F, 0.700F, 1.0F);
+  const ImVec4 accentHover(0.312F, 0.539F, 0.781F, 1.0F);
+  const ImVec4 accentActive(0.211F, 0.406F, 0.622F, 1.0F);
+
+  colors[ImGuiCol_WindowBg] = bg;
+  colors[ImGuiCol_ChildBg] = bg;
+  colors[ImGuiCol_PopupBg] = bgDark;
+  colors[ImGuiCol_MenuBarBg] = bgDark;
+  colors[ImGuiCol_TitleBg] = bgDark;
+  colors[ImGuiCol_TitleBgActive] = bgLight;
+  colors[ImGuiCol_TitleBgCollapsed] = bgDark;
+  colors[ImGuiCol_FrameBg] = frame;
+  colors[ImGuiCol_FrameBgHovered] = ImVec4(0.22F, 0.23F, 0.26F, 1.0F);
+  colors[ImGuiCol_FrameBgActive] = ImVec4(0.26F, 0.28F, 0.31F, 1.0F);
+  colors[ImGuiCol_Header] = ImVec4(accent.x, accent.y, accent.z, 0.35F);
+  colors[ImGuiCol_HeaderHovered] = ImVec4(accent.x, accent.y, accent.z, 0.55F);
+  colors[ImGuiCol_HeaderActive] = ImVec4(accent.x, accent.y, accent.z, 0.75F);
+  colors[ImGuiCol_Button] = frame;
+  colors[ImGuiCol_ButtonHovered] = accentHover;
+  colors[ImGuiCol_ButtonActive] = accentActive;
+  colors[ImGuiCol_CheckMark] = accentHover;
+  colors[ImGuiCol_SliderGrab] = accent;
+  colors[ImGuiCol_SliderGrabActive] = accentHover;
+  colors[ImGuiCol_Tab] = bgDark;
+  colors[ImGuiCol_TabHovered] = accentHover;
+  colors[ImGuiCol_TabSelected] = accent;
+  colors[ImGuiCol_TabDimmed] = bgDark;
+  colors[ImGuiCol_TabDimmedSelected] = bgLight;
+  colors[ImGuiCol_DockingPreview] = ImVec4(accent.x, accent.y, accent.z, 0.6F);
+  colors[ImGuiCol_SeparatorHovered] = accentHover;
+  colors[ImGuiCol_SeparatorActive] = accent;
+  colors[ImGuiCol_ResizeGrip] = ImVec4(accent.x, accent.y, accent.z, 0.25F);
+  colors[ImGuiCol_ResizeGripHovered] =
+      ImVec4(accent.x, accent.y, accent.z, 0.6F);
+  colors[ImGuiCol_ResizeGripActive] = accent;
+  colors[ImGuiCol_ScrollbarBg] = bgDark;
+  colors[ImGuiCol_ScrollbarGrab] = frame;
+  colors[ImGuiCol_ScrollbarGrabHovered] = bgLight;
+  colors[ImGuiCol_ScrollbarGrabActive] = accent;
+}
+
 } // namespace
 
 /// Initializes the owning system for editor.
@@ -169,7 +240,16 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-  ImGui::StyleColorsDark();
+  // Proper UI font (the 13px bitmap default reads as a debug tool). Falls
+  // back to the built-in font when the asset is missing.
+  const ImFont *editorFont = io.Fonts->AddFontFromFileTTF(
+      "assets/fonts/Roboto-Medium.ttf", 17.0F);
+  if (editorFont == nullptr) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "editor font missing; using ImGui default");
+  }
+
+  apply_editor_style();
 
   static_cast<void>(core::cvar_register_bool(
       "r_showStats", true,

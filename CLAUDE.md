@@ -180,9 +180,11 @@ architecture splits, comment quality — all closed, quality CI-enforced).
 
 Open — Phase 1 ship blockers:
 
-- **P1-M6 residuals**: shader binary cache; `SceneCaptureComponent`
-  (render-to-texture, multiple captures). Done 2026-07-18: material
-  instances + JSON material assets — `material_loader` resolves
+- **P1-M6 residuals**: `SceneCaptureComponent` (render-to-texture,
+  multiple captures). The shader binary cache was CUT 2026-07-19: it is
+  GL-specific work that the planned RHI migration (below) discards —
+  bgfx/modern APIs bring their own pipeline caching. Done 2026-07-18:
+  material instances + JSON material assets — `material_loader` resolves
   parent-chain overrides at load into flat `AssetDatabase` records
   (`AssetTypeTag::Material`), referenced by
   `MeshComponent.materialAssetId` and applied during render prep (inline
@@ -200,18 +202,35 @@ Open — Phase 1 ship blockers:
 - **P1-M9 Editor**: inspector for nested structs/arrays; full undo coverage;
   scene hierarchy panel (tree, drag-drop reparent, multi-select); asset
   browser upgrades (drag-to-viewport, search/tags); prefab overrides +
-  nesting; PIE pause/step; editor Lua API (menu items, custom panels).
+  nesting; PIE pause/step; editor Lua API (menu items, custom panels);
+  **UX overhaul to commercial-editor standard** (2026-07-19 priority call:
+  the look/feel gap is a real problem, not polish) — icon set, layout and
+  spacing pass, toolbar/hierarchy/inspector usability, DPI-aware font
+  scaling. The base theme + Roboto font landed 2026-07-19
+  (`apply_editor_style` in editor.cpp, assets/fonts/).
 - **P1-M10 Scene/Streaming**: scene transition API (exclusive/additive);
   UUID cross-scene references; streaming volumes; distance LOD with
   hysteresis; multi-slot save system with platform-aware paths.
+- **RHI migration** (decided 2026-07-19; scheduled after P1-M10, before
+  P1-M11): adopt **bgfx** as the render backend, replacing the GL
+  implementation behind `RenderDevice` and porting the backend TUs +
+  GLSL shaders to bgfx's model. The command-buffer frontend (builder,
+  DrawKey sort, render prep) is designed to survive unchanged. Ship
+  targets after migration: Windows, Linux, iOS/iPadOS (bgfx Metal
+  backend). macOS is NOT a ship target (2026-07-19 decision), but macOS
+  CI lanes stay: Apple requires Mac hosts to build for iOS, and they are
+  free portability checks meanwhile.
 - **P1-M11 Runtime UI**: canvas + resolution independence, batched 2D quad
   pipeline, font rendering (SDF, rich text), core widgets + layout
   containers, input routing, tweens, Lua UI API, localization +
   accessibility.
 - **P1-M12 Ship readiness**: finish platform abstraction; quality presets +
-  dynamic resolution; distribution packaging (asset packs, CPack); crash
-  handler; accessibility (UI scaling, subtitles); end-to-end smoke + leak
-  detection.
+  dynamic resolution; **frame pacing** (vsync modes, frame cap, and
+  fixed-step render interpolation — currently the renderer runs uncapped
+  against the 60 Hz sim with no interpolation, which will visibly stutter
+  once anything moves fast); distribution packaging (asset packs, CPack);
+  crash handler; accessibility (UI scaling, subtitles); end-to-end smoke +
+  leak detection.
 - **P1-M13 Production ops**: versioned data migrations; project manifest/
   templates; headless commandlets; content validation + cook reports;
   platform asset variants/compression; support diagnostics + crash dumps;
@@ -224,6 +243,16 @@ tilemaps, 2D physics/camera), networking (reliable UDP, replication, lobby),
 splines + data tables + CSG + foliage painting, haptics/gyro/input replay,
 advanced editor features, performance polish.
 
-Open — Phase 3 (future): XR, Vulkan backend, mobile, Web/Emscripten, AI +
-navigation, advanced networking. Parallel lanes: documentation, extended test
-coverage, devops pipeline.
+Open — Phase 3 (future): XR, iOS/iPadOS ship targets (on the bgfx Metal
+backend from the RHI migration; the former "Vulkan backend" item is absorbed
+by that migration), Web/Emscripten, AI + navigation, advanced networking.
+macOS and Android are not planned ship targets. Parallel lanes:
+documentation, extended test coverage (including golden-image renderer tests
+— offscreen render + image-hash compare where a GL context exists, closing
+the pixel-verification gap), devops pipeline.
+
+Known renderer issue (2026-07-19): `deferred_lighting.frag` exceeds NVIDIA's
+fragment uniform register limit (C6020) and fails to link, so the deferred
+path is silently unavailable on at least NVIDIA — the engine renders via the
+forward fallback. Fix by moving per-light data into the tile texture/UBO or
+shrinking the shader-side arrays.
