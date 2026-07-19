@@ -163,6 +163,22 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - Prefer `bool`+log, small status objects, or optional-like returns;
   assertions only for programmer errors.
 
+## Product vision (2026-07-19 — priorities derive from this)
+
+The engine's users are beginners making games, scenes, and interactive
+things with no game-dev or modeling background, on whatever hardware they
+have — and the same tool must scale to professional use ("absolute beginner
+to master in the game industry"). What that implies, in priority order:
+device reach over high-end rendering; a commercial-grade editor experience;
+built-in creation tools so no external DCC is ever required (shape/blockout
+tools, starter templates, bundled assets); radically good defaults; and
+one-click sharing, with web export as the headline distribution feature.
+Platforms follow the vision: Windows/Linux editor first, iOS/iPadOS
+runtime, web export once the bgfx migration lands; a macOS editor is likely
+(creators and students use Macs) even though shipping games on macOS stays
+a non-goal; Android is a low-cost later option (bgfx GLES), not a
+commitment.
+
 ## Roadmap
 
 Production-ready foundations (verified; details in git history of the former
@@ -217,9 +233,18 @@ Open — Phase 1 ship blockers:
   GLSL shaders to bgfx's model. The command-buffer frontend (builder,
   DrawKey sort, render prep) is designed to survive unchanged. Ship
   targets after migration: Windows, Linux, iOS/iPadOS (bgfx Metal
-  backend). macOS is NOT a ship target (2026-07-19 decision), but macOS
-  CI lanes stay: Apple requires Mac hosts to build for iOS, and they are
-  free portability checks meanwhile.
+  backend). macOS game shipping is a non-goal, but a macOS *editor* is
+  likely for creator/student reach; macOS CI lanes stay regardless (Apple
+  requires Mac hosts to build for iOS, and they are free portability
+  checks meanwhile).
+- **Web export** (elevated from Phase 3 by the product vision; feasible
+  once bgfx lands): Emscripten runtime builds plus a share-ready HTML
+  shell, so creations run from a link — the beginner sharing story.
+- **Creator starter kit** (elevated from Phase 2): built-in shape and
+  CSG-style blockout tools (moved up from P2-M5), playable starter
+  templates, and a bundled drag-in asset library — the
+  no-modeling-knowledge path to a first scene (project templates
+  coordinate with P1-M13-B).
 - **P1-M11 Runtime UI**: canvas + resolution independence, batched 2D quad
   pipeline, font rendering (SDF, rich text), core widgets + layout
   containers, input routing, tweens, Lua UI API, localization +
@@ -240,16 +265,18 @@ Open — Phase 1 ship blockers:
 Open — Phase 2 (competitive parity): advanced rendering (lightmap baking,
 SSR, volumetric fog, advanced post), CPU/GPU particles, 2D engine (sprites,
 tilemaps, 2D physics/camera), networking (reliable UDP, replication, lobby),
-splines + data tables + CSG + foliage painting, haptics/gyro/input replay,
-advanced editor features, performance polish.
+splines + data tables + foliage painting (CSG moved into the Phase 1
+creator starter kit), haptics/gyro/input replay, advanced editor features,
+performance polish.
 
 Open — Phase 3 (future): XR, iOS/iPadOS ship targets (on the bgfx Metal
 backend from the RHI migration; the former "Vulkan backend" item is absorbed
-by that migration), Web/Emscripten, AI + navigation, advanced networking.
-macOS and Android are not planned ship targets. Parallel lanes:
-documentation, extended test coverage (including golden-image renderer tests
-— offscreen render + image-hash compare where a GL context exists, closing
-the pixel-verification gap), devops pipeline.
+by that migration; web export moved up to Phase 1), AI + navigation,
+advanced networking. macOS game shipping and Android are options, not
+commitments (see the product vision). Parallel lanes: documentation,
+extended test coverage (including golden-image renderer tests — offscreen
+render + image-hash compare where a GL context exists, closing the
+pixel-verification gap), devops pipeline.
 
 Known renderer issue (2026-07-19): `deferred_lighting.frag` exceeds NVIDIA's
 fragment uniform register limit (C6020) and fails to link, so the deferred
