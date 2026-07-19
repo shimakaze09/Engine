@@ -51,4 +51,24 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
 /// Compute the required buffer size for tile data.
 std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept;
 
+/// Per-light data texture layout (R32F, one row per light) consumed by the
+/// deferred lighting shader; lights are fetched by the indices stored in the
+/// tile data, keeping the shader free of per-light uniform arrays.
+/// Rows [0, kMaxPointLights): point light [posXYZ, colorRGB, intensity,
+/// radius]. Rows [kLightDataSpotRow, kLightDataTexHeight): spot light
+/// [posXYZ, dirXYZ, colorRGB, intensity, radius, innerCone, outerCone].
+constexpr int kLightDataTexWidth = 13;
+constexpr int kLightDataSpotRow = static_cast<int>(kMaxPointLights);
+constexpr int kLightDataTexHeight =
+    kLightDataSpotRow + static_cast<int>(kMaxSpotLights);
+constexpr std::size_t kLightDataBufferSize =
+    static_cast<std::size_t>(kLightDataTexWidth) *
+    static_cast<std::size_t>(kLightDataTexHeight);
+
+/// Packs scene lights into the per-light data texture layout above.
+/// Unused rows and trailing floats are zero-filled.
+/// @return false if the output buffer is null or too small.
+bool pack_light_data(const SceneLightData &lights, float *out,
+                     std::size_t outSize) noexcept;
+
 } // namespace engine::renderer

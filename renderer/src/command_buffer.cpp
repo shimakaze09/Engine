@@ -863,37 +863,9 @@ bool initialize_backend() noexcept {
     backend.dlSpotLightCountLoc =
         dev->uniform_location(dlProg, "uSpotLightCount");
 
-    // Point light uniform arrays.
-    for (std::size_t i = 0U; i < kMaxPointLights; ++i) {
-      char nm[80] = {};
-      std::snprintf(nm, sizeof(nm), "uPointLightPositions[%zu]", i);
-      backend.dlPointPosLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uPointLightColors[%zu]", i);
-      backend.dlPointColorLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uPointLightIntensities[%zu]", i);
-      backend.dlPointIntensityLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uPointLightRadii[%zu]", i);
-      backend.dlPointRadiusLocs[i] = dev->uniform_location(dlProg, nm);
-    }
-
-    // Spot light uniform arrays.
-    for (std::size_t i = 0U; i < kMaxSpotLights; ++i) {
-      char nm[80] = {};
-      std::snprintf(nm, sizeof(nm), "uSpotLightPositions[%zu]", i);
-      backend.dlSpotPosLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uSpotLightDirections[%zu]", i);
-      backend.dlSpotDirLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uSpotLightColors[%zu]", i);
-      backend.dlSpotColorLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uSpotLightIntensities[%zu]", i);
-      backend.dlSpotIntensityLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uSpotLightRadii[%zu]", i);
-      backend.dlSpotRadiusLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uSpotLightInnerCones[%zu]", i);
-      backend.dlSpotInnerConeLocs[i] = dev->uniform_location(dlProg, nm);
-      std::snprintf(nm, sizeof(nm), "uSpotLightOuterCones[%zu]", i);
-      backend.dlSpotOuterConeLocs[i] = dev->uniform_location(dlProg, nm);
-    }
+    // Per-light data texture sampler (light parameters are fetched by index
+    // instead of per-light uniform arrays).
+    backend.dlLightDataTexLoc = dev->uniform_location(dlProg, "uLightDataTex");
 
     // SSAO uniforms in deferred lighting shader.
     backend.dlSsaoTextureLoc = dev->uniform_location(dlProg, "uSsaoTexture");
@@ -1095,6 +1067,12 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->tileLightTex = 0U;
   }
   backend->tileBuffer.clear();
+
+  // Destroy per-light data texture.
+  if (backend->lightDataTex != 0U && dev != nullptr) {
+    dev->destroy_texture(backend->lightDataTex);
+    backend->lightDataTex = 0U;
+  }
 
   // Destroy bloom resources.
   destroy_bloom_resources(*backend);
