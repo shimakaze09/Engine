@@ -373,6 +373,16 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
       }
       continue;
     }
+
+    if ((std::strcmp(desc->name, kSceneCaptureTypeName) == 0) &&
+        !editor_session().world->has_scene_capture_component(entity)) {
+      if (ImGui::Selectable(kSceneCaptureSectionLabel)) {
+        execute_component_add(entity, ComponentEditType::SceneCapture,
+                              default_component_snapshot(
+                                  entity, ComponentEditType::SceneCapture));
+      }
+      continue;
+    }
   }
 
   if (editor_session().world->get_mesh_component_ptr(entity) == nullptr) {
@@ -794,6 +804,9 @@ void draw_inspector_panel() noexcept {
     if (sectionOpen) {
       ImGui::Text("Mesh Asset ID: %llu",
                   static_cast<unsigned long long>(mesh.meshAssetId));
+      // Persistent id of an enabled SceneCaptureComponent entity whose
+      // rendered output feeds this mesh's albedo texture (0 = none).
+      int captureSourceId = static_cast<int>(mesh.sceneCaptureSourceId);
       if (editable) {
         meshModified |= ImGui::ColorEdit3("Albedo", &mesh.albedo.x);
         meshModified |= ImGui::SliderFloat("Roughness", &mesh.roughness, 0.0F,
@@ -802,6 +815,12 @@ void draw_inspector_panel() noexcept {
             ImGui::SliderFloat("Metallic", &mesh.metallic, 0.0F, 1.0F, "%.2f");
         meshModified |=
             ImGui::SliderFloat("Opacity", &mesh.opacity, 0.0F, 1.0F, "%.2f");
+        if (ImGui::InputInt("Capture Source ID", &captureSourceId)) {
+          mesh.sceneCaptureSourceId =
+              (captureSourceId > 0) ? static_cast<std::uint32_t>(captureSourceId)
+                                    : 0U;
+          meshModified = true;
+        }
       } else {
         ImGui::BeginDisabled();
         static_cast<void>(ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
@@ -811,6 +830,8 @@ void draw_inspector_panel() noexcept {
             ImGui::SliderFloat("Metallic", &mesh.metallic, 0.0F, 1.0F, "%.2f"));
         static_cast<void>(
             ImGui::SliderFloat("Opacity", &mesh.opacity, 0.0F, 1.0F, "%.2f"));
+        static_cast<void>(
+            ImGui::InputInt("Capture Source ID", &captureSourceId));
         ImGui::EndDisabled();
       }
     }
@@ -878,6 +899,64 @@ void draw_inspector_panel() noexcept {
     }
   } else {
     ImGui::TextUnformatted("ReflectionProbeComponent: <none>");
+  }
+
+  runtime::SceneCaptureComponent sceneCapture{};
+  if (editor_session().world->get_scene_capture_component(entity,
+                                                          &sceneCapture)) {
+    ImGui::PushID("SceneCaptureComponentSection");
+    const bool sectionOpen = ImGui::CollapsingHeader(
+        kSceneCaptureSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removePressed = draw_remove_component_button("remove", editable);
+
+    bool captureModified = false;
+    if (sectionOpen) {
+      if (editable) {
+        captureModified =
+            draw_reflected_component(kSceneCaptureTypeName, &sceneCapture);
+      } else {
+        ImGui::BeginDisabled();
+        static_cast<void>(
+            draw_reflected_component(kSceneCaptureTypeName, &sceneCapture));
+        ImGui::EndDisabled();
+      }
+
+      const runtime::PersistentId capturePersistentId =
+          editor_session().world->persistent_id(entity);
+      ImGui::Text("Capture Source ID: %u",
+                  static_cast<unsigned>(capturePersistentId));
+
+      // Live preview of the capture output, fitted to the panel width
+      // (flipped V to match the GL framebuffer origin, like the viewport).
+      const std::int32_t captureSlot =
+          editor_session().world->scene_capture_slot_for_entity(entity);
+      const std::uint32_t captureTexture =
+          (captureSlot >= 0) ? renderer::get_scene_capture_texture(
+                                   static_cast<std::size_t>(captureSlot))
+                             : 0U;
+      if ((captureTexture != 0U) && (sceneCapture.width > 0U)) {
+        const float availWidth = ImGui::GetContentRegionAvail().x;
+        const float aspect = static_cast<float>(sceneCapture.height) /
+                             static_cast<float>(sceneCapture.width);
+        const ImVec2 previewSize(availWidth, availWidth * aspect);
+        ImGui::Image(static_cast<ImTextureID>(captureTexture), previewSize,
+                     ImVec2(0.0F, 1.0F), ImVec2(1.0F, 0.0F));
+      } else {
+        ImGui::TextUnformatted(sceneCapture.enabled
+                                   ? "Preview: waiting for first frame"
+                                   : "Preview: capture disabled");
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removePressed) {
+      execute_component_remove(entity, ComponentEditType::SceneCapture);
+    } else if (editable && captureModified) {
+      static_cast<void>(editor_session().world->add_scene_capture_component(
+          entity, sceneCapture));
+    }
+  } else {
+    ImGui::TextUnformatted("SceneCaptureComponent: <none>");
   }
 
   runtime::ScriptComponent script{};

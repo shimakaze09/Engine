@@ -137,6 +137,84 @@ int check_texture_handle_generation() {
   return 0;
 }
 
+// External registrations alias GL textures owned elsewhere: the texture
+// system must never destroy them, on unload or on shutdown.
+int check_external_texture_registration() {
+  engine::renderer::reset_fake_device();
+
+  // Registration requires an initialized texture system.
+  if (engine::renderer::register_external_texture(7U) !=
+      engine::renderer::kInvalidTextureHandle) {
+    return 30;
+  }
+
+  if (!engine::renderer::initialize_texture_system()) {
+    return 31;
+  }
+
+  const engine::renderer::TextureHandle handle =
+      engine::renderer::register_external_texture(77U);
+  if (handle == engine::renderer::kInvalidTextureHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 32;
+  }
+  if (engine::renderer::texture_gpu_id(handle) != 77U) {
+    engine::renderer::shutdown_texture_system();
+    return 33;
+  }
+  // No GL texture was created on the device for an external registration.
+  if (engine::renderer::fake_alive_textures() != 0) {
+    engine::renderer::shutdown_texture_system();
+    return 34;
+  }
+
+  if (!engine::renderer::update_external_texture(handle, 88U) ||
+      (engine::renderer::texture_gpu_id(handle) != 88U)) {
+    engine::renderer::shutdown_texture_system();
+    return 35;
+  }
+
+  // Unload releases the slot without touching the GL object (the fake
+  // device would go negative if destroy were called).
+  engine::renderer::unload_texture(handle);
+  if (engine::renderer::texture_gpu_id(handle) != 0U) {
+    engine::renderer::shutdown_texture_system();
+    return 36;
+  }
+  if (engine::renderer::fake_alive_textures() != 0) {
+    engine::renderer::shutdown_texture_system();
+    return 37;
+  }
+
+  // A stale handle can no longer be updated.
+  if (engine::renderer::update_external_texture(handle, 99U)) {
+    engine::renderer::shutdown_texture_system();
+    return 38;
+  }
+
+  // Shutdown must also skip external GL objects.
+  const engine::renderer::TextureHandle survivor =
+      engine::renderer::register_external_texture(55U);
+  if (survivor == engine::renderer::kInvalidTextureHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 39;
+  }
+  engine::renderer::shutdown_texture_system();
+  if (engine::renderer::fake_alive_textures() != 0) {
+    return 40;
+  }
+
+  return 0;
+}
+
 } // namespace
 
-int main() { return check_texture_handle_generation(); }
+/// Runs this executable or test program.
+int main() {
+  const int externalResult = check_external_texture_registration();
+  if (externalResult != 0) {
+    return externalResult;
+  }
+
+  return check_texture_handle_generation();
+}

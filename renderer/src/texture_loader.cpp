@@ -68,6 +68,9 @@ struct TextureSlot final {
   bool occupied = false;
   bool hdr = false;
   bool cubemap = false;
+  // External slots alias a GL texture owned elsewhere (e.g. a scene capture
+  // target); the texture system never destroys their GL object.
+  bool external = false;
   std::array<char, kMaxPathLen> path{};
 };
 
@@ -101,7 +104,7 @@ TextureHandle make_texture_handle(std::size_t slotIndex) noexcept {
 /// Resets a texture slot while preserving stale-handle invalidation.
 void reset_texture_slot(TextureSlot &slot) noexcept {
   slot = TextureSlot{0U, next_texture_generation(slot.generation), false,
-                     false, false, {}};
+                     false, false, false, {}};
 }
 
 /// Copies a texture VFS path into a fixed-size slot field.
@@ -326,7 +329,8 @@ void shutdown_texture_system() noexcept {
 
   const RenderDevice *dev = render_device();
   for (std::size_t i = 0U; i < kMaxTextureSlots; ++i) {
-    if (g_texState.slots[i].occupied && g_texState.slots[i].gpuId != 0U) {
+    if (g_texState.slots[i].occupied && (g_texState.slots[i].gpuId != 0U) &&
+        !g_texState.slots[i].external) {
       if (dev != nullptr) {
         dev->destroy_texture(g_texState.slots[i].gpuId);
       }
@@ -553,11 +557,44 @@ void unload_texture(TextureHandle handle) noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  if (dev != nullptr && slot->gpuId != 0U) {
+  if (dev != nullptr && slot->gpuId != 0U && !slot->external) {
     dev->destroy_texture(slot->gpuId);
   }
 
   reset_texture_slot(g_texState.slots[slotIndex]);
+}
+
+TextureHandle register_external_texture(std::uint32_t gpuId) noexcept {
+  if (!g_texState.initialized) {
+    return kInvalidTextureHandle;
+  }
+
+  const std::size_t freeSlot = find_free_texture_slot();
+  if (freeSlot == 0U) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "texture registry full");
+    return kInvalidTextureHandle;
+  }
+
+  TextureSlot &slot = g_texState.slots[freeSlot];
+  slot.occupied = true;
+  slot.external = true;
+  slot.gpuId = gpuId;
+  slot.hdr = false;
+  slot.cubemap = false;
+  safe_copy_path(slot.path.data(), slot.path.size(), "<external>");
+  return make_texture_handle(freeSlot);
+}
+
+bool update_external_texture(TextureHandle handle,
+                             std::uint32_t gpuId) noexcept {
+  TextureSlot *slot = lookup_texture_slot(handle);
+  if ((slot == nullptr) || !slot->external) {
+    return false;
+  }
+
+  slot->gpuId = gpuId;
+  return true;
 }
 
 std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {

@@ -42,6 +42,8 @@ constexpr const char *kPointLightTypeName =
     "engine::runtime::PointLightComponent";
 constexpr const char *kSpotLightTypeName =
     "engine::runtime::SpotLightComponent";
+constexpr const char *kSceneCaptureTypeName =
+    "engine::runtime::SceneCaptureComponent";
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
 
@@ -283,6 +285,15 @@ bool read_mesh_component(const core::JsonParser &parser,
     static_cast<void>(parser.as_float(opacityValue, &component.opacity));
   }
 
+  core::JsonValue captureSourceValue{};
+  if (parser.get_object_field(meshObject, "sceneCaptureSourceId",
+                              &captureSourceValue)) {
+    if (!parser.as_uint(captureSourceValue,
+                        &component.sceneCaptureSourceId)) {
+      return false;
+    }
+  }
+
   *outComponent = component;
   return true;
 }
@@ -362,6 +373,7 @@ struct SceneComponentDescriptors final {
   const core::TypeDescriptor *reflectionProbe = nullptr;
   const core::TypeDescriptor *pointLight = nullptr;
   const core::TypeDescriptor *spotLight = nullptr;
+  const core::TypeDescriptor *sceneCapture = nullptr;
 };
 
 /// Looks up every reflected scene-component descriptor; logs and fails when
@@ -379,10 +391,12 @@ bool find_scene_descriptors(SceneComponentDescriptors *outDescs) noexcept {
   outDescs->reflectionProbe = registry.find_type(kReflectionProbeTypeName);
   outDescs->pointLight = registry.find_type(kPointLightTypeName);
   outDescs->spotLight = registry.find_type(kSpotLightTypeName);
+  outDescs->sceneCapture = registry.find_type(kSceneCaptureTypeName);
   if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
       (outDescs->collider == nullptr) || (outDescs->springArm == nullptr) ||
       (outDescs->reflectionProbe == nullptr) ||
-      (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr)) {
+      (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr) ||
+      (outDescs->sceneCapture == nullptr)) {
     return log_scene_error("missing runtime reflection descriptors");
   }
   return true;
@@ -541,6 +555,19 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    core::JsonValue sceneCaptureValue{};
+    if (parser.get_object_field(components, kJsonKeySceneCaptureComponent,
+                                &sceneCaptureValue)) {
+      SceneCaptureComponent sceneCapture{};
+      if (!read_reflected_component(parser, sceneCaptureValue,
+                                    *descs.sceneCapture, &sceneCapture) ||
+          !targetWorld.add_scene_capture_component(entity, sceneCapture)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error(
+            "failed to load SceneCaptureComponent component");
+      }
+    }
+
     core::JsonValue nameValue{};
     if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
       NameComponent nameComponent{};
@@ -642,6 +669,8 @@ bool copy_world_contents(const World &sourceWorld,
              &World::add_spot_light_component) &&
         copy(&World::get_reflection_probe_component,
              &World::add_reflection_probe_component) &&
+        copy(&World::get_scene_capture_component,
+             &World::add_scene_capture_component) &&
         copy(&World::get_name_component, &World::add_name_component) &&
         copy(&World::get_script_component, &World::add_script_component) &&
         copy(&World::get_spring_arm, &World::add_spring_arm);
@@ -740,6 +769,10 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_float("roughness", mesh.roughness);
       writer.write_float("metallic", mesh.metallic);
       writer.write_float("opacity", mesh.opacity);
+      // Written only when set so pre-capture scenes stay byte-identical.
+      if (mesh.sceneCaptureSourceId != 0U) {
+        writer.write_uint("sceneCaptureSourceId", mesh.sceneCaptureSourceId);
+      }
       writer.end_object();
     }
 
@@ -779,6 +812,14 @@ bool serialize_scene_to_writer(const World &world,
     if (world.get_reflection_probe_component(entity, &reflectionProbe) &&
         !write_reflected_component(writer, kJsonKeyReflectionProbeComponent,
                                    *reflectionProbeDesc, &reflectionProbe)) {
+      writeFailed = true;
+      return;
+    }
+
+    SceneCaptureComponent sceneCapture{};
+    if (world.get_scene_capture_component(entity, &sceneCapture) &&
+        !write_reflected_component(writer, kJsonKeySceneCaptureComponent,
+                                   *descs.sceneCapture, &sceneCapture)) {
       writeFailed = true;
       return;
     }

@@ -1007,6 +1007,55 @@ collect_scene_lights(const runtime::World &world) noexcept {
   return sceneLights;
 }
 
+// ---------------------------------------------------------------------------
+// Scene capture collection
+// ---------------------------------------------------------------------------
+
+// Converts enabled SceneCaptureComponents (dense order) into renderer capture
+// requests; the capture camera looks along the world rotation's -Z axis.
+std::size_t
+collect_scene_captures(const runtime::World &world,
+                       renderer::SceneCaptureRequest *outRequests,
+                       std::size_t capacity) noexcept {
+  if (outRequests == nullptr) {
+    return 0U;
+  }
+
+  std::size_t requestCount = 0U;
+  const std::size_t captureCount = world.scene_capture_count();
+  for (std::size_t ci = 0U;
+       (ci < captureCount) && (requestCount < capacity); ++ci) {
+    const runtime::SceneCaptureComponent *capture = world.scene_capture_at(ci);
+    if ((capture == nullptr) || !capture->enabled) {
+      continue;
+    }
+
+    const runtime::Entity captureEntity = world.scene_capture_entity_at(ci);
+    const runtime::WorldTransform *wt =
+        world.get_world_transform_read_ptr(captureEntity);
+    const math::Vec3 position =
+        (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    const math::Quat rotation = (wt != nullptr) ? wt->rotation : math::Quat();
+
+    renderer::SceneCaptureRequest &request = outRequests[requestCount];
+    request = renderer::SceneCaptureRequest{};
+    request.camera.position = position;
+    request.camera.target = math::add(
+        position,
+        math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
+    request.camera.up =
+        math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation);
+    request.camera.fovRadians = capture->fovRadians;
+    request.camera.nearPlane = capture->nearPlane;
+    request.camera.farPlane = capture->farPlane;
+    request.width = capture->width;
+    request.height = capture->height;
+    ++requestCount;
+  }
+
+  return requestCount;
+}
+
 } // namespace
 
 // ===========================================================================
@@ -1771,6 +1820,11 @@ void EnginePipeline::Impl::stage_render() noexcept {
   }
 
   const renderer::SceneLightData sceneLights = collect_scene_lights(*world);
+
+  renderer::SceneCaptureRequest captureRequests[renderer::kMaxSceneCaptures]{};
+  const std::size_t captureRequestCount = collect_scene_captures(
+      *world, captureRequests, renderer::kMaxSceneCaptures);
+  renderer::set_scene_capture_requests(captureRequests, captureRequestCount);
 
   renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                            static_cast<float>(simulationTimeSeconds),

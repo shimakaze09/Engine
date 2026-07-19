@@ -16,6 +16,8 @@ inline constexpr const char *kJsonKeyReflectionProbeComponent =
     "ReflectionProbeComponent";
 inline constexpr const char *kJsonKeyFoliagePatchComponent =
     "FoliagePatchComponent";
+inline constexpr const char *kJsonKeySceneCaptureComponent =
+    "SceneCaptureComponent";
 inline constexpr const char *kJsonKeyNameComponent = "NameComponent";
 inline constexpr const char *kJsonKeyScriptComponent = "ScriptComponent";
 inline constexpr const char *kJsonKeyCameraComponent = "CameraComponent";

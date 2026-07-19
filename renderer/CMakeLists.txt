@@ -6,6 +6,7 @@ engine_add_module_library(engine_renderer
     src/asset_manager.cpp
     src/asset_streaming.cpp
     src/command_buffer_builder.cpp
+    src/command_buffer_capture.cpp
     src/command_buffer_context.cpp
     src/command_buffer_flush.cpp
     src/command_buffer_ibl.cpp

@@ -8,6 +8,7 @@
 
 #include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
+#include "engine/renderer/camera.h"
 #include "engine/renderer/material.h"
 
 namespace engine::renderer {
@@ -156,6 +157,36 @@ struct ReflectionProbeBakeResult final {
   ReflectionProbeBakeSettings settings{};
   bool baked = false;
 };
+
+// Scene capture (render-to-texture) requests consumed by flush_renderer.
+inline constexpr std::size_t kMaxSceneCaptures = 8U;
+inline constexpr std::uint32_t kMinSceneCaptureSize = 16U;
+inline constexpr std::uint32_t kMaxSceneCaptureSize = 2048U;
+
+/// One render-to-texture request: capture camera plus target resolution.
+struct SceneCaptureRequest final {
+  CameraState camera{};
+  std::uint32_t width = 256U;
+  std::uint32_t height = 256U;
+};
+
+/// Clamps and fills the request into a safe runtime range for scene capture.
+SceneCaptureRequest
+normalize_scene_capture_request(const SceneCaptureRequest &request) noexcept;
+/// Stores up to kMaxSceneCaptures requests for the next flush_renderer call;
+/// excess requests are dropped with a log. Pass count 0 to disable captures.
+void set_scene_capture_requests(const SceneCaptureRequest *requests,
+                                std::size_t count) noexcept;
+/// Number of capture requests currently stored.
+std::size_t scene_capture_request_count() noexcept;
+/// LDR color texture rendered for capture slot `index` (request order);
+/// 0 until that slot has been rendered by a flush.
+std::uint32_t get_scene_capture_texture(std::size_t index) noexcept;
+/// Stable texture-system handle for capture slot `index`, usable as a
+/// material albedo texture. Invalid until the slot is first requested via
+/// set_scene_capture_requests; resolves to "no texture" until the slot's
+/// target is created by a flush.
+TextureHandle scene_capture_texture_handle(std::size_t index) noexcept;
 
 /// Enumerates distance fog mode values used by the engine.
 enum class DistanceFogMode : std::uint8_t {
