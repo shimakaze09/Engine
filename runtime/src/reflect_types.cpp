@@ -88,6 +88,15 @@ REFLECT_FIELD(boxProjection, Bool)
 REFLECT_FIELD(needsBake, Bool)
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::SceneCaptureComponent)
+REFLECT_FIELD(width, Uint32)
+REFLECT_FIELD(height, Uint32)
+REFLECT_FIELD(fovRadians, Float)
+REFLECT_FIELD(nearPlane, Float)
+REFLECT_FIELD(farPlane, Float)
+REFLECT_FIELD(enabled, Bool)
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::FoliagePatchComponent)
 static_cast<void>(desc);
 // Fixed instance and LOD arrays are edited/serialized manually.

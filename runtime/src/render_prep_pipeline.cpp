@@ -212,6 +212,24 @@ void render_prep_chunk_job(void *userData) noexcept {
               command.material.metallic = meshComponent->metallic;
               command.material.opacity = meshComponent->opacity;
             }
+            // A referenced scene capture overrides the albedo texture; the
+            // handle is a stable read-only registration, so this is safe
+            // from worker threads.
+            if (meshComponent->sceneCaptureSourceId != 0U) {
+              const Entity captureEntity =
+                  jobData->world->find_entity_by_persistent_id(
+                      meshComponent->sceneCaptureSourceId);
+              const std::int32_t captureSlot =
+                  jobData->world->scene_capture_slot_for_entity(captureEntity);
+              if (captureSlot >= 0) {
+                const renderer::TextureHandle captureTexture =
+                    renderer::scene_capture_texture_handle(
+                        static_cast<std::size_t>(captureSlot));
+                if (captureTexture != renderer::kInvalidTextureHandle) {
+                  command.material.albedoTexture = captureTexture;
+                }
+              }
+            }
             command.modelMatrix = transforms[i].matrix;
             command.sortKey.value =
                 build_draw_sort_key(command.material, runtimeMesh, center, vp);

@@ -174,6 +174,7 @@ int main() {
   mesh.roughness = 0.6F;
   mesh.metallic = 0.1F;
   mesh.opacity = 0.9F;
+  mesh.sceneCaptureSourceId = 6U;
   if (!world->add_mesh_component(src, mesh)) {
     return 7;
   }
@@ -197,6 +198,17 @@ int main() {
   reflectionProbe.needsBake = false;
   if (!world->add_reflection_probe_component(src, reflectionProbe)) {
     return 26;
+  }
+
+  engine::runtime::SceneCaptureComponent sceneCapture{};
+  sceneCapture.width = 400U;
+  sceneCapture.height = 300U;
+  sceneCapture.fovRadians = 1.2F;
+  sceneCapture.nearPlane = 0.2F;
+  sceneCapture.farPlane = 80.0F;
+  sceneCapture.enabled = false;
+  if (!world->add_scene_capture_component(src, sceneCapture)) {
+    return 45;
   }
 
   engine::runtime::FoliagePatchComponent foliage{};
@@ -306,7 +318,8 @@ int main() {
   if (instMesh.meshAssetId != 42U || !nearly_equal(instMesh.albedo.x, 0.8F) ||
       !nearly_equal(instMesh.roughness, 0.6F) ||
       !nearly_equal(instMesh.metallic, 0.1F) ||
-      !nearly_equal(instMesh.opacity, 0.9F)) {
+      !nearly_equal(instMesh.opacity, 0.9F) ||
+      (instMesh.sceneCaptureSourceId != 6U)) {
     remove_prefab_file();
     return 21;
   }
@@ -341,6 +354,20 @@ int main() {
       instProbe.needsBake) {
     remove_prefab_file();
     return 28;
+  }
+
+  // Verify SceneCaptureComponent.
+  engine::runtime::SceneCaptureComponent instCapture{};
+  if (!world->get_scene_capture_component(inst, &instCapture)) {
+    remove_prefab_file();
+    return 46;
+  }
+  if ((instCapture.width != 400U) || (instCapture.height != 300U) ||
+      !nearly_equal(instCapture.fovRadians, 1.2F) ||
+      !nearly_equal(instCapture.nearPlane, 0.2F) ||
+      !nearly_equal(instCapture.farPlane, 80.0F) || instCapture.enabled) {
+    remove_prefab_file();
+    return 47;
   }
 
   // Verify FoliagePatchComponent.

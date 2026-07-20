@@ -222,7 +222,14 @@ int check_shutdown_resets_public_renderer_state() {
   engine::renderer::set_active_camera(camera);
   engine::renderer::set_skybox_texture(engine::renderer::TextureHandle{77U});
 
+  engine::renderer::SceneCaptureRequest pendingCapture{};
+  engine::renderer::set_scene_capture_requests(&pendingCapture, 1U);
+
   engine::renderer::shutdown_renderer();
+
+  if (engine::renderer::scene_capture_request_count() != 0U) {
+    return 38;
+  }
 
   const engine::renderer::CameraState resetCamera =
       engine::renderer::get_active_camera();
@@ -432,6 +439,124 @@ int check_distance_fog_settings() {
   return 0;
 }
 
+int check_scene_capture_requests() {
+  // Normalization clamps resolution and repairs degenerate camera planes.
+  engine::renderer::SceneCaptureRequest request{};
+  request.width = 8U;
+  request.height = 5000U;
+  request.camera.fovRadians = 0.0F;
+  request.camera.nearPlane = -1.0F;
+  request.camera.farPlane = -2.0F;
+
+  const engine::renderer::SceneCaptureRequest normalized =
+      engine::renderer::normalize_scene_capture_request(request);
+  if ((normalized.width != engine::renderer::kMinSceneCaptureSize) ||
+      (normalized.height != engine::renderer::kMaxSceneCaptureSize)) {
+    return 90;
+  }
+  if (normalized.camera.fovRadians != 1.0471975512F) {
+    return 91;
+  }
+  if (normalized.camera.nearPlane != 0.1F) {
+    return 92;
+  }
+  if (normalized.camera.farPlane != normalized.camera.nearPlane + 100.0F) {
+    return 93;
+  }
+
+  // In-range requests pass through unchanged.
+  engine::renderer::SceneCaptureRequest valid{};
+  valid.width = 320U;
+  valid.height = 240U;
+  valid.camera.fovRadians = 0.9F;
+  valid.camera.nearPlane = 0.5F;
+  valid.camera.farPlane = 50.0F;
+  const engine::renderer::SceneCaptureRequest untouched =
+      engine::renderer::normalize_scene_capture_request(valid);
+  if ((untouched.width != 320U) || (untouched.height != 240U) ||
+      (untouched.camera.fovRadians != 0.9F) ||
+      (untouched.camera.nearPlane != 0.5F) ||
+      (untouched.camera.farPlane != 50.0F)) {
+    return 94;
+  }
+
+  // Stored requests report their count; overflow drops to the slot count.
+  engine::renderer::SceneCaptureRequest
+      many[engine::renderer::kMaxSceneCaptures + 2U]{};
+  engine::renderer::set_scene_capture_requests(
+      many, engine::renderer::kMaxSceneCaptures + 2U);
+  if (engine::renderer::scene_capture_request_count() !=
+      engine::renderer::kMaxSceneCaptures) {
+    return 95;
+  }
+
+  // A null array with nonzero count clears the stored requests.
+  engine::renderer::set_scene_capture_requests(nullptr, 3U);
+  if (engine::renderer::scene_capture_request_count() != 0U) {
+    return 96;
+  }
+
+  engine::renderer::set_scene_capture_requests(many, 2U);
+  if (engine::renderer::scene_capture_request_count() != 2U) {
+    return 97;
+  }
+  engine::renderer::set_scene_capture_requests(nullptr, 0U);
+  if (engine::renderer::scene_capture_request_count() != 0U) {
+    return 98;
+  }
+
+  // Without a rendered flush, capture textures stay unavailable; slot
+  // indices past the fixed capacity always return 0.
+  if (engine::renderer::get_scene_capture_texture(0U) != 0U) {
+    return 99;
+  }
+  if (engine::renderer::get_scene_capture_texture(
+          engine::renderer::kMaxSceneCaptures) != 0U) {
+    return 100;
+  }
+
+  // Capture texture handles: out-of-range slots are always invalid; a
+  // requested slot gets a stable handle that resolves to "no texture"
+  // until a flush creates the target.
+  if (engine::renderer::scene_capture_texture_handle(
+          engine::renderer::kMaxSceneCaptures) !=
+      engine::renderer::kInvalidTextureHandle) {
+    return 101;
+  }
+  if (!engine::renderer::initialize_texture_system()) {
+    return 102;
+  }
+  engine::renderer::shutdown_renderer();
+  engine::renderer::SceneCaptureRequest handleRequest{};
+  engine::renderer::set_scene_capture_requests(&handleRequest, 1U);
+  const engine::renderer::TextureHandle slotHandle =
+      engine::renderer::scene_capture_texture_handle(0U);
+  if (slotHandle == engine::renderer::kInvalidTextureHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 103;
+  }
+  if (engine::renderer::texture_gpu_id(slotHandle) != 0U) {
+    engine::renderer::shutdown_texture_system();
+    return 104;
+  }
+  // Re-submitting requests keeps the handle stable.
+  engine::renderer::set_scene_capture_requests(&handleRequest, 1U);
+  if (engine::renderer::scene_capture_texture_handle(0U) != slotHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 105;
+  }
+  // Renderer shutdown releases the slot handles even before GL init.
+  engine::renderer::shutdown_renderer();
+  if (engine::renderer::scene_capture_texture_handle(0U) !=
+      engine::renderer::kInvalidTextureHandle) {
+    engine::renderer::shutdown_texture_system();
+    return 106;
+  }
+  engine::renderer::shutdown_texture_system();
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -465,6 +590,10 @@ int main() {
     return result;
   }
   result = check_distance_fog_settings();
+  if (result != 0) {
+    return result;
+  }
+  result = check_scene_capture_requests();
   if (result != 0) {
     return result;
   }

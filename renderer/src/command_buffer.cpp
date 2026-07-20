@@ -1,6 +1,7 @@
 // Implements command buffer behavior for the Engine renderer system.
 
 #include "engine/renderer/command_buffer.h"
+#include "command_buffer_capture.h"
 #include "command_buffer_context.h"
 #include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
@@ -1074,6 +1075,9 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->lightDataTex = 0U;
   }
 
+  // Destroy scene capture render targets.
+  destroy_scene_capture_targets(*backend, dev);
+
   // Destroy bloom resources.
   destroy_bloom_resources(*backend);
   if (backend->bloomUpsampleShaderHandle != kInvalidShaderProgram) {
@@ -1205,6 +1209,9 @@ void destroy_backend_resources(BackendState *backend) noexcept {
 void shutdown_renderer() noexcept {
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
+    // No GL resources exist yet, but capture slots may hold texture-system
+    // handles that would go stale across a texture-system restart.
+    backend.sceneCaptureTargets = {};
     reset_renderer_public_state();
     return;
   }

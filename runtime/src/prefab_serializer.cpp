@@ -102,6 +102,10 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_float("roughness", mesh.roughness);
     w.write_float("metallic", mesh.metallic);
     w.write_float("opacity", mesh.opacity);
+    // Written only when set so pre-capture prefabs stay byte-identical.
+    if (mesh.sceneCaptureSourceId != 0U) {
+      w.write_uint("sceneCaptureSourceId", mesh.sceneCaptureSourceId);
+    }
     w.end_object();
   }
 
@@ -164,6 +168,20 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_uint("mipLevels", reflectionProbe.mipLevels);
     w.write_bool("boxProjection", reflectionProbe.boxProjection);
     w.write_bool("needsBake", reflectionProbe.needsBake);
+    w.end_object();
+  }
+
+  // SceneCaptureComponent
+  SceneCaptureComponent sceneCapture{};
+  if (world.get_scene_capture_component(entity, &sceneCapture)) {
+    w.write_key(kJsonKeySceneCaptureComponent);
+    w.begin_object();
+    w.write_uint("width", sceneCapture.width);
+    w.write_uint("height", sceneCapture.height);
+    w.write_float("fovRadians", sceneCapture.fovRadians);
+    w.write_float("nearPlane", sceneCapture.nearPlane);
+    w.write_float("farPlane", sceneCapture.farPlane);
+    w.write_bool("enabled", sceneCapture.enabled);
     w.end_object();
   }
 
@@ -396,6 +414,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
         !readFloatField(componentValue, "roughness", &mesh.roughness) ||
         !readFloatField(componentValue, "metallic", &mesh.metallic) ||
         !readFloatField(componentValue, "opacity", &mesh.opacity) ||
+        !readUintField(componentValue, "sceneCaptureSourceId",
+                       &mesh.sceneCaptureSourceId) ||
         !world.add_mesh_component(entity, mesh)) {
       return failComponent("instantiate_prefab: failed to add MeshComponent");
     }
@@ -494,6 +514,26 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
         !world.add_reflection_probe_component(entity, reflectionProbe)) {
       return failComponent(
           "instantiate_prefab: failed to add ReflectionProbeComponent");
+    }
+  }
+
+  if (!readComponentObject(kJsonKeySceneCaptureComponent, &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid SceneCaptureComponent");
+  }
+  if (hasComponent) {
+    SceneCaptureComponent sceneCapture{};
+    if (!readUintField(componentValue, "width", &sceneCapture.width) ||
+        !readUintField(componentValue, "height", &sceneCapture.height) ||
+        !readFloatField(componentValue, "fovRadians",
+                        &sceneCapture.fovRadians) ||
+        !readFloatField(componentValue, "nearPlane",
+                        &sceneCapture.nearPlane) ||
+        !readFloatField(componentValue, "farPlane", &sceneCapture.farPlane) ||
+        !readBoolField(componentValue, "enabled", &sceneCapture.enabled) ||
+        !world.add_scene_capture_component(entity, sceneCapture)) {
+      return failComponent(
+          "instantiate_prefab: failed to add SceneCaptureComponent");
     }
   }
 
