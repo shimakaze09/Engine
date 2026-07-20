@@ -1296,6 +1296,20 @@ void flush_renderer(CommandBufferView commandBufferView,
                                   backend.tileBuffer.data());
     }
 
+    // Upload per-light data texture (fetched by tile light index in the
+    // deferred lighting shader).
+    static_cast<void>(pack_light_data(lights, backend.lightDataBuffer.data(),
+                                      backend.lightDataBuffer.size()));
+    if (backend.lightDataTex == 0U) {
+      backend.lightDataTex = dev->create_texture_2d_r32f(
+          kLightDataTexWidth, kLightDataTexHeight,
+          backend.lightDataBuffer.data());
+    } else {
+      dev->update_texture_2d_r32f(backend.lightDataTex, kLightDataTexWidth,
+                                  kLightDataTexHeight,
+                                  backend.lightDataBuffer.data());
+    }
+
     // --- G-Buffer debug visualization (overrides lighting pass) ---
     if (gbufferDebugMode > 0 && backend.gbufferDebugProgram != 0U) {
       gpu_profiler_begin_pass(GpuPassId::GBufferDebug);
@@ -1348,12 +1362,14 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       dev->bind_program(backend.deferredLightProgram);
 
-      // Bind G-Buffer textures on units 0-3, tile on unit 4, SSAO on unit 5.
+      // Bind G-Buffer textures on units 0-3, tile on unit 4, SSAO on unit 5,
+      // per-light data on unit 18 (units 6-17 hold shadow maps).
       dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferAlbedo));
       dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
       dev->bind_texture(2, pass_resource_gpu_texture(passRes.gbufferEmissive));
       dev->bind_texture(3, pass_resource_gpu_texture(passRes.gbufferDepth));
       dev->bind_texture(4, backend.tileLightTex);
+      dev->bind_texture(18, backend.lightDataTex);
 
       if (ssaoEnabled) {
         dev->bind_texture(5,
@@ -1370,6 +1386,8 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_int(backend.dlGBufDepthLoc, 3);
       if (backend.dlTileLightTexLoc >= 0)
         dev->set_uniform_int(backend.dlTileLightTexLoc, 4);
+      if (backend.dlLightDataTexLoc >= 0)
+        dev->set_uniform_int(backend.dlLightDataTexLoc, 18);
 
       if (backend.dlSsaoTextureLoc >= 0)
         dev->set_uniform_int(backend.dlSsaoTextureLoc, 5);
@@ -1501,51 +1519,16 @@ void flush_renderer(CommandBufferView commandBufferView,
       upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
       upload_deferred_height_fog_uniforms(backend, dev, heightFogSettings);
 
-      // Upload point light data.
+      // Upload active light counts (light parameters live in the per-light
+      // data texture bound on unit 18).
       const auto plCount = static_cast<int>(std::min(
           lights.pointLightCount, static_cast<std::size_t>(kMaxPointLights)));
       if (backend.dlPointLightCountLoc >= 0)
         dev->set_uniform_int(backend.dlPointLightCountLoc, plCount);
-      for (int pi = 0; pi < plCount; ++pi) {
-        const auto &pl = lights.pointLights[pi];
-        const auto idx = static_cast<std::size_t>(pi);
-        if (backend.dlPointPosLocs[idx] >= 0)
-          dev->set_uniform_vec3(backend.dlPointPosLocs[idx], &pl.position.x);
-        if (backend.dlPointColorLocs[idx] >= 0)
-          dev->set_uniform_vec3(backend.dlPointColorLocs[idx], &pl.color.x);
-        if (backend.dlPointIntensityLocs[idx] >= 0)
-          dev->set_uniform_float(backend.dlPointIntensityLocs[idx],
-                                 pl.intensity);
-        if (backend.dlPointRadiusLocs[idx] >= 0)
-          dev->set_uniform_float(backend.dlPointRadiusLocs[idx], pl.radius);
-      }
-
-      // Upload spot light data.
       const auto slCount = static_cast<int>(std::min(
           lights.spotLightCount, static_cast<std::size_t>(kMaxSpotLights)));
       if (backend.dlSpotLightCountLoc >= 0)
         dev->set_uniform_int(backend.dlSpotLightCountLoc, slCount);
-      for (int si = 0; si < slCount; ++si) {
-        const auto &sl = lights.spotLights[si];
-        const auto idx = static_cast<std::size_t>(si);
-        if (backend.dlSpotPosLocs[idx] >= 0)
-          dev->set_uniform_vec3(backend.dlSpotPosLocs[idx], &sl.position.x);
-        if (backend.dlSpotDirLocs[idx] >= 0)
-          dev->set_uniform_vec3(backend.dlSpotDirLocs[idx], &sl.direction.x);
-        if (backend.dlSpotColorLocs[idx] >= 0)
-          dev->set_uniform_vec3(backend.dlSpotColorLocs[idx], &sl.color.x);
-        if (backend.dlSpotIntensityLocs[idx] >= 0)
-          dev->set_uniform_float(backend.dlSpotIntensityLocs[idx],
-                                 sl.intensity);
-        if (backend.dlSpotRadiusLocs[idx] >= 0)
-          dev->set_uniform_float(backend.dlSpotRadiusLocs[idx], sl.radius);
-        if (backend.dlSpotInnerConeLocs[idx] >= 0)
-          dev->set_uniform_float(backend.dlSpotInnerConeLocs[idx],
-                                 sl.innerConeAngle);
-        if (backend.dlSpotOuterConeLocs[idx] >= 0)
-          dev->set_uniform_float(backend.dlSpotOuterConeLocs[idx],
-                                 sl.outerConeAngle);
-      }
 
       dev->bind_vertex_array(backend.emptyVao);
       dev->draw_arrays_triangles(0, 3);
@@ -1555,6 +1538,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_texture(2, 0U);
       dev->bind_texture(3, 0U);
       dev->bind_texture(4, 0U);
+      dev->bind_texture(18, 0U);
       if (ssaoEnabled) {
         dev->bind_texture(5, 0U);
       }

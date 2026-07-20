@@ -293,6 +293,110 @@ int verify_256_lights_stress() {
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Test 5: Per-light data texture packing — exact layout the deferred
+// lighting shader hardcodes (light_data/light_data3 fetch offsets).
+// ---------------------------------------------------------------------------
+
+int verify_pack_light_data() {
+  namespace er = engine::renderer;
+
+  // The shader hardcodes these as TILE_MAX_POINT_LIGHTS=32 and
+  // LIGHT_DATA_SPOT_ROW=128 with 13-float rows; lock them here.
+  static_assert(er::kMaxPointLightsPerTile == 32);
+  static_assert(er::kMaxSpotLightsPerTile == 16);
+  static_assert(er::kLightDataTexWidth == 13);
+  static_assert(er::kLightDataSpotRow == 128);
+  static_assert(er::kLightDataTexHeight == 192);
+
+  er::SceneLightData lights{};
+  lights.pointLightCount = 2U;
+  lights.pointLights[0].position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  lights.pointLights[0].color = engine::math::Vec3(0.5F, 0.25F, 0.125F);
+  lights.pointLights[0].intensity = 4.0F;
+  lights.pointLights[0].radius = 9.0F;
+  lights.pointLights[1].position = engine::math::Vec3(-1.0F, -2.0F, -3.0F);
+  lights.pointLights[1].color = engine::math::Vec3(1.0F, 0.0F, 1.0F);
+  lights.pointLights[1].intensity = 2.5F;
+  lights.pointLights[1].radius = 7.5F;
+
+  lights.spotLightCount = 1U;
+  lights.spotLights[0].position = engine::math::Vec3(10.0F, 20.0F, 30.0F);
+  lights.spotLights[0].direction = engine::math::Vec3(0.0F, -1.0F, 0.0F);
+  lights.spotLights[0].color = engine::math::Vec3(0.75F, 0.5F, 0.25F);
+  lights.spotLights[0].intensity = 6.0F;
+  lights.spotLights[0].radius = 15.0F;
+  lights.spotLights[0].innerConeAngle = 0.25F;
+  lights.spotLights[0].outerConeAngle = 0.5F;
+
+  std::vector<float> buffer(er::kLightDataBufferSize, -1.0F);
+
+  // Rejects null/too-small buffers.
+  if (er::pack_light_data(lights, nullptr, buffer.size())) {
+    return 500;
+  }
+  if (er::pack_light_data(lights, buffer.data(), buffer.size() - 1U)) {
+    return 501;
+  }
+
+  if (!er::pack_light_data(lights, buffer.data(), buffer.size())) {
+    return 502;
+  }
+
+  const auto rowW = static_cast<std::size_t>(er::kLightDataTexWidth);
+
+  // Point light row 0: posXYZ, colorRGB, intensity, radius, zero padding.
+  const float expectedPoint0[13] = {1.0F, 2.0F,  3.0F,   0.5F, 0.25F,
+                                    0.125F, 4.0F, 9.0F, 0.0F, 0.0F,
+                                    0.0F,   0.0F, 0.0F};
+  for (std::size_t x = 0U; x < rowW; ++x) {
+    if (buffer[x] != expectedPoint0[x]) {
+      return 503;
+    }
+  }
+
+  // Point light row 1.
+  const float expectedPoint1[13] = {-1.0F, -2.0F, -3.0F, 1.0F, 0.0F,
+                                    1.0F,  2.5F,  7.5F,  0.0F, 0.0F,
+                                    0.0F,  0.0F,  0.0F};
+  for (std::size_t x = 0U; x < rowW; ++x) {
+    if (buffer[rowW + x] != expectedPoint1[x]) {
+      return 504;
+    }
+  }
+
+  // Unused point row 2 is fully zeroed.
+  for (std::size_t x = 0U; x < rowW; ++x) {
+    if (buffer[2U * rowW + x] != 0.0F) {
+      return 505;
+    }
+  }
+
+  // Spot light row: posXYZ, dirXYZ, colorRGB, intensity, radius, cones.
+  const float expectedSpot0[13] = {10.0F, 20.0F, 30.0F, 0.0F,  -1.0F,
+                                   0.0F,  0.75F, 0.5F,  0.25F, 6.0F,
+                                   15.0F, 0.25F, 0.5F};
+  const std::size_t spotBase =
+      static_cast<std::size_t>(er::kLightDataSpotRow) * rowW;
+  for (std::size_t x = 0U; x < rowW; ++x) {
+    if (buffer[spotBase + x] != expectedSpot0[x]) {
+      return 506;
+    }
+  }
+
+  // Unused spot row and the last row are fully zeroed.
+  for (std::size_t x = 0U; x < rowW; ++x) {
+    if (buffer[spotBase + rowW + x] != 0.0F) {
+      return 507;
+    }
+    if (buffer[er::kLightDataBufferSize - rowW + x] != 0.0F) {
+      return 508;
+    }
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -312,5 +416,10 @@ int main() {
     return result;
   }
 
-  return verify_256_lights_stress();
+  result = verify_256_lights_stress();
+  if (result != 0) {
+    return result;
+  }
+
+  return verify_pack_light_data();
 }

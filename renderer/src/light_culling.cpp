@@ -205,4 +205,50 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
   return true;
 }
 
+bool pack_light_data(const SceneLightData &lights, float *out,
+                     std::size_t outSize) noexcept {
+  if ((out == nullptr) || (outSize < kLightDataBufferSize)) {
+    return false;
+  }
+
+  std::memset(out, 0, kLightDataBufferSize * sizeof(float));
+
+  const std::size_t pointCount =
+      std::min(lights.pointLightCount, kMaxPointLights);
+  for (std::size_t i = 0U; i < pointCount; ++i) {
+    const auto &pl = lights.pointLights[i];
+    float *row = out + i * static_cast<std::size_t>(kLightDataTexWidth);
+    row[0] = pl.position.x;
+    row[1] = pl.position.y;
+    row[2] = pl.position.z;
+    row[3] = pl.color.x;
+    row[4] = pl.color.y;
+    row[5] = pl.color.z;
+    row[6] = pl.intensity;
+    row[7] = pl.radius;
+  }
+
+  const std::size_t spotCount = std::min(lights.spotLightCount, kMaxSpotLights);
+  for (std::size_t i = 0U; i < spotCount; ++i) {
+    const auto &sl = lights.spotLights[i];
+    float *row = out + (static_cast<std::size_t>(kLightDataSpotRow) + i) *
+                           static_cast<std::size_t>(kLightDataTexWidth);
+    row[0] = sl.position.x;
+    row[1] = sl.position.y;
+    row[2] = sl.position.z;
+    row[3] = sl.direction.x;
+    row[4] = sl.direction.y;
+    row[5] = sl.direction.z;
+    row[6] = sl.color.x;
+    row[7] = sl.color.y;
+    row[8] = sl.color.z;
+    row[9] = sl.intensity;
+    row[10] = sl.radius;
+    row[11] = sl.innerConeAngle;
+    row[12] = sl.outerConeAngle;
+  }
+
+  return true;
+}
+
 } // namespace engine::renderer

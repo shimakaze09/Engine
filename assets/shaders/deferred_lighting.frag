@@ -37,7 +37,10 @@ uniform vec3 uPointShadowLightPos[MAX_POINT_SHADOW_LIGHTS];
 uniform float uPointShadowFarPlane[MAX_POINT_SHADOW_LIGHTS];
 uniform int uPointShadowLightIdx[MAX_POINT_SHADOW_LIGHTS];
 
-// Tile light data (R32F texture: x = MAX_LIGHTS_PER_TILE+1, y = numTiles).
+// Tile light data (R32F texture: one row per tile laid out as
+// [pointCount, pointIdx0..31, spotCount, spotIdx0..15]). The section sizes
+// must match kMaxPointLightsPerTile/kMaxSpotLightsPerTile in light_culling.h.
+#define TILE_MAX_POINT_LIGHTS 32
 uniform sampler2D uTileLightTex;
 uniform int uTileCountX;
 uniform int uTileCountY;
@@ -68,24 +71,28 @@ uniform float uHeightFogDensity;
 uniform float uHeightFogFalloff;
 uniform int uHeightFogStepCount;
 
-// ---- Point lights (uniform arrays, max 128) ----
-#define MAX_POINT_LIGHTS 128
+// ---- Per-light data texture ----
+// R32F texture, one row per light; fetched by tile light index so the shader
+// needs no per-light uniform arrays (which exceed the NVIDIA fragment
+// uniform register limit). Rows [0, 128): point light [posXYZ, colorRGB,
+// intensity, radius]. Rows [128, 192): spot light [posXYZ, dirXYZ, colorRGB,
+// intensity, radius, innerCone, outerCone]. Layout must match
+// pack_light_data in light_culling.cpp.
+#define LIGHT_DATA_SPOT_ROW 128
+uniform sampler2D uLightDataTex;
 uniform int uPointLightCount;
-uniform vec3 uPointLightPositions[MAX_POINT_LIGHTS];
-uniform vec3 uPointLightColors[MAX_POINT_LIGHTS];
-uniform float uPointLightIntensities[MAX_POINT_LIGHTS];
-uniform float uPointLightRadii[MAX_POINT_LIGHTS];
-
-// ---- Spot lights (uniform arrays, max 64) ----
-#define MAX_SPOT_LIGHTS 64
 uniform int uSpotLightCount;
-uniform vec3 uSpotLightPositions[MAX_SPOT_LIGHTS];
-uniform vec3 uSpotLightDirections[MAX_SPOT_LIGHTS];
-uniform vec3 uSpotLightColors[MAX_SPOT_LIGHTS];
-uniform float uSpotLightIntensities[MAX_SPOT_LIGHTS];
-uniform float uSpotLightRadii[MAX_SPOT_LIGHTS];
-uniform float uSpotLightInnerCones[MAX_SPOT_LIGHTS];
-uniform float uSpotLightOuterCones[MAX_SPOT_LIGHTS];
+
+// Fetch one float from a light data row.
+float light_data(int x, int row) {
+    return texelFetch(uLightDataTex, ivec2(x, row), 0).r;
+}
+
+// Fetch three consecutive floats from a light data row.
+vec3 light_data3(int x, int row) {
+    return vec3(light_data(x, row), light_data(x + 1, row),
+                light_data(x + 2, row));
+}
 
 // ---- PBR BRDF ----
 
@@ -392,10 +399,10 @@ void main() {
         int lightIdx = int(texelFetch(uTileLightTex, ivec2(1 + i, tileIdx), 0).r);
         if (lightIdx < 0 || lightIdx >= uPointLightCount) continue;
 
-        vec3 Lpos = uPointLightPositions[lightIdx];
+        vec3 Lpos = light_data3(0, lightIdx);
         vec3 toLight = Lpos - worldPos;
         float dist = length(toLight);
-        float radius = uPointLightRadii[lightIdx];
+        float radius = light_data(7, lightIdx);
         if (dist > radius) continue;
 
         vec3 L = toLight / dist;
@@ -403,22 +410,23 @@ void main() {
         attenuation *= attenuation;
 
         Lo += cook_torrance(N, V, L, albedo, metallic, roughness,
-                            uPointLightColors[lightIdx],
-                            uPointLightIntensities[lightIdx] * attenuation)
+                            light_data3(3, lightIdx),
+                            light_data(6, lightIdx) * attenuation)
               * compute_point_shadow(worldPos, lightIdx);
     }
 
-    // Read tile spot light count.
-    int spotOffset = MAX_POINT_LIGHTS + 1;
+    // Read tile spot light count (stored after the point section).
+    int spotOffset = TILE_MAX_POINT_LIGHTS + 1;
     int tileSpotCount = int(texelFetch(uTileLightTex, ivec2(spotOffset, tileIdx), 0).r);
     for (int i = 0; i < tileSpotCount; ++i) {
         int lightIdx = int(texelFetch(uTileLightTex, ivec2(spotOffset + 1 + i, tileIdx), 0).r);
         if (lightIdx < 0 || lightIdx >= uSpotLightCount) continue;
 
-        vec3 Lpos = uSpotLightPositions[lightIdx];
+        int row = LIGHT_DATA_SPOT_ROW + lightIdx;
+        vec3 Lpos = light_data3(0, row);
         vec3 toLight = Lpos - worldPos;
         float dist = length(toLight);
-        float radius = uSpotLightRadii[lightIdx];
+        float radius = light_data(10, row);
         if (dist > radius) continue;
 
         vec3 L = toLight / dist;
@@ -426,16 +434,16 @@ void main() {
         attenuation *= attenuation;
 
         // Spot cone falloff.
-        vec3 spotDir = normalize(uSpotLightDirections[lightIdx]);
+        vec3 spotDir = normalize(light_data3(3, row));
         float theta = dot(L, -spotDir);
-        float innerCone = uSpotLightInnerCones[lightIdx];
-        float outerCone = uSpotLightOuterCones[lightIdx];
+        float innerCone = light_data(11, row);
+        float outerCone = light_data(12, row);
         float epsilon = innerCone - outerCone;
         float spotFactor = clamp((theta - outerCone) / max(epsilon, 0.0001), 0.0, 1.0);
 
         Lo += cook_torrance(N, V, L, albedo, metallic, roughness,
-                            uSpotLightColors[lightIdx],
-                            uSpotLightIntensities[lightIdx] * attenuation * spotFactor)
+                            light_data3(6, row),
+                            light_data(9, row) * attenuation * spotFactor)
               * compute_spot_shadow(worldPos, lightIdx);
     }
 

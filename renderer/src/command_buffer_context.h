@@ -11,6 +11,7 @@
 #include "engine/math/vec4.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/light_culling.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 
@@ -245,20 +246,9 @@ struct BackendState final {
   std::int32_t dlPointLightCountLoc = -1;
   std::int32_t dlSpotLightCountLoc = -1;
 
-  // Deferred point light uniform arrays.
-  std::array<std::int32_t, kMaxPointLights> dlPointPosLocs{};
-  std::array<std::int32_t, kMaxPointLights> dlPointColorLocs{};
-  std::array<std::int32_t, kMaxPointLights> dlPointIntensityLocs{};
-  std::array<std::int32_t, kMaxPointLights> dlPointRadiusLocs{};
-
-  // Deferred spot light uniform arrays.
-  std::array<std::int32_t, kMaxSpotLights> dlSpotPosLocs{};
-  std::array<std::int32_t, kMaxSpotLights> dlSpotDirLocs{};
-  std::array<std::int32_t, kMaxSpotLights> dlSpotColorLocs{};
-  std::array<std::int32_t, kMaxSpotLights> dlSpotIntensityLocs{};
-  std::array<std::int32_t, kMaxSpotLights> dlSpotRadiusLocs{};
-  std::array<std::int32_t, kMaxSpotLights> dlSpotInnerConeLocs{};
-  std::array<std::int32_t, kMaxSpotLights> dlSpotOuterConeLocs{};
+  // Deferred per-light data texture sampler (replaces per-light uniform
+  // arrays, which exceeded the NVIDIA fragment uniform register limit).
+  std::int32_t dlLightDataTexLoc = -1;
 
   // G-Buffer debug shader.
   ShaderProgramHandle gbufferDebugShaderHandle{};
@@ -272,6 +262,11 @@ struct BackendState final {
   // Tile light texture (uploaded each frame by CPU culling).
   std::uint32_t tileLightTex = 0U;
   std::vector<float> tileBuffer;
+
+  // Per-light data texture consumed by the deferred lighting shader
+  // (uploaded each frame; fixed layout, see light_culling.h).
+  std::uint32_t lightDataTex = 0U;
+  std::array<float, kLightDataBufferSize> lightDataBuffer{};
   std::uint32_t instanceMatrixBuffer = 0U;
   std::vector<InstanceAttributes> instanceAttributes;
   std::vector<StaticMeshBatch> staticMeshBatches;
