@@ -3,171 +3,233 @@
 #include "engine/physics/constraint_solver.h"
 
 #include "engine/core/cvar.h"
+#include "engine/core/logging.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "joint_handle.h"
 #include "joints/joint_solvers.h"
 
+#include <cmath>
 #include <cstddef>
 
 namespace engine::physics {
 
 // --- Typed joint creation ---------------------------------------------------
 
-static JointId allocate_joint(PhysicsWorldView &world) noexcept {
-  PhysicsContext &ctx = world.physics_context();
-  for (std::size_t i = 0U; i < kMaxPhysicsJoints; ++i) {
-    if (!ctx.joints[i].active) {
-      if (i >= ctx.jointCount) {
-        ctx.jointCount = i + 1U;
-      }
-      return static_cast<JointId>(i);
-    }
-  }
+/// True when every component is finite.
+static bool is_finite_joint_vector(const math::Vec3 &value) noexcept {
+  return std::isfinite(value.x) && std::isfinite(value.y) &&
+         std::isfinite(value.z);
+}
+
+/// Reads exact generation-bearing endpoint transforms and rejects self-joints.
+static bool read_joint_endpoints(PhysicsWorldView &world, Entity entityA,
+                                 Entity entityB, Transform *outTransformA,
+                                 Transform *outTransformB) noexcept {
+  return (outTransformA != nullptr) && (outTransformB != nullptr) &&
+         (entityA != kInvalidEntity) && (entityB != kInvalidEntity) &&
+         (entityA != entityB) && world.get_transform(entityA, outTransformA) &&
+         world.get_transform(entityB, outTransformB);
+}
+
+/// Logs an invalid joint request and returns the sentinel ID.
+static JointId reject_joint(const char *message) noexcept {
+  core::log_message(core::LogLevel::Error, "physics", message);
   return kInvalidJointId;
+}
+
+/// Claims one inactive slot and returns its generation-bearing ID.
+static JointId allocate_joint(PhysicsWorldView &world,
+                              PhysicsJointSlot **outSlot) noexcept {
+  return claim_joint_slot(world.physics_context(), outSlot);
 }
 
 JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept {
-  const JointId id = allocate_joint(world);
-  if (id == kInvalidJointId) {
-    return id;
+  Transform transformA{};
+  Transform transformB{};
+  const float axisLengthSquared = math::dot(axis, axis);
+  if (!is_finite_joint_vector(pivot) || !is_finite_joint_vector(axis) ||
+      !std::isfinite(axisLengthSquared) || (axisLengthSquared <= 1.0e-12F) ||
+      !read_joint_endpoints(world, entityA, entityB, &transformA,
+                            &transformB)) {
+    return reject_joint("invalid hinge joint endpoints, pivot, or axis");
   }
 
-  PhysicsContext &ctx = world.physics_context();
-  auto &j = ctx.joints[id];
-  j.entityA = entityA;
-  j.entityB = entityB;
-  j.type = JointType::Hinge;
-  j.active = true;
+  PhysicsJointSlot *joint = nullptr;
+  const JointId id = allocate_joint(world, &joint);
+  if ((id == kInvalidJointId) || (joint == nullptr)) {
+    return reject_joint("joint table full");
+  }
 
-  // Compute local anchors from pivot (world-space).
-  Transform tA{};
-  Transform tB{};
-  world.get_transform(entityA, &tA);
-  world.get_transform(entityB, &tB);
-  j.anchorA = math::sub(pivot, tA.position);
-  j.anchorB = math::sub(pivot, tB.position);
-  j.axis = axis;
-  j.accumulatedImpulse = 0.0F;
-
+  joint->entityA = entityA;
+  joint->entityB = entityB;
+  joint->type = JointType::Hinge;
+  joint->active = true;
+  joint->anchorA = math::sub(pivot, transformA.position);
+  joint->anchorB = math::sub(pivot, transformB.position);
+  joint->axis = math::normalize(axis);
+  joint->accumulatedImpulse = 0.0F;
   return id;
 }
 
 JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
                               Entity entityB,
                               const math::Vec3 &pivot) noexcept {
-  const JointId id = allocate_joint(world);
-  if (id == kInvalidJointId) {
-    return id;
+  Transform transformA{};
+  Transform transformB{};
+  if (!is_finite_joint_vector(pivot) ||
+      !read_joint_endpoints(world, entityA, entityB, &transformA,
+                            &transformB)) {
+    return reject_joint("invalid ball-socket joint endpoints or pivot");
   }
 
-  PhysicsContext &ctx = world.physics_context();
-  auto &j = ctx.joints[id];
-  j.entityA = entityA;
-  j.entityB = entityB;
-  j.type = JointType::BallSocket;
-  j.active = true;
+  PhysicsJointSlot *joint = nullptr;
+  const JointId id = allocate_joint(world, &joint);
+  if ((id == kInvalidJointId) || (joint == nullptr)) {
+    return reject_joint("joint table full");
+  }
 
-  Transform tA{};
-  Transform tB{};
-  world.get_transform(entityA, &tA);
-  world.get_transform(entityB, &tB);
-  j.anchorA = math::sub(pivot, tA.position);
-  j.anchorB = math::sub(pivot, tB.position);
-  j.accumulatedImpulse = 0.0F;
-
+  joint->entityA = entityA;
+  joint->entityB = entityB;
+  joint->type = JointType::BallSocket;
+  joint->active = true;
+  joint->anchorA = math::sub(pivot, transformA.position);
+  joint->anchorB = math::sub(pivot, transformB.position);
+  joint->accumulatedImpulse = 0.0F;
   return id;
 }
 
 JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, const math::Vec3 &axis) noexcept {
-  const JointId id = allocate_joint(world);
-  if (id == kInvalidJointId) {
-    return id;
+  Transform transformA{};
+  Transform transformB{};
+  const float axisLengthSquared = math::dot(axis, axis);
+  if (!is_finite_joint_vector(axis) || !std::isfinite(axisLengthSquared) ||
+      (axisLengthSquared <= 1.0e-12F) ||
+      !read_joint_endpoints(world, entityA, entityB, &transformA,
+                            &transformB)) {
+    return reject_joint("invalid slider joint endpoints or axis");
   }
 
-  PhysicsContext &ctx = world.physics_context();
-  auto &j = ctx.joints[id];
-  j.entityA = entityA;
-  j.entityB = entityB;
-  j.type = JointType::Slider;
-  j.active = true;
-  j.axis = axis;
-  j.accumulatedImpulse = 0.0F;
+  PhysicsJointSlot *joint = nullptr;
+  const JointId id = allocate_joint(world, &joint);
+  if ((id == kInvalidJointId) || (joint == nullptr)) {
+    return reject_joint("joint table full");
+  }
 
+  joint->entityA = entityA;
+  joint->entityB = entityB;
+  joint->type = JointType::Slider;
+  joint->active = true;
+  joint->axis = math::normalize(axis);
+  joint->accumulatedImpulse = 0.0F;
   return id;
 }
 
 JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, float restLength, float stiffness,
                          float damping) noexcept {
-  const JointId id = allocate_joint(world);
-  if (id == kInvalidJointId) {
-    return id;
+  Transform transformA{};
+  Transform transformB{};
+  if (!std::isfinite(restLength) || !std::isfinite(stiffness) ||
+      !std::isfinite(damping) || (restLength < 0.0F) ||
+      (stiffness < 0.0F) || (damping < 0.0F) ||
+      !read_joint_endpoints(world, entityA, entityB, &transformA,
+                            &transformB)) {
+    return reject_joint("invalid spring joint endpoints or parameters");
   }
 
-  PhysicsContext &ctx = world.physics_context();
-  auto &j = ctx.joints[id];
-  j.entityA = entityA;
-  j.entityB = entityB;
-  j.type = JointType::Spring;
-  j.active = true;
-  j.distance = restLength;
-  j.stiffness = stiffness;
-  j.damping = damping;
-  j.accumulatedImpulse = 0.0F;
+  PhysicsJointSlot *joint = nullptr;
+  const JointId id = allocate_joint(world, &joint);
+  if ((id == kInvalidJointId) || (joint == nullptr)) {
+    return reject_joint("joint table full");
+  }
 
+  joint->entityA = entityA;
+  joint->entityB = entityB;
+  joint->type = JointType::Spring;
+  joint->active = true;
+  joint->distance = restLength;
+  joint->stiffness = stiffness;
+  joint->damping = damping;
+  joint->accumulatedImpulse = 0.0F;
   return id;
 }
 
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept {
-  const JointId id = allocate_joint(world);
-  if (id == kInvalidJointId) {
-    return id;
+  Transform transformA{};
+  Transform transformB{};
+  if (!read_joint_endpoints(world, entityA, entityB, &transformA,
+                            &transformB)) {
+    return reject_joint("invalid fixed joint endpoints");
   }
 
-  PhysicsContext &ctx = world.physics_context();
-  auto &j = ctx.joints[id];
-  j.entityA = entityA;
-  j.entityB = entityB;
-  j.type = JointType::Fixed;
-  j.active = true;
+  PhysicsJointSlot *joint = nullptr;
+  const JointId id = allocate_joint(world, &joint);
+  if ((id == kInvalidJointId) || (joint == nullptr)) {
+    return reject_joint("joint table full");
+  }
 
-  Transform tA{};
-  Transform tB{};
-  world.get_transform(entityA, &tA);
-  world.get_transform(entityB, &tB);
-  j.anchorA = math::sub(tB.position, tA.position);
-  j.anchorB = math::Vec3(0.0F, 0.0F, 0.0F);
-  j.accumulatedImpulse = 0.0F;
-
+  joint->entityA = entityA;
+  joint->entityB = entityB;
+  joint->type = JointType::Fixed;
+  joint->active = true;
+  joint->anchorA = math::sub(transformB.position, transformA.position);
+  joint->anchorB = math::Vec3(0.0F, 0.0F, 0.0F);
+  joint->accumulatedImpulse = 0.0F;
   return id;
 }
 
-/// Sets the requested value for joint limits.
+/// Sets finite ordered limits on hinge and slider joints.
 void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept {
-  PhysicsContext &ctx = world.physics_context();
-  if (id >= kMaxPhysicsJoints) {
+  PhysicsJointSlot *joint = find_joint_slot(world.physics_context(), id);
+  if ((joint == nullptr) ||
+      ((joint->type != JointType::Hinge) &&
+       (joint->type != JointType::Slider)) ||
+      !std::isfinite(minLimit) || !std::isfinite(maxLimit) ||
+      (minLimit > maxLimit)) {
+    core::log_message(core::LogLevel::Error, "physics",
+                      "invalid joint ID, type, or limits");
     return;
   }
-  auto &j = ctx.joints[id];
-  if (!j.active) {
-    return;
-  }
-  j.hasLimits = true;
-  j.minLimit = minLimit;
-  j.maxLimit = maxLimit;
+
+  joint->hasLimits = true;
+  joint->minLimit = minLimit;
+  joint->maxLimit = maxLimit;
 }
 
 // --- Main constraint solver -------------------------------------------------
 
+/// Retires constraints whose exact generation-bearing endpoint disappeared.
+static void retire_missing_joint_endpoints(PhysicsWorldView &world,
+                                           PhysicsContext &context) noexcept {
+  Transform endpoint{};
+  for (std::size_t index = 0U; index < context.jointCount; ++index) {
+    PhysicsJointSlot &joint = context.joints[index];
+    if (!joint.active) {
+      continue;
+    }
+    if (!world.get_transform(joint.entityA, &endpoint) ||
+        !world.get_transform(joint.entityB, &endpoint)) {
+      retire_joint_slot(joint);
+    }
+  }
+
+  while ((context.jointCount > 0U) &&
+         !context.joints[context.jointCount - 1U].active) {
+    --context.jointCount;
+  }
+}
+
 void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
   PhysicsContext &ctx = world.physics_context();
+  retire_missing_joint_endpoints(world, ctx);
   if (ctx.jointCount == 0U) {
     return;
   }

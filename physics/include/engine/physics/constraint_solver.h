@@ -39,6 +39,7 @@ static constexpr std::size_t kMaxContactManifolds = 2048U;
 // ------ Constraint Solver API -----------------------------------------------
 
 // Solve all joint constraints on the world.  Called after collision resolution.
+/// Creates a hinge with a finite nonzero axis; invalid ID on bad input/full.
 void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept;
 
 // ------ Typed Joint Creation ------------------------------------------------
@@ -47,25 +48,25 @@ JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept;
 
-/// Creates a ball-socket joint at pivot; kInvalidJointId on failure.
+/// Creates a ball-socket joint at a finite pivot; invalid ID on failure.
 JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
                               Entity entityB, const math::Vec3 &pivot) noexcept;
 
-/// Creates a slider joint along axis; kInvalidJointId on failure.
+/// Creates a slider along a finite nonzero axis; invalid ID on failure.
 JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, const math::Vec3 &axis) noexcept;
 
-/// Creates a spring joint (rest length, stiffness, damping);
-/// kInvalidJointId on failure.
+/// Creates a spring with finite nonnegative parameters; invalid ID on
+/// failure.
 JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
                          Entity entityB, float restLength, float stiffness,
                          float damping) noexcept;
 
-/// Creates a fixed joint; kInvalidJointId on failure.
+/// Creates a fixed joint between distinct live endpoints; invalid ID on failure.
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept;
 
-/// Sets the requested value for joint limits.
+/// Sets finite ordered limits on a live hinge or slider; invalid input is ignored.
 void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept;
 

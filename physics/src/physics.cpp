@@ -11,6 +11,7 @@
 #include <new>
 
 #include "engine/core/cvar.h"
+#include "engine/core/logging.h"
 #include "engine/math/aabb.h"
 #include "engine/math/quat.h"
 #include "engine/math/ray.h"
@@ -22,6 +23,7 @@
 #include "engine/physics/convex_hull.h"
 
 #include "engine/physics/physics_context.h"
+#include "joint_handle.h"
 #include "engine/physics/physics_world_view.h"
 
 namespace engine::physics {
@@ -2233,10 +2235,14 @@ bool ray_intersects_convex_hull(const engine::math::Ray &ray,
 bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
-  // Validate direction vector to prevent NaN from normalization.
-  if (math::length_sq(direction) < 1e-12F) {
+  const float directionLengthSquared = math::length_sq(direction);
+  if (!std::isfinite(directionLengthSquared) ||
+      (directionLengthSquared < 1.0e-12F) || !std::isfinite(maxDistance) ||
+      (maxDistance <= 0.0F)) {
     return false;
   }
+  const math::Vec3 normalizedDirection =
+      math::mul(direction, 1.0F / std::sqrt(directionLengthSquared));
 
   const std::size_t count = world.collider_count();
   if (count == 0U) {
@@ -2250,7 +2256,7 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
   }
   const PhysicsContext &physicsCtx = world.physics_context();
 
-  const math::Ray ray{origin, direction};
+  const math::Ray ray{origin, normalizedDirection};
   bool hit = false;
   float bestT = maxDistance;
 
@@ -2306,7 +2312,7 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
       if (outHit != nullptr) {
         outHit->entity = entities[i];
         outHit->distance = t;
-        outHit->point = math::add(origin, math::mul(direction, t));
+        outHit->point = math::add(origin, math::mul(normalizedDirection, t));
         if (col.shape == ColliderShape::Sphere) {
           outHit->normal =
               math::normalize(math::sub(outHit->point, transform.position));
@@ -2329,14 +2335,18 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits,
                         std::size_t maxHits) noexcept {
-  // Validate direction vector to prevent NaN from normalization.
-  if (math::length_sq(direction) < 1e-12F) {
-    return 0U;
-  }
-
   if ((outHits == nullptr) || (maxHits == 0U)) {
     return 0U;
   }
+
+  const float directionLengthSquared = math::length_sq(direction);
+  if (!std::isfinite(directionLengthSquared) ||
+      (directionLengthSquared < 1.0e-12F) || !std::isfinite(maxDistance) ||
+      (maxDistance <= 0.0F)) {
+    return 0U;
+  }
+  const math::Vec3 normalizedDirection =
+      math::mul(direction, 1.0F / std::sqrt(directionLengthSquared));
 
   const std::size_t count = world.collider_count();
   if (count == 0U) {
@@ -2350,7 +2360,7 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
   }
   const PhysicsContext &physicsCtx = world.physics_context();
 
-  const math::Ray ray{origin, direction};
+  const math::Ray ray{origin, normalizedDirection};
   std::size_t hitCount = 0U;
 
   for (std::size_t i = 0U; i < count; ++i) {
@@ -2397,31 +2407,48 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
     }
 
     if ((t >= 0.0F) && (t <= maxDistance)) {
-      if (hitCount < maxHits) {
-        PhysicsRaycastHit &rh = outHits[hitCount];
-        rh.entity = entities[i];
-        rh.distance = t;
-        rh.point = math::add(origin, math::mul(direction, t));
-        if (col.shape == ColliderShape::Sphere) {
-          rh.normal = math::normalize(math::sub(rh.point, transform.position));
-        } else if (col.shape == ColliderShape::Capsule ||
-                   col.shape == ColliderShape::ConvexHull ||
-                   col.shape == ColliderShape::Heightfield) {
-          rh.normal = shapeNormal;
-        } else {
-          rh.normal =
-              aabb_hit_normal(rh.point, transform.position, col.halfExtents);
+      std::size_t outputIndex = hitCount;
+      if (hitCount == maxHits) {
+        outputIndex = 0U;
+        for (std::size_t hitIndex = 1U; hitIndex < hitCount; ++hitIndex) {
+          if (outHits[hitIndex].distance > outHits[outputIndex].distance) {
+            outputIndex = hitIndex;
+          }
         }
+        if (t >= outHits[outputIndex].distance) {
+          continue;
+        }
+      } else {
         ++hitCount;
+      }
+
+      PhysicsRaycastHit &hit = outHits[outputIndex];
+      hit.entity = entities[i];
+      hit.distance = t;
+      hit.point = math::add(origin, math::mul(normalizedDirection, t));
+      if (col.shape == ColliderShape::Sphere) {
+        hit.normal = math::normalize(math::sub(hit.point, transform.position));
+      } else if (col.shape == ColliderShape::Capsule ||
+                 col.shape == ColliderShape::ConvexHull ||
+                 col.shape == ColliderShape::Heightfield) {
+        hit.normal = shapeNormal;
+      } else {
+        hit.normal =
+            aabb_hit_normal(hit.point, transform.position, col.halfExtents);
       }
     }
   }
 
-  // Sort hits by distance.
   std::sort(
       outHits, outHits + hitCount,
       [](const PhysicsRaycastHit &a, const PhysicsRaycastHit &b) noexcept {
-        return a.distance < b.distance;
+        if (a.distance != b.distance) {
+          return a.distance < b.distance;
+        }
+        if (a.entity.index != b.entity.index) {
+          return a.entity.index < b.entity.index;
+        }
+        return a.entity.generation < b.entity.generation;
       });
 
   return hitCount;
@@ -2429,36 +2456,48 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
 
 JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
                            Entity entityB, float distance) noexcept {
-  PhysicsContext &ctx = world.physics_context();
-  for (std::size_t i = 0U; i < kMaxPhysicsJoints; ++i) {
-    if (!ctx.joints[i].active) {
-      ctx.joints[i].entityA = entityA;
-      ctx.joints[i].entityB = entityB;
-      ctx.joints[i].type = JointType::Distance;
-      ctx.joints[i].distance = distance;
-      ctx.joints[i].active = true;
-      ctx.joints[i].accumulatedImpulse = 0.0F;
-      if (i >= ctx.jointCount) {
-        ctx.jointCount = i + 1U;
-      }
-      return static_cast<JointId>(i);
-    }
+  Transform transformA{};
+  Transform transformB{};
+  if (!std::isfinite(distance) || (distance < 0.0F) ||
+      (entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      (entityA == entityB) || !world.get_transform(entityA, &transformA) ||
+      !world.get_transform(entityB, &transformB)) {
+    core::log_message(core::LogLevel::Error, "physics",
+                      "invalid distance joint endpoints or distance");
+    return kInvalidJointId;
   }
-  return kInvalidJointId;
+
+  PhysicsJointSlot *joint = nullptr;
+  PhysicsContext &context = world.physics_context();
+  const JointId id = claim_joint_slot(context, &joint);
+  if ((id == kInvalidJointId) || (joint == nullptr)) {
+    core::log_message(core::LogLevel::Error, "physics", "joint table full");
+    return kInvalidJointId;
+  }
+
+  joint->entityA = entityA;
+  joint->entityB = entityB;
+  joint->type = JointType::Distance;
+  joint->distance = distance;
+  joint->active = true;
+  joint->accumulatedImpulse = 0.0F;
+  return id;
 }
 
 void remove_joint(PhysicsWorldView &world, JointId id) noexcept {
-  PhysicsContext &ctx = world.physics_context();
-  if (id >= kMaxPhysicsJoints) {
+  PhysicsContext &context = world.physics_context();
+  std::size_t slotIndex = 0U;
+  PhysicsJointSlot *joint = find_joint_slot(context, id, &slotIndex);
+  if (joint == nullptr) {
     return;
   }
-  ctx.joints[id].active = false;
-  // Shrink high-water mark.
-  while ((ctx.jointCount > 0U) && !ctx.joints[ctx.jointCount - 1U].active) {
-    --ctx.jointCount;
+
+  retire_joint_slot(*joint);
+  while ((context.jointCount > 0U) &&
+         !context.joints[context.jointCount - 1U].active) {
+    --context.jointCount;
   }
 }
-
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept {
   RigidBody *body = world.get_rigid_body_ptr(entity);
   if (body != nullptr) {

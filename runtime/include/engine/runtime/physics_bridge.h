@@ -39,7 +39,8 @@ void set_collision_dispatch(World &world,
 /// Forwards this step's collision pairs to the registered dispatch.
 void dispatch_collision_callbacks(World &world) noexcept;
 
-/// Closest-hit raycast; false when nothing is hit within maxDistance.
+/// Closest-hit raycast using a normalized copy of direction; false when
+/// maxDistance is not finite and positive or nothing is hit within it.
 bool raycast(const World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit,
@@ -94,6 +95,8 @@ const physics::HeightfieldData *get_heightfield_data(
     const World &world, Entity entity) noexcept;
 
 // Physics queries (P1-M3-D)
+/// Returns the nearest maxHits intersections sorted by distance, normalizing
+/// direction internally; maxDistance must be finite and positive.
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
@@ -113,13 +116,15 @@ std::size_t overlap_box(const World &world, const math::Vec3 &center,
                         std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
-/// Sweeps a sphere along direction; earliest hit within maxDistance.
+/// Sweeps a sphere along a normalized copy of direction; maxDistance must be
+/// finite and positive.
 bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,
                   const math::Vec3 &direction, float maxDistance,
                   physics::SweepHit *outHit,
                   std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
-/// Sweeps an AABB along direction; earliest hit within maxDistance.
+/// Sweeps an AABB along a normalized copy of direction; maxDistance must be
+/// finite and positive.
 bool sweep_box(const World &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, physics::SweepHit *outHit,

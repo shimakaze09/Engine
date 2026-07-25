@@ -24,7 +24,9 @@ struct SweepHit final {
 
 // ------ Query Functions------------------------------------------------------
 
-// Raycast returning all hits, sorted by distance.  Respects collision mask.
+/// Returns the nearest maxHits ray intersections sorted by distance.
+/// Direction is normalized internally; maxDistance must be finite and
+/// positive. Respects the collision mask.
 std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
@@ -44,12 +46,14 @@ std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
                         std::uint32_t *outEntityIndices, std::size_t maxResults,
                         std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
-// Sweep queries — move a shape along a direction and report first collision.
+/// Sweeps a sphere along a normalized copy of direction.
+/// Returns the earliest hit when maxDistance is finite and positive.
 bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
                   SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
-/// Sweeps an AABB along direction; earliest hit within maxDistance.
+/// Sweeps an AABB along a normalized copy of direction.
+/// Returns the earliest hit when maxDistance is finite and positive.
 bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, SweepHit *outHit,

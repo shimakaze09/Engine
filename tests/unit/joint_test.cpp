@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <limits>
 #include <new>
 
 #include "engine/math/vec3.h"
@@ -332,6 +333,176 @@ int test_joint_limits() noexcept {
   return 0;
 }
 
+/// Destroyed endpoints must retire their joint instead of binding slot reuse.
+int test_destroyed_endpoint_retires_joint() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const Entity original =
+      make_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+  const Entity other = make_body(*world, math::Vec3(2.0F, 0.0F, 0.0F));
+  const physics::JointId originalJoint =
+      engine::runtime::add_distance_joint(*world, original, other, 2.0F);
+  if (originalJoint == physics::kInvalidJointId) {
+    return 2;
+  }
+
+  if (!world->destroy_entity(original)) {
+    return 3;
+  }
+  const Entity replacement =
+      make_body(*world, math::Vec3(10.0F, 0.0F, 0.0F));
+  if ((replacement.index != original.index) ||
+      (replacement.generation == original.generation)) {
+    return 4;
+  }
+
+  world->begin_update_phase();
+  physics::solve_constraints(*world, 1.0F / 60.0F);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  const physics::PhysicsContext &context = world->physics_context();
+  if (context.jointCount != 0U) {
+    return 5;
+  }
+  for (const physics::PhysicsJointSlot &joint : context.joints) {
+    if (joint.active) {
+      return 6;
+    }
+  }
+
+  const physics::JointId replacementJoint =
+      engine::runtime::add_distance_joint(*world, replacement, other, 8.0F);
+  if ((replacementJoint == physics::kInvalidJointId) ||
+      (replacementJoint == originalJoint)) {
+    return 7;
+  }
+
+  engine::runtime::remove_joint(*world, originalJoint);
+  if (context.jointCount != 1U) {
+    return 8;
+  }
+  std::size_t activeCount = 0U;
+  for (const physics::PhysicsJointSlot &joint : context.joints) {
+    if (joint.active) {
+      ++activeCount;
+    }
+  }
+  if (activeCount != 1U) {
+    return 9;
+  }
+  return 0;
+}
+
+
+/// Invalid parameters are rejected, axes normalize, and stale IDs never alias.
+int test_joint_validation_and_stale_ids() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const Entity a = make_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+  const Entity b = make_body(*world, math::Vec3(2.0F, 0.0F, 0.0F));
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float infinity = std::numeric_limits<float>::infinity();
+
+  if ((engine::runtime::add_distance_joint(*world, a, a, 1.0F) !=
+       physics::kInvalidJointId) ||
+      (engine::runtime::add_distance_joint(*world, a, b, -1.0F) !=
+       physics::kInvalidJointId) ||
+      (engine::runtime::add_distance_joint(*world, a, b, nan) !=
+       physics::kInvalidJointId) ||
+      (physics::add_hinge_joint(*world, a, b, math::Vec3{},
+                                math::Vec3{}) != physics::kInvalidJointId) ||
+      (physics::add_ball_socket_joint(*world, a, b,
+                                      math::Vec3(nan, 0.0F, 0.0F)) !=
+       physics::kInvalidJointId) ||
+      (physics::add_slider_joint(*world, a, b,
+                                 math::Vec3(infinity, 0.0F, 0.0F)) !=
+       physics::kInvalidJointId) ||
+      (physics::add_spring_joint(*world, a, b, 1.0F, -1.0F, 1.0F) !=
+       physics::kInvalidJointId) ||
+      (physics::add_fixed_joint(*world, a, a) !=
+       physics::kInvalidJointId)) {
+    return 2;
+  }
+
+  physics::PhysicsContext &context = world->physics_context();
+  if (context.jointCount != 0U) {
+    return 3;
+  }
+
+  const physics::JointId first = physics::add_slider_joint(
+      *world, a, b, math::Vec3(10.0F, 0.0F, 0.0F));
+  if (first == physics::kInvalidJointId) {
+    return 4;
+  }
+
+  physics::PhysicsJointSlot *active = nullptr;
+  for (physics::PhysicsJointSlot &joint : context.joints) {
+    if (joint.active) {
+      if (active != nullptr) {
+        return 5;
+      }
+      active = &joint;
+    }
+  }
+  if ((active == nullptr) || (active->axis.x != 1.0F) ||
+      (active->axis.y != 0.0F) || (active->axis.z != 0.0F) ||
+      active->hasLimits) {
+    return 6;
+  }
+
+  physics::set_joint_limits(*world, first, 2.0F, 1.0F);
+  if (active->hasLimits) {
+    return 7;
+  }
+  physics::set_joint_limits(*world, first, -1.0F, 1.0F);
+  if (!active->hasLimits || (active->minLimit != -1.0F) ||
+      (active->maxLimit != 1.0F)) {
+    return 8;
+  }
+
+  engine::runtime::remove_joint(*world, first);
+  if (context.jointCount != 0U) {
+    return 9;
+  }
+
+  const physics::JointId replacement = physics::add_slider_joint(
+      *world, a, b, math::Vec3(1.0F, 0.0F, 0.0F));
+  if ((replacement == physics::kInvalidJointId) || (replacement == first)) {
+    return 10;
+  }
+
+  active = nullptr;
+  for (physics::PhysicsJointSlot &joint : context.joints) {
+    if (joint.active) {
+      active = &joint;
+      break;
+    }
+  }
+  if ((active == nullptr) || active->hasLimits) {
+    return 11;
+  }
+
+  physics::set_joint_limits(*world, first, -2.0F, 2.0F);
+  engine::runtime::remove_joint(*world, first);
+  if ((context.jointCount != 1U) || !active->active || active->hasLimits) {
+    return 12;
+  }
+
+  engine::runtime::remove_joint(*world, replacement);
+  return (context.jointCount == 0U) ? 0 : 13;
+}
+
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -349,6 +520,9 @@ int main() {
       {"spring_joint", test_spring_joint},
       {"fixed_joint", test_fixed_joint},
       {"joint_limits", test_joint_limits},
+      {"destroyed_endpoint_retires_joint",
+       test_destroyed_endpoint_retires_joint},
+      {"joint_validation_and_stale_ids", test_joint_validation_and_stale_ids},
   };
 
   int failures = 0;

@@ -47,6 +47,7 @@ enum class JointType : std::uint8_t {
 struct PhysicsJointSlot final {
   Entity entityA = kInvalidEntity;
   Entity entityB = kInvalidEntity;
+  std::uint32_t generation = 1U;
   JointType type = JointType::Distance;
   bool active = false;
   bool hasLimits = false;

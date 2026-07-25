@@ -14,6 +14,7 @@ struct PhysicsContext;
 
 /// Registers physics runtime CVars. Call after core::initialize_cvars().
 bool register_physics_cvars() noexcept;
+/// Opaque generation-bearing joint identifier; never use it as a slot index.
 
 // Joints / Constraints --------------------------------------------------------
 using JointId = std::uint32_t;

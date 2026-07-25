@@ -117,6 +117,95 @@ int test_raycast_all_mask() noexcept {
   return 0;
 }
 
+/// Verifies ray direction magnitude cannot rescale world-space distances.
+int test_raycast_direction_is_normalized() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const Entity target = make_box(*world, math::Vec3(5.0F, 0.0F, 0.0F),
+                                 math::Vec3(0.5F, 0.5F, 0.5F));
+  PhysicsRaycastHit hits[1]{};
+  const std::size_t count =
+      physics::raycast_all(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                           math::Vec3(2.0F, 0.0F, 0.0F), 10.0F, hits, 1U);
+  if ((count != 1U) || (hits[0].entity != target) ||
+      (hits[0].distance != 4.5F) || (hits[0].point.x != 4.5F) ||
+      (hits[0].point.y != 0.0F) || (hits[0].point.z != 0.0F)) {
+    return 2;
+  }
+
+  PhysicsRaycastHit closest{};
+  if (!engine::runtime::raycast(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                                math::Vec3(2.0F, 0.0F, 0.0F), 10.0F,
+                                &closest) ||
+      (closest.entity != target) || (closest.distance != 4.5F) ||
+      (closest.point.x != 4.5F)) {
+    return 3;
+  }
+
+  return 0;
+}
+
+/// Verifies bounded multi-hit rays retain the nearest results, not dense order.
+int test_raycast_all_bounded_keeps_nearest() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  static_cast<void>(make_sphere(*world, math::Vec3(8.0F, 0.0F, 0.0F), 0.5F));
+  const Entity nearEntity =
+      make_sphere(*world, math::Vec3(2.0F, 0.0F, 0.0F), 0.5F);
+
+  PhysicsRaycastHit hit{};
+  const std::size_t count =
+      physics::raycast_all(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                           math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit, 1U);
+  if ((count != 1U) || (hit.entity != nearEntity) || (hit.distance != 1.5F) ||
+      (hit.point.x != 1.5F)) {
+    return 2;
+  }
+
+  return 0;
+}
+
+/// Verifies sweep distances use world units and zero-length ranges are safe.
+int test_sweep_direction_and_zero_range() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const Entity target = make_box(*world, math::Vec3(5.0F, 0.0F, 0.0F),
+                                 math::Vec3(0.5F, 2.0F, 2.0F));
+  physics::SweepHit hit{};
+  if (!physics::sweep_sphere(*world, math::Vec3(0.0F, 0.0F, 0.0F), 0.5F,
+                             math::Vec3(2.0F, 0.0F, 0.0F), 10.0F, &hit) ||
+      (hit.entityIndex != target.index) || (hit.distance != 4.0F) ||
+      (hit.timeOfImpact != 0.4F) || (hit.contactPoint.x != 4.0F)) {
+    return 2;
+  }
+
+  physics::SweepHit zeroRangeHit{};
+  if (physics::sweep_sphere(*world, math::Vec3(0.0F, 0.0F, 0.0F), 0.5F,
+                            math::Vec3(1.0F, 0.0F, 0.0F), 0.0F,
+                            &zeroRangeHit)) {
+    return 3;
+  }
+  if (physics::sweep_box(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                         math::Vec3(0.5F, 0.5F, 0.5F),
+                         math::Vec3(1.0F, 0.0F, 0.0F), 0.0F, &zeroRangeHit)) {
+    return 4;
+  }
+
+  return 0;
+}
+
 // D2d: 10 entities in cluster, overlap sphere catches correct subset.
 int test_overlap_sphere_cluster() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
@@ -268,6 +357,10 @@ int main() {
   const TestCase tests[] = {
       {"raycast_all_3_spheres", test_raycast_all_3_spheres},
       {"raycast_all_mask", test_raycast_all_mask},
+      {"raycast_direction_is_normalized", test_raycast_direction_is_normalized},
+      {"raycast_all_bounded_keeps_nearest",
+       test_raycast_all_bounded_keeps_nearest},
+      {"sweep_direction_and_zero_range", test_sweep_direction_and_zero_range},
       {"overlap_sphere_cluster", test_overlap_sphere_cluster},
       {"overlap_box", test_overlap_box},
       {"overlap_sphere_mask", test_overlap_sphere_mask},

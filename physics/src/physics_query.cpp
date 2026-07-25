@@ -120,18 +120,39 @@ math::Vec3 aabb_hit_normal(const math::Vec3 &hitPoint,
   return math::Vec3(0.0F, 0.0F, nz > 0.0F ? 1.0F : -1.0F);
 }
 
+/// Normalizes a finite query direction and validates its world-space range.
+bool normalize_query_direction(const math::Vec3 &direction, float maxDistance,
+                               math::Vec3 *outDirection) noexcept {
+  if ((outDirection == nullptr) || !std::isfinite(maxDistance) ||
+      (maxDistance <= 0.0F)) {
+    return false;
+  }
+
+  const float lengthSquared = math::length_sq(direction);
+  if (!std::isfinite(lengthSquared) || (lengthSquared < 1.0e-12F)) {
+    return false;
+  }
+
+  const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+  *outDirection = math::mul(direction, inverseLength);
+  return true;
+}
+
 } // namespace
 
 // ---------- raycast_all with mask -------------------------------------------
 
 std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
-                        PhysicsRaycastHit *outHits,
-                        std::size_t maxHits, std::uint32_t mask) noexcept {
-  if (math::length_sq(direction) < 1e-12F) {
+                        PhysicsRaycastHit *outHits, std::size_t maxHits,
+                        std::uint32_t mask) noexcept {
+  if ((outHits == nullptr) || (maxHits == 0U)) {
     return 0U;
   }
-  if ((outHits == nullptr) || (maxHits == 0U)) {
+
+  math::Vec3 normalizedDirection{};
+  if (!normalize_query_direction(direction, maxDistance,
+                                 &normalizedDirection)) {
     return 0U;
   }
 
@@ -146,7 +167,7 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
     return 0U;
   }
 
-  const math::Ray ray{origin, direction};
+  const math::Ray ray{origin, normalizedDirection};
   std::size_t hitCount = 0U;
 
   for (std::size_t i = 0U; i < count; ++i) {
@@ -176,27 +197,45 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
     }
 
     if ((t >= 0.0F) && (t <= maxDistance)) {
-      if (hitCount < maxHits) {
-        PhysicsRaycastHit &rh = outHits[hitCount];
-        rh.entity = entities[i];
-        rh.distance = t;
-        rh.point = math::add(origin, math::mul(direction, t));
-        if (col.shape == ColliderShape::Sphere) {
-          rh.normal = math::normalize(math::sub(rh.point, transform.position));
-        } else {
-          rh.normal =
-              aabb_hit_normal(rh.point, transform.position, col.halfExtents);
+      std::size_t outputIndex = hitCount;
+      if (hitCount == maxHits) {
+        outputIndex = 0U;
+        for (std::size_t hitIndex = 1U; hitIndex < hitCount; ++hitIndex) {
+          if (outHits[hitIndex].distance > outHits[outputIndex].distance) {
+            outputIndex = hitIndex;
+          }
         }
+        if (t >= outHits[outputIndex].distance) {
+          continue;
+        }
+      } else {
         ++hitCount;
+      }
+
+      PhysicsRaycastHit &hit = outHits[outputIndex];
+      hit.entity = entities[i];
+      hit.distance = t;
+      hit.point = math::add(origin, math::mul(normalizedDirection, t));
+      if (col.shape == ColliderShape::Sphere) {
+        hit.normal = math::normalize(math::sub(hit.point, transform.position));
+      } else {
+        hit.normal =
+            aabb_hit_normal(hit.point, transform.position, col.halfExtents);
       }
     }
   }
 
-  std::sort(outHits, outHits + hitCount,
-            [](const PhysicsRaycastHit &a,
-               const PhysicsRaycastHit &b) noexcept {
-              return a.distance < b.distance;
-            });
+  std::sort(
+      outHits, outHits + hitCount,
+      [](const PhysicsRaycastHit &a, const PhysicsRaycastHit &b) noexcept {
+        if (a.distance != b.distance) {
+          return a.distance < b.distance;
+        }
+        if (a.entity.index != b.entity.index) {
+          return a.entity.index < b.entity.index;
+        }
+        return a.entity.generation < b.entity.generation;
+      });
 
   return hitCount;
 }
@@ -318,7 +357,10 @@ std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
 bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
                   SweepHit *outHit, std::uint32_t mask) noexcept {
-  if (math::length_sq(direction) < 1e-12F) {
+  math::Vec3 normalizedDirection{};
+  if (!std::isfinite(radius) || (radius < 0.0F) ||
+      !normalize_query_direction(direction, maxDistance,
+                                 &normalizedDirection)) {
     return false;
   }
 
@@ -350,7 +392,8 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
     float hitT = 0.0F;
     const math::AABB targetBox = collider_aabb(t, col);
 
-    if (!swept_sphere_aabb(origin, radius, direction, bestT, targetBox, hitT)) {
+    if (!swept_sphere_aabb(origin, radius, normalizedDirection, bestT,
+                           targetBox, hitT)) {
       continue;
     }
 
@@ -361,7 +404,8 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
         outHit->entityIndex = entities[i].index;
         outHit->timeOfImpact = hitT / maxDistance;
         outHit->distance = hitT;
-        outHit->contactPoint = math::add(origin, math::mul(direction, hitT));
+        outHit->contactPoint =
+            math::add(origin, math::mul(normalizedDirection, hitT));
         outHit->normal =
             aabb_hit_normal(outHit->contactPoint, t.position, col.halfExtents);
       }
@@ -377,7 +421,9 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, SweepHit *outHit,
                std::uint32_t mask) noexcept {
-  if (math::length_sq(direction) < 1e-12F) {
+  math::Vec3 normalizedDirection{};
+  if (!normalize_query_direction(direction, maxDistance,
+                                 &normalizedDirection)) {
     return false;
   }
 
@@ -409,8 +455,8 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
     float hitT = 0.0F;
     const math::AABB targetBox = collider_aabb(t, col);
 
-    if (!swept_box_aabb(center, halfExtents, direction, bestT, targetBox,
-                        hitT)) {
+    if (!swept_box_aabb(center, halfExtents, normalizedDirection, bestT,
+                        targetBox, hitT)) {
       continue;
     }
 
@@ -421,7 +467,8 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
         outHit->entityIndex = entities[i].index;
         outHit->timeOfImpact = hitT / maxDistance;
         outHit->distance = hitT;
-        outHit->contactPoint = math::add(center, math::mul(direction, hitT));
+        outHit->contactPoint =
+            math::add(center, math::mul(normalizedDirection, hitT));
         outHit->normal =
             aabb_hit_normal(outHit->contactPoint, t.position, col.halfExtents);
       }
