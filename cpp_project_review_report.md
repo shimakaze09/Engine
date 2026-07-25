@@ -8,7 +8,7 @@ The audit combined manual data-flow and lifetime review, high-risk pattern searc
 
 ## 2. Executive Summary
 
-The review confirmed and repaired 22 correctness, lifetime, determinism, validation, renderer, tooling, editor, and demo-script defects. The most serious issues were stale generation-blind handles, leaked Lua registry references, non-transactional hot reload, a deferred shader that exceeded NVIDIA uniform limits, stale joint IDs mutating replacement joints, and silent asset-graph corruption.
+The review confirmed and repaired 20 correctness, lifetime, determinism, validation, renderer, tooling, editor, and demo-script defects. The most serious issues were stale generation-blind handles, leaked Lua registry references, non-transactional hot reload, a deferred shader that exceeded NVIDIA uniform limits, stale joint IDs mutating replacement joints, and silent asset-graph corruption.
 
 No known Critical, High, Medium, or Low defect from this review remains open. Full verification passes. One hardware-validation gap remains informational: the deferred path passes the available GPU smoke test, but the original NVIDIA C6020 failure should still be confirmed on an NVIDIA CI runner.
 
