@@ -25,6 +25,22 @@ namespace {
 constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
 EngineConfig g_activeConfig{};
 
+/// Shuts down editor GL resources while the platform context is current.
+void shutdown_editor_bridge(const runtime::EditorBridge *bridge) noexcept {
+  if ((bridge == nullptr) || (bridge->shutdown == nullptr)) {
+    return;
+  }
+
+  if (!core::make_render_context_current()) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "failed to acquire OpenGL context for editor shutdown");
+    return;
+  }
+
+  bridge->shutdown();
+  core::release_render_context();
+}
+
 } // namespace
 
 bool bootstrap() noexcept {
@@ -85,9 +101,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
   if (!scripting::initialize_scripting()) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "failed to initialize scripting");
-    if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
-      bridge->shutdown();
-    }
+    shutdown_editor_bridge(bridge);
     core::shutdown_core();
     return false;
   }
@@ -111,9 +125,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
                       "failed to initialize audio");
     scripting::dap_stop();
     scripting::shutdown_scripting();
-    if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
-      bridge->shutdown();
-    }
+    shutdown_editor_bridge(bridge);
     core::shutdown_core();
     return false;
   }
@@ -145,9 +157,7 @@ void shutdown() noexcept {
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
 
-  if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
-    bridge->shutdown();
-  }
+  shutdown_editor_bridge(bridge);
   renderer::shutdown_renderer();
   audio::shutdown_audio();
   scripting::dap_stop();

@@ -8,3 +8,8 @@ engine_add_test_executable(engine_smoke
     LABELS
     gpu
 )
+
+# Mirror the editor application's bridge registration and GL lifecycle.
+target_link_libraries(engine_smoke PRIVATE
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,engine_editor>
+)

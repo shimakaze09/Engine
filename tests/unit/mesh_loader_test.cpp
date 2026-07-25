@@ -18,6 +18,8 @@ constexpr const char *kOversizedVertexPath =
 constexpr const char *kOversizedIndexPath =
     "mesh_loader_oversized_indices.mesh";
 constexpr const char *kFileSizeMismatchPath = "mesh_loader_size_mismatch.mesh";
+constexpr const char *kOutOfRangeIndexPath =
+    "mesh_loader_out_of_range_index.mesh";
 
 engine::renderer::RenderDevice g_fakeDevice{};
 std::uint32_t g_fakeVertexArray = 1U;
@@ -233,6 +235,50 @@ int check_file_size_mismatch() {
   return loaded ? 52 : 0;
 }
 
+int check_out_of_range_index() {
+  remove_file(kOutOfRangeIndexPath);
+
+  engine::core::MeshAssetHeader header{};
+  header.magic = engine::core::kMeshAssetMagic;
+  header.version = engine::core::kMeshAssetVersion;
+  header.vertexCount = 1U;
+  header.indexCount = 1U;
+
+  const std::array<float, 6U> vertexData = {0.0F, 0.0F, 0.0F,
+                                            0.0F, 1.0F, 0.0F};
+  constexpr std::uint32_t kInvalidIndex = 1U;
+  FILE *file = nullptr;
+  if (!open_file_for_write(kOutOfRangeIndexPath, &file) ||
+      (file == nullptr)) {
+    remove_file(kOutOfRangeIndexPath);
+    return 141;
+  }
+  const bool wrote =
+      (std::fwrite(&header, sizeof(header), 1U, file) == 1U) &&
+      (std::fwrite(vertexData.data(), sizeof(float), vertexData.size(), file) ==
+       vertexData.size()) &&
+      (std::fwrite(&kInvalidIndex, sizeof(kInvalidIndex), 1U, file) == 1U);
+  std::fclose(file);
+  if (!wrote) {
+    remove_file(kOutOfRangeIndexPath);
+    return 142;
+  }
+
+  engine::renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 99ULL;
+  const bool loaded = engine::renderer::load_mesh_data_from_file(
+      kOutOfRangeIndexPath, &meshData, &sizeBytes);
+  remove_file(kOutOfRangeIndexPath);
+  if (loaded) {
+    return 143;
+  }
+  return ((meshData.vertexCount == 0U) && (meshData.indexCount == 0U) &&
+          (meshData.vertices == nullptr) && (meshData.indices == nullptr) &&
+          (sizeBytes == 0ULL))
+             ? 0
+             : 144;
+}
+
 int check_empty_path() {
   engine::renderer::GpuMesh mesh{};
   const bool loaded = engine::renderer::load_mesh_from_file(nullptr, &mesh);
@@ -437,6 +483,11 @@ int main() {
   }
 
   result = check_file_size_mismatch();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_out_of_range_index();
   if (result != 0) {
     return result;
   }

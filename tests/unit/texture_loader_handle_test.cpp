@@ -3,6 +3,7 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
+#include "texture_handle_codec.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -207,10 +208,40 @@ int check_external_texture_registration() {
   return 0;
 }
 
+
+/// Encoded generations wrap inside their 22-bit field without becoming zero.
+int check_texture_generation_wrap() noexcept {
+  namespace codec = engine::renderer::texture_handle_detail;
+  if (codec::next_generation(codec::kGenerationMask - 1U) !=
+          codec::kGenerationMask ||
+      (codec::next_generation(codec::kGenerationMask) != 1U)) {
+    return 50;
+  }
+
+  constexpr engine::renderer::TextureHandle maximum =
+      codec::make_handle(511U, codec::kGenerationMask);
+  constexpr engine::renderer::TextureHandle wrapped =
+      codec::make_handle(511U, codec::next_generation(codec::kGenerationMask));
+  if ((maximum == engine::renderer::kInvalidTextureHandle) ||
+      (wrapped == engine::renderer::kInvalidTextureHandle) ||
+      (maximum == wrapped) || (codec::slot_index(maximum) != 511U) ||
+      (codec::generation(maximum) != codec::kGenerationMask) ||
+      (codec::generation(wrapped) != 1U)) {
+    return 51;
+  }
+  return 0;
+}
+
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  const int wrapResult = check_texture_generation_wrap();
+  if (wrapResult != 0) {
+    return wrapResult;
+  }
+
   const int externalResult = check_external_texture_registration();
   if (externalResult != 0) {
     return externalResult;

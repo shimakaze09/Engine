@@ -16,6 +16,7 @@
 #include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec3.h"
+#include "texture_handle_codec.h"
 #include "engine/renderer/render_device.h"
 
 #ifdef __clang__
@@ -55,8 +56,6 @@ namespace engine::renderer {
 namespace {
 
 constexpr std::size_t kMaxTextureSlots = 512U;
-constexpr unsigned kTextureSlotBits = 10U;
-constexpr std::uint32_t kTextureSlotMask = (1U << kTextureSlotBits) - 1U;
 constexpr std::size_t kMaxPathLen = 260U;
 constexpr std::int32_t kHdrCubemapChannels = 3;
 constexpr std::int32_t kMaxCubemapFaceSize = 4096;
@@ -81,14 +80,6 @@ struct TextureSystemState final {
 
 TextureSystemState g_texState{};
 
-/// Advances a generation counter, skipping zero.
-std::uint32_t next_texture_generation(std::uint32_t generation) noexcept {
-  ++generation;
-  if (generation == 0U) {
-    generation = 1U;
-  }
-  return generation;
-}
 
 /// Builds an externally visible handle for a live texture slot.
 TextureHandle make_texture_handle(std::size_t slotIndex) noexcept {
@@ -97,13 +88,12 @@ TextureHandle make_texture_handle(std::size_t slotIndex) noexcept {
   }
 
   const TextureSlot &slot = g_texState.slots[slotIndex];
-  return TextureHandle{(slot.generation << kTextureSlotBits) |
-                       static_cast<std::uint32_t>(slotIndex)};
+  return texture_handle_detail::make_handle(slotIndex, slot.generation);
 }
 
 /// Resets a texture slot while preserving stale-handle invalidation.
 void reset_texture_slot(TextureSlot &slot) noexcept {
-  slot = TextureSlot{0U, next_texture_generation(slot.generation), false,
+  slot = TextureSlot{0U, texture_handle_detail::next_generation(slot.generation), false,
                      false, false, false, {}};
 }
 
@@ -130,8 +120,8 @@ TextureSlot *lookup_texture_slot(TextureHandle handle,
     return nullptr;
   }
 
-  const std::uint32_t slotIndex = handle.id & kTextureSlotMask;
-  const std::uint32_t generation = handle.id >> kTextureSlotBits;
+  const std::uint32_t slotIndex = texture_handle_detail::slot_index(handle);
+  const std::uint32_t generation = texture_handle_detail::generation(handle);
   if ((slotIndex == 0U) || (slotIndex >= kMaxTextureSlots) ||
       (generation == 0U) || !g_texState.slots[slotIndex].occupied ||
       (g_texState.slots[slotIndex].generation != generation)) {

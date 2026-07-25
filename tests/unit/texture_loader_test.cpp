@@ -1,12 +1,15 @@
 // Verifies texture loader test behavior for the Engine test suite.
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
 
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/texture_loader.h"
+#include "gl_texture_upload_layout.h"
 
 namespace {
 
@@ -116,6 +119,79 @@ int check_stb_input_size_validation() {
   return 0;
 }
 
+/// Verifies exact formats and scoped row alignment for GL texture uploads.
+int check_gl_texture_upload_layout() {
+  using engine::renderer::detail::GlTextureUploadLayout;
+  using engine::renderer::detail::describe_gl_texture_upload;
+  using engine::renderer::detail::with_gl_unpack_alignment;
+
+  struct LayoutCase final {
+    std::int32_t channels;
+    bool hdr;
+    std::uint32_t externalFormat;
+    std::int32_t internalFormat;
+    std::int32_t unpackAlignment;
+  };
+  constexpr std::array<LayoutCase, 8U> kCases = {{
+      {1, false, 0x1903U, 0x1903, 1},
+      {2, false, 0x8227U, 0x8227, 2},
+      {3, false, 0x1907U, 0x1907, 1},
+      {4, false, 0x1908U, 0x1908, 4},
+      {1, true, 0x1903U, 0x822D, 4},
+      {2, true, 0x8227U, 0x822F, 8},
+      {3, true, 0x1907U, 0x881B, 4},
+      {4, true, 0x1908U, 0x881A, 8},
+  }};
+
+  for (const LayoutCase &testCase : kCases) {
+    GlTextureUploadLayout layout{};
+    const std::int32_t bytesPerChannel = testCase.hdr ? 4 : 1;
+    if (!describe_gl_texture_upload(1, testCase.channels, bytesPerChannel,
+                                    testCase.hdr, &layout) ||
+        (layout.externalFormat != testCase.externalFormat) ||
+        (layout.internalFormat != testCase.internalFormat) ||
+        (layout.unpackAlignment != testCase.unpackAlignment)) {
+      return 56;
+    }
+  }
+
+  GlTextureUploadLayout invalid{99U, 99, 8};
+  if (describe_gl_texture_upload(1, 5, 1, false, &invalid) ||
+      (invalid.externalFormat != 0U) || (invalid.internalFormat != 0) ||
+      (invalid.unpackAlignment != 1)) {
+    return 57;
+  }
+
+  std::int32_t currentAlignment = 8;
+  std::array<std::int32_t, 2U> changes{};
+  std::size_t changeCount = 0U;
+  bool uploadedWithRequiredAlignment = false;
+  with_gl_unpack_alignment(
+      1,
+      [&](std::int32_t *outAlignment) noexcept {
+        *outAlignment = currentAlignment;
+      },
+      [&](std::int32_t alignment) noexcept {
+        changes[changeCount++] = alignment;
+        currentAlignment = alignment;
+      },
+      [&]() noexcept { uploadedWithRequiredAlignment = currentAlignment == 1; });
+  if (!uploadedWithRequiredAlignment || (changeCount != 2U) ||
+      (changes[0] != 1) || (changes[1] != 8) || (currentAlignment != 8)) {
+    return 58;
+  }
+
+  changeCount = 0U;
+  currentAlignment = 1;
+  with_gl_unpack_alignment(
+      1,
+      [&](std::int32_t *outAlignment) noexcept {
+        *outAlignment = currentAlignment;
+      },
+      [&](std::int32_t) noexcept { ++changeCount; }, []() noexcept {});
+  return (changeCount == 0U) ? 0 : 59;
+}
+
 int check_texture_asset_database() {
   // Basic texture asset database test.
   // TextureAssetRecord is already compiled into asset_database;
@@ -202,6 +278,11 @@ int main() {
   }
 
   result = check_stb_input_size_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_gl_texture_upload_layout();
   if (result != 0) {
     return result;
   }

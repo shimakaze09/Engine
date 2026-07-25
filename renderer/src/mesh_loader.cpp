@@ -59,6 +59,25 @@ bool checked_add(std::size_t lhs, std::size_t rhs,
   return true;
 }
 
+/// Returns whether every mesh index addresses an existing vertex.
+bool mesh_indices_in_range(const std::uint32_t *indices,
+                           std::uint32_t indexCount,
+                           std::uint32_t vertexCount) noexcept {
+  if (indexCount == 0U) {
+    return true;
+  }
+  if ((indices == nullptr) || (vertexCount == 0U)) {
+    return false;
+  }
+
+  for (std::uint32_t index = 0U; index < indexCount; ++index) {
+    if (indices[index] >= vertexCount) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
   if ((mesh == nullptr) || (dev == nullptr)) {
     return;
@@ -257,6 +276,12 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
       std::fclose(file);
       return false;
     }
+
+    if (!mesh_indices_in_range(indices.get(), header.indexCount,
+                               header.vertexCount)) {
+      std::fclose(file);
+      return false;
+    }
   }
 
   std::fclose(file);
@@ -303,6 +328,11 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
   }
 
   *outMesh = GpuMesh{};
+
+  if (!mesh_indices_in_range(meshData.indices.get(), meshData.indexCount,
+                             meshData.vertexCount)) {
+    return false;
+  }
 
   if (!initialize_render_device()) {
     return false;
@@ -379,6 +409,10 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
   }
 
   *outMesh = GpuMesh{};
+
+  if (!mesh_indices_in_range(indices, indexCount, vertexCount)) {
+    return false;
+  }
 
   if (!initialize_render_device()) {
     return false;

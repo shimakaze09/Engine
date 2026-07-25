@@ -6,7 +6,9 @@ namespace engine::runtime {
 
 class World;
 
-/// Function-pointer bridge the runtime uses to reach the editor.
+/// Function-pointer bridge the runtime uses to reach the editor. Initialize,
+/// shutdown, new-frame, and render callbacks run with the render context
+/// current.
 struct EditorBridge final {
   bool (*initialize)(void *sdlWindow, void *glContext) noexcept = nullptr;
   void (*shutdown)() noexcept = nullptr;

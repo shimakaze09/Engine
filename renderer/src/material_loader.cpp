@@ -59,6 +59,33 @@ bool read_optional_float(const core::JsonParser &parser,
   return parser.as_float(field, outValue);
 }
 
+
+/// True when material registration can insert or update this ID.
+bool material_slot_available(const AssetDatabase &database,
+                             AssetId id) noexcept {
+  for (std::size_t index = 0U; index < database.materialAssets.size();
+       ++index) {
+    if (!database.materialOccupied[index] ||
+        (database.materialAssets[index].id == id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// True when metadata registration can insert or update this ID.
+bool metadata_slot_available(const AssetDatabase &database,
+                             AssetId id) noexcept {
+  for (std::size_t index = 0U; index < database.metadata.size(); ++index) {
+    if (!database.metadataOccupied[index] ||
+        (database.metadata[index].assetId == id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
                              std::size_t depth, AssetId *outId,
                              Material *outParams) noexcept;
@@ -112,20 +139,31 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     return log_material_error(virtualPath, "malformed parameter field");
   }
 
-  if (!register_material_asset(database, id, virtualPath, params)) {
-    return log_material_error(virtualPath, "material table is full");
-  }
-
   AssetMetadata metadata{};
   metadata.assetId = id;
   metadata.typeTag = AssetTypeTag::Material;
   write_metadata_path(&metadata.filePath, virtualPath);
-  if (parentId != kInvalidAssetId) {
-    static_cast<void>(asset_metadata_add_dependency(&metadata, parentId));
+  if ((parentId != kInvalidAssetId) &&
+      !asset_metadata_add_dependency(&metadata, parentId)) {
+    return log_material_error(virtualPath,
+                              "material dependency table is full");
   }
-  static_cast<void>(register_asset_metadata(database, metadata));
-  if (parentId != kInvalidAssetId) {
-    static_cast<void>(add_asset_dependency(database, id, parentId));
+
+  if (!material_slot_available(*database, id)) {
+    return log_material_error(virtualPath, "material table is full");
+  }
+  if (!metadata_slot_available(*database, id)) {
+    return log_material_error(virtualPath, "metadata table is full");
+  }
+
+  // Both fixed tables were preflighted, so these mutations complete together.
+  if (!register_material_asset(database, id, virtualPath, params)) {
+    return log_material_error(virtualPath,
+                              "material registration unexpectedly failed");
+  }
+  if (!register_asset_metadata(database, metadata)) {
+    return log_material_error(virtualPath,
+                              "metadata registration unexpectedly failed");
   }
 
   if (outParams != nullptr) {

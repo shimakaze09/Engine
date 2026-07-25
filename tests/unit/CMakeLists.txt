@@ -206,6 +206,8 @@ engine_add_test_executable(engine_unit_audio
 engine_add_test_executable(engine_unit_texture_loader
     SOURCES
     texture_loader_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
     PRIVATE_DEPS
     engine_renderer
 )
@@ -216,6 +218,7 @@ engine_add_test_executable(engine_unit_texture_loader_handles
     ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
     ${CMAKE_SOURCE_DIR}/core/include
     ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS

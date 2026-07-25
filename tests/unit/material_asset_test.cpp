@@ -15,10 +15,7 @@ namespace {
 
 /// Exact float comparison: every tested value is exactly representable and
 /// never crosses lossy text formatting wider than round-trip precision.
-bool nearly_equal(float lhs, float rhs) noexcept {
-  const float diff = (lhs > rhs) ? (lhs - rhs) : (rhs - lhs);
-  return diff <= 0.0001F;
-}
+bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
 
 /// Writes a material JSON file into the mounted test directory.
 bool write_material_file(const char *path, const char *text) noexcept {
@@ -68,15 +65,15 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
   if (params == nullptr) {
     return 12;
   }
-  if (!nearly_equal(params->albedo.x, 0.25F) ||
-      !nearly_equal(params->albedo.y, 0.5F) ||
-      !nearly_equal(params->albedo.z, 0.75F) ||
-      !nearly_equal(params->emissive.x, 0.125F) ||
-      !nearly_equal(params->emissive.y, 0.0F) ||
-      !nearly_equal(params->emissive.z, 1.0F) ||
-      !nearly_equal(params->roughness, 0.25F) ||
-      !nearly_equal(params->metallic, 1.0F) ||
-      !nearly_equal(params->opacity, 0.5F)) {
+  if (!exactly_equal(params->albedo.x, 0.25F) ||
+      !exactly_equal(params->albedo.y, 0.5F) ||
+      !exactly_equal(params->albedo.z, 0.75F) ||
+      !exactly_equal(params->emissive.x, 0.125F) ||
+      !exactly_equal(params->emissive.y, 0.0F) ||
+      !exactly_equal(params->emissive.z, 1.0F) ||
+      !exactly_equal(params->roughness, 0.25F) ||
+      !exactly_equal(params->metallic, 1.0F) ||
+      !exactly_equal(params->opacity, 0.5F)) {
     return 13;
   }
 
@@ -119,12 +116,12 @@ int verify_partial_material_defaults(
   }
 
   const engine::renderer::Material defaults{};
-  if (!nearly_equal(params->roughness, 0.75F) ||
-      !nearly_equal(params->albedo.x, defaults.albedo.x) ||
-      !nearly_equal(params->albedo.y, defaults.albedo.y) ||
-      !nearly_equal(params->albedo.z, defaults.albedo.z) ||
-      !nearly_equal(params->metallic, defaults.metallic) ||
-      !nearly_equal(params->opacity, defaults.opacity)) {
+  if (!exactly_equal(params->roughness, 0.75F) ||
+      !exactly_equal(params->albedo.x, defaults.albedo.x) ||
+      !exactly_equal(params->albedo.y, defaults.albedo.y) ||
+      !exactly_equal(params->albedo.z, defaults.albedo.z) ||
+      !exactly_equal(params->metallic, defaults.metallic) ||
+      !exactly_equal(params->opacity, defaults.opacity)) {
     return 23;
   }
 
@@ -154,8 +151,8 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
   }
 
   engine::renderer::AssetId grandId = engine::renderer::kInvalidAssetId;
-  const bool loaded =
-      engine::renderer::load_material_asset(database, "mat/material_test_grand.json", &grandId);
+  const bool loaded = engine::renderer::load_material_asset(
+      database, "mat/material_test_grand.json", &grandId);
   remove_file(kBasePath);
   remove_file(kChildPath);
   remove_file(kGrandPath);
@@ -169,12 +166,12 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
     return 32;
   }
   // From base: albedo + roughness. From child: metallic. Own: opacity.
-  if (!nearly_equal(grand->albedo.x, 1.0F) ||
-      !nearly_equal(grand->albedo.y, 0.0F) ||
-      !nearly_equal(grand->albedo.z, 0.0F) ||
-      !nearly_equal(grand->roughness, 0.125F) ||
-      !nearly_equal(grand->metallic, 1.0F) ||
-      !nearly_equal(grand->opacity, 0.25F)) {
+  if (!exactly_equal(grand->albedo.x, 1.0F) ||
+      !exactly_equal(grand->albedo.y, 0.0F) ||
+      !exactly_equal(grand->albedo.z, 0.0F) ||
+      !exactly_equal(grand->roughness, 0.125F) ||
+      !exactly_equal(grand->metallic, 1.0F) ||
+      !exactly_equal(grand->opacity, 0.25F)) {
     return 33;
   }
 
@@ -183,8 +180,8 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
       engine::renderer::make_asset_id_from_path("mat/material_test_child.json");
   const engine::renderer::Material *child =
       engine::renderer::find_material_params(database, childId);
-  if ((child == nullptr) || !nearly_equal(child->metallic, 1.0F) ||
-      !nearly_equal(child->opacity, 1.0F)) {
+  if ((child == nullptr) || !exactly_equal(child->metallic, 1.0F) ||
+      !exactly_equal(child->opacity, 1.0F)) {
     return 34;
   }
 
@@ -205,18 +202,16 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
 int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   constexpr const char *kCyclePathA = "material_test_cycle_a.json";
   constexpr const char *kCyclePathB = "material_test_cycle_b.json";
-  if (!write_material_file(
-          kCyclePathA,
-          "{\"parent\":\"mat/material_test_cycle_b.json\"}") ||
-      !write_material_file(
-          kCyclePathB,
-          "{\"parent\":\"mat/material_test_cycle_a.json\"}")) {
+  if (!write_material_file(kCyclePathA,
+                           "{\"parent\":\"mat/material_test_cycle_b.json\"}") ||
+      !write_material_file(kCyclePathB,
+                           "{\"parent\":\"mat/material_test_cycle_a.json\"}")) {
     remove_file(kCyclePathA);
     remove_file(kCyclePathB);
     return 40;
   }
-  const bool cycleLoaded =
-      engine::renderer::load_material_asset(database, "mat/material_test_cycle_a.json", nullptr);
+  const bool cycleLoaded = engine::renderer::load_material_asset(
+      database, "mat/material_test_cycle_a.json", nullptr);
   remove_file(kCyclePathA);
   remove_file(kCyclePathB);
   if (cycleLoaded) {
@@ -228,8 +223,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
                            "{\"parent\":\"mat/material_test_missing.json\"}")) {
     return 42;
   }
-  const bool orphanLoaded =
-      engine::renderer::load_material_asset(database, "mat/material_test_orphan.json", nullptr);
+  const bool orphanLoaded = engine::renderer::load_material_asset(
+      database, "mat/material_test_orphan.json", nullptr);
   remove_file(kOrphanPath);
   if (orphanLoaded) {
     return 43;
@@ -239,8 +234,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kBadFieldPath, "{\"roughness\":\"rough\"}")) {
     return 44;
   }
-  const bool badFieldLoaded =
-      engine::renderer::load_material_asset(database, "mat/material_test_bad_field.json", nullptr);
+  const bool badFieldLoaded = engine::renderer::load_material_asset(
+      database, "mat/material_test_bad_field.json", nullptr);
   remove_file(kBadFieldPath);
   if (badFieldLoaded) {
     return 45;
@@ -250,8 +245,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kBadVec3Path, "{\"albedo\":[1.0,2.0]}")) {
     return 46;
   }
-  const bool badVec3Loaded =
-      engine::renderer::load_material_asset(database, "mat/material_test_bad_vec3.json", nullptr);
+  const bool badVec3Loaded = engine::renderer::load_material_asset(
+      database, "mat/material_test_bad_vec3.json", nullptr);
   remove_file(kBadVec3Path);
   if (badVec3Loaded) {
     return 47;
@@ -268,10 +263,87 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
     return 49;
   }
 
-  if (engine::renderer::load_material_asset(database,
-                                            "mat/material_test_absent.json",
-                                            nullptr)) {
+  if (engine::renderer::load_material_asset(
+          database, "mat/material_test_absent.json", nullptr)) {
     return 50;
+  }
+
+  return 0;
+}
+
+/// Full fixed tables reject a load before creating a partial companion record.
+int verify_full_table_failures() {
+  constexpr const char *kPath = "material_test_full_table.json";
+  constexpr const char *kVirtualPath = "mat/material_test_full_table.json";
+  const engine::renderer::AssetId targetId =
+      engine::renderer::make_asset_id_from_path(kVirtualPath);
+
+  {
+    std::unique_ptr<engine::renderer::AssetDatabase> database(
+        new (std::nothrow) engine::renderer::AssetDatabase());
+    if (database == nullptr) {
+      return 70;
+    }
+
+    std::size_t inserted = 0U;
+    engine::renderer::AssetId candidate = 1U;
+    while (inserted < engine::renderer::AssetDatabase::kMaxMetadata) {
+      if (candidate != targetId) {
+        engine::renderer::AssetMetadata metadata{};
+        metadata.assetId = candidate;
+        metadata.typeTag = engine::renderer::AssetTypeTag::Mesh;
+        if (!engine::renderer::register_asset_metadata(database.get(),
+                                                       metadata)) {
+          return 71;
+        }
+        ++inserted;
+      }
+      ++candidate;
+    }
+
+    if (!write_material_file(kPath, "{}")) {
+      return 72;
+    }
+    const bool loaded = engine::renderer::load_material_asset(
+        database.get(), kVirtualPath, nullptr);
+    remove_file(kPath);
+    if (loaded || (engine::renderer::find_material_params(
+                       database.get(), targetId) != nullptr)) {
+      return 73;
+    }
+  }
+
+  {
+    std::unique_ptr<engine::renderer::AssetDatabase> database(
+        new (std::nothrow) engine::renderer::AssetDatabase());
+    if (database == nullptr) {
+      return 74;
+    }
+
+    const engine::renderer::Material params{};
+    std::size_t inserted = 0U;
+    engine::renderer::AssetId candidate = 1U;
+    while (inserted < engine::renderer::AssetDatabase::kMaxMaterialAssets) {
+      if (candidate != targetId) {
+        if (!engine::renderer::register_material_asset(
+                database.get(), candidate, "capacity-fill", params)) {
+          return 75;
+        }
+        ++inserted;
+      }
+      ++candidate;
+    }
+
+    if (!write_material_file(kPath, "{}")) {
+      return 76;
+    }
+    const bool loaded = engine::renderer::load_material_asset(
+        database.get(), kVirtualPath, nullptr);
+    remove_file(kPath);
+    if (loaded || (engine::renderer::find_asset_metadata(
+                       database.get(), targetId) != nullptr)) {
+      return 77;
+    }
   }
 
   return 0;
@@ -298,7 +370,7 @@ int verify_material_database_edges(engine::renderer::AssetDatabase *database) {
   }
   const engine::renderer::Material *found =
       engine::renderer::find_material_params(database, 777U);
-  if ((found == nullptr) || !nearly_equal(found->metallic, 0.5F)) {
+  if ((found == nullptr) || !exactly_equal(found->metallic, 0.5F)) {
     return 64;
   }
 
@@ -340,6 +412,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_material_load_failures(database.get());
+  }
+  if (result == 0) {
+    result = verify_full_table_failures();
   }
   if (result == 0) {
     result = verify_material_database_edges(database.get());

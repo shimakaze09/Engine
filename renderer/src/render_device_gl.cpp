@@ -17,6 +17,7 @@
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "gl_texture_upload_layout.h"
 
 namespace engine::renderer {
 
@@ -64,6 +65,10 @@ namespace {
 
 #ifndef GL_FLOAT
 #define GL_FLOAT 0x1406
+#endif
+
+#ifndef GL_UNPACK_ALIGNMENT
+#define GL_UNPACK_ALIGNMENT 0x0CF5
 #endif
 
 #ifndef GL_RED
@@ -305,6 +310,8 @@ using GlUniform1iProc = void(APIENTRYP)(GLint, GLint);
 using GlUniform4fvProc = void(APIENTRYP)(GLint, GLsizei, const GLfloat *);
 
 // Texture procs
+using GlGetIntegervProc = void(APIENTRYP)(GLenum, GLint *);
+using GlPixelStoreiProc = void(APIENTRYP)(GLenum, GLint);
 using GlGenTexturesProc = void(APIENTRYP)(GLsizei, GLuint *);
 using GlDeleteTexturesProc = void(APIENTRYP)(GLsizei, const GLuint *);
 using GlBindTextureProc = void(APIENTRYP)(GLenum, GLuint);
@@ -388,6 +395,8 @@ struct GlTable final {
   GlUniform4fvProc uniform4fv = nullptr;
 
   // Textures
+  GlGetIntegervProc getIntegerv = nullptr;
+  GlPixelStoreiProc pixelStorei = nullptr;
   GlGenTexturesProc genTextures = nullptr;
   GlDeleteTexturesProc deleteTextures = nullptr;
   GlBindTextureProc bindTexture = nullptr;
@@ -441,6 +450,24 @@ RenderDevice &render_device_state() noexcept {
   return render_device_context().device;
 }
 
+/// Executes a texture upload without leaking pixel-store state.
+template <typename Upload>
+void with_texture_unpack_alignment(std::int32_t requiredAlignment,
+                                   Upload upload) noexcept {
+  detail::with_gl_unpack_alignment(
+      requiredAlignment,
+      [](std::int32_t *outAlignment) noexcept {
+        GLint alignment = 4;
+        gl_table().getIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
+        *outAlignment = static_cast<std::int32_t>(alignment);
+      },
+      [](std::int32_t alignment) noexcept {
+        gl_table().pixelStorei(GL_UNPACK_ALIGNMENT,
+                               static_cast<GLint>(alignment));
+      },
+      upload);
+}
+
 /// Loads the requested resource for proc.
 template <typename T> bool load_proc(T *out, const char *name) noexcept {
   *out = reinterpret_cast<T>(core::get_gl_proc_address(name));
@@ -489,6 +516,8 @@ bool load_all_gl_functions() noexcept {
          load_proc(&gl_table().clear, "glClear") &&
          load_proc(&gl_table().uniform1i, "glUniform1i") &&
          load_proc(&gl_table().uniform4fv, "glUniform4fv") &&
+         load_proc(&gl_table().getIntegerv, "glGetIntegerv") &&
+         load_proc(&gl_table().pixelStorei, "glPixelStorei") &&
          load_proc(&gl_table().genTextures, "glGenTextures") &&
          load_proc(&gl_table().deleteTextures, "glDeleteTextures") &&
          load_proc(&gl_table().bindTexture, "glBindTexture") &&
@@ -736,6 +765,12 @@ void gl_set_uniform_vec4(std::int32_t loc, const float *value) noexcept {
 std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
                                    std::int32_t channels,
                                    const void *data) noexcept {
+  detail::GlTextureUploadLayout layout{};
+  if ((height <= 0) ||
+      !detail::describe_gl_texture_upload(width, channels, 1, false, &layout)) {
+    return 0U;
+  }
+
   GLuint tex = 0U;
   gl_table().genTextures(1, &tex);
   if (tex == 0U) {
@@ -743,20 +778,12 @@ std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
   }
 
   gl_table().bindTexture(GL_TEXTURE_2D, tex);
-
-  GLenum format = GL_RGBA;
-  GLint internalFormat = GL_RGBA;
-  if (channels == 1) {
-    format = GL_RED;
-    internalFormat = GL_RED;
-  } else if (channels == 3) {
-    format = GL_RGB;
-    internalFormat = GL_RGB;
-  }
-
-  gl_table().texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
-                  static_cast<GLsizei>(height), 0, format, GL_UNSIGNED_BYTE,
-                  data);
+  with_texture_unpack_alignment(layout.unpackAlignment, [&]() noexcept {
+    gl_table().texImage2D(
+        GL_TEXTURE_2D, 0, static_cast<GLint>(layout.internalFormat),
+        static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
+        static_cast<GLenum>(layout.externalFormat), GL_UNSIGNED_BYTE, data);
+  });
 
   gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
   gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -772,6 +799,12 @@ std::uint32_t gl_create_texture_2d(std::int32_t width, std::int32_t height,
 std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
                                        std::int32_t channels,
                                        const float *data) noexcept {
+  detail::GlTextureUploadLayout layout{};
+  if ((height <= 0) ||
+      !detail::describe_gl_texture_upload(width, channels, 4, true, &layout)) {
+    return 0U;
+  }
+
   GLuint tex = 0U;
   gl_table().genTextures(1, &tex);
   if (tex == 0U) {
@@ -779,19 +812,12 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
   }
 
   gl_table().bindTexture(GL_TEXTURE_2D, tex);
-
-  GLenum format = GL_RGBA;
-  GLint internalFormat = GL_RGBA16F;
-  if (channels == 2) {
-    format = GL_RG;
-    internalFormat = GL_RG16F;
-  } else if (channels == 3) {
-    format = GL_RGB;
-    internalFormat = GL_RGB16F;
-  }
-
-  gl_table().texImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLsizei>(width),
-                  static_cast<GLsizei>(height), 0, format, GL_FLOAT, data);
+  with_texture_unpack_alignment(layout.unpackAlignment, [&]() noexcept {
+    gl_table().texImage2D(
+        GL_TEXTURE_2D, 0, static_cast<GLint>(layout.internalFormat),
+        static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
+        static_cast<GLenum>(layout.externalFormat), GL_FLOAT, data);
+  });
 
   gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
   gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -805,7 +831,9 @@ std::uint32_t gl_create_texture_2d_hdr(std::int32_t width, std::int32_t height,
 std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
                                     std::int32_t channels,
                                     const float *const facePixels[6]) noexcept {
-  if (faceSize <= 0) {
+  detail::GlTextureUploadLayout layout{};
+  if (!detail::describe_gl_texture_upload(faceSize, channels, 4, true,
+                                          &layout)) {
     return 0U;
   }
 
@@ -815,21 +843,18 @@ std::uint32_t gl_create_cubemap_hdr(std::int32_t faceSize,
     return 0U;
   }
 
-  GLenum format = GL_RGBA;
-  GLint internalFormat = GL_RGBA16F;
-  if (channels == 3) {
-    format = GL_RGB;
-    internalFormat = GL_RGB16F;
-  }
-
   gl_table().bindTexture(GL_TEXTURE_CUBE_MAP, tex);
-  for (int face = 0; face < 6; ++face) {
-    const float *pixels = (facePixels != nullptr) ? facePixels[face] : nullptr;
-    gl_table().texImage2D(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
-                    0, internalFormat, static_cast<GLsizei>(faceSize),
-                    static_cast<GLsizei>(faceSize), 0, format, GL_FLOAT,
-                    pixels);
-  }
+  with_texture_unpack_alignment(layout.unpackAlignment, [&]() noexcept {
+    for (int face = 0; face < 6; ++face) {
+      const float *pixels =
+          (facePixels != nullptr) ? facePixels[face] : nullptr;
+      gl_table().texImage2D(
+          static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face), 0,
+          static_cast<GLint>(layout.internalFormat),
+          static_cast<GLsizei>(faceSize), static_cast<GLsizei>(faceSize), 0,
+          static_cast<GLenum>(layout.externalFormat), GL_FLOAT, pixels);
+    }
+  });
   gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
                      GL_LINEAR_MIPMAP_LINEAR);
   gl_table().texParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1052,6 +1077,12 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
 
 std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
                                         const float *data) noexcept {
+  detail::GlTextureUploadLayout layout{};
+  if ((height <= 0) ||
+      !detail::describe_gl_texture_upload(width, 1, 4, true, &layout)) {
+    return 0U;
+  }
+
   GLuint tex = 0U;
   gl_table().genTextures(1, &tex);
   if (tex == 0U) {
@@ -1059,9 +1090,12 @@ std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
   }
 
   gl_table().bindTexture(GL_TEXTURE_2D, tex);
-  gl_table().texImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(GL_R32F),
-                  static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0,
-                  GL_RED, GL_FLOAT, data);
+  with_texture_unpack_alignment(layout.unpackAlignment, [&]() noexcept {
+    gl_table().texImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(GL_R32F),
+                          static_cast<GLsizei>(width),
+                          static_cast<GLsizei>(height), 0, GL_RED, GL_FLOAT,
+                          data);
+  });
   gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                      static_cast<GLint>(GL_NEAREST));
   gl_table().texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
@@ -1077,12 +1111,17 @@ std::uint32_t gl_create_texture_2d_r32f(std::int32_t width, std::int32_t height,
 void gl_update_texture_2d_r32f(std::uint32_t texId, std::int32_t width,
                                std::int32_t height,
                                const float *data) noexcept {
-  if (texId == 0U) {
+  detail::GlTextureUploadLayout layout{};
+  if ((texId == 0U) || (height <= 0) ||
+      !detail::describe_gl_texture_upload(width, 1, 4, true, &layout)) {
     return;
   }
   gl_table().bindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texId));
-  gl_table().texSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width),
-                     static_cast<GLsizei>(height), GL_RED, GL_FLOAT, data);
+  with_texture_unpack_alignment(layout.unpackAlignment, [&]() noexcept {
+    gl_table().texSubImage2D(
+        GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width),
+        static_cast<GLsizei>(height), GL_RED, GL_FLOAT, data);
+  });
   gl_table().bindTexture(GL_TEXTURE_2D, 0U);
 }
 
