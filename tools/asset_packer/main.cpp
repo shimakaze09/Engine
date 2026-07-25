@@ -49,6 +49,7 @@
 #include "animation_import.h"
 #include "dependency_graph.h"
 #include "skeleton_import.h"
+#include "thumbnail_resample.h"
 
 namespace {
 
@@ -103,8 +104,7 @@ bool file_exists(const char *path) {
 }
 
 /// Writes a complete text buffer to a file.
-bool write_text_file(const char *path, const char *text,
-                     std::size_t textSize) {
+bool write_text_file(const char *path, const char *text, std::size_t textSize) {
   if ((path == nullptr) || (text == nullptr)) {
     return false;
   }
@@ -127,8 +127,7 @@ bool write_text_file(const char *path, const char *text,
 }
 
 void format_hex_u64(std::uint64_t value, char (&out)[17]) noexcept {
-  std::snprintf(out, 17U, "%016llx",
-                static_cast<unsigned long long>(value));
+  std::snprintf(out, 17U, "%016llx", static_cast<unsigned long long>(value));
 }
 
 std::uint64_t hash_file_contents(const char *path, bool *ok) {
@@ -261,7 +260,7 @@ bool read_import_settings_from_meta(const char *outputPath,
   const std::size_t readBytes =
       std::fread(buffer.data(), 1U, static_cast<std::size_t>(fileSize), file);
   std::fclose(file);
-  if (readBytes == 0U) {
+  if (readBytes != static_cast<std::size_t>(fileSize)) {
     return false;
   }
 
@@ -745,15 +744,15 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   writer.begin_object();
   writer.write_uint64("meshIndex",
                       static_cast<std::uint64_t>(importSettings.meshIndex));
-  writer.write_uint64(
-      "primitiveIndex",
-      static_cast<std::uint64_t>(importSettings.primitiveIndex));
+  writer.write_uint64("primitiveIndex", static_cast<std::uint64_t>(
+                                            importSettings.primitiveIndex));
   writer.write_float("scaleFactor", importSettings.scaleFactor);
-  writer.write_uint64("upAxis", static_cast<std::uint64_t>(importSettings.upAxis));
+  writer.write_uint64("upAxis",
+                      static_cast<std::uint64_t>(importSettings.upAxis));
   writer.write_bool("generateNormals", importSettings.generateNormals);
-  writer.write_string("interleavedLayout",
-                      data.hasUVs ? "position_normal_texcoord"
-                                  : "position_normal");
+  writer.write_string("interleavedLayout", data.hasUVs
+                                               ? "position_normal_texcoord"
+                                               : "position_normal");
   writer.end_object();
   writer.end_object();
 
@@ -978,10 +977,10 @@ bool generate_texture_thumbnail(const char *inputPath,
 
   // Box-filter downsample to 64x64.
   // Progressively halve until <= 64x64 for better quality (mip-chain style).
-  std::vector<std::uint8_t> current(
-      static_cast<std::size_t>(srcW * srcH * kChannels));
-  std::memcpy(current.data(), srcPixels,
-              static_cast<std::size_t>(srcW * srcH * kChannels));
+  std::vector<std::uint8_t> current(static_cast<std::size_t>(srcW) *
+                                    static_cast<std::size_t>(srcH) *
+                                    static_cast<std::size_t>(kChannels));
+  std::memcpy(current.data(), srcPixels, current.size());
   stbi_image_free(srcPixels);
 
   int curW = srcW, curH = srcH;
@@ -989,8 +988,10 @@ bool generate_texture_thumbnail(const char *inputPath,
   while ((curW > kThumbSize) || (curH > kThumbSize)) {
     const int newW = std::max(curW / 2, 1);
     const int newH = std::max(curH / 2, 1);
-    std::vector<std::uint8_t> next(
-        static_cast<std::size_t>(newW * newH * kChannels), 0U);
+    std::vector<std::uint8_t> next(static_cast<std::size_t>(newW) *
+                                       static_cast<std::size_t>(newH) *
+                                       static_cast<std::size_t>(kChannels),
+                                   0U);
 
     for (int y = 0; y < newH; ++y) {
       for (int x = 0; x < newW; ++x) {
@@ -1003,14 +1004,22 @@ bool generate_texture_thumbnail(const char *inputPath,
             for (int dx = 0; dx <= 1; ++dx) {
               const int px = std::min(sx + dx, curW - 1);
               const int py = std::min(sy + dy, curH - 1);
-              sum +=
-                  static_cast<std::uint32_t>(current[static_cast<std::size_t>(
-                      (py * curW + px) * kChannels + c)]);
+              const std::size_t sourceIndex =
+                  (static_cast<std::size_t>(py) *
+                       static_cast<std::size_t>(curW) +
+                   static_cast<std::size_t>(px)) *
+                      static_cast<std::size_t>(kChannels) +
+                  static_cast<std::size_t>(c);
+              sum += static_cast<std::uint32_t>(current[sourceIndex]);
               ++count;
             }
           }
-          next[static_cast<std::size_t>((y * newW + x) * kChannels + c)] =
-              static_cast<std::uint8_t>(sum / count);
+          const std::size_t destinationIndex =
+              (static_cast<std::size_t>(y) * static_cast<std::size_t>(newW) +
+               static_cast<std::size_t>(x)) *
+                  static_cast<std::size_t>(kChannels) +
+              static_cast<std::size_t>(c);
+          next[destinationIndex] = static_cast<std::uint8_t>(sum / count);
         }
       }
     }
@@ -1023,39 +1032,11 @@ bool generate_texture_thumbnail(const char *inputPath,
   // Final resize to exactly 64x64 (bilinear).
   std::vector<std::uint8_t> thumb(
       static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
-  for (int y = 0; y < kThumbSize; ++y) {
-    for (int x = 0; x < kThumbSize; ++x) {
-      const float fx = (static_cast<float>(x) + 0.5F) /
-                           static_cast<float>(kThumbSize) *
-                           static_cast<float>(curW) -
-                       0.5F;
-      const float fy = (static_cast<float>(y) + 0.5F) /
-                           static_cast<float>(kThumbSize) *
-                           static_cast<float>(curH) -
-                       0.5F;
-      const int x0 = std::max(static_cast<int>(fx), 0);
-      const int y0 = std::max(static_cast<int>(fy), 0);
-      const int x1 = std::min(x0 + 1, curW - 1);
-      const int y1 = std::min(y0 + 1, curH - 1);
-      const float wx = fx - static_cast<float>(x0);
-      const float wy = fy - static_cast<float>(y0);
-
-      for (int c = 0; c < kChannels; ++c) {
-        const float s00 = static_cast<float>(current[static_cast<std::size_t>(
-            (y0 * curW + x0) * kChannels + c)]);
-        const float s10 = static_cast<float>(current[static_cast<std::size_t>(
-            (y0 * curW + x1) * kChannels + c)]);
-        const float s01 = static_cast<float>(current[static_cast<std::size_t>(
-            (y1 * curW + x0) * kChannels + c)]);
-        const float s11 = static_cast<float>(current[static_cast<std::size_t>(
-            (y1 * curW + x1) * kChannels + c)]);
-        const float val = s00 * (1.0F - wx) * (1.0F - wy) +
-                          s10 * wx * (1.0F - wy) + s01 * (1.0F - wx) * wy +
-                          s11 * wx * wy;
-        thumb[static_cast<std::size_t>((y * kThumbSize + x) * kChannels + c)] =
-            static_cast<std::uint8_t>(std::min(val + 0.5F, 255.0F));
-      }
-    }
+  if (!engine::tools::resize_rgba_bilinear(
+          current.data(), curW, curH, thumb.data(), kThumbSize, kThumbSize)) {
+    std::fprintf(stderr, "thumbnail: invalid image dimensions for %s\n",
+                 inputPath);
+    return false;
   }
 
   if (!stbi_write_png(thumbPath, kThumbSize, kThumbSize, kChannels,
@@ -1429,18 +1410,18 @@ bool resolve_image_path(const char *inputPath, const char *imageUri,
   return true;
 }
 
-/// Extract texture/material dependencies from glTF data and register them
-/// in the dependency graph. Returns dependency paths for cookstamp hashing.
-void extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
+/// Extracts validated glTF dependencies and cookstamp digests.
+bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
                                std::uint64_t meshAssetId,
                                engine::tools::DependencyGraph *graph,
                                std::vector<DependencyDigest> *autoDepDigests) {
   if ((data == nullptr) || (inputPath == nullptr) || (graph == nullptr)) {
-    return;
+    return false;
   }
 
   // Walk all materials used by this mesh's primitives.
   std::unordered_set<const cgltf_image *> seenImages{};
+  bool graphValid = true;
 
   auto processTexture = [&](const cgltf_texture_view &texView) {
     if ((texView.texture == nullptr) || (texView.texture->image == nullptr)) {
@@ -1466,10 +1447,10 @@ void extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
     }
 
     engine::tools::register_asset_path(graph, texAssetId, resolvedPath);
-    // mesh depends on texture (forward edge).
-    // Use direct insert to avoid cycle check for texture→mesh (impossible).
-    graph->dependencies[meshAssetId].insert(texAssetId);
-    graph->dependents[texAssetId].insert(meshAssetId);
+    if (!engine::tools::add_dependency(graph, meshAssetId, texAssetId)) {
+      graphValid = false;
+      return;
+    }
 
     // Also add to the auto-discovered dependency list for cookstamp.
     if (autoDepDigests != nullptr) {
@@ -1505,8 +1486,9 @@ void extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
       const std::uint64_t matAssetId = hash_path_to_asset_id(matName);
       if (matAssetId != 0ULL) {
         engine::tools::register_asset_path(graph, matAssetId, matName);
-        graph->dependencies[meshAssetId].insert(matAssetId);
-        graph->dependents[matAssetId].insert(meshAssetId);
+        if (!engine::tools::add_dependency(graph, meshAssetId, matAssetId)) {
+          graphValid = false;
+        }
       }
 
       // PBR metallic roughness textures.
@@ -1521,6 +1503,7 @@ void extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
       processTexture(mat.emissive_texture);
     }
   }
+  return graphValid;
 }
 
 } // namespace
@@ -1583,9 +1566,12 @@ int main(int argc, char **argv) {
   // Load the dependency graph (if a graph path was provided).
   engine::tools::DependencyGraph depGraph{};
   const bool hasGraphPath = !graphPath.empty();
-  if (hasGraphPath) {
-    // Load existing graph; failure is ok (first run).
-    engine::tools::read_dependency_graph_json(&depGraph, graphPath.c_str());
+  if (hasGraphPath && file_exists(graphPath.c_str()) &&
+      !engine::tools::read_dependency_graph_json(&depGraph,
+                                                 graphPath.c_str())) {
+    std::fprintf(stderr, "error: failed to read dependency graph: %s\n",
+                 graphPath.c_str());
+    return 15;
   }
 
   // Compute the mesh asset ID for graph registration.
@@ -1648,9 +1634,8 @@ int main(int argc, char **argv) {
           std::strcmp(ext, ".jpg") == 0 || std::strcmp(ext, ".jpeg") == 0 ||
           std::strcmp(ext, ".JPG") == 0 || std::strcmp(ext, ".JPEG") == 0;
       if (isPng || isJpg) {
-        generate_texture_thumbnail(inputPath, outputPath);
-        // Texture assets have no further cook step — just return success.
-        return 0;
+        // Texture assets have no further cook step.
+        return generate_texture_thumbnail(inputPath, outputPath) ? 0 : 14;
       }
     }
   }
@@ -1683,9 +1668,9 @@ int main(int argc, char **argv) {
         engine::tools::SkeletonImportResult::Ok;
     if (!engine::tools::parse_gltf_skeleton(data, 0U, &skeleton,
                                             &skeletonResult)) {
-      std::fprintf(stderr, "error: failed to import glTF skin: %s\n",
-                   engine::tools::skeleton_import_result_message(
-                       skeletonResult));
+      std::fprintf(
+          stderr, "error: failed to import glTF skin: %s\n",
+          engine::tools::skeleton_import_result_message(skeletonResult));
       cgltf_free(data);
       return 14;
     }
@@ -1697,9 +1682,9 @@ int main(int argc, char **argv) {
           engine::tools::AnimationImportResult::Ok;
       if (!engine::tools::parse_gltf_animation(data, 0U, 0U, &clip,
                                                &animationResult)) {
-        std::fprintf(stderr, "error: failed to import glTF animation: %s\n",
-                     engine::tools::animation_import_result_message(
-                         animationResult));
+        std::fprintf(
+            stderr, "error: failed to import glTF animation: %s\n",
+            engine::tools::animation_import_result_message(animationResult));
         cgltf_free(data);
         return 15;
       }
@@ -1751,8 +1736,13 @@ int main(int argc, char **argv) {
       depGraph.dependencies.erase(fwdIt);
     }
 
-    extract_gltf_dependencies(data, inputPath, meshAssetId, &depGraph,
-                              &autoDiscoveredDeps);
+    if (!extract_gltf_dependencies(data, inputPath, meshAssetId, &depGraph,
+                                   &autoDiscoveredDeps)) {
+      std::fprintf(stderr,
+                   "error: glTF dependencies would make the graph invalid\n");
+      cgltf_free(data);
+      return 15;
+    }
 
     // Also register manually specified deps in the graph.
     for (const auto &manualDep : dependencyDigests) {
@@ -1760,8 +1750,13 @@ int main(int argc, char **argv) {
       if (depId != 0ULL) {
         engine::tools::register_asset_path(&depGraph, depId,
                                            manualDep.path.c_str());
-        depGraph.dependencies[meshAssetId].insert(depId);
-        depGraph.dependents[depId].insert(meshAssetId);
+        if (!engine::tools::add_dependency(&depGraph, meshAssetId, depId)) {
+          std::fprintf(stderr,
+                       "error: dependency would make the graph invalid: %s\n",
+                       manualDep.path.c_str());
+          cgltf_free(data);
+          return 15;
+        }
       }
     }
   }
@@ -1812,8 +1807,9 @@ int main(int argc, char **argv) {
   if (hasGraphPath) {
     if (!engine::tools::write_dependency_graph_json(&depGraph,
                                                     graphPath.c_str())) {
-      std::fprintf(stderr, "warning: failed to write dependency graph: %s\n",
+      std::fprintf(stderr, "error: failed to write dependency graph: %s\n",
                    graphPath.c_str());
+      return 16;
     }
   }
 

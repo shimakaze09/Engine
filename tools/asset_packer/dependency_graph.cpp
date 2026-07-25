@@ -612,6 +612,15 @@ bool read_dependency_graph_json(DependencyGraph *graph,
 
   DependencyGraph loaded{};
 
+  engine::core::JsonValue schemaVersionValue{};
+  std::uint32_t schemaVersion = 0U;
+  if (!parser.get_object_field(*root, "schemaVersion",
+                               &schemaVersionValue) ||
+      !parser.as_uint(schemaVersionValue, &schemaVersion) ||
+      (schemaVersion != 1U)) {
+    return false;
+  }
+
   engine::core::JsonValue assets{};
   if (parser.get_object_field(*root, "assets", &assets)) {
     if (assets.type != engine::core::JsonValue::Type::Array) {
@@ -660,8 +669,9 @@ bool read_dependency_graph_json(DependencyGraph *graph,
       return false;
     }
 
-    loaded.dependencies[dependent].insert(dependency);
-    loaded.dependents[dependency].insert(dependent);
+    if (!add_dependency(&loaded, dependent, dependency)) {
+      return false;
+    }
   }
 
   *graph = std::move(loaded);

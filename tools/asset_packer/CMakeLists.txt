@@ -10,6 +10,8 @@ engine_add_executable_target(asset_packer
     dependency_graph.h
     skeleton_import.cpp
     skeleton_import.h
+    thumbnail_resample.cpp
+    thumbnail_resample.h
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/core/include
     ${CMAKE_SOURCE_DIR}/math/include

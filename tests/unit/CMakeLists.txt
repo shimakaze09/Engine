@@ -382,6 +382,15 @@ if(WIN32)
     target_compile_definitions(engine_unit_dependency_graph PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+engine_add_test_executable(engine_unit_thumbnail_resample
+    SOURCES
+    thumbnail_resample_test.cpp
+    ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_resample.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/tools/asset_packer
+)
+
+
 # ---- P1-M4-C: Async Streaming ----
 
 engine_add_test_executable(engine_unit_async_streaming

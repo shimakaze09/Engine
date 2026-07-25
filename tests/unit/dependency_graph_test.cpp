@@ -56,6 +56,29 @@ bool read_text_file(const char *path, std::string *outText) {
   return readBytes == outText->size();
 }
 
+/// Writes exact JSON fixture bytes for graph deserialization tests.
+bool write_text_file(const char *path, const char *text) {
+  if ((path == nullptr) || (text == nullptr)) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const std::size_t size = std::strlen(text);
+  const bool wrote = std::fwrite(text, 1U, size, file) == size;
+  std::fclose(file);
+  return wrote;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -396,6 +419,50 @@ int main() {
         (dependencyIt->second != dependencyPath)) {
       return 107;
     }
+  }
+
+  // --- Test 12: JSON load rejects cycles and unsupported schemas atomically.
+  {
+    char tempPath[512] = {};
+    if (!make_temp_graph_path(tempPath, sizeof(tempPath))) {
+      return 108;
+    }
+
+    constexpr const char *kCyclicGraph =
+        "{\"schemaVersion\":1,\"assets\":[],\"edges\":["
+        "{\"dependent\":\"0000000000000001\","
+        "\"dependency\":\"0000000000000002\"},"
+        "{\"dependent\":\"0000000000000002\","
+        "\"dependency\":\"0000000000000001\"}]}";
+    Graph graph{};
+    if (!engine::tools::add_dependency(&graph, 9ULL, 10ULL) ||
+        !write_text_file(tempPath, kCyclicGraph) ||
+        engine::tools::read_dependency_graph_json(&graph, tempPath)) {
+      std::remove(tempPath);
+      return 109;
+    }
+    AssetId existingDeps[1] = {};
+    if ((engine::tools::get_dependencies(&graph, 9ULL, existingDeps, 1U) !=
+         1U) ||
+        (existingDeps[0] != 10ULL) || engine::tools::has_cycle(&graph)) {
+      std::remove(tempPath);
+      return 118;
+    }
+
+    constexpr const char *kUnsupportedSchema =
+        "{\"schemaVersion\":2,\"assets\":[],\"edges\":[]}";
+    if (!write_text_file(tempPath, kUnsupportedSchema) ||
+        engine::tools::read_dependency_graph_json(&graph, tempPath)) {
+      std::remove(tempPath);
+      return 119;
+    }
+    if ((engine::tools::get_dependencies(&graph, 9ULL, existingDeps, 1U) !=
+         1U) ||
+        (existingDeps[0] != 10ULL)) {
+      std::remove(tempPath);
+      return 124;
+    }
+    std::remove(tempPath);
   }
 
   // --- Test 12: compute_invalidation_set ---

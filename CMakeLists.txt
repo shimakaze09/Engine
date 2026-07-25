@@ -101,7 +101,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ENGINE_DETERMINISTIC_FLOATS "Enable strict floating-point determinism flags" ON)
 set(ENGINE_MAX_ENTITIES "65536" CACHE STRING "Maximum runtime world entities (compile-time constant)")
 
-if(NOT ENGINE_MAX_ENTITIES MATCHES "^[0-9]+$")
+if(NOT ENGINE_MAX_ENTITIES MATCHES "^[0-9]+$" OR
+   ENGINE_MAX_ENTITIES LESS 1)
     message(FATAL_ERROR "ENGINE_MAX_ENTITIES must be a positive integer, got '${ENGINE_MAX_ENTITIES}'")
 endif()
 

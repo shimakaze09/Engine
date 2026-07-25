@@ -140,6 +140,35 @@ engine_add_test_executable(engine_integration_streaming_budget
     integration
 )
 
+if(ENGINE_BUILD_TOOLS)
+    add_test(
+        NAME engine_integration_asset_packer_rejects_corrupt_texture
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/corrupt_texture.png"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/corrupt_texture.asset"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_corrupt_texture_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_rejects_corrupt_texture
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_rejects_corrupt_graph
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/corrupt_texture.png"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/corrupt_graph.asset"
+            "-DGRAPH=${CMAKE_SOURCE_DIR}/tests/data/corrupt_dependency_graph.json"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_corrupt_graph_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_rejects_corrupt_graph
+        PROPERTIES LABELS integration
+    )
+endif()
+
 engine_add_test_executable(engine_integration_hotreload
     SOURCES
     hotreload_test.cpp
