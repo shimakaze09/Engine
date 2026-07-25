@@ -1,4 +1,4 @@
-# CLAUDE.md — Engine
+# AGENTS.md — Engine
 
 The single project document: instructions, repository map, conventions, and
 roadmap. It replaces the former `AGENTS.md`, `PROJECT_INDEX.md`, `TODO.md`,
