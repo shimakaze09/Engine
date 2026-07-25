@@ -418,6 +418,53 @@ int verify_begin_play_pending_count() {
   return 0;
 }
 
+/// Verifies destruction removes scripts from dense component iteration.
+int verify_destroy_removes_script_component() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 140;
+  }
+
+  const engine::runtime::Entity entity = world->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 141;
+  }
+
+  engine::runtime::ScriptComponent script{};
+  script.scriptPath[0] = 'x';
+  script.scriptPath[1] = '\0';
+  if (!world->add_script_component(entity, script)) {
+    return 142;
+  }
+
+  std::size_t scriptCount = 0U;
+  world->for_each<engine::runtime::ScriptComponent>(
+      [&scriptCount](engine::runtime::Entity,
+                     const engine::runtime::ScriptComponent &) noexcept {
+        ++scriptCount;
+      });
+  if (scriptCount != 1U) {
+    return 143;
+  }
+
+  if (!world->destroy_entity(entity)) {
+    return 144;
+  }
+
+  scriptCount = 0U;
+  world->for_each<engine::runtime::ScriptComponent>(
+      [&scriptCount](engine::runtime::Entity,
+                     const engine::runtime::ScriptComponent &) noexcept {
+        ++scriptCount;
+      });
+  if (scriptCount != 0U) {
+    return 145;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -428,6 +475,11 @@ int main() {
   }
 
   result = verify_begin_play_pending_count();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_destroy_removes_script_component();
   if (result != 0) {
     return result;
   }

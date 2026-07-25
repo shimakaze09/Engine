@@ -176,9 +176,13 @@ engine_add_test_executable(engine_unit_pass_resources
 engine_add_test_executable(engine_unit_command_history
     SOURCES
     command_history_test.cpp
-    ${CMAKE_SOURCE_DIR}/editor/src/command_history.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
 )
 
 engine_add_test_executable(engine_unit_shader_system

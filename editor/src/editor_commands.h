@@ -64,7 +64,8 @@ struct ComponentEditSnapshot final {
 /// when the world is unbound or the component is absent.
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
                                 ComponentEditSnapshot *out) noexcept;
-/// Applies (or removes, when !exists) the snapshotted component of `type`.
+/// Applies (or removes, when !exists) the snapshotted component of `type`;
+/// false when the exact entity generation is no longer alive.
 bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
                               bool exists,
                               const ComponentEditSnapshot &snapshot) noexcept;

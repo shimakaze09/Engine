@@ -211,6 +211,46 @@ bool test_multiple_shakes_additive() noexcept {
   return true;
 }
 
+bool test_camera_shake_large_phase_is_finite_and_deterministic() noexcept {
+  CameraManager first{};
+  CameraManager second{};
+
+  CameraEntry entry{};
+  entry.position = math::Vec3(0.0F, 0.0F, 0.0F);
+  entry.target = math::Vec3(0.0F, 0.0F, -1.0F);
+  if (!first.push_camera(kOwnerA, entry, 1.0F) ||
+      !second.push_camera(kOwnerA, entry, 1.0F)) {
+    return false;
+  }
+
+  constexpr float kHugeFrequency = 1.0e30F;
+  if (!first.add_shake(1.0F, kHugeFrequency, 1.0F, 0.0F) ||
+      !second.add_shake(1.0F, kHugeFrequency, 1.0F, 0.0F)) {
+    return false;
+  }
+
+  math::Vec3 posA{}, targetA{}, upA{};
+  math::Vec3 posB{}, targetB{}, upB{};
+  float fovA = 0.0F, nearA = 0.0F, farA = 0.0F;
+  float fovB = 0.0F, nearB = 0.0F, farB = 0.0F;
+  first.evaluate(0.0F, &posA, &targetA, &upA, &fovA, &nearA, &farA);
+  second.evaluate(0.0F, &posB, &targetB, &upB, &fovB, &nearB, &farB);
+  first.evaluate(0.25F, &posA, &targetA, &upA, &fovA, &nearA, &farA);
+  second.evaluate(0.25F, &posB, &targetB, &upB, &fovB, &nearB, &farB);
+
+  if (!std::isfinite(posA.x) || !std::isfinite(posA.y) ||
+      !std::isfinite(posA.z) || !std::isfinite(targetA.x) ||
+      !std::isfinite(targetA.y) || !std::isfinite(targetA.z)) {
+    return false;
+  }
+
+  return (posA.x == posB.x) && (posA.y == posB.y) && (posA.z == posB.z) &&
+         (targetA.x == targetB.x) && (targetA.y == targetB.y) &&
+         (targetA.z == targetB.z) && (upA.x == upB.x) && (upA.y == upB.y) &&
+         (upA.z == upB.z) && (fovA == fovB) && (nearA == nearB) &&
+         (farA == farB);
+}
+
 bool test_destroyed_owner_removes_camera() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
@@ -325,10 +365,8 @@ bool test_spring_arm_updates_camera_position() noexcept {
   }
 
   return nearly(active->target.x, 1.0F) && nearly(active->target.y, 4.0F) &&
-         nearly(active->target.z, 3.0F) &&
-         nearly(active->position.x, 1.0F) &&
-         nearly(active->position.y, 4.0F) &&
-         nearly(active->position.z, 11.0F);
+         nearly(active->target.z, 3.0F) && nearly(active->position.x, 1.0F) &&
+         nearly(active->position.y, 4.0F) && nearly(active->position.z, 11.0F);
 }
 
 bool test_clear() noexcept {
@@ -370,10 +408,13 @@ int main() {
   run("test_camera_shake_nonzero_then_zero",
       test_camera_shake_nonzero_during_and_zero_after);
   run("test_multiple_shakes_additive", test_multiple_shakes_additive);
+  run("test_camera_shake_large_phase_is_finite_and_deterministic",
+      test_camera_shake_large_phase_is_finite_and_deterministic);
   run("test_spring_arm_crud", test_spring_arm_crud);
   run("test_spring_arm_updates_camera_position",
       test_spring_arm_updates_camera_position);
-  run("test_destroyed_owner_removes_camera", test_destroyed_owner_removes_camera);
+  run("test_destroyed_owner_removes_camera",
+      test_destroyed_owner_removes_camera);
   run("test_clear", test_clear);
 
   if (failures > 0) {

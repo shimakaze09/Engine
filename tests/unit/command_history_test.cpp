@@ -1,8 +1,12 @@
 // Verifies editor command history ownership behavior.
 
+#include "editor_commands.h"
 #include "engine/editor/command_history.h"
+#include "engine/runtime/world.h"
 
 #include <cstdio>
+#include <cstring>
+#include <memory>
 #include <new>
 #include <type_traits>
 
@@ -129,6 +133,88 @@ int check_undo_redo_dispatch() noexcept {
   return 0;
 }
 
+/// Undo and redo must not target a replacement entity that reuses the slot.
+int check_component_command_rejects_recycled_entity() noexcept {
+  using engine::editor::ComponentEditCommand;
+  using engine::editor::ComponentEditSnapshot;
+  using engine::editor::ComponentEditType;
+  using engine::runtime::Entity;
+  using engine::runtime::NameComponent;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 50;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity original = world->create_entity();
+  if (original == engine::runtime::kInvalidEntity) {
+    return finish(51);
+  }
+
+  ComponentEditSnapshot added{};
+  std::snprintf(added.name.name, sizeof(added.name.name), "%s", "Original");
+  auto *command = new (std::nothrow) ComponentEditCommand();
+  if (command == nullptr) {
+    return finish(52);
+  }
+  command->entity = original;
+  command->type = ComponentEditType::Name;
+  command->beforeExists = false;
+  command->afterExists = true;
+  command->after = added;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  NameComponent current{};
+  if (!world->get_name_component(original, &current) ||
+      (std::strcmp(current.name, "Original") != 0)) {
+    return finish(53);
+  }
+  if (!world->destroy_entity(original)) {
+    return finish(54);
+  }
+
+  const Entity replacement = world->create_entity();
+  if ((replacement == engine::runtime::kInvalidEntity) ||
+      (replacement.index != original.index) ||
+      (replacement.generation == original.generation)) {
+    return finish(55);
+  }
+
+  NameComponent replacementName{};
+  std::snprintf(replacementName.name, sizeof(replacementName.name), "%s",
+                "Replacement");
+  if (!world->add_name_component(replacement, replacementName)) {
+    return finish(56);
+  }
+
+  history.undo();
+  NameComponent afterUndo{};
+  if (!world->get_name_component(replacement, &afterUndo) ||
+      (std::strcmp(afterUndo.name, "Replacement") != 0)) {
+    return finish(57);
+  }
+
+  history.redo();
+  NameComponent afterRedo{};
+  if (!world->get_name_component(replacement, &afterRedo) ||
+      (std::strcmp(afterRedo.name, "Replacement") != 0)) {
+    return finish(58);
+  }
+
+  return finish(0);
+}
+
 } // namespace
 
 static_assert(!std::is_copy_constructible_v<engine::editor::CommandHistory>);
@@ -156,6 +242,12 @@ int main() {
   }
 
   result = check_undo_redo_dispatch();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_component_command_rejects_recycled_entity();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

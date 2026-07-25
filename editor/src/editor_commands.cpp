@@ -109,14 +109,11 @@ bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
 bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
                               bool exists,
                               const ComponentEditSnapshot &snapshot) noexcept {
-  if (editor_session().world == nullptr) {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
     return false;
   }
-  const runtime::Entity resolved =
-      editor_session().world->find_entity_by_index(entity.index);
-  if (resolved == runtime::kInvalidEntity) {
-    return false;
-  }
+  const runtime::Entity resolved = entity;
 
   if (!exists) {
     switch (type) {

@@ -3,6 +3,7 @@
 #include "engine/runtime/camera_manager.h"
 
 #include <cmath>
+#include <cstdint>
 
 #include "engine/core/logging.h"
 
@@ -118,18 +119,30 @@ bool CameraManager::add_shake(float amplitude, float frequency, float duration,
 }
 
 float CameraManager::noise1d(float t) noexcept {
+  if (!std::isfinite(t)) {
+    return 0.0F;
+  }
+
   // Simple value-noise approximation via integer lattice + smoothstep.
-  const float fl = std::floor(t);
-  const int i0 = static_cast<int>(fl);
-  const float frac = t - fl;
+  const double lattice = std::floor(static_cast<double>(t));
+  constexpr double kUint32Period = 4294967296.0;
+  double wrappedLattice = std::fmod(lattice, kUint32Period);
+  if (wrappedLattice < 0.0) {
+    wrappedLattice += kUint32Period;
+  }
+  const std::uint32_t i0 = static_cast<std::uint32_t>(wrappedLattice);
+  const float frac = static_cast<float>(static_cast<double>(t) - lattice);
+
   // Hash integers to pseudo-random floats in [-1, 1].
-  auto hash = [](int n) noexcept -> float {
-    n = (n << 13) ^ n;
-    const int t2 = (n * (n * n * 15731 + 789221) + 1376312589) & 0x7FFFFFFF;
-    return 1.0F - static_cast<float>(t2) / 1073741824.0F;
+  const auto hash = [](std::uint32_t value) noexcept -> float {
+    const std::uint32_t mixed = (value << 13U) ^ value;
+    const std::uint32_t hashed =
+        (mixed * ((mixed * mixed * 15731U) + 789221U) + 1376312589U) &
+        0x7FFFFFFFU;
+    return 1.0F - static_cast<float>(hashed) / 1073741824.0F;
   };
   const float v0 = hash(i0);
-  const float v1 = hash(i0 + 1);
+  const float v1 = hash(i0 + 1U);
   // Smoothstep interpolation.
   const float s = frac * frac * (3.0F - 2.0F * frac);
   return v0 + s * (v1 - v0);

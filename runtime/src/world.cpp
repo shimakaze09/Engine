@@ -214,6 +214,7 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   static_cast<void>(m_sceneCaptures.remove(entity));
   static_cast<void>(m_foliagePatches.remove(entity));
   static_cast<void>(m_springArms.remove(entity));
+  static_cast<void>(m_scriptComponents.remove(entity));
 
   const std::uint32_t index = entity.index;
   erase_persistent_index(m_entityPersistentIds[index]);
