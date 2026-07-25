@@ -186,8 +186,74 @@ bool test_error_recovery() noexcept {
   return result;
 }
 
+
 // -----------------------------------------------------------------------
-// 4. Persist table values (number, string, boolean, table)
+// 4. Runtime-error reload rolls back globals and later reloads recover
+// -----------------------------------------------------------------------
+bool test_runtime_error_reload_rollback() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  const char *v1 =
+      "reload_marker = 'v1'\n"
+      "keep_value = 42\n"
+      "function verify_original()\n"
+      "  if reload_marker ~= 'v1' then error('marker changed') end\n"
+      "  if keep_value ~= 42 then error('value deletion leaked') end\n"
+      "  if failed_only ~= nil then error('new global leaked') end\n"
+      "end\n";
+  if (!write_script(v1) || !engine::scripting::load_script(kTempScript)) {
+    remove_script();
+    engine::scripting::shutdown_scripting();
+    return false;
+  }
+  engine::scripting::watch_script_file(kTempScript);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  const char *runtimeFailure =
+      "reload_marker = 'failed'\n"
+      "keep_value = nil\n"
+      "failed_only = 'leaked'\n"
+      "function verify_original() error('replacement function leaked') end\n"
+      "error('intentional reload failure')\n";
+  if (!write_script(runtimeFailure)) {
+    remove_script();
+    engine::scripting::shutdown_scripting();
+    return false;
+  }
+
+  engine::scripting::check_script_reload();
+  bool result = engine::scripting::call_script_function("verify_original");
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  const char *recovered =
+      "reload_marker = 'v3'\n"
+      "function verify_recovery()\n"
+      "  if reload_marker ~= 'v3' then error('recovery did not commit') end\n"
+      "  if failed_only ~= nil then error('failed global survived') end\n"
+      "end\n";
+  if (!write_script(recovered)) {
+    result = false;
+  } else {
+    engine::scripting::check_script_reload();
+    result =
+        engine::scripting::call_script_function("verify_recovery") && result;
+  }
+
+  remove_script();
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
+
+// -----------------------------------------------------------------------
+// 5. Persist table values (number, string, boolean, table)
 // -----------------------------------------------------------------------
 bool test_persist_table() noexcept {
   engine::scripting::initialize_scripting();
@@ -238,6 +304,7 @@ int main() {
       {"persist_restore", test_persist_restore},
       {"state_survives_reload", test_state_survives_reload},
       {"error_recovery", test_error_recovery},
+      {"runtime_error_reload_rollback", test_runtime_error_reload_rollback},
       {"persist_table", test_persist_table},
   };
 

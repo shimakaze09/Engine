@@ -83,35 +83,37 @@ void clear_pending_scene_op() noexcept;
 // Begin watching a Lua script file for changes (hot-reload).
 void watch_script_file(const char *path) noexcept;
 
-// Check if the watched script file has changed; reload it if so.
+// Reload changed watched scripts atomically; failed execution restores all
+// previous top-level global bindings.
 void check_script_reload() noexcept;
 
 // --- Per-entity script dispatch (ScriptComponent) ---
 // Each entity with a ScriptComponent references a Lua script file that returns
-// a module table with optional on_start(self) and on_update(self, dt) entries.
-// Multiple entities may share the same script file.
+// a module table. The canonical hooks are on_begin_play(self), on_tick(self,
+// dt), on_end_play(self), on_save_state(self), and on_reload(self, state);
+// legacy on_start/on_update/on_end names remain fallbacks. `self` is an opaque,
+// generation-checked handle. Multiple entities may share the same script file.
 
 // Load all unique script files referenced by ScriptComponents in the world and
-// call module.on_begin_play(entityIndex) for each entity. Call once on Play
-// start.
+// call module.on_begin_play(self) for each entity. Call once on Play start.
 void dispatch_entity_scripts_start() noexcept;
 
 // Dispatch on_begin_play for entities that need it (newly created).
 // Also marks each entity's begin_play as done in the World.
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;
 
-// Dispatch on_end_play for entities pending deferred destruction.
+// Dispatch on_end_play(self) for entities pending deferred destruction.
 void dispatch_entity_scripts_end_play(runtime::World *world) noexcept;
 
-// Call module.on_tick(entityIndex, dt) for every entity with a
-// ScriptComponent. Call once per simulation step.
+// Restore pending reload state, then call module.on_tick(self, dt) for every
+// entity with a ScriptComponent. Call once per simulation step.
 void dispatch_entity_scripts_update(float dt) noexcept;
 
-// Call module.on_end_play(entityIndex) for every entity with a ScriptComponent.
+// Call module.on_end_play(self) for every entity with a ScriptComponent.
 // Call once when Play transitions to Stopped.
 void dispatch_entity_scripts_end() noexcept;
 
-// Drop all cached entity script modules (called on Stop / reload).
+// Drop all cached entity script modules and unclaimed reload state.
 void clear_entity_script_modules() noexcept;
 
 // --- Sandbox configuration ---

@@ -447,6 +447,8 @@ void shutdown_scripting() noexcept {
   reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
+  std::memset(g_watchedScripts, 0, sizeof(g_watchedScripts));
+  g_watchedScriptCount = 0U;
 }
 
 
@@ -553,6 +555,98 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
 }
 
 namespace {
+
+/// Captures the current top-level globals for rollback after a failed reload.
+int snapshot_global_bindings(lua_State *state) noexcept {
+  lua_newtable(state);
+  const int snapshotIndex = lua_absindex(state, -1);
+  lua_pushglobaltable(state);
+  const int globalsIndex = lua_absindex(state, -1);
+
+  lua_pushnil(state);
+  while (lua_next(state, globalsIndex) != 0) {
+    lua_pushvalue(state, -2);
+    lua_pushvalue(state, -2);
+    lua_rawset(state, snapshotIndex);
+    lua_pop(state, 1);
+  }
+
+  lua_pop(state, 1);
+  return luaL_ref(state, LUA_REGISTRYINDEX);
+}
+
+/// Restores top-level globals exactly, including removing newly introduced keys.
+void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
+  const int originalTop = lua_gettop(state);
+  lua_rawgeti(state, LUA_REGISTRYINDEX, snapshotReference);
+  if (!lua_istable(state, -1)) {
+    lua_settop(state, originalTop);
+    return;
+  }
+  const int snapshotIndex = lua_absindex(state, -1);
+
+  lua_pushglobaltable(state);
+  const int globalsIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int removalIndex = lua_absindex(state, -1);
+  lua_Integer removalCount = 0;
+
+  lua_pushnil(state);
+  while (lua_next(state, globalsIndex) != 0) {
+    lua_pushvalue(state, -2);
+    lua_rawget(state, snapshotIndex);
+    const bool wasPresent = !lua_isnil(state, -1);
+    lua_pop(state, 1);
+    if (!wasPresent) {
+      ++removalCount;
+      lua_pushvalue(state, -2);
+      lua_rawseti(state, removalIndex, removalCount);
+    }
+    lua_pop(state, 1);
+  }
+
+  for (lua_Integer index = 1; index <= removalCount; ++index) {
+    lua_rawgeti(state, removalIndex, index);
+    lua_pushnil(state);
+    lua_rawset(state, globalsIndex);
+  }
+
+  lua_pushnil(state);
+  while (lua_next(state, snapshotIndex) != 0) {
+    lua_pushvalue(state, -2);
+    lua_pushvalue(state, -2);
+    lua_rawset(state, globalsIndex);
+    lua_pop(state, 1);
+  }
+
+  lua_settop(state, originalTop);
+}
+
+/// Executes a reload while rolling back all top-level bindings on failure.
+bool reload_script_transactionally(const char *path) noexcept {
+  lua_State *state = lua_state();
+  if ((state == nullptr) || (path == nullptr)) {
+    return false;
+  }
+
+  if (luaL_loadfile(state, path) != LUA_OK) {
+    log_lua_error("hot_reload");
+    return false;
+  }
+
+  const int snapshotReference = snapshot_global_bindings(state);
+  refresh_lua_hook();
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+    log_lua_error("hot_reload");
+    restore_global_bindings(state, snapshotReference);
+    luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
+    return false;
+  }
+
+  luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
+  return true;
+}
+
 std::int64_t get_file_mtime(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     return 0;
@@ -643,7 +737,7 @@ void check_script_reload() noexcept {
     entry.mtime = mtime;
     core::log_message(core::LogLevel::Info, "scripting",
                       "hot-reloading script");
-    if (!load_script(entry.path)) {
+    if (!reload_script_transactionally(entry.path)) {
       core::log_message(core::LogLevel::Warning, "scripting",
                         "hot-reload failed; keeping previous version");
     }

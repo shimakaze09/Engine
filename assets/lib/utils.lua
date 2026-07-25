@@ -10,6 +10,9 @@ local M = {}
 
 -- Clamp a value between lo and hi.
 function M.clamp(v, lo, hi)
+    if lo > hi then
+        lo, hi = hi, lo
+    end
     if v < lo then
         return lo
     end

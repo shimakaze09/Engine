@@ -14,6 +14,8 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <new>
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -769,11 +771,20 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
 
   // Read "command" and "seq".
   const core::JsonValue *cmdVal = parser.get_object_field(*root, "command");
+  std::unique_ptr<char[]> commandStorage{};
   const char *cmdStr = nullptr;
   std::size_t cmdLen = 0U;
-  if (cmdVal != nullptr) {
-    parser.as_string(*cmdVal, &cmdStr, &cmdLen);
+  if ((cmdVal == nullptr) ||
+      !parser.as_string(*cmdVal, &cmdStr, &cmdLen) || (cmdLen == 0U)) {
+    return DapStepMode::Continue;
   }
+
+  commandStorage.reset(new (std::nothrow) char[cmdLen + 1U]);
+  if ((commandStorage == nullptr) ||
+      !parser.copy_string(*cmdVal, commandStorage.get(), cmdLen + 1U)) {
+    return DapStepMode::Continue;
+  }
+  cmdStr = commandStorage.get();
 
   const core::JsonValue *seqVal = parser.get_object_field(*root, "seq");
   std::uint32_t seq = 0U;
@@ -789,14 +800,9 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
     argsStorage = *argsVal;
   }
 
-  if (cmdStr == nullptr || cmdLen == 0U) {
-    return DapStepMode::Continue;
-  }
-
   // Compare command strings.
   auto cmd_eq = [&](const char *expected) -> bool {
-    return std::strlen(expected) == cmdLen &&
-           std::memcmp(cmdStr, expected, cmdLen) == 0;
+    return std::strcmp(cmdStr, expected) == 0;
   };
 
   if (cmd_eq("initialize")) {
@@ -871,8 +877,7 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
   } else {
     // Unknown command — send error response.
     core::JsonWriter w;
-    write_response_header(w, requestSeq, cmdStr != nullptr ? cmdStr : "unknown",
-                          false);
+    write_response_header(w, requestSeq, cmdStr, false);
     w.write_string("message", "unsupported command");
     w.end_object();
     send_json_writer(w);

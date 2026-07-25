@@ -19,7 +19,13 @@ namespace engine::scripting {
 namespace {
 
 constexpr std::size_t kMaxTimerRefs = runtime::TimerManager::kMaxTimers;
-int g_timerLuaRefs[kMaxTimerRefs];
+/// Owns one Lua callback registry ref for an exact timer generation.
+struct LuaTimerRef final {
+  runtime::TimerId ownerId = runtime::kInvalidTimerId;
+  int registryRef = LUA_NOREF;
+};
+
+LuaTimerRef g_timerLuaRefs[kMaxTimerRefs];
 bool g_timerRefsInit = false;
 lua_State *g_timerLuaState = nullptr;
 
@@ -29,8 +35,8 @@ void ensure_timer_refs_init() noexcept {
     return;
   }
 
-  for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
-    g_timerLuaRefs[i] = LUA_NOREF;
+  for (auto &timerRef : g_timerLuaRefs) {
+    timerRef = LuaTimerRef{};
   }
   g_timerRefsInit = true;
 }
@@ -38,6 +44,14 @@ void ensure_timer_refs_init() noexcept {
 /// Returns the Lua state that owns timer registry refs.
 lua_State *timer_ref_state(lua_State *fallbackState) noexcept {
   return (g_timerLuaState != nullptr) ? g_timerLuaState : fallbackState;
+}
+
+/// Releases one Lua timer callback ref and clears its timer ownership.
+void release_timer_ref(LuaTimerRef &timerRef, lua_State *state) noexcept {
+  if ((state != nullptr) && (timerRef.registryRef != LUA_NOREF)) {
+    luaL_unref(state, LUA_REGISTRYINDEX, timerRef.registryRef);
+  }
+  timerRef = LuaTimerRef{};
 }
 
 /// Logs a Lua timer callback error with traceback and pops error values.
@@ -83,12 +97,12 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   }
 
   const bool wasRepeating = timerManager.entry_at(slot).repeat;
-  const int ref = g_timerLuaRefs[slot];
-  if (ref == LUA_NOREF) {
+  const LuaTimerRef firedRef = g_timerLuaRefs[slot];
+  if ((firedRef.ownerId != id) || (firedRef.registryRef == LUA_NOREF)) {
     return;
   }
 
-  lua_rawgeti(g_timerLuaState, LUA_REGISTRYINDEX, ref);
+  lua_rawgeti(g_timerLuaState, LUA_REGISTRYINDEX, firedRef.registryRef);
   if (lua_isfunction(g_timerLuaState, -1)) {
     if (lua_pcall(g_timerLuaState, 0, 0, 0) != LUA_OK) {
       log_timer_lua_error(g_timerLuaState, "timer");
@@ -106,9 +120,9 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
       (currentTimerManager.slot_for_id(id) == slot) &&
       currentTimerManager.entry_at(slot).active;
   if (!wasRepeating || !stillCurrent) {
-    if (g_timerLuaRefs[slot] != LUA_NOREF) {
-      luaL_unref(g_timerLuaState, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
-      g_timerLuaRefs[slot] = LUA_NOREF;
+    LuaTimerRef &currentRef = g_timerLuaRefs[slot];
+    if (currentRef.ownerId == id) {
+      release_timer_ref(currentRef, g_timerLuaState);
     }
   }
 }
@@ -123,8 +137,10 @@ void rewire_lua_timer_callbacks() noexcept {
   auto &timerManager = runtime_binding().world->timer_manager();
   for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
     auto &entry = timerManager.entry_at_mut(i);
+    const LuaTimerRef &timerRef = g_timerLuaRefs[i];
     if (entry.active && (entry.callback == nullptr) &&
-        (g_timerLuaRefs[i] != LUA_NOREF)) {
+        (timerRef.registryRef != LUA_NOREF) &&
+        (timerManager.slot_for_id(timerRef.ownerId) == i)) {
       entry.callback = lua_timer_callback;
       entry.userData = nullptr;
     }
@@ -154,14 +170,12 @@ runtime::TimerId register_lua_timer(lua_State *state, float seconds,
   }
 
   lua_State *refState = timer_ref_state(state);
-  if ((refState != nullptr) && (g_timerLuaRefs[slot] != LUA_NOREF)) {
-    luaL_unref(refState, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
-    g_timerLuaRefs[slot] = LUA_NOREF;
-  }
+  release_timer_ref(g_timerLuaRefs[slot], refState);
 
   g_timerLuaState = state;
   lua_pushvalue(state, 1);
-  g_timerLuaRefs[slot] = luaL_ref(state, LUA_REGISTRYINDEX);
+  g_timerLuaRefs[slot].ownerId = id;
+  g_timerLuaRefs[slot].registryRef = luaL_ref(state, LUA_REGISTRYINDEX);
   return id;
 }
 
@@ -219,9 +233,9 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
 
   timerManager.cancel(id);
   lua_State *refState = timer_ref_state(state);
-  if ((refState != nullptr) && (g_timerLuaRefs[slot] != LUA_NOREF)) {
-    luaL_unref(refState, LUA_REGISTRYINDEX, g_timerLuaRefs[slot]);
-    g_timerLuaRefs[slot] = LUA_NOREF;
+  LuaTimerRef &timerRef = g_timerLuaRefs[slot];
+  if (timerRef.ownerId == id) {
+    release_timer_ref(timerRef, refState);
   }
   return 0;
 }
@@ -230,13 +244,8 @@ void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {
   ensure_timer_refs_init();
 
   lua_State *refState = timer_ref_state(fallbackState);
-  if (refState != nullptr) {
-    for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
-      if (g_timerLuaRefs[i] != LUA_NOREF) {
-        luaL_unref(refState, LUA_REGISTRYINDEX, g_timerLuaRefs[i]);
-        g_timerLuaRefs[i] = LUA_NOREF;
-      }
-    }
+  for (auto &timerRef : g_timerLuaRefs) {
+    release_timer_ref(timerRef, refState);
   }
 
   if (runtime_binding().world != nullptr) {

@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -29,14 +30,22 @@ struct EntityScriptModule final {
 constexpr std::size_t kMaxEntityScriptModules = 32U;
 constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
 constexpr std::size_t kMaxModuleLoadDepth = 32U;
+constexpr std::size_t kInvalidModuleSlot = kMaxEntityScriptModules;
+
+/// Owns one per-entity table captured while replacing a Lua module.
+struct EntitySavedState final {
+  core::Entity owner = core::kInvalidEntity;
+  std::size_t moduleSlot = kInvalidModuleSlot;
+  int registryRef = LUA_NOREF;
+};
 
 lua_State *g_state = nullptr;
 EntityScriptBindingCallbacks g_callbacks{};
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
-bool g_entityFaulted[kMaxFaultedEntities]{};
-int g_entitySavedState[kMaxFaultedEntities]{};
-bool g_entitySavedStateInit = false;
+bool g_hasPendingEntityReloads = false;
+core::Entity g_entityFaulted[kMaxFaultedEntities]{};
+EntitySavedState g_entitySavedState[kMaxFaultedEntities]{};
 char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
 
@@ -70,25 +79,46 @@ void push_entity_handle(lua_State *state, core::Entity entity) noexcept {
   }
 }
 
-/// Initializes saved-state registry refs on first use.
-void init_entity_saved_state() noexcept {
-  if (!g_entitySavedStateInit) {
-    for (auto &ref : g_entitySavedState) {
-      ref = LUA_NOREF;
-    }
-    g_entitySavedStateInit = true;
+/// Returns whether this exact entity generation has faulted.
+bool entity_is_faulted(core::Entity entity) noexcept {
+  return (entity.index > 0U) && (entity.index < kMaxFaultedEntities) &&
+         (g_entityFaulted[entity.index] == entity);
+}
+
+/// Records a script fault against the exact entity generation.
+void mark_entity_faulted(core::Entity entity) noexcept {
+  if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
+    g_entityFaulted[entity.index] = entity;
   }
 }
 
-/// Releases saved-state registry refs for entity script hot reload.
-void clear_entity_saved_state() noexcept {
-  if (g_state == nullptr) {
-    return;
+/// Clears any script fault stored in this entity index slot.
+void clear_entity_fault(core::Entity entity) noexcept {
+  if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
+    g_entityFaulted[entity.index] = core::kInvalidEntity;
   }
-  for (auto &ref : g_entitySavedState) {
-    if (ref != LUA_NOREF) {
-      luaL_unref(g_state, LUA_REGISTRYINDEX, ref);
-      ref = LUA_NOREF;
+}
+
+/// Releases one saved-state registry reference and resets its owner metadata.
+void release_entity_saved_state(EntitySavedState &savedState) noexcept {
+  if ((g_state != nullptr) && (savedState.registryRef != LUA_NOREF)) {
+    luaL_unref(g_state, LUA_REGISTRYINDEX, savedState.registryRef);
+  }
+  savedState = EntitySavedState{};
+}
+
+/// Releases all saved-state registry references for entity script hot reload.
+void clear_entity_saved_state() noexcept {
+  for (EntitySavedState &savedState : g_entitySavedState) {
+    release_entity_saved_state(savedState);
+  }
+}
+
+/// Releases saved-state references captured for one cached module slot.
+void clear_entity_saved_state_for_module(std::size_t moduleSlot) noexcept {
+  for (EntitySavedState &savedState : g_entitySavedState) {
+    if (savedState.moduleSlot == moduleSlot) {
+      release_entity_saved_state(savedState);
     }
   }
 }
@@ -104,6 +134,56 @@ bool module_is_currently_loading(const char *path) noexcept {
     }
   }
   return false;
+}
+
+/// Captures state from every live entity using one cached module.
+void capture_entity_saved_state(std::size_t moduleSlot,
+                                const EntityScriptModule &mod) noexcept {
+  clear_entity_saved_state_for_module(moduleSlot);
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr) ||
+      (mod.registryRef == LUA_NOREF)) {
+    return;
+  }
+
+  runtime_binding().world->for_each<runtime::ScriptComponent>(
+      [moduleSlot, &mod](runtime::Entity entity,
+                         const runtime::ScriptComponent &sc) noexcept {
+        if ((std::strcmp(sc.scriptPath, mod.path) != 0) ||
+            (entity.index == 0U) || (entity.index >= kMaxFaultedEntities)) {
+          return;
+        }
+
+        lua_rawgeti(g_state, LUA_REGISTRYINDEX, mod.registryRef);
+        if (lua_istable(g_state, -1) == 0) {
+          lua_pop(g_state, 1);
+          return;
+        }
+
+        lua_getfield(g_state, -1, "on_save_state");
+        if (lua_isfunction(g_state, -1) == 0) {
+          lua_pop(g_state, 2);
+          return;
+        }
+
+        lua_remove(g_state, -2);
+        push_entity_handle(g_state, entity);
+        refresh_lua_hook();
+        if (lua_pcall(g_state, 1, 1, 0) != LUA_OK) {
+          log_lua_error("on_save_state");
+          return;
+        }
+
+        if (lua_istable(g_state, -1) == 0) {
+          lua_pop(g_state, 1);
+          return;
+        }
+
+        EntitySavedState &savedState = g_entitySavedState[entity.index];
+        release_entity_saved_state(savedState);
+        savedState.owner = entity;
+        savedState.moduleSlot = moduleSlot;
+        savedState.registryRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
+      });
 }
 
 /// Loads a Lua module table, reusing or hot-reloading cache entries.
@@ -126,58 +206,17 @@ int get_or_load_entity_script_module(const char *path) noexcept {
       const std::int64_t currentMtime = file_mtime(path);
       if ((currentMtime != 0) && (mod.mtime != 0) &&
           (currentMtime != mod.mtime)) {
-        init_entity_saved_state();
-        if ((runtime_binding().world != nullptr) &&
-            (mod.registryRef != LUA_NOREF)) {
-          runtime_binding().world->for_each<runtime::ScriptComponent>(
-              [&mod](runtime::Entity entity,
-                     const runtime::ScriptComponent &sc) noexcept {
-                if (std::strcmp(sc.scriptPath, mod.path) != 0) {
-                  return;
-                }
-                if (entity.index >= kMaxFaultedEntities) {
-                  return;
-                }
-                lua_rawgeti(g_state, LUA_REGISTRYINDEX, mod.registryRef);
-                if (lua_istable(g_state, -1) == 0) {
-                  lua_pop(g_state, 1);
-                  return;
-                }
-                lua_getfield(g_state, -1, "on_save_state");
-                if (lua_isfunction(g_state, -1) == 0) {
-                  lua_pop(g_state, 2);
-                  return;
-                }
-                lua_remove(g_state, -2);
-                lua_pushinteger(g_state,
-                                static_cast<lua_Integer>(entity.index));
-                refresh_lua_hook();
-                if (lua_pcall(g_state, 1, 1, 0) != LUA_OK) {
-                  log_lua_error("on_save_state");
-                  return;
-                }
-                if (lua_istable(g_state, -1) != 0) {
-                  if (g_entitySavedState[entity.index] != LUA_NOREF) {
-                    luaL_unref(g_state, LUA_REGISTRYINDEX,
-                               g_entitySavedState[entity.index]);
-                  }
-                  g_entitySavedState[entity.index] =
-                      luaL_ref(g_state, LUA_REGISTRYINDEX);
-                } else {
-                  lua_pop(g_state, 1);
-                }
-              });
-        }
-
         if (luaL_loadfile(g_state, path) != LUA_OK) {
           log_lua_error("reload entity script");
           return mod.registryRef;
         }
 
+        capture_entity_saved_state(i, mod);
         refresh_lua_hook();
 
         if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
           log_lua_error("reload entity script");
+          clear_entity_saved_state_for_module(i);
           return mod.registryRef;
         }
 
@@ -185,6 +224,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
           core::log_message(core::LogLevel::Error, "scripting",
                             "entity script must return a module table");
           lua_pop(g_state, 1);
+          clear_entity_saved_state_for_module(i);
           return mod.registryRef;
         }
 
@@ -195,6 +235,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         mod.registryRef = newRef;
         mod.mtime = currentMtime;
         mod.reloaded = true;
+        g_hasPendingEntityReloads = true;
 
         char logBuf[256] = {};
         std::snprintf(logBuf, sizeof(logBuf), "hot-reloaded entity script: %s",
@@ -303,12 +344,101 @@ bool call_module_function(int moduleRef, const char *funcName,
   refresh_lua_hook();
   if (lua_pcall(g_state, nargs, 0, 0) != LUA_OK) {
     log_lua_error(funcName);
-    if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-      g_entityFaulted[entity.index] = true;
-    }
+    mark_entity_faulted(entity);
     return false;
   }
   return true;
+}
+
+/// Classifies the result of invoking an optional module reload hook.
+enum class ReloadHookResult : std::uint8_t { Missing, Succeeded, Failed };
+
+/// Invokes on_reload with the entity handle and its captured state table.
+ReloadHookResult call_module_reload_hook(int moduleRef, runtime::Entity entity,
+                                         int savedStateRef) noexcept {
+  if ((g_state == nullptr) || (moduleRef == LUA_NOREF)) {
+    return ReloadHookResult::Failed;
+  }
+
+  lua_rawgeti(g_state, LUA_REGISTRYINDEX, moduleRef);
+  if (lua_istable(g_state, -1) == 0) {
+    lua_pop(g_state, 1);
+    return ReloadHookResult::Failed;
+  }
+
+  lua_getfield(g_state, -1, "on_reload");
+  if (lua_isfunction(g_state, -1) == 0) {
+    lua_pop(g_state, 2);
+    return ReloadHookResult::Missing;
+  }
+
+  lua_remove(g_state, -2);
+  push_entity_handle(g_state, entity);
+  if (savedStateRef != LUA_NOREF) {
+    lua_rawgeti(g_state, LUA_REGISTRYINDEX, savedStateRef);
+  } else {
+    lua_pushnil(g_state);
+  }
+
+  refresh_lua_hook();
+  if (lua_pcall(g_state, 2, 0, 0) != LUA_OK) {
+    log_lua_error("on_reload");
+    mark_entity_faulted(entity);
+    return ReloadHookResult::Failed;
+  }
+  return ReloadHookResult::Succeeded;
+}
+
+/// Delivers pending module reloads before any new-module tick callback.
+void dispatch_pending_entity_reloads() noexcept {
+  if (!g_hasPendingEntityReloads || (g_state == nullptr) ||
+      (runtime_binding().world == nullptr)) {
+    return;
+  }
+
+  g_hasPendingEntityReloads = false;
+  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
+    EntityScriptModule &module = g_entityScriptModules[i];
+    if (!module.reloaded) {
+      continue;
+    }
+
+    runtime_binding().world->for_each<runtime::ScriptComponent>(
+        [i, &module](runtime::Entity entity,
+                     const runtime::ScriptComponent &sc) noexcept {
+          if (std::strcmp(sc.scriptPath, module.path) != 0) {
+            return;
+          }
+
+          EntitySavedState *savedState = nullptr;
+          int savedStateRef = LUA_NOREF;
+          if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
+            EntitySavedState &candidate = g_entitySavedState[entity.index];
+            if (candidate.moduleSlot == i) {
+              savedState = &candidate;
+              if (candidate.owner == entity) {
+                savedStateRef = candidate.registryRef;
+              }
+            }
+          }
+
+          clear_entity_fault(entity);
+          const ReloadHookResult result = call_module_reload_hook(
+              module.registryRef, entity, savedStateRef);
+          if (result == ReloadHookResult::Missing) {
+            static_cast<void>(call_module_function(module.registryRef,
+                                                   "on_begin_play", "on_start",
+                                                   entity, false, 0.0F));
+          }
+
+          if (savedState != nullptr) {
+            release_entity_saved_state(*savedState);
+          }
+        });
+
+    clear_entity_saved_state_for_module(i);
+    module.reloaded = false;
+  }
 }
 
 } // namespace
@@ -344,8 +474,7 @@ void dispatch_entity_scripts_start() noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
         }
-        if ((entity.index < kMaxFaultedEntities) &&
-            g_entityFaulted[entity.index]) {
+        if (entity_is_faulted(entity)) {
           return;
         }
         runtime_binding().world->mark_begin_play_done(entity);
@@ -369,15 +498,14 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
     if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
       return;
     }
-    if ((entity.index < kMaxFaultedEntities) && g_entityFaulted[entity.index]) {
+    if (entity_is_faulted(entity)) {
       return;
     }
     const int ref = get_or_load_entity_script_module(sc->scriptPath);
     if (ref == LUA_NOREF) {
       return;
     }
-    call_module_function(ref, "on_begin_play", "on_start", entity, false,
-                         0.0F);
+    call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
   });
 }
 
@@ -395,8 +523,8 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
     if (ref == LUA_NOREF) {
       return;
     }
-    static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                           entity, false, 0.0F));
+    static_cast<void>(call_module_function(ref, "on_end_play", "on_end", entity,
+                                           false, 0.0F));
   });
 }
 
@@ -405,31 +533,7 @@ void dispatch_entity_scripts_update(float dt) noexcept {
     return;
   }
 
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (!g_entityScriptModules[i].reloaded) {
-      continue;
-    }
-
-    const char *reloadedPath = g_entityScriptModules[i].path;
-    const int moduleRef = g_entityScriptModules[i].registryRef;
-    runtime_binding().world->for_each<runtime::ScriptComponent>(
-        [reloadedPath, moduleRef](runtime::Entity entity,
-                                  const runtime::ScriptComponent &sc) noexcept {
-          if (std::strcmp(sc.scriptPath, reloadedPath) != 0) {
-            return;
-          }
-          if (entity.index < kMaxFaultedEntities) {
-            g_entityFaulted[entity.index] = false;
-          }
-
-          static_cast<void>(call_module_function(
-              moduleRef, "on_reload", nullptr, entity, false, 0.0F));
-          static_cast<void>(call_module_function(moduleRef, "on_begin_play",
-                                                 "on_start", entity, false,
-                                                 0.0F));
-        });
-    g_entityScriptModules[i].reloaded = false;
-  }
+  dispatch_pending_entity_reloads();
 
   runtime_binding().world->for_each<runtime::ScriptComponent>(
       [dt](runtime::Entity entity,
@@ -437,12 +541,12 @@ void dispatch_entity_scripts_update(float dt) noexcept {
         if (sc.scriptPath[0] == '\0') {
           return;
         }
-        if ((entity.index < kMaxFaultedEntities) &&
-            g_entityFaulted[entity.index]) {
-          return;
-        }
         const int ref = get_or_load_entity_script_module(sc.scriptPath);
         if (ref == LUA_NOREF) {
+          return;
+        }
+        dispatch_pending_entity_reloads();
+        if (entity_is_faulted(entity)) {
           return;
         }
         call_module_function(ref, "on_tick", "on_update", entity, true, dt);
@@ -469,6 +573,11 @@ void dispatch_entity_scripts_end() noexcept {
 }
 
 void clear_entity_script_modules() noexcept {
+  clear_entity_saved_state();
+  g_hasPendingEntityReloads = false;
+  for (core::Entity &faultedEntity : g_entityFaulted) {
+    faultedEntity = core::kInvalidEntity;
+  }
   if (g_state != nullptr) {
     for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
       if (g_entityScriptModules[i].registryRef != LUA_NOREF) {
@@ -487,11 +596,7 @@ void clear_entity_script_modules() noexcept {
 
 void reset_entity_script_bindings() noexcept {
   clear_entity_script_modules();
-  clear_entity_saved_state();
   g_moduleLoadDepth = 0U;
-  for (std::size_t i = 0U; i < kMaxFaultedEntities; ++i) {
-    g_entityFaulted[i] = false;
-  }
 }
 
 } // namespace engine::scripting

@@ -5,6 +5,23 @@
 #include <memory>
 #include <new>
 
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
+    !defined(__PRFCHWINTRIN_H)
+#define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
+#endif
+
+#ifndef SDL_MAIN_HANDLED
+#define SDL_MAIN_HANDLED
+#endif
+
+#if __has_include(<SDL.h>)
+#include <SDL.h>
+#elif __has_include(<SDL2/SDL.h>)
+#include <SDL2/SDL.h>
+#else
+#error "SDL2 headers not found"
+#endif
+
 #include "engine/core/cvar.h"
 #include "engine/core/touch_input.h"
 #include "engine/core/service_locator.h"
@@ -692,6 +709,53 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 203;
+    }
+  }
+
+  // =========================================================================
+  // Step 4.6 Regression: fired timer cleanup preserves same-slot replacement
+  // =========================================================================
+  {
+    const char *replacementTimerScript =
+        "local old_id = nil\n"
+        "function on_start()\n"
+        "    old_id = engine.set_timeout(function()\n"
+        "        engine.cancel_timer(old_id)\n"
+        "        engine.set_timeout(function()\n"
+        "            local e = engine.spawn_entity()\n"
+        "            engine.set_name(e, 'replacement_timer_fired')\n"
+        "        end, 0.1)\n"
+        "    end, 0.1)\n"
+        "end\n";
+    if (!write_script_file(replacementTimerScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 209;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 210;
+    }
+
+    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::scripting::tick_timers();
+    engine::scripting::set_frame_time(0.2F, 0.4F);
+    engine::scripting::tick_timers();
+
+    bool replacementTimerFired = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc) &&
+          std::strcmp(nc.name, "replacement_timer_fired") == 0) {
+        replacementTimerFired = true;
+      }
+    });
+    if (!replacementTimerFired) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 211;
     }
   }
 
@@ -1417,6 +1481,21 @@ int main() {
     }
 
     const char *touchCleanupScript =
+        "local coroutine_touch_count = 0\n"
+        "function register_coroutine_touch()\n"
+        "  local id = engine.start_coroutine(function()\n"
+        "    if not engine.on_touch(function(event)\n"
+        "      coroutine_touch_count = coroutine_touch_count + 1\n"
+        "    end) then error('coroutine on_touch failed') end\n"
+        "  end)\n"
+        "  if id == nil then error('start_coroutine failed') end\n"
+        "  collectgarbage('collect')\n"
+        "end\n"
+        "function verify_coroutine_touch()\n"
+        "  if coroutine_touch_count ~= 1 then\n"
+        "    error('coroutine touch callback count mismatch')\n"
+        "  end\n"
+        "end\n"
         "function register_touch_hooks()\n"
         "  if not engine.on_touch(function(event) end) then\n"
         "    error('on_touch failed')\n"
@@ -1438,6 +1517,27 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 109;
+    }
+    if (!engine::scripting::call_script_function(
+            "register_coroutine_touch")) {
+      engine::core::shutdown_touch_input();
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 212;
+    }
+
+    SDL_Event touchEvent{};
+    touchEvent.type = SDL_FINGERDOWN;
+    touchEvent.tfinger.fingerId = 4242;
+    touchEvent.tfinger.x = 0.25F;
+    touchEvent.tfinger.y = 0.75F;
+    touchEvent.tfinger.pressure = 1.0F;
+    engine::core::touch_process_event(&touchEvent);
+    if (!engine::scripting::call_script_function("verify_coroutine_touch")) {
+      engine::core::shutdown_touch_input();
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 213;
     }
     if (!engine::scripting::call_script_function("register_touch_hooks")) {
       engine::core::shutdown_touch_input();

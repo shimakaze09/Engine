@@ -5,32 +5,49 @@
 --   engine.add_script_component(entity, "assets/scripts/player.lua")
 --
 -- This script is a MODULE — it must return a table (M).
--- The engine calls M.on_start(self) once on Play and
--- M.on_update(self, dt) every simulation step.
--- 'self' is the entity's integer ID.
+-- The engine calls M.on_begin_play(self) once on Play and
+-- M.on_tick(self, dt) every simulation step.
+-- 'self' is an opaque, generation-checked entity handle.
 local M = {}
 
 local MOVE_SPEED = 5.0
 local JUMP_VY = 7.0
+local GROUND_CHECK_DISTANCE = 0.65
 
--- Handles on start.
-function M.on_start(self)
-    engine.log("Player on_start, entity=" .. self)
+-- Reports whether a downward ray reaches supporting geometry.
+local function is_grounded(self, x, y, z)
+    local hits = engine.raycast_all(
+        x, y, z, 0.0, -1.0, 0.0, GROUND_CHECK_DISTANCE)
+    for i = 1, #hits do
+        local hit = hits[i]
+        if hit.entity ~= self and hit.ny > 0.5 then
+            return true
+        end
+    end
+    return false
+end
+
+-- Applies the player's initial physics and material settings.
+function M.on_begin_play(self)
+    engine.log("Player on_begin_play, entity=" .. tostring(self))
     engine.set_restitution(self, 0.05)
     engine.set_friction(self, 0.9, 0.7)
     engine.set_roughness(self, 0.3)
     engine.set_metallic(self, 0.0)
 end
 
--- Handles on update.
-function M.on_update(self, dt)
+-- Applies input-driven velocity once per simulation step.
+function M.on_tick(self, _dt)
     if not engine.is_alive(self) then
         return
     end
 
     -- Respawn if the entity falls below y=-20
     local x, y, z = engine.get_position(self)
-    if y ~= nil and y < -20.0 then
+    if x == nil then
+        return
+    end
+    if y < -20.0 then
         engine.set_position(self, 0.0, 3.0, 0.0)
         engine.set_velocity(self, 0.0, 0.0, 0.0)
         engine.log("Player respawned")
@@ -44,24 +61,34 @@ function M.on_update(self, dt)
     end
 
     -- Arrow keys: directly set horizontal velocity for responsive control.
-    local tx = 0.0
-    local tz = 0.0
+    local move_x = 0.0
+    local move_z = 0.0
     if engine.is_key_down(engine.KEY_LEFT) then
-        tx = -MOVE_SPEED
-    elseif engine.is_key_down(engine.KEY_RIGHT) then
-        tx = MOVE_SPEED
+        move_x = move_x - 1.0
+    end
+    if engine.is_key_down(engine.KEY_RIGHT) then
+        move_x = move_x + 1.0
     end
     if engine.is_key_down(engine.KEY_UP) then
-        tz = -MOVE_SPEED
-    elseif engine.is_key_down(engine.KEY_DOWN) then
-        tz = MOVE_SPEED
+        move_z = move_z - 1.0
+    end
+    if engine.is_key_down(engine.KEY_DOWN) then
+        move_z = move_z + 1.0
     end
 
-    -- Space bar: jump (only when nearly stationary vertically)
-    if engine.is_key_pressed(engine.KEY_SPACE) then
-        if math.abs(vy) < 0.5 then
-            vy = JUMP_VY
-        end
+    local length_squared = move_x * move_x + move_z * move_z
+    if length_squared > 1.0 then
+        local inverse_length = 1.0 / math.sqrt(length_squared)
+        move_x = move_x * inverse_length
+        move_z = move_z * inverse_length
+    end
+    local tx = move_x * MOVE_SPEED
+    local tz = move_z * MOVE_SPEED
+
+    -- Space bar: jump only while supported by upward-facing geometry.
+    if engine.is_key_pressed(engine.KEY_SPACE)
+        and is_grounded(self, x, y, z) then
+        vy = JUMP_VY
     end
 
     engine.set_velocity(self, tx, vy, tz)

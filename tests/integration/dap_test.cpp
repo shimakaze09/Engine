@@ -450,6 +450,47 @@ bool test_dap_rejects_overflowing_content_length() noexcept {
       "Content-Length: 999999999999999999999999999999\r\n\r\n{}");
 }
 
+/// Verifies an unknown command is echoed as its exact bounded JSON string.
+bool test_dap_unknown_command_echo() noexcept {
+  if (!engine::scripting::dap_start(kDapPort) ||
+      !init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock)) {
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  const bool accepted = wait_for_dap_client(true);
+  const bool sent =
+      accepted && send_dap_request(sock, 77, "mysteryCommand", "{}");
+
+  std::string receiveBuffer{};
+  std::string response{};
+  bool received = false;
+  for (int attempt = 0; sent && (attempt < 50); ++attempt) {
+    engine::scripting::dap_poll();
+    if (recv_dap_message(sock, &receiveBuffer, &response, 20)) {
+      received = true;
+      break;
+    }
+  }
+
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  engine::scripting::dap_stop();
+
+  constexpr const char *kExpected =
+      "{\"seq\":1,\"type\":\"response\",\"request_seq\":77,"
+      "\"success\":false,\"command\":\"mysteryCommand\","
+      "\"message\":\"unsupported command\"}";
+  return accepted && sent && received && (response == kExpected);
+}
+
 bool test_dap_breakpoint_pause() noexcept {
   if (!engine::scripting::initialize_scripting()) {
     return false;
@@ -539,8 +580,14 @@ int main() {
   const bool overflowOk = test_dap_rejects_overflowing_content_length();
   std::printf(overflowOk ? "PASS\n" : "FAIL\n");
 
+  std::printf("  dap_test::unknown_command_echo ... ");
+  const bool unknownOk = test_dap_unknown_command_echo();
+  std::printf(unknownOk ? "PASS\n" : "FAIL\n");
+
   std::printf("  dap_test::breakpoint_pause ... ");
   const bool breakpointOk = test_dap_breakpoint_pause();
   std::printf(breakpointOk ? "PASS\n" : "FAIL\n");
-  return (restartOk && oversizedOk && overflowOk && breakpointOk) ? 0 : 1;
+  return (restartOk && oversizedOk && overflowOk && unknownOk && breakpointOk)
+             ? 0
+             : 1;
 }
