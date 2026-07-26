@@ -447,7 +447,9 @@ void shutdown_scripting() noexcept {
   reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
-  std::memset(g_watchedScripts, 0, sizeof(g_watchedScripts));
+  for (WatchedScript &watchedScript : g_watchedScripts) {
+    watchedScript = {};
+  }
   g_watchedScriptCount = 0U;
 }
 
