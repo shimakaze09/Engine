@@ -140,6 +140,11 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
     return 1;
   }
   rigidBody.velocity = velocity;
+  if ((velocity.x != 0.0F) || (velocity.y != 0.0F) ||
+      (velocity.z != 0.0F)) {
+    rigidBody.sleeping = false;
+    rigidBody.sleepFrameCount = 0U;
+  }
 
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);

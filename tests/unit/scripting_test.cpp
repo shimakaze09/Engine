@@ -157,6 +157,9 @@ int main() {
       "    engine.set_acceleration(spawned, 0.0, -9.0, 0.0)\n"
       "    engine.add_collider(spawned, 0.5, 0.5, 0.5)\n"
       "end\n"
+      "function wake_with_velocity()\n"
+      "    engine.set_velocity(spawned, 8.0, 0.0, -2.0)\n"
+      "end\n"
       "function on_update()\n"
       "    if engine.is_alive(spawned) then\n"
       "        engine.destroy_entity(spawned)\n"
@@ -179,6 +182,33 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 5;
   }
+
+  const engine::runtime::Entity initialSpawned =
+      world->find_entity_by_index(1U);
+  engine::runtime::RigidBody *sleepingBody =
+      world->get_rigid_body_ptr(initialSpawned);
+  if (sleepingBody == nullptr) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 126;
+  }
+  sleepingBody->velocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  sleepingBody->sleepFrameCount = 60U;
+  sleepingBody->sleeping = true;
+  if (!engine::scripting::call_script_function("wake_with_velocity")) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 127;
+  }
+  if (sleepingBody->sleeping || (sleepingBody->sleepFrameCount != 0U) ||
+      (sleepingBody->velocity.x != 8.0F) ||
+      (sleepingBody->velocity.y != 0.0F) ||
+      (sleepingBody->velocity.z != -2.0F)) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 128;
+  }
+  sleepingBody->velocity = engine::math::Vec3(5.0F, 6.0F, 7.0F);
 
   const char *asyncAssetScript =
       "function request_asset()\n"
