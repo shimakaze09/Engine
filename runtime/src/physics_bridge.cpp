@@ -20,9 +20,6 @@ math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept;
 void set_collision_dispatch(PhysicsWorldView &world,
                             CollisionDispatchFn fn) noexcept;
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept;
-bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
-             const math::Vec3 &direction, float maxDistance,
-             PhysicsRaycastHit *outHit, Entity skipEntity) noexcept;
 JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
                            Entity entityB, float distance) noexcept;
 void remove_joint(PhysicsWorldView &world, JointId id) noexcept;
@@ -232,8 +229,8 @@ bool set_convex_hull_data(World &world, Entity entity,
   return physics::set_convex_hull_data(world.physics_context(), entity, hull);
 }
 
-const physics::ConvexHullData *get_convex_hull_data(
-    const World &world, Entity entity) noexcept {
+const physics::ConvexHullData *get_convex_hull_data(const World &world,
+                                                    Entity entity) noexcept {
   if (!world.is_alive(entity)) {
     return nullptr;
   }
@@ -249,8 +246,8 @@ bool set_heightfield_data(World &world, Entity entity,
   return physics::set_heightfield_data(world.physics_context(), entity, hf);
 }
 
-const physics::HeightfieldData *get_heightfield_data(
-    const World &world, Entity entity) noexcept {
+const physics::HeightfieldData *get_heightfield_data(const World &world,
+                                                     Entity entity) noexcept {
   if (!world.is_alive(entity)) {
     return nullptr;
   }

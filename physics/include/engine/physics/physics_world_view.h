@@ -41,15 +41,10 @@ public:
   /// Copies the entity's local transform (read state); false when absent.
   virtual bool get_transform(Entity entity,
                              Transform *outTransform) const noexcept = 0;
-  /// World-space pose for collision detection and queries. Identical to the
-  /// local transform for hierarchy roots; parented entities return their
-  /// composed world pose (from the previous propagation) with parentId
-  /// cleared, so child colliders follow their parent's motion.
+  /// Copies the entity's full read-state world transform.
   virtual bool
-  get_collision_transform(Entity entity,
-                          Transform *outTransform) const noexcept {
-    return get_transform(entity, outTransform);
-  }
+  get_physics_transform(Entity entity,
+                        PhysicsTransform *outTransform) const noexcept = 0;
   /// Read/write transform spans for one parallel update chunk.
   virtual bool
   get_transform_update_range(std::size_t startIndex, std::size_t count,
@@ -62,6 +57,12 @@ public:
   virtual Transform *
   get_transform_write_ptr(Entity entity,
                           const SimulationAccessToken &token) noexcept = 0;
+  /// Copies the full world transform built from simulation write-state locals.
+  /// Call only from the serialized collision-resolution stage, after all
+  /// parallel integration jobs have completed.
+  virtual bool get_simulation_physics_transform(
+      Entity entity, const SimulationAccessToken &token,
+      PhysicsTransform *outTransform) const noexcept = 0;
 
   // --- Colliders ------------------------------------------------------------
   virtual std::size_t collider_count() const noexcept = 0;
@@ -74,11 +75,23 @@ public:
   virtual const Collider *get_collider_ptr(Entity entity) const noexcept = 0;
 
   // --- Rigid bodies ---------------------------------------------------------
+  virtual std::size_t rigid_body_count() const noexcept = 0;
+  /// Dense mutable rigid-body span used by the serialized sleep pass.
+  virtual bool get_rigid_body_range(std::size_t startIndex, std::size_t count,
+                                    const Entity **outEntities,
+                                    RigidBody **outBodies) noexcept = 0;
   virtual RigidBody *get_rigid_body_ptr(Entity entity) noexcept = 0;
   virtual const RigidBody *get_rigid_body_ptr(Entity entity) const noexcept = 0;
   /// Copies the entity's rigid body; false when absent.
   virtual bool get_rigid_body(Entity entity,
                               RigidBody *outRigidBody) const noexcept = 0;
+  /// Nearest self-or-ancestor rigid body in the stable read-state hierarchy.
+  virtual Entity rigid_body_owner(Entity colliderEntity) const noexcept = 0;
+  /// Nearest self-or-ancestor rigid body that owns this collider in the
+  /// simulation write-state hierarchy; invalid means a static collider.
+  virtual Entity
+  rigid_body_owner(Entity colliderEntity,
+                   const SimulationAccessToken &token) const noexcept = 0;
 
   // --- Movement authority ---------------------------------------------------
   virtual MovementAuthority

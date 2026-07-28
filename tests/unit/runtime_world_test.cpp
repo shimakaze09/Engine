@@ -13,6 +13,151 @@ bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
+int verify_raw_and_scene_object_creation() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 150;
+  }
+
+  const engine::runtime::Entity raw = world->create_entity();
+  if (raw == engine::runtime::kInvalidEntity) {
+    return 151;
+  }
+  if ((world->get_transform_read_ptr(raw) != nullptr) ||
+      (world->get_world_transform_read_ptr(raw) != nullptr)) {
+    return 152;
+  }
+
+  const engine::runtime::Entity sceneObject = world->create_scene_object();
+  if (sceneObject == engine::runtime::kInvalidEntity) {
+    return 153;
+  }
+
+  engine::runtime::Transform identityLocal{};
+  const engine::runtime::WorldTransform *identityWorld =
+      world->get_world_transform_read_ptr(sceneObject);
+  if (!world->get_transform(sceneObject, &identityLocal) ||
+      (identityWorld == nullptr)) {
+    return 154;
+  }
+  if ((identityLocal.position.x != 0.0F) ||
+      (identityLocal.position.y != 0.0F) ||
+      (identityLocal.position.z != 0.0F) ||
+      (identityLocal.rotation.x != 0.0F) ||
+      (identityLocal.rotation.y != 0.0F) ||
+      (identityLocal.rotation.z != 0.0F) ||
+      (identityLocal.rotation.w != 1.0F) || (identityLocal.scale.x != 1.0F) ||
+      (identityLocal.scale.y != 1.0F) || (identityLocal.scale.z != 1.0F) ||
+      (identityLocal.parentId != engine::runtime::kInvalidPersistentId)) {
+    return 155;
+  }
+  if ((identityWorld->position.x != 0.0F) ||
+      (identityWorld->position.y != 0.0F) ||
+      (identityWorld->position.z != 0.0F) ||
+      (identityWorld->rotation.x != 0.0F) ||
+      (identityWorld->rotation.y != 0.0F) ||
+      (identityWorld->rotation.z != 0.0F) ||
+      (identityWorld->rotation.w != 1.0F) || (identityWorld->scale.x != 1.0F) ||
+      (identityWorld->scale.y != 1.0F) || (identityWorld->scale.z != 1.0F)) {
+    return 156;
+  }
+
+  engine::runtime::Transform configuredLocal{};
+  configuredLocal.position = engine::math::Vec3(2.0F, -3.0F, 4.0F);
+  configuredLocal.rotation = engine::math::Quat(0.0F, 0.0F, 1.0F, 0.0F);
+  configuredLocal.scale = engine::math::Vec3(0.5F, 2.0F, 4.0F);
+  constexpr engine::runtime::PersistentId kConfiguredId = 9001U;
+  const engine::runtime::Entity configured =
+      world->create_scene_object_with_persistent_id(kConfiguredId,
+                                                    configuredLocal);
+  if ((configured == engine::runtime::kInvalidEntity) ||
+      (world->persistent_id(configured) != kConfiguredId) ||
+      (world->find_entity_by_persistent_id(kConfiguredId) != configured)) {
+    return 157;
+  }
+
+  engine::runtime::Transform configuredRead{};
+  if (!world->get_transform(configured, &configuredRead)) {
+    return 158;
+  }
+  if ((configuredRead.position.x != 2.0F) ||
+      (configuredRead.position.y != -3.0F) ||
+      (configuredRead.position.z != 4.0F) ||
+      (configuredRead.rotation.x != 0.0F) ||
+      (configuredRead.rotation.y != 0.0F) ||
+      (configuredRead.rotation.z != 1.0F) ||
+      (configuredRead.rotation.w != 0.0F) || (configuredRead.scale.x != 0.5F) ||
+      (configuredRead.scale.y != 2.0F) || (configuredRead.scale.z != 4.0F)) {
+    return 159;
+  }
+
+  if ((world->alive_entity_count() != 3U) || (world->transform_count() != 2U) ||
+      (world->world_transform_count() != 2U)) {
+    return 160;
+  }
+  return 0;
+}
+
+int verify_parent_trs_propagation_exact() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 170;
+  }
+
+  engine::runtime::Transform parentLocal{};
+  parentLocal.position = engine::math::Vec3(10.0F, 20.0F, 30.0F);
+  parentLocal.rotation = engine::math::Quat(0.0F, 0.0F, 1.0F, 0.0F);
+  parentLocal.scale = engine::math::Vec3(2.0F, 3.0F, 4.0F);
+  const engine::runtime::Entity parent =
+      world->create_scene_object(parentLocal);
+  if (parent == engine::runtime::kInvalidEntity) {
+    return 171;
+  }
+
+  engine::runtime::Transform childLocal{};
+  childLocal.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  childLocal.rotation = engine::math::Quat(1.0F, 0.0F, 0.0F, 0.0F);
+  childLocal.scale = engine::math::Vec3(0.5F, 2.0F, 0.25F);
+  childLocal.parentId = world->persistent_id(parent);
+  const engine::runtime::Entity child = world->create_scene_object(childLocal);
+  if (child == engine::runtime::kInvalidEntity) {
+    return 172;
+  }
+
+  world->begin_render_prep_phase();
+  const engine::runtime::WorldTransform *childWorld =
+      world->get_world_transform_read_ptr(child);
+  if (childWorld == nullptr) {
+    return 173;
+  }
+
+  if ((childWorld->position.x != 8.0F) || (childWorld->position.y != 14.0F) ||
+      (childWorld->position.z != 42.0F) || (childWorld->rotation.x != 0.0F) ||
+      (childWorld->rotation.y != 1.0F) || (childWorld->rotation.z != 0.0F) ||
+      (childWorld->rotation.w != 0.0F) || (childWorld->scale.x != 1.0F) ||
+      (childWorld->scale.y != 6.0F) || (childWorld->scale.z != 1.0F)) {
+    return 174;
+  }
+
+  const engine::math::Mat4 &matrix = childWorld->matrix;
+  if ((matrix.columns[0].x != -1.0F) || (matrix.columns[0].y != 0.0F) ||
+      (matrix.columns[0].z != 0.0F) || (matrix.columns[0].w != 0.0F) ||
+      (matrix.columns[1].x != 0.0F) || (matrix.columns[1].y != 6.0F) ||
+      (matrix.columns[1].z != 0.0F) || (matrix.columns[1].w != 0.0F) ||
+      (matrix.columns[2].x != 0.0F) || (matrix.columns[2].y != 0.0F) ||
+      (matrix.columns[2].z != -1.0F) || (matrix.columns[2].w != 0.0F) ||
+      (matrix.columns[3].x != 8.0F) || (matrix.columns[3].y != 14.0F) ||
+      (matrix.columns[3].z != 42.0F) || (matrix.columns[3].w != 1.0F)) {
+    return 175;
+  }
+
+  world->begin_render_phase();
+  world->end_frame_phase();
+  return 0;
+}
+
 int verify_persistent_id_index() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -212,8 +357,8 @@ int verify_transform_cycle_is_stable() {
 }
 
 // Parented colliders must collide and answer queries at their composed world
-// pose, and parented rigid bodies must never integrate (they are kinematic
-// attachments that follow their parent).
+// pose, and a body-less attached collider must never integrate (it follows
+// its parent through transform propagation).
 int verify_physics_follows_transform_hierarchy() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -240,8 +385,7 @@ int verify_physics_follows_transform_hierarchy() {
   childTransform.position = engine::math::Vec3(0.0F, 2.0F, 0.0F);
   childTransform.parentId = world->persistent_id(parent);
   if (!world->add_transform(child, childTransform) ||
-      !world->add_collider(child, engine::runtime::Collider{}) ||
-      !world->add_rigid_body(child, engine::runtime::RigidBody{})) {
+      !world->add_collider(child, engine::runtime::Collider{})) {
     return 93;
   }
 
@@ -260,15 +404,14 @@ int verify_physics_follows_transform_hierarchy() {
   world->begin_render_phase();
   world->end_frame_phase();
 
-  // Collision transform: composed world pose with the parent link cleared.
-  engine::runtime::Transform collisionPose{};
-  if (!world->get_collision_transform(child, &collisionPose)) {
+  // Physics transform: the hierarchy-composed world pose.
+  engine::physics::PhysicsTransform collisionPose{};
+  if (!world->get_physics_transform(child, &collisionPose)) {
     return 95;
   }
   if ((collisionPose.position.x != 10.0F) ||
       (collisionPose.position.y != 2.0F) ||
-      (collisionPose.position.z != 0.0F) ||
-      (collisionPose.parentId != engine::runtime::kInvalidPersistentId)) {
+      (collisionPose.position.z != 0.0F)) {
     return 96;
   }
 
@@ -301,8 +444,8 @@ int verify_physics_follows_transform_hierarchy() {
     return 100;
   }
 
-  // Step physics: the parented body must not integrate at all, while the
-  // root control body advances by exactly velocity.x * dt.
+  // Step physics: the body-less attached collider must not integrate, while
+  // the root control body advances by exactly velocity.x * dt.
   const float dt = 1.0F / 60.0F;
   world->begin_update_phase();
   if (!engine::runtime::step_physics(*world, dt)) {
@@ -586,7 +729,17 @@ int verify_destroy_removes_script_component() {
 
 /// Runs this executable or test program.
 int main() {
-  int result = verify_persistent_id_index();
+  int result = verify_raw_and_scene_object_creation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_parent_trs_propagation_exact();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_persistent_id_index();
   if (result != 0) {
     return result;
   }

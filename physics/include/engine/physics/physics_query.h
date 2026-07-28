@@ -24,6 +24,12 @@ struct SweepHit final {
 
 // ------ Query Functions------------------------------------------------------
 
+/// Returns the nearest ray intersection while optionally skipping one entity.
+bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
+             const math::Vec3 &direction, float maxDistance,
+             PhysicsRaycastHit *outHit,
+             Entity skipEntity = kInvalidEntity) noexcept;
+
 /// Returns the nearest maxHits ray intersections sorted by distance.
 /// Direction is normalized internally; maxDistance must be finite and
 /// positive. Respects the collision mask.

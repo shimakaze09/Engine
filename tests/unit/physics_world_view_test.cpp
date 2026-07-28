@@ -16,6 +16,7 @@ using engine::physics::Collider;
 using engine::physics::Entity;
 using engine::physics::MovementAuthority;
 using engine::physics::PhysicsContext;
+using engine::physics::PhysicsTransform;
 using engine::physics::PhysicsWorldView;
 using engine::physics::RigidBody;
 using engine::physics::Transform;
@@ -27,6 +28,12 @@ public:
 
   bool get_transform(Entity /*entity*/,
                      Transform * /*outTransform*/) const noexcept override {
+    return false;
+  }
+
+  bool get_physics_transform(
+      Entity /*entity*/,
+      PhysicsTransform * /*outTransform*/) const noexcept override {
     return false;
   }
 
@@ -47,6 +54,12 @@ public:
     return nullptr;
   }
 
+  bool get_simulation_physics_transform(
+      Entity /*entity*/, const SimulationAccessToken & /*token*/,
+      PhysicsTransform * /*outTransform*/) const noexcept override {
+    return false;
+  }
+
   std::size_t collider_count() const noexcept override { return 0U; }
 
   bool get_collider_range(
@@ -58,6 +71,14 @@ public:
 
   const Collider *get_collider_ptr(Entity /*entity*/) const noexcept override {
     return nullptr;
+  }
+
+  std::size_t rigid_body_count() const noexcept override { return 0U; }
+
+  bool get_rigid_body_range(std::size_t /*startIndex*/, std::size_t /*count*/,
+                            const Entity ** /*outEntities*/,
+                            RigidBody ** /*outBodies*/) noexcept override {
+    return false;
   }
 
   RigidBody *get_rigid_body_ptr(Entity /*entity*/) noexcept override {
@@ -72,6 +93,16 @@ public:
   bool get_rigid_body(Entity /*entity*/,
                       RigidBody * /*outRigidBody*/) const noexcept override {
     return false;
+  }
+
+  Entity rigid_body_owner(Entity /*colliderEntity*/) const noexcept override {
+    return engine::physics::kInvalidEntity;
+  }
+
+  Entity rigid_body_owner(
+      Entity /*colliderEntity*/,
+      const SimulationAccessToken & /*token*/) const noexcept override {
+    return engine::physics::kInvalidEntity;
   }
 
   MovementAuthority

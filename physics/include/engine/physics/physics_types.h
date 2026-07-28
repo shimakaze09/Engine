@@ -8,10 +8,12 @@
 
 #include "engine/core/entity.h"
 #include "engine/math/component_types.h"
+#include "engine/math/mat4.h"
 
 namespace engine::physics {
 
-// Re-export shared types into engine::physics for use in physics headers/sources.
+// Re-export shared types into engine::physics for use in physics
+// headers/sources.
 using engine::core::Entity;
 using engine::core::kInvalidEntity;
 using engine::core::kInvalidPersistentId;
@@ -21,6 +23,19 @@ using engine::math::ColliderShape;
 using engine::math::MovementAuthority;
 using engine::math::RigidBody;
 using engine::math::Transform;
+
+/// Full world-space transform consumed by physics spatial queries.
+///
+/// The matrix is authoritative because a rotated child below a non-uniformly
+/// scaled parent can contain shear that separate rotation/scale values cannot
+/// represent exactly. The decomposed values are retained for body integration
+/// and diagnostics.
+struct PhysicsTransform final {
+  math::Vec3 position = math::Vec3(0.0F, 0.0F, 0.0F);
+  math::Quat rotation = math::Quat();
+  math::Vec3 scale = math::Vec3(1.0F, 1.0F, 1.0F);
+  math::Mat4 matrix = math::Mat4();
+};
 
 // Physics-specific result type.
 struct PhysicsRaycastHit final {
