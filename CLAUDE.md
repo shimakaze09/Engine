@@ -1,10 +1,13 @@
 # CLAUDE.md — Engine
 
 The single project document: instructions, repository map, conventions, and
-roadmap. It replaces the former `AGENTS.md`, `PROJECT_INDEX.md`, `TODO.md`,
-and `REVIEW_FINDINGS.md` (their full text and the 2026-07 hardening-campaign
-history live in git). Keep this file updated in the same commit as any change
-to module structure, build commands, test layout, or roadmap status.
+roadmap. It replaced the former `PROJECT_INDEX.md`, `TODO.md`, and
+`REVIEW_FINDINGS.md` (their full text and the 2026-07 hardening-campaign
+history live in git). `AGENTS.md` is a byte-identical mirror of this file
+(title line aside) so agents that look for that name see the same document —
+edit both together in the same commit; CI fails if they drift. Keep this file
+updated in the same commit as any change to module structure, build commands,
+test layout, or roadmap status.
 
 ## What this is
 
@@ -301,5 +304,8 @@ beside the tile texture, sampled via `texelFetch`) instead of 128-point/
 64-spot uniform arrays. The same change fixed a latent tile-lookup bug:
 the shader read the spot section at `MAX_POINT_LIGHTS + 1` (129) while the
 CPU packs tile rows as `1 + 32 + 1 + 16` texels, so deferred spot lights
-sampled out of bounds and never lit. Needs a run on NVIDIA hardware to
-confirm the link failure is gone.
+sampled out of bounds and never lit. Verified on NVIDIA hardware 2026-07-20
+(RTX 5070, driver 32.0.16.1074): the shader links cleanly, no renderer
+warnings across a live editor session, and the deferred path is active. A
+deliberately broken shader was used as a control to confirm link failures
+do surface in the startup log.

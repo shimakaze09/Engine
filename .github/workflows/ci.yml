@@ -160,6 +160,13 @@ jobs:
       - name: Audit comment quality
         run: python3 tools/check_comment_quality.py
 
+      - name: Check CLAUDE.md and AGENTS.md stay in sync
+        run: |
+          if ! diff <(tail -n +2 CLAUDE.md) <(tail -n +2 AGENTS.md); then
+            echo "FAIL: CLAUDE.md and AGENTS.md have drifted apart (they must be identical below the title line)"
+            exit 1
+          fi
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 

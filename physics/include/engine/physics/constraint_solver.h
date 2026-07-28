@@ -39,11 +39,11 @@ static constexpr std::size_t kMaxContactManifolds = 2048U;
 // ------ Constraint Solver API -----------------------------------------------
 
 // Solve all joint constraints on the world.  Called after collision resolution.
-/// Creates a hinge with a finite nonzero axis; invalid ID on bad input/full.
 void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept;
 
 // ------ Typed Joint Creation ------------------------------------------------
 
+/// Creates a hinge with a finite nonzero axis; invalid ID on bad input/full.
 JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept;
