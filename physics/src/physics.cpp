@@ -88,6 +88,8 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   pairHashGeneration = other.pairHashGeneration;
   testedStamps = other.testedStamps;
   testedGeneration = other.testedGeneration;
+  ccdColliderCount = other.ccdColliderCount;
+  ccdHasCompoundColliders = other.ccdHasCompoundColliders;
 
   if (other.shapeStore == nullptr) {
     shapeStore.reset();
