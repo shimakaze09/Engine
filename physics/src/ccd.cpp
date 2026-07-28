@@ -175,9 +175,43 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   std::uint32_t bestHitEntity = 0U;
   const Entity movingOwner = world.rigid_body_owner(entity);
 
+  // The previous resolve's snapshot provides candidate bounds and ownership:
+  // per-candidate hierarchy walks and geometry builds dominate the sweep
+  // cost, so candidates are rejected on snapshot AABBs first.
+  const PhysicsContext &physicsCtx = world.physics_context();
+  const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
+  const bool snapshotUsable =
+      (snapshotStore != nullptr) && (physicsCtx.ccdColliderCount == count);
+
+  // Conservative reject bounds: the mover's whole-step swept AABB expanded
+  // by a slop covering one step of snapshot drift (positional corrections).
+  // Pairs missed because the OTHER body races toward a slow mover are
+  // covered by that body's own CCD sweep.
+  constexpr float kSnapshotDriftSlop = 0.1F;
+  const math::Vec3 gateDisplacement = math::mul(body.velocity, dt);
+  math::AABB gateBounds = movingGeometry.worldAabb;
+  gateBounds.min.x += std::min(gateDisplacement.x, 0.0F) - kSnapshotDriftSlop;
+  gateBounds.min.y += std::min(gateDisplacement.y, 0.0F) - kSnapshotDriftSlop;
+  gateBounds.min.z += std::min(gateDisplacement.z, 0.0F) - kSnapshotDriftSlop;
+  gateBounds.max.x += std::max(gateDisplacement.x, 0.0F) + kSnapshotDriftSlop;
+  gateBounds.max.y += std::max(gateDisplacement.y, 0.0F) + kSnapshotDriftSlop;
+  gateBounds.max.z += std::max(gateDisplacement.z, 0.0F) + kSnapshotDriftSlop;
+
   for (std::size_t i = 0U; i < count; ++i) {
     if (entities[i] == entity) {
       continue;
+    }
+
+    if (snapshotUsable) {
+      const math::AABB &otherBounds = snapshotStore->ccdColliderAabbs[i];
+      if ((gateBounds.min.x > otherBounds.max.x) ||
+          (gateBounds.max.x < otherBounds.min.x) ||
+          (gateBounds.min.y > otherBounds.max.y) ||
+          (gateBounds.max.y < otherBounds.min.y) ||
+          (gateBounds.min.z > otherBounds.max.z) ||
+          (gateBounds.max.z < otherBounds.min.z)) {
+        continue;
+      }
     }
 
     // Collision layer/mask filtering.
@@ -187,28 +221,33 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    const Entity otherOwner = world.rigid_body_owner(entities[i]);
+    const Entity otherOwner =
+        (snapshotUsable &&
+         (snapshotStore->ccdColliderEntities[i] == entities[i]))
+            ? snapshotStore->ccdColliderOwners[i]
+            : world.rigid_body_owner(entities[i]);
     if ((movingOwner != kInvalidEntity) && (movingOwner == otherOwner)) {
       continue;
     }
 
-    ColliderWorldGeometry otherGeometry{};
-    if (!build_geometry(world, entities[i], other, nullptr, &otherGeometry)) {
-      continue;
-    }
-
-    // Get the other body's velocity (might be moving too).
+    // Reject on relative velocity BEFORE building world geometry: geometry
+    // construction (transform composition + matrix inverse) is by far the
+    // most expensive part of a candidate visit, and bodies moving together
+    // can never produce a sweep hit.
     const RigidBody *otherBody = (otherOwner != kInvalidEntity)
                                      ? world.get_rigid_body_ptr(otherOwner)
                                      : nullptr;
     const math::Vec3 otherVel = (otherBody != nullptr)
                                     ? otherBody->velocity
                                     : math::Vec3(0.0F, 0.0F, 0.0F);
-
-    // Relative velocity of moving body w.r.t. other.
     const math::Vec3 relVel = math::sub(body.velocity, otherVel);
     const float relSpeed = math::length(relVel);
     if (relSpeed < 1e-6F) {
+      continue;
+    }
+
+    ColliderWorldGeometry otherGeometry{};
+    if (!build_geometry(world, entities[i], other, nullptr, &otherGeometry)) {
       continue;
     }
 

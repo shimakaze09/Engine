@@ -470,6 +470,56 @@ int verify_physics_follows_transform_hierarchy() {
   return 0;
 }
 
+// Destroying a parent must take its whole transform subtree with it; an
+// unrelated sibling hierarchy survives untouched.
+int verify_cascade_destroy_subtree() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 110;
+  }
+
+  const engine::runtime::Entity parent = world->create_scene_object();
+  engine::runtime::Transform childTransform{};
+  childTransform.parentId = world->persistent_id(parent);
+  const engine::runtime::Entity child =
+      world->create_scene_object(childTransform);
+  engine::runtime::Transform grandchildTransform{};
+  grandchildTransform.parentId = world->persistent_id(child);
+  const engine::runtime::Entity grandchild =
+      world->create_scene_object(grandchildTransform);
+  const engine::runtime::Entity bystander = world->create_scene_object();
+  engine::runtime::Transform bystanderChildTransform{};
+  bystanderChildTransform.parentId = world->persistent_id(bystander);
+  const engine::runtime::Entity bystanderChild =
+      world->create_scene_object(bystanderChildTransform);
+
+  if ((parent == engine::runtime::kInvalidEntity) ||
+      (child == engine::runtime::kInvalidEntity) ||
+      (grandchild == engine::runtime::kInvalidEntity) ||
+      (bystander == engine::runtime::kInvalidEntity) ||
+      (bystanderChild == engine::runtime::kInvalidEntity)) {
+    return 111;
+  }
+
+  if (!world->destroy_entity(parent)) {
+    return 112;
+  }
+
+  if (world->is_alive(parent) || world->is_alive(child) ||
+      world->is_alive(grandchild)) {
+    return 113;
+  }
+  if (!world->is_alive(bystander) || !world->is_alive(bystanderChild)) {
+    return 114;
+  }
+  if (world->alive_entity_count() != 2U) {
+    return 115;
+  }
+
+  return 0;
+}
+
 int verify_persistent_index_tombstones() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -770,6 +820,11 @@ int main() {
   }
 
   result = verify_physics_follows_transform_hierarchy();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_cascade_destroy_subtree();
   if (result != 0) {
     return result;
   }

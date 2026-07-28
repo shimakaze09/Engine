@@ -84,6 +84,14 @@ engine_add_test_executable(engine_unit_physics_hierarchy_collision
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_capsule_contact_stability
+    SOURCES
+    capsule_contact_stability_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp

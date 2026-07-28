@@ -34,6 +34,7 @@
 #include "imgui_internal.h"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -44,6 +45,7 @@
 #include <vector>
 
 #include "engine/core/cvar.h"
+#include "engine/core/debug_draw.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -74,35 +76,78 @@ namespace engine::editor {
 
 namespace {
 
-bool project_world_to_screen(const math::Vec3 &worldPos, const math::Mat4 &vp,
-                             const ImVec2 &viewportOrigin,
-                             const ImVec2 &viewportSize,
-                             ImVec2 *outScreen) noexcept {
-  if ((outScreen == nullptr) || (viewportSize.x <= 0.0F) ||
-      (viewportSize.y <= 0.0F)) {
-    return false;
-  }
+constexpr core::DebugColor kColliderWireColor{0.16F, 1.0F, 0.47F, 0.86F};
 
-  const math::Vec4 clip =
-      math::mul(vp, math::Vec4(worldPos.x, worldPos.y, worldPos.z, 1.0F));
-  if (clip.w <= 0.0001F) {
-    return false;
-  }
-
-  const float invW = 1.0F / clip.w;
-  const float ndcX = clip.x * invW;
-  const float ndcY = clip.y * invW;
-
-  outScreen->x = viewportOrigin.x + ((ndcX * 0.5F) + 0.5F) * viewportSize.x;
-  outScreen->y =
-      viewportOrigin.y + (1.0F - ((ndcY * 0.5F) + 0.5F)) * viewportSize.y;
-  return true;
+/// Emits one collider-frame segment as a depth-tested world debug line.
+void emit_collider_segment(const math::Mat4 &localToWorld,
+                           const math::Vec3 &from,
+                           const math::Vec3 &to) noexcept {
+  const math::Vec4 worldFrom =
+      math::mul(localToWorld, math::Vec4(from.x, from.y, from.z, 1.0F));
+  const math::Vec4 worldTo =
+      math::mul(localToWorld, math::Vec4(to.x, to.y, to.z, 1.0F));
+  core::debug_draw_line({worldFrom.x, worldFrom.y, worldFrom.z},
+                        {worldTo.x, worldTo.y, worldTo.z}, kColliderWireColor);
 }
 
-void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
-                                    const math::Mat4 &viewProjection,
-                                    const ImVec2 &viewportOrigin,
-                                    const ImVec2 &viewportSize) noexcept {
+/// Emits the 12 edges of a collider-frame box around center.
+void emit_collider_box(const math::Mat4 &localToWorld,
+                       const math::Vec3 &center,
+                       const math::Vec3 &halfExtents) noexcept {
+  math::Vec3 corners[8]{};
+  for (std::size_t corner = 0U; corner < 8U; ++corner) {
+    corners[corner] = math::Vec3(
+        center.x + (((corner & 1U) != 0U) ? halfExtents.x : -halfExtents.x),
+        center.y + (((corner & 2U) != 0U) ? halfExtents.y : -halfExtents.y),
+        center.z + (((corner & 4U) != 0U) ? halfExtents.z : -halfExtents.z));
+  }
+
+  // Corner indices are bit-encoded (x=1, y=2, z=4); every edge joins two
+  // corners that differ in exactly one bit.
+  static constexpr int kEdges[24] = {
+      0, 1, 2, 3, 4, 5, 6, 7, // x-aligned edges
+      0, 2, 1, 3, 4, 6, 5, 7, // y-aligned edges
+      0, 4, 1, 5, 2, 6, 3, 7  // z-aligned edges
+  };
+  for (int i = 0; i < 24; i += 2) {
+    emit_collider_segment(localToWorld, corners[kEdges[i]],
+                          corners[kEdges[i + 1]]);
+  }
+}
+
+/// Emits an arc of the given sweep in one collider-frame plane.
+void emit_collider_arc(const math::Mat4 &localToWorld,
+                       const math::Vec3 &center, float radius, int axisU,
+                       int axisV, float startAngle, float sweep) noexcept {
+  constexpr int kSegments = 16;
+  math::Vec3 previous{};
+  for (int i = 0; i <= kSegments; ++i) {
+    const float angle =
+        startAngle + (sweep * static_cast<float>(i)) / kSegments;
+    float coords[3] = {center.x, center.y, center.z};
+    coords[axisU] += radius * std::cos(angle);
+    coords[axisV] += radius * std::sin(angle);
+    const math::Vec3 point(coords[0], coords[1], coords[2]);
+    if (i > 0) {
+      emit_collider_segment(localToWorld, previous, point);
+    }
+    previous = point;
+  }
+}
+
+/// Emits a full circle in one collider-frame plane.
+void emit_collider_circle(const math::Mat4 &localToWorld,
+                          const math::Vec3 &center, float radius, int axisU,
+                          int axisV) noexcept {
+  constexpr float kTwoPi = 6.28318530718F;
+  emit_collider_arc(localToWorld, center, radius, axisU, axisV, 0.0F, kTwoPi);
+}
+
+// Emits the selected entity's collider as a shape-matched wireframe into the
+// depth-tested debug line pass, using the same world geometry physics
+// collides with.
+void draw_selected_collider_overlay(
+    const runtime::Entity selectedEntity) noexcept {
   if ((editor_session().world == nullptr) ||
       (selectedEntity == runtime::kInvalidEntity)) {
     return;
@@ -131,57 +176,64 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
     return;
   }
 
-  math::Vec3 localCenter(0.0F, 0.0F, 0.0F);
-  math::Vec3 halfExtents = geometry.halfExtents;
-  if (collider->shape == runtime::ColliderShape::Sphere) {
-    const float r = collider->halfExtents.x;
-    halfExtents = math::Vec3(r, r, r);
-  } else if (collider->shape == runtime::ColliderShape::Capsule) {
+  const math::Mat4 &localToWorld = geometry.localToWorld;
+  const math::Vec3 origin(0.0F, 0.0F, 0.0F);
+  constexpr float kPi = 3.14159265359F;
+
+  switch (collider->shape) {
+  case runtime::ColliderShape::Sphere: {
     const float radius = collider->halfExtents.x;
-    halfExtents = math::Vec3(radius, collider->halfExtents.y + radius, radius);
-  } else if ((collider->shape == runtime::ColliderShape::ConvexHull) &&
-             (hull != nullptr)) {
-    localCenter = hull->localCenter;
-    halfExtents = hull->localHalfExtents;
+    emit_collider_circle(localToWorld, origin, radius, 0, 1);
+    emit_collider_circle(localToWorld, origin, radius, 0, 2);
+    emit_collider_circle(localToWorld, origin, radius, 2, 1);
+    break;
   }
+  case runtime::ColliderShape::Capsule: {
+    const float radius = collider->halfExtents.x;
+    const float halfHeight = collider->halfExtents.y;
+    const math::Vec3 top(0.0F, halfHeight, 0.0F);
+    const math::Vec3 bottom(0.0F, -halfHeight, 0.0F);
 
-  math::Vec3 corners[8]{};
-  for (std::size_t corner = 0U; corner < 8U; ++corner) {
-    const math::Vec3 localPoint(
-        localCenter.x +
-            (((corner & 1U) != 0U) ? halfExtents.x : -halfExtents.x),
-        localCenter.y +
-            (((corner & 2U) != 0U) ? halfExtents.y : -halfExtents.y),
-        localCenter.z +
-            (((corner & 4U) != 0U) ? halfExtents.z : -halfExtents.z));
-    const math::Vec4 worldPoint =
-        math::mul(geometry.localToWorld,
-                  math::Vec4(localPoint.x, localPoint.y, localPoint.z, 1.0F));
-    corners[corner] = math::Vec3(worldPoint.x, worldPoint.y, worldPoint.z);
+    emit_collider_circle(localToWorld, top, radius, 0, 2);
+    emit_collider_circle(localToWorld, bottom, radius, 0, 2);
+    emit_collider_segment(localToWorld, math::Vec3(radius, -halfHeight, 0.0F),
+                          math::Vec3(radius, halfHeight, 0.0F));
+    emit_collider_segment(localToWorld, math::Vec3(-radius, -halfHeight, 0.0F),
+                          math::Vec3(-radius, halfHeight, 0.0F));
+    emit_collider_segment(localToWorld, math::Vec3(0.0F, -halfHeight, radius),
+                          math::Vec3(0.0F, halfHeight, radius));
+    emit_collider_segment(localToWorld, math::Vec3(0.0F, -halfHeight, -radius),
+                          math::Vec3(0.0F, halfHeight, -radius));
+
+    emit_collider_arc(localToWorld, top, radius, 0, 1, 0.0F, kPi);
+    emit_collider_arc(localToWorld, top, radius, 2, 1, 0.0F, kPi);
+    emit_collider_arc(localToWorld, bottom, radius, 0, 1, kPi, kPi);
+    emit_collider_arc(localToWorld, bottom, radius, 2, 1, kPi, kPi);
+    break;
   }
-
-  ImVec2 projected[8] = {};
-  bool visible[8] = {};
-  for (int i = 0; i < 8; ++i) {
-    visible[i] =
-        project_world_to_screen(corners[i], viewProjection, viewportOrigin,
-                                viewportSize, &projected[i]);
-  }
-
-  static constexpr int kEdges[24] = {
-      0, 1, 1, 2, 2, 3, 3, 0, // back face
-      4, 5, 5, 6, 6, 7, 7, 4, // front face
-      0, 4, 1, 5, 2, 6, 3, 7  // side links
-  };
-
-  ImDrawList *drawList = ImGui::GetWindowDrawList();
-  const ImU32 color = IM_COL32(40, 255, 120, 220);
-  for (int i = 0; i < 24; i += 2) {
-    const int a = kEdges[i];
-    const int b = kEdges[i + 1];
-    if (visible[a] && visible[b]) {
-      drawList->AddLine(projected[a], projected[b], color, 2.0F);
+  case runtime::ColliderShape::ConvexHull: {
+    if (hull != nullptr) {
+      emit_collider_box(localToWorld, hull->localCenter,
+                        hull->localHalfExtents);
+    } else {
+      emit_collider_box(localToWorld, origin, collider->halfExtents);
     }
+    break;
+  }
+  case runtime::ColliderShape::Heightfield: {
+    // Heightfields are world-anchored: draw the conservative world bounds.
+    const math::Vec3 aabbCenter =
+        math::mul(math::add(geometry.worldAabb.min, geometry.worldAabb.max),
+                  0.5F);
+    const math::Vec3 aabbHalf = math::mul(
+        math::sub(geometry.worldAabb.max, geometry.worldAabb.min), 0.5F);
+    emit_collider_box(math::Mat4(), aabbCenter, aabbHalf);
+    break;
+  }
+  default: {
+    emit_collider_box(localToWorld, origin, collider->halfExtents);
+    break;
+  }
   }
 }
 
@@ -228,23 +280,8 @@ void draw_scene_viewport_panel() noexcept {
                             (editor_session().world->get_transform_read_ptr(
                                  selectedEntity) != nullptr);
 
-  if ((selectedEntity != runtime::kInvalidEntity) && (regionSize.x > 0.0F) &&
-      (regionSize.y > 0.0F)) {
-    const renderer::CameraState cam =
-        (editor_session().playState == PlayState::Playing)
-            ? renderer::get_active_camera()
-            : editor_camera_state(editor_session().editorCamera);
-
-    constexpr float kDefaultFov = 1.0471975512F;
-    constexpr float kNear = 0.1F;
-    constexpr float kFar = 100.0F;
-    const float aspect = regionSize.x / regionSize.y;
-    const math::Mat4 viewMat = math::look_at(cam.position, cam.target, cam.up);
-    const math::Mat4 projMat =
-        math::perspective(kDefaultFov, aspect, kNear, kFar);
-    const math::Mat4 vp = math::mul(projMat, viewMat);
-    draw_selected_collider_overlay(selectedEntity, vp, cursorScreenPos,
-                                   regionSize);
+  if (selectedEntity != runtime::kInvalidEntity) {
+    draw_selected_collider_overlay(selectedEntity);
   }
 
   if (editable && hasTransform && (regionSize.x > 0.0F) &&

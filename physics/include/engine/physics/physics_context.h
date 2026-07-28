@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "engine/core/entity.h"
+#include "engine/math/aabb.h"
 #include "engine/math/component_types.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
@@ -83,6 +84,13 @@ struct PhysicsShapeStore final {
   std::array<HeightfieldData, kMaxHeightfields> heightfieldData{};
   std::array<Entity, kMaxHeightfields> heightfieldEntity{};
   std::size_t heightfieldCount = 0U;
+
+  // Per-collider snapshot rebuilt by resolve_collisions each step; the next
+  // step's CCD reads it for cheap candidate rejection and ownership lookup
+  // instead of re-walking the hierarchy per body×collider combination.
+  std::array<Entity, kMaxColliders> ccdColliderEntities{};
+  std::array<Entity, kMaxColliders> ccdColliderOwners{};
+  std::array<math::AABB, kMaxColliders> ccdColliderAabbs{};
 };
 
 /// World-owned physics storage: gravity, joints, pair/stamp scratch,
@@ -114,6 +122,12 @@ struct PhysicsContext final {
   // O(1) broadphase neighbor dedupe using per-collider generation stamps.
   std::array<std::uint32_t, kMaxColliders> testedStamps{};
   std::uint32_t testedGeneration = 1U;
+
+  // Valid entry count and compound flag for the shape store's CCD snapshot
+  // (one step stale after reparenting, an Input-phase-only mutation). When
+  // no compound colliders exist, CCD sweeps each body's own collider.
+  std::size_t ccdColliderCount = 0U;
+  bool ccdHasCompoundColliders = false;
 
   // Heap-backed so large heightfield buffers do not inflate World stack size.
   std::unique_ptr<PhysicsShapeStore> shapeStore;

@@ -223,7 +223,8 @@ public:
   Entity create_scene_object_with_persistent_id(
       PersistentId persistentId,
       const Transform &localTransform = Transform{}) noexcept;
-  /// Destroys or releases the requested object, handle, or resource for entity.
+  /// Destroys the entity and its whole transform subtree (children never
+  /// survive their parent); defers during Simulation so EndPlay fires.
   bool destroy_entity(Entity entity) noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
@@ -785,11 +786,16 @@ private:
   bool is_mutation_phase() const noexcept;
   /// Returns whether is valid entity.
   bool is_valid_entity(Entity entity) const noexcept;
-  /// Destroys or releases the requested object, handle, or resource for entity
-  /// immediate.
+  /// Destroys the entity and its whole transform subtree right now.
   bool destroy_entity_immediate(Entity entity) noexcept;
-  /// Queues the entity for destruction at the EndPlay flush.
+  /// Queues the entity and its transform subtree for the EndPlay flush.
   bool queue_deferred_destroy(Entity entity) noexcept;
+  /// Destroys exactly one entity without cascading to its children.
+  bool destroy_single_entity(Entity entity) noexcept;
+  /// Queues exactly one entity for deferred destruction, deduplicated.
+  bool queue_single_deferred_destroy(Entity entity) noexcept;
+  /// Marks root's live descendants in m_cascadeMarks; returns the count.
+  std::size_t mark_hierarchy_descendants(Entity root) noexcept;
   /// Flushes queued work to the backing runtime system for deferred destroys.
   void flush_deferred_destroys() noexcept;
   /// Maps a persistent id to its entity index; false when the table is full.
@@ -1094,6 +1100,8 @@ private:
   core::FixedHashTable<PersistentId, std::uint32_t, kPersistentIndexCapacity>
       m_persistentIndex{};
   std::array<bool, kMaxEntities + 1U> m_entityAlive{};
+  // Scratch marks for subtree collection during cascade destruction.
+  std::array<bool, kMaxEntities + 1U> m_cascadeMarks{};
   std::array<bool, kMaxEntities + 1U> m_entityBeginPlayFired{};
   // Alive entities whose begin_play has not fired yet (kept in sync by
   // create/destroy/mark_begin_play_done).

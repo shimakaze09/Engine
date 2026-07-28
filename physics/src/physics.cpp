@@ -88,6 +88,8 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   pairHashGeneration = other.pairHashGeneration;
   testedStamps = other.testedStamps;
   testedGeneration = other.testedGeneration;
+  ccdColliderCount = other.ccdColliderCount;
+  ccdHasCompoundColliders = other.ccdHasCompoundColliders;
 
   if (other.shapeStore == nullptr) {
     shapeStore.reset();
@@ -851,27 +853,63 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
 
       // CCD: sweep every collider owned by this rigid-body root, including
       // child colliders in a compound object, and keep the earliest impact.
+      // Ownership comes from the previous resolve's snapshot so this stays
+      // O(1) per body in the common no-compound case instead of re-walking
+      // the hierarchy for every body×collider combination.
       bool clamped = false;
       CcdSweepResult earliestCcd{};
-      const std::size_t colliderCount = world.collider_count();
-      const Entity *colliderEntities = nullptr;
-      const Collider *colliders = nullptr;
-      if ((colliderCount > 0U) &&
-          !world.get_collider_range(0U, colliderCount, &colliderEntities,
-                                    &colliders)) {
-        return false;
-      }
-      for (std::size_t colliderIndex = 0U; colliderIndex < colliderCount;
-           ++colliderIndex) {
-        if (world.rigid_body_owner(colliderEntities[colliderIndex]) != entity) {
-          continue;
+      const Collider *ownCollider = world.get_collider_ptr(entity);
+      if (!physicsCtx.ccdHasCompoundColliders && (ownCollider != nullptr)) {
+        earliestCcd =
+            bilateral_advance_ccd(world, entity, *body, *ownCollider,
+                                  readTransforms[i], deltaSeconds);
+      } else if ((physicsCtx.shapeStore != nullptr) &&
+                 (physicsCtx.ccdColliderCount > 0U)) {
+        const PhysicsShapeStore &store = *physicsCtx.shapeStore;
+        for (std::size_t colliderIndex = 0U;
+             colliderIndex < physicsCtx.ccdColliderCount; ++colliderIndex) {
+          if (store.ccdColliderOwners[colliderIndex] != entity) {
+            continue;
+          }
+          const Entity colliderEntity =
+              store.ccdColliderEntities[colliderIndex];
+          const Collider *ownedCollider = world.get_collider_ptr(colliderEntity);
+          if (ownedCollider == nullptr) {
+            continue;
+          }
+          const CcdSweepResult candidate =
+              bilateral_advance_ccd(world, colliderEntity, *body,
+                                    *ownedCollider, readTransforms[i],
+                                    deltaSeconds);
+          if (candidate.hit &&
+              (!earliestCcd.hit ||
+               (candidate.timeOfImpact < earliestCcd.timeOfImpact))) {
+            earliestCcd = candidate;
+          }
         }
-        const CcdSweepResult candidate = bilateral_advance_ccd(
-            world, colliderEntities[colliderIndex], *body,
-            colliders[colliderIndex], readTransforms[i], deltaSeconds);
-        if (candidate.hit && (!earliestCcd.hit || (candidate.timeOfImpact <
-                                                   earliestCcd.timeOfImpact))) {
-          earliestCcd = candidate;
+      } else {
+        // No resolve snapshot yet (first step): resolve ownership directly.
+        const std::size_t colliderCount = world.collider_count();
+        const Entity *colliderEntities = nullptr;
+        const Collider *colliders = nullptr;
+        if ((colliderCount > 0U) &&
+            world.get_collider_range(0U, colliderCount, &colliderEntities,
+                                     &colliders)) {
+          for (std::size_t colliderIndex = 0U; colliderIndex < colliderCount;
+               ++colliderIndex) {
+            if (world.rigid_body_owner(colliderEntities[colliderIndex]) !=
+                entity) {
+              continue;
+            }
+            const CcdSweepResult candidate = bilateral_advance_ccd(
+                world, colliderEntities[colliderIndex], *body,
+                colliders[colliderIndex], readTransforms[i], deltaSeconds);
+            if (candidate.hit &&
+                (!earliestCcd.hit ||
+                 (candidate.timeOfImpact < earliestCcd.timeOfImpact))) {
+              earliestCcd = candidate;
+            }
+          }
         }
       }
       if (earliestCcd.hit) {
@@ -1473,11 +1511,23 @@ void narrow_phase_capsule_aabb(const PairContext &pair) noexcept {
 
   const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
   // Normal points from box toward capsule segment.
-  engine::math::Vec3 normal = (dist2 > 0.0F)
-                                  ? engine::math::mul(diff, 1.0F / dist)
-                                  : engine::math::Vec3(0.0F, 1.0F, 0.0F);
-  // Ensure normal points from A to B.
-  if (!aIsCap) {
+  engine::math::Vec3 normal;
+  if (dist2 > 0.0F) {
+    normal = engine::math::mul(diff, 1.0F / dist);
+  } else {
+    // Degenerate deep contact (axis touching the box): separate along the
+    // horizontal center offset instead of an arbitrary vertical pop.
+    const engine::math::Vec3 horizontal(capPos.x - boxPos.x, 0.0F,
+                                        capPos.z - boxPos.z);
+    const float horizontal2 = engine::math::dot(horizontal, horizontal);
+    normal = (horizontal2 > 1e-12F)
+                 ? engine::math::mul(horizontal,
+                                     1.0F / std::sqrt(horizontal2))
+                 : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  }
+  // The solver expects the normal to point from A toward B; the computed
+  // direction is box → capsule, so flip when A is the capsule.
+  if (aIsCap) {
     normal = engine::math::mul(normal, -1.0F);
   }
   const float overlap = capR - dist;
@@ -1826,6 +1876,23 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
       continue;
     }
     bodyCenters[i] = bodyTransform.position;
+  }
+
+  // Publish the ownership/bounds snapshot the next step's CCD consumes.
+  physicsCtx.ccdColliderCount = 0U;
+  physicsCtx.ccdHasCompoundColliders = false;
+  if (physicsCtx.shapeStore != nullptr) {
+    PhysicsShapeStore &store = *physicsCtx.shapeStore;
+    physicsCtx.ccdColliderCount = colliderCount;
+    for (std::size_t i = 0U; i < colliderCount; ++i) {
+      store.ccdColliderEntities[i] = entities[i];
+      store.ccdColliderOwners[i] = bodyOwners[i];
+      store.ccdColliderAabbs[i] = geometries[i].worldAabb;
+      if ((bodyOwners[i] != kInvalidEntity) &&
+          (bodyOwners[i] != entities[i])) {
+        physicsCtx.ccdHasCompoundColliders = true;
+      }
+    }
   }
 
   if (colliderCount >= 2U) {

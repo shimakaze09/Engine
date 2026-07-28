@@ -211,7 +211,66 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
   return Entity{index, m_entityGenerations[index]};
 }
 
+std::size_t World::mark_hierarchy_descendants(Entity root) noexcept {
+  m_cascadeMarks.fill(false);
+  m_cascadeMarks[root.index] = true;
+
+  // Fixpoint marking: a transform whose resolved parent index is marked
+  // joins the subtree. Pass count is bounded by hierarchy depth, and cycles
+  // terminate because the mark set only grows.
+  std::size_t markedCount = 0U;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    const std::size_t transformCount = m_transforms.count();
+    for (std::size_t denseIndex = 0U; denseIndex < transformCount;
+         ++denseIndex) {
+      const Entity entity = m_transforms.entity_at(denseIndex);
+      if (m_cascadeMarks[entity.index] || !m_entityAlive[entity.index]) {
+        continue;
+      }
+
+      const Transform &local =
+          m_transforms.component_at(denseIndex, m_readStateIndex);
+      if (local.parentId == kInvalidPersistentId) {
+        continue;
+      }
+
+      const std::uint32_t parentIndex = find_persistent_index(local.parentId);
+      if ((parentIndex != 0U) && m_cascadeMarks[parentIndex]) {
+        m_cascadeMarks[entity.index] = true;
+        ++markedCount;
+        changed = true;
+      }
+    }
+  }
+
+  return markedCount;
+}
+
 bool World::destroy_entity_immediate(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+
+  // Children never survive their parent: destroy the whole subtree so no
+  // orphan snaps to its local offset.
+  if (mark_hierarchy_descendants(entity) > 0U) {
+    const std::uint32_t upperBound = m_nextEntityIndex;
+    for (std::uint32_t index = 1U; index < upperBound; ++index) {
+      if (!m_cascadeMarks[index] || (index == entity.index) ||
+          !m_entityAlive[index]) {
+        continue;
+      }
+      static_cast<void>(
+          destroy_single_entity(Entity{index, m_entityGenerations[index]}));
+    }
+  }
+
+  return destroy_single_entity(entity);
+}
+
+bool World::destroy_single_entity(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     return false;
   }
@@ -269,6 +328,24 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
 }
 
 bool World::queue_deferred_destroy(Entity entity) noexcept {
+  // Children join the deferred queue too, so their EndPlay callbacks fire
+  // before the flush removes the subtree.
+  if (mark_hierarchy_descendants(entity) > 0U) {
+    const std::uint32_t upperBound = m_nextEntityIndex;
+    for (std::uint32_t index = 1U; index < upperBound; ++index) {
+      if (!m_cascadeMarks[index] || (index == entity.index) ||
+          !m_entityAlive[index]) {
+        continue;
+      }
+      static_cast<void>(queue_single_deferred_destroy(
+          Entity{index, m_entityGenerations[index]}));
+    }
+  }
+
+  return queue_single_deferred_destroy(entity);
+}
+
+bool World::queue_single_deferred_destroy(Entity entity) noexcept {
   for (std::size_t i = 0U; i < m_pendingDestroyCount; ++i) {
     if (m_pendingDestroyEntities[i] == entity) {
       return true;

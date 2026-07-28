@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "engine/core/cvar.h"
+#include "engine/core/debug_draw.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/math/mat4.h"
@@ -1938,6 +1939,57 @@ void flush_renderer(CommandBufferView commandBufferView,
     dev->bind_program(0U);
     gpu_profiler_end_pass(GpuPassId::Scene);
   }
+
+  // --- Depth-tested debug line overlay (collider wireframes and similar) ---
+  if (backend.debugLineAvailable) {
+    constexpr std::size_t kMaxDebugLineDraws = 1024U;
+    thread_local static std::array<core::DebugLine, kMaxDebugLineDraws>
+        debugLines{};
+    const std::size_t debugLineCount =
+        core::debug_draw_get_lines(debugLines.data(), kMaxDebugLineDraws);
+    if (debugLineCount > 0U) {
+      thread_local static std::array<float, kMaxDebugLineDraws * 14U>
+          debugLineVertices{};
+      std::size_t floatIndex = 0U;
+      for (std::size_t i = 0U; i < debugLineCount; ++i) {
+        const core::DebugLine &line = debugLines[i];
+        const float endpoints[14] = {
+            line.from.x,    line.from.y,    line.from.z,    line.color.r,
+            line.color.g,   line.color.b,   line.color.a,   line.to.x,
+            line.to.y,      line.to.z,      line.color.r,   line.color.g,
+            line.color.b,   line.color.a};
+        for (float value : endpoints) {
+          debugLineVertices[floatIndex++] = value;
+        }
+      }
+
+      const math::Mat4 debugLineViewProjection = math::mul(projMat, viewMat);
+      dev->bind_framebuffer(pass_resource_framebuffer(passRes.sceneColor));
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      dev->enable_depth_test();
+      dev->enable_blending();
+      dev->set_blend_func_alpha();
+
+      dev->bind_program(backend.debugLineProgram);
+      if (backend.debugLineViewProjectionLoc >= 0) {
+        dev->set_uniform_mat4(backend.debugLineViewProjectionLoc,
+                              &debugLineViewProjection.columns[0].x);
+      }
+      dev->bind_vertex_array(backend.debugLineVao);
+      dev->bind_array_buffer(backend.debugLineVbo);
+      dev->buffer_data_array(debugLineVertices.data(),
+                             static_cast<std::ptrdiff_t>(floatIndex *
+                                                         sizeof(float)));
+      dev->draw_arrays_lines(0, static_cast<std::int32_t>(debugLineCount * 2U));
+
+      dev->bind_array_buffer(0U);
+      dev->bind_vertex_array(0U);
+      dev->bind_program(0U);
+      dev->disable_blending();
+    }
+  }
+  // Expire per-frame debug primitives once per rendered frame.
+  core::debug_draw_tick();
 
   // --- Bloom pass (before tonemap, operates on HDR sceneColor) ---
   const bool bloomAvailable = backend.bloomThresholdProgram != 0U &&
