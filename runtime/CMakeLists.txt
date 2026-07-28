@@ -9,6 +9,7 @@ engine_add_module_library(engine_runtime
     src/engine_pipeline.cpp
     src/physics_bridge.cpp
     src/prefab_serializer.cpp
+    src/primitive_colliders.cpp
     src/render_prep_pipeline.cpp
     src/reflect_types.cpp
     src/scene_serializer.cpp

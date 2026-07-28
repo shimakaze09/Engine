@@ -14,6 +14,7 @@
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/primitive_colliders.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -2407,11 +2408,94 @@ int check_invalid_shape_payloads_rejected() {
   return 0;
 }
 
+// The built-in cylinder and pyramid primitives collide as convex hulls that
+// match their meshes: a cylinder has a flat top (not a capsule dome) and a
+// pyramid's empty corners do not collide (not a bounding box).
+int check_primitive_hull_collision() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 900;
+  }
+  world->end_frame_phase();
+
+  engine::physics::ConvexHullData cylinderHull{};
+  engine::physics::ConvexHullData pyramidHull{};
+  if (!engine::runtime::build_cylinder_hull(&cylinderHull) ||
+      !engine::runtime::build_pyramid_hull(&pyramidHull)) {
+    return 901;
+  }
+
+  const engine::runtime::Entity cylinder = world->create_scene_object();
+  engine::runtime::Transform pyramidTransform{};
+  pyramidTransform.position = engine::math::Vec3(5.0F, 0.0F, 0.0F);
+  const engine::runtime::Entity pyramid =
+      world->create_scene_object(pyramidTransform);
+  if ((cylinder == engine::runtime::kInvalidEntity) ||
+      (pyramid == engine::runtime::kInvalidEntity)) {
+    return 902;
+  }
+
+  engine::runtime::Collider cylinderCollider{};
+  cylinderCollider.shape = engine::runtime::ColliderShape::ConvexHull;
+  cylinderCollider.halfExtents = cylinderHull.localHalfExtents;
+  engine::runtime::Collider pyramidCollider{};
+  pyramidCollider.shape = engine::runtime::ColliderShape::ConvexHull;
+  pyramidCollider.halfExtents = pyramidHull.localHalfExtents;
+  if (!world->add_collider(cylinder, cylinderCollider) ||
+      !world->add_collider(pyramid, pyramidCollider) ||
+      !engine::runtime::set_convex_hull_data(*world, cylinder, cylinderHull) ||
+      !engine::runtime::set_convex_hull_data(*world, pyramid, pyramidHull)) {
+    return 903;
+  }
+
+  // Flat cylinder top: a ray down the axis hits at exactly y = 0.5 (an
+  // upright capsule of the same footprint would answer y = 1.0).
+  engine::runtime::PhysicsRaycastHit hit{};
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(0.0F, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &hit)) {
+    return 904;
+  }
+  if ((hit.entity != cylinder) || (hit.distance != 9.5F) ||
+      (hit.point.y != 0.5F)) {
+    return 905;
+  }
+
+  // Pyramid apex: the slant planes intersect the axis ray at exactly 0.5.
+  engine::runtime::PhysicsRaycastHit apexHit{};
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(5.0F, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &apexHit)) {
+    return 906;
+  }
+  if ((apexHit.entity != pyramid) || (apexHit.distance != 9.5F) ||
+      (apexHit.point.y != 0.5F)) {
+    return 907;
+  }
+
+  // Outside the triangular footprint but inside the old bounding box: the
+  // hull must not report a hit there.
+  engine::runtime::PhysicsRaycastHit cornerHit{};
+  if (engine::runtime::raycast(*world, engine::math::Vec3(5.45F, 10.0F, 0.4F),
+                               engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                               &cornerHit)) {
+    return 908;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
   int result = check_physics_cvars_register_after_core_cvars();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_primitive_hull_collision();
   if (result != 0) {
     return result;
   }

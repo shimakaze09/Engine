@@ -127,7 +127,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   double-buffered transforms, persistent ids), scene/prefab serializers
   (shared `serialization_util`, reflection-backed components), physics/
   scripting/editor bridges, render-prep pipeline, service registry, timers,
-  cameras, spring arms, game mode/state, player controllers, entity pool.
+  cameras, spring arms, game mode/state, player controllers, entity pool,
+  primitive hull colliders (`primitive_colliders` — cylinder/pyramid spawn
+  shapes collide as mesh-matched convex hulls; box/sphere/capsule stay
+  analytic, mirroring the Unity/Unreal collider model).
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle),
   `editor_commands` (undoable edits), panel TUs (main/inspector/diagnostics/
   assets/viewport), editor + debug cameras, command history.
