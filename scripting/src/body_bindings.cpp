@@ -388,6 +388,104 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
   return 1;
 }
 
+// --- Transform hierarchy: parent/children ---
+
+int lua_engine_set_parent(lua_State *state) noexcept {
+  runtime::Entity child{};
+  if (!read_entity(state, 1, &child)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+
+  runtime::World *const world = runtime_binding().world;
+  runtime::PersistentId parentId = runtime::kInvalidPersistentId;
+  if (!lua_isnoneornil(state, 2)) {
+    runtime::Entity parent{};
+    if (!read_entity(state, 2, &parent) || (parent == child)) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+    parentId = world->persistent_id(parent);
+    if (parentId == runtime::kInvalidPersistentId) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+  }
+
+  runtime::Transform transform{};
+  if (!world->get_transform(child, &transform)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_parent requires the child to have a Transform");
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  transform.parentId = parentId;
+
+  // Reparenting must not steal movement authority from physics or scripts.
+  const bool ok = apply_or_queue_transform(child, transform, false,
+                                           runtime::MovementAuthority::None);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+int lua_engine_get_parent(lua_State *state) noexcept {
+  runtime::Entity child{};
+  if (!read_entity(state, 1, &child)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  const runtime::Transform *transform =
+      runtime_binding().world->get_transform_read_ptr(child);
+  if ((transform == nullptr) ||
+      (transform->parentId == runtime::kInvalidPersistentId)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  push_entity_handle(state, runtime_binding().world->find_entity_by_persistent_id(
+                                transform->parentId));
+  return 1;
+}
+
+/// Collects one entity into the Lua child table when its parent id matches.
+struct ChildCollectContext final {
+  lua_State *state = nullptr;
+  runtime::PersistentId parentId = runtime::kInvalidPersistentId;
+  int childCount = 0;
+};
+
+void collect_child_visitor(runtime::Entity entity,
+                           const runtime::Transform &transform,
+                           void *userData) noexcept {
+  auto *context = static_cast<ChildCollectContext *>(userData);
+  if (transform.parentId != context->parentId) {
+    return;
+  }
+  ++context->childCount;
+  push_entity_handle(context->state, entity);
+  lua_rawseti(context->state, -2, context->childCount);
+}
+
+int lua_engine_get_children(lua_State *state) noexcept {
+  runtime::Entity parent{};
+  if (!read_entity(state, 1, &parent)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  runtime::World *const world = runtime_binding().world;
+  const runtime::PersistentId parentId = world->persistent_id(parent);
+  lua_newtable(state);
+  if (parentId == runtime::kInvalidPersistentId) {
+    return 1;
+  }
+
+  ChildCollectContext context{state, parentId, 0};
+  world->for_each_transform(&collect_child_visitor, &context);
+  return 1;
+}
+
 // --- Collider: getters ---
 
 } // namespace
@@ -429,6 +527,12 @@ void register_body_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "get_inverse_mass");
   lua_pushcfunction(state, &lua_engine_set_inverse_mass);
   lua_setfield(state, -2, "set_inverse_mass");
+  lua_pushcfunction(state, &lua_engine_set_parent);
+  lua_setfield(state, -2, "set_parent");
+  lua_pushcfunction(state, &lua_engine_get_parent);
+  lua_setfield(state, -2, "get_parent");
+  lua_pushcfunction(state, &lua_engine_get_children);
+  lua_setfield(state, -2, "get_children");
 }
 
 } // namespace engine::scripting

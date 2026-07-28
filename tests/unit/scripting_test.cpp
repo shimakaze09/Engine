@@ -160,6 +160,33 @@ int main() {
       "function wake_with_velocity()\n"
       "    engine.set_velocity(spawned, 8.0, 0.0, -2.0)\n"
       "end\n"
+      "function verify_parenting()\n"
+      "    local parent = engine.spawn_entity()\n"
+      "    if parent == nil then error('spawn parent failed') end\n"
+      "    engine.set_position(parent, 50.0, 0.0, 0.0)\n"
+      "    if not engine.set_parent(spawned, parent) then\n"
+      "        error('set_parent failed')\n"
+      "    end\n"
+      "    if engine.get_parent(spawned) ~= parent then\n"
+      "        error('get_parent mismatch')\n"
+      "    end\n"
+      "    local children = engine.get_children(parent)\n"
+      "    if #children ~= 1 or children[1] ~= spawned then\n"
+      "        error('get_children mismatch')\n"
+      "    end\n"
+      "    if engine.set_parent(spawned, spawned) then\n"
+      "        error('self-parent must fail')\n"
+      "    end\n"
+      "    if not engine.set_parent(spawned, nil) then\n"
+      "        error('unparent failed')\n"
+      "    end\n"
+      "    if engine.get_parent(spawned) ~= nil then\n"
+      "        error('parent should be nil after unparent')\n"
+      "    end\n"
+      "    if #engine.get_children(parent) ~= 0 then\n"
+      "        error('children should be empty after unparent')\n"
+      "    end\n"
+      "end\n"
       "function on_update()\n"
       "    if engine.is_alive(spawned) then\n"
       "        engine.destroy_entity(spawned)\n"
@@ -209,6 +236,12 @@ int main() {
     return 128;
   }
   sleepingBody->velocity = engine::math::Vec3(5.0F, 6.0F, 7.0F);
+
+  if (!engine::scripting::call_script_function("verify_parenting")) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 129;
+  }
 
   const char *asyncAssetScript =
       "function request_asset()\n"

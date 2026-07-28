@@ -141,6 +141,15 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   resolve_collisions job → commit swap; then render-prep jobs fill per-thread
   command buffers merged for the GL flush. Preserve deterministic stepping
   and thread-count independence.
+- Parented entities (`Transform.parentId`) are kinematic attachments for
+  physics: collision and queries use the composed world pose
+  (`PhysicsWorldView::get_collision_transform`, one propagation behind), the
+  solver treats them as immovable, and rigid bodies on them never integrate
+  (one-time warning). Joints remain root-only. Lua exposes
+  `set_parent`/`get_parent`/`get_children`. Editor-created entities always
+  start with Name + Transform; the inspector treats both as non-removable
+  identity. Known gap: destroying a parent silently re-roots children at
+  their local offset instead of cascade-deleting.
 - Serialization format changes need migration handling + tests; scene loads
   stage into a replacement World and commit only on success.
 - Renderer: command construction stays separate from GL execution; preserve

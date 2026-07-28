@@ -394,6 +394,29 @@ bool World::get_transform(Entity entity,
   return m_transforms.get(entity, outTransform, m_readStateIndex);
 }
 
+bool World::get_collision_transform(Entity entity,
+                                    Transform *outTransform) const noexcept {
+  if (!get_transform(entity, outTransform)) {
+    return false;
+  }
+
+  if (outTransform->parentId == kInvalidPersistentId) {
+    return true;
+  }
+
+  // Parented entity: substitute the composed world pose from the previous
+  // propagation (one fixed step of latency), cleared of its parent link so
+  // physics consumes a plain world-space transform.
+  const WorldTransform *world = m_worldTransforms.get_ptr(entity);
+  if (world != nullptr) {
+    outTransform->position = world->position;
+    outTransform->rotation = world->rotation;
+    outTransform->scale = world->scale;
+  }
+  outTransform->parentId = kInvalidPersistentId;
+  return true;
+}
+
 const Transform *World::get_transform_read_ptr(Entity entity) const noexcept {
   if (!is_valid_entity(entity)) {
     return nullptr;

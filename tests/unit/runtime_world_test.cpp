@@ -4,6 +4,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -207,6 +208,122 @@ int verify_transform_cycle_is_stable() {
 
   world->begin_render_phase();
   world->end_frame_phase();
+  return 0;
+}
+
+// Parented colliders must collide and answer queries at their composed world
+// pose, and parented rigid bodies must never integrate (they are kinematic
+// attachments that follow their parent).
+int verify_physics_follows_transform_hierarchy() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 90;
+  }
+
+  const engine::runtime::Entity parent = world->create_entity();
+  const engine::runtime::Entity child = world->create_entity();
+  const engine::runtime::Entity root = world->create_entity();
+  if ((parent == engine::runtime::kInvalidEntity) ||
+      (child == engine::runtime::kInvalidEntity) ||
+      (root == engine::runtime::kInvalidEntity)) {
+    return 91;
+  }
+
+  engine::runtime::Transform parentTransform{};
+  parentTransform.position = engine::math::Vec3(10.0F, 0.0F, 0.0F);
+  if (!world->add_transform(parent, parentTransform)) {
+    return 92;
+  }
+
+  engine::runtime::Transform childTransform{};
+  childTransform.position = engine::math::Vec3(0.0F, 2.0F, 0.0F);
+  childTransform.parentId = world->persistent_id(parent);
+  if (!world->add_transform(child, childTransform) ||
+      !world->add_collider(child, engine::runtime::Collider{}) ||
+      !world->add_rigid_body(child, engine::runtime::RigidBody{})) {
+    return 93;
+  }
+
+  engine::runtime::Transform rootTransform{};
+  rootTransform.position = engine::math::Vec3(20.0F, 0.0F, 0.0F);
+  engine::runtime::RigidBody rootBody{};
+  rootBody.velocity = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  if (!world->add_transform(root, rootTransform) ||
+      !world->add_collider(root, engine::runtime::Collider{}) ||
+      !world->add_rigid_body(root, rootBody)) {
+    return 94;
+  }
+
+  // One frame cycle so the world-transform cache holds the composed poses.
+  world->begin_render_prep_phase();
+  world->begin_render_phase();
+  world->end_frame_phase();
+
+  // Collision transform: composed world pose with the parent link cleared.
+  engine::runtime::Transform collisionPose{};
+  if (!world->get_collision_transform(child, &collisionPose)) {
+    return 95;
+  }
+  if ((collisionPose.position.x != 10.0F) ||
+      (collisionPose.position.y != 2.0F) ||
+      (collisionPose.position.z != 0.0F) ||
+      (collisionPose.parentId != engine::runtime::kInvalidPersistentId)) {
+    return 96;
+  }
+
+  // The local transform read stays untouched local space.
+  engine::runtime::Transform localPose{};
+  if (!world->get_transform(child, &localPose) ||
+      (localPose.position.x != 0.0F) || (localPose.position.y != 2.0F)) {
+    return 97;
+  }
+
+  // A ray down through the child's WORLD position hits it exactly on the
+  // top face of its default half-extent-0.5 AABB.
+  engine::runtime::PhysicsRaycastHit hit{};
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(10.0F, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &hit)) {
+    return 98;
+  }
+  if ((hit.entity != child) || (hit.distance != 7.5F) ||
+      (hit.point.y != 2.5F)) {
+    return 99;
+  }
+
+  // A ray down through the child's LOCAL position must miss: the collider
+  // lives at the world pose, not the raw local offset.
+  engine::runtime::PhysicsRaycastHit localHit{};
+  if (engine::runtime::raycast(*world, engine::math::Vec3(0.0F, 10.0F, 0.0F),
+                               engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                               &localHit)) {
+    return 100;
+  }
+
+  // Step physics: the parented body must not integrate at all, while the
+  // root control body advances by exactly velocity.x * dt.
+  const float dt = 1.0F / 60.0F;
+  world->begin_update_phase();
+  if (!engine::runtime::step_physics(*world, dt)) {
+    world->commit_update_phase();
+    return 101;
+  }
+  world->commit_update_phase();
+
+  engine::runtime::Transform childAfter{};
+  if (!world->get_transform(child, &childAfter) ||
+      (childAfter.position.x != 0.0F) || (childAfter.position.y != 2.0F) ||
+      (childAfter.position.z != 0.0F)) {
+    return 102;
+  }
+
+  engine::runtime::Transform rootAfter{};
+  if (!world->get_transform(root, &rootAfter) ||
+      (rootAfter.position.x != 20.0F + (1.0F * dt))) {
+    return 103;
+  }
+
   return 0;
 }
 
@@ -495,6 +612,11 @@ int main() {
   }
 
   result = verify_transform_cycle_is_stable();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_physics_follows_transform_hierarchy();
   if (result != 0) {
     return result;
   }

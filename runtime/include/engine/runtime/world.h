@@ -255,6 +255,11 @@ public:
   /// false for stale or dead entities or when the component is absent.
   bool get_transform(Entity entity,
                      Transform *outTransform) const noexcept override;
+  /// World-space pose for physics collision/queries: local transform for
+  /// hierarchy roots, composed world pose (previous propagation) for
+  /// parented entities so child colliders follow their parent.
+  bool get_collision_transform(Entity entity,
+                               Transform *outTransform) const noexcept override;
   // Read buffer is last committed state; during Idle this is the previous
   // frame.
   const Transform *get_transform_read_ptr(Entity entity) const noexcept;

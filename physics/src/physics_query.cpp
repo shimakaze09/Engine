@@ -177,7 +177,7 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
     }
 
     Transform transform{};
-    if (!world.get_transform(entities[i], &transform)) {
+    if (!world.get_collision_transform(entities[i], &transform)) {
       continue;
     }
 
@@ -271,7 +271,7 @@ std::size_t overlap_sphere(const PhysicsWorldView &world,
     }
 
     Transform t{};
-    if (!world.get_transform(entities[i], &t)) {
+    if (!world.get_collision_transform(entities[i], &t)) {
       continue;
     }
 
@@ -328,7 +328,7 @@ std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
     }
 
     Transform t{};
-    if (!world.get_transform(entities[i], &t)) {
+    if (!world.get_collision_transform(entities[i], &t)) {
       continue;
     }
 
@@ -385,7 +385,7 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
     }
 
     Transform t{};
-    if (!world.get_transform(entities[i], &t)) {
+    if (!world.get_collision_transform(entities[i], &t)) {
       continue;
     }
 
@@ -448,7 +448,7 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
     }
 
     Transform t{};
-    if (!world.get_transform(entities[i], &t)) {
+    if (!world.get_collision_transform(entities[i], &t)) {
       continue;
     }
 

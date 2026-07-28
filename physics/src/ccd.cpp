@@ -240,7 +240,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     }
 
     Transform otherTransform{};
-    if (!world.get_transform(entities[i], &otherTransform)) {
+    if (!world.get_collision_transform(entities[i], &otherTransform)) {
       continue;
     }
 
