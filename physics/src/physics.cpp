@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -918,6 +919,12 @@ const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
   return find_hull_data(context, entity);
 }
 
+namespace {
+/// One-time notice that rigid bodies on parented entities are not simulated
+/// (atomic: step ranges run on parallel job workers).
+std::atomic<bool> g_parentedBodyWarned{false};
+} // namespace
+
 // Forward declaration — step_physics delegates to step_physics_range.
 bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept;
@@ -946,6 +953,21 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
     }
 
     RigidBody *body = world.get_rigid_body_ptr(entity);
+
+    // Parented entities are kinematic attachments driven by transform
+    // propagation; physics never integrates them.
+    if (readTransforms[i].parentId != kInvalidPersistentId) {
+      if ((body != nullptr) &&
+          !g_parentedBodyWarned.load(std::memory_order_relaxed) &&
+          !g_parentedBodyWarned.exchange(true, std::memory_order_relaxed)) {
+        core::log_message(core::LogLevel::Warning, "physics",
+                          "rigid body on a parented entity follows its parent "
+                          "and is not simulated; unparent it for dynamics");
+      }
+      writeTransforms[i] = readTransforms[i];
+      continue;
+    }
+
     Transform updated = readTransforms[i];
     const Collider *col = world.get_collider_ptr(entity);
     const bool lockRotation =
@@ -1768,9 +1790,18 @@ bool resolve_collisions(PhysicsWorldView &world,
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       const Transform *t = world.get_transform_write_ptr(entities[i], simToken);
       if (t != nullptr) {
-        posX[i] = t->position.x;
-        posY[i] = t->position.y;
-        posZ[i] = t->position.z;
+        engine::math::Vec3 position = t->position;
+        // Parented colliders collide at their composed world pose so they
+        // follow their parent; roots keep the freshly integrated position.
+        if (t->parentId != kInvalidPersistentId) {
+          Transform composed{};
+          if (world.get_collision_transform(entities[i], &composed)) {
+            position = composed.position;
+          }
+        }
+        posX[i] = position.x;
+        posY[i] = position.y;
+        posZ[i] = position.z;
       } else {
         posX[i] = 0.0F;
         posY[i] = 0.0F;
@@ -1938,10 +1969,19 @@ bool resolve_collisions(PhysicsWorldView &world,
 
               RigidBody *bodyA = world.get_rigid_body_ptr(entityA);
               RigidBody *bodyB = world.get_rigid_body_ptr(entityB);
-              const float invMassA =
-                  (bodyA != nullptr) ? bodyA->inverseMass : kStaticInverseMass;
-              const float invMassB =
-                  (bodyB != nullptr) ? bodyB->inverseMass : kStaticInverseMass;
+              // Parented entities are kinematic attachments: they follow
+              // their parent through transform propagation, so the solver
+              // treats them as immovable.
+              const bool aAttached =
+                  transformA->parentId != kInvalidPersistentId;
+              const bool bAttached =
+                  transformB->parentId != kInvalidPersistentId;
+              const float invMassA = (aAttached || (bodyA == nullptr))
+                                         ? kStaticInverseMass
+                                         : bodyA->inverseMass;
+              const float invMassB = (bAttached || (bodyB == nullptr))
+                                         ? kStaticInverseMass
+                                         : bodyB->inverseMass;
               const float invMassSum = invMassA + invMassB;
 
               const auto shapeA = colliderA.shape;
@@ -2265,7 +2305,7 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
       continue;
     }
     Transform transform{};
-    if (!world.get_transform(entities[i], &transform)) {
+    if (!world.get_collision_transform(entities[i], &transform)) {
       continue;
     }
     const Collider &col = colliders[i];
@@ -2365,7 +2405,7 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
 
   for (std::size_t i = 0U; i < count; ++i) {
     Transform transform{};
-    if (!world.get_transform(entities[i], &transform)) {
+    if (!world.get_collision_transform(entities[i], &transform)) {
       continue;
     }
     const Collider &col = colliders[i];

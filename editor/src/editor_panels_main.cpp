@@ -281,6 +281,10 @@ void draw_entities_panel() noexcept {
       runtime::NameComponent nameComponent{};
       make_default_entity_name(newEntity.index, &nameComponent);
       static_cast<void>(editor_session().world->add_name_component(newEntity, nameComponent));
+      // Every editor-created object starts with an identity transform so it
+      // always has a position/axis, matching the empty-object mental model.
+      static_cast<void>(
+          editor_session().world->add_transform(newEntity, runtime::Transform{}));
       editor_session().selectedEntityIndex = newEntity.index;
     }
   }

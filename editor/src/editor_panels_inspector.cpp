@@ -542,24 +542,21 @@ void draw_inspector_panel() noexcept {
   const bool hasNameComponent =
       editor_session().world->get_name_component(entity, &nameComponent);
   if (hasNameComponent) {
+    // The name is entity identity, not a removable behavior — it can be
+    // edited but never deleted from the inspector.
     bool nameChanged = false;
-    bool removeNamePressed = false;
     if (!editable) {
       ImGui::BeginDisabled();
     }
 
     nameChanged = ImGui::InputText("Name", nameComponent.name,
                                    sizeof(nameComponent.name));
-    ImGui::SameLine();
-    removeNamePressed = ImGui::SmallButton("-");
 
     if (!editable) {
       ImGui::EndDisabled();
     }
 
-    if (editable && removeNamePressed) {
-      execute_component_remove(entity, ComponentEditType::Name);
-    } else if (editable && nameChanged) {
+    if (editable && nameChanged) {
       static_cast<void>(editor_session().world->add_name_component(entity, nameComponent));
     }
   } else {
@@ -603,10 +600,11 @@ void draw_inspector_panel() noexcept {
 
   runtime::Transform transform{};
   if (editor_session().world->get_transform(entity, &transform)) {
+    // The transform is entity identity (position/axis) — editable in place
+    // but never removable, matching the empty-object mental model.
     ImGui::PushID("TransformSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kTransformSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
-    const bool removePressed = draw_remove_component_button("remove", editable);
 
     bool transformModified = false;
     if (sectionOpen) {
@@ -622,9 +620,7 @@ void draw_inspector_panel() noexcept {
     }
     ImGui::PopID();
 
-    if (editable && removePressed) {
-      execute_component_remove(entity, ComponentEditType::Transform);
-    } else if (editable && transformModified) {
+    if (editable && transformModified) {
       static_cast<void>(editor_session().world->add_transform(entity, transform));
     }
   } else {

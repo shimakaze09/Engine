@@ -7,10 +7,15 @@ description: 运行 Engine 的完整验证流程：构建 + headless 测试 + �
 
 Run these from `D:\dev\Engine`, in order. All must pass before a fix counts as done.
 
+IMPORTANT: when running from an agent harness or any GUI-launched shell, wrap
+every build/test command in the quiet runner so child processes do not flash
+console windows on the user's desktop (output still streams back; exit codes
+are preserved): `pwsh -NoProfile -File tools/run_quiet.ps1 -- <command...>`.
+
 ## 1. Build (zero new warnings)
 
 ```powershell
-cmake --build build --parallel
+pwsh -NoProfile -File tools/run_quiet.ps1 -- cmake --build build --parallel
 ```
 
 If the cache is broken, reconfigure per CLAUDE.md, then rebuild.
@@ -18,7 +23,7 @@ If the cache is broken, reconfigure per CLAUDE.md, then rebuild.
 ## 2. Headless-safe tests
 
 ```powershell
-ctest --test-dir build --output-on-failure -LE gpu
+pwsh -NoProfile -File tools/run_quiet.ps1 -- ctest --test-dir build --output-on-failure -LE gpu
 ```
 
 GPU-labelled tests (`engine_smoke`, some integration) need a real GL context —
@@ -29,12 +34,12 @@ for renderer-behavior changes.
 
 - ECS/world/serialization/render-prep/physics/Lua API (determinism-sensitive):
   ```powershell
-  ctest --test-dir build --output-on-failure -R "determinism"
+  pwsh -NoProfile -File tools/run_quiet.ps1 -- ctest --test-dir build --output-on-failure -R determinism
   ```
 - Performance-sensitive (math, physics inner loops, command buffer):
   ```powershell
-  cmake --build build --target engine_bench_ecs_perf engine_bench_physics_perf
-  ctest --test-dir build --output-on-failure -R engine_bench_
+  pwsh -NoProfile -File tools/run_quiet.ps1 -- cmake --build build --target engine_bench_ecs_perf engine_bench_physics_perf
+  pwsh -NoProfile -File tools/run_quiet.ps1 -- ctest --test-dir build --output-on-failure -R engine_bench_
   ```
   Compare against `tests/benchmark/perf_baseline.json`.
 

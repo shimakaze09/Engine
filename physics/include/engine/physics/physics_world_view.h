@@ -41,6 +41,15 @@ public:
   /// Copies the entity's local transform (read state); false when absent.
   virtual bool get_transform(Entity entity,
                              Transform *outTransform) const noexcept = 0;
+  /// World-space pose for collision detection and queries. Identical to the
+  /// local transform for hierarchy roots; parented entities return their
+  /// composed world pose (from the previous propagation) with parentId
+  /// cleared, so child colliders follow their parent's motion.
+  virtual bool
+  get_collision_transform(Entity entity,
+                          Transform *outTransform) const noexcept {
+    return get_transform(entity, outTransform);
+  }
   /// Read/write transform spans for one parallel update chunk.
   virtual bool
   get_transform_update_range(std::size_t startIndex, std::size_t count,
