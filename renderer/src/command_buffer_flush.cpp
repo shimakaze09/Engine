@@ -1963,7 +1963,7 @@ void flush_renderer(CommandBufferView commandBufferView,
         }
       }
 
-      const math::Mat4 viewProjection = math::mul(projMat, viewMat);
+      const math::Mat4 debugLineViewProjection = math::mul(projMat, viewMat);
       dev->bind_framebuffer(pass_resource_framebuffer(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       dev->enable_depth_test();
@@ -1973,7 +1973,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_program(backend.debugLineProgram);
       if (backend.debugLineViewProjectionLoc >= 0) {
         dev->set_uniform_mat4(backend.debugLineViewProjectionLoc,
-                              &viewProjection.columns[0].x);
+                              &debugLineViewProjection.columns[0].x);
       }
       dev->bind_vertex_array(backend.debugLineVao);
       dev->bind_array_buffer(backend.debugLineVbo);
