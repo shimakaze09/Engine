@@ -65,6 +65,15 @@ python tools/check_comment_quality.py             # comment quality audit
 cmake --build build --target analysis             # cppcheck / clang-tidy
 ```
 
+When launching builds/tests from a GUI or agent harness (anything without its
+own console), wrap the command in `tools/run_quiet.ps1` so the dozens of
+child processes stop flashing console windows — output still streams to the
+calling terminal and the exit code is preserved:
+
+```powershell
+pwsh -NoProfile -File tools/run_quiet.ps1 -- ctest --test-dir build --output-on-failure -LE gpu
+```
+
 Reconfigure (only if the cache is broken):
 
 ```powershell
