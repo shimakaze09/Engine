@@ -157,9 +157,9 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   composed world pose via `get_physics_transform` /
   `get_simulation_physics_transform`. Lua exposes
   `set_parent`/`get_parent`/`get_children`; the inspector treats Name and
-  Transform as non-removable identity. Known gap: destroying a parent
-  silently re-roots children at their local offset instead of
-  cascade-deleting.
+  Transform as non-removable identity. Destroying an entity destroys its
+  whole transform subtree (deferred destruction queues the subtree so
+  EndPlay fires for every member).
 - Frame: per fixed step, chunked update jobs → chunked physics jobs → one
   resolve_collisions job → commit swap; then render-prep jobs fill per-thread
   command buffers merged for the GL flush. Preserve deterministic stepping

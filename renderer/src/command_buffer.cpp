@@ -1013,6 +1013,43 @@ bool initialize_backend() noexcept {
     }
   }
 
+  // Depth-tested debug line pass (soft-fail: debug overlays simply skipped).
+  {
+    const ShaderProgramHandle lineShader =
+        load_configured_shader_program("debug_line.vert", "debug_line.frag");
+    if (lineShader != kInvalidShaderProgram) {
+      const std::uint32_t prog = shader_gpu_program(lineShader);
+      if (prog != 0U) {
+        backend.debugLineShaderHandle = lineShader;
+        backend.debugLineProgram = prog;
+        backend.debugLineViewProjectionLoc =
+            dev->uniform_location(prog, "uViewProjection");
+        backend.debugLineVao = dev->create_vertex_array();
+        backend.debugLineVbo = dev->create_buffer();
+        if ((backend.debugLineVao != 0U) && (backend.debugLineVbo != 0U)) {
+          dev->bind_vertex_array(backend.debugLineVao);
+          dev->bind_array_buffer(backend.debugLineVbo);
+          constexpr std::int32_t kLineStride =
+              static_cast<std::int32_t>(sizeof(float) * 7U);
+          dev->enable_vertex_attrib(0U);
+          dev->vertex_attrib_float(0U, 3, kLineStride, nullptr);
+          dev->enable_vertex_attrib(1U);
+          dev->vertex_attrib_float(
+              1U, 4, kLineStride,
+              reinterpret_cast<const void *>(sizeof(float) * 3U));
+          dev->bind_vertex_array(0U);
+          dev->bind_array_buffer(0U);
+          backend.debugLineAvailable = true;
+        }
+      } else {
+        destroy_shader_program(lineShader);
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "debug line shader not available — overlays disabled");
+    }
+  }
+
   // Auto-exposure luminance shader (soft-fail: uses manual exposure).
   core::cvar_register_bool("r_auto_exposure", true,
                            "Enable automatic exposure adaptation");
@@ -1074,6 +1111,22 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     dev->destroy_texture(backend->lightDataTex);
     backend->lightDataTex = 0U;
   }
+
+  // Destroy debug line resources.
+  if (backend->debugLineVao != 0U && dev != nullptr) {
+    dev->destroy_vertex_array(backend->debugLineVao);
+    backend->debugLineVao = 0U;
+  }
+  if (backend->debugLineVbo != 0U && dev != nullptr) {
+    dev->destroy_buffer(backend->debugLineVbo);
+    backend->debugLineVbo = 0U;
+  }
+  if (backend->debugLineShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->debugLineShaderHandle);
+    backend->debugLineShaderHandle = ShaderProgramHandle{};
+  }
+  backend->debugLineProgram = 0U;
+  backend->debugLineAvailable = false;
 
   // Destroy scene capture render targets.
   destroy_scene_capture_targets(*backend, dev);

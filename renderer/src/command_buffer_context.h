@@ -259,6 +259,15 @@ struct BackendState final {
   std::int32_t dbgGBufDepthLoc = -1;
   std::int32_t dbgModeLoc = -1;
 
+  // Depth-tested debug line pass (positions+colors streamed each frame from
+  // the core debug-draw queue).
+  bool debugLineAvailable = false;
+  ShaderProgramHandle debugLineShaderHandle{};
+  std::uint32_t debugLineProgram = 0U;
+  std::int32_t debugLineViewProjectionLoc = -1;
+  std::uint32_t debugLineVao = 0U;
+  std::uint32_t debugLineVbo = 0U;
+
   // Tile light texture (uploaded each frame by CPU culling).
   std::uint32_t tileLightTex = 0U;
   std::vector<float> tileBuffer;

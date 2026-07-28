@@ -1473,11 +1473,23 @@ void narrow_phase_capsule_aabb(const PairContext &pair) noexcept {
 
   const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
   // Normal points from box toward capsule segment.
-  engine::math::Vec3 normal = (dist2 > 0.0F)
-                                  ? engine::math::mul(diff, 1.0F / dist)
-                                  : engine::math::Vec3(0.0F, 1.0F, 0.0F);
-  // Ensure normal points from A to B.
-  if (!aIsCap) {
+  engine::math::Vec3 normal;
+  if (dist2 > 0.0F) {
+    normal = engine::math::mul(diff, 1.0F / dist);
+  } else {
+    // Degenerate deep contact (axis touching the box): separate along the
+    // horizontal center offset instead of an arbitrary vertical pop.
+    const engine::math::Vec3 horizontal(capPos.x - boxPos.x, 0.0F,
+                                        capPos.z - boxPos.z);
+    const float horizontal2 = engine::math::dot(horizontal, horizontal);
+    normal = (horizontal2 > 1e-12F)
+                 ? engine::math::mul(horizontal,
+                                     1.0F / std::sqrt(horizontal2))
+                 : engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  }
+  // The solver expects the normal to point from A toward B; the computed
+  // direction is box → capsule, so flip when A is the capsule.
+  if (aIsCap) {
     normal = engine::math::mul(normal, -1.0F);
   }
   const float overlap = capR - dist;

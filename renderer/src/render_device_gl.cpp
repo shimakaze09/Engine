@@ -716,6 +716,14 @@ void gl_draw_arrays_triangles(std::int32_t first, std::int32_t count) noexcept {
                   static_cast<GLsizei>(count));
 }
 
+void gl_draw_arrays_lines(std::int32_t first, std::int32_t count) noexcept {
+#ifndef GL_LINES
+#define GL_LINES 0x0001
+#endif
+  gl_table().drawArrays(GL_LINES, static_cast<GLint>(first),
+                  static_cast<GLsizei>(count));
+}
+
 void gl_draw_elements_triangles_u32(std::int32_t count) noexcept {
   gl_table().drawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT,
                     nullptr);
@@ -1229,6 +1237,7 @@ bool initialize_render_device() noexcept {
   render_device_state().vertex_attrib_float = &gl_vertex_attrib_float;
   render_device_state().vertex_attrib_divisor = &gl_vertex_attrib_divisor;
   render_device_state().draw_arrays_triangles = &gl_draw_arrays_triangles;
+  render_device_state().draw_arrays_lines = &gl_draw_arrays_lines;
   render_device_state().draw_elements_triangles_u32 = &gl_draw_elements_triangles_u32;
   render_device_state().draw_elements_triangles_u32_instanced =
       &gl_draw_elements_triangles_u32_instanced;

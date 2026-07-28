@@ -62,6 +62,8 @@ struct RenderDevice final {
   // Drawing.
   void (*draw_arrays_triangles)(std::int32_t first,
                                 std::int32_t count) noexcept = nullptr;
+  void (*draw_arrays_lines)(std::int32_t first,
+                            std::int32_t count) noexcept = nullptr;
   void (*draw_elements_triangles_u32)(std::int32_t count) noexcept = nullptr;
   void (*draw_elements_triangles_u32_instanced)(
       std::int32_t count, std::int32_t instanceCount) noexcept = nullptr;

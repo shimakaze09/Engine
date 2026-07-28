@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <thread>
 
+#include "engine/core/debug_draw.h"
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -106,6 +107,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
     }
     profilerInitialized = true;
 
+    // Fixed-storage queue with no failure modes or teardown ordering needs.
+    static_cast<void>(initialize_debug_draw());
+
     const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
     const std::uint32_t workerThreads =
         (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
@@ -194,6 +198,7 @@ void shutdown_core() noexcept {
   }
 
   shutdown_job_system();
+  shutdown_debug_draw();
   shutdown_profiler();
   shutdown_input();
   shutdown_platform();
