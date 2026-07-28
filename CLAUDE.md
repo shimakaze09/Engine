@@ -103,7 +103,8 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
   speculative contacts, manifolds, sequential-impulse solver + joints
   (`src/joints/`), queries, materials. Talks to the world ONLY through
-  `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`.
+  `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`;
+  `collider.cpp` centralizes affine world geometry for every shape.
 - `renderer/` — asset database/manager/streaming (fixed slots + tombstones,
   worker-thread queue, LRU), mesh/texture loading, procedural
   `mesh_primitives`, shader system (variants, hot reload), `RenderDevice`
@@ -146,19 +147,23 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   legal in `WorldPhase::Input`; writable transforms during Simulation require
   the `SimulationAccessToken`. Never break transform double-buffering,
   persistent-id behavior, or entity-capacity assumptions.
+- User-facing scene objects are created through `create_scene_object` and
+  always own a non-removable Transform (position, rotation, scale);
+  `create_entity` is the internal bare-ECS escape hatch. Spatial components
+  and children consume the composed world matrix. Dynamic rigid bodies must
+  be hierarchy roots, and descendant colliders form one compound body owned
+  by their nearest rigid-body ancestor
+  (`PhysicsWorldView::rigid_body_owner`); collision and queries consume the
+  composed world pose via `get_physics_transform` /
+  `get_simulation_physics_transform`. Lua exposes
+  `set_parent`/`get_parent`/`get_children`; the inspector treats Name and
+  Transform as non-removable identity. Known gap: destroying a parent
+  silently re-roots children at their local offset instead of
+  cascade-deleting.
 - Frame: per fixed step, chunked update jobs → chunked physics jobs → one
   resolve_collisions job → commit swap; then render-prep jobs fill per-thread
   command buffers merged for the GL flush. Preserve deterministic stepping
   and thread-count independence.
-- Parented entities (`Transform.parentId`) are kinematic attachments for
-  physics: collision and queries use the composed world pose
-  (`PhysicsWorldView::get_collision_transform`, one propagation behind), the
-  solver treats them as immovable, and rigid bodies on them never integrate
-  (one-time warning). Joints remain root-only. Lua exposes
-  `set_parent`/`get_parent`/`get_children`. Editor-created entities always
-  start with Name + Transform; the inspector treats both as non-removable
-  identity. Known gap: destroying a parent silently re-roots children at
-  their local offset instead of cascade-deleting.
 - Serialization format changes need migration handling + tests; scene loads
   stage into a replacement World and commit only on success.
 - Renderer: command construction stays separate from GL execution; preserve

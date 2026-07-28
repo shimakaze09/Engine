@@ -16,8 +16,8 @@ extern "C" {
 #include "lualib.h"
 }
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -140,15 +140,14 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     colliderShape = runtime::ColliderShape::AABB;
   }
 
-  const runtime::Entity entity = runtime_binding().world->create_entity();
+  runtime::Transform transform{};
+  transform.position = pos;
+  const runtime::Entity entity =
+      runtime_binding().world->create_scene_object(transform);
   if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
-
-  runtime::Transform transform{};
-  transform.position = pos;
-  static_cast<void>(runtime_binding().world->add_transform(entity, transform));
 
   runtime::RigidBody rigidBody{};
   rigidBody.inverseMass = 1.0F;
@@ -163,7 +162,8 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
     meshComp.albedo = albedo;
-    static_cast<void>(runtime_binding().world->add_mesh_component(entity, meshComp));
+    static_cast<void>(
+        runtime_binding().world->add_mesh_component(entity, meshComp));
   }
 
   push_entity_handle(state, entity);
@@ -197,7 +197,8 @@ int lua_engine_get_albedo(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh =
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -214,7 +215,8 @@ int lua_engine_get_mesh(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh =
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -245,7 +247,8 @@ int lua_engine_get_roughness(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh =
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -276,7 +279,8 @@ int lua_engine_get_metallic(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh =
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;
@@ -307,7 +311,8 @@ int lua_engine_get_opacity(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh = runtime_binding().world->get_mesh_component_ptr(entity);
+  const runtime::MeshComponent *mesh =
+      runtime_binding().world->get_mesh_component_ptr(entity);
   if (mesh == nullptr) {
     lua_pushnil(state);
     return 1;

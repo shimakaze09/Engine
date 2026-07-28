@@ -6,18 +6,18 @@
 #include "engine/math/aabb.h"
 #include "engine/math/ray.h"
 #include "engine/math/sphere.h"
+#include "engine/math/transform.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
-#include "engine/physics/physics_world_view.h"
 #include "engine/physics/physics_context.h"
+#include "engine/physics/physics_world_view.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 
 namespace engine::physics {
 
@@ -30,146 +30,87 @@ namespace {
 constexpr int kMaxBilateralIterations = 32;
 constexpr float kTolerance = 1e-4F;
 
-// Forward declarations from physics.cpp — defined there, used here.
-// We re-declare locally rather than exposing them publicly.
-
-// Compute broadphase half-extents for any collider shape.
-math::Vec3 broadphase_half_extents_ccd(const Collider &col) noexcept {
-  if (col.shape == ColliderShape::Capsule) {
-    const float r = col.halfExtents.x;
-    const float hh = col.halfExtents.y;
-    return math::Vec3(r, hh + r, r);
-  }
-  return col.halfExtents;
-}
-
-// Separating distance between two AABBs given their centers and half-extents.
-// Returns a positive value when separated, negative when overlapping.
-float aabb_separating_distance(const math::Vec3 &posA, const math::Vec3 &heA,
-                               const math::Vec3 &posB,
-                               const math::Vec3 &heB) noexcept {
-  const float dx = std::fabs(posA.x - posB.x) - (heA.x + heB.x);
-  const float dy = std::fabs(posA.y - posB.y) - (heA.y + heB.y);
-  const float dz = std::fabs(posA.z - posB.z) - (heA.z + heB.z);
-  // The separating distance is the maximum of the three axis distances.
-  // If all are negative, they overlap — return the largest (least negative).
+/// Returns positive axis separation, or a non-positive overlap measure.
+float aabb_separating_distance(const math::AABB &a,
+                               const math::AABB &b) noexcept {
+  const float dx = std::max(b.min.x - a.max.x, a.min.x - b.max.x);
+  const float dy = std::max(b.min.y - a.max.y, a.min.y - b.max.y);
+  const float dz = std::max(b.min.z - a.max.z, a.min.z - b.max.z);
   return std::max({dx, dy, dz});
 }
 
-// Sphere-vs-sphere separating distance.
-float sphere_separating_distance(const math::Vec3 &posA, float radiusA,
-                                 const math::Vec3 &posB,
-                                 float radiusB) noexcept {
-  const float dist = math::length(math::sub(posA, posB));
-  return dist - (radiusA + radiusB);
+/// Builds parent-aware geometry, falling back to the supplied local transform.
+bool build_geometry(const PhysicsWorldView &world, Entity entity,
+                    const Collider &collider, const Transform *fallback,
+                    ColliderWorldGeometry *outGeometry) noexcept {
+  PhysicsTransform transform{};
+  math::Mat4 worldMatrix{};
+  if (world.get_physics_transform(entity, &transform)) {
+    worldMatrix = transform.matrix;
+  } else if (fallback != nullptr) {
+    worldMatrix = math::compose_trs(fallback->position, fallback->rotation,
+                                    fallback->scale);
+  } else {
+    return false;
+  }
+  const ConvexHullData *hull = nullptr;
+  if (collider.shape == ColliderShape::ConvexHull) {
+    hull = get_hull_data_ptr(world.physics_context(), entity);
+  }
+  return make_collider_world_geometry(collider, worldMatrix, hull, outGeometry);
 }
 
-// Resolve support function and opaque data for a collider shape.
-SupportFn resolve_support(const Collider &col) noexcept {
-  switch (col.shape) {
-  case ColliderShape::ConvexHull:
-    return &support_convex_hull;
-  case ColliderShape::Sphere:
-    return &support_sphere;
-  case ColliderShape::Capsule:
-    return &support_capsule;
-  case ColliderShape::AABB:
-  default:
-    return &support_aabb;
-  }
+/// Translates cached geometry in world space without rebuilding local shape
+/// data.
+ColliderWorldGeometry
+translated_geometry(const ColliderWorldGeometry &source,
+                    const math::Vec3 &translation) noexcept {
+  ColliderWorldGeometry result = source;
+  result.localToWorld.columns[3].x += translation.x;
+  result.localToWorld.columns[3].y += translation.y;
+  result.localToWorld.columns[3].z += translation.z;
+  result.center = math::add(result.center, translation);
+  result.worldAabb.min = math::add(result.worldAabb.min, translation);
+  result.worldAabb.max = math::add(result.worldAabb.max, translation);
+  return result;
 }
 
-const void *resolve_support_data(const PhysicsContext &context,
-                                  const Collider &col,
-                                  Entity entity, float *storage) noexcept {
-  switch (col.shape) {
-  case ColliderShape::ConvexHull:
-    return get_hull_data_ptr(context, entity);
-  case ColliderShape::Sphere:
-    storage[0] = col.halfExtents.x;
-    return storage;
-  case ColliderShape::Capsule:
-    storage[0] = col.halfExtents.x; // radius
-    storage[1] = col.halfExtents.y; // halfHeight
-    return storage;
-  case ColliderShape::AABB:
-  default:
-    std::memcpy(storage, &col.halfExtents, sizeof(float) * 3);
-    return storage;
-  }
+/// Adapts world geometry to the fixed GJK support-function signature.
+math::Vec3 support_geometry(const void *data, const math::Vec3 &,
+                            const math::Vec3 &direction) noexcept {
+  return collider_support_point(
+      *static_cast<const ColliderWorldGeometry *>(data), direction);
 }
 
-// Generic separating distance between two colliders at given positions.
-// Positive means separated, negative means overlapping.
-// Uses GJK for shape-aware distance; falls back to AABB when GJK data
-// is unavailable (e.g. missing hull).
-float separating_distance(const Collider &colA,
-                          const math::Vec3 &posA, Entity entityA,
-                          const Collider &colB, const math::Vec3 &posB,
-                          Entity entityB,
-                          const PhysicsContext &context) noexcept {
-  const bool aIsSphere = (colA.shape == ColliderShape::Sphere);
-  const bool bIsSphere = (colB.shape == ColliderShape::Sphere);
-
-  if (aIsSphere && bIsSphere) {
-    return sphere_separating_distance(posA, colA.halfExtents.x, posB,
-                                      colB.halfExtents.x);
-  }
-
-  // Use GJK for shape-accurate distance.
-  alignas(16) float storA[4]{};
-  alignas(16) float storB[4]{};
-  const void *dataA = resolve_support_data(context, colA, entityA, storA);
-  const void *dataB = resolve_support_data(context, colB, entityB, storB);
-
-  if ((dataA != nullptr) && (dataB != nullptr)) {
-    SupportFn supA = resolve_support(colA);
-    SupportFn supB = resolve_support(colB);
-    const GjkResult gjk = gjk_epa(dataA, posA, supA, dataB, posB, supB);
-    if (gjk.intersecting) {
-      return -gjk.depth; // overlapping → negative distance
-    }
-    // GJK says not intersecting — compute conservative distance from
-    // the Minkowski difference support.  Use the AABB lower bound.
-  }
-
-  // Fallback: AABB-based distance.
-  const math::Vec3 heA = broadphase_half_extents_ccd(colA);
-  const math::Vec3 heB = broadphase_half_extents_ccd(colB);
-  return aabb_separating_distance(posA, heA, posB, heB);
+/// Runs exact convex intersection for one transformed CCD candidate.
+GjkResult geometry_intersection(const ColliderWorldGeometry &a,
+                                const ColliderWorldGeometry &b) noexcept {
+  return gjk_epa(&a, a.center, &support_geometry, &b, b.center,
+                 &support_geometry);
 }
 
-// Compute the contact normal between two overlapping shapes (A hitting B).
-// Uses GJK/EPA for shape-accurate normal; falls back to center-to-center.
-math::Vec3 contact_normal_between(const Collider &colA,
-                                  const math::Vec3 &posA,
-                                  Entity entityA,
-                                  const Collider &colB,
-                                  const math::Vec3 &posB,
-                                  Entity entityB,
-                                  const PhysicsContext &context) noexcept {
-  alignas(16) float storA[4]{};
-  alignas(16) float storB[4]{};
-  const void *dataA = resolve_support_data(context, colA, entityA, storA);
-  const void *dataB = resolve_support_data(context, colB, entityB, storB);
-
-  if ((dataA != nullptr) && (dataB != nullptr)) {
-    SupportFn supA = resolve_support(colA);
-    SupportFn supB = resolve_support(colB);
-    const GjkResult gjk = gjk_epa(dataA, posA, supA, dataB, posB, supB);
-    if (gjk.intersecting && math::length(gjk.normal) > 1e-8F) {
-      // GJK normal points from A→B.  CCD wants normal from B→A.
-      return math::mul(gjk.normal, -1.0F);
-    }
+/// Produces the response normal from target B toward moving collider A.
+math::Vec3 contact_normal(const ColliderWorldGeometry &a,
+                          const ColliderWorldGeometry &b,
+                          const GjkResult &intersection) noexcept {
+  if (math::length_sq(intersection.normal) > 1.0e-12F) {
+    return math::normalize(math::mul(intersection.normal, -1.0F));
   }
-
-  // Fallback: center-to-center direction.
-  const math::Vec3 delta = math::sub(posA, posB);
+  const math::Vec3 delta = math::sub(a.center, b.center);
   const float len = math::length(delta);
-  if (len > 1e-8F) {
+  if (len > 1.0e-8F) {
     return math::div(delta, len);
   }
   return math::Vec3(0.0F, 1.0F, 0.0F);
+}
+
+/// Approximates the shared boundary point from opposing support points.
+math::Vec3 contact_point(const ColliderWorldGeometry &a,
+                         const ColliderWorldGeometry &b,
+                         const math::Vec3 &normal) noexcept {
+  const math::Vec3 onA = collider_support_point(a, math::mul(normal, -1.0F));
+  const math::Vec3 onB = collider_support_point(b, normal);
+  return math::mul(math::add(onA, onB), 0.5F);
 }
 
 } // namespace
@@ -179,13 +120,21 @@ float ccd_velocity_threshold() noexcept {
 }
 
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
-                                     Entity entity,
-                                     const RigidBody &body,
+                                     Entity entity, const RigidBody &body,
                                      const Collider &collider,
                                      const Transform &transform,
                                      float dt) noexcept {
 
   CcdSweepResult result{};
+
+  if (!std::isfinite(dt) || (dt <= 0.0F)) {
+    return result;
+  }
+
+  ColliderWorldGeometry movingGeometry{};
+  if (!build_geometry(world, entity, collider, &transform, &movingGeometry)) {
+    return result;
+  }
 
   const float speed = math::length(body.velocity);
   if (speed < 1e-6F) {
@@ -202,7 +151,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   const float travelDist = speed * dt;
 
   // Minimum half-extent of the moving shape — if travel < this, skip CCD.
-  const math::Vec3 movingHe = broadphase_half_extents_ccd(collider);
+  const math::Vec3 movingHe = math::aabb_half_extents(movingGeometry.worldAabb);
   const float minHalf = std::min({movingHe.x, movingHe.y, movingHe.z});
   if (travelDist <= minHalf * 0.5F) {
     return result; // Travel distance too small relative to collider size.
@@ -213,8 +162,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   if (count == 0U) {
     return result;
   }
-  const PhysicsContext &physicsContext = world.physics_context();
-
   const Entity *entities = nullptr;
   const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
@@ -226,6 +173,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   math::Vec3 bestNormal(0.0F, 1.0F, 0.0F);
   math::Vec3 bestContactPt{};
   std::uint32_t bestHitEntity = 0U;
+  const Entity movingOwner = world.rigid_body_owner(entity);
 
   for (std::size_t i = 0U; i < count; ++i) {
     if (entities[i] == entity) {
@@ -239,13 +187,20 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    Transform otherTransform{};
-    if (!world.get_collision_transform(entities[i], &otherTransform)) {
+    const Entity otherOwner = world.rigid_body_owner(entities[i]);
+    if ((movingOwner != kInvalidEntity) && (movingOwner == otherOwner)) {
+      continue;
+    }
+
+    ColliderWorldGeometry otherGeometry{};
+    if (!build_geometry(world, entities[i], other, nullptr, &otherGeometry)) {
       continue;
     }
 
     // Get the other body's velocity (might be moving too).
-    const RigidBody *otherBody = world.get_rigid_body_ptr(entities[i]);
+    const RigidBody *otherBody = (otherOwner != kInvalidEntity)
+                                     ? world.get_rigid_body_ptr(otherOwner)
+                                     : nullptr;
     const math::Vec3 otherVel = (otherBody != nullptr)
                                     ? otherBody->velocity
                                     : math::Vec3(0.0F, 0.0F, 0.0F);
@@ -259,27 +214,25 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
 
     // Quick conservative AABB sweep test: check if the swept AABB of the
     // moving body intersects the other's AABB at all.
-    const math::Vec3 otherHe = broadphase_half_extents_ccd(other);
-    const math::Vec3 endPos =
-        math::add(transform.position, math::mul(relVel, dt));
-
-    // Compute axis-aligned bounding box of the swept path.
+    const math::Vec3 relativeDisplacement = math::mul(relVel, dt);
+    const ColliderWorldGeometry endGeometry =
+        translated_geometry(movingGeometry, relativeDisplacement);
     const math::Vec3 sweepMin(
-        std::min(transform.position.x - movingHe.x, endPos.x - movingHe.x),
-        std::min(transform.position.y - movingHe.y, endPos.y - movingHe.y),
-        std::min(transform.position.z - movingHe.z, endPos.z - movingHe.z));
+        std::min(movingGeometry.worldAabb.min.x, endGeometry.worldAabb.min.x),
+        std::min(movingGeometry.worldAabb.min.y, endGeometry.worldAabb.min.y),
+        std::min(movingGeometry.worldAabb.min.z, endGeometry.worldAabb.min.z));
     const math::Vec3 sweepMax(
-        std::max(transform.position.x + movingHe.x, endPos.x + movingHe.x),
-        std::max(transform.position.y + movingHe.y, endPos.y + movingHe.y),
-        std::max(transform.position.z + movingHe.z, endPos.z + movingHe.z));
+        std::max(movingGeometry.worldAabb.max.x, endGeometry.worldAabb.max.x),
+        std::max(movingGeometry.worldAabb.max.y, endGeometry.worldAabb.max.y),
+        std::max(movingGeometry.worldAabb.max.z, endGeometry.worldAabb.max.z));
 
     // Does swept AABB overlap with static AABB of other object?
-    if (sweepMin.x > otherTransform.position.x + otherHe.x ||
-        sweepMax.x < otherTransform.position.x - otherHe.x ||
-        sweepMin.y > otherTransform.position.y + otherHe.y ||
-        sweepMax.y < otherTransform.position.y - otherHe.y ||
-        sweepMin.z > otherTransform.position.z + otherHe.z ||
-        sweepMax.z < otherTransform.position.z - otherHe.z) {
+    if (sweepMin.x > otherGeometry.worldAabb.max.x ||
+        sweepMax.x < otherGeometry.worldAabb.min.x ||
+        sweepMin.y > otherGeometry.worldAabb.max.y ||
+        sweepMax.y < otherGeometry.worldAabb.min.y ||
+        sweepMin.z > otherGeometry.worldAabb.max.z ||
+        sweepMax.z < otherGeometry.worldAabb.min.z) {
       continue; // No possible intersection, skip.
     }
 
@@ -296,32 +249,41 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     // -----------------------------------------------------------------------
 
     float tLo = 0.0F;
-    float tHi = bestToi;
     bool foundContact = false;
+    ColliderWorldGeometry contactGeometry{};
+    GjkResult contactIntersection{};
+    const math::Vec3 motionDirection = math::div(relVel, relSpeed);
 
     for (int iter = 0; iter < kMaxBilateralIterations; ++iter) {
-      // Position of A at time tLo.
-      const math::Vec3 posA =
-          math::add(transform.position, math::mul(relVel, tLo * dt));
-      // Position of B (assumed stationary in relative frame at otherPos).
-      const math::Vec3 &posB = otherTransform.position;
-
-      const float sep = separating_distance(collider, posA, entity, other, posB,
-                                            entities[i],
-                                            physicsContext);
-
-      if (sep <= kTolerance) {
-        // Contact (or overlap) at tLo.
+      const ColliderWorldGeometry candidateGeometry = translated_geometry(
+          movingGeometry, math::mul(relativeDisplacement, tLo));
+      const GjkResult intersection =
+          geometry_intersection(candidateGeometry, otherGeometry);
+      if (intersection.intersecting) {
         foundContact = true;
+        contactGeometry = candidateGeometry;
+        contactIntersection = intersection;
         break;
       }
 
-      // Advance conservatively: sep / relSpeed gives time to close the gap,
-      // but we normalise by dt to get t-fraction.
-      const float advance = sep / (relSpeed * dt);
+      const float boundsSeparation = aabb_separating_distance(
+          candidateGeometry.worldAabb, otherGeometry.worldAabb);
+      const math::Vec3 movingFront =
+          collider_support_point(candidateGeometry, motionDirection);
+      const math::Vec3 targetBack = collider_support_point(
+          otherGeometry, math::mul(motionDirection, -1.0F));
+      const float projectedSeparation =
+          math::dot(math::sub(targetBack, movingFront), motionDirection);
+      const float separation = std::max(boundsSeparation, projectedSeparation);
+      const float minimumAdvance =
+          std::max(kTolerance / (relSpeed * dt), 1.0e-5F);
+      const float advance =
+          separation > kTolerance
+              ? std::max(separation / (relSpeed * dt), minimumAdvance)
+              : minimumAdvance;
       tLo += advance;
 
-      if (tLo >= tHi) {
+      if (tLo >= bestToi) {
         break; // Passed beyond best known TOI or end of step.
       }
     }
@@ -329,14 +291,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     if (foundContact && (tLo < bestToi)) {
       bestToi = tLo;
       anyHit = true;
-
-      const math::Vec3 hitPosA =
-          math::add(transform.position, math::mul(relVel, tLo * dt));
-      bestNormal = contact_normal_between(collider, hitPosA, entity, other,
-                                          otherTransform.position, entities[i],
-                                          physicsContext);
-      bestContactPt =
-          math::mul(math::add(hitPosA, otherTransform.position), 0.5F);
+      bestNormal =
+          contact_normal(contactGeometry, otherGeometry, contactIntersection);
+      bestContactPt = contact_point(contactGeometry, otherGeometry, bestNormal);
       bestHitEntity = entities[i].index;
     }
   }

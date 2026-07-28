@@ -65,6 +65,16 @@ bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
 bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
                math::Quat *outQuat) noexcept;
 
+// --- Collider -------------------------------------------------------------
+
+/// Writes every collider field, including its validated shape and local pose.
+bool write_collider_component(core::JsonWriter &writer,
+                              const Collider &component) noexcept;
+/// Reads a collider strictly while retaining defaults for omitted legacy data.
+bool read_collider_component(const core::JsonParser &parser,
+                             const core::JsonValue &colliderObject,
+                             Collider *outComponent) noexcept;
+
 // --- FoliagePatchComponent -------------------------------------------------
 
 /// Writes the full foliage patch object (LOD mesh ids, material, wind, and

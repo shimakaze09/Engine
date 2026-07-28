@@ -5,6 +5,7 @@
 
 #include "editor_commands.h"
 #include "editor_session.h"
+#include "editor_transform_util.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -49,14 +50,16 @@
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
-#include "engine/engine.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
+#include "engine/physics/collider.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -100,11 +103,13 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
                                     const math::Mat4 &viewProjection,
                                     const ImVec2 &viewportOrigin,
                                     const ImVec2 &viewportSize) noexcept {
-  if ((editor_session().world == nullptr) || (selectedEntity == runtime::kInvalidEntity)) {
+  if ((editor_session().world == nullptr) ||
+      (selectedEntity == runtime::kInvalidEntity)) {
     return;
   }
 
-  const runtime::Collider *collider = editor_session().world->get_collider_ptr(selectedEntity);
+  const runtime::Collider *collider =
+      editor_session().world->get_collider_ptr(selectedEntity);
   if (collider == nullptr) {
     return;
   }
@@ -115,23 +120,45 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
     return;
   }
 
-  math::Vec3 halfExtents = collider->halfExtents;
+  const physics::ConvexHullData *hull =
+      (collider->shape == runtime::ColliderShape::ConvexHull)
+          ? runtime::get_convex_hull_data(*editor_session().world,
+                                          selectedEntity)
+          : nullptr;
+  physics::ColliderWorldGeometry geometry{};
+  if (!physics::make_collider_world_geometry(*collider, worldTransform->matrix,
+                                             hull, &geometry)) {
+    return;
+  }
+
+  math::Vec3 localCenter(0.0F, 0.0F, 0.0F);
+  math::Vec3 halfExtents = geometry.halfExtents;
   if (collider->shape == runtime::ColliderShape::Sphere) {
     const float r = collider->halfExtents.x;
     halfExtents = math::Vec3(r, r, r);
+  } else if (collider->shape == runtime::ColliderShape::Capsule) {
+    const float radius = collider->halfExtents.x;
+    halfExtents = math::Vec3(radius, collider->halfExtents.y + radius, radius);
+  } else if ((collider->shape == runtime::ColliderShape::ConvexHull) &&
+             (hull != nullptr)) {
+    localCenter = hull->localCenter;
+    halfExtents = hull->localHalfExtents;
   }
 
-  const math::Vec3 c = worldTransform->position;
-  const math::Vec3 corners[8] = {
-      math::Vec3(c.x - halfExtents.x, c.y - halfExtents.y, c.z - halfExtents.z),
-      math::Vec3(c.x + halfExtents.x, c.y - halfExtents.y, c.z - halfExtents.z),
-      math::Vec3(c.x + halfExtents.x, c.y + halfExtents.y, c.z - halfExtents.z),
-      math::Vec3(c.x - halfExtents.x, c.y + halfExtents.y, c.z - halfExtents.z),
-      math::Vec3(c.x - halfExtents.x, c.y - halfExtents.y, c.z + halfExtents.z),
-      math::Vec3(c.x + halfExtents.x, c.y - halfExtents.y, c.z + halfExtents.z),
-      math::Vec3(c.x + halfExtents.x, c.y + halfExtents.y, c.z + halfExtents.z),
-      math::Vec3(c.x - halfExtents.x, c.y + halfExtents.y, c.z + halfExtents.z),
-  };
+  math::Vec3 corners[8]{};
+  for (std::size_t corner = 0U; corner < 8U; ++corner) {
+    const math::Vec3 localPoint(
+        localCenter.x +
+            (((corner & 1U) != 0U) ? halfExtents.x : -halfExtents.x),
+        localCenter.y +
+            (((corner & 2U) != 0U) ? halfExtents.y : -halfExtents.y),
+        localCenter.z +
+            (((corner & 4U) != 0U) ? halfExtents.z : -halfExtents.z));
+    const math::Vec4 worldPoint =
+        math::mul(geometry.localToWorld,
+                  math::Vec4(localPoint.x, localPoint.y, localPoint.z, 1.0F));
+    corners[corner] = math::Vec3(worldPoint.x, worldPoint.y, worldPoint.z);
+  }
 
   ImVec2 projected[8] = {};
   bool visible[8] = {};
@@ -157,7 +184,6 @@ void draw_selected_collider_overlay(const runtime::Entity selectedEntity,
     }
   }
 }
-
 
 } // namespace
 
@@ -191,19 +217,23 @@ void draw_scene_viewport_panel() noexcept {
   // --- ImGuizmo gizmo rendering ---
   const bool editable = world_is_editable();
   const runtime::Entity selectedEntity =
-      (editor_session().world != nullptr && editor_session().selectedEntityIndex != 0U)
-          ? editor_session().world->find_entity_by_index(editor_session().selectedEntityIndex)
+      (editor_session().world != nullptr &&
+       editor_session().selectedEntityIndex != 0U)
+          ? editor_session().world->find_entity_by_index(
+                editor_session().selectedEntityIndex)
           : runtime::kInvalidEntity;
 
-  const bool hasTransform =
-      (selectedEntity != runtime::kInvalidEntity) && (editor_session().world != nullptr) &&
-      (editor_session().world->get_transform_read_ptr(selectedEntity) != nullptr);
+  const bool hasTransform = (selectedEntity != runtime::kInvalidEntity) &&
+                            (editor_session().world != nullptr) &&
+                            (editor_session().world->get_transform_read_ptr(
+                                 selectedEntity) != nullptr);
 
   if ((selectedEntity != runtime::kInvalidEntity) && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
-    const renderer::CameraState cam = (editor_session().playState == PlayState::Playing)
-                                          ? renderer::get_active_camera()
-                                          : editor_camera_state(editor_session().editorCamera);
+    const renderer::CameraState cam =
+        (editor_session().playState == PlayState::Playing)
+            ? renderer::get_active_camera()
+            : editor_camera_state(editor_session().editorCamera);
 
     constexpr float kDefaultFov = 1.0471975512F;
     constexpr float kNear = 0.1F;
@@ -219,7 +249,8 @@ void draw_scene_viewport_panel() noexcept {
 
   if (editable && hasTransform && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
-    const renderer::CameraState cam = editor_camera_state(editor_session().editorCamera);
+    const renderer::CameraState cam =
+        editor_camera_state(editor_session().editorCamera);
 
     constexpr float kDefaultFov = 1.0471975512F;
     constexpr float kNear = 0.1F;
@@ -232,8 +263,13 @@ void draw_scene_viewport_panel() noexcept {
 
     runtime::Transform transform{};
     editor_session().world->get_transform(selectedEntity, &transform);
-    math::Mat4 modelMat = math::compose_trs(
-        transform.position, transform.rotation, transform.scale);
+    const runtime::WorldTransform *worldTransform =
+        editor_session().world->get_world_transform_read_ptr(selectedEntity);
+    math::Mat4 modelMat =
+        (worldTransform != nullptr)
+            ? worldTransform->matrix
+            : math::compose_trs(transform.position, transform.rotation,
+                                transform.scale);
 
     ImGuizmo::SetOrthographic(false);
     ImGuizmo::SetDrawlist();
@@ -251,14 +287,30 @@ void draw_scene_viewport_panel() noexcept {
     }
 
     if (manipulated) {
-      math::Vec3 newPos{};
-      math::Quat newRot{};
-      math::Vec3 newScale{};
-      if (math::decompose_trs(modelMat, &newPos, &newRot, &newScale)) {
-        transform.position = newPos;
-        transform.rotation = newRot;
-        transform.scale = newScale;
-        static_cast<void>(editor_session().world->add_transform(selectedEntity, transform));
+      const math::Mat4 *parentWorldMatrix = nullptr;
+      if (transform.parentId != runtime::kInvalidPersistentId) {
+        const runtime::Entity parent =
+            editor_session().world->find_entity_by_persistent_id(
+                transform.parentId);
+        const runtime::WorldTransform *parentWorld =
+            editor_session().world->get_world_transform_read_ptr(parent);
+        if (parentWorld != nullptr) {
+          parentWorldMatrix = &parentWorld->matrix;
+        }
+      }
+
+      runtime::Transform localTransform{};
+      if (!world_matrix_to_local_transform(modelMat, parentWorldMatrix,
+                                           transform, &localTransform)) {
+        core::log_message(
+            core::LogLevel::Warning, "editor",
+            "gizmo transform could not be converted to local space");
+      } else if (!editor_session().world->add_transform(selectedEntity,
+                                                        localTransform)) {
+        core::log_message(core::LogLevel::Error, "editor",
+                          "gizmo transform update failed");
+      } else {
+        transform = localTransform;
       }
     }
 
@@ -267,7 +319,8 @@ void draw_scene_viewport_panel() noexcept {
       if (cmd != nullptr) {
         cmd->entity = selectedEntity;
         cmd->oldTransform = editor_session().gizmoStartTransform;
-        editor_session().world->get_transform(selectedEntity, &cmd->newTransform);
+        editor_session().world->get_transform(selectedEntity,
+                                              &cmd->newTransform);
         editor_session().commandHistory.execute(cmd);
       }
     }
@@ -281,9 +334,11 @@ void draw_scene_viewport_panel() noexcept {
     if (editor_session().playState == PlayState::Playing) {
       editor_session().frozenCameraState = renderer::get_active_camera();
     } else {
-      editor_session().frozenCameraState = editor_camera_state(editor_session().editorCamera);
+      editor_session().frozenCameraState =
+          editor_camera_state(editor_session().editorCamera);
     }
-    editor_session().debugCamera.position = editor_session().frozenCameraState.position;
+    editor_session().debugCamera.position =
+        editor_session().frozenCameraState.position;
     editor_session().debugCameraActive = true;
   } else if (!debugDetach && editor_session().debugCameraActive) {
     editor_session().debugCameraActive = false;
@@ -301,14 +356,15 @@ void draw_scene_viewport_panel() noexcept {
         ImGui::IsKeyDown(ImGuiKey_Q), io.KeyShift,
         rmbDown ? static_cast<int>(io.MouseDelta.x) : 0,
         rmbDown ? static_cast<int>(io.MouseDelta.y) : 0);
-    renderer::set_active_camera(debug_camera_state(editor_session().debugCamera));
+    renderer::set_active_camera(
+        debug_camera_state(editor_session().debugCamera));
 
     // Draw the frozen game camera frustum as wireframe.
     const float aspect =
         (regionSize.y > 0.0F) ? (regionSize.x / regionSize.y) : 1.0F;
     draw_camera_frustum_wireframe(editor_session().frozenCameraState, aspect);
-  } else if ((editor_session().playState != PlayState::Playing) && ImGui::IsWindowHovered() &&
-             !ImGuizmo::IsUsing()) {
+  } else if ((editor_session().playState != PlayState::Playing) &&
+             ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
     const ImGuiIO &io = ImGui::GetIO();
     const bool altHeld = io.KeyAlt;
     const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -316,18 +372,20 @@ void draw_scene_viewport_panel() noexcept {
     const int scrollDelta =
         (io.MouseWheel > 0.0F) ? 1 : ((io.MouseWheel < 0.0F) ? -1 : 0);
 
-    update_editor_camera(editor_session().editorCamera, static_cast<int>(io.MouseDelta.x),
+    update_editor_camera(editor_session().editorCamera,
+                         static_cast<int>(io.MouseDelta.x),
                          static_cast<int>(io.MouseDelta.y), scrollDelta,
                          altHeld && lmbDown, altHeld && mmbDown);
   }
 
   // Push editor camera when not playing (and debug camera is not active).
-  if ((editor_session().playState != PlayState::Playing) && !editor_session().debugCameraActive) {
-    renderer::set_active_camera(editor_camera_state(editor_session().editorCamera));
+  if ((editor_session().playState != PlayState::Playing) &&
+      !editor_session().debugCameraActive) {
+    renderer::set_active_camera(
+        editor_camera_state(editor_session().editorCamera));
   }
 
   ImGui::End();
 }
-
 
 } // namespace engine::editor

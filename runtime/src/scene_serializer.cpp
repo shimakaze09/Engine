@@ -33,7 +33,6 @@ constexpr const char *kComponentsKey = "components";
 constexpr const char *kPersistentIdKey = "persistentId";
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
-constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
 constexpr const char *kReflectionProbeTypeName =
@@ -288,8 +287,7 @@ bool read_mesh_component(const core::JsonParser &parser,
   core::JsonValue captureSourceValue{};
   if (parser.get_object_field(meshObject, "sceneCaptureSourceId",
                               &captureSourceValue)) {
-    if (!parser.as_uint(captureSourceValue,
-                        &component.sceneCaptureSourceId)) {
+    if (!parser.as_uint(captureSourceValue, &component.sceneCaptureSourceId)) {
       return false;
     }
   }
@@ -343,10 +341,12 @@ bool read_light_component(const core::JsonParser &parser,
   return true;
 }
 
-// Reflection-path coverage (S7): Transform, RigidBody, Collider, SpringArm,
+// Reflection-path coverage (S7): Transform, RigidBody, SpringArm,
 // ReflectionProbe, PointLight, and SpotLight serialize through the field
 // descriptors registered in reflect_types.cpp. The remaining component types
 // stay hand-written deliberately:
+//  - Collider: shape has an 8-bit enum representation, so the dedicated reader
+//    validates a uint32 temporary before assigning the enum.
 //  - MeshComponent: meshAssetId is 64-bit (reflection has no Uint64 field
 //    kind) and the reader keeps a legacy "meshId" fallback for scenes
 //    authored before asset ids.
@@ -368,7 +368,6 @@ bool log_scene_error(const char *message) noexcept {
 struct SceneComponentDescriptors final {
   const core::TypeDescriptor *transform = nullptr;
   const core::TypeDescriptor *rigidBody = nullptr;
-  const core::TypeDescriptor *collider = nullptr;
   const core::TypeDescriptor *springArm = nullptr;
   const core::TypeDescriptor *reflectionProbe = nullptr;
   const core::TypeDescriptor *pointLight = nullptr;
@@ -386,14 +385,13 @@ bool find_scene_descriptors(SceneComponentDescriptors *outDescs) noexcept {
   const core::TypeRegistry &registry = core::global_type_registry();
   outDescs->transform = registry.find_type(kTransformTypeName);
   outDescs->rigidBody = registry.find_type(kRigidBodyTypeName);
-  outDescs->collider = registry.find_type(kColliderTypeName);
   outDescs->springArm = registry.find_type(kSpringArmTypeName);
   outDescs->reflectionProbe = registry.find_type(kReflectionProbeTypeName);
   outDescs->pointLight = registry.find_type(kPointLightTypeName);
   outDescs->spotLight = registry.find_type(kSpotLightTypeName);
   outDescs->sceneCapture = registry.find_type(kSceneCaptureTypeName);
   if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
-      (outDescs->collider == nullptr) || (outDescs->springArm == nullptr) ||
+      (outDescs->springArm == nullptr) ||
       (outDescs->reflectionProbe == nullptr) ||
       (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr) ||
       (outDescs->sceneCapture == nullptr)) {
@@ -408,7 +406,6 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
                                 World &targetWorld) noexcept {
   const core::TypeDescriptor &transformDesc = *descs.transform;
   const core::TypeDescriptor &rigidBodyDesc = *descs.rigidBody;
-  const core::TypeDescriptor &colliderDesc = *descs.collider;
   const core::TypeDescriptor &springArmDesc = *descs.springArm;
   const core::TypeDescriptor &reflectionProbeDesc = *descs.reflectionProbe;
   const core::TypeDescriptor &pointLightDesc = *descs.pointLight;
@@ -438,8 +435,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 
     const Entity entity =
         (persistentId != kInvalidPersistentId)
-            ? targetWorld.create_entity_with_persistent_id(persistentId)
-            : targetWorld.create_entity();
+            ? targetWorld.create_scene_object_with_persistent_id(persistentId)
+            : targetWorld.create_scene_object();
     if (entity == kInvalidEntity) {
       return log_scene_error("failed to allocate entity while loading scene");
     }
@@ -455,7 +452,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue transformValue{};
-    if (parser.get_object_field(components, kJsonKeyTransform, &transformValue)) {
+    if (parser.get_object_field(components, kJsonKeyTransform,
+                                &transformValue)) {
       Transform transform{};
       if (!read_reflected_component(parser, transformValue, transformDesc,
                                     &transform) ||
@@ -466,7 +464,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue rigidBodyValue{};
-    if (parser.get_object_field(components, kJsonKeyRigidBody, &rigidBodyValue)) {
+    if (parser.get_object_field(components, kJsonKeyRigidBody,
+                                &rigidBodyValue)) {
       RigidBody rigidBody{};
       if (!read_reflected_component(parser, rigidBodyValue, rigidBodyDesc,
                                     &rigidBody) ||
@@ -479,8 +478,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     core::JsonValue colliderValue{};
     if (parser.get_object_field(components, kJsonKeyCollider, &colliderValue)) {
       Collider collider{};
-      if (!read_reflected_component(parser, colliderValue, colliderDesc,
-                                    &collider) ||
+      if (!read_collider_component(parser, colliderValue, &collider) ||
           !targetWorld.add_collider(entity, collider)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to load Collider component");
@@ -510,7 +508,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue lightValue{};
-    if (parser.get_object_field(components, kJsonKeyLightComponent, &lightValue)) {
+    if (parser.get_object_field(components, kJsonKeyLightComponent,
+                                &lightValue)) {
       LightComponent light{};
       if (!read_light_component(parser, lightValue, &light) ||
           !targetWorld.add_light_component(entity, light)) {
@@ -548,7 +547,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       if (!read_reflected_component(parser, reflectionProbeValue,
                                     reflectionProbeDesc, &reflectionProbe) ||
           !targetWorld.add_reflection_probe_component(entity,
-                                                     reflectionProbe)) {
+                                                      reflectionProbe)) {
         targetWorld.destroy_entity(entity);
         return log_scene_error(
             "failed to load ReflectionProbeComponent component");
@@ -585,7 +584,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 
     core::JsonValue scriptValue{};
     if (parser.get_object_field(components, kJsonKeyScriptComponent,
-                                       &scriptValue)) {
+                                &scriptValue)) {
       ScriptComponent scriptComp{};
       if (!parser.copy_string(scriptValue, scriptComp.scriptPath,
                               sizeof(scriptComp.scriptPath))) {
@@ -707,7 +706,6 @@ bool serialize_scene_to_writer(const World &world,
   }
   const core::TypeDescriptor *transformDesc = descs.transform;
   const core::TypeDescriptor *rigidBodyDesc = descs.rigidBody;
-  const core::TypeDescriptor *colliderDesc = descs.collider;
   const core::TypeDescriptor *springArmDesc = descs.springArm;
   const core::TypeDescriptor *reflectionProbeDesc = descs.reflectionProbe;
 
@@ -750,8 +748,7 @@ bool serialize_scene_to_writer(const World &world,
 
     Collider collider{};
     if (world.get_collider(entity, &collider) &&
-        !write_reflected_component(writer, kJsonKeyCollider, *colliderDesc,
-                                   &collider)) {
+        !write_collider_component(writer, collider)) {
       writeFailed = true;
       return;
     }

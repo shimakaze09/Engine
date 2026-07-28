@@ -1,29 +1,29 @@
 // Implements scripting behavior for the Engine Lua scripting system.
 
 #include "engine/scripting/scripting.h"
-#include "engine/scripting/bindable_api.h"
-#include "engine/scripting/dap_server.h"
 #include "asset_bindings.h"
 #include "audio_bindings.h"
 #include "binding_util.h"
 #include "body_bindings.h"
 #include "camera_bindings.h"
-#include "collision_bindings.h"
-#include "entity_lifecycle_bindings.h"
-#include "light_bindings.h"
-#include "mesh_material_bindings.h"
-#include "physics_bindings.h"
 #include "cheat_bindings.h"
+#include "collision_bindings.h"
 #include "coroutine_bindings.h"
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
+#include "engine/scripting/bindable_api.h"
+#include "engine/scripting/dap_server.h"
 #include "entity_handle.h"
+#include "entity_lifecycle_bindings.h"
 #include "entity_pool_bindings.h"
 #include "entity_script_bindings.h"
 #include "game_bindings.h"
 #include "input_bindings.h"
+#include "light_bindings.h"
 #include "lua_state.h"
+#include "mesh_material_bindings.h"
 #include "persist_bindings.h"
+#include "physics_bindings.h"
 #include "runtime_binding.h"
 #include "scene_bindings.h"
 #include "timer_bindings.h"
@@ -35,15 +35,15 @@ extern "C" {
 #include "lualib.h"
 }
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 
 #include "engine/core/input.h"
-#include "engine/core/string_util.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
@@ -59,7 +59,6 @@ extern "C" {
 #else
 #include <sys/stat.h>
 #endif
-
 
 namespace engine::scripting {
 
@@ -117,9 +116,7 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
 
 void refresh_lua_hook() noexcept;
 
-void refresh_lua_hook() noexcept {
-  refresh_debug_lua_hook();
-}
+void refresh_lua_hook() noexcept { refresh_debug_lua_hook(); }
 
 int lua_engine_delta_time(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(g_deltaSeconds));
@@ -236,7 +233,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_debugger_last_watch_values);
   lua_setfield(state, -2, "debugger_last_watch_values");
 
-
   register_camera_bindings(state);
 
   lua_pushcfunction(state, &lua_engine_frame_count);
@@ -294,7 +290,6 @@ void register_engine_bindings(lua_State *state) noexcept {
 
 } // namespace
 
-
 float bindable_delta_time() noexcept { return g_deltaSeconds; }
 
 float bindable_elapsed_time() noexcept { return g_totalSeconds; }
@@ -302,10 +297,12 @@ float bindable_elapsed_time() noexcept { return g_totalSeconds; }
 int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
 
 int bindable_get_entity_count() noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr)) {
+  if ((runtime_binding().world == nullptr) ||
+      (runtime_binding().services == nullptr)) {
     return 0;
   }
-  return static_cast<int>(runtime_binding().services->get_transform_count(runtime_binding().world));
+  return static_cast<int>(
+      runtime_binding().services->get_entity_count(runtime_binding().world));
 }
 
 bool bindable_is_gamepad_connected() noexcept {
@@ -362,19 +359,22 @@ bool bindable_has_light(std::uint64_t entity) noexcept {
 }
 
 void bindable_set_camera_fov(float fov) noexcept {
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_camera_fov != nullptr)) {
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->set_camera_fov != nullptr)) {
     runtime_binding().services->set_camera_fov(fov);
   }
 }
 
 void bindable_set_master_volume(float volume) noexcept {
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_master_volume != nullptr)) {
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->set_master_volume != nullptr)) {
     runtime_binding().services->set_master_volume(volume);
   }
 }
 
 void bindable_stop_all_sounds() noexcept {
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_all_sounds != nullptr)) {
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->stop_all_sounds != nullptr)) {
     runtime_binding().services->stop_all_sounds();
   }
 }
@@ -452,7 +452,6 @@ void shutdown_scripting() noexcept {
   }
   g_watchedScriptCount = 0U;
 }
-
 
 /// Sets the requested value for frame time.
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
@@ -577,7 +576,8 @@ int snapshot_global_bindings(lua_State *state) noexcept {
   return luaL_ref(state, LUA_REGISTRYINDEX);
 }
 
-/// Restores top-level globals exactly, including removing newly introduced keys.
+/// Restores top-level globals exactly, including removing newly introduced
+/// keys.
 void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
   const int originalTop = lua_gettop(state);
   lua_rawgeti(state, LUA_REGISTRYINDEX, snapshotReference);
@@ -687,18 +687,14 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
 }
 
-void tick_timers() noexcept {
-  tick_lua_timers(lua_state(), g_deltaSeconds);
-}
+void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 
 void tick_coroutines() noexcept {
   tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
                       refresh_lua_hook);
 }
 
-void clear_coroutines() noexcept {
-  clear_lua_coroutines(lua_state());
-}
+void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
 
 /// Adds a script to the hot-reload watch table (or refreshes its mtime when
 /// already watched). Watching a new file no longer drops earlier watches;

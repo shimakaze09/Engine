@@ -30,6 +30,8 @@ REFLECT_FIELD(sleeping, Bool)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::Collider)
+REFLECT_FIELD(localPosition, Vec3)
+REFLECT_FIELD(localRotation, Quat)
 REFLECT_FIELD(halfExtents, Vec3)
 REFLECT_FIELD(restitution, Float)
 REFLECT_FIELD(staticFriction, Float)

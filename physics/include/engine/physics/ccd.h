@@ -20,13 +20,11 @@ struct CcdSweepResult {
   std::uint32_t hitEntityIndex = 0U;
 };
 
-/// Perform bilateral advancement CCD for a single moving body.
-/// Sweeps the body's collider from its current position along its velocity
-/// for up to `dt` seconds. Returns the earliest time-of-impact against any
-/// static or dynamic collider in the world.
+/// Performs bilateral advancement for one collider owned by a moving body.
+/// The collider may live on the body root or a child compound object.
 ///
 /// @param world     The physics world view.
-/// @param entity    The moving entity.
+/// @param entity    The moving collider entity.
 /// @param body      The rigid body (must have inverseMass > 0).
 /// @param collider  The entity's collider.
 /// @param transform The entity's current transform.

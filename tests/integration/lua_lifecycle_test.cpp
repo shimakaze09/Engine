@@ -84,12 +84,12 @@ engine::runtime::WorldPhase get_phase(engine::runtime::World *w) noexcept {
                         : engine::runtime::WorldPhase::Input;
 }
 
-/// Creates a new object, handle, or resource for entity.
-std::uint32_t create_entity(engine::runtime::World *w) noexcept {
+/// Creates a scene object for the Lua-facing spawn operation.
+std::uint32_t create_scene_object(engine::runtime::World *w) noexcept {
   if (w == nullptr) {
     return 0U;
   }
-  return w->create_entity().index;
+  return w->create_scene_object().index;
 }
 
 /// Destroys or releases the requested object, handle, or resource for entity.
@@ -110,18 +110,37 @@ bool add_transform(engine::runtime::World *w, std::uint32_t idx,
   return w->add_transform(e, t);
 }
 
-std::uint32_t get_transform_count(engine::runtime::World *w) noexcept {
-  return (w != nullptr) ? static_cast<std::uint32_t>(w->transform_count()) : 0U;
+std::uint32_t get_entity_count(engine::runtime::World *w) noexcept {
+  return (w != nullptr) ? static_cast<std::uint32_t>(w->alive_entity_count())
+                        : 0U;
+}
+
+const engine::runtime::Transform *
+get_transform_read_ptr(engine::runtime::World *w, std::uint32_t idx) noexcept {
+  if (w == nullptr) {
+    return nullptr;
+  }
+  return w->get_transform_read_ptr(w->find_entity_by_index(idx));
+}
+
+bool get_transform(engine::runtime::World *w, std::uint32_t idx,
+                   engine::runtime::Transform *outTransform) noexcept {
+  if (w == nullptr) {
+    return false;
+  }
+  return w->get_transform(w->find_entity_by_index(idx), outTransform);
 }
 
 /// Builds the requested runtime data for test services.
 engine::scripting::RuntimeServices build_test_services() noexcept {
   engine::scripting::RuntimeServices svc{};
   svc.get_current_phase = &get_phase;
-  svc.create_entity_op = &create_entity;
+  svc.create_scene_object_op = &create_scene_object;
   svc.destroy_entity_op = &destroy_entity;
   svc.add_transform_op = &add_transform;
-  svc.get_transform_count = &get_transform_count;
+  svc.get_entity_count = &get_entity_count;
+  svc.get_transform_read_ptr = &get_transform_read_ptr;
+  svc.get_transform_op = &get_transform;
   return svc;
 }
 
@@ -413,6 +432,42 @@ end
   return engine::scripting::call_script_function("verify_demo_scripts");
 }
 
+/// Verifies Lua scene-object creation exposes an identity TRS immediately and
+/// that entity counting includes transformless raw ECS entities.
+bool verify_lua_scene_object_defaults(engine::runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+
+  const std::size_t aliveBefore = world->alive_entity_count();
+  const char *script =
+      "function verify_scene_object_defaults()\n"
+      "    local count_before = engine.get_entity_count()\n"
+      "    local entity = engine.spawn_entity()\n"
+      "    if entity == nil then error('spawn_entity returned nil') end\n"
+      "    local px, py, pz = engine.get_position(entity)\n"
+      "    local rx, ry, rz, rw = engine.get_rotation(entity)\n"
+      "    local sx, sy, sz = engine.get_scale(entity)\n"
+      "    if px ~= 0.0 or py ~= 0.0 or pz ~= 0.0\n"
+      "        or rx ~= 0.0 or ry ~= 0.0 or rz ~= 0.0 or rw ~= 1.0\n"
+      "        or sx ~= 1.0 or sy ~= 1.0 or sz ~= 1.0 then\n"
+      "        error('spawned scene object did not have identity TRS')\n"
+      "    end\n"
+      "    if engine.get_entity_count() ~= count_before + 1 then\n"
+      "        error('get_entity_count did not include spawned object')\n"
+      "    end\n"
+      "end\n";
+
+  if (!write_script_file(script) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function(
+          "verify_scene_object_defaults")) {
+    return false;
+  }
+
+  return world->alive_entity_count() == (aliveBefore + 1U);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -557,7 +612,18 @@ int main() {
     }
   }
 
-  // --- Test 5: shipped demo Lua modules load and behave correctly ---
+  // --- Test 5: Lua-spawned entities are scene objects with identity TRS ---
+  {
+    std::printf("  %-40s ", "Lua spawn creates identity scene object");
+    if (verify_lua_scene_object_defaults(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 6: shipped demo Lua modules load and behave correctly ---
   {
     std::printf("  %-40s ", "demo Lua modules");
     if (verify_demo_script_modules()) {

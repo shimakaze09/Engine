@@ -1,9 +1,12 @@
 // Verifies editor command history ownership behavior.
 
 #include "editor_commands.h"
+#include "editor_transform_util.h"
 #include "engine/editor/command_history.h"
+#include "engine/math/transform.h"
 #include "engine/runtime/world.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -43,6 +46,62 @@ struct CountingCommand final : engine::editor::EditorCommand {
 
 engine::editor::EditorCommand *make_command() noexcept {
   return new (std::nothrow) CountingCommand();
+}
+
+/// Returns whether two editor-transform scalar values match tightly.
+bool nearly_equal(float lhs, float rhs) noexcept {
+  return std::fabs(lhs - rhs) <= 0.0001F;
+}
+
+/// Returns whether two transform matrices represent the same affine mapping.
+bool matrices_nearly_equal(const engine::math::Mat4 &lhs,
+                           const engine::math::Mat4 &rhs) noexcept {
+  for (std::size_t column = 0U; column < 4U; ++column) {
+    if (!nearly_equal(lhs.columns[column].x, rhs.columns[column].x) ||
+        !nearly_equal(lhs.columns[column].y, rhs.columns[column].y) ||
+        !nearly_equal(lhs.columns[column].z, rhs.columns[column].z) ||
+        !nearly_equal(lhs.columns[column].w, rhs.columns[column].w)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Verifies a parented gizmo world matrix converts back to local TRS and
+/// preserves the selected object's parent identity.
+int check_parented_gizmo_world_to_local_conversion() noexcept {
+  constexpr float kHalfPi = 1.57079632679F;
+  const engine::math::Mat4 parentWorld = engine::math::compose_trs(
+      engine::math::Vec3(10.0F, -2.0F, 5.0F),
+      engine::math::from_axis_angle(engine::math::Vec3(0.0F, 0.0F, 1.0F),
+                                    kHalfPi),
+      engine::math::Vec3(2.0F, 2.0F, 2.0F));
+
+  engine::runtime::Transform expected{};
+  expected.position = engine::math::Vec3(4.0F, -1.0F, 2.0F);
+  expected.rotation = engine::math::from_axis_angle(
+      engine::math::Vec3(0.0F, 1.0F, 0.0F), kHalfPi);
+  expected.scale = engine::math::Vec3(0.5F, 1.5F, 2.0F);
+  expected.parentId = 77U;
+
+  const engine::math::Mat4 expectedLocalMatrix = engine::math::compose_trs(
+      expected.position, expected.rotation, expected.scale);
+  const engine::math::Mat4 manipulatedWorld =
+      engine::math::mul(parentWorld, expectedLocalMatrix);
+
+  engine::runtime::Transform converted{};
+  if (!engine::editor::world_matrix_to_local_transform(
+          manipulatedWorld, &parentWorld, expected, &converted)) {
+    return 1;
+  }
+  if (converted.parentId != expected.parentId) {
+    return 2;
+  }
+
+  const engine::math::Mat4 convertedLocalMatrix = engine::math::compose_trs(
+      converted.position, converted.rotation, converted.scale);
+  return matrices_nearly_equal(convertedLocalMatrix, expectedLocalMatrix) ? 0
+                                                                          : 3;
 }
 
 int check_destructor_releases_commands() noexcept {
@@ -223,7 +282,13 @@ static_assert(!std::is_move_constructible_v<engine::editor::CommandHistory>);
 static_assert(!std::is_move_assignable_v<engine::editor::CommandHistory>);
 
 int main() {
-  int result = check_destructor_releases_commands();
+  int result = check_parented_gizmo_world_to_local_conversion();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_destructor_releases_commands();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

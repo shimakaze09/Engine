@@ -23,6 +23,7 @@
 #endif
 
 #include "engine/core/cvar.h"
+#include "engine/core/logging.h"
 #include "engine/core/touch_input.h"
 #include "engine/core/service_locator.h"
 #include "engine/renderer/asset_database.h"
@@ -89,6 +90,9 @@ void gesture_probe_callback(const engine::core::GestureEvent &,
 /// Runs this executable or test program.
 int main() {
   remove_script_file();
+
+  // Logging surfaces Lua tracebacks when a scripted verification fails.
+  static_cast<void>(engine::core::initialize_logging());
 
   if (!engine::scripting::initialize_scripting()) {
     return 1;
@@ -162,29 +166,38 @@ int main() {
       "end\n"
       "function verify_parenting()\n"
       "    local parent = engine.spawn_entity()\n"
-      "    if parent == nil then error('spawn parent failed') end\n"
+      "    local kid = engine.spawn_entity()\n"
+      "    if parent == nil or kid == nil then error('spawn failed') end\n"
       "    engine.set_position(parent, 50.0, 0.0, 0.0)\n"
-      "    if not engine.set_parent(spawned, parent) then\n"
+      "    engine.set_position(kid, 1.0, 1.0, 1.0)\n"
+      "    -- Dynamic rigid bodies must stay hierarchy roots.\n"
+      "    if engine.set_parent(spawned, parent) then\n"
+      "        error('parenting a dynamic body must fail')\n"
+      "    end\n"
+      "    if not engine.set_parent(kid, parent) then\n"
       "        error('set_parent failed')\n"
       "    end\n"
-      "    if engine.get_parent(spawned) ~= parent then\n"
+      "    if engine.get_parent(kid) ~= parent then\n"
       "        error('get_parent mismatch')\n"
       "    end\n"
       "    local children = engine.get_children(parent)\n"
-      "    if #children ~= 1 or children[1] ~= spawned then\n"
+      "    if #children ~= 1 or children[1] ~= kid then\n"
       "        error('get_children mismatch')\n"
       "    end\n"
-      "    if engine.set_parent(spawned, spawned) then\n"
+      "    if engine.set_parent(kid, kid) then\n"
       "        error('self-parent must fail')\n"
       "    end\n"
-      "    if not engine.set_parent(spawned, nil) then\n"
+      "    if not engine.set_parent(kid, nil) then\n"
       "        error('unparent failed')\n"
       "    end\n"
-      "    if engine.get_parent(spawned) ~= nil then\n"
+      "    if engine.get_parent(kid) ~= nil then\n"
       "        error('parent should be nil after unparent')\n"
       "    end\n"
       "    if #engine.get_children(parent) ~= 0 then\n"
       "        error('children should be empty after unparent')\n"
+      "    end\n"
+      "    if not engine.destroy_entity(kid) then\n"
+      "        error('kid cleanup failed')\n"
       "    end\n"
       "end\n"
       "function on_update()\n"

@@ -49,8 +49,8 @@
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
-#include "engine/engine.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
@@ -258,7 +258,6 @@ bool draw_reflected_component(const char *typeName, void *instance) noexcept {
   return modified;
 }
 
-
 bool draw_remove_component_button(const char *id, bool editable) noexcept {
   if (!editable || (id == nullptr)) {
     return false;
@@ -325,7 +324,8 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
 
     if ((std::strcmp(desc->name, kReflectionProbeTypeName) == 0) &&
-        (editor_session().world->get_reflection_probe_component_ptr(entity) == nullptr)) {
+        (editor_session().world->get_reflection_probe_component_ptr(entity) ==
+         nullptr)) {
       if (ImGui::Selectable(kReflectionProbeSectionLabel)) {
         execute_component_add(entity, ComponentEditType::ReflectionProbe,
                               default_component_snapshot(
@@ -337,9 +337,9 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     if ((std::strcmp(desc->name, kFoliagePatchTypeName) == 0) &&
         !editor_session().world->has_foliage_patch_component(entity)) {
       if (ImGui::Selectable(kFoliagePatchSectionLabel)) {
-        execute_component_add(
-            entity, ComponentEditType::FoliagePatch,
-            default_component_snapshot(entity, ComponentEditType::FoliagePatch));
+        execute_component_add(entity, ComponentEditType::FoliagePatch,
+                              default_component_snapshot(
+                                  entity, ComponentEditType::FoliagePatch));
       }
       continue;
     }
@@ -428,11 +428,10 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
        ++lod) {
     char label[32] = {};
     std::snprintf(label, sizeof(label), "LOD %zu Mesh ID", lod);
-    mark_modified(
-        modified,
-        ImGui::InputScalar(label, ImGuiDataType_U64,
-                           &foliage.meshAssetIds[lod], nullptr, nullptr,
-                           "%llu", ImGuiInputTextFlags_None));
+    mark_modified(modified, ImGui::InputScalar(label, ImGuiDataType_U64,
+                                               &foliage.meshAssetIds[lod],
+                                               nullptr, nullptr, "%llu",
+                                               ImGuiInputTextFlags_None));
   }
 
   int instanceCount = static_cast<int>(foliage.instanceCount);
@@ -456,18 +455,18 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
   mark_modified(modified, ImGui::SliderFloat("Opacity", &foliage.opacity, 0.0F,
                                              1.0F, "%.2f"));
   mark_modified(modified,
-                ImGui::DragFloat("Wind Strength", &foliage.windStrength,
-                                  0.01F, 0.0F, 5.0F, "%.2f"));
+                ImGui::DragFloat("Wind Strength", &foliage.windStrength, 0.01F,
+                                 0.0F, 5.0F, "%.2f"));
   mark_modified(modified,
                 ImGui::DragFloat("Wind Frequency", &foliage.windFrequency,
-                                  0.05F, 0.0F, 20.0F, "%.2f"));
+                                 0.05F, 0.0F, 20.0F, "%.2f"));
 
   if (ImGui::TreeNode("Instances")) {
     std::uint32_t visibleCount = foliage.instanceCount;
-    if (visibleCount >
-        static_cast<std::uint32_t>(runtime::FoliagePatchComponent::kMaxInstances)) {
-      visibleCount =
-          static_cast<std::uint32_t>(runtime::FoliagePatchComponent::kMaxInstances);
+    if (visibleCount > static_cast<std::uint32_t>(
+                           runtime::FoliagePatchComponent::kMaxInstances)) {
+      visibleCount = static_cast<std::uint32_t>(
+          runtime::FoliagePatchComponent::kMaxInstances);
     }
     if (visibleCount > 16U) {
       visibleCount = 16U;
@@ -479,15 +478,15 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
       ImGui::Separator();
       ImGui::Text("Instance %u", i);
       draw_vec3_field("Offset", instance.offset, modified);
-      mark_modified(modified, ImGui::DragFloat("Scale", &instance.scale,
-                                               0.01F, 0.05F, 10.0F, "%.2f"));
-      mark_modified(modified, ImGui::DragFloat("Phase", &instance.phase,
-                                               0.05F, -100.0F, 100.0F,
-                                               "%.2f"));
+      mark_modified(modified, ImGui::DragFloat("Scale", &instance.scale, 0.01F,
+                                               0.05F, 10.0F, "%.2f"));
+      mark_modified(modified, ImGui::DragFloat("Phase", &instance.phase, 0.05F,
+                                               -100.0F, 100.0F, "%.2f"));
       int lodIndex = static_cast<int>(instance.lodIndex);
       if (ImGui::SliderInt(
               "LOD Index", &lodIndex, 0,
-              static_cast<int>(runtime::FoliagePatchComponent::kMaxLods - 1U))) {
+              static_cast<int>(runtime::FoliagePatchComponent::kMaxLods -
+                               1U))) {
         instance.lodIndex = static_cast<std::uint32_t>(lodIndex);
         mark_modified(modified, true);
       }
@@ -506,7 +505,6 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
   }
 }
 
-
 } // namespace
 
 void draw_inspector_panel() noexcept {
@@ -522,14 +520,15 @@ void draw_inspector_panel() noexcept {
     ImGui::Separator();
   }
 
-  if ((editor_session().world == nullptr) || (editor_session().selectedEntityIndex == 0U)) {
+  if ((editor_session().world == nullptr) ||
+      (editor_session().selectedEntityIndex == 0U)) {
     ImGui::TextUnformatted("No entity selected");
     ImGui::End();
     return;
   }
 
-  const runtime::Entity entity =
-      editor_session().world->find_entity_by_index(editor_session().selectedEntityIndex);
+  const runtime::Entity entity = editor_session().world->find_entity_by_index(
+      editor_session().selectedEntityIndex);
   if (entity == runtime::kInvalidEntity) {
     ImGui::TextUnformatted("Selected entity is no longer alive");
     editor_session().selectedEntityIndex = 0U;
@@ -557,7 +556,8 @@ void draw_inspector_panel() noexcept {
     }
 
     if (editable && nameChanged) {
-      static_cast<void>(editor_session().world->add_name_component(entity, nameComponent));
+      static_cast<void>(
+          editor_session().world->add_name_component(entity, nameComponent));
     }
   } else {
     if (!editable) {
@@ -621,7 +621,8 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && transformModified) {
-      static_cast<void>(editor_session().world->add_transform(entity, transform));
+      static_cast<void>(
+          editor_session().world->add_transform(entity, transform));
     }
   } else {
     ImGui::TextUnformatted("Transform: <none>");
@@ -651,7 +652,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::RigidBody);
     } else if (editable && rigidBodyModified) {
-      static_cast<void>(editor_session().world->add_rigid_body(entity, rigidBody));
+      static_cast<void>(
+          editor_session().world->add_rigid_body(entity, rigidBody));
     }
   } else {
     ImGui::TextUnformatted("RigidBody: <none>");
@@ -666,13 +668,25 @@ void draw_inspector_panel() noexcept {
 
     bool colliderModified = false;
     if (sectionOpen) {
-      if (editable) {
-        colliderModified =
-            draw_reflected_component(kColliderTypeName, &collider);
-      } else {
+      if (!editable) {
         ImGui::BeginDisabled();
-        static_cast<void>(
-            draw_reflected_component(kColliderTypeName, &collider));
+      }
+
+      constexpr const char *kColliderShapeNames[] = {
+          "Box", "Sphere", "Capsule", "Convex Hull", "Heightfield"};
+      int shapeIndex = static_cast<int>(collider.shape);
+      if ((shapeIndex < 0) || (shapeIndex >= 5)) {
+        shapeIndex = 0;
+      }
+      if (ImGui::Combo("Shape", &shapeIndex, kColliderShapeNames, 5)) {
+        collider.shape = static_cast<runtime::ColliderShape>(shapeIndex);
+        colliderModified = true;
+      }
+      colliderModified =
+          draw_reflected_component(kColliderTypeName, &collider) ||
+          colliderModified;
+
+      if (!editable) {
         ImGui::EndDisabled();
       }
     }
@@ -722,7 +736,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removeLightPressed) {
       execute_component_remove(entity, ComponentEditType::Light);
     } else if (editable && lightModified) {
-      static_cast<void>(editor_session().world->add_light_component(entity, light));
+      static_cast<void>(
+          editor_session().world->add_light_component(entity, light));
     }
   } else {
     ImGui::TextUnformatted("LightComponent: <none>");
@@ -752,8 +767,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::PointLight);
     } else if (editable && pointLightModified) {
-      static_cast<void>(
-          editor_session().world->add_point_light_component(entity, pointLight));
+      static_cast<void>(editor_session().world->add_point_light_component(
+          entity, pointLight));
     }
   } else {
     ImGui::TextUnformatted("PointLightComponent: <none>");
@@ -783,7 +798,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SpotLight);
     } else if (editable && spotLightModified) {
-      static_cast<void>(editor_session().world->add_spot_light_component(entity, spotLight));
+      static_cast<void>(
+          editor_session().world->add_spot_light_component(entity, spotLight));
     }
   } else {
     ImGui::TextUnformatted("SpotLightComponent: <none>");
@@ -813,8 +829,9 @@ void draw_inspector_panel() noexcept {
             ImGui::SliderFloat("Opacity", &mesh.opacity, 0.0F, 1.0F, "%.2f");
         if (ImGui::InputInt("Capture Source ID", &captureSourceId)) {
           mesh.sceneCaptureSourceId =
-              (captureSourceId > 0) ? static_cast<std::uint32_t>(captureSourceId)
-                                    : 0U;
+              (captureSourceId > 0)
+                  ? static_cast<std::uint32_t>(captureSourceId)
+                  : 0U;
           meshModified = true;
         }
       } else {
@@ -836,14 +853,16 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::Mesh);
     } else if (editable && meshModified) {
-      static_cast<void>(editor_session().world->add_mesh_component(entity, mesh));
+      static_cast<void>(
+          editor_session().world->add_mesh_component(entity, mesh));
     }
   } else {
     ImGui::TextUnformatted("MeshComponent: <none>");
   }
 
   runtime::FoliagePatchComponent foliagePatch{};
-  if (editor_session().world->get_foliage_patch_component(entity, &foliagePatch)) {
+  if (editor_session().world->get_foliage_patch_component(entity,
+                                                          &foliagePatch)) {
     ImGui::PushID("FoliagePatchComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kFoliagePatchSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -858,15 +877,16 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::FoliagePatch);
     } else if (editable && foliageModified) {
-      static_cast<void>(
-          editor_session().world->add_foliage_patch_component(entity, foliagePatch));
+      static_cast<void>(editor_session().world->add_foliage_patch_component(
+          entity, foliagePatch));
     }
   } else {
     ImGui::TextUnformatted("FoliagePatchComponent: <none>");
   }
 
   runtime::ReflectionProbeComponent reflectionProbe{};
-  if (editor_session().world->get_reflection_probe_component(entity, &reflectionProbe)) {
+  if (editor_session().world->get_reflection_probe_component(
+          entity, &reflectionProbe)) {
     ImGui::PushID("ReflectionProbeComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kReflectionProbeSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -875,9 +895,8 @@ void draw_inspector_panel() noexcept {
     bool probeModified = false;
     if (sectionOpen) {
       if (editable) {
-        probeModified =
-            draw_reflected_component(kReflectionProbeTypeName,
-                                     &reflectionProbe);
+        probeModified = draw_reflected_component(kReflectionProbeTypeName,
+                                                 &reflectionProbe);
       } else {
         ImGui::BeginDisabled();
         static_cast<void>(draw_reflected_component(kReflectionProbeTypeName,
@@ -890,8 +909,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::ReflectionProbe);
     } else if (editable && probeModified) {
-      static_cast<void>(
-          editor_session().world->add_reflection_probe_component(entity, reflectionProbe));
+      static_cast<void>(editor_session().world->add_reflection_probe_component(
+          entity, reflectionProbe));
     }
   } else {
     ImGui::TextUnformatted("ReflectionProbeComponent: <none>");
@@ -986,7 +1005,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removeScriptPressed) {
       execute_component_remove(entity, ComponentEditType::Script);
     } else if (editable && scriptModified) {
-      static_cast<void>(editor_session().world->add_script_component(entity, script));
+      static_cast<void>(
+          editor_session().world->add_script_component(entity, script));
     }
   } else {
     ImGui::TextUnformatted("ScriptComponent: <none>");
@@ -1016,7 +1036,8 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SpringArm);
     } else if (editable && springArmModified) {
-      static_cast<void>(editor_session().world->add_spring_arm(entity, springArm));
+      static_cast<void>(
+          editor_session().world->add_spring_arm(entity, springArm));
     }
   } else {
     ImGui::TextUnformatted("SpringArmComponent: <none>");
@@ -1026,6 +1047,5 @@ void draw_inspector_panel() noexcept {
 
   ImGui::End();
 }
-
 
 } // namespace engine::editor
