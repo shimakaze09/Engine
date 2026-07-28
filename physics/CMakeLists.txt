@@ -3,6 +3,7 @@
 engine_add_module_library(engine_physics
     SOURCES
     src/physics.cpp
+    src/collider.cpp
     src/convex_hull.cpp
     src/ccd.cpp
     src/constraint_solver.cpp

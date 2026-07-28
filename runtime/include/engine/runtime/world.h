@@ -209,10 +209,20 @@ public:
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
   World() noexcept;
 
-  /// Creates a new object, handle, or resource for entity.
+  /// Allocates a raw entity without components for low-level ECS use.
   Entity create_entity() noexcept;
-  /// Creates a new object, handle, or resource for entity with persistent id.
+  /// Allocates a raw entity with a caller-supplied persistent id.
   Entity create_entity_with_persistent_id(PersistentId persistentId) noexcept;
+  /// Creates a scene object with the supplied local transform (identity by
+  /// default); rolls the entity allocation back if the transform cannot be
+  /// installed.
+  Entity
+  create_scene_object(const Transform &localTransform = Transform{}) noexcept;
+  /// Creates a scene object with a caller-supplied persistent id and local
+  /// transform; rolls the entity allocation back on component failure.
+  Entity create_scene_object_with_persistent_id(
+      PersistentId persistentId,
+      const Transform &localTransform = Transform{}) noexcept;
   /// Destroys or releases the requested object, handle, or resource for entity.
   bool destroy_entity(Entity entity) noexcept;
   /// Returns whether is alive.
@@ -245,8 +255,8 @@ public:
     }
   }
 
-  /// Adds or replaces the entity's transform. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's transform. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when storage is full.
   bool add_transform(Entity entity, const Transform &transform) noexcept;
   /// Removes the entity's transform. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
@@ -255,6 +265,10 @@ public:
   /// false for stale or dead entities or when the component is absent.
   bool get_transform(Entity entity,
                      Transform *outTransform) const noexcept override;
+  /// Copies the hierarchy-composed read-state transform for physics.
+  bool get_physics_transform(
+      Entity entity,
+      physics::PhysicsTransform *outTransform) const noexcept override;
   // Read buffer is last committed state; during Idle this is the previous
   // frame.
   const Transform *get_transform_read_ptr(Entity entity) const noexcept;
@@ -265,8 +279,12 @@ public:
   Transform *
   get_transform_write_ptr(Entity entity,
                           const SimulationAccessToken &token) noexcept override;
-  /// Pointer to the entity's world transform read, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
+  /// Copies the hierarchy-composed simulation write-state transform.
+  bool get_simulation_physics_transform(
+      Entity entity, const SimulationAccessToken &token,
+      physics::PhysicsTransform *outTransform) const noexcept override;
+  /// Pointer to the entity's world transform read, or nullptr when the handle
+  /// is stale or the component is absent (no logging).
   const WorldTransform *
   get_world_transform_read_ptr(Entity entity) const noexcept;
   /// Sets the requested value for movement authority.
@@ -275,8 +293,8 @@ public:
   /// Who currently drives this entity's transform (physics vs script).
   MovementAuthority movement_authority(Entity entity) const noexcept override;
 
-  /// Adds or replaces the entity's rigid body. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's rigid body. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when storage is full.
   bool add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept;
   /// Removes the entity's rigid body. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
@@ -285,9 +303,19 @@ public:
   /// false for stale or dead entities or when the component is absent.
   bool get_rigid_body(Entity entity,
                       RigidBody *outRigidBody) const noexcept override;
+  /// Dense mutable rigid-body span used by the serialized physics pass.
+  bool get_rigid_body_range(std::size_t startIndex, std::size_t count,
+                            const Entity **outEntities,
+                            RigidBody **outBodies) noexcept override;
+  /// Nearest rigid body in the stable read-state transform hierarchy.
+  Entity rigid_body_owner(Entity colliderEntity) const noexcept override;
+  /// Nearest rigid body on the entity or its transform ancestors.
+  Entity
+  rigid_body_owner(Entity colliderEntity,
+                   const SimulationAccessToken &token) const noexcept override;
 
-  /// Adds or replaces the entity's collider. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's collider. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when storage is full.
   bool add_collider(Entity entity, const Collider &collider) noexcept;
   /// Removes the entity's collider. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
@@ -301,15 +329,15 @@ public:
                      const Entity **outEntities,
                      const Collider **outColliders) const noexcept override;
 
-  /// Adds or replaces the entity's mesh component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's mesh component. Requires the Input phase and
+  /// a live entity; logs and returns false otherwise or when storage is full.
   bool add_mesh_component(Entity entity,
                           const MeshComponent &component) noexcept;
   /// Removes the entity's mesh component. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
   bool remove_mesh_component(Entity entity) noexcept;
-  /// Copies the entity's mesh component into the out parameter; logs and returns
-  /// false for stale or dead entities or when the component is absent.
+  /// Copies the entity's mesh component into the out parameter; logs and
+  /// returns false for stale or dead entities or when the component is absent.
   bool get_mesh_component(Entity entity,
                           MeshComponent *outComponent) const noexcept;
   /// Pointer to the entity's mesh component, or nullptr when the handle is
@@ -321,10 +349,12 @@ public:
 
   /// Adds or replaces the entity's foliage patch. Requires the Input phase
   /// and a live entity; logs and returns false otherwise or when full.
-  bool add_foliage_patch_component(
-      Entity entity, const FoliagePatchComponent &component) noexcept;
-  /// Removes the entity's foliage patch component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when the component is absent.
+  bool
+  add_foliage_patch_component(Entity entity,
+                              const FoliagePatchComponent &component) noexcept;
+  /// Removes the entity's foliage patch component. Requires the Input phase and
+  /// a live entity; logs and returns false otherwise or when the component is
+  /// absent.
   bool remove_foliage_patch_component(Entity entity) noexcept;
   /// Copies the entity's foliage patch into the out parameter; logs and
   /// returns false for stale/dead entities or when absent.
@@ -340,24 +370,24 @@ public:
   /// Entity owning the dense foliage patch slot at `index`; kInvalidEntity
   /// when out of range.
   Entity foliage_patch_entity_at(std::size_t index) const noexcept;
-  /// Pointer to the entity's foliage patch component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
-  FoliagePatchComponent *get_foliage_patch_component_ptr(
-      Entity entity) noexcept;
-  /// Pointer to the entity's foliage patch component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
-  const FoliagePatchComponent *get_foliage_patch_component_ptr(
-      Entity entity) const noexcept;
+  /// Pointer to the entity's foliage patch component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
+  FoliagePatchComponent *
+  get_foliage_patch_component_ptr(Entity entity) noexcept;
+  /// Pointer to the entity's foliage patch component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
+  const FoliagePatchComponent *
+  get_foliage_patch_component_ptr(Entity entity) const noexcept;
 
-  /// Adds or replaces the entity's name component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's name component. Requires the Input phase and
+  /// a live entity; logs and returns false otherwise or when storage is full.
   bool add_name_component(Entity entity,
                           const NameComponent &component) noexcept;
   /// Removes the entity's name component. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
   bool remove_name_component(Entity entity) noexcept;
-  /// Copies the entity's name component into the out parameter; logs and returns
-  /// false for stale or dead entities or when the component is absent.
+  /// Copies the entity's name component into the out parameter; logs and
+  /// returns false for stale or dead entities or when the component is absent.
   bool get_name_component(Entity entity,
                           NameComponent *outComponent) const noexcept;
   /// Pointer to the entity's name component, or nullptr when the handle is
@@ -369,15 +399,16 @@ public:
   /// Finds the matching object or resource for entity by name.
   Entity find_entity_by_name(const char *name) const noexcept;
 
-  /// Adds or replaces the entity's script component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's script component. Requires the Input phase
+  /// and a live entity; logs and returns false otherwise or when storage is
+  /// full.
   bool add_script_component(Entity entity,
                             const ScriptComponent &component) noexcept;
   /// Removes the entity's script component. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
   bool remove_script_component(Entity entity) noexcept;
-  /// Copies the entity's script component into the out parameter; logs and returns
-  /// false for stale or dead entities or when the component is absent.
+  /// Copies the entity's script component into the out parameter; logs and
+  /// returns false for stale or dead entities or when the component is absent.
   bool get_script_component(Entity entity,
                             ScriptComponent *outComponent) const noexcept;
   /// Pointer to the entity's script component, or nullptr when the handle is
@@ -387,15 +418,16 @@ public:
   /// stale or the component is absent (no logging).
   const ScriptComponent *get_script_component_ptr(Entity entity) const noexcept;
 
-  /// Adds or replaces the entity's light component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's light component. Requires the Input phase
+  /// and a live entity; logs and returns false otherwise or when storage is
+  /// full.
   bool add_light_component(Entity entity,
                            const LightComponent &component) noexcept;
   /// Removes the entity's light component. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.
   bool remove_light_component(Entity entity) noexcept;
-  /// Copies the entity's light component into the out parameter; logs and returns
-  /// false for stale or dead entities or when the component is absent.
+  /// Copies the entity's light component into the out parameter; logs and
+  /// returns false for stale or dead entities or when the component is absent.
   bool get_light_component(Entity entity,
                            LightComponent *outComponent) const noexcept;
   /// Returns whether has light component.
@@ -408,15 +440,17 @@ public:
   /// when out of range.
   Entity light_entity_at(std::size_t index) const noexcept;
 
-  /// Adds or replaces the entity's point light component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's point light component. Requires the Input
+  /// phase and a live entity; logs and returns false otherwise or when storage
+  /// is full.
   bool add_point_light_component(Entity entity,
                                  const PointLightComponent &component) noexcept;
-  /// Removes the entity's point light component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when the component is absent.
+  /// Removes the entity's point light component. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when the component is
+  /// absent.
   bool remove_point_light_component(Entity entity) noexcept;
-  /// Copies the entity's point light component into the out parameter; logs and returns
-  /// false for stale or dead entities or when the component is absent.
+  /// Copies the entity's point light component into the out parameter; logs and
+  /// returns false for stale or dead entities or when the component is absent.
   bool
   get_point_light_component(Entity entity,
                             PointLightComponent *outComponent) const noexcept;
@@ -430,15 +464,17 @@ public:
   /// when out of range.
   Entity point_light_entity_at(std::size_t index) const noexcept;
 
-  /// Adds or replaces the entity's spot light component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's spot light component. Requires the Input
+  /// phase and a live entity; logs and returns false otherwise or when storage
+  /// is full.
   bool add_spot_light_component(Entity entity,
                                 const SpotLightComponent &component) noexcept;
-  /// Removes the entity's spot light component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when the component is absent.
+  /// Removes the entity's spot light component. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when the component is
+  /// absent.
   bool remove_spot_light_component(Entity entity) noexcept;
-  /// Copies the entity's spot light component into the out parameter; logs and returns
-  /// false for stale or dead entities or when the component is absent.
+  /// Copies the entity's spot light component into the out parameter; logs and
+  /// returns false for stale or dead entities or when the component is absent.
   bool
   get_spot_light_component(Entity entity,
                            SpotLightComponent *outComponent) const noexcept;
@@ -456,8 +492,9 @@ public:
   /// phase and a live entity; logs and returns false otherwise or when full.
   bool add_reflection_probe_component(
       Entity entity, const ReflectionProbeComponent &component) noexcept;
-  /// Removes the entity's reflection probe component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when the component is absent.
+  /// Removes the entity's reflection probe component. Requires the Input phase
+  /// and a live entity; logs and returns false otherwise or when the component
+  /// is absent.
   bool remove_reflection_probe_component(Entity entity) noexcept;
   /// Copies the entity's reflection probe into the out parameter; logs and
   /// returns false for stale/dead entities or when absent.
@@ -467,27 +504,30 @@ public:
   bool has_reflection_probe_component(Entity entity) const noexcept;
   /// Number of live reflection probe components.
   std::size_t reflection_probe_count() const noexcept;
-  /// Dense-storage reflection probe at `index` (0..count-1); nullptr out of range.
+  /// Dense-storage reflection probe at `index` (0..count-1); nullptr out of
+  /// range.
   const ReflectionProbeComponent *
   reflection_probe_at(std::size_t index) const noexcept;
   /// Entity owning the dense reflection probe slot at `index`; kInvalidEntity
   /// when out of range.
   Entity reflection_probe_entity_at(std::size_t index) const noexcept;
-  /// Pointer to the entity's reflection probe component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
+  /// Pointer to the entity's reflection probe component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
   ReflectionProbeComponent *
   get_reflection_probe_component_ptr(Entity entity) noexcept;
-  /// Pointer to the entity's reflection probe component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
+  /// Pointer to the entity's reflection probe component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
   const ReflectionProbeComponent *
   get_reflection_probe_component_ptr(Entity entity) const noexcept;
 
   /// Adds or replaces the entity's scene capture. Requires the Input phase
   /// and a live entity; logs and returns false otherwise or when full.
-  bool add_scene_capture_component(
-      Entity entity, const SceneCaptureComponent &component) noexcept;
-  /// Removes the entity's scene capture component. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when the component is absent.
+  bool
+  add_scene_capture_component(Entity entity,
+                              const SceneCaptureComponent &component) noexcept;
+  /// Removes the entity's scene capture component. Requires the Input phase and
+  /// a live entity; logs and returns false otherwise or when the component is
+  /// absent.
   bool remove_scene_capture_component(Entity entity) noexcept;
   /// Copies the entity's scene capture into the out parameter; logs and
   /// returns false for stale/dead entities or when absent.
@@ -507,17 +547,17 @@ public:
   /// among enabled captures in dense order (the request order the runtime
   /// submits). -1 when absent or disabled.
   std::int32_t scene_capture_slot_for_entity(Entity entity) const noexcept;
-  /// Pointer to the entity's scene capture component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
+  /// Pointer to the entity's scene capture component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
   SceneCaptureComponent *
   get_scene_capture_component_ptr(Entity entity) noexcept;
-  /// Pointer to the entity's scene capture component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
+  /// Pointer to the entity's scene capture component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
   const SceneCaptureComponent *
   get_scene_capture_component_ptr(Entity entity) const noexcept;
 
-  /// Adds or replaces the entity's spring arm. Requires the Input phase and a live
-  /// entity; logs and returns false otherwise or when storage is full.
+  /// Adds or replaces the entity's spring arm. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when storage is full.
   bool add_spring_arm(Entity entity,
                       const SpringArmComponent &component) noexcept;
   /// Removes the entity's spring arm. Requires the Input phase and a live
@@ -647,7 +687,7 @@ public:
   /// Number of live world transform components.
   std::size_t world_transform_count() const noexcept;
   /// Number of live rigid body components.
-  std::size_t rigid_body_count() const noexcept;
+  std::size_t rigid_body_count() const noexcept override;
   /// Number of live collider components.
   std::size_t collider_count() const noexcept override;
 
@@ -745,7 +785,8 @@ private:
   bool is_mutation_phase() const noexcept;
   /// Returns whether is valid entity.
   bool is_valid_entity(Entity entity) const noexcept;
-  /// Destroys or releases the requested object, handle, or resource for entity immediate.
+  /// Destroys or releases the requested object, handle, or resource for entity
+  /// immediate.
   bool destroy_entity_immediate(Entity entity) noexcept;
   /// Queues the entity for destruction at the EndPlay flush.
   bool queue_deferred_destroy(Entity entity) noexcept;
@@ -764,6 +805,13 @@ private:
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
   /// Rebuilds parent links and recomputes dirty world transforms.
   bool propagate_world_transforms() noexcept;
+  /// Composes one transform hierarchy from the requested local-state buffer.
+  bool build_physics_transform(
+      Entity entity, std::size_t stateIndex,
+      physics::PhysicsTransform *outTransform) const noexcept;
+  /// Resolves a nearest body owner from one transform state buffer.
+  Entity find_rigid_body_owner(Entity entity,
+                               std::size_t stateIndex) const noexcept;
   /// Transform state buffer index reads should use in the current phase.
   std::size_t query_state_index() const noexcept;
   // Shared guard/log/dispatch bodies behind the per-component add/remove/get
@@ -793,7 +841,8 @@ private:
   }
   /// Liveness-guarded const SparseSet pointer lookup (silent on miss).
   template <typename Set>
-  auto *get_component_ptr_checked(const Set &set, Entity entity) const noexcept {
+  auto *get_component_ptr_checked(const Set &set,
+                                  Entity entity) const noexcept {
     if (!is_valid_entity(entity)) {
       return static_cast<decltype(set.get_ptr(entity))>(nullptr);
     }
@@ -1023,8 +1072,7 @@ private:
       }
     } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
       for (std::size_t i = 0U; i < m_reflectionProbes.count(); ++i) {
-        fn(m_reflectionProbes.entity_at(i),
-           m_reflectionProbes.component_at(i));
+        fn(m_reflectionProbes.entity_at(i), m_reflectionProbes.component_at(i));
       }
     } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
       for (std::size_t i = 0U; i < m_sceneCaptures.count(); ++i) {

@@ -91,7 +91,8 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
   speculative contacts, manifolds, sequential-impulse solver + joints
   (`src/joints/`), queries, materials. Talks to the world ONLY through
-  `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`.
+  `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`;
+  `collider.cpp` centralizes affine world geometry for every shape.
 - `renderer/` — asset database/manager/streaming (fixed slots + tombstones,
   worker-thread queue, LRU), mesh/texture loading, procedural
   `mesh_primitives`, shader system (variants, hot reload), `RenderDevice`
@@ -134,6 +135,12 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   legal in `WorldPhase::Input`; writable transforms during Simulation require
   the `SimulationAccessToken`. Never break transform double-buffering,
   persistent-id behavior, or entity-capacity assumptions.
+- User-facing scene objects are created through `create_scene_object` and
+  always own a non-removable Transform (position, rotation, scale);
+  `create_entity` is the internal bare-ECS escape hatch. Spatial components
+  and children consume the composed world matrix. Dynamic rigid bodies must
+  be hierarchy roots, and descendant colliders form one compound body owned
+  by their nearest rigid-body ancestor.
 - Frame: per fixed step, chunked update jobs → chunked physics jobs → one
   resolve_collisions job → commit swap; then render-prep jobs fill per-thread
   command buffers merged for the GL flush. Preserve deterministic stepping

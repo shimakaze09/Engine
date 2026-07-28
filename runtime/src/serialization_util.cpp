@@ -218,6 +218,88 @@ bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+bool write_collider_component(core::JsonWriter &writer,
+                              const Collider &component) noexcept {
+  const std::uint32_t shape = static_cast<std::uint32_t>(component.shape);
+  if (shape > static_cast<std::uint32_t>(ColliderShape::Heightfield)) {
+    return false;
+  }
+
+  writer.write_key(kJsonKeyCollider);
+  writer.begin_object();
+  writer.write_uint("shape", shape);
+  write_vec3(writer, "localPosition", component.localPosition);
+  write_quat(writer, "localRotation", component.localRotation);
+  write_vec3(writer, "halfExtents", component.halfExtents);
+  writer.write_float("restitution", component.restitution);
+  writer.write_float("staticFriction", component.staticFriction);
+  writer.write_float("dynamicFriction", component.dynamicFriction);
+  writer.write_float("density", component.density);
+  writer.write_uint("collisionLayer", component.collisionLayer);
+  writer.write_uint("collisionMask", component.collisionMask);
+  writer.end_object();
+  return !writer.failed();
+}
+
+bool read_collider_component(const core::JsonParser &parser,
+                             const core::JsonValue &colliderObject,
+                             Collider *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (colliderObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  Collider component{};
+  core::JsonValue value{};
+  std::uint32_t shape = static_cast<std::uint32_t>(component.shape);
+  if (parser.get_object_field(colliderObject, "shape", &value)) {
+    if (!parser.as_uint(value, &shape) ||
+        (shape > static_cast<std::uint32_t>(ColliderShape::Heightfield))) {
+      return false;
+    }
+    component.shape = static_cast<ColliderShape>(shape);
+  }
+  if (parser.get_object_field(colliderObject, "localPosition", &value) &&
+      !read_vec3(parser, value, &component.localPosition)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "localRotation", &value) &&
+      !read_quat(parser, value, &component.localRotation)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "halfExtents", &value) &&
+      !read_vec3(parser, value, &component.halfExtents)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "restitution", &value) &&
+      !parser.as_float(value, &component.restitution)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "staticFriction", &value) &&
+      !parser.as_float(value, &component.staticFriction)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "dynamicFriction", &value) &&
+      !parser.as_float(value, &component.dynamicFriction)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "density", &value) &&
+      !parser.as_float(value, &component.density)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "collisionLayer", &value) &&
+      !parser.as_uint(value, &component.collisionLayer)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "collisionMask", &value) &&
+      !parser.as_uint(value, &component.collisionMask)) {
+    return false;
+  }
+
+  *outComponent = component;
+  return true;
+}
+
 void write_foliage_patch_component(
     core::JsonWriter &writer, const FoliagePatchComponent &component) noexcept {
   writer.write_key(kJsonKeyFoliagePatchComponent);

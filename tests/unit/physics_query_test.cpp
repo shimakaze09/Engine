@@ -5,6 +5,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics_query.h"
 #include "engine/runtime/physics_bridge.h"
@@ -345,6 +346,92 @@ int test_sweep_box_wall() noexcept {
   return 0;
 }
 
+/// Verifies queries use parent TRS plus collider-local position and rotation.
+int test_parented_trs_collider_queries() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  constexpr float kQuarterTurnSinCos = 0.7071067811865475F;
+  const math::Quat quarterTurn(0.0F, 0.0F, kQuarterTurnSinCos,
+                               kQuarterTurnSinCos);
+  const Entity parent = world->create_entity();
+  Transform parentTransform{};
+  parentTransform.position = math::Vec3(10.0F, 0.0F, 0.0F);
+  parentTransform.rotation = quarterTurn;
+  parentTransform.scale = math::Vec3(2.0F, 3.0F, 1.0F);
+  if (!world->add_transform(parent, parentTransform)) {
+    return 2;
+  }
+
+  const Entity child = world->create_entity();
+  Transform childTransform{};
+  childTransform.position = math::Vec3(1.0F, 0.0F, 0.0F);
+  childTransform.scale = math::Vec3(0.5F, 2.0F, 1.0F);
+  childTransform.parentId = world->persistent_id(parent);
+  if (!world->add_transform(child, childTransform)) {
+    return 3;
+  }
+
+  Collider collider{};
+  collider.halfExtents = math::Vec3(1.0F, 0.5F, 0.5F);
+  collider.localPosition = math::Vec3(1.0F, 0.0F, 0.0F);
+  collider.localRotation = quarterTurn;
+  if (!world->add_collider(child, collider)) {
+    return 4;
+  }
+
+  PhysicsRaycastHit rayHit{};
+  const std::size_t rayCount =
+      physics::raycast_all(*world, math::Vec3(0.0F, 3.0F, 0.0F),
+                           math::Vec3(4.0F, 0.0F, 0.0F), 20.0F, &rayHit, 1U);
+  if ((rayCount != 1U) || (rayHit.entity != child) ||
+      (std::fabs(rayHit.distance - 4.0F) > 1.0e-4F) ||
+      (std::fabs(rayHit.point.x - 4.0F) > 1.0e-4F) ||
+      (std::fabs(rayHit.normal.x + 1.0F) > 1.0e-4F)) {
+    return 5;
+  }
+
+  std::uint32_t overlaps[1]{};
+  const std::size_t overlapCount = physics::overlap_sphere(
+      *world, math::Vec3(10.0F, 3.0F, 0.0F), 0.1F, overlaps, 1U);
+  if ((overlapCount != 1U) || (overlaps[0] != child.index)) {
+    return 6;
+  }
+
+  physics::SweepHit sweepHit{};
+  if (!physics::sweep_sphere(*world, math::Vec3(-5.0F, 3.0F, 0.0F), 1.0F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &sweepHit) ||
+      (sweepHit.entityIndex != child.index) ||
+      (std::fabs(sweepHit.distance - 8.0F) > 1.0e-4F) ||
+      (std::fabs(sweepHit.timeOfImpact - 0.4F) > 1.0e-5F)) {
+    return 7;
+  }
+
+  const Entity fitParent = world->create_entity();
+  Transform fitParentTransform{};
+  fitParentTransform.position = math::Vec3(-10.0F, 0.0F, 0.0F);
+  fitParentTransform.rotation =
+      math::Quat(0.0F, 0.0F, 0.3826834323650898F, 0.9238795325112867F);
+  world->add_transform(fitParent, fitParentTransform);
+  const Entity fitChild = world->create_entity();
+  Transform fitChildTransform{};
+  fitChildTransform.parentId = world->persistent_id(fitParent);
+  world->add_transform(fitChild, fitChildTransform);
+  Collider fitCollider{};
+  fitCollider.halfExtents = math::Vec3(2.0F, 0.1F, 0.5F);
+  world->add_collider(fitChild, fitCollider);
+  std::uint32_t falsePositive[1]{};
+  if (physics::overlap_sphere(*world, math::Vec3(-8.7F, -1.3F, 0.0F), 0.05F,
+                              falsePositive, 1U) != 0U) {
+    return 8;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -366,6 +453,7 @@ int main() {
       {"overlap_sphere_mask", test_overlap_sphere_mask},
       {"sweep_sphere_wall", test_sweep_sphere_wall},
       {"sweep_box_wall", test_sweep_box_wall},
+      {"parented_trs_collider_queries", test_parented_trs_collider_queries},
   };
 
   int failures = 0;

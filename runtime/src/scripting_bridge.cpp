@@ -31,8 +31,7 @@ runtime::EngineAssetDatabaseService *g_scriptingAssetDatabaseService = nullptr;
 /// Encodes a runtime asset load handle for Lua.
 std::uint32_t encode_script_asset_handle(std::uint32_t slot,
                                          std::uint16_t generation) noexcept {
-  if (slot >=
-      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+  if (slot >= runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
     return kInvalidScriptAssetHandle;
   }
   return (static_cast<std::uint32_t>(generation)
@@ -41,8 +40,7 @@ std::uint32_t encode_script_asset_handle(std::uint32_t slot,
 }
 
 /// Decodes a Lua-facing runtime asset load handle.
-bool decode_script_asset_handle(std::uint32_t handle,
-                                std::uint32_t *outSlot,
+bool decode_script_asset_handle(std::uint32_t handle, std::uint32_t *outSlot,
                                 std::uint16_t *outGeneration) noexcept {
   if ((handle == kInvalidScriptAssetHandle) || (outSlot == nullptr) ||
       (outGeneration == nullptr)) {
@@ -50,8 +48,7 @@ bool decode_script_asset_handle(std::uint32_t handle,
   }
 
   const std::uint32_t slot = handle & kScriptAssetHandleSlotMask;
-  if (slot >=
-      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+  if (slot >= runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
     return false;
   }
 
@@ -82,9 +79,9 @@ std::uint32_t find_script_asset_handle_slot(
 }
 
 /// Allocates or reuses a Lua handle slot for a runtime asset request.
-std::uint32_t allocate_script_asset_handle_slot(
-    runtime::EngineAssetDatabaseService *service,
-    renderer::AssetId assetId) noexcept {
+std::uint32_t
+allocate_script_asset_handle_slot(runtime::EngineAssetDatabaseService *service,
+                                  renderer::AssetId assetId) noexcept {
   if ((service == nullptr) || (assetId == renderer::kInvalidAssetId)) {
     return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
   }
@@ -557,15 +554,13 @@ std::uint32_t scripting_load_asset_async(const char *path,
 
   const std::uint32_t slot = allocate_script_asset_handle_slot(
       g_scriptingAssetDatabaseService, assetId);
-  if (slot >=
-      runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
+  if (slot >= runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "load_asset_async: no free runtime asset handles");
     return kInvalidScriptAssetHandle;
   }
 
-  auto &scriptHandle =
-      g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
+  auto &scriptHandle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
   scriptHandle.streamingHandle = renderer::kInvalidLoadHandle;
 
   if (g_scriptingAssetDatabaseService->streamingQueue != nullptr) {
@@ -631,9 +626,9 @@ bool scripting_is_asset_ready(std::uint32_t handleIndex) noexcept {
                                  handle.assetId) == renderer::AssetState::Ready;
   if ((g_scriptingAssetDatabaseService->streamingQueue != nullptr) &&
       handle.streamingHandle.valid()) {
-    return databaseReady &&
-           renderer::is_load_ready(g_scriptingAssetDatabaseService->streamingQueue,
-                                   handle.streamingHandle);
+    return databaseReady && renderer::is_load_ready(
+                                g_scriptingAssetDatabaseService->streamingQueue,
+                                handle.streamingHandle);
   }
 
   return databaseReady;
@@ -657,20 +652,20 @@ std::uint32_t scripting_get_entity_index(runtime::World *world,
   return (entity != runtime::kInvalidEntity) ? entity.index : 0U;
 }
 
-std::uint32_t scripting_get_transform_count(runtime::World *world) noexcept {
+std::uint32_t scripting_get_entity_count(runtime::World *world) noexcept {
   if (world == nullptr) {
     return 0U;
   }
 
-  const std::size_t count = world->transform_count();
+  const std::size_t count = world->alive_entity_count();
   return static_cast<std::uint32_t>(count);
 }
 
-std::uint32_t scripting_create_entity_op(runtime::World *world) noexcept {
+std::uint32_t scripting_create_scene_object_op(runtime::World *world) noexcept {
   if (world == nullptr) {
     return 0U;
   }
-  const runtime::Entity entity = world->create_entity();
+  const runtime::Entity entity = world->create_scene_object();
   return entity.index;
 }
 
@@ -861,8 +856,8 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_camera_shake,
     &scripting_get_current_phase,
     &scripting_get_entity_index,
-    &scripting_get_transform_count,
-    &scripting_create_entity_op,
+    &scripting_get_entity_count,
+    &scripting_create_scene_object_op,
     &scripting_get_transform_read_ptr,
     &scripting_get_transform_op,
     &scripting_get_rigid_body_op,
@@ -917,7 +912,8 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
 namespace runtime {
 
 /// Binds scripting runtime pointers into an explicit service locator.
-void bind_scripting_runtime(World *world, core::ServiceLocator &locator) noexcept {
+void bind_scripting_runtime(World *world,
+                            core::ServiceLocator &locator) noexcept {
   scripting::bind_runtime_world(world, locator);
   g_scriptingAssetDatabaseService =
       locator.get_service<runtime::EngineAssetDatabaseService>();

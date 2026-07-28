@@ -67,16 +67,11 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   // Collider
   Collider collider{};
   if (world.get_collider(entity, &collider)) {
-    w.write_key(kJsonKeyCollider);
-    w.begin_object();
-    write_vec3(w, "halfExtents", collider.halfExtents);
-    w.write_float("restitution", collider.restitution);
-    w.write_float("staticFriction", collider.staticFriction);
-    w.write_float("dynamicFriction", collider.dynamicFriction);
-    w.write_float("density", collider.density);
-    w.write_uint("collisionLayer", collider.collisionLayer);
-    w.write_uint("collisionMask", collider.collisionMask);
-    w.end_object();
+    if (!write_collider_component(w, collider)) {
+      core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                        "save_prefab: invalid Collider component");
+      return false;
+    }
   }
 
   // NameComponent
@@ -162,8 +157,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_float("intensity", reflectionProbe.intensity);
     w.write_uint("prefilteredResolution",
                  reflectionProbe.prefilteredResolution);
-    w.write_uint("irradianceResolution",
-                 reflectionProbe.irradianceResolution);
+    w.write_uint("irradianceResolution", reflectionProbe.irradianceResolution);
     w.write_uint("brdfLutResolution", reflectionProbe.brdfLutResolution);
     w.write_uint("mipLevels", reflectionProbe.mipLevels);
     w.write_bool("boxProjection", reflectionProbe.boxProjection);
@@ -258,7 +252,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     return kInvalidEntity;
   }
 
-  const Entity entity = world.create_entity();
+  const Entity entity = world.create_scene_object();
   if (entity == kInvalidEntity) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
                       "instantiate_prefab: create_entity failed");
@@ -366,19 +360,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     Collider collider{};
-    if (!readVec3Field(componentValue, "halfExtents",
-                       &collider.halfExtents) ||
-        !readFloatField(componentValue, "restitution",
-                        &collider.restitution) ||
-        !readFloatField(componentValue, "staticFriction",
-                        &collider.staticFriction) ||
-        !readFloatField(componentValue, "dynamicFriction",
-                        &collider.dynamicFriction) ||
-        !readFloatField(componentValue, "density", &collider.density) ||
-        !readUintField(componentValue, "collisionLayer",
-                       &collider.collisionLayer) ||
-        !readUintField(componentValue, "collisionMask",
-                       &collider.collisionMask) ||
+    if (!read_collider_component(parser, componentValue, &collider) ||
         !world.add_collider(entity, collider)) {
       return failComponent("instantiate_prefab: failed to add Collider");
     }
@@ -490,7 +472,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   if (!readComponentObject(kJsonKeyReflectionProbeComponent, &componentValue,
                            &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid ReflectionProbeComponent");
+    return failComponent(
+        "instantiate_prefab: invalid ReflectionProbeComponent");
   }
   if (hasComponent) {
     ReflectionProbeComponent reflectionProbe{};
@@ -527,8 +510,7 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
         !readUintField(componentValue, "height", &sceneCapture.height) ||
         !readFloatField(componentValue, "fovRadians",
                         &sceneCapture.fovRadians) ||
-        !readFloatField(componentValue, "nearPlane",
-                        &sceneCapture.nearPlane) ||
+        !readFloatField(componentValue, "nearPlane", &sceneCapture.nearPlane) ||
         !readFloatField(componentValue, "farPlane", &sceneCapture.farPlane) ||
         !readBoolField(componentValue, "enabled", &sceneCapture.enabled) ||
         !world.add_scene_capture_component(entity, sceneCapture)) {

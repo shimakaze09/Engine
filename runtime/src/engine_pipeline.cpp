@@ -27,7 +27,6 @@
 #endif
 
 #include "engine/audio/audio.h"
-#include "engine/engine.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
@@ -36,6 +35,7 @@
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
+#include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
@@ -54,6 +54,7 @@
 #include "engine/runtime/spring_arm_update.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "spatial_transform_util.h"
 
 namespace engine {
 
@@ -193,7 +194,6 @@ bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
   }
   return core::vfs_resolve_os_path(virtualPath, outPath, outCapacity);
 }
-
 
 renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                         renderer::AssetDatabase *database,
@@ -492,7 +492,8 @@ struct BootstrapMeshIds final {
   renderer::AssetId pyramid = renderer::kInvalidAssetId;
 };
 
-/// CPU mesh payloads loaded by the streaming worker and consumed on the render thread.
+/// CPU mesh payloads loaded by the streaming worker and consumed on the render
+/// thread.
 struct StreamingMeshTransferSlot final {
   renderer::AssetId assetId = renderer::kInvalidAssetId;
   renderer::CpuMeshData meshData{};
@@ -504,7 +505,8 @@ struct StreamingMeshTransferSlot final {
 struct RuntimeAssetStreamingState final {
   renderer::AssetDatabase *database = nullptr;
   renderer::GpuMeshRegistry *meshRegistry = nullptr;
-  std::array<StreamingMeshTransferSlot, renderer::AssetStreamingQueue::kMaxRequests>
+  std::array<StreamingMeshTransferSlot,
+             renderer::AssetStreamingQueue::kMaxRequests>
       meshTransfers{};
   std::mutex mutex{};
 };
@@ -663,8 +665,10 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
   return true;
 }
 
-/// Mirrors terminal streaming failures into the asset database on the main thread.
-void sync_streaming_failures(runtime::EngineAssetDatabaseService *service) noexcept {
+/// Mirrors terminal streaming failures into the asset database on the main
+/// thread.
+void sync_streaming_failures(
+    runtime::EngineAssetDatabaseService *service) noexcept {
   if ((service == nullptr) || (service->database == nullptr) ||
       (service->streamingQueue == nullptr)) {
     return;
@@ -772,12 +776,12 @@ void create_bootstrap_scene(runtime::World *world,
       (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
                                                   : meshIds.bootstrap;
 
-  const runtime::Entity entity = world->create_entity();
-  const runtime::Entity stackedEntity = world->create_entity();
-  const runtime::Entity groundEntity = world->create_entity();
-  const runtime::Entity foliageEntity = world->create_entity();
-  const runtime::Entity lightEntity = world->create_entity();
-  const runtime::Entity sceneControllerEntity = world->create_entity();
+  const runtime::Entity entity = world->create_scene_object();
+  const runtime::Entity stackedEntity = world->create_scene_object();
+  const runtime::Entity groundEntity = world->create_scene_object();
+  const runtime::Entity foliageEntity = world->create_scene_object();
+  const runtime::Entity lightEntity = world->create_scene_object();
+  const runtime::Entity sceneControllerEntity = world->create_scene_object();
   if ((entity == runtime::kInvalidEntity) ||
       (stackedEntity == runtime::kInvalidEntity) ||
       (groundEntity == runtime::kInvalidEntity) ||
@@ -876,12 +880,12 @@ void create_bootstrap_scene(runtime::World *world,
     static_cast<void>(world->add_transform(foliageEntity, t));
 
     runtime::FoliagePatchComponent foliage{};
-    foliage.meshAssetIds[0] =
-        (meshIds.pyramid != renderer::kInvalidAssetId) ? meshIds.pyramid
-                                                       : defaultMesh;
-    foliage.meshAssetIds[1] =
-        (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                    : foliage.meshAssetIds[0];
+    foliage.meshAssetIds[0] = (meshIds.pyramid != renderer::kInvalidAssetId)
+                                  ? meshIds.pyramid
+                                  : defaultMesh;
+    foliage.meshAssetIds[1] = (meshIds.cube != renderer::kInvalidAssetId)
+                                  ? meshIds.cube
+                                  : foliage.meshAssetIds[0];
     foliage.meshAssetIds[2] = foliage.meshAssetIds[1];
     foliage.instanceCount = 35U;
     foliage.density = 2.5F;
@@ -939,9 +943,15 @@ collect_scene_lights(const runtime::World &world) noexcept {
     }
     if (lc->type == runtime::LightType::Directional) {
       if (sceneLights.directionalLightCount < renderer::kMaxDirectionalLights) {
+        const runtime::Entity lightEntity = world.light_entity_at(li);
+        const runtime::WorldTransform *wt =
+            world.get_world_transform_read_ptr(lightEntity);
         auto &dl =
             sceneLights.directionalLights[sceneLights.directionalLightCount];
-        dl.direction = lc->direction;
+        dl.direction = (wt != nullptr)
+                           ? runtime::detail::rotate_local_direction(
+                                 wt->rotation, lc->direction)
+                           : lc->direction;
         dl.color = lc->color;
         dl.intensity = lc->intensity;
         ++sceneLights.directionalLightCount;
@@ -995,7 +1005,9 @@ collect_scene_lights(const runtime::World &world) noexcept {
         world.get_world_transform_read_ptr(slEntity);
     auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
     sl.position = (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
-    sl.direction = slc->direction;
+    sl.direction = (wt != nullptr) ? runtime::detail::rotate_local_direction(
+                                         wt->rotation, slc->direction)
+                                   : slc->direction;
     sl.color = slc->color;
     sl.intensity = slc->intensity;
     sl.radius = slc->radius;
@@ -1013,18 +1025,17 @@ collect_scene_lights(const runtime::World &world) noexcept {
 
 // Converts enabled SceneCaptureComponents (dense order) into renderer capture
 // requests; the capture camera looks along the world rotation's -Z axis.
-std::size_t
-collect_scene_captures(const runtime::World &world,
-                       renderer::SceneCaptureRequest *outRequests,
-                       std::size_t capacity) noexcept {
+std::size_t collect_scene_captures(const runtime::World &world,
+                                   renderer::SceneCaptureRequest *outRequests,
+                                   std::size_t capacity) noexcept {
   if (outRequests == nullptr) {
     return 0U;
   }
 
   std::size_t requestCount = 0U;
   const std::size_t captureCount = world.scene_capture_count();
-  for (std::size_t ci = 0U;
-       (ci < captureCount) && (requestCount < capacity); ++ci) {
+  for (std::size_t ci = 0U; (ci < captureCount) && (requestCount < capacity);
+       ++ci) {
     const runtime::SceneCaptureComponent *capture = world.scene_capture_at(ci);
     if ((capture == nullptr) || !capture->enabled) {
       continue;
@@ -1041,8 +1052,7 @@ collect_scene_captures(const runtime::World &world,
     request = renderer::SceneCaptureRequest{};
     request.camera.position = position;
     request.camera.target = math::add(
-        position,
-        math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
+        position, math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
     request.camera.up =
         math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation);
     request.camera.fovRadians = capture->fovRadians;
@@ -1169,7 +1179,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   assetStreamingState->database = assetDatabase.get();
   assetStreamingState->meshRegistry = meshRegistry.get();
   physicsService.world = world.get();
-  physicsService.worldView = static_cast<physics::PhysicsWorldView *>(world.get());
+  physicsService.worldView =
+      static_cast<physics::PhysicsWorldView *>(world.get());
   physicsService.context = &world->physics_context();
   audioService.update = &audio::update_audio;
   audioService.load_sound = &audio::load_sound;

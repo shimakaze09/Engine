@@ -1,5 +1,5 @@
-// Implements the editor main menu bar, play toolbar, and entity hierarchy panel.
-// Split out of editor.cpp (REVIEW_FINDINGS A3).
+// Implements the editor main menu bar, play toolbar, and entity hierarchy
+// panel. Split out of editor.cpp (REVIEW_FINDINGS A3).
 
 #include "editor_panels_main.h"
 
@@ -49,8 +49,8 @@
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
-#include "engine/engine.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
@@ -153,7 +153,6 @@ void draw_main_menu_bar() noexcept {
   ImGui::EndMainMenuBar();
 }
 
-
 void draw_toolbar() noexcept {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {
@@ -178,9 +177,8 @@ void draw_toolbar() noexcept {
   }
 
   const bool hasWorld = (editor_session().world != nullptr);
-  const bool canPlay =
-      hasWorld && !editor_session().worldRestoreFailed &&
-      (editor_session().playState != PlayState::Playing);
+  const bool canPlay = hasWorld && !editor_session().worldRestoreFailed &&
+                       (editor_session().playState != PlayState::Playing);
   const bool canPause =
       hasWorld && (editor_session().playState == PlayState::Playing);
   const bool canStop =
@@ -224,7 +222,8 @@ void draw_toolbar() noexcept {
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
   ImGui::SameLine();
 
-  if (ImGui::RadioButton("T", editor_session().gizmoOp == ImGuizmo::TRANSLATE)) {
+  if (ImGui::RadioButton("T",
+                         editor_session().gizmoOp == ImGuizmo::TRANSLATE)) {
     editor_session().gizmoOp = ImGuizmo::TRANSLATE;
   }
   ImGui::SameLine();
@@ -238,7 +237,6 @@ void draw_toolbar() noexcept {
 
   ImGui::End();
 }
-
 
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
@@ -256,14 +254,16 @@ void draw_entities_panel() noexcept {
   editor_session().world->for_each_alive([](runtime::Entity entity) {
     char label[160] = {};
     runtime::NameComponent name{};
-    if (editor_session().world->get_name_component(entity, &name) && (name.name[0] != '\0')) {
+    if (editor_session().world->get_name_component(entity, &name) &&
+        (name.name[0] != '\0')) {
       std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
                     entity.index);
     } else {
       std::snprintf(label, sizeof(label), "Entity [%u]", entity.index);
     }
 
-    const bool isSelected = (editor_session().selectedEntityIndex == entity.index);
+    const bool isSelected =
+        (editor_session().selectedEntityIndex == entity.index);
     if (ImGui::Selectable(label, isSelected)) {
       editor_session().selectedEntityIndex = entity.index;
     }
@@ -276,11 +276,13 @@ void draw_entities_panel() noexcept {
   }
 
   if (ImGui::Button("Create Entity") && editable) {
-    const runtime::Entity newEntity = editor_session().world->create_entity();
+    const runtime::Entity newEntity =
+        editor_session().world->create_scene_object();
     if (newEntity != runtime::kInvalidEntity) {
       runtime::NameComponent nameComponent{};
       make_default_entity_name(newEntity.index, &nameComponent);
-      static_cast<void>(editor_session().world->add_name_component(newEntity, nameComponent));
+      static_cast<void>(
+          editor_session().world->add_name_component(newEntity, nameComponent));
       editor_session().selectedEntityIndex = newEntity.index;
     }
   }
@@ -291,6 +293,5 @@ void draw_entities_panel() noexcept {
 
   ImGui::End();
 }
-
 
 } // namespace engine::editor

@@ -49,6 +49,8 @@ enum class ColliderShape : std::uint8_t {
 
 /// Shape + half extents + material/filter fields for collision.
 struct Collider final {
+  Vec3 localPosition = Vec3(0.0F, 0.0F, 0.0F);
+  Quat localRotation = Quat();
   Vec3 halfExtents = Vec3(0.5F, 0.5F, 0.5F);
   float restitution = 0.3F;
   float staticFriction = 0.5F;

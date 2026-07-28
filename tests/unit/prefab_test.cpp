@@ -24,6 +24,33 @@ bool nearly_equal(float lhs, float rhs) noexcept {
   return (diff < 0.0001F) && (diff > -0.0001F);
 }
 
+engine::math::Quat collider_test_rotation(std::size_t index) noexcept {
+  switch (index) {
+  case 1U:
+    return engine::math::Quat(1.0F, 0.0F, 0.0F, 0.0F);
+  case 2U:
+    return engine::math::Quat(0.0F, 1.0F, 0.0F, 0.0F);
+  case 3U:
+    return engine::math::Quat(0.0F, 0.0F, 1.0F, 0.0F);
+  case 4U:
+    return engine::math::Quat(0.0F, 0.0F, 0.0F, -1.0F);
+  default:
+    return engine::math::Quat();
+  }
+}
+
+bool collider_pose_equals(const engine::runtime::Collider &collider,
+                          const engine::math::Vec3 &position,
+                          const engine::math::Quat &rotation) noexcept {
+  return (collider.localPosition.x == position.x) &&
+         (collider.localPosition.y == position.y) &&
+         (collider.localPosition.z == position.z) &&
+         (collider.localRotation.x == rotation.x) &&
+         (collider.localRotation.y == rotation.y) &&
+         (collider.localRotation.z == rotation.z) &&
+         (collider.localRotation.w == rotation.w);
+}
+
 bool write_prefab_text(const char *text) noexcept {
   if (text == nullptr) {
     return false;
@@ -89,8 +116,8 @@ int verify_instantiate_rolls_back_on_component_add_failure() {
     remove_prefab_file();
     return 41;
   }
-  for (std::size_t i = 0U;
-       i < engine::runtime::World::kMaxPointLightComponents; ++i) {
+  for (std::size_t i = 0U; i < engine::runtime::World::kMaxPointLightComponents;
+       ++i) {
     const engine::runtime::Entity entity = world->create_entity();
     if (entity == engine::runtime::kInvalidEntity) {
       remove_prefab_file();
@@ -112,6 +139,77 @@ int verify_instantiate_rolls_back_on_component_add_failure() {
   }
   if (world->alive_entity_count() != aliveBefore) {
     return 39;
+  }
+  return 0;
+}
+
+/// Verifies all collider shapes/local poses plus legacy and invalid prefabs.
+int verify_collider_prefab_round_trip() {
+  constexpr engine::runtime::ColliderShape kShapes[] = {
+      engine::runtime::ColliderShape::AABB,
+      engine::runtime::ColliderShape::Sphere,
+      engine::runtime::ColliderShape::Capsule,
+      engine::runtime::ColliderShape::ConvexHull,
+      engine::runtime::ColliderShape::Heightfield};
+  remove_prefab_file();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 100;
+  }
+  for (std::size_t i = 0U; i < 5U; ++i) {
+    const engine::runtime::Entity source = world->create_scene_object();
+    if (source == engine::runtime::kInvalidEntity) {
+      return 101;
+    }
+    engine::runtime::Collider collider{};
+    collider.shape = kShapes[i];
+    collider.localPosition = engine::math::Vec3(static_cast<float>(i + 1U),
+                                                -static_cast<float>(i + 2U),
+                                                static_cast<float>(i + 3U));
+    collider.localRotation = collider_test_rotation(i);
+    if (!world->add_collider(source, collider) ||
+        !engine::runtime::save_prefab(*world, source, kPrefabPath)) {
+      return 102;
+    }
+    const engine::runtime::Entity instance =
+        engine::runtime::instantiate_prefab(*world, kPrefabPath);
+    engine::runtime::Collider loaded{};
+    if ((instance == engine::runtime::kInvalidEntity) ||
+        !world->get_collider(instance, &loaded) ||
+        (loaded.shape != kShapes[i]) ||
+        !collider_pose_equals(loaded, collider.localPosition,
+                              collider.localRotation)) {
+      return 103;
+    }
+  }
+
+  constexpr const char *kLegacyPrefab =
+      "{\"version\":1,\"components\":{\"Collider\":{\"halfExtents\":[1,2,3]}}}";
+  if (!write_prefab_text(kLegacyPrefab)) {
+    return 104;
+  }
+  const engine::runtime::Entity legacy =
+      engine::runtime::instantiate_prefab(*world, kPrefabPath);
+  engine::runtime::Collider legacyCollider{};
+  if ((legacy == engine::runtime::kInvalidEntity) ||
+      !world->get_collider(legacy, &legacyCollider) ||
+      (legacyCollider.shape != engine::runtime::ColliderShape::AABB) ||
+      !collider_pose_equals(legacyCollider, engine::math::Vec3(),
+                            engine::math::Quat())) {
+    return 105;
+  }
+
+  constexpr const char *kInvalidPrefab =
+      "{\"version\":1,\"components\":{\"Collider\":{\"shape\":5}}}";
+  if (!write_prefab_text(kInvalidPrefab)) {
+    return 106;
+  }
+  const std::size_t aliveBefore = world->alive_entity_count();
+  if ((engine::runtime::instantiate_prefab(*world, kPrefabPath) !=
+       engine::runtime::kInvalidEntity) ||
+      (world->alive_entity_count() != aliveBefore)) {
+    return 107;
   }
   return 0;
 }
@@ -155,8 +253,7 @@ int main() {
   }
 
   engine::runtime::NameComponent nameComp{};
-  std::snprintf(nameComp.name, sizeof(nameComp.name), "%s",
-                kPrefabSourceName);
+  std::snprintf(nameComp.name, sizeof(nameComp.name), "%s", kPrefabSourceName);
   if (!world->add_name_component(src, nameComp)) {
     return 6;
   }
@@ -349,9 +446,8 @@ int main() {
       !nearly_equal(instProbe.radius, 14.0F) ||
       !nearly_equal(instProbe.intensity, 0.75F) ||
       (instProbe.prefilteredResolution != 256U) ||
-      (instProbe.irradianceResolution != 64U) ||
-      (instProbe.mipLevels != 6U) || !instProbe.boxProjection ||
-      instProbe.needsBake) {
+      (instProbe.irradianceResolution != 64U) || (instProbe.mipLevels != 6U) ||
+      !instProbe.boxProjection || instProbe.needsBake) {
     remove_prefab_file();
     return 28;
   }
@@ -409,6 +505,12 @@ int main() {
   }
 
   result = verify_instantiate_rolls_back_on_component_add_failure();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_collider_prefab_round_trip();
   if (result != 0) {
     remove_prefab_file();
     return result;

@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/ccd.h"
 #include "engine/physics/physics.h"
@@ -191,6 +192,126 @@ static void test_ccd_velocity_reflects_on_hit() noexcept {
         "Bullet velocity reflects after CCD hit");
 }
 
+/// Verifies CCD sees a thin collider through parent TRS and local offset.
+static void test_ccd_parented_rotated_scaled_wall() noexcept {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    check(false, "Parented CCD world allocation");
+    return;
+  }
+  world->end_frame_phase();
+
+  const auto bullet = world->create_entity();
+  engine::runtime::Transform bulletTransform{};
+  world->add_transform(bullet, bulletTransform);
+  engine::runtime::Collider bulletCollider{};
+  bulletCollider.shape = engine::runtime::ColliderShape::Sphere;
+  bulletCollider.halfExtents = engine::math::Vec3(0.1F, 0.1F, 0.1F);
+  world->add_collider(bullet, bulletCollider);
+  engine::runtime::RigidBody bulletBody{};
+  bulletBody.inverseMass = 1.0F;
+  bulletBody.velocity = engine::math::Vec3(300.0F, 0.0F, 0.0F);
+  world->add_rigid_body(bullet, bulletBody);
+
+  constexpr float kQuarterTurnSinCos = 0.7071067811865475F;
+  const auto wallParent = world->create_entity();
+  engine::runtime::Transform parentTransform{};
+  parentTransform.position = engine::math::Vec3(6.0F, 0.0F, 0.0F);
+  parentTransform.rotation =
+      engine::math::Quat(0.0F, 0.0F, kQuarterTurnSinCos, kQuarterTurnSinCos);
+  parentTransform.scale = engine::math::Vec3(2.0F, 1.0F, 1.0F);
+  world->add_transform(wallParent, parentTransform);
+
+  const auto wall = world->create_entity();
+  engine::runtime::Transform wallTransform{};
+  wallTransform.parentId = world->persistent_id(wallParent);
+  world->add_transform(wall, wallTransform);
+  engine::runtime::Collider wallCollider{};
+  wallCollider.halfExtents = engine::math::Vec3(2.0F, 0.02F, 2.0F);
+  wallCollider.localPosition = engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  world->add_collider(wall, wallCollider);
+
+  const engine::physics::CcdSweepResult hit =
+      engine::physics::bilateral_advance_ccd(*world, bullet, bulletBody,
+                                             bulletCollider, bulletTransform,
+                                             1.0F / 60.0F);
+  check(hit.hit, "CCD hits parented rotated scaled wall");
+  check(hit.hitEntityIndex == wall.index,
+        "CCD reports parented collider entity");
+  check(std::fabs(hit.timeOfImpact - 0.976F) <= 1.0e-3F,
+        "CCD parented wall time of impact");
+}
+
+/// Verifies a collider-less body root sweeps child colliders without self-hits.
+static void test_ccd_compound_child_clamps_root() noexcept {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    check(false, "Compound CCD world allocation");
+    return;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  constexpr float kQuarterTurnSinCos = 0.7071067811865475F;
+  const engine::math::Quat quarterTurn(0.0F, 0.0F, kQuarterTurnSinCos,
+                                       kQuarterTurnSinCos);
+  const auto root = world->create_entity();
+  engine::runtime::Transform rootTransform{};
+  rootTransform.rotation = quarterTurn;
+  rootTransform.scale = engine::math::Vec3(2.0F, 1.0F, 1.0F);
+  world->add_transform(root, rootTransform);
+  engine::runtime::RigidBody rootBody{};
+  rootBody.inverseMass = 1.0F;
+  rootBody.velocity = engine::math::Vec3(300.0F, 0.0F, 0.0F);
+  world->add_rigid_body(root, rootBody);
+
+  const auto movingChild = world->create_entity();
+  engine::runtime::Transform childTransform{};
+  childTransform.position = engine::math::Vec3(0.0F, 1.0F, 0.0F);
+  childTransform.scale = engine::math::Vec3(0.5F, 2.0F, 1.0F);
+  childTransform.parentId = world->persistent_id(root);
+  world->add_transform(movingChild, childTransform);
+  engine::runtime::Collider childCollider{};
+  childCollider.localPosition = engine::math::Vec3(0.0F, -0.5F, 0.0F);
+  childCollider.localRotation = quarterTurn;
+  childCollider.halfExtents = engine::math::Vec3(0.25F, 0.5F, 0.5F);
+  world->add_collider(movingChild, childCollider);
+
+  const auto sameRootSibling = world->create_entity();
+  engine::runtime::Transform siblingTransform{};
+  siblingTransform.parentId = world->persistent_id(root);
+  world->add_transform(sameRootSibling, siblingTransform);
+  engine::runtime::Collider siblingCollider{};
+  siblingCollider.shape = engine::runtime::ColliderShape::Sphere;
+  siblingCollider.halfExtents = engine::math::Vec3(0.1F, 0.1F, 0.1F);
+  world->add_collider(sameRootSibling, siblingCollider);
+
+  const auto wall = world->create_entity();
+  engine::runtime::Transform wallTransform{};
+  wallTransform.position = engine::math::Vec3(5.0F, 0.0F, 0.0F);
+  world->add_transform(wall, wallTransform);
+  engine::runtime::Collider wallCollider{};
+  wallCollider.halfExtents = engine::math::Vec3(0.02F, 2.0F, 2.0F);
+  world->add_collider(wall, wallCollider);
+
+  world->begin_update_phase();
+  engine::runtime::step_physics(*world, 1.0F / 60.0F);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform result{};
+  const bool hasResult = world->get_transform(root, &result);
+  check(world->get_collider_ptr(root) == nullptr,
+        "Compound CCD root remains collider-less");
+  check(hasResult && (std::fabs(result.position.x - 4.4301F) <= 2.0e-3F),
+        "Compound CCD clamps the rigid-body root at child impact");
+  check(hasResult && (result.position.x > 4.0F),
+        "Compound CCD skips overlapping same-root colliders");
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("=== CCD Tests (P1-M3-E1) ===\n");
@@ -199,6 +320,8 @@ int main() {
   test_bullet_300_no_tunnel();
   test_slow_body_normal_integration();
   test_ccd_velocity_reflects_on_hit();
+  test_ccd_parented_rotated_scaled_wall();
+  test_ccd_compound_child_clamps_root();
 
   std::printf("\n%d passed, %d failed\n", g_passed, g_failed);
   return (g_failed > 0) ? 1 : 0;

@@ -17,8 +17,8 @@ extern "C" {
 #include "lualib.h"
 }
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -75,22 +75,26 @@ int lua_engine_log(lua_State *state) noexcept {
 }
 
 int lua_engine_get_entity_count(lua_State *state) noexcept {
-  const std::size_t count = (runtime_binding().world != nullptr && runtime_binding().services != nullptr)
-                                ? runtime_binding().services->get_transform_count(runtime_binding().world)
+  const std::size_t count = (runtime_binding().world != nullptr &&
+                             runtime_binding().services != nullptr)
+                                ? runtime_binding().services->get_entity_count(
+                                      runtime_binding().world)
                                 : 0U;
   lua_pushinteger(state, static_cast<lua_Integer>(count));
   return 1;
 }
 
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
-      !can_apply_mutations_now()) {
+  if ((runtime_binding().world == nullptr) ||
+      (runtime_binding().services == nullptr) || !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
 
-  // Only valid during Input; create_entity returns 0 otherwise.
-  const std::uint32_t entityIndex = runtime_binding().services->create_entity_op(runtime_binding().world);
+  // Only valid during Input; scene-object creation returns 0 otherwise.
+  const std::uint32_t entityIndex =
+      runtime_binding().services->create_scene_object_op(
+          runtime_binding().world);
   if (entityIndex == 0U) {
     lua_pushnil(state);
     return 1;
@@ -166,7 +170,8 @@ int lua_engine_get_name(lua_State *state) noexcept {
 
   runtime::NameComponent component{};
   if ((runtime_binding().services == nullptr) ||
-      !runtime_binding().services->get_name_component_op(runtime_binding().world, entity.index, &component)) {
+      !runtime_binding().services->get_name_component_op(
+          runtime_binding().world, entity.index, &component)) {
     lua_pushnil(state);
     return 1;
   }
@@ -186,7 +191,8 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity found = runtime_binding().world->find_entity_by_name(searchName);
+  const runtime::Entity found =
+      runtime_binding().world->find_entity_by_name(searchName);
 
   if (found == runtime::kInvalidEntity) {
     lua_pushnil(state);
@@ -207,7 +213,8 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity newEntity = runtime_binding().world->create_entity();
+  const runtime::Entity newEntity =
+      runtime_binding().world->create_scene_object();
   if (newEntity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
@@ -216,25 +223,29 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
   // Copy Transform.
   runtime::Transform transform{};
   if (runtime_binding().world->get_transform(source, &transform)) {
-    static_cast<void>(runtime_binding().world->add_transform(newEntity, transform));
+    static_cast<void>(
+        runtime_binding().world->add_transform(newEntity, transform));
   }
 
   // Copy RigidBody.
   runtime::RigidBody rigidBody{};
   if (runtime_binding().world->get_rigid_body(source, &rigidBody)) {
-    static_cast<void>(runtime_binding().world->add_rigid_body(newEntity, rigidBody));
+    static_cast<void>(
+        runtime_binding().world->add_rigid_body(newEntity, rigidBody));
   }
 
   // Copy Collider.
   runtime::Collider collider{};
   if (runtime_binding().world->get_collider(source, &collider)) {
-    static_cast<void>(runtime_binding().world->add_collider(newEntity, collider));
+    static_cast<void>(
+        runtime_binding().world->add_collider(newEntity, collider));
   }
 
   // Copy MeshComponent.
   runtime::MeshComponent mesh{};
   if (runtime_binding().world->get_mesh_component(source, &mesh)) {
-    static_cast<void>(runtime_binding().world->add_mesh_component(newEntity, mesh));
+    static_cast<void>(
+        runtime_binding().world->add_mesh_component(newEntity, mesh));
   }
 
   // Copy NameComponent with "(clone)" suffix.
@@ -242,13 +253,15 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
   if (runtime_binding().world->get_name_component(source, &name)) {
     runtime::NameComponent cloneName{};
     copy_clone_name(cloneName.name, sizeof(cloneName.name), name.name);
-    static_cast<void>(runtime_binding().world->add_name_component(newEntity, cloneName));
+    static_cast<void>(
+        runtime_binding().world->add_name_component(newEntity, cloneName));
   }
 
   // Copy LightComponent.
   runtime::LightComponent light{};
   if (runtime_binding().world->get_light_component(source, &light)) {
-    static_cast<void>(runtime_binding().world->add_light_component(newEntity, light));
+    static_cast<void>(
+        runtime_binding().world->add_light_component(newEntity, light));
   }
 
   push_entity_handle(state, newEntity);

@@ -12,6 +12,9 @@
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec4.h"
+#include "engine/physics/collider.h"
+#include "engine/physics/physics.h"
+#include "spatial_transform_util.h"
 
 namespace engine::runtime {
 
@@ -74,8 +77,8 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
   const std::uint64_t shaderBits = 0ULL;
 
   const std::uint64_t textureBits =
-      (static_cast<std::uint64_t>(material.albedoTexture.id) & 0xFFFFFULL) <<
-      36U;
+      (static_cast<std::uint64_t>(material.albedoTexture.id) & 0xFFFFFULL)
+      << 36U;
 
   const std::uint64_t meshBits =
       (static_cast<std::uint64_t>(runtimeMesh.id) & 0xFFFFFULL) << 16U;
@@ -112,8 +115,9 @@ bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
   return false;
 }
 
-renderer::AssetId fallback_foliage_mesh_asset(
-    const FoliagePatchComponent &foliage, std::uint32_t lodIndex) noexcept {
+renderer::AssetId
+fallback_foliage_mesh_asset(const FoliagePatchComponent &foliage,
+                            std::uint32_t lodIndex) noexcept {
   if (lodIndex < static_cast<std::uint32_t>(FoliagePatchComponent::kMaxLods)) {
     const renderer::AssetId selected = foliage.meshAssetIds[lodIndex];
     if (selected != renderer::kInvalidAssetId) {
@@ -172,17 +176,23 @@ void render_prep_chunk_job(void *userData) noexcept {
     const MeshComponent *meshComponent =
         jobData->world->get_mesh_component_ptr(entities[i]);
     if (meshComponent != nullptr) {
-      // Derive a world-space AABB from the collider for frustum culling.
-      // Spheres use (radius, radius, radius) as conservative half-extents.
+      // Derive a conservative world-space AABB from the authoritative
+      // collider geometry, including parent TRS and the collider-local pose.
       const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
-      const math::Vec3 center = transforms[i].position;
-      math::Vec3 half(0.5F, 0.5F, 0.5F);
+      math::Vec3 center = transforms[i].position;
+      math::Vec3 half = detail::transformed_aabb_half_extents(
+          transforms[i].matrix, math::Vec3(0.5F, 0.5F, 0.5F));
       if (collider != nullptr) {
-        if (collider->shape == ColliderShape::Sphere) {
-          const float r = collider->halfExtents.x;
-          half = math::Vec3(r, r, r);
-        } else {
-          half = collider->halfExtents;
+        const physics::ConvexHullData *hull =
+            (collider->shape == ColliderShape::ConvexHull)
+                ? physics::get_convex_hull_data(
+                      jobData->world->physics_context(), entities[i])
+                : nullptr;
+        physics::ColliderWorldGeometry geometry{};
+        if (physics::make_collider_world_geometry(
+                *collider, transforms[i].matrix, hull, &geometry)) {
+          center = math::aabb_center(geometry.worldAabb);
+          half = math::aabb_half_extents(geometry.worldAabb);
         }
       }
 
@@ -283,11 +293,10 @@ void render_prep_chunk_job(void *userData) noexcept {
         continue;
       }
 
-      const float safeScale =
-          (instance.scale > 0.0F) ? instance.scale : 1.0F;
-      const math::Mat4 instanceLocal = math::compose_trs(
-          instance.offset, math::Quat(), math::Vec3(safeScale, safeScale,
-                                                    safeScale));
+      const float safeScale = (instance.scale > 0.0F) ? instance.scale : 1.0F;
+      const math::Mat4 instanceLocal =
+          math::compose_trs(instance.offset, math::Quat(),
+                            math::Vec3(safeScale, safeScale, safeScale));
       const math::Mat4 model = math::mul(transforms[i].matrix, instanceLocal);
       const math::Vec4 center4 =
           math::mul(model, math::Vec4(0.0F, 0.0F, 0.0F, 1.0F));

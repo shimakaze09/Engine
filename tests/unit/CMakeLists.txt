@@ -69,6 +69,21 @@ engine_add_test_executable(engine_unit_physics
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_collider_geometry
+    SOURCES
+    collider_geometry_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+)
+
+engine_add_test_executable(engine_unit_physics_hierarchy_collision
+    SOURCES
+    physics_hierarchy_collision_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp
@@ -564,6 +579,8 @@ engine_add_test_executable(engine_unit_platform_paths
 engine_add_test_executable(engine_unit_engine_pipeline
     SOURCES
     engine_pipeline_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
     PRIVATE_DEPS
     engine_runtime
 )

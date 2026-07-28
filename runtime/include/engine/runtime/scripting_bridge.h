@@ -71,9 +71,9 @@ struct RuntimeServices final {
       nullptr;
   std::uint32_t (*get_entity_index)(
       runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
-  std::uint32_t (*get_transform_count)(runtime::World *world) noexcept =
+  std::uint32_t (*get_entity_count)(runtime::World *world) noexcept = nullptr;
+  std::uint32_t (*create_scene_object_op)(runtime::World *world) noexcept =
       nullptr;
-  std::uint32_t (*create_entity_op)(runtime::World *world) noexcept = nullptr;
   const runtime::Transform *(*get_transform_read_ptr)(
       runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
   bool (*get_transform_op)(runtime::World *world, std::uint32_t entityIndex,

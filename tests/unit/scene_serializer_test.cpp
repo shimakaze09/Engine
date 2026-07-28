@@ -22,13 +22,40 @@ bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
+engine::math::Quat collider_test_rotation(std::size_t index) noexcept {
+  switch (index) {
+  case 1U:
+    return engine::math::Quat(1.0F, 0.0F, 0.0F, 0.0F);
+  case 2U:
+    return engine::math::Quat(0.0F, 1.0F, 0.0F, 0.0F);
+  case 3U:
+    return engine::math::Quat(0.0F, 0.0F, 1.0F, 0.0F);
+  case 4U:
+    return engine::math::Quat(0.0F, 0.0F, 0.0F, -1.0F);
+  default:
+    return engine::math::Quat();
+  }
+}
+
+bool collider_pose_equals(const engine::runtime::Collider &collider,
+                          const engine::math::Vec3 &position,
+                          const engine::math::Quat &rotation) noexcept {
+  return (collider.localPosition.x == position.x) &&
+         (collider.localPosition.y == position.y) &&
+         (collider.localPosition.z == position.z) &&
+         (collider.localRotation.x == rotation.x) &&
+         (collider.localRotation.y == rotation.y) &&
+         (collider.localRotation.z == rotation.z) &&
+         (collider.localRotation.w == rotation.w);
+}
+
 /// No-op timer callback used to create active timer state for reset tests.
 void noop_timer(engine::runtime::TimerId, void *) noexcept {}
 
 /// Seeds scene-owned state that must not survive reset or scene replacement.
 int seed_non_entity_scene_state(engine::runtime::World &world) {
-  if (world.timer_manager().set_timeout(1.0F, noop_timer, nullptr)
-      == engine::runtime::kInvalidTimerId) {
+  if (world.timer_manager().set_timeout(1.0F, noop_timer, nullptr) ==
+      engine::runtime::kInvalidTimerId) {
     return 80;
   }
 
@@ -50,16 +77,15 @@ int seed_non_entity_scene_state(engine::runtime::World &world) {
 }
 
 /// Verifies that scene state has been restored to the default empty state.
-int verify_non_entity_scene_state_cleared(
-    const engine::runtime::World &world) {
+int verify_non_entity_scene_state_cleared(const engine::runtime::World &world) {
   if (world.timer_manager().active_count() != 0U) {
     return 84;
   }
   if (world.camera_manager().camera_count() != 0U) {
     return 85;
   }
-  if (world.game_mode().state
-      != engine::runtime::GameMode::State::WaitingToStart) {
+  if (world.game_mode().state !=
+      engine::runtime::GameMode::State::WaitingToStart) {
     return 86;
   }
   if (std::strcmp(world.game_mode().name, "default") != 0) {
@@ -83,9 +109,9 @@ int build_source_scene(const char *path) {
   const engine::runtime::Entity first = world->create_entity();
   const engine::runtime::Entity second = world->create_entity();
   const engine::runtime::Entity third = world->create_entity();
-  if ((first == engine::runtime::kInvalidEntity)
-      || (second == engine::runtime::kInvalidEntity)
-      || (third == engine::runtime::kInvalidEntity)) {
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity)) {
     return 2;
   }
 
@@ -116,8 +142,7 @@ int build_source_scene(const char *path) {
   }
 
   engine::runtime::NameComponent secondName{};
-  std::snprintf(secondName.name, sizeof(secondName.name), "%s",
-                kRoundTripName);
+  std::snprintf(secondName.name, sizeof(secondName.name), "%s", kRoundTripName);
   if (!world->add_name_component(second, secondName)) {
     return 10;
   }
@@ -190,9 +215,9 @@ int build_source_buffer(
   const engine::runtime::Entity first = world->create_entity();
   const engine::runtime::Entity second = world->create_entity();
   const engine::runtime::Entity third = world->create_entity();
-  if ((first == engine::runtime::kInvalidEntity)
-      || (second == engine::runtime::kInvalidEntity)
-      || (third == engine::runtime::kInvalidEntity)) {
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity)) {
     return 32;
   }
 
@@ -223,8 +248,7 @@ int build_source_buffer(
   }
 
   engine::runtime::NameComponent secondName{};
-  std::snprintf(secondName.name, sizeof(secondName.name), "%s",
-                kRoundTripName);
+  std::snprintf(secondName.name, sizeof(secondName.name), "%s", kRoundTripName);
   if (!world->add_name_component(second, secondName)) {
     return 51;
   }
@@ -273,8 +297,8 @@ int build_source_buffer(
     return 54;
   }
 
-  if (!engine::runtime::save_scene(
-          *world, outBuffer->data(), outBuffer->size(), outSize)) {
+  if (!engine::runtime::save_scene(*world, outBuffer->data(), outBuffer->size(),
+                                   outSize)) {
     return 39;
   }
 
@@ -306,8 +330,9 @@ int verify_loaded_scene(const char *path) {
   bool foundReflectionProbeValue = false;
   bool foundSceneCaptureValue = false;
 
-  for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
-                                     engine::runtime::World::kMaxEntities);
+  for (std::uint32_t index = 1U;
+       index <=
+       static_cast<std::uint32_t>(engine::runtime::World::kMaxEntities);
        ++index) {
     const engine::runtime::Entity entity = world->find_entity_by_index(index);
     if (entity == engine::runtime::kInvalidEntity) {
@@ -317,14 +342,14 @@ int verify_loaded_scene(const char *path) {
     ++aliveCount;
 
     engine::runtime::RigidBody rigidBody{};
-    if (world->get_rigid_body(entity, &rigidBody)
-        && nearly_equal(rigidBody.inverseMass, 0.5F)) {
+    if (world->get_rigid_body(entity, &rigidBody) &&
+        nearly_equal(rigidBody.inverseMass, 0.5F)) {
       foundRigidBodyValue = nearly_equal(rigidBody.velocity.y, 2.0F);
     }
 
     engine::runtime::Collider collider{};
-    if (world->get_collider(entity, &collider)
-        && nearly_equal(collider.halfExtents.z, 2.5F)) {
+    if (world->get_collider(entity, &collider) &&
+        nearly_equal(collider.halfExtents.z, 2.5F)) {
       foundColliderValue = true;
     }
 
@@ -338,8 +363,8 @@ int verify_loaded_scene(const char *path) {
     }
 
     engine::runtime::NameComponent name{};
-    if (world->get_name_component(entity, &name)
-        && (std::strcmp(name.name, kRoundTripName) == 0)) {
+    if (world->get_name_component(entity, &name) &&
+        (std::strcmp(name.name, kRoundTripName) == 0)) {
       foundNameValue = true;
     }
 
@@ -351,14 +376,13 @@ int verify_loaded_scene(const char *path) {
 
     engine::runtime::ReflectionProbeComponent probe{};
     if (world->get_reflection_probe_component(entity, &probe)) {
-      foundReflectionProbeValue =
-          nearly_equal(probe.boxExtents.z, 5.0F) &&
-          nearly_equal(probe.radius, 18.0F) &&
-          nearly_equal(probe.intensity, 1.25F) &&
-          (probe.prefilteredResolution == 256U) &&
-          (probe.irradianceResolution == 64U) &&
-          (probe.mipLevels == 6U) && probe.boxProjection &&
-          !probe.needsBake;
+      foundReflectionProbeValue = nearly_equal(probe.boxExtents.z, 5.0F) &&
+                                  nearly_equal(probe.radius, 18.0F) &&
+                                  nearly_equal(probe.intensity, 1.25F) &&
+                                  (probe.prefilteredResolution == 256U) &&
+                                  (probe.irradianceResolution == 64U) &&
+                                  (probe.mipLevels == 6U) &&
+                                  probe.boxProjection && !probe.needsBake;
     }
 
     engine::runtime::SceneCaptureComponent capture{};
@@ -453,8 +477,9 @@ int verify_loaded_scene_from_buffer(
   bool foundReflectionProbeValue = false;
   bool foundSceneCaptureValue = false;
 
-  for (std::uint32_t index = 1U; index <= static_cast<std::uint32_t>(
-                                     engine::runtime::World::kMaxEntities);
+  for (std::uint32_t index = 1U;
+       index <=
+       static_cast<std::uint32_t>(engine::runtime::World::kMaxEntities);
        ++index) {
     const engine::runtime::Entity entity = world->find_entity_by_index(index);
     if (entity == engine::runtime::kInvalidEntity) {
@@ -464,14 +489,14 @@ int verify_loaded_scene_from_buffer(
     ++aliveCount;
 
     engine::runtime::RigidBody rigidBody{};
-    if (world->get_rigid_body(entity, &rigidBody)
-        && nearly_equal(rigidBody.inverseMass, 0.5F)) {
+    if (world->get_rigid_body(entity, &rigidBody) &&
+        nearly_equal(rigidBody.inverseMass, 0.5F)) {
       foundRigidBodyValue = nearly_equal(rigidBody.velocity.y, 2.0F);
     }
 
     engine::runtime::Collider collider{};
-    if (world->get_collider(entity, &collider)
-        && nearly_equal(collider.halfExtents.z, 2.5F)) {
+    if (world->get_collider(entity, &collider) &&
+        nearly_equal(collider.halfExtents.z, 2.5F)) {
       foundColliderValue = true;
     }
 
@@ -485,8 +510,8 @@ int verify_loaded_scene_from_buffer(
     }
 
     engine::runtime::NameComponent name{};
-    if (world->get_name_component(entity, &name)
-        && (std::strcmp(name.name, kRoundTripName) == 0)) {
+    if (world->get_name_component(entity, &name) &&
+        (std::strcmp(name.name, kRoundTripName) == 0)) {
       foundNameValue = true;
     }
 
@@ -498,14 +523,13 @@ int verify_loaded_scene_from_buffer(
 
     engine::runtime::ReflectionProbeComponent probe{};
     if (world->get_reflection_probe_component(entity, &probe)) {
-      foundReflectionProbeValue =
-          nearly_equal(probe.boxExtents.z, 5.0F) &&
-          nearly_equal(probe.radius, 18.0F) &&
-          nearly_equal(probe.intensity, 1.25F) &&
-          (probe.prefilteredResolution == 256U) &&
-          (probe.irradianceResolution == 64U) &&
-          (probe.mipLevels == 6U) && probe.boxProjection &&
-          !probe.needsBake;
+      foundReflectionProbeValue = nearly_equal(probe.boxExtents.z, 5.0F) &&
+                                  nearly_equal(probe.radius, 18.0F) &&
+                                  nearly_equal(probe.intensity, 1.25F) &&
+                                  (probe.prefilteredResolution == 256U) &&
+                                  (probe.irradianceResolution == 64U) &&
+                                  (probe.mipLevels == 6U) &&
+                                  probe.boxProjection && !probe.needsBake;
     }
 
     engine::runtime::SceneCaptureComponent capture{};
@@ -586,8 +610,8 @@ int verify_scene_version_in_buffer(
   }
 
   const engine::core::JsonValue *root = parser.root();
-  if ((root == nullptr)
-      || (root->type != engine::core::JsonValue::Type::Object)) {
+  if ((root == nullptr) ||
+      (root->type != engine::core::JsonValue::Type::Object)) {
     return 63;
   }
 
@@ -620,8 +644,8 @@ int verify_duplicate_persistent_id_fails() {
     return 67;
   }
 
-  if (engine::runtime::load_scene(
-          *world, kDuplicateScene, std::strlen(kDuplicateScene))) {
+  if (engine::runtime::load_scene(*world, kDuplicateScene,
+                                  std::strlen(kDuplicateScene))) {
     return 68;
   }
 
@@ -859,7 +883,8 @@ int verify_point_spot_light_scene_round_trip() {
 }
 
 /// Malformed foliage fields must reject the scene (shared strict reader —
-/// scene and prefab serializers now use one implementation, REVIEW_FINDINGS S5).
+/// scene and prefab serializers now use one implementation, REVIEW_FINDINGS
+/// S5).
 int verify_foliage_parse_failures_reject_scene() {
   constexpr const char *kBadFoliageDensityScene =
       "{\"version\":2,\"entities\":[{\"components\":{"
@@ -974,6 +999,101 @@ int verify_mesh_material_reference_round_trip() {
   return 0;
 }
 
+/// Verifies every collider shape/local pose plus legacy and invalid JSON.
+int verify_collider_scene_round_trip() {
+  constexpr std::array<engine::runtime::ColliderShape, 5U> kShapes = {
+      engine::runtime::ColliderShape::AABB,
+      engine::runtime::ColliderShape::Sphere,
+      engine::runtime::ColliderShape::Capsule,
+      engine::runtime::ColliderShape::ConvexHull,
+      engine::runtime::ColliderShape::Heightfield};
+  std::unique_ptr<engine::runtime::World> source(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (source == nullptr) {
+    return 200;
+  }
+
+  std::array<engine::runtime::PersistentId, kShapes.size()> ids{};
+  for (std::size_t i = 0U; i < kShapes.size(); ++i) {
+    const engine::runtime::Entity entity = source->create_scene_object();
+    if (entity == engine::runtime::kInvalidEntity) {
+      return 201;
+    }
+    ids[i] = source->persistent_id(entity);
+    engine::runtime::Collider collider{};
+    collider.shape = kShapes[i];
+    collider.localPosition = engine::math::Vec3(static_cast<float>(i + 1U),
+                                                -static_cast<float>(i + 2U),
+                                                static_cast<float>(i + 3U));
+    collider.localRotation = collider_test_rotation(i);
+    if (!source->add_collider(entity, collider)) {
+      return 202;
+    }
+  }
+
+  std::array<char, engine::core::JsonWriter::kBufferBytes> buffer{};
+  std::size_t size = 0U;
+  if (!engine::runtime::save_scene(*source, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 203;
+  }
+  std::unique_ptr<engine::runtime::World> loaded(new (std::nothrow)
+                                                     engine::runtime::World());
+  if ((loaded == nullptr) ||
+      !engine::runtime::load_scene(*loaded, buffer.data(), size)) {
+    return 204;
+  }
+  for (std::size_t i = 0U; i < kShapes.size(); ++i) {
+    const engine::runtime::Entity entity =
+        loaded->find_entity_by_persistent_id(ids[i]);
+    engine::runtime::Collider collider{};
+    const engine::math::Vec3 expectedPosition(static_cast<float>(i + 1U),
+                                              -static_cast<float>(i + 2U),
+                                              static_cast<float>(i + 3U));
+    if ((entity == engine::runtime::kInvalidEntity) ||
+        !loaded->get_collider(entity, &collider) ||
+        (collider.shape != kShapes[i]) ||
+        !collider_pose_equals(collider, expectedPosition,
+                              collider_test_rotation(i))) {
+      return 205;
+    }
+  }
+
+  constexpr const char *kLegacyScene =
+      "{\"version\":2,\"entities\":[{\"components\":{\"Collider\":{"
+      "\"halfExtents\":[1,2,3]}}}]}";
+  std::unique_ptr<engine::runtime::World> legacy(new (std::nothrow)
+                                                     engine::runtime::World());
+  if ((legacy == nullptr) ||
+      !engine::runtime::load_scene(*legacy, kLegacyScene,
+                                   std::strlen(kLegacyScene))) {
+    return 206;
+  }
+  engine::runtime::Entity legacyEntity = engine::runtime::kInvalidEntity;
+  legacy->for_each_alive(
+      [&](engine::runtime::Entity entity) noexcept { legacyEntity = entity; });
+  engine::runtime::Collider legacyCollider{};
+  if (!legacy->get_collider(legacyEntity, &legacyCollider) ||
+      (legacyCollider.shape != engine::runtime::ColliderShape::AABB) ||
+      !collider_pose_equals(legacyCollider, engine::math::Vec3(),
+                            engine::math::Quat())) {
+    return 207;
+  }
+
+  constexpr const char *kInvalidScene =
+      "{\"version\":2,\"entities\":[{\"components\":{\"Collider\":{\"shape\":5}"
+      "}}]}";
+  std::unique_ptr<engine::runtime::World> invalid(new (std::nothrow)
+                                                      engine::runtime::World());
+  if ((invalid == nullptr) ||
+      engine::runtime::load_scene(*invalid, kInvalidScene,
+                                  std::strlen(kInvalidScene)) ||
+      (invalid->alive_entity_count() != 0U)) {
+    return 208;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -1036,8 +1156,8 @@ int main() {
     return result;
   }
 
-  result = verify_load_scene_replaces_existing_scene_state(sceneBuffer,
-                                                           sceneSize);
+  result =
+      verify_load_scene_replaces_existing_scene_state(sceneBuffer, sceneSize);
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
@@ -1066,6 +1186,13 @@ int main() {
   }
 
   result = verify_mesh_material_reference_round_trip();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_collider_scene_round_trip();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
