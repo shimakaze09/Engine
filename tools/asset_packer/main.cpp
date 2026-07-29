@@ -72,7 +72,7 @@ struct ImportSettings final {
   bool generateNormals = false;
 };
 
-constexpr std::uint64_t kFnv64Offset = 1469598103934665603ULL;
+constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
 void print_usage() {
