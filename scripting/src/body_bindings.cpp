@@ -244,25 +244,19 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
 }
 
 int lua_engine_wake_body(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    return 0;
-  }
-  if (!lua_isnumber(state, 1)) {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
     return 0;
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->wake_body != nullptr)) {
-    const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().services->wake_body(runtime_binding().world, idx);
+    runtime_binding().services->wake_body(runtime_binding().world, entity.index);
   }
   return 0;
 }
 
 int lua_engine_is_sleeping(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  if (!lua_isnumber(state, 1)) {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -270,8 +264,7 @@ int lua_engine_is_sleeping(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const auto idx = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  lua_pushboolean(state, runtime_binding().services->is_sleeping(runtime_binding().world, idx) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->is_sleeping(runtime_binding().world, entity.index) ? 1 : 0);
   return 1;
 }
 

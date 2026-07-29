@@ -33,7 +33,10 @@ bool read_vec3_args(lua_State *state, int startIndex,
 }
 
 void log_lua_error(const char *context) noexcept {
-  lua_State *state = current_lua_state();
+  log_lua_error(current_lua_state(), context);
+}
+
+void log_lua_error(lua_State *state, const char *context) noexcept {
   if (state == nullptr) {
     return;
   }

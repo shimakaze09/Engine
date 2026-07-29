@@ -16,4 +16,7 @@ bool read_vec3_args(lua_State *state, int startIndex,
 /// Logs the Lua error on top of the stack with a traceback, then pops it.
 void log_lua_error(const char *context) noexcept;
 
+/// Same, but on an explicit stack (e.g. a coroutine thread's caller).
+void log_lua_error(lua_State *state, const char *context) noexcept;
+
 } // namespace engine::scripting

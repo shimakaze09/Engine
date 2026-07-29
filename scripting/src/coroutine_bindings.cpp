@@ -81,7 +81,7 @@ public:
     lua_rawgeti(state, LUA_REGISTRYINDEX, condRef);
     if (lua_pcall(state, 0, 1, 0) != LUA_OK) {
       if (logLuaError != nullptr) {
-        logLuaError("wait_until condition");
+        logLuaError(state, "wait_until condition");
       } else {
         lua_pop(state, 1);
       }
@@ -198,7 +198,7 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
       lua_pushstring(state, "start_coroutine error (non-string)");
     }
     if (logLuaError != nullptr) {
-      logLuaError("start_coroutine");
+      logLuaError(state, "start_coroutine");
     } else {
       lua_pop(state, 1);
     }
@@ -248,7 +248,7 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
         lua_pushstring(state, "coroutine error (non-string)");
       }
       if (logLuaError != nullptr) {
-        logLuaError("coroutine");
+        logLuaError(state, "coroutine");
       } else {
         lua_pop(state, 1);
       }
