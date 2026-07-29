@@ -238,13 +238,21 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const std::size_t iterCount =
       (iterations > 0) ? static_cast<std::size_t>(iterations) : 8U;
 
-  // Warm starting: apply accumulated impulses from previous frame.
+  // Warm starting: apply accumulated impulses from previous frame. Only
+  // distance and spring joints participate — their corrections act along
+  // the center line this warm start replays. The other joint types store
+  // anchor/axis-relative magnitudes, so a center-line replay would displace
+  // them in directions their solvers never correct.
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
     if (!ctx.joints[i].active) {
       continue;
     }
     auto &j = ctx.joints[i];
-    if (j.accumulatedImpulse <= 0.0F) {
+    const auto warmType = static_cast<JointType>(j.type);
+    if ((warmType != JointType::Distance) && (warmType != JointType::Spring)) {
+      continue;
+    }
+    if (j.accumulatedImpulse == 0.0F) {
       continue;
     }
 

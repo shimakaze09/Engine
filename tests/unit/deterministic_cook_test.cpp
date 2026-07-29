@@ -16,7 +16,7 @@
 
 namespace {
 
-constexpr std::uint64_t kFnv64Offset = 1469598103934665603ULL;
+constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
 struct DependencyDigest final {

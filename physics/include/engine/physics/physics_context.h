@@ -91,6 +91,10 @@ struct PhysicsShapeStore final {
   std::array<Entity, kMaxColliders> ccdColliderEntities{};
   std::array<Entity, kMaxColliders> ccdColliderOwners{};
   std::array<math::AABB, kMaxColliders> ccdColliderAabbs{};
+  // Owner body velocities captured with the snapshot: CCD's candidate
+  // rejection must not read live RigidBody::velocity, which parallel chunk
+  // jobs are integrating concurrently.
+  std::array<math::Vec3, kMaxColliders> ccdColliderVelocities{};
 };
 
 /// World-owned physics storage: gravity, joints, pair/stamp scratch,

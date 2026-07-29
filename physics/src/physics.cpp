@@ -1940,7 +1940,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       store.ccdColliderEntities[i] = entities[i];
       store.ccdColliderOwners[i] = bodyOwners[i];
-      store.ccdColliderAabbs[i] = geometries[i].worldAabb;
+      // Publish a zeroed AABB for invalid geometry: geometries[i] is
+      // per-thread scratch, so its stale content would vary with whichever
+      // worker ran the previous resolve.
+      store.ccdColliderAabbs[i] =
+          geometryValid[i] ? geometries[i].worldAabb : math::AABB{};
       if ((bodyOwners[i] != kInvalidEntity) &&
           (bodyOwners[i] != entities[i])) {
         physicsCtx.ccdHasCompoundColliders = true;
@@ -2266,6 +2270,22 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
       }
     } else {
       body->sleepFrameCount = 0U;
+    }
+  }
+
+  // Capture owner velocities into the CCD snapshot LAST: the next step's CCD
+  // consumes them instead of live RigidBody reads (which race with parallel
+  // chunk integration), so they must include this step's solver impulses.
+  if (physicsCtx.shapeStore != nullptr) {
+    PhysicsShapeStore &store = *physicsCtx.shapeStore;
+    for (std::size_t i = 0U; i < colliderCount; ++i) {
+      const RigidBody *ownerBody =
+          (bodyOwners[i] != kInvalidEntity)
+              ? world.get_rigid_body_ptr(bodyOwners[i])
+              : nullptr;
+      store.ccdColliderVelocities[i] = (ownerBody != nullptr)
+                                           ? ownerBody->velocity
+                                           : math::Vec3(0.0F, 0.0F, 0.0F);
     }
   }
 
