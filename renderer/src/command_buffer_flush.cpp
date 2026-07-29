@@ -1232,6 +1232,8 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       if (backend.ssaoProjectionLoc >= 0)
         dev->set_uniform_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
+      if (backend.ssaoViewLoc >= 0)
+        dev->set_uniform_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
 
       if (backend.ssaoNoiseScaleLoc >= 0) {
         const float noiseScale[2] = {static_cast<float>(drawableWidth) / 4.0F,

@@ -715,6 +715,7 @@ bool initialize_backend() noexcept {
         backend.ssaoNormalLoc = dev->uniform_location(prog, "u_gBufferNormal");
         backend.ssaoNoiseLoc = dev->uniform_location(prog, "u_noiseTexture");
         backend.ssaoProjectionLoc = dev->uniform_location(prog, "u_projection");
+        backend.ssaoViewLoc = dev->uniform_location(prog, "u_view");
         backend.ssaoNoiseScaleLoc = dev->uniform_location(prog, "u_noiseScale");
         backend.ssaoRadiusLoc = dev->uniform_location(prog, "u_radius");
         backend.ssaoBiasLoc = dev->uniform_location(prog, "u_bias");

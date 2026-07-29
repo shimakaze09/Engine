@@ -9,6 +9,7 @@ uniform sampler2D u_gBufferNormal;
 uniform sampler2D u_noiseTexture;
 uniform vec3 u_samples[32];
 uniform mat4 u_projection;
+uniform mat4 u_view;
 uniform vec2 u_noiseScale;
 uniform float u_radius;
 uniform float u_bias;
@@ -29,7 +30,8 @@ void main() {
     if (depth >= 1.0) { outAO = 1.0; return; }
 
     vec3 fragPos = reconstructViewPos(vTexCoord, depth);
-    vec3 normal = normalize(texture(u_gBufferNormal, vTexCoord).rgb * 2.0 - 1.0);
+    vec3 worldNormal = texture(u_gBufferNormal, vTexCoord).rgb * 2.0 - 1.0;
+    vec3 normal = normalize(mat3(u_view) * worldNormal);
 
     vec3 randomVec = texture(u_noiseTexture, vTexCoord * u_noiseScale).rgb;
     vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));

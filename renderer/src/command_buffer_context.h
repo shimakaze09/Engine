@@ -321,6 +321,7 @@ struct BackendState final {
   std::int32_t ssaoNormalLoc = -1;
   std::int32_t ssaoNoiseLoc = -1;
   std::int32_t ssaoProjectionLoc = -1;
+  std::int32_t ssaoViewLoc = -1;
   std::int32_t ssaoNoiseScaleLoc = -1;
   std::int32_t ssaoRadiusLoc = -1;
   std::int32_t ssaoBiasLoc = -1;
