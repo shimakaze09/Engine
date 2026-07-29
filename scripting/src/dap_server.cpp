@@ -656,7 +656,11 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
       lua_pushglobaltable(L);
       lua_pushnil(L);
       int count = 0;
-      while (lua_next(L, -2) != 0 && count < 50) {
+      while (lua_next(L, -2) != 0) {
+        if (count >= 50) {
+          lua_pop(L, 2);
+          break;
+        }
         if (lua_type(L, -2) == LUA_TSTRING) {
           const char *name = lua_tostring(L, -2);
           // Skip internal/standard library names.
