@@ -1460,17 +1460,24 @@ void flush_renderer(CommandBufferView commandBufferView,
                              spotShadowEnabled ? 1 : 0);
       }
 
-      // Bind point shadow cubemaps on texture units 14-17.
+      // Bind point shadow cubemaps on texture units 14-17. The samplerCube
+      // uniforms must point at their units even when point shadows are off:
+      // left at the default unit 0 they alias the sampler2D G-buffer binding,
+      // which makes the whole draw GL_INVALID_OPERATION on conformant
+      // drivers.
       const bool pointShadowEnabled = doPointShadows;
+      for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+        const int texUnit = 14 + static_cast<int>(s);
+        if (backend.dlPointShadowMapLocs[s] >= 0) {
+          dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
+        }
+      }
       if (pointShadowEnabled) {
         for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
           const auto &slot = backend.pointShadowState.slots[s];
           const int texUnit = 14 + static_cast<int>(s);
           if (dev->bind_texture_cubemap != nullptr) {
             dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
-          }
-          if (backend.dlPointShadowMapLocs[s] >= 0) {
-            dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
           }
           if (backend.dlPointShadowLightPosLocs[s] >= 0) {
             const auto &lp = lights
