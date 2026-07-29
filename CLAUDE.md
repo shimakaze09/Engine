@@ -58,11 +58,11 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
   project owner, not a silent test edit.
 - No god files: one responsibility per translation unit. When a TU accretes
   a second concern, split it (the `command_buffer_*` backend split is the
-  model); ~1,000 lines is the review trigger for engine sources. Standing
-  offenders queued for splitting: `command_buffer_flush.cpp`, `physics.cpp`,
-  `engine_pipeline.cpp`, `world.cpp`, asset_packer `main.cpp`. Test files
-  grow by appending (rule above) — split them by starting new suite files,
-  never by relocating existing tests.
+  model); ~1,000 lines is the review trigger for engine sources. The
+  2026-07-30 split campaign resolved all standing offenders (physics,
+  world, engine_pipeline, asset_packer main, command_buffer init and
+  flush). Test files grow by appending (rule above) — split them by
+  starting new suite files, never by relocating existing tests.
 - No new third-party dependencies without confirmation; never ones requiring
   exceptions/RTTI in engine code.
 
@@ -116,7 +116,9 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - `math/` — header-only INTERFACE lib (no `math/src/`): Vec2/3/4, Mat4, Quat,
   Transform, AABB/ray/sphere, component PODs; SSE2 paths in `math_detail.h`.
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
-  speculative contacts, manifolds, sequential-impulse solver + joints
+  speculative contacts, clipped contact manifolds (`contact_clip`,
+  `contact_resolution`, `narrow_phase`, `physics_step`,
+  `physics_payloads` TUs), sequential-impulse solver + joints
   (`src/joints/`), queries, materials, primitive hull builders
   (`primitive_hulls` — cylinder/pyramid spawn shapes collide as mesh-matched
   convex hulls; box/sphere/capsule stay analytic, mirroring the Unity/Unreal
@@ -128,7 +130,9 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   `mesh_primitives`, shader system (variants, hot reload), `RenderDevice`
   function table (GL impl in `render_device_gl.cpp`), command buffer frontend
   (`CommandBufferBuilder`, 64-bit DrawKey sort) with backend split across
-  `command_buffer{,_flush,_sky,_ibl,_post_resources,_context,_builder,_math}`,
+  `command_buffer{,_init_*,_flush,_flush_*,_sky,_ibl,_post_resources,_context,_builder,_math}`
+  (init stages behind `command_buffer_init_internal.h`; flush passes share
+  `FrameFlushContext` in `command_buffer_flush_internal.h`),
   pass resources, shadows (cascade/spot/point), light culling, post stack
   (bloom/SSAO/auto-exposure/tonemap/FXAA), GPU profiler.
 - `audio/` — miniaudio-backed load/play/stop/volume.
