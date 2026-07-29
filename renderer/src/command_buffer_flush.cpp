@@ -770,7 +770,13 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->bind_vertex_array(mesh->vertexArray);
           boundVao = mesh->vertexArray;
         }
-        dev->draw_elements_triangles_u32(mesh->indexCount);
+        if (mesh->indexCount > 0U) {
+          dev->draw_elements_triangles_u32(
+              static_cast<std::int32_t>(mesh->indexCount));
+        } else {
+          dev->draw_arrays_triangles(
+              0, static_cast<std::int32_t>(mesh->vertexCount));
+        }
       }
     }
 
@@ -874,7 +880,13 @@ void flush_renderer(CommandBufferView commandBufferView,
             dev->bind_vertex_array(mesh->vertexArray);
             boundVao = mesh->vertexArray;
           }
-          dev->draw_elements_triangles_u32(mesh->indexCount);
+          if (mesh->indexCount > 0U) {
+            dev->draw_elements_triangles_u32(
+                static_cast<std::int32_t>(mesh->indexCount));
+          } else {
+            dev->draw_arrays_triangles(
+                0, static_cast<std::int32_t>(mesh->vertexCount));
+          }
         }
       }
     }
