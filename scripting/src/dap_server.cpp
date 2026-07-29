@@ -402,9 +402,6 @@ void handle_configuration_done(int requestSeq) noexcept {
 
 void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
                             const core::JsonValue &args) noexcept {
-  // Replace current breakpoints with incoming list.
-  debugger_clear_breakpoints();
-
   // Read source path.
   const core::JsonValue *srcObj = parser.get_object_field(args, "source");
   const char *sourcePath = nullptr;
@@ -427,6 +424,10 @@ void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
                                     : sizeof(srcPath) - 1U;
     std::memcpy(srcPath, sourcePath, copyLen);
   }
+
+  // Replace this source's breakpoints with the incoming list; other
+  // sources' breakpoints must survive (DAP per-source semantics).
+  debugger_clear_breakpoints_for_source(srcPath);
 
   // Build response with verified breakpoints.
   core::JsonWriter w;

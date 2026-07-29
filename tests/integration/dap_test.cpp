@@ -307,6 +307,18 @@ void run_mock_dap_client(int breakpointLine, ClientResult *result) noexcept {
     return;
   }
 
+  // A setBreakpoints request for a different source must not clear the one
+  // above: replacement is per-source in DAP.
+  const char *otherArgs = "{\"source\":{\"path\":\"dap_other_source.lua\"},"
+                          "\"breakpoints\":[{\"line\":1}]}";
+  if (!send_dap_request(sock, seq++, "setBreakpoints", otherArgs)) {
+    close_socket_safe(sock);
+#if defined(_WIN32)
+    WSACleanup();
+#endif
+    return;
+  }
+
   std::string recvBuffer;
   bool waiting = true;
   while (waiting) {

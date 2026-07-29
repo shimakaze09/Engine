@@ -41,6 +41,9 @@ void reset_debug_bindings() noexcept;
 
 /// Clears all registered debugger breakpoints.
 void debugger_clear_breakpoints() noexcept;
+/// Clears only the breakpoints registered for one source file, matching the
+/// DAP setBreakpoints per-source replace contract.
+void debugger_clear_breakpoints_for_source(const char *file) noexcept;
 /// Adds a debugger breakpoint matched by source suffix and line.
 bool debugger_add_breakpoint(const char *file, int line) noexcept;
 

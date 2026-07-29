@@ -443,6 +443,22 @@ void debugger_clear_breakpoints() noexcept {
   }
 }
 
+void debugger_clear_breakpoints_for_source(const char *file) noexcept {
+  if (file == nullptr) {
+    return;
+  }
+
+  // Compare against the same truncation add applies when storing.
+  char stored[sizeof(g_breakpoints[0].file)] = {};
+  std::snprintf(stored, sizeof(stored), "%s", file);
+  for (std::size_t i = 0U; i < kMaxBreakpoints; ++i) {
+    if (g_breakpoints[i].active &&
+        (std::strcmp(g_breakpoints[i].file, stored) == 0)) {
+      g_breakpoints[i] = DebugBreakpoint{};
+    }
+  }
+}
+
 bool debugger_add_breakpoint(const char *file, int line) noexcept {
   if ((file == nullptr) || (line <= 0)) {
     return false;

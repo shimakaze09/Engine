@@ -43,6 +43,8 @@ bool call_script_function_float(const char *name, float arg) noexcept;
 
 // Debugger breakpoint controls (used by DAP transport).
 void debugger_clear_breakpoints() noexcept;
+/// Clears only one source file's breakpoints (DAP per-source replace).
+void debugger_clear_breakpoints_for_source(const char *file) noexcept;
 /// Adds a DAP breakpoint; false when the breakpoint table is full.
 bool debugger_add_breakpoint(const char *file, int line) noexcept;
 
