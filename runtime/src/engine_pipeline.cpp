@@ -1412,10 +1412,10 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
   scripting::set_frame_index(frameIndex);
 
   if (isPlaying && (updateStepCount > 0U)) {
-    scripting::tick_timers();
-    scripting::tick_coroutines();
     scripting::set_frame_time(static_cast<float>(kFixedDeltaSeconds),
                               static_cast<float>(simulationTimeSeconds));
+    scripting::tick_timers();
+    scripting::tick_coroutines();
     scripting::dispatch_entity_scripts_update(
         static_cast<float>(kFixedDeltaSeconds));
   }
