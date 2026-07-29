@@ -309,8 +309,13 @@ constexpr std::uint32_t kSpatialHashEmpty = 0xFFFFFFFFU;
 
 constexpr float kSleepThreshold = 0.01F;
 constexpr std::uint8_t kSleepFramesRequired = 60U;
-constexpr float kAngularDampingPerSecond = 1.8F;
-constexpr float kMaxAngularSpeed = 3.0F;
+// Light air damping only: contact friction is what actually stops rotation
+// on supported bodies, and a heavier value here makes falling boxes right
+// themselves in visible slow motion.
+constexpr float kAngularDampingPerSecond = 0.4F;
+// Cap fast enough for a knocked-over box to slam down naturally; it exists
+// to stop numeric runaway, not to art-direct tumbles.
+constexpr float kMaxAngularSpeed = 12.0F;
 
 float axis_overlap(float aMin, float aMax, float bMin, float bMax) noexcept {
   const float left = std::max(aMin, bMin);
@@ -658,6 +663,23 @@ void resolve_contact(PhysicsWorldView &world,
 // Sequential-impulse iterations over one clipped contact manifold.
 constexpr std::size_t kManifoldSolverIterations = 8U;
 
+// Scalar inverse inertia derived from the collider's box dimensions
+// (axis-averaged box tensor: a unit cube of mass 1 answers 6). The manifold
+// path uses this instead of RigidBody::inverseInertia, whose 1.0 default
+// makes every box right itself in slow motion; the stored field remains the
+// knob for the legacy single-point paths and joints.
+float box_scalar_inverse_inertia(const Collider &collider,
+                                 float invMass) noexcept {
+  const float hx = std::fabs(collider.halfExtents.x);
+  const float hy = std::fabs(collider.halfExtents.y);
+  const float hz = std::fabs(collider.halfExtents.z);
+  const float extentSq = (hx * hx) + (hy * hy) + (hz * hz);
+  if ((invMass <= 0.0F) || (extentSq <= 1.0e-6F)) {
+    return 0.0F;
+  }
+  return invMass * 4.5F / extentSq;
+}
+
 // Clamps the body's angular speed to the global cap.
 void clamp_angular_speed(RigidBody *body) noexcept {
   if (body == nullptr) {
@@ -726,9 +748,13 @@ void resolve_manifold_contact(
   const engine::math::Vec3 centerB =
       engine::math::add(bodyCenterB, engine::math::mul(normal, moveB));
   const float invInertiaA =
-      ((bodyA != nullptr) && (invMassA > 0.0F)) ? bodyA->inverseInertia : 0.0F;
+      ((bodyA != nullptr) && (bodyA->inverseInertia > 0.0F))
+          ? box_scalar_inverse_inertia(colliderA, invMassA)
+          : 0.0F;
   const float invInertiaB =
-      ((bodyB != nullptr) && (invMassB > 0.0F)) ? bodyB->inverseInertia : 0.0F;
+      ((bodyB != nullptr) && (bodyB->inverseInertia > 0.0F))
+          ? box_scalar_inverse_inertia(colliderB, invMassB)
+          : 0.0F;
 
   const engine::math::Vec3 zero(0.0F, 0.0F, 0.0F);
   const engine::math::Vec3 rA0 =

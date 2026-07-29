@@ -27,11 +27,14 @@ local function is_grounded(self, x, y, z)
     return false
 end
 
--- Applies the player's initial physics and material settings.
+-- Applies the player's initial physics and material settings. Rotation is
+-- locked (standard character-controller setup): a velocity-driven box would
+-- otherwise trip over its own contact friction and tumble.
 function M.on_begin_play(self)
     engine.log("Player on_begin_play, entity=" .. tostring(self))
     engine.set_restitution(self, 0.05)
     engine.set_friction(self, 0.9, 0.7)
+    engine.set_lock_rotation(self, true)
     engine.set_roughness(self, 0.3)
     engine.set_metallic(self, 0.0)
 end

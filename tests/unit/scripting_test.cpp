@@ -263,6 +263,50 @@ int main() {
     return 131;
   }
 
+  const char *lockRotationScript =
+      "function verify_lock_rotation()\n"
+      "    local body = engine.spawn_entity()\n"
+      "    if body == nil then error('spawn failed') end\n"
+      "    engine.set_name(body, 'LockTest')\n"
+      "    engine.add_rigid_body(body, 1.0)\n"
+      "    if not engine.set_lock_rotation(body, true) then\n"
+      "        error('set_lock_rotation(true) failed')\n"
+      "    end\n"
+      "end\n"
+      "function verify_unlock_rotation()\n"
+      "    local body = engine.find_entity_by_name('LockTest')\n"
+      "    if body == nil then error('LockTest lookup failed') end\n"
+      "    if not engine.set_lock_rotation(body, false) then\n"
+      "        error('set_lock_rotation(false) failed')\n"
+      "    end\n"
+      "end\n";
+  if (!write_script_file(lockRotationScript) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("verify_lock_rotation")) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 132;
+  }
+  const engine::runtime::Entity lockEntity =
+      world->find_entity_by_name("LockTest");
+  const engine::runtime::RigidBody *lockedBody =
+      world->get_rigid_body_ptr(lockEntity);
+  if ((lockedBody == nullptr) || (lockedBody->inverseInertia != 0.0F)) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 133;
+  }
+  if (!engine::scripting::call_script_function("verify_unlock_rotation")) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 134;
+  }
+  if (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 1.0F) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 135;
+  }
+
   const char *asyncAssetScript =
       "function request_asset()\n"
       "    local h = engine.load_asset_async('assets/missing_async.mesh', 2)\n"

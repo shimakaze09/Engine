@@ -121,6 +121,34 @@ int lua_engine_set_friction(lua_State *state) noexcept {
   return 1;
 }
 
+// engine.set_lock_rotation(entity, locked) → bool
+// Freezes (or restores) the body's rotational response — the standard
+// player-controller setup, so driven actors slide instead of tumbling.
+int lua_engine_set_lock_rotation(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity) || !lua_isboolean(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const bool locked = lua_toboolean(state, 2) != 0;
+
+  runtime::RigidBody rigidBody{};
+  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_lock_rotation requires an existing RigidBody");
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  rigidBody.inverseInertia = locked ? 0.0F : 1.0F;
+  if (locked) {
+    rigidBody.angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
+  }
+
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
 // engine.create_physics_material(static_friction, dynamic_friction,
 //                                restitution, density) → table
 int lua_engine_create_physics_material(lua_State *state) noexcept {
@@ -735,6 +763,8 @@ void register_physics_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "add_capsule_collider");
   lua_pushcfunction(state, &lua_engine_set_restitution);
   lua_setfield(state, -2, "set_restitution");
+  lua_pushcfunction(state, &lua_engine_set_lock_rotation);
+  lua_setfield(state, -2, "set_lock_rotation");
   lua_pushcfunction(state, &lua_engine_set_friction);
   lua_setfield(state, -2, "set_friction");
   lua_pushcfunction(state, &lua_engine_create_physics_material);
