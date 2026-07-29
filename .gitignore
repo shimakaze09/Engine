@@ -486,3 +486,6 @@ build-*/
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/git,c++,visualstudiocode,cmake,visualstudio
+### Engine ###
+# Editor-generated ImGui layout state
+imgui.ini
