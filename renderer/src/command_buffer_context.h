@@ -212,6 +212,8 @@ struct BackendState final {
   std::int32_t gbufFoliageWindFrequencyLoc = -1;
   std::int32_t gbufFoliagePhaseLoc = -1;
   std::int32_t gbufAlbedoLoc = -1;
+  std::int32_t gbufHasAlbedoTextureLoc = -1;
+  std::int32_t gbufAlbedoTextureLoc = -1;
   std::int32_t gbufMetallicLoc = -1;
   std::int32_t gbufRoughnessLoc = -1;
   std::int32_t gbufAOLoc = -1;
@@ -268,8 +270,10 @@ struct BackendState final {
   std::uint32_t debugLineVao = 0U;
   std::uint32_t debugLineVbo = 0U;
 
-  // Tile light texture (uploaded each frame by CPU culling).
+  // Tile light texture (uploaded each frame by CPU culling); rows tracks the
+  // allocated height so viewport growth recreates it.
   std::uint32_t tileLightTex = 0U;
+  int tileLightTexRows = 0;
   std::vector<float> tileBuffer;
 
   // Per-light data texture consumed by the deferred lighting shader
@@ -319,6 +323,7 @@ struct BackendState final {
   std::int32_t ssaoNormalLoc = -1;
   std::int32_t ssaoNoiseLoc = -1;
   std::int32_t ssaoProjectionLoc = -1;
+  std::int32_t ssaoViewLoc = -1;
   std::int32_t ssaoNoiseScaleLoc = -1;
   std::int32_t ssaoRadiusLoc = -1;
   std::int32_t ssaoBiasLoc = -1;

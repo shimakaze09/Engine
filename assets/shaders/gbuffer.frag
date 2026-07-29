@@ -16,12 +16,19 @@ uniform float uMetallic;
 uniform float uRoughness;
 uniform float uAO;
 uniform vec3 uEmissive;
+uniform int uHasAlbedoTexture;
+uniform sampler2D uAlbedoTexture;
 
 /// Runs the shader entry point for this stage.
 void main() {
     vec3 N = normalize(vNormal);
 
-    gAlbedoMetallic = vec4(uAlbedo, uMetallic);
+    vec3 albedo = uAlbedo;
+    if (uHasAlbedoTexture != 0) {
+        albedo *= texture(uAlbedoTexture, vTexCoord).rgb;
+    }
+
+    gAlbedoMetallic = vec4(albedo, uMetallic);
     gNormalRoughness = vec4(N * 0.5 + 0.5, uRoughness);
     gEmissiveAO = vec4(uEmissive, uAO);
 }

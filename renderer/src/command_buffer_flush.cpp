@@ -1108,6 +1108,10 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     auto drawGBufferBatches = [&]() {
       std::uint32_t boundVertexArray = 0U;
+      std::uint32_t boundAlbedoTex = 0U;
+      if (backend.gbufAlbedoTextureLoc >= 0) {
+        dev->set_uniform_int(backend.gbufAlbedoTextureLoc, 0);
+      }
       for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
            ++batchIndex) {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
@@ -1142,6 +1146,22 @@ void flush_renderer(CommandBufferView commandBufferView,
         if (backend.gbufEmissiveLoc >= 0) {
           dev->set_uniform_vec3(backend.gbufEmissiveLoc,
                                 &command.material.emissive.x);
+        }
+        const std::uint32_t albedoGpu =
+            texture_gpu_id(command.material.albedoTexture);
+        const bool hasAlbedoTex =
+            (command.material.albedoTexture != kInvalidTextureHandle) &&
+            (albedoGpu != 0U);
+        if (backend.gbufHasAlbedoTextureLoc >= 0) {
+          dev->set_uniform_int(backend.gbufHasAlbedoTextureLoc,
+                               hasAlbedoTex ? 1 : 0);
+        }
+        if (hasAlbedoTex && (albedoGpu != boundAlbedoTex)) {
+          dev->bind_texture(0, albedoGpu);
+          boundAlbedoTex = albedoGpu;
+        } else if (!hasAlbedoTex && (boundAlbedoTex != 0U)) {
+          dev->bind_texture(0, 0U);
+          boundAlbedoTex = 0U;
         }
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
@@ -1232,6 +1252,8 @@ void flush_renderer(CommandBufferView commandBufferView,
 
       if (backend.ssaoProjectionLoc >= 0)
         dev->set_uniform_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
+      if (backend.ssaoViewLoc >= 0)
+        dev->set_uniform_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
 
       if (backend.ssaoNoiseScaleLoc >= 0) {
         const float noiseScale[2] = {static_cast<float>(drawableWidth) / 4.0F,
@@ -1303,9 +1325,18 @@ void flush_renderer(CommandBufferView commandBufferView,
                       drawableWidth, drawableHeight, tileData);
 
     // Upload tile texture.
+    if ((backend.tileLightTex != 0U) &&
+        (tileData.totalTiles > backend.tileLightTexRows)) {
+      dev->destroy_texture(backend.tileLightTex);
+      backend.tileLightTex = 0U;
+      backend.tileLightTexRows = 0;
+    }
     if (backend.tileLightTex == 0U) {
       backend.tileLightTex = dev->create_texture_2d_r32f(
           kTileDataWidth, tileData.totalTiles, backend.tileBuffer.data());
+      if (backend.tileLightTex != 0U) {
+        backend.tileLightTexRows = tileData.totalTiles;
+      }
     } else {
       dev->update_texture_2d_r32f(backend.tileLightTex, kTileDataWidth,
                                   tileData.totalTiles,

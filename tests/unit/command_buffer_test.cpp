@@ -51,6 +51,39 @@ int check_submit_sort_and_reset() {
   return 0;
 }
 
+// Transparent commands sort by depth before any other key bits.
+int check_transparent_sorts_depth_first() {
+  static engine::renderer::CommandBufferBuilder builder;
+  builder.reset();
+
+  constexpr std::uint64_t kTransparent = 1ULL << 63U;
+  // Far surface (small inverted depth) with HIGH texture/mesh key bits.
+  const std::uint64_t farKey = kTransparent | (0xFFFFFULL << 16U) | 5ULL;
+  // Near surface (large inverted depth) with LOW texture/mesh key bits.
+  const std::uint64_t nearKey = kTransparent | (0x00001ULL << 16U) | 500ULL;
+  // One opaque command to confirm opaque still draws before transparent.
+  const std::uint64_t opaqueKey = (0x00002ULL << 16U) | 7ULL;
+
+  if (!builder.submit(make_command(nearKey, 1U)) ||
+      !builder.submit(make_command(farKey, 2U)) ||
+      !builder.submit(make_command(opaqueKey, 3U))) {
+    return 21;
+  }
+
+  builder.sort_by_key();
+  const engine::renderer::CommandBufferView view = builder.view();
+  if (view.count != 3U) {
+    return 22;
+  }
+  if (view.data[0].entity != 3U) {
+    return 23; // opaque first
+  }
+  if ((view.data[1].entity != 2U) || (view.data[2].entity != 1U)) {
+    return 24; // far transparent before near transparent, despite key bits
+  }
+  return 0;
+}
+
 int check_append_and_capacity() {
   static engine::renderer::CommandBufferBuilder left;
   static engine::renderer::CommandBufferBuilder right;
@@ -562,6 +595,10 @@ int check_scene_capture_requests() {
 /// Runs this executable or test program.
 int main() {
   int result = check_submit_sort_and_reset();
+  if (result != 0) {
+    return result;
+  }
+  result = check_transparent_sorts_depth_first();
   if (result != 0) {
     return result;
   }

@@ -715,6 +715,7 @@ bool initialize_backend() noexcept {
         backend.ssaoNormalLoc = dev->uniform_location(prog, "u_gBufferNormal");
         backend.ssaoNoiseLoc = dev->uniform_location(prog, "u_noiseTexture");
         backend.ssaoProjectionLoc = dev->uniform_location(prog, "u_projection");
+        backend.ssaoViewLoc = dev->uniform_location(prog, "u_view");
         backend.ssaoNoiseScaleLoc = dev->uniform_location(prog, "u_noiseScale");
         backend.ssaoRadiusLoc = dev->uniform_location(prog, "u_radius");
         backend.ssaoBiasLoc = dev->uniform_location(prog, "u_bias");
@@ -818,6 +819,10 @@ bool initialize_backend() noexcept {
     backend.gbufFoliagePhaseLoc =
         dev->uniform_location(gbufProg, "uFoliagePhase");
     backend.gbufAlbedoLoc = dev->uniform_location(gbufProg, "uAlbedo");
+    backend.gbufHasAlbedoTextureLoc =
+        dev->uniform_location(gbufProg, "uHasAlbedoTexture");
+    backend.gbufAlbedoTextureLoc =
+        dev->uniform_location(gbufProg, "uAlbedoTexture");
     backend.gbufMetallicLoc = dev->uniform_location(gbufProg, "uMetallic");
     backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
     backend.gbufAOLoc = dev->uniform_location(gbufProg, "uAO");
@@ -1104,6 +1109,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     dev->destroy_texture(backend->tileLightTex);
     backend->tileLightTex = 0U;
   }
+  backend->tileLightTexRows = 0;
   backend->tileBuffer.clear();
 
   // Destroy per-light data texture.
