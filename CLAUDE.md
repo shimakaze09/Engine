@@ -42,6 +42,9 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
   concise purpose comments. Both are CI-enforced:
   `tools/check_source_comments.py` (presence) and
   `tools/check_comment_quality.py` (no filler patterns; must stay at zero).
+  Comments live ONLY in those two places — file top and above declarations;
+  no comments inside function bodies or on variables unless a constraint
+  genuinely cannot be expressed at the declaration.
 - Changes to math/ECS/physics/renderer/scripting behavior require tests.
   Determinism-sensitive areas (world, serialization, physics, render-prep,
   Lua API) pair changes with determinism tests.
@@ -49,6 +52,10 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
   the subject under test); never assert wall-clock timing/throughput in
   functional tests — only dedicated `engine_bench_*` tests hold performance
   thresholds (gated against `tests/benchmark/perf_baseline.json`).
+- Tests are append-only: adding tests is always welcome, but an existing
+  test may only be modified when the test itself is defective. A deliberate
+  behavior change that invalidates a pinned test is a decision for the
+  project owner, not a silent test edit.
 - No new third-party dependencies without confirmation; never ones requiring
   exceptions/RTTI in engine code.
 

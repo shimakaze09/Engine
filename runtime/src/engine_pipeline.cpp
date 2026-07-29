@@ -922,8 +922,6 @@ void create_bootstrap_scene(runtime::World *world,
         const float jitterZ =
             (static_cast<float>((x * 7U + z * 19U) % 5U) - 2.0F) * 0.05F;
         instance.scale = 0.55F + (static_cast<float>((x + z) % 4U) * 0.08F);
-        // Grass blades root at the mesh origin, so the tuft sits on the
-        // ground plane instead of floating at its own half height.
         instance.offset =
             math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX, 0.0F,
                        (static_cast<float>(z) - 2.0F) * 0.62F + jitterZ);

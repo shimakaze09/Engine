@@ -340,8 +340,6 @@ bool build_grass_tuft_mesh(GpuMesh *outMesh) noexcept {
   constexpr float kTwoPi = 6.28318530718F;
   constexpr float kRootRadius = 0.05F;
   constexpr float kHalfWidth = 0.035F;
-
-  // Per-blade variation keeps the tuft from looking stamped.
   constexpr float kHeights[kBlades] = {0.46F, 0.55F, 0.40F, 0.52F,
                                        0.44F, 0.58F, 0.48F};
   constexpr float kLeans[kBlades] = {0.16F, 0.10F, 0.20F, 0.13F,

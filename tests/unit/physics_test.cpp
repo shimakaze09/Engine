@@ -2486,6 +2486,73 @@ int check_primitive_hull_collision() {
   return 0;
 }
 
+// Restitution applies only above the speed threshold: slow pushing contacts
+// must fully absorb (no bounce), fast impacts still rebound, so driven
+// bodies cannot ratchet themselves airborne against round obstacles.
+int check_restitution_speed_threshold() {
+  const auto run_case = [](float approachSpeed, float *outVelocity) -> bool {
+    std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                      engine::runtime::World());
+    if (world == nullptr) {
+      return false;
+    }
+    world->end_frame_phase();
+
+    engine::runtime::Transform movingTransform{};
+    const engine::runtime::Entity moving =
+        world->create_scene_object(movingTransform);
+    engine::runtime::Transform blockerTransform{};
+    blockerTransform.position = engine::math::Vec3(0.9F, 0.0F, 0.0F);
+    const engine::runtime::Entity blocker =
+        world->create_scene_object(blockerTransform);
+    if ((moving == engine::runtime::kInvalidEntity) ||
+        (blocker == engine::runtime::kInvalidEntity)) {
+      return false;
+    }
+
+    engine::runtime::Collider sphere{};
+    sphere.shape = engine::runtime::ColliderShape::Sphere;
+    sphere.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+    sphere.restitution = 0.3F;
+    engine::runtime::RigidBody body{};
+    body.inverseMass = 1.0F;
+    body.velocity = engine::math::Vec3(approachSpeed, 0.0F, 0.0F);
+    if (!world->add_collider(moving, sphere) ||
+        !world->add_collider(blocker, sphere) ||
+        !world->add_rigid_body(moving, body)) {
+      return false;
+    }
+
+    world->begin_update_phase();
+    const bool resolved = engine::runtime::resolve_collisions(*world);
+    world->commit_update_phase();
+    if (!resolved) {
+      return false;
+    }
+
+    const engine::runtime::RigidBody *after =
+        world->get_rigid_body_ptr(moving);
+    if (after == nullptr) {
+      return false;
+    }
+    *outVelocity = after->velocity.x;
+    return true;
+  };
+
+  float slowVelocity = -1.0F;
+  if (!run_case(0.5F, &slowVelocity) || (slowVelocity != 0.0F)) {
+    return 950;
+  }
+
+  float fastVelocity = 0.0F;
+  if (!run_case(5.0F, &fastVelocity) ||
+      (fastVelocity != (5.0F - ((1.0F + 0.3F) * 5.0F)))) {
+    return 951;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -2496,6 +2563,11 @@ int main() {
   }
 
   result = check_primitive_hull_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_restitution_speed_threshold();
   if (result != 0) {
     return result;
   }

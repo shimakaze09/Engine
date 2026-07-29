@@ -228,8 +228,6 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-  // UI scale = monitor content scale × user preference, so the editor stays
-  // readable on every display instead of only at one DPI.
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
   const float displayScale =

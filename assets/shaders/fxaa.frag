@@ -72,7 +72,6 @@ void main() {
                          abs(-2.0 * lumaDown + lumaDownCorners);
     bool isHorizontal = edgeHorizontal >= edgeVertical;
 
-    // Pick the steeper of the two perpendicular neighbors.
     float luma1 = isHorizontal ? lumaDown : lumaLeft;
     float luma2 = isHorizontal ? lumaUp : lumaRight;
     float gradient1 = luma1 - lumaCenter;
@@ -96,7 +95,6 @@ void main() {
         currentUv.x += stepLength * 0.5;
     }
 
-    // March both directions along the edge until the luma pattern ends.
     vec2 offset = isHorizontal ? vec2(u_texelSize.x, 0.0)
                                : vec2(0.0, u_texelSize.y);
     vec2 uv1 = currentUv - offset;
@@ -133,15 +131,11 @@ void main() {
     float edgeThickness = distance1 + distance2;
     float pixelOffset = -distanceFinal / edgeThickness + 0.5;
 
-    // Correct-variation guard: only shift when the closest edge end varies
-    // AWAY from the center's side of the local average; otherwise the shift
-    // would sample the wrong surface and paint corner artifacts.
     bool isLumaCenterSmaller = lumaCenter < lumaLocalAverage;
     bool correctVariation =
         ((isDirection1 ? lumaEnd1 : lumaEnd2) < 0.0) != isLumaCenterSmaller;
     float finalOffset = correctVariation ? pixelOffset : 0.0;
 
-    // Subpixel antialiasing from the full 3x3 neighborhood.
     float lumaAverage = (1.0 / 12.0) * (2.0 * (lumaDownUp + lumaLeftRight) +
                                         lumaLeftCorners + lumaRightCorners);
     float subPixelOffset1 =

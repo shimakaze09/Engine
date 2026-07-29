@@ -592,6 +592,9 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 }
 
 // Forward declaration.
+// Applies the contact impulse with friction. Restitution only acts above a
+// 1 m/s approach speed: slow pushing/resting contacts absorb fully, or
+// driven bodies would pump bounce energy every step and ratchet airborne.
 void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
@@ -725,8 +728,11 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
   const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
   const float relVelAlongNormal = engine::math::dot(relVel, normal);
   if (relVelAlongNormal < 0.0F) {
+    constexpr float kRestitutionSpeedThreshold = 1.0F;
+    const float effectiveRestitution =
+        (-relVelAlongNormal > kRestitutionSpeedThreshold) ? restitution : 0.0F;
     const float impulseMagnitude =
-        -(1.0F + restitution) * relVelAlongNormal / invMassSum;
+        -(1.0F + effectiveRestitution) * relVelAlongNormal / invMassSum;
     const engine::math::Vec3 impulseVec =
         engine::math::mul(normal, impulseMagnitude);
     if ((bodyA != nullptr) && (invMassA > 0.0F)) {

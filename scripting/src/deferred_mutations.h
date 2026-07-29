@@ -19,8 +19,12 @@ bool apply_or_queue_transform(runtime::Entity entity,
                               runtime::MovementAuthority authority) noexcept;
 
 /// Applies or queues a rigid body update based on the current World phase.
+/// releaseAuthority hands movement authority back to physics — velocity
+/// writes pass true so a teleported entity resumes simulating; body
+/// configuration writes pass false and leave script movers untouched.
 bool apply_or_queue_rigid_body(runtime::Entity entity,
-                               const runtime::RigidBody &rigidBody) noexcept;
+                               const runtime::RigidBody &rigidBody,
+                               bool releaseAuthority = false) noexcept;
 
 /// Applies or queues a collider update based on the current World phase.
 bool apply_or_queue_collider(runtime::Entity entity,

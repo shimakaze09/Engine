@@ -154,6 +154,11 @@ int main() {
       "function wake_with_velocity()\n"
       "    engine.set_velocity(spawned, 8.0, 0.0, -2.0)\n"
       "end\n"
+      "function teleport_then_release()\n"
+      "    -- Values match what later position/velocity assertions expect.\n"
+      "    engine.set_position(spawned, 2.0, 3.0, 4.0)\n"
+      "    engine.set_velocity(spawned, 5.0, 6.0, 7.0)\n"
+      "end\n"
       "function verify_parenting()\n"
       "    local parent = engine.spawn_entity()\n"
       "    local kid = engine.spawn_entity()\n"
@@ -244,6 +249,18 @@ int main() {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 129;
+  }
+
+  if (!engine::scripting::call_script_function("teleport_then_release")) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 130;
+  }
+  if (world->movement_authority(initialSpawned) !=
+      engine::runtime::MovementAuthority::None) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 131;
   }
 
   const char *asyncAssetScript =
