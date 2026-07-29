@@ -207,8 +207,21 @@ int get_or_load_entity_script_module(const char *path) noexcept {
       const std::int64_t currentMtime = file_mtime(path);
       if ((currentMtime != 0) && (mod.mtime != 0) &&
           (currentMtime != mod.mtime)) {
+        // The reload chunk (and its on_save_state hooks) can require this
+        // module again before the new mtime is recorded; the load stack
+        // turns that recursion into a logged circular-dependency failure.
+        if (g_moduleLoadDepth >= kMaxModuleLoadDepth) {
+          core::log_message(core::LogLevel::Error, "scripting",
+                            "module load stack overflow");
+          return mod.registryRef;
+        }
+        std::snprintf(g_moduleLoadStack[g_moduleLoadDepth],
+                      sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
+        ++g_moduleLoadDepth;
+
         if (luaL_loadfile(g_state, path) != LUA_OK) {
           log_lua_error("reload entity script");
+          --g_moduleLoadDepth;
           return mod.registryRef;
         }
 
@@ -218,6 +231,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
           log_lua_error("reload entity script");
           clear_entity_saved_state_for_module(i);
+          --g_moduleLoadDepth;
           return mod.registryRef;
         }
 
@@ -226,9 +240,11 @@ int get_or_load_entity_script_module(const char *path) noexcept {
                             "entity script must return a module table");
           lua_pop(g_state, 1);
           clear_entity_saved_state_for_module(i);
+          --g_moduleLoadDepth;
           return mod.registryRef;
         }
 
+        --g_moduleLoadDepth;
         const int newRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
         if (mod.registryRef != LUA_NOREF) {
           luaL_unref(g_state, LUA_REGISTRYINDEX, mod.registryRef);

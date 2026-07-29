@@ -162,6 +162,80 @@ bool advance_script_mtime(
   return !error;
 }
 
+/// Writes contents to an arbitrary relative path.
+bool write_file_at(const char *path, const char *contents) noexcept {
+  FILE *file = nullptr;
+  if (!open_file_for_write(path, &file) || (file == nullptr)) {
+    return false;
+  }
+  const std::size_t len = std::strlen(contents);
+  const bool ok = (std::fwrite(contents, 1U, len, file) == len);
+  std::fclose(file);
+  return ok;
+}
+
+/// Verifies a hot reload of a module that requires itself terminates with a
+/// logged circular-dependency failure instead of recursing.
+bool verify_circular_reload_guard() noexcept {
+  constexpr const char *kCircularPath = "lua_lifecycle_circular.lua";
+  engine::scripting::clear_entity_script_modules();
+
+  const char *versionOne = "local M = {}\n"
+                           "return M\n";
+  if (!write_file_at(kCircularPath, versionOne)) {
+    return false;
+  }
+
+  const char *driver =
+      "function load_circular()\n"
+      "    if engine.require('lua_lifecycle_circular.lua') == nil then\n"
+      "        error('initial load failed')\n"
+      "    end\n"
+      "end\n"
+      "function reload_circular()\n"
+      "    if engine.require('lua_lifecycle_circular.lua') == nil then\n"
+      "        error('reload failed')\n"
+      "    end\n"
+      "end\n";
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("load_circular")) {
+    static_cast<void>(std::remove(kCircularPath));
+    return false;
+  }
+
+  std::error_code error{};
+  const std::filesystem::file_time_type cachedMtime =
+      std::filesystem::last_write_time(kCircularPath, error);
+  if (error) {
+    static_cast<void>(std::remove(kCircularPath));
+    return false;
+  }
+
+  // The reloaded chunk requires itself; the load-stack guard must fail that
+  // inner require (nil) while the reload itself still completes.
+  const char *versionTwo = "local M = {}\n"
+                           "M.inner = engine.require("
+                           "'lua_lifecycle_circular.lua')\n"
+                           "return M\n";
+  if (!write_file_at(kCircularPath, versionTwo)) {
+    static_cast<void>(std::remove(kCircularPath));
+    return false;
+  }
+  std::filesystem::last_write_time(kCircularPath,
+                                   cachedMtime + std::chrono::seconds(2),
+                                   error);
+  if (error) {
+    static_cast<void>(std::remove(kCircularPath));
+    return false;
+  }
+
+  const bool reloaded =
+      engine::scripting::call_script_function("reload_circular");
+  static_cast<void>(std::remove(kCircularPath));
+  return reloaded;
+}
+
 /// Verifies generation-safe state restoration before the first reloaded tick.
 bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
   if (world == nullptr) {
@@ -711,6 +785,17 @@ int main() {
   {
     std::printf("  %-40s ", "demo Lua modules");
     if (verify_demo_script_modules()) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 7: circular self-require during hot reload is rejected ---
+  {
+    std::printf("  %-40s ", "circular reload guard");
+    if (verify_circular_reload_guard()) {
       std::printf("PASS\n");
     } else {
       std::printf("FAIL\n");
