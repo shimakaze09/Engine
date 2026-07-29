@@ -9,6 +9,7 @@ engine_add_module_library(engine_physics
     src/constraint_solver.cpp
     src/contact_manifold.cpp
     src/physics_query.cpp
+    src/primitive_hulls.cpp
     src/joints/distance_joint.cpp
     src/joints/hinge_joint.cpp
     src/joints/ball_joint.cpp

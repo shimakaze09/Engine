@@ -26,6 +26,8 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
+#include "engine/physics/primitive_hulls.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -102,9 +104,14 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   const char *shape = lua_tostring(state, 1);
 
+  // Collider model mirrors Unity/Unreal: box, sphere, and capsule are the
+  // analytic primitives; cylinder and pyramid collide as convex hulls that
+  // match their render meshes.
   std::uint64_t meshId = g_defaultMeshAssetId;
   math::Vec3 halfExtents(0.5F, 0.5F, 0.5F);
   runtime::ColliderShape colliderShape = runtime::ColliderShape::AABB;
+  physics::ConvexHullData hull{};
+  bool hasHull = false;
 
   if (std::strcmp(shape, "cube") == 0) {
     meshId =
@@ -119,9 +126,10 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "cylinder") == 0) {
     meshId = (g_builtinCylinderMesh != 0ULL) ? g_builtinCylinderMesh
                                              : g_defaultMeshAssetId;
-    // Best available approximation for a round cylinder: upright capsule.
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    colliderShape = runtime::ColliderShape::Capsule;
+    hasHull = physics::build_cylinder_hull(&hull);
+    colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
+                            : runtime::ColliderShape::Capsule;
+    halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.5F);
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0ULL) ? g_builtinCapsuleMesh
                                             : g_defaultMeshAssetId;
@@ -131,8 +139,10 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "pyramid") == 0) {
     meshId = (g_builtinPyramidMesh != 0ULL) ? g_builtinPyramidMesh
                                             : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
-    colliderShape = runtime::ColliderShape::AABB;
+    hasHull = physics::build_pyramid_hull(&hull);
+    colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
+                            : runtime::ColliderShape::AABB;
+    halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.58F);
   } else if (std::strcmp(shape, "plane") == 0) {
     meshId = (g_builtinPlaneMesh != 0ULL) ? g_builtinPlaneMesh
                                           : g_defaultMeshAssetId;
@@ -157,6 +167,15 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   collider.halfExtents = halfExtents;
   collider.shape = colliderShape;
   static_cast<void>(runtime_binding().world->add_collider(entity, collider));
+  if (hasHull && !runtime::set_convex_hull_data(*runtime_binding().world,
+                                                entity, hull)) {
+    // Hull slots exhausted: degrade to the bounding box so the prop still
+    // collides instead of falling through the world.
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "spawn_shape hull slots exhausted — using box collider");
+    collider.shape = runtime::ColliderShape::AABB;
+    static_cast<void>(runtime_binding().world->add_collider(entity, collider));
+  }
 
   if (meshId != 0ULL) {
     runtime::MeshComponent meshComp{};

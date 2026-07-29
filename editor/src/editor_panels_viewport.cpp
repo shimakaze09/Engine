@@ -143,6 +143,41 @@ void emit_collider_circle(const math::Mat4 &localToWorld,
   emit_collider_arc(localToWorld, center, radius, axisU, axisV, 0.0F, kTwoPi);
 }
 
+// Emits a convex hull's crease edges: vertex pairs lying on two hull faces
+// with distinct normals. Coplanar triangulation diagonals stay invisible.
+void emit_collider_hull(const math::Mat4 &localToWorld,
+                        const physics::ConvexHullData &hull) noexcept {
+  constexpr float kOnPlaneEpsilon = 1.0e-3F;
+  constexpr float kCoplanarNormalDot = 0.9999F;
+  for (std::size_t u = 0U; u + 1U < hull.vertexCount; ++u) {
+    for (std::size_t v = u + 1U; v < hull.vertexCount; ++v) {
+      const math::Vec3 &from = hull.vertices[u];
+      const math::Vec3 &to = hull.vertices[v];
+
+      const physics::ConvexHullData::Plane *firstFace = nullptr;
+      bool crease = false;
+      for (std::size_t p = 0U; (p < hull.planeCount) && !crease; ++p) {
+        const physics::ConvexHullData::Plane &plane = hull.planes[p];
+        if ((std::fabs(math::dot(plane.normal, from) - plane.distance) >
+             kOnPlaneEpsilon) ||
+            (std::fabs(math::dot(plane.normal, to) - plane.distance) >
+             kOnPlaneEpsilon)) {
+          continue;
+        }
+        if (firstFace == nullptr) {
+          firstFace = &plane;
+        } else if (math::dot(firstFace->normal, plane.normal) <
+                   kCoplanarNormalDot) {
+          crease = true;
+        }
+      }
+      if (crease) {
+        emit_collider_segment(localToWorld, from, to);
+      }
+    }
+  }
+}
+
 // Emits the selected entity's collider as a shape-matched wireframe into the
 // depth-tested debug line pass, using the same world geometry physics
 // collides with.
@@ -212,7 +247,10 @@ void draw_selected_collider_overlay(
     break;
   }
   case runtime::ColliderShape::ConvexHull: {
-    if (hull != nullptr) {
+    if ((hull != nullptr) && (hull->vertexCount >= 4U) &&
+        (hull->planeCount >= 4U)) {
+      emit_collider_hull(localToWorld, *hull);
+    } else if (hull != nullptr) {
       emit_collider_box(localToWorld, hull->localCenter,
                         hull->localHalfExtents);
     } else {
