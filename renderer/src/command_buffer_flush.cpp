@@ -856,11 +856,12 @@ void flush_renderer(CommandBufferView commandBufferView,
             continue;
           }
 
-          const math::Mat4 mvp =
-              math::mul(slot.faceViewProjections[face], cmd.modelMatrix);
+          // The point shader multiplies u_lightMVP by the world-space
+          // position (u_model * aPosition), so upload the face VP alone —
+          // including the model here would apply it twice.
           if (backend.shadowPointLightMvpLoc >= 0) {
             dev->set_uniform_mat4(backend.shadowPointLightMvpLoc,
-                                  &mvp.columns[0].x);
+                                  &slot.faceViewProjections[face].columns[0].x);
           }
           if (backend.shadowPointModelLoc >= 0) {
             dev->set_uniform_mat4(backend.shadowPointModelLoc,
