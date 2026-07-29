@@ -11,17 +11,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 using namespace engine::core;
 
@@ -108,8 +98,8 @@ void shutdown_all() noexcept {
 // Helper to simulate finger events.
 void sim_finger_down(SDL_FingerID fingerId, float x, float y) noexcept {
   SDL_Event ev{};
-  ev.type = SDL_FINGERDOWN;
-  ev.tfinger.fingerId = fingerId;
+  ev.type = SDL_EVENT_FINGER_DOWN;
+  ev.tfinger.fingerID = fingerId;
   ev.tfinger.x = x;
   ev.tfinger.y = y;
   ev.tfinger.pressure = 1.0F;
@@ -119,8 +109,8 @@ void sim_finger_down(SDL_FingerID fingerId, float x, float y) noexcept {
 void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
                      float dy) noexcept {
   SDL_Event ev{};
-  ev.type = SDL_FINGERMOTION;
-  ev.tfinger.fingerId = fingerId;
+  ev.type = SDL_EVENT_FINGER_MOTION;
+  ev.tfinger.fingerID = fingerId;
   ev.tfinger.x = x;
   ev.tfinger.y = y;
   ev.tfinger.dx = dx;
@@ -131,8 +121,8 @@ void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
 
 void sim_finger_up(SDL_FingerID fingerId, float x, float y) noexcept {
   SDL_Event ev{};
-  ev.type = SDL_FINGERUP;
-  ev.tfinger.fingerId = fingerId;
+  ev.type = SDL_EVENT_FINGER_UP;
+  ev.tfinger.fingerID = fingerId;
   ev.tfinger.x = x;
   ev.tfinger.y = y;
   ev.tfinger.pressure = 0.0F;

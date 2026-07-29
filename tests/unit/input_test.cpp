@@ -9,17 +9,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 using namespace engine::core;
 
@@ -198,8 +188,8 @@ bool test_axis_value_from_key_events() noexcept {
   SDL_Event ev{};
 
   begin_input_frame();
-  ev.type = SDL_KEYDOWN;
-  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_D);
+  ev.type = SDL_EVENT_KEY_DOWN;
+  ev.key.scancode = static_cast<SDL_Scancode>(kKey_D);
   input_process_event(&ev);
   end_input_frame();
   if (axis_value("move_x") != 1.0F) {
@@ -208,11 +198,11 @@ bool test_axis_value_from_key_events() noexcept {
   }
 
   begin_input_frame();
-  ev.type = SDL_KEYUP;
-  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_D);
+  ev.type = SDL_EVENT_KEY_UP;
+  ev.key.scancode = static_cast<SDL_Scancode>(kKey_D);
   input_process_event(&ev);
-  ev.type = SDL_KEYDOWN;
-  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_A);
+  ev.type = SDL_EVENT_KEY_DOWN;
+  ev.key.scancode = static_cast<SDL_Scancode>(kKey_A);
   input_process_event(&ev);
   end_input_frame();
   if (axis_value("move_x") != -1.0F) {
@@ -221,8 +211,8 @@ bool test_axis_value_from_key_events() noexcept {
   }
 
   begin_input_frame();
-  ev.type = SDL_KEYDOWN;
-  ev.key.keysym.scancode = static_cast<SDL_Scancode>(kKey_D);
+  ev.type = SDL_EVENT_KEY_DOWN;
+  ev.key.scancode = static_cast<SDL_Scancode>(kKey_D);
   input_process_event(&ev);
   end_input_frame();
   if (axis_value("move_x") != 0.0F) {
@@ -240,21 +230,21 @@ bool test_gamepad_axis_deadzone() noexcept {
   }
 
   SDL_Event ev{};
-  ev.type = SDL_CONTROLLERDEVICEADDED;
+  ev.type = SDL_EVENT_GAMEPAD_ADDED;
   input_process_event(&ev);
 
-  ev.type = SDL_CONTROLLERAXISMOTION;
-  ev.caxis.axis = SDL_CONTROLLER_AXIS_LEFTX;
-  ev.caxis.value = 4000; // under default deadzone
+  ev.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  ev.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
+  ev.gaxis.value = 4000; // under default deadzone
   input_process_event(&ev);
-  if (gamepad_axis_value(SDL_CONTROLLER_AXIS_LEFTX) != 0.0F) {
+  if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX) != 0.0F) {
     shutdown_input();
     return false;
   }
 
-  ev.caxis.value = 20000;
+  ev.gaxis.value = 20000;
   input_process_event(&ev);
-  if (gamepad_axis_value(SDL_CONTROLLER_AXIS_LEFTX) <= 0.0F) {
+  if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX) <= 0.0F) {
     shutdown_input();
     return false;
   }
@@ -269,21 +259,21 @@ bool test_gamepad_button_state() noexcept {
   }
 
   SDL_Event ev{};
-  ev.type = SDL_CONTROLLERDEVICEADDED;
+  ev.type = SDL_EVENT_GAMEPAD_ADDED;
   input_process_event(&ev);
 
-  ev.type = SDL_CONTROLLERBUTTONDOWN;
-  ev.cbutton.button = SDL_CONTROLLER_BUTTON_A;
+  ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
   input_process_event(&ev);
-  if (!is_gamepad_button_down(SDL_CONTROLLER_BUTTON_A)) {
+  if (!is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH)) {
     shutdown_input();
     return false;
   }
 
-  ev.type = SDL_CONTROLLERBUTTONUP;
-  ev.cbutton.button = SDL_CONTROLLER_BUTTON_A;
+  ev.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+  ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
   input_process_event(&ev);
-  if (is_gamepad_button_down(SDL_CONTROLLER_BUTTON_A)) {
+  if (is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH)) {
     shutdown_input();
     return false;
   }

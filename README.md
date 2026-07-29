@@ -67,7 +67,7 @@ campaign (27 correctness/performance/structure findings) is complete.
 
 - Language: C++23
 - Build: CMake 3.28+
-- Window/input: SDL2
+- Window/input: SDL3
 - Rendering: OpenGL (GLSL 330 core shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
@@ -95,14 +95,14 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 
 - CMake 3.28+
 - Python 3 (required for generated Lua bindings during configure/build)
-- A C++23 compiler
+- A C++23-capable compiler
 	- MSVC (Windows) or
 	- Clang/GCC (Linux/macOS)
 - OpenGL development support
 
 Notes:
 
-- SDL2 is discovered with `find_package(SDL2 CONFIG QUIET)` first, then fetched from source if unavailable.
+- SDL3 is discovered with `find_package(SDL3 CONFIG QUIET)` first, then fetched from source if unavailable.
 - First configure/build may need internet access due to dependency fetches.
 
 ## Quick start
@@ -241,8 +241,9 @@ If you modify core behavior in math, ECS/runtime, physics, renderer/mesh loading
 
 ## Troubleshooting
 
-- Configure fails finding SDL2:
-	- Ensure internet access for first-time fetch, or install SDL2 CMake package config locally.
+- Configure fails finding SDL3:
+	- Ensure internet access for first-time fetch, or install SDL3 CMake package config locally.
+	- On Linux, SDL3 requires X11 extension dev headers that SDL2 treated as optional (Xcursor, Xi, Xtst, Xfixes, Xrandr, XScrnSaver); install them or configure the matching `SDL_X11_*` options off.
 - Configure fails because Python is missing:
 	- Install Python 3 and ensure it is available to CMake as `Python3_EXECUTABLE`.
 - App starts but assets are missing:

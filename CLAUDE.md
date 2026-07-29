@@ -8,7 +8,7 @@ module structure, build commands, test layout, or roadmap status.
 
 ## What this is
 
-C++23 game engine built from scratch: SDL2 window/input, OpenGL renderer
+C++23 game engine built from scratch: SDL3 window/input, OpenGL renderer
 (deferred+forward, PBR/IBL, GLSL 330 core), fixed-capacity ECS (65,536
 entities, double-buffered transforms), CPU-deterministic physics, Lua 5.4
 scripting, miniaudio, ImGui editor. Goal: production level. Game authors work
@@ -16,7 +16,7 @@ through Lua and the editor; engine contributors work in C++ under the rules
 below.
 
 Third-party (all SHA-pinned via FetchContent in the root CMakeLists.txt):
-SDL2 2.30.11, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
+SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
 (tools only), stb snapshot, miniaudio 0.11.21, OpenGL 4.5+.
 
 ## Hard rules (enforced)

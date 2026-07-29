@@ -7,7 +7,7 @@
 
 namespace engine::core {
 
-// Scancode type. Values match SDL_SCANCODE_* from the SDL2 backend.
+// Scancode type. Values match SDL_SCANCODE_* from the SDL3 backend.
 using KeyScancode = int;
 
 // ----- Lifecycle -----------------------------------------------------------

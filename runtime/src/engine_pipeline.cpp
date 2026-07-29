@@ -18,13 +18,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
@@ -75,17 +69,18 @@ InputEventRoute process_editor_input_event(const EditorBridge *bridge,
     bridge->process_event(event);
   }
 
-  if (event->type == SDL_QUIT) {
+  if (event->type == SDL_EVENT_QUIT) {
     return InputEventRoute::QuitRequested;
   }
 
-  const bool keyboardEvent =
-      (event->type == SDL_KEYDOWN) || (event->type == SDL_KEYUP) ||
-      (event->type == SDL_TEXTINPUT) || (event->type == SDL_TEXTEDITING);
-  const bool mouseEvent = (event->type == SDL_MOUSEMOTION) ||
-                          (event->type == SDL_MOUSEBUTTONDOWN) ||
-                          (event->type == SDL_MOUSEBUTTONUP) ||
-                          (event->type == SDL_MOUSEWHEEL);
+  const bool keyboardEvent = (event->type == SDL_EVENT_KEY_DOWN) ||
+                             (event->type == SDL_EVENT_KEY_UP) ||
+                             (event->type == SDL_EVENT_TEXT_INPUT) ||
+                             (event->type == SDL_EVENT_TEXT_EDITING);
+  const bool mouseEvent = (event->type == SDL_EVENT_MOUSE_MOTION) ||
+                          (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) ||
+                          (event->type == SDL_EVENT_MOUSE_BUTTON_UP) ||
+                          (event->type == SDL_EVENT_MOUSE_WHEEL);
   const bool captureKeyboard = (bridge != nullptr) &&
                                (bridge->wants_capture_keyboard != nullptr) &&
                                bridge->wants_capture_keyboard();
@@ -359,7 +354,7 @@ void process_input_events_with_editor() noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
 
   SDL_Event event{};
-  while (SDL_PollEvent(&event) != 0) {
+  while (SDL_PollEvent(&event)) {
     const runtime::InputEventRoute route =
         runtime::process_editor_input_event(bridge, &event);
     if (route == runtime::InputEventRoute::QuitRequested) {
