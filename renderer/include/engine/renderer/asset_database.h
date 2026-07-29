@@ -79,6 +79,21 @@ struct AssetDatabase final {
 /// Bumps the frame counter used for last-access stamps.
 void advance_asset_database_frame(AssetDatabase *database) noexcept;
 
+// Minimum frames since last access before a mesh record may be evicted, so
+// budget pressure never drops meshes that were just uploaded or drawn.
+inline constexpr std::uint64_t kMeshEvictionMinAgeFrames = 60ULL;
+
+/// Records the loaded payload size used for cache-budget accounting.
+bool set_mesh_asset_size(AssetDatabase *database, AssetId id,
+                         std::uint64_t sizeBytes) noexcept;
+
+/// Marks the coldest unpinned streamed meshes non-resident (LRU order, age
+/// hysteresis, retained records skipped) until the resident total fits the
+/// budget; the asset manager unloads them on its next residency sync.
+/// Returns the number of records marked.
+std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
+                                          std::uint64_t budgetBytes) noexcept;
+
 /// 64-bit FNV-1a id from the canonicalized path.
 AssetId make_asset_id_from_path(const char *path) noexcept;
 /// 64-bit content-hash id from the file bytes; 0 on read failure.

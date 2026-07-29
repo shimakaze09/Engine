@@ -28,6 +28,7 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -661,7 +662,8 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
     return false;
   }
 
-  static_cast<void>(sizeBytes);
+  static_cast<void>(
+      renderer::set_mesh_asset_size(state->database, assetId, sizeBytes));
   return true;
 }
 
@@ -1429,6 +1431,7 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
 
 void EnginePipeline::Impl::stage_assets() noexcept {
   bool updatedAssets = true;
+  renderer::advance_asset_database_frame(assetDatabase.get());
   if (assetStreamingQueue != nullptr) {
     renderer::begin_streaming_frame(assetStreamingQueue.get());
   }
@@ -1447,6 +1450,13 @@ void EnginePipeline::Impl::stage_assets() noexcept {
     updatedAssets = renderer::update_asset_manager(
         assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
     core::release_render_context();
+  }
+
+  const int cacheMb = core::cvar_get_int("asset.cache_size_mb", 512);
+  if (cacheMb > 0) {
+    static_cast<void>(renderer::evict_mesh_assets_over_budget(
+        assetDatabase.get(),
+        static_cast<std::uint64_t>(cacheMb) * 1024ULL * 1024ULL));
   }
 
   if (!updatedAssets) {
