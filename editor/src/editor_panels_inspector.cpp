@@ -54,6 +54,7 @@
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
+#include "engine/renderer/asset_database.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
@@ -816,10 +817,24 @@ void draw_inspector_panel() noexcept {
     if (sectionOpen) {
       ImGui::Text("Mesh Asset ID: %llu",
                   static_cast<unsigned long long>(mesh.meshAssetId));
+      ImGui::Text("Material Asset ID: %llu",
+                  static_cast<unsigned long long>(mesh.materialAssetId));
       // Persistent id of an enabled SceneCaptureComponent entity whose
       // rendered output feeds this mesh's albedo texture (0 = none).
       int captureSourceId = static_cast<int>(mesh.sceneCaptureSourceId);
+      // Material path entry converts to the path-derived id on Enter
+      // (e.g. assets/materials/rock.json); empty clears the reference.
+      static char materialPathBuffer[196] = {};
       if (editable) {
+        if (ImGui::InputText("Material Path", materialPathBuffer,
+                             sizeof(materialPathBuffer),
+                             ImGuiInputTextFlags_EnterReturnsTrue)) {
+          mesh.materialAssetId =
+              (materialPathBuffer[0] != '\0')
+                  ? renderer::make_asset_id_from_path(materialPathBuffer)
+                  : 0ULL;
+          meshModified = true;
+        }
         meshModified |= ImGui::ColorEdit3("Albedo", &mesh.albedo.x);
         meshModified |= ImGui::SliderFloat("Roughness", &mesh.roughness, 0.0F,
                                            1.0F, "%.2f");

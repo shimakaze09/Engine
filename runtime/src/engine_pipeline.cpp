@@ -39,6 +39,7 @@
 #include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/asset_database.h"
+#include "engine/renderer/material_loader.h"
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/asset_streaming.h"
 #include "engine/renderer/camera.h"
@@ -763,6 +764,23 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                                            "builtin://pyramid");
     }
     core::release_render_context();
+  }
+
+  // Discover project material JSONs so MeshComponent.materialAssetId
+  // references resolve during render prep.
+  char materialsDir[512] = {};
+  std::snprintf(materialsDir, sizeof(materialsDir), "%s/materials",
+                active_config().assetRoot);
+  char materialsPrefix[512] = {};
+  std::snprintf(materialsPrefix, sizeof(materialsPrefix), "%s/materials",
+                active_config().assetMount);
+  const std::size_t materialCount = renderer::load_material_assets_in_directory(
+      assetDatabase, materialsDir, materialsPrefix);
+  if (materialCount > 0U) {
+    char logBuffer[128] = {};
+    std::snprintf(logBuffer, sizeof(logBuffer), "loaded %zu material assets",
+                  materialCount);
+    core::log_message(core::LogLevel::Info, "assets", logBuffer);
   }
 
   return true;

@@ -3,9 +3,14 @@
 
 #include "engine/renderer/material_loader.h"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <string>
+#include <system_error>
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -222,6 +227,66 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
 bool load_material_asset(AssetDatabase *database, const char *virtualPath,
                          AssetId *outId) noexcept {
   return load_material_recursive(database, virtualPath, 0U, outId, nullptr);
+}
+
+std::size_t load_material_assets_in_directory(
+    AssetDatabase *database, const char *osDirectory,
+    const char *virtualPrefix) noexcept {
+  if ((database == nullptr) || (osDirectory == nullptr) ||
+      (virtualPrefix == nullptr)) {
+    return 0U;
+  }
+
+  // Collect *.json names into fixed storage, then sort so registration
+  // order (and therefore record slot layout) is deterministic.
+  constexpr std::size_t kMaxDiscovered = 256U;
+  constexpr std::size_t kMaxNameLength = 128U;
+  static std::array<std::array<char, kMaxNameLength>, kMaxDiscovered> names{};
+  std::size_t nameCount = 0U;
+
+  std::error_code error{};
+  std::filesystem::directory_iterator it(osDirectory, error);
+  if (error) {
+    return 0U;
+  }
+  for (const std::filesystem::directory_entry &entry : it) {
+    if (!entry.is_regular_file(error) || error) {
+      continue;
+    }
+    const std::filesystem::path &path = entry.path();
+    if (path.extension() != ".json") {
+      continue;
+    }
+    if (nameCount >= kMaxDiscovered) {
+      log_material_error(osDirectory, "too many material files; rest skipped");
+      break;
+    }
+    const std::string fileName = path.filename().string();
+    if (fileName.size() >= kMaxNameLength) {
+      log_material_error(fileName.c_str(), "material file name too long");
+      continue;
+    }
+    std::memcpy(names[nameCount].data(), fileName.c_str(),
+                fileName.size() + 1U);
+    ++nameCount;
+  }
+
+  std::sort(names.begin(), names.begin() + static_cast<std::ptrdiff_t>(nameCount),
+            [](const std::array<char, kMaxNameLength> &lhs,
+               const std::array<char, kMaxNameLength> &rhs) noexcept {
+              return std::strcmp(lhs.data(), rhs.data()) < 0;
+            });
+
+  std::size_t loaded = 0U;
+  for (std::size_t i = 0U; i < nameCount; ++i) {
+    char virtualPath[512] = {};
+    std::snprintf(virtualPath, sizeof(virtualPath), "%s/%s", virtualPrefix,
+                  names[i].data());
+    if (load_material_asset(database, virtualPath, nullptr)) {
+      ++loaded;
+    }
+  }
+  return loaded;
 }
 
 } // namespace engine::renderer

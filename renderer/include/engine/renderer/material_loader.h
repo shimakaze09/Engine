@@ -34,4 +34,11 @@ inline constexpr std::size_t kMaxMaterialParentDepth = 8U;
 bool load_material_asset(AssetDatabase *database, const char *virtualPath,
                          AssetId *outId) noexcept;
 
+/// Loads every *.json under an OS directory as material assets addressed as
+/// "<virtualPrefix>/<filename>" (sorted, so registration order is
+/// deterministic). Returns the number successfully loaded; boot-time only.
+std::size_t load_material_assets_in_directory(
+    AssetDatabase *database, const char *osDirectory,
+    const char *virtualPrefix) noexcept;
+
 } // namespace engine::renderer
