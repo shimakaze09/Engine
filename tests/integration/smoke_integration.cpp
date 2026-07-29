@@ -220,6 +220,15 @@ bool verify_deferred_destroy_commit() {
   world->begin_render_prep_phase();
   world->end_frame_phase();
 
+  // Deferred destroys survive end_frame_phase and commit at the EndPlay
+  // phase, where script callbacks observe them first.
+  if (!world->is_alive(entity) || (world->pending_destroy_count() != 1U)) {
+    return false;
+  }
+
+  world->begin_end_play_phase();
+  world->end_end_play_phase();
+
   if (world->is_alive(entity)) {
     return false;
   }
