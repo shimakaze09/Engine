@@ -1302,8 +1302,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
                       drawableWidth, drawableHeight, tileData);
 
-    // Upload tile texture; recreate when the tile count outgrows the
-    // allocated height (sub-image updates cannot grow it).
+    // Upload tile texture.
     if ((backend.tileLightTex != 0U) &&
         (tileData.totalTiles > backend.tileLightTexRows)) {
       dev->destroy_texture(backend.tileLightTex);
