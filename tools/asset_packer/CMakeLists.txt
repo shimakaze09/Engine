@@ -3,6 +3,10 @@
 engine_add_executable_target(asset_packer
     SOURCES
     main.cpp
+    cook_stamp.cpp
+    mesh_cook.cpp
+    thumbnail_generate.cpp
+    packer_shared.h
     animation_import.cpp
     animation_import.h
     cgltf_impl.cpp
