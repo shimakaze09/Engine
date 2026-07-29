@@ -224,9 +224,33 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
 
 } // namespace
 
-bool load_material_asset(AssetDatabase *database, const char *virtualPath,
-                         AssetId *outId) noexcept {
-  return load_material_recursive(database, virtualPath, 0U, outId, nullptr);
+std::expected<AssetId, MaterialLoadError>
+load_material_asset(AssetDatabase *database, const char *virtualPath) noexcept {
+  if ((database == nullptr) || (virtualPath == nullptr) ||
+      (virtualPath[0] == '\0')) {
+    static_cast<void>(log_material_error(virtualPath, "invalid arguments"));
+    return std::unexpected(MaterialLoadError::InvalidArgument);
+  }
+
+  const AssetId id = make_asset_id_from_path(virtualPath);
+  if (find_material_params(database, id) != nullptr) {
+    return id;
+  }
+
+  char *text = nullptr;
+  std::size_t size = 0U;
+  if (!core::vfs_read_text(virtualPath, &text, &size)) {
+    static_cast<void>(log_material_error(virtualPath, "failed to read file"));
+    return std::unexpected(MaterialLoadError::Io);
+  }
+
+  const bool loaded =
+      parse_material_text(database, virtualPath, text, size, 0U, id, nullptr);
+  core::vfs_free(text);
+  if (!loaded) {
+    return std::unexpected(MaterialLoadError::Parse);
+  }
+  return id;
 }
 
 std::size_t load_material_assets_in_directory(
@@ -282,7 +306,7 @@ std::size_t load_material_assets_in_directory(
     char virtualPath[512] = {};
     std::snprintf(virtualPath, sizeof(virtualPath), "%s/%s", virtualPrefix,
                   names[i].data());
-    if (load_material_asset(database, virtualPath, nullptr)) {
+    if (load_material_asset(database, virtualPath).has_value()) {
       ++loaded;
     }
   }

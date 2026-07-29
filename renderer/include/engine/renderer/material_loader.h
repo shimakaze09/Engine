@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <expected>
+
 #include "engine/renderer/asset_database.h"
 
 namespace engine::renderer {
@@ -27,12 +29,21 @@ namespace engine::renderer {
 /// Maximum parent-chain depth; deeper chains (including cycles) fail.
 inline constexpr std::size_t kMaxMaterialParentDepth = 8U;
 
+/// Failure classes for material loading; details are already logged when a
+/// class is returned. Parent-chain failures surface as Parse.
+enum class MaterialLoadError : std::uint8_t {
+  InvalidArgument,
+  Io,
+  Parse,
+};
+
 /// Loads a material JSON file (through the core VFS), resolves its parent
 /// chain, registers the record plus Material-tagged metadata (with a
-/// dependency edge to the parent), and returns its path-derived AssetId in
-/// outId. Logs and returns false on IO, parse, or depth failures.
-bool load_material_asset(AssetDatabase *database, const char *virtualPath,
-                         AssetId *outId) noexcept;
+/// dependency edge to the parent), and returns its path-derived AssetId.
+/// Never call .value(): with exceptions disabled it aborts — check
+/// has_value() and use operator* / error().
+std::expected<AssetId, MaterialLoadError>
+load_material_asset(AssetDatabase *database, const char *virtualPath) noexcept;
 
 /// Loads every *.json under an OS directory as material assets addressed as
 /// "<virtualPrefix>/<filename>" (sorted, so registration order is
