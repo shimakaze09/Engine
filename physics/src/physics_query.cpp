@@ -70,11 +70,11 @@ bool collider_geometry(const PhysicsWorldView &world, Entity entity,
                                       outGeometry);
 }
 
-// Swept sphere vs AABB: return time of impact in [0, maxT].
+// Swept sphere vs AABB: expands the box by the radius and raycasts,
+// returning time of impact in [0, maxT].
 bool swept_sphere_aabb(const math::Vec3 &origin, float radius,
                        const math::Vec3 &dir, float maxT, const math::AABB &box,
                        float &outT) noexcept {
-  // Expand the AABB by the sphere radius, then raycast.
   math::AABB expanded{};
   expanded.min = math::sub(box.min, math::Vec3(radius, radius, radius));
   expanded.max = math::add(box.max, math::Vec3(radius, radius, radius));
@@ -91,11 +91,11 @@ bool swept_sphere_aabb(const math::Vec3 &origin, float radius,
   return true;
 }
 
-// Swept box vs AABB via Minkowski expansion.
+// Swept box vs AABB via Minkowski expansion of the target by the moving
+// box's half extents.
 bool swept_box_aabb(const math::Vec3 &center, const math::Vec3 &halfExtents,
                     const math::Vec3 &dir, float maxT,
                     const math::AABB &targetBox, float &outT) noexcept {
-  // Expand target by moving box half extents.
   math::AABB expanded{};
   expanded.min = math::sub(targetBox.min, halfExtents);
   expanded.max = math::add(targetBox.max, halfExtents);

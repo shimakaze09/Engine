@@ -11,14 +11,14 @@
 
 namespace engine::physics {
 
+/// Dimensions mirror build_cylinder_mesh in mesh_primitives.cpp; the hull
+/// uses 16 slices (32 points, ~60 triangulated planes) so Quickhull stays
+/// inside ConvexHullData::kMaxPlanes.
 bool build_cylinder_hull(ConvexHullData *outHull) noexcept {
   if (outHull == nullptr) {
     return false;
   }
 
-  // Dimensions mirror build_cylinder_mesh in mesh_primitives.cpp; the hull
-  // uses 16 slices (32 points, ~60 triangulated planes) so Quickhull stays
-  // inside ConvexHullData::kMaxPlanes.
   constexpr int kSlices = 16;
   constexpr float kRadius = 0.5F;
   constexpr float kHalfHeight = 0.5F;
@@ -37,12 +37,12 @@ bool build_cylinder_hull(ConvexHullData *outHull) noexcept {
   return build_convex_hull(points, 2U * kSlices, *outHull);
 }
 
+/// Vertices mirror build_pyramid_mesh in mesh_primitives.cpp exactly.
 bool build_pyramid_hull(ConvexHullData *outHull) noexcept {
   if (outHull == nullptr) {
     return false;
   }
 
-  // Vertices mirror build_pyramid_mesh in mesh_primitives.cpp exactly.
   constexpr float kBaseZBack = -0.288675F;
   constexpr float kBaseZFront = 0.577350F;
   const math::Vec3 points[4] = {

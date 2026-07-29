@@ -8,6 +8,9 @@
 
 namespace engine::physics {
 
+/// Hinge joint: a ball-socket positional constraint holding the anchors
+/// together, plus (when limited) an axis constraint — without angular
+/// velocity the relative displacement is clamped along the hinge axis.
 float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                         const math::Vec3 &anchorB, const math::Vec3 &axis,
                         bool hasLimits, float minAngle, float maxAngle,
@@ -21,7 +24,6 @@ float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
     return 0.0F;
   }
 
-  // Position constraint: keep anchor points together (ball-socket part).
   const math::Vec3 worldA = math::add(ctx.tA->position, anchorA);
   const math::Vec3 worldB = math::add(ctx.tB->position, anchorB);
   const math::Vec3 posError = math::sub(worldB, worldA);
@@ -37,9 +39,6 @@ float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
         ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
   }
 
-  // Hinge axis constraint: project the relative displacement perpendicular
-  // to the axis. Without angular velocity we constrain the linear displacement
-  // to be along the hinge axis only.
   if (hasLimits) {
     const math::Vec3 relPos = math::sub(ctx.tB->position, ctx.tA->position);
     const float projOnAxis = math::dot(relPos, axis);

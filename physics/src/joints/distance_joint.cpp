@@ -8,6 +8,9 @@
 
 namespace engine::physics {
 
+/// Positional distance constraint. The accumulated impulse keeps the SIGNED
+/// error: the warm start replays it along the center line, so compression
+/// (negative) must push apart, not pull together.
 float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
                            float &accumulatedImpulse) noexcept {
   if ((ctx.tA == nullptr) || (ctx.tB == nullptr)) {
@@ -34,9 +37,6 @@ float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
   ctx.tB->position = math::sub(
       ctx.tB->position, math::mul(correction, ctx.invMassB / invMassSum));
 
-  // Accumulate the SIGNED error: the warm start replays it along the
-  // center line, so compression (negative) must push apart, not pull
-  // together.
   accumulatedImpulse += error;
   return std::fabs(error);
 }

@@ -18,13 +18,19 @@ namespace {
 // Simplified incremental convex hull builder.  Sufficient for up to ~128
 // input points with up to 64 output faces — the engine's collider budget.
 
-static constexpr std::size_t kMaxFaces = 256U; // working faces during build
+// Working-set budgets during the build; output is clamped to ConvexHullData's
+// tighter limits when surviving faces are collected.
+static constexpr std::size_t kMaxFaces = 256U;
 static constexpr std::size_t kMaxEdges = 512U;
 
+// Build-time triangle face. Faces wind counter-clockwise seen from outside,
+// so adjacent faces share each edge with reversed winding — horizon-edge
+// detection relies on that to find the neighbor across an edge.
 struct HullFace {
   std::uint16_t v[3]{};
   math::Vec3 normal{};
-  float dist = 0.0F; // plane distance from origin
+  // Plane distance from the origin.
+  float dist = 0.0F;
   bool alive = true;
 };
 
@@ -40,6 +46,7 @@ void face_plane(HullFace &f, const math::Vec3 *verts) noexcept {
   f.dist = math::dot(f.normal, verts[f.v[0]]);
 }
 
+// Signed distance of a point from the face plane (positive = outside).
 float point_plane_distance(const math::Vec3 &point,
                            const HullFace &face) noexcept {
   return math::dot(face.normal, point) - face.dist;
@@ -47,25 +54,24 @@ float point_plane_distance(const math::Vec3 &point,
 
 } // namespace
 
-/// Builds the requested runtime data for convex hull.
+/// Quickhull: seeds a tetrahedron from extremal points (rejecting degenerate,
+/// collinear, and coplanar input), incrementally adds the remaining points by
+/// killing visible faces and re-facing their horizon edges, then compacts the
+/// surviving outward-oriented faces and their vertices into the output.
 bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
                        ConvexHullData &outHull) noexcept {
   if ((points == nullptr) || (pointCount < 4U)) {
     return false;
   }
 
-  // Clamp input.
   const std::size_t maxPts = ConvexHullData::kMaxVertices;
   const std::size_t count = (pointCount > maxPts) ? maxPts : pointCount;
 
-  // Copy points to local workspace.
   std::array<math::Vec3, ConvexHullData::kMaxVertices> verts{};
   for (std::size_t i = 0U; i < count; ++i) {
     verts[i] = points[i];
   }
 
-  // 1. Find initial tetrahedron: two most distant points, farthest from
-  //    their line, farthest from their plane.
   std::size_t i0 = 0U;
   std::size_t i1 = 1U;
   float bestDist2 = 0.0F;
@@ -81,10 +87,9 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
   }
 
   if (bestDist2 < 1e-12F) {
-    return false; // degenerate
+    return false;
   }
 
-  // Farthest from line i0→i1.
   const math::Vec3 lineDir = math::normalize(math::sub(verts[i1], verts[i0]));
   std::size_t i2 = 0U;
   float maxLineDist = 0.0F;
@@ -103,15 +108,13 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
   }
 
   if (maxLineDist < 1e-12F) {
-    return false; // collinear
+    return false;
   }
 
-  // Triangle normal.
   math::Vec3 triNormal = math::cross(math::sub(verts[i1], verts[i0]),
                                      math::sub(verts[i2], verts[i0]));
   triNormal = math::normalize(triNormal);
 
-  // Farthest from that plane.
   std::size_t i3 = 0U;
   float maxPlaneDist = 0.0F;
   for (std::size_t i = 0U; i < count; ++i) {
@@ -127,18 +130,15 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
   }
 
   if (maxPlaneDist < 1e-12F) {
-    return false; // coplanar
+    return false;
   }
 
-  // Orient tetrahedron so that face i0-i1-i2 has outward normal (away from i3).
   if (math::dot(math::sub(verts[i3], verts[i0]), triNormal) > 0.0F) {
-    // Normal points toward i3 (inward) — swap i1 and i2 to flip.
     const std::size_t tmp = i1;
     i1 = i2;
     i2 = tmp;
   }
 
-  // Build initial 4 faces.
   std::array<HullFace, kMaxFaces> faces{};
   std::size_t faceCount = 0U;
 
@@ -156,13 +156,11 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
     return faceCount++;
   };
 
-  // 4 faces of the tetrahedron. Each face normal should point outward.
   add_face(i0, i1, i2);
   add_face(i0, i2, i3);
   add_face(i0, i3, i1);
   add_face(i1, i3, i2);
 
-  // Validate: flip any face whose normal points toward the centroid.
   {
     const math::Vec3 centroid =
         math::mul(math::add(math::add(verts[i0], verts[i1]),
@@ -179,13 +177,11 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
     }
   }
 
-  // 2. Incrementally add remaining points.
   for (std::size_t pi = 0U; pi < count; ++pi) {
     if (pi == i0 || pi == i1 || pi == i2 || pi == i3) {
       continue;
     }
 
-    // Find faces visible from this point.
     bool anyVisible = false;
     std::array<bool, kMaxFaces> visible{};
     for (std::size_t fi = 0U; fi < faceCount; ++fi) {
@@ -199,10 +195,9 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
     }
 
     if (!anyVisible) {
-      continue; // inside the hull
+      continue;
     }
 
-    // Find horizon edges (boundary of visible region).
     struct Edge {
       std::uint16_t a, b;
     };
@@ -216,13 +211,11 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
       for (int e = 0; e < 3; ++e) {
         const std::uint16_t ea = faces[fi].v[e];
         const std::uint16_t eb = faces[fi].v[(e + 1) % 3];
-        // Check if the neighboring face across this edge is NOT visible.
         bool neighborVisible = false;
         for (std::size_t fj = 0U; fj < faceCount; ++fj) {
           if (fj == fi || !faces[fj].alive) {
             continue;
           }
-          // Check if fj shares edge (eb, ea) — reversed winding.
           for (int e2 = 0; e2 < 3; ++e2) {
             if ((faces[fj].v[e2] == eb) && (faces[fj].v[(e2 + 1) % 3] == ea)) {
               neighborVisible = visible[fj];
@@ -237,24 +230,20 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
       }
     }
 
-    // Kill visible faces.
     for (std::size_t fi = 0U; fi < faceCount; ++fi) {
       if (visible[fi]) {
         faces[fi].alive = false;
       }
     }
 
-    // Create new faces from horizon edges to the new point.
     for (std::size_t ei = 0U; ei < horizonCount; ++ei) {
       add_face(horizon[ei].a, horizon[ei].b, static_cast<std::uint16_t>(pi));
     }
   }
 
-  // 3. Collect surviving faces/vertices into output.
   outHull.planeCount = 0U;
   outHull.vertexCount = 0U;
 
-  // Remap vertex indices: only include vertices used by surviving faces.
   std::array<std::int16_t, ConvexHullData::kMaxVertices> vertRemap{};
   for (auto &v : vertRemap) {
     v = -1;
@@ -285,7 +274,6 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
     return false;
   }
 
-  // Compute local AABB.
   math::Vec3 minV = outHull.vertices[0];
   math::Vec3 maxV = outHull.vertices[0];
   for (std::size_t i = 1U; i < outHull.vertexCount; ++i) {
@@ -312,12 +300,15 @@ static constexpr std::size_t kEpaMaxIter = 64U;
 static constexpr std::size_t kEpaMaxFaces = 128U;
 static constexpr float kEpaTolerance = 1e-4F;
 
+// Minkowski difference sample: v = a − b, keeping the originating support
+// points on each shape for contact reconstruction.
 struct MinkowskiPoint {
-  math::Vec3 v{}; // Minkowski difference point
-  math::Vec3 a{}; // support point on A
-  math::Vec3 b{}; // support point on B
+  math::Vec3 v{};
+  math::Vec3 a{};
+  math::Vec3 b{};
 };
 
+// Samples the Minkowski difference support in the given direction.
 MinkowskiPoint support(const void *shapeA, const math::Vec3 &centerA,
                        SupportFn supA, const void *shapeB,
                        const math::Vec3 &centerB, SupportFn supB,
@@ -329,13 +320,13 @@ MinkowskiPoint support(const void *shapeA, const math::Vec3 &centerA,
   return mp;
 }
 
-// GJK simplex operations.
+// GJK simplex: newest point always sits at the front.
 struct Simplex {
   std::array<MinkowskiPoint, 4> pts{};
   int size = 0;
 
+  // Inserts at the front, shifting existing points back.
   void push(const MinkowskiPoint &p) noexcept {
-    // Push to front.
     for (int i = size; i > 0; --i) {
       pts[i] = pts[i - 1];
     }
@@ -346,12 +337,11 @@ struct Simplex {
   }
 };
 
+// Line case: keeps the closest feature and aims dir back at the origin.
 bool do_simplex_line(Simplex &s, math::Vec3 &dir) noexcept {
-  // A = s.pts[0], B = s.pts[1]
   const math::Vec3 ab = math::sub(s.pts[1].v, s.pts[0].v);
   const math::Vec3 ao = math::mul(s.pts[0].v, -1.0F);
   if (math::dot(ab, ao) > 0.0F) {
-    // Origin is between A and B or beyond B.
     dir = math::cross(math::cross(ab, ao), ab);
   } else {
     s.size = 1;
@@ -360,6 +350,7 @@ bool do_simplex_line(Simplex &s, math::Vec3 &dir) noexcept {
   return false;
 }
 
+// Triangle case: reduces to the edge/face region containing the origin.
 bool do_simplex_triangle(Simplex &s, math::Vec3 &dir) noexcept {
   const math::Vec3 &a = s.pts[0].v;
   const math::Vec3 &b = s.pts[1].v;
@@ -386,7 +377,6 @@ bool do_simplex_triangle(Simplex &s, math::Vec3 &dir) noexcept {
       if (math::dot(abc, ao) > 0.0F) {
         dir = abc;
       } else {
-        // Flip winding.
         const MinkowskiPoint tmp = s.pts[1];
         s.pts[1] = s.pts[2];
         s.pts[2] = tmp;
@@ -397,6 +387,8 @@ bool do_simplex_triangle(Simplex &s, math::Vec3 &dir) noexcept {
   return false;
 }
 
+// Tetrahedron case: true when the origin is enclosed, otherwise reduces to
+// the face whose outside contains the origin.
 bool do_simplex_tetrahedron(Simplex &s, math::Vec3 &dir) noexcept {
   const math::Vec3 &a = s.pts[0].v;
   const math::Vec3 &b = s.pts[1].v;
@@ -427,10 +419,10 @@ bool do_simplex_tetrahedron(Simplex &s, math::Vec3 &dir) noexcept {
     s.size = 3;
     return do_simplex_triangle(s, dir);
   }
-  // Origin is inside the tetrahedron.
   return true;
 }
 
+// Dispatches to the case handler for the current simplex dimension.
 bool do_simplex(Simplex &s, math::Vec3 &dir) noexcept {
   switch (s.size) {
   case 2:
@@ -454,6 +446,7 @@ struct EpaFace {
   bool alive = true;
 };
 
+// Plane from the face vertices with the normal oriented away from the origin.
 void epa_face_plane(EpaFace &f,
                     const std::array<MinkowskiPoint, 256> &verts) noexcept {
   const math::Vec3 ab = math::sub(verts[f.v[1]].v, verts[f.v[0]].v);
@@ -464,7 +457,6 @@ void epa_face_plane(EpaFace &f,
     f.normal = math::mul(f.normal, 1.0F / len);
   }
   f.dist = math::dot(f.normal, verts[f.v[0]].v);
-  // Ensure normal faces outward (away from origin).
   if (f.dist < 0.0F) {
     f.dist = -f.dist;
     f.normal = math::mul(f.normal, -1.0F);
@@ -474,6 +466,10 @@ void epa_face_plane(EpaFace &f,
   }
 }
 
+// Expands the polytope toward the closest boundary face until the support
+// distance converges (or the face/vertex budget or iteration cap is hit, in
+// which case the current closest face is the answer). The contact point is
+// approximated as the centroid of the closest face's A-side support points.
 GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
               SupportFn supA, const void *shapeB, const math::Vec3 &centerB,
               SupportFn supB) noexcept {
@@ -502,14 +498,12 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
     ++faceCount;
   };
 
-  // Build initial tetrahedron faces.
   add_epa_face(0, 1, 2);
   add_epa_face(0, 2, 3);
   add_epa_face(0, 3, 1);
   add_epa_face(1, 3, 2);
 
   for (std::size_t iter = 0U; iter < kEpaMaxIter; ++iter) {
-    // Find closest face to origin.
     std::size_t closestIdx = 0U;
     float closestDist = 1e30F;
     for (std::size_t fi = 0U; fi < faceCount; ++fi) {
@@ -525,18 +519,13 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
     const EpaFace &closest = faces[closestIdx];
     const math::Vec3 searchDir = closest.normal;
 
-    // Get new support point.
     const MinkowskiPoint newPt =
         support(shapeA, centerA, supA, shapeB, centerB, supB, searchDir);
     const float newDist = math::dot(newPt.v, searchDir);
 
     if ((newDist - closestDist) < kEpaTolerance) {
-      // Converged.
       result.normal = closest.normal;
       result.depth = closestDist;
-      // Approximate contact point: interpolate A-side support points on
-      // the closest face using barycentric coordinates of the origin
-      // projection.
       result.contactPoint = math::mul(
           math::add(verts[closest.v[0]].a,
                     math::add(verts[closest.v[1]].a, verts[closest.v[2]].a)),
@@ -545,7 +534,6 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
     }
 
     if (vertCount >= 256U) {
-      // Out of vertex budget; return best so far.
       result.normal = closest.normal;
       result.depth = closestDist;
       result.contactPoint = math::mul(
@@ -558,7 +546,6 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
     const auto newIdx = static_cast<std::uint16_t>(vertCount);
     verts[vertCount++] = newPt;
 
-    // Remove faces visible from the new point and collect horizon edges.
     struct Edge {
       std::uint16_t a, b;
     };
@@ -613,7 +600,6 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
     }
   }
 
-  // Max iterations — return best estimate.
   float closestDist = 1e30F;
   std::size_t closestIdx = 0U;
   for (std::size_t fi = 0U; fi < faceCount; ++fi) {
@@ -637,6 +623,9 @@ GjkResult epa(Simplex &simplex, const void *shapeA, const math::Vec3 &centerA,
 
 } // namespace
 
+/// GJK intersection walk that hands enclosing simplexes to EPA; reports
+/// non-intersection when the support direction can no longer reach the
+/// origin (or degenerates, or the iteration cap is exhausted).
 GjkResult gjk_epa(const void *shapeA, const math::Vec3 &centerA,
                   SupportFn supportA, const void *shapeB,
                   const math::Vec3 &centerB, SupportFn supportB) noexcept {
@@ -662,12 +651,9 @@ GjkResult gjk_epa(const void *shapeA, const math::Vec3 &centerA,
     simplex.push(sp);
 
     if (do_simplex(simplex, dir)) {
-      // Origin is inside the Minkowski difference — shapes intersect.
-      // Run EPA for penetration info.
       return epa(simplex, shapeA, centerA, supportA, shapeB, centerB, supportB);
     }
 
-    // Safety: direction must not degenerate.
     if (math::length_sq(dir) < 1e-20F) {
       result.intersecting = false;
       return result;
@@ -712,13 +698,10 @@ math::Vec3 support_sphere(const void *data, const math::Vec3 &center,
 
 math::Vec3 support_capsule(const void *data, const math::Vec3 &center,
                            const math::Vec3 &dir) noexcept {
-  // data points to float[2]: {radius, halfHeight}
   const auto *params = static_cast<const float *>(data);
   const float radius = params[0];
   const float halfHeight = params[1];
 
-  // Capsule is Y-axis aligned.  Find the endpoint that is farthest in
-  // the given direction.
   const math::Vec3 top = math::add(center, math::Vec3(0.0F, halfHeight, 0.0F));
   const math::Vec3 bot = math::add(center, math::Vec3(0.0F, -halfHeight, 0.0F));
   const math::Vec3 base =

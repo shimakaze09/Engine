@@ -8,6 +8,9 @@
 
 namespace engine::physics {
 
+/// Fixed joint: a positional constraint holding the anchors coincident (as
+/// ball-socket does) followed by a velocity constraint zeroing relative
+/// motion.
 float solve_fixed_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
                         const math::Vec3 &anchorB,
                         float &accumulatedImpulse) noexcept {
@@ -20,7 +23,6 @@ float solve_fixed_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
     return 0.0F;
   }
 
-  // Position constraint: anchor points must coincide (same as ball-socket).
   const math::Vec3 worldA = math::add(ctx.tA->position, anchorA);
   const math::Vec3 worldB = math::add(ctx.tB->position, anchorB);
   const math::Vec3 error = math::sub(worldB, worldA);
@@ -36,7 +38,6 @@ float solve_fixed_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
         ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
   }
 
-  // Velocity constraint: zero relative velocity.
   if ((ctx.bodyA != nullptr) && (ctx.bodyB != nullptr)) {
     const math::Vec3 relVel =
         math::sub(ctx.bodyB->velocity, ctx.bodyA->velocity);

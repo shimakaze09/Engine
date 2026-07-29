@@ -14,8 +14,8 @@ struct PhysicsMaterial final {
   float density = 1.0F;
 };
 
-// Combine two materials at contact time.
-// friction = sqrt(a * b), restitution = max(a, b).
+// Combine two materials at contact time: friction = sqrt(a * b),
+// restitution = max(a, b); density is zeroed (not meaningful for a pair).
 inline PhysicsMaterial combine_materials(const PhysicsMaterial &a,
                                          const PhysicsMaterial &b) noexcept {
   PhysicsMaterial result;
@@ -23,7 +23,7 @@ inline PhysicsMaterial combine_materials(const PhysicsMaterial &a,
   result.dynamicFriction = std::sqrt(a.dynamicFriction * b.dynamicFriction);
   result.restitution =
       (a.restitution > b.restitution) ? a.restitution : b.restitution;
-  result.density = 0.0F; // not meaningful for combined material
+  result.density = 0.0F;
   return result;
 }
 
