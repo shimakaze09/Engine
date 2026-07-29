@@ -11,7 +11,11 @@ namespace {
 
 // Mirrors the demo scene: ground plane, embedded upright capsule prop, and a
 // velocity-driven player box pressed into the capsule side. The press must
-// never ratchet the box upward or leave it oscillating vertically.
+// never ratchet the box upward or leave it oscillating vertically. Like the
+// demo player, the box is rotation-locked (inverseInertia 0) — a driven box
+// with free rotation legitimately trips over its contact friction and vaults
+// obstacles, which is real tumbling physics, not the controller feel this
+// test protects.
 int verify_driven_box_against_capsule() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -59,6 +63,7 @@ int verify_driven_box_against_capsule() {
   playerCollider.dynamicFriction = 0.7F;
   engine::runtime::RigidBody playerBody{};
   playerBody.inverseMass = 1.0F;
+  playerBody.inverseInertia = 0.0F;
   if ((player == engine::runtime::kInvalidEntity) ||
       !world->add_collider(player, playerCollider) ||
       !world->add_rigid_body(player, playerBody)) {
