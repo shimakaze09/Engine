@@ -8,13 +8,13 @@
 
 #include "engine/physics/collider.h"
 
-namespace engine::runtime {
+namespace engine::physics {
 
 /// Builds the unit cylinder hull (radius 0.5, half height 0.5, 16 slices —
 /// the render mesh uses 24; 16 keeps Quickhull inside the plane budget).
-bool build_cylinder_hull(physics::ConvexHullData *outHull) noexcept;
+bool build_cylinder_hull(ConvexHullData *outHull) noexcept;
 
 /// Builds the unit pyramid (tetrahedron) hull matching the render mesh.
-bool build_pyramid_hull(physics::ConvexHullData *outHull) noexcept;
+bool build_pyramid_hull(ConvexHullData *outHull) noexcept;
 
-} // namespace engine::runtime
+} // namespace engine::physics

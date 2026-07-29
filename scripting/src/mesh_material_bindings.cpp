@@ -26,8 +26,8 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
+#include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/physics_bridge.h"
-#include "engine/runtime/primitive_colliders.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -126,7 +126,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "cylinder") == 0) {
     meshId = (g_builtinCylinderMesh != 0ULL) ? g_builtinCylinderMesh
                                              : g_defaultMeshAssetId;
-    hasHull = runtime::build_cylinder_hull(&hull);
+    hasHull = physics::build_cylinder_hull(&hull);
     colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
                             : runtime::ColliderShape::Capsule;
     halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.5F);
@@ -139,7 +139,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "pyramid") == 0) {
     meshId = (g_builtinPyramidMesh != 0ULL) ? g_builtinPyramidMesh
                                             : g_defaultMeshAssetId;
-    hasHull = runtime::build_pyramid_hull(&hull);
+    hasHull = physics::build_pyramid_hull(&hull);
     colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
                             : runtime::ColliderShape::AABB;
     halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.58F);

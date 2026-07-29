@@ -13,8 +13,8 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/physics_bridge.h"
-#include "engine/runtime/primitive_colliders.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -2421,8 +2421,8 @@ int check_primitive_hull_collision() {
 
   engine::physics::ConvexHullData cylinderHull{};
   engine::physics::ConvexHullData pyramidHull{};
-  if (!engine::runtime::build_cylinder_hull(&cylinderHull) ||
-      !engine::runtime::build_pyramid_hull(&pyramidHull)) {
+  if (!engine::physics::build_cylinder_hull(&cylinderHull) ||
+      !engine::physics::build_pyramid_hull(&pyramidHull)) {
     return 901;
   }
 

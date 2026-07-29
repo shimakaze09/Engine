@@ -1,7 +1,7 @@
 // Implements canonical convex-hull builders for the built-in shape
 // primitives.
 
-#include "engine/runtime/primitive_colliders.h"
+#include "engine/physics/primitive_hulls.h"
 
 #include <cmath>
 #include <cstddef>
@@ -9,9 +9,9 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/convex_hull.h"
 
-namespace engine::runtime {
+namespace engine::physics {
 
-bool build_cylinder_hull(physics::ConvexHullData *outHull) noexcept {
+bool build_cylinder_hull(ConvexHullData *outHull) noexcept {
   if (outHull == nullptr) {
     return false;
   }
@@ -34,10 +34,10 @@ bool build_cylinder_hull(physics::ConvexHullData *outHull) noexcept {
     points[kSlices + slice] = math::Vec3(x, kHalfHeight, z);
   }
 
-  return physics::build_convex_hull(points, 2U * kSlices, *outHull);
+  return build_convex_hull(points, 2U * kSlices, *outHull);
 }
 
-bool build_pyramid_hull(physics::ConvexHullData *outHull) noexcept {
+bool build_pyramid_hull(ConvexHullData *outHull) noexcept {
   if (outHull == nullptr) {
     return false;
   }
@@ -52,7 +52,7 @@ bool build_pyramid_hull(physics::ConvexHullData *outHull) noexcept {
       math::Vec3(0.0F, -0.5F, kBaseZFront),
   };
 
-  return physics::build_convex_hull(points, 4U, *outHull);
+  return build_convex_hull(points, 4U, *outHull);
 }
 
-} // namespace engine::runtime
+} // namespace engine::physics

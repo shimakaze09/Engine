@@ -102,7 +102,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   Transform, AABB/ray/sphere, component PODs; SSE2 paths in `math_detail.h`.
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
   speculative contacts, manifolds, sequential-impulse solver + joints
-  (`src/joints/`), queries, materials. Talks to the world ONLY through
+  (`src/joints/`), queries, materials, primitive hull builders
+  (`primitive_hulls` — cylinder/pyramid spawn shapes collide as mesh-matched
+  convex hulls; box/sphere/capsule stay analytic, mirroring the Unity/Unreal
+  collider model). Talks to the world ONLY through
   `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`;
   `collider.cpp` centralizes affine world geometry for every shape.
 - `renderer/` — asset database/manager/streaming (fixed slots + tombstones,
@@ -127,10 +130,7 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   double-buffered transforms, persistent ids), scene/prefab serializers
   (shared `serialization_util`, reflection-backed components), physics/
   scripting/editor bridges, render-prep pipeline, service registry, timers,
-  cameras, spring arms, game mode/state, player controllers, entity pool,
-  primitive hull colliders (`primitive_colliders` — cylinder/pyramid spawn
-  shapes collide as mesh-matched convex hulls; box/sphere/capsule stay
-  analytic, mirroring the Unity/Unreal collider model).
+  cameras, spring arms, game mode/state, player controllers, entity pool.
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle),
   `editor_commands` (undoable edits), panel TUs (main/inspector/diagnostics/
   assets/viewport), editor + debug cameras, command history.
