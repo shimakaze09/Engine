@@ -20,6 +20,8 @@ engine_add_module_library(engine_runtime
     src/service_registry.cpp
     src/timer_manager.cpp
     src/world.cpp
+    src/world_components.cpp
+    src/world_lifecycle.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS
