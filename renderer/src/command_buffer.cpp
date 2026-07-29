@@ -819,6 +819,10 @@ bool initialize_backend() noexcept {
     backend.gbufFoliagePhaseLoc =
         dev->uniform_location(gbufProg, "uFoliagePhase");
     backend.gbufAlbedoLoc = dev->uniform_location(gbufProg, "uAlbedo");
+    backend.gbufHasAlbedoTextureLoc =
+        dev->uniform_location(gbufProg, "uHasAlbedoTexture");
+    backend.gbufAlbedoTextureLoc =
+        dev->uniform_location(gbufProg, "uAlbedoTexture");
     backend.gbufMetallicLoc = dev->uniform_location(gbufProg, "uMetallic");
     backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
     backend.gbufAOLoc = dev->uniform_location(gbufProg, "uAO");

@@ -212,6 +212,8 @@ struct BackendState final {
   std::int32_t gbufFoliageWindFrequencyLoc = -1;
   std::int32_t gbufFoliagePhaseLoc = -1;
   std::int32_t gbufAlbedoLoc = -1;
+  std::int32_t gbufHasAlbedoTextureLoc = -1;
+  std::int32_t gbufAlbedoTextureLoc = -1;
   std::int32_t gbufMetallicLoc = -1;
   std::int32_t gbufRoughnessLoc = -1;
   std::int32_t gbufAOLoc = -1;

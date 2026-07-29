@@ -1108,6 +1108,10 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     auto drawGBufferBatches = [&]() {
       std::uint32_t boundVertexArray = 0U;
+      std::uint32_t boundAlbedoTex = 0U;
+      if (backend.gbufAlbedoTextureLoc >= 0) {
+        dev->set_uniform_int(backend.gbufAlbedoTextureLoc, 0);
+      }
       for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
            ++batchIndex) {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
@@ -1142,6 +1146,22 @@ void flush_renderer(CommandBufferView commandBufferView,
         if (backend.gbufEmissiveLoc >= 0) {
           dev->set_uniform_vec3(backend.gbufEmissiveLoc,
                                 &command.material.emissive.x);
+        }
+        const std::uint32_t albedoGpu =
+            texture_gpu_id(command.material.albedoTexture);
+        const bool hasAlbedoTex =
+            (command.material.albedoTexture != kInvalidTextureHandle) &&
+            (albedoGpu != 0U);
+        if (backend.gbufHasAlbedoTextureLoc >= 0) {
+          dev->set_uniform_int(backend.gbufHasAlbedoTextureLoc,
+                               hasAlbedoTex ? 1 : 0);
+        }
+        if (hasAlbedoTex && (albedoGpu != boundAlbedoTex)) {
+          dev->bind_texture(0, albedoGpu);
+          boundAlbedoTex = albedoGpu;
+        } else if (!hasAlbedoTex && (boundAlbedoTex != 0U)) {
+          dev->bind_texture(0, 0U);
+          boundAlbedoTex = 0U;
         }
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
