@@ -373,9 +373,11 @@ int verify_pack_light_data() {
   }
 
   // Spot light row: posXYZ, dirXYZ, colorRGB, intensity, radius, cones.
+  // Cone texels hold cosines of the stored radian angles because the shader
+  // compares them against dot(L, -spotDir).
   const float expectedSpot0[13] = {10.0F, 20.0F, 30.0F, 0.0F,  -1.0F,
                                    0.0F,  0.75F, 0.5F,  0.25F, 6.0F,
-                                   15.0F, 0.25F, 0.5F};
+                                   15.0F, std::cos(0.25F), std::cos(0.5F)};
   const std::size_t spotBase =
       static_cast<std::size_t>(er::kLightDataSpotRow) * rowW;
   for (std::size_t x = 0U; x < rowW; ++x) {

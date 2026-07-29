@@ -126,13 +126,15 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
     if (backend.pbrSpotLightRadius[i] >= 0) {
       dev->set_uniform_float(backend.pbrSpotLightRadius[i], sl.radius);
     }
+    // Shaders compare these against dot(L, -spotDir), a cosine — upload
+    // cosines, not the stored radian angles.
     if (backend.pbrSpotLightInnerCone[i] >= 0) {
       dev->set_uniform_float(backend.pbrSpotLightInnerCone[i],
-                             sl.innerConeAngle);
+                             std::cos(sl.innerConeAngle));
     }
     if (backend.pbrSpotLightOuterCone[i] >= 0) {
       dev->set_uniform_float(backend.pbrSpotLightOuterCone[i],
-                             sl.outerConeAngle);
+                             std::cos(sl.outerConeAngle));
     }
   }
 }
@@ -768,7 +770,13 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->bind_vertex_array(mesh->vertexArray);
           boundVao = mesh->vertexArray;
         }
-        dev->draw_elements_triangles_u32(mesh->indexCount);
+        if (mesh->indexCount > 0U) {
+          dev->draw_elements_triangles_u32(
+              static_cast<std::int32_t>(mesh->indexCount));
+        } else {
+          dev->draw_arrays_triangles(
+              0, static_cast<std::int32_t>(mesh->vertexCount));
+        }
       }
     }
 
@@ -856,11 +864,12 @@ void flush_renderer(CommandBufferView commandBufferView,
             continue;
           }
 
-          const math::Mat4 mvp =
-              math::mul(slot.faceViewProjections[face], cmd.modelMatrix);
+          // The point shader multiplies u_lightMVP by the world-space
+          // position (u_model * aPosition), so upload the face VP alone —
+          // including the model here would apply it twice.
           if (backend.shadowPointLightMvpLoc >= 0) {
             dev->set_uniform_mat4(backend.shadowPointLightMvpLoc,
-                                  &mvp.columns[0].x);
+                                  &slot.faceViewProjections[face].columns[0].x);
           }
           if (backend.shadowPointModelLoc >= 0) {
             dev->set_uniform_mat4(backend.shadowPointModelLoc,
@@ -871,7 +880,13 @@ void flush_renderer(CommandBufferView commandBufferView,
             dev->bind_vertex_array(mesh->vertexArray);
             boundVao = mesh->vertexArray;
           }
-          dev->draw_elements_triangles_u32(mesh->indexCount);
+          if (mesh->indexCount > 0U) {
+            dev->draw_elements_triangles_u32(
+                static_cast<std::int32_t>(mesh->indexCount));
+          } else {
+            dev->draw_arrays_triangles(
+                0, static_cast<std::int32_t>(mesh->vertexCount));
+          }
         }
       }
     }
@@ -1445,17 +1460,24 @@ void flush_renderer(CommandBufferView commandBufferView,
                              spotShadowEnabled ? 1 : 0);
       }
 
-      // Bind point shadow cubemaps on texture units 14-17.
+      // Bind point shadow cubemaps on texture units 14-17. The samplerCube
+      // uniforms must point at their units even when point shadows are off:
+      // left at the default unit 0 they alias the sampler2D G-buffer binding,
+      // which makes the whole draw GL_INVALID_OPERATION on conformant
+      // drivers.
       const bool pointShadowEnabled = doPointShadows;
+      for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+        const int texUnit = 14 + static_cast<int>(s);
+        if (backend.dlPointShadowMapLocs[s] >= 0) {
+          dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
+        }
+      }
       if (pointShadowEnabled) {
         for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
           const auto &slot = backend.pointShadowState.slots[s];
           const int texUnit = 14 + static_cast<int>(s);
           if (dev->bind_texture_cubemap != nullptr) {
             dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
-          }
-          if (backend.dlPointShadowMapLocs[s] >= 0) {
-            dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
           }
           if (backend.dlPointShadowLightPosLocs[s] >= 0) {
             const auto &lp = lights
@@ -1497,15 +1519,26 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->set_uniform_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
       }
 
-      // Directional light (use first if available).
-      if (backend.dlDirLightDirLoc >= 0 && lights.directionalLightCount > 0U) {
-        dev->set_uniform_vec3(backend.dlDirLightDirLoc,
-                              &lights.directionalLights[0].direction.x);
-      }
-      if (backend.dlDirLightColorLoc >= 0 &&
-          lights.directionalLightCount > 0U) {
-        dev->set_uniform_vec3(backend.dlDirLightColorLoc,
-                              &lights.directionalLights[0].color.x);
+      // Directional light (use first if available). Always upload: the
+      // shader evaluates the light unconditionally, so a zero-light scene
+      // must overwrite stale values with a black color and a valid (unit)
+      // direction — a zero direction would NaN inside normalize().
+      {
+        const bool hasDirLight = lights.directionalLightCount > 0U;
+        const math::Vec3 kNoLightDir(0.0F, -1.0F, 0.0F);
+        const math::Vec3 kNoLightColor(0.0F, 0.0F, 0.0F);
+        if (backend.dlDirLightDirLoc >= 0) {
+          const math::Vec3 &dir = hasDirLight
+                                      ? lights.directionalLights[0].direction
+                                      : kNoLightDir;
+          dev->set_uniform_vec3(backend.dlDirLightDirLoc, &dir.x);
+        }
+        if (backend.dlDirLightColorLoc >= 0) {
+          const math::Vec3 &color = hasDirLight
+                                        ? lights.directionalLights[0].color
+                                        : kNoLightColor;
+          dev->set_uniform_vec3(backend.dlDirLightColorLoc, &color.x);
+        }
       }
 
       if (backend.dlCameraPosLoc >= 0) {

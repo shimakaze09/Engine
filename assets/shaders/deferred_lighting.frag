@@ -105,6 +105,7 @@ float distribution_ggx(vec3 N, vec3 H, float roughness) {
     float NdotH = max(dot(N, H), 0.0);
     float NdotH2 = NdotH * NdotH;
     float denom = NdotH2 * (a2 - 1.0) + 1.0;
+    denom = max(denom, 0.0001);
     return a2 / (PI * denom * denom);
 }
 
@@ -227,7 +228,10 @@ float combine_fog_factors(float distanceFog, float heightFog) {
 
 // PCF shadow sampling with 3x3 kernel.
 float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
-    if (projCoords.z > 1.0) return 1.0;
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
 
     float shadow = 0.0;
     vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
