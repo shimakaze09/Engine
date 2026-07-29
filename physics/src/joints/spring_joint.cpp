@@ -58,7 +58,9 @@ float solve_spring_joint(JointSolveContext &ctx, float restLength,
         math::add(ctx.bodyB->velocity, math::mul(dir, impulse * ctx.invMassB));
   }
 
-  accumulatedImpulse += std::fabs(lambda);
+  // Accumulate the SIGNED correction: the warm start replays it along the
+  // center line, so its direction must survive.
+  accumulatedImpulse += lambda;
   return std::fabs(lambda);
 }
 

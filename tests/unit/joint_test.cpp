@@ -210,6 +210,67 @@ int test_slider_joint() noexcept {
   return 0;
 }
 
+// A settled slider joint must stay put: the warm start replays center-line
+// impulses, which for a slider would drift both bodies along the axis in a
+// direction its solver never corrects.
+int test_slider_settled_no_warm_start_drift() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const Entity a = make_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+  const Entity b = make_body(*world, math::Vec3(2.0F, 1.0F, 0.0F));
+  const math::Vec3 axis(1.0F, 0.0F, 0.0F);
+  if (physics::add_slider_joint(*world, a, b, axis) ==
+      physics::kInvalidJointId) {
+    return 2;
+  }
+
+  // Frame 1 fully corrects the perpendicular offset and accumulates the
+  // correction magnitude.
+  world->begin_update_phase();
+  physics::solve_constraints(*world, 1.0F / 60.0F);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  Transform settledA{};
+  Transform settledB{};
+  if (!world->get_transform(a, &settledA) ||
+      !world->get_transform(b, &settledB)) {
+    return 3;
+  }
+
+  // Frame 2 has nothing to correct; positions must not move at all.
+  world->begin_update_phase();
+  physics::solve_constraints(*world, 1.0F / 60.0F);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  Transform afterA{};
+  Transform afterB{};
+  if (!world->get_transform(a, &afterA) || !world->get_transform(b, &afterB)) {
+    return 4;
+  }
+  if ((afterA.position.x != settledA.position.x) ||
+      (afterA.position.y != settledA.position.y) ||
+      (afterA.position.z != settledA.position.z) ||
+      (afterB.position.x != settledB.position.x) ||
+      (afterB.position.y != settledB.position.y) ||
+      (afterB.position.z != settledB.position.z)) {
+    std::printf("FAIL slider drift: a=(%.4f,%.4f) b=(%.4f,%.4f)\n",
+                static_cast<double>(afterA.position.x),
+                static_cast<double>(afterA.position.y),
+                static_cast<double>(afterB.position.x),
+                static_cast<double>(afterB.position.y));
+    return 5;
+  }
+  return 0;
+}
+
 // ---- Spring joint ----------------------------------------------------------
 
 int test_spring_joint() noexcept {
@@ -518,6 +579,8 @@ int main() {
       {"ball_socket_joint", test_ball_socket_joint},
       {"slider_joint", test_slider_joint},
       {"spring_joint", test_spring_joint},
+      {"slider_settled_no_warm_start_drift",
+       test_slider_settled_no_warm_start_drift},
       {"fixed_joint", test_fixed_joint},
       {"joint_limits", test_joint_limits},
       {"destroyed_endpoint_retires_joint",
