@@ -1512,15 +1512,26 @@ void flush_renderer(CommandBufferView commandBufferView,
           dev->set_uniform_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
       }
 
-      // Directional light (use first if available).
-      if (backend.dlDirLightDirLoc >= 0 && lights.directionalLightCount > 0U) {
-        dev->set_uniform_vec3(backend.dlDirLightDirLoc,
-                              &lights.directionalLights[0].direction.x);
-      }
-      if (backend.dlDirLightColorLoc >= 0 &&
-          lights.directionalLightCount > 0U) {
-        dev->set_uniform_vec3(backend.dlDirLightColorLoc,
-                              &lights.directionalLights[0].color.x);
+      // Directional light (use first if available). Always upload: the
+      // shader evaluates the light unconditionally, so a zero-light scene
+      // must overwrite stale values with a black color and a valid (unit)
+      // direction — a zero direction would NaN inside normalize().
+      {
+        const bool hasDirLight = lights.directionalLightCount > 0U;
+        const math::Vec3 kNoLightDir(0.0F, -1.0F, 0.0F);
+        const math::Vec3 kNoLightColor(0.0F, 0.0F, 0.0F);
+        if (backend.dlDirLightDirLoc >= 0) {
+          const math::Vec3 &dir = hasDirLight
+                                      ? lights.directionalLights[0].direction
+                                      : kNoLightDir;
+          dev->set_uniform_vec3(backend.dlDirLightDirLoc, &dir.x);
+        }
+        if (backend.dlDirLightColorLoc >= 0) {
+          const math::Vec3 &color = hasDirLight
+                                        ? lights.directionalLights[0].color
+                                        : kNoLightColor;
+          dev->set_uniform_vec3(backend.dlDirLightColorLoc, &color.x);
+        }
       }
 
       if (backend.dlCameraPosLoc >= 0) {
