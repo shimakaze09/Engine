@@ -233,7 +233,8 @@ bool initialize_platform_impl(int width, int height, const char *title,
   }
 
   g_window = SDL_CreateWindow(title, width, height,
-                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                                  SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();

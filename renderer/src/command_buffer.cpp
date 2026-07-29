@@ -443,11 +443,12 @@ bool initialize_backend() noexcept {
         "Preetham sky shader not available — procedural sky disabled");
   }
 
-  // Hosek-Wilkie procedural sky (preferred over Preetham when available).
+  // Default procedural scatter sky (preferred over Preetham when available;
+  // selected by the legacy "hosek" value of r_sky_model).
   core::cvar_register_float("r_sky_ground_albedo", 0.1F,
                             "Procedural sky ground albedo");
   const ShaderProgramHandle hosekShader = load_configured_shader_program(
-      "skybox.vert", "hosek_wilkie_sky.frag");
+      "skybox.vert", "procedural_sky.frag");
   if (hosekShader != kInvalidShaderProgram) {
     const std::uint32_t hosekProgram = shader_gpu_program(hosekShader);
     if (hosekProgram != 0U) {

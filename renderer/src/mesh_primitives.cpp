@@ -332,4 +332,61 @@ bool build_pyramid_mesh(GpuMesh *outMesh) noexcept {
   return build_gpu_mesh_from_data(verts, 12U, nullptr, 0U, false, outMesh);
 }
 
+// Grass tuft: blades fan outward from the root so the silhouette reads as
+// grass from every angle; each blade is emitted twice with opposite winding
+// so face culling never hides its back.
+bool build_grass_tuft_mesh(GpuMesh *outMesh) noexcept {
+  constexpr int kBlades = 7;
+  constexpr float kTwoPi = 6.28318530718F;
+  constexpr float kRootRadius = 0.05F;
+  constexpr float kHalfWidth = 0.035F;
+
+  // Per-blade variation keeps the tuft from looking stamped.
+  constexpr float kHeights[kBlades] = {0.46F, 0.55F, 0.40F, 0.52F,
+                                       0.44F, 0.58F, 0.48F};
+  constexpr float kLeans[kBlades] = {0.16F, 0.10F, 0.20F, 0.13F,
+                                     0.22F, 0.09F, 0.18F};
+
+  constexpr int kTotalVerts = kBlades * 2 * 3;
+  float verts[kTotalVerts * 6]{};
+  int vi = 0;
+  const auto addFace = [&](const math::Vec3 &p0, const math::Vec3 &p1,
+                           const math::Vec3 &p2) {
+    const math::Vec3 normal =
+        math::normalize(math::cross(math::sub(p1, p0), math::sub(p2, p0)));
+    for (const math::Vec3 &p : {p0, p1, p2}) {
+      verts[vi++] = p.x;
+      verts[vi++] = p.y;
+      verts[vi++] = p.z;
+      verts[vi++] = normal.x;
+      verts[vi++] = normal.y;
+      verts[vi++] = normal.z;
+    }
+  };
+
+  for (int blade = 0; blade < kBlades; ++blade) {
+    const float angle =
+        (kTwoPi * static_cast<float>(blade)) / static_cast<float>(kBlades) +
+        0.35F * static_cast<float>(blade % 3);
+    const float dirX = std::cos(angle);
+    const float dirZ = std::sin(angle);
+    const float tanX = -dirZ;
+    const float tanZ = dirX;
+
+    const math::Vec3 baseA(dirX * kRootRadius - tanX * kHalfWidth, 0.0F,
+                           dirZ * kRootRadius - tanZ * kHalfWidth);
+    const math::Vec3 baseB(dirX * kRootRadius + tanX * kHalfWidth, 0.0F,
+                           dirZ * kRootRadius + tanZ * kHalfWidth);
+    const math::Vec3 tip(dirX * (kRootRadius + kLeans[blade]),
+                         kHeights[blade],
+                         dirZ * (kRootRadius + kLeans[blade]));
+
+    addFace(baseA, baseB, tip);
+    addFace(baseB, baseA, tip);
+  }
+
+  return build_gpu_mesh_from_data(verts, static_cast<std::uint32_t>(kTotalVerts),
+                                  nullptr, 0U, false, outMesh);
+}
+
 } // namespace engine::renderer

@@ -219,7 +219,8 @@ collider shapes incl. capsule/hull/heightfield, warm-started solver, 6 joint
 types, manifolds, materials/layers, queries, CCD + speculative contacts),
 asset pipeline (64-bit ids, metadata/tags, dependency graph, async streaming
 with budgets, LRU, deterministic cook + thumbnails), renderer through
-deferred+forward, shadows (cascade/spot/point), sky (cubemap/Preetham/Hosek),
+deferred+forward, shadows (cascade/spot/point), sky (cubemap/Preetham/
+procedural scatter — `procedural_sky.frag`, the default),
 IBL + reflection probes, fog, instancing + foliage, post stack; 2026-07
 production-hardening campaign (27 findings: correctness, perf, dedup,
 architecture splits, comment quality — all closed, quality CI-enforced).
@@ -265,9 +266,10 @@ Open — Phase 1 ship blockers:
   nesting; PIE pause/step; editor Lua API (menu items, custom panels);
   **UX overhaul to commercial-editor standard** (2026-07-19 priority call:
   the look/feel gap is a real problem, not polish) — icon set, layout and
-  spacing pass, toolbar/hierarchy/inspector usability, DPI-aware font
-  scaling. The base theme + Roboto font landed 2026-07-19
-  (`apply_editor_style` in editor.cpp, assets/fonts/).
+  spacing pass, toolbar/hierarchy/inspector usability. The base theme +
+  Roboto font landed 2026-07-19 (`apply_editor_style` in editor.cpp,
+  assets/fonts/); DPI-aware UI scaling landed 2026-07-30 (high-pixel-density
+  window + fonts/style scaled by display scale × `editor.ui_scale`).
 - **P1-M10 Scene/Streaming**: scene transition API (exclusive/additive);
   UUID cross-scene references; streaming volumes; distance LOD with
   hysteresis; multi-slot save system with platform-aware paths.

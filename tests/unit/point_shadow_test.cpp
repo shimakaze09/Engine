@@ -139,13 +139,13 @@ int verify_point_state_defaults() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: kMaxPointShadowLights is 4 and kPointShadowMapResolution is 512.
+// Test 5: kMaxPointShadowLights is 4 and kPointShadowMapResolution is 1024.
 // ---------------------------------------------------------------------------
 int verify_point_shadow_constants() {
   if (engine::renderer::kMaxPointShadowLights != 4U) {
     return 500;
   }
-  if (engine::renderer::kPointShadowMapResolution != 512) {
+  if (engine::renderer::kPointShadowMapResolution != 1024) {
     return 501;
   }
   return 0;
