@@ -173,6 +173,33 @@ bool test_pool_release_unknown() {
   return true;
 }
 
+// A stale handle sharing a pooled entity's index but not its generation
+// must not free the slot (that would allow double-acquisition).
+bool test_pool_release_stale_generation() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (!world)
+    return false;
+  EntityPool pool;
+  pool.init(world.get(), 2U);
+
+  const Entity acquired = pool.acquire();
+  if (acquired == kInvalidEntity) {
+    return false;
+  }
+
+  Entity stale = acquired;
+  stale.generation = acquired.generation + 1U;
+  if (pool.release(stale)) {
+    std::fprintf(stderr, "FAIL: stale-generation release should fail\n");
+    return false;
+  }
+  if (pool.available() != 1U) {
+    std::fprintf(stderr, "FAIL: slot freed by stale handle\n");
+    return false;
+  }
+  return pool.release(acquired) && (pool.available() == 2U);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -188,6 +215,7 @@ int main() {
       {"pool_handle_reuse_100", test_pool_handle_reuse},
       {"pool_double_init", test_pool_double_init},
       {"pool_release_unknown", test_pool_release_unknown},
+      {"pool_release_stale_generation", test_pool_release_stale_generation},
   };
 
   int failures = 0;
