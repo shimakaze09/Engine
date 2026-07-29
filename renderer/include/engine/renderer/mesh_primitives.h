@@ -31,4 +31,8 @@ bool build_capsule_mesh(GpuMesh *outMesh) noexcept;
 /// Triangular pyramid with unit-ish footprint and apex at y = +0.5.
 bool build_pyramid_mesh(GpuMesh *outMesh) noexcept;
 
+/// Grass tuft: seven double-sided tapered blades rooted at y = 0, heights
+/// around 0.5, for foliage patches.
+bool build_grass_tuft_mesh(GpuMesh *outMesh) noexcept;
+
 } // namespace engine::renderer

@@ -146,7 +146,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
     rigidBody.sleepFrameCount = 0U;
   }
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -238,7 +238,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   }
   rigidBody.angularVelocity = angVel;
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }

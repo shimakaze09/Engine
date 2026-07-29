@@ -487,6 +487,7 @@ struct BootstrapMeshIds final {
   renderer::AssetId cylinder = renderer::kInvalidAssetId;
   renderer::AssetId capsule = renderer::kInvalidAssetId;
   renderer::AssetId pyramid = renderer::kInvalidAssetId;
+  renderer::AssetId grass = renderer::kInvalidAssetId;
 };
 
 /// CPU mesh payloads loaded by the streaming worker and consumed on the render
@@ -758,6 +759,11 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
       out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, m,
                                            "builtin://pyramid");
     }
+    m = renderer::GpuMesh{};
+    if (renderer::build_grass_tuft_mesh(&m)) {
+      out->grass = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                         "builtin://grass");
+    }
     core::release_render_context();
   }
 
@@ -895,12 +901,10 @@ void create_bootstrap_scene(runtime::World *world,
     static_cast<void>(world->add_transform(foliageEntity, t));
 
     runtime::FoliagePatchComponent foliage{};
-    foliage.meshAssetIds[0] = (meshIds.pyramid != renderer::kInvalidAssetId)
-                                  ? meshIds.pyramid
+    foliage.meshAssetIds[0] = (meshIds.grass != renderer::kInvalidAssetId)
+                                  ? meshIds.grass
                                   : defaultMesh;
-    foliage.meshAssetIds[1] = (meshIds.cube != renderer::kInvalidAssetId)
-                                  ? meshIds.cube
-                                  : foliage.meshAssetIds[0];
+    foliage.meshAssetIds[1] = foliage.meshAssetIds[0];
     foliage.meshAssetIds[2] = foliage.meshAssetIds[1];
     foliage.instanceCount = 35U;
     foliage.density = 2.5F;
@@ -917,10 +921,9 @@ void create_bootstrap_scene(runtime::World *world,
             (static_cast<float>((x * 17U + z * 11U) % 5U) - 2.0F) * 0.05F;
         const float jitterZ =
             (static_cast<float>((x * 7U + z * 19U) % 5U) - 2.0F) * 0.05F;
-        instance.scale = 0.34F + (static_cast<float>((x + z) % 4U) * 0.05F);
+        instance.scale = 0.55F + (static_cast<float>((x + z) % 4U) * 0.08F);
         instance.offset =
-            math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX,
-                       instance.scale * 0.5F,
+            math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX, 0.0F,
                        (static_cast<float>(z) - 2.0F) * 0.62F + jitterZ);
         instance.phase = static_cast<float>(cursor) * 0.37F;
         instance.lodIndex = ((x + z) % 5U == 0U) ? 1U : 0U;

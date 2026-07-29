@@ -4,6 +4,7 @@ engine_add_module_library(engine_physics
     SOURCES
     src/physics.cpp
     src/collider.cpp
+    src/contact_clip.cpp
     src/convex_hull.cpp
     src/ccd.cpp
     src/constraint_solver.cpp

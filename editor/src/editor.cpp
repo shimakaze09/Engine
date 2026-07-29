@@ -228,16 +228,25 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+  static_cast<void>(core::cvar_register_float(
+      "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
+  const float displayScale =
+      SDL_GetWindowDisplayScale(static_cast<SDL_Window *>(sdlWindow));
+  const float uiScale =
+      ((displayScale > 0.0F) ? displayScale : 1.0F) *
+      core::cvar_get_float("editor.ui_scale", 1.0F);
+
   // Proper UI font (the 13px bitmap default reads as a debug tool). Falls
   // back to the built-in font when the asset is missing.
   const ImFont *editorFont = io.Fonts->AddFontFromFileTTF(
-      "assets/fonts/Roboto-Medium.ttf", 17.0F);
+      "assets/fonts/Roboto-Medium.ttf", 17.0F * uiScale);
   if (editorFont == nullptr) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "editor font missing; using ImGui default");
   }
 
   apply_editor_style();
+  ImGui::GetStyle().ScaleAllSizes(uiScale);
 
   static_cast<void>(core::cvar_register_bool(
       "r_showStats", true,

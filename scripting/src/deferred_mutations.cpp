@@ -133,23 +133,32 @@ bool apply_or_queue_transform(runtime::Entity entity,
   return queue_deferred_mutation(mutation);
 }
 
-/// Applies or queues a rigid body update based on the current World phase.
+/// Applies or queues a rigid body update based on the current World phase;
+/// releaseAuthority additionally returns the entity to physics control.
 bool apply_or_queue_rigid_body(runtime::Entity entity,
-                               const runtime::RigidBody &rigidBody) noexcept {
+                               const runtime::RigidBody &rigidBody,
+                               bool releaseAuthority) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    return binding.services->add_rigid_body_op(binding.world, entity.index,
-                                               rigidBody);
+    if (!binding.services->add_rigid_body_op(binding.world, entity.index,
+                                             rigidBody)) {
+      return false;
+    }
+    return !releaseAuthority ||
+           binding.services->set_movement_authority_op(
+               binding.world, entity.index, runtime::MovementAuthority::None);
   }
 
   DeferredMutation mutation{};
   mutation.type = DeferredMutationType::AddRigidBody;
   mutation.entity = entity;
   mutation.rigidBody = rigidBody;
+  mutation.setMovementAuthority = releaseAuthority;
+  mutation.movementAuthority = runtime::MovementAuthority::None;
   return queue_deferred_mutation(mutation);
 }
 
@@ -402,8 +411,13 @@ void flush_deferred_mutations() noexcept {
     }
     case DeferredMutationType::AddRigidBody:
       if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->add_rigid_body_op(
-            binding.world, mutation.entity.index, mutation.rigidBody));
+        const bool bodyUpdated = binding.services->add_rigid_body_op(
+            binding.world, mutation.entity.index, mutation.rigidBody);
+        if (bodyUpdated && mutation.setMovementAuthority) {
+          static_cast<void>(binding.services->set_movement_authority_op(
+              binding.world, mutation.entity.index,
+              mutation.movementAuthority));
+        }
       }
       break;
     case DeferredMutationType::AddCollider:

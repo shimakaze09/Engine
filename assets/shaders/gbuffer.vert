@@ -1,4 +1,6 @@
-// Defines the gbuffer vertex shader used by the Engine renderer.
+// Defines the gbuffer vertex shader used by the Engine renderer. Foliage
+// meshes root at local y = 0: the quadratic wind factor pins roots to the
+// ground and bends only the tips.
 
 #version 330 core
 
@@ -34,13 +36,14 @@ void main() {
         ? aInstanceFoliage.x
         : uFoliagePhase;
     if (uFoliageWindStrength > 0.0) {
-        float heightFactor = clamp(aPosition.y + 0.5, 0.0, 1.0);
+        float heightFactor = clamp(aPosition.y * 2.0, 0.0, 1.0);
+        float bend = heightFactor * heightFactor;
         float waveArg =
             ((worldPos.x + worldPos.z) * uFoliageWindFrequency) + uTime + phase;
-        float sway = sin(waveArg) * uFoliageWindStrength * heightFactor;
+        float sway = sin(waveArg) * uFoliageWindStrength * bend;
         worldPos.x += sway;
         worldPos.z += cos(waveArg * 0.73) * uFoliageWindStrength * 0.35
-            * heightFactor;
+            * bend;
     }
     vWorldPos = worldPos.xyz;
     vNormal = normalize(normalMatrix * aNormal);

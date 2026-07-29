@@ -120,13 +120,13 @@ int verify_spot_state_defaults() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 5: kMaxSpotShadowLights is 4 and kSpotShadowMapResolution is 512.
+// Test 5: kMaxSpotShadowLights is 4 and kSpotShadowMapResolution is 1024.
 // ---------------------------------------------------------------------------
 int verify_spot_shadow_constants() {
   if (engine::renderer::kMaxSpotShadowLights != 4U) {
     return 500;
   }
-  if (engine::renderer::kSpotShadowMapResolution != 512) {
+  if (engine::renderer::kSpotShadowMapResolution != 1024) {
     return 501;
   }
   return 0;

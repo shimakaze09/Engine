@@ -15,7 +15,7 @@ namespace engine::renderer {
 inline constexpr std::size_t kShadowCascadeCount = 4U;
 
 /// Maximum directional shadow map resolution (square).
-inline constexpr int kShadowMapResolution = 1024;
+inline constexpr int kShadowMapResolution = 2048;
 
 /// Per-cascade directional shadow resolutions. Near cascades keep full
 /// resolution; distant cascades use lower resolution to reduce shadow cost.
@@ -81,7 +81,7 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept;
 // ---- Spot Light Shadow Maps ----
 
 inline constexpr std::size_t kMaxSpotShadowLights = 4U;
-inline constexpr int kSpotShadowMapResolution = 512;
+inline constexpr int kSpotShadowMapResolution = 1024;
 
 /// One spot light's shadow map: texture, FBO, and light matrix.
 struct SpotShadowData final {
@@ -113,7 +113,7 @@ void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept;
 // ---- Point Light Cubemap Shadow Maps ----
 
 inline constexpr std::size_t kMaxPointShadowLights = 4U;
-inline constexpr int kPointShadowMapResolution = 512;
+inline constexpr int kPointShadowMapResolution = 1024;
 
 /// One point light's cube shadow map and far plane.
 struct PointShadowData final {

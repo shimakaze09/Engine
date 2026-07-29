@@ -42,6 +42,9 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
   concise purpose comments. Both are CI-enforced:
   `tools/check_source_comments.py` (presence) and
   `tools/check_comment_quality.py` (no filler patterns; must stay at zero).
+  Comments live ONLY in those two places — file top and above declarations;
+  no comments inside function bodies or on variables unless a constraint
+  genuinely cannot be expressed at the declaration.
 - Changes to math/ECS/physics/renderer/scripting behavior require tests.
   Determinism-sensitive areas (world, serialization, physics, render-prep,
   Lua API) pair changes with determinism tests.
@@ -49,6 +52,17 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
   the subject under test); never assert wall-clock timing/throughput in
   functional tests — only dedicated `engine_bench_*` tests hold performance
   thresholds (gated against `tests/benchmark/perf_baseline.json`).
+- Tests are append-only: adding tests is always welcome, but an existing
+  test may only be modified when the test itself is defective. A deliberate
+  behavior change that invalidates a pinned test is a decision for the
+  project owner, not a silent test edit.
+- No god files: one responsibility per translation unit. When a TU accretes
+  a second concern, split it (the `command_buffer_*` backend split is the
+  model); ~1,000 lines is the review trigger for engine sources. Standing
+  offenders queued for splitting: `command_buffer_flush.cpp`, `physics.cpp`,
+  `engine_pipeline.cpp`, `world.cpp`, asset_packer `main.cpp`. Test files
+  grow by appending (rule above) — split them by starting new suite files,
+  never by relocating existing tests.
 - No new third-party dependencies without confirmation; never ones requiring
   exceptions/RTTI in engine code.
 
@@ -219,7 +233,8 @@ collider shapes incl. capsule/hull/heightfield, warm-started solver, 6 joint
 types, manifolds, materials/layers, queries, CCD + speculative contacts),
 asset pipeline (64-bit ids, metadata/tags, dependency graph, async streaming
 with budgets, LRU, deterministic cook + thumbnails), renderer through
-deferred+forward, shadows (cascade/spot/point), sky (cubemap/Preetham/Hosek),
+deferred+forward, shadows (cascade/spot/point), sky (cubemap/Preetham/
+procedural scatter — `procedural_sky.frag`, the default),
 IBL + reflection probes, fog, instancing + foliage, post stack; 2026-07
 production-hardening campaign (27 findings: correctness, perf, dedup,
 architecture splits, comment quality — all closed, quality CI-enforced).
@@ -265,9 +280,10 @@ Open — Phase 1 ship blockers:
   nesting; PIE pause/step; editor Lua API (menu items, custom panels);
   **UX overhaul to commercial-editor standard** (2026-07-19 priority call:
   the look/feel gap is a real problem, not polish) — icon set, layout and
-  spacing pass, toolbar/hierarchy/inspector usability, DPI-aware font
-  scaling. The base theme + Roboto font landed 2026-07-19
-  (`apply_editor_style` in editor.cpp, assets/fonts/).
+  spacing pass, toolbar/hierarchy/inspector usability. The base theme +
+  Roboto font landed 2026-07-19 (`apply_editor_style` in editor.cpp,
+  assets/fonts/); DPI-aware UI scaling landed 2026-07-30 (high-pixel-density
+  window + fonts/style scaled by display scale × `editor.ui_scale`).
 - **P1-M10 Scene/Streaming**: scene transition API (exclusive/additive);
   UUID cross-scene references; streaming volumes; distance LOD with
   hysteresis; multi-slot save system with platform-aware paths.
