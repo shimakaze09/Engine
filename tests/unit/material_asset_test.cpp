@@ -3,8 +3,10 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <new>
+#include <system_error>
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -382,6 +384,55 @@ int verify_material_database_edges(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
+/// Directory discovery loads every JSON under a folder with deterministic
+/// ids derived from the virtual prefix, skipping non-JSON files.
+int verify_material_directory_discovery(
+    engine::renderer::AssetDatabase *database) {
+  std::error_code error{};
+  std::filesystem::create_directory("mat_discovery_test", error);
+  if (error) {
+    return 90;
+  }
+
+  const bool wrote =
+      write_material_file("mat_discovery_test/disc_a.json",
+                          "{\"version\":1,\"roughness\":0.25}") &&
+      write_material_file("mat_discovery_test/disc_b.json",
+                          "{\"version\":1,\"metallic\":1.0}") &&
+      write_material_file("mat_discovery_test/ignored.txt", "not a material");
+
+  int result = 0;
+  if (!wrote) {
+    result = 91;
+  } else if (engine::renderer::load_material_assets_in_directory(
+                 database, "mat_discovery_test", "mat/mat_discovery_test") !=
+             2U) {
+    result = 92;
+  } else {
+    const engine::renderer::AssetId idA =
+        engine::renderer::make_asset_id_from_path(
+            "mat/mat_discovery_test/disc_a.json");
+    const engine::renderer::AssetId idB =
+        engine::renderer::make_asset_id_from_path(
+            "mat/mat_discovery_test/disc_b.json");
+    const engine::renderer::Material *matA =
+        engine::renderer::find_material_params(database, idA);
+    const engine::renderer::Material *matB =
+        engine::renderer::find_material_params(database, idB);
+    if ((matA == nullptr) || (matB == nullptr)) {
+      result = 93;
+    } else if ((matA->roughness != 0.25F) || (matB->metallic != 1.0F)) {
+      result = 94;
+    }
+  }
+
+  remove_file("mat_discovery_test/disc_a.json");
+  remove_file("mat_discovery_test/disc_b.json");
+  remove_file("mat_discovery_test/ignored.txt");
+  std::filesystem::remove("mat_discovery_test", error);
+  return result;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -418,6 +469,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_material_database_edges(database.get());
+  }
+  if (result == 0) {
+    result = verify_material_directory_discovery(database.get());
   }
 
   engine::core::shutdown_vfs();

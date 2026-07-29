@@ -258,6 +258,14 @@ bool process_load_like_request(AssetDatabase *database,
   }
 
   record.state = AssetState::Ready;
+  record.lastAccessFrame = database->currentFrame;
+  // Estimated payload size (positions/normals + optional UVs, 32-bit
+  // indices) for cache-budget accounting; streamed loads store exact sizes.
+  const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
+  record.sizeBytes =
+      (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *
+       sizeof(float)) +
+      (static_cast<std::uint64_t>(mesh.indexCount) * sizeof(std::uint32_t));
   return true;
 }
 

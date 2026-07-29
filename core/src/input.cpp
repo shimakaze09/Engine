@@ -23,9 +23,11 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "engine/core/event_bus.h"
+#include "engine/core/logging.h"
 
 namespace engine::core {
 
@@ -124,11 +126,32 @@ bool initialize_input() noexcept {
   g_axes = {};
   g_gamepad = {};
   g_inputInitialized = true;
+
+  static_cast<void>(initialize_input_mapper());
+
+  // Restore persisted rebindings when a per-user file exists; saved
+  // bindings take precedence over script defaults registered later.
+  char bindingsPath[512] = {};
+  if (input_bindings_default_path(bindingsPath, sizeof(bindingsPath))) {
+    FILE *probe = nullptr;
+#ifdef _WIN32
+    if ((fopen_s(&probe, bindingsPath, "rb") == 0) && (probe != nullptr)) {
+#else
+    probe = std::fopen(bindingsPath, "rb");
+    if (probe != nullptr) {
+#endif
+      std::fclose(probe);
+      if (load_input_bindings(bindingsPath)) {
+        log_message(LogLevel::Info, "input", "loaded saved input bindings");
+      }
+    }
+  }
   return true;
 }
 
 /// Shuts down the owning system for input.
 void shutdown_input() noexcept {
+  shutdown_input_mapper();
   g_inputInitialized = false;
   g_keyState = {};
   g_prevKeyState = {};

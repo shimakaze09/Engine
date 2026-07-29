@@ -533,6 +533,55 @@ bool test_null_and_edge_cases() noexcept {
   return true;
 }
 
+/// Round-trips bindings through a real file and checks the default-path
+/// shape (composition only — never writes the per-user file).
+bool test_file_round_trip_and_default_path() noexcept {
+  char defaultPath[512] = {};
+  if (engine::core::input_bindings_default_path(defaultPath,
+                                                sizeof(defaultPath))) {
+    const std::size_t len = std::strlen(defaultPath);
+    const char *suffix = "input_bindings.json";
+    const std::size_t suffixLen = std::strlen(suffix);
+    if ((len <= suffixLen) ||
+        (std::strcmp(defaultPath + (len - suffixLen), suffix) != 0) ||
+        (std::strchr(defaultPath, '\\') != nullptr)) {
+      return false;
+    }
+  }
+
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  const char *tempPath = "input_map_test_bindings.json";
+  if (!engine::core::save_input_bindings(tempPath)) {
+    shutdown_all();
+    return false;
+  }
+
+  shutdown_input_mapper();
+  initialize_input_mapper();
+
+  const bool loaded = engine::core::load_input_bindings(tempPath);
+  static_cast<void>(std::remove(tempPath));
+  if (!loaded) {
+    shutdown_all();
+    return false;
+  }
+
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool restored = is_mapped_action_down("jump");
+  shutdown_all();
+  return restored;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -560,6 +609,8 @@ int main() {
   run("remove_action", &test_remove_action);
   run("rebind_action", &test_rebind_action);
   run("save_load_roundtrip", &test_save_load_roundtrip);
+  run("file_round_trip_and_default_path",
+      &test_file_round_trip_and_default_path);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

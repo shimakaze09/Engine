@@ -60,6 +60,11 @@ struct BackendState final {
   std::int32_t pbrMetallicLocation = -1;
   std::int32_t pbrTimeLocation = -1;
   std::int32_t pbrCameraPosLocation = -1;
+  std::int32_t pbrIblEnabledLoc = -1;
+  std::int32_t pbrIrradianceMapLoc = -1;
+  std::int32_t pbrPrefilteredMapLoc = -1;
+  std::int32_t pbrBrdfLutLoc = -1;
+  std::int32_t pbrPrefilteredMipsLoc = -1;
   std::int32_t pbrHasAlbedoTextureLocation = -1;
   std::int32_t pbrAlbedoMapLocation = -1;
   std::int32_t pbrOpacityLocation = -1;
@@ -226,6 +231,11 @@ struct BackendState final {
   std::int32_t dlGBufNormalLoc = -1;
   std::int32_t dlGBufEmissiveLoc = -1;
   std::int32_t dlGBufDepthLoc = -1;
+  std::int32_t dlIblEnabledLoc = -1;
+  std::int32_t dlIrradianceMapLoc = -1;
+  std::int32_t dlPrefilteredMapLoc = -1;
+  std::int32_t dlBrdfLutLoc = -1;
+  std::int32_t dlPrefilteredMipsLoc = -1;
   std::int32_t dlTileLightTexLoc = -1;
   std::int32_t dlTileCountXLoc = -1;
   std::int32_t dlTileCountYLoc = -1;

@@ -117,6 +117,102 @@ int verify_mesh_slot_reclamation() {
   return 0;
 }
 
+/// Verifies budget eviction clears the coldest unpinned records only, with
+/// age hysteresis and retain protection.
+int verify_mesh_cache_eviction() {
+  using engine::renderer::AssetDatabase;
+  using engine::renderer::AssetId;
+  using engine::renderer::AssetState;
+  using engine::renderer::MeshHandle;
+
+  std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
+  if (database == nullptr) {
+    return 300;
+  }
+  engine::renderer::clear_asset_database(database.get());
+
+  constexpr AssetId kA = 501ULL;
+  constexpr AssetId kB = 502ULL;
+  constexpr AssetId kC = 503ULL;
+  constexpr std::uint64_t kSize = 10ULL;
+
+  const auto makeReady = [&database](AssetId id, const char *path,
+                                     std::uint32_t slot) noexcept {
+    return engine::renderer::request_mesh_asset_streaming_load(database.get(),
+                                                               id, path) &&
+           engine::renderer::set_mesh_asset_state(database.get(), id,
+                                                  AssetState::Ready,
+                                                  MeshHandle{slot}) &&
+           engine::renderer::set_mesh_asset_size(database.get(), id, kSize);
+  };
+  const auto advanceFrames = [&database](std::uint64_t frames) noexcept {
+    for (std::uint64_t i = 0ULL; i < frames; ++i) {
+      engine::renderer::advance_asset_database_frame(database.get());
+    }
+  };
+
+  // A at frame 0, B at frame 100, C at frame 200: ages 200/100/0.
+  if (!makeReady(kA, "assets/evict_a.mesh", 1U)) {
+    return 301;
+  }
+  advanceFrames(100ULL);
+  if (!makeReady(kB, "assets/evict_b.mesh", 2U)) {
+    return 302;
+  }
+  advanceFrames(100ULL);
+  if (!makeReady(kC, "assets/evict_c.mesh", 3U)) {
+    return 303;
+  }
+
+  // 30 resident bytes against a 25-byte budget: exactly the coldest goes.
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 25ULL) !=
+      1U) {
+    return 304;
+  }
+  if (engine::renderer::mesh_asset_requested_resident(database.get(), kA) ||
+      !engine::renderer::mesh_asset_requested_resident(database.get(), kB) ||
+      !engine::renderer::mesh_asset_requested_resident(database.get(), kC)) {
+    return 305;
+  }
+
+  // 20 resident bytes against 15: B is next-coldest; C is younger than the
+  // hysteresis window and must survive even though the budget is still over.
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 15ULL) !=
+      1U) {
+    return 306;
+  }
+  if (engine::renderer::mesh_asset_requested_resident(database.get(), kB) ||
+      !engine::renderer::mesh_asset_requested_resident(database.get(), kC)) {
+    return 307;
+  }
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 5ULL) !=
+      0U) {
+    return 308;
+  }
+
+  // Once old enough, C is evictable — unless explicitly retained.
+  advanceFrames(100ULL);
+  if (!engine::renderer::retain_mesh_asset(database.get(), kC)) {
+    return 309;
+  }
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 5ULL) !=
+      0U) {
+    return 310;
+  }
+  if (!engine::renderer::release_mesh_asset(database.get(), kC)) {
+    return 311;
+  }
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 5ULL) !=
+      1U) {
+    return 312;
+  }
+  if (engine::renderer::mesh_asset_requested_resident(database.get(), kC)) {
+    return 313;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -125,6 +221,11 @@ int main() {
   if (reclamation != 0) {
     std::fprintf(stderr, "mesh slot reclamation failed: %d\n", reclamation);
     return reclamation;
+  }
+  const int eviction = verify_mesh_cache_eviction();
+  if (eviction != 0) {
+    std::fprintf(stderr, "mesh cache eviction failed: %d\n", eviction);
+    return eviction;
   }
   std::unique_ptr<engine::renderer::AssetDatabase> database(
       new (std::nothrow) engine::renderer::AssetDatabase());

@@ -63,10 +63,11 @@ public:
     return m_entities[slotIndex];
   }
 
-  /// Returns an entity to the pool; false when it is not pool-owned.
+  /// Returns an entity to the pool; false when it is not pool-owned. The
+  /// full handle must match so stale-generation handles cannot free a slot.
   inline bool release(Entity entity) noexcept {
     for (std::size_t i = 0U; i < m_capacity; ++i) {
-      if ((m_entities[i].index == entity.index) && m_inUse[i]) {
+      if ((m_entities[i] == entity) && m_inUse[i]) {
         m_inUse[i] = false;
         m_freeList[m_freeCount] = static_cast<std::uint32_t>(i);
         ++m_freeCount;

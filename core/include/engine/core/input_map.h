@@ -151,6 +151,11 @@ void input_mapper_end_frame() noexcept;
 // JSON persistence (P1-M2-C2b)
 // ---------------------------------------------------------------------------
 
+/// Writes the per-user default bindings path (save dir +
+/// "input_bindings.json"); false when no save dir is available.
+bool input_bindings_default_path(char *outBuffer,
+                                 std::size_t bufferCapacity) noexcept;
+
 bool save_input_bindings(const char *path) noexcept;
 /// Loads the requested resource for input bindings.
 bool load_input_bindings(const char *path) noexcept;

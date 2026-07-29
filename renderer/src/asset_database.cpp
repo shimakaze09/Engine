@@ -282,11 +282,81 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
   record.state = state;
   if (state == AssetState::Ready) {
     record.runtimeMesh = runtimeMesh;
+    // A fresh upload gets a full eviction-hysteresis window even before its
+    // first draw resolves it.
+    record.lastAccessFrame = database->currentFrame;
   } else {
     record.runtimeMesh = kInvalidMeshHandle;
   }
 
   return true;
+}
+
+bool set_mesh_asset_size(AssetDatabase *database, AssetId id,
+                         std::uint64_t sizeBytes) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return false;
+  }
+
+  const std::size_t slot = find_mesh_asset_slot(database, id);
+  if (slot == database->meshAssets.size()) {
+    return false;
+  }
+
+  database->meshAssets[slot].sizeBytes = sizeBytes;
+  return true;
+}
+
+std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
+                                          std::uint64_t budgetBytes) noexcept {
+  if (database == nullptr) {
+    return 0U;
+  }
+
+  std::uint64_t residentBytes = 0ULL;
+  for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
+    const MeshAssetRecord &record = database->meshAssets[i];
+    if (database->occupied[i] && (record.state == AssetState::Ready) &&
+        record.requestedResident) {
+      residentBytes += record.sizeBytes;
+    }
+  }
+
+  std::size_t evicted = 0U;
+  while (residentBytes > budgetBytes) {
+    std::size_t coldestSlot = database->meshAssets.size();
+    std::uint64_t coldestFrame = 0ULL;
+    for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
+      const MeshAssetRecord &record = database->meshAssets[i];
+      if (!database->occupied[i] || (record.state != AssetState::Ready) ||
+          !record.requestedResident || (record.refCount > 1U) ||
+          (record.sizeBytes == 0ULL)) {
+        continue;
+      }
+      if ((record.lastAccessFrame + kMeshEvictionMinAgeFrames) >
+          database->currentFrame) {
+        continue;
+      }
+      if ((coldestSlot == database->meshAssets.size()) ||
+          (record.lastAccessFrame < coldestFrame)) {
+        coldestSlot = i;
+        coldestFrame = record.lastAccessFrame;
+      }
+    }
+
+    if (coldestSlot == database->meshAssets.size()) {
+      break;
+    }
+
+    // Declarative eviction: the asset manager's residency sync sees the
+    // cleared flag and unloads the GPU mesh on its next pass.
+    MeshAssetRecord &record = database->meshAssets[coldestSlot];
+    record.requestedResident = false;
+    residentBytes -= record.sizeBytes;
+    ++evicted;
+  }
+
+  return evicted;
 }
 
 bool mesh_asset_requested_resident(const AssetDatabase *database,
