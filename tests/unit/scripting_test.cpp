@@ -10,17 +10,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
@@ -1603,8 +1593,8 @@ int main() {
     }
 
     SDL_Event touchEvent{};
-    touchEvent.type = SDL_FINGERDOWN;
-    touchEvent.tfinger.fingerId = 4242;
+    touchEvent.type = SDL_EVENT_FINGER_DOWN;
+    touchEvent.tfinger.fingerID = 4242;
     touchEvent.tfinger.x = 0.25F;
     touchEvent.tfinger.y = 0.75F;
     touchEvent.tfinger.pressure = 1.0F;

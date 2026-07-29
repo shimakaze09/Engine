@@ -2,21 +2,11 @@
 
 #include "engine/core/platform.h"
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -206,7 +196,7 @@ void log_sdl_error(const char *message) noexcept {
 void shutdown_platform_resources() noexcept {
   if (g_glContext != nullptr) {
     SDL_GL_MakeCurrent(g_window, nullptr);
-    SDL_GL_DeleteContext(g_glContext);
+    SDL_GL_DestroyContext(g_glContext);
     g_glContext = nullptr;
   }
 
@@ -221,37 +211,36 @@ void shutdown_platform_resources() noexcept {
 /// Initializes the owning system for platform impl.
 bool initialize_platform_impl(int width, int height, const char *title,
                               bool vsync) noexcept {
-  SDL_SetMainReady();
-
   if (g_window != nullptr) {
     g_platformRunning = true;
     return true;
   }
 
-  if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+  if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
     log_sdl_error("failed to initialize SDL video subsystem");
     return false;
   }
 
-  if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                          SDL_GL_CONTEXT_PROFILE_CORE) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0 ||
-      SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0) {
+  if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) ||
+      !SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) ||
+      !SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                           SDL_GL_CONTEXT_PROFILE_CORE) ||
+      !SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) ||
+      !SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24)) {
     log_sdl_error("failed to configure OpenGL context attributes");
     shutdown_platform_resources();
     return false;
   }
 
-  g_window = SDL_CreateWindow(
-      title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
-      SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+  g_window = SDL_CreateWindow(title, width, height,
+                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();
     return false;
   }
+  static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
+                                          SDL_WINDOWPOS_CENTERED));
 
   g_glContext = SDL_GL_CreateContext(g_window);
   if (g_glContext == nullptr) {
@@ -260,13 +249,13 @@ bool initialize_platform_impl(int width, int height, const char *title,
     return false;
   }
 
-  if (SDL_GL_MakeCurrent(g_window, g_glContext) != 0) {
+  if (!SDL_GL_MakeCurrent(g_window, g_glContext)) {
     log_sdl_error("failed to make OpenGL context current");
     shutdown_platform_resources();
     return false;
   }
 
-  if (SDL_GL_SetSwapInterval(vsync ? 1 : 0) != 0) {
+  if (!SDL_GL_SetSwapInterval(vsync ? 1 : 0)) {
     log_sdl_error("failed to set swap interval");
   }
 
@@ -306,7 +295,7 @@ bool make_render_context_current() noexcept {
     return false;
   }
 
-  return SDL_GL_MakeCurrent(g_window, g_glContext) == 0;
+  return SDL_GL_MakeCurrent(g_window, g_glContext);
 }
 
 void release_render_context() noexcept {
@@ -326,7 +315,7 @@ void *get_gl_proc_address(const char *name) noexcept {
     return nullptr;
   }
 
-  return SDL_GL_GetProcAddress(name);
+  return reinterpret_cast<void *>(SDL_GL_GetProcAddress(name));
 }
 
 void render_drawable_size(int *outWidth, int *outHeight) noexcept {
@@ -340,7 +329,7 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
     return;
   }
 
-  SDL_GL_GetDrawableSize(g_window, outWidth, outHeight);
+  static_cast<void>(SDL_GetWindowSizeInPixels(g_window, outWidth, outHeight));
 }
 
 void *get_sdl_window() noexcept { return g_window; }
@@ -430,14 +419,13 @@ bool platform_get_app_dir(char *outBuffer,
     return false;
   }
 
-  char *basePath = SDL_GetBasePath();
+  // SDL3 owns the returned base-path string; it must not be freed.
+  const char *basePath = SDL_GetBasePath();
   if (basePath == nullptr) {
     return false;
   }
 
-  const bool result = copy_normalized_path(basePath, outBuffer, bufferCapacity);
-  SDL_free(basePath);
-  return result;
+  return copy_normalized_path(basePath, outBuffer, bufferCapacity);
 }
 
 bool platform_get_temp_dir(char *outBuffer,

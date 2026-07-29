@@ -2,13 +2,7 @@
 
 #include "engine/renderer/render_device.h"
 
-#if __has_include(<SDL_opengl.h>)
-#include <SDL_opengl.h>
-#elif __has_include(<SDL2/SDL_opengl.h>)
-#include <SDL2/SDL_opengl.h>
-#else
-#error "SDL OpenGL headers not found"
-#endif
+#include <SDL3/SDL_opengl.h>
 
 #include <algorithm>
 #include <array>

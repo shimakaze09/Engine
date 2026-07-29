@@ -7,24 +7,12 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
-#if __has_include(<SDL_opengl.h>)
-#include <SDL_opengl.h>
-#elif __has_include(<SDL2/SDL_opengl.h>)
-#include <SDL2/SDL_opengl.h>
-#else
-#error "SDL OpenGL headers not found"
-#endif
+#include <SDL3/SDL_opengl.h>
 
 #include "backends/imgui_impl_opengl3.h"
-#include "backends/imgui_impl_sdl2.h"
+#include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -259,14 +247,14 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
       "debug.camera_detach", false,
       "Detach debug free-fly camera from game camera"));
 
-  if (!ImGui_ImplSDL2_InitForOpenGL(static_cast<SDL_Window *>(sdlWindow),
+  if (!ImGui_ImplSDL3_InitForOpenGL(static_cast<SDL_Window *>(sdlWindow),
                                     static_cast<SDL_GLContext>(glContext))) {
     ImGui::DestroyContext();
     return false;
   }
 
   if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     return false;
   }
@@ -283,7 +271,7 @@ void shutdown_editor() noexcept {
   }
 
   ImGui_ImplOpenGL3_Shutdown();
-  ImGui_ImplSDL2_Shutdown();
+  ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
 
   clear_thumbnail_cache();
@@ -306,7 +294,7 @@ void editor_new_frame() noexcept {
   }
 
   ImGui_ImplOpenGL3_NewFrame();
-  ImGui_ImplSDL2_NewFrame();
+  ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
   ImGuizmo::BeginFrame();
 
@@ -346,7 +334,7 @@ void editor_process_event(void *sdlEvent) noexcept {
     return;
   }
 
-  ImGui_ImplSDL2_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
+  ImGui_ImplSDL3_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
 }
 
 void editor_set_world(runtime::World *world) noexcept {
