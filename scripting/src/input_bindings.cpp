@@ -279,23 +279,33 @@ int lua_engine_rebind_action(lua_State *state) noexcept {
   return 1;
 }
 
-/// Lua binding: Lua engine.save_input_config(path).
+/// Lua binding: Lua engine.save_input_config([path]); defaults to the
+/// per-user bindings file the engine reloads at boot.
 int lua_engine_save_input_config(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
+  char defaultPath[512] = {};
   if (path == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
+    if (!core::input_bindings_default_path(defaultPath, sizeof(defaultPath))) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+    path = defaultPath;
   }
   lua_pushboolean(state, core::save_input_bindings(path) ? 1 : 0);
   return 1;
 }
 
-/// Lua binding: Lua engine.load_input_config(path).
+/// Lua binding: Lua engine.load_input_config([path]); defaults to the
+/// per-user bindings file.
 int lua_engine_load_input_config(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
+  char defaultPath[512] = {};
   if (path == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
+    if (!core::input_bindings_default_path(defaultPath, sizeof(defaultPath))) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+    path = defaultPath;
   }
   lua_pushboolean(state, core::load_input_bindings(path) ? 1 : 0);
   return 1;
