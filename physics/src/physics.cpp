@@ -24,6 +24,7 @@
 
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "contact_clip.h"
 #include "joint_handle.h"
 
 namespace engine::physics {
@@ -654,6 +655,236 @@ void resolve_contact(PhysicsWorldView &world,
                          combinedRest, combinedStaticFric, combinedDynFric);
 }
 
+// Sequential-impulse iterations over one clipped contact manifold.
+constexpr std::size_t kManifoldSolverIterations = 8U;
+
+// Clamps the body's angular speed to the global cap.
+void clamp_angular_speed(RigidBody *body) noexcept {
+  if (body == nullptr) {
+    return;
+  }
+  const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
+  if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
+    const float angSpeed = std::sqrt(angSpeedSq);
+    body->angularVelocity =
+        engine::math::mul(body->angularVelocity, kMaxAngularSpeed / angSpeed);
+  }
+}
+
+// Resolves a clipped multi-point contact manifold with rotational response:
+// impulses use contact-point relative velocity and the angular effective
+// mass, and act against static geometry too, so a tilted box receives the
+// torque that lays it flat and an overhanging box tips over its support
+// edge. Friction is per-point Coulomb (clamped by that point's normal
+// impulse), which also brakes twist about the contact normal — a box spun on
+// the ground stops instead of yawing freely. Restitution keeps the 1 m/s
+// approach-speed threshold, evaluated at the deepest point before solving.
+void resolve_manifold_contact(
+    PhysicsWorldView &world,
+    const PhysicsWorldView::SimulationAccessToken &simToken,
+    Entity bodyEntityA, Entity bodyEntityB,
+    const engine::math::Vec3 &bodyCenterA,
+    const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA, RigidBody *bodyB,
+    float invMassA, float invMassB, float invMassSum,
+    const engine::math::Vec3 &normal, const ClippedManifold &manifold,
+    const Collider &colliderA, const Collider &colliderB) noexcept {
+  if ((manifold.count == 0U) || (invMassSum <= 0.0F)) {
+    return;
+  }
+
+  std::size_t deepestIndex = 0U;
+  for (std::size_t i = 1U; i < manifold.count; ++i) {
+    if (manifold.penetrations[i] > manifold.penetrations[deepestIndex]) {
+      deepestIndex = i;
+    }
+  }
+  const float overlap = manifold.penetrations[deepestIndex];
+
+  const float moveA = overlap * (invMassA / invMassSum);
+  const float moveB = overlap * (invMassB / invMassSum);
+  Transform *mutableA =
+      (invMassA > 0.0F) ? world.get_transform_write_ptr(bodyEntityA, simToken)
+                        : nullptr;
+  Transform *mutableB =
+      (invMassB > 0.0F) ? world.get_transform_write_ptr(bodyEntityB, simToken)
+                        : nullptr;
+  if (((invMassA > 0.0F) && (mutableA == nullptr)) ||
+      ((invMassB > 0.0F) && (mutableB == nullptr))) {
+    return;
+  }
+  if (mutableA != nullptr) {
+    mutableA->position =
+        engine::math::sub(mutableA->position, engine::math::mul(normal, moveA));
+  }
+  if (mutableB != nullptr) {
+    mutableB->position =
+        engine::math::add(mutableB->position, engine::math::mul(normal, moveB));
+  }
+
+  const engine::math::Vec3 centerA =
+      engine::math::sub(bodyCenterA, engine::math::mul(normal, moveA));
+  const engine::math::Vec3 centerB =
+      engine::math::add(bodyCenterB, engine::math::mul(normal, moveB));
+  const float invInertiaA =
+      ((bodyA != nullptr) && (invMassA > 0.0F)) ? bodyA->inverseInertia : 0.0F;
+  const float invInertiaB =
+      ((bodyB != nullptr) && (invMassB > 0.0F)) ? bodyB->inverseInertia : 0.0F;
+
+  const engine::math::Vec3 zero(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 rA0 =
+      engine::math::sub(manifold.points[deepestIndex], centerA);
+  const engine::math::Vec3 rB0 =
+      engine::math::sub(manifold.points[deepestIndex], centerB);
+  const engine::math::Vec3 pointVelA0 = engine::math::add(
+      (bodyA != nullptr) ? bodyA->velocity : zero,
+      (bodyA != nullptr) ? engine::math::cross(bodyA->angularVelocity, rA0)
+                         : zero);
+  const engine::math::Vec3 pointVelB0 = engine::math::add(
+      (bodyB != nullptr) ? bodyB->velocity : zero,
+      (bodyB != nullptr) ? engine::math::cross(bodyB->angularVelocity, rB0)
+                         : zero);
+  const float approachSpeed0 =
+      engine::math::dot(engine::math::sub(pointVelB0, pointVelA0), normal);
+  const float combinedRest =
+      std::max(colliderA.restitution, colliderB.restitution);
+  constexpr float kRestitutionSpeedThreshold = 1.0F;
+  const float restitutionTarget =
+      (-approachSpeed0 > kRestitutionSpeedThreshold)
+          ? (combinedRest * -approachSpeed0)
+          : 0.0F;
+
+  float accumulated[ClippedManifold::kMaxPoints] = {};
+  for (std::size_t iteration = 0U; iteration < kManifoldSolverIterations;
+       ++iteration) {
+    for (std::size_t p = 0U; p < manifold.count; ++p) {
+      const engine::math::Vec3 rA =
+          engine::math::sub(manifold.points[p], centerA);
+      const engine::math::Vec3 rB =
+          engine::math::sub(manifold.points[p], centerB);
+      const engine::math::Vec3 pointVelA = engine::math::add(
+          (bodyA != nullptr) ? bodyA->velocity : zero,
+          (bodyA != nullptr) ? engine::math::cross(bodyA->angularVelocity, rA)
+                             : zero);
+      const engine::math::Vec3 pointVelB = engine::math::add(
+          (bodyB != nullptr) ? bodyB->velocity : zero,
+          (bodyB != nullptr) ? engine::math::cross(bodyB->angularVelocity, rB)
+                             : zero);
+      const float vn = engine::math::dot(
+          engine::math::sub(pointVelB, pointVelA), normal);
+      const float target = (p == deepestIndex) ? restitutionTarget : 0.0F;
+      const float effectiveMass =
+          invMassSum +
+          invInertiaA *
+              engine::math::length_sq(engine::math::cross(rA, normal)) +
+          invInertiaB *
+              engine::math::length_sq(engine::math::cross(rB, normal));
+      if (effectiveMass <= 0.0F) {
+        continue;
+      }
+      const float rawImpulse = -(vn - target) / effectiveMass;
+      const float newAccumulated =
+          std::fmax(0.0F, accumulated[p] + rawImpulse);
+      const float impulse = newAccumulated - accumulated[p];
+      accumulated[p] = newAccumulated;
+      if (impulse == 0.0F) {
+        continue;
+      }
+      const engine::math::Vec3 impulseVec = engine::math::mul(normal, impulse);
+      if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+        bodyA->velocity = engine::math::sub(
+            bodyA->velocity, engine::math::mul(impulseVec, invMassA));
+        if (invInertiaA > 0.0F) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(rA, impulseVec),
+                                invInertiaA));
+        }
+      }
+      if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+        bodyB->velocity = engine::math::add(
+            bodyB->velocity, engine::math::mul(impulseVec, invMassB));
+        if (invInertiaB > 0.0F) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(rB, impulseVec),
+                                invInertiaB));
+        }
+      }
+    }
+  }
+  const float combinedStaticFric =
+      std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
+  const float combinedDynFric =
+      std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+  for (std::size_t pass = 0U; pass < 2U; ++pass) {
+    for (std::size_t p = 0U; p < manifold.count; ++p) {
+      if (accumulated[p] <= 0.0F) {
+        continue;
+      }
+      const engine::math::Vec3 rA =
+          engine::math::sub(manifold.points[p], centerA);
+      const engine::math::Vec3 rB =
+          engine::math::sub(manifold.points[p], centerB);
+      const engine::math::Vec3 pointVelA = engine::math::add(
+          (bodyA != nullptr) ? bodyA->velocity : zero,
+          (bodyA != nullptr) ? engine::math::cross(bodyA->angularVelocity, rA)
+                             : zero);
+      const engine::math::Vec3 pointVelB = engine::math::add(
+          (bodyB != nullptr) ? bodyB->velocity : zero,
+          (bodyB != nullptr) ? engine::math::cross(bodyB->angularVelocity, rB)
+                             : zero);
+      const engine::math::Vec3 relVel =
+          engine::math::sub(pointVelB, pointVelA);
+      const engine::math::Vec3 tangentVel = engine::math::sub(
+          relVel, engine::math::mul(normal, engine::math::dot(relVel, normal)));
+      const float tangentSpeedSq = engine::math::length_sq(tangentVel);
+      if (tangentSpeedSq <= 1e-12F) {
+        continue;
+      }
+      const float tangentSpeed = std::sqrt(tangentSpeedSq);
+      const engine::math::Vec3 tangent =
+          engine::math::div(tangentVel, tangentSpeed);
+      const float effectiveMass =
+          invMassSum +
+          invInertiaA *
+              engine::math::length_sq(engine::math::cross(rA, tangent)) +
+          invInertiaB *
+              engine::math::length_sq(engine::math::cross(rB, tangent));
+      if (effectiveMass <= 0.0F) {
+        continue;
+      }
+      float frictionImpulse = tangentSpeed / effectiveMass;
+      if (frictionImpulse >= accumulated[p] * combinedStaticFric) {
+        frictionImpulse = accumulated[p] * combinedDynFric;
+      }
+      const engine::math::Vec3 impulseVec =
+          engine::math::mul(tangent, -frictionImpulse);
+      if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+        bodyA->velocity = engine::math::sub(
+            bodyA->velocity, engine::math::mul(impulseVec, invMassA));
+        if (invInertiaA > 0.0F) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(rA, impulseVec),
+                                invInertiaA));
+        }
+      }
+      if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+        bodyB->velocity = engine::math::add(
+            bodyB->velocity, engine::math::mul(impulseVec, invMassB));
+        if (invInertiaB > 0.0F) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(rB, impulseVec),
+                                invInertiaB));
+        }
+      }
+    }
+  }
+  clamp_angular_speed((invMassA > 0.0F) ? bodyA : nullptr);
+  clamp_angular_speed((invMassB > 0.0F) ? bodyB : nullptr);
+}
+
 // Resolve a speculative contact (E2a/E2b).
 // Bodies are NOT yet overlapping but are approaching. Apply a clamped velocity
 // impulse to prevent penetration in the next frame — no positional correction,
@@ -1013,6 +1244,18 @@ void resolve_pair_contact(const PairContext &pair,
                   overlap, contactPoint, pair.colliderA, pair.colliderB);
 }
 
+/// Resolves one clipped manifold against the rigid bodies that own the two
+/// collider entities, mirroring resolve_pair_contact's ownership mapping.
+void resolve_pair_manifold(const PairContext &pair,
+                           const engine::math::Vec3 &normal,
+                           const ClippedManifold &manifold) noexcept {
+  resolve_manifold_contact(pair.world, pair.simToken, pair.bodyEntityA,
+                           pair.bodyEntityB, pair.bodyCenterA, pair.bodyCenterB,
+                           pair.bodyA, pair.bodyB, pair.invMassA, pair.invMassB,
+                           pair.invMassSum, normal, manifold, pair.colliderA,
+                           pair.colliderB);
+}
+
 /// Records the colliding pair, wakes sleeping bodies, and returns whether a
 /// positional/impulse response is required (false for static-static pairs).
 bool record_pair_and_wake(const PairContext &pair) noexcept {
@@ -1367,6 +1610,8 @@ support_affine_collider(const void *shapeData,
 }
 
 /// Generic GJK/EPA path for convex shapes carrying any affine hierarchy TRS.
+/// Faceted pairs (box/hull) resolve through a clipped multi-point manifold so
+/// resting contacts get face support; other shapes keep the EPA point.
 void narrow_phase_convex_gjk(const PairContext &pair) noexcept {
   const GjkResult gjk =
       gjk_epa(&pair.geometryA, pair.posA, &support_affine_collider,
@@ -1380,6 +1625,12 @@ void narrow_phase_convex_gjk(const PairContext &pair) noexcept {
     return;
   }
 
+  ClippedManifold manifold{};
+  if (clip_contact_manifold(pair.geometryA, pair.geometryB, gjk.normal,
+                            &manifold)) {
+    resolve_pair_manifold(pair, gjk.normal, manifold);
+    return;
+  }
   resolve_pair_contact(pair, gjk.normal, gjk.depth, gjk.contactPoint);
 }
 
@@ -1776,6 +2027,14 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
     pushZ = sign_or_positive(bz - az);
   }
 
+  const engine::math::Vec3 aabbNormal(pushX, pushY, pushZ);
+  ClippedManifold manifold{};
+  if (clip_contact_manifold(pair.geometryA, pair.geometryB, aabbNormal,
+                            &manifold)) {
+    resolve_pair_manifold(pair, aabbNormal, manifold);
+    return;
+  }
+
   const float moveA = pushAmount * (pair.invMassA / pair.invMassSum);
   const float moveB = pushAmount * (pair.invMassB / pair.invMassSum);
 
@@ -1794,7 +2053,6 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
   mutableB->position.y += pushY * moveB;
   mutableB->position.z += pushZ * moveB;
 
-  const engine::math::Vec3 aabbNormal(pushX, pushY, pushZ);
   const engine::math::Vec3 midPt = engine::math::mul(
       engine::math::add(mutableA->position, mutableB->position), 0.5F);
   const float combinedRest =

@@ -92,6 +92,14 @@ engine_add_test_executable(engine_unit_capsule_contact_stability
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_physics_rest
+    SOURCES
+    physics_rest_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp
