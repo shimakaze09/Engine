@@ -1,6 +1,6 @@
 # Engine
 
-An open-source C++20 game engine.
+An open-source C++23 game engine.
 
 The repository is not production-complete yet. Game authors primarily work through Lua scripts and the editor. Engine contributors extend core systems in C++ under strict performance, safety, and correctness constraints.
 
@@ -39,7 +39,16 @@ Verified working areas in the current tree include:
   lighting for opaque geometry, forward transparency, PBR shaders, frustum
   culling, mesh loading, and editor integration
 - Physics systems including rigid bodies, collider shapes, spatial broadphase,
-  CCD/speculative contacts, joints, materials, and query APIs
+  CCD/speculative contacts, joints, materials, and query APIs — colliders
+  follow the transform hierarchy (child colliders form compound bodies owned
+  by their nearest rigid-body ancestor), and the built-in cylinder/pyramid
+  shapes collide as mesh-matched convex hulls
+- Scene-object model with parenting (`set_parent`/`get_children` from Lua),
+  cascade destruction of transform subtrees, and non-removable Name/Transform
+  identity in the editor
+- Render-to-texture scene captures with material binding, JSON material
+  assets with parent-chain overrides, and a depth-tested debug-line pass for
+  shape-accurate collider overlays
 - Editor play/pause/stop flow, gizmo transforms, and transform undo support
 - Audio playback via miniaudio with wav/mp3/ogg/flac support plus volume, pitch, and loop control
 - Lua module loading, traceback-based error reporting, generated and hand-written bindings, per-World timers, coroutine helpers, sandbox controls, and hot-reload coverage
@@ -56,7 +65,7 @@ campaign (27 correctness/performance/structure findings) is complete.
 
 ## Tech stack
 
-- Language: C++20
+- Language: C++23
 - Build: CMake 3.28+
 - Window/input: SDL2
 - Rendering: OpenGL (GLSL 330 core shaders)
@@ -86,7 +95,7 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 
 - CMake 3.28+
 - Python 3 (required for generated Lua bindings during configure/build)
-- A C++20 compiler
+- A C++23 compiler
 	- MSVC (Windows) or
 	- Clang/GCC (Linux/macOS)
 - OpenGL development support
@@ -177,8 +186,11 @@ The runtime exposes an `engine` table to Lua scripts.
 Current script conventions in `assets/`:
 
 - Scene-level module (`assets/main.lua`)
-	- `M.on_start(self)` is called once when play starts
-	- `M.on_update(self, dt)` is called every simulation step
+	- `M.on_begin_play(self)` is called once when play starts
+	- `M.on_tick(self, dt)` is called every simulation step
+	- `M.on_end_play(self)`, `M.on_save_state(self)`, and
+	  `M.on_reload(self, state)` cover teardown and hot reload
+	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks
 - Entity behavior module example (`assets/scripts/player.lua`)
 - Reusable utility module example (`assets/lib/utils.lua`)
 
@@ -192,7 +204,7 @@ Current scripting/runtime support in the tree includes:
 - Coroutine helpers such as `engine.wait()`, `engine.wait_frames()`, and `engine.wait_until()`
 - Sandbox, generated binding, and hot-reload coverage in integration tests
 
-The scripting surface is still evolving. Some APIs are generated from annotated accessors, while much of the engine-facing Lua surface is still hand-written in `scripting/src/scripting.cpp`.
+The scripting surface is still evolving. Some APIs are generated from annotated accessors, while the hand-written surface lives in domain binding translation units under `scripting/src/` (entity lifecycle, body, mesh/material, physics, lights, camera, audio, input, timers, coroutines, and more).
 
 ## Assets and mesh conversion
 
@@ -207,16 +219,20 @@ build\tools\asset_packer\asset_packer.exe <input.gltf|input.glb> <output.mesh>
 
 Tool behavior:
 
-- Reads the first mesh primitive from the source file
-- Writes engine mesh binary (`.mesh`)
-- Writes metadata sidecar (`.meta.json`)
+- Deterministic cook: identical inputs produce byte-identical outputs
+- Imports glTF meshes plus skeletons and animation clips
+- Writes engine mesh binary (`.mesh`) and metadata sidecar (`.meta.json`)
+- Generates asset thumbnails and maintains the asset dependency graph
 
 ## Engine contributor rules
 
-- Use C++20 only (no compiler extensions)
+- Use C++23 only (no compiler extensions); features must compile on every CI
+  lane, including AppleClang
 - Do not use exceptions, RTTI, `dynamic_cast`, or `typeid`
 - Keep engine API functions `noexcept`
-- Use explicit return values plus logging for runtime failures
+- Use explicit return values plus logging for runtime failures; prefer
+  `std::expected<T, E>` in new APIs and never call `.value()` (with
+  exceptions disabled it aborts — use `has_value()`/`operator*`/`error()`)
 - Keep dependency flow strictly downward; do not introduce upward or sideways cycles
 - Do not heap-allocate on hot paths
 - Keep public headers self-contained and free of SDL, OpenGL, Lua, and ImGui types
