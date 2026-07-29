@@ -1294,7 +1294,6 @@ void World::end_frame_phase() noexcept {
     return;
   }
 
-  flush_deferred_destroys();
   m_phase = WorldPhase::Input;
 }
 

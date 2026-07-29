@@ -153,7 +153,8 @@ int lua_engine_wait_until(lua_State *state) noexcept {
 
 int start_lua_coroutine(lua_State *state, float totalSeconds,
                         std::uint32_t frameIndex,
-                        CoroutineLogLuaErrorFn logLuaError) noexcept {
+                        CoroutineLogLuaErrorFn logLuaError,
+                        CoroutineRefreshHookFn refreshLuaHook) noexcept {
   if (lua_isfunction(state, 1) == 0) {
     lua_pushnil(state);
     return 1;
@@ -174,6 +175,9 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
     lua_pushvalue(state, 1);
     lua_xmove(state, thread, 1);
 
+    if (refreshLuaHook != nullptr) {
+      refreshLuaHook(thread);
+    }
     int nresults = 0;
     const int status = lua_resume(thread, state, 0, &nresults);
     if (status == LUA_OK) {
@@ -231,7 +235,7 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
       entry.conditionRef = LUA_NOREF;
     }
     if (refreshLuaHook != nullptr) {
-      refreshLuaHook();
+      refreshLuaHook(entry.thread);
     }
 
     int nresults = 0;

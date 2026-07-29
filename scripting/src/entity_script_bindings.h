@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "engine/core/entity.h"
+#include "engine/runtime/world.h"
 
 struct lua_State;
 
@@ -33,5 +34,15 @@ int lua_engine_require(lua_State *state) noexcept;
 
 /// Clears cached entity script modules and hot-reload state.
 void reset_entity_script_bindings() noexcept;
+
+/// True while an entity on_end_play callback is executing; world mutations
+/// must queue during dispatch so destruction cannot reenter mid-iteration.
+bool in_end_play_dispatch() noexcept;
+
+/// Fires on_end_play for the entity and its alive transform subtree
+/// (descendants first) for members that received begin_play; called before
+/// script-initiated immediate destroys.
+void dispatch_entity_subtree_end_play(runtime::World *world,
+                                      runtime::Entity entity) noexcept;
 
 } // namespace engine::scripting
