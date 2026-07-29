@@ -1940,7 +1940,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       store.ccdColliderEntities[i] = entities[i];
       store.ccdColliderOwners[i] = bodyOwners[i];
-      store.ccdColliderAabbs[i] = geometries[i].worldAabb;
+      // Publish a zeroed AABB for invalid geometry: geometries[i] is
+      // per-thread scratch, so its stale content would vary with whichever
+      // worker ran the previous resolve.
+      store.ccdColliderAabbs[i] =
+          geometryValid[i] ? geometries[i].worldAabb : math::AABB{};
       if ((bodyOwners[i] != kInvalidEntity) &&
           (bodyOwners[i] != entities[i])) {
         physicsCtx.ccdHasCompoundColliders = true;
