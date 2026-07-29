@@ -1,6 +1,6 @@
 # Engine
 
-An open-source C++20 game engine.
+An open-source C++23 game engine.
 
 The repository is not production-complete yet. Game authors primarily work through Lua scripts and the editor. Engine contributors extend core systems in C++ under strict performance, safety, and correctness constraints.
 
@@ -56,9 +56,9 @@ campaign (27 correctness/performance/structure findings) is complete.
 
 ## Tech stack
 
-- Language: C++20
+- Language: C++23
 - Build: CMake 3.28+
-- Window/input: SDL2
+- Window/input: SDL3
 - Rendering: OpenGL (GLSL 330 core shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
@@ -86,14 +86,14 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 
 - CMake 3.28+
 - Python 3 (required for generated Lua bindings during configure/build)
-- A C++20 compiler
+- A C++23-capable compiler
 	- MSVC (Windows) or
 	- Clang/GCC (Linux/macOS)
 - OpenGL development support
 
 Notes:
 
-- SDL2 is discovered with `find_package(SDL2 CONFIG QUIET)` first, then fetched from source if unavailable.
+- SDL3 is discovered with `find_package(SDL3 CONFIG QUIET)` first, then fetched from source if unavailable.
 - First configure/build may need internet access due to dependency fetches.
 
 ## Quick start
@@ -213,7 +213,7 @@ Tool behavior:
 
 ## Engine contributor rules
 
-- Use C++20 only (no compiler extensions)
+- Use C++23 only (no compiler extensions); prefer `std::expected<T, E>` for new fallible APIs and never call `.value()` (it aborts with exceptions disabled)
 - Do not use exceptions, RTTI, `dynamic_cast`, or `typeid`
 - Keep engine API functions `noexcept`
 - Use explicit return values plus logging for runtime failures
@@ -225,8 +225,9 @@ If you modify core behavior in math, ECS/runtime, physics, renderer/mesh loading
 
 ## Troubleshooting
 
-- Configure fails finding SDL2:
-	- Ensure internet access for first-time fetch, or install SDL2 CMake package config locally.
+- Configure fails finding SDL3:
+	- Ensure internet access for first-time fetch, or install SDL3 CMake package config locally.
+	- On Linux, SDL3 requires X11 extension dev headers that SDL2 treated as optional (Xcursor, Xi, Xtst, Xfixes, Xrandr, XScrnSaver); install them or configure the matching `SDL_X11_*` options off.
 - Configure fails because Python is missing:
 	- Install Python 3 and ensure it is available to CMake as `Python3_EXECUTABLE`.
 - App starts but assets are missing:
