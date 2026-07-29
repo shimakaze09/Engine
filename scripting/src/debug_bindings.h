@@ -33,6 +33,9 @@ int lua_engine_debugger_last_watch_values(lua_State *state) noexcept;
 void set_debug_lua_state(lua_State *state) noexcept;
 /// Refreshes debugger/profiler/sandbox hooks on the owning Lua state.
 void refresh_debug_lua_hook() noexcept;
+/// Applies the current hook configuration to an explicit Lua thread; hooks
+/// are per-thread in Lua 5.4, so coroutines must arm them before resuming.
+void apply_debug_lua_hook(lua_State *state) noexcept;
 /// Clears transient debugger/profiler state.
 void reset_debug_bindings() noexcept;
 

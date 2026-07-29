@@ -389,8 +389,8 @@ int lua_engine_debugger_last_watch_values(lua_State *state) noexcept {
 
 void set_debug_lua_state(lua_State *state) noexcept { g_hookState = state; }
 
-void refresh_debug_lua_hook() noexcept {
-  if (g_hookState == nullptr) {
+void apply_debug_lua_hook(lua_State *state) noexcept {
+  if (state == nullptr) {
     return;
   }
 
@@ -411,12 +411,14 @@ void refresh_debug_lua_hook() noexcept {
   }
 
   if (mask == 0) {
-    lua_sethook(g_hookState, nullptr, 0, 0);
+    lua_sethook(state, nullptr, 0, 0);
     return;
   }
 
-  lua_sethook(g_hookState, &scripting_debug_hook, mask, count);
+  lua_sethook(state, &scripting_debug_hook, mask, count);
 }
+
+void refresh_debug_lua_hook() noexcept { apply_debug_lua_hook(g_hookState); }
 
 void reset_debug_bindings() noexcept {
   for (std::size_t i = 0U; i < kMaxProfilerEntries; ++i) {

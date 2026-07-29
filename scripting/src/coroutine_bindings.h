@@ -10,7 +10,7 @@ namespace engine::scripting {
 
 using CoroutineLogLuaErrorFn = void (*)(lua_State *state,
                                         const char *context) noexcept;
-using CoroutineRefreshHookFn = void (*)() noexcept;
+using CoroutineRefreshHookFn = void (*)(lua_State *thread) noexcept;
 
 /// Lua binding: Lua engine.wait(seconds).
 int lua_engine_wait(lua_State *state) noexcept;
@@ -19,10 +19,12 @@ int lua_engine_wait_frames(lua_State *state) noexcept;
 /// Lua binding: Lua engine.wait_until(callback).
 int lua_engine_wait_until(lua_State *state) noexcept;
 
-/// Starts a Lua coroutine using the supplied scheduler clock.
+/// Starts a Lua coroutine using the supplied scheduler clock; the refresh
+/// hook arms sandbox/debug hooks on the new thread before its first resume.
 int start_lua_coroutine(lua_State *state, float totalSeconds,
                         std::uint32_t frameIndex,
-                        CoroutineLogLuaErrorFn logLuaError) noexcept;
+                        CoroutineLogLuaErrorFn logLuaError,
+                        CoroutineRefreshHookFn refreshLuaHook) noexcept;
 
 /// Advances active Lua coroutines against the supplied scheduler clock.
 void tick_lua_coroutines(lua_State *state, float totalSeconds,

@@ -155,6 +155,56 @@ bool test_instruction_limit() noexcept {
 }
 
 // -----------------------------------------------------------------------
+// 3b. Coroutine threads inherit the instruction limit (hooks are
+//     per-thread in Lua 5.4, so each resume must re-arm them)
+// -----------------------------------------------------------------------
+bool test_coroutine_instruction_limit() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+  engine::scripting::set_instruction_limit(10000);
+
+  // A runaway coroutine body must be terminated on its first resume, making
+  // start_coroutine return nil; without the per-thread hook this hangs.
+  const char *code = "local id = engine.start_coroutine(function()\n"
+                     "  while true do end\n"
+                     "end)\n"
+                     "if id ~= nil then\n"
+                     "  error('runaway coroutine survived first resume')\n"
+                     "end\n"
+                     "resumed_id = engine.start_coroutine(function()\n"
+                     "  engine.wait(0)\n"
+                     "  while true do end\n"
+                     "end)\n"
+                     "if resumed_id == nil then\n"
+                     "  error('yielding coroutine failed to start')\n"
+                     "end\n";
+
+  if (!write_script(code)) {
+    return false;
+  }
+
+  bool result = engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  // The second coroutine yields, then loops forever on its scheduler
+  // resume: tick_coroutines must terminate it and return.
+  engine::scripting::set_frame_time(1.0F, 1.0F);
+  engine::scripting::tick_coroutines();
+
+  engine::scripting::set_instruction_limit(1000000);
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
+// -----------------------------------------------------------------------
 // 4. Memory limit: huge allocation fails
 // -----------------------------------------------------------------------
 bool test_memory_limit() noexcept {
@@ -242,6 +292,7 @@ int main() {
       {"io_blocked", test_io_blocked},
       {"safe_globals_available", test_safe_globals_available},
       {"instruction_limit", test_instruction_limit},
+      {"coroutine_instruction_limit", test_coroutine_instruction_limit},
       {"memory_limit", test_memory_limit},
       {"debug_blocked", test_debug_blocked},
   };

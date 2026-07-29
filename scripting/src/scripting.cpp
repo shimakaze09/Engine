@@ -139,7 +139,7 @@ int lua_engine_frame_count(lua_State *state) noexcept {
 
 int lua_engine_start_coroutine(lua_State *state) noexcept {
   return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
-                             log_lua_error);
+                             log_lua_error, apply_debug_lua_hook);
 }
 
 // --- Entity lifecycle completeness ---
@@ -695,7 +695,7 @@ void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 
 void tick_coroutines() noexcept {
   tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
-                      refresh_lua_hook);
+                      apply_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
