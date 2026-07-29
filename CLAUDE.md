@@ -56,6 +56,13 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
   test may only be modified when the test itself is defective. A deliberate
   behavior change that invalidates a pinned test is a decision for the
   project owner, not a silent test edit.
+- No god files: one responsibility per translation unit. When a TU accretes
+  a second concern, split it (the `command_buffer_*` backend split is the
+  model); ~1,000 lines is the review trigger for engine sources. Standing
+  offenders queued for splitting: `command_buffer_flush.cpp`, `physics.cpp`,
+  `engine_pipeline.cpp`, `world.cpp`, asset_packer `main.cpp`. Test files
+  grow by appending (rule above) — split them by starting new suite files,
+  never by relocating existing tests.
 - No new third-party dependencies without confirmation; never ones requiring
   exceptions/RTTI in engine code.
 
