@@ -269,6 +269,14 @@ bool initialize_backend() noexcept {
       dev->uniform_location(pbrProgram, "u_viewProjection");
   backend.pbrUseInstancingLocation =
       dev->uniform_location(pbrProgram, "uUseInstancing");
+  backend.pbrIblEnabledLoc = dev->uniform_location(pbrProgram, "uIblEnabled");
+  backend.pbrIrradianceMapLoc =
+      dev->uniform_location(pbrProgram, "uIrradianceMap");
+  backend.pbrPrefilteredMapLoc =
+      dev->uniform_location(pbrProgram, "uPrefilteredMap");
+  backend.pbrBrdfLutLoc = dev->uniform_location(pbrProgram, "uBrdfLut");
+  backend.pbrPrefilteredMipsLoc =
+      dev->uniform_location(pbrProgram, "uPrefilteredMips");
   backend.pbrFoliageWindStrengthLocation =
       dev->uniform_location(pbrProgram, "uFoliageWindStrength");
   backend.pbrFoliageWindFrequencyLocation =
@@ -872,6 +880,16 @@ bool initialize_backend() noexcept {
     // Per-light data texture sampler (light parameters are fetched by index
     // instead of per-light uniform arrays).
     backend.dlLightDataTexLoc = dev->uniform_location(dlProg, "uLightDataTex");
+
+    // Environment IBL samplers in deferred lighting shader.
+    backend.dlIblEnabledLoc = dev->uniform_location(dlProg, "uIblEnabled");
+    backend.dlIrradianceMapLoc =
+        dev->uniform_location(dlProg, "uIrradianceMap");
+    backend.dlPrefilteredMapLoc =
+        dev->uniform_location(dlProg, "uPrefilteredMap");
+    backend.dlBrdfLutLoc = dev->uniform_location(dlProg, "uBrdfLut");
+    backend.dlPrefilteredMipsLoc =
+        dev->uniform_location(dlProg, "uPrefilteredMips");
 
     // SSAO uniforms in deferred lighting shader.
     backend.dlSsaoTextureLoc = dev->uniform_location(dlProg, "uSsaoTexture");

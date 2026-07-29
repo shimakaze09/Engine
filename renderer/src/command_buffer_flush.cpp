@@ -59,6 +59,48 @@ struct ShadowCandidate final {
   float distSq = 0.0F;
 };
 
+// Environment IBL texture units shared by the deferred and forward passes
+// (units 0-17 hold G-buffer/tile/shadow data, 18 the light-data texture).
+constexpr int kIblIrradianceUnit = 19;
+constexpr int kIblPrefilteredUnit = 20;
+constexpr int kIblBrdfLutUnit = 21;
+
+/// Uploads the environment IBL uniforms for the forward PBR program and
+/// binds its textures when enabled; every pbrProgram pass must call this so
+/// stale program state never leaks between passes.
+void apply_pbr_ibl_uniforms(const BackendState &backend,
+                            const RenderDevice *dev,
+                            bool iblAvailable) noexcept {
+  const bool enabled = iblAvailable && (backend.pbrIblEnabledLoc >= 0) &&
+                       (dev->bind_texture_cubemap != nullptr);
+  if (backend.pbrIblEnabledLoc >= 0) {
+    dev->set_uniform_int(backend.pbrIblEnabledLoc, enabled ? 1 : 0);
+  }
+  if (!enabled) {
+    return;
+  }
+
+  dev->bind_texture_cubemap(kIblIrradianceUnit,
+                            backend.irradianceEnvironmentTexture);
+  dev->bind_texture_cubemap(kIblPrefilteredUnit,
+                            backend.prefilteredEnvironmentTexture);
+  dev->bind_texture(kIblBrdfLutUnit, backend.brdfLutTexture);
+  if (backend.pbrIrradianceMapLoc >= 0) {
+    dev->set_uniform_int(backend.pbrIrradianceMapLoc, kIblIrradianceUnit);
+  }
+  if (backend.pbrPrefilteredMapLoc >= 0) {
+    dev->set_uniform_int(backend.pbrPrefilteredMapLoc, kIblPrefilteredUnit);
+  }
+  if (backend.pbrBrdfLutLoc >= 0) {
+    dev->set_uniform_int(backend.pbrBrdfLutLoc, kIblBrdfLutUnit);
+  }
+  if (backend.pbrPrefilteredMipsLoc >= 0) {
+    dev->set_uniform_float(
+        backend.pbrPrefilteredMipsLoc,
+        static_cast<float>(backend.prefilteredEnvironmentMipLevels));
+  }
+}
+
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
@@ -388,6 +430,16 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   }
 }
 
+/// Unbinds the environment IBL texture units after a forward PBR pass.
+void unbind_pbr_ibl_textures(const RenderDevice *dev) noexcept {
+  if ((dev == nullptr) || (dev->bind_texture_cubemap == nullptr)) {
+    return;
+  }
+  dev->bind_texture_cubemap(kIblIrradianceUnit, 0U);
+  dev->bind_texture_cubemap(kIblPrefilteredUnit, 0U);
+  dev->bind_texture(kIblBrdfLutUnit, 0U);
+}
+
 DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
   DistanceFogSettings settings{};
   settings.mode =
@@ -529,6 +581,24 @@ void flush_renderer(CommandBufferView commandBufferView,
   const DistanceFogSettings fogSettings = distance_fog_settings_from_cvars();
   const HeightFogSettings heightFogSettings = height_fog_settings_from_cvars();
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
+
+  // Bake (or reuse) the environment IBL from the active cubemap skybox before
+  // any lighting pass so both deferred and forward can sample it this frame.
+  const std::uint32_t envSkyboxTexture =
+      (selected_sky_model() == SkyModel::Cubemap)
+          ? active_skybox_gpu_texture(backend)
+          : 0U;
+  std::uint32_t iblPrefilteredTex = 0U;
+  std::uint32_t iblIrradianceTex = 0U;
+  if (envSkyboxTexture != 0U) {
+    iblPrefilteredTex = ensure_prefiltered_environment(
+        backend, dev, envSkyboxTexture, environmentBakeSettings);
+    iblIrradianceTex = ensure_irradiance_environment(
+        backend, dev, envSkyboxTexture, environmentBakeSettings);
+  }
+  const bool iblAvailable = (iblPrefilteredTex != 0U) &&
+                            (iblIrradianceTex != 0U) &&
+                            (backend.brdfLutTexture != 0U);
 
   // Check if deferred rendering is enabled.
   const bool useDeferred =
@@ -960,6 +1030,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
     upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
     bind_pbr_shadow_uniforms(backend, dev, lights, false, false, false);
+    // Captures skip sky and IBL by design.
+    apply_pbr_ibl_uniforms(backend, dev, false);
     if (backend.pbrAlbedoMapLocation >= 0) {
       dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
     }
@@ -1436,6 +1508,33 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.dlLightDataTexLoc >= 0)
         dev->set_uniform_int(backend.dlLightDataTexLoc, 18);
 
+      const bool dlIblEnabled = iblAvailable &&
+                                (backend.dlIblEnabledLoc >= 0) &&
+                                (dev->bind_texture_cubemap != nullptr);
+      if (backend.dlIblEnabledLoc >= 0) {
+        dev->set_uniform_int(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
+      }
+      if (dlIblEnabled) {
+        dev->bind_texture_cubemap(kIblIrradianceUnit, iblIrradianceTex);
+        dev->bind_texture_cubemap(kIblPrefilteredUnit, iblPrefilteredTex);
+        dev->bind_texture(kIblBrdfLutUnit, backend.brdfLutTexture);
+        if (backend.dlIrradianceMapLoc >= 0) {
+          dev->set_uniform_int(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
+        }
+        if (backend.dlPrefilteredMapLoc >= 0) {
+          dev->set_uniform_int(backend.dlPrefilteredMapLoc,
+                               kIblPrefilteredUnit);
+        }
+        if (backend.dlBrdfLutLoc >= 0) {
+          dev->set_uniform_int(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
+        }
+        if (backend.dlPrefilteredMipsLoc >= 0) {
+          dev->set_uniform_float(
+              backend.dlPrefilteredMipsLoc,
+              static_cast<float>(backend.prefilteredEnvironmentMipLevels));
+        }
+      }
+
       if (backend.dlSsaoTextureLoc >= 0)
         dev->set_uniform_int(backend.dlSsaoTextureLoc, 5);
       if (backend.dlSsaoEnabledLoc >= 0)
@@ -1604,6 +1703,11 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->bind_texture(3, 0U);
       dev->bind_texture(4, 0U);
       dev->bind_texture(18, 0U);
+      if (dlIblEnabled) {
+        dev->bind_texture_cubemap(kIblIrradianceUnit, 0U);
+        dev->bind_texture_cubemap(kIblPrefilteredUnit, 0U);
+        dev->bind_texture(kIblBrdfLutUnit, 0U);
+      }
       if (ssaoEnabled) {
         dev->bind_texture(5, 0U);
       }
@@ -1618,16 +1722,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
 
     const SkyModel skyModel = selected_sky_model();
-    const std::uint32_t skyboxTexture = (skyModel == SkyModel::Cubemap)
-                                            ? active_skybox_gpu_texture(backend)
-                                            : 0U;
+    const std::uint32_t skyboxTexture = envSkyboxTexture;
     if (skyboxTexture != 0U) {
-      static_cast<void>(
-          ensure_prefiltered_environment(backend, dev, skyboxTexture,
-                                         environmentBakeSettings));
-      static_cast<void>(
-          ensure_irradiance_environment(backend, dev, skyboxTexture,
-                                        environmentBakeSettings));
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
       dev->bind_framebuffer(sceneFbo);
@@ -1686,6 +1782,7 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
       }
       upload_pbr_lighting_uniforms(backend, dev, lights);
+      apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
       upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
       upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
       bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
@@ -1769,6 +1866,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->enable_face_culling();
       dev->bind_texture(0, 0U);
       unbind_pbr_shadow_textures(dev);
+      unbind_pbr_ibl_textures(dev);
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
     }
@@ -1813,6 +1911,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
     }
     upload_pbr_lighting_uniforms(backend, dev, lights);
+    apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
     upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
     upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
     bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
@@ -1960,16 +2059,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     drawRange(0U, opaqueCount);
 
     const SkyModel skyModel = selected_sky_model();
-    const std::uint32_t skyboxTexture = (skyModel == SkyModel::Cubemap)
-                                            ? active_skybox_gpu_texture(backend)
-                                            : 0U;
+    const std::uint32_t skyboxTexture = envSkyboxTexture;
     if (skyboxTexture != 0U) {
-      static_cast<void>(
-          ensure_prefiltered_environment(backend, dev, skyboxTexture,
-                                         environmentBakeSettings));
-      static_cast<void>(
-          ensure_irradiance_environment(backend, dev, skyboxTexture,
-                                        environmentBakeSettings));
       dev->bind_framebuffer(sceneFbo);
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
@@ -1999,6 +2090,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
     dev->bind_texture(0, 0U);
     unbind_pbr_shadow_textures(dev);
+    unbind_pbr_ibl_textures(dev);
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
     gpu_profiler_end_pass(GpuPassId::Scene);

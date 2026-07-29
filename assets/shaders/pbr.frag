@@ -111,11 +111,41 @@ float geometry_smith(vec3 N, vec3 V, vec3 L, float roughness) {
 }
 
 /// Handles fresnel schlick.
+// IBL environment (skybox-derived irradiance, prefiltered specular, BRDF LUT).
+uniform int uIblEnabled;
+uniform samplerCube uIrradianceMap;
+uniform samplerCube uPrefilteredMap;
+uniform sampler2D uBrdfLut;
+uniform float uPrefilteredMips;
+
 vec3 fresnel_schlick(float cosTheta, vec3 F0) {
   return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 /// Handles cook torrance.
+// Fresnel with roughness attenuation for the ambient IBL terms.
+vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness) {
+  return F0 + (max(vec3(1.0 - roughness), F0) - F0) *
+              pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// Split-sum IBL ambient: irradiance-lit diffuse plus prefiltered specular
+// weighted by the BRDF integration LUT.
+vec3 ibl_ambient(vec3 N, vec3 V, vec3 albedo, float metallic,
+                 float roughness) {
+  vec3 F0 = mix(vec3(0.04), albedo, metallic);
+  float NdotV = max(dot(N, V), 0.0);
+  vec3 F = fresnel_schlick_roughness(NdotV, F0, roughness);
+  vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+  vec3 diffuse = texture(uIrradianceMap, N).rgb * albedo;
+  vec3 R = reflect(-V, N);
+  vec3 prefiltered =
+      textureLod(uPrefilteredMap, R,
+                 roughness * max(uPrefilteredMips - 1.0, 0.0)).rgb;
+  vec2 brdf = texture(uBrdfLut, vec2(NdotV, roughness)).rg;
+  return kD * diffuse + prefiltered * (F * brdf.x + brdf.y);
+}
+
 vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
                    float metallic, float roughness, vec3 F0) {
   vec3 H = normalize(V + L);
@@ -406,7 +436,9 @@ void main() {
           compute_spot_shadow(vWorldPos, i);
   }
 
-  vec3 ambient = vec3(0.03) * albedo;
+  vec3 ambient = (uIblEnabled != 0)
+      ? ibl_ambient(N, V, albedo, metallic, roughness)
+      : vec3(0.03) * albedo;
   vec3 color = ambient + Lo;
   float distanceFog = compute_distance_fog_factor(length(u_cameraPos - vWorldPos));
   float heightFog = compute_height_fog_factor(u_cameraPos, vWorldPos);
