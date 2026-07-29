@@ -5,6 +5,7 @@
 #include "engine/core/logging.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/scripting/scripting.h"
+#include "entity_script_bindings.h"
 #include "runtime_binding.h"
 
 #include <cstddef>
@@ -77,11 +78,13 @@ bool is_deferred_entity_current(runtime::World *world,
 bool can_apply_mutations_now() noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   return (binding.world != nullptr) && (binding.services != nullptr) &&
+         !in_end_play_dispatch() &&
          (binding.services->get_current_phase(binding.world) ==
           runtime::WorldPhase::Input);
 }
 
 /// Applies or queues entity destruction based on the current World phase.
+/// Immediate destroys fire on_end_play for the subtree first.
 bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr)) {
@@ -89,6 +92,7 @@ bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
   }
 
   if (can_apply_mutations_now()) {
+    dispatch_entity_subtree_end_play(binding.world, entity);
     return binding.services->destroy_entity_op(binding.world, entity.index);
   }
 
@@ -370,13 +374,15 @@ void flush_deferred_mutations() noexcept {
     return;
   }
 
+  // Applying a destroy runs on_end_play, which may queue new mutations;
+  // they append past the snapshot count and survive into the next flush.
   const std::size_t count = g_deferredMutationCount;
-  g_deferredMutationCount = 0U;
   for (std::size_t i = 0U; i < count; ++i) {
     const DeferredMutation &mutation = g_deferredMutations[i];
     switch (mutation.type) {
     case DeferredMutationType::DestroyEntity:
       if (is_deferred_entity_current(binding.world, mutation.entity)) {
+        dispatch_entity_subtree_end_play(binding.world, mutation.entity);
         static_cast<void>(
             binding.services->destroy_entity_op(binding.world,
                                                 mutation.entity.index));
@@ -472,6 +478,12 @@ void flush_deferred_mutations() noexcept {
     }
     }
   }
+
+  const std::size_t appended = g_deferredMutationCount - count;
+  for (std::size_t i = 0U; i < appended; ++i) {
+    g_deferredMutations[i] = g_deferredMutations[count + i];
+  }
+  g_deferredMutationCount = appended;
 }
 
 /// Clears queued deferred mutations without applying them.

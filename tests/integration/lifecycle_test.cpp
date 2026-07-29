@@ -261,6 +261,112 @@ bool test_full_lifecycle_sequence() {
   return true;
 }
 
+// Regression: the frame pipeline calls end_frame_phase inside the frame
+// graph and only reaches the EndPlay phase afterwards, so a deferred destroy
+// must survive end_frame_phase for EndPlay dispatch to ever see it.
+bool test_deferred_destroy_survives_end_frame() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (!world)
+    return false;
+
+  const Entity e1 = world->create_entity();
+  const Transform t{};
+  static_cast<void>(world->add_transform(e1, t));
+
+  world->begin_begin_play_phase();
+  world->mark_begin_play_done(e1);
+  world->end_begin_play_phase();
+
+  world->begin_update_phase();
+  if (!world->destroy_entity(e1)) {
+    std::fprintf(stderr, "FAIL: destroy_entity returned false\n");
+    return false;
+  }
+  world->begin_transform_phase();
+  world->begin_render_prep_phase();
+  world->begin_render_phase();
+  world->end_frame_phase();
+
+  if (!world->is_alive(e1)) {
+    std::fprintf(stderr,
+                 "FAIL: end_frame_phase must not flush pending destroys\n");
+    return false;
+  }
+  if (world->pending_destroy_count() != 1U) {
+    std::fprintf(stderr, "FAIL: expected 1 pending destroy, got %zu\n",
+                 world->pending_destroy_count());
+    return false;
+  }
+
+  std::size_t endPlayCount = 0U;
+  world->begin_end_play_phase();
+  world->for_each_pending_destroy(
+      [&endPlayCount](Entity) noexcept { ++endPlayCount; });
+  world->end_end_play_phase();
+
+  if (endPlayCount != 1U) {
+    std::fprintf(stderr, "FAIL: EndPlay should see 1 entity, got %zu\n",
+                 endPlayCount);
+    return false;
+  }
+  if (world->is_alive(e1) || (world->pending_destroy_count() != 0U)) {
+    std::fprintf(stderr, "FAIL: entity should be dead after EndPlay flush\n");
+    return false;
+  }
+
+  return true;
+}
+
+// Subtree iteration order feeds EndPlay dispatch: descendants first, root
+// last, and only alive members.
+bool test_subtree_member_iteration() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (!world)
+    return false;
+
+  const Entity parent = world->create_scene_object();
+  const Entity child = world->create_scene_object();
+  const Entity grandchild = world->create_scene_object();
+  const Entity unrelated = world->create_scene_object();
+  static_cast<void>(unrelated);
+
+  Transform childT{};
+  childT.parentId = world->persistent_id(parent);
+  static_cast<void>(world->add_transform(child, childT));
+  Transform grandT{};
+  grandT.parentId = world->persistent_id(child);
+  static_cast<void>(world->add_transform(grandchild, grandT));
+
+  Entity visited[4] = {};
+  std::size_t visitedCount = 0U;
+  world->for_each_subtree_member(
+      parent, [&visited, &visitedCount](Entity entity) noexcept {
+        if (visitedCount < 4U) {
+          visited[visitedCount] = entity;
+        }
+        ++visitedCount;
+      });
+
+  if (visitedCount != 3U) {
+    std::fprintf(stderr, "FAIL: expected 3 subtree members, got %zu\n",
+                 visitedCount);
+    return false;
+  }
+  if (visited[2] != parent) {
+    std::fprintf(stderr, "FAIL: root must be visited last\n");
+    return false;
+  }
+  const bool childrenFirst =
+      ((visited[0] == child) && (visited[1] == grandchild)) ||
+      ((visited[0] == grandchild) && (visited[1] == child));
+  if (!childrenFirst) {
+    std::fprintf(stderr, "FAIL: descendants must be visited before root\n");
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -275,6 +381,9 @@ int main() {
       {"lifecycle_tick", test_lifecycle_tick},
       {"lifecycle_end_play", test_lifecycle_end_play},
       {"full_lifecycle_sequence", test_full_lifecycle_sequence},
+      {"deferred_destroy_survives_end_frame",
+       test_deferred_destroy_survives_end_frame},
+      {"subtree_member_iteration", test_subtree_member_iteration},
   };
 
   int failures = 0;

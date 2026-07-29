@@ -48,6 +48,7 @@ core::Entity g_entityFaulted[kMaxFaultedEntities]{};
 EntitySavedState g_entitySavedState[kMaxFaultedEntities]{};
 char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
+int g_endPlayDispatchDepth = 0;
 
 /// Returns the file modification timestamp from the configured callback.
 std::int64_t file_mtime(const char *path) noexcept {
@@ -441,6 +442,26 @@ void dispatch_pending_entity_reloads() noexcept {
   }
 }
 
+/// Fires on_end_play for one entity when it has a script and began play.
+void dispatch_entity_end_play(runtime::World *world,
+                              runtime::Entity entity) noexcept {
+  if (!world->has_begun_play(entity)) {
+    return;
+  }
+  const auto *sc = world->get_script_component_ptr(entity);
+  if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+    return;
+  }
+  const int ref = get_or_load_entity_script_module(sc->scriptPath);
+  if (ref == LUA_NOREF) {
+    return;
+  }
+  ++g_endPlayDispatchDepth;
+  static_cast<void>(
+      call_module_function(ref, "on_end_play", "on_end", entity, false, 0.0F));
+  --g_endPlayDispatchDepth;
+}
+
 } // namespace
 
 void configure_entity_script_bindings(
@@ -509,22 +530,26 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   });
 }
 
+bool in_end_play_dispatch() noexcept { return g_endPlayDispatchDepth > 0; }
+
+void dispatch_entity_subtree_end_play(runtime::World *world,
+                                      runtime::Entity entity) noexcept {
+  if ((g_state == nullptr) || (world == nullptr)) {
+    return;
+  }
+  world->for_each_subtree_member(entity,
+                                 [world](runtime::Entity member) noexcept {
+                                   dispatch_entity_end_play(world, member);
+                                 });
+}
+
 void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
   }
 
   world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
-    const auto *sc = world->get_script_component_ptr(entity);
-    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
-      return;
-    }
-    const int ref = get_or_load_entity_script_module(sc->scriptPath);
-    if (ref == LUA_NOREF) {
-      return;
-    }
-    static_cast<void>(call_module_function(ref, "on_end_play", "on_end", entity,
-                                           false, 0.0F));
+    dispatch_entity_end_play(world, entity);
   });
 }
 

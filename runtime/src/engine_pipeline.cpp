@@ -1749,9 +1749,11 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
     runtime::dispatch_collision_callbacks(*world);
   }
 
-  if (isPlaying) {
+  if (isPlaying || (world->pending_destroy_count() > 0U)) {
     world->begin_end_play_phase();
-    scripting::dispatch_entity_scripts_end_play(world.get());
+    if (isPlaying) {
+      scripting::dispatch_entity_scripts_end_play(world.get());
+    }
     world->end_end_play_phase();
   }
 

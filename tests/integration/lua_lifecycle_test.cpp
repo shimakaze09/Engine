@@ -110,6 +110,14 @@ bool add_transform(engine::runtime::World *w, std::uint32_t idx,
   return w->add_transform(e, t);
 }
 
+bool add_script_component(engine::runtime::World *w, std::uint32_t idx,
+                          const engine::runtime::ScriptComponent &sc) noexcept {
+  if (w == nullptr) {
+    return false;
+  }
+  return w->add_script_component(w->find_entity_by_index(idx), sc);
+}
+
 std::uint32_t get_entity_count(engine::runtime::World *w) noexcept {
   return (w != nullptr) ? static_cast<std::uint32_t>(w->alive_entity_count())
                         : 0U;
@@ -138,6 +146,7 @@ engine::scripting::RuntimeServices build_test_services() noexcept {
   svc.create_scene_object_op = &create_scene_object;
   svc.destroy_entity_op = &destroy_entity;
   svc.add_transform_op = &add_transform;
+  svc.add_script_component_op = &add_script_component;
   svc.get_entity_count = &get_entity_count;
   svc.get_transform_read_ptr = &get_transform_read_ptr;
   svc.get_transform_op = &get_transform;
@@ -482,24 +491,68 @@ int main() {
   // Create the script: uses on_begin_play / on_tick / on_end_play.
   // The script records counters in global variables which we read via
   // call_script_function after the test.
-  const char *script = "local M = {}\n"
-                       "local begin_play_count = 0\n"
-                       "local tick_count = 0\n"
-                       "local end_play_count = 0\n"
-                       "\n"
-                       "function M.on_begin_play(self)\n"
-                       "    begin_play_count = begin_play_count + 1\n"
-                       "end\n"
-                       "\n"
-                       "function M.on_tick(self, dt)\n"
-                       "    tick_count = tick_count + 1\n"
-                       "end\n"
-                       "\n"
-                       "function M.on_end_play(self)\n"
-                       "    end_play_count = end_play_count + 1\n"
-                       "end\n"
-                       "\n"
-                       "return M\n";
+  const char *script =
+      "local M = {}\n"
+      "local begin_play_count = 0\n"
+      "local tick_count = 0\n"
+      "local end_play_count = 0\n"
+      "\n"
+      "function M.on_begin_play(self)\n"
+      "    begin_play_count = begin_play_count + 1\n"
+      "end\n"
+      "\n"
+      "function M.on_tick(self, dt)\n"
+      "    tick_count = tick_count + 1\n"
+      "end\n"
+      "\n"
+      "function M.on_end_play(self)\n"
+      "    end_play_count = end_play_count + 1\n"
+      "end\n"
+      "\n"
+      "function spawn_scripted_pair()\n"
+      "    destroy_root = engine.spawn_entity()\n"
+      "    destroy_kid = engine.spawn_entity()\n"
+      "    if destroy_root == nil or destroy_kid == nil then\n"
+      "        error('spawn failed')\n"
+      "    end\n"
+      "    if not engine.set_parent(destroy_kid, destroy_root) then\n"
+      "        error('set_parent failed')\n"
+      "    end\n"
+      "    if not engine.add_script_component(destroy_root,\n"
+      "                                       'lua_lifecycle_test.lua') then\n"
+      "        error('root script failed')\n"
+      "    end\n"
+      "    if not engine.add_script_component(destroy_kid,\n"
+      "                                       'lua_lifecycle_test.lua') then\n"
+      "        error('kid script failed')\n"
+      "    end\n"
+      "end\n"
+      "\n"
+      "function destroy_scripted_root()\n"
+      "    if not engine.destroy_entity(destroy_root) then\n"
+      "        error('destroy failed')\n"
+      "    end\n"
+      "    if engine.is_alive(destroy_root) then\n"
+      "        error('root alive after destroy')\n"
+      "    end\n"
+      "    if engine.is_alive(destroy_kid) then\n"
+      "        error('kid alive after destroy')\n"
+      "    end\n"
+      "end\n"
+      "\n"
+      "function verify_end_play_count_one()\n"
+      "    if end_play_count ~= 1 then\n"
+      "        error('end_play_count ' .. tostring(end_play_count))\n"
+      "    end\n"
+      "end\n"
+      "\n"
+      "function verify_end_play_count_three()\n"
+      "    if end_play_count ~= 3 then\n"
+      "        error('end_play_count ' .. tostring(end_play_count))\n"
+      "    end\n"
+      "end\n"
+      "\n"
+      "return M\n";
 
   if (!write_script_file(script)) {
     std::fprintf(stderr, "FAIL: write script file\n");
@@ -577,26 +630,57 @@ int main() {
     std::printf("PASS\n");
   }
 
-  // --- Test 3: on_end_play fires on destroy ---
+  // --- Test 3: on_end_play fires for deferred destroys at EndPlay ---
   {
-    std::printf("  %-40s ", "on_end_play fires before destroy");
+    std::printf("  %-40s ", "on_end_play fires for deferred destroy");
 
-    // Queue the entity for destruction (deferred).
+    // Destroy during Simulation so the entity queues, then walk the frame
+    // phases exactly as the pipeline does: the queue must survive
+    // end_frame_phase so EndPlay dispatch sees it.
+    world->begin_update_phase();
     world->for_each_alive([&world](engine::runtime::Entity entity) noexcept {
       static_cast<void>(world->destroy_entity(entity));
     });
+    world->begin_transform_phase();
+    world->begin_render_prep_phase();
+    world->begin_render_phase();
+    world->end_frame_phase();
 
-    // Dispatch EndPlay.
     world->begin_end_play_phase();
     engine::scripting::dispatch_entity_scripts_end_play(world.get());
     world->end_end_play_phase();
 
-    // Entity should now be dead.
-    if (world->alive_entity_count() == 0U) {
+    if ((world->alive_entity_count() == 0U) &&
+        engine::scripting::call_script_function("verify_end_play_count_one")) {
       std::printf("PASS\n");
     } else {
-      std::printf("FAIL (entity still alive: %zu)\n",
-                  world->alive_entity_count());
+      std::printf("FAIL (alive: %zu)\n", world->alive_entity_count());
+      ++failures;
+    }
+  }
+
+  // --- Test 3b: script-initiated destroy fires on_end_play for the subtree ---
+  {
+    std::printf("  %-40s ", "on_end_play fires for script destroy");
+
+    const std::size_t aliveBefore = world->alive_entity_count();
+    bool ok = engine::scripting::call_script_function("spawn_scripted_pair");
+
+    if (ok) {
+      world->begin_begin_play_phase();
+      engine::scripting::dispatch_entity_scripts_begin_play(world.get());
+      world->end_begin_play_phase();
+      ok = engine::scripting::call_script_function("destroy_scripted_root");
+    }
+
+    ok = ok &&
+         engine::scripting::call_script_function(
+             "verify_end_play_count_three") &&
+         (world->alive_entity_count() == aliveBefore);
+    if (ok) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL (alive: %zu)\n", world->alive_entity_count());
       ++failures;
     }
   }

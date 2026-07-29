@@ -624,6 +624,12 @@ public:
   // Mark entity as having received its begin_play callback.
   void mark_begin_play_done(Entity entity) noexcept;
 
+  // Whether the entity has received its begin_play callback; gates EndPlay
+  // dispatch so callbacks stay paired.
+  bool has_begun_play(Entity entity) const noexcept {
+    return is_valid_entity(entity) && m_entityBeginPlayFired[entity.index];
+  }
+
   // Number of alive entities that have not yet received begin_play; lets the
   // frame loop skip the BeginPlay phase entirely on quiet frames.
   std::size_t begin_play_pending_count() const noexcept {
@@ -647,6 +653,32 @@ public:
         fn(Entity{index, m_entityGenerations[index]});
       }
     }
+  }
+
+  // Number of entities queued for deferred destruction; lets the frame loop
+  // skip the EndPlay phase on frames with nothing queued.
+  std::size_t pending_destroy_count() const noexcept {
+    return m_pendingDestroyCount;
+  }
+
+  // Invoke fn(Entity) for every alive member of the entity's transform
+  // subtree — descendants first, the root last, matching deferred-destroy
+  // queue order. Must not create or destroy entities while iterating.
+  template <typename Fn> void for_each_subtree_member(Entity root,
+                                                      Fn &&fn) noexcept {
+    if (!is_valid_entity(root)) {
+      return;
+    }
+    if (mark_hierarchy_descendants(root) > 0U) {
+      const std::uint32_t upperBound = m_nextEntityIndex;
+      for (std::uint32_t index = 1U; index < upperBound; ++index) {
+        if (m_cascadeMarks[index] && (index != root.index) &&
+            m_entityAlive[index]) {
+          fn(Entity{index, m_entityGenerations[index]});
+        }
+      }
+    }
+    fn(root);
   }
 
   // Iterate entities pending deferred destruction (read-only snapshot).
