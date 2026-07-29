@@ -8,7 +8,8 @@ struct lua_State;
 
 namespace engine::scripting {
 
-using CoroutineLogLuaErrorFn = void (*)(const char *context) noexcept;
+using CoroutineLogLuaErrorFn = void (*)(lua_State *state,
+                                        const char *context) noexcept;
 using CoroutineRefreshHookFn = void (*)() noexcept;
 
 /// Lua binding: Lua engine.wait(seconds).
