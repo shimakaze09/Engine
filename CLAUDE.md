@@ -8,7 +8,7 @@ module structure, build commands, test layout, or roadmap status.
 
 ## What this is
 
-C++20 game engine built from scratch: SDL2 window/input, OpenGL renderer
+C++23 game engine built from scratch: SDL2 window/input, OpenGL renderer
 (deferred+forward, PBR/IBL, GLSL 330 core), fixed-capacity ECS (65,536
 entities, double-buffered transforms), CPU-deterministic physics, Lua 5.4
 scripting, miniaudio, ImGui editor. Goal: production level. Game authors work
@@ -21,8 +21,12 @@ SDL2 2.30.11, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
 
 ## Hard rules (enforced)
 
-- C++20 only. No exceptions, no RTTI, no `dynamic_cast`/`typeid`
+- C++23 only. No exceptions, no RTTI, no `dynamic_cast`/`typeid`
   (`/EHs-c- /GR-`, `_HAS_EXCEPTIONS=0`; `/W4 /WX` or `-Werror`).
+  Language features must compile on every CI lane (AppleClang is the
+  laggard — no deducing `this` until its Xcode catches up). Error paths
+  prefer `std::expected<T, E>` in new APIs; never call `.value()` — with
+  exceptions disabled it aborts. Use `has_value()`/`operator*`/`error()`.
 - Engine APIs `noexcept`; explicit return values + logged failure paths.
   No silent failure; no process termination for recoverable errors.
 - No heap allocation on hot paths (ECS iteration, transform propagation,

@@ -94,7 +94,7 @@ if(APPLE)
     add_link_options(-Wl,-no_warn_duplicate_libraries)
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -338,7 +338,7 @@ target_include_directories(engine_imgui
     ${imguizmo_SOURCE_DIR}
 )
 
-target_compile_features(engine_imgui PUBLIC cxx_std_20)
+target_compile_features(engine_imgui PUBLIC cxx_std_23)
 
 target_link_libraries(engine_imgui
     PUBLIC
