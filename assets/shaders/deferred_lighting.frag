@@ -228,7 +228,10 @@ float combine_fog_factors(float distanceFog, float heightFog) {
 
 // PCF shadow sampling with 3x3 kernel.
 float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
-    if (projCoords.z > 1.0) return 1.0;
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
 
     float shadow = 0.0;
     vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
