@@ -204,13 +204,17 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
 
   // Extend the near plane to catch shadow casters behind the frustum.
   constexpr float kShadowNearExtend = 50.0F;
-  minZ -= kShadowNearExtend;
 
   const float minX = -radius;
   const float maxX = radius;
   const float minY = -radius;
   const float maxY = radius;
-  const math::Mat4 lightProj = math::ortho(minX, maxX, minY, maxY, minZ, maxZ);
+  // ortho() follows the glOrtho convention: view-space z = -nearZ maps to the
+  // near plane. Light-space corners sit at negative z, so near/far are the
+  // negated max/min corner depths — passing minZ/maxZ raw puts the whole
+  // cascade outside the clip volume.
+  const math::Mat4 lightProj = math::ortho(
+      minX, maxX, minY, maxY, -maxZ - kShadowNearExtend, -minZ);
   return math::mul(lightProj, lightView);
 }
 
