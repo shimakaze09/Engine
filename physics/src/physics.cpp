@@ -2269,6 +2269,22 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     }
   }
 
+  // Capture owner velocities into the CCD snapshot LAST: the next step's CCD
+  // consumes them instead of live RigidBody reads (which race with parallel
+  // chunk integration), so they must include this step's solver impulses.
+  if (physicsCtx.shapeStore != nullptr) {
+    PhysicsShapeStore &store = *physicsCtx.shapeStore;
+    for (std::size_t i = 0U; i < colliderCount; ++i) {
+      const RigidBody *ownerBody =
+          (bodyOwners[i] != kInvalidEntity)
+              ? world.get_rigid_body_ptr(bodyOwners[i])
+              : nullptr;
+      store.ccdColliderVelocities[i] = (ownerBody != nullptr)
+                                           ? ownerBody->velocity
+                                           : math::Vec3(0.0F, 0.0F, 0.0F);
+    }
+  }
+
   return true;
 }
 

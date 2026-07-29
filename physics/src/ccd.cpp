@@ -233,13 +233,19 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     // Reject on relative velocity BEFORE building world geometry: geometry
     // construction (transform composition + matrix inverse) is by far the
     // most expensive part of a candidate visit, and bodies moving together
-    // can never produce a sweep hit.
-    const RigidBody *otherBody = (otherOwner != kInvalidEntity)
-                                     ? world.get_rigid_body_ptr(otherOwner)
-                                     : nullptr;
-    const math::Vec3 otherVel = (otherBody != nullptr)
-                                    ? otherBody->velocity
-                                    : math::Vec3(0.0F, 0.0F, 0.0F);
+    // can never produce a sweep hit. The velocity comes from the resolve
+    // snapshot (captured post-solve): reading live RigidBody::velocity here
+    // races with the other chunk jobs integrating it.
+    math::Vec3 otherVel(0.0F, 0.0F, 0.0F);
+    if (snapshotUsable &&
+        (snapshotStore->ccdColliderEntities[i] == entities[i])) {
+      otherVel = snapshotStore->ccdColliderVelocities[i];
+    } else if (otherOwner != kInvalidEntity) {
+      const RigidBody *otherBody = world.get_rigid_body_ptr(otherOwner);
+      if (otherBody != nullptr) {
+        otherVel = otherBody->velocity;
+      }
+    }
     const math::Vec3 relVel = math::sub(body.velocity, otherVel);
     const float relSpeed = math::length(relVel);
     if (relSpeed < 1e-6F) {
