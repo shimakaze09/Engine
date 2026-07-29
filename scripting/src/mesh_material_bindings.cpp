@@ -50,8 +50,8 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
     return 1;
   }
 
-  const lua_Integer meshId = lua_tointeger(state, 2);
-  if (meshId <= 0) {
+  const auto meshId = static_cast<std::uint64_t>(lua_tointeger(state, 2));
+  if (meshId == 0ULL) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -63,7 +63,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
     component = *existing;
   }
 
-  component.meshAssetId = static_cast<std::uint64_t>(meshId);
+  component.meshAssetId = meshId;
   const bool ok = apply_or_queue_mesh_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
