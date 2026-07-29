@@ -20,6 +20,10 @@ engine_add_module_library(engine_renderer
     src/command_buffer_post_resources.cpp
     src/command_buffer_sky.cpp
     src/command_buffer.cpp
+    src/command_buffer_init_core.cpp
+    src/command_buffer_init_environment.cpp
+    src/command_buffer_init_lighting.cpp
+    src/command_buffer_init_post.cpp
     src/gpu_profiler.cpp
     src/light_culling.cpp
     src/lru_cache.cpp
