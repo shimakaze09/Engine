@@ -36,7 +36,6 @@ math::Vec3 camera_right(float yaw) noexcept {
 void update_debug_camera(DebugCamera &camera, float dt, bool forward, bool back,
                          bool left, bool right, bool up, bool down, bool shift,
                          int mouseDeltaX, int mouseDeltaY) noexcept {
-  // Mouse look
   camera.yaw -= static_cast<float>(mouseDeltaX) * camera.lookSensitivity;
   camera.pitch -= static_cast<float>(mouseDeltaY) * camera.lookSensitivity;
   if (camera.pitch < DebugCamera::kMinPitch) {
@@ -46,7 +45,6 @@ void update_debug_camera(DebugCamera &camera, float dt, bool forward, bool back,
     camera.pitch = DebugCamera::kMaxPitch;
   }
 
-  // Movement
   float speed = camera.moveSpeed * dt;
   if (shift) {
     speed *= kSpeedBoost;
@@ -88,7 +86,6 @@ renderer::CameraState debug_camera_state(const DebugCamera &camera) noexcept {
 
 void draw_camera_frustum_wireframe(const renderer::CameraState &frozenCamera,
                                    float aspectRatio) noexcept {
-  // Compute view and projection matrices, then extract frustum corners.
   const math::Mat4 view = math::look_at(frozenCamera.position,
                                         frozenCamera.target, frozenCamera.up);
   const math::Mat4 proj =
@@ -96,10 +93,9 @@ void draw_camera_frustum_wireframe(const renderer::CameraState &frozenCamera,
                         frozenCamera.nearPlane, frozenCamera.farPlane);
   const math::Mat4 vp = math::mul(proj, view);
 
-  // Invert VP to unproject NDC corners.
   math::Mat4 invVP{};
   if (!math::inverse(vp, &invVP)) {
-    return; // Degenerate matrix
+    return;
   }
 
   // NDC corners: 8 corners of the unit cube [-1,1]^3
@@ -126,25 +122,22 @@ void draw_camera_frustum_wireframe(const renderer::CameraState &frozenCamera,
     corners[i] = math::Vec3(world.x * invW, world.y * invW, world.z * invW);
   }
 
-  const core::DebugColor color{1.0F, 1.0F, 0.0F, 1.0F}; // yellow
+  const core::DebugColor color{1.0F, 1.0F, 0.0F, 1.0F};
 
   auto toDbg = [](const math::Vec3 &v) -> core::DebugVec3 {
     return {v.x, v.y, v.z};
   };
 
-  // Near quad
   core::debug_draw_line(toDbg(corners[0]), toDbg(corners[1]), color);
   core::debug_draw_line(toDbg(corners[1]), toDbg(corners[2]), color);
   core::debug_draw_line(toDbg(corners[2]), toDbg(corners[3]), color);
   core::debug_draw_line(toDbg(corners[3]), toDbg(corners[0]), color);
 
-  // Far quad
   core::debug_draw_line(toDbg(corners[4]), toDbg(corners[5]), color);
   core::debug_draw_line(toDbg(corners[5]), toDbg(corners[6]), color);
   core::debug_draw_line(toDbg(corners[6]), toDbg(corners[7]), color);
   core::debug_draw_line(toDbg(corners[7]), toDbg(corners[4]), color);
 
-  // Connecting edges
   core::debug_draw_line(toDbg(corners[0]), toDbg(corners[4]), color);
   core::debug_draw_line(toDbg(corners[1]), toDbg(corners[5]), color);
   core::debug_draw_line(toDbg(corners[2]), toDbg(corners[6]), color);

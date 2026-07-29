@@ -16,7 +16,6 @@ void CommandHistory::execute(EditorCommand *cmd) noexcept {
   std::unique_ptr<EditorCommand> ownedCommand(cmd);
   ownedCommand->execute();
 
-  // Delete redo entries (entries beyond m_top).
   for (int i = m_top + 1; i < m_count; ++i) {
     m_history[static_cast<std::size_t>(i)].reset();
   }
@@ -27,13 +26,11 @@ void CommandHistory::execute(EditorCommand *cmd) noexcept {
     ++m_count;
     m_top = m_count - 1;
   } else {
-    // At capacity: discard oldest entry, shift, insert at top.
-    for (std::size_t i = 0U; i < kMaxHistory - 1U; ++i) {
+      for (std::size_t i = 0U; i < kMaxHistory - 1U; ++i) {
       m_history[i] = std::move(m_history[i + 1U]);
     }
     m_history[kMaxHistory - 1U] = std::move(ownedCommand);
     m_top = static_cast<int>(kMaxHistory) - 1;
-    // m_count stays kMaxHistory
   }
 }
 

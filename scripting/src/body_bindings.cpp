@@ -151,6 +151,9 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   return 1;
 }
 
+// engine.set_acceleration(entity, x, y, z) → bool
+// Accepts total world acceleration and converts it to the runtime's
+// additive term used by physics integration (gravity is subtracted).
 int lua_engine_set_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 acceleration{};
@@ -167,8 +170,6 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  // set_acceleration accepts total world acceleration; convert to the
-  // runtime's additive term used by physics integration.
   rigidBody.acceleration =
       math::clamp(math::sub(acceleration, kDefaultGravity),
                   -kMaxScriptAcceleration, kMaxScriptAcceleration);
@@ -383,6 +384,9 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
 
 // --- Transform hierarchy: parent/children ---
 
+// engine.set_parent(child, parent|nil) → bool
+// Reparenting must not steal movement authority from physics or scripts,
+// so the transform write releases authority to None.
 int lua_engine_set_parent(lua_State *state) noexcept {
   runtime::Entity child{};
   if (!read_entity(state, 1, &child)) {
@@ -414,7 +418,6 @@ int lua_engine_set_parent(lua_State *state) noexcept {
   }
   transform.parentId = parentId;
 
-  // Reparenting must not steal movement authority from physics or scripts.
   const bool ok = apply_or_queue_transform(child, transform, false,
                                            runtime::MovementAuthority::None);
   lua_pushboolean(state, ok ? 1 : 0);

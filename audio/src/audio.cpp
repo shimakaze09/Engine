@@ -162,12 +162,10 @@ void shutdown_audio() noexcept {
   core::log_message(core::LogLevel::Info, "audio", "audio shut down");
 }
 
-/// Advances this system for the current frame or tick for audio.
-void update_audio() noexcept {
-  // miniaudio's default device-driven mode handles playback on its own
-  // thread.  Nothing to pump here, but the function is kept as a hook for
-  // future per-frame work (spatial position updates, etc.).
-}
+/// Per-frame audio hook. miniaudio's device-driven mode plays back on
+/// its own thread, so nothing needs pumping yet; the hook exists for
+/// future per-frame work (spatial position updates, etc.).
+void update_audio() noexcept {}
 
 /// Loads the requested resource for sound.
 SoundHandle load_sound(const char *virtualPath) noexcept {
@@ -175,7 +173,6 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     return kInvalidSound;
   }
 
-  // Find a free slot.
   std::size_t slot = kMaxSounds;
   for (std::size_t i = 0U; i < kMaxSounds; ++i) {
     if (!g_audio.sounds[i].active) {
@@ -189,7 +186,6 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     return kInvalidSound;
   }
 
-  // Read the file through VFS.
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
   if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
@@ -201,7 +197,6 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   SoundEntry &entry = g_audio.sounds[slot];
   entry.fileData = fileData;
 
-  // Decode from memory.
   ma_decoder_config decoderConfig = ma_decoder_config_init_default();
   ma_result res = ma_decoder_init_memory(
       fileData, fileSize, &decoderConfig, &entry.decoder);
@@ -213,7 +208,6 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     return kInvalidSound;
   }
 
-  // Create sound from data source.
   res = ma_sound_init_from_data_source(
       &g_audio.engine, &entry.decoder, 0U, nullptr, &entry.sound);
   if (res != MA_SUCCESS) {
@@ -253,7 +247,6 @@ bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   ma_sound_set_pitch(&entry->sound, params.pitch);
   ma_sound_set_looping(&entry->sound, params.loop ? MA_TRUE : MA_FALSE);
 
-  // Rewind to start before playing.
   ma_sound_seek_to_pcm_frame(&entry->sound, 0);
 
   const ma_result res = ma_sound_start(&entry->sound);

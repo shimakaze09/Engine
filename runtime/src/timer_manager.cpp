@@ -251,7 +251,7 @@ std::size_t TimerManager::restore(const TimerSnapshot *in,
         m_timers[s].interval = in[i].intervalSeconds;
         m_timers[s].repeat = in[i].repeat;
         m_timers[s].active = true;
-        m_timers[s].callback = nullptr; // Caller must re-wire.
+        m_timers[s].callback = nullptr;
         m_timers[s].userData = nullptr;
         ++restored;
         break;

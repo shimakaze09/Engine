@@ -141,7 +141,7 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
     std::array<core::MemTagSnapshot, core::kMemTagCount> snaps{};
     const std::size_t count =
         core::mem_tracker_snapshot(snaps.data(), snaps.size());
-    float maxBytes = 1.0F; // avoid division by zero
+    float maxBytes = 1.0F;
     for (std::size_t i = 0U; i < count; ++i) {
       const float bytes = static_cast<float>(
           snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);

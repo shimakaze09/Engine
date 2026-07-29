@@ -49,7 +49,9 @@ bool bootstrap() noexcept {
   return bootstrap(config);
 }
 
-/// Boots the engine with explicit app/runtime configuration.
+/// Boots the engine with explicit app/runtime configuration. The
+/// configured project asset root is mounted before any runtime or
+/// editor path resolves through the VFS.
 bool bootstrap(const EngineConfig &config) noexcept {
   g_activeConfig = config;
 
@@ -67,8 +69,6 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   static_cast<void>(physics::register_physics_cvars());
 
-  // Mount the configured project asset root before runtime/editor paths are
-  // resolved through the VFS.
   if (!core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to mount configured asset root");
@@ -106,7 +106,6 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
 
-  // Start DAP debugger server if CVar port is set.
   {
     const int dapPort = core::cvar_get_int("debug_dap_port");
     if (dapPort > 0) {

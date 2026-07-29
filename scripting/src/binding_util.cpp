@@ -46,7 +46,6 @@ void log_lua_error(lua_State *state, const char *context) noexcept {
     message = "unknown lua error";
   }
 
-  // Attach traceback so logs include script file and line diagnostics.
   luaL_traceback(state, state, message, 1);
   const char *trace = lua_tostring(state, -1);
   if (trace == nullptr) {
