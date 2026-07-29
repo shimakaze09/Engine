@@ -145,7 +145,7 @@ void try_recognize_tap(const ActiveTouch &touch) noexcept {
     return;
   }
   const std::uint32_t frameDuration = g_frameCounter - timing->framesBegan;
-  // Approximate time: assume 60fps → 0.3s ≈ 18 frames.
+  // Tap window approximated in frames: 0.3 s at 60 fps.
   constexpr std::uint32_t kMaxTapFrames = 18U;
 
   const float dist = distance(touch.startX, touch.startY, touch.x, touch.y);
@@ -196,7 +196,6 @@ void try_recognize_swipe(const ActiveTouch &touch) noexcept {
 
 /// Advances this system for the current frame or tick for two finger gestures.
 void update_two_finger_gestures() noexcept {
-  // Find the first two active touches.
   const ActiveTouch *t1 = nullptr;
   const ActiveTouch *t2 = nullptr;
   for (const auto &t : g_touches) {
@@ -220,7 +219,6 @@ void update_two_finger_gestures() noexcept {
   const float ang = angle_between(t1->x, t1->y, t2->x, t2->y);
 
   if (g_twoFingerTracking) {
-    // Pinch.
     const float distDelta = dist - g_prevTwoFingerDist;
     if ((distDelta > kPinchMinDelta) || (distDelta < -kPinchMinDelta)) {
       GestureEvent ge{};
@@ -232,7 +230,6 @@ void update_two_finger_gestures() noexcept {
       fire_gesture_callbacks(ge);
     }
 
-    // Rotate.
     float angleDelta = ang - g_prevTwoFingerAngle;
     constexpr float kPi = 3.14159265358979323846F;
     if (angleDelta > kPi) {
@@ -320,7 +317,6 @@ void touch_process_event(const void *nativeEvent) noexcept {
       slot->active = true;
     }
 
-    // Record timing for gesture recognition.
     TouchTiming *timing = find_timing(fingerId);
     if (timing == nullptr) {
       for (auto &candidate : g_touchTimings) {
@@ -344,7 +340,6 @@ void touch_process_event(const void *nativeEvent) noexcept {
     te.phase = TouchPhase::Began;
     fire_touch_callbacks(te);
 
-    // Mouse emulation: first finger acts as mouse.
     if (g_mouseEmulation && (slot == &g_touches[0])) {
       SDL_Event fakeEvent{};
       fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
@@ -374,7 +369,6 @@ void touch_process_event(const void *nativeEvent) noexcept {
     te.phase = TouchPhase::Moved;
     fire_touch_callbacks(te);
 
-    // Mouse emulation.
     if (g_mouseEmulation && (touch == &g_touches[0])) {
       SDL_Event fakeEvent{};
       fakeEvent.type = SDL_EVENT_MOUSE_MOTION;
@@ -385,7 +379,6 @@ void touch_process_event(const void *nativeEvent) noexcept {
       input_process_event(&fakeEvent);
     }
 
-    // Update two-finger gestures on move.
     update_two_finger_gestures();
     break;
   }
@@ -398,14 +391,12 @@ void touch_process_event(const void *nativeEvent) noexcept {
       touch->y = event->tfinger.y;
       touch->phase = TouchPhase::Ended;
 
-      // Try gesture recognition before deactivating.
       try_recognize_tap(*touch);
       try_recognize_swipe(*touch);
 
       touch->active = false;
     }
 
-    // Clean up timing.
     TouchTiming *timing = find_timing(fingerId);
     if (timing != nullptr) {
       timing->active = false;
@@ -419,7 +410,6 @@ void touch_process_event(const void *nativeEvent) noexcept {
     te.phase = TouchPhase::Ended;
     fire_touch_callbacks(te);
 
-    // Mouse emulation.
     if (g_mouseEmulation && (touch == &g_touches[0])) {
       SDL_Event fakeEvent{};
       fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_UP;
@@ -427,7 +417,6 @@ void touch_process_event(const void *nativeEvent) noexcept {
       input_process_event(&fakeEvent);
     }
 
-    // Reset two-finger tracking if we lose a finger.
     std::uint32_t activeCount = 0;
     for (const auto &t : g_touches) {
       if (t.active) {

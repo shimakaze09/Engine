@@ -186,7 +186,6 @@ int tokenize(char *lineBuf, const char *const **outArgs, const char **argPtrs,
   int count = 0;
   char *p = lineBuf;
   while ((*p != '\0') && (count < maxArgs)) {
-    // skip whitespace
     while ((*p == ' ') || (*p == '\t')) {
       ++p;
     }
@@ -194,7 +193,6 @@ int tokenize(char *lineBuf, const char *const **outArgs, const char **argPtrs,
       break;
     }
     argPtrs[count++] = p;
-    // advance to end of token
     while ((*p != ' ') && (*p != '\t') && (*p != '\0')) {
       ++p;
     }
@@ -223,7 +221,6 @@ bool initialize_console() noexcept {
   g_outputCount = 0U;
   g_initialized = true;
 
-  // register built-ins
   static_cast<void>(register_command_unlocked(
       "help", builtin_help, nullptr, "List all registered commands"));
   static_cast<void>(register_command_unlocked(
@@ -256,7 +253,6 @@ bool console_execute(const char *line) noexcept {
     return false;
   }
 
-  // Copy into mutable buffer for tokenization
   char lineBuf[kMaxInputLen] = {};
   std::snprintf(lineBuf, kMaxInputLen - 1U + 1U, "%s", line);
 
@@ -267,7 +263,6 @@ bool console_execute(const char *line) noexcept {
     return false;
   }
 
-  // Echo the command
   char echo[kMaxLineLen] = {};
   std::snprintf(echo, sizeof(echo), "> %s", line);
   console_print(echo);

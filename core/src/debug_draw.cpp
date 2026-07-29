@@ -106,8 +106,8 @@ void debug_draw_text(DebugVec3 position, const char *text, DebugColor color,
   t.lifeFrames = (lifeFrames > 0U) ? lifeFrames : 1U;
 }
 
+/// Ages every entry one frame and compacts the expired ones.
 void debug_draw_tick() noexcept {
-  // Decrement lifetimes
   for (std::size_t i = 0U; i < g_lines.count; ++i) {
     if (g_lines.entries[i].lifeFrames > 0U) {
       --g_lines.entries[i].lifeFrames;
@@ -123,7 +123,6 @@ void debug_draw_tick() noexcept {
       --g_texts.entries[i].lifeFrames;
     }
   }
-  // Remove expired
   compact(g_lines.entries, g_lines.count);
   compact(g_spheres.entries, g_spheres.count);
   compact(g_texts.entries, g_texts.count);

@@ -52,11 +52,9 @@ TypedSlot *find_typed_slot(EventTypeId typeId) noexcept {
 
 /// Finds an existing typed slot or creates one when capacity allows.
 TypedSlot *find_or_create_typed_slot(EventTypeId typeId) noexcept {
-  // Try to find existing.
   if (auto *slot = find_typed_slot(typeId)) {
     return slot;
   }
-  // Allocate new.
   for (auto &slot : g_typedSlots) {
     if (!slot.active) {
       slot.typeId = typeId;
@@ -210,7 +208,6 @@ bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
   for (std::size_t i = 0U; i < slot->subscriberCount; ++i) {
     if ((slot->subscribers[i].handler == handler) &&
         (slot->subscribers[i].userData == userData)) {
-      // Swap with last and shrink.
       slot->subscribers[i] = slot->subscribers[slot->subscriberCount - 1U];
       slot->subscribers[slot->subscriberCount - 1U] = TypedSubscriber{};
       --slot->subscriberCount;
@@ -220,7 +217,8 @@ bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
   return false;
 }
 
-/// Emits an event or message to subscribers for raw.
+/// Emits an event to the type's subscribers; the subscriber list is
+/// snapshotted first so subscribe/unsubscribe during emit is safe.
 void emit_raw(EventTypeId typeId, const void *eventData) noexcept {
   EmitDepthScope emitDepthScope{};
   static_cast<void>(emitDepthScope);
@@ -229,7 +227,6 @@ void emit_raw(EventTypeId typeId, const void *eventData) noexcept {
   if (slot == nullptr) {
     return;
   }
-  // Snapshot subscribers so subscribe/unsubscribe during emit is safe.
   std::array<TypedSubscriber, kMaxSubscribersPerType> subscribersSnapshot{};
   const std::size_t count =
       (slot->subscriberCount <= subscribersSnapshot.size())
