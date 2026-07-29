@@ -79,35 +79,26 @@ void extract_frustum_corners(const math::Mat4 &invViewProj,
 
 } // namespace
 
+/// Builds the light-space matrix for one cascade: the camera frustum's
+/// corners are interpolated to the [cascadeNear, cascadeFar] range (near
+/// and far recovered from the projection matrix), a bounding sphere fixes
+/// the X/Y extent for stable texel density, and the light-space center is
+/// snapped to texel steps so sub-texel camera motion does not move the
+/// shadow projection.
 math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
                                   const math::Vec3 &lightDir, float cascadeNear,
                                   float cascadeFar,
                                   int shadowMapSize) noexcept {
-  // Build a sub-frustum projection that covers [cascadeNear, cascadeFar].
-  // We modify the projection matrix to clip to the cascade range by
-  // interpolating the frustum corners between near and far.
   const math::Mat4 viewProj = math::mul(projMatrix, viewMatrix);
   math::Mat4 invViewProj{};
   if (!math::inverse(viewProj, &invViewProj)) {
     return math::Mat4{};
   }
 
-  // Get full frustum corners and interpolate to cascade range.
   math::Vec3 fullCorners[8]{};
   extract_frustum_corners(invViewProj, fullCorners);
 
-  // Compute cascade sub-frustum corners by lerp between near/far planes.
-  // Near plane corners: fullCorners[0..3], Far plane: fullCorners[4..7].
-  // We need to compute sub-frustum near/far as ratio of full near/far.
-
-  // Extract camera near/far from the projection matrix.
-  // For perspective: P[2][2] = -(f+n)/(f-n), P[3][2] = -2fn/(f-n)
-  // nearClip, farClip are already provided as parameters.
-  // Use the frustum corner interpolation approach.
-
-  // Inverse of full projection gives us the full frustum at NDC z=-1 and z=1.
-  // We want sub-frustum at cascadeNear/cascadeFar. So we compute the ratio.
   const float projNear =
       projMatrix.columns[3].z / (projMatrix.columns[2].z - 1.0F);
   const float projFar =
@@ -122,7 +113,6 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
 
   math::Vec3 cascadeCorners[8]{};
   for (int i = 0; i < 4; ++i) {
-    // Near plane corners: lerp between full near and full far.
     const math::Vec3 &nrCorner = fullCorners[i];
     const math::Vec3 &frCorner = fullCorners[i + 4];
     cascadeCorners[i] =
@@ -135,7 +125,6 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                    nrCorner.z + (frCorner.z - nrCorner.z) * farRatio);
   }
 
-  // Compute center of the sub-frustum.
   math::Vec3 center(0.0F, 0.0F, 0.0F);
   for (int i = 0; i < 8; ++i) {
     center.x += cascadeCorners[i].x;
@@ -182,16 +171,11 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
   const math::Vec3 snappedCenter(snappedCenterWorld.x, snappedCenterWorld.y,
                                  snappedCenterWorld.z);
 
-  // Build a look-at matrix from the light's perspective. The target is snapped
-  // in light-space world units so sub-texel camera motion does not move the
-  // shadow projection.
   const math::Vec3 lightPos =
       math::sub(snappedCenter, math::mul(stableLightDir, 50.0F));
   const math::Mat4 lightView =
       math::look_at(lightPos, snappedCenter, lightUp);
 
-  // Find depth bounds of cascade corners in light space. X/Y use a fixed
-  // bounding sphere extent around the snapped center for stable texel density.
   float minZ = 1e30F, maxZ = -1e30F;
 
   for (int i = 0; i < 8; ++i) {
@@ -218,13 +202,13 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
   return math::mul(lightProj, lightView);
 }
 
+/// Snaps the projection's x/y translation to shadow-texel boundaries.
 math::Mat4 snap_to_texel(const math::Mat4 &lightViewProj,
                          int shadowMapSize) noexcept {
   const int safeShadowMapSize =
       (shadowMapSize > 0) ? shadowMapSize : kShadowMapResolution;
   const float texelWorld = 2.0F / static_cast<float>(safeShadowMapSize);
 
-  // Snap the x/y offset to texel boundaries.
   math::Mat4 result = lightViewProj;
   result.columns[3].x =
       std::floor(result.columns[3].x / texelWorld) * texelWorld;
@@ -290,15 +274,15 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept {
 
 // ---- Spot Light Shadow Maps ----
 
+/// Perspective light matrix for a spot: the FOV is slightly wider than
+/// the outer cone to avoid edge clipping.
 math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
                                       const math::Vec3 &direction,
                                       float outerConeAngle,
                                       float radius) noexcept {
-  // Build light view matrix.
   const math::Vec3 target(position.x + direction.x, position.y + direction.y,
                           position.z + direction.z);
 
-  // Choose an up vector that is not collinear with direction.
   math::Vec3 up(0.0F, 1.0F, 0.0F);
   if (std::abs(direction.y) > 0.99F) {
     up = math::Vec3(1.0F, 0.0F, 0.0F);
@@ -306,7 +290,6 @@ math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
 
   const math::Mat4 lightView = math::look_at(position, target, up);
 
-  // FOV slightly wider than the outer cone to avoid edge clipping.
   const float fov = outerConeAngle * 2.0F + 0.05F;
   constexpr float kNearPlane = 0.1F;
   const float farPlane = std::max(radius, 1.0F);
@@ -374,11 +357,12 @@ void compute_point_shadow_matrices(const math::Vec3 &position, float radius,
                                    math::Mat4 outVP[6]) noexcept {
   constexpr float kNearPlane = 0.1F;
   const float farPlane = std::max(radius, 1.0F);
-  constexpr float kFov = 3.14159265F / 2.0F; // 90 degrees
+  constexpr float kFov = 3.14159265F / 2.0F;
 
   const math::Mat4 proj = math::perspective(kFov, 1.0F, kNearPlane, farPlane);
 
-  // Six face directions: +X, -X, +Y, -Y, +Z, -Z.
+  // Face order and up vectors follow the GL cubemap convention
+  // (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i): +X, -X, +Y, -Y, +Z, -Z.
   struct FaceDir {
     math::Vec3 target;
     math::Vec3 up;

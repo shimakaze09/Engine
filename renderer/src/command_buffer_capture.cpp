@@ -59,6 +59,10 @@ SceneCaptureRequest normalize_scene_capture_request(
   return normalized;
 }
 
+/// Stores this frame's normalized capture requests and gives each slot a
+/// stable external texture-system handle so render prep can reference the
+/// capture output as a material texture. Registration happens on the render
+/// thread only; render prep merely reads the handle.
 void set_scene_capture_requests(const SceneCaptureRequest *requests,
                                 std::size_t count) noexcept {
   RendererContext &context = renderer_context();
@@ -79,9 +83,6 @@ void set_scene_capture_requests(const SceneCaptureRequest *requests,
   for (std::size_t i = 0U; i < count; ++i) {
     context.sceneCaptureRequests[i] =
         normalize_scene_capture_request(requests[i]);
-    // Give each requested slot a stable external texture-system handle so
-    // render prep can reference the capture output as a material texture.
-    // Registration is render-thread only; render prep merely reads it.
     SceneCaptureTarget &target = context.backend.sceneCaptureTargets[i];
     if (target.textureHandle == kInvalidTextureHandle) {
       target.textureHandle = register_external_texture(target.colorTexture);
@@ -124,7 +125,6 @@ bool ensure_scene_capture_target(BackendState &backend,
 
   destroy_capture_target(target, dev);
 
-  // Same recipe as the pass-resource finalColor target: LDR color + DEPTH24.
   target.colorTexture = dev->create_texture_2d(width, height, 4, nullptr);
   if (target.colorTexture == 0U) {
     core::log_message(core::LogLevel::Error, kCaptureLogChannel,

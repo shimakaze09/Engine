@@ -369,7 +369,6 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
     return false;
   }
 
-  // Destroy old program and swap in the new one.
   const RenderDevice *dev = render_device();
   if ((dev != nullptr) && (entry.gpuProgram != 0U)) {
     dev->destroy_program(entry.gpuProgram);
@@ -385,7 +384,6 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
 ShaderProgramHandle load_shader_program_internal(
     const char *vertPath, const char *fragPath, const ShaderDefine *defines,
     std::size_t defineCount) noexcept {
-  // Find a free slot.
   std::size_t slot = kMaxShaderPrograms;
   for (std::size_t i = 0U; i < kMaxShaderPrograms; ++i) {
     if (!g_entries[i].active) {
@@ -416,7 +414,6 @@ ShaderProgramHandle load_shader_program_internal(
     return kInvalidShaderProgram;
   }
 
-  // Handle id is slot + 1 so that 0 remains invalid.
   return ShaderProgramHandle{static_cast<std::uint32_t>(slot + 1U),
                              entry.generation};
 }

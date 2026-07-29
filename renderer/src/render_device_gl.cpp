@@ -1070,7 +1070,6 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
                               GL_TEXTURE_2D, static_cast<GLuint>(depthTex), 0);
   }
 
-  // Activate all color attachments for MRT output.
   gl_table().drawBuffers(static_cast<GLsizei>(colorCount), kAttachments);
 
   gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);

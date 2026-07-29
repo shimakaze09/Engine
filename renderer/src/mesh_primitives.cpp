@@ -157,7 +157,6 @@ bool build_cylinder_mesh(GpuMesh *outMesh) noexcept {
     verts[vi++] = nz;
   };
 
-  // Bottom ring
   for (int j = 0; j <= kSlices; ++j) {
     const float phi =
         static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
@@ -165,7 +164,6 @@ bool build_cylinder_mesh(GpuMesh *outMesh) noexcept {
     const float nz = std::sin(phi);
     pushV(nx * kRadius, -kHalfH, nz * kRadius, nx, 0.0F, nz);
   }
-  // Top ring
   for (int j = 0; j <= kSlices; ++j) {
     const float phi =
         static_cast<float>(j) * 2.0F * kPI / static_cast<float>(kSlices);
@@ -174,7 +172,6 @@ bool build_cylinder_mesh(GpuMesh *outMesh) noexcept {
     pushV(nx * kRadius, kHalfH, nz * kRadius, nx, 0.0F, nz);
   }
 
-  // Top cap verts
   const std::uint32_t topBase = static_cast<std::uint32_t>(kSideVerts);
   pushV(0.0F, kHalfH, 0.0F, 0.0F, 1.0F, 0.0F);
   for (int j = 0; j < kSlices; ++j) {
@@ -184,7 +181,6 @@ bool build_cylinder_mesh(GpuMesh *outMesh) noexcept {
           0.0F);
   }
 
-  // Bottom cap verts
   const std::uint32_t botBase = topBase + static_cast<std::uint32_t>(kCapVerts);
   pushV(0.0F, -kHalfH, 0.0F, 0.0F, -1.0F, 0.0F);
   for (int j = 0; j < kSlices; ++j) {
@@ -195,7 +191,6 @@ bool build_cylinder_mesh(GpuMesh *outMesh) noexcept {
   }
 
   int ii = 0;
-  // Side indices
   for (int j = 0; j < kSlices; ++j) {
     const std::uint32_t a = static_cast<std::uint32_t>(j);
     const std::uint32_t b = static_cast<std::uint32_t>(j + 1);
