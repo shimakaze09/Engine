@@ -67,10 +67,23 @@ constexpr int kIblBrdfLutUnit = 21;
 
 /// Uploads the environment IBL uniforms for the forward PBR program and
 /// binds its textures when enabled; every pbrProgram pass must call this so
-/// stale program state never leaks between passes.
+/// stale program state never leaks between passes. The sampler units are
+/// assigned even when IBL is off: a samplerCube uniform left at its default
+/// unit 0 aliases the sampler2D albedo there, which is a draw-time
+/// GL_INVALID_OPERATION that corrupts every draw.
 void apply_pbr_ibl_uniforms(const BackendState &backend,
                             const RenderDevice *dev,
                             bool iblAvailable) noexcept {
+  if (backend.pbrIrradianceMapLoc >= 0) {
+    dev->set_uniform_int(backend.pbrIrradianceMapLoc, kIblIrradianceUnit);
+  }
+  if (backend.pbrPrefilteredMapLoc >= 0) {
+    dev->set_uniform_int(backend.pbrPrefilteredMapLoc, kIblPrefilteredUnit);
+  }
+  if (backend.pbrBrdfLutLoc >= 0) {
+    dev->set_uniform_int(backend.pbrBrdfLutLoc, kIblBrdfLutUnit);
+  }
+
   const bool enabled = iblAvailable && (backend.pbrIblEnabledLoc >= 0) &&
                        (dev->bind_texture_cubemap != nullptr);
   if (backend.pbrIblEnabledLoc >= 0) {
@@ -85,15 +98,6 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
   dev->bind_texture_cubemap(kIblPrefilteredUnit,
                             backend.prefilteredEnvironmentTexture);
   dev->bind_texture(kIblBrdfLutUnit, backend.brdfLutTexture);
-  if (backend.pbrIrradianceMapLoc >= 0) {
-    dev->set_uniform_int(backend.pbrIrradianceMapLoc, kIblIrradianceUnit);
-  }
-  if (backend.pbrPrefilteredMapLoc >= 0) {
-    dev->set_uniform_int(backend.pbrPrefilteredMapLoc, kIblPrefilteredUnit);
-  }
-  if (backend.pbrBrdfLutLoc >= 0) {
-    dev->set_uniform_int(backend.pbrBrdfLutLoc, kIblBrdfLutUnit);
-  }
   if (backend.pbrPrefilteredMipsLoc >= 0) {
     dev->set_uniform_float(
         backend.pbrPrefilteredMipsLoc,
@@ -1508,6 +1512,19 @@ void flush_renderer(CommandBufferView commandBufferView,
       if (backend.dlLightDataTexLoc >= 0)
         dev->set_uniform_int(backend.dlLightDataTexLoc, 18);
 
+      // Sampler units are assigned even when IBL is off: a samplerCube
+      // uniform left at its default unit 0 aliases the sampler2D G-buffer
+      // there, which is a draw-time GL_INVALID_OPERATION that corrupts
+      // every deferred draw.
+      if (backend.dlIrradianceMapLoc >= 0) {
+        dev->set_uniform_int(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
+      }
+      if (backend.dlPrefilteredMapLoc >= 0) {
+        dev->set_uniform_int(backend.dlPrefilteredMapLoc, kIblPrefilteredUnit);
+      }
+      if (backend.dlBrdfLutLoc >= 0) {
+        dev->set_uniform_int(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
+      }
       const bool dlIblEnabled = iblAvailable &&
                                 (backend.dlIblEnabledLoc >= 0) &&
                                 (dev->bind_texture_cubemap != nullptr);
@@ -1518,16 +1535,6 @@ void flush_renderer(CommandBufferView commandBufferView,
         dev->bind_texture_cubemap(kIblIrradianceUnit, iblIrradianceTex);
         dev->bind_texture_cubemap(kIblPrefilteredUnit, iblPrefilteredTex);
         dev->bind_texture(kIblBrdfLutUnit, backend.brdfLutTexture);
-        if (backend.dlIrradianceMapLoc >= 0) {
-          dev->set_uniform_int(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
-        }
-        if (backend.dlPrefilteredMapLoc >= 0) {
-          dev->set_uniform_int(backend.dlPrefilteredMapLoc,
-                               kIblPrefilteredUnit);
-        }
-        if (backend.dlBrdfLutLoc >= 0) {
-          dev->set_uniform_int(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
-        }
         if (backend.dlPrefilteredMipsLoc >= 0) {
           dev->set_uniform_float(
               backend.dlPrefilteredMipsLoc,
