@@ -87,7 +87,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       return true;
     };
 
-    // --- G-Buffer pass: render geometry into MRT ---
     gpu_profiler_begin_pass(GpuPassId::GBuffer);
     const std::uint32_t gbufferFbo =
         pass_resource_framebuffer(passRes.gbufferAlbedo);
@@ -99,7 +98,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
     dev->bind_program(backend.gbufferProgram);
 
-    // Per-frame camera uniforms.
     if (backend.gbufViewLoc >= 0) {
       dev->set_uniform_mat4(backend.gbufViewLoc, &viewMat.columns[0].x);
     }
@@ -131,7 +129,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           boundVertexArray = mesh->vertexArray;
         }
 
-        // Material uniforms.
         if (backend.gbufAlbedoLoc >= 0) {
           dev->set_uniform_vec3(backend.gbufAlbedoLoc,
                                 &command.material.albedo.x);
@@ -220,7 +217,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
     };
 
-    // Opaque geometry only for G-Buffer.
     dev->set_depth_mask(true);
     dev->disable_blending();
     dev->enable_face_culling();
@@ -230,7 +226,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     dev->bind_program(0U);
     gpu_profiler_end_pass(GpuPassId::GBuffer);
 
-    // --- SSAO pass: sample hemisphere, output raw AO ---
     const bool ssaoEnabled =
         backend.ssaoAvailable && core::cvar_get_bool("r_ssao", true);
     if (ssaoEnabled) {
@@ -288,7 +283,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
 
-      // --- SSAO blur pass ---
       const std::uint32_t ssaoBlurFbo =
           pass_resource_framebuffer(passRes.ssaoBlurTexture);
       dev->bind_framebuffer(ssaoBlurFbo);
@@ -314,7 +308,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       gpu_profiler_end_pass(GpuPassId::SSAO);
     }
 
-    // --- CPU tiled light culling ---
     const std::size_t tileBufferSize =
         compute_tile_buffer_size(drawableWidth, drawableHeight);
     if (backend.tileBuffer.size() < tileBufferSize) {
@@ -328,7 +321,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
                       drawableWidth, drawableHeight, tileData);
 
-    // Upload tile texture.
     if ((backend.tileLightTex != 0U) &&
         (tileData.totalTiles > backend.tileLightTexRows)) {
       dev->destroy_texture(backend.tileLightTex);
@@ -347,8 +339,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                                   backend.tileBuffer.data());
     }
 
-    // Upload per-light data texture (fetched by tile light index in the
-    // deferred lighting shader).
     static_cast<void>(pack_light_data(lights, backend.lightDataBuffer.data(),
                                       backend.lightDataBuffer.size()));
     if (backend.lightDataTex == 0U) {
@@ -361,7 +351,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                                   backend.lightDataBuffer.data());
     }
 
-    // --- G-Buffer debug visualization (overrides lighting pass) ---
     if (gbufferDebugMode > 0 && backend.gbufferDebugProgram != 0U) {
       gpu_profiler_begin_pass(GpuPassId::GBufferDebug);
       const std::uint32_t sceneFbo =
@@ -372,7 +361,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       dev->bind_program(backend.gbufferDebugProgram);
 
-      // Bind G-Buffer textures.
       dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferAlbedo));
       dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
       dev->bind_texture(2, pass_resource_gpu_texture(passRes.gbufferEmissive));
@@ -403,7 +391,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       dev->bind_program(0U);
       gpu_profiler_end_pass(GpuPassId::GBufferDebug);
     } else {
-      // --- Deferred lighting pass: fullscreen, reads G-Buffer → HDR scene ---
       gpu_profiler_begin_pass(GpuPassId::DeferredLighting);
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
@@ -475,7 +462,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlSsaoEnabledLoc >= 0)
         dev->set_uniform_int(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
 
-      // Bind shadow maps on texture units 6-9.
       if (shadowEnabled) {
         for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
           const int texUnit = 6 + static_cast<int>(c);
@@ -500,7 +486,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_uniform_int(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
       }
 
-      // Bind spot shadow maps on texture units 10-13.
       const bool spotShadowEnabled = doSpotShadows;
       if (spotShadowEnabled) {
         for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
@@ -571,7 +556,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlTileCountYLoc >= 0)
         dev->set_uniform_int(backend.dlTileCountYLoc, tileData.tileCountY);
 
-      // Inverse matrices for depth reconstruction.
       math::Mat4 invProj{};
       if (math::inverse(projMat, &invProj)) {
         if (backend.dlInvProjectionLoc >= 0)
@@ -618,8 +602,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
       upload_deferred_height_fog_uniforms(backend, dev, heightFogSettings);
 
-      // Upload active light counts (light parameters live in the per-light
-      // data texture bound on unit 18).
       const auto plCount = static_cast<int>(std::min(
           lights.pointLightCount, static_cast<std::size_t>(kMaxPointLights)));
       if (backend.dlPointLightCountLoc >= 0)
@@ -686,7 +668,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
     }
 
-    // Forward-render transparent geometry into the scene HDR FBO.
     if (opaqueCount < totalCount) {
       const std::uint32_t sceneFbo =
           pass_resource_framebuffer(passRes.sceneColor);
@@ -698,7 +679,6 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       static_cast<void>(ensureSceneDepthHasOpaque());
       dev->bind_program(backend.pbrProgram);
 
-      // Re-upload forward PBR camera/lights for transparent pass.
       if (backend.pbrTimeLocation >= 0) {
         dev->set_uniform_float(backend.pbrTimeLocation, timeSeconds);
       }

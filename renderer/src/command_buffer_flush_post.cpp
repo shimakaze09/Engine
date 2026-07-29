@@ -59,7 +59,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     const std::uint32_t sceneColorTexBloom =
         pass_resource_gpu_texture(passRes.sceneColor);
 
-    // Step 1: Threshold — extract bright pixels into mip[0].
     dev->bind_framebuffer(backend.bloomMipFbos[0]);
     dev->set_viewport(0, 0, backend.bloomMipWidths[0],
                       backend.bloomMipHeights[0]);
@@ -76,7 +75,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     dev->bind_vertex_array(backend.emptyVao);
     dev->draw_arrays_triangles(0, 3);
 
-    // Step 2: Downsample chain.
     dev->bind_program(backend.bloomDownsampleProgram);
     for (int i = 1; i < BackendState::kBloomMipLevels; ++i) {
       dev->bind_framebuffer(backend.bloomMipFbos[i]);
@@ -95,8 +93,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
       dev->draw_arrays_triangles(0, 3);
     }
 
-    // Step 3: Upsample chain — each level is overwritten with the blurred
-    // result from the level below it.
     dev->bind_program(backend.bloomUpsampleProgram);
     for (int i = BackendState::kBloomMipLevels - 2; i >= 0; --i) {
       dev->bind_framebuffer(backend.bloomMipFbos[i]);
@@ -121,7 +117,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::Bloom);
   }
 
-  // --- Auto-exposure pass: compute average luminance → adapt exposure ---
   const bool autoExposureEnabled =
       backend.autoExposureAvailable &&
       core::cvar_get_bool("r_auto_exposure", true);
@@ -129,7 +124,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
     ensure_luminance_resources(backend, drawableWidth, drawableHeight);
 
-    // Step 1: Extract log-luminance from HDR scene color into lum mip[0].
     dev->bind_framebuffer(backend.lumMipFbos[0]);
     dev->set_viewport(0, 0, backend.lumMipWidths[0], backend.lumMipHeights[0]);
     dev->disable_depth_test();
@@ -179,7 +173,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     // Simple temporal adaptation (no readback — use previous frame's
     // estimate). The mip chain drives the shader-side average; we use
     // a smooth exponential approach.
-    const float dt = 1.0F / 60.0F; // approximate frame dt
+    const float dt = 1.0F / 60.0F;
     const float targetExposure =
         std::clamp(backend.currentExposure, minExposure, maxExposure);
     backend.currentExposure +=
@@ -193,12 +187,10 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::AutoExposure);
   }
 
-  // Determine final exposure value for tonemap.
   const float finalExposure = autoExposureEnabled
                                   ? backend.currentExposure
                                   : core::cvar_get_float("r_exposure", 1.0F);
 
-  // --- Tonemap pass: HDR scene → LDR final FBO ---
   gpu_profiler_begin_pass(GpuPassId::Tonemap);
   const std::uint32_t finalFbo = pass_resource_framebuffer(passRes.finalColor);
   dev->bind_framebuffer(finalFbo);
@@ -221,7 +213,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
                          core::cvar_get_int("r_tonemap_operator"));
   }
 
-  // Bloom integration: bind bloom mip[0] on texture unit 1.
   if (bloomEnabled) {
     dev->bind_texture(1, backend.bloomMipTextures[0]);
     if (backend.tonemapBloomTextureLoc >= 0) {
@@ -251,7 +242,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   dev->bind_program(0U);
   gpu_profiler_end_pass(GpuPassId::Tonemap);
 
-  // --- FXAA pass (optional): finalColor → sceneColor (ping-pong) ---
   renderer_context().fxaaAppliedThisFrame = false;
   if (backend.fxaaProgram != 0U && core::cvar_get_bool("r_fxaa")) {
     const std::uint32_t sceneFbo =
@@ -284,7 +274,6 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     renderer_context().fxaaAppliedThisFrame = true;
   }
 
-  // --- Prepare back buffer for editor overlay (ImGui) ---
   dev->bind_framebuffer(0U);
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
   dev->set_clear_color(0.0F, 0.0F, 0.0F, 1.0F);

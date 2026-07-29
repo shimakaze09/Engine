@@ -75,7 +75,6 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
 
     dev->bind_program(backend.pbrProgram);
 
-    // Per-frame uniforms.
     if (backend.pbrTimeLocation >= 0) {
       dev->set_uniform_float(backend.pbrTimeLocation, timeSeconds);
     }
@@ -100,7 +99,6 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
                              doPointShadows);
 
-    // Set albedo map sampler to texture unit 0.
     if (backend.pbrAlbedoMapLocation >= 0) {
       dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
     }
@@ -235,7 +233,6 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       }
     };
 
-    // Pass 1: Opaque.
     dev->set_depth_mask(true);
     dev->disable_blending();
     dev->enable_face_culling();
@@ -258,7 +255,6 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       dev->bind_program(backend.pbrProgram);
     }
 
-    // Pass 2: Transparent.
     if (opaqueCount < totalCount) {
       dev->set_depth_mask(false);
       dev->enable_blending();
@@ -334,7 +330,6 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
       dev->disable_blending();
     }
   }
-  // Expire per-frame debug primitives once per rendered frame.
   core::debug_draw_tick();
   core::debug_draw_tick();
 }

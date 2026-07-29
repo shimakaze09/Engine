@@ -1,7 +1,7 @@
-// Implements the renderer frame flush: consumes the sorted draw command
-// buffer and drives the GL frame (shadow passes, deferred or forward PBR,
-// sky, SSAO, bloom, auto-exposure, tonemap, FXAA).
-// Split out of command_buffer.cpp (REVIEW_FINDINGS A1).
+// Implements the renderer frame flush orchestration: per-frame setup
+// (targets, camera, environment IBL baked before any lighting pass so
+// both paths can sample it, opaque/transparent partition) and dispatch
+// through the pass TUs sharing FrameFlushContext.
 
 #include "engine/renderer/command_buffer.h"
 
@@ -79,7 +79,6 @@ void flush_renderer(CommandBufferView commandBufferView,
     drawableHeight = 1;
   }
 
-  // Initialize or resize pass resources when dimensions change.
   if (backend.lastWidth != drawableWidth ||
       backend.lastHeight != drawableHeight) {
     if (backend.lastWidth == 0 && backend.lastHeight == 0) {
@@ -98,8 +97,6 @@ void flush_renderer(CommandBufferView commandBufferView,
   const HeightFogSettings heightFogSettings = height_fog_settings_from_cvars();
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
-  // Bake (or reuse) the environment IBL from the active cubemap skybox before
-  // any lighting pass so both deferred and forward can sample it this frame.
   const std::uint32_t envSkyboxTexture =
       (selected_sky_model() == SkyModel::Cubemap)
           ? active_skybox_gpu_texture(backend)
@@ -116,12 +113,10 @@ void flush_renderer(CommandBufferView commandBufferView,
                             (iblIrradianceTex != 0U) &&
                             (backend.brdfLutTexture != 0U);
 
-  // Check if deferred rendering is enabled.
   const bool useDeferred =
       backend.deferredAvailable && core::cvar_get_bool("r_deferred", true);
   const int gbufferDebugMode = core::cvar_get_int("r_gbuffer_debug", 0);
 
-  // Camera setup (shared by both paths).
   const float aspect =
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
   const math::Mat4 viewMat = math::look_at(
@@ -146,7 +141,6 @@ void flush_renderer(CommandBufferView commandBufferView,
                       "draw command view is invalid");
   }
 
-  // Determine opaque / transparent partition.
   std::size_t opaqueCount = 0U;
   std::size_t totalCount = 0U;
 

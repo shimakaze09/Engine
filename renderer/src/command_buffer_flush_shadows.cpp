@@ -168,13 +168,11 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     backend.directionalShadowCacheValid = false;
   }
 
-  // ==== Spot Light Shadow Pass ====
   const bool doSpotShadows =
       backend.spotShadowAvailable && core::cvar_get_bool("r_spot_shadows");
   if (doSpotShadows && (lights.spotLightCount > 0U)) {
     gpu_profiler_begin_pass(GpuPassId::SpotShadowMap);
 
-    // Select up to kMaxSpotShadowLights nearest shadow-casting spots.
     for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
       backend.spotShadowState.slots[i].lightIndex = -1;
     }
@@ -213,7 +211,6 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           lights.spotLights[li].outerConeAngle, lights.spotLights[li].radius);
     }
 
-    // Render into each spot shadow FBO.
     dev->bind_program(backend.shadowDepthProgram);
     for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
       const auto &slot = backend.spotShadowState.slots[s];
@@ -261,13 +258,11 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::SpotShadowMap);
   }
 
-  // ==== Point Light Cubemap Shadow Pass ====
   const bool doPointShadows =
       backend.pointShadowAvailable && core::cvar_get_bool("r_point_shadows");
   if (doPointShadows && (lights.pointLightCount > 0U)) {
     gpu_profiler_begin_pass(GpuPassId::PointShadowMap);
 
-    // Select up to kMaxPointShadowLights nearest shadow-casting points.
     for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
       backend.pointShadowState.slots[i].lightIndex = -1;
     }
@@ -308,7 +303,6 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                     slot.faceViewProjections);
     }
 
-    // Render into each point shadow cubemap (6 faces per light).
     dev->bind_program(backend.shadowDepthPointProgram);
     for (std::size_t s = 0U; s < activePointShadows; ++s) {
       const auto &slot = backend.pointShadowState.slots[s];
