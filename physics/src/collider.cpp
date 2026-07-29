@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <utility>
 
 namespace engine::physics {
 namespace {
@@ -113,7 +114,9 @@ local_support_point(const ColliderWorldGeometry &geometry,
     return hull->vertices[bestIndex];
   }
   }
-  return math::Vec3(0.0F, 0.0F, 0.0F);
+  // Geometry shape is validated at construction (valid_shape in
+  // make_collider_world_geometry), so the switch is exhaustive.
+  std::unreachable();
 }
 
 [[nodiscard]] bool valid_shape(const math::ColliderShape shape) noexcept {
