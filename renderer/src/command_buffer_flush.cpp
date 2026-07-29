@@ -126,13 +126,15 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
     if (backend.pbrSpotLightRadius[i] >= 0) {
       dev->set_uniform_float(backend.pbrSpotLightRadius[i], sl.radius);
     }
+    // Shaders compare these against dot(L, -spotDir), a cosine — upload
+    // cosines, not the stored radian angles.
     if (backend.pbrSpotLightInnerCone[i] >= 0) {
       dev->set_uniform_float(backend.pbrSpotLightInnerCone[i],
-                             sl.innerConeAngle);
+                             std::cos(sl.innerConeAngle));
     }
     if (backend.pbrSpotLightOuterCone[i] >= 0) {
       dev->set_uniform_float(backend.pbrSpotLightOuterCone[i],
-                             sl.outerConeAngle);
+                             std::cos(sl.outerConeAngle));
     }
   }
 }

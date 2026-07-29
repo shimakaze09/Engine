@@ -244,8 +244,10 @@ bool pack_light_data(const SceneLightData &lights, float *out,
     row[8] = sl.color.z;
     row[9] = sl.intensity;
     row[10] = sl.radius;
-    row[11] = sl.innerConeAngle;
-    row[12] = sl.outerConeAngle;
+    // The deferred shader compares these texels against a cosine — pack
+    // cosines, not the stored radian angles.
+    row[11] = std::cos(sl.innerConeAngle);
+    row[12] = std::cos(sl.outerConeAngle);
   }
 
   return true;
