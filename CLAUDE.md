@@ -1,13 +1,10 @@
 # CLAUDE.md — Engine
 
 The single project document: instructions, repository map, conventions, and
-roadmap. It replaced the former `PROJECT_INDEX.md`, `TODO.md`, and
-`REVIEW_FINDINGS.md` (their full text and the 2026-07 hardening-campaign
-history live in git). `AGENTS.md` is a byte-identical mirror of this file
-(title line aside) so agents that look for that name see the same document —
-edit both together in the same commit; CI fails if they drift. Keep this file
-updated in the same commit as any change to module structure, build commands,
-test layout, or roadmap status.
+roadmap. It replaced the former `PROJECT_INDEX.md`, `TODO.md`,
+`REVIEW_FINDINGS.md`, and the `AGENTS.md` mirror (their full text lives in
+git history). Keep this file updated in the same commit as any change to
+module structure, build commands, test layout, or roadmap status.
 
 ## What this is
 
