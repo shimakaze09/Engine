@@ -2,8 +2,8 @@
 
 include(CMakeParseArguments)
 
-function(engine_set_cxx20 target visibility)
-    target_compile_features(${target} ${visibility} cxx_std_20)
+function(engine_set_cxx23 target visibility)
+    target_compile_features(${target} ${visibility} cxx_std_23)
 endfunction()
 
 function(engine_add_module_library target)
@@ -17,7 +17,7 @@ function(engine_add_module_library target)
     endif()
 
     add_library(${target} STATIC ${ENGINE_MOD_SOURCES})
-    engine_set_cxx20(${target} PUBLIC)
+    engine_set_cxx23(${target} PUBLIC)
 
     if(ENGINE_MOD_PUBLIC_INCLUDE_DIRS)
         target_include_directories(${target} PUBLIC ${ENGINE_MOD_PUBLIC_INCLUDE_DIRS})
@@ -47,7 +47,7 @@ function(engine_add_header_library target)
     cmake_parse_arguments(ENGINE_HDR "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     add_library(${target} INTERFACE)
-    engine_set_cxx20(${target} INTERFACE)
+    engine_set_cxx23(${target} INTERFACE)
 
     if(ENGINE_HDR_PUBLIC_INCLUDE_DIRS)
         target_include_directories(${target} INTERFACE ${ENGINE_HDR_PUBLIC_INCLUDE_DIRS})
@@ -69,7 +69,7 @@ function(engine_add_executable_target target)
     endif()
 
     add_executable(${target} ${ENGINE_EXE_SOURCES})
-    engine_set_cxx20(${target} PRIVATE)
+    engine_set_cxx23(${target} PRIVATE)
 
     if(ENGINE_EXE_PUBLIC_INCLUDE_DIRS)
         target_include_directories(${target} PUBLIC ${ENGINE_EXE_PUBLIC_INCLUDE_DIRS})

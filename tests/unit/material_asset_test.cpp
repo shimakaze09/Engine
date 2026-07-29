@@ -54,13 +54,14 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
     return 10;
   }
 
-  engine::renderer::AssetId id = engine::renderer::kInvalidAssetId;
-  const bool loaded =
-      engine::renderer::load_material_asset(database, virtualPath, &id);
+  const auto loadResult =
+      engine::renderer::load_material_asset(database, virtualPath);
   remove_file(kPath);
-  if (!loaded || (id == engine::renderer::kInvalidAssetId)) {
+  if (!loadResult.has_value() ||
+      (*loadResult == engine::renderer::kInvalidAssetId)) {
     return 11;
   }
+  const engine::renderer::AssetId id = *loadResult;
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -103,13 +104,13 @@ int verify_partial_material_defaults(
     return 20;
   }
 
-  engine::renderer::AssetId id = engine::renderer::kInvalidAssetId;
-  const bool loaded =
-      engine::renderer::load_material_asset(database, virtualPath, &id);
+  const auto loadResult =
+      engine::renderer::load_material_asset(database, virtualPath);
   remove_file(kPath);
-  if (!loaded) {
+  if (!loadResult.has_value()) {
     return 21;
   }
+  const engine::renderer::AssetId id = *loadResult;
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -152,15 +153,15 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
     return 30;
   }
 
-  engine::renderer::AssetId grandId = engine::renderer::kInvalidAssetId;
-  const bool loaded = engine::renderer::load_material_asset(
-      database, "mat/material_test_grand.json", &grandId);
+  const auto grandResult = engine::renderer::load_material_asset(
+      database, "mat/material_test_grand.json");
   remove_file(kBasePath);
   remove_file(kChildPath);
   remove_file(kGrandPath);
-  if (!loaded) {
+  if (!grandResult.has_value()) {
     return 31;
   }
+  const engine::renderer::AssetId grandId = *grandResult;
 
   const engine::renderer::Material *grand =
       engine::renderer::find_material_params(database, grandId);
@@ -212,11 +213,12 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
     remove_file(kCyclePathB);
     return 40;
   }
-  const bool cycleLoaded = engine::renderer::load_material_asset(
-      database, "mat/material_test_cycle_a.json", nullptr);
+  const auto cycleResult = engine::renderer::load_material_asset(
+      database, "mat/material_test_cycle_a.json");
   remove_file(kCyclePathA);
   remove_file(kCyclePathB);
-  if (cycleLoaded) {
+  if (cycleResult.has_value() ||
+      (cycleResult.error() != engine::renderer::MaterialLoadError::Parse)) {
     return 41;
   }
 
@@ -225,10 +227,10 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
                            "{\"parent\":\"mat/material_test_missing.json\"}")) {
     return 42;
   }
-  const bool orphanLoaded = engine::renderer::load_material_asset(
-      database, "mat/material_test_orphan.json", nullptr);
+  const auto orphanResult = engine::renderer::load_material_asset(
+      database, "mat/material_test_orphan.json");
   remove_file(kOrphanPath);
-  if (orphanLoaded) {
+  if (orphanResult.has_value()) {
     return 43;
   }
 
@@ -236,10 +238,11 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kBadFieldPath, "{\"roughness\":\"rough\"}")) {
     return 44;
   }
-  const bool badFieldLoaded = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_field.json", nullptr);
+  const auto badFieldResult = engine::renderer::load_material_asset(
+      database, "mat/material_test_bad_field.json");
   remove_file(kBadFieldPath);
-  if (badFieldLoaded) {
+  if (badFieldResult.has_value() ||
+      (badFieldResult.error() != engine::renderer::MaterialLoadError::Parse)) {
     return 45;
   }
 
@@ -247,10 +250,10 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kBadVec3Path, "{\"albedo\":[1.0,2.0]}")) {
     return 46;
   }
-  const bool badVec3Loaded = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_vec3.json", nullptr);
+  const auto badVec3Result = engine::renderer::load_material_asset(
+      database, "mat/material_test_bad_vec3.json");
   remove_file(kBadVec3Path);
-  if (badVec3Loaded) {
+  if (badVec3Result.has_value()) {
     return 47;
   }
 
@@ -258,15 +261,17 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kBadVersionPath, "{\"version\":2}")) {
     return 48;
   }
-  const bool badVersionLoaded = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_version.json", nullptr);
+  const auto badVersionResult = engine::renderer::load_material_asset(
+      database, "mat/material_test_bad_version.json");
   remove_file(kBadVersionPath);
-  if (badVersionLoaded) {
+  if (badVersionResult.has_value()) {
     return 49;
   }
 
-  if (engine::renderer::load_material_asset(
-          database, "mat/material_test_absent.json", nullptr)) {
+  const auto absentResult = engine::renderer::load_material_asset(
+      database, "mat/material_test_absent.json");
+  if (absentResult.has_value() ||
+      (absentResult.error() != engine::renderer::MaterialLoadError::Io)) {
     return 50;
   }
 
@@ -306,11 +311,12 @@ int verify_full_table_failures() {
     if (!write_material_file(kPath, "{}")) {
       return 72;
     }
-    const bool loaded = engine::renderer::load_material_asset(
-        database.get(), kVirtualPath, nullptr);
+    const auto loadResult = engine::renderer::load_material_asset(
+        database.get(), kVirtualPath);
     remove_file(kPath);
-    if (loaded || (engine::renderer::find_material_params(
-                       database.get(), targetId) != nullptr)) {
+    if (loadResult.has_value() ||
+        (engine::renderer::find_material_params(database.get(), targetId) !=
+         nullptr)) {
       return 73;
     }
   }
@@ -339,11 +345,12 @@ int verify_full_table_failures() {
     if (!write_material_file(kPath, "{}")) {
       return 76;
     }
-    const bool loaded = engine::renderer::load_material_asset(
-        database.get(), kVirtualPath, nullptr);
+    const auto loadResult = engine::renderer::load_material_asset(
+        database.get(), kVirtualPath);
     remove_file(kPath);
-    if (loaded || (engine::renderer::find_asset_metadata(
-                       database.get(), targetId) != nullptr)) {
+    if (loadResult.has_value() ||
+        (engine::renderer::find_asset_metadata(database.get(), targetId) !=
+         nullptr)) {
       return 77;
     }
   }

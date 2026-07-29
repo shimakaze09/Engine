@@ -211,8 +211,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # clang-tidy 19+ is required: older clang reports __cpp_concepts as
+      # 201907, which makes libstdc++ hide <expected> in C++23 mode.
       - name: Install clang-tidy
-        run: bash .github/scripts/install-linux-deps.sh clang-tidy
+        run: |
+          if ! bash .github/scripts/install-linux-deps.sh clang-tidy-19; then
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
+              sudo tee /etc/apt/trusted.gpg.d/apt-llvm-org.asc >/dev/null
+            echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" | \
+              sudo tee /etc/apt/sources.list.d/llvm19.list
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang-tidy-19
+          fi
 
       - name: Install Linux dependencies
         run: |
@@ -258,7 +268,7 @@ jobs:
           files = [e['file'] for e in db]
           print(f'Checking {len(files)} files...')
           result = subprocess.run(
-            ['clang-tidy', '-p', 'build', '--warnings-as-errors=*'] + files,
+            ['clang-tidy-19', '-p', 'build', '--warnings-as-errors=*'] + files,
             capture_output=False
           )
           sys.exit(result.returncode)
