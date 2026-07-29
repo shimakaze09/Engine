@@ -45,6 +45,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
@@ -169,6 +170,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
@@ -230,6 +232,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
@@ -287,6 +290,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
@@ -316,6 +320,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
@@ -357,6 +362,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
@@ -398,6 +404,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev lcov
 
@@ -466,6 +473,7 @@ jobs:
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 

@@ -25,7 +25,7 @@ engine_add_module_library(engine_core
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS
     Threads::Threads
-    ${ENGINE_SDL2_TARGET}
+    ${ENGINE_SDL_TARGET}
     PCH
     src/pch.h
 )

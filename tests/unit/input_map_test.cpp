@@ -11,17 +11,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 using namespace engine::core;
 
@@ -83,15 +73,15 @@ void shutdown_all() noexcept {
 // Helper to simulate a key press event through the full pipeline.
 void sim_key_down(KeyScancode key) noexcept {
   SDL_Event ev{};
-  ev.type = SDL_KEYDOWN;
-  ev.key.keysym.scancode = static_cast<SDL_Scancode>(key);
+  ev.type = SDL_EVENT_KEY_DOWN;
+  ev.key.scancode = static_cast<SDL_Scancode>(key);
   input_process_event(&ev);
 }
 
 void sim_key_up(KeyScancode key) noexcept {
   SDL_Event ev{};
-  ev.type = SDL_KEYUP;
-  ev.key.keysym.scancode = static_cast<SDL_Scancode>(key);
+  ev.type = SDL_EVENT_KEY_UP;
+  ev.key.scancode = static_cast<SDL_Scancode>(key);
   input_process_event(&ev);
 }
 

@@ -9,17 +9,7 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 #include <array>
 #include <cmath>
@@ -309,8 +299,8 @@ void touch_process_event(const void *nativeEvent) noexcept {
   const auto *event = static_cast<const SDL_Event *>(nativeEvent);
 
   switch (event->type) {
-  case SDL_FINGERDOWN: {
-    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerId);
+  case SDL_EVENT_FINGER_DOWN: {
+    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
     const float x = event->tfinger.x;
     const float y = event->tfinger.y;
     const float pressure = event->tfinger.pressure;
@@ -357,17 +347,17 @@ void touch_process_event(const void *nativeEvent) noexcept {
     // Mouse emulation: first finger acts as mouse.
     if (g_mouseEmulation && (slot == &g_touches[0])) {
       SDL_Event fakeEvent{};
-      fakeEvent.type = SDL_MOUSEBUTTONDOWN;
+      fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
       fakeEvent.button.button = SDL_BUTTON_LEFT;
-      fakeEvent.button.x = static_cast<int>(x * 1920.0F);
-      fakeEvent.button.y = static_cast<int>(y * 1080.0F);
+      fakeEvent.button.x = x * 1920.0F;
+      fakeEvent.button.y = y * 1080.0F;
       input_process_event(&fakeEvent);
     }
     break;
   }
 
-  case SDL_FINGERMOTION: {
-    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerId);
+  case SDL_EVENT_FINGER_MOTION: {
+    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
     ActiveTouch *touch = find_touch(fingerId);
     if (touch != nullptr) {
       touch->x = event->tfinger.x;
@@ -387,11 +377,11 @@ void touch_process_event(const void *nativeEvent) noexcept {
     // Mouse emulation.
     if (g_mouseEmulation && (touch == &g_touches[0])) {
       SDL_Event fakeEvent{};
-      fakeEvent.type = SDL_MOUSEMOTION;
-      fakeEvent.motion.x = static_cast<int>(event->tfinger.x * 1920.0F);
-      fakeEvent.motion.y = static_cast<int>(event->tfinger.y * 1080.0F);
-      fakeEvent.motion.xrel = static_cast<int>(event->tfinger.dx * 1920.0F);
-      fakeEvent.motion.yrel = static_cast<int>(event->tfinger.dy * 1080.0F);
+      fakeEvent.type = SDL_EVENT_MOUSE_MOTION;
+      fakeEvent.motion.x = event->tfinger.x * 1920.0F;
+      fakeEvent.motion.y = event->tfinger.y * 1080.0F;
+      fakeEvent.motion.xrel = event->tfinger.dx * 1920.0F;
+      fakeEvent.motion.yrel = event->tfinger.dy * 1080.0F;
       input_process_event(&fakeEvent);
     }
 
@@ -400,8 +390,8 @@ void touch_process_event(const void *nativeEvent) noexcept {
     break;
   }
 
-  case SDL_FINGERUP: {
-    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerId);
+  case SDL_EVENT_FINGER_UP: {
+    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
     ActiveTouch *touch = find_touch(fingerId);
     if (touch != nullptr) {
       touch->x = event->tfinger.x;
@@ -432,7 +422,7 @@ void touch_process_event(const void *nativeEvent) noexcept {
     // Mouse emulation.
     if (g_mouseEmulation && (touch == &g_touches[0])) {
       SDL_Event fakeEvent{};
-      fakeEvent.type = SDL_MOUSEBUTTONUP;
+      fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_UP;
       fakeEvent.button.button = SDL_BUTTON_LEFT;
       input_process_event(&fakeEvent);
     }

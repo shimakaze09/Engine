@@ -8,17 +8,7 @@
 
 #include <cmath>
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 namespace {
 
@@ -147,8 +137,8 @@ int check_editor_capture_after_event_processing_skips_gameplay_input() {
   bridge.wants_capture_keyboard = &wants_keyboard_capture;
 
   SDL_Event event{};
-  event.type = SDL_KEYDOWN;
-  event.key.keysym.scancode = static_cast<SDL_Scancode>(engine::core::kKey_A);
+  event.type = SDL_EVENT_KEY_DOWN;
+  event.key.scancode = static_cast<SDL_Scancode>(engine::core::kKey_A);
 
   engine::core::begin_input_frame();
   const engine::runtime::InputEventRoute route =
@@ -189,7 +179,7 @@ int check_editor_mouse_capture_after_event_processing_skips_gameplay_input() {
   bridge.wants_capture_mouse = &wants_mouse_capture;
 
   SDL_Event event{};
-  event.type = SDL_MOUSEBUTTONDOWN;
+  event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
   event.button.button = SDL_BUTTON_LEFT;
 
   engine::core::begin_input_frame();
@@ -230,8 +220,8 @@ int check_uncaptured_editor_event_reaches_gameplay_input() {
   bridge.wants_capture_keyboard = &wants_no_capture;
 
   SDL_Event event{};
-  event.type = SDL_KEYDOWN;
-  event.key.keysym.scancode = static_cast<SDL_Scancode>(engine::core::kKey_B);
+  event.type = SDL_EVENT_KEY_DOWN;
+  event.key.scancode = static_cast<SDL_Scancode>(engine::core::kKey_B);
 
   engine::core::begin_input_frame();
   const engine::runtime::InputEventRoute route =
@@ -265,7 +255,7 @@ int check_editor_processed_quit_event_routes_to_quit() {
   bridge.process_event = &process_editor_event_without_capture;
 
   SDL_Event event{};
-  event.type = SDL_QUIT;
+  event.type = SDL_EVENT_QUIT;
 
   const engine::runtime::InputEventRoute route =
       engine::runtime::process_editor_input_event(&bridge, &event);

@@ -4,22 +4,12 @@
 #include "engine/core/input_map.h"
 #include "engine/core/touch_input.h"
 
-#ifndef SDL_MAIN_HANDLED
-#define SDL_MAIN_HANDLED
-#endif
-
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#if __has_include(<SDL.h>)
-#include <SDL.h>
-#elif __has_include(<SDL2/SDL.h>)
-#include <SDL2/SDL.h>
-#else
-#error "SDL2 headers not found"
-#endif
+#include <SDL3/SDL.h>
 
 #include <array>
 #include <cstdint>
@@ -180,11 +170,11 @@ void input_process_event(const void *nativeEvent) noexcept {
   const auto *event = static_cast<const SDL_Event *>(nativeEvent);
 
   switch (event->type) {
-  case SDL_KEYDOWN:
-  case SDL_KEYUP: {
-    const int scancode = static_cast<int>(event->key.keysym.scancode);
+  case SDL_EVENT_KEY_DOWN:
+  case SDL_EVENT_KEY_UP: {
+    const int scancode = static_cast<int>(event->key.scancode);
     if ((scancode >= 0) && (scancode < kMaxScancodes)) {
-      const bool down = (event->type == SDL_KEYDOWN);
+      const bool down = (event->type == SDL_EVENT_KEY_DOWN);
       g_keyState[static_cast<std::size_t>(scancode)] = down;
       KeyEvent ke{};
       ke.scancode = scancode;
@@ -193,24 +183,24 @@ void input_process_event(const void *nativeEvent) noexcept {
     }
     break;
   }
-  case SDL_MOUSEMOTION: {
-    g_mouse.x = event->motion.x;
-    g_mouse.y = event->motion.y;
-    g_mouse.deltaX += event->motion.xrel;
-    g_mouse.deltaY += event->motion.yrel;
+  case SDL_EVENT_MOUSE_MOTION: {
+    g_mouse.x = static_cast<int>(event->motion.x);
+    g_mouse.y = static_cast<int>(event->motion.y);
+    g_mouse.deltaX += static_cast<int>(event->motion.xrel);
+    g_mouse.deltaY += static_cast<int>(event->motion.yrel);
     MouseMoveEvent me{};
-    me.x = event->motion.x;
-    me.y = event->motion.y;
-    me.deltaX = event->motion.xrel;
-    me.deltaY = event->motion.yrel;
+    me.x = static_cast<int>(event->motion.x);
+    me.y = static_cast<int>(event->motion.y);
+    me.deltaX = static_cast<int>(event->motion.xrel);
+    me.deltaY = static_cast<int>(event->motion.yrel);
     emit(me);
     break;
   }
-  case SDL_MOUSEBUTTONDOWN:
-  case SDL_MOUSEBUTTONUP: {
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
+  case SDL_EVENT_MOUSE_BUTTON_UP: {
     const int button = static_cast<int>(event->button.button) - 1;
     if ((button >= 0) && (button < kMaxMouseButtons)) {
-      const bool down = (event->type == SDL_MOUSEBUTTONDOWN);
+      const bool down = (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
       g_mouse.buttons[static_cast<std::size_t>(button)] = down;
       MouseButtonEvent mbe{};
       mbe.button = button;
@@ -219,30 +209,30 @@ void input_process_event(const void *nativeEvent) noexcept {
     }
     break;
   }
-  case SDL_MOUSEWHEEL:
-    g_mouse.scrollDelta += event->wheel.y;
+  case SDL_EVENT_MOUSE_WHEEL:
+    g_mouse.scrollDelta += static_cast<int>(event->wheel.y);
     break;
-  case SDL_CONTROLLERDEVICEADDED:
+  case SDL_EVENT_GAMEPAD_ADDED:
     g_gamepad.connected = true;
     break;
-  case SDL_CONTROLLERDEVICEREMOVED:
+  case SDL_EVENT_GAMEPAD_REMOVED:
     g_gamepad.connected = false;
     g_gamepad.buttons = {};
     g_gamepad.axes = {};
     break;
-  case SDL_CONTROLLERBUTTONDOWN:
-  case SDL_CONTROLLERBUTTONUP: {
-    const int button = static_cast<int>(event->cbutton.button);
+  case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+  case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+    const int button = static_cast<int>(event->gbutton.button);
     if ((button >= 0) && (button < kMaxGamepadButtons)) {
       g_gamepad.buttons[static_cast<std::size_t>(button)] =
-          (event->type == SDL_CONTROLLERBUTTONDOWN);
+          (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
     }
     break;
   }
-  case SDL_CONTROLLERAXISMOTION: {
-    const int axis = static_cast<int>(event->caxis.axis);
+  case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+    const int axis = static_cast<int>(event->gaxis.axis);
     if ((axis >= 0) && (axis < kMaxGamepadAxes)) {
-      g_gamepad.axes[static_cast<std::size_t>(axis)] = event->caxis.value;
+      g_gamepad.axes[static_cast<std::size_t>(axis)] = event->gaxis.value;
     }
     break;
   }

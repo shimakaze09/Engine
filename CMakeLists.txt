@@ -43,22 +43,23 @@ set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
 set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
     "Build-tree asset directory used by local editor/runtime builds")
 
-find_package(SDL2 CONFIG QUIET)
-if(NOT SDL2_FOUND)
+find_package(SDL3 CONFIG QUIET)
+if(NOT SDL3_FOUND)
     include(FetchContent)
     set(SDL_SHARED OFF CACHE BOOL "Build SDL shared library" FORCE)
     set(SDL_STATIC ON CACHE BOOL "Build SDL static library" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "Build SDL test library" FORCE)
     FetchContent_Declare(
-        SDL2
+        SDL3
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG fa24d868ac2f8fd558e4e914c9863411245db8fd # release-2.30.11
+        GIT_TAG f87239e71e42da91ca317a12eefb82cfbf3393eb # release-3.4.12
     )
     if(DEFINED CMAKE_WARN_DEPRECATED)
         set(_ENGINE_PREV_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
     endif()
     set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL
         "Suppress third-party CMake deprecation warnings" FORCE)
-    FetchContent_MakeAvailable(SDL2)
+    FetchContent_MakeAvailable(SDL3)
     if(DEFINED _ENGINE_PREV_CMAKE_WARN_DEPRECATED)
         set(CMAKE_WARN_DEPRECATED "${_ENGINE_PREV_CMAKE_WARN_DEPRECATED}"
             CACHE BOOL "Show CMake deprecation warnings" FORCE)
@@ -67,22 +68,22 @@ if(NOT SDL2_FOUND)
     endif()
 endif()
 
-if(NOT SDL2_FOUND AND NOT TARGET SDL2::SDL2)
-    message(FATAL_ERROR "SDL2 is required but was not found or fetched.")
+if(NOT SDL3_FOUND AND NOT TARGET SDL3::SDL3-static AND NOT TARGET SDL3::SDL3)
+    message(FATAL_ERROR "SDL3 is required but was not found or fetched.")
 endif()
 
-if(TARGET SDL2::SDL2-static)
-    set(ENGINE_SDL2_TARGET SDL2::SDL2-static)
-elseif(TARGET SDL2::SDL2)
-    set(ENGINE_SDL2_TARGET SDL2::SDL2)
+if(TARGET SDL3::SDL3-static)
+    set(ENGINE_SDL_TARGET SDL3::SDL3-static)
+elseif(TARGET SDL3::SDL3)
+    set(ENGINE_SDL_TARGET SDL3::SDL3)
 else()
-    message(FATAL_ERROR "No SDL2 CMake target is available.")
+    message(FATAL_ERROR "No SDL3 CMake target is available.")
 endif()
 
 find_package(OpenGL REQUIRED)
 
 if(APPLE)
-    foreach(_engine_sdl_target SDL2-static SDL2)
+    foreach(_engine_sdl_target SDL3-static SDL3-shared)
         if(TARGET ${_engine_sdl_target})
             target_compile_options(${_engine_sdl_target} PRIVATE -Wno-deprecated-declarations)
         endif()
@@ -326,7 +327,7 @@ add_library(engine_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp
 )
@@ -342,7 +343,7 @@ target_compile_features(engine_imgui PUBLIC cxx_std_23)
 
 target_link_libraries(engine_imgui
     PUBLIC
-    ${ENGINE_SDL2_TARGET}
+    ${ENGINE_SDL_TARGET}
     OpenGL::GL
 )
 
