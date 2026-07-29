@@ -268,8 +268,10 @@ struct BackendState final {
   std::uint32_t debugLineVao = 0U;
   std::uint32_t debugLineVbo = 0U;
 
-  // Tile light texture (uploaded each frame by CPU culling).
+  // Tile light texture (uploaded each frame by CPU culling); rows tracks the
+  // allocated height so viewport growth recreates it.
   std::uint32_t tileLightTex = 0U;
+  int tileLightTexRows = 0;
   std::vector<float> tileBuffer;
 
   // Per-light data texture consumed by the deferred lighting shader

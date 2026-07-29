@@ -122,6 +122,13 @@ void CommandBufferBuilder::sort_by_key() noexcept {
                 return lhsTransparent < rhsTransparent;
               }
               if (lhsTransparent) {
+                const std::uint64_t lhsDepth =
+                    lhs.sortKey.value & kDrawKeyDepthMask;
+                const std::uint64_t rhsDepth =
+                    rhs.sortKey.value & kDrawKeyDepthMask;
+                if (lhsDepth != rhsDepth) {
+                  return lhsDepth < rhsDepth;
+                }
                 return lhs.sortKey.value < rhs.sortKey.value;
               }
 

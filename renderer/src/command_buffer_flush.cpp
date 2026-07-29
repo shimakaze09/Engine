@@ -1302,10 +1302,20 @@ void flush_renderer(CommandBufferView commandBufferView,
     cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
                       drawableWidth, drawableHeight, tileData);
 
-    // Upload tile texture.
+    // Upload tile texture; recreate when the tile count outgrows the
+    // allocated height (sub-image updates cannot grow it).
+    if ((backend.tileLightTex != 0U) &&
+        (tileData.totalTiles > backend.tileLightTexRows)) {
+      dev->destroy_texture(backend.tileLightTex);
+      backend.tileLightTex = 0U;
+      backend.tileLightTexRows = 0;
+    }
     if (backend.tileLightTex == 0U) {
       backend.tileLightTex = dev->create_texture_2d_r32f(
           kTileDataWidth, tileData.totalTiles, backend.tileBuffer.data());
+      if (backend.tileLightTex != 0U) {
+        backend.tileLightTexRows = tileData.totalTiles;
+      }
     } else {
       dev->update_texture_2d_r32f(backend.tileLightTex, kTileDataWidth,
                                   tileData.totalTiles,

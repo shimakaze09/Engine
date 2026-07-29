@@ -1104,6 +1104,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     dev->destroy_texture(backend->tileLightTex);
     backend->tileLightTex = 0U;
   }
+  backend->tileLightTexRows = 0;
   backend->tileBuffer.clear();
 
   // Destroy per-light data texture.
