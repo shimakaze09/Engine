@@ -1804,6 +1804,52 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
                          combinedRest, combinedStaticFric, combinedDynFric);
 }
 
+// Linked-list node for the broadphase spatial hash grid.
+struct SpatialNode final {
+  std::uint32_t colliderIdx;
+  std::uint32_t next;
+};
+
+// Max spatial-hash entries: each collider may touch up to 8 cells (the
+// corners of its AABB).
+constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
+
+// Per-thread scratch buffers for resolve_collisions, heap-allocated on first
+// use. These must not be plain thread_local arrays: ~19 MB of static TLS is
+// carved out of every new thread's stack allocation on glibc, which starves
+// threads created with small explicit stacks (Mesa's GL driver workers
+// overflowed and crashed the editor on startup exactly that way).
+struct ResolveScratch final {
+  std::array<ColliderWorldGeometry, kMaxColliders> geometries{};
+  std::array<Entity, kMaxColliders> bodyOwners{};
+  std::array<engine::math::Vec3, kMaxColliders> bodyCenters{};
+  std::array<bool, kMaxColliders> geometryValid{};
+  std::array<float, kMaxColliders> posX{};
+  std::array<float, kMaxColliders> posY{};
+  std::array<float, kMaxColliders> posZ{};
+  std::array<std::uint32_t, kSpatialHashBuckets> buckets{};
+  std::array<SpatialNode, kMaxNodes> nodes{};
+};
+
+// Owns one thread's ResolveScratch and frees it at thread exit.
+struct ResolveScratchOwner final {
+  ResolveScratch *scratch = nullptr;
+  ResolveScratchOwner() noexcept = default;
+  ResolveScratchOwner(const ResolveScratchOwner &) = delete;
+  ResolveScratchOwner &operator=(const ResolveScratchOwner &) = delete;
+  ~ResolveScratchOwner() { delete scratch; }
+};
+
+// Returns this thread's resolve scratch, allocating it on first use (a
+// one-time per-thread allocation, not a per-step hot-path one).
+ResolveScratch *acquire_resolve_scratch() noexcept {
+  thread_local static ResolveScratchOwner owner;
+  if (owner.scratch == nullptr) {
+    owner.scratch = new (std::nothrow) ResolveScratch();
+  }
+  return owner.scratch;
+}
+
 } // namespace
 
 bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
@@ -1827,16 +1873,23 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return false;
   }
 
+  ResolveScratch *const resolveScratch = acquire_resolve_scratch();
+  if (resolveScratch == nullptr) {
+    core::log_message(core::LogLevel::Error, "physics",
+                      "resolve_collisions scratch allocation failed");
+    return false;
+  }
+
   // Build collider world geometry serially in dense order after all parallel
   // integration jobs. This is the only simulation stage allowed to compose
   // child transforms from the write buffer.
-  thread_local static std::array<ColliderWorldGeometry, kMaxColliders>
-      geometries{};
-  thread_local static std::array<Entity, kMaxColliders> bodyOwners{};
-  thread_local static std::array<engine::math::Vec3, kMaxColliders>
-      bodyCenters{};
-  thread_local static std::array<bool, kMaxColliders> geometryValid{};
-  thread_local static std::array<float, kMaxColliders> posX{}, posY{}, posZ{};
+  auto &geometries = resolveScratch->geometries;
+  auto &bodyOwners = resolveScratch->bodyOwners;
+  auto &bodyCenters = resolveScratch->bodyCenters;
+  auto &geometryValid = resolveScratch->geometryValid;
+  auto &posX = resolveScratch->posX;
+  auto &posY = resolveScratch->posY;
+  auto &posZ = resolveScratch->posZ;
 
   for (std::size_t i = 0U; i < colliderCount; ++i) {
     PhysicsTransform entityTransform{};
@@ -1916,16 +1969,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     const float invCellSize = 1.0F / cellSize;
 
     // Spatial hash: bucket heads + linked-list nodes.
-    struct SpatialNode {
-      std::uint32_t colliderIdx;
-      std::uint32_t next;
-    };
-
-    // Max entries: each collider may touch up to 8 cells (corners of its AABB).
-    constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
-    thread_local static std::array<std::uint32_t, kSpatialHashBuckets>
-        buckets{};
-    thread_local static std::array<SpatialNode, kMaxNodes> nodes{};
+    auto &buckets = resolveScratch->buckets;
+    auto &nodes = resolveScratch->nodes;
     std::size_t nodeCount = 0U;
 
     for (std::size_t b = 0U; b < kSpatialHashBuckets; ++b) {
