@@ -89,9 +89,13 @@ constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
 std::size_t g_memoryLimit = kDefaultMemoryLimit;
 std::size_t g_memoryUsed = 0U;
 
-// Custom allocator wrapper that enforces memory limit.
+// Custom allocator wrapper that enforces memory limit. Per the lua_Alloc
+// contract, osize is an object type tag (not a size) when ptr is null.
 void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
                     std::size_t nsize) noexcept {
+  if (ptr == nullptr) {
+    osize = 0U;
+  }
   if (nsize == 0U) {
     if (osize > 0U) {
       g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
