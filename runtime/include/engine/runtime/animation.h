@@ -80,6 +80,16 @@ struct AnimationClip final {
 /// order evaluation requires).
 bool anim_skeleton_parents_ordered(const AnimSkeleton &skeleton) noexcept;
 
+/// Loads a cooked .skel through the VFS; validates magic, version, joint
+/// budget, and the parent-before-child order.
+bool load_skeleton_asset(const char *virtualPath,
+                         AnimSkeleton *outSkeleton) noexcept;
+
+/// Loads a cooked .anim through the VFS; validates magic, version, track
+/// budget, and that every track's keys fit inside the payload.
+bool load_animation_clip_asset(const char *virtualPath,
+                               AnimationClip *outClip) noexcept;
+
 /// Samples the clip at timeSeconds (clamped to [0, duration]) over the
 /// skeleton's rest pose: joints the clip does not animate keep their rest
 /// transform. outPose must hold skeleton.jointCount entries.

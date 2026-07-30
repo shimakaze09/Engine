@@ -588,6 +588,18 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/math/include
         ${ENGINE_CGLTF_INCLUDE_DIR}
     )
+
+    engine_add_test_executable(engine_unit_anim_cook
+        SOURCES
+        anim_cook_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/anim_cook.cpp
+        PRIVATE_DEPS
+        engine_runtime
+        engine_core
+        engine_math
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+    )
 endif()
 
 # ---- P1-M12-A: Platform Paths ----

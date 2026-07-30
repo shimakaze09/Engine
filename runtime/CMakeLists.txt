@@ -7,6 +7,7 @@ engine_add_module_library(engine_runtime
     src/editor_bridge.cpp
     src/engine.cpp
     src/animation.cpp
+    src/animation_assets.cpp
     src/engine_pipeline.cpp
     src/engine_bootstrap_content.cpp
     src/engine_frame_collect.cpp
