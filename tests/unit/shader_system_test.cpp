@@ -6,6 +6,7 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
+#include "shader_system_internal.h"
 
 #include <cstdio>
 #include <cstring>
@@ -317,6 +318,39 @@ static void test_check_reload_without_init() {
   ++g_passed;
 }
 
+/// EXPECTATION: the version scan finds the #version line after the
+/// file-top comment every engine shader carries (variant defines must
+/// splice AFTER it, or GL rejects the source), handles sources that
+/// start with the directive, includes indented directives, and returns 0
+/// when no #version exists.
+static void test_version_prefix_after_leading_comments() {
+  using namespace engine::renderer;
+
+  const char *commented =
+      "// Purpose comment line one.\n"
+      "// Line two.\n"
+      "\n"
+      "#version 330 core\n"
+      "void main() {}\n";
+  const std::size_t commentedPrefix = shader_version_prefix_length(commented);
+  TEST_ASSERT(commentedPrefix == std::strlen("// Purpose comment line one.\n"
+                                             "// Line two.\n"
+                                             "\n"
+                                             "#version 330 core\n"));
+
+  const char *bare = "#version 330 core\nvoid main() {}\n";
+  TEST_ASSERT(shader_version_prefix_length(bare) ==
+              std::strlen("#version 330 core\n"));
+
+  const char *indented = "  #version 330 core\nvoid main() {}\n";
+  TEST_ASSERT(shader_version_prefix_length(indented) ==
+              std::strlen("  #version 330 core\n"));
+
+  TEST_ASSERT(shader_version_prefix_length("void main() {}\n") == 0U);
+  TEST_ASSERT(shader_version_prefix_length("") == 0U);
+  ++g_passed;
+}
+
 /// Runs this executable or test program.
 int main() {
   int before_test_init_shutdown = g_failed;
@@ -343,6 +377,8 @@ int main() {
   RUN_TEST(test_stale_handle_rejected_after_slot_reuse);
   int before_test_check_reload_without_init = g_failed;
   RUN_TEST(test_check_reload_without_init);
+  int before_test_version_prefix_after_leading_comments = g_failed;
+  RUN_TEST(test_version_prefix_after_leading_comments);
 
   std::printf(
       "\nShader system tests: %d passed, %d failed\n", g_passed, g_failed);

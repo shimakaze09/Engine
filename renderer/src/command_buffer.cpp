@@ -66,6 +66,25 @@ ShaderProgramHandle load_configured_shader_program(
   return load_shader_program(vertexPath, fragmentPath);
 }
 
+/// Loads a shader-pair variant from the configured shader root with the
+/// given preprocessor defines.
+ShaderProgramHandle load_configured_shader_variant(
+    const char *vertexShader, const char *fragmentShader,
+    const ShaderDefine *defines, std::size_t defineCount) noexcept {
+  char vertexPath[512]{};
+  char fragmentPath[512]{};
+  if (!make_shader_path(vertexShader, vertexPath, sizeof(vertexPath)) ||
+      !make_shader_path(fragmentShader, fragmentPath, sizeof(fragmentPath))) {
+    return ShaderProgramHandle{};
+  }
+  ShaderVariantDesc desc{};
+  desc.vertPath = vertexPath;
+  desc.fragPath = fragmentPath;
+  desc.defines = defines;
+  desc.defineCount = defineCount;
+  return load_shader_variant(desc);
+}
+
 /// Initializes the GL backend once: the hard-fail core first, then the
 /// soft-fail environment, lighting, and post groups whose availability
 /// flags gate their passes.
@@ -219,6 +238,21 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   }
   backend->instanceAttributes.clear();
   backend->staticMeshBatches.clear();
+
+  // Destroy GPU skinning state.
+  if (backend->bonePaletteUbo != 0U && dev != nullptr) {
+    dev->destroy_buffer(backend->bonePaletteUbo);
+    backend->bonePaletteUbo = 0U;
+  }
+  if (backend->gbufferSkinnedShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->gbufferSkinnedShaderHandle);
+    backend->gbufferSkinnedShaderHandle = ShaderProgramHandle{};
+  }
+  if (backend->shadowDepthSkinnedShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->shadowDepthSkinnedShaderHandle);
+    backend->shadowDepthSkinnedShaderHandle = ShaderProgramHandle{};
+  }
+  backend->skinningAvailable = false;
 
   // Destroy deferred shaders.
   if (backend->gbufferDebugShaderHandle != kInvalidShaderProgram) {

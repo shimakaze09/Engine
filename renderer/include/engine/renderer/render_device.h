@@ -51,6 +51,17 @@ struct RenderDevice final {
   void (*buffer_data_element)(const void *data,
                               std::ptrdiff_t sizeBytes) noexcept = nullptr;
 
+  // Uniform buffers (std140 blocks, e.g. skinning bone palettes).
+  void (*bind_uniform_buffer)(std::uint32_t buffer) noexcept = nullptr;
+  void (*buffer_data_uniform)(const void *data,
+                              std::ptrdiff_t sizeBytes) noexcept = nullptr;
+  void (*buffer_sub_data_uniform)(const void *data,
+                                  std::ptrdiff_t sizeBytes) noexcept = nullptr;
+  void (*bind_uniform_buffer_base)(std::uint32_t binding,
+                                   std::uint32_t buffer) noexcept = nullptr;
+  void (*bind_uniform_block)(std::uint32_t program, const char *blockName,
+                             std::uint32_t binding) noexcept = nullptr;
+
   // Vertex attributes.
   void (*enable_vertex_attrib)(std::uint32_t index) noexcept = nullptr;
   void (*vertex_attrib_float)(std::uint32_t index, std::int32_t components,

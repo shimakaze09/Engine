@@ -14,8 +14,35 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
+#include "shader_system_internal.h"
 
 namespace engine::renderer {
+
+std::size_t shader_version_prefix_length(const char *source) noexcept {
+  std::size_t lineStart = 0U;
+  while (source[lineStart] != '\0') {
+    std::size_t i = lineStart;
+    while ((source[i] == ' ') || (source[i] == '\t')) {
+      ++i;
+    }
+    if (std::strncmp(source + i, "#version", 8U) == 0) {
+      while ((source[i] != '\0') && (source[i] != '\n')) {
+        ++i;
+      }
+      if (source[i] == '\n') {
+        ++i;
+      }
+      return i;
+    }
+    while ((source[lineStart] != '\0') && (source[lineStart] != '\n')) {
+      ++lineStart;
+    }
+    if (source[lineStart] == '\n') {
+      ++lineStart;
+    }
+  }
+  return 0U;
+}
 
 namespace {
 
@@ -218,22 +245,6 @@ std::size_t shader_define_preamble_size(const ShaderDefineCopy *defines,
              std::strlen(defines[i].value) + 1U;
   }
   return total;
-}
-
-/// Returns the initial #version line length when a shader has one.
-std::size_t shader_version_prefix_length(const char *source) noexcept {
-  if (std::strncmp(source, "#version", 8U) != 0) {
-    return 0U;
-  }
-
-  std::size_t i = 0U;
-  while (source[i] != '\0') {
-    ++i;
-    if (source[i - 1U] == '\n') {
-      break;
-    }
-  }
-  return i;
 }
 
 /// Appends a byte range to an output cursor.

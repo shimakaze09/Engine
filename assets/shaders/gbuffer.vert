@@ -9,6 +9,14 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in mat4 aInstanceModel;
 layout(location = 7) in vec4 aInstanceFoliage;
+#ifdef SKINNED
+layout(location = 8) in vec4 aJoints;
+layout(location = 9) in vec4 aWeights;
+
+layout(std140) uniform BonePalette {
+    mat4 uBones[128];
+};
+#endif
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -31,7 +39,20 @@ void main() {
         /// Handles transpose.
         ? transpose(inverse(mat3(model)))
         : uNormalMatrix;
-    vec4 worldPos = model * vec4(aPosition, 1.0);
+    vec3 localPosition = aPosition;
+    vec3 localNormal = aNormal;
+#ifdef SKINNED
+    float weightSum = dot(aWeights, vec4(1.0));
+    if (weightSum > 0.0) {
+        mat4 skin = aWeights.x * uBones[int(aJoints.x)]
+            + aWeights.y * uBones[int(aJoints.y)]
+            + aWeights.z * uBones[int(aJoints.z)]
+            + aWeights.w * uBones[int(aJoints.w)];
+        localPosition = vec3(skin * vec4(aPosition, 1.0));
+        localNormal = mat3(skin) * aNormal;
+    }
+#endif
+    vec4 worldPos = model * vec4(localPosition, 1.0);
     float phase = (uUseInstancing != 0)
         ? aInstanceFoliage.x
         : uFoliagePhase;
@@ -46,7 +67,7 @@ void main() {
             * bend;
     }
     vWorldPos = worldPos.xyz;
-    vNormal = normalize(normalMatrix * aNormal);
+    vNormal = normalize(normalMatrix * localNormal);
     vTexCoord = aTexCoord;
     gl_Position = uProjection * uView * worldPos;
 }

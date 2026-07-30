@@ -23,6 +23,26 @@ struct MeshHandle final {
 
 inline constexpr MeshHandle kInvalidMeshHandle{};
 
+// GPU skinning: per-entity bone palettes uploaded once per frame and
+// referenced by DrawCommand::skinPalette. One palette fits the 128-joint
+// skeleton budget inside the GL-guaranteed 16 KiB uniform block size.
+inline constexpr std::size_t kMaxSkinPalettes = 16U;
+inline constexpr std::size_t kMaxSkinPaletteJoints = 128U;
+inline constexpr std::uint32_t kInvalidSkinPalette = 0xFFFFFFFFU;
+
+/// One entity's skinning matrices (model-space pose times inverse bind).
+struct SkinPalette final {
+  std::array<math::Mat4, kMaxSkinPaletteJoints> joints{};
+  std::uint32_t jointCount = 0U;
+};
+
+/// Stores up to kMaxSkinPalettes palettes for the next flush_renderer
+/// call; excess palettes are dropped with a log. Pass count 0 to clear.
+void set_skin_palettes(const SkinPalette *palettes,
+                       std::size_t count) noexcept;
+/// Number of palettes currently stored for the next flush.
+std::size_t skin_palette_count() noexcept;
+
 // Instancing-ready sort key.
 // Bit layout (MSB→LSB):
 //   transparent:1 | shader:7 | texture:20 | mesh:20 | depth:16
@@ -44,6 +64,7 @@ struct DrawCommand final {
   float foliageWindFrequency = 1.0F;
   float foliageWindPhase = 0.0F;
   std::uint32_t foliageLodIndex = 0U;
+  std::uint32_t skinPalette = kInvalidSkinPalette;
   math::Mat4 modelMatrix = math::Mat4();
 };
 
