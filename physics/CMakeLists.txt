@@ -3,12 +3,16 @@
 engine_add_module_library(engine_physics
     SOURCES
     src/physics.cpp
+    src/physics_payloads.cpp
+    src/physics_step.cpp
     src/collider.cpp
     src/contact_clip.cpp
+    src/contact_resolution.cpp
     src/convex_hull.cpp
     src/ccd.cpp
     src/constraint_solver.cpp
     src/contact_manifold.cpp
+    src/narrow_phase.cpp
     src/physics_query.cpp
     src/primitive_hulls.cpp
     src/joints/distance_joint.cpp

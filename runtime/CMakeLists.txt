@@ -7,6 +7,9 @@ engine_add_module_library(engine_runtime
     src/editor_bridge.cpp
     src/engine.cpp
     src/engine_pipeline.cpp
+    src/engine_bootstrap_content.cpp
+    src/engine_frame_collect.cpp
+    src/engine_runtime_streaming.cpp
     src/physics_bridge.cpp
     src/prefab_serializer.cpp
     src/render_prep_pipeline.cpp
@@ -17,6 +20,8 @@ engine_add_module_library(engine_runtime
     src/service_registry.cpp
     src/timer_manager.cpp
     src/world.cpp
+    src/world_components.cpp
+    src/world_lifecycle.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS

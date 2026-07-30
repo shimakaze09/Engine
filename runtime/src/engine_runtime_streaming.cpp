@@ -1,0 +1,197 @@
+// Implements the runtime side of async mesh streaming: worker-thread CPU
+// loads staged into transfer slots, main-thread GPU uploads, and failure
+// synchronization back into the asset database.
+
+#include "engine_runtime_streaming.h"
+
+#include <cstddef>
+#include <mutex>
+#include <utility>
+
+#include "engine/core/logging.h"
+#include "engine/renderer/mesh_loader.h"
+
+namespace engine {
+
+/// Stores a CPU-side mesh payload for main-thread upload.
+bool store_streamed_mesh_data(RuntimeAssetStreamingState *state,
+                              renderer::AssetId assetId,
+                              renderer::CpuMeshData &&meshData,
+                              std::uint64_t sizeBytes) noexcept {
+  if ((state == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(state->mutex);
+  std::size_t freeSlot = state->meshTransfers.size();
+  for (std::size_t i = 0U; i < state->meshTransfers.size(); ++i) {
+    StreamingMeshTransferSlot &slot = state->meshTransfers[i];
+    if (slot.occupied && (slot.assetId == assetId)) {
+      slot.meshData = std::move(meshData);
+      slot.sizeBytes = sizeBytes;
+      return true;
+    }
+    if (!slot.occupied && (freeSlot == state->meshTransfers.size())) {
+      freeSlot = i;
+    }
+  }
+
+  if (freeSlot == state->meshTransfers.size()) {
+    return false;
+  }
+
+  StreamingMeshTransferSlot &slot = state->meshTransfers[freeSlot];
+  slot.assetId = assetId;
+  slot.meshData = std::move(meshData);
+  slot.sizeBytes = sizeBytes;
+  slot.occupied = true;
+  return true;
+}
+
+/// Takes a CPU-side mesh payload loaded by the streaming worker.
+bool take_streamed_mesh_data(RuntimeAssetStreamingState *state,
+                             renderer::AssetId assetId,
+                             renderer::CpuMeshData *outMeshData,
+                             std::uint64_t *outSizeBytes) noexcept {
+  if ((state == nullptr) || (assetId == renderer::kInvalidAssetId) ||
+      (outMeshData == nullptr)) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(state->mutex);
+  for (StreamingMeshTransferSlot &slot : state->meshTransfers) {
+    if (!slot.occupied || (slot.assetId != assetId)) {
+      continue;
+    }
+
+    *outMeshData = std::move(slot.meshData);
+    if (outSizeBytes != nullptr) {
+      *outSizeBytes = slot.sizeBytes;
+    }
+    slot = StreamingMeshTransferSlot{};
+    return true;
+  }
+  return false;
+}
+
+/// Clears any CPU-side mesh payloads not consumed by upload.
+void clear_streamed_mesh_data(RuntimeAssetStreamingState *state) noexcept {
+  if (state == nullptr) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(state->mutex);
+  for (StreamingMeshTransferSlot &slot : state->meshTransfers) {
+    slot = StreamingMeshTransferSlot{};
+  }
+}
+
+/// Worker-thread CPU load callback for runtime asset streaming.
+bool runtime_streaming_load_mesh(renderer::AssetId assetId, const char *path,
+                                 std::uint64_t *outSizeBytes,
+                                 void *userData) noexcept {
+  auto *state = static_cast<RuntimeAssetStreamingState *>(userData);
+  renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 0ULL;
+  if (!renderer::load_mesh_data_from_file(path, &meshData, &sizeBytes)) {
+    return false;
+  }
+
+  if (!store_streamed_mesh_data(state, assetId, std::move(meshData),
+                                sizeBytes)) {
+    return false;
+  }
+
+  if (outSizeBytes != nullptr) {
+    *outSizeBytes = sizeBytes;
+  }
+  return true;
+}
+
+/// Main-thread GPU upload callback for runtime asset streaming.
+bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
+                                   void *userData) noexcept {
+  auto *state = static_cast<RuntimeAssetStreamingState *>(userData);
+  if ((state == nullptr) || (state->database == nullptr) ||
+      (state->meshRegistry == nullptr)) {
+    return false;
+  }
+
+  renderer::CpuMeshData meshData{};
+  std::uint64_t sizeBytes = 0ULL;
+  if (!take_streamed_mesh_data(state, assetId, &meshData, &sizeBytes)) {
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Failed,
+        renderer::kInvalidMeshHandle));
+    return false;
+  }
+
+  if (!renderer::mesh_asset_requested_resident(state->database, assetId) ||
+      (renderer::mesh_asset_state(state->database, assetId) !=
+       renderer::AssetState::Loading)) {
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Unloaded,
+        renderer::kInvalidMeshHandle));
+    return true;
+  }
+
+  renderer::GpuMesh mesh{};
+  if (!renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Failed,
+        renderer::kInvalidMeshHandle));
+    return false;
+  }
+
+  const std::uint32_t meshSlot =
+      renderer::register_gpu_mesh(state->meshRegistry, mesh);
+  if (meshSlot == 0U) {
+    renderer::unload_mesh(&mesh);
+    static_cast<void>(renderer::set_mesh_asset_state(
+        state->database, assetId, renderer::AssetState::Failed,
+        renderer::kInvalidMeshHandle));
+    core::log_message(core::LogLevel::Error, "assets",
+                      "mesh registry is full; streamed asset upload failed");
+    return false;
+  }
+
+  if (!renderer::set_mesh_asset_state(state->database, assetId,
+                                      renderer::AssetState::Ready,
+                                      renderer::MeshHandle{meshSlot})) {
+    renderer::unload_mesh(&state->meshRegistry->meshes[meshSlot]);
+    state->meshRegistry->occupied[meshSlot] = false;
+    return false;
+  }
+
+  static_cast<void>(
+      renderer::set_mesh_asset_size(state->database, assetId, sizeBytes));
+  return true;
+}
+
+/// Mirrors terminal streaming failures into the asset database on the main
+/// thread.
+void sync_streaming_failures(
+    runtime::EngineAssetDatabaseService *service) noexcept {
+  if ((service == nullptr) || (service->database == nullptr) ||
+      (service->streamingQueue == nullptr)) {
+    return;
+  }
+
+  for (const auto &handle : service->scriptLoadHandles) {
+    if (!handle.occupied || !handle.streamingHandle.valid() ||
+        (handle.assetId == renderer::kInvalidAssetId)) {
+      continue;
+    }
+
+    if (renderer::get_load_state(service->streamingQueue,
+                                 handle.streamingHandle) ==
+        renderer::LoadingState::Failed) {
+      static_cast<void>(renderer::set_mesh_asset_state(
+          service->database, handle.assetId, renderer::AssetState::Failed,
+          renderer::kInvalidMeshHandle));
+    }
+  }
+}
+
+
+} // namespace engine

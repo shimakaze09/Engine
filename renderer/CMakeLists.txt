@@ -9,11 +9,21 @@ engine_add_module_library(engine_renderer
     src/command_buffer_capture.cpp
     src/command_buffer_context.cpp
     src/command_buffer_flush.cpp
+    src/command_buffer_flush_captures.cpp
+    src/command_buffer_flush_deferred.cpp
+    src/command_buffer_flush_forward.cpp
+    src/command_buffer_flush_post.cpp
+    src/command_buffer_flush_shadows.cpp
+    src/command_buffer_flush_uniforms.cpp
     src/command_buffer_ibl.cpp
     src/command_buffer_math.cpp
     src/command_buffer_post_resources.cpp
     src/command_buffer_sky.cpp
     src/command_buffer.cpp
+    src/command_buffer_init_core.cpp
+    src/command_buffer_init_environment.cpp
+    src/command_buffer_init_lighting.cpp
+    src/command_buffer_init_post.cpp
     src/gpu_profiler.cpp
     src/light_culling.cpp
     src/lru_cache.cpp
