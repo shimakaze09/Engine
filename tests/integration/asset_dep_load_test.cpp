@@ -78,7 +78,6 @@ int main() {
       return 5;
     }
 
-    // Load prefab with dependency tracking.
     LoadTracker tracker{};
     if (!load_with_dependencies(database.get(), 100ULL, tracking_load_callback,
                                 &tracker)) {
@@ -198,7 +197,6 @@ int main() {
     write_metadata_path(&metaY.filePath, "Y");
     register_asset_metadata(database.get(), metaY);
 
-    // Create a cycle: X -> Y -> X.
     add_asset_dependency(database.get(), 10ULL, 20ULL);
     add_asset_dependency(database.get(), 20ULL, 10ULL);
 

@@ -103,7 +103,6 @@ static void test_50_mesh_loads() noexcept {
 
   CHECK(pending_load_count(queue.get()) == kLoadCount, "all 50 pending");
 
-  // Process frames until all loads are ready.
   std::size_t frameCount = 0U;
   constexpr std::size_t kMaxFrames = 100U;
 
@@ -112,7 +111,6 @@ static void test_50_mesh_loads() noexcept {
     update_asset_streaming(queue.get(), &dummy_load, &dummy_upload, nullptr);
     ++frameCount;
 
-    // Check if all are ready.
     bool allReady = true;
     for (std::size_t i = 0U; i < kLoadCount; ++i) {
       if (!is_load_ready(queue.get(), handles[i])) {
@@ -148,7 +146,6 @@ static void test_priority_ordering() noexcept {
   auto queue = std::make_unique<AssetStreamingQueue>();
   initialize_asset_streaming(queue.get());
 
-  // Set budget low enough to allow one conservative load slot per frame.
   engine::core::cvar_set_int("asset.streaming_budget_mb", 1);
   engine::core::cvar_set_int("asset.max_uploads_per_frame", 1024);
 

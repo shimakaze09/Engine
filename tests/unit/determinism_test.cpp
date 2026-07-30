@@ -65,7 +65,6 @@ int run_sim(SimSnapshot *out, int maxEntities) noexcept {
     world->add_rigid_body(entities[i], rb);
   }
 
-  // Step
   for (int s = 0; s < kStepCount; ++s) {
     world->begin_update_phase();
     step_physics(*world, kDt);

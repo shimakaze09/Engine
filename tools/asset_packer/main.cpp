@@ -195,7 +195,6 @@ int main(int argc, char **argv) {
     return 11;
   }
 
-  // Load the dependency graph (if a graph path was provided).
   engine::tools::DependencyGraph depGraph{};
   const bool hasGraphPath = !graphPath.empty();
   if (hasGraphPath && file_exists(graphPath.c_str()) &&
@@ -206,20 +205,18 @@ int main(int argc, char **argv) {
     return 15;
   }
 
-  // Compute the mesh asset ID for graph registration.
   const std::uint64_t meshAssetId = hash_path_to_asset_id(inputPath);
   if (hasGraphPath && (meshAssetId != 0ULL)) {
     engine::tools::register_asset_path(&depGraph, meshAssetId, inputPath);
 
-    // Check if any dependency in the graph has changed, requiring a repack.
-    // This extends beyond just the explicit --dep flags.
+    // Graph-tracked dependencies (auto-discovered on earlier cooks) can
+    // force a repack beyond the explicit --dep flags.
     engine::tools::DependencyGraph::AssetId depIds[64] = {};
     const std::size_t depCount =
         engine::tools::get_dependencies(&depGraph, meshAssetId, depIds, 64U);
     for (std::size_t i = 0U; i < depCount; ++i) {
       auto pathIt = depGraph.assetPaths.find(depIds[i]);
       if (pathIt != depGraph.assetPaths.end()) {
-        // Check if already in the manual deps list.
         bool alreadyTracked = false;
         for (const auto &d : dependencyDigests) {
           if (d.path == pathIt->second) {
@@ -242,7 +239,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  // Read import settings from existing .meta.json (if present).
   ImportSettings importSettings{};
   read_import_settings_from_meta(outputPath, &importSettings);
   const std::uint64_t importSettingsHash = hash_import_settings(importSettings);
@@ -256,7 +252,6 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  // If input is a texture file (PNG/JPG/JPEG), generate its thumbnail now.
   {
     const char *ext = std::strrchr(inputPath, '.');
     if (ext != nullptr) {
@@ -266,8 +261,7 @@ int main(int argc, char **argv) {
           std::strcmp(ext, ".jpg") == 0 || std::strcmp(ext, ".jpeg") == 0 ||
           std::strcmp(ext, ".JPG") == 0 || std::strcmp(ext, ".JPEG") == 0;
       if (isPng || isJpg) {
-        // Texture assets have no further cook step.
-        return generate_texture_thumbnail(inputPath, outputPath) ? 0 : 14;
+            return generate_texture_thumbnail(inputPath, outputPath) ? 0 : 14;
       }
     }
   }
@@ -326,7 +320,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  // Select mesh and primitive from import settings (bounds-checked).
   const cgltf_size meshIdx =
       (importSettings.meshIndex >= 0 &&
        static_cast<cgltf_size>(importSettings.meshIndex) < data->meshes_count)
@@ -347,13 +340,10 @@ int main(int argc, char **argv) {
     return 5;
   }
 
-  // Apply import settings: scale factor.
   apply_scale_to_primitive(&primitiveData, importSettings.scaleFactor);
 
-  // Extract material/texture dependencies from glTF and register in graph.
   std::vector<DependencyDigest> autoDiscoveredDeps{};
   if (hasGraphPath && (meshAssetId != 0ULL)) {
-    // Clear previous forward edges for this asset before repopulating.
     auto fwdIt = depGraph.dependencies.find(meshAssetId);
     if (fwdIt != depGraph.dependencies.end()) {
       for (const auto oldDep : fwdIt->second) {
@@ -376,8 +366,7 @@ int main(int argc, char **argv) {
       return 15;
     }
 
-    // Also register manually specified deps in the graph.
-    for (const auto &manualDep : dependencyDigests) {
+      for (const auto &manualDep : dependencyDigests) {
       const std::uint64_t depId = hash_path_to_asset_id(manualDep.path.c_str());
       if (depId != 0ULL) {
         engine::tools::register_asset_path(&depGraph, depId,
@@ -393,7 +382,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  // Merge auto-discovered deps into the cookstamp dependency list.
   for (const auto &autoDep : autoDiscoveredDeps) {
     bool alreadyPresent = false;
     for (const auto &existing : dependencyDigests) {
@@ -429,13 +417,10 @@ int main(int argc, char **argv) {
     return 13;
   }
 
-  // Cook convex hull sidecar (best-effort; failure is non-fatal).
   cook_and_write_convex_hull(outputPath, primitiveData);
 
-  // Generate mesh thumbnail (best-effort; failure is non-fatal).
   generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
 
-  // Save the dependency graph (if graph path was provided).
   if (hasGraphPath) {
     if (!engine::tools::write_dependency_graph_json(&depGraph,
                                                     graphPath.c_str())) {

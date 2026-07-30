@@ -345,7 +345,6 @@ bool test_pinch_gesture() noexcept {
   sim_finger_down(2, 0.6F, 0.5F);
   end_input_frame();
 
-  // Move them apart.
   begin_input_frame();
   sim_finger_move(1, 0.3F, 0.5F, -0.1F, 0.0F);
   end_input_frame();
@@ -426,7 +425,6 @@ bool test_callback_register_unregister() noexcept {
     return false;
   }
 
-  // Clean up the touch.
   begin_input_frame();
   sim_finger_up(1, 0.5F, 0.5F);
   end_input_frame();
@@ -451,7 +449,6 @@ bool test_null_edge_cases() noexcept {
     return false;
   }
 
-  // Process null event should not crash.
   touch_process_event(nullptr);
 
   shutdown_all();

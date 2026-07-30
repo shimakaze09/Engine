@@ -713,7 +713,6 @@ int check_raycast_hits_aabb() {
     return 93;
   }
 
-  // Advance to readable state.
   world->begin_update_phase();
   world->commit_update_phase();
   world->begin_render_prep_phase();
@@ -934,7 +933,6 @@ int check_distance_joint_maintains_distance() {
     return 135;
   }
 
-  // Run several physics steps with gravity pulling the ball down.
   for (int step = 0; step < 10; ++step) {
     world->begin_update_phase();
     if (!engine::runtime::step_physics(*world, 1.0F / 60.0F)) {
@@ -1020,7 +1018,6 @@ int check_ccd_catches_fast_projectile() {
     return 144;
   }
 
-  // Disable gravity so it doesn't interfere.
   engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
 
   world->begin_update_phase();
@@ -1841,7 +1838,6 @@ int check_convex_hull_vs_aabb_collision() {
     return 410;
   }
 
-  // Build a unit-cube convex hull.
   engine::math::Vec3 cubeVerts[8] = {
       engine::math::Vec3(-0.5F, -0.5F, -0.5F),
       engine::math::Vec3(0.5F, -0.5F, -0.5F),
@@ -1866,7 +1862,6 @@ int check_convex_hull_vs_aabb_collision() {
     return 412;
   }
 
-  // Both at origin → overlapping.
   engine::runtime::Transform tH{};
   tH.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
   engine::runtime::Transform tB{};
@@ -1941,7 +1936,6 @@ int check_raycast_hits_convex_hull() {
     return 430;
   }
 
-  // Build a unit cube hull.
   engine::math::Vec3 cubeVerts[8] = {
       engine::math::Vec3(-0.5F, -0.5F, -0.5F),
       engine::math::Vec3(0.5F, -0.5F, -0.5F),

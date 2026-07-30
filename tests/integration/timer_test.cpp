@@ -60,7 +60,6 @@ bool test_timeout_fires_once() noexcept {
     return false;
   }
 
-  // Tick more: should NOT fire again.
   tm.tick(1.0F);
   if (g_timeoutFired != 1) {
     return false;
@@ -265,7 +264,6 @@ bool test_snapshot_restore() noexcept {
     return false;
   }
 
-  // Restore into a fresh timer manager (new world).
   std::unique_ptr<engine::runtime::World> world2(new (std::nothrow)
                                                      engine::runtime::World());
   if (world2 == nullptr) {

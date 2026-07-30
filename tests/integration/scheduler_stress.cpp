@@ -31,7 +31,6 @@ void stress_job(void *userData) noexcept {
     value *= 1099511628211ULL;
   }
 
-  // Create deterministic skew to expose imbalance behavior.
   if ((data->jobIndex % 11U) == 0U) {
     for (std::uint32_t i = 0U; i < 2000U; ++i) {
       value ^= static_cast<std::uint64_t>(i + data->jobIndex);

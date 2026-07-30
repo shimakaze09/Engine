@@ -94,7 +94,6 @@ int verify_point_light_double_add() {
     return 223;
   }
 
-  // Verify the overwrite took effect.
   engine::runtime::PointLightComponent readBack{};
   if (!world->get_point_light_component(entity, &readBack)) {
     return 224;
@@ -116,18 +115,15 @@ int verify_point_light_invalid_entity() {
   const engine::runtime::Entity invalid = engine::runtime::kInvalidEntity;
   engine::runtime::PointLightComponent plc{};
 
-  // Add on invalid entity must fail.
   if (world->add_point_light_component(invalid, plc)) {
     return 231;
   }
 
-  // Get on invalid entity must fail.
   engine::runtime::PointLightComponent readBack{};
   if (world->get_point_light_component(invalid, &readBack)) {
     return 232;
   }
 
-  // Remove on invalid entity must fail.
   if (world->remove_point_light_component(invalid)) {
     return 233;
   }
@@ -236,7 +232,6 @@ int verify_spot_light_double_add() {
     return 323;
   }
 
-  // Verify the overwrite took effect.
   engine::runtime::SpotLightComponent readBack{};
   if (!world->get_spot_light_component(entity, &readBack)) {
     return 324;

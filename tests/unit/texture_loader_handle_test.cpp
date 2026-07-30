@@ -193,7 +193,6 @@ int check_external_texture_registration() {
     return 38;
   }
 
-  // Shutdown must also skip external GL objects.
   const engine::renderer::TextureHandle survivor =
       engine::renderer::register_external_texture(55U);
   if (survivor == engine::renderer::kInvalidTextureHandle) {

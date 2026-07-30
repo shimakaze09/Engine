@@ -119,7 +119,6 @@ bool test_add_action_and_poll() noexcept {
     return false;
   }
 
-  // Release.
   begin_input_frame();
   sim_key_up(kKey_Space);
   end_input_frame();
@@ -277,7 +276,6 @@ bool test_axis_key_pair() noexcept {
     return false;
   }
 
-  // Release D → negative.
   begin_input_frame();
   sim_key_up(kKey_D);
   end_input_frame();
@@ -404,7 +402,6 @@ bool test_save_load_roundtrip() noexcept {
     return false;
   }
 
-  // Register an action and an axis.
   InputBinding binding{};
   binding.type = InputBindingType::Key;
   binding.code = kKey_Space;
@@ -417,7 +414,6 @@ bool test_save_load_roundtrip() noexcept {
   src.scale = 1.0F;
   add_input_axis("move_x", &src, 1U);
 
-  // Save to buffer.
   char buffer[4096] = {};
   std::size_t size = 0U;
   if (!save_input_bindings_to_buffer(buffer, sizeof(buffer), &size)) {
@@ -430,17 +426,14 @@ bool test_save_load_roundtrip() noexcept {
     return false;
   }
 
-  // Shutdown and reinitialize to clear state.
   shutdown_input_mapper();
   initialize_input_mapper();
 
-  // Verify cleared.
   if (is_mapped_action_down("jump")) {
     shutdown_all();
     return false;
   }
 
-  // Load from buffer.
   if (!load_input_bindings_from_buffer(buffer, size)) {
     shutdown_all();
     return false;

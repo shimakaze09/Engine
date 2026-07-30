@@ -48,7 +48,6 @@ static bool test_multiple_tags() noexcept {
   if (mem_tracker_current_bytes(MemTag::ECS) != 8192) {
     return false;
   }
-  // Ensure Physics was not affected
   if (mem_tracker_current_bytes(MemTag::Physics) != 0) {
     return false;
   }

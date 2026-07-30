@@ -233,7 +233,6 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
       data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
   const std::size_t indexCount = data.indices.size();
 
-  // Compute output file size.
   std::uint64_t outputFileSize = 0ULL;
   {
     FILE *outputCheck = nullptr;
@@ -317,7 +316,6 @@ bool cook_and_write_convex_hull(const char *outputPath,
     return false;
   }
 
-  // Extract positions from interleaved data.
   std::vector<engine::math::Vec3> positions(vertexCount);
   for (std::size_t i = 0U; i < vertexCount; ++i) {
     const std::size_t base = i * strideFloats;
@@ -333,7 +331,6 @@ bool cook_and_write_convex_hull(const char *outputPath,
     return false;
   }
 
-  // Write hull sidecar: <output>.hull (binary).
   char hullPath[512] = {};
   const int pathLen =
       std::snprintf(hullPath, sizeof(hullPath), "%s.hull", outputPath);
@@ -404,7 +401,6 @@ bool resolve_image_path(const char *inputPath, const char *imageUri,
     return false;
   }
 
-  // Find directory of input file.
   const char *lastSlash = std::strrchr(inputPath, '/');
   const char *lastBackslash = std::strrchr(inputPath, '\\');
   const char *sep = lastSlash;
@@ -442,7 +438,6 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
     return false;
   }
 
-  // Walk all materials used by this mesh's primitives.
   std::unordered_set<const cgltf_image *> seenImages{};
   bool graphValid = true;
 
@@ -455,7 +450,7 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
       return; // Embedded texture (buffer view), no external dep.
     }
     if (!seenImages.insert(image).second) {
-      return; // Already processed.
+      return;
     }
 
     char resolvedPath[512] = {};
@@ -475,8 +470,7 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
       return;
     }
 
-    // Also add to the auto-discovered dependency list for cookstamp.
-    if (autoDepDigests != nullptr) {
+      if (autoDepDigests != nullptr) {
       bool hashOk = false;
       const std::uint64_t fileHash = hash_file_contents(resolvedPath, &hashOk);
       if (hashOk) {
@@ -497,7 +491,6 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
       }
       const cgltf_material &mat = *prim.material;
 
-      // Register the material as a dependency of the mesh.
       char matName[512] = {};
       if (mat.name != nullptr) {
         std::snprintf(matName, sizeof(matName), "%s#material:%s", inputPath,

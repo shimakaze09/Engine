@@ -205,7 +205,6 @@ static int test_import_settings_hash_change() noexcept {
   ImportSettings base{};
   const std::uint64_t baseHash = hash_import_settings(base);
 
-  // Change scaleFactor.
   ImportSettings modified = base;
   modified.scaleFactor = 2.0F;
   const std::uint64_t modifiedHash = hash_import_settings(modified);
@@ -215,7 +214,6 @@ static int test_import_settings_hash_change() noexcept {
     return 1;
   }
 
-  // Change meshIndex.
   ImportSettings modified2 = base;
   modified2.meshIndex = 5;
   const std::uint64_t modified2Hash = hash_import_settings(modified2);
@@ -225,7 +223,6 @@ static int test_import_settings_hash_change() noexcept {
     return 1;
   }
 
-  // Change generateNormals.
   ImportSettings modified3 = base;
   modified3.generateNormals = true;
   const std::uint64_t modified3Hash = hash_import_settings(modified3);

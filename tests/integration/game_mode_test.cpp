@@ -225,7 +225,6 @@ static bool test_player_controller_array() noexcept {
   check(!pca.controllers[0].active, "player 0 inactive after destroy");
   check(pca.get_controlled_entity(3) == kEntityB, "player 3 unaffected");
 
-  // Reset
   pca.reset();
   check(pca.get_controlled_entity(0) == engine::runtime::kInvalidEntity,
         "reset player 0");
@@ -241,7 +240,6 @@ static bool test_game_state_persists_across_worlds() noexcept {
   gs.set_number("level", 5.0F);
   gs.set_string("name", "player1");
 
-  // Simulate world reset (GameState is independent).
   {
     std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                       engine::runtime::World());

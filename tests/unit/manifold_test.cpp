@@ -111,7 +111,6 @@ int test_manifold_feature_id_match() noexcept {
     return 1;
   }
 
-  // Update same contact (same entity pair + same feature ID).
   const math::Vec3 pt2(1.1F, 0.0F, 0.0F);
   physics::manifold_add_contact(0U, 1U, pt2, pt2, normal, 0.08F, 42U, 2U);
 

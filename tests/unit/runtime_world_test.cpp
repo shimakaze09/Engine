@@ -587,7 +587,6 @@ int verify_variadic_for_each() {
     return 100;
   }
 
-  // Create entities with different component combinations.
   const engine::runtime::Entity e1 = world->create_entity();
   const engine::runtime::Entity e2 = world->create_entity();
   const engine::runtime::Entity e3 = world->create_entity();

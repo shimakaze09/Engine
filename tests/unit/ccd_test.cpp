@@ -70,7 +70,6 @@ static float run_bullet_vs_wall(float speed) noexcept {
   wallRB.inverseMass = 0.0F; // static
   world->add_rigid_body(wall, wallRB);
 
-  // Step one frame.
   const float dt = 1.0F / 60.0F;
   world->begin_update_phase();
   engine::runtime::step_physics(*world, dt);
