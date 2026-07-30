@@ -100,6 +100,14 @@ engine_add_test_executable(engine_unit_physics_rest
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_animation
+    SOURCES
+    animation_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp
@@ -566,6 +574,7 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/skeleton_import.cpp
         PRIVATE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${CMAKE_SOURCE_DIR}/math/include
         ${ENGINE_CGLTF_INCLUDE_DIR}
     )
 

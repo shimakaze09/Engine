@@ -3,9 +3,12 @@
 #include "skeleton_import.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 
 #include <cgltf.h>
+
+#include "engine/math/mat4.h"
 
 namespace engine::tools {
 namespace {
@@ -23,6 +26,52 @@ void set_result(SkeletonImportResult *outResult,
   if (outResult != nullptr) {
     *outResult = result;
   }
+}
+
+/// Decomposes a node's local transform into TRS rest-pose values. Handles
+/// both TRS-authored and matrix-authored nodes (scale from column lengths,
+/// rotation from the scale-normalized linear block).
+void decompose_rest_pose(const cgltf_node *node, math::Vec3 *outTranslation,
+                         math::Quat *outRotation,
+                         math::Vec3 *outScale) noexcept {
+  std::array<float, 16U> local{};
+  cgltf_node_transform_local(node, local.data());
+
+  math::Mat4 matrix{};
+  for (std::size_t column = 0U; column < 4U; ++column) {
+    matrix.columns[column] =
+        math::Vec4(local[column * 4U + 0U], local[column * 4U + 1U],
+                   local[column * 4U + 2U], local[column * 4U + 3U]);
+  }
+
+  *outTranslation =
+      math::Vec3(matrix.columns[3].x, matrix.columns[3].y, matrix.columns[3].z);
+
+  math::Vec3 scale(
+      std::sqrt(matrix.columns[0].x * matrix.columns[0].x +
+                matrix.columns[0].y * matrix.columns[0].y +
+                matrix.columns[0].z * matrix.columns[0].z),
+      std::sqrt(matrix.columns[1].x * matrix.columns[1].x +
+                matrix.columns[1].y * matrix.columns[1].y +
+                matrix.columns[1].z * matrix.columns[1].z),
+      std::sqrt(matrix.columns[2].x * matrix.columns[2].x +
+                matrix.columns[2].y * matrix.columns[2].y +
+                matrix.columns[2].z * matrix.columns[2].z));
+  *outScale = scale;
+
+  math::Mat4 rotationOnly = matrix;
+  rotationOnly.columns[3] = math::Vec4(0.0F, 0.0F, 0.0F, 1.0F);
+  for (std::size_t column = 0U; column < 3U; ++column) {
+    const float axisScale = (column == 0U) ? scale.x
+                            : (column == 1U) ? scale.y
+                                             : scale.z;
+    if (axisScale > 1.0e-8F) {
+      rotationOnly.columns[column].x /= axisScale;
+      rotationOnly.columns[column].y /= axisScale;
+      rotationOnly.columns[column].z /= axisScale;
+    }
+  }
+  *outRotation = math::normalize(math::from_mat4(rotationOnly));
 }
 
 /// Returns the local skeleton joint index for a glTF node pointer.
@@ -124,6 +173,8 @@ bool parse_gltf_skeleton(const cgltf_data *data, std::size_t skinIndex,
     }
 
     joint.parent = find_joint_index(skin, jointNode->parent);
+    decompose_rest_pose(jointNode, &joint.restTranslation, &joint.restRotation,
+                        &joint.restScale);
     joint.inverseBindMatrix = kIdentityMatrix;
     if (inverseBindMatrices != nullptr) {
       if (!cgltf_accessor_read_float(inverseBindMatrices, i,
