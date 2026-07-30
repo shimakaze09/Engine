@@ -550,7 +550,6 @@ bool test_dap_breakpoint_pause() noexcept {
     return false;
   }
 
-  // Give server time to accept/process initialize + breakpoint commands.
   for (int i = 0; i < 100; ++i) {
     engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(i));
     std::this_thread::sleep_for(std::chrono::milliseconds(5));

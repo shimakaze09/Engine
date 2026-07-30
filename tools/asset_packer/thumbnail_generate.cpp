@@ -78,11 +78,9 @@ bool generate_texture_thumbnail(const char *inputPath,
     return false;
   }
 
-  // Build thumbnail path.
   char thumbPath[512] = {};
   build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
 
-  // Checksum-based invalidation.
   bool hashOk = false;
   const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
   if (hashOk) {
@@ -96,7 +94,6 @@ bool generate_texture_thumbnail(const char *inputPath,
     }
   }
 
-  // Load source image.
   int srcW = 0, srcH = 0, srcChannels = 0;
   stbi_uc *srcPixels = stbi_load(inputPath, &srcW, &srcH, &srcChannels, 4);
   if (srcPixels == nullptr) {
@@ -107,8 +104,7 @@ bool generate_texture_thumbnail(const char *inputPath,
   constexpr int kThumbSize = 64;
   constexpr int kChannels = 4;
 
-  // Box-filter downsample to 64x64.
-  // Progressively halve until <= 64x64 for better quality (mip-chain style).
+  // Progressive halving (mip-chain style) beats one-shot box filtering.
   std::vector<std::uint8_t> current(static_cast<std::size_t>(srcW) *
                                     static_cast<std::size_t>(srcH) *
                                     static_cast<std::size_t>(kChannels));
@@ -161,7 +157,6 @@ bool generate_texture_thumbnail(const char *inputPath,
     curH = newH;
   }
 
-  // Final resize to exactly 64x64 (bilinear).
   std::vector<std::uint8_t> thumb(
       static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
   if (!engine::tools::resize_rgba_bilinear(
@@ -177,7 +172,6 @@ bool generate_texture_thumbnail(const char *inputPath,
     return false;
   }
 
-  // Update checksum sidecar.
   if (hashOk) {
     char checksumPath[512] = {};
     build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
@@ -223,11 +217,9 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     return false;
   }
 
-  // Build thumbnail output path.
   char thumbPath[512] = {};
   build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
 
-  // Checksum-based invalidation: skip if thumbnail checksum matches source.
   if (inputPath != nullptr) {
     bool hashOk = false;
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
@@ -244,7 +236,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   }
 
   constexpr int kThumbSize = 64;
-  constexpr int kChannels = 4; // RGBA
+  constexpr int kChannels = 4;
   std::vector<std::uint8_t> pixels(
       static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
   std::vector<float> depth(static_cast<std::size_t>(kThumbSize * kThumbSize),
@@ -257,7 +249,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     return false;
   }
 
-  // Compute AABB.
   float minX = 1e30F;
   float minY = 1e30F;
   float minZ = 1e30F;
@@ -312,7 +303,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   constexpr float kLightY = 0.511208F;
   constexpr float kLightZ = 0.730297F;
 
-  // Rasterize triangles.
   auto project = [&](std::size_t vi, float *sx, float *sy, float *sz) {
     const std::size_t base = vi * strideFloats;
     const float x = data.interleavedVertices[base + 0U];
@@ -337,7 +327,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     project(i1, &x1, &y1, &z1);
     project(i2, &x2, &y2, &z2);
 
-    // Face normal from vertex normals (average).
     const std::size_t b0 = i0 * strideFloats;
     const std::size_t b1 = i1 * strideFloats;
     const std::size_t b2 = i2 * strideFloats;
@@ -362,7 +351,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     const auto color = static_cast<std::uint8_t>(
         shade > 1.0F ? 255U : static_cast<unsigned>(shade * 255.0F));
 
-    // Bounding box of triangle in screen space.
     float fminX = x0;
     if (x1 < fminX) {
       fminX = x1;
@@ -407,14 +395,12 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
         }
         const float pxf = static_cast<float>(px) + 0.5F;
         const float pyf = static_cast<float>(py) + 0.5F;
-        // Barycentric coordinates.
-        const float d00 = (x1 - x0) * (pyf - y0) - (y1 - y0) * (pxf - x0);
+          const float d00 = (x1 - x0) * (pyf - y0) - (y1 - y0) * (pxf - x0);
         const float d01 = (x2 - x1) * (pyf - y1) - (y2 - y1) * (pxf - x1);
         const float d02 = (x0 - x2) * (pyf - y2) - (y0 - y2) * (pxf - x2);
         if ((d00 >= 0.0F && d01 >= 0.0F && d02 >= 0.0F) ||
             (d00 <= 0.0F && d01 <= 0.0F && d02 <= 0.0F)) {
-          // Interpolate depth.
-          const float area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+              const float area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
           float z = z0;
           if (std::fabs(area) > 1e-8F) {
             const float invArea = 1.0F / area;
@@ -451,7 +437,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     }
   }
 
-  // Set background to a neutral grey with alpha=0 for transparent areas.
   for (std::size_t i = 0U;
        i < static_cast<std::size_t>(kThumbSize * kThumbSize); ++i) {
     if (pixels[i * kChannels + 3U] == 0U) {
@@ -468,7 +453,6 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     return false;
   }
 
-  // Write checksum sidecar after successful generation.
   if (inputPath != nullptr) {
     bool hashOk = false;
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);

@@ -96,7 +96,6 @@ bool test_state_survives_reload() noexcept {
   engine::core::ServiceLocator serviceLocator{};
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
-  // First version: persist some state.
   const char *v1 = "engine.persist('score', 100)\n"
                    "g_version = 1\n";
 
@@ -124,7 +123,6 @@ bool test_state_survives_reload() noexcept {
     return false;
   }
 
-  // Trigger reload check.
   engine::scripting::check_script_reload();
 
   // Verify the reload ran (g_version should be 2 now).
@@ -148,7 +146,6 @@ bool test_error_recovery() noexcept {
   engine::core::ServiceLocator serviceLocator{};
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
-  // First version: define a working function.
   const char *v1 = "function greet() return 'hello' end\n";
 
   if (!write_script(v1) || !engine::scripting::load_script(kTempScript)) {
@@ -166,7 +163,6 @@ bool test_error_recovery() noexcept {
     return false;
   }
 
-  // Write a broken version.
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   const char *v2_bad = "this is not valid lua code!!!!\n";
   if (!write_script(v2_bad)) {
@@ -175,7 +171,6 @@ bool test_error_recovery() noexcept {
     return false;
   }
 
-  // Trigger reload — should fail but not crash.
   engine::scripting::check_script_reload();
 
   // Old function should still work after failed reload.

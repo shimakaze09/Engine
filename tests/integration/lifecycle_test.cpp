@@ -62,7 +62,6 @@ bool test_lifecycle_begin_play() {
     return false;
   }
 
-  // Second call should find no entities needing begin_play.
   std::size_t secondCount = 0U;
   world->for_each_needs_begin_play(
       [&secondCount](Entity) noexcept { ++secondCount; });
@@ -86,7 +85,6 @@ bool test_lifecycle_tick() {
   const Transform t{};
   static_cast<void>(world->add_transform(e1, t));
 
-  // Mark begin_play done.
   world->begin_begin_play_phase();
   world->mark_begin_play_done(e1);
   world->end_begin_play_phase();
@@ -178,7 +176,6 @@ bool test_full_lifecycle_sequence() {
   if (!world)
     return false;
 
-  // Create entity with components.
   const Entity e1 = world->create_entity();
   const Transform t{};
   static_cast<void>(world->add_transform(e1, t));
@@ -203,7 +200,6 @@ bool test_full_lifecycle_sequence() {
   constexpr float kDt = 1.0F / 60.0F;
   std::size_t tickCount = 0U;
   for (int step = 0; step < 3; ++step) {
-    // Check no BeginPlay needed on subsequent frames.
     world->begin_begin_play_phase();
     std::size_t extraBeginPlay = 0U;
     world->for_each_needs_begin_play(
@@ -233,7 +229,6 @@ bool test_full_lifecycle_sequence() {
     return false;
   }
 
-  // Destroy during Simulation so it is deferred → EndPlay can fire.
   world->begin_update_phase();
   static_cast<void>(world->destroy_entity(e1));
   world->begin_transform_phase();

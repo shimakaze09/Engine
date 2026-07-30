@@ -226,7 +226,6 @@ int main() {
     return 1;
   }
 
-  // Create a source entity with every supported component type.
   const engine::runtime::Entity src = world->create_entity();
   if (src == engine::runtime::kInvalidEntity) {
     return 2;
@@ -328,7 +327,6 @@ int main() {
     return 29;
   }
 
-  // Save the prefab.
   if (!engine::runtime::save_prefab(*world, src, kPrefabPath)) {
     remove_prefab_file();
     return 9;
@@ -342,7 +340,6 @@ int main() {
     return 10;
   }
 
-  // Verify Transform.
   engine::runtime::Transform instTransform{};
   if (!world->get_transform(inst, &instTransform)) {
     remove_prefab_file();
@@ -361,7 +358,6 @@ int main() {
     return 13;
   }
 
-  // Verify RigidBody.
   engine::runtime::RigidBody instRb{};
   if (!world->get_rigid_body(inst, &instRb)) {
     remove_prefab_file();
@@ -372,7 +368,6 @@ int main() {
     return 15;
   }
 
-  // Verify Collider.
   engine::runtime::Collider instCol{};
   if (!world->get_collider(inst, &instCol)) {
     remove_prefab_file();
@@ -384,7 +379,6 @@ int main() {
     return 17;
   }
 
-  // Verify NameComponent.
   engine::runtime::NameComponent instName{};
   if (!world->get_name_component(inst, &instName)) {
     remove_prefab_file();
@@ -395,7 +389,6 @@ int main() {
     return 19;
   }
 
-  // Verify ScriptComponent.
   engine::runtime::ScriptComponent instScript{};
   if (!world->get_script_component(inst, &instScript)) {
     remove_prefab_file();
@@ -406,7 +399,6 @@ int main() {
     return 43;
   }
 
-  // Verify MeshComponent.
   engine::runtime::MeshComponent instMesh{};
   if (!world->get_mesh_component(inst, &instMesh)) {
     remove_prefab_file();
@@ -421,7 +413,6 @@ int main() {
     return 21;
   }
 
-  // Verify LightComponent.
   engine::runtime::LightComponent instLight{};
   if (!world->get_light_component(inst, &instLight)) {
     remove_prefab_file();
@@ -436,7 +427,6 @@ int main() {
     return 23;
   }
 
-  // Verify ReflectionProbeComponent.
   engine::runtime::ReflectionProbeComponent instProbe{};
   if (!world->get_reflection_probe_component(inst, &instProbe)) {
     remove_prefab_file();
@@ -452,7 +442,6 @@ int main() {
     return 28;
   }
 
-  // Verify SceneCaptureComponent.
   engine::runtime::SceneCaptureComponent instCapture{};
   if (!world->get_scene_capture_component(inst, &instCapture)) {
     remove_prefab_file();
@@ -466,7 +455,6 @@ int main() {
     return 47;
   }
 
-  // Verify FoliagePatchComponent.
   engine::runtime::FoliagePatchComponent instFoliage{};
   if (!world->get_foliage_patch_component(inst, &instFoliage)) {
     remove_prefab_file();
@@ -486,7 +474,6 @@ int main() {
     return 31;
   }
 
-  // Verify invalid-input guards.
   if (engine::runtime::save_prefab(*world, engine::runtime::kInvalidEntity,
                                    kPrefabPath)) {
     remove_prefab_file();

@@ -67,7 +67,6 @@ bool test_pool_acquire_release() {
     return false;
   }
 
-  // Release all.
   for (auto &entity : entities) {
     if (!pool.release(entity)) {
       std::fprintf(stderr, "FAIL: release failed\n");
@@ -122,7 +121,6 @@ bool test_pool_handle_reuse() {
     secondRoundIndices[i] = e.index;
   }
 
-  // Verify each second-round index appeared in the first round.
   for (std::size_t i = 0U; i < kCount; ++i) {
     bool found = false;
     for (std::size_t j = 0U; j < kCount; ++j) {
@@ -149,7 +147,6 @@ bool test_pool_double_init() {
   EntityPool pool;
   pool.init(world.get(), 5U);
 
-  // Second init should fail.
   if (pool.init(world.get(), 5U)) {
     std::fprintf(stderr, "FAIL: double init should fail\n");
     return false;
@@ -164,7 +161,6 @@ bool test_pool_release_unknown() {
   EntityPool pool;
   pool.init(world.get(), 2U);
 
-  // Create an entity outside the pool.
   const Entity outsider = world->create_entity();
   if (pool.release(outsider)) {
     std::fprintf(stderr, "FAIL: releasing non-pool entity should fail\n");

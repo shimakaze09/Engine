@@ -62,7 +62,6 @@ int test_distance_joint() noexcept {
     return 2;
   }
 
-  // Run several solver iterations to let the constraint converge.
   for (int i = 0; i < 60; ++i) {
     world->begin_update_phase();
     physics::solve_constraints(*world, 1.0F / 60.0F);
@@ -155,7 +154,6 @@ int test_ball_socket_joint() noexcept {
     world->end_frame_phase();
   }
 
-  // Both anchors should converge close to pivot.
   Transform tA{};
   Transform tB{};
   world->get_transform(a, &tA);
@@ -329,7 +327,6 @@ int test_fixed_joint() noexcept {
     return 2;
   }
 
-  // Give entity B a velocity kick.
   {
     RigidBody *rbB = world->get_rigid_body_ptr(b);
     if (rbB == nullptr) {

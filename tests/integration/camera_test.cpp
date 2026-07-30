@@ -83,7 +83,6 @@ bool test_priority_stack() noexcept {
     return false;
   }
 
-  // Pop high-priority camera.
   cm.pop_camera(kOwnerB);
   active = cm.active_camera();
   if ((active == nullptr) || (active->position.x != 1.0F)) {
@@ -104,7 +103,6 @@ bool test_blend_interpolation() noexcept {
 
   cm.push_camera(kOwnerA, entry, 1.0F);
 
-  // First evaluate snaps directly.
   math::Vec3 pos{}, tgt{}, up{};
   float fov = 0.0F, nearP = 0.0F, farP = 0.0F;
   cm.evaluate(0.0F, &pos, &tgt, &up, &fov, &nearP, &farP);
@@ -112,7 +110,6 @@ bool test_blend_interpolation() noexcept {
     return false;
   }
 
-  // Push a second camera and evaluate — should blend.
   CameraEntry entry2{};
   entry2.position = math::Vec3(20.0F, 0.0F, 0.0F);
   entry2.target = math::Vec3(0.0F, 0.0F, 0.0F);
@@ -146,7 +143,6 @@ bool test_camera_shake_nonzero_during_and_zero_after() noexcept {
   // Evaluate one step to snap camera.
   cm.evaluate(0.0F, &pos, &tgt, &up, &fov, &nearP, &farP);
 
-  // Now evaluate with time so shake advances.
   cm.evaluate(0.1F, &pos, &tgt, &up, &fov, &nearP, &farP);
 
   // At least one shake axis should be nonzero.

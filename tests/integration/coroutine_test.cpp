@@ -208,7 +208,6 @@ bool test_wait_until() noexcept {
   engine::scripting::set_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
-  // Tick a few times — flag is false, should NOT wake.
   for (int i = 1; i <= 3; ++i) {
     engine::scripting::set_frame_index(static_cast<std::uint32_t>(i));
     engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(i));
@@ -220,7 +219,6 @@ bool test_wait_until() noexcept {
     return false;
   }
 
-  // Set the flag and tick again — should wake.
   engine::scripting::call_script_function("set_flag");
   engine::scripting::set_frame_index(4U);
   engine::scripting::set_frame_time(0.016F, 0.064F);
@@ -399,10 +397,8 @@ bool test_clear() noexcept {
   engine::scripting::set_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
-  // Clear before wake time.
   engine::scripting::clear_coroutines();
 
-  // Advance past wake time and tick — it should NOT fire.
   engine::scripting::set_frame_time(11.0F, 11.0F);
   engine::scripting::set_frame_index(1U);
   engine::scripting::tick_coroutines();

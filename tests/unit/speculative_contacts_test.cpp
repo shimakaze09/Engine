@@ -72,7 +72,6 @@ static void test_ball_approaching_wall_no_penetration() noexcept {
   wallRB.inverseMass = 0.0F;
   world->add_rigid_body(wall, wallRB);
 
-  // Run multiple physics frames.
   for (int frame = 0; frame < 10; ++frame) {
     world->begin_update_phase();
     engine::runtime::step_physics(*world, 1.0F / 60.0F);
@@ -204,7 +203,6 @@ static void test_speculative_approaching_spheres() noexcept {
   rbB.velocity = engine::math::Vec3(-5.0F, 0.0F, 0.0F);
   world->add_rigid_body(entB, rbB);
 
-  // Run a few frames.
   for (int frame = 0; frame < 5; ++frame) {
     world->begin_update_phase();
     engine::runtime::step_physics(*world, 1.0F / 60.0F);

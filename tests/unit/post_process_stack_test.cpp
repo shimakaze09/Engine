@@ -22,7 +22,6 @@ int verify_default_stack() {
     return 100;
   }
 
-  // Verify default ordering.
   if (stack.passes[0].id != engine::renderer::PostProcessPassId::Bloom)
     return 101;
   if (stack.passes[1].id != engine::renderer::PostProcessPassId::SSAO)

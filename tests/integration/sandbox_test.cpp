@@ -48,7 +48,6 @@ bool test_io_blocked() noexcept {
   engine::core::ServiceLocator serviceLocator{};
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
-  // Ensure sandbox is enabled.
   engine::scripting::set_sandbox_enabled(true);
 
   const char *code = "-- Try to access io.open — should fail.\n"
@@ -132,7 +131,6 @@ bool test_instruction_limit() noexcept {
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::scripting::set_sandbox_enabled(true);
-  // Set a low instruction limit for the test.
   engine::scripting::set_instruction_limit(10000);
 
   const char *code = "-- Infinite loop — sandbox must terminate this.\n"
@@ -146,7 +144,6 @@ bool test_instruction_limit() noexcept {
   bool loadOk = engine::scripting::load_script(kTempScript);
   remove_script();
 
-  // Restore default limit.
   engine::scripting::set_instruction_limit(1000000);
   engine::scripting::shutdown_scripting();
 
@@ -239,7 +236,6 @@ bool test_memory_limit() noexcept {
   bool result = engine::scripting::load_script(kTempScript);
   remove_script();
 
-  // Restore default limit.
   engine::scripting::set_memory_limit(64U * 1024U * 1024U);
   engine::scripting::shutdown_scripting();
   return result;

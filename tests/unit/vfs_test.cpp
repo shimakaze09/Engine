@@ -113,14 +113,12 @@ bool test_read_write_roundtrip() noexcept {
   const char *testData = "Hello, VFS!";
   const std::size_t testSize = std::strlen(testData);
 
-  // Write.
   if (!vfs_write_text("tmp/_vfs_test_file.txt", testData, testSize)) {
     shutdown_vfs();
     shutdown_logging();
     return false;
   }
 
-  // Read back.
   char *readBack = nullptr;
   std::size_t readSize = 0U;
   if (!vfs_read_text("tmp/_vfs_test_file.txt", &readBack, &readSize)) {
@@ -133,7 +131,6 @@ bool test_read_write_roundtrip() noexcept {
             && (std::memcmp(readBack, testData, testSize) == 0);
   vfs_free(readBack);
 
-  // Clean up test file.
   std::remove("_vfs_test_file.txt");
 
   shutdown_vfs();
@@ -151,7 +148,6 @@ bool test_file_exists() noexcept {
     return false;
   }
 
-  // Write a temp file to ensure it exists.
   const char *data = "x";
   if (!vfs_write_binary("root/_vfs_exist_test.dat", data, 1U)) {
     shutdown_vfs();

@@ -101,7 +101,6 @@ int main() {
       return 2;
     }
 
-    // Query forward deps of mesh: should be {material}.
     AssetId deps[8] = {};
     std::size_t count = engine::tools::get_dependencies(&graph, kMesh, deps, 8);
     if (count != 1U) {
@@ -111,7 +110,6 @@ int main() {
       return 4;
     }
 
-    // Query forward deps of material: should be {texture}.
     count = engine::tools::get_dependencies(&graph, kMaterial, deps, 8);
     if (count != 1U) {
       return 5;
@@ -120,7 +118,6 @@ int main() {
       return 6;
     }
 
-    // Query forward deps of texture: should be empty.
     count = engine::tools::get_dependencies(&graph, kTexture, deps, 8);
     if (count != 0U) {
       return 7;
@@ -168,7 +165,6 @@ int main() {
     engine::tools::add_dependency(&graph, kMesh, kMaterial);
     engine::tools::add_dependency(&graph, kMaterial, kTexture);
 
-    // All transitive dependents of texture: {material, mesh}.
     AssetId deps[8] = {};
     const std::size_t count =
         engine::tools::get_all_dependents_recursive(&graph, kTexture, deps, 8);
@@ -176,7 +172,6 @@ int main() {
       return 20;
     }
 
-    // Both mesh and material should be in the set.
     bool foundMesh = false;
     bool foundMaterial = false;
     for (std::size_t i = 0U; i < count; ++i) {
@@ -335,7 +330,6 @@ int main() {
       return 92;
     }
 
-    // Verify edges.
     AssetId deps[8] = {};
     std::size_t count =
         engine::tools::get_dependencies(&loaded, 100ULL, deps, 8);
@@ -354,13 +348,11 @@ int main() {
       return 96;
     }
 
-    // Verify paths.
     auto it = loaded.assetPaths.find(100ULL);
     if ((it == loaded.assetPaths.end()) || (it->second != "meshes/hero.mesh")) {
       return 97;
     }
 
-    // Clean up.
     std::remove(tempPath);
   }
 

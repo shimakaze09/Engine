@@ -115,7 +115,6 @@ static bool test_clear() noexcept {
 }
 
 static bool test_type_safety() noexcept {
-  // Verify that different types produce different TypeIds.
   engine::core::TypeId idAudio = engine::core::type_id<AudioSystem>();
   engine::core::TypeId idPhysics = engine::core::type_id<PhysicsWorld>();
   engine::core::TypeId idRenderer = engine::core::type_id<Renderer>();

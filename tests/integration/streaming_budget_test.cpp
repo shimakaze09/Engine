@@ -67,7 +67,6 @@ static void test_budget_spreading() noexcept {
     CHECK(handles[i].valid(), "handle valid");
   }
 
-  // Process frames and count how many are required.
   std::size_t frameCount = 0U;
   std::size_t readyPerFrame[32]{};
   constexpr std::size_t kMaxFrames = 96U;
@@ -95,7 +94,6 @@ static void test_budget_spreading() noexcept {
   // The 256 MB budget should keep requests spread across frames.
   CHECK(frameCount >= 5U, "takes multiple frames due to budget");
 
-  // Verify all loaded.
   std::size_t totalReady = 0U;
   for (std::size_t i = 0U; i < kLoadCount; ++i) {
     if (is_load_ready(queue.get(), handles[i])) {
@@ -147,7 +145,6 @@ static void test_upload_limit() noexcept {
       update_asset_streaming(queue.get(), &big_load, &big_upload, nullptr);
   CHECK(readyFrame1 <= 2U, "at most 2 uploads in frame 1");
 
-  // Process remaining frames.
   std::size_t frameCount = 1U;
   constexpr std::size_t kMaxFrames = 20U;
   while (frameCount < kMaxFrames) {
@@ -170,7 +167,6 @@ static void test_upload_limit() noexcept {
 
   CHECK(frameCount >= 5U, "takes multiple frames due to upload cap");
 
-  // Verify all loaded eventually.
   std::size_t totalReady = 0U;
   for (std::size_t i = 0U; i < kLoadCount; ++i) {
     if (is_load_ready(queue.get(), handles[i])) {

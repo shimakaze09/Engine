@@ -164,7 +164,6 @@ static void test_explicit_remove() noexcept {
   CHECK(lru_count(cache.get()) == 1U, "count after remove");
   CHECK(lru_total_size(cache.get()) == 200U, "size after remove");
 
-  // Remove non-existent.
   CHECK(!lru_remove(cache.get(), make_id(99)), "remove non-existent fails");
 
   std::printf("  test_explicit_remove: %s\n",

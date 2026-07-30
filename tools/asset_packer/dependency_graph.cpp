@@ -155,7 +155,6 @@ bool add_dependency(DependencyGraph *graph, DependencyGraph::AssetId dependent,
     return false;
   }
 
-  // Check for cycles before adding.
   if (would_create_cycle(graph, dependent, dependency)) {
     std::fprintf(stderr,
                  "error: adding dependency %016llx -> %016llx would create a "
@@ -209,7 +208,6 @@ void remove_asset(DependencyGraph *graph,
     return;
   }
 
-  // Remove forward edges (things id depends on).
   auto fwdIt = graph->dependencies.find(id);
   if (fwdIt != graph->dependencies.end()) {
     for (const auto dep : fwdIt->second) {
@@ -224,7 +222,6 @@ void remove_asset(DependencyGraph *graph,
     graph->dependencies.erase(fwdIt);
   }
 
-  // Remove reverse edges (things that depend on id).
   auto revIt = graph->dependents.find(id);
   if (revIt != graph->dependents.end()) {
     for (const auto dep : revIt->second) {
@@ -298,6 +295,7 @@ std::size_t get_dependents(const DependencyGraph *graph,
   return count;
 }
 
+/// BFS over reverse edges from the asset's direct dependents.
 std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
                                          DependencyGraph::AssetId id,
                                          DependencyGraph::AssetId *outIds,
@@ -310,7 +308,6 @@ std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
   std::unordered_set<DependencyGraph::AssetId> visited{};
   std::queue<DependencyGraph::AssetId> frontier{};
 
-  // Seed with direct dependents.
   auto it = graph->dependents.find(id);
   if (it != graph->dependents.end()) {
     for (const auto dep : it->second) {
@@ -320,7 +317,6 @@ std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
     }
   }
 
-  // BFS through reverse edges.
   while (!frontier.empty()) {
     const auto current = frontier.front();
     frontier.pop();
@@ -346,6 +342,9 @@ std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
   return count;
 }
 
+/// A cycle would exist if the dependency already transitively depends on
+/// the dependent — BFS from dependency along forward edges looking for
+/// the dependent.
 bool would_create_cycle(const DependencyGraph *graph,
                         DependencyGraph::AssetId dependent,
                         DependencyGraph::AssetId dependency) noexcept {
@@ -354,14 +353,10 @@ bool would_create_cycle(const DependencyGraph *graph,
     return false;
   }
 
-  // A cycle exists if there is already a path from dependent to dependency
-  // in the reverse direction, i.e., dependency transitively depends on
-  // dependent.
   if (dependent == dependency) {
     return true;
   }
 
-  // BFS from dependency following forward edges; if we reach dependent, cycle.
   std::unordered_set<DependencyGraph::AssetId> visited{};
   std::queue<DependencyGraph::AssetId> frontier{};
   frontier.push(dependency);
@@ -390,12 +385,13 @@ bool would_create_cycle(const DependencyGraph *graph,
 }
 
 /// Returns whether has cycle.
+/// Kahn's algorithm: if the topological peel cannot process every node,
+/// a cycle exists.
 bool has_cycle(const DependencyGraph *graph) noexcept {
   if (graph == nullptr) {
     return false;
   }
 
-  // Collect all nodes.
   std::unordered_set<DependencyGraph::AssetId> allNodes{};
   for (const auto &[key, _] : graph->dependencies) {
     allNodes.insert(key);
@@ -404,7 +400,6 @@ bool has_cycle(const DependencyGraph *graph) noexcept {
     allNodes.insert(key);
   }
 
-  // Kahn's algorithm: compute in-degree and do topological peel.
   std::unordered_map<DependencyGraph::AssetId, std::size_t> inDegree{};
   for (const auto node : allNodes) {
     inDegree[node] = 0U;
@@ -446,6 +441,8 @@ bool has_cycle(const DependencyGraph *graph) noexcept {
 }
 
 /// Converts topological sort into the target representation.
+/// Kahn's algorithm over all nodes (including leaf dependencies that
+/// appear only as edge targets), dependencies before dependents.
 std::size_t topological_sort(const DependencyGraph *graph,
                              DependencyGraph::AssetId *outIds,
                              std::size_t maxIds) noexcept {
@@ -453,7 +450,6 @@ std::size_t topological_sort(const DependencyGraph *graph,
     return 0U;
   }
 
-  // Collect all nodes.
   std::unordered_set<DependencyGraph::AssetId> allNodes{};
   for (const auto &[key, _] : graph->dependencies) {
     allNodes.insert(key);
@@ -462,14 +458,12 @@ std::size_t topological_sort(const DependencyGraph *graph,
     allNodes.insert(key);
   }
 
-  // Also include leaf dependencies that appear only as values.
   for (const auto &[_, deps] : graph->dependencies) {
     for (const auto d : deps) {
       allNodes.insert(d);
     }
   }
 
-  // Kahn's algorithm.
   std::unordered_map<DependencyGraph::AssetId, std::size_t> inDegree{};
   for (const auto node : allNodes) {
     inDegree[node] = 0U;
@@ -512,7 +506,6 @@ std::size_t topological_sort(const DependencyGraph *graph,
     }
   }
 
-  // If not all nodes were processed, there is a cycle.
   if (count < allNodes.size()) {
     return 0U;
   }
@@ -678,6 +671,8 @@ bool read_dependency_graph_json(DependencyGraph *graph,
   return true;
 }
 
+/// BFS from every changed asset over reverse edges: the transitive set
+/// of dependents that must recook.
 std::size_t compute_invalidation_set(const DependencyGraph *graph,
                                      const DependencyGraph::AssetId *changedIds,
                                      std::size_t changedCount,
@@ -693,7 +688,6 @@ std::size_t compute_invalidation_set(const DependencyGraph *graph,
   std::unordered_set<DependencyGraph::AssetId> invalidated{};
   std::queue<DependencyGraph::AssetId> frontier{};
 
-  // Seed BFS with direct dependents of all changed assets.
   for (std::size_t i = 0U; i < changedCount; ++i) {
     auto it = graph->dependents.find(changedIds[i]);
     if (it != graph->dependents.end()) {
@@ -706,7 +700,6 @@ std::size_t compute_invalidation_set(const DependencyGraph *graph,
     }
   }
 
-  // BFS to find transitive dependents.
   while (!frontier.empty()) {
     const auto current = frontier.front();
     frontier.pop();

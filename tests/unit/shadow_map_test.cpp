@@ -17,7 +17,6 @@ int verify_cascade_splits_monotonic() {
   const auto splits =
       engine::renderer::compute_cascade_splits(0.1F, 100.0F, 0.75F);
 
-  // First distance must equal near clip.
   if (std::abs(splits.distances[0] - 0.1F) > 1e-5F) {
     return 100;
   }
@@ -27,7 +26,6 @@ int verify_cascade_splits_monotonic() {
     return 101;
   }
 
-  // All distances must be strictly increasing.
   for (std::size_t i = 1U; i <= engine::renderer::kShadowCascadeCount; ++i) {
     if (splits.distances[i] <= splits.distances[i - 1]) {
       return 102;

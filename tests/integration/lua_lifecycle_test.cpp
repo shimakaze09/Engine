@@ -674,7 +674,6 @@ int main() {
     engine::scripting::dispatch_entity_scripts_begin_play(world.get());
     world->end_begin_play_phase();
 
-    // Verify: entity should no longer need begin_play.
     std::size_t remainingCount = 0U;
     world->for_each_needs_begin_play(
         [&remainingCount](engine::runtime::Entity) noexcept {

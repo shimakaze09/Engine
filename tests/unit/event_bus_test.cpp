@@ -354,7 +354,6 @@ bool test_channel_subscribe_emit() noexcept {
     return false;
   }
 
-  // Emit on unknown channel should not crash.
   emit_channel("unknown", &score, sizeof(score));
 
   if (!unsubscribe_channel("score", on_channel_int)) {
@@ -375,7 +374,6 @@ bool test_channel_subscribe_emit() noexcept {
 }
 
 bool test_typed_event_isolation() noexcept {
-  // Verify that emitting EventA does not trigger EventB subscribers.
   if (!initialize_event_bus()) {
     return false;
   }
@@ -629,7 +627,6 @@ bool test_empty_bus_edge_cases() noexcept {
     return false;
   }
 
-  // Ensure raw handler was never called by empty-bus operations.
   if (g_emptyBusTouchCount != 0) {
     shutdown_event_bus();
     return false;

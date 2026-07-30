@@ -770,7 +770,6 @@ int main() {
       remove_script_file();
       return 47;
     }
-    // Advance past the timer threshold; it should NOT fire.
     engine::scripting::set_frame_time(0.5F, 0.5F);
     engine::scripting::tick_timers();
     bool cancelledFired = false;
