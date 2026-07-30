@@ -95,9 +95,10 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
                              std::size_t depth, AssetId *outId,
                              Material *outParams) noexcept;
 
-/// Parses one material file's JSON text and registers the resolved record.
-/// The text buffer must stay alive for the whole call: JsonValues reference
-/// slices of it.
+/// Parses one material file's JSON text and registers the resolved record;
+/// both fixed tables are preflighted for space first so the two mutations
+/// complete together. The text buffer must stay alive for the whole call:
+/// JsonValues reference slices of it.
 bool parse_material_text(AssetDatabase *database, const char *virtualPath,
                          const char *text, std::size_t size, std::size_t depth,
                          AssetId id, Material *outParams) noexcept {
@@ -120,7 +121,6 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     }
   }
 
-  // Start from defaults, or from the parent's fully resolved parameters.
   Material params{};
   AssetId parentId = kInvalidAssetId;
   core::JsonValue parentValue{};
@@ -161,7 +161,6 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     return log_material_error(virtualPath, "metadata table is full");
   }
 
-  // Both fixed tables were preflighted, so these mutations complete together.
   if (!register_material_asset(database, id, virtualPath, params)) {
     return log_material_error(virtualPath,
                               "material registration unexpectedly failed");
@@ -194,7 +193,6 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
 
   const AssetId id = make_asset_id_from_path(virtualPath);
 
-  // Already resolved (shared parents load once).
   if (const Material *cached = find_material_params(database, id)) {
     if (outId != nullptr) {
       *outId = id;
@@ -261,8 +259,8 @@ std::size_t load_material_assets_in_directory(
     return 0U;
   }
 
-  // Collect *.json names into fixed storage, then sort so registration
-  // order (and therefore record slot layout) is deterministic.
+  // Discovered names are sorted before registration so record slot
+  // layout is deterministic across platforms and directory orders.
   constexpr std::size_t kMaxDiscovered = 256U;
   constexpr std::size_t kMaxNameLength = 128U;
   static std::array<std::array<char, kMaxNameLength>, kMaxDiscovered> names{};

@@ -52,7 +52,6 @@ bool CameraManager::push_camera(core::Entity ownerEntity,
     }
   }
 
-  // Find a free slot.
   for (auto &cam : m_cameras) {
     if (!cam.active) {
       cam = entry;
@@ -118,12 +117,13 @@ bool CameraManager::add_shake(float amplitude, float frequency, float duration,
   return false;
 }
 
+/// Simple value noise: integer-lattice hash to [-1, 1] with smoothstep
+/// interpolation between lattice points.
 float CameraManager::noise1d(float t) noexcept {
   if (!std::isfinite(t)) {
     return 0.0F;
   }
 
-  // Simple value-noise approximation via integer lattice + smoothstep.
   const double lattice = std::floor(static_cast<double>(t));
   constexpr double kUint32Period = 4294967296.0;
   double wrappedLattice = std::fmod(lattice, kUint32Period);
@@ -133,7 +133,6 @@ float CameraManager::noise1d(float t) noexcept {
   const std::uint32_t i0 = static_cast<std::uint32_t>(wrappedLattice);
   const float frac = static_cast<float>(static_cast<double>(t) - lattice);
 
-  // Hash integers to pseudo-random floats in [-1, 1].
   const auto hash = [](std::uint32_t value) noexcept -> float {
     const std::uint32_t mixed = (value << 13U) ^ value;
     const std::uint32_t hashed =
@@ -143,7 +142,6 @@ float CameraManager::noise1d(float t) noexcept {
   };
   const float v0 = hash(i0);
   const float v1 = hash(i0 + 1U);
-  // Smoothstep interpolation.
   const float s = frac * frac * (3.0F - 2.0F * frac);
   return v0 + s * (v1 - v0);
 }
@@ -158,10 +156,8 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     return;
   }
 
-  // Find highest-priority camera.
   const CameraEntry *best = active_camera();
   if (best == nullptr) {
-    // No cameras — return current state unchanged.
     *outPosition = m_currentPosition;
     *outTarget = m_currentTarget;
     *outUp = m_currentUp;
@@ -171,7 +167,6 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     return;
   }
 
-  // Advance blend weights.
   for (auto &cam : m_cameras) {
     if (!cam.active) {
       continue;
@@ -183,11 +178,9 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     }
   }
 
-  // Blend active camera toward target.
   const float t = clamp01(best->blendWeight);
 
   if (!m_hasEvaluated) {
-    // First evaluate: snap directly.
     m_currentPosition = best->position;
     m_currentTarget = best->target;
     m_currentUp = best->up;
@@ -204,7 +197,6 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     m_currentFar = lerp(m_currentFar, best->farPlane, t);
   }
 
-  // Apply camera shakes additively.
   math::Vec3 shakeOffset(0.0F, 0.0F, 0.0F);
   for (auto &shake : m_shakes) {
     if (!shake.active) {

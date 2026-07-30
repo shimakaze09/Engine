@@ -226,6 +226,11 @@ static void retire_missing_joint_endpoints(PhysicsWorldView &world,
   }
 }
 
+/// Iteratively solves all active joints for the step. Warm starting replays
+/// 80% of the previous frame's accumulated impulse along the body center
+/// line, and only distance and spring joints participate — the other joint
+/// types store anchor/axis-relative magnitudes, so a center-line replay
+/// would displace them in directions their solvers never correct.
 void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
   PhysicsContext &ctx = world.physics_context();
@@ -238,11 +243,6 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const std::size_t iterCount =
       (iterations > 0) ? static_cast<std::size_t>(iterations) : 8U;
 
-  // Warm starting: apply accumulated impulses from previous frame. Only
-  // distance and spring joints participate — their corrections act along
-  // the center line this warm start replays. The other joint types store
-  // anchor/axis-relative magnitudes, so a center-line replay would displace
-  // them in directions their solvers never correct.
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
     if (!ctx.joints[i].active) {
       continue;
@@ -271,26 +271,23 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       continue;
     }
 
-    // Apply fraction of previous accumulated impulse as warm start.
     const math::Vec3 delta = math::sub(tB->position, tA->position);
     const float dist = math::length(delta);
     if (dist < 1e-8F) {
       continue;
     }
     const math::Vec3 dir = math::div(delta, dist);
-    const float warmImpulse = j.accumulatedImpulse * 0.8F; // 80% warm start
+    const float warmImpulse = j.accumulatedImpulse * 0.8F;
     tA->position = math::add(
         tA->position, math::mul(dir, warmImpulse * invMassA / invMassSum));
     tB->position = math::sub(
         tB->position, math::mul(dir, warmImpulse * invMassB / invMassSum));
   }
 
-  // Reset accumulated impulses for this frame.
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
     ctx.joints[i].accumulatedImpulse = 0.0F;
   }
 
-  // Iterative solving.
   for (std::size_t iter = 0U; iter < iterCount; ++iter) {
     for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
       if (!ctx.joints[i].active) {

@@ -292,7 +292,6 @@ void draw_scene_viewport_panel() noexcept {
     ImGui::TextUnformatted("Waiting for renderer...");
   }
 
-  // --- ImGuizmo gizmo rendering ---
   const bool editable = world_is_editable();
   const runtime::Entity selectedEntity =
       (editor_session().world != nullptr &&
@@ -343,8 +342,7 @@ void draw_scene_viewport_panel() noexcept {
         &viewMat.columns[0].x, &projMat.columns[0].x, editor_session().gizmoOp,
         ImGuizmo::LOCAL, &modelMat.columns[0].x);
 
-    // Track gizmo drag start/end for undo.
-    const bool gizmoUsing = ImGuizmo::IsUsing();
+      const bool gizmoUsing = ImGuizmo::IsUsing();
     if (gizmoUsing && !editor_session().gizmoWasUsing) {
       editor_session().gizmoStartTransform = transform;
     }
@@ -393,7 +391,6 @@ void draw_scene_viewport_panel() noexcept {
   // Camera input: only when stopped/paused, viewport hovered, gizmo not active.
   const bool debugDetach = core::cvar_get_bool("debug.camera_detach", false);
   if (debugDetach && !editor_session().debugCameraActive) {
-    // Snapshot the current camera on transition to detached mode.
     if (editor_session().playState == PlayState::Playing) {
       editor_session().frozenCameraState = renderer::get_active_camera();
     } else {
@@ -408,7 +405,6 @@ void draw_scene_viewport_panel() noexcept {
   }
 
   if (editor_session().debugCameraActive && ImGui::IsWindowHovered()) {
-    // Free-fly debug camera with WASD + mouse
     const ImGuiIO &io = ImGui::GetIO();
     const bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     const float dt = io.DeltaTime;
@@ -422,7 +418,6 @@ void draw_scene_viewport_panel() noexcept {
     renderer::set_active_camera(
         debug_camera_state(editor_session().debugCamera));
 
-    // Draw the frozen game camera frustum as wireframe.
     const float aspect =
         (regionSize.y > 0.0F) ? (regionSize.x / regionSize.y) : 1.0F;
     draw_camera_frustum_wireframe(editor_session().frozenCameraState, aspect);

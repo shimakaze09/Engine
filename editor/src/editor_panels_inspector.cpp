@@ -991,7 +991,6 @@ void draw_inspector_panel() noexcept {
         ImGui::BeginDisabled();
       }
 
-      // InputText needs a mutable buffer — copy into one.
       char pathBuf[sizeof(script.scriptPath)] = {};
       std::memcpy(pathBuf, script.scriptPath, sizeof(pathBuf));
       if (ImGui::InputText("Script Path", pathBuf, sizeof(pathBuf))) {

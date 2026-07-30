@@ -124,7 +124,6 @@ inline bool asset_metadata_add_dependency(AssetMetadata *metadata,
       (metadata->dependencyCount >= AssetMetadata::kMaxDependencies)) {
     return false;
   }
-  // Check for duplicates.
   for (std::size_t i = 0U; i < metadata->dependencyCount; ++i) {
     if (metadata->dependencies[i] == depId) {
       return true;

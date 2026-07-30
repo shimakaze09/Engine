@@ -83,7 +83,6 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
     return 0U;
   }
 
-  // Check cache.
   for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
     if (std::strcmp(editor_session().thumbnailCache[i].path, assetPath) == 0) {
       return editor_session().thumbnailCache[i].textureId;
@@ -93,9 +92,6 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
     return 0U;
   }
 
-  // Build the .thumbnails/<basename>.png path.
-  // Asset path example: "assets/triangle.mesh" →
-  // "assets/.thumbnails/triangle.mesh.png"
   std::string assetStr(assetPath);
   std::size_t lastSlash = assetStr.find_last_of("/\\");
   std::string thumbPath;

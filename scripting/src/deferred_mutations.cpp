@@ -375,7 +375,9 @@ bool apply_or_queue_remove_spot_light_component(
   return queue_deferred_mutation(mutation);
 }
 
-/// Flushes queued work to the backing runtime system for deferred mutations.
+/// Flushes queued mutations against a snapshot of the current count:
+/// applying a destroy runs on_end_play, which may queue new mutations —
+/// those append past the snapshot and survive into the next flush.
 void flush_deferred_mutations() noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr) ||
@@ -383,8 +385,6 @@ void flush_deferred_mutations() noexcept {
     return;
   }
 
-  // Applying a destroy runs on_end_play, which may queue new mutations;
-  // they append past the snapshot count and survive into the next flush.
   const std::size_t count = g_deferredMutationCount;
   for (std::size_t i = 0U; i < count; ++i) {
     const DeferredMutation &mutation = g_deferredMutations[i];

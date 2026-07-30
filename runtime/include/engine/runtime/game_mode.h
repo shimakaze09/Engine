@@ -44,7 +44,6 @@ struct GameMode final {
     if ((key == nullptr) || (key[0] == '\0')) {
       return false;
     }
-    // Overwrite existing.
     for (std::size_t i = 0U; i < ruleCount; ++i) {
       if (std::strcmp(rules[i].key, key) == 0) {
         std::snprintf(rules[i].value, kMaxValueLength, "%s",

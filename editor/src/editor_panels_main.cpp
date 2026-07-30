@@ -238,7 +238,6 @@ void draw_entities_panel() noexcept {
     return;
   }
 
-  // Selection mutates EditorSession state.
   editor_session().world->for_each_alive([](runtime::Entity entity) {
     char label[160] = {};
     runtime::NameComponent name{};

@@ -28,7 +28,8 @@ ContactManifold *find_manifold(std::uint32_t entityIndexA,
   return nullptr;
 }
 
-// Allocate a new manifold slot, or evict the oldest if full.
+// Allocate a new manifold slot, or evict the oldest (lowest lastFrameUsed)
+// if full.
 ContactManifold *allocate_manifold() noexcept {
   if (g_manifoldCount < kMaxContactManifolds) {
     ContactManifold *m = &g_manifolds[g_manifoldCount];
@@ -36,7 +37,6 @@ ContactManifold *allocate_manifold() noexcept {
     return m;
   }
 
-  // All slots full — find the oldest (lowest lastFrameUsed).
   std::size_t oldestIdx = 0U;
   std::uint32_t oldestFrame = g_manifolds[0U].lastFrameUsed;
   for (std::size_t i = 1U; i < g_manifoldCount; ++i) {
@@ -53,20 +53,19 @@ ContactManifold *allocate_manifold() noexcept {
 // Feature-ID based contact matching threshold.
 constexpr float kContactMatchDistSq = 0.01F; // 0.1 units
 
-// Find the best matching existing contact by feature ID or proximity.
+// Find the best matching existing contact by feature ID first, then by
+// proximity; returns contactCount when nothing matches.
 std::size_t find_matching_contact(const ContactManifold &m,
                                   const math::Vec3 &pointOnA,
                                   std::uint32_t featureId) noexcept {
-  // First try matching by feature ID.
   for (std::size_t i = 0U; i < m.contactCount; ++i) {
     if (m.contacts[i].featureId == featureId && featureId != 0U) {
       return i;
     }
   }
 
-  // Fall back to proximity.
   float bestDistSq = kContactMatchDistSq;
-  std::size_t bestIdx = m.contactCount; // sentinel = no match
+  std::size_t bestIdx = m.contactCount;
   for (std::size_t i = 0U; i < m.contactCount; ++i) {
     const math::Vec3 diff = math::sub(m.contacts[i].pointOnA, pointOnA);
     const float distSq = math::dot(diff, diff);
@@ -83,8 +82,9 @@ struct ExtendedManifold final {
   std::size_t contactCount = 0U;
 };
 
-// Manifold reduction: keep at most 4 contacts that maximize contact area.
-// Algorithm: keep deepest, then pick 3 more maximizing spread.
+// Manifold reduction: keep at most 4 contacts that maximize contact area —
+// the deepest, the farthest from it, then the largest-triangle and
+// largest-quadrilateral additions.
 void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
   if (em.contactCount <= ContactManifold::kMaxContacts) {
     for (std::size_t i = 0U; i < em.contactCount; ++i) {
@@ -98,7 +98,6 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
   bool used[ContactManifold::kMaxContacts + 2U] = {};
   const std::size_t n = em.contactCount;
 
-  // 1. Pick deepest penetration.
   std::size_t deepestIdx = 0U;
   float deepestPen = em.contacts[0U].penetration;
   for (std::size_t i = 1U; i < n; ++i) {
@@ -110,7 +109,6 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
   kept[0U] = em.contacts[deepestIdx];
   used[deepestIdx] = true;
 
-  // 2. Pick farthest from first.
   float maxDistSq = -1.0F;
   std::size_t secondIdx = 0U;
   for (std::size_t i = 0U; i < n; ++i) {
@@ -127,7 +125,6 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
   kept[1U] = em.contacts[secondIdx];
   used[secondIdx] = true;
 
-  // 3. Pick point forming largest triangle area with first two.
   float maxArea = -1.0F;
   std::size_t thirdIdx = 0U;
   const math::Vec3 edge01 = math::sub(kept[1U].pointOnA, kept[0U].pointOnA);
@@ -149,7 +146,6 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
     used[thirdIdx] = true;
   }
 
-  // 4. Pick point forming largest quadrilateral area with first three.
   float maxArea2 = -1.0F;
   std::size_t fourthIdx = 0U;
   for (std::size_t i = 0U; i < n; ++i) {
@@ -169,7 +165,6 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
     kept[3U] = em.contacts[fourthIdx];
   }
 
-  // Copy back.
   for (std::size_t i = 0U; i < ContactManifold::kMaxContacts; ++i) {
     m.contacts[i] = kept[i];
   }
@@ -194,10 +189,8 @@ std::size_t manifold_add_contact(std::uint32_t entityIndexA,
   }
   m->lastFrameUsed = frameNumber;
 
-  // Try to match an existing contact.
   const std::size_t matchIdx = find_matching_contact(*m, pointOnA, featureId);
   if (matchIdx < m->contactCount) {
-    // Update existing contact, preserving accumulated impulse.
     ManifoldContact &c = m->contacts[matchIdx];
     c.pointOnA = pointOnA;
     c.pointOnB = pointOnB;
@@ -205,7 +198,6 @@ std::size_t manifold_add_contact(std::uint32_t entityIndexA,
     c.penetration = penetration;
     c.featureId = featureId;
   } else if (m->contactCount < ContactManifold::kMaxContacts) {
-    // Add new contact.
     ManifoldContact &c = m->contacts[m->contactCount];
     c.pointOnA = pointOnA;
     c.pointOnB = pointOnB;
@@ -215,7 +207,6 @@ std::size_t manifold_add_contact(std::uint32_t entityIndexA,
     c.featureId = featureId;
     ++m->contactCount;
   } else {
-    // Manifold full — copy to extended buffer, add new, reduce back to 4.
     ExtendedManifold em{};
     for (std::size_t i = 0U; i < m->contactCount; ++i) {
       em.contacts[i] = m->contacts[i];
@@ -232,7 +223,6 @@ std::size_t manifold_add_contact(std::uint32_t entityIndexA,
     reduce_manifold(em, *m);
   }
 
-  // Return manifold index.
   return static_cast<std::size_t>(m - g_manifolds);
 }
 

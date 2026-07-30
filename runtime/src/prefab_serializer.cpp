@@ -40,7 +40,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   w.write_key("components");
   w.begin_object();
 
-  // Transform
   Transform transform{};
   if (world.get_transform(entity, &transform)) {
     w.write_key(kJsonKeyTransform);
@@ -51,7 +50,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // RigidBody
   RigidBody rigidBody{};
   if (world.get_rigid_body(entity, &rigidBody)) {
     w.write_key(kJsonKeyRigidBody);
@@ -64,7 +62,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // Collider
   Collider collider{};
   if (world.get_collider(entity, &collider)) {
     if (!write_collider_component(w, collider)) {
@@ -74,7 +71,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     }
   }
 
-  // NameComponent
   NameComponent nameComp{};
   if (world.get_name_component(entity, &nameComp)) {
     w.write_key(kJsonKeyNameComponent);
@@ -83,7 +79,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // MeshComponent
   MeshComponent mesh{};
   if (world.get_mesh_component(entity, &mesh)) {
     w.write_key("MeshComponent");
@@ -104,13 +99,11 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // FoliagePatchComponent
   FoliagePatchComponent foliage{};
   if (world.get_foliage_patch_component(entity, &foliage)) {
     write_foliage_patch_component(w, foliage);
   }
 
-  // LightComponent
   LightComponent light{};
   if (world.get_light_component(entity, &light)) {
     w.write_key(kJsonKeyLightComponent);
@@ -122,7 +115,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // PointLightComponent
   PointLightComponent pointLight{};
   if (world.get_point_light_component(entity, &pointLight)) {
     w.write_key("PointLightComponent");
@@ -133,7 +125,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // SpotLightComponent
   SpotLightComponent spotLight{};
   if (world.get_spot_light_component(entity, &spotLight)) {
     w.write_key("SpotLightComponent");
@@ -147,7 +138,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // ReflectionProbeComponent
   ReflectionProbeComponent reflectionProbe{};
   if (world.get_reflection_probe_component(entity, &reflectionProbe)) {
     w.write_key(kJsonKeyReflectionProbeComponent);
@@ -165,7 +155,6 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // SceneCaptureComponent
   SceneCaptureComponent sceneCapture{};
   if (world.get_scene_capture_component(entity, &sceneCapture)) {
     w.write_key(kJsonKeySceneCaptureComponent);
@@ -179,15 +168,14 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
-  // ScriptComponent— plain string format (matches scene serializer).
   ScriptComponent scriptComp{};
   if (world.get_script_component(entity, &scriptComp) &&
       (scriptComp.scriptPath[0] != '\0')) {
     w.write_string(kJsonKeyScriptComponent, scriptComp.scriptPath);
   }
 
-  w.end_object(); // components
-  w.end_object(); // root
+  w.end_object();
+  w.end_object();
 
   if (w.failed()) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,

@@ -624,12 +624,12 @@ private:
     }
   }
 
+  // Event-driven worker: sleeps until work is pushed or shutdown begins.
+  // The wait predicate re-checks queue state under m_queueMutex — the same
+  // mutex every push holds — so wakeups cannot be lost.
   void worker_loop(std::uint32_t threadIndex) noexcept {
     g_threadIndex = threadIndex;
 
-    // Event-driven: sleep until work is pushed or shutdown begins. The wait
-    // predicate re-checks queue state under m_queueMutex — the same mutex
-    // every push holds — so wakeups cannot be lost.
     for (;;) {
       std::uint32_t nodeIndex = kInvalidIndex;
       {
@@ -640,7 +640,7 @@ private:
         });
 
         if (m_queueCount == 0U) {
-          return; // Shutdown with no work left.
+          return;
         }
 
         nodeIndex = m_readyQueue[m_queueHead];

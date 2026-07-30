@@ -229,7 +229,6 @@ bool add_input_action(const char *name, const InputBinding *bindings,
     count = static_cast<std::uint32_t>(kMaxBindingsPerAction);
   }
 
-  // Overwrite existing?
   InputAction *existing = find_mapped_action(name);
   if (existing != nullptr) {
     existing->bindingCount = count;
@@ -239,7 +238,6 @@ bool add_input_action(const char *name, const InputBinding *bindings,
     return true;
   }
 
-  // Find empty slot.
   for (auto &a : g_mappedActions) {
     if (!a.occupied) {
       std::memcpy(a.name, name, nameLen + 1U);
@@ -275,7 +273,6 @@ bool add_input_axis(const char *name, const InputAxisSource *sources,
     count = static_cast<std::uint32_t>(kMaxSourcesPerAxis);
   }
 
-  // Overwrite existing?
   InputAxisMapping *existing = find_mapped_axis(name);
   if (existing != nullptr) {
     existing->sourceCount = count;
@@ -285,7 +282,6 @@ bool add_input_axis(const char *name, const InputAxisSource *sources,
     return true;
   }
 
-  // Find empty slot.
   for (auto &a : g_mappedAxes) {
     if (!a.occupied) {
       std::memcpy(a.name, name, nameLen + 1U);
@@ -373,7 +369,6 @@ bool is_mapped_action_pressed(const char *name) noexcept {
     return false;
   }
 
-  // Find the action index to compare current vs previous frame.
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
     if (g_mappedActions[i].occupied &&
         (std::strcmp(g_mappedActions[i].name, name) == 0)) {
@@ -383,12 +378,13 @@ bool is_mapped_action_pressed(const char *name) noexcept {
   return false;
 }
 
+/// Combines all of the axis's sources, keeping the one with the largest
+/// absolute value.
 float mapped_axis_value(const char *name) noexcept {
   const InputAxisMapping *a = find_mapped_axis(name);
   if (a == nullptr) {
     return 0.0F;
   }
-  // Combine all sources — take the one with the largest absolute value.
   float result = 0.0F;
   for (std::uint32_t i = 0; i < a->sourceCount; ++i) {
     const float val = evaluate_axis_source(a->sources[i]);
@@ -410,7 +406,6 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
     return false;
   }
   if (bindingIndex >= a->bindingCount) {
-    // Allow extending by one if there's room.
     if ((bindingIndex == a->bindingCount) &&
         (a->bindingCount < kMaxBindingsPerAction)) {
       a->bindings[a->bindingCount] = newBinding;
@@ -433,20 +428,19 @@ void input_mapper_begin_frame() noexcept {
   g_mouseDeltaY = 0.0F;
 }
 
+/// Consumes mouse-motion events into the per-frame delta accumulator; all
+/// other event types are seen indirectly via the underlying input state
+/// (is_key_down, etc.) that input_process_event maintains.
 void input_mapper_process_event(const void *nativeEvent) noexcept {
   if (nativeEvent == nullptr) {
     return;
   }
-  // Mouse motion events update the per-frame delta accumulator.
-  // All other event types are handled indirectly via the underlying input
-  // state (is_key_down, etc.) which is updated by input_process_event.
   const MouseState ms = mouse_state();
   g_mouseDeltaX = static_cast<float>(ms.deltaX);
   g_mouseDeltaY = static_cast<float>(ms.deltaY);
 }
 
 void input_mapper_end_frame() noexcept {
-  // Evaluate all mapped actions and record their current state.
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
     if (!g_mappedActions[i].occupied) {
       g_actionDown[i] = false;
@@ -461,8 +455,7 @@ void input_mapper_end_frame() noexcept {
     }
     g_actionDown[i] = down;
 
-    // Fire callback on press/release transitions.
-    if (g_mappedActions[i].callback != nullptr) {
+      if (g_mappedActions[i].callback != nullptr) {
       if (down && !g_prevActionDown[i]) {
         g_mappedActions[i].callback(g_mappedActions[i].name, true,
                                     g_mappedActions[i].userData);
@@ -473,7 +466,6 @@ void input_mapper_end_frame() noexcept {
     }
   }
 
-  // Fire axis callbacks for all mapped axes.
   for (std::size_t i = 0; i < kMaxInputAxes; ++i) {
     if (!g_mappedAxes[i].occupied || (g_mappedAxes[i].callback == nullptr)) {
       continue;
@@ -514,7 +506,6 @@ bool save_input_bindings(const char *path) noexcept {
   JsonWriter writer{};
   writer.begin_object();
 
-  // Actions array.
   writer.begin_array("actions");
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
     if (!g_mappedActions[i].occupied) {
@@ -537,7 +528,6 @@ bool save_input_bindings(const char *path) noexcept {
   }
   writer.end_array();
 
-  // Axes array.
   writer.begin_array("axes");
   for (std::size_t i = 0; i < kMaxInputAxes; ++i) {
     if (!g_mappedAxes[i].occupied) {
@@ -683,13 +673,11 @@ bool load_input_bindings_from_buffer(const char *buffer,
     return false;
   }
 
-  // Clear existing.
   g_mappedActions = {};
   g_mappedAxes = {};
   g_actionDown = {};
   g_prevActionDown = {};
 
-  // Parse actions.
   JsonValue actionsVal{};
   if (parser.get_object_field(*root, "actions", &actionsVal) &&
       (actionsVal.type == JsonValue::Type::Array)) {
@@ -704,7 +692,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
       InputAction action{};
       action.occupied = true;
 
-      // Name.
       JsonValue nameVal{};
       if (parser.get_object_field(actionVal, "name", &nameVal)) {
         const char *str = nullptr;
@@ -718,7 +705,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
         }
       }
 
-      // Bindings.
       JsonValue bindingsVal{};
       if (parser.get_object_field(actionVal, "bindings", &bindingsVal) &&
           (bindingsVal.type == JsonValue::Type::Array)) {
@@ -757,7 +743,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
         }
       }
 
-      // Store.
       for (auto &slot : g_mappedActions) {
         if (!slot.occupied) {
           slot = action;
@@ -767,7 +752,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
     }
   }
 
-  // Parse axes.
   JsonValue axesVal{};
   if (parser.get_object_field(*root, "axes", &axesVal) &&
       (axesVal.type == JsonValue::Type::Array)) {
@@ -782,7 +766,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
       InputAxisMapping axis{};
       axis.occupied = true;
 
-      // Name.
       JsonValue nameVal{};
       if (parser.get_object_field(axisVal, "name", &nameVal)) {
         const char *str = nullptr;
@@ -796,7 +779,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
         }
       }
 
-      // Sources.
       JsonValue sourcesVal{};
       if (parser.get_object_field(axisVal, "sources", &sourcesVal) &&
           (sourcesVal.type == JsonValue::Type::Array)) {
@@ -843,7 +825,6 @@ bool load_input_bindings_from_buffer(const char *buffer,
         }
       }
 
-      // Store.
       for (auto &slot : g_mappedAxes) {
         if (!slot.occupied) {
           slot = axis;

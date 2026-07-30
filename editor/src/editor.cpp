@@ -307,7 +307,6 @@ void editor_new_frame() noexcept {
   ImGui::NewFrame();
   ImGuizmo::BeginFrame();
 
-  // Keyboard shortcuts.
   const ImGuiIO &io = ImGui::GetIO();
   if (!io.WantTextInput) {
     if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {

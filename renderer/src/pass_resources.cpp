@@ -61,7 +61,6 @@ void destroy_gpu_resources(PassResourceState &state) noexcept {
     return;
   }
 
-  // SSAO (reverse order of creation).
   if (state.ssaoBlurFbo != 0U) {
     dev->destroy_framebuffer(state.ssaoBlurFbo);
     state.ssaoBlurFbo = 0U;
@@ -79,7 +78,6 @@ void destroy_gpu_resources(PassResourceState &state) noexcept {
     state.ssaoTex = 0U;
   }
 
-  // G-Buffer (reverse order of creation).
   if (state.gbufferFbo != 0U) {
     dev->destroy_framebuffer(state.gbufferFbo);
     state.gbufferFbo = 0U;
@@ -101,7 +99,6 @@ void destroy_gpu_resources(PassResourceState &state) noexcept {
     state.gbufferAlbedoTex = 0U;
   }
 
-  // Forward path.
   if (state.finalFbo != 0U) {
     dev->destroy_framebuffer(state.finalFbo);
     state.finalFbo = 0U;
@@ -131,7 +128,10 @@ bool fail_create(PassResourceState &state, const char *message) noexcept {
   return false;
 }
 
-/// Creates a new object, handle, or resource for gpu resources.
+/// Creates every pass render target. Layout: scene RGBA16F + DEPTH24,
+/// final RGBA8 LDR (tonemapped editor-viewport output, no depth);
+/// G-Buffer RT0 albedo RGBA8, RT1 normals+roughness RGBA16F, RT2
+/// emissive+AO RGBA8, DEPTH24, bound as one MRT FBO; SSAO R32F.
 bool create_gpu_resources(PassResourceState *outState, int width,
                           int height) noexcept {
   if (outState == nullptr) {
@@ -147,7 +147,6 @@ bool create_gpu_resources(PassResourceState *outState, int width,
   next.width = width;
   next.height = height;
 
-  // Scene color: RGBA16F (via create_texture_2d_hdr with nullptr data).
   next.sceneColorTexture =
       dev->create_texture_2d_hdr(static_cast<std::int32_t>(width),
                                  static_cast<std::int32_t>(height), 4, nullptr);
@@ -155,21 +154,18 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     return fail_create(next, "failed to create scene color texture");
   }
 
-  // Scene depth: DEPTH24.
   next.sceneDepthTexture = dev->create_depth_texture(
       static_cast<std::int32_t>(width), static_cast<std::int32_t>(height));
   if (next.sceneDepthTexture == 0U) {
     return fail_create(next, "failed to create scene depth texture");
   }
 
-  // Scene FBO.
   next.sceneFbo =
       dev->create_framebuffer(next.sceneColorTexture, next.sceneDepthTexture);
   if (next.sceneFbo == 0U) {
     return fail_create(next, "failed to create scene framebuffer");
   }
 
-  // Final color: RGBA8 LDR (tonemapped output for editor viewport).
   next.finalColorTexture =
       dev->create_texture_2d(static_cast<std::int32_t>(width),
                              static_cast<std::int32_t>(height), 4, nullptr);
@@ -177,7 +173,6 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     return fail_create(next, "failed to create final color texture");
   }
 
-  // Final FBO (color-only, no depth).
   next.finalFbo = dev->create_framebuffer(next.finalColorTexture, 0U);
   if (next.finalFbo == 0U) {
     return fail_create(next, "failed to create final framebuffer");
@@ -187,35 +182,29 @@ bool create_gpu_resources(PassResourceState *outState, int width,
   next.resources.sceneDepth = PassResourceId{kSceneDepthSlot};
   next.resources.finalColor = PassResourceId{kFinalColorSlot};
 
-  // --- G-Buffer textures (deferred path) ---
   const auto w32 = static_cast<std::int32_t>(width);
   const auto h32 = static_cast<std::int32_t>(height);
 
-  // RT0: albedo (RGBA8).
   next.gbufferAlbedoTex = dev->create_texture_2d(w32, h32, 4, nullptr);
   if (next.gbufferAlbedoTex == 0U) {
     return fail_create(next, "failed to create G-Buffer albedo texture");
   }
 
-  // RT1: normals + roughness (RGBA16F).
   next.gbufferNormalTex = dev->create_texture_2d_hdr(w32, h32, 4, nullptr);
   if (next.gbufferNormalTex == 0U) {
     return fail_create(next, "failed to create G-Buffer normal texture");
   }
 
-  // RT2: emissive + AO (RGBA8).
   next.gbufferEmissiveTex = dev->create_texture_2d(w32, h32, 4, nullptr);
   if (next.gbufferEmissiveTex == 0U) {
     return fail_create(next, "failed to create G-Buffer emissive texture");
   }
 
-  // G-Buffer depth (DEPTH24).
   next.gbufferDepthTex = dev->create_depth_texture(w32, h32);
   if (next.gbufferDepthTex == 0U) {
     return fail_create(next, "failed to create G-Buffer depth texture");
   }
 
-  // G-Buffer MRT FBO (3 color + 1 depth).
   const std::uint32_t gbufferColors[] = {next.gbufferAlbedoTex,
                                          next.gbufferNormalTex,
                                          next.gbufferEmissiveTex};
@@ -225,7 +214,6 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     return fail_create(next, "failed to create G-Buffer framebuffer");
   }
 
-  // Verify G-Buffer FBO completeness.
   dev->bind_framebuffer(next.gbufferFbo);
   if (!dev->check_framebuffer_complete()) {
     dev->bind_framebuffer(0U);
@@ -238,7 +226,6 @@ bool create_gpu_resources(PassResourceState *outState, int width,
   next.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
   next.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
 
-  // --- SSAO textures (R32F) ---
   next.ssaoTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
   if (next.ssaoTex == 0U) {
     return fail_create(next, "failed to create SSAO texture");

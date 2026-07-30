@@ -518,7 +518,6 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
-    // PointLightComponent
     core::JsonValue plVal{};
     if (parser.get_object_field(components, "PointLightComponent", &plVal)) {
       PointLightComponent pc{};
@@ -529,7 +528,6 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
-    // SpotLightComponent
     core::JsonValue slVal{};
     if (parser.get_object_field(components, "SpotLightComponent", &slVal)) {
       SpotLightComponent sc{};

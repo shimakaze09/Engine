@@ -758,7 +758,6 @@ public:
       for_each_primary<C0>(
           [&fn](Entity entity, const C0 &c0) noexcept { fn(entity, c0); });
     } else {
-      // Iterate the component set with the fewest entries, then probe the rest.
       for_each_variadic<ComponentTuple>(fn, std::make_index_sequence<N>{});
     }
   }

@@ -18,7 +18,6 @@ bool ServiceLocator::register_raw(TypeId id, void *service) noexcept {
     return true;
   }
 
-  // Check for existing entry to overwrite.
   for (std::size_t i = 0U; i < m_count; ++i) {
     if (m_entries[i].typeId == id) {
       m_entries[i].service = service;
@@ -26,7 +25,6 @@ bool ServiceLocator::register_raw(TypeId id, void *service) noexcept {
     }
   }
 
-  // Insert new entry.
   if (m_count >= kMaxServices) {
     log_message(LogLevel::Error, "service_locator",
                 "register_service: registry full");
@@ -51,7 +49,6 @@ void *ServiceLocator::get_raw(TypeId id) const noexcept {
 bool ServiceLocator::remove_raw(TypeId id) noexcept {
   for (std::size_t i = 0U; i < m_count; ++i) {
     if (m_entries[i].typeId == id) {
-      // Swap with last to keep dense.
       m_entries[i] = m_entries[m_count - 1U];
       m_entries[m_count - 1U] = {};
       --m_count;

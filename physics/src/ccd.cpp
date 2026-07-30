@@ -119,6 +119,17 @@ float ccd_velocity_threshold() noexcept {
   return core::cvar_get_float("physics.ccd_threshold", 2.0F);
 }
 
+/// Bilateral advancement CCD (Erwin Coumans, GDC 2013): sweeps the moving
+/// collider through dt-normalized time, advancing by conservative separation
+/// bounds until contact or the current-best TOI. Only fast movers sweep — the
+/// physics.ccd_threshold cvar gates speed, and the step's travel must exceed
+/// half the collider's smallest extent. Candidates are gated on the previous
+/// resolve's snapshot: snapshot AABBs (expanded by one step of positional
+/// correction drift) reject most pairs before the expensive geometry build,
+/// and candidate velocities come from the snapshot because reading live
+/// RigidBody::velocity races with the parallel integration chunks. A pair
+/// missed because the OTHER body races toward a slow mover is covered by
+/// that body's own sweep.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity, const RigidBody &body,
                                      const Collider &collider,
@@ -141,23 +152,19 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     return result;
   }
 
-  // Only trigger CCD if speed exceeds threshold.
   const float threshold = ccd_velocity_threshold();
   if (speed < threshold) {
     return result;
   }
 
-  // The body will travel this far in dt.
   const float travelDist = speed * dt;
 
-  // Minimum half-extent of the moving shape — if travel < this, skip CCD.
   const math::Vec3 movingHe = math::aabb_half_extents(movingGeometry.worldAabb);
   const float minHalf = std::min({movingHe.x, movingHe.y, movingHe.z});
   if (travelDist <= minHalf * 0.5F) {
-    return result; // Travel distance too small relative to collider size.
+    return result;
   }
 
-  // Iterate over all colliders in the world, find earliest TOI.
   const std::size_t count = world.collider_count();
   if (count == 0U) {
     return result;
@@ -175,18 +182,11 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   std::uint32_t bestHitEntity = 0U;
   const Entity movingOwner = world.rigid_body_owner(entity);
 
-  // The previous resolve's snapshot provides candidate bounds and ownership:
-  // per-candidate hierarchy walks and geometry builds dominate the sweep
-  // cost, so candidates are rejected on snapshot AABBs first.
   const PhysicsContext &physicsCtx = world.physics_context();
   const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
   const bool snapshotUsable =
       (snapshotStore != nullptr) && (physicsCtx.ccdColliderCount == count);
 
-  // Conservative reject bounds: the mover's whole-step swept AABB expanded
-  // by a slop covering one step of snapshot drift (positional corrections).
-  // Pairs missed because the OTHER body races toward a slow mover are
-  // covered by that body's own CCD sweep.
   constexpr float kSnapshotDriftSlop = 0.1F;
   const math::Vec3 gateDisplacement = math::mul(body.velocity, dt);
   math::AABB gateBounds = movingGeometry.worldAabb;
@@ -214,7 +214,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       }
     }
 
-    // Collision layer/mask filtering.
     const Collider &other = colliders[i];
     if (((collider.collisionLayer & other.collisionMask) == 0U) ||
         ((other.collisionLayer & collider.collisionMask) == 0U)) {
@@ -230,12 +229,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    // Reject on relative velocity BEFORE building world geometry: geometry
-    // construction (transform composition + matrix inverse) is by far the
-    // most expensive part of a candidate visit, and bodies moving together
-    // can never produce a sweep hit. The velocity comes from the resolve
-    // snapshot (captured post-solve): reading live RigidBody::velocity here
-    // races with the other chunk jobs integrating it.
     math::Vec3 otherVel(0.0F, 0.0F, 0.0F);
     if (snapshotUsable &&
         (snapshotStore->ccdColliderEntities[i] == entities[i])) {
@@ -257,8 +250,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    // Quick conservative AABB sweep test: check if the swept AABB of the
-    // moving body intersects the other's AABB at all.
     const math::Vec3 relativeDisplacement = math::mul(relVel, dt);
     const ColliderWorldGeometry endGeometry =
         translated_geometry(movingGeometry, relativeDisplacement);
@@ -271,27 +262,14 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
         std::max(movingGeometry.worldAabb.max.y, endGeometry.worldAabb.max.y),
         std::max(movingGeometry.worldAabb.max.z, endGeometry.worldAabb.max.z));
 
-    // Does swept AABB overlap with static AABB of other object?
     if (sweepMin.x > otherGeometry.worldAabb.max.x ||
         sweepMax.x < otherGeometry.worldAabb.min.x ||
         sweepMin.y > otherGeometry.worldAabb.max.y ||
         sweepMax.y < otherGeometry.worldAabb.min.y ||
         sweepMin.z > otherGeometry.worldAabb.max.z ||
         sweepMax.z < otherGeometry.worldAabb.min.z) {
-      continue; // No possible intersection, skip.
+      continue;
     }
-
-    // -----------------------------------------------------------------------
-    // Bilateral Advancement (Erwin Coumans, GDC 2013)
-    // -----------------------------------------------------------------------
-    // We sweep body A from t=0 to t=1 (in dt-normalised time).
-    // At each iteration we compute the separating distance between A(t) and B.
-    // We advance t by sep_dist / relSpeed (conservative bound).
-    // We stop when either:
-    //   - sep_dist <= tolerance (contact found at current t)
-    //   - t >= bestToi (a closer hit already found)
-    //   - iterations exhausted
-    // -----------------------------------------------------------------------
 
     float tLo = 0.0F;
     bool foundContact = false;
@@ -329,7 +307,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       tLo += advance;
 
       if (tLo >= bestToi) {
-        break; // Passed beyond best known TOI or end of step.
+        break;
       }
     }
 

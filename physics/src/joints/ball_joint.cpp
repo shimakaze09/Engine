@@ -20,7 +20,6 @@ float solve_ball_socket_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
     return 0.0F;
   }
 
-  // World-space anchor positions.
   const math::Vec3 worldA = math::add(ctx.tA->position, anchorA);
   const math::Vec3 worldB = math::add(ctx.tB->position, anchorB);
 

@@ -26,9 +26,9 @@ constexpr PassCVarBinding kPassCVars[] = {
 
 } // namespace
 
-/// Initializes the owning system for post process stack.
+/// Initializes the stack in its default order: Bloom → SSAO →
+/// AutoExposure → Tonemap → FXAA, all enabled.
 void initialize_post_process_stack() noexcept {
-  // Default ordering: Bloom → SSAO → AutoExposure → Tonemap → FXAA.
   g_stack.passCount = static_cast<std::size_t>(PostProcessPassId::Count);
   for (std::size_t i = 0U; i < g_stack.passCount; ++i) {
     g_stack.passes[i].id = static_cast<PostProcessPassId>(i);
@@ -39,21 +39,21 @@ void initialize_post_process_stack() noexcept {
 
 const PostProcessStack &get_post_process_stack() noexcept { return g_stack; }
 
-/// Returns whether is post process pass enabled.
+/// Returns whether the pass is enabled: its bound CVar when one exists,
+/// otherwise always enabled.
 bool is_post_process_pass_enabled(PostProcessPassId id) noexcept {
   const auto idx = static_cast<std::size_t>(id);
   if (idx >= static_cast<std::size_t>(PostProcessPassId::Count)) {
     return false;
   }
 
-  // Check CVar if one is bound to this pass.
   for (const auto &binding : kPassCVars) {
     if (binding.id == id && binding.cvarName != nullptr) {
       return core::cvar_get_bool(binding.cvarName, true);
     }
   }
 
-  return true; // No CVar bound → always enabled.
+  return true;
 }
 
 const char *post_process_pass_name(PostProcessPassId id) noexcept {

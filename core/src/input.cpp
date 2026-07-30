@@ -103,7 +103,9 @@ const AxisBinding *find_axis(const char *name) noexcept {
 
 } // namespace
 
-/// Initializes the owning system for input.
+/// Initializes the owning system for input. Persisted per-user rebindings
+/// are restored here when the file exists, and take precedence over script
+/// defaults registered later.
 bool initialize_input() noexcept {
   if (g_inputInitialized) {
     return true;
@@ -119,8 +121,6 @@ bool initialize_input() noexcept {
 
   static_cast<void>(initialize_input_mapper());
 
-  // Restore persisted rebindings when a per-user file exists; saved
-  // bindings take precedence over script defaults registered later.
   char bindingsPath[512] = {};
   if (input_bindings_default_path(bindingsPath, sizeof(bindingsPath))) {
     FILE *probe = nullptr;
@@ -240,14 +240,13 @@ void input_process_event(const void *nativeEvent) noexcept {
     break;
   }
 
-  // Forward to InputMapper and TouchInput subsystems.
   input_mapper_process_event(nativeEvent);
   touch_process_event(nativeEvent);
 }
 
-/// Ends the requested operation or profiling range for input frame.
+/// Ends the input frame for the mapper and touch subsystems; keyboard and
+/// mouse state is maintained per-event and needs no end-of-frame sync.
 void end_input_frame() noexcept {
-  // Keyboard and mouse state is maintained per-event; no sync needed.
   input_mapper_end_frame();
   touch_end_frame();
 }

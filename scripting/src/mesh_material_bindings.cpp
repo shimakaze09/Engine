@@ -82,6 +82,12 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // engine.spawn_shape(shape, x, y, z, r, g, b) → entity index or nil
 // shape: "cube" | "sphere" | "cylinder" | "capsule" | "pyramid" | "plane"
 // Spawns a physics entity with the matching mesh and appropriate collider.
+// The collider model mirrors Unity/Unreal: box, sphere, and capsule are
+// the analytic primitives (sphere encodes radius in halfExtents.x;
+// capsule encodes radius in .x and half height in .y); cylinder and
+// pyramid collide as convex hulls that match their render meshes, and
+// degrade to the bounding box if hull slots are exhausted so the prop
+// still collides instead of falling through the world.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || !can_apply_mutations_now() ||
       !lua_isstring(state, 1)) {
@@ -104,9 +110,6 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   const char *shape = lua_tostring(state, 1);
 
-  // Collider model mirrors Unity/Unreal: box, sphere, and capsule are the
-  // analytic primitives; cylinder and pyramid collide as convex hulls that
-  // match their render meshes.
   std::uint64_t meshId = g_defaultMeshAssetId;
   math::Vec3 halfExtents(0.5F, 0.5F, 0.5F);
   runtime::ColliderShape colliderShape = runtime::ColliderShape::AABB;
@@ -121,7 +124,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "sphere") == 0) {
     meshId = (g_builtinSphereMesh != 0ULL) ? g_builtinSphereMesh
                                            : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F); // halfExtents.x = radius
+    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
     colliderShape = runtime::ColliderShape::Sphere;
   } else if (std::strcmp(shape, "cylinder") == 0) {
     meshId = (g_builtinCylinderMesh != 0ULL) ? g_builtinCylinderMesh
@@ -133,7 +136,6 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0ULL) ? g_builtinCapsuleMesh
                                             : g_defaultMeshAssetId;
-    // Capsule: halfExtents.x = radius, halfExtents.y = halfHeight.
     halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
     colliderShape = runtime::ColliderShape::Capsule;
   } else if (std::strcmp(shape, "pyramid") == 0) {
@@ -169,8 +171,6 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   static_cast<void>(runtime_binding().world->add_collider(entity, collider));
   if (hasHull && !runtime::set_convex_hull_data(*runtime_binding().world,
                                                 entity, hull)) {
-    // Hull slots exhausted: degrade to the bounding box so the prop still
-    // collides instead of falling through the world.
     core::log_message(core::LogLevel::Warning, "scripting",
                       "spawn_shape hull slots exhausted — using box collider");
     collider.shape = runtime::ColliderShape::AABB;

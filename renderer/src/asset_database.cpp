@@ -56,6 +56,8 @@ void write_source_path(std::array<char, 260U> *outPath,
 
 } // namespace
 
+/// FNV-1a over the path with separators canonicalized to '/' so the same
+/// asset hashes identically on every platform.
 AssetId make_asset_id_from_path(const char *path) noexcept {
   if (path == nullptr) {
     return kInvalidAssetId;
@@ -65,8 +67,6 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
   for (const unsigned char *cursor =
            reinterpret_cast<const unsigned char *>(path);
        *cursor != 0U; ++cursor) {
-    // Canonicalize separators so the same asset hashes identically on every
-    // platform.
     const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
                                  ? static_cast<unsigned char>('/')
                                  : *cursor;
@@ -116,6 +116,8 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
   return hash;
 }
 
+/// Linear-probe lookup; a never-used slot terminates the probe chain while
+/// tombstones keep it alive. Returns capacity when the id is absent.
 std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
                                         AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -131,7 +133,6 @@ std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
         return slot;
       }
     } else if (!database->meshTombstoned[slot]) {
-      // A never-used slot terminates the probe chain; tombstones do not.
       return database->meshAssets.size();
     }
   }
@@ -183,6 +184,8 @@ std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
   return database->meshAssets.size();
 }
 
+/// Unregisters the asset record; refused while it is still referenced or
+/// still owns a GPU mesh.
 bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   const std::size_t slot = find_mesh_asset_record_slot(database, id);
   if (slot == database->meshAssets.size()) {
@@ -191,7 +194,7 @@ bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
 
   const MeshAssetRecord &record = database->meshAssets[slot];
   if ((record.refCount > 0U) || (record.runtimeMesh != kInvalidMeshHandle)) {
-    return false; // Still referenced or still owns a GPU mesh.
+    return false;
   }
 
   database->occupied[slot] = false;
@@ -262,7 +265,9 @@ AssetState mesh_asset_state(const AssetDatabase *database,
   return database->meshAssets[slot].state;
 }
 
-/// Sets the requested value for mesh asset state.
+/// Sets the mesh asset state; a Ready transition stamps lastAccessFrame so
+/// a fresh upload gets a full eviction-hysteresis window even before its
+/// first draw resolves it.
 bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
                           MeshHandle runtimeMesh) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -282,8 +287,6 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
   record.state = state;
   if (state == AssetState::Ready) {
     record.runtimeMesh = runtimeMesh;
-    // A fresh upload gets a full eviction-hysteresis window even before its
-    // first draw resolves it.
     record.lastAccessFrame = database->currentFrame;
   } else {
     record.runtimeMesh = kInvalidMeshHandle;
@@ -307,6 +310,9 @@ bool set_mesh_asset_size(AssetDatabase *database, AssetId id,
   return true;
 }
 
+/// Clears requestedResident on the coldest assets until resident bytes fit
+/// the budget — declarative eviction: the asset manager's residency sync
+/// sees the cleared flag and unloads the GPU mesh on its next pass.
 std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
                                           std::uint64_t budgetBytes) noexcept {
   if (database == nullptr) {
@@ -348,8 +354,6 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
       break;
     }
 
-    // Declarative eviction: the asset manager's residency sync sees the
-    // cleared flag and unloads the GPU mesh on its next pass.
     MeshAssetRecord &record = database->meshAssets[coldestSlot];
     record.requestedResident = false;
     residentBytes -= record.sizeBytes;
@@ -909,7 +913,9 @@ bool add_asset_dependency(AssetDatabase *database, AssetId id,
 
 namespace {
 
-/// Loads the requested resource for with deps recursive.
+/// Depth-first dependency load: rejects cycles via the visit stack,
+/// skips assets already loaded this session, and loads every dependency
+/// before the asset itself.
 bool load_with_deps_recursive(AssetDatabase *database, AssetId id,
                               bool (*loadCallback)(AssetDatabase *db,
                                                    AssetId id, void *userData),
@@ -917,7 +923,6 @@ bool load_with_deps_recursive(AssetDatabase *database, AssetId id,
                               std::size_t visitDepth, std::size_t maxVisitDepth,
                               AssetId *loadedSet, std::size_t *loadedCount,
                               std::size_t maxLoaded) noexcept {
-  // Cycle detection: check if id is already in the visit stack.
   for (std::size_t i = 0U; i < visitDepth; ++i) {
     if (visitStack[i] == id) {
       std::fprintf(stderr,
@@ -935,17 +940,14 @@ bool load_with_deps_recursive(AssetDatabase *database, AssetId id,
     return false;
   }
 
-  // Check if already loaded in this session.
   for (std::size_t i = 0U; i < *loadedCount; ++i) {
     if (loadedSet[i] == id) {
-      return true; // Already loaded, skip.
+      return true;
     }
   }
 
-  // Push this asset onto the visit stack.
   visitStack[visitDepth] = id;
 
-  // Load dependencies first.
   const AssetMetadata *meta = find_asset_metadata(database, id);
   if (meta != nullptr) {
     for (std::size_t i = 0U; i < meta->dependencyCount; ++i) {
@@ -962,14 +964,12 @@ bool load_with_deps_recursive(AssetDatabase *database, AssetId id,
     }
   }
 
-  // Now load the asset itself (after all deps are loaded).
   if (loadCallback != nullptr) {
     if (!loadCallback(database, id, userData)) {
       return false;
     }
   }
 
-  // Mark as loaded.
   if (*loadedCount < maxLoaded) {
     loadedSet[*loadedCount] = id;
     ++(*loadedCount);

@@ -232,7 +232,6 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
     return false;
   }
 
-  // Register CVars for streaming budget.
   engine::core::cvar_register_int("asset.streaming_budget_mb", 256,
                                   "Max memory (MB) for in-flight asset loads");
   engine::core::cvar_register_int("asset.max_uploads_per_frame", 8,
@@ -294,12 +293,10 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
 
   std::lock_guard<std::mutex> lock(queue->mutex);
 
-  // Check if already queued.
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     if (queue->requests[i].occupied && (queue->requests[i].assetId == id) &&
         (queue->requests[i].state != LoadingState::Failed)) {
-      // Already in flight — update priority if higher.
-      if (static_cast<std::uint8_t>(priority) >
+          if (static_cast<std::uint8_t>(priority) >
           static_cast<std::uint8_t>(queue->requests[i].priority)) {
         queue->requests[i].priority = priority;
       }
@@ -339,7 +336,7 @@ bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
   }
   LoadRequest &req = queue->requests[handle.index];
   if (!req.occupied || (req.state != LoadingState::Queued)) {
-    return false; // Can only update priority while still queued.
+    return false;
   }
 
   req.priority = newPriority;
@@ -456,7 +453,6 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
 
   std::lock_guard<std::mutex> lock(queue->mutex);
 
-  // Refresh budget from CVars.
   const int budgetMb =
       engine::core::cvar_get_int("asset.streaming_budget_mb", 256);
   queue->streamingBudgetBytes =
@@ -471,7 +467,12 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
   queue->uploads_this_frame = 0U;
 }
 
-/// Advances this system for the current frame or tick for asset streaming.
+/// Advances streaming one frame: promotes finished loads to Ready (up to
+/// the per-frame upload cap), then schedules queued requests onto idle
+/// workers — the loaded byte size is only known after CPU IO finishes, so
+/// the budget gate counts bytes already loaded and awaiting upload.
+/// Completed/failed requests stay observable until callers retire their
+/// terminal handles with release_load().
 std::size_t update_asset_streaming(
     AssetStreamingQueue *queue,
     AssetLoadCallback loadCallback,
@@ -490,7 +491,6 @@ std::size_t update_asset_streaming(
     queue->callbackUserData = userData;
   }
 
-  // Phase 1: Promote Uploading -> Ready up to maxUploadsPerFrame.
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     AssetId assetId = kInvalidAssetId;
     AssetUploadCallback callback = nullptr;
@@ -539,9 +539,6 @@ std::size_t update_asset_streaming(
   {
     std::lock_guard<std::mutex> lock(queue->mutex);
 
-    // Phase 2: schedule queued requests for idle workers. The loaded byte size
-    // is only known after CPU IO finishes, so the budget gate uses bytes that
-    // are already loaded and waiting for upload.
     std::size_t activeLoads = active_load_count_unlocked(queue);
     const std::uint64_t pendingUploadBytes =
         pending_upload_bytes_unlocked(queue);
@@ -566,8 +563,6 @@ std::size_t update_asset_streaming(
     }
   }
 
-  // Completed/failed requests remain observable until callers retire their
-  // terminal handles with release_load().
 
   return readyCount;
 }

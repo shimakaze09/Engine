@@ -47,7 +47,8 @@ math::Vec3 support_convex_hull(const void *data, const math::Vec3 &center,
 math::Vec3 support_sphere(const void *data, const math::Vec3 &center,
                           const math::Vec3 &dir) noexcept;
 
-/// GJK support point for a capsule (data = {radius, halfHeight}).
+/// GJK support point for a Y-axis-aligned capsule (data = {radius,
+/// halfHeight}).
 math::Vec3 support_capsule(const void *data, const math::Vec3 &center,
                            const math::Vec3 &dir) noexcept;
 

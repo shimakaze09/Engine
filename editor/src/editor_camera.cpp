@@ -41,10 +41,8 @@ void update_editor_camera(EditorCamera &camera, int deltaX, int deltaY,
     const float cosYaw = std::cos(camera.yaw);
     const float sinYaw = std::sin(camera.yaw);
 
-    // Right vector (horizontal plane).
-    const math::Vec3 right(cosYaw, 0.0F, -sinYaw);
-    // Up vector (world up).
-    const math::Vec3 up(0.0F, 1.0F, 0.0F);
+      const math::Vec3 right(cosYaw, 0.0F, -sinYaw);
+      const math::Vec3 up(0.0F, 1.0F, 0.0F);
 
     camera.target =
         math::add(math::add(camera.target, math::mul(right, -dx * scale)),

@@ -8,6 +8,8 @@
 
 namespace engine::physics {
 
+/// Slider joint: removes the displacement component perpendicular to the
+/// slider axis, then clamps the along-axis travel to the optional limits.
 float solve_slider_joint(JointSolveContext &ctx, const math::Vec3 &axis,
                          bool hasLimits, float minDist, float maxDist,
                          float &accumulatedImpulse) noexcept {
@@ -22,7 +24,6 @@ float solve_slider_joint(JointSolveContext &ctx, const math::Vec3 &axis,
 
   const math::Vec3 relPos = math::sub(ctx.tB->position, ctx.tA->position);
 
-  // Remove the component perpendicular to the slider axis.
   const float projOnAxis = math::dot(relPos, axis);
   const math::Vec3 onAxis = math::mul(axis, projOnAxis);
   const math::Vec3 perpError = math::sub(relPos, onAxis);
@@ -30,7 +31,6 @@ float solve_slider_joint(JointSolveContext &ctx, const math::Vec3 &axis,
 
   float lambda = 0.0F;
 
-  // Correct perpendicular displacement (constrain to axis).
   if (perpLen > 1e-6F) {
     const math::Vec3 perpDir = math::div(perpError, perpLen);
     ctx.tA->position =
@@ -42,7 +42,6 @@ float solve_slider_joint(JointSolveContext &ctx, const math::Vec3 &axis,
     lambda += perpLen;
   }
 
-  // Apply distance limits along the axis.
   if (hasLimits) {
     float clampedProj = projOnAxis;
     if (clampedProj < minDist) {

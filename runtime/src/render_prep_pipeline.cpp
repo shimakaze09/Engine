@@ -35,7 +35,8 @@ bool aabb_outside_plane(const FrustumPlane &p, const math::Vec3 &center,
   return (p.a * px + p.b * py + p.c * pz + p.d) < 0.0F;
 }
 
-// Gribb-Hartmann: extract 6 frustum planes from a column-major VP matrix.
+// Gribb-Hartmann: extract 6 frustum planes from a column-major VP matrix,
+// in order left, right, bottom, top, near, far.
 // Row j = (columns[0][j], columns[1][j], columns[2][j], columns[3][j])
 // where Vec4 x/y/z/w map to indices 0/1/2/3.
 void extract_frustum_planes(const math::Mat4 &vp,
@@ -44,12 +45,12 @@ void extract_frustum_planes(const math::Mat4 &vp,
   const math::Vec4 c1 = vp.columns[1];
   const math::Vec4 c2 = vp.columns[2];
   const math::Vec4 c3 = vp.columns[3];
-  planes[0] = {c0.w + c0.x, c1.w + c1.x, c2.w + c2.x, c3.w + c3.x}; // left
-  planes[1] = {c0.w - c0.x, c1.w - c1.x, c2.w - c2.x, c3.w - c3.x}; // right
-  planes[2] = {c0.w + c0.y, c1.w + c1.y, c2.w + c2.y, c3.w + c3.y}; // bottom
-  planes[3] = {c0.w - c0.y, c1.w - c1.y, c2.w - c2.y, c3.w - c3.y}; // top
-  planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z}; // near
-  planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z}; // far
+  planes[0] = {c0.w + c0.x, c1.w + c1.x, c2.w + c2.x, c3.w + c3.x};
+  planes[1] = {c0.w - c0.x, c1.w - c1.x, c2.w - c2.x, c3.w - c3.x};
+  planes[2] = {c0.w + c0.y, c1.w + c1.y, c2.w + c2.y, c3.w + c3.y};
+  planes[3] = {c0.w - c0.y, c1.w - c1.y, c2.w - c2.y, c3.w - c3.y};
+  planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z};
+  planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z};
 }
 
 bool aabb_culled_by_frustum(const FrustumPlane planes[6],
@@ -63,17 +64,16 @@ bool aabb_culled_by_frustum(const FrustumPlane planes[6],
   return false;
 }
 
-/// Builds the requested runtime data for draw sort key.
+/// Builds the 64-bit draw sort key, MSB→LSB:
+/// transparent:1 | shader:7 (0 = PBR, the only shader) | texture:20 |
+/// mesh:20 | depth:16.
 std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::MeshHandle runtimeMesh,
                                   const math::Vec3 &center,
                                   const math::Mat4 &viewProjection) noexcept {
-  // Layout (MSB->LSB):
-  //   transparent:1 | shader:7 | texture:20 | mesh:20 | depth:16
   const bool transparent = (material.opacity < 1.0F);
   const std::uint64_t transparentBit = transparent ? (1ULL << 63U) : 0ULL;
 
-  // Shader index: 0 = PBR (only shader for now).
   const std::uint64_t shaderBits = 0ULL;
 
   const std::uint64_t textureBits =
@@ -167,7 +167,6 @@ void render_prep_chunk_job(void *userData) noexcept {
   renderer::CommandBufferBuilder &localBuffer =
       jobData->localBuffers[threadIndex];
 
-  // Use the pre-computed view-projection matrix from the pipeline context.
   const math::Mat4 &vp = jobData->viewProjection;
   FrustumPlane frustumPlanes[6];
   extract_frustum_planes(vp, frustumPlanes);
@@ -176,8 +175,6 @@ void render_prep_chunk_job(void *userData) noexcept {
     const MeshComponent *meshComponent =
         jobData->world->get_mesh_component_ptr(entities[i]);
     if (meshComponent != nullptr) {
-      // Derive a conservative world-space AABB from the authoritative
-      // collider geometry, including parent TRS and the collider-local pose.
       const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
       math::Vec3 center = transforms[i].position;
       math::Vec3 half = detail::transformed_aabb_half_extents(

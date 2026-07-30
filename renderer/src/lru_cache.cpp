@@ -86,14 +86,12 @@ bool lru_touch(LruCache *cache, AssetId id, std::uint64_t accessFrame,
     return false;
   }
 
-  // Check if already present — move to tail.
   const std::uint32_t existing = find_node_index(cache, id);
   if (existing != LruNode::kInvalidIndex) {
     LruNode &node = cache->nodes[existing];
     node.lastAccessFrame = accessFrame;
     node.refCount = refCount;
-    // Update size if changed.
-    cache->totalSizeBytes -= node.sizeBytes;
+      cache->totalSizeBytes -= node.sizeBytes;
     node.sizeBytes = sizeBytes;
     cache->totalSizeBytes += sizeBytes;
     unlink_node(cache, existing);
@@ -101,10 +99,9 @@ bool lru_touch(LruCache *cache, AssetId id, std::uint64_t accessFrame,
     return true;
   }
 
-  // Insert new node.
   const std::uint32_t slot = find_free_slot(cache);
   if (slot == LruNode::kInvalidIndex) {
-    return false; // Cache is full — caller should evict first.
+    return false;
   }
 
   LruNode &node = cache->nodes[slot];
@@ -139,12 +136,13 @@ bool lru_remove(LruCache *cache, AssetId id) noexcept {
   return true;
 }
 
+/// Evicts the least-recently-used unreferenced asset; kInvalidAssetId when
+/// every cached asset is still referenced.
 AssetId lru_evict_one(LruCache *cache) noexcept {
   if ((cache == nullptr) || (cache->head == LruNode::kInvalidIndex)) {
     return kInvalidAssetId;
   }
 
-  // Walk from head (LRU) and find the first node with refCount == 0.
   std::uint32_t cur = cache->head;
   while (cur != LruNode::kInvalidIndex) {
     LruNode &node = cache->nodes[cur];
@@ -159,7 +157,7 @@ AssetId lru_evict_one(LruCache *cache) noexcept {
     cur = node.next;
   }
 
-  return kInvalidAssetId; // All assets are protected.
+  return kInvalidAssetId;
 }
 
 std::size_t lru_evict_to_budget(LruCache *cache, std::uint64_t targetBytes,
@@ -173,7 +171,7 @@ std::size_t lru_evict_to_budget(LruCache *cache, std::uint64_t targetBytes,
   while (cache->totalSizeBytes > targetBytes) {
     const AssetId id = lru_evict_one(cache);
     if (id == kInvalidAssetId) {
-      break; // Nothing more can be evicted.
+      break;
     }
     if (callback != nullptr) {
       callback(id, userData);

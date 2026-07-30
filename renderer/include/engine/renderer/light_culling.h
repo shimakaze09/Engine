@@ -66,7 +66,9 @@ constexpr std::size_t kLightDataBufferSize =
     static_cast<std::size_t>(kLightDataTexHeight);
 
 /// Packs scene lights into the per-light data texture layout above.
-/// Unused rows and trailing floats are zero-filled.
+/// Spot cone angles are packed as cosines — the deferred shader compares
+/// the texels against a cosine, not radians. Unused rows and trailing
+/// floats are zero-filled.
 /// @return false if the output buffer is null or too small.
 bool pack_light_data(const SceneLightData &lights, float *out,
                      std::size_t outSize) noexcept;

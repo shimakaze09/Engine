@@ -104,7 +104,7 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
     return nullptr;
   }
   if (nsize > osize && (g_memoryUsed + (nsize - osize)) > g_memoryLimit) {
-    return nullptr; // Memory limit exceeded.
+    return nullptr;
   }
   void *newPtr = std::realloc(ptr, nsize);
   if (newPtr != nullptr) {
@@ -144,6 +144,9 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
 
 // --- Entity lifecycle completeness ---
 
+/// Registers the full Lua API on one global engine table; generated
+/// bindings are registered last and override a curated subset of the
+/// manual wrappers.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -160,7 +163,6 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   register_input_bindings(state);
 
-  // Touch/gesture bindings (P1-M2-C3e).
   lua_pushcfunction(state, &lua_engine_on_touch);
   lua_setfield(state, -2, "on_touch");
   lua_pushcfunction(state, &lua_engine_on_gesture);
@@ -181,7 +183,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_get_player_controller);
   lua_setfield(state, -2, "get_player_controller");
 
-  // Game mode state transitions and rules.
   lua_pushcfunction(state, &lua_engine_game_mode_start);
   lua_setfield(state, -2, "game_mode_start");
   lua_pushcfunction(state, &lua_engine_game_mode_pause);
@@ -197,7 +198,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_game_mode_max_players);
   lua_setfield(state, -2, "game_mode_max_players");
 
-  // Persistent game state (survives scene transitions).
   lua_pushcfunction(state, &lua_engine_game_state_set_number);
   lua_setfield(state, -2, "game_state_set_number");
   lua_pushcfunction(state, &lua_engine_game_state_get_number);
@@ -244,13 +244,11 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   register_audio_bindings(state);
 
-  // Collision handlers
   lua_pushcfunction(state, &lua_engine_on_collision_register);
   lua_setfield(state, -2, "on_collision_handler");
   lua_pushcfunction(state, &lua_engine_remove_collision_handler);
   lua_setfield(state, -2, "remove_collision_handler");
 
-  // Timers
   lua_pushcfunction(state, &lua_engine_set_timeout);
   lua_setfield(state, -2, "set_timeout");
   lua_pushcfunction(state, &lua_engine_set_interval);
@@ -258,7 +256,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_cancel_timer);
   lua_setfield(state, -2, "cancel_timer");
 
-  // Coroutines
   lua_pushcfunction(state, &lua_engine_start_coroutine);
   lua_setfield(state, -2, "start_coroutine");
   lua_pushcfunction(state, &lua_engine_wait);
@@ -276,14 +273,11 @@ void register_engine_bindings(lua_State *state) noexcept {
 
   register_entity_pool_bindings(state);
 
-  // Utility module loader — load a Lua file as a shared module (cached).
   lua_pushcfunction(state, &lua_engine_require);
   lua_setfield(state, -2, "require");
 
-  // Generated bindings override a curated subset of manual wrappers.
   register_generated_bindings(state);
 
-  // Hot-reload state preservation.
   lua_pushcfunction(state, &lua_engine_persist);
   lua_setfield(state, -2, "persist");
   lua_pushcfunction(state, &lua_engine_restore);
@@ -383,7 +377,11 @@ void bindable_stop_all_sounds() noexcept {
   }
 }
 
-/// Initializes the owning system for scripting.
+/// Initializes the scripting system. Only safe Lua libraries are opened
+/// (base, coroutine, table, string, math, utf8) — io, os, debug, and
+/// package are excluded so untrusted game scripts cannot touch the file
+/// system or execute system commands — and the sandboxed allocator is
+/// installed when the sandbox is enabled.
 bool initialize_scripting() noexcept {
   if (lua_state() != nullptr) {
     return true;
@@ -400,9 +398,6 @@ bool initialize_scripting() noexcept {
       state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
                                           &refresh_lua_hook, &get_file_mtime});
 
-  // Open only safe libraries. io, os, debug, and package are excluded to
-  // prevent untrusted game scripts from accessing the file system or executing
-  // arbitrary system commands.
   luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
   lua_pop(state, 1);
   luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
@@ -418,8 +413,6 @@ bool initialize_scripting() noexcept {
   register_engine_bindings(state);
   register_cheat_commands();
 
-  // Install sandboxed memory allocator. io/os/debug libraries are already
-  // excluded (only base, coroutine, table, string, math, utf8 are opened).
   if (debug_sandbox_enabled()) {
     lua_setallocf(state, sandbox_alloc, nullptr);
   }
@@ -486,7 +479,7 @@ bool load_script(const char *path) noexcept {
     return false;
   }
 
-  refresh_lua_hook(); // Reset instruction counter for this invocation.
+  refresh_lua_hook();
 
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("load_script");
@@ -653,6 +646,9 @@ bool reload_script_transactionally(const char *path) noexcept {
   return true;
 }
 
+/// File mtime with nanosecond precision where the platform provides it,
+/// so sub-second writes are detected (st_mtime alone has 1-second
+/// granularity on many POSIX filesystems).
 std::int64_t get_file_mtime(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     return 0;
@@ -671,8 +667,6 @@ std::int64_t get_file_mtime(const char *path) noexcept {
   if (stat(path, &st) != 0) {
     return 0;
   }
-  // Use nanosecond-precision mtime when available so sub-second file writes
-  // are detected (st_mtime alone has 1-second granularity on many POSIX FS).
 #if defined(__APPLE__)
   return static_cast<std::int64_t>(st.st_mtimespec.tv_sec) * 1000000000LL +
          static_cast<std::int64_t>(st.st_mtimespec.tv_nsec);

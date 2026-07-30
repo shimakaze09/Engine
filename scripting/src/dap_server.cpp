@@ -208,7 +208,6 @@ bool send_dap_message(const char *json, std::size_t len) noexcept {
   if (headerLen <= 0) {
     return false;
   }
-  // Send header.
   const auto hLen = static_cast<std::size_t>(headerLen);
   std::size_t sent = 0U;
   while (sent < hLen) {
@@ -220,7 +219,6 @@ bool send_dap_message(const char *json, std::size_t len) noexcept {
     }
     sent += static_cast<std::size_t>(n);
   }
-  // Send body.
   sent = 0U;
   while (sent < len) {
     const auto n =
@@ -257,7 +255,6 @@ DapMessageExtractResult try_extract_message(const char **outBody,
   *outConsumed = 0U;
 
   DapServerState &state = dap_server_state();
-  // Look for "Content-Length: <number>\r\n\r\n".
   const char *haystack = state.recvBuffer;
   const char *needle = "Content-Length: ";
   const std::size_t needleLen = 16U;
@@ -274,7 +271,6 @@ DapMessageExtractResult try_extract_message(const char **outBody,
     return DapMessageExtractResult::NeedMore;
   }
 
-  // Find the header/body separator "\r\n\r\n".
   const char *sep = nullptr;
   const std::size_t remaining =
       state.recvUsed - static_cast<std::size_t>(found - state.recvBuffer);
@@ -343,7 +339,7 @@ bool recv_into_buffer() noexcept {
     return false;
   }
   if (state.recvUsed >= kRecvBufferSize) {
-    return false; // Buffer full.
+    return false;
   }
   const auto n = recv(state.clientSocket, state.recvBuffer + state.recvUsed,
                       static_cast<int>(kRecvBufferSize - state.recvUsed), 0);
@@ -379,7 +375,6 @@ void handle_initialize(int requestSeq) noexcept {
   w.end_object();
   send_json_writer(w);
 
-  // Send initialized event.
   core::JsonWriter ev;
   write_event_header(ev, "initialized");
   ev.end_object();
@@ -400,9 +395,10 @@ void handle_configuration_done(int requestSeq) noexcept {
   send_json_writer(w);
 }
 
+// Replaces one source's breakpoints with the incoming list; other
+// sources' breakpoints survive (DAP per-source semantics).
 void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
                             const core::JsonValue &args) noexcept {
-  // Read source path.
   const core::JsonValue *srcObj = parser.get_object_field(args, "source");
   const char *sourcePath = nullptr;
   std::size_t sourcePathLen = 0U;
@@ -413,10 +409,8 @@ void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
     }
   }
 
-  // Read breakpoints array.
   const core::JsonValue *bpArray = parser.get_object_field(args, "breakpoints");
 
-  // Build a temporary source path (null-terminated).
   char srcPath[256]{};
   if (sourcePath != nullptr && sourcePathLen > 0U) {
     const std::size_t copyLen = sourcePathLen < sizeof(srcPath) - 1U
@@ -425,11 +419,8 @@ void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
     std::memcpy(srcPath, sourcePath, copyLen);
   }
 
-  // Replace this source's breakpoints with the incoming list; other
-  // sources' breakpoints must survive (DAP per-source semantics).
   debugger_clear_breakpoints_for_source(srcPath);
 
-  // Build response with verified breakpoints.
   core::JsonWriter w;
   write_response_header(w, requestSeq, "setBreakpoints", true);
   w.write_key("body");
@@ -518,16 +509,16 @@ void handle_stack_trace(int requestSeq, lua_State *L) noexcept {
   send_json_writer(w);
 }
 
+// Three scopes are exposed per frame — Locals, Upvalues, Globals — and
+// variablesReference encodes (frameId * 3 + scopeType + 1) so
+// handle_variables can decode both from one integer.
 void handle_scopes(int requestSeq, int frameId) noexcept {
-  // We expose 3 scopes: Locals, Upvalues, Globals.
-  // The variablesReference encodes (frameId * 3 + scopeType).
   core::JsonWriter w;
   write_response_header(w, requestSeq, "scopes", true);
   w.write_key("body");
   w.begin_object();
   w.begin_array("scopes");
 
-  // Locals
   w.begin_object();
   w.write_string("name", "Locals");
   w.write_uint("variablesReference",
@@ -535,7 +526,6 @@ void handle_scopes(int requestSeq, int frameId) noexcept {
   w.write_bool("expensive", false);
   w.end_object();
 
-  // Upvalues
   w.begin_object();
   w.write_string("name", "Upvalues");
   w.write_uint("variablesReference",
@@ -543,7 +533,6 @@ void handle_scopes(int requestSeq, int frameId) noexcept {
   w.write_bool("expensive", false);
   w.end_object();
 
-  // Globals
   w.begin_object();
   w.write_string("name", "Globals");
   w.write_uint("variablesReference",
@@ -596,10 +585,11 @@ void format_lua_value(lua_State *L, int index, char *buf,
   }
 }
 
+// Decodes handle_scopes' variablesReference back into frame and scope
+// (0 = locals, 1 = upvalues, 2 = globals) and lists that scope.
 void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
-  // Decode: frameId = (varRef - 1) / 3, scopeType = (varRef - 1) % 3
   const int frameId = (varRef - 1) / 3;
-  const int scopeType = (varRef - 1) % 3; // 0=locals, 1=upvalues, 2=globals
+  const int scopeType = (varRef - 1) % 3;
 
   core::JsonWriter w;
   write_response_header(w, requestSeq, "variables", true);
@@ -610,13 +600,11 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
   if (L != nullptr) {
     lua_Debug ar{};
     if (scopeType == 0 && lua_getstack(L, frameId, &ar) != 0) {
-      // Locals
       for (int n = 1;; ++n) {
         const char *name = lua_getlocal(L, &ar, n);
         if (name == nullptr) {
           break;
         }
-        // Skip internal variables (start with '(').
         if (name[0] == '(') {
           lua_pop(L, 1);
           continue;
@@ -632,7 +620,6 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
         lua_pop(L, 1);
       }
     } else if (scopeType == 1 && lua_getstack(L, frameId, &ar) != 0) {
-      // Upvalues
       lua_getinfo(L, "f", &ar);
       if (lua_isfunction(L, -1)) {
         for (int n = 1;; ++n) {
@@ -653,8 +640,7 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
       }
       lua_pop(L, 1); // pop the function
     } else if (scopeType == 2) {
-      // Globals — list a limited set of non-function globals.
-      lua_pushglobaltable(L);
+          lua_pushglobaltable(L);
       lua_pushnil(L);
       int count = 0;
       while (lua_next(L, -2) != 0) {
@@ -664,8 +650,7 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
         }
         if (lua_type(L, -2) == LUA_TSTRING) {
           const char *name = lua_tostring(L, -2);
-          // Skip internal/standard library names.
-          if (name != nullptr && name[0] != '_') {
+            if (name != nullptr && name[0] != '_') {
             char valueBuf[256]{};
             format_lua_value(L, -1, valueBuf, sizeof(valueBuf));
             w.begin_object();
@@ -710,8 +695,7 @@ void handle_evaluate(int requestSeq, lua_State *L,
   const char *typeName = "nil";
 
   if (L != nullptr && expr[0] != '\0') {
-    // Wrap in "return (...)" to evaluate as expression.
-    char chunk[600]{};
+      char chunk[600]{};
     std::snprintf(chunk, sizeof(chunk), "return (%s)", expr);
 
     // Disable hooks during eval to avoid re-entry.
@@ -774,7 +758,6 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
     return DapStepMode::Continue;
   }
 
-  // Read "command" and "seq".
   const core::JsonValue *cmdVal = parser.get_object_field(*root, "command");
   std::unique_ptr<char[]> commandStorage{};
   const char *cmdStr = nullptr;
@@ -798,14 +781,12 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
   }
   const int requestSeq = static_cast<int>(seq);
 
-  // Read "arguments".
   core::JsonValue argsStorage{};
   const core::JsonValue *argsVal = parser.get_object_field(*root, "arguments");
   if (argsVal != nullptr) {
     argsStorage = *argsVal;
   }
 
-  // Compare command strings.
   auto cmd_eq = [&](const char *expected) -> bool {
     return std::strcmp(cmdStr, expected) == 0;
   };
@@ -877,11 +858,10 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
     return DapStepMode::StepOut;
   } else if (cmd_eq("disconnect")) {
     handle_disconnect(requestSeq);
-    *outResume = true; // Resume execution, client gone.
+    *outResume = true;
     return DapStepMode::Continue;
   } else {
-    // Unknown command — send error response.
-    core::JsonWriter w;
+      core::JsonWriter w;
     write_response_header(w, requestSeq, cmdStr, false);
     w.write_string("message", "unsupported command");
     w.end_object();
@@ -898,7 +878,7 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
 bool dap_start(std::uint16_t port) noexcept {
   DapServerState &state = dap_server_state();
   if (state.listenSocket != kBadSocket) {
-    return true; // Already running.
+    return true;
   }
   reset_dap_server_state(state);
   if (!platform_init_sockets()) {
@@ -916,7 +896,6 @@ bool dap_start(std::uint16_t port) noexcept {
     return false;
   }
 
-  // Allow address reuse.
   int optVal = 1;
   setsockopt(state.listenSocket, SOL_SOCKET, SO_REUSEADDR,
              reinterpret_cast<const char *>(&optVal),
@@ -977,7 +956,6 @@ void dap_poll() noexcept {
   if (state.listenSocket == kBadSocket) {
     return;
   }
-  // Accept new client if none connected.
   if (state.clientSocket == kBadSocket) {
     state.clientSocket = accept(state.listenSocket, nullptr, nullptr);
     if (state.clientSocket != kBadSocket) {
@@ -986,7 +964,6 @@ void dap_poll() noexcept {
       // Client socket stays blocking for the message processing loop.
     }
   }
-  // Try to process any already-buffered or incoming messages (non-blocking).
   if (state.clientSocket != kBadSocket) {
     platform_set_nonblocking(state.clientSocket);
     recv_into_buffer();
@@ -1012,7 +989,6 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
     return DapStepMode::Continue;
   }
 
-  // Send "stopped" event.
   core::JsonWriter ev;
   write_event_header(ev, "stopped");
   ev.write_key("body");
@@ -1024,13 +1000,11 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
   ev.end_object();
   send_json_writer(ev);
 
-  // Enter blocking message loop — process DAP requests until continue/step.
   platform_set_blocking(state.clientSocket);
 
   DapStepMode mode = DapStepMode::Continue;
   for (;;) {
-    // Try to extract from buffer first.
-    const char *body = nullptr;
+      const char *body = nullptr;
     std::size_t bodyLen = 0U;
     std::size_t consumed = 0U;
     const DapMessageExtractResult extractResult =
@@ -1050,9 +1024,7 @@ DapStepMode dap_on_stopped(lua_State *L, const char * /*source*/, int /*line*/,
       break;
     }
 
-    // Need more data.
     if (!recv_into_buffer()) {
-      // Connection lost — resume execution.
       close_dap_client(state);
       break;
     }

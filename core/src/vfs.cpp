@@ -47,7 +47,6 @@ void normalize_path(char *path, std::size_t length) noexcept {
       path[i] = '/';
     }
   }
-  // Strip trailing slash.
   if ((length > 0U) && (path[length - 1U] == '/')) {
     path[length - 1U] = '\0';
   }
@@ -97,14 +96,16 @@ bool is_safe_virtual_remainder(const char *remainder) noexcept {
 }
 
 // Resolve virtualPath to an OS path using the longest-prefix match.
-// Returns the number of characters written (excluding null) or 0 on failure.
+// Resolves a virtual path against the longest matching mount prefix (a
+// prefix matches only at a '/' or end-of-string boundary) into
+// mount.osPath + '/' + remainder. Returns the number of characters
+// written (excluding null) or 0 on failure.
 std::size_t resolve(const char *virtualPath, char *outBuffer,
                     std::size_t capacity) noexcept {
   if ((virtualPath == nullptr) || (outBuffer == nullptr) || (capacity == 0U)) {
     return 0U;
   }
 
-  // Normalize virtualPath into a local copy.
   char normalizedVirtual[kMaxResolvedPathLength] = {};
   const std::size_t vpLen = std::strlen(virtualPath);
   if (vpLen >= kMaxResolvedPathLength) {
@@ -113,7 +114,6 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
   std::memcpy(normalizedVirtual, virtualPath, vpLen + 1U);
   normalize_path(normalizedVirtual, vpLen);
 
-  // Find longest-prefix match.
   const MountEntry *bestMount = nullptr;
   std::size_t bestPrefixLen = 0U;
 
@@ -124,12 +124,10 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
     if (entry.prefixLength > vpLen) {
       continue;
     }
-    // Prefix must match exactly up to its length.
     if (std::strncmp(normalizedVirtual, entry.prefix, entry.prefixLength) !=
         0) {
       continue;
     }
-    // After the prefix, the next char must be '/' or end of string.
     if ((entry.prefixLength < vpLen) &&
         (normalizedVirtual[entry.prefixLength] != '/')) {
       continue;
@@ -144,9 +142,7 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
     return 0U;
   }
 
-  // Build OS path: mount.osPath + "/" + remainder.
   const char *remainder = normalizedVirtual + bestPrefixLen;
-  // Skip the leading '/' in remainder.
   if ((remainder[0] == '/') && (remainder[1] != '\0')) {
     ++remainder;
   } else if (remainder[0] == '/') {
@@ -212,7 +208,6 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
     return false;
   }
 
-  // Check for existing mount with same prefix; update if found.
   for (auto &entry : g_mounts) {
     if (entry.active && (std::strcmp(entry.prefix, virtualPrefix) == 0)) {
       std::memcpy(entry.osPath, osDirectoryPath, osLen + 1U);
@@ -223,7 +218,6 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
     }
   }
 
-  // Find free slot.
   for (auto &entry : g_mounts) {
     if (!entry.active) {
       std::memcpy(entry.prefix, virtualPrefix, prefixLen + 1U);

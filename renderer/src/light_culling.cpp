@@ -34,21 +34,16 @@ void mat4_mul(const float *a, const float *b, float *out) noexcept {
   }
 }
 
-// Extract frustum planes from a view-projection matrix (column-major).
-// Planes are in world space, pointing inward, normalized.
+// Extract frustum planes from a view-projection matrix (column-major)
+// via the Gribb-Hartmann row combinations, in order left, right, bottom,
+// top, near, far. Planes are in world space, pointing inward, normalized.
 void extract_frustum_planes(const float *vp, Frustum &f) noexcept {
-  // Left: row3 + row0
   f.planes[0] = {vp[3] + vp[0], vp[7] + vp[4], vp[11] + vp[8], vp[15] + vp[12]};
-  // Right: row3 - row0
   f.planes[1] = {vp[3] - vp[0], vp[7] - vp[4], vp[11] - vp[8], vp[15] - vp[12]};
-  // Bottom: row3 + row1
   f.planes[2] = {vp[3] + vp[1], vp[7] + vp[5], vp[11] + vp[9], vp[15] + vp[13]};
-  // Top: row3 - row1
   f.planes[3] = {vp[3] - vp[1], vp[7] - vp[5], vp[11] - vp[9], vp[15] - vp[13]};
-  // Near: row3 + row2
   f.planes[4] = {vp[3] + vp[2], vp[7] + vp[6], vp[11] + vp[10],
                  vp[15] + vp[14]};
-  // Far: row3 - row2
   f.planes[5] = {vp[3] - vp[2], vp[7] - vp[6], vp[11] - vp[10],
                  vp[15] - vp[14]};
 
@@ -77,11 +72,11 @@ bool sphere_in_frustum(const Frustum &f, float cx, float cy, float cz,
 }
 
 // Build a tile frustum from pixel bounds [x0,x1) x [y0,y1) at screen size
-// (w,h) given the view and projection matrices.
+// (w,h): a clip-space scale/offset matrix maps the tile's NDC sub-range
+// back to the full [-1,1] range and left-multiplies the projection.
 void build_tile_vp(int x0, int y0, int x1, int y1, int screenW, int screenH,
                    const float *viewMatrix, const float *projMatrix,
                    float *tileVP) noexcept {
-  // Compute NDC bounds.
   const float ndcLeft =
       2.0F * static_cast<float>(x0) / static_cast<float>(screenW) - 1.0F;
   const float ndcRight =
@@ -91,14 +86,11 @@ void build_tile_vp(int x0, int y0, int x1, int y1, int screenW, int screenH,
   const float ndcTop =
       2.0F * static_cast<float>(y1) / static_cast<float>(screenH) - 1.0F;
 
-  // Scale + translate to map full NDC [-1,1] to tile's NDC sub-range.
   const float scaleX = 2.0F / (ndcRight - ndcLeft);
   const float scaleY = 2.0F / (ndcTop - ndcBottom);
   const float offsetX = -(ndcRight + ndcLeft) / (ndcRight - ndcLeft);
   const float offsetY = -(ndcTop + ndcBottom) / (ndcTop - ndcBottom);
 
-  // Tile projection = tileClip * proj
-  // tileClip scales and offsets x,y in clip space.
   float tileClip[16];
   std::memset(tileClip, 0, sizeof(tileClip));
   tileClip[0] = scaleX;
@@ -173,7 +165,6 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
       Frustum tileFrustum{};
       extract_frustum_planes(tileVP, tileFrustum);
 
-      // Cull point lights.
       int tilePointCount = 0;
       for (int li = 0;
            li < pointCount && tilePointCount < kMaxPointLightsPerTile; ++li) {
@@ -186,7 +177,6 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
       }
       tileRow[0] = static_cast<float>(tilePointCount);
 
-      // Cull spot lights (stored after point section).
       const int spotBase = 1 + kMaxPointLightsPerTile;
       int tileSpotCount = 0;
       for (int li = 0; li < spotCount && tileSpotCount < kMaxSpotLightsPerTile;
@@ -244,8 +234,6 @@ bool pack_light_data(const SceneLightData &lights, float *out,
     row[8] = sl.color.z;
     row[9] = sl.intensity;
     row[10] = sl.radius;
-    // The deferred shader compares these texels against a cosine — pack
-    // cosines, not the stored radian angles.
     row[11] = std::cos(sl.innerConeAngle);
     row[12] = std::cos(sl.outerConeAngle);
   }

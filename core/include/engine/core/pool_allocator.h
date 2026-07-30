@@ -20,8 +20,8 @@ public:
   static_assert(std::is_nothrow_destructible_v<T>,
                 "PoolAllocator<T> requires nothrow destruction");
 
+  /// Builds the initial free list: each slot points to the next free slot.
   PoolAllocator() noexcept {
-    // Build free list: each slot points to the next free slot.
     for (std::size_t i = 0U; i < Capacity - 1U; ++i) {
       m_storage[i].next = &m_storage[i + 1U];
     }

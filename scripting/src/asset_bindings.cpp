@@ -101,7 +101,7 @@ int lua_engine_load_asset_async(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  std::uint8_t priority = 1U; // Normal
+  std::uint8_t priority = 1U;
   if (lua_isinteger(state, 2)) {
     const lua_Integer p = lua_tointeger(state, 2);
     if ((p >= 0) && (p <= 3)) {

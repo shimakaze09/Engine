@@ -102,9 +102,8 @@ void safe_copy_path(char *dst, std::size_t dstSize, const char *src) noexcept {
   core::copy_string(dst, dstSize, src);
 }
 
-/// Finds the matching object or resource for free texture slot.
+/// Finds a free texture slot; slot 0 is reserved as the invalid handle.
 std::size_t find_free_texture_slot() noexcept {
-  // Slot 0 is reserved as the invalid handle.
   for (std::size_t i = 1U; i < kMaxTextureSlots; ++i) {
     if (!g_texState.slots[i].occupied) {
       return i;
@@ -344,7 +343,6 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     return kInvalidTextureHandle;
   }
 
-  // Read file via VFS.
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
   if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
@@ -377,8 +375,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   }
 
   if (stbi_is_hdr_from_memory(fileBytes, stbFileSize) != 0) {
-    // HDR path.
-    float *pixels = stbi_loadf_from_memory(
+      float *pixels = stbi_loadf_from_memory(
         fileBytes, stbFileSize, &width, &height, &channels, 0);
     core::vfs_free(fileData);
 
@@ -395,8 +392,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     stbi_image_free(pixels);
     isHdr = true;
   } else {
-    // LDR path.
-    unsigned char *pixels = stbi_load_from_memory(
+      unsigned char *pixels = stbi_load_from_memory(
         fileBytes, stbFileSize, &width, &height, &channels, 0);
     core::vfs_free(fileData);
 

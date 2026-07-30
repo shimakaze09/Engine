@@ -12,7 +12,9 @@
 
 namespace engine::runtime {
 
-/// Advances this system for the current frame or tick for spring arm cameras.
+/// Advances spring-arm cameras: the camera trails the entity along its
+/// local +Z with the arm length smoothed toward the target (collision
+/// shortening is not implemented yet).
 void update_spring_arm_cameras(World &world, float dt) noexcept {
   CameraManager &camMgr = world.camera_manager();
 
@@ -23,18 +25,14 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
       return;
     }
 
-    // Pivot = entity position + local offset.
-    const math::Vec3 pivot(transform.position.x + arm.offset.x,
+      const math::Vec3 pivot(transform.position.x + arm.offset.x,
                            transform.position.y + arm.offset.y,
                            transform.position.z + arm.offset.z);
 
-    // Camera sits behind the entity along its local +Z axis.
-    const math::Vec3 localBack(0.0F, 0.0F, 1.0F);
+      const math::Vec3 localBack(0.0F, 0.0F, 1.0F);
     const math::Vec3 armDir =
         math::normalize(math::rotate_vector(localBack, transform.rotation));
 
-    // Desired arm length — could be shortened by collision in a full impl.
-    // For now, smoothly interpolate currentLength toward armLength.
     auto *armPtr = world.get_spring_arm_ptr(entity);
     if (armPtr == nullptr) {
       return;
