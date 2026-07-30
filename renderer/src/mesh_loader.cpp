@@ -19,6 +19,12 @@ namespace {
 
 constexpr std::size_t kVertexStrideV1Floats = 6U;
 constexpr std::size_t kVertexStrideV2Floats = 8U;
+constexpr std::size_t kVertexStrideV3Floats = 16U;
+
+/// Vertex attribute locations for skinned joint indices and weights;
+/// 3-7 are reserved for the per-instance model matrix and foliage data.
+constexpr std::uint32_t kSkinJointsAttrib = 8U;
+constexpr std::uint32_t kSkinWeightsAttrib = 9U;
 constexpr std::uint32_t kMaxMeshVertexCount = 1000000U;
 constexpr std::uint32_t kMaxMeshIndexCount = 3000000U;
 
@@ -187,13 +193,15 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
 
   const bool isV1 = (header.version == core::kMeshAssetVersion);
   const bool isV2 = (header.version == core::kMeshAssetVersion2);
-  if (!isV1 && !isV2) {
+  const bool isV3 = (header.version == core::kMeshAssetVersion3);
+  if (!isV1 && !isV2 && !isV3) {
     std::fclose(file);
     return false;
   }
 
   const std::size_t strideFloats =
-      isV2 ? kVertexStrideV2Floats : kVertexStrideV1Floats;
+      isV3 ? kVertexStrideV3Floats
+           : (isV2 ? kVertexStrideV2Floats : kVertexStrideV1Floats);
 
   if ((header.vertexCount == 0U) ||
       (header.vertexCount > kMaxMeshVertexCount) ||
@@ -290,7 +298,8 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
   outData->indexCount = header.indexCount;
   outData->vertexFloatCount = vertexFloatCount;
   outData->strideFloats = strideFloats;
-  outData->hasUVs = isV2;
+  outData->hasUVs = isV2 || isV3;
+  outData->hasSkin = isV3;
   outData->vertices = std::move(vertices);
   outData->indices = std::move(indices);
   if (outSizeBytes != nullptr) {
@@ -347,6 +356,7 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
 
   GpuMesh mesh{};
   mesh.hasUVs = meshData.hasUVs;
+  mesh.hasSkin = meshData.hasSkin;
   mesh.vertexArray = dev->create_vertex_array();
   if (mesh.vertexArray == 0U) {
     return fail_mesh_upload(dev, &mesh, outMesh);
@@ -373,6 +383,17 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
     dev->enable_vertex_attrib(2U);
     dev->vertex_attrib_float(
         2U, 2, stride, reinterpret_cast<const void *>(sizeof(float) * 6U));
+  }
+
+  if (meshData.hasSkin) {
+    dev->enable_vertex_attrib(kSkinJointsAttrib);
+    dev->vertex_attrib_float(
+        kSkinJointsAttrib, 4, stride,
+        reinterpret_cast<const void *>(sizeof(float) * 8U));
+    dev->enable_vertex_attrib(kSkinWeightsAttrib);
+    dev->vertex_attrib_float(
+        kSkinWeightsAttrib, 4, stride,
+        reinterpret_cast<const void *>(sizeof(float) * 12U));
   }
 
   if (meshData.indexCount > 0U) {

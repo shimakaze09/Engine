@@ -16,12 +16,19 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 
+std::size_t primitive_stride_floats(const PrimitiveData &data) {
+  if (data.hasSkin) {
+    return 16U;
+  }
+  return data.hasUVs ? 8U : 6U;
+}
+
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
   if ((data == nullptr) || (scaleFactor == 1.0F)) {
     return;
   }
 
-  const std::size_t strideFloats = data->hasUVs ? 8U : 6U;
+  const std::size_t strideFloats = primitive_stride_floats(*data);
   const std::size_t vertexCount =
       data->interleavedVertices.size() / strideFloats;
   for (std::size_t i = 0U; i < vertexCount; ++i) {
@@ -50,7 +57,8 @@ const cgltf_accessor *find_attribute_accessor(const cgltf_primitive *primitive,
 }
 
 bool extract_primitive(const cgltf_primitive *primitive,
-                       PrimitiveData *outData) {
+                       PrimitiveData *outData,
+                       const std::vector<std::uint32_t> *jointRemap) {
   if ((primitive == nullptr) || (outData == nullptr)) {
     return false;
   }
@@ -83,7 +91,19 @@ bool extract_primitive(const cgltf_primitive *primitive,
                       (texcoords->type == cgltf_type_vec2) &&
                       (texcoords->count == positions->count);
   outData->hasUVs = hasUVs;
-  const std::size_t strideFloats = hasUVs ? 8U : 6U;
+
+  const cgltf_accessor *joints =
+      find_attribute_accessor(primitive, cgltf_attribute_type_joints);
+  const cgltf_accessor *weights =
+      find_attribute_accessor(primitive, cgltf_attribute_type_weights);
+  const bool hasSkin = (jointRemap != nullptr) && (joints != nullptr) &&
+                       (weights != nullptr) &&
+                       (joints->type == cgltf_type_vec4) &&
+                       (weights->type == cgltf_type_vec4) &&
+                       (joints->count == positions->count) &&
+                       (weights->count == positions->count);
+  outData->hasSkin = hasSkin;
+  const std::size_t strideFloats = primitive_stride_floats(*outData);
 
   const std::size_t vertexCount = static_cast<std::size_t>(positions->count);
   outData->interleavedVertices.assign(vertexCount * strideFloats, 0.0F);
@@ -91,6 +111,8 @@ bool extract_primitive(const cgltf_primitive *primitive,
   std::array<float, 3U> position{};
   std::array<float, 3U> normal{};
   std::array<float, 2U> uv{};
+  std::array<cgltf_uint, 4U> jointIndices{};
+  std::array<float, 4U> jointWeights{};
 
   for (std::size_t i = 0U; i < vertexCount; ++i) {
     if (!cgltf_accessor_read_float(positions, static_cast<cgltf_size>(i),
@@ -117,6 +139,32 @@ bool extract_primitive(const cgltf_primitive *primitive,
       }
       outData->interleavedVertices[base + 6U] = uv[0U];
       outData->interleavedVertices[base + 7U] = uv[1U];
+    }
+
+    if (hasSkin) {
+      if (!cgltf_accessor_read_uint(joints, static_cast<cgltf_size>(i),
+                                    jointIndices.data(),
+                                    jointIndices.size()) ||
+          !cgltf_accessor_read_float(weights, static_cast<cgltf_size>(i),
+                                     jointWeights.data(),
+                                     jointWeights.size())) {
+        std::fprintf(stderr, "error: failed to decode skin attributes\n");
+        return false;
+      }
+      const float weightSum = jointWeights[0U] + jointWeights[1U] +
+                              jointWeights[2U] + jointWeights[3U];
+      for (std::size_t c = 0U; c < 4U; ++c) {
+        const std::uint32_t joint =
+            static_cast<std::uint32_t>(jointIndices[c]);
+        if (joint >= jointRemap->size()) {
+          std::fprintf(stderr, "error: vertex joint index out of range\n");
+          return false;
+        }
+        outData->interleavedVertices[base + 8U + c] =
+            static_cast<float>((*jointRemap)[joint]);
+        outData->interleavedVertices[base + 12U + c] =
+            (weightSum > 0.0F) ? (jointWeights[c] / weightSum) : 0.0F;
+      }
     }
   }
 
@@ -147,7 +195,7 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
     return false;
   }
 
-  const std::size_t strideFloats = data.hasUVs ? 8U : 6U;
+  const std::size_t strideFloats = primitive_stride_floats(data);
   if ((data.interleavedVertices.size() % strideFloats) != 0U) {
     std::fprintf(stderr, "error: interleaved vertex buffer is invalid\n");
     return false;
@@ -176,8 +224,10 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
 
   engine::core::MeshAssetHeader header{};
   header.magic = engine::core::kMeshAssetMagic;
-  header.version = data.hasUVs ? engine::core::kMeshAssetVersion2
-                               : engine::core::kMeshAssetVersion;
+  header.version = data.hasSkin
+                       ? engine::core::kMeshAssetVersion3
+                       : (data.hasUVs ? engine::core::kMeshAssetVersion2
+                                      : engine::core::kMeshAssetVersion);
   header.vertexCount = static_cast<std::uint32_t>(vertexCount);
   header.indexCount = static_cast<std::uint32_t>(data.indices.size());
 
@@ -230,7 +280,7 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   }
 
   const std::size_t vertexCount =
-      data.interleavedVertices.size() / (data.hasUVs ? 8U : 6U);
+      data.interleavedVertices.size() / primitive_stride_floats(data);
   const std::size_t indexCount = data.indices.size();
 
   // Compute output file size.
@@ -263,8 +313,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   writer.write_string("output", outputPath);
   writer.write_string("assetFormat", "engine.mesh");
   writer.write_uint("assetFormatVersion",
-                    data.hasUVs ? engine::core::kMeshAssetVersion2
-                                : engine::core::kMeshAssetVersion);
+                    data.hasSkin
+                        ? engine::core::kMeshAssetVersion3
+                        : (data.hasUVs ? engine::core::kMeshAssetVersion2
+                                       : engine::core::kMeshAssetVersion));
   writer.write_string("sourceContentHash", sourceHashText);
   writer.write_uint64("fileSize", outputFileSize);
   writer.write_uint64("vertexCount", static_cast<std::uint64_t>(vertexCount));
@@ -308,7 +360,7 @@ bool cook_and_write_convex_hull(const char *outputPath,
     return false;
   }
 
-  const std::size_t strideFloats = data.hasUVs ? 8U : 6U;
+  const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
       data.interleavedVertices.size() / strideFloats;
   if (vertexCount < 4U) {

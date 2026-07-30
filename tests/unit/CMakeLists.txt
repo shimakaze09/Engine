@@ -600,6 +600,26 @@ if(ENGINE_BUILD_TOOLS)
         PRIVATE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
     )
+
+    engine_add_test_executable(engine_unit_skinned_mesh_cook
+        SOURCES
+        skinned_mesh_cook_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
+        PRIVATE_DEPS
+        engine_core
+        engine_math
+        engine_physics
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+    )
+
+    if(WIN32)
+        target_compile_definitions(engine_unit_skinned_mesh_cook PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
 endif()
 
 # ---- P1-M12-A: Platform Paths ----

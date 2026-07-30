@@ -94,9 +94,11 @@ std::string cooked_output_base(const char *outputPath) {
 }
 
 /// Cooks skin 0 and every animation into "<base>.skel" and
-/// "<base>.<clip>.anim" beside the mesh output; returns 0 on success or
-/// the packer exit code (14 skeleton, 15 animation).
-int cook_skeletal_assets(const cgltf_data *data, const char *outputPath) {
+/// "<base>.<clip>.anim" beside the mesh output, filling outJointRemap for
+/// skinned vertex extraction; returns 0 on success or the packer exit
+/// code (14 skeleton, 15 animation).
+int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
+                         std::vector<std::uint32_t> *outJointRemap) {
   engine::tools::Skeleton skeleton{};
   engine::tools::SkeletonImportResult skeletonResult =
       engine::tools::SkeletonImportResult::Ok;
@@ -107,7 +109,7 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath) {
     return 14;
   }
 
-  std::vector<std::uint32_t> jointRemap{};
+  std::vector<std::uint32_t> &jointRemap = *outJointRemap;
   if (!engine::tools::reorder_skeleton_parent_first(&skeleton, &jointRemap)) {
     std::fprintf(stderr, "error: skeleton parent links form a cycle\n");
     return 14;
@@ -152,51 +154,6 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath) {
 }
 
 } // namespace
-
-bool file_exists(const char *path) {
-  if (path == nullptr) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  std::fclose(file);
-  return true;
-}
-
-/// Writes a complete text buffer to a file.
-bool write_text_file(const char *path, const char *text, std::size_t textSize) {
-  if ((path == nullptr) || (text == nullptr)) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  const bool ok = (std::fwrite(text, 1U, textSize, file) == textSize);
-  std::fclose(file);
-  return ok;
-}
-
 
 bool ensure_directory_exists(const char *dirPath) {
   if (dirPath == nullptr) {
@@ -382,8 +339,10 @@ int main(int argc, char **argv) {
     return 4;
   }
 
+  std::vector<std::uint32_t> jointRemap{};
   if (data->skins_count > 0U) {
-    const int skeletalExitCode = cook_skeletal_assets(data, outputPath);
+    const int skeletalExitCode =
+        cook_skeletal_assets(data, outputPath, &jointRemap);
     if (skeletalExitCode != 0) {
       cgltf_free(data);
       return skeletalExitCode;
@@ -406,7 +365,8 @@ int main(int argc, char **argv) {
 
   const cgltf_primitive *primitive = &selectedMesh.primitives[primIdx];
   PrimitiveData primitiveData{};
-  if (!extract_primitive(primitive, &primitiveData)) {
+  if (!extract_primitive(primitive, &primitiveData,
+                         jointRemap.empty() ? nullptr : &jointRemap)) {
     cgltf_free(data);
     return 5;
   }
@@ -510,10 +470,11 @@ int main(int argc, char **argv) {
   }
 
   std::printf(
-      "packed mesh: vertices=%zu indices=%zu uvs=%s -> %s (+ .meta.json)\n",
+      "packed mesh: vertices=%zu indices=%zu uvs=%s skin=%s -> %s "
+      "(+ .meta.json)\n",
       primitiveData.interleavedVertices.size() /
-          (primitiveData.hasUVs ? 8U : 6U),
+          primitive_stride_floats(primitiveData),
       primitiveData.indices.size(), primitiveData.hasUVs ? "yes" : "no",
-      outputPath);
+      primitiveData.hasSkin ? "yes" : "no", outputPath);
   return 0;
 }
