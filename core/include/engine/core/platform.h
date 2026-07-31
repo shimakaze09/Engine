@@ -34,6 +34,9 @@ void swap_render_buffers() noexcept;
 void *get_gl_proc_address(const char *name) noexcept;
 /// Drawable size in pixels (may differ from window size on HiDPI).
 void render_drawable_size(int *outWidth, int *outHeight) noexcept;
+/// Environment variable value, or nullptr when unset or empty (the
+/// Windows path avoids the CRT getenv deprecation).
+const char *non_empty_env(const char *name) noexcept;
 /// Underlying SDL_Window* (opaque; platform/editor glue only).
 void *get_sdl_window() noexcept;
 /// Underlying SDL_GLContext (opaque; platform/editor glue only).

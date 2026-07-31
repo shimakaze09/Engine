@@ -51,27 +51,6 @@ bool validate_path_output(char *outBuffer,
   return true;
 }
 
-const char *non_empty_env(const char *name) noexcept {
-#if defined(_WIN32)
-  static thread_local char value[kPlatformPathMax] = {};
-  if ((name == nullptr) || (name[0] == '\0')) {
-    return nullptr;
-  }
-  const DWORD length =
-      GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
-  if ((length == 0U) || (length >= sizeof(value))) {
-    value[0] = '\0';
-    return nullptr;
-  }
-  return value;
-#else
-  const char *value = std::getenv(name);
-  if ((value == nullptr) || (value[0] == '\0')) {
-    return nullptr;
-  }
-  return value;
-#endif
-}
 
 /// Clamps and fills settings into a safe runtime range for directory path.
 void normalize_directory_path(char *path) noexcept {
@@ -266,6 +245,28 @@ bool initialize_platform_impl(int width, int height, const char *title,
 }
 
 } // namespace
+
+const char *non_empty_env(const char *name) noexcept {
+#if defined(_WIN32)
+  static thread_local char value[kPlatformPathMax] = {};
+  if ((name == nullptr) || (name[0] == '\0')) {
+    return nullptr;
+  }
+  const DWORD length =
+      GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
+  if ((length == 0U) || (length >= sizeof(value))) {
+    value[0] = '\0';
+    return nullptr;
+  }
+  return value;
+#else
+  const char *value = std::getenv(name);
+  if ((value == nullptr) || (value[0] == '\0')) {
+    return nullptr;
+  }
+  return value;
+#endif
+}
 
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept {

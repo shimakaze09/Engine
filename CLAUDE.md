@@ -279,12 +279,17 @@ Acceptance demo: Island Hopper is built *in the editor* from the bundled
 kit, played start-to-finish with sound, and feels smooth (no visible
 stutter) at 60 Hz sim.
 
-- **Animation (from P1-M7, cut down)**: glTF skinned character import
-  (packer already imports skins/clips), clip playback + crossfade
-  blending, GPU skinning (bone palette UBO, skinned G-buffer/forward
-  variants), a minimal JSON state machine (idle/walk/jump, Lua-settable
-  params), simple animation events (footsteps). CUT to parking lot: blend
-  spaces, additive/masked blending, montages, root motion, IK.
+- **Animation (from P1-M7, cut down) — LANDED 2026-07-31** (PR #39): glTF
+  skinned character import (cooked .skel/.anim/.mesh v3 formats, joint
+  reorder + vertex remap), clip playback + crossfade blending, GPU
+  skinning (bone palette UBO, skinned G-buffer and shadow-depth variants;
+  the forward-path skinned variant is still pending, so characters render
+  bind-pose in the forward fallback), a minimal JSON state machine
+  (idle/walk/jump controller, Lua `engine.set_anim_param`), animation
+  events (`on_anim_event`, footsteps), and a generated blocky rigged
+  character (`tools/gen_character.py` → `assets/character.*`) in the
+  bootstrap scene. CUT to parking lot: blend spaces, additive/masked
+  blending, montages, root motion, IK.
 - **Audio (from P1-M8, cut down)**: 3D positional playback (attenuation +
   stereo pan, listener follows the active camera), master/music/sfx buses
   with volumes, music file streaming, audio events triggerable from Lua
