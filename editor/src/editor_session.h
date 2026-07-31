@@ -99,6 +99,7 @@ constexpr const char *kSpotLightSectionLabel = "SpotLightComponent";
 constexpr const char *kSpringArmSectionLabel = "SpringArmComponent";
 constexpr const char *kSceneCaptureSectionLabel = "SceneCaptureComponent";
 constexpr const char *kScriptSectionLabel = "ScriptComponent";
+constexpr const char *kAnimationSectionLabel = "AnimationComponent";
 
 /// Returns the process-wide editor session state.
 EditorSession &editor_session() noexcept;

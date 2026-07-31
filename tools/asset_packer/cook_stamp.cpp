@@ -18,6 +18,50 @@ constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 } // namespace
 
+bool file_exists(const char *path) {
+  if (path == nullptr) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+
+  std::fclose(file);
+  return true;
+}
+
+/// Writes a complete text buffer to a file.
+bool write_text_file(const char *path, const char *text, std::size_t textSize) {
+  if ((path == nullptr) || (text == nullptr)) {
+    return false;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+
+  const bool ok = (std::fwrite(text, 1U, textSize, file) == textSize);
+  std::fclose(file);
+  return ok;
+}
+
 void format_hex_u64(std::uint64_t value, char (&out)[17]) noexcept {
   std::snprintf(out, 17U, "%016llx", static_cast<unsigned long long>(value));
 }

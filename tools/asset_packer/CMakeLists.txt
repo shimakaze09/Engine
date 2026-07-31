@@ -8,6 +8,8 @@ engine_add_executable_target(asset_packer
     thumbnail_generate.cpp
     packer_shared.h
     animation_import.cpp
+    anim_cook.cpp
+    anim_cook.h
     animation_import.h
     cgltf_impl.cpp
     dependency_graph.cpp

@@ -20,6 +20,8 @@ inline constexpr const char *kJsonKeySceneCaptureComponent =
     "SceneCaptureComponent";
 inline constexpr const char *kJsonKeyNameComponent = "NameComponent";
 inline constexpr const char *kJsonKeyScriptComponent = "ScriptComponent";
+inline constexpr const char *kJsonKeyAnimationComponent =
+    "AnimationComponent";
 inline constexpr const char *kJsonKeyCameraComponent = "CameraComponent";
 
 } // namespace engine::runtime

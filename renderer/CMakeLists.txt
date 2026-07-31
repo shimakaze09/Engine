@@ -18,6 +18,7 @@ engine_add_module_library(engine_renderer
     src/command_buffer_ibl.cpp
     src/command_buffer_math.cpp
     src/command_buffer_post_resources.cpp
+    src/command_buffer_skinning.cpp
     src/command_buffer_sky.cpp
     src/command_buffer.cpp
     src/command_buffer_init_core.cpp

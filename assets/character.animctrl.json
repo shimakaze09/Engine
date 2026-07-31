@@ -1,0 +1,24 @@
+{
+  "skeleton": "assets/character.skel",
+  "clips": [
+    {"name": "idle", "path": "assets/character.idle.anim"},
+    {"name": "walk", "path": "assets/character.walk.anim"},
+    {"name": "jump", "path": "assets/character.jump.anim"}
+  ],
+  "initial": "idle",
+  "states": [
+    {"name": "idle", "clip": "idle", "loop": true},
+    {"name": "walk", "clip": "walk", "loop": true},
+    {"name": "jump", "clip": "jump", "loop": false}
+  ],
+  "transitions": [
+    {"from": "idle", "to": "walk", "param": "speed", "when": ">", "value": 0.5, "blend": 0.15},
+    {"from": "walk", "to": "idle", "param": "speed", "when": "<", "value": 0.5, "blend": 0.15},
+    {"from": "any", "to": "jump", "param": "jump", "when": ">", "value": 0.5, "blend": 0.05},
+    {"from": "jump", "to": "idle", "param": "jump", "when": "<", "value": 0.5, "blend": 0.1}
+  ],
+  "events": [
+    {"clip": "walk", "time": 0.1, "name": "footstep"},
+    {"clip": "walk", "time": 0.5, "name": "footstep"}
+  ]
+}

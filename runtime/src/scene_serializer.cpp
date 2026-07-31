@@ -2,6 +2,8 @@
 
 #include "engine/runtime/scene_serializer.h"
 
+#include "engine/runtime/animation_system.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -352,9 +354,10 @@ bool read_light_component(const core::JsonParser &parser,
 //    authored before asset ids.
 //  - LightComponent: `type` is an enum that must clamp to a valid LightType
 //    on load rather than round-tripping arbitrary integers.
-//  - FoliagePatchComponent, NameComponent, ScriptComponent: fixed-size
-//    arrays and bounded strings; reflection has no array/string field kinds
-//    (their zero-field descriptors are documented in reflect_types.cpp).
+//  - FoliagePatchComponent, NameComponent, ScriptComponent,
+//    AnimationComponent: fixed-size arrays and bounded strings; reflection
+//    has no array/string field kinds (their zero-field descriptors are
+//    documented in reflect_types.cpp).
 
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
@@ -596,6 +599,22 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    core::JsonValue animationValue{};
+    if (parser.get_object_field(components, kJsonKeyAnimationComponent,
+                                &animationValue)) {
+      AnimationComponent animationComp{};
+      if (!parser.copy_string(animationValue, animationComp.controllerPath,
+                              sizeof(animationComp.controllerPath))) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to parse AnimationComponent path");
+      }
+
+      if (!targetWorld.add_animation_component(entity, animationComp)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load AnimationComponent");
+      }
+    }
+
     core::JsonValue springArmValue{};
     if (parser.get_object_field(components, "SpringArmComponent",
                                 &springArmValue)) {
@@ -830,6 +849,13 @@ bool serialize_scene_to_writer(const World &world,
       writer.write_string(kJsonKeyScriptComponent, script.scriptPath);
     }
 
+    AnimationComponent animation{};
+    if (world.get_animation_component(entity, &animation) &&
+        (animation.controllerPath[0] != '\0')) {
+      writer.write_string(kJsonKeyAnimationComponent,
+                          animation.controllerPath);
+    }
+
     SpringArmComponent springArm{};
     if (world.get_spring_arm(entity, &springArm) &&
         !write_reflected_component(writer, "SpringArmComponent", *springArmDesc,
@@ -881,19 +907,30 @@ bool serialize_scene_to_writer(const World &world,
 } // namespace
 
 /// Resets this object back to its reusable empty state for world.
+/// The destroy list is heap scratch: this is a cold path, and a
+/// thread_local array this size would pin 512 KB of TLS per thread (the
+/// physics scratch owner documents the same rule).
 void reset_world(World &world) noexcept {
   if (world.alive_entity_count() > 0U) {
-    thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
+    using DestroyList = std::array<Entity, World::kMaxEntities>;
+    std::unique_ptr<DestroyList> toDestroy(new (std::nothrow) DestroyList());
+    if (toDestroy == nullptr) {
+      core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                        "reset_world scratch allocation failed");
+      return;
+    }
     std::size_t count = 0U;
-    world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
+    world.for_each_alive(
+        [&](Entity e) noexcept { (*toDestroy)[count++] = e; });
     for (std::size_t i = 0U; i < count; ++i) {
-      static_cast<void>(world.destroy_entity(toDestroy[i]));
+      static_cast<void>(world.destroy_entity((*toDestroy)[i]));
     }
   }
 
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();
+  reset_anim_controllers();
 }
 
 /// Saves the requested resource for scene.
@@ -1095,6 +1132,11 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   }
 
   world = *committedWorld;
+  // The replaced world's components are gone, so their cached animation
+  // controllers are released; the loaded scene's components re-acquire
+  // lazily on the next animation update (controllerSlot is runtime state
+  // and never serialized).
+  reset_anim_controllers();
   return true;
 }
 

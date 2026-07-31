@@ -174,6 +174,12 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.write_string(kJsonKeyScriptComponent, scriptComp.scriptPath);
   }
 
+  AnimationComponent animationComp{};
+  if (world.get_animation_component(entity, &animationComp) &&
+      (animationComp.controllerPath[0] != '\0')) {
+    w.write_string(kJsonKeyAnimationComponent, animationComp.controllerPath);
+  }
+
   w.end_object();
   w.end_object();
 
@@ -532,6 +538,23 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
     if (!world.add_script_component(entity, script)) {
       return failComponent("instantiate_prefab: failed to add ScriptComponent");
+    }
+  }
+
+  core::JsonValue animationValue{};
+  if (parser.get_object_field(componentsVal, kJsonKeyAnimationComponent,
+                              &animationValue)) {
+    AnimationComponent animation{};
+    if ((animationValue.type != core::JsonValue::Type::String) ||
+        !parser.copy_string(animationValue, animation.controllerPath,
+                            sizeof(animation.controllerPath)) ||
+        (animation.controllerPath[0] == '\0')) {
+      return failComponent("instantiate_prefab: invalid AnimationComponent");
+    }
+
+    if (!world.add_animation_component(entity, animation)) {
+      return failComponent(
+          "instantiate_prefab: failed to add AnimationComponent");
     }
   }
 

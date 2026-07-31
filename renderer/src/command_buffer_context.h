@@ -20,6 +20,10 @@ namespace engine::renderer {
 inline constexpr std::size_t kForwardMaxPointLights = 8U;
 inline constexpr std::size_t kForwardMaxSpotLights = 8U;
 
+/// Uniform-buffer binding index shared by every skinned shader variant's
+/// BonePalette block.
+inline constexpr std::uint32_t kBonePaletteUboBinding = 0U;
+
 /// Stores per-instance attributes uploaded for static mesh instancing.
 struct InstanceAttributes final {
   math::Mat4 model = math::Mat4();
@@ -416,6 +420,34 @@ struct BackendState final {
 
   // Scene capture render targets (slot i backs capture request i).
   std::array<SceneCaptureTarget, kMaxSceneCaptures> sceneCaptureTargets{};
+
+  // GPU skinning state: skinned G-buffer and shadow-depth program
+  // variants plus the shared bone-palette uniform buffer they sample.
+  // lastUploadedBonePalette dedupes uploads within one flush (palette
+  // contents are per-frame, so flush start resets it to invalid).
+  bool skinningAvailable = false;
+  std::uint32_t bonePaletteUbo = 0U;
+  std::uint32_t lastUploadedBonePalette = 0xFFFFFFFFU;
+
+  ShaderProgramHandle gbufferSkinnedShaderHandle{};
+  std::uint32_t gbufferSkinnedProgram = 0U;
+  std::int32_t gbufSkinnedModelLoc = -1;
+  std::int32_t gbufSkinnedViewLoc = -1;
+  std::int32_t gbufSkinnedProjectionLoc = -1;
+  std::int32_t gbufSkinnedNormalMatrixLoc = -1;
+  std::int32_t gbufSkinnedUseInstancingLoc = -1;
+  std::int32_t gbufSkinnedTimeLoc = -1;
+  std::int32_t gbufSkinnedAlbedoLoc = -1;
+  std::int32_t gbufSkinnedHasAlbedoTextureLoc = -1;
+  std::int32_t gbufSkinnedAlbedoTextureLoc = -1;
+  std::int32_t gbufSkinnedMetallicLoc = -1;
+  std::int32_t gbufSkinnedRoughnessLoc = -1;
+  std::int32_t gbufSkinnedAOLoc = -1;
+  std::int32_t gbufSkinnedEmissiveLoc = -1;
+
+  ShaderProgramHandle shadowDepthSkinnedShaderHandle{};
+  std::uint32_t shadowDepthSkinnedProgram = 0U;
+  std::int32_t shadowSkinnedLightMvpLoc = -1;
 };
 
 /// Owns renderer state for the default renderer context.
@@ -429,6 +461,8 @@ struct RendererContext final {
   char shaderRootPath[260] = "assets/shaders";
   std::array<SceneCaptureRequest, kMaxSceneCaptures> sceneCaptureRequests{};
   std::size_t sceneCaptureRequestCount = 0U;
+  std::array<SkinPalette, kMaxSkinPalettes> skinPalettes{};
+  std::size_t skinPaletteCount = 0U;
   BackendState backend{};
 };
 

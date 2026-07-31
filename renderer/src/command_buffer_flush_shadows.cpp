@@ -92,7 +92,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     const std::uint64_t cacheKey = directional_shadow_cache_key(
         commandBufferView, opaqueCount, lights.directionalLights[0],
         cascadeSplits, lightMatrices);
-    const bool cacheEnabled = core::cvar_get_bool("r_shadow_cache", true);
+    // Skinned poses change every frame, so cached maps would freeze a
+    // character's shadow mid-animation.
+    const bool cacheEnabled = core::cvar_get_bool("r_shadow_cache", true) &&
+                              (skin_palette_count() == 0U);
     directionalShadowCacheReused =
         cacheEnabled && backend.directionalShadowCacheValid &&
         (backend.directionalShadowCacheKey == cacheKey);
@@ -134,13 +137,25 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           }
 
           const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
-          if (backend.shadowLightMvpLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowLightMvpLoc,
-                                  &lightMvp.columns[0].x);
-          }
-          if (backend.shadowModelLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowModelLoc,
-                                  &command.modelMatrix.columns[0].x);
+          const bool skinnedDraw =
+              mesh->hasSkin && (command.skinPalette != kInvalidSkinPalette) &&
+              (backend.shadowDepthSkinnedProgram != 0U) &&
+              upload_bone_palette(backend, dev, command.skinPalette);
+          if (skinnedDraw) {
+            dev->bind_program(backend.shadowDepthSkinnedProgram);
+            if (backend.shadowSkinnedLightMvpLoc >= 0) {
+              dev->set_uniform_mat4(backend.shadowSkinnedLightMvpLoc,
+                                    &lightMvp.columns[0].x);
+            }
+          } else {
+            if (backend.shadowLightMvpLoc >= 0) {
+              dev->set_uniform_mat4(backend.shadowLightMvpLoc,
+                                    &lightMvp.columns[0].x);
+            }
+            if (backend.shadowModelLoc >= 0) {
+              dev->set_uniform_mat4(backend.shadowModelLoc,
+                                    &command.modelMatrix.columns[0].x);
+            }
           }
 
           if (mesh->indexCount > 0U) {
@@ -153,6 +168,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
             frameStats.triangleCount += mesh->vertexCount / 3U;
           }
           ++frameStats.drawCalls;
+          if (skinnedDraw) {
+            dev->bind_program(backend.shadowDepthProgram);
+          }
         }
 
         dev->bind_vertex_array(0U);
@@ -231,12 +249,24 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
         const math::Mat4 mvp =
             math::mul(slot.lightViewProjection, cmd.modelMatrix);
-        if (backend.shadowLightMvpLoc >= 0) {
-          dev->set_uniform_mat4(backend.shadowLightMvpLoc, &mvp.columns[0].x);
-        }
-        if (backend.shadowModelLoc >= 0) {
-          dev->set_uniform_mat4(backend.shadowModelLoc,
-                                &cmd.modelMatrix.columns[0].x);
+        const bool skinnedDraw =
+            mesh->hasSkin && (cmd.skinPalette != kInvalidSkinPalette) &&
+            (backend.shadowDepthSkinnedProgram != 0U) &&
+            upload_bone_palette(backend, dev, cmd.skinPalette);
+        if (skinnedDraw) {
+          dev->bind_program(backend.shadowDepthSkinnedProgram);
+          if (backend.shadowSkinnedLightMvpLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowSkinnedLightMvpLoc,
+                                  &mvp.columns[0].x);
+          }
+        } else {
+          if (backend.shadowLightMvpLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowLightMvpLoc, &mvp.columns[0].x);
+          }
+          if (backend.shadowModelLoc >= 0) {
+            dev->set_uniform_mat4(backend.shadowModelLoc,
+                                  &cmd.modelMatrix.columns[0].x);
+          }
         }
 
         if (mesh->vertexArray != boundVao) {
@@ -249,6 +279,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
         } else {
           dev->draw_arrays_triangles(
               0, static_cast<std::int32_t>(mesh->vertexCount));
+        }
+        if (skinnedDraw) {
+          dev->bind_program(backend.shadowDepthProgram);
         }
       }
     }

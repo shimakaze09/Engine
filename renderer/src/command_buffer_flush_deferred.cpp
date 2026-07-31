@@ -166,7 +166,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         }
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
-        if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
+        if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
             upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                      batch)) {
           boundVertexArray = mesh->vertexArray;
@@ -190,11 +190,35 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
               static_cast<std::size_t>(batch.first) +
               static_cast<std::size_t>(local);
           const DrawCommand &singleCommand = commandBufferView.data[commandIndex];
-          upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
           const math::Mat4 model = compute_model_matrix(singleCommand);
           float normalMatrix[9] = {};
           extract_normal_matrix(model, normalMatrix);
 
+          const bool skinnedDraw =
+              mesh->hasSkin &&
+              (singleCommand.skinPalette != kInvalidSkinPalette) &&
+              upload_bone_palette(backend, dev, singleCommand.skinPalette);
+          if (skinnedDraw) {
+            dev->bind_program(backend.gbufferSkinnedProgram);
+            upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,
+                                            timeSeconds, singleCommand, model,
+                                            normalMatrix, &boundAlbedoTex);
+            if (mesh->indexCount > 0U) {
+              ++frameStats.drawCalls;
+              frameStats.triangleCount += (mesh->indexCount / 3U);
+              dev->draw_elements_triangles_u32(
+                  static_cast<std::int32_t>(mesh->indexCount));
+            } else {
+              ++frameStats.drawCalls;
+              frameStats.triangleCount += (mesh->vertexCount / 3U);
+              dev->draw_arrays_triangles(
+                  0, static_cast<std::int32_t>(mesh->vertexCount));
+            }
+            dev->bind_program(backend.gbufferProgram);
+            continue;
+          }
+
+          upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
           if (backend.gbufModelLoc >= 0) {
             dev->set_uniform_mat4(backend.gbufModelLoc, &model.columns[0].x);
           }

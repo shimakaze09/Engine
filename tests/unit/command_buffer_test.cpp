@@ -590,6 +590,43 @@ int check_scene_capture_requests() {
   return 0;
 }
 
+/// EXPECTATION: skin palettes mirror the capture-request store contract —
+/// counts clamp to kMaxSkinPalettes, a null array with nonzero count
+/// clears the store, and a fresh DrawCommand carries no palette.
+int check_skin_palette_store() {
+  if (engine::renderer::DrawCommand{}.skinPalette !=
+      engine::renderer::kInvalidSkinPalette) {
+    return 110;
+  }
+
+  static engine::renderer::SkinPalette
+      palettes[engine::renderer::kMaxSkinPalettes + 2U]{};
+  palettes[0].jointCount =
+      static_cast<std::uint32_t>(engine::renderer::kMaxSkinPaletteJoints) +
+      5U;
+  engine::renderer::set_skin_palettes(
+      palettes, engine::renderer::kMaxSkinPalettes + 2U);
+  if (engine::renderer::skin_palette_count() !=
+      engine::renderer::kMaxSkinPalettes) {
+    return 111;
+  }
+
+  engine::renderer::set_skin_palettes(nullptr, 3U);
+  if (engine::renderer::skin_palette_count() != 0U) {
+    return 112;
+  }
+
+  engine::renderer::set_skin_palettes(palettes, 2U);
+  if (engine::renderer::skin_palette_count() != 2U) {
+    return 113;
+  }
+  engine::renderer::set_skin_palettes(nullptr, 0U);
+  if (engine::renderer::skin_palette_count() != 0U) {
+    return 114;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -634,5 +671,5 @@ int main() {
   if (result != 0) {
     return result;
   }
-  return 0;
+  return check_skin_palette_store();
 }

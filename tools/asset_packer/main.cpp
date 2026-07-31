@@ -46,6 +46,7 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 
+#include "anim_cook.h"
 #include "animation_import.h"
 #include "dependency_graph.h"
 #include "skeleton_import.h"
@@ -62,53 +63,97 @@ void print_usage() {
                "[--force]\n");
 }
 
+/// Replaces every character outside [A-Za-z0-9_-] so clip names cook to
+/// portable file names; empty names fall back to "clip<index>".
+std::string sanitize_clip_name(const std::string &name, std::size_t index) {
+  std::string cleaned{};
+  cleaned.reserve(name.size());
+  for (const char c : name) {
+    const bool keep = ((c >= 'a') && (c <= 'z')) ||
+                      ((c >= 'A') && (c <= 'Z')) ||
+                      ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-');
+    cleaned.push_back(keep ? c : '_');
+  }
+  if (cleaned.empty()) {
+    cleaned = "clip" + std::to_string(index);
+  }
+  return cleaned;
+}
+
+/// Strips the mesh output's extension so cooked skeletal assets land
+/// beside it ("chars/hero.mesh" -> "chars/hero").
+std::string cooked_output_base(const char *outputPath) {
+  std::string base(outputPath);
+  const std::size_t separator = base.find_last_of("/\\");
+  const std::size_t dot = base.rfind('.');
+  if ((dot != std::string::npos) &&
+      ((separator == std::string::npos) || (dot > separator))) {
+    base.resize(dot);
+  }
+  return base;
+}
+
+/// Cooks skin 0 and every animation into "<base>.skel" and
+/// "<base>.<clip>.anim" beside the mesh output, filling outJointRemap for
+/// skinned vertex extraction; returns 0 on success or the packer exit
+/// code (14 skeleton, 15 animation).
+int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
+                         std::vector<std::uint32_t> *outJointRemap) {
+  engine::tools::Skeleton skeleton{};
+  engine::tools::SkeletonImportResult skeletonResult =
+      engine::tools::SkeletonImportResult::Ok;
+  if (!engine::tools::parse_gltf_skeleton(data, 0U, &skeleton,
+                                          &skeletonResult)) {
+    std::fprintf(stderr, "error: failed to import glTF skin: %s\n",
+                 engine::tools::skeleton_import_result_message(skeletonResult));
+    return 14;
+  }
+
+  std::vector<std::uint32_t> &jointRemap = *outJointRemap;
+  if (!engine::tools::reorder_skeleton_parent_first(&skeleton, &jointRemap)) {
+    std::fprintf(stderr, "error: skeleton parent links form a cycle\n");
+    return 14;
+  }
+
+  const std::string base = cooked_output_base(outputPath);
+  const std::string skeletonPath = base + ".skel";
+  if (!engine::tools::write_skeleton_asset(skeletonPath.c_str(), skeleton)) {
+    std::fprintf(stderr, "error: failed to write cooked skeleton: %s\n",
+                 skeletonPath.c_str());
+    return 14;
+  }
+  std::printf("cooked skeleton: %s (%zu joints)\n", skeletonPath.c_str(),
+              skeleton.joints.size());
+
+  for (std::size_t animIndex = 0U; animIndex < data->animations_count;
+       ++animIndex) {
+    engine::tools::AnimClip clip{};
+    engine::tools::AnimationImportResult animationResult =
+        engine::tools::AnimationImportResult::Ok;
+    if (!engine::tools::parse_gltf_animation(data, animIndex, 0U, &clip,
+                                             &animationResult)) {
+      std::fprintf(
+          stderr, "error: failed to import glTF animation %zu: %s\n",
+          animIndex,
+          engine::tools::animation_import_result_message(animationResult));
+      return 15;
+    }
+    const std::string clipPath =
+        base + "." + sanitize_clip_name(clip.name, animIndex) + ".anim";
+    if (!engine::tools::write_anim_clip_asset(clipPath.c_str(), clip,
+                                              jointRemap)) {
+      std::fprintf(stderr, "error: failed to write cooked animation: %s\n",
+                   clipPath.c_str());
+      return 15;
+    }
+    std::printf("cooked animation: %s (%zu tracks, %.3fs)\n",
+                clipPath.c_str(), clip.tracks.size(),
+                static_cast<double>(clip.durationSeconds));
+  }
+  return 0;
+}
 
 } // namespace
-
-bool file_exists(const char *path) {
-  if (path == nullptr) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  std::fclose(file);
-  return true;
-}
-
-/// Writes a complete text buffer to a file.
-bool write_text_file(const char *path, const char *text, std::size_t textSize) {
-  if ((path == nullptr) || (text == nullptr)) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  const bool ok = (std::fwrite(text, 1U, textSize, file) == textSize);
-  std::fclose(file);
-  return ok;
-}
-
 
 bool ensure_directory_exists(const char *dirPath) {
   if (dirPath == nullptr) {
@@ -288,35 +333,13 @@ int main(int argc, char **argv) {
     return 4;
   }
 
+  std::vector<std::uint32_t> jointRemap{};
   if (data->skins_count > 0U) {
-    engine::tools::Skeleton skeleton{};
-    engine::tools::SkeletonImportResult skeletonResult =
-        engine::tools::SkeletonImportResult::Ok;
-    if (!engine::tools::parse_gltf_skeleton(data, 0U, &skeleton,
-                                            &skeletonResult)) {
-      std::fprintf(
-          stderr, "error: failed to import glTF skin: %s\n",
-          engine::tools::skeleton_import_result_message(skeletonResult));
+    const int skeletalExitCode =
+        cook_skeletal_assets(data, outputPath, &jointRemap);
+    if (skeletalExitCode != 0) {
       cgltf_free(data);
-      return 14;
-    }
-    std::printf("parsed skeleton: %zu joints\n", skeleton.joints.size());
-
-    if (data->animations_count > 0U) {
-      engine::tools::AnimClip clip{};
-      engine::tools::AnimationImportResult animationResult =
-          engine::tools::AnimationImportResult::Ok;
-      if (!engine::tools::parse_gltf_animation(data, 0U, 0U, &clip,
-                                               &animationResult)) {
-        std::fprintf(
-            stderr, "error: failed to import glTF animation: %s\n",
-            engine::tools::animation_import_result_message(animationResult));
-        cgltf_free(data);
-        return 15;
-      }
-      std::printf("parsed animation: %s (%zu tracks, %.3fs)\n",
-                  clip.name.c_str(), clip.tracks.size(),
-                  static_cast<double>(clip.durationSeconds));
+      return skeletalExitCode;
     }
   }
 
@@ -335,7 +358,8 @@ int main(int argc, char **argv) {
 
   const cgltf_primitive *primitive = &selectedMesh.primitives[primIdx];
   PrimitiveData primitiveData{};
-  if (!extract_primitive(primitive, &primitiveData)) {
+  if (!extract_primitive(primitive, &primitiveData,
+                         jointRemap.empty() ? nullptr : &jointRemap)) {
     cgltf_free(data);
     return 5;
   }
@@ -431,10 +455,11 @@ int main(int argc, char **argv) {
   }
 
   std::printf(
-      "packed mesh: vertices=%zu indices=%zu uvs=%s -> %s (+ .meta.json)\n",
+      "packed mesh: vertices=%zu indices=%zu uvs=%s skin=%s -> %s "
+      "(+ .meta.json)\n",
       primitiveData.interleavedVertices.size() /
-          (primitiveData.hasUVs ? 8U : 6U),
+          primitive_stride_floats(primitiveData),
       primitiveData.indices.size(), primitiveData.hasUVs ? "yes" : "no",
-      outputPath);
+      primitiveData.hasSkin ? "yes" : "no", outputPath);
   return 0;
 }

@@ -30,6 +30,7 @@
 #include <memory>
 #include <vector>
 
+#include "engine/core/platform.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
@@ -167,6 +168,19 @@ void draw_toolbar() noexcept {
   const bool hasWorld = (editor_session().world != nullptr);
   const bool canPlay = hasWorld && !editor_session().worldRestoreFailed &&
                        (editor_session().playState != PlayState::Playing);
+
+  // One-shot automation hook: ENGINE_EDITOR_AUTOPLAY=1 enters play mode on
+  // the first eligible frame (scripted verification runs use it; interactive
+  // sessions never set the variable).
+  static bool autoplayConsumed = false;
+  if (!autoplayConsumed && canPlay &&
+      (editor_session().playState == PlayState::Stopped)) {
+    const char *autoplay = core::non_empty_env("ENGINE_EDITOR_AUTOPLAY");
+    autoplayConsumed = true;
+    if ((autoplay != nullptr) && (autoplay[0] == '1')) {
+      start_play_mode();
+    }
+  }
   const bool canPause =
       hasWorld && (editor_session().playState == PlayState::Playing);
   const bool canStop =

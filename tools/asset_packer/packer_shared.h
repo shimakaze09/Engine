@@ -18,7 +18,12 @@ struct PrimitiveData final {
   std::vector<float> interleavedVertices{};
   std::vector<std::uint32_t> indices{};
   bool hasUVs = false;
+  bool hasSkin = false;
 };
+
+/// Interleaved floats per vertex for a primitive's layout: 16 skinned
+/// (uv slot always present), 8 with UVs, 6 bare.
+std::size_t primitive_stride_floats(const PrimitiveData &data);
 
 /// One dependency path with its content hash, for cook-stamp comparison.
 struct DependencyDigest final {
@@ -70,8 +75,12 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
 /// Uniform scale applied in place to an extracted primitive.
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor);
 /// Extracts one glTF primitive into interleaved vertices and indices.
+/// When jointRemap is non-null and the primitive carries JOINTS_0 and
+/// WEIGHTS_0, cooks the skinned v3 layout with joint indices remapped to
+/// the reordered skeleton.
 bool extract_primitive(const cgltf_primitive *primitive,
-                       PrimitiveData *outData);
+                       PrimitiveData *outData,
+                       const std::vector<std::uint32_t> *jointRemap = nullptr);
 /// Writes the cooked .mesh file.
 bool write_mesh_file(const char *outputPath, const PrimitiveData &data);
 /// Writes the .meta.json metadata sidecar.

@@ -54,6 +54,12 @@ static_cast<void>(desc);
 // is a fixed char array serialized manually.
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::AnimationComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor. The controller path is
+// a fixed char array serialized manually; the rest is runtime state.
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::SpringArmComponent)
 REFLECT_FIELD(armLength, Float)
 REFLECT_FIELD(currentLength, Float)

@@ -59,10 +59,13 @@ SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
 - No god files: one responsibility per translation unit. When a TU accretes
   a second concern, split it (the `command_buffer_*` backend split is the
   model); ~1,000 lines is the review trigger for engine sources. The
-  2026-07-30 split campaign resolved all standing offenders (physics,
-  world, engine_pipeline, asset_packer main, command_buffer init and
-  flush). Test files grow by appending (rule above) — split them by
-  starting new suite files, never by relocating existing tests.
+  2026-07-30 split campaign resolved the then-standing offenders; the
+  2026-07-31 review found nine TUs back over the trigger (json,
+  render_device_gl, engine_pipeline, world.h, scene_serializer,
+  narrow_phase, editor_panels_inspector, dap_server, asset_database) —
+  queued for the next split pass, owner directs each split. Test files
+  grow by appending (rule above) — split them by starting new suite
+  files, never by relocating existing tests.
 - No new third-party dependencies without confirmation; never ones requiring
   exceptions/RTTI in engine code.
 
@@ -140,16 +143,21 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   debugger, hot reload with state persist, generated bindings
   (`bindable_api.h` → binding generator), and domain binding TUs in `src/`
   (entity lifecycle, body, mesh/material, physics, lights, camera, audio,
-  asset, game, input, scene, timers, coroutines, collision, touch, cheat,
-  debug, persist, entity pool/script/handle, `binding_util`). ~180 functions
-  on one global `engine` table.
+  asset, game, input, scene, timers, coroutines, collision, animation,
+  touch, cheat, debug, persist, entity pool/script/handle, `binding_util`).
+  ~180 functions on one global `engine` table.
 - `runtime/` — public `engine::bootstrap/run/shutdown` + `EngineConfig`,
-  `EnginePipeline` (13 named frame stages, fixed 1/60 step, job-graph frame),
-  `World` ECS (13 component types on SparseSets, WorldPhase gating,
+  `EnginePipeline` (14 named frame stages, fixed 1/60 step, job-graph frame;
+  animation evaluates per fixed step BEFORE the frame graph so render prep
+  bakes current-frame palette slots),
+  `World` ECS (14 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
   (shared `serialization_util`, reflection-backed components), physics/
-  scripting/editor bridges, render-prep pipeline, service registry, timers,
-  cameras, spring arms, game mode/state, player controllers, entity pool.
+  scripting/editor bridges, render-prep pipeline, skeletal animation (CPU
+  pose evaluation in `animation.cpp`, cooked .skel/.anim loaders, the
+  controller state machine + palette handoff in `animation_system.cpp`),
+  service registry, timers, cameras, spring arms, game mode/state, player
+  controllers, entity pool.
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle),
   `editor_commands` (undoable edits), panel TUs (main/inspector/diagnostics/
   assets/viewport), editor + debug cameras, command history.
@@ -276,12 +284,22 @@ Acceptance demo: Island Hopper is built *in the editor* from the bundled
 kit, played start-to-finish with sound, and feels smooth (no visible
 stutter) at 60 Hz sim.
 
-- **Animation (from P1-M7, cut down)**: glTF skinned character import
-  (packer already imports skins/clips), clip playback + crossfade
-  blending, GPU skinning (bone palette UBO, skinned G-buffer/forward
-  variants), a minimal JSON state machine (idle/walk/jump, Lua-settable
-  params), simple animation events (footsteps). CUT to parking lot: blend
-  spaces, additive/masked blending, montages, root motion, IK.
+- **Animation (from P1-M7, cut down) — LANDED 2026-07-31** (PR #39): glTF
+  skinned character import (cooked .skel/.anim/.mesh v3 formats, joint
+  reorder + vertex remap), clip playback + crossfade blending, GPU
+  skinning (bone palette UBO, skinned G-buffer and cascade/spot
+  shadow-depth variants; the forward path, scene captures, and
+  point-light shadows have no skinned variants yet, so characters render
+  bind-pose on those surfaces), a minimal JSON state machine
+  (idle/walk/jump controller, Lua `engine.set_anim_param`; transitions
+  match in array order — first match wins — non-looping states latch at
+  their final frame until a parameter drives them out, and event names
+  cap at 31 chars), animation events (`on_anim_event`, footsteps), and a
+  generated blocky rigged character (`tools/gen_character.py` →
+  `assets/character.*`) in the bootstrap scene. Authoring: the inspector
+  edits AnimationComponent (controller path, playing, speed) with
+  undoable add/remove. CUT to parking lot: blend spaces, additive/masked
+  blending, montages, root motion, IK.
 - **Audio (from P1-M8, cut down)**: 3D positional playback (attenuation +
   stereo pan, listener follows the active camera), master/music/sfx buses
   with volumes, music file streaming, audio events triggerable from Lua

@@ -62,6 +62,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();
   RendererFrameStats frameStats{};
+  backend.lastUploadedBonePalette = 0xFFFFFFFFU;
   gpu_profiler_begin_frame();
 
   int drawableWidth = 1280;

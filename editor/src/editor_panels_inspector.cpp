@@ -404,6 +404,18 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
     }
   }
 
+  {
+    runtime::AnimationComponent tmpAnimation{};
+    if (!editor_session().world->get_animation_component(entity,
+                                                         &tmpAnimation)) {
+      if (ImGui::Selectable(kAnimationSectionLabel)) {
+        execute_component_add(
+            entity, ComponentEditType::Animation,
+            default_component_snapshot(entity, ComponentEditType::Animation));
+      }
+    }
+  }
+
   ImGui::EndCombo();
 }
 
@@ -1012,6 +1024,53 @@ void draw_inspector_panel() noexcept {
     }
   } else {
     ImGui::TextUnformatted("ScriptComponent: <none>");
+  }
+
+  runtime::AnimationComponent animation{};
+  if (editor_session().world->get_animation_component(entity, &animation)) {
+    ImGui::PushID("AnimationComponentSection");
+    const bool animationOpen = ImGui::CollapsingHeader(
+        kAnimationSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
+    const bool removeAnimationPressed =
+        draw_remove_component_button("remove", editable);
+
+    bool animationModified = false;
+    if (animationOpen) {
+      if (!editable) {
+        ImGui::BeginDisabled();
+      }
+
+      char controllerBuf[sizeof(animation.controllerPath)] = {};
+      std::memcpy(controllerBuf, animation.controllerPath,
+                  sizeof(controllerBuf));
+      if (ImGui::InputText("Controller Path", controllerBuf,
+                           sizeof(controllerBuf))) {
+        std::memcpy(animation.controllerPath, controllerBuf,
+                    sizeof(controllerBuf));
+        animationModified = true;
+      }
+      if (ImGui::Checkbox("Playing", &animation.playing)) {
+        animationModified = true;
+      }
+      if (ImGui::DragFloat("Playback Speed", &animation.playbackSpeed, 0.01F,
+                           0.0F, 8.0F)) {
+        animationModified = true;
+      }
+
+      if (!editable) {
+        ImGui::EndDisabled();
+      }
+    }
+    ImGui::PopID();
+
+    if (editable && removeAnimationPressed) {
+      execute_component_remove(entity, ComponentEditType::Animation);
+    } else if (editable && animationModified) {
+      static_cast<void>(
+          editor_session().world->add_animation_component(entity, animation));
+    }
+  } else {
+    ImGui::TextUnformatted("AnimationComponent: <none>");
   }
 
   runtime::SpringArmComponent springArm{};

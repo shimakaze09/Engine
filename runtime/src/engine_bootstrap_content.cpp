@@ -131,6 +131,30 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
       out->grass = register_builtin_mesh(meshRegistry, assetDatabase, m,
                                          "builtin://grass");
     }
+
+    // Bundled rigged character (cooked skinned .mesh loaded from disk).
+    {
+      char characterVirtualPath[512] = {};
+      std::snprintf(characterVirtualPath, sizeof(characterVirtualPath),
+                    "%s/character.mesh", active_config().assetMount);
+      char characterPath[512] = {};
+      if (core::vfs_resolve_os_path(characterVirtualPath, characterPath,
+                                    sizeof(characterPath))) {
+        const renderer::AssetId characterId =
+            renderer::make_asset_id_from_path(characterVirtualPath);
+        if (renderer::queue_mesh_load(assetManager, assetDatabase,
+                                      characterId, characterPath) &&
+            renderer::update_asset_manager(assetManager, assetDatabase,
+                                           meshRegistry, 8U) &&
+            (renderer::mesh_asset_state(assetDatabase, characterId) ==
+             renderer::AssetState::Ready)) {
+          out->character = characterId;
+        } else {
+          core::log_message(core::LogLevel::Warning, "engine",
+                            "rigged character mesh failed to load");
+        }
+      }
+    }
     core::release_render_context();
   }
 
@@ -170,6 +194,10 @@ void create_bootstrap_scene(runtime::World *world,
   const runtime::Entity foliageEntity = world->create_scene_object();
   const runtime::Entity lightEntity = world->create_scene_object();
   const runtime::Entity sceneControllerEntity = world->create_scene_object();
+  const runtime::Entity characterEntity =
+      (meshIds.character != renderer::kInvalidAssetId)
+          ? world->create_scene_object()
+          : runtime::kInvalidEntity;
   if ((entity == runtime::kInvalidEntity) ||
       (stackedEntity == runtime::kInvalidEntity) ||
       (groundEntity == runtime::kInvalidEntity) ||
@@ -192,6 +220,24 @@ void create_bootstrap_scene(runtime::World *world,
   add_name(foliageEntity, "Foliage Patch");
   add_name(lightEntity, "Sun Light");
   add_name(sceneControllerEntity, "Scene Controller");
+  if (characterEntity != runtime::kInvalidEntity) {
+    add_name(characterEntity, "Character");
+  }
+
+  // Rigged character: skinned mesh plus the idle/walk/jump controller.
+  if (characterEntity != runtime::kInvalidEntity) {
+    runtime::Transform t{};
+    t.position = math::Vec3(-3.5F, 0.0F, 1.5F);
+    static_cast<void>(world->add_transform(characterEntity, t));
+    runtime::MeshComponent mc{};
+    mc.meshAssetId = meshIds.character;
+    mc.albedo = math::Vec3(0.85F, 0.65F, 0.35F);
+    static_cast<void>(world->add_mesh_component(characterEntity, mc));
+    runtime::AnimationComponent anim{};
+    std::snprintf(anim.controllerPath, sizeof(anim.controllerPath),
+                  "%s/character.animctrl.json", active_config().assetMount);
+    static_cast<void>(world->add_animation_component(characterEntity, anim));
+  }
 
   // Directional light.
   {

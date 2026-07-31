@@ -242,7 +242,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   std::vector<float> depth(static_cast<std::size_t>(kThumbSize * kThumbSize),
                            1e30F);
 
-  const std::size_t strideFloats = data.hasUVs ? 8U : 6U;
+  const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
       data.interleavedVertices.size() / strideFloats;
   if (vertexCount == 0U) {

@@ -19,6 +19,7 @@ struct GpuMesh final {
   std::uint32_t vertexCount = 0U;
   std::uint32_t indexCount = 0U;
   bool hasUVs = false;
+  bool hasSkin = false;
 };
 
 /// Fixed table mapping MeshHandle to uploaded GpuMesh slots.
@@ -37,6 +38,7 @@ struct CpuMeshData final {
   std::size_t vertexFloatCount = 0U;
   std::size_t strideFloats = 6U;
   bool hasUVs = false;
+  bool hasSkin = false;
 };
 
 // Returns slot index (same as MeshHandle::id) or 0 on failure.

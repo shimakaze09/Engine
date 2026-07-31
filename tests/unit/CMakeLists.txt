@@ -100,6 +100,14 @@ engine_add_test_executable(engine_unit_physics_rest
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_animation
+    SOURCES
+    animation_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp
@@ -222,6 +230,7 @@ engine_add_test_executable(engine_unit_shader_system
     ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
     PRIVATE_DEPS
     engine_core
     engine_math
@@ -566,6 +575,7 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/skeleton_import.cpp
         PRIVATE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${CMAKE_SOURCE_DIR}/math/include
         ${ENGINE_CGLTF_INCLUDE_DIR}
     )
 
@@ -579,6 +589,51 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/math/include
         ${ENGINE_CGLTF_INCLUDE_DIR}
     )
+
+    engine_add_test_executable(engine_unit_anim_cook
+        SOURCES
+        anim_cook_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/anim_cook.cpp
+        PRIVATE_DEPS
+        engine_runtime
+        engine_core
+        engine_math
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+    )
+
+    engine_add_test_executable(engine_unit_anim_controller
+        SOURCES
+        anim_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/anim_cook.cpp
+        PRIVATE_DEPS
+        engine_runtime
+        engine_renderer
+        engine_core
+        engine_math
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+    )
+
+    engine_add_test_executable(engine_unit_skinned_mesh_cook
+        SOURCES
+        skinned_mesh_cook_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
+        PRIVATE_DEPS
+        engine_core
+        engine_math
+        engine_physics
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+    )
+
+    if(WIN32)
+        target_compile_definitions(engine_unit_skinned_mesh_cook PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
 endif()
 
 # ---- P1-M12-A: Platform Paths ----

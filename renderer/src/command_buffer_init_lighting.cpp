@@ -329,6 +329,97 @@ void init_backend_lighting(BackendState &backend,
     }
   }
 
+  // GPU skinning (soft-fail: skinned meshes render in bind pose). The
+  // skinned G-buffer and shadow-depth variants share one bone-palette
+  // uniform buffer rebound per skinned draw.
+  {
+    const bool uboSupported = (dev->bind_uniform_buffer != nullptr) &&
+                              (dev->buffer_data_uniform != nullptr) &&
+                              (dev->buffer_sub_data_uniform != nullptr) &&
+                              (dev->bind_uniform_buffer_base != nullptr) &&
+                              (dev->bind_uniform_block != nullptr);
+    if (backend.deferredAvailable && uboSupported) {
+      const ShaderDefine skinnedDefine{"SKINNED", "1"};
+      const ShaderProgramHandle skinnedGbufferShader =
+          load_configured_shader_variant("gbuffer.vert", "gbuffer.frag",
+                                         &skinnedDefine, 1U);
+      const std::uint32_t skinnedProg =
+          shader_gpu_program(skinnedGbufferShader);
+      if (skinnedProg != 0U) {
+        backend.gbufferSkinnedShaderHandle = skinnedGbufferShader;
+        backend.gbufferSkinnedProgram = skinnedProg;
+        backend.gbufSkinnedModelLoc =
+            dev->uniform_location(skinnedProg, "uModel");
+        backend.gbufSkinnedViewLoc =
+            dev->uniform_location(skinnedProg, "uView");
+        backend.gbufSkinnedProjectionLoc =
+            dev->uniform_location(skinnedProg, "uProjection");
+        backend.gbufSkinnedNormalMatrixLoc =
+            dev->uniform_location(skinnedProg, "uNormalMatrix");
+        backend.gbufSkinnedUseInstancingLoc =
+            dev->uniform_location(skinnedProg, "uUseInstancing");
+        backend.gbufSkinnedTimeLoc =
+            dev->uniform_location(skinnedProg, "uTime");
+        backend.gbufSkinnedAlbedoLoc =
+            dev->uniform_location(skinnedProg, "uAlbedo");
+        backend.gbufSkinnedHasAlbedoTextureLoc =
+            dev->uniform_location(skinnedProg, "uHasAlbedoTexture");
+        backend.gbufSkinnedAlbedoTextureLoc =
+            dev->uniform_location(skinnedProg, "uAlbedoTexture");
+        backend.gbufSkinnedMetallicLoc =
+            dev->uniform_location(skinnedProg, "uMetallic");
+        backend.gbufSkinnedRoughnessLoc =
+            dev->uniform_location(skinnedProg, "uRoughness");
+        backend.gbufSkinnedAOLoc = dev->uniform_location(skinnedProg, "uAO");
+        backend.gbufSkinnedEmissiveLoc =
+            dev->uniform_location(skinnedProg, "uEmissive");
+
+        backend.bonePaletteUbo = dev->create_buffer();
+        if (backend.bonePaletteUbo != 0U) {
+          dev->bind_uniform_buffer(backend.bonePaletteUbo);
+          dev->buffer_data_uniform(
+              nullptr, static_cast<std::ptrdiff_t>(kMaxSkinPaletteJoints *
+                                                   sizeof(math::Mat4)));
+          dev->bind_uniform_buffer(0U);
+          dev->bind_uniform_buffer_base(kBonePaletteUboBinding,
+                                        backend.bonePaletteUbo);
+          dev->bind_uniform_block(skinnedProg, "BonePalette",
+                                  kBonePaletteUboBinding);
+          backend.skinningAvailable = true;
+        } else {
+          core::log_message(
+              core::LogLevel::Warning, "renderer",
+              "bone palette buffer creation failed — GPU skinning disabled");
+        }
+
+        if (backend.skinningAvailable && backend.shadowAvailable) {
+          const ShaderProgramHandle skinnedShadowShader =
+              load_configured_shader_variant("shadow_depth.vert",
+                                             "shadow_depth.frag",
+                                             &skinnedDefine, 1U);
+          const std::uint32_t skinnedShadowProg =
+              shader_gpu_program(skinnedShadowShader);
+          if (skinnedShadowProg != 0U) {
+            backend.shadowDepthSkinnedShaderHandle = skinnedShadowShader;
+            backend.shadowDepthSkinnedProgram = skinnedShadowProg;
+            backend.shadowSkinnedLightMvpLoc =
+                dev->uniform_location(skinnedShadowProg, "u_lightMVP");
+            dev->bind_uniform_block(skinnedShadowProg, "BonePalette",
+                                    kBonePaletteUboBinding);
+          } else {
+            core::log_message(core::LogLevel::Warning, "renderer",
+                              "skinned shadow shader not available — skinned "
+                              "meshes cast bind-pose shadows");
+          }
+        }
+      } else {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "skinned G-buffer shader not available — GPU "
+                          "skinning disabled");
+      }
+    }
+  }
+
 }
 
 } // namespace engine::renderer

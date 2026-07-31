@@ -249,6 +249,18 @@ namespace {
 #define GL_STATIC_DRAW 0x88E4
 #endif
 
+#ifndef GL_DYNAMIC_DRAW
+#define GL_DYNAMIC_DRAW 0x88E8
+#endif
+
+#ifndef GL_UNIFORM_BUFFER
+#define GL_UNIFORM_BUFFER 0x8A11
+#endif
+
+#ifndef GL_INVALID_INDEX
+#define GL_INVALID_INDEX 0xFFFFFFFFU
+#endif
+
 // --- GL proc types ---
 
 using GlCreateShaderProc = GLuint(APIENTRYP)(GLenum);
@@ -330,6 +342,13 @@ using GlTexSubImage2DProc = void(APIENTRYP)(GLenum, GLint, GLint, GLint,
                                             GLsizei, GLsizei, GLenum, GLenum,
                                             const void *);
 
+// Uniform buffer procs
+using GlBufferSubDataProc = void(APIENTRYP)(GLenum, std::ptrdiff_t,
+                                            std::ptrdiff_t, const void *);
+using GlBindBufferBaseProc = void(APIENTRYP)(GLenum, GLuint, GLuint);
+using GlGetUniformBlockIndexProc = GLuint(APIENTRYP)(GLuint, const GLchar *);
+using GlUniformBlockBindingProc = void(APIENTRYP)(GLuint, GLuint, GLuint);
+
 // Blend procs
 using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
 
@@ -371,6 +390,10 @@ struct GlTable final {
   GlGenBuffersProc genBuffers = nullptr;
   GlBindBufferProc bindBuffer = nullptr;
   GlBufferDataProc bufferData = nullptr;
+  GlBufferSubDataProc bufferSubData = nullptr;
+  GlBindBufferBaseProc bindBufferBase = nullptr;
+  GlGetUniformBlockIndexProc getUniformBlockIndex = nullptr;
+  GlUniformBlockBindingProc uniformBlockBinding = nullptr;
   GlDeleteBuffersProc deleteBuffers = nullptr;
   GlEnableVertexAttribArrayProc enableVertexAttribArray = nullptr;
   GlVertexAttribPointerProc vertexAttribPointer = nullptr;
@@ -495,6 +518,12 @@ bool load_all_gl_functions() noexcept {
          load_proc(&gl_table().genBuffers, "glGenBuffers") &&
          load_proc(&gl_table().bindBuffer, "glBindBuffer") &&
          load_proc(&gl_table().bufferData, "glBufferData") &&
+         load_proc(&gl_table().bufferSubData, "glBufferSubData") &&
+         load_proc(&gl_table().bindBufferBase, "glBindBufferBase") &&
+         load_proc(&gl_table().getUniformBlockIndex,
+                   "glGetUniformBlockIndex") &&
+         load_proc(&gl_table().uniformBlockBinding,
+                   "glUniformBlockBinding") &&
          load_proc(&gl_table().deleteBuffers, "glDeleteBuffers") &&
          load_proc(&gl_table().enableVertexAttribArray,
                    "glEnableVertexAttribArray") &&
@@ -686,6 +715,40 @@ void gl_buffer_data_array(const void *data, std::ptrdiff_t sizeBytes) noexcept {
 void gl_buffer_data_element(const void *data,
                             std::ptrdiff_t sizeBytes) noexcept {
   gl_table().bufferData(GL_ELEMENT_ARRAY_BUFFER, sizeBytes, data, GL_STATIC_DRAW);
+}
+
+void gl_bind_uniform_buffer(std::uint32_t buffer) noexcept {
+  gl_table().bindBuffer(GL_UNIFORM_BUFFER, static_cast<GLuint>(buffer));
+}
+
+void gl_buffer_data_uniform(const void *data,
+                            std::ptrdiff_t sizeBytes) noexcept {
+  gl_table().bufferData(GL_UNIFORM_BUFFER, sizeBytes, data, GL_DYNAMIC_DRAW);
+}
+
+void gl_buffer_sub_data_uniform(const void *data,
+                                std::ptrdiff_t sizeBytes) noexcept {
+  gl_table().bufferSubData(GL_UNIFORM_BUFFER, 0, sizeBytes, data);
+}
+
+void gl_bind_uniform_buffer_base(std::uint32_t binding,
+                                 std::uint32_t buffer) noexcept {
+  gl_table().bindBufferBase(GL_UNIFORM_BUFFER, static_cast<GLuint>(binding),
+                            static_cast<GLuint>(buffer));
+}
+
+void gl_bind_uniform_block(std::uint32_t program, const char *blockName,
+                           std::uint32_t binding) noexcept {
+  if ((program == 0U) || (blockName == nullptr)) {
+    return;
+  }
+  const GLuint blockIndex = gl_table().getUniformBlockIndex(
+      static_cast<GLuint>(program), blockName);
+  if (blockIndex == GL_INVALID_INDEX) {
+    return;
+  }
+  gl_table().uniformBlockBinding(static_cast<GLuint>(program), blockIndex,
+                                 static_cast<GLuint>(binding));
 }
 
 void gl_enable_vertex_attrib(std::uint32_t index) noexcept {
@@ -1225,6 +1288,12 @@ bool initialize_render_device() noexcept {
   render_device_state().bind_array_buffer = &gl_bind_array_buffer;
   render_device_state().bind_element_buffer = &gl_bind_element_buffer;
   render_device_state().buffer_data_array = &gl_buffer_data_array;
+  render_device_state().bind_uniform_buffer = &gl_bind_uniform_buffer;
+  render_device_state().buffer_data_uniform = &gl_buffer_data_uniform;
+  render_device_state().buffer_sub_data_uniform = &gl_buffer_sub_data_uniform;
+  render_device_state().bind_uniform_buffer_base =
+      &gl_bind_uniform_buffer_base;
+  render_device_state().bind_uniform_block = &gl_bind_uniform_block;
   render_device_state().buffer_data_element = &gl_buffer_data_element;
   render_device_state().enable_vertex_attrib = &gl_enable_vertex_attrib;
   render_device_state().vertex_attrib_float = &gl_vertex_attrib_float;

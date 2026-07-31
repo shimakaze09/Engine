@@ -14,6 +14,12 @@ namespace engine::renderer {
 ShaderProgramHandle load_configured_shader_program(
     const char *vertFileName, const char *fragFileName) noexcept;
 
+/// Loads a shader-pair variant from the configured shader root with the
+/// given preprocessor defines.
+ShaderProgramHandle load_configured_shader_variant(
+    const char *vertFileName, const char *fragFileName,
+    const ShaderDefine *defines, std::size_t defineCount) noexcept;
+
 /// Hard-fail core: render device, shader system, default/PBR/tonemap
 /// programs with required uniforms, and the fullscreen empty VAO. On any
 /// failure the partial state is unwound and the backend is marked failed.

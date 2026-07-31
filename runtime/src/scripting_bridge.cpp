@@ -11,6 +11,7 @@
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/asset_streaming.h"
 #include "engine/renderer/camera.h"
+#include "engine/runtime/animation_system.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/scene_serializer.h"
@@ -918,6 +919,28 @@ void bind_scripting_runtime(World *world,
   g_scriptingAssetDatabaseService =
       locator.get_service<runtime::EngineAssetDatabaseService>();
   scripting::bind_runtime_services(&kScriptingRuntimeServices, locator);
+
+  scripting::AnimationScriptBridge animationBridge{};
+  animationBridge.queueParam = [](core::Entity entity, const char *name,
+                                  float value) noexcept {
+    return queue_anim_param(entity, name, value);
+  };
+  animationBridge.firedEventCount = []() noexcept {
+    return fired_anim_event_count();
+  };
+  animationBridge.firedEventAt = [](std::size_t index,
+                                    core::Entity *outEntity,
+                                    const char **outName) noexcept {
+    const FiredAnimEvent *event = fired_anim_event_at(index);
+    if ((event == nullptr) || (outEntity == nullptr) ||
+        (outName == nullptr)) {
+      return false;
+    }
+    *outEntity = event->entity;
+    *outName = event->name;
+    return true;
+  };
+  scripting::set_animation_script_bridge(animationBridge);
 }
 
 /// Clears scripting runtime bindings from an explicit service locator.
@@ -925,6 +948,7 @@ void unbind_scripting_runtime(core::ServiceLocator &locator) noexcept {
   g_scriptingAssetDatabaseService = nullptr;
   scripting::bind_runtime_world(nullptr, locator);
   scripting::bind_runtime_services(nullptr, locator);
+  scripting::set_animation_script_bridge(scripting::AnimationScriptBridge{});
 }
 
 } // namespace runtime

@@ -5,11 +5,28 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/entity.h"
+
 namespace engine::runtime {
 class World;
 } // namespace engine::runtime
 
 namespace engine::scripting {
+
+/// Function-pointer bridge the runtime installs so the animation Lua
+/// bindings reach the animation system without an upward link dependency
+/// (scripting never links engine_runtime).
+struct AnimationScriptBridge final {
+  bool (*queueParam)(core::Entity entity, const char *name,
+                     float value) noexcept = nullptr;
+  std::size_t (*firedEventCount)() noexcept = nullptr;
+  bool (*firedEventAt)(std::size_t index, core::Entity *outEntity,
+                       const char **outName) noexcept = nullptr;
+};
+
+/// Installs (or, with a default-constructed bridge, clears) the animation
+/// bridge the Lua animation bindings call through.
+void set_animation_script_bridge(const AnimationScriptBridge &bridge) noexcept;
 
 /// Initializes the owning system for scripting.
 bool initialize_scripting() noexcept;
@@ -54,6 +71,10 @@ bool debugger_add_breakpoint(const char *file, int line) noexcept;
 // No-op if the scripting system is not initialised or no handlers are present.
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept;
+
+// Dispatch registered Lua handlers and the global on_anim_event fallback
+// for every animation event fired by the last fixed-step animation update.
+void dispatch_animation_event_callbacks() noexcept;
 
 // Set the current frame index; exposed to Lua via engine.frame_count().
 void set_frame_index(std::uint32_t frameIndex) noexcept;

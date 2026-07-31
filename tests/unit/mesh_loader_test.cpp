@@ -429,6 +429,75 @@ int check_gpu_upload_cleans_index_buffer_failure() {
                                                                          : 123;
 }
 
+constexpr const char *kV3ValidPath = "mesh_loader_v3_valid.mesh";
+constexpr const char *kV3TruncatedPath = "mesh_loader_v3_truncated.mesh";
+
+/// EXPECTATION: a v3 file decodes with the 16-float stride, both hasUVs
+/// and hasSkin set, and a byte-exact vertex payload roundtrip.
+int check_v3_cpu_decode() {
+  remove_file(kV3ValidPath);
+
+  engine::core::MeshAssetHeader header{};
+  header.magic = engine::core::kMeshAssetMagic;
+  header.version = engine::core::kMeshAssetVersion3;
+  header.vertexCount = 1U;
+  header.indexCount = 0U;
+
+  const std::array<float, 16U> vertexData = {
+      1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.75F,
+      2.0F, 1.0F, 0.0F, 2.0F, 0.5F, 0.25F, 0.25F, 0.0F};
+  if (!write_mesh_file(kV3ValidPath, header, vertexData.data(),
+                       vertexData.size() * sizeof(float))) {
+    remove_file(kV3ValidPath);
+    return 141;
+  }
+
+  engine::renderer::CpuMeshData meshData{};
+  const bool loaded =
+      engine::renderer::load_mesh_data_from_file(kV3ValidPath, &meshData);
+  remove_file(kV3ValidPath);
+  if (!loaded) {
+    return 142;
+  }
+  if ((meshData.vertexCount != 1U) || (meshData.strideFloats != 16U) ||
+      (meshData.vertexFloatCount != 16U) || !meshData.hasUVs ||
+      !meshData.hasSkin || (meshData.vertices == nullptr)) {
+    return 143;
+  }
+  for (std::size_t i = 0U; i < vertexData.size(); ++i) {
+    if (meshData.vertices[i] != vertexData[i]) {
+      return 144;
+    }
+  }
+  return 0;
+}
+
+/// EXPECTATION: a v3 header over an 8-float payload is a file size
+/// mismatch and the load fails.
+int check_v3_file_size_validation() {
+  remove_file(kV3TruncatedPath);
+
+  engine::core::MeshAssetHeader header{};
+  header.magic = engine::core::kMeshAssetMagic;
+  header.version = engine::core::kMeshAssetVersion3;
+  header.vertexCount = 1U;
+  header.indexCount = 0U;
+
+  const std::array<float, 8U> truncatedData = {0.0F, 0.0F, 0.0F, 0.0F,
+                                               1.0F, 0.0F, 0.0F, 0.0F};
+  if (!write_mesh_file(kV3TruncatedPath, header, truncatedData.data(),
+                       truncatedData.size() * sizeof(float))) {
+    remove_file(kV3TruncatedPath);
+    return 151;
+  }
+
+  engine::renderer::CpuMeshData meshData{};
+  const bool loaded =
+      engine::renderer::load_mesh_data_from_file(kV3TruncatedPath, &meshData);
+  remove_file(kV3TruncatedPath);
+  return loaded ? 152 : 0;
+}
+
 int check_gpu_upload_rejects_missing_indices() {
   configure_fake_render_device(1U, 2U, 3U);
 
@@ -532,5 +601,15 @@ int main() {
     return result;
   }
 
-  return check_cpu_decode_valid_mesh();
+  result = check_cpu_decode_valid_mesh();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_v3_cpu_decode();
+  if (result != 0) {
+    return result;
+  }
+
+  return check_v3_file_size_validation();
 }
