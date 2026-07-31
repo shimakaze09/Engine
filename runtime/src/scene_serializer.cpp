@@ -907,13 +907,23 @@ bool serialize_scene_to_writer(const World &world,
 } // namespace
 
 /// Resets this object back to its reusable empty state for world.
+/// The destroy list is heap scratch: this is a cold path, and a
+/// thread_local array this size would pin 512 KB of TLS per thread (the
+/// physics scratch owner documents the same rule).
 void reset_world(World &world) noexcept {
   if (world.alive_entity_count() > 0U) {
-    thread_local static std::array<Entity, World::kMaxEntities> toDestroy{};
+    using DestroyList = std::array<Entity, World::kMaxEntities>;
+    std::unique_ptr<DestroyList> toDestroy(new (std::nothrow) DestroyList());
+    if (toDestroy == nullptr) {
+      core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                        "reset_world scratch allocation failed");
+      return;
+    }
     std::size_t count = 0U;
-    world.for_each_alive([&](Entity e) noexcept { toDestroy[count++] = e; });
+    world.for_each_alive(
+        [&](Entity e) noexcept { (*toDestroy)[count++] = e; });
     for (std::size_t i = 0U; i < count; ++i) {
-      static_cast<void>(world.destroy_entity(toDestroy[i]));
+      static_cast<void>(world.destroy_entity((*toDestroy)[i]));
     }
   }
 

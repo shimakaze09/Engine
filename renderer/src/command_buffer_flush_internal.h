@@ -161,9 +161,10 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                               const StaticMeshBatch &batch) noexcept;
 
 /// Uploads the frame palette at paletteIndex into the bone-palette uniform
-/// buffer; false when skinning is unavailable or the index is out of range
-/// (the caller then draws the mesh unskinned in bind pose).
-bool upload_bone_palette(const BackendState &backend, const RenderDevice *dev,
+/// buffer, skipping the upload when that palette is already resident from
+/// an earlier pass this flush; false when skinning is unavailable or the
+/// index is out of range (the caller then draws the mesh in bind pose).
+bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
                          std::uint32_t paletteIndex) noexcept;
 
 /// Uploads every uniform the bound skinned G-buffer program needs for one

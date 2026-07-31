@@ -21,6 +21,10 @@ inline constexpr std::size_t kMaxAnimJoints = 128U;
 inline constexpr std::size_t kMaxAnimTracks = kMaxAnimJoints * 3U;
 inline constexpr std::uint32_t kInvalidAnimJoint = 0xFFFFFFFFU;
 
+/// Invalid index for every animation-system slot (controller registry
+/// slots and per-frame palette slots stored on AnimationComponent).
+inline constexpr std::uint32_t kInvalidAnimSlot = 0xFFFFFFFFU;
+
 /// One joint's local translation/rotation/scale.
 struct JointPose final {
   math::Vec3 translation = math::Vec3(0.0F, 0.0F, 0.0F);
@@ -97,7 +101,8 @@ void sample_clip_pose(const AnimSkeleton &skeleton, const AnimationClip &clip,
                       float timeSeconds, JointPose *outPose) noexcept;
 
 /// Blends two local poses per joint: lerp for translation/scale, shortest
-/// path normalized lerp for rotation. weight 0 = a, 1 = b.
+/// path normalized lerp for rotation. weight 0 = a, 1 = b. out may alias
+/// a or b (each joint's fields are read before that field is written).
 void blend_poses(const JointPose *a, const JointPose *b, std::size_t count,
                  float weight, JointPose *out) noexcept;
 

@@ -17,6 +17,7 @@
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics_world_view.h"
+#include "engine/runtime/animation.h"
 #include "engine/runtime/camera_manager.h"
 #include "engine/runtime/game_mode.h"
 #include "engine/runtime/timer_manager.h"
@@ -177,14 +178,14 @@ struct AnimationComponent final {
   char controllerPath[kMaxPathLength + 1U] = {};
   float playbackSpeed = 1.0F;
   bool playing = true;
-  std::uint32_t controllerSlot = 0xFFFFFFFFU;
+  std::uint32_t controllerSlot = kInvalidAnimSlot;
   std::uint32_t currentState = 0U;
   std::uint32_t previousState = 0U;
   float stateTime = 0.0F;
   float previousStateTime = 0.0F;
   float blendRemaining = 0.0F;
   float blendDuration = 0.0F;
-  std::uint32_t paletteSlot = 0xFFFFFFFFU;
+  std::uint32_t paletteSlot = kInvalidAnimSlot;
   std::uint32_t paramCount = 0U;
   AnimParam params[kMaxParams] = {};
 };

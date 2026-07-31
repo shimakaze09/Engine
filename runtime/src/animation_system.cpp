@@ -7,6 +7,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 
 #include "engine/core/hash.h"
 #include "engine/core/json.h"
@@ -20,7 +22,9 @@ namespace engine::runtime {
 
 namespace {
 
-AnimControllerData g_controllers[kMaxAnimControllers]{};
+// Controller slots allocate on first acquire (~114 KB each) so the
+// registry costs nothing until a scene actually animates.
+std::unique_ptr<AnimControllerData> g_controllers[kMaxAnimControllers]{};
 
 FiredAnimEvent g_firedEvents[kMaxFiredAnimEvents]{};
 std::size_t g_firedEventCount = 0U;
@@ -133,12 +137,14 @@ bool parse_controller_states(const core::JsonParser &parser,
       return false;
     }
     core::JsonValue loopValue{};
-    if (parser.get_object_field(stateValue, "loop", &loopValue)) {
-      static_cast<void>(parser.as_bool(loopValue, &state.loop));
+    if (parser.get_object_field(stateValue, "loop", &loopValue) &&
+        !parser.as_bool(loopValue, &state.loop)) {
+      return false;
     }
     core::JsonValue speedValue{};
-    if (parser.get_object_field(stateValue, "speed", &speedValue)) {
-      static_cast<void>(parser.as_float(speedValue, &state.speed));
+    if (parser.get_object_field(stateValue, "speed", &speedValue) &&
+        !parser.as_float(speedValue, &state.speed)) {
+      return false;
     }
   }
   controller.stateCount = static_cast<std::uint32_t>(stateCount);
@@ -195,13 +201,14 @@ bool parse_controller_transitions(const core::JsonParser &parser,
       return false;
     }
     core::JsonValue thresholdValue{};
-    if (parser.get_object_field(transitionValue, "value", &thresholdValue)) {
-      static_cast<void>(parser.as_float(thresholdValue, &transition.value));
+    if (parser.get_object_field(transitionValue, "value", &thresholdValue) &&
+        !parser.as_float(thresholdValue, &transition.value)) {
+      return false;
     }
     core::JsonValue blendValue{};
-    if (parser.get_object_field(transitionValue, "blend", &blendValue)) {
-      static_cast<void>(
-          parser.as_float(blendValue, &transition.blendSeconds));
+    if (parser.get_object_field(transitionValue, "blend", &blendValue) &&
+        !parser.as_float(blendValue, &transition.blendSeconds)) {
+      return false;
     }
   }
   controller.transitionCount = static_cast<std::uint32_t>(transitionCount);
@@ -236,8 +243,9 @@ bool parse_controller_events(const core::JsonParser &parser,
     }
     event.nameHash = core::fnv1a_32(event.name);
     core::JsonValue timeValue{};
-    if (parser.get_object_field(eventValue, "time", &timeValue)) {
-      static_cast<void>(parser.as_float(timeValue, &event.timeSeconds));
+    if (parser.get_object_field(eventValue, "time", &timeValue) &&
+        !parser.as_float(timeValue, &event.timeSeconds)) {
+      return false;
     }
   }
   controller.eventCount = static_cast<std::uint32_t>(eventCount);
@@ -335,6 +343,12 @@ bool condition_met(const AnimTransition &transition,
 /// Records one fired event for this update's queue.
 void push_fired_event(core::Entity entity, const AnimEvent &event) noexcept {
   if (g_firedEventCount >= kMaxFiredAnimEvents) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      core::log_message(core::LogLevel::Warning, "animation",
+                        "fired-event queue full; animation events dropped");
+    }
     return;
   }
   FiredAnimEvent &fired = g_firedEvents[g_firedEventCount];
@@ -401,8 +415,8 @@ std::uint32_t acquire_anim_controller(const char *virtualPath) noexcept {
 
   std::uint32_t freeSlot = kInvalidAnimSlot;
   for (std::uint32_t i = 0U; i < kMaxAnimControllers; ++i) {
-    if (g_controllers[i].active) {
-      if (std::strcmp(g_controllers[i].sourcePath, virtualPath) == 0) {
+    if (g_controllers[i] != nullptr) {
+      if (std::strcmp(g_controllers[i]->sourcePath, virtualPath) == 0) {
         return i;
       }
     } else if (freeSlot == kInvalidAnimSlot) {
@@ -414,28 +428,32 @@ std::uint32_t acquire_anim_controller(const char *virtualPath) noexcept {
     return kInvalidAnimSlot;
   }
 
-  AnimControllerData &controller = g_controllers[freeSlot];
-  controller = AnimControllerData{};
-  if (!parse_controller(virtualPath, controller)) {
-    controller = AnimControllerData{};
+  std::unique_ptr<AnimControllerData> controller(new (std::nothrow)
+                                                     AnimControllerData());
+  if (controller == nullptr) {
+    log_controller_error(virtualPath, "controller allocation failed");
     return kInvalidAnimSlot;
   }
-  core::copy_string(controller.sourcePath, sizeof(controller.sourcePath),
+  if (!parse_controller(virtualPath, *controller)) {
+    return kInvalidAnimSlot;
+  }
+  core::copy_string(controller->sourcePath, sizeof(controller->sourcePath),
                     virtualPath);
-  controller.active = true;
+  controller->active = true;
+  g_controllers[freeSlot] = std::move(controller);
   return freeSlot;
 }
 
 const AnimControllerData *get_anim_controller(std::uint32_t slot) noexcept {
-  if ((slot >= kMaxAnimControllers) || !g_controllers[slot].active) {
+  if ((slot >= kMaxAnimControllers) || (g_controllers[slot] == nullptr)) {
     return nullptr;
   }
-  return &g_controllers[slot];
+  return g_controllers[slot].get();
 }
 
 void reset_anim_controllers() noexcept {
-  for (AnimControllerData &controller : g_controllers) {
-    controller = AnimControllerData{};
+  for (std::unique_ptr<AnimControllerData> &controller : g_controllers) {
+    controller.reset();
   }
   g_firedEventCount = 0U;
   g_pendingParamCount = 0U;
@@ -472,7 +490,7 @@ void update_animations(World &world, float dt) noexcept {
         return;
       }
       const AnimControllerData &controller =
-          g_controllers[component->controllerSlot];
+          *g_controllers[component->controllerSlot];
       component->currentState = controller.initialState;
       component->previousState = controller.initialState;
       component->stateTime = 0.0F;
@@ -534,7 +552,7 @@ void update_animations(World &world, float dt) noexcept {
 
     const AnimSkeleton &skeleton = controller->skeleton;
     const AnimState &state = controller->states[component->currentState];
-    JointPose pose[kMaxAnimJoints]{};
+    static JointPose pose[kMaxAnimJoints];
     sample_clip_pose(skeleton, controller->clips[state.clipIndex],
                      component->stateTime, pose);
 
@@ -543,7 +561,7 @@ void update_animations(World &world, float dt) noexcept {
         (component->previousState < controller->stateCount)) {
       const AnimState &previous =
           controller->states[component->previousState];
-      JointPose previousPose[kMaxAnimJoints]{};
+      static JointPose previousPose[kMaxAnimJoints];
       sample_clip_pose(skeleton, controller->clips[previous.clipIndex],
                        component->previousStateTime, previousPose);
       const float currentWeight =
@@ -552,7 +570,7 @@ void update_animations(World &world, float dt) noexcept {
                   pose);
     }
 
-    math::Mat4 globalPose[kMaxAnimJoints]{};
+    static math::Mat4 globalPose[kMaxAnimJoints];
     compute_global_pose(skeleton, pose, globalPose);
     renderer::SkinPalette &palette = palettes[paletteCount];
     compute_skinning_palette(skeleton, globalPose, palette.joints.data());
@@ -578,8 +596,16 @@ bool set_anim_param(World &world, core::Entity entity, const char *name,
 
 bool queue_anim_param(core::Entity entity, const char *name,
                       float value) noexcept {
-  if ((name == nullptr) || (name[0] == '\0') ||
-      (g_pendingParamCount >= kMaxPendingAnimParams)) {
+  if ((name == nullptr) || (name[0] == '\0')) {
+    return false;
+  }
+  if (g_pendingParamCount >= kMaxPendingAnimParams) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      core::log_message(core::LogLevel::Warning, "animation",
+                        "pending param queue full; parameter writes dropped");
+    }
     return false;
   }
   PendingAnimParam &pending = g_pendingParams[g_pendingParamCount];

@@ -238,6 +238,10 @@ void render_prep_chunk_job(void *userData) noexcept {
               }
             }
             command.modelMatrix = transforms[i].matrix;
+            static_assert(renderer::kInvalidSkinPalette == kInvalidAnimSlot,
+                          "paletteSlot passes through to DrawCommand "
+                          "unchanged, so the two invalid sentinels must "
+                          "stay numerically equal");
             const AnimationComponent *animation =
                 jobData->world->get_animation_component_ptr(entities[i]);
             if (animation != nullptr) {

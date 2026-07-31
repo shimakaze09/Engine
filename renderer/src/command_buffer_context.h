@@ -423,8 +423,11 @@ struct BackendState final {
 
   // GPU skinning state: skinned G-buffer and shadow-depth program
   // variants plus the shared bone-palette uniform buffer they sample.
+  // lastUploadedBonePalette dedupes uploads within one flush (palette
+  // contents are per-frame, so flush start resets it to invalid).
   bool skinningAvailable = false;
   std::uint32_t bonePaletteUbo = 0U;
+  std::uint32_t lastUploadedBonePalette = 0xFFFFFFFFU;
 
   ShaderProgramHandle gbufferSkinnedShaderHandle{};
   std::uint32_t gbufferSkinnedProgram = 0U;

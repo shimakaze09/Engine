@@ -48,7 +48,7 @@ std::size_t skin_palette_count() noexcept {
   return renderer_context().skinPaletteCount;
 }
 
-bool upload_bone_palette(const BackendState &backend, const RenderDevice *dev,
+bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
                          std::uint32_t paletteIndex) noexcept {
   const RendererContext &context = renderer_context();
   if (!backend.skinningAvailable || (backend.bonePaletteUbo == 0U) ||
@@ -62,6 +62,10 @@ bool upload_bone_palette(const BackendState &backend, const RenderDevice *dev,
   if (palette.jointCount == 0U) {
     return false;
   }
+  if (backend.lastUploadedBonePalette == paletteIndex) {
+    return true;
+  }
+  backend.lastUploadedBonePalette = paletteIndex;
 
   dev->bind_uniform_buffer(backend.bonePaletteUbo);
   dev->buffer_sub_data_uniform(

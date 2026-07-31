@@ -189,7 +189,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           uploadForwardMaterial(command.material, &boundAlbedoTexture);
           upload_pbr_foliage_uniforms(backend, dev, command);
 
-          if ((batch.count > 1U) && (mesh->indexCount > 0U) &&
+          if ((batch.count > 1U) && !mesh->hasSkin &&
+              (mesh->indexCount > 0U) &&
               upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                        batch)) {
             boundVertexArray = mesh->vertexArray;

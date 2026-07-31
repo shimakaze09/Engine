@@ -21,7 +21,6 @@ inline constexpr std::size_t kMaxAnimStates = 8U;
 inline constexpr std::size_t kMaxAnimTransitions = 16U;
 inline constexpr std::size_t kMaxAnimEvents = 16U;
 inline constexpr std::size_t kMaxFiredAnimEvents = 32U;
-inline constexpr std::uint32_t kInvalidAnimSlot = 0xFFFFFFFFU;
 
 /// Comparison a transition applies to its parameter value.
 enum class AnimCondition : std::uint8_t {
