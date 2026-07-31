@@ -126,11 +126,15 @@ bool load_animation_clip_asset(const char *virtualPath,
       const auto *base = static_cast<const std::uint8_t *>(data);
       const auto *records = reinterpret_cast<const core::AnimClipAssetTrack *>(
           base + sizeof(header));
-      const auto *payload = reinterpret_cast<const float *>(
-          base + sizeof(header) +
-          (static_cast<std::size_t>(header.trackCount) *
-           sizeof(core::AnimClipAssetTrack)));
-      clip.payload.assign(payload, payload + header.payloadFloatCount);
+      clip.payload.resize(header.payloadFloatCount);
+      if (header.payloadFloatCount > 0U) {
+        std::memcpy(clip.payload.data(),
+                    base + sizeof(header) +
+                        (static_cast<std::size_t>(header.trackCount) *
+                         sizeof(core::AnimClipAssetTrack)),
+                    static_cast<std::size_t>(header.payloadFloatCount) *
+                        sizeof(float));
+      }
 
       bool tracksValid = true;
       for (std::uint32_t t = 0U; tracksValid && (t < header.trackCount);
