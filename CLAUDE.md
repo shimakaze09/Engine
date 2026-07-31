@@ -144,7 +144,9 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   touch, cheat, debug, persist, entity pool/script/handle, `binding_util`).
   ~180 functions on one global `engine` table.
 - `runtime/` — public `engine::bootstrap/run/shutdown` + `EngineConfig`,
-  `EnginePipeline` (13 named frame stages, fixed 1/60 step, job-graph frame),
+  `EnginePipeline` (14 named frame stages, fixed 1/60 step, job-graph frame;
+  animation evaluates per fixed step BEFORE the frame graph so render prep
+  bakes current-frame palette slots),
   `World` ECS (14 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
   (shared `serialization_util`, reflection-backed components), physics/

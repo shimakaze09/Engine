@@ -438,6 +438,7 @@ struct EnginePipeline::Impl final {
   void stage_assets() noexcept;
   void stage_hot_reload() noexcept;
   void stage_audio() noexcept;
+  void stage_animation() noexcept;
   bool stage_frame_graph() noexcept;
   void stage_post_frame() noexcept;
   void stage_measure_frame() noexcept;
@@ -576,6 +577,7 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   stage_assets();
   stage_hot_reload();
   stage_audio();
+  stage_animation();
 
   if (runFrameGraph) {
     if (!stage_frame_graph()) {
@@ -779,6 +781,24 @@ void EnginePipeline::Impl::stage_hot_reload() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_audio() noexcept { audio::update_audio(); }
+
+// ---------------------------------------------------------------------------
+// Stage: animation (must precede the frame graph: render prep bakes each
+// draw's palette slot, so poses and slots have to be current-frame)
+// ---------------------------------------------------------------------------
+
+void EnginePipeline::Impl::stage_animation() noexcept {
+  if (!isPlaying) {
+    return;
+  }
+  // One evaluation per fixed simulation step, matching the frame graph's
+  // stepping — never per render frame, or playback speed would track the
+  // uncapped render rate.
+  for (std::size_t step = 0U; step < updateStepCount; ++step) {
+    runtime::update_animations(*world, static_cast<float>(kFixedDeltaSeconds));
+    scripting::dispatch_animation_event_callbacks();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Stage: frame graph (job submission + execution)
@@ -1070,8 +1090,6 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
   scripting::flush_deferred_mutations();
 
   if (isPlaying) {
-    runtime::update_animations(*world, static_cast<float>(kFixedDeltaSeconds));
-    scripting::dispatch_animation_event_callbacks();
     runtime::update_spring_arm_cameras(*world,
                                        static_cast<float>(kFixedDeltaSeconds));
     math::Vec3 camPos, camTarget, camUp;

@@ -329,6 +329,39 @@ int check_queued_params() {
   return 0;
 }
 
+/// EXPECTATION: reset_anim_controllers releases every cached slot (the
+/// scene-load and shutdown paths call it), the released slot reads as
+/// empty, and the same path re-acquires a valid slot afterwards — so
+/// repeated scene loads can never exhaust the fixed registry.
+int check_reset_releases_slots() {
+  engine::runtime::reset_anim_controllers();
+  const std::uint32_t slot =
+      engine::runtime::acquire_anim_controller(kControllerVirtualPath);
+  if ((slot == kInvalidAnimSlot) ||
+      (engine::runtime::get_anim_controller(slot) == nullptr)) {
+    std::puts("initial acquire failed");
+    return 1;
+  }
+
+  engine::runtime::reset_anim_controllers();
+  if (engine::runtime::get_anim_controller(slot) != nullptr) {
+    std::puts("reset left the slot readable");
+    return 1;
+  }
+
+  const std::uint32_t reacquired =
+      engine::runtime::acquire_anim_controller(kControllerVirtualPath);
+  if (reacquired == kInvalidAnimSlot) {
+    std::puts("re-acquire after reset failed");
+    return 1;
+  }
+  if (engine::runtime::get_anim_controller(reacquired) == nullptr) {
+    std::puts("re-acquired slot not readable");
+    return 1;
+  }
+  return 0;
+}
+
 /// EXPECTATION: a missing controller path leaves the component unbound and
 /// publishes zero palettes instead of crashing.
 int check_missing_controller() {
@@ -380,6 +413,9 @@ int main() {
   }
   if (result == 0) {
     result = check_queued_params();
+  }
+  if (result == 0) {
+    result = check_reset_releases_slots();
   }
   if (result == 0) {
     result = check_missing_controller();

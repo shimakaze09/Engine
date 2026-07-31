@@ -13,6 +13,7 @@
 #include "engine/core/vfs.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/runtime/animation_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/dap_server.h"
@@ -157,6 +158,7 @@ void shutdown() noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
 
   shutdown_editor_bridge(bridge);
+  runtime::reset_anim_controllers();
   renderer::shutdown_renderer();
   audio::shutdown_audio();
   scripting::dap_stop();

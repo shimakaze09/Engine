@@ -2,6 +2,8 @@
 
 #include "engine/runtime/scene_serializer.h"
 
+#include "engine/runtime/animation_system.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -918,6 +920,7 @@ void reset_world(World &world) noexcept {
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();
+  reset_anim_controllers();
 }
 
 /// Saves the requested resource for scene.
@@ -1119,6 +1122,11 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   }
 
   world = *committedWorld;
+  // The replaced world's components are gone, so their cached animation
+  // controllers are released; the loaded scene's components re-acquire
+  // lazily on the next animation update (controllerSlot is runtime state
+  // and never serialized).
+  reset_anim_controllers();
   return true;
 }
 
