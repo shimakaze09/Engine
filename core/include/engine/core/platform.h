@@ -30,6 +30,9 @@ bool make_render_context_current() noexcept;
 void release_render_context() noexcept;
 /// Swaps the window's front/back buffers.
 void swap_render_buffers() noexcept;
+/// Sets the present interval (0 off, 1 on, -1 adaptive; adaptive falls
+/// back to 1 when the driver rejects it). Requires a current GL context.
+bool set_render_vsync(int interval) noexcept;
 /// GL function loader (wraps SDL_GL_GetProcAddress).
 void *get_gl_proc_address(const char *name) noexcept;
 /// Drawable size in pixels (may differ from window size on HiDPI).

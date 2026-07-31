@@ -312,6 +312,21 @@ void swap_render_buffers() noexcept {
   }
 }
 
+bool set_render_vsync(int interval) noexcept {
+  if (g_window == nullptr) {
+    return false;
+  }
+  if (SDL_GL_SetSwapInterval(interval)) {
+    return true;
+  }
+  if ((interval == -1) && SDL_GL_SetSwapInterval(1)) {
+    log_sdl_error("adaptive vsync unavailable; fell back to vsync on");
+    return true;
+  }
+  log_sdl_error("failed to set swap interval");
+  return false;
+}
+
 void *get_gl_proc_address(const char *name) noexcept {
   if (name == nullptr) {
     return nullptr;

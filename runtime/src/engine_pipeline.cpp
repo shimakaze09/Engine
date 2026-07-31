@@ -49,6 +49,7 @@
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/spring_arm_update.h"
+#include "frame_pacing.h"
 #include "engine_bootstrap_content.h"
 #include "engine_frame_collect.h"
 #include "engine_runtime_streaming.h"
@@ -421,6 +422,7 @@ struct EnginePipeline::Impl final {
   bool isPaused = false;
   bool runPhysics = false;
   bool runFrameGraph = false;
+  int appliedVsync = 1;
   std::size_t updateStepCount = 0U;
   double frameMs = 0.0;
   double utilizationPct = 0.0;
@@ -445,6 +447,7 @@ struct EnginePipeline::Impl final {
   void stage_render() noexcept;
   void stage_diagnostics() noexcept;
   void stage_frame_cleanup() noexcept;
+  void stage_frame_pacing() noexcept;
 };
 
 EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
@@ -549,6 +552,12 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   create_bootstrap_scene(world.get(), meshIds);
 
+  core::cvar_register_int("r_vsync", 1,
+                          "Present interval: 0 off, 1 on, -1 adaptive");
+  core::cvar_register_int("r_max_fps", 0,
+                          "Frame cap in FPS (0 = uncapped; applies on top "
+                          "of vsync)");
+
   previousTick = Clock::now();
   accumulator = 0.0;
   simulationTimeSeconds = 0.0;
@@ -591,6 +600,7 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   stage_render();
   stage_diagnostics();
   stage_frame_cleanup();
+  stage_frame_pacing();
 
   core::profiler_end_frame();
   return running;
@@ -1158,6 +1168,13 @@ void EnginePipeline::Impl::stage_render() noexcept {
     return;
   }
 
+  const int requestedVsync = runtime::normalize_vsync_interval(
+      core::cvar_get_int("r_vsync", 1));
+  if (requestedVsync != appliedVsync) {
+    appliedVsync = requestedVsync;
+    static_cast<void>(core::set_render_vsync(requestedVsync));
+  }
+
   if ((bridge != nullptr) && (bridge->new_frame != nullptr)) {
     bridge->new_frame();
   }
@@ -1303,6 +1320,21 @@ void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
   if (!core::is_platform_running()) {
     running = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stage: frame pacing (must stay last: waits out the r_max_fps budget)
+// ---------------------------------------------------------------------------
+
+void EnginePipeline::Impl::stage_frame_pacing() noexcept {
+  const int maxFps = core::cvar_get_int("r_max_fps", 0);
+  if (maxFps <= 0) {
+    return;
+  }
+  const double elapsedSeconds =
+      std::chrono::duration<double>(Clock::now() - frameStart).count();
+  runtime::wait_for_frame_cap(
+      runtime::frame_cap_wait_seconds(elapsedSeconds, maxFps));
 }
 
 // ===========================================================================

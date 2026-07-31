@@ -108,6 +108,14 @@ engine_add_test_executable(engine_unit_animation
     engine_math
 )
 
+engine_add_test_executable(engine_unit_frame_pacing
+    SOURCES
+    frame_pacing_test.cpp
+    ${CMAKE_SOURCE_DIR}/runtime/src/frame_pacing.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp
