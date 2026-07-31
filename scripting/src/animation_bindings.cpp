@@ -16,7 +16,7 @@ extern "C" {
 
 #include <cstddef>
 
-#include "engine/runtime/animation_system.h"
+#include "engine/scripting/scripting.h"
 
 namespace engine::scripting {
 
@@ -27,7 +27,14 @@ int g_animEventHandlers[kMaxAnimEventHandlers] = {
     LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF,
     LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
 
+AnimationScriptBridge g_animationBridge{};
+
 } // namespace
+
+void set_animation_script_bridge(
+    const AnimationScriptBridge &bridge) noexcept {
+  g_animationBridge = bridge;
+}
 
 // engine.set_anim_param(entity, name, value) → bool
 // Queued and applied at the next fixed-step animation update, so scripts
@@ -41,7 +48,8 @@ int lua_engine_set_anim_param(lua_State *state) noexcept {
   }
   const char *name = lua_tostring(state, 2);
   const float value = static_cast<float>(lua_tonumber(state, 3));
-  const bool ok = runtime::queue_anim_param(entity, name, value);
+  const bool ok = (g_animationBridge.queueParam != nullptr) &&
+                  g_animationBridge.queueParam(entity, name, value);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -94,14 +102,17 @@ void clear_anim_event_handlers(lua_State *state) noexcept {
 
 void dispatch_anim_event_handlers() noexcept {
   lua_State *state = current_lua_state();
-  const std::size_t eventCount = runtime::fired_anim_event_count();
-  if ((state == nullptr) || (eventCount == 0U)) {
+  if ((state == nullptr) || (g_animationBridge.firedEventCount == nullptr) ||
+      (g_animationBridge.firedEventAt == nullptr)) {
     return;
   }
+  const std::size_t eventCount = g_animationBridge.firedEventCount();
 
   for (std::size_t i = 0U; i < eventCount; ++i) {
-    const runtime::FiredAnimEvent *event = runtime::fired_anim_event_at(i);
-    if (event == nullptr) {
+    core::Entity entity{};
+    const char *eventName = nullptr;
+    if (!g_animationBridge.firedEventAt(i, &entity, &eventName) ||
+        (eventName == nullptr)) {
       continue;
     }
 
@@ -114,8 +125,8 @@ void dispatch_anim_event_handlers() noexcept {
         lua_pop(state, 1);
         continue;
       }
-      push_entity_handle(state, event->entity);
-      lua_pushstring(state, event->name);
+      push_entity_handle(state, entity);
+      lua_pushstring(state, eventName);
       if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
         log_lua_error("on_anim_event_handler");
       }
@@ -123,8 +134,8 @@ void dispatch_anim_event_handlers() noexcept {
 
     lua_getglobal(state, "on_anim_event");
     if (lua_isfunction(state, -1)) {
-      push_entity_handle(state, event->entity);
-      lua_pushstring(state, event->name);
+      push_entity_handle(state, entity);
+      lua_pushstring(state, eventName);
       if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
         log_lua_error("on_anim_event");
       }

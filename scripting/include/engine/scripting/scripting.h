@@ -5,11 +5,28 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/entity.h"
+
 namespace engine::runtime {
 class World;
 } // namespace engine::runtime
 
 namespace engine::scripting {
+
+/// Function-pointer bridge the runtime installs so the animation Lua
+/// bindings reach the animation system without an upward link dependency
+/// (scripting never links engine_runtime).
+struct AnimationScriptBridge final {
+  bool (*queueParam)(core::Entity entity, const char *name,
+                     float value) noexcept = nullptr;
+  std::size_t (*firedEventCount)() noexcept = nullptr;
+  bool (*firedEventAt)(std::size_t index, core::Entity *outEntity,
+                       const char **outName) noexcept = nullptr;
+};
+
+/// Installs (or, with a default-constructed bridge, clears) the animation
+/// bridge the Lua animation bindings call through.
+void set_animation_script_bridge(const AnimationScriptBridge &bridge) noexcept;
 
 /// Initializes the owning system for scripting.
 bool initialize_scripting() noexcept;
