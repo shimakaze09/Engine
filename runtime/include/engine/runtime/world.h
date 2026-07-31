@@ -160,6 +160,35 @@ struct FoliagePatchComponent final {
   FoliageInstance instances[kMaxInstances] = {};
 };
 
+/// One animation parameter the state machine's transitions read; set from
+/// gameplay by name hash.
+struct AnimParam final {
+  std::uint32_t nameHash = 0U;
+  float value = 0.0F;
+};
+
+/// Skeletal animation playback: references an animation controller JSON
+/// (skeleton, clips, states, transitions) by VFS path and carries the
+/// runtime state-machine position, crossfade progress, parameters, and
+/// the renderer palette slot assigned for the current frame.
+struct AnimationComponent final {
+  static constexpr std::size_t kMaxPathLength = 127U; // +1 for null
+  static constexpr std::size_t kMaxParams = 8U;
+  char controllerPath[kMaxPathLength + 1U] = {};
+  float playbackSpeed = 1.0F;
+  bool playing = true;
+  std::uint32_t controllerSlot = 0xFFFFFFFFU;
+  std::uint32_t currentState = 0U;
+  std::uint32_t previousState = 0U;
+  float stateTime = 0.0F;
+  float previousStateTime = 0.0F;
+  float blendRemaining = 0.0F;
+  float blendDuration = 0.0F;
+  std::uint32_t paletteSlot = 0xFFFFFFFFU;
+  std::uint32_t paramCount = 0U;
+  AnimParam params[kMaxParams] = {};
+};
+
 /// Spring arm component: drives a third-person camera boom that shortens on
 /// collision and smoothly interpolates length.
 struct SpringArmComponent final {
@@ -204,6 +233,7 @@ public:
   static constexpr std::size_t kMaxReflectionProbeComponents = 64U;
   static constexpr std::size_t kMaxSceneCaptureComponents = 8U;
   static constexpr std::size_t kMaxFoliagePatchComponents = 128U;
+  static constexpr std::size_t kMaxAnimationComponents = 64U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -418,6 +448,20 @@ public:
   /// Pointer to the entity's script component, or nullptr when the handle is
   /// stale or the component is absent (no logging).
   const ScriptComponent *get_script_component_ptr(Entity entity) const noexcept;
+
+  /// Adds or replaces the entity's animation component.
+  bool add_animation_component(Entity entity,
+                               const AnimationComponent &component) noexcept;
+  /// Removes the entity's animation component.
+  bool remove_animation_component(Entity entity) noexcept;
+  /// Copies the entity's animation component into outComponent.
+  bool get_animation_component(Entity entity,
+                               AnimationComponent *outComponent) const noexcept;
+  /// Writable pointer to the entity's animation component, or nullptr.
+  AnimationComponent *get_animation_component_ptr(Entity entity) noexcept;
+  /// Read-only pointer to the entity's animation component, or nullptr.
+  const AnimationComponent *
+  get_animation_component_ptr(Entity entity) const noexcept;
 
   /// Adds or replaces the entity's light component. Requires the Input phase
   /// and a live entity; logs and returns false otherwise or when storage is
@@ -795,6 +839,9 @@ private:
   using FoliagePatchSet =
       core::SparseSet<Entity, FoliagePatchComponent, kMaxEntities,
                       kMaxFoliagePatchComponents>;
+  using AnimationComponentSet =
+      core::SparseSet<Entity, AnimationComponent, kMaxEntities,
+                      kMaxAnimationComponents>;
 
   /// Returns whether is supported component.
   template <typename Component> static consteval bool is_supported_component() {
@@ -810,7 +857,8 @@ private:
            std::is_same_v<C, SpotLightComponent> ||
            std::is_same_v<C, ReflectionProbeComponent> ||
            std::is_same_v<C, SceneCaptureComponent> ||
-           std::is_same_v<C, FoliagePatchComponent>;
+           std::is_same_v<C, FoliagePatchComponent> ||
+           std::is_same_v<C, AnimationComponent>;
   }
 
   /// Returns whether is mutation phase.
@@ -927,6 +975,8 @@ private:
       return m_sceneCaptures.count();
     } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
       return m_foliagePatches.count();
+    } else if constexpr (std::is_same_v<C, AnimationComponent>) {
+      return m_animationComponents.count();
     } else {
       return 0U;
     }
@@ -969,6 +1019,8 @@ private:
       return m_sceneCaptures.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
       return m_foliagePatches.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, AnimationComponent>) {
+      return m_animationComponents.get_ptr(entity);
     } else {
       return nullptr;
     }
@@ -1119,6 +1171,11 @@ private:
       for (std::size_t i = 0U; i < m_foliagePatches.count(); ++i) {
         fn(m_foliagePatches.entity_at(i), m_foliagePatches.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, AnimationComponent>) {
+      for (std::size_t i = 0U; i < m_animationComponents.count(); ++i) {
+        fn(m_animationComponents.entity_at(i),
+           m_animationComponents.component_at(i));
+      }
     }
   }
 
@@ -1194,6 +1251,7 @@ private:
   ReflectionProbeSet m_reflectionProbes{};
   SceneCaptureSet m_sceneCaptures{};
   FoliagePatchSet m_foliagePatches{};
+  AnimationComponentSet m_animationComponents{};
   physics::PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
   TimerManager m_timerManager{};

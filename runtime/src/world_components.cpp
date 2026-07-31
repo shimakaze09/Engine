@@ -759,6 +759,40 @@ World::get_script_component_ptr(Entity entity) const noexcept {
   return get_component_ptr_checked(m_scriptComponents, entity);
 }
 
+bool World::add_animation_component(
+    Entity entity, const AnimationComponent &component) noexcept {
+  if (!check_component_mutation(entity, "add_animation_component")) {
+    return false;
+  }
+
+  AnimationComponent safe = component;
+  core::copy_string(safe.controllerPath, sizeof(safe.controllerPath),
+                    component.controllerPath);
+
+  return m_animationComponents.add(entity, safe);
+}
+
+bool World::remove_animation_component(Entity entity) noexcept {
+  return remove_component_checked(m_animationComponents, entity,
+                                  "remove_animation_component");
+}
+
+bool World::get_animation_component(
+    Entity entity, AnimationComponent *outComponent) const noexcept {
+  return get_component_checked(m_animationComponents, entity, outComponent,
+                               "get_animation_component");
+}
+
+AnimationComponent *World::get_animation_component_ptr(
+    Entity entity) noexcept {
+  return get_component_ptr_checked(m_animationComponents, entity);
+}
+
+const AnimationComponent *
+World::get_animation_component_ptr(Entity entity) const noexcept {
+  return get_component_ptr_checked(m_animationComponents, entity);
+}
+
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
   return add_component_checked(m_springArms, entity, component,

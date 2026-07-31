@@ -352,9 +352,10 @@ bool read_light_component(const core::JsonParser &parser,
 //    authored before asset ids.
 //  - LightComponent: `type` is an enum that must clamp to a valid LightType
 //    on load rather than round-tripping arbitrary integers.
-//  - FoliagePatchComponent, NameComponent, ScriptComponent: fixed-size
-//    arrays and bounded strings; reflection has no array/string field kinds
-//    (their zero-field descriptors are documented in reflect_types.cpp).
+//  - FoliagePatchComponent, NameComponent, ScriptComponent,
+//    AnimationComponent: fixed-size arrays and bounded strings; reflection
+//    has no array/string field kinds (their zero-field descriptors are
+//    documented in reflect_types.cpp).
 
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
@@ -596,6 +597,22 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    core::JsonValue animationValue{};
+    if (parser.get_object_field(components, kJsonKeyAnimationComponent,
+                                &animationValue)) {
+      AnimationComponent animationComp{};
+      if (!parser.copy_string(animationValue, animationComp.controllerPath,
+                              sizeof(animationComp.controllerPath))) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to parse AnimationComponent path");
+      }
+
+      if (!targetWorld.add_animation_component(entity, animationComp)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load AnimationComponent");
+      }
+    }
+
     core::JsonValue springArmValue{};
     if (parser.get_object_field(components, "SpringArmComponent",
                                 &springArmValue)) {
@@ -828,6 +845,13 @@ bool serialize_scene_to_writer(const World &world,
     if (world.get_script_component(entity, &script) &&
         (script.scriptPath[0] != '\0')) {
       writer.write_string(kJsonKeyScriptComponent, script.scriptPath);
+    }
+
+    AnimationComponent animation{};
+    if (world.get_animation_component(entity, &animation) &&
+        (animation.controllerPath[0] != '\0')) {
+      writer.write_string(kJsonKeyAnimationComponent,
+                          animation.controllerPath);
     }
 
     SpringArmComponent springArm{};

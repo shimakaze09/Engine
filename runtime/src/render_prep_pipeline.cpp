@@ -238,6 +238,11 @@ void render_prep_chunk_job(void *userData) noexcept {
               }
             }
             command.modelMatrix = transforms[i].matrix;
+            const AnimationComponent *animation =
+                jobData->world->get_animation_component_ptr(entities[i]);
+            if (animation != nullptr) {
+              command.skinPalette = animation->paletteSlot;
+            }
             command.sortKey.value =
                 build_draw_sort_key(command.material, runtimeMesh, center, vp);
 

@@ -602,6 +602,19 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
     )
 
+    engine_add_test_executable(engine_unit_anim_controller
+        SOURCES
+        anim_controller_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/anim_cook.cpp
+        PRIVATE_DEPS
+        engine_runtime
+        engine_renderer
+        engine_core
+        engine_math
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+    )
+
     engine_add_test_executable(engine_unit_skinned_mesh_cook
         SOURCES
         skinned_mesh_cook_test.cpp
