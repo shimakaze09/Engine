@@ -1071,6 +1071,7 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
 
   if (isPlaying) {
     runtime::update_animations(*world, static_cast<float>(kFixedDeltaSeconds));
+    scripting::dispatch_animation_event_callbacks();
     runtime::update_spring_arm_cameras(*world,
                                        static_cast<float>(kFixedDeltaSeconds));
     math::Vec3 camPos, camTarget, camUp;

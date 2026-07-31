@@ -292,6 +292,43 @@ int check_state_machine_and_events() {
   return 0;
 }
 
+/// EXPECTATION: a parameter queued through the phase-safe script entry is
+/// drained at the start of the next update, so the same update already
+/// takes the idle-to-walk transition.
+int check_queued_params() {
+  engine::runtime::reset_anim_controllers();
+  std::unique_ptr<engine::runtime::World> world(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const auto entity = world->create_entity();
+  AnimationComponent component{};
+  std::snprintf(component.controllerPath, sizeof(component.controllerPath),
+                "%s", kControllerVirtualPath);
+  if (!world->add_animation_component(entity, component)) {
+    std::puts("add_animation_component failed");
+    return 1;
+  }
+  engine::runtime::update_animations(*world, kFixedDt);
+
+  if (!engine::runtime::queue_anim_param(entity, "speed", 1.0F)) {
+    std::puts("queue_anim_param failed");
+    return 1;
+  }
+  engine::runtime::update_animations(*world, kFixedDt);
+  const AnimationComponent *walking =
+      world->get_animation_component_ptr(entity);
+  if ((walking == nullptr) || (walking->currentState != 1U)) {
+    std::puts("queued param did not drive the transition");
+    return 1;
+  }
+  engine::renderer::set_skin_palettes(nullptr, 0U);
+  return 0;
+}
+
 /// EXPECTATION: a missing controller path leaves the component unbound and
 /// publishes zero palettes instead of crashing.
 int check_missing_controller() {
@@ -340,6 +377,9 @@ int main() {
   int result = check_controller_parse_and_cache();
   if (result == 0) {
     result = check_state_machine_and_events();
+  }
+  if (result == 0) {
+    result = check_queued_params();
   }
   if (result == 0) {
     result = check_missing_controller();

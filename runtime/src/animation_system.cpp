@@ -25,6 +25,17 @@ AnimControllerData g_controllers[kMaxAnimControllers]{};
 FiredAnimEvent g_firedEvents[kMaxFiredAnimEvents]{};
 std::size_t g_firedEventCount = 0U;
 
+/// One queued script-side parameter write drained by update_animations.
+struct PendingAnimParam final {
+  core::Entity entity{};
+  std::uint32_t nameHash = 0U;
+  float value = 0.0F;
+};
+
+constexpr std::size_t kMaxPendingAnimParams = 64U;
+PendingAnimParam g_pendingParams[kMaxPendingAnimParams]{};
+std::size_t g_pendingParamCount = 0U;
+
 /// Logs one controller load failure with its path.
 void log_controller_error(const char *path, const char *reason) noexcept {
   char message[224] = {};
@@ -278,6 +289,23 @@ bool parse_controller(const char *virtualPath,
   return ok;
 }
 
+/// Writes (or adds) a parameter by hash; false when the budget is full.
+bool set_param_by_hash(AnimationComponent &component, std::uint32_t nameHash,
+                       float value) noexcept {
+  for (std::uint32_t i = 0U; i < component.paramCount; ++i) {
+    if (component.params[i].nameHash == nameHash) {
+      component.params[i].value = value;
+      return true;
+    }
+  }
+  if (component.paramCount >= AnimationComponent::kMaxParams) {
+    return false;
+  }
+  component.params[component.paramCount] = AnimParam{nameHash, value};
+  ++component.paramCount;
+  return true;
+}
+
 /// Current value of a named parameter on the component (0 when unset).
 float param_value(const AnimationComponent &component,
                   std::uint32_t nameHash) noexcept {
@@ -410,12 +438,24 @@ void reset_anim_controllers() noexcept {
     controller = AnimControllerData{};
   }
   g_firedEventCount = 0U;
+  g_pendingParamCount = 0U;
 }
 
 void update_animations(World &world, float dt) noexcept {
   static renderer::SkinPalette palettes[renderer::kMaxSkinPalettes]{};
   std::size_t paletteCount = 0U;
   g_firedEventCount = 0U;
+
+  for (std::size_t i = 0U; i < g_pendingParamCount; ++i) {
+    const PendingAnimParam &pending = g_pendingParams[i];
+    AnimationComponent *component =
+        world.get_animation_component_ptr(pending.entity);
+    if (component != nullptr) {
+      static_cast<void>(
+          set_param_by_hash(*component, pending.nameHash, pending.value));
+    }
+  }
+  g_pendingParamCount = 0U;
 
   world.for_each<AnimationComponent>([&](core::Entity entity,
                                          const AnimationComponent &) {
@@ -533,19 +573,20 @@ bool set_anim_param(World &world, core::Entity entity, const char *name,
   if (component == nullptr) {
     return false;
   }
+  return set_param_by_hash(*component, core::fnv1a_32(name), value);
+}
 
-  const std::uint32_t nameHash = core::fnv1a_32(name);
-  for (std::uint32_t i = 0U; i < component->paramCount; ++i) {
-    if (component->params[i].nameHash == nameHash) {
-      component->params[i].value = value;
-      return true;
-    }
-  }
-  if (component->paramCount >= AnimationComponent::kMaxParams) {
+bool queue_anim_param(core::Entity entity, const char *name,
+                      float value) noexcept {
+  if ((name == nullptr) || (name[0] == '\0') ||
+      (g_pendingParamCount >= kMaxPendingAnimParams)) {
     return false;
   }
-  component->params[component->paramCount] = AnimParam{nameHash, value};
-  ++component->paramCount;
+  PendingAnimParam &pending = g_pendingParams[g_pendingParamCount];
+  pending.entity = entity;
+  pending.nameHash = core::fnv1a_32(name);
+  pending.value = value;
+  ++g_pendingParamCount;
   return true;
 }
 

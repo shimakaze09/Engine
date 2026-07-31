@@ -20,6 +20,7 @@ add_custom_command(
 engine_add_module_library(engine_scripting
     SOURCES
     src/scripting.cpp
+    src/animation_bindings.cpp
     src/asset_bindings.cpp
     src/audio_bindings.cpp
     src/binding_util.cpp

@@ -7,6 +7,7 @@
 #include "body_bindings.h"
 #include "camera_bindings.h"
 #include "cheat_bindings.h"
+#include "animation_bindings.h"
 #include "collision_bindings.h"
 #include "coroutine_bindings.h"
 #include "debug_bindings.h"
@@ -249,6 +250,13 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_remove_collision_handler);
   lua_setfield(state, -2, "remove_collision_handler");
 
+  lua_pushcfunction(state, &lua_engine_set_anim_param);
+  lua_setfield(state, -2, "set_anim_param");
+  lua_pushcfunction(state, &lua_engine_on_anim_event_register);
+  lua_setfield(state, -2, "on_anim_event_handler");
+  lua_pushcfunction(state, &lua_engine_remove_anim_event_handler);
+  lua_setfield(state, -2, "remove_anim_event_handler");
+
   lua_pushcfunction(state, &lua_engine_set_timeout);
   lua_setfield(state, -2, "set_timeout");
   lua_pushcfunction(state, &lua_engine_set_interval);
@@ -431,6 +439,7 @@ void shutdown_scripting() noexcept {
     reset_entity_script_bindings();
     clear_lua_timer_bindings(state);
     clear_collision_handlers(state);
+    clear_anim_event_handlers(state);
     clear_lua_coroutines(state);
     shutdown_lua_state();
   }
@@ -550,6 +559,10 @@ void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept {
   dispatch_collision_handlers(lua_state(), pairData, pairCount,
                               push_entity_handle_from_index, log_lua_error);
+}
+
+void dispatch_animation_event_callbacks() noexcept {
+  dispatch_anim_event_handlers();
 }
 
 namespace {

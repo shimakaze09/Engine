@@ -55,6 +55,10 @@ bool debugger_add_breakpoint(const char *file, int line) noexcept;
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept;
 
+// Dispatch registered Lua handlers and the global on_anim_event fallback
+// for every animation event fired by the last fixed-step animation update.
+void dispatch_animation_event_callbacks() noexcept;
+
 // Set the current frame index; exposed to Lua via engine.frame_count().
 void set_frame_index(std::uint32_t frameIndex) noexcept;
 

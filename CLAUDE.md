@@ -140,16 +140,19 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   debugger, hot reload with state persist, generated bindings
   (`bindable_api.h` → binding generator), and domain binding TUs in `src/`
   (entity lifecycle, body, mesh/material, physics, lights, camera, audio,
-  asset, game, input, scene, timers, coroutines, collision, touch, cheat,
-  debug, persist, entity pool/script/handle, `binding_util`). ~180 functions
-  on one global `engine` table.
+  asset, game, input, scene, timers, coroutines, collision, animation,
+  touch, cheat, debug, persist, entity pool/script/handle, `binding_util`).
+  ~180 functions on one global `engine` table.
 - `runtime/` — public `engine::bootstrap/run/shutdown` + `EngineConfig`,
   `EnginePipeline` (13 named frame stages, fixed 1/60 step, job-graph frame),
-  `World` ECS (13 component types on SparseSets, WorldPhase gating,
+  `World` ECS (14 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
   (shared `serialization_util`, reflection-backed components), physics/
-  scripting/editor bridges, render-prep pipeline, service registry, timers,
-  cameras, spring arms, game mode/state, player controllers, entity pool.
+  scripting/editor bridges, render-prep pipeline, skeletal animation (CPU
+  pose evaluation in `animation.cpp`, cooked .skel/.anim loaders, the
+  controller state machine + palette handoff in `animation_system.cpp`),
+  service registry, timers, cameras, spring arms, game mode/state, player
+  controllers, entity pool.
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle),
   `editor_commands` (undoable edits), panel TUs (main/inspector/diagnostics/
   assets/viewport), editor + debug cameras, command history.

@@ -106,6 +106,11 @@ void update_animations(World &world, float dt) noexcept;
 bool set_anim_param(World &world, core::Entity entity, const char *name,
                     float value) noexcept;
 
+/// Queues a parameter write applied at the start of the next
+/// update_animations call — the phase-safe entry point for scripts.
+bool queue_anim_param(core::Entity entity, const char *name,
+                      float value) noexcept;
+
 /// Number of events fired by the last update_animations call.
 std::size_t fired_anim_event_count() noexcept;
 
