@@ -263,6 +263,46 @@ void draw_selected_collider_overlay(
   }
 }
 
+// Editor viewport projection constants shared by the gizmo and drop ray.
+constexpr float kViewportFov = 1.0471975512F;
+constexpr float kViewportNear = 0.1F;
+constexpr float kViewportFar = 100.0F;
+
+/// Projects the current mouse position through the editor camera onto the
+/// y = 0 ground plane (falling back to a point ahead of the camera when
+/// the ray misses) to place viewport asset drops.
+math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
+                                        const ImVec2 &imageSize) noexcept {
+  const renderer::CameraState cam =
+      editor_camera_state(editor_session().editorCamera);
+  const math::Vec3 forward =
+      math::normalize(math::sub(cam.target, cam.position));
+  constexpr float kFallbackDistance = 6.0F;
+  const math::Vec3 fallback =
+      math::add(cam.position, math::mul(forward, kFallbackDistance));
+  if ((imageSize.x <= 0.0F) || (imageSize.y <= 0.0F)) {
+    return fallback;
+  }
+
+  const ImVec2 mouse = ImGui::GetMousePos();
+  const float ndcX = (((mouse.x - imagePos.x) / imageSize.x) * 2.0F) - 1.0F;
+  const float ndcY = 1.0F - (((mouse.y - imagePos.y) / imageSize.y) * 2.0F);
+  const float tanHalfFov = std::tan(kViewportFov * 0.5F);
+  const float aspect = imageSize.x / imageSize.y;
+  const math::Vec3 right = math::normalize(math::cross(forward, cam.up));
+  const math::Vec3 up = math::cross(right, forward);
+  const math::Vec3 dir = math::normalize(
+      math::add(forward, math::add(math::mul(right, ndcX * tanHalfFov * aspect),
+                                   math::mul(up, ndcY * tanHalfFov))));
+  if (dir.y < 0.0F) {
+    const float t = -cam.position.y / dir.y;
+    if ((t > 0.0F) && (t <= kViewportFar)) {
+      return math::add(cam.position, math::mul(dir, t));
+    }
+  }
+  return fallback;
+}
+
 } // namespace
 
 void draw_scene_viewport_panel() noexcept {
@@ -292,6 +332,32 @@ void draw_scene_viewport_panel() noexcept {
     ImGui::TextUnformatted("Waiting for renderer...");
   }
 
+  // Dropping a browser mesh asset spawns it where the drop ray meets the
+  // ground plane, as an undoable create.
+  if (ImGui::BeginDragDropTarget()) {
+    if (const ImGuiPayload *payload =
+            ImGui::AcceptDragDropPayload("ASSET_VIRTUAL_PATH")) {
+      char virtualPath[512] = {};
+      if ((payload->Data != nullptr) && (payload->DataSize > 0) &&
+          (static_cast<std::size_t>(payload->DataSize) <=
+           sizeof(virtualPath)) &&
+          world_is_editable()) {
+        std::memcpy(virtualPath, payload->Data,
+                    static_cast<std::size_t>(payload->DataSize));
+        virtualPath[sizeof(virtualPath) - 1U] = '\0';
+        runtime::Transform spawnTransform{};
+        spawnTransform.position =
+            viewport_drop_world_position(cursorScreenPos, regionSize);
+        const runtime::Entity spawned =
+            execute_asset_spawn(virtualPath, spawnTransform);
+        if (spawned != runtime::kInvalidEntity) {
+          select_entity(spawned.index, false);
+        }
+      }
+    }
+    ImGui::EndDragDropTarget();
+  }
+
   const bool editable = world_is_editable();
   const runtime::Entity selectedEntity =
       (editor_session().world != nullptr &&
@@ -314,14 +380,10 @@ void draw_scene_viewport_panel() noexcept {
     const renderer::CameraState cam =
         editor_camera_state(editor_session().editorCamera);
 
-    constexpr float kDefaultFov = 1.0471975512F;
-    constexpr float kNear = 0.1F;
-    constexpr float kFar = 100.0F;
-
     const float aspect = regionSize.x / regionSize.y;
     const math::Mat4 viewMat = math::look_at(cam.position, cam.target, cam.up);
     const math::Mat4 projMat =
-        math::perspective(kDefaultFov, aspect, kNear, kFar);
+        math::perspective(kViewportFov, aspect, kViewportNear, kViewportFar);
 
     runtime::Transform transform{};
     editor_session().world->get_transform(selectedEntity, &transform);

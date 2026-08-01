@@ -337,8 +337,9 @@ void EntityCreateCommand::execute() noexcept {
   }
   const runtime::Entity entity =
       (persistentId == runtime::kInvalidPersistentId)
-          ? world->create_scene_object()
-          : world->create_scene_object_with_persistent_id(persistentId);
+          ? world->create_scene_object(transform)
+          : world->create_scene_object_with_persistent_id(persistentId,
+                                                          transform);
   if (entity == runtime::kInvalidEntity) {
     core::log_message(core::LogLevel::Error, "editor",
                       "entity create command could not create the entity");
@@ -349,6 +350,9 @@ void EntityCreateCommand::execute() noexcept {
     make_default_entity_name(entity.index, &name);
   }
   static_cast<void>(world->add_name_component(entity, name));
+  if (hasMesh) {
+    static_cast<void>(world->add_mesh_component(entity, mesh));
+  }
 }
 
 void EntityCreateCommand::undo() noexcept {
@@ -475,6 +479,62 @@ runtime::Entity execute_entity_create() noexcept {
     }
     return entity;
   }
+  editor_session().commandHistory.execute(command);
+  return world->find_entity_by_persistent_id(command->persistentId);
+}
+
+/// Copies the file stem of a virtual asset path into a name component
+/// ("assets/props/rock.mesh" names the spawn "rock").
+static void make_asset_spawn_name(const char *virtualPath,
+                                  runtime::NameComponent *outName) noexcept {
+  if ((virtualPath == nullptr) || (outName == nullptr)) {
+    return;
+  }
+  const char *stem = virtualPath;
+  for (const char *cursor = virtualPath; *cursor != '\0'; ++cursor) {
+    if ((*cursor == '/') || (*cursor == '\\')) {
+      stem = cursor + 1;
+    }
+  }
+  std::snprintf(outName->name, sizeof(outName->name), "%s", stem);
+  char *dot = std::strrchr(outName->name, '.');
+  if ((dot != nullptr) && (dot != outName->name)) {
+    *dot = '\0';
+  }
+}
+
+runtime::Entity execute_asset_spawn(
+    const char *virtualPath, const runtime::Transform &transform) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || (virtualPath == nullptr) ||
+      (virtualPath[0] == '\0')) {
+    return runtime::kInvalidEntity;
+  }
+
+  const std::uint64_t assetId =
+      runtime::editor_request_mesh_asset(virtualPath);
+  if (assetId == 0ULL) {
+    return runtime::kInvalidEntity;
+  }
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    const runtime::Entity entity = world->create_scene_object(transform);
+    if (entity != runtime::kInvalidEntity) {
+      runtime::NameComponent nameComponent{};
+      make_asset_spawn_name(virtualPath, &nameComponent);
+      static_cast<void>(world->add_name_component(entity, nameComponent));
+      runtime::MeshComponent meshComponent{};
+      meshComponent.meshAssetId = assetId;
+      static_cast<void>(world->add_mesh_component(entity, meshComponent));
+    }
+    return entity;
+  }
+
+  command->transform = transform;
+  make_asset_spawn_name(virtualPath, &command->name);
+  command->hasMesh = true;
+  command->mesh.meshAssetId = assetId;
   editor_session().commandHistory.execute(command);
   return world->find_entity_by_persistent_id(command->persistentId);
 }

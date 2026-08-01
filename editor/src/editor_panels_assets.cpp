@@ -59,6 +59,29 @@ namespace engine::editor {
 
 namespace {
 
+/// Builds the VFS virtual path ("<mount>/<relative>") for a browser entry;
+/// false when the entry is outside the configured asset root.
+bool make_asset_virtual_path(const std::filesystem::path &entryPath,
+                             char *outPath, std::size_t capacity) noexcept {
+  std::error_code ec{};
+  const std::filesystem::path relative =
+      std::filesystem::relative(entryPath, editor_asset_root(), ec);
+  if (ec || relative.empty() || (*relative.begin() == "..")) {
+    return false;
+  }
+  const std::string generic = relative.generic_string();
+  const int written = std::snprintf(outPath, capacity, "%s/%s",
+                                    active_config().assetMount,
+                                    generic.c_str());
+  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+}
+
+/// True when the file name ends in .mesh (the drag-to-viewport spawn type).
+bool is_spawnable_mesh_asset(const std::string &filename) noexcept {
+  const char *dot = std::strrchr(filename.c_str(), '.');
+  return (dot != nullptr) && (std::strcmp(dot, ".mesh") == 0);
+}
+
 void draw_asset_tree(const std::filesystem::path &dir) noexcept {
   std::error_code ec{};
   for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
@@ -81,6 +104,17 @@ void draw_asset_tree(const std::filesystem::path &dir) noexcept {
         std::snprintf(editor_session().selectedAssetPath,
                       sizeof(editor_session().selectedAssetPath), "%s",
                       relPath.c_str());
+      }
+      if (is_spawnable_mesh_asset(filename) &&
+          ImGui::BeginDragDropSource()) {
+        char virtualPath[512] = {};
+        if (make_asset_virtual_path(entry.path(), virtualPath,
+                                    sizeof(virtualPath))) {
+          ImGui::SetDragDropPayload("ASSET_VIRTUAL_PATH", virtualPath,
+                                    std::strlen(virtualPath) + 1U);
+        }
+        ImGui::TextUnformatted(filename.c_str());
+        ImGui::EndDragDropSource();
       }
     }
   }

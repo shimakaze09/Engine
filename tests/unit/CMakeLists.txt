@@ -168,6 +168,13 @@ engine_add_test_executable(engine_unit_runtime_world
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_editor_asset_request
+    SOURCES
+    editor_asset_request_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_world_name_lookup
     SOURCES
     world_name_lookup_test.cpp

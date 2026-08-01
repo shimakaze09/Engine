@@ -536,6 +536,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   }
 
   bridge = runtime::editor_bridge();
+  runtime::set_editor_asset_service(&assetDatabaseService);
 
   runtime::bind_scripting_runtime(world.get(), serviceLocator);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
@@ -647,6 +648,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     bridge->set_world(nullptr);
   }
 
+  runtime::set_editor_asset_service(nullptr);
   runtime::unbind_scripting_runtime(serviceLocator);
   serviceRegistry.unregister_services();
 

@@ -139,11 +139,15 @@ struct ReparentCommand final : EditorCommand {
 bool execute_reparent(runtime::Entity child,
                       runtime::Entity newParent) noexcept;
 
-/// Undoable scene-object creation; redo re-creates the entity under its
-/// original persistent id so later history entries keep resolving.
+/// Undoable scene-object creation (optionally carrying an initial mesh for
+/// asset spawns); redo re-creates the entity under its original persistent
+/// id so later history entries keep resolving.
 struct EntityCreateCommand final : EditorCommand {
   runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
   runtime::NameComponent name{};
+  runtime::Transform transform{};
+  bool hasMesh = false;
+  runtime::MeshComponent mesh{};
 
   void execute() noexcept override;
   void undo() noexcept override;
@@ -171,6 +175,11 @@ struct EntityDeleteCommand final : EditorCommand {
 /// Creates a scene object with a default name through the command history;
 /// returns the new entity (kInvalidEntity on failure).
 runtime::Entity execute_entity_create() noexcept;
+/// Spawns a scene object at `transform` referencing the mesh asset behind
+/// `virtualPath` (requesting its async load) through the command history;
+/// returns the new entity (kInvalidEntity on failure).
+runtime::Entity execute_asset_spawn(const char *virtualPath,
+                                    const runtime::Transform &transform) noexcept;
 /// Captures the entity's transform subtree into a delete command; null on
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *

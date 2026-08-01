@@ -659,6 +659,75 @@ int check_entity_delete_restores_subtree() noexcept {
   return finish(0);
 }
 
+/// An asset-spawn create command must place the entity at the requested
+/// transform with its mesh reference, and restore both on redo.
+int check_entity_create_with_mesh_payload() noexcept {
+  using engine::editor::EntityCreateCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::MeshComponent;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 130;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    return finish(131);
+  }
+  command->transform.position = engine::math::Vec3(4.0F, 0.0F, -2.0F);
+  std::snprintf(command->name.name, sizeof(command->name.name), "%s", "rock");
+  command->hasMesh = true;
+  command->mesh.meshAssetId = 777ULL;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  const engine::runtime::PersistentId persistentId = command->persistentId;
+  const Entity created = world->find_entity_by_persistent_id(persistentId);
+  if (created == engine::runtime::kInvalidEntity) {
+    return finish(132);
+  }
+  Transform placed{};
+  MeshComponent meshComponent{};
+  if (!world->get_transform(created, &placed) ||
+      (placed.position.x != 4.0F) || (placed.position.y != 0.0F) ||
+      (placed.position.z != -2.0F) ||
+      !world->get_mesh_component(created, &meshComponent) ||
+      (meshComponent.meshAssetId != 777ULL)) {
+    return finish(133);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != 0U) {
+    return finish(134);
+  }
+
+  history.redo();
+  const Entity redone = world->find_entity_by_persistent_id(persistentId);
+  Transform redonePlaced{};
+  MeshComponent redoneMesh{};
+  if ((redone == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(redone, &redonePlaced) ||
+      (redonePlaced.position.x != 4.0F) ||
+      !world->get_mesh_component(redone, &redoneMesh) ||
+      (redoneMesh.meshAssetId != 777ULL)) {
+    return finish(135);
+  }
+
+  return finish(0);
+}
+
 /// A create-then-edit history chain must survive full undo and redo even
 /// though redo re-creates the entity with a fresh generation.
 int check_create_edit_chain_survives_undo_redo() noexcept {
@@ -800,6 +869,12 @@ int main() {
   }
 
   result = check_entity_delete_restores_subtree();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_entity_create_with_mesh_payload();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;
