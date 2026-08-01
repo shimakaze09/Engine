@@ -138,7 +138,11 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   `FrameFlushContext` in `command_buffer_flush_internal.h`),
   pass resources, shadows (cascade/spot/point), light culling, post stack
   (bloom/SSAO/auto-exposure/tonemap/FXAA), GPU profiler.
-- `audio/` — miniaudio-backed load/play/stop/volume.
+- `audio/` — miniaudio-backed: loaded-sound handles, master/music/sfx
+  bus groups, a fixed one-shot instance pool (spatialized
+  `play_sound_at` + 2D `play_sound_oneshot`), the camera-following 3D
+  listener, and VFS-streamed music (`tools/gen_sounds.py` generates the
+  bundled placeholder WAVs in `assets/sounds/`).
 - `scripting/` — Lua runtime + sandbox (instruction/memory caps), DAP
   debugger, hot reload with state persist, generated bindings
   (`bindable_api.h` → binding generator), and domain binding TUs in `src/`
@@ -301,11 +305,14 @@ stutter) at 60 Hz sim.
   edits AnimationComponent (controller path, playing, speed) with
   undoable add/remove. CUT to parking lot: blend spaces, additive/masked
   blending, montages, root motion, IK.
-- **Audio (from P1-M8, cut down)**: 3D positional playback (attenuation +
-  stereo pan, listener follows the active camera), master/music/sfx buses
-  with volumes, music file streaming, audio events triggerable from Lua
-  and animation events. CUT: HRTF, DSP (reverb/filters/occlusion),
-  Doppler, snapshots/ducking.
+- **Audio (from P1-M8, cut down) — LANDED 2026-08-01**: 3D positional
+  one-shots from a fixed instance pool (attenuation + pan, listener
+  follows the presented camera), master/music/sfx buses with volumes,
+  VFS-streamed music, and Lua audio (`engine.play_sound_at`,
+  `set_bus_volume`, `play_music`, `stop_music`); the sample scene's
+  character walks with footstep animation events playing positional
+  sounds over a streamed ambient loop. CUT: HRTF, DSP
+  (reverb/filters/occlusion), Doppler, snapshots/ducking.
 - **Editor (from P1-M9, cut down)**: scene hierarchy panel (tree,
   drag-drop reparent, multi-select), asset browser drag-to-viewport,
   inspector nested structs/arrays, undo covering every operation the

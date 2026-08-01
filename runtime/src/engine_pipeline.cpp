@@ -1229,6 +1229,12 @@ void EnginePipeline::Impl::stage_render() noexcept {
         static_cast<float>(renderAlpha)));
   }
 
+  const renderer::CameraState listenerCamera = renderer::get_active_camera();
+  audio::set_listener(
+      listenerCamera.position,
+      math::sub(listenerCamera.target, listenerCamera.position),
+      listenerCamera.up);
+
   if ((bridge != nullptr) && (bridge->new_frame != nullptr)) {
     bridge->new_frame();
   }

@@ -508,6 +508,28 @@ void scripting_set_master_volume(float volume) noexcept {
   audio::set_master_volume(volume);
 }
 
+bool scripting_play_sound_at(std::uint32_t soundId, float x, float y, float z,
+                             float volume) noexcept {
+  audio::PlayParams params{};
+  params.volume = volume;
+  return audio::play_sound_at(audio::SoundHandle{soundId},
+                              math::Vec3(x, y, z), params,
+                              audio::AudioBus::Sfx);
+}
+
+void scripting_set_bus_volume(std::uint32_t bus, float volume) noexcept {
+  if (bus <= static_cast<std::uint32_t>(audio::AudioBus::Sfx)) {
+    audio::set_bus_volume(static_cast<audio::AudioBus>(bus), volume);
+  }
+}
+
+bool scripting_play_music(const char *path, float volume,
+                          bool loop) noexcept {
+  return audio::play_music(path, volume, loop);
+}
+
+void scripting_stop_music() noexcept { audio::stop_music(); }
+
 bool scripting_save_scene(const runtime::World *world,
                           const char *path) noexcept {
   return (world != nullptr) && runtime::save_scene(*world, path);
@@ -901,6 +923,10 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_stop_sound,
     &scripting_stop_all_sounds,
     &scripting_set_master_volume,
+    &scripting_play_sound_at,
+    &scripting_set_bus_volume,
+    &scripting_play_music,
+    &scripting_stop_music,
     &scripting_save_scene,
     &scripting_save_prefab,
     &scripting_instantiate_prefab,

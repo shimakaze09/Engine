@@ -119,6 +119,83 @@ int lua_engine_set_master_volume(lua_State *state) noexcept {
   return 0;
 }
 
+// engine.play_sound_at(sound, x, y, z [, volume]) → bool
+// Spatialized fire-and-forget one-shot on the sfx bus.
+int lua_engine_play_sound_at(lua_State *state) noexcept {
+  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
+      !lua_isnumber(state, 3) || !lua_isnumber(state, 4)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  bool ok = false;
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->play_sound_at != nullptr)) {
+    const auto soundId = static_cast<std::uint32_t>(lua_tointeger(state, 1));
+    const auto x = static_cast<float>(lua_tonumber(state, 2));
+    const auto y = static_cast<float>(lua_tonumber(state, 3));
+    const auto z = static_cast<float>(lua_tonumber(state, 4));
+    const float volume =
+        lua_isnumber(state, 5) ? static_cast<float>(lua_tonumber(state, 5))
+                               : 1.0F;
+    ok = runtime_binding().services->play_sound_at(soundId, x, y, z, volume);
+  }
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.set_bus_volume(bus, volume): bus is "master", "music", or "sfx".
+int lua_engine_set_bus_volume(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2)) {
+    return 0;
+  }
+  const char *busName = lua_tostring(state, 1);
+  std::uint32_t bus = 0U;
+  if (std::strcmp(busName, "music") == 0) {
+    bus = 1U;
+  } else if (std::strcmp(busName, "sfx") == 0) {
+    bus = 2U;
+  } else if (std::strcmp(busName, "master") != 0) {
+    return 0;
+  }
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->set_bus_volume != nullptr)) {
+    runtime_binding().services->set_bus_volume(
+        bus, static_cast<float>(lua_tonumber(state, 2)));
+  }
+  return 0;
+}
+
+// engine.play_music(path [, volume, loop]) → bool (streams on the music bus).
+int lua_engine_play_music(lua_State *state) noexcept {
+  if (!lua_isstring(state, 1)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  bool ok = false;
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->play_music != nullptr)) {
+    const float volume =
+        lua_isnumber(state, 2) ? static_cast<float>(lua_tonumber(state, 2))
+                               : 1.0F;
+    const bool loop = (lua_isboolean(state, 3) == 0) ||
+                      (lua_toboolean(state, 3) != 0);
+    ok = runtime_binding().services->play_music(lua_tostring(state, 1),
+                                                volume, loop);
+  }
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.stop_music() stops the streamed track.
+int lua_engine_stop_music(lua_State *state) noexcept {
+  static_cast<void>(state);
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->stop_music != nullptr)) {
+    runtime_binding().services->stop_music();
+  }
+  return 0;
+}
+
 // --- Transform: rotation and scale ---
 
 } // namespace
@@ -138,6 +215,14 @@ void register_audio_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "stop_all_sounds");
   lua_pushcfunction(state, &lua_engine_set_master_volume);
   lua_setfield(state, -2, "set_master_volume");
+  lua_pushcfunction(state, &lua_engine_play_sound_at);
+  lua_setfield(state, -2, "play_sound_at");
+  lua_pushcfunction(state, &lua_engine_set_bus_volume);
+  lua_setfield(state, -2, "set_bus_volume");
+  lua_pushcfunction(state, &lua_engine_play_music);
+  lua_setfield(state, -2, "play_music");
+  lua_pushcfunction(state, &lua_engine_stop_music);
+  lua_setfield(state, -2, "stop_music");
 }
 
 } // namespace engine::scripting

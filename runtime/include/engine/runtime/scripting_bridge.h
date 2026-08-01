@@ -196,6 +196,12 @@ struct RuntimeServices final {
   void (*stop_sound)(std::uint32_t soundId) noexcept = nullptr;
   void (*stop_all_sounds)() noexcept = nullptr;
   void (*set_master_volume)(float volume) noexcept = nullptr;
+  bool (*play_sound_at)(std::uint32_t soundId, float x, float y, float z,
+                        float volume) noexcept = nullptr;
+  void (*set_bus_volume)(std::uint32_t bus, float volume) noexcept = nullptr;
+  bool (*play_music)(const char *path, float volume,
+                     bool loop) noexcept = nullptr;
+  void (*stop_music)() noexcept = nullptr;
 
   bool (*save_scene)(const runtime::World *world,
                      const char *path) noexcept = nullptr;
