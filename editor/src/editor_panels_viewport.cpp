@@ -400,9 +400,21 @@ void draw_scene_viewport_panel() noexcept {
     ImGuizmo::SetRect(cursorScreenPos.x, cursorScreenPos.y, regionSize.x,
                       regionSize.y);
 
+    float snapValues[3] = {0.0F, 0.0F, 0.0F};
+    const float *snap = nullptr;
+    if (editor_session().snapEnabled) {
+      const float step = (editor_session().gizmoOp == ImGuizmo::ROTATE)
+                             ? editor_session().snapAngleDegrees
+                             : editor_session().snapStep;
+      snapValues[0] = step;
+      snapValues[1] = step;
+      snapValues[2] = step;
+      snap = snapValues;
+    }
+
     const bool manipulated = ImGuizmo::Manipulate(
         &viewMat.columns[0].x, &projMat.columns[0].x, editor_session().gizmoOp,
-        ImGuizmo::LOCAL, &modelMat.columns[0].x);
+        ImGuizmo::LOCAL, &modelMat.columns[0].x, nullptr, snap);
 
       const bool gizmoUsing = ImGuizmo::IsUsing();
     if (gizmoUsing && !editor_session().gizmoWasUsing) {

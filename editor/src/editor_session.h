@@ -64,6 +64,9 @@ struct EditorSession final {
   ImGuizmo::OPERATION gizmoOp = ImGuizmo::TRANSLATE;
   bool gizmoWasUsing = false;
   runtime::Transform gizmoStartTransform{};
+  bool snapEnabled = false;
+  float snapStep = 0.5F;
+  float snapAngleDegrees = 15.0F;
   CommandHistory commandHistory{};
   DebugCamera debugCamera{};
   renderer::CameraState frozenCameraState{};

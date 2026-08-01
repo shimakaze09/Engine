@@ -250,6 +250,20 @@ void draw_toolbar() noexcept {
     editor_session().gizmoOp = ImGuizmo::SCALE;
   }
 
+  ImGui::SameLine();
+  ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+  ImGui::SameLine();
+  ImGui::Checkbox("Snap", &editor_session().snapEnabled);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(64.0F);
+  if (editor_session().gizmoOp == ImGuizmo::ROTATE) {
+    ImGui::DragFloat("##SnapStep", &editor_session().snapAngleDegrees, 1.0F,
+                     1.0F, 90.0F, "%.0f deg");
+  } else {
+    ImGui::DragFloat("##SnapStep", &editor_session().snapStep, 0.05F, 0.05F,
+                     10.0F, "%.2f");
+  }
+
   ImGui::End();
 }
 
