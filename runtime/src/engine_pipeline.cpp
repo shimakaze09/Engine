@@ -1032,6 +1032,14 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
         break;
       }
 
+      // With zero transform chunks no physics jobs exist, so resolve must
+      // gate on the step begin directly or it can race phase preparation.
+      if (core::is_valid_handle(updateGate) &&
+          !link_dependency(updateGate, resolveHandle)) {
+        graphFailed = true;
+        break;
+      }
+
       for (std::size_t i = physicsJobStart; i < physicsJobCursor; ++i) {
         if (!link_dependency(frameContext->physicsJobHandles[i],
                              resolveHandle)) {
