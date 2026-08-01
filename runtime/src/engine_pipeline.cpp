@@ -897,8 +897,9 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
       break;
     }
 
+    core::JobHandle beginStepHandle{};
     if (step > 0U) {
-      core::JobHandle beginStepHandle =
+      beginStepHandle =
           submit_world_phase_job(frameContext.get(), world.get(),
                                  &phaseJobCursor, &begin_update_step_job);
       if (!core::is_valid_handle(beginStepHandle)) {
@@ -914,6 +915,13 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
         break;
       }
     }
+
+    // Catch-up steps gate their update jobs on the step's begin job so
+    // phase preparation can never race chunk work; step 0's begin ran
+    // synchronously above, so its updates gate on nothing.
+    const core::JobHandle updateGate = core::is_valid_handle(beginStepHandle)
+                                           ? beginStepHandle
+                                           : previousUpdateCommit;
 
     const std::size_t transformCount = world->transform_count();
     const std::size_t updateJobStart = updateJobCursor;
@@ -944,8 +952,8 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
         break;
       }
 
-      if (core::is_valid_handle(previousUpdateCommit) &&
-          !link_dependency(previousUpdateCommit, updateHandle)) {
+      if (core::is_valid_handle(updateGate) &&
+          !link_dependency(updateGate, updateHandle)) {
         graphFailed = true;
         break;
       }

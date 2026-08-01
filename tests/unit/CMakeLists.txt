@@ -15,6 +15,13 @@ engine_add_test_executable(engine_unit_job_handle_generation
     engine_core
 )
 
+engine_add_test_executable(engine_unit_frame_graph_order
+    SOURCES
+    frame_graph_order_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_sparse_set
     SOURCES
     sparse_set_test.cpp
