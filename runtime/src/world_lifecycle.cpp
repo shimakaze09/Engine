@@ -355,6 +355,24 @@ bool World::activate_recycled_entity(Entity entity) noexcept {
   return true;
 }
 
+void World::reset_all_entities() noexcept {
+  // Every entity goes, so EndPlay sequencing and hierarchy cascade order
+  // do not matter; each live slot tears down through the authoritative
+  // single-entity path, which cannot fail for a live entity.
+  const std::uint32_t upperBound = m_nextEntityIndex;
+  for (std::uint32_t index = 1U; index < upperBound; ++index) {
+    if (!m_entityAlive[index]) {
+      continue;
+    }
+    static_cast<void>(
+        destroy_single_entity(Entity{index, m_entityGenerations[index]}));
+  }
+
+  // A destroy queued by a pre-reset Simulation step must not fire into
+  // the replacement content after the reset.
+  m_pendingDestroyCount = 0U;
+}
+
 bool World::destroy_entity(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     core::log_message(core::LogLevel::Error, "world",
