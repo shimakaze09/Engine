@@ -240,6 +240,44 @@ bool capture_play_snapshot() noexcept {
   return false;
 }
 
+bool is_entity_selected(std::uint32_t entityIndex) noexcept {
+  const EditorSession &session = editor_session();
+  for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
+    if (session.selectedEntities[i] == entityIndex) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void select_entity(std::uint32_t entityIndex, bool additive) noexcept {
+  EditorSession &session = editor_session();
+  if (!additive) {
+    session.selectedEntityCount = 0U;
+  }
+  if (additive && is_entity_selected(entityIndex)) {
+    std::size_t write = 0U;
+    for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
+      if (session.selectedEntities[i] != entityIndex) {
+        session.selectedEntities[write++] = session.selectedEntities[i];
+      }
+    }
+    session.selectedEntityCount = write;
+    session.selectedEntityIndex =
+        (write > 0U) ? session.selectedEntities[write - 1U] : 0U;
+    return;
+  }
+  if (session.selectedEntityCount < EditorSession::kMaxSelectedEntities) {
+    session.selectedEntities[session.selectedEntityCount++] = entityIndex;
+  }
+  session.selectedEntityIndex = entityIndex;
+}
+
+void clear_entity_selection() noexcept {
+  editor_session().selectedEntityCount = 0U;
+  editor_session().selectedEntityIndex = 0U;
+}
+
 void start_play_mode() noexcept {
   if (editor_session().world == nullptr) {
     return;

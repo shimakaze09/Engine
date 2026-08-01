@@ -100,6 +100,23 @@ struct ComponentEditCommand final : EditorCommand {
   }
 };
 
+/// Undoable reparent: rewrites the child transform's parent persistent
+/// id (add_transform enforces the dynamic-body-root rule, so an invalid
+/// reparent simply fails and the command records no change).
+struct ReparentCommand final : EditorCommand {
+  runtime::Entity child{};
+  runtime::PersistentId beforeParentId = runtime::kInvalidPersistentId;
+  runtime::PersistentId afterParentId = runtime::kInvalidPersistentId;
+
+  void execute() noexcept override;
+  void undo() noexcept override;
+};
+
+/// Reparents through the command history; false when the child has no
+/// transform, the parent is invalid, or the reparent would cycle.
+bool execute_reparent(runtime::Entity child,
+                      runtime::Entity newParent) noexcept;
+
 /// Returns the default-valued snapshot used when adding a component.
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept;

@@ -48,6 +48,9 @@ struct EditorSession final {
   bool initialized = false;
   runtime::World *world = nullptr;
   std::uint32_t selectedEntityIndex = 0U;
+  static constexpr std::size_t kMaxSelectedEntities = 64U;
+  std::array<std::uint32_t, kMaxSelectedEntities> selectedEntities{};
+  std::size_t selectedEntityCount = 0U;
   PlayState playState = PlayState::Stopped;
   std::unique_ptr<char[]> playSnapshotBuffer{};
   std::size_t playSnapshotCapacity = 0U;
@@ -103,6 +106,14 @@ constexpr const char *kAnimationSectionLabel = "AnimationComponent";
 
 /// Returns the process-wide editor session state.
 EditorSession &editor_session() noexcept;
+
+/// True when the entity index is in the multi-selection.
+bool is_entity_selected(std::uint32_t entityIndex) noexcept;
+/// Selects an entity: replaces the selection, or toggles membership when
+/// additive (Ctrl-click). The primary selection follows the last pick.
+void select_entity(std::uint32_t entityIndex, bool additive) noexcept;
+/// Clears the multi-selection and the primary selection.
+void clear_entity_selection() noexcept;
 
 /// Returns the configured editor scene path ("" when unset).
 const char *editor_scene_path() noexcept;

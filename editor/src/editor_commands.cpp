@@ -221,6 +221,97 @@ void execute_component_remove(runtime::Entity entity,
 }
 
 
+/// Applies a parent persistent id onto the child's transform.
+static bool apply_parent_id(runtime::Entity child,
+                            runtime::PersistentId parentId) noexcept {
+  runtime::World *world = editor_session().world;
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity resolved = world->find_entity_by_index(child.index);
+  if ((resolved == runtime::kInvalidEntity) ||
+      (resolved.generation != child.generation)) {
+    return false;
+  }
+  runtime::Transform transform{};
+  if (!world->get_transform(resolved, &transform)) {
+    return false;
+  }
+  transform.parentId = parentId;
+  return world->add_transform(resolved, transform);
+}
+
+void ReparentCommand::execute() noexcept {
+  static_cast<void>(apply_parent_id(child, afterParentId));
+}
+
+void ReparentCommand::undo() noexcept {
+  static_cast<void>(apply_parent_id(child, beforeParentId));
+}
+
+bool execute_reparent(runtime::Entity child,
+                      runtime::Entity newParent) noexcept {
+  runtime::World *world = editor_session().world;
+  if ((world == nullptr) || (child == runtime::kInvalidEntity) ||
+      (child == newParent)) {
+    return false;
+  }
+
+  runtime::PersistentId afterId = runtime::kInvalidPersistentId;
+  if (newParent != runtime::kInvalidEntity) {
+    afterId = world->persistent_id(newParent);
+    if (afterId == runtime::kInvalidPersistentId) {
+      return false;
+    }
+    runtime::Entity cursor = newParent;
+    for (std::size_t depth = 0U; depth < 256U; ++depth) {
+      runtime::Transform cursorTransform{};
+      if (!world->get_transform(cursor, &cursorTransform) ||
+          (cursorTransform.parentId == runtime::kInvalidPersistentId)) {
+        break;
+      }
+      cursor = world->find_entity_by_persistent_id(cursorTransform.parentId);
+      if (cursor == runtime::kInvalidEntity) {
+        break;
+      }
+      if (cursor == child) {
+        return false;
+      }
+    }
+  }
+
+  runtime::Transform before{};
+  if (!world->get_transform(child, &before)) {
+    return false;
+  }
+  if (before.parentId == afterId) {
+    return true;
+  }
+
+  // Prove the reparent is legal (add_transform enforces the
+  // dynamic-body-root rule) before recording it, then revert and route
+  // the real application through the command history.
+  if (!apply_parent_id(child, afterId)) {
+    return false;
+  }
+  runtime::Transform applied{};
+  if (!world->get_transform(child, &applied) ||
+      (applied.parentId != afterId)) {
+    return false;
+  }
+  static_cast<void>(apply_parent_id(child, before.parentId));
+
+  auto *command = new (std::nothrow) ReparentCommand();
+  if (command == nullptr) {
+    return false;
+  }
+  command->child = child;
+  command->beforeParentId = before.parentId;
+  command->afterParentId = afterId;
+  editor_session().commandHistory.execute(command);
+  return true;
+}
+
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept {
   ComponentEditSnapshot snapshot{};

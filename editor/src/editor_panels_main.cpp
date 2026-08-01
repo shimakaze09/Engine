@@ -240,6 +240,103 @@ void draw_toolbar() noexcept {
   ImGui::End();
 }
 
+/// True when the entity's transform names parentId as its parent (or the
+/// entity has no transform and parentId is invalid, keeping
+/// transform-less entities visible at the root).
+static bool entity_has_parent(runtime::Entity entity,
+                              runtime::PersistentId parentId) noexcept {
+  runtime::Transform transform{};
+  if (!editor_session().world->get_transform(entity, &transform)) {
+    return parentId == runtime::kInvalidPersistentId;
+  }
+  return transform.parentId == parentId;
+}
+
+/// Draws one hierarchy node with selection, drag-drop reparenting, and
+/// its children as a subtree.
+static void draw_entity_node(runtime::Entity entity) noexcept {
+  char label[160] = {};
+  runtime::NameComponent name{};
+  if (editor_session().world->get_name_component(entity, &name) &&
+      (name.name[0] != '\0')) {
+    std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
+                  entity.index);
+  } else {
+    std::snprintf(label, sizeof(label), "Entity [%u]###entity_%u",
+                  entity.index, entity.index);
+  }
+
+  const runtime::PersistentId ownId =
+      editor_session().world->persistent_id(entity);
+  bool hasChildren = false;
+  if (ownId != runtime::kInvalidPersistentId) {
+    editor_session().world->for_each_alive([&](runtime::Entity candidate) {
+      if (!hasChildren && (candidate != entity) &&
+          entity_has_parent(candidate, ownId)) {
+        hasChildren = true;
+      }
+    });
+  }
+
+  ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                             ImGuiTreeNodeFlags_SpanAvailWidth |
+                             ImGuiTreeNodeFlags_DefaultOpen;
+  if (!hasChildren) {
+    flags |= ImGuiTreeNodeFlags_Leaf;
+  }
+  if (is_entity_selected(entity.index) ||
+      (editor_session().selectedEntityIndex == entity.index)) {
+    flags |= ImGuiTreeNodeFlags_Selected;
+  }
+
+  const bool open = ImGui::TreeNodeEx(label, flags);
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
+      !ImGui::IsItemToggledOpen()) {
+    select_entity(entity.index, ImGui::GetIO().KeyCtrl);
+  }
+
+  if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+    ImGui::SetDragDropPayload("ENTITY_INDEX", &entity.index,
+                              sizeof(entity.index));
+    ImGui::TextUnformatted(label);
+    ImGui::EndDragDropSource();
+  }
+  if (ImGui::BeginDragDropTarget()) {
+    if (const ImGuiPayload *payload =
+            ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
+      const std::uint32_t droppedIndex =
+          *static_cast<const std::uint32_t *>(payload->Data);
+      const runtime::Entity dropped =
+          editor_session().world->find_entity_by_index(droppedIndex);
+      if ((dropped != runtime::kInvalidEntity) && (dropped != entity) &&
+          world_is_editable()) {
+        static_cast<void>(execute_reparent(dropped, entity));
+      }
+    }
+    ImGui::EndDragDropTarget();
+  }
+
+  if (open) {
+    if (hasChildren) {
+      editor_session().world->for_each_alive([&](runtime::Entity candidate) {
+        if ((candidate != entity) && entity_has_parent(candidate, ownId)) {
+          draw_entity_node(candidate);
+        }
+      });
+    }
+    ImGui::TreePop();
+  }
+}
+
+/// Draws every root entity (no transform parent) as a tree.
+static void draw_entity_hierarchy() noexcept {
+  editor_session().world->for_each_alive([](runtime::Entity entity) {
+    if (entity_has_parent(entity, runtime::kInvalidPersistentId)) {
+      draw_entity_node(entity);
+    }
+  });
+}
+
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
     ImGui::End();
@@ -252,23 +349,23 @@ void draw_entities_panel() noexcept {
     return;
   }
 
-  editor_session().world->for_each_alive([](runtime::Entity entity) {
-    char label[160] = {};
-    runtime::NameComponent name{};
-    if (editor_session().world->get_name_component(entity, &name) &&
-        (name.name[0] != '\0')) {
-      std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
-                    entity.index);
-    } else {
-      std::snprintf(label, sizeof(label), "Entity [%u]", entity.index);
-    }
+  draw_entity_hierarchy();
 
-    const bool isSelected =
-        (editor_session().selectedEntityIndex == entity.index);
-    if (ImGui::Selectable(label, isSelected)) {
-      editor_session().selectedEntityIndex = entity.index;
+  // Dropping onto the panel background clears the parent.
+  ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 24.0F));
+  if (ImGui::BeginDragDropTarget()) {
+    if (const ImGuiPayload *payload =
+            ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
+      const std::uint32_t droppedIndex =
+          *static_cast<const std::uint32_t *>(payload->Data);
+      const runtime::Entity dropped =
+          editor_session().world->find_entity_by_index(droppedIndex);
+      if ((dropped != runtime::kInvalidEntity) && world_is_editable()) {
+        static_cast<void>(execute_reparent(dropped, runtime::kInvalidEntity));
+      }
     }
-  });
+    ImGui::EndDragDropTarget();
+  }
 
   ImGui::Separator();
   const bool editable = world_is_editable();
