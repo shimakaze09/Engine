@@ -179,9 +179,9 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
   return destroy_single_entity(entity);
 }
 
-bool World::destroy_single_entity(Entity entity) noexcept {
+void World::remove_all_components(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
-    return false;
+    return;
   }
 
   NameComponent removedName{};
@@ -206,6 +206,20 @@ bool World::destroy_single_entity(Entity entity) noexcept {
   static_cast<void>(m_scriptComponents.remove(entity));
   static_cast<void>(m_animationComponents.remove(entity));
 
+  m_movementAuthorities[entity.index] = MovementAuthority::None;
+  reset_transform_cache(entity.index);
+  if (hadName && (removedName.name[0] != '\0')) {
+    name_lookup_erase(core::fnv1a_32(removedName.name), entity.index);
+  }
+}
+
+bool World::destroy_single_entity(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+
+  remove_all_components(entity);
+
   const std::uint32_t index = entity.index;
   erase_persistent_index(m_entityPersistentIds[index]);
   m_entityAlive[index] = false;
@@ -214,8 +228,6 @@ bool World::destroy_single_entity(Entity entity) noexcept {
   }
   m_entityBeginPlayFired[index] = false;
   m_entityPersistentIds[index] = kInvalidPersistentId;
-  m_movementAuthorities[index] = MovementAuthority::None;
-  reset_transform_cache(index);
   if (m_aliveEntityCount > 0U) {
     --m_aliveEntityCount;
   }
@@ -228,10 +240,6 @@ bool World::destroy_single_entity(Entity entity) noexcept {
   if (m_freeEntityCount < m_freeEntityIndices.size()) {
     m_freeEntityIndices[m_freeEntityCount] = index;
     ++m_freeEntityCount;
-  }
-
-  if (hadName && (removedName.name[0] != '\0')) {
-    name_lookup_erase(core::fnv1a_32(removedName.name), index);
   }
 
   return true;

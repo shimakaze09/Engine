@@ -63,23 +63,28 @@ public:
     return m_entities[slotIndex];
   }
 
-  /// Returns an entity to the pool; false when it is not pool-owned. The
-  /// full handle must match so stale-generation handles cannot free a slot.
+  /// Returns an entity to the pool; false when it is not pool-owned or a
+  /// mutation phase is not active. The full handle must match so
+  /// stale-generation handles cannot free a slot, cleanup runs through the
+  /// World's authoritative teardown, and the slot is only published free
+  /// after cleanup completes so a reused entity can never inherit state.
   inline bool release(Entity entity) noexcept {
     for (std::size_t i = 0U; i < m_capacity; ++i) {
       if ((m_entities[i] == entity) && m_inUse[i]) {
+        if (m_world == nullptr) {
+          return false;
+        }
+        const WorldPhase phase = m_world->current_phase();
+        if ((phase != WorldPhase::Input) && (phase != WorldPhase::BeginPlay) &&
+            (phase != WorldPhase::EndPlay)) {
+          core::log_message(core::LogLevel::Warning, "entity_pool",
+                            "release refused outside a mutation phase");
+          return false;
+        }
+        m_world->remove_all_components(entity);
         m_inUse[i] = false;
         m_freeList[m_freeCount] = static_cast<std::uint32_t>(i);
         ++m_freeCount;
-        if (m_world != nullptr) {
-          static_cast<void>(m_world->remove_transform(entity));
-          static_cast<void>(m_world->remove_rigid_body(entity));
-          static_cast<void>(m_world->remove_collider(entity));
-          static_cast<void>(m_world->remove_mesh_component(entity));
-          static_cast<void>(m_world->remove_name_component(entity));
-          static_cast<void>(m_world->remove_script_component(entity));
-          static_cast<void>(m_world->remove_light_component(entity));
-        }
         return true;
       }
     }

@@ -258,6 +258,10 @@ public:
   /// Destroys the entity and its whole transform subtree (children never
   /// survive their parent); defers during Simulation so EndPlay fires.
   bool destroy_entity(Entity entity) noexcept;
+  /// Removes every component, physics payload, and manager reference from
+  /// the entity while keeping its slot alive — the single authoritative
+  /// teardown shared by entity destruction and pool recycling.
+  void remove_all_components(Entity entity) noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
   /// Finds the matching object or resource for entity by index.
