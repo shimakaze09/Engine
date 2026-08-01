@@ -123,6 +123,14 @@ engine_add_test_executable(engine_unit_world_transform_history
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_save_data
+    SOURCES
+    save_data_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp
