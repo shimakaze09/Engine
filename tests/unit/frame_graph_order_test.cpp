@@ -59,7 +59,7 @@ void update_job(void *userData) noexcept {
   }
   volatile unsigned spin = 0U;
   for (unsigned i = 0U; i < 400U; ++i) {
-    spin += i;
+    spin = spin + i;
   }
   state.updatesDone.fetch_add(1, std::memory_order_acq_rel);
 }
