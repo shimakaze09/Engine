@@ -9,6 +9,7 @@ engine_add_module_library(engine_runtime
     src/animation.cpp
     src/animation_assets.cpp
     src/animation_system.cpp
+    src/frame_pacing.cpp
     src/engine_pipeline.cpp
     src/engine_bootstrap_content.cpp
     src/engine_frame_collect.cpp

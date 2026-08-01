@@ -49,6 +49,7 @@
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/spring_arm_update.h"
+#include "frame_pacing.h"
 #include "engine_bootstrap_content.h"
 #include "engine_frame_collect.h"
 #include "engine_runtime_streaming.h"
@@ -189,6 +190,25 @@ void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
   if (frameGraphFailed != nullptr) {
     frameGraphFailed->store(true, std::memory_order_release);
   }
+}
+
+/// Blends two fixed-step camera samples for smooth presentation; the
+/// clip planes stay at the newer sample's values.
+renderer::CameraState interpolate_camera_state(
+    const renderer::CameraState &previous, const renderer::CameraState &current,
+    float alpha) noexcept {
+  renderer::CameraState out = current;
+  out.position = math::add(
+      previous.position,
+      math::mul(math::sub(current.position, previous.position), alpha));
+  out.target = math::add(
+      previous.target,
+      math::mul(math::sub(current.target, previous.target), alpha));
+  out.up = math::normalize(math::add(
+      previous.up, math::mul(math::sub(current.up, previous.up), alpha)));
+  out.fovRadians =
+      previous.fovRadians + ((current.fovRadians - previous.fovRadians) * alpha);
+  return out;
 }
 
 /// Advances this system for the current frame or tick for chunk job.
@@ -421,6 +441,13 @@ struct EnginePipeline::Impl final {
   bool isPaused = false;
   bool runPhysics = false;
   bool runFrameGraph = false;
+  int appliedVsync = 1;
+  double renderAlpha = 1.0;
+  Clock::time_point previousFrameStart{};
+  double wallFrameMs = 0.0;
+  renderer::CameraState previousCameraSample{};
+  renderer::CameraState currentCameraSample{};
+  bool cameraSampleValid = false;
   std::size_t updateStepCount = 0U;
   double frameMs = 0.0;
   double utilizationPct = 0.0;
@@ -445,6 +472,7 @@ struct EnginePipeline::Impl final {
   void stage_render() noexcept;
   void stage_diagnostics() noexcept;
   void stage_frame_cleanup() noexcept;
+  void stage_frame_pacing() noexcept;
 };
 
 EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
@@ -549,6 +577,12 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   create_bootstrap_scene(world.get(), meshIds);
 
+  core::cvar_register_int("r_vsync", 1,
+                          "Present interval: 0 off, 1 on, -1 adaptive");
+  core::cvar_register_int("r_max_fps", 0,
+                          "Frame cap in FPS (0 = uncapped; applies on top "
+                          "of vsync)");
+
   previousTick = Clock::now();
   accumulator = 0.0;
   simulationTimeSeconds = 0.0;
@@ -569,6 +603,13 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   core::profiler_begin_frame();
   PROFILE_SCOPE("engine_frame");
   frameStart = Clock::now();
+  wallFrameMs =
+      (previousFrameStart.time_since_epoch().count() != 0)
+          ? std::chrono::duration<double, std::milli>(frameStart -
+                                                      previousFrameStart)
+                .count()
+          : 0.0;
+  previousFrameStart = frameStart;
 
   stage_input();
   stage_play_transitions();
@@ -591,6 +632,7 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   stage_render();
   stage_diagnostics();
   stage_frame_cleanup();
+  stage_frame_pacing();
 
   core::profiler_end_frame();
   return running;
@@ -675,6 +717,11 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
   isPaused = (playState == LoopPlayState::Paused);
   runPhysics = isPlaying;
   runFrameGraph = !isPaused;
+
+  if (isPlaying && (previousPlayState != LoopPlayState::Playing)) {
+    world->clear_world_transform_history();
+    cameraSampleValid = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -702,9 +749,11 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 
     simulationTimeSeconds +=
         static_cast<double>(updateStepCount) * kFixedDeltaSeconds;
+    renderAlpha = accumulator / kFixedDeltaSeconds;
   } else {
     accumulator = 0.0;
     previousTick = frameStart;
+    renderAlpha = 1.0;
   }
 }
 
@@ -1027,7 +1076,9 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
             &frameContext->renderPrepPipeline, world.get(), commandBuffer.get(),
             assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
             renderPhaseHandle, &frameContext->frameGraphFailed,
-            frameThreadCount, kChunkSize, vpMatrix, &mergeHandle)) {
+            frameThreadCount, kChunkSize, vpMatrix,
+            isPlaying ? static_cast<float>(renderAlpha) : 1.0F,
+            &mergeHandle)) {
       graphFailed = true;
     }
   }
@@ -1109,6 +1160,11 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
       cam.farPlane = camFar;
       renderer::set_active_camera(cam);
     }
+
+    previousCameraSample =
+        cameraSampleValid ? currentCameraSample : renderer::get_active_camera();
+    currentCameraSample = renderer::get_active_camera();
+    cameraSampleValid = true;
   }
 
   static_cast<void>(runtime::process_pending_scene_op(*world));
@@ -1158,6 +1214,21 @@ void EnginePipeline::Impl::stage_render() noexcept {
     return;
   }
 
+  const int requestedVsync = runtime::normalize_vsync_interval(
+      core::cvar_get_int("r_vsync", 1));
+  if (requestedVsync != appliedVsync) {
+    appliedVsync = requestedVsync;
+    static_cast<void>(core::set_render_vsync(requestedVsync));
+  }
+
+  const bool interpolateCamera =
+      isPlaying && cameraSampleValid && (renderAlpha < 1.0);
+  if (interpolateCamera) {
+    renderer::set_active_camera(interpolate_camera_state(
+        previousCameraSample, currentCameraSample,
+        static_cast<float>(renderAlpha)));
+  }
+
   if ((bridge != nullptr) && (bridge->new_frame != nullptr)) {
     bridge->new_frame();
   }
@@ -1179,6 +1250,10 @@ void EnginePipeline::Impl::stage_render() noexcept {
   }
   core::swap_render_buffers();
   core::release_render_context();
+
+  if (interpolateCamera) {
+    renderer::set_active_camera(currentCameraSample);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1260,8 +1335,11 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
 
   core::EngineStats frameStats{};
   frameStats.frameTimeMs = static_cast<float>(frameMs);
+  // FPS reports the presented frame-to-frame rate (includes vsync and the
+  // r_max_fps wait); frameTimeMs stays the busy cost of the frame.
+  const double presentedMs = (wallFrameMs > 0.0) ? wallFrameMs : frameMs;
   frameStats.fps =
-      (frameMs > 0.0) ? static_cast<float>(1000.0 / frameMs) : 0.0F;
+      (presentedMs > 0.0) ? static_cast<float>(1000.0 / presentedMs) : 0.0F;
   frameStats.drawCalls = rendererStats.drawCalls;
   frameStats.triCount = rendererStats.triangleCount;
   frameStats.entityCount = aliveCount;
@@ -1303,6 +1381,21 @@ void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
   if (!core::is_platform_running()) {
     running = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stage: frame pacing (must stay last: waits out the r_max_fps budget)
+// ---------------------------------------------------------------------------
+
+void EnginePipeline::Impl::stage_frame_pacing() noexcept {
+  const int maxFps = core::cvar_get_int("r_max_fps", 0);
+  if (maxFps <= 0) {
+    return;
+  }
+  const double elapsedSeconds =
+      std::chrono::duration<double>(Clock::now() - frameStart).count();
+  runtime::wait_for_frame_cap(
+      runtime::frame_cap_wait_seconds(elapsedSeconds, maxFps));
 }
 
 // ===========================================================================

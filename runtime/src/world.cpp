@@ -53,6 +53,7 @@ void World::begin_update_phase() noexcept {
     return;
   }
 
+  snapshot_world_transform_history();
   m_writeStateIndex = (m_readStateIndex + 1U) % kStateBufferCount;
   m_updateSwapPending = true;
   m_phase = WorldPhase::Simulation;
@@ -69,7 +70,51 @@ void World::begin_update_step() noexcept {
                       "begin_update_step called with pending update");
     return;
   }
+  snapshot_world_transform_history();
   m_updateSwapPending = true;
+}
+
+void World::snapshot_world_transform_history() noexcept {
+  ++m_worldTransformHistoryEpoch;
+  const std::size_t count = m_worldTransforms.count();
+  const Entity *entities = m_worldTransforms.entity_data();
+  const WorldTransform *transforms = m_worldTransforms.component_data();
+  if ((entities == nullptr) || (transforms == nullptr)) {
+    return;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    const std::uint32_t index = entities[i].index;
+    WorldTransformHistoryEntry &entry = m_worldTransformHistory[index];
+    entry.position = transforms[i].position;
+    entry.rotation = transforms[i].rotation;
+    entry.scale = transforms[i].scale;
+    entry.generation = entities[i].generation;
+    entry.epoch = m_worldTransformHistoryEpoch;
+  }
+}
+
+bool World::get_previous_world_trs(Entity entity, math::Vec3 *outPosition,
+                                   math::Quat *outRotation,
+                                   math::Vec3 *outScale) const noexcept {
+  if ((outPosition == nullptr) || (outRotation == nullptr) ||
+      (outScale == nullptr) || (entity.index == 0U) ||
+      (entity.index > kMaxEntities)) {
+    return false;
+  }
+  const WorldTransformHistoryEntry &entry =
+      m_worldTransformHistory[entity.index];
+  if ((entry.epoch != m_worldTransformHistoryEpoch) ||
+      (entry.generation != entity.generation)) {
+    return false;
+  }
+  *outPosition = entry.position;
+  *outRotation = entry.rotation;
+  *outScale = entry.scale;
+  return true;
+}
+
+void World::clear_world_transform_history() noexcept {
+  ++m_worldTransformHistoryEpoch;
 }
 
 void World::commit_update_phase() noexcept {

@@ -760,6 +760,15 @@ public:
   bool read_world_transform_range(
       std::size_t startIndex, std::size_t count, const Entity **outEntities,
       const WorldTransform **outTransforms) const noexcept;
+  /// Previous-step world TRS for the entity, captured at the start of the
+  /// current fixed step; false when no matching snapshot exists (fresh
+  /// spawn, cleared history, or a stale generation).
+  bool get_previous_world_trs(Entity entity, math::Vec3 *outPosition,
+                              math::Quat *outRotation,
+                              math::Vec3 *outScale) const noexcept;
+  /// Invalidates the world-transform history (play start and scene loads
+  /// clear it so render interpolation never blends from stale poses).
+  void clear_world_transform_history() noexcept;
   /// Number of live transform components.
   std::size_t transform_count() const noexcept override;
   /// Number of live world transform components.
@@ -1234,6 +1243,22 @@ private:
   std::array<std::uint32_t, kMaxEntities> m_transformRoots{};
   std::array<std::uint32_t, kMaxEntities> m_transformQueueIndices{};
   std::array<bool, kMaxEntities> m_transformQueueInheritedDirty{};
+  /// One entity's world TRS captured at the start of the current fixed
+  /// step; entries are valid only when their epoch matches the latest
+  /// snapshot and their generation matches the live entity.
+  struct WorldTransformHistoryEntry final {
+    math::Vec3 position = math::Vec3(0.0F, 0.0F, 0.0F);
+    math::Quat rotation{};
+    math::Vec3 scale = math::Vec3(1.0F, 1.0F, 1.0F);
+    std::uint32_t generation = 0U;
+    std::uint64_t epoch = 0U;
+  };
+
+  /// Copies every current composed world TRS into the history;
+  /// begin_update_phase/begin_update_step call it so the history always
+  /// holds the previous fixed step's pose.
+  void snapshot_world_transform_history() noexcept;
+
   RigidBodySet m_rigidBodies{};
   ColliderSet m_colliders{};
   MeshComponentSet m_meshComponents{};
@@ -1253,6 +1278,9 @@ private:
   SceneCaptureSet m_sceneCaptures{};
   FoliagePatchSet m_foliagePatches{};
   AnimationComponentSet m_animationComponents{};
+  std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>
+      m_worldTransformHistory{};
+  std::uint64_t m_worldTransformHistoryEpoch = 0U;
   physics::PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};
   TimerManager m_timerManager{};

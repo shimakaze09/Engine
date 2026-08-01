@@ -196,7 +196,7 @@ bool run_render_prep_pipeline(
   if (!engine::runtime::enqueue_render_prep_pipeline(
           pipelineContext, world, commandBuffer, assetDatabase, meshRegistry,
           renderPrepPhaseHandle, renderPhaseHandle, &frameGraphFailed,
-          frameThreadCount, 256U, vpMatrix, &mergeHandle)) {
+          frameThreadCount, 256U, vpMatrix, 1.0F, &mergeHandle)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
     return false;
