@@ -85,12 +85,12 @@ def capsule_collider(radius, half_height, local):
     return collider
 
 
-def dynamic_body(gravity=True):
+def dynamic_body(gravity=True, inverse_mass=1.0):
     return {
         "velocity": [0.0, 0.0, 0.0],
         "acceleration": [0.0, -9.8, 0.0] if gravity else [0.0, 0.0, 0.0],
         "angularVelocity": [0.0, 0.0, 0.0],
-        "inverseMass": 1.0,
+        "inverseMass": inverse_mass,
         "inverseInertia": 0.0,
         "sleeping": False,
     }
@@ -150,12 +150,13 @@ entity("Mushroom2", (-3.6, 0.1, 1.1), mesh=PROP("mushroom"),
        albedo=(0.90, 0.55, 0.30))
 entity("Signpost", (1.4, 0.1, 4.6), mesh=PROP("signpost"), albedo=WOOD)
 
-# --- Dock out over the water ---
+# --- Dock out over the water (collider extents stay in the plank's local
+# frame: the physics collider is oriented by the entity rotation) ---
 for i in range(3):
     entity(f"DockPlank{i + 1}", (0.0, 0.02, 7.2 + i * 1.6),
            mesh=PROP("plank"), albedo=WOOD,
            rot=[0.0, 0.7071068, 0.0, 0.7071068],
-           collider=box_collider((0.20, 0.06, 0.80), (0.0, 0.04, 0.0)))
+           collider=box_collider((0.80, 0.15, 0.20), (0.0, -0.07, 0.0)))
 
 # --- Coins (script picks these up by name) and the bonus gem ---
 COIN_SPOTS = [
@@ -173,9 +174,11 @@ entity("HopPlatform1", (6.5, 0.8, -1.0), mesh=PROP("platform_square"),
        albedo=STONE, collider=box_collider((0.8, 0.1, 0.8), (0.0, 0.1, 0.0)))
 entity("HopPlatform2", (8.2, 1.6, -2.5), mesh=PROP("platform_square"),
        albedo=STONE, collider=box_collider((0.8, 0.1, 0.8), (0.0, 0.1, 0.0)))
-entity("MovingPlatform", (10.2, 2.2, -4.0), mesh=PROP("platform_round"),
+entity("MovingPlatform", (9.0, 2.2, -4.0), mesh=PROP("platform_round"),
        albedo=(0.55, 0.50, 0.60),
-       collider=box_collider((0.9, 0.1, 0.9), (0.0, 0.1, 0.0)),
+       collider=box_collider((0.9, 0.1, 0.9), (0.0, 0.1, 0.0),
+                             friction=(0.95, 0.85)),
+       body=dynamic_body(gravity=False, inverse_mass=0.001),
        script="assets/scripts/moving_platform.lua")
 entity("FallingRock", (8.2, 6.0, -2.5), mesh=PROP("rock_large"),
        albedo=(0.35, 0.33, 0.35),

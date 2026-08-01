@@ -17,18 +17,20 @@ local g_footstep = nil
 local g_jump_sound = nil
 local g_land_sound = nil
 local g_airborne = false
+local g_last_ground = nil
 
--- Reports whether a downward ray from the capsule base reaches ground.
-local function is_grounded(self, x, y, z)
+-- Returns the supporting entity under the capsule base, or nil when
+-- airborne (the handle lets the controller ride moving ground).
+local function ground_entity(self, x, y, z)
     local hits = engine.raycast_all(
         x, y + 0.25, z, 0.0, -1.0, 0.0, GROUND_CHECK_DISTANCE + 0.25)
     for i = 1, #hits do
         local hit = hits[i]
         if hit.entity ~= self and hit.ny > 0.5 then
-            return true
+            return hit.entity
         end
     end
-    return false
+    return nil
 end
 
 -- Locks rotation, hooks footstep events to positional audio, and frames
@@ -59,10 +61,15 @@ function M.on_begin_play(self)
 end
 
 -- Movement, jump, animation parameters, and the follow camera per step.
-function M.on_tick(self, _dt)
+function M.on_tick(self, dt)
     if not engine.is_alive(self) then
         return
     end
+
+    -- The avatar must never sleep: the solver would otherwise idle the
+    -- body after a few still seconds and velocity writes stop applying
+    -- until a contact wakes it — input would go dead.
+    engine.wake_body(self)
 
     local x, y, z = engine.get_position(self)
     if x == nil then
@@ -103,7 +110,8 @@ function M.on_tick(self, _dt)
     local tx = move_x * MOVE_SPEED
     local tz = move_z * MOVE_SPEED
 
-    local grounded = is_grounded(self, x, y, z)
+    local ground = ground_entity(self, x, y, z)
+    local grounded = ground ~= nil
     if engine.is_key_pressed(engine.KEY_SPACE) and grounded then
         vy = JUMP_VY
         engine.set_anim_param(self, "jump", 1.0)
@@ -121,10 +129,33 @@ function M.on_tick(self, _dt)
         engine.set_anim_param(self, "jump", 0.0)
     end
 
+    -- Riding: the controller hard-sets velocity, so moving ground must be
+    -- carried explicitly. The carry uses the ground's ACTUAL displacement
+    -- (not its commanded velocity, which can overshoot when the ground's
+    -- own corrective is clamped) so the rider tracks it without drifting
+    -- toward an edge.
+    if grounded then
+        local gx, _, gz = engine.get_position(ground)
+        if gx ~= nil then
+            if g_last_ground ~= nil and g_last_ground.id == ground
+                and dt > 0.0 then
+                tx = tx + (gx - g_last_ground.x) / dt
+                tz = tz + (gz - g_last_ground.z) / dt
+            end
+            g_last_ground = { id = ground, x = gx, z = gz }
+        else
+            g_last_ground = nil
+        end
+    else
+        g_last_ground = nil
+    end
+
     engine.set_velocity(self, tx, vy, tz)
 
-    local planar = math.sqrt(tx * tx + tz * tz)
-    engine.set_anim_param(self, "speed", planar / MOVE_SPEED)
+    -- The walk animation tracks the player's own input, not inherited
+    -- platform velocity, so riders idle while standing still.
+    local input_speed = math.sqrt(move_x * move_x + move_z * move_z)
+    engine.set_anim_param(self, "speed", input_speed)
 
     engine.push_camera(self, x, y + CAMERA_UP, z + CAMERA_BACK,
         x, y + 1.0, z, 10.0, 4.0)
