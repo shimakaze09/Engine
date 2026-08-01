@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
@@ -257,6 +258,90 @@ int main() {
   degenerateRay.direction = engine::math::Vec3(0.0F, 0.0F, 0.0F);
   if (engine::math::ray_intersects_sphere(degenerateRay, unitSphere, nullptr)) {
     return 27;
+  }
+
+  // Slab intersection per axis: axis-aligned rays along y and z hit the
+  // unit box exactly one unit out (these axes previously went through
+  // member-pointer indexing; the per-axis accessor must agree).
+  engine::math::AABB unitBox{};
+  unitBox.min = engine::math::Vec3(-1.0F, -1.0F, -1.0F);
+  unitBox.max = engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  const engine::math::Vec3 axisDirections[3] = {
+      engine::math::Vec3(1.0F, 0.0F, 0.0F),
+      engine::math::Vec3(0.0F, 1.0F, 0.0F),
+      engine::math::Vec3(0.0F, 0.0F, 1.0F),
+  };
+  for (int axis = 0; axis < 3; ++axis) {
+    engine::math::Ray axisRay{};
+    axisRay.origin = engine::math::Vec3(
+        (axis == 0) ? -2.0F : 0.0F, (axis == 1) ? -2.0F : 0.0F,
+        (axis == 2) ? -2.0F : 0.0F);
+    axisRay.direction = axisDirections[axis];
+    float t = -1.0F;
+    if (!engine::math::ray_intersects_aabb(axisRay, unitBox, &t) ||
+        (t != 1.0F)) {
+      return 28;
+    }
+    axisRay.direction = engine::math::Vec3(
+        -axisDirections[axis].x, -axisDirections[axis].y,
+        -axisDirections[axis].z);
+    if (engine::math::ray_intersects_aabb(axisRay, unitBox, nullptr)) {
+      return 29;
+    }
+  }
+
+  // Zero and signed-zero directions: parallel axes pass only when the
+  // origin lies inside that slab.
+  engine::math::Ray parallelRay{};
+  parallelRay.origin = engine::math::Vec3(0.0F, 0.0F, -2.0F);
+  parallelRay.direction = engine::math::Vec3(0.0F, -0.0F, 1.0F);
+  float parallelT = -1.0F;
+  if (!engine::math::ray_intersects_aabb(parallelRay, unitBox, &parallelT) ||
+      (parallelT != 1.0F)) {
+    return 30;
+  }
+  parallelRay.origin = engine::math::Vec3(2.0F, 0.0F, -2.0F);
+  if (engine::math::ray_intersects_aabb(parallelRay, unitBox, nullptr)) {
+    return 31;
+  }
+  parallelRay.origin = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  parallelRay.direction = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  float insideT = -1.0F;
+  if (!engine::math::ray_intersects_aabb(parallelRay, unitBox, &insideT) ||
+      (insideT != 0.0F)) {
+    return 32;
+  }
+
+  // Boundary origins: starting exactly on a face reports a hit at t = 0
+  // whether the ray points inward or away along that axis.
+  engine::math::Ray faceRay{};
+  faceRay.origin = engine::math::Vec3(-1.0F, 0.0F, 0.0F);
+  faceRay.direction = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  float faceT = -1.0F;
+  if (!engine::math::ray_intersects_aabb(faceRay, unitBox, &faceT) ||
+      (faceT != 0.0F)) {
+    return 33;
+  }
+  faceRay.origin = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  if (!engine::math::ray_intersects_aabb(faceRay, unitBox, &faceT) ||
+      (faceT != 0.0F)) {
+    return 34;
+  }
+
+  // An infinite direction component collapses that axis to t = 0; the
+  // other axes still gate the result.
+  engine::math::Ray infiniteRay{};
+  infiniteRay.origin = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  infiniteRay.direction = engine::math::Vec3(
+      std::numeric_limits<float>::infinity(), 0.0F, 0.0F);
+  float infiniteT = -1.0F;
+  if (!engine::math::ray_intersects_aabb(infiniteRay, unitBox, &infiniteT) ||
+      (infiniteT != 0.0F)) {
+    return 35;
+  }
+  infiniteRay.origin = engine::math::Vec3(0.0F, 5.0F, 0.0F);
+  if (engine::math::ray_intersects_aabb(infiniteRay, unitBox, nullptr)) {
+    return 36;
   }
 
   return 0;
