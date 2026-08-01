@@ -36,7 +36,7 @@ struct DependencyDigest final {
 /// outputs recook once instead of silently keeping stale bytes (audit
 /// H-20). Stamps written before this key existed read as version 0 and
 /// therefore always recook.
-inline constexpr std::uint32_t kCookToolVersion = 1U;
+inline constexpr std::uint32_t kCookToolVersion = 2U;
 
 /// Import settings read from an asset's .meta.json sidecar.
 struct ImportSettings final {
@@ -79,6 +79,15 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
                    std::uint64_t importSettingsHash);
 
+/// Rotates positions and normals from the declared source up axis
+/// (0 = X-up, 2 = Z-up) into engine Y-up; 1 and unknown values no-op.
+/// Proper rotations only, so triangle winding is preserved (audit H-20:
+/// the setting was hashed but never applied).
+void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis);
+/// Recomputes per-vertex normals as area-weighted face-normal averages
+/// over the primitive's triangles (audit H-20: the setting was hashed
+/// but never applied).
+void generate_normals_for_primitive(PrimitiveData *data);
 /// Uniform scale applied in place to an extracted primitive.
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor);
 /// Extracts one glTF primitive into interleaved vertices and indices.

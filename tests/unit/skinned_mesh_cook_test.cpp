@@ -282,6 +282,103 @@ int check_v3_mesh_file_header() {
   return 0;
 }
 
+/// EXPECTATION (audit H-20): upAxis conversion rotates positions and
+/// normals with proper rotations — Z-up (0,0,1) lands exactly on Y-up
+/// (0,1,0), X-up (1,0,0) likewise — and Y-up plus unknown values no-op.
+/// Sign/swap maps are exact in floats, so assertions are exact.
+int check_up_axis_applied() {
+  PrimitiveData data{};
+  data.interleavedVertices = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F,
+                              2.0F, 3.0F, 5.0F, 0.0F, 1.0F, 0.0F};
+
+  apply_up_axis_to_primitive(&data, 2);
+  if ((data.interleavedVertices[0] != 0.0F) ||
+      (data.interleavedVertices[1] != 1.0F) ||
+      (data.interleavedVertices[2] != 0.0F) ||
+      (data.interleavedVertices[4] != 1.0F) ||
+      (data.interleavedVertices[5] != 0.0F)) {
+    std::puts("Z-up conversion wrong for first vertex");
+    return 1;
+  }
+  if ((data.interleavedVertices[6] != 2.0F) ||
+      (data.interleavedVertices[7] != 5.0F) ||
+      (data.interleavedVertices[8] != -3.0F) ||
+      (data.interleavedVertices[10] != 0.0F) ||
+      (data.interleavedVertices[11] != -1.0F)) {
+    std::puts("Z-up conversion wrong for second vertex");
+    return 1;
+  }
+
+  PrimitiveData xUp{};
+  xUp.interleavedVertices = {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+  apply_up_axis_to_primitive(&xUp, 0);
+  if ((xUp.interleavedVertices[0] != 0.0F) ||
+      (xUp.interleavedVertices[1] != 1.0F) ||
+      (xUp.interleavedVertices[2] != 0.0F) ||
+      (xUp.interleavedVertices[4] != 1.0F)) {
+    std::puts("X-up conversion wrong");
+    return 1;
+  }
+
+  PrimitiveData untouched{};
+  untouched.interleavedVertices = {1.0F, 2.0F, 3.0F, 0.0F, 1.0F, 0.0F};
+  const std::vector<float> before = untouched.interleavedVertices;
+  apply_up_axis_to_primitive(&untouched, 1);
+  apply_up_axis_to_primitive(&untouched, 7);
+  if (untouched.interleavedVertices != before) {
+    std::puts("Y-up or unknown axis modified the primitive");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-20): generateNormals recomputes per-vertex
+/// normals from triangle geometry — a CCW triangle in the XY plane gets
+/// exactly (0,0,1) at every corner through both the indexed and the
+/// sequential-triple paths, and a malformed index leaves normals zeroed
+/// instead of reading out of bounds.
+int check_generate_normals_applied() {
+  PrimitiveData data{};
+  data.hasUVs = true;
+  data.interleavedVertices = {
+      0.0F, 0.0F, 0.0F, 9.0F, 9.0F, 9.0F, 0.0F, 0.0F,
+      1.0F, 0.0F, 0.0F, 9.0F, 9.0F, 9.0F, 0.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 9.0F, 9.0F, 9.0F, 0.0F, 0.0F};
+  data.indices = {0U, 1U, 2U};
+
+  generate_normals_for_primitive(&data);
+  for (std::size_t v = 0U; v < 3U; ++v) {
+    const std::size_t base = v * 8U;
+    if ((data.interleavedVertices[base + 3U] != 0.0F) ||
+        (data.interleavedVertices[base + 4U] != 0.0F) ||
+        (data.interleavedVertices[base + 5U] != 1.0F)) {
+      std::puts("indexed normal generation wrong");
+      return 1;
+    }
+  }
+
+  data.indices.clear();
+  generate_normals_for_primitive(&data);
+  if ((data.interleavedVertices[5U] != 1.0F) ||
+      (data.interleavedVertices[13U] != 1.0F)) {
+    std::puts("unindexed normal generation wrong");
+    return 1;
+  }
+
+  data.indices = {0U, 1U, 5U};
+  generate_normals_for_primitive(&data);
+  for (std::size_t v = 0U; v < 3U; ++v) {
+    const std::size_t base = v * 8U;
+    if ((data.interleavedVertices[base + 3U] != 0.0F) ||
+        (data.interleavedVertices[base + 4U] != 0.0F) ||
+        (data.interleavedVertices[base + 5U] != 0.0F)) {
+      std::puts("malformed index did not leave normals zeroed");
+      return 1;
+    }
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-20): the external .bin buffer payload the glTF
 /// references lands in both the dependency graph and the auto digest
 /// list, so editing vertex data without touching the .gltf still forces
@@ -354,6 +451,12 @@ int main() {
   }
   if (result == 0) {
     result = check_external_buffer_becomes_dependency();
+  }
+  if (result == 0) {
+    result = check_up_axis_applied();
+  }
+  if (result == 0) {
+    result = check_generate_normals_applied();
   }
   cleanup_fixture_files();
   return result;

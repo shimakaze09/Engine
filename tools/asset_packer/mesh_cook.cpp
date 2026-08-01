@@ -23,6 +23,105 @@ std::size_t primitive_stride_floats(const PrimitiveData &data) {
   return data.hasUVs ? 8U : 6U;
 }
 
+void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis) {
+  if ((data == nullptr) || ((upAxis != 0) && (upAxis != 2))) {
+    return; // 1 = already Y-up; unknown values are ignored upstream.
+  }
+
+  const std::size_t strideFloats = primitive_stride_floats(*data);
+  const std::size_t vertexCount =
+      data->interleavedVertices.size() / strideFloats;
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    const std::size_t base = i * strideFloats;
+    // Positions at 0-2 and normals at 3-5 rotate identically; both maps
+    // are proper rotations (determinant +1) so winding is preserved.
+    for (std::size_t offset = 0U; offset <= 3U; offset += 3U) {
+      float &x = data->interleavedVertices[base + offset + 0U];
+      float &y = data->interleavedVertices[base + offset + 1U];
+      float &z = data->interleavedVertices[base + offset + 2U];
+      if (upAxis == 2) {
+        // Z-up source to Y-up: rotate -90 degrees about X.
+        const float oldY = y;
+        y = z;
+        z = -oldY;
+      } else {
+        // X-up source to Y-up: rotate +90 degrees about Z.
+        const float oldX = x;
+        x = -y;
+        y = oldX;
+      }
+    }
+  }
+}
+
+void generate_normals_for_primitive(PrimitiveData *data) {
+  if (data == nullptr) {
+    return;
+  }
+
+  const std::size_t strideFloats = primitive_stride_floats(*data);
+  const std::size_t vertexCount =
+      data->interleavedVertices.size() / strideFloats;
+  if (vertexCount == 0U) {
+    return;
+  }
+
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    const std::size_t base = i * strideFloats;
+    data->interleavedVertices[base + 3U] = 0.0F;
+    data->interleavedVertices[base + 4U] = 0.0F;
+    data->interleavedVertices[base + 5U] = 0.0F;
+  }
+
+  // Area-weighted accumulation: each triangle adds its unnormalized
+  // cross product to its three corners; sequential triples when the
+  // primitive is unindexed.
+  const std::size_t triangleCount = data->indices.empty()
+                                        ? (vertexCount / 3U)
+                                        : (data->indices.size() / 3U);
+  for (std::size_t t = 0U; t < triangleCount; ++t) {
+    std::uint32_t corners[3] = {};
+    for (std::size_t c = 0U; c < 3U; ++c) {
+      corners[c] = data->indices.empty()
+                       ? static_cast<std::uint32_t>((t * 3U) + c)
+                       : data->indices[(t * 3U) + c];
+      if (corners[c] >= vertexCount) {
+        return; // Malformed index; leave zeroed rather than read OOB.
+      }
+    }
+
+    const float *a = &data->interleavedVertices[corners[0] * strideFloats];
+    const float *b = &data->interleavedVertices[corners[1] * strideFloats];
+    const float *c = &data->interleavedVertices[corners[2] * strideFloats];
+    const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+    const float normal[3] = {(e1[1] * e2[2]) - (e1[2] * e2[1]),
+                             (e1[2] * e2[0]) - (e1[0] * e2[2]),
+                             (e1[0] * e2[1]) - (e1[1] * e2[0])};
+    for (const std::uint32_t corner : corners) {
+      float *out = &data->interleavedVertices[(corner * strideFloats) + 3U];
+      out[0] += normal[0];
+      out[1] += normal[1];
+      out[2] += normal[2];
+    }
+  }
+
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    float *normal = &data->interleavedVertices[(i * strideFloats) + 3U];
+    const float lengthSquared = (normal[0] * normal[0]) +
+                                (normal[1] * normal[1]) +
+                                (normal[2] * normal[2]);
+    if (lengthSquared > 0.0F) {
+      const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+      normal[0] *= inverseLength;
+      normal[1] *= inverseLength;
+      normal[2] *= inverseLength;
+    } else {
+      normal[1] = 1.0F; // Degenerate-only vertex: any unit vector works.
+    }
+  }
+}
+
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
   if ((data == nullptr) || (scaleFactor == 1.0F)) {
     return;

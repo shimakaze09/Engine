@@ -356,6 +356,23 @@ int main(int argc, char **argv) {
     return 5;
   }
 
+  if (primitiveData.hasSkin && (importSettings.upAxis != 1)) {
+    // The skeleton's inverse binds are not rotated with the mesh, so an
+    // axis conversion would desync the two; reject rather than desync.
+    std::fprintf(stderr,
+                 "error: upAxis conversion is unsupported for skinned "
+                 "meshes — re-export the source Y-up\n");
+    cgltf_free(data);
+    return 5;
+  }
+  if ((importSettings.upAxis < 0) || (importSettings.upAxis > 2)) {
+    std::fprintf(stderr, "warning: unknown upAxis %d ignored (treated Y-up)\n",
+                 importSettings.upAxis);
+  }
+  apply_up_axis_to_primitive(&primitiveData, importSettings.upAxis);
+  if (importSettings.generateNormals) {
+    generate_normals_for_primitive(&primitiveData);
+  }
   apply_scale_to_primitive(&primitiveData, importSettings.scaleFactor);
 
   std::vector<DependencyDigest> autoDiscoveredDeps{};
