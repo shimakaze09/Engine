@@ -10,6 +10,7 @@
 #include "joint_handle.h"
 #include "joints/joint_solvers.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 
@@ -239,9 +240,15 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return;
   }
 
+  // Iterations clamp to a documented safe range: non-positive falls back
+  // to the default and the upper bound keeps a misconfigured cvar from
+  // hanging the frame.
+  constexpr int kMaxSolverIterations = 64;
   const int iterations = core::cvar_get_int("physics.solver_iterations");
   const std::size_t iterCount =
-      (iterations > 0) ? static_cast<std::size_t>(iterations) : 8U;
+      (iterations > 0)
+          ? static_cast<std::size_t>(std::min(iterations, kMaxSolverIterations))
+          : 8U;
 
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
     if (!ctx.joints[i].active) {

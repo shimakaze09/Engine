@@ -16,12 +16,60 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 namespace engine::runtime {
 
 namespace {
+
+/// True when every component of the vector is finite.
+bool finite_vec3(const math::Vec3 &value) noexcept {
+  return std::isfinite(value.x) && std::isfinite(value.y) &&
+         std::isfinite(value.z);
+}
+
+/// True when every component of the quaternion is finite.
+bool finite_quat(const math::Quat &value) noexcept {
+  return std::isfinite(value.x) && std::isfinite(value.y) &&
+         std::isfinite(value.z) && std::isfinite(value.w);
+}
+
+/// Ingress validation (audit H-06): rejects non-finite transform fields so
+/// NaN can never enter propagation, physics, or rendering.
+bool validate_transform_ingress(const Transform &transform) noexcept {
+  return finite_vec3(transform.position) && finite_quat(transform.rotation) &&
+         finite_vec3(transform.scale);
+}
+
+/// Ingress validation (audit H-06): rigid body fields must be finite and
+/// the inverse mass/inertia non-negative.
+bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
+  return finite_vec3(rigidBody.velocity) &&
+         finite_vec3(rigidBody.acceleration) &&
+         finite_vec3(rigidBody.angularVelocity) &&
+         std::isfinite(rigidBody.inverseMass) &&
+         (rigidBody.inverseMass >= 0.0F) &&
+         std::isfinite(rigidBody.inverseInertia) &&
+         (rigidBody.inverseInertia >= 0.0F);
+}
+
+/// Ingress validation (audit H-06): collider geometry must be finite with
+/// strictly positive extents, and material terms finite and non-negative.
+bool validate_collider_ingress(const Collider &collider) noexcept {
+  return finite_vec3(collider.localPosition) &&
+         finite_quat(collider.localRotation) &&
+         finite_vec3(collider.halfExtents) && (collider.halfExtents.x > 0.0F) &&
+         (collider.halfExtents.y > 0.0F) && (collider.halfExtents.z > 0.0F) &&
+         std::isfinite(collider.restitution) &&
+         (collider.restitution >= 0.0F) &&
+         std::isfinite(collider.staticFriction) &&
+         (collider.staticFriction >= 0.0F) &&
+         std::isfinite(collider.dynamicFriction) &&
+         (collider.dynamicFriction >= 0.0F) &&
+         std::isfinite(collider.density) && (collider.density >= 0.0F);
+}
 
 // Rebuilds the canonical primitive hull recorded in Collider::hullSource so
 // every collider install path (scene/prefab load, world copy, editor undo,
@@ -137,6 +185,12 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
     return false;
   }
 
+  if (!validate_transform_ingress(transform)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_transform rejected non-finite fields");
+    return false;
+  }
+
   const RigidBody *body = m_rigidBodies.get_ptr(entity);
   if ((body != nullptr) && (body->inverseMass > 0.0F) &&
       (transform.parentId != kInvalidPersistentId)) {
@@ -222,6 +276,13 @@ MovementAuthority World::movement_authority(Entity entity) const noexcept {
 
 bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   if (!check_component_mutation(entity, "add_rigid_body")) {
+    return false;
+  }
+
+  if (!validate_rigid_body_ingress(rigidBody)) {
+    core::log_message(
+        core::LogLevel::Error, "world",
+        "add_rigid_body rejected non-finite or negative fields");
     return false;
   }
 
@@ -311,6 +372,13 @@ World::rigid_body_owner(Entity colliderEntity,
 }
 
 bool World::add_collider(Entity entity, const Collider &collider) noexcept {
+  if (!validate_collider_ingress(collider)) {
+    core::log_message(
+        core::LogLevel::Error, "world",
+        "add_collider rejected non-finite or non-positive fields");
+    return false;
+  }
+
   if (!add_component_checked(m_colliders, entity, collider, "add_collider")) {
     return false;
   }

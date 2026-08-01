@@ -116,7 +116,8 @@ math::Vec3 contact_point(const ColliderWorldGeometry &a,
 } // namespace
 
 float ccd_velocity_threshold() noexcept {
-  return core::cvar_get_float("physics.ccd_threshold", 2.0F);
+  const float threshold = core::cvar_get_float("physics.ccd_threshold", 2.0F);
+  return (std::isfinite(threshold) && (threshold >= 0.0F)) ? threshold : 2.0F;
 }
 
 /// Bilateral advancement CCD (Erwin Coumans, GDC 2013): sweeps the moving
