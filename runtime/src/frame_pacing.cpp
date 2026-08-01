@@ -1,6 +1,6 @@
 // Implements frame pacing helpers: vsync interval normalization, the
-// pure frame-cap wait computation, and the hybrid sleep-then-spin wait
-// the pipeline runs at the end of each frame.
+// pure frame-cap wait computation, the fixed-step count decision, and the
+// hybrid sleep-then-spin wait the pipeline runs at the end of each frame.
 
 #include "frame_pacing.h"
 
@@ -23,6 +23,34 @@ double frame_cap_wait_seconds(double elapsedSeconds, int maxFps) noexcept {
   const double targetSeconds = 1.0 / static_cast<double>(maxFps);
   const double wait = targetSeconds - elapsedSeconds;
   return (wait > 0.0) ? wait : 0.0;
+}
+
+FixedStepDecision fixed_step_decision(bool playing, bool singleStep,
+                                      double accumulatorSeconds,
+                                      double fixedDeltaSeconds,
+                                      std::size_t maxSteps) noexcept {
+  FixedStepDecision decision{};
+  if (singleStep) {
+    decision.stepCount = 1U;
+    return decision;
+  }
+  if (!playing || (fixedDeltaSeconds <= 0.0)) {
+    return decision;
+  }
+
+  double accumulator = accumulatorSeconds;
+  const double maxAccumulator =
+      static_cast<double>(maxSteps) * fixedDeltaSeconds;
+  if (accumulator > maxAccumulator) {
+    accumulator = maxAccumulator;
+  }
+  while ((accumulator >= fixedDeltaSeconds) &&
+         (decision.stepCount < maxSteps)) {
+    accumulator -= fixedDeltaSeconds;
+    ++decision.stepCount;
+  }
+  decision.remainingAccumulator = accumulator;
+  return decision;
 }
 
 void wait_for_frame_cap(double waitSeconds) noexcept {

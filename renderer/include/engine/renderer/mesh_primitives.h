@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 #include "engine/renderer/mesh_loader.h"
 
 namespace engine::renderer {
@@ -30,6 +32,12 @@ bool build_capsule_mesh(GpuMesh *outMesh) noexcept;
 
 /// Triangular pyramid with unit-ish footprint and apex at y = +0.5.
 bool build_pyramid_mesh(GpuMesh *outMesh) noexcept;
+
+/// Fills the pyramid's CPU vertex data (12 verts x 6 floats, CCW outward
+/// winding) so orientation is verifiable without a GPU; returns the float
+/// count written (0 when the capacity is too small).
+std::size_t fill_pyramid_vertices(float *outVerts,
+                                  std::size_t capacity) noexcept;
 
 /// Grass tuft: seven double-sided tapered blades rooted at y = 0, heights
 /// around 0.5, for foliage patches.

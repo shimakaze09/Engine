@@ -274,6 +274,631 @@ int check_component_command_rejects_recycled_entity() noexcept {
   return finish(0);
 }
 
+/// Commands that captured a persistent id must re-target the entity after
+/// it is destroyed and re-created under the same persistent id.
+int check_commands_resolve_persistent_id_after_recreate() noexcept {
+  using engine::editor::ComponentEditCommand;
+  using engine::editor::ComponentEditSnapshot;
+  using engine::editor::ComponentEditType;
+  using engine::editor::TransformEditCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::NameComponent;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 60;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity first = world->create_scene_object();
+  if (first == engine::runtime::kInvalidEntity) {
+    return finish(61);
+  }
+  const engine::runtime::PersistentId persistentId =
+      world->persistent_id(first);
+  if (persistentId == engine::runtime::kInvalidPersistentId) {
+    return finish(62);
+  }
+
+  ComponentEditSnapshot added{};
+  std::snprintf(added.name.name, sizeof(added.name.name), "%s", "Tracked");
+  auto *nameCommand = new (std::nothrow) ComponentEditCommand();
+  if (nameCommand == nullptr) {
+    return finish(63);
+  }
+  nameCommand->entity = first;
+  nameCommand->persistentId = persistentId;
+  nameCommand->type = ComponentEditType::Name;
+  nameCommand->beforeExists = false;
+  nameCommand->afterExists = true;
+  nameCommand->after = added;
+
+  engine::editor::CommandHistory history{};
+  history.execute(nameCommand);
+
+  auto *transformCommand = new (std::nothrow) TransformEditCommand();
+  if (transformCommand == nullptr) {
+    return finish(64);
+  }
+  transformCommand->entity = first;
+  transformCommand->persistentId = persistentId;
+  transformCommand->oldTransform = Transform{};
+  transformCommand->newTransform.position =
+      engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  history.execute(transformCommand);
+
+  Transform moved{};
+  if (!world->get_transform(first, &moved) ||
+      (moved.position.x != 1.0F) || (moved.position.y != 2.0F) ||
+      (moved.position.z != 3.0F)) {
+    return finish(65);
+  }
+
+  if (!world->destroy_entity(first)) {
+    return finish(66);
+  }
+  Transform displaced{};
+  displaced.position = engine::math::Vec3(9.0F, 9.0F, 9.0F);
+  const Entity second =
+      world->create_scene_object_with_persistent_id(persistentId, displaced);
+  if ((second == engine::runtime::kInvalidEntity) ||
+      (second.generation == first.generation)) {
+    return finish(67);
+  }
+
+  history.undo();
+  Transform reverted{};
+  if (!world->get_transform(second, &reverted) ||
+      (reverted.position.x != 0.0F) || (reverted.position.y != 0.0F) ||
+      (reverted.position.z != 0.0F)) {
+    return finish(68);
+  }
+
+  history.undo();
+  NameComponent afterUndo{};
+  if (world->get_name_component(second, &afterUndo)) {
+    return finish(69);
+  }
+
+  history.redo();
+  NameComponent afterRedo{};
+  if (!world->get_name_component(second, &afterRedo) ||
+      (std::strcmp(afterRedo.name, "Tracked") != 0)) {
+    return finish(70);
+  }
+
+  return finish(0);
+}
+
+/// A reparent command must keep targeting its child across the child being
+/// destroyed and re-created under the same persistent id.
+int check_reparent_resolves_persistent_id_after_recreate() noexcept {
+  using engine::editor::ReparentCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 80;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity parent = world->create_scene_object();
+  const Entity child = world->create_scene_object();
+  if ((parent == engine::runtime::kInvalidEntity) ||
+      (child == engine::runtime::kInvalidEntity)) {
+    return finish(81);
+  }
+  const engine::runtime::PersistentId parentId = world->persistent_id(parent);
+  const engine::runtime::PersistentId childId = world->persistent_id(child);
+
+  auto *command = new (std::nothrow) ReparentCommand();
+  if (command == nullptr) {
+    return finish(82);
+  }
+  command->child = child;
+  command->childPersistentId = childId;
+  command->beforeParentId = engine::runtime::kInvalidPersistentId;
+  command->afterParentId = parentId;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  Transform linked{};
+  if (!world->get_transform(child, &linked) ||
+      (linked.parentId != parentId)) {
+    return finish(83);
+  }
+
+  if (!world->destroy_entity(child)) {
+    return finish(84);
+  }
+  Transform prelinked{};
+  prelinked.parentId = parentId;
+  const Entity rebuilt =
+      world->create_scene_object_with_persistent_id(childId, prelinked);
+  if ((rebuilt == engine::runtime::kInvalidEntity) ||
+      (rebuilt.generation == child.generation)) {
+    return finish(85);
+  }
+
+  history.undo();
+  Transform unlinked{};
+  if (!world->get_transform(rebuilt, &unlinked) ||
+      (unlinked.parentId != engine::runtime::kInvalidPersistentId)) {
+    return finish(86);
+  }
+
+  history.redo();
+  Transform relinked{};
+  if (!world->get_transform(rebuilt, &relinked) ||
+      (relinked.parentId != parentId)) {
+    return finish(87);
+  }
+
+  return finish(0);
+}
+
+/// Entity creation must be undoable and must redo under the same
+/// persistent id with its default name intact.
+int check_entity_create_undo_redo() noexcept {
+  using engine::editor::EntityCreateCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::NameComponent;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 90;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    return finish(91);
+  }
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  const engine::runtime::PersistentId persistentId = command->persistentId;
+  const Entity created = world->find_entity_by_persistent_id(persistentId);
+  if ((created == engine::runtime::kInvalidEntity) ||
+      (world->alive_entity_count() != 1U)) {
+    return finish(92);
+  }
+
+  char expectedName[64] = {};
+  std::snprintf(expectedName, sizeof(expectedName), "Entity_%u",
+                created.index);
+  NameComponent createdName{};
+  if (!world->get_name_component(created, &createdName) ||
+      (std::strcmp(createdName.name, expectedName) != 0)) {
+    return finish(93);
+  }
+
+  history.undo();
+  if ((world->alive_entity_count() != 0U) ||
+      (world->find_entity_by_persistent_id(persistentId) !=
+       engine::runtime::kInvalidEntity)) {
+    return finish(94);
+  }
+
+  history.redo();
+  const Entity redone = world->find_entity_by_persistent_id(persistentId);
+  if ((redone == engine::runtime::kInvalidEntity) ||
+      (world->alive_entity_count() != 1U)) {
+    return finish(95);
+  }
+  NameComponent redoneName{};
+  if (!world->get_name_component(redone, &redoneName) ||
+      (std::strcmp(redoneName.name, expectedName) != 0)) {
+    return finish(96);
+  }
+
+  return finish(0);
+}
+
+/// Deleting a parented subtree must restore every member, component
+/// values, and parent links on undo — under the original persistent ids.
+int check_entity_delete_restores_subtree() noexcept {
+  using engine::editor::EntityDeleteCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::MeshComponent;
+  using engine::runtime::NameComponent;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 100;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity parent = world->create_scene_object();
+  if (parent == engine::runtime::kInvalidEntity) {
+    return finish(101);
+  }
+  NameComponent parentName{};
+  std::snprintf(parentName.name, sizeof(parentName.name), "%s", "Parent");
+  MeshComponent parentMesh{};
+  parentMesh.meshAssetId = 42ULL;
+  parentMesh.albedo = engine::math::Vec3(0.25F, 0.5F, 0.75F);
+  if (!world->add_name_component(parent, parentName) ||
+      !world->add_mesh_component(parent, parentMesh)) {
+    return finish(102);
+  }
+  const engine::runtime::PersistentId parentId = world->persistent_id(parent);
+
+  Transform childTransform{};
+  childTransform.parentId = parentId;
+  childTransform.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  const Entity child = world->create_scene_object(childTransform);
+  if (child == engine::runtime::kInvalidEntity) {
+    return finish(103);
+  }
+  NameComponent childName{};
+  std::snprintf(childName.name, sizeof(childName.name), "%s", "Child");
+  if (!world->add_name_component(child, childName)) {
+    return finish(104);
+  }
+  const engine::runtime::PersistentId childId = world->persistent_id(child);
+
+  Transform grandTransform{};
+  grandTransform.parentId = childId;
+  const Entity grand = world->create_scene_object(grandTransform);
+  if (grand == engine::runtime::kInvalidEntity) {
+    return finish(105);
+  }
+  const engine::runtime::PersistentId grandId = world->persistent_id(grand);
+
+  EntityDeleteCommand *const command =
+      engine::editor::build_entity_delete_command(parent);
+  if ((command == nullptr) || (command->recordCount != 3U)) {
+    delete command;
+    return finish(106);
+  }
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+  if (world->alive_entity_count() != 0U) {
+    return finish(107);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != 3U) {
+    return finish(108);
+  }
+  const Entity restoredParent = world->find_entity_by_persistent_id(parentId);
+  const Entity restoredChild = world->find_entity_by_persistent_id(childId);
+  const Entity restoredGrand = world->find_entity_by_persistent_id(grandId);
+  if ((restoredParent == engine::runtime::kInvalidEntity) ||
+      (restoredChild == engine::runtime::kInvalidEntity) ||
+      (restoredGrand == engine::runtime::kInvalidEntity)) {
+    return finish(109);
+  }
+
+  NameComponent restoredParentName{};
+  MeshComponent restoredMesh{};
+  if (!world->get_name_component(restoredParent, &restoredParentName) ||
+      (std::strcmp(restoredParentName.name, "Parent") != 0) ||
+      !world->get_mesh_component(restoredParent, &restoredMesh) ||
+      (restoredMesh.meshAssetId != 42ULL) ||
+      (restoredMesh.albedo.x != 0.25F) || (restoredMesh.albedo.y != 0.5F) ||
+      (restoredMesh.albedo.z != 0.75F)) {
+    return finish(110);
+  }
+
+  NameComponent restoredChildName{};
+  Transform restoredChildTransform{};
+  if (!world->get_name_component(restoredChild, &restoredChildName) ||
+      (std::strcmp(restoredChildName.name, "Child") != 0) ||
+      !world->get_transform(restoredChild, &restoredChildTransform) ||
+      (restoredChildTransform.parentId != parentId) ||
+      (restoredChildTransform.position.x != 1.0F) ||
+      (restoredChildTransform.position.y != 2.0F) ||
+      (restoredChildTransform.position.z != 3.0F)) {
+    return finish(111);
+  }
+
+  Transform restoredGrandTransform{};
+  if (!world->get_transform(restoredGrand, &restoredGrandTransform) ||
+      (restoredGrandTransform.parentId != childId)) {
+    return finish(112);
+  }
+
+  history.redo();
+  if ((world->alive_entity_count() != 0U) ||
+      (world->find_entity_by_persistent_id(parentId) !=
+       engine::runtime::kInvalidEntity)) {
+    return finish(113);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != 3U) {
+    return finish(114);
+  }
+  Transform secondRestore{};
+  const Entity childAgain = world->find_entity_by_persistent_id(childId);
+  if ((childAgain == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(childAgain, &secondRestore) ||
+      (secondRestore.parentId != parentId)) {
+    return finish(115);
+  }
+
+  return finish(0);
+}
+
+/// An asset-spawn create command must place the entity at the requested
+/// transform with its mesh reference, and restore both on redo.
+int check_entity_create_with_mesh_payload() noexcept {
+  using engine::editor::EntityCreateCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::MeshComponent;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 130;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    return finish(131);
+  }
+  command->transform.position = engine::math::Vec3(4.0F, 0.0F, -2.0F);
+  std::snprintf(command->name.name, sizeof(command->name.name), "%s", "rock");
+  command->hasMesh = true;
+  command->mesh.meshAssetId = 777ULL;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  const engine::runtime::PersistentId persistentId = command->persistentId;
+  const Entity created = world->find_entity_by_persistent_id(persistentId);
+  if (created == engine::runtime::kInvalidEntity) {
+    return finish(132);
+  }
+  Transform placed{};
+  MeshComponent meshComponent{};
+  if (!world->get_transform(created, &placed) ||
+      (placed.position.x != 4.0F) || (placed.position.y != 0.0F) ||
+      (placed.position.z != -2.0F) ||
+      !world->get_mesh_component(created, &meshComponent) ||
+      (meshComponent.meshAssetId != 777ULL)) {
+    return finish(133);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != 0U) {
+    return finish(134);
+  }
+
+  history.redo();
+  const Entity redone = world->find_entity_by_persistent_id(persistentId);
+  Transform redonePlaced{};
+  MeshComponent redoneMesh{};
+  if ((redone == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(redone, &redonePlaced) ||
+      (redonePlaced.position.x != 4.0F) ||
+      !world->get_mesh_component(redone, &redoneMesh) ||
+      (redoneMesh.meshAssetId != 777ULL)) {
+    return finish(135);
+  }
+
+  return finish(0);
+}
+
+/// A create-then-edit history chain must survive full undo and redo even
+/// though redo re-creates the entity with a fresh generation.
+int check_create_edit_chain_survives_undo_redo() noexcept {
+  using engine::editor::ComponentEditCommand;
+  using engine::editor::ComponentEditSnapshot;
+  using engine::editor::ComponentEditType;
+  using engine::editor::EntityCreateCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::NameComponent;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 120;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  auto *createCommand = new (std::nothrow) EntityCreateCommand();
+  if (createCommand == nullptr) {
+    return finish(121);
+  }
+  engine::editor::CommandHistory history{};
+  history.execute(createCommand);
+
+  const engine::runtime::PersistentId persistentId =
+      createCommand->persistentId;
+  const Entity created = world->find_entity_by_persistent_id(persistentId);
+  if (created == engine::runtime::kInvalidEntity) {
+    return finish(122);
+  }
+
+  ComponentEditSnapshot before{};
+  if (!engine::editor::capture_component_snapshot(ComponentEditType::Name,
+                                                  created, &before)) {
+    return finish(123);
+  }
+  ComponentEditSnapshot after{};
+  std::snprintf(after.name.name, sizeof(after.name.name), "%s", "Renamed");
+  auto *renameCommand = new (std::nothrow) ComponentEditCommand();
+  if (renameCommand == nullptr) {
+    return finish(124);
+  }
+  renameCommand->entity = created;
+  renameCommand->persistentId = persistentId;
+  renameCommand->type = ComponentEditType::Name;
+  renameCommand->beforeExists = true;
+  renameCommand->before = before;
+  renameCommand->afterExists = true;
+  renameCommand->after = after;
+  history.execute(renameCommand);
+
+  history.undo();
+  history.undo();
+  if (world->alive_entity_count() != 0U) {
+    return finish(125);
+  }
+
+  history.redo();
+  history.redo();
+  const Entity redone = world->find_entity_by_persistent_id(persistentId);
+  NameComponent finalName{};
+  if ((redone == engine::runtime::kInvalidEntity) ||
+      (world->alive_entity_count() != 1U) ||
+      !world->get_name_component(redone, &finalName) ||
+      (std::strcmp(finalName.name, "Renamed") != 0)) {
+    return finish(126);
+  }
+
+  return finish(0);
+}
+
+/// A foliage-instance structural edit recorded as before/after snapshots
+/// must undo back to the original instance list and redo the change.
+int check_foliage_instance_edit_round_trip() noexcept {
+  using engine::editor::ComponentEditCommand;
+  using engine::editor::ComponentEditSnapshot;
+  using engine::editor::ComponentEditType;
+  using engine::runtime::Entity;
+  using engine::runtime::FoliagePatchComponent;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 140;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity entity = world->create_scene_object();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return finish(141);
+  }
+
+  FoliagePatchComponent original{};
+  original.instanceCount = 2U;
+  original.instances[0].offset = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  original.instances[0].scale = 0.5F;
+  original.instances[1].offset = engine::math::Vec3(0.0F, 0.0F, 2.0F);
+  original.instances[1].scale = 0.75F;
+  if (!world->add_foliage_patch_component(entity, original)) {
+    return finish(142);
+  }
+
+  ComponentEditSnapshot before{};
+  if (!engine::editor::capture_component_snapshot(
+          ComponentEditType::FoliagePatch, entity, &before)) {
+    return finish(143);
+  }
+  ComponentEditSnapshot after = before;
+  after.foliagePatch.instances[0] = after.foliagePatch.instances[1];
+  after.foliagePatch.instanceCount = 1U;
+  after.foliagePatch.instances[1] = engine::runtime::FoliageInstance{};
+
+  auto *command = new (std::nothrow) ComponentEditCommand();
+  if (command == nullptr) {
+    return finish(144);
+  }
+  command->entity = entity;
+  command->persistentId = world->persistent_id(entity);
+  command->type = ComponentEditType::FoliagePatch;
+  command->beforeExists = true;
+  command->before = before;
+  command->afterExists = true;
+  command->after = after;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  FoliagePatchComponent removed{};
+  if (!world->get_foliage_patch_component(entity, &removed) ||
+      (removed.instanceCount != 1U) ||
+      (removed.instances[0].offset.z != 2.0F) ||
+      (removed.instances[0].scale != 0.75F)) {
+    return finish(145);
+  }
+
+  history.undo();
+  FoliagePatchComponent restored{};
+  if (!world->get_foliage_patch_component(entity, &restored) ||
+      (restored.instanceCount != 2U) ||
+      (restored.instances[0].offset.x != 1.0F) ||
+      (restored.instances[0].scale != 0.5F) ||
+      (restored.instances[1].offset.z != 2.0F) ||
+      (restored.instances[1].scale != 0.75F)) {
+    return finish(146);
+  }
+
+  history.redo();
+  FoliagePatchComponent redone{};
+  if (!world->get_foliage_patch_component(entity, &redone) ||
+      (redone.instanceCount != 1U) ||
+      (redone.instances[0].offset.z != 2.0F)) {
+    return finish(147);
+  }
+
+  return finish(0);
+}
+
 } // namespace
 
 static_assert(!std::is_copy_constructible_v<engine::editor::CommandHistory>);
@@ -313,6 +938,48 @@ int main() {
   }
 
   result = check_component_command_rejects_recycled_entity();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_commands_resolve_persistent_id_after_recreate();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_reparent_resolves_persistent_id_after_recreate();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_entity_create_undo_redo();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_entity_delete_restores_subtree();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_entity_create_with_mesh_payload();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_create_edit_chain_survives_undo_redo();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_foliage_instance_edit_round_trip();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

@@ -439,6 +439,7 @@ struct EnginePipeline::Impl final {
   LoopPlayState playState = LoopPlayState::Stopped;
   bool isPlaying = false;
   bool isPaused = false;
+  bool singleStepping = false;
   bool runPhysics = false;
   bool runFrameGraph = false;
   int appliedVsync = 1;
@@ -536,6 +537,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   }
 
   bridge = runtime::editor_bridge();
+  runtime::set_editor_asset_service(&assetDatabaseService);
 
   runtime::bind_scripting_runtime(world.get(), serviceLocator);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
@@ -647,6 +649,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     bridge->set_world(nullptr);
   }
 
+  runtime::set_editor_asset_service(nullptr);
   runtime::unbind_scripting_runtime(serviceLocator);
   serviceRegistry.unregister_services();
 
@@ -718,7 +721,19 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
   runPhysics = isPlaying;
   runFrameGraph = !isPaused;
 
-  if (isPlaying && (previousPlayState != LoopPlayState::Playing)) {
+  // A consumed editor single-step promotes this paused frame to a playing
+  // frame; stage_timing then simulates exactly one fixed step.
+  singleStepping = isPaused && (bridge != nullptr) &&
+                   (bridge->consume_step_request != nullptr) &&
+                   bridge->consume_step_request();
+  if (singleStepping) {
+    isPlaying = true;
+    runPhysics = true;
+    runFrameGraph = true;
+  }
+
+  if (isPlaying && (previousPlayState != LoopPlayState::Playing) &&
+      !singleStepping) {
     world->clear_world_transform_history();
     cameraSampleValid = false;
   }
@@ -729,32 +744,24 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_timing() noexcept {
-  updateStepCount = 0U;
-  if (isPlaying) {
+  if (isPlaying && !singleStepping) {
     const auto now = Clock::now();
     accumulator += std::chrono::duration<double>(now - previousTick).count();
     previousTick = now;
-
-    const double maxAccumulator =
-        static_cast<double>(kMaxUpdateStepsPerFrame) * kFixedDeltaSeconds;
-    if (accumulator > maxAccumulator) {
-      accumulator = maxAccumulator;
-    }
-
-    while ((accumulator >= kFixedDeltaSeconds) &&
-           (updateStepCount < kMaxUpdateStepsPerFrame)) {
-      accumulator -= kFixedDeltaSeconds;
-      ++updateStepCount;
-    }
-
-    simulationTimeSeconds +=
-        static_cast<double>(updateStepCount) * kFixedDeltaSeconds;
-    renderAlpha = accumulator / kFixedDeltaSeconds;
   } else {
-    accumulator = 0.0;
     previousTick = frameStart;
-    renderAlpha = 1.0;
   }
+
+  const runtime::FixedStepDecision decision = runtime::fixed_step_decision(
+      isPlaying, singleStepping, accumulator, kFixedDeltaSeconds,
+      kMaxUpdateStepsPerFrame);
+  updateStepCount = decision.stepCount;
+  accumulator = decision.remainingAccumulator;
+  simulationTimeSeconds +=
+      static_cast<double>(updateStepCount) * kFixedDeltaSeconds;
+  renderAlpha = (isPlaying && !singleStepping)
+                    ? accumulator / kFixedDeltaSeconds
+                    : 1.0;
 }
 
 // ---------------------------------------------------------------------------

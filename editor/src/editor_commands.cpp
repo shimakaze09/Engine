@@ -54,6 +54,17 @@
 
 namespace engine::editor {
 
+runtime::Entity resolve_command_target(
+    runtime::Entity entity, runtime::PersistentId persistentId) noexcept {
+  if ((editor_session().world == nullptr) ||
+      (persistentId == runtime::kInvalidPersistentId)) {
+    return entity;
+  }
+  const runtime::Entity resolved =
+      editor_session().world->find_entity_by_persistent_id(persistentId);
+  return (resolved == runtime::kInvalidEntity) ? entity : resolved;
+}
+
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
                                 ComponentEditSnapshot *out) noexcept {
   if ((editor_session().world == nullptr) || (out == nullptr)) {
@@ -190,6 +201,9 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
   }
 
   cmd->entity = entity;
+  cmd->persistentId = (editor_session().world != nullptr)
+                          ? editor_session().world->persistent_id(entity)
+                          : runtime::kInvalidPersistentId;
   cmd->type = type;
   cmd->beforeExists = beforeExists;
   cmd->before = before;
@@ -213,6 +227,7 @@ void execute_component_remove(runtime::Entity entity,
   }
 
   cmd->entity = entity;
+  cmd->persistentId = editor_session().world->persistent_id(entity);
   cmd->type = type;
   cmd->beforeExists = true;
   cmd->before = before;
@@ -220,6 +235,342 @@ void execute_component_remove(runtime::Entity entity,
   editor_session().commandHistory.execute(cmd);
 }
 
+
+/// Applies a parent persistent id onto the child's transform.
+static bool apply_parent_id(runtime::Entity child,
+                            runtime::PersistentId parentId) noexcept {
+  runtime::World *world = editor_session().world;
+  if (world == nullptr) {
+    return false;
+  }
+  const runtime::Entity resolved = world->find_entity_by_index(child.index);
+  if ((resolved == runtime::kInvalidEntity) ||
+      (resolved.generation != child.generation)) {
+    return false;
+  }
+  runtime::Transform transform{};
+  if (!world->get_transform(resolved, &transform)) {
+    return false;
+  }
+  transform.parentId = parentId;
+  return world->add_transform(resolved, transform);
+}
+
+void ReparentCommand::execute() noexcept {
+  static_cast<void>(apply_parent_id(
+      resolve_command_target(child, childPersistentId), afterParentId));
+}
+
+void ReparentCommand::undo() noexcept {
+  static_cast<void>(apply_parent_id(
+      resolve_command_target(child, childPersistentId), beforeParentId));
+}
+
+bool execute_reparent(runtime::Entity child,
+                      runtime::Entity newParent) noexcept {
+  runtime::World *world = editor_session().world;
+  if ((world == nullptr) || (child == runtime::kInvalidEntity) ||
+      (child == newParent)) {
+    return false;
+  }
+
+  runtime::PersistentId afterId = runtime::kInvalidPersistentId;
+  if (newParent != runtime::kInvalidEntity) {
+    afterId = world->persistent_id(newParent);
+    if (afterId == runtime::kInvalidPersistentId) {
+      return false;
+    }
+    runtime::Entity cursor = newParent;
+    for (std::size_t depth = 0U; depth < 256U; ++depth) {
+      runtime::Transform cursorTransform{};
+      if (!world->get_transform(cursor, &cursorTransform) ||
+          (cursorTransform.parentId == runtime::kInvalidPersistentId)) {
+        break;
+      }
+      cursor = world->find_entity_by_persistent_id(cursorTransform.parentId);
+      if (cursor == runtime::kInvalidEntity) {
+        break;
+      }
+      if (cursor == child) {
+        return false;
+      }
+    }
+  }
+
+  runtime::Transform before{};
+  if (!world->get_transform(child, &before)) {
+    return false;
+  }
+  if (before.parentId == afterId) {
+    return true;
+  }
+
+  // Prove the reparent is legal (add_transform enforces the
+  // dynamic-body-root rule) before recording it, then revert and route
+  // the real application through the command history.
+  if (!apply_parent_id(child, afterId)) {
+    return false;
+  }
+  runtime::Transform applied{};
+  if (!world->get_transform(child, &applied) ||
+      (applied.parentId != afterId)) {
+    return false;
+  }
+  static_cast<void>(apply_parent_id(child, before.parentId));
+
+  auto *command = new (std::nothrow) ReparentCommand();
+  if (command == nullptr) {
+    return false;
+  }
+  command->child = child;
+  command->childPersistentId = world->persistent_id(child);
+  command->beforeParentId = before.parentId;
+  command->afterParentId = afterId;
+  editor_session().commandHistory.execute(command);
+  return true;
+}
+
+void EntityCreateCommand::execute() noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return;
+  }
+  const runtime::Entity entity =
+      (persistentId == runtime::kInvalidPersistentId)
+          ? world->create_scene_object(transform)
+          : world->create_scene_object_with_persistent_id(persistentId,
+                                                          transform);
+  if (entity == runtime::kInvalidEntity) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "entity create command could not create the entity");
+    return;
+  }
+  persistentId = world->persistent_id(entity);
+  if (name.name[0] == '\0') {
+    make_default_entity_name(entity.index, &name);
+  }
+  static_cast<void>(world->add_name_component(entity, name));
+  if (hasMesh) {
+    static_cast<void>(world->add_mesh_component(entity, mesh));
+  }
+}
+
+void EntityCreateCommand::undo() noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) ||
+      (persistentId == runtime::kInvalidPersistentId)) {
+    return;
+  }
+  const runtime::Entity entity =
+      world->find_entity_by_persistent_id(persistentId);
+  if (entity == runtime::kInvalidEntity) {
+    return;
+  }
+  static_cast<void>(world->destroy_entity(entity));
+}
+
+/// Counts the entity plus all its transform descendants.
+static std::size_t count_subtree_entities(runtime::World &world,
+                                          runtime::Entity entity) noexcept {
+  std::size_t count = 1U;
+  const runtime::PersistentId ownId = world.persistent_id(entity);
+  world.for_each_alive([&](runtime::Entity candidate) {
+    if (candidate == entity) {
+      return;
+    }
+    runtime::Transform transform{};
+    if (world.get_transform(candidate, &transform) &&
+        (transform.parentId == ownId)) {
+      count += count_subtree_entities(world, candidate);
+    }
+  });
+  return count;
+}
+
+/// Fills delete records for the subtree in parent-before-child order so
+/// undo can restore parents ahead of the children that link to them.
+static void capture_subtree_records(runtime::World &world,
+                                    runtime::Entity entity,
+                                    EntityDeleteRecord *records,
+                                    std::size_t capacity,
+                                    std::size_t *written) noexcept {
+  if (*written >= capacity) {
+    return;
+  }
+  EntityDeleteRecord &record = records[*written];
+  ++(*written);
+  record.persistentId = world.persistent_id(entity);
+  for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
+       ++typeIndex) {
+    record.present[typeIndex] = capture_component_snapshot(
+        static_cast<ComponentEditType>(typeIndex), entity,
+        &record.components);
+  }
+  const runtime::PersistentId ownId = record.persistentId;
+  world.for_each_alive([&](runtime::Entity candidate) {
+    if (candidate == entity) {
+      return;
+    }
+    runtime::Transform transform{};
+    if (world.get_transform(candidate, &transform) &&
+        (transform.parentId == ownId)) {
+      capture_subtree_records(world, candidate, records, capacity, written);
+    }
+  });
+}
+
+void EntityDeleteCommand::execute() noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || (recordCount == 0U)) {
+    return;
+  }
+  const runtime::Entity root =
+      world->find_entity_by_persistent_id(records[0].persistentId);
+  if (root == runtime::kInvalidEntity) {
+    return;
+  }
+  static_cast<void>(world->destroy_entity(root));
+}
+
+void EntityDeleteCommand::undo() noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return;
+  }
+  constexpr std::size_t transformSlot =
+      static_cast<std::size_t>(ComponentEditType::Transform);
+  for (std::size_t i = 0U; i < recordCount; ++i) {
+    const EntityDeleteRecord &record = records[i];
+    const runtime::Entity entity =
+        record.present[transformSlot]
+            ? world->create_scene_object_with_persistent_id(
+                  record.persistentId, record.components.transform)
+            : world->create_entity_with_persistent_id(record.persistentId);
+    if (entity == runtime::kInvalidEntity) {
+      core::log_message(
+          core::LogLevel::Error, "editor",
+          "entity delete undo could not re-create a subtree member");
+      continue;
+    }
+    for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
+         ++typeIndex) {
+      if (!record.present[typeIndex] || (typeIndex == transformSlot)) {
+        continue;
+      }
+      static_cast<void>(apply_component_snapshot(
+          static_cast<ComponentEditType>(typeIndex), entity, true,
+          record.components));
+    }
+  }
+}
+
+runtime::Entity execute_entity_create() noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    const runtime::Entity entity = world->create_scene_object();
+    if (entity != runtime::kInvalidEntity) {
+      runtime::NameComponent nameComponent{};
+      make_default_entity_name(entity.index, &nameComponent);
+      static_cast<void>(world->add_name_component(entity, nameComponent));
+    }
+    return entity;
+  }
+  editor_session().commandHistory.execute(command);
+  return world->find_entity_by_persistent_id(command->persistentId);
+}
+
+/// Copies the file stem of a virtual asset path into a name component
+/// ("assets/props/rock.mesh" names the spawn "rock").
+static void make_asset_spawn_name(const char *virtualPath,
+                                  runtime::NameComponent *outName) noexcept {
+  if ((virtualPath == nullptr) || (outName == nullptr)) {
+    return;
+  }
+  const char *stem = virtualPath;
+  for (const char *cursor = virtualPath; *cursor != '\0'; ++cursor) {
+    if ((*cursor == '/') || (*cursor == '\\')) {
+      stem = cursor + 1;
+    }
+  }
+  std::snprintf(outName->name, sizeof(outName->name), "%s", stem);
+  char *dot = std::strrchr(outName->name, '.');
+  if ((dot != nullptr) && (dot != outName->name)) {
+    *dot = '\0';
+  }
+}
+
+runtime::Entity execute_asset_spawn(
+    const char *virtualPath, const runtime::Transform &transform) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || (virtualPath == nullptr) ||
+      (virtualPath[0] == '\0')) {
+    return runtime::kInvalidEntity;
+  }
+
+  const std::uint64_t assetId =
+      runtime::editor_request_mesh_asset(virtualPath);
+  if (assetId == 0ULL) {
+    return runtime::kInvalidEntity;
+  }
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    const runtime::Entity entity = world->create_scene_object(transform);
+    if (entity != runtime::kInvalidEntity) {
+      runtime::NameComponent nameComponent{};
+      make_asset_spawn_name(virtualPath, &nameComponent);
+      static_cast<void>(world->add_name_component(entity, nameComponent));
+      runtime::MeshComponent meshComponent{};
+      meshComponent.meshAssetId = assetId;
+      static_cast<void>(world->add_mesh_component(entity, meshComponent));
+    }
+    return entity;
+  }
+
+  command->transform = transform;
+  make_asset_spawn_name(virtualPath, &command->name);
+  command->hasMesh = true;
+  command->mesh.meshAssetId = assetId;
+  editor_session().commandHistory.execute(command);
+  return world->find_entity_by_persistent_id(command->persistentId);
+}
+
+EntityDeleteCommand *
+build_entity_delete_command(runtime::Entity entity) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
+    return nullptr;
+  }
+  const std::size_t count = count_subtree_entities(*world, entity);
+  auto *command = new (std::nothrow) EntityDeleteCommand();
+  if (command == nullptr) {
+    return nullptr;
+  }
+  command->records.reset(new (std::nothrow) EntityDeleteRecord[count]);
+  if (command->records == nullptr) {
+    delete command;
+    return nullptr;
+  }
+  std::size_t written = 0U;
+  capture_subtree_records(*world, entity, command->records.get(), count,
+                          &written);
+  command->recordCount = written;
+  return command;
+}
+
+bool execute_entity_delete(runtime::Entity entity) noexcept {
+  EntityDeleteCommand *const command = build_entity_delete_command(entity);
+  if (command == nullptr) {
+    return (editor_session().world != nullptr) &&
+           editor_session().world->destroy_entity(entity);
+  }
+  editor_session().commandHistory.execute(command);
+  return true;
+}
 
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept {

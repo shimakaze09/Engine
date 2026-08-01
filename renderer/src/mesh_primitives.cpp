@@ -295,7 +295,13 @@ bool build_capsule_mesh(GpuMesh *outMesh) noexcept {
       static_cast<std::uint32_t>(kICount), false, outMesh);
 }
 
-bool build_pyramid_mesh(GpuMesh *outMesh) noexcept {
+std::size_t fill_pyramid_vertices(float *outVerts,
+                                  std::size_t capacity) noexcept {
+  constexpr std::size_t kFloatCount = 72U;
+  if ((outVerts == nullptr) || (capacity < kFloatCount)) {
+    return 0U;
+  }
+
   constexpr float kBaseZBack = -0.288675F;
   constexpr float kBaseZFront = 0.577350F;
   const math::Vec3 apex(0.0F, 0.5F, 0.0F);
@@ -303,27 +309,33 @@ bool build_pyramid_mesh(GpuMesh *outMesh) noexcept {
   const math::Vec3 b1(0.5F, -0.5F, kBaseZBack);
   const math::Vec3 b2(0.0F, -0.5F, kBaseZFront);
 
-  float verts[72]{};
   int vi = 0;
   const auto addFace = [&](const math::Vec3 &p0, const math::Vec3 &p1,
                            const math::Vec3 &p2) {
     const math::Vec3 normal =
         math::normalize(math::cross(math::sub(p1, p0), math::sub(p2, p0)));
     for (const math::Vec3 &p : {p0, p1, p2}) {
-      verts[vi++] = p.x;
-      verts[vi++] = p.y;
-      verts[vi++] = p.z;
-      verts[vi++] = normal.x;
-      verts[vi++] = normal.y;
-      verts[vi++] = normal.z;
+      outVerts[vi++] = p.x;
+      outVerts[vi++] = p.y;
+      outVerts[vi++] = p.z;
+      outVerts[vi++] = normal.x;
+      outVerts[vi++] = normal.y;
+      outVerts[vi++] = normal.z;
     }
   };
 
-  addFace(b0, b2, b1);
-  addFace(b0, b1, apex);
-  addFace(b1, b2, apex);
-  addFace(b2, b0, apex);
+  addFace(b0, b1, b2);
+  addFace(b0, apex, b1);
+  addFace(b1, apex, b2);
+  addFace(b2, apex, b0);
+  return kFloatCount;
+}
 
+bool build_pyramid_mesh(GpuMesh *outMesh) noexcept {
+  float verts[72]{};
+  if (fill_pyramid_vertices(verts, 72U) != 72U) {
+    return false;
+  }
   return build_gpu_mesh_from_data(verts, 12U, nullptr, 0U, false, outMesh);
 }
 

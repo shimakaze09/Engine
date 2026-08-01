@@ -168,6 +168,13 @@ engine_add_test_executable(engine_unit_runtime_world
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_editor_asset_request
+    SOURCES
+    editor_asset_request_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_world_name_lookup
     SOURCES
     world_name_lookup_test.cpp
@@ -512,6 +519,15 @@ engine_add_test_executable(engine_unit_light_culling
 engine_add_test_executable(engine_unit_command_buffer
     SOURCES
     command_buffer_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_mesh_primitives
+    SOURCES
+    mesh_primitives_test.cpp
     PRIVATE_DEPS
     engine_renderer
     engine_math
