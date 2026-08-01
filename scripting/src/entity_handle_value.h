@@ -12,7 +12,8 @@
 namespace engine::scripting {
 
 /// Encodes an entity plus the bound world's content epoch into the
-/// numeric handle format; false when any field exceeds its bit budget.
+/// numeric handle format; false when any field exceeds its bit budget or
+/// the entity is not alive in the currently bound world.
 bool encode_entity_handle_value(runtime::Entity entity,
                                 std::uint64_t *outHandle) noexcept;
 

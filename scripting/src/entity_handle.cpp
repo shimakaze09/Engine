@@ -33,13 +33,24 @@ static_assert(static_cast<std::uint64_t>(runtime::World::kMaxEntities) <=
                   kLuaEntityIndexMask,
               "entity index field too small for the configured capacity");
 
-/// Content epoch of the bound world, masked to the handle field width.
+/// Content epoch of the bound world, masked to the handle field width; the
+/// first time the raw epoch exceeds the field, the weakened stale-handle
+/// guarantee is announced instead of masking silently.
 std::uint64_t bound_world_epoch() noexcept {
   const runtime::World *world = runtime_binding().world;
-  return (world != nullptr)
-             ? (static_cast<std::uint64_t>(world->content_epoch()) &
-                kLuaEntityEpochMask)
-             : 0ULL;
+  if (world == nullptr) {
+    return 0ULL;
+  }
+  const std::uint32_t epoch = world->content_epoch();
+  static bool warnedExhausted = false;
+  if ((static_cast<std::uint64_t>(epoch) > kLuaEntityEpochMask) &&
+      !warnedExhausted) {
+    warnedExhausted = true;
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "entity-handle epoch field exhausted: handles retained "
+                      "across 131072+ world replacements can alias");
+  }
+  return static_cast<std::uint64_t>(epoch) & kLuaEntityEpochMask;
 }
 
 } // namespace
@@ -56,6 +67,10 @@ bool encode_entity_handle_value(runtime::Entity entity,
   const std::uint64_t encodedGeneration =
       static_cast<std::uint64_t>(entity.generation - 1U);
   if (encodedGeneration > kLuaEntityGenerationMask) {
+    return false;
+  }
+  const runtime::World *world = runtime_binding().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
     return false;
   }
   *outHandle = (bound_world_epoch() << kLuaEntityEpochShift) |
