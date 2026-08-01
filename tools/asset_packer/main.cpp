@@ -362,7 +362,8 @@ int main(int argc, char **argv) {
   const cgltf_primitive *primitive = &selectedMesh.primitives[primIdx];
   PrimitiveData primitiveData{};
   if (!extract_primitive(primitive, &primitiveData,
-                         jointRemap.empty() ? nullptr : &jointRemap)) {
+                         jointRemap.empty() ? nullptr : &jointRemap,
+                         importSettings.generateNormals)) {
     cgltf_free(data);
     return 5;
   }
@@ -455,7 +456,12 @@ int main(int argc, char **argv) {
     return 12;
   }
 
-  cook_and_write_convex_hull(outputPath, primitiveData);
+  // Hull-less geometry reports success; only a write failure blocks the
+  // stamp below so a broken sidecar can never be certified complete.
+  if (!cook_and_write_convex_hull(outputPath, primitiveData)) {
+    std::fprintf(stderr, "error: failed to write convex hull sidecar\n");
+    return 17;
+  }
 
   generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
 

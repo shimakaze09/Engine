@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 
 #include <cgltf.h>
@@ -282,6 +283,104 @@ int check_v3_mesh_file_header() {
   return 0;
 }
 
+/// EXPECTATION (review item 1): a glTF primitive without a NORMAL
+/// accessor extracts when normal generation will follow — normals come
+/// out zeroed, and generation then produces exact face normals — while
+/// the default path still rejects the missing accessor.
+int check_missing_normals_with_generation() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  for (cgltf_size i = 0U; i < primitive->attributes_count; ++i) {
+    if (data->meshes[0].primitives[0].attributes[i].type ==
+        cgltf_attribute_type_normal) {
+      data->meshes[0].primitives[0].attributes[i].type =
+          cgltf_attribute_type_invalid;
+    }
+  }
+
+  PrimitiveData rejected{};
+  if (extract_primitive(primitive, &rejected, nullptr, false)) {
+    cgltf_free(data);
+    std::puts("missing NORMAL accepted without generation");
+    return 1;
+  }
+
+  PrimitiveData extracted{};
+  const bool ok = extract_primitive(primitive, &extracted, nullptr, true);
+  cgltf_free(data);
+  if (!ok) {
+    std::puts("missing NORMAL rejected despite generation");
+    return 1;
+  }
+  const std::size_t stride = primitive_stride_floats(extracted);
+  const std::size_t vertexCount =
+      extracted.interleavedVertices.size() / stride;
+  for (std::size_t v = 0U; v < vertexCount; ++v) {
+    const std::size_t base = v * stride;
+    if ((extracted.interleavedVertices[base + 3U] != 0.0F) ||
+        (extracted.interleavedVertices[base + 4U] != 0.0F) ||
+        (extracted.interleavedVertices[base + 5U] != 0.0F)) {
+      std::puts("missing NORMAL did not zero the normal fields");
+      return 1;
+    }
+  }
+
+  generate_normals_for_primitive(&extracted);
+  bool anyUnit = false;
+  for (std::size_t v = 0U; v < vertexCount; ++v) {
+    const std::size_t base = v * stride;
+    const float x = extracted.interleavedVertices[base + 3U];
+    const float y = extracted.interleavedVertices[base + 4U];
+    const float z = extracted.interleavedVertices[base + 5U];
+    const float lengthSquared = (x * x) + (y * y) + (z * z);
+    if ((lengthSquared < 0.99F) || (lengthSquared > 1.01F)) {
+      std::puts("generated normal is not unit length");
+      return 1;
+    }
+    anyUnit = true;
+  }
+  return anyUnit ? 0 : 1;
+}
+
+/// EXPECTATION (review item 3): a hull write failure is reported so the
+/// cook cannot stamp a missing sidecar complete — injected here by
+/// occupying the .hull path with a directory — while structurally
+/// hull-less geometry (too few vertices) reports success.
+int check_hull_write_failure_reported() {
+  PrimitiveData tetrahedron{};
+  tetrahedron.interleavedVertices = {
+      0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0.0F};
+
+  const char *blockedOutput = "hull_block_test.mesh";
+  const char *blockedHullPath = "hull_block_test.mesh.hull";
+  std::error_code ec{};
+  std::filesystem::remove_all(blockedHullPath, ec);
+  if (!std::filesystem::create_directory(blockedHullPath, ec) || ec) {
+    std::puts("could not stage hull-path blocker");
+    return 1;
+  }
+  const bool blocked = cook_and_write_convex_hull(blockedOutput, tetrahedron);
+  std::filesystem::remove_all(blockedHullPath, ec);
+  if (blocked) {
+    std::puts("blocked hull write reported success");
+    return 1;
+  }
+
+  PrimitiveData degenerate{};
+  degenerate.interleavedVertices = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  if (!cook_and_write_convex_hull("hull_skip_test.mesh", degenerate)) {
+    std::puts("structurally hull-less geometry reported failure");
+    return 1;
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-19): a non-triangle primitive mode is rejected
 /// by extraction instead of cooking its data as if it were a triangle
 /// list; the same primitive extracts fine as triangles.
@@ -491,6 +590,13 @@ int main() {
   if (result == 0) {
     result = check_non_triangle_mode_rejected();
   }
+  if (result == 0) {
+    result = check_missing_normals_with_generation();
+  }
+  if (result == 0) {
+    result = check_hull_write_failure_reported();
+  }
+  remove_file("hull_skip_test.mesh.hull");
   cleanup_fixture_files();
   return result;
 }

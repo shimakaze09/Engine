@@ -93,10 +93,12 @@ void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor);
 /// Extracts one glTF primitive into interleaved vertices and indices.
 /// When jointRemap is non-null and the primitive carries JOINTS_0 and
 /// WEIGHTS_0, cooks the skinned v3 layout with joint indices remapped to
-/// the reordered skeleton.
+/// the reordered skeleton. allowMissingNormals accepts sources without a
+/// NORMAL accessor, leaving zeroed normals for the caller to generate.
 bool extract_primitive(const cgltf_primitive *primitive,
                        PrimitiveData *outData,
-                       const std::vector<std::uint32_t> *jointRemap = nullptr);
+                       const std::vector<std::uint32_t> *jointRemap = nullptr,
+                       bool allowMissingNormals = false);
 /// Writes the cooked .mesh file.
 bool write_mesh_file(const char *outputPath, const PrimitiveData &data);
 /// Writes the .meta.json metadata sidecar.
@@ -105,7 +107,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
                          std::uint64_t sourceHash,
                          const std::vector<DependencyDigest> &dependencies,
                          const ImportSettings &importSettings);
-/// Cooks and writes the collision convex hull beside the mesh.
+/// Cooks and writes the collision convex hull beside the mesh. True when
+/// the sidecar was written OR the geometry structurally has no hull
+/// (too few vertices, degenerate); false only on a write failure, which
+/// must block the cook-stamp commit marker.
 bool cook_and_write_convex_hull(const char *outputPath,
                                 const PrimitiveData &data);
 /// Resolves a glTF image URI relative to the input file.

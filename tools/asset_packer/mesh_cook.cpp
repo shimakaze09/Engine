@@ -158,7 +158,8 @@ const cgltf_accessor *find_attribute_accessor(const cgltf_primitive *primitive,
 
 bool extract_primitive(const cgltf_primitive *primitive,
                        PrimitiveData *outData,
-                       const std::vector<std::uint32_t> *jointRemap) {
+                       const std::vector<std::uint32_t> *jointRemap,
+                       bool allowMissingNormals) {
   if ((primitive == nullptr) || (outData == nullptr)) {
     return false;
   }
@@ -179,19 +180,24 @@ bool extract_primitive(const cgltf_primitive *primitive,
       find_attribute_accessor(primitive, cgltf_attribute_type_normal);
   const cgltf_accessor *texcoords =
       find_attribute_accessor(primitive, cgltf_attribute_type_texcoord);
-  if ((positions == nullptr) || (normals == nullptr)) {
+  // A missing NORMAL accessor is acceptable only when the caller will
+  // generate normals afterwards; the fields stay zero-initialized until
+  // then (review item 1: generateNormals' primary use case is sources
+  // without normals).
+  if ((positions == nullptr) ||
+      ((normals == nullptr) && !allowMissingNormals)) {
     std::fprintf(stderr,
                  "error: primitive must have POSITION and NORMAL accessors\n");
     return false;
   }
 
   if ((positions->type != cgltf_type_vec3) ||
-      (normals->type != cgltf_type_vec3)) {
+      ((normals != nullptr) && (normals->type != cgltf_type_vec3))) {
     std::fprintf(stderr, "error: POSITION and NORMAL must be vec3\n");
     return false;
   }
 
-  if (positions->count != normals->count) {
+  if ((normals != nullptr) && (positions->count != normals->count)) {
     std::fprintf(stderr,
                  "error: POSITION and NORMAL vertex counts do not match\n");
     return false;
@@ -227,8 +233,9 @@ bool extract_primitive(const cgltf_primitive *primitive,
   for (std::size_t i = 0U; i < vertexCount; ++i) {
     if (!cgltf_accessor_read_float(positions, static_cast<cgltf_size>(i),
                                    position.data(), position.size()) ||
-        !cgltf_accessor_read_float(normals, static_cast<cgltf_size>(i),
-                                   normal.data(), normal.size())) {
+        ((normals != nullptr) &&
+         !cgltf_accessor_read_float(normals, static_cast<cgltf_size>(i),
+                                    normal.data(), normal.size()))) {
       std::fprintf(stderr, "error: failed to decode vertex attributes\n");
       return false;
     }
@@ -237,9 +244,11 @@ bool extract_primitive(const cgltf_primitive *primitive,
     outData->interleavedVertices[base + 0U] = position[0U];
     outData->interleavedVertices[base + 1U] = position[1U];
     outData->interleavedVertices[base + 2U] = position[2U];
-    outData->interleavedVertices[base + 3U] = normal[0U];
-    outData->interleavedVertices[base + 4U] = normal[1U];
-    outData->interleavedVertices[base + 5U] = normal[2U];
+    if (normals != nullptr) {
+      outData->interleavedVertices[base + 3U] = normal[0U];
+      outData->interleavedVertices[base + 4U] = normal[1U];
+      outData->interleavedVertices[base + 5U] = normal[2U];
+    }
 
     if (hasUVs) {
       if (!cgltf_accessor_read_float(texcoords, static_cast<cgltf_size>(i),
@@ -453,10 +462,13 @@ bool cook_and_write_convex_hull(const char *outputPath,
   const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
       data.interleavedVertices.size() / strideFloats;
+  // Structurally hull-less geometry is not a cook failure — the mesh is
+  // valid without a sidecar — so the stamp gate below treats it as
+  // success; only an actual write failure must block the commit marker.
   if (vertexCount < 4U) {
     std::fprintf(stderr, "warning: too few vertices (%zu) for convex hull\n",
                  vertexCount);
-    return false;
+    return true;
   }
 
   std::vector<engine::math::Vec3> positions(vertexCount);
@@ -470,8 +482,10 @@ bool cook_and_write_convex_hull(const char *outputPath,
   engine::physics::ConvexHullData hull{};
   if (!engine::physics::build_convex_hull(positions.data(), vertexCount,
                                           hull)) {
+    // Degenerate geometry cannot produce a hull; the cook proceeds
+    // without the sidecar, matching the too-few-vertices skip above.
     std::fprintf(stderr, "warning: convex hull build failed\n");
-    return false;
+    return true;
   }
 
   char hullPath[512] = {};
