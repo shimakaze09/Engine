@@ -444,12 +444,6 @@ int main(int argc, char **argv) {
     return 12;
   }
 
-  if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
-                        importSettingsHash)) {
-    std::fprintf(stderr, "error: failed to write cook stamp\n");
-    return 13;
-  }
-
   cook_and_write_convex_hull(outputPath, primitiveData);
 
   generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
@@ -461,6 +455,15 @@ int main(int argc, char **argv) {
                    graphPath.c_str());
       return 16;
     }
+  }
+
+  // The stamp is the cook's commit marker: written only after every
+  // output above landed, so any interruption leaves no stamp and the
+  // next run recooks the full output set (audit H-20).
+  if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
+                        importSettingsHash)) {
+    std::fprintf(stderr, "error: failed to write cook stamp\n");
+    return 13;
   }
 
   std::printf(

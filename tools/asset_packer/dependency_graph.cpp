@@ -2,6 +2,7 @@
 
 #include "dependency_graph.h"
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 
 #include <algorithm>
@@ -13,27 +14,15 @@
 namespace engine::tools {
 namespace {
 
+/// Staged atomic replacement so an interrupted write cannot truncate the
+/// shared dependency-graph file (audit H-20).
 bool write_text_file(const char *path, const char *text,
                      std::size_t textSize) noexcept {
   if ((path == nullptr) || (text == nullptr)) {
     return false;
   }
 
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
-    std::fprintf(stderr, "error: cannot open %s for writing\n", path);
-    return false;
-  }
-
-  const bool ok = (std::fwrite(text, 1U, textSize, file) == textSize);
-  std::fclose(file);
+  const bool ok = engine::core::atomic_write_file(path, text, textSize);
   if (!ok) {
     std::fprintf(stderr, "error: failed to write %s\n", path);
   }

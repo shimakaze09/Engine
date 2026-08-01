@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 #include "engine/core/mesh_asset.h"
 #include "engine/math/vec3.h"
@@ -308,19 +309,6 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
     return false;
   }
 
-  FILE *outputFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&outputFile, outputPath, "wb") != 0) {
-    outputFile = nullptr;
-  }
-#else
-  outputFile = std::fopen(outputPath, "wb");
-#endif
-  if (outputFile == nullptr) {
-    std::fprintf(stderr, "error: failed to open output file: %s\n", outputPath);
-    return false;
-  }
-
   engine::core::MeshAssetHeader header{};
   header.magic = engine::core::kMeshAssetMagic;
   header.version = data.hasSkin
@@ -330,34 +318,28 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   header.vertexCount = static_cast<std::uint32_t>(vertexCount);
   header.indexCount = static_cast<std::uint32_t>(data.indices.size());
 
-  if (std::fwrite(&header, sizeof(header), 1U, outputFile) != 1U) {
-    std::fprintf(stderr, "error: failed to write mesh header\n");
-    std::fclose(outputFile);
+  // Assemble in memory and commit atomically so an interrupted cook can
+  // never leave a truncated .mesh behind (audit H-20).
+  const std::size_t vertexBytes =
+      data.interleavedVertices.size() * sizeof(float);
+  const std::size_t indexBytes = data.indices.size() * sizeof(std::uint32_t);
+  std::vector<unsigned char> buffer(sizeof(header) + vertexBytes + indexBytes);
+  std::memcpy(buffer.data(), &header, sizeof(header));
+  if (vertexBytes > 0U) {
+    std::memcpy(buffer.data() + sizeof(header),
+                data.interleavedVertices.data(), vertexBytes);
+  }
+  if (indexBytes > 0U) {
+    std::memcpy(buffer.data() + sizeof(header) + vertexBytes,
+                data.indices.data(), indexBytes);
+  }
+
+  if (!engine::core::atomic_write_file(outputPath, buffer.data(),
+                                       buffer.size())) {
+    std::fprintf(stderr, "error: failed to write output file: %s\n",
+                 outputPath);
     return false;
   }
-
-  if (!data.interleavedVertices.empty()) {
-    const std::size_t vertexBytes =
-        data.interleavedVertices.size() * sizeof(float);
-    if (std::fwrite(data.interleavedVertices.data(), 1U, vertexBytes,
-                    outputFile) != vertexBytes) {
-      std::fprintf(stderr, "error: failed to write vertex data\n");
-      std::fclose(outputFile);
-      return false;
-    }
-  }
-
-  if (!data.indices.empty()) {
-    const std::size_t indexBytes = data.indices.size() * sizeof(std::uint32_t);
-    if (std::fwrite(data.indices.data(), 1U, indexBytes, outputFile) !=
-        indexBytes) {
-      std::fprintf(stderr, "error: failed to write index data\n");
-      std::fclose(outputFile);
-      return false;
-    }
-  }
-
-  std::fclose(outputFile);
   return true;
 }
 
@@ -489,52 +471,37 @@ bool cook_and_write_convex_hull(const char *outputPath,
     return false;
   }
 
-  FILE *hullFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&hullFile, hullPath, "wb") != 0) {
-    hullFile = nullptr;
-  }
-#else
-  hullFile = std::fopen(hullPath, "wb");
-#endif
-  if (hullFile == nullptr) {
-    std::fprintf(stderr, "error: failed to open hull file: %s\n", hullPath);
-    return false;
-  }
-
   // Header: magic (4 bytes) + planeCount (4) + vertexCount (4) + localCenter
-  // (12) + localHalfExtents (12) = 36 bytes.
+  // (12) + localHalfExtents (12) = 36 bytes; then 16-byte planes and
+  // 12-byte vertices. Assembled in memory and committed atomically so an
+  // interrupted cook cannot leave a truncated hull (audit H-20).
   constexpr std::uint32_t kHullMagic = 0x48554C4CU; // 'HULL'
   const std::uint32_t planeCount32 =
       static_cast<std::uint32_t>(hull.planeCount);
   const std::uint32_t vertCount32 =
       static_cast<std::uint32_t>(hull.vertexCount);
 
-  bool ok = true;
-  ok = ok && (std::fwrite(&kHullMagic, 4U, 1U, hullFile) == 1U);
-  ok = ok && (std::fwrite(&planeCount32, 4U, 1U, hullFile) == 1U);
-  ok = ok && (std::fwrite(&vertCount32, 4U, 1U, hullFile) == 1U);
-  ok =
-      ok && (std::fwrite(&hull.localCenter, sizeof(float), 3U, hullFile) == 3U);
-  ok = ok &&
-       (std::fwrite(&hull.localHalfExtents, sizeof(float), 3U, hullFile) == 3U);
-
-  // Planes: each is (normal.x, normal.y, normal.z, distance) = 16 bytes.
-  for (std::size_t i = 0U; i < hull.planeCount && ok; ++i) {
-    ok = ok && (std::fwrite(&hull.planes[i].normal, sizeof(float), 3U,
-                            hullFile) == 3U);
-    ok = ok && (std::fwrite(&hull.planes[i].distance, sizeof(float), 1U,
-                            hullFile) == 1U);
+  std::vector<unsigned char> buffer{};
+  buffer.reserve(36U + (hull.planeCount * 16U) + (hull.vertexCount * 12U));
+  auto appendBytes = [&buffer](const void *bytes, std::size_t size) {
+    const auto *begin = static_cast<const unsigned char *>(bytes);
+    buffer.insert(buffer.end(), begin, begin + size);
+  };
+  appendBytes(&kHullMagic, 4U);
+  appendBytes(&planeCount32, 4U);
+  appendBytes(&vertCount32, 4U);
+  appendBytes(&hull.localCenter, sizeof(float) * 3U);
+  appendBytes(&hull.localHalfExtents, sizeof(float) * 3U);
+  for (std::size_t i = 0U; i < hull.planeCount; ++i) {
+    appendBytes(&hull.planes[i].normal, sizeof(float) * 3U);
+    appendBytes(&hull.planes[i].distance, sizeof(float));
+  }
+  for (std::size_t i = 0U; i < hull.vertexCount; ++i) {
+    appendBytes(&hull.vertices[i], sizeof(float) * 3U);
   }
 
-  // Vertices: each is (x, y, z) = 12 bytes.
-  for (std::size_t i = 0U; i < hull.vertexCount && ok; ++i) {
-    ok = ok &&
-         (std::fwrite(&hull.vertices[i], sizeof(float), 3U, hullFile) == 3U);
-  }
-
-  std::fclose(hullFile);
-  if (!ok) {
+  if (!engine::core::atomic_write_file(hullPath, buffer.data(),
+                                       buffer.size())) {
     std::fprintf(stderr, "error: failed to write hull data\n");
     return false;
   }

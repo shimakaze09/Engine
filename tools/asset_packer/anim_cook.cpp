@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "engine/core/animation_asset.h"
+#include "engine/core/atomic_file.h"
 #include "engine/core/hash.h"
 
 namespace engine::tools {
@@ -38,19 +39,6 @@ bool derive_unique_clip_name(const std::string &clipName, std::size_t index,
 }
 
 namespace {
-
-/// Opens a binary file for writing, portably across CRTs.
-std::FILE *open_write(const char *path) {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  return file;
-}
 
 /// Appends one track's keys to the payload and fills its cooked record.
 void pack_track(const AnimTrack &track, std::uint32_t cookedJoint,
@@ -173,16 +161,17 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
     return false;
   }
 
-  std::FILE *file = open_write(outputPath);
-  if (file == nullptr) {
-    return false;
-  }
-
   core::SkeletonAssetHeader header{};
   header.jointCount = static_cast<std::uint32_t>(skeleton.joints.size());
-  bool ok = std::fwrite(&header, sizeof(header), 1U, file) == 1U;
 
-  for (std::size_t i = 0U; ok && (i < skeleton.joints.size()); ++i) {
+  // Assemble in memory and commit atomically so an interrupted cook can
+  // never leave a truncated .skel behind (audit H-20).
+  std::vector<unsigned char> buffer(
+      sizeof(header) +
+      (skeleton.joints.size() * sizeof(core::SkeletonAssetJoint)));
+  std::memcpy(buffer.data(), &header, sizeof(header));
+
+  for (std::size_t i = 0U; i < skeleton.joints.size(); ++i) {
     const SkeletonJoint &joint = skeleton.joints[i];
     core::SkeletonAssetJoint record{};
     record.parent = joint.parent;
@@ -199,11 +188,12 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
     record.restScale[0] = joint.restScale.x;
     record.restScale[1] = joint.restScale.y;
     record.restScale[2] = joint.restScale.z;
-    ok = std::fwrite(&record, sizeof(record), 1U, file) == 1U;
+    std::memcpy(buffer.data() + sizeof(header) +
+                    (i * sizeof(core::SkeletonAssetJoint)),
+                &record, sizeof(record));
   }
 
-  ok = (std::fclose(file) == 0) && ok;
-  return ok;
+  return core::atomic_write_file(outputPath, buffer.data(), buffer.size());
 }
 
 bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
@@ -224,28 +214,28 @@ bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
     records.push_back(record);
   }
 
-  std::FILE *file = open_write(outputPath);
-  if (file == nullptr) {
-    return false;
-  }
-
   core::AnimClipAssetHeader header{};
   header.trackCount = static_cast<std::uint32_t>(records.size());
   header.payloadFloatCount = static_cast<std::uint32_t>(payload.size());
   header.durationSeconds = clip.durationSeconds;
 
-  bool ok = std::fwrite(&header, sizeof(header), 1U, file) == 1U;
-  if (ok && !records.empty()) {
-    ok = std::fwrite(records.data(), sizeof(records[0]), records.size(),
-                     file) == records.size();
+  // Assemble in memory and commit atomically so an interrupted cook can
+  // never leave a truncated .anim behind (audit H-20).
+  const std::size_t recordBytes =
+      records.size() * sizeof(core::AnimClipAssetTrack);
+  const std::size_t payloadBytes = payload.size() * sizeof(float);
+  std::vector<unsigned char> buffer(sizeof(header) + recordBytes +
+                                    payloadBytes);
+  std::memcpy(buffer.data(), &header, sizeof(header));
+  if (!records.empty()) {
+    std::memcpy(buffer.data() + sizeof(header), records.data(), recordBytes);
   }
-  if (ok && !payload.empty()) {
-    ok = std::fwrite(payload.data(), sizeof(float), payload.size(), file) ==
-         payload.size();
+  if (!payload.empty()) {
+    std::memcpy(buffer.data() + sizeof(header) + recordBytes, payload.data(),
+                payloadBytes);
   }
 
-  ok = (std::fclose(file) == 0) && ok;
-  return ok;
+  return core::atomic_write_file(outputPath, buffer.data(), buffer.size());
 }
 
 } // namespace engine::tools
