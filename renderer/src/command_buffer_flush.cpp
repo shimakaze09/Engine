@@ -52,12 +52,34 @@ constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
 
 } // namespace
 
+const SceneLightData &
+sanitize_scene_light_counts(const SceneLightData &lights,
+                            SceneLightData &storage) noexcept {
+  if ((lights.pointLightCount <= kMaxPointLights) &&
+      (lights.spotLightCount <= kMaxSpotLights)) {
+    return lights;
+  }
+  core::log_message(core::LogLevel::Warning, "renderer",
+                    "scene light counts exceed fixed capacities; clamped");
+  storage = lights;
+  storage.pointLightCount =
+      std::min(lights.pointLightCount, kMaxPointLights);
+  storage.spotLightCount = std::min(lights.spotLightCount, kMaxSpotLights);
+  return storage;
+}
+
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
-                    const SceneLightData &lights) noexcept {
+                    const SceneLightData &rawLights) noexcept {
   if (!initialize_backend()) {
     return;
   }
+
+  // The flush runs on the render thread only, so one static sanitized
+  // copy backs the rare oversized-count case without per-frame cost.
+  static SceneLightData sanitizedLightStorage;
+  const SceneLightData &lights =
+      sanitize_scene_light_counts(rawLights, sanitizedLightStorage);
 
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();

@@ -1,5 +1,6 @@
 // Verifies command buffer test behavior for the Engine test suite.
 
+#include "command_buffer_flush_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
@@ -627,6 +628,67 @@ int check_skin_palette_store() {
   return 0;
 }
 
+/// Audit H-10: sanitize_scene_light_counts must pass valid counts through
+/// by reference identity (no copy), clamp oversized public counts to the
+/// fixed array capacities, preserve the light payloads when clamping, and
+/// handle each count overflowing independently.
+int check_scene_light_count_sanitizer() {
+  static engine::renderer::SceneLightData lights{};
+  static engine::renderer::SceneLightData storage{};
+
+  lights.pointLightCount = engine::renderer::kMaxPointLights;
+  lights.spotLightCount = engine::renderer::kMaxSpotLights;
+  if (&engine::renderer::sanitize_scene_light_counts(lights, storage) !=
+      &lights) {
+    return 120;
+  }
+
+  lights.pointLightCount = 0U;
+  lights.spotLightCount = 0U;
+  if (&engine::renderer::sanitize_scene_light_counts(lights, storage) !=
+      &lights) {
+    return 121;
+  }
+
+  lights.pointLightCount = engine::renderer::kMaxPointLights + 1U;
+  lights.spotLightCount = 3U;
+  lights.pointLights[engine::renderer::kMaxPointLights - 1U].intensity = 7.5F;
+  lights.spotLights[2].intensity = 2.5F;
+  const engine::renderer::SceneLightData &pointClamped =
+      engine::renderer::sanitize_scene_light_counts(lights, storage);
+  if (&pointClamped != &storage) {
+    return 122;
+  }
+  if (pointClamped.pointLightCount != engine::renderer::kMaxPointLights) {
+    return 123;
+  }
+  if (pointClamped.spotLightCount != 3U) {
+    return 124;
+  }
+  if (pointClamped.pointLights[engine::renderer::kMaxPointLights - 1U]
+          .intensity != 7.5F) {
+    return 125;
+  }
+  if (pointClamped.spotLights[2].intensity != 2.5F) {
+    return 126;
+  }
+
+  lights.pointLightCount = 5U;
+  lights.spotLightCount = engine::renderer::kMaxSpotLights + 900U;
+  const engine::renderer::SceneLightData &spotClamped =
+      engine::renderer::sanitize_scene_light_counts(lights, storage);
+  if (&spotClamped != &storage) {
+    return 127;
+  }
+  if (spotClamped.pointLightCount != 5U) {
+    return 128;
+  }
+  if (spotClamped.spotLightCount != engine::renderer::kMaxSpotLights) {
+    return 129;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -671,5 +733,9 @@ int main() {
   if (result != 0) {
     return result;
   }
-  return check_skin_palette_store();
+  result = check_skin_palette_store();
+  if (result != 0) {
+    return result;
+  }
+  return check_scene_light_count_sanitizer();
 }
