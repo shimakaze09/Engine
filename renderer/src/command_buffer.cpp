@@ -111,6 +111,32 @@ bool initialize_backend() noexcept {
   return true;
 }
 
+namespace {
+
+/// Recomputes one family's availability from this reload's reflection
+/// result and its (reload-invariant) resource readiness, logging only on
+/// transitions so a broken edit warns once and a corrected reload
+/// restores the feature (review item 7: flags used to latch false).
+void recompute_availability(bool *availability, bool reflectionOk,
+                            bool resourcesReady, const char *familyName) {
+  const bool nowAvailable = reflectionOk && resourcesReady;
+  if (*availability && !nowAvailable) {
+    char message[128] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s lost required state on shader reload — disabled",
+                  familyName);
+    core::log_message(core::LogLevel::Warning, "renderer", message);
+  } else if (!*availability && nowAvailable) {
+    char message[128] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s restored by shader reload — re-enabled", familyName);
+    core::log_message(core::LogLevel::Info, "renderer", message);
+  }
+  *availability = nowAvailable;
+}
+
+} // namespace
+
 void refresh_backend_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
   if (dev == nullptr) {
@@ -124,87 +150,73 @@ void refresh_backend_program_state(BackendState &backend,
   }
   static_cast<void>(resolve_tonemap_program_state(backend, dev));
 
-  if ((backend.skyboxShaderHandle != kInvalidShaderProgram) &&
-      !resolve_skybox_program_state(backend, dev) &&
-      backend.skyboxAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "skybox shader lost uniforms on reload — disabled");
-    backend.skyboxAvailable = false;
-  }
-  if ((backend.preethamSkyShaderHandle != kInvalidShaderProgram) &&
-      !resolve_preetham_sky_program_state(backend, dev) &&
-      backend.preethamSkyAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "Preetham sky shader lost uniforms on reload — disabled");
-    backend.preethamSkyAvailable = false;
-  }
-  if ((backend.hosekSkyShaderHandle != kInvalidShaderProgram) &&
-      !resolve_hosek_sky_program_state(backend, dev) &&
-      backend.hosekSkyAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "procedural sky shader lost uniforms on reload — "
-                      "disabled");
-    backend.hosekSkyAvailable = false;
-  }
-  if ((backend.environmentPrefilterShaderHandle != kInvalidShaderProgram) &&
-      !resolve_environment_prefilter_program_state(backend, dev) &&
-      backend.environmentPrefilterAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "IBL prefilter shader lost uniforms on reload — "
-                      "disabled");
-    backend.environmentPrefilterAvailable = false;
-  }
-  if ((backend.environmentIrradianceShaderHandle != kInvalidShaderProgram) &&
-      !resolve_environment_irradiance_program_state(backend, dev) &&
-      backend.environmentIrradianceAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "IBL irradiance shader lost uniforms on reload — "
-                      "disabled");
-    backend.environmentIrradianceAvailable = false;
-  }
-  if (backend.environmentBrdfLutShaderHandle != kInvalidShaderProgram) {
-    static_cast<void>(
-        resolve_environment_brdf_lut_program_state(backend, dev));
-  }
+  // Every family recomputes availability from scratch: reflection is
+  // re-evaluated on each reload while resource readiness (geometry,
+  // FBOs, UBOs) is reload-invariant, so a corrected shader re-enables
+  // its feature instead of latching it off.
+  const bool skyGeometryReady = backend.skyboxVertexArray != 0U;
+  recompute_availability(
+      &backend.skyboxAvailable,
+      (backend.skyboxShaderHandle != kInvalidShaderProgram) &&
+          resolve_skybox_program_state(backend, dev),
+      skyGeometryReady, "skybox");
+  recompute_availability(
+      &backend.preethamSkyAvailable,
+      (backend.preethamSkyShaderHandle != kInvalidShaderProgram) &&
+          resolve_preetham_sky_program_state(backend, dev),
+      skyGeometryReady, "Preetham sky");
+  recompute_availability(
+      &backend.hosekSkyAvailable,
+      (backend.hosekSkyShaderHandle != kInvalidShaderProgram) &&
+          resolve_hosek_sky_program_state(backend, dev),
+      skyGeometryReady, "procedural sky");
+  recompute_availability(
+      &backend.environmentPrefilterAvailable,
+      (backend.environmentPrefilterShaderHandle != kInvalidShaderProgram) &&
+          resolve_environment_prefilter_program_state(backend, dev),
+      skyGeometryReady, "IBL prefilter");
+  recompute_availability(
+      &backend.environmentIrradianceAvailable,
+      (backend.environmentIrradianceShaderHandle != kInvalidShaderProgram) &&
+          resolve_environment_irradiance_program_state(backend, dev),
+      skyGeometryReady, "IBL irradiance");
+  recompute_availability(
+      &backend.environmentBrdfLutAvailable,
+      (backend.environmentBrdfLutShaderHandle != kInvalidShaderProgram) &&
+          resolve_environment_brdf_lut_program_state(backend, dev),
+      true, "BRDF LUT");
 
-  if (backend.deferredAvailable) {
-    const bool gbufferOk = resolve_gbuffer_program_state(backend, dev);
-    const bool deferredOk = resolve_deferred_light_program_state(backend, dev);
-    if (!gbufferOk || !deferredOk) {
-      core::log_message(core::LogLevel::Warning, "renderer",
-                        "deferred shaders lost programs on reload — deferred "
-                        "path disabled");
-      backend.deferredAvailable = false;
-    }
-  }
+  const bool gbufferOk =
+      (backend.gbufferShaderHandle != kInvalidShaderProgram) &&
+      resolve_gbuffer_program_state(backend, dev);
+  const bool deferredLightOk =
+      (backend.deferredLightShaderHandle != kInvalidShaderProgram) &&
+      resolve_deferred_light_program_state(backend, dev);
+  recompute_availability(&backend.deferredAvailable,
+                         gbufferOk && deferredLightOk, true,
+                         "deferred path");
   if (backend.gbufferDebugShaderHandle != kInvalidShaderProgram) {
     static_cast<void>(resolve_gbuffer_debug_program_state(backend, dev));
   }
 
-  if ((backend.shadowDepthShaderHandle != kInvalidShaderProgram) &&
-      !resolve_shadow_depth_program_state(backend, dev) &&
-      backend.shadowAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "shadow depth shader lost program on reload — shadows "
-                      "disabled");
-    backend.shadowAvailable = false;
-    backend.spotShadowAvailable = false;
-  }
-  if ((backend.shadowDepthPointShaderHandle != kInvalidShaderProgram) &&
-      !resolve_shadow_depth_point_program_state(backend, dev) &&
-      backend.pointShadowAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "point shadow shader lost program on reload — disabled");
-    backend.pointShadowAvailable = false;
-  }
-  if ((backend.gbufferSkinnedShaderHandle != kInvalidShaderProgram) &&
-      !resolve_gbuffer_skinned_program_state(backend, dev) &&
-      backend.skinningAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "skinned G-buffer shader lost program on reload — GPU "
-                      "skinning disabled");
-    backend.skinningAvailable = false;
-  }
+  recompute_availability(
+      &backend.shadowAvailable,
+      (backend.shadowDepthShaderHandle != kInvalidShaderProgram) &&
+          resolve_shadow_depth_program_state(backend, dev),
+      backend.shadowState.initialized, "cascade shadows");
+  recompute_availability(&backend.spotShadowAvailable,
+                         backend.shadowAvailable,
+                         backend.spotShadowState.initialized, "spot shadows");
+  recompute_availability(
+      &backend.pointShadowAvailable,
+      (backend.shadowDepthPointShaderHandle != kInvalidShaderProgram) &&
+          resolve_shadow_depth_point_program_state(backend, dev),
+      backend.pointShadowState.initialized, "point shadows");
+  recompute_availability(
+      &backend.skinningAvailable,
+      (backend.gbufferSkinnedShaderHandle != kInvalidShaderProgram) &&
+          resolve_gbuffer_skinned_program_state(backend, dev),
+      backend.bonePaletteUbo != 0U, "GPU skinning");
   if (backend.shadowDepthSkinnedShaderHandle != kInvalidShaderProgram) {
     static_cast<void>(
         resolve_shadow_depth_skinned_program_state(backend, dev));
@@ -214,21 +226,19 @@ void refresh_backend_program_state(BackendState &backend,
     static_cast<void>(resolve_fxaa_program_state(backend, dev));
   }
   static_cast<void>(resolve_bloom_program_state(backend, dev));
-  if (!resolve_ssao_program_state(backend, dev) && backend.ssaoAvailable) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "SSAO shaders lost programs on reload — SSAO disabled");
-    backend.ssaoAvailable = false;
-  }
-  if ((backend.debugLineShaderHandle != kInvalidShaderProgram) &&
-      !resolve_debug_line_program_state(backend, dev) &&
-      backend.debugLineAvailable) {
-    backend.debugLineAvailable = false;
-  }
-  if ((backend.luminanceShaderHandle != kInvalidShaderProgram) &&
-      !resolve_luminance_program_state(backend, dev) &&
-      backend.autoExposureAvailable) {
-    backend.autoExposureAvailable = false;
-  }
+  recompute_availability(&backend.ssaoAvailable,
+                         resolve_ssao_program_state(backend, dev),
+                         backend.ssaoNoiseTexture != 0U, "SSAO");
+  recompute_availability(
+      &backend.debugLineAvailable,
+      (backend.debugLineShaderHandle != kInvalidShaderProgram) &&
+          resolve_debug_line_program_state(backend, dev),
+      backend.debugLineVao != 0U, "debug lines");
+  recompute_availability(
+      &backend.autoExposureAvailable,
+      (backend.luminanceShaderHandle != kInvalidShaderProgram) &&
+          resolve_luminance_program_state(backend, dev),
+      true, "auto exposure");
 }
 
 namespace {
