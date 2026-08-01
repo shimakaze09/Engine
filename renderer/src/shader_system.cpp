@@ -88,6 +88,10 @@ ShaderEntry g_entries[kMaxShaderPrograms] = {};
 ShaderVariantEntry g_variants[kMaxShaderVariants] = {};
 bool g_initialized = false;
 
+/// Never reset, so external caches always observe a change after any
+/// relink — including one that straddles a shader-system restart.
+std::uint64_t g_reloadEpoch = 0U;
+
 std::uint32_t next_generation(std::uint32_t generation) noexcept {
   ++generation;
   return generation == 0U ? 1U : generation;
@@ -388,6 +392,7 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
   entry.gpuProgram = newProgram;
   entry.vertMtime = core::vfs_file_mtime(entry.vertPath);
   entry.fragMtime = core::vfs_file_mtime(entry.fragPath);
+  ++g_reloadEpoch;
   return true;
 }
 
@@ -598,6 +603,8 @@ std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
   const ShaderEntry &entry = g_entries[handle.id - 1U];
   return entry.gpuProgram;
 }
+
+std::uint64_t shader_reload_epoch() noexcept { return g_reloadEpoch; }
 
 void check_shader_reload() noexcept {
   if (!g_initialized) {

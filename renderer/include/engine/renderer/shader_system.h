@@ -84,4 +84,10 @@ std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept;
 // Call once per frame.
 void check_shader_reload() noexcept;
 
+/// Monotonic count of successful program (re)links. Caches that store raw
+/// GPU program ids or uniform locations snapshot this and re-resolve when
+/// it changes — a relink replaces the GL program object, so every derived
+/// id and location is stale afterwards (audit H-09).
+std::uint64_t shader_reload_epoch() noexcept;
+
 } // namespace engine::renderer

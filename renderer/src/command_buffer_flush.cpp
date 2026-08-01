@@ -39,6 +39,7 @@
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
 #include "command_buffer_flush_internal.h"
+#include "command_buffer_init_internal.h"
 
 
 namespace engine::renderer {
@@ -83,6 +84,16 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();
+
+  // A hot reload replaced GL program objects, so every cached program id
+  // and uniform location must be re-resolved before any pass binds one
+  // (audit H-09).
+  const std::uint64_t reloadEpoch = shader_reload_epoch();
+  if (backend.programCacheEpoch != reloadEpoch) {
+    refresh_backend_program_state(backend, dev);
+    backend.programCacheEpoch = reloadEpoch;
+  }
+
   RendererFrameStats frameStats{};
   backend.lastUploadedBonePalette = 0xFFFFFFFFU;
   gpu_profiler_begin_frame();

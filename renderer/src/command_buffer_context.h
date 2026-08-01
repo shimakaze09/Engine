@@ -47,6 +47,11 @@ struct BackendState final {
   bool initialized = false;
   bool failed = false;
 
+  // Snapshot of shader_reload_epoch() the cached program ids and uniform
+  // locations below were resolved against; a mismatch at flush time
+  // triggers refresh_backend_program_state (audit H-09).
+  std::uint64_t programCacheEpoch = 0U;
+
   // Fallback shader (kept for compatibility).
   ShaderProgramHandle defaultShaderHandle{};
   std::uint32_t defaultProgram = 0U;

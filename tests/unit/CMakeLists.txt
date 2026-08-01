@@ -580,6 +580,18 @@ engine_add_test_executable(engine_unit_command_buffer
     engine_core
 )
 
+engine_add_test_executable(engine_unit_shader_reload
+    SOURCES
+    shader_reload_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_mesh_primitives
     SOURCES
     mesh_primitives_test.cpp

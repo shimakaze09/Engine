@@ -40,4 +40,103 @@ void init_backend_lighting(BackendState &backend,
 void init_backend_post(BackendState &backend,
                        const RenderDevice *dev) noexcept;
 
+// Per-program resolvers shared by initialization and hot-reload refresh
+// (audit H-09): each re-reads the GPU program id from its stored handle
+// and re-queries every cached uniform location (and uniform-block binding
+// where the program uses one). Return value is false when a required
+// uniform is missing from the current link.
+
+/// Default fallback program: id only, no cached uniforms.
+bool resolve_default_program_state(BackendState &backend,
+                                   const RenderDevice *dev) noexcept;
+
+/// Forward PBR program: all material/camera/fog/light/shadow locations.
+bool resolve_pbr_program_state(BackendState &backend,
+                               const RenderDevice *dev) noexcept;
+
+/// Tonemap program, including the bloom-integration uniforms.
+bool resolve_tonemap_program_state(BackendState &backend,
+                                   const RenderDevice *dev) noexcept;
+
+/// Cubemap skybox program.
+bool resolve_skybox_program_state(BackendState &backend,
+                                  const RenderDevice *dev) noexcept;
+
+/// Preetham procedural sky program.
+bool resolve_preetham_sky_program_state(BackendState &backend,
+                                        const RenderDevice *dev) noexcept;
+
+/// Hosek-Wilkie procedural scatter sky program.
+bool resolve_hosek_sky_program_state(BackendState &backend,
+                                     const RenderDevice *dev) noexcept;
+
+/// Specular environment prefilter program.
+bool resolve_environment_prefilter_program_state(
+    BackendState &backend, const RenderDevice *dev) noexcept;
+
+/// Diffuse irradiance convolution program.
+bool resolve_environment_irradiance_program_state(
+    BackendState &backend, const RenderDevice *dev) noexcept;
+
+/// Split-sum BRDF LUT program: id only, no cached uniforms.
+bool resolve_environment_brdf_lut_program_state(
+    BackendState &backend, const RenderDevice *dev) noexcept;
+
+/// G-Buffer geometry program.
+bool resolve_gbuffer_program_state(BackendState &backend,
+                                   const RenderDevice *dev) noexcept;
+
+/// Deferred lighting program: G-Buffer samplers, tiles, fog, IBL, SSAO,
+/// and every shadow family.
+bool resolve_deferred_light_program_state(BackendState &backend,
+                                          const RenderDevice *dev) noexcept;
+
+/// G-Buffer debug visualization program.
+bool resolve_gbuffer_debug_program_state(BackendState &backend,
+                                         const RenderDevice *dev) noexcept;
+
+/// Cascade shadow depth program.
+bool resolve_shadow_depth_program_state(BackendState &backend,
+                                        const RenderDevice *dev) noexcept;
+
+/// Point-light cubemap shadow depth program.
+bool resolve_shadow_depth_point_program_state(
+    BackendState &backend, const RenderDevice *dev) noexcept;
+
+/// Skinned G-Buffer variant; rebinds the BonePalette uniform block.
+bool resolve_gbuffer_skinned_program_state(BackendState &backend,
+                                           const RenderDevice *dev) noexcept;
+
+/// Skinned shadow depth variant; rebinds the BonePalette uniform block.
+bool resolve_shadow_depth_skinned_program_state(
+    BackendState &backend, const RenderDevice *dev) noexcept;
+
+/// FXAA program.
+bool resolve_fxaa_program_state(BackendState &backend,
+                                const RenderDevice *dev) noexcept;
+
+/// The three bloom programs (threshold, downsample, upsample).
+bool resolve_bloom_program_state(BackendState &backend,
+                                 const RenderDevice *dev) noexcept;
+
+/// SSAO and SSAO blur programs.
+bool resolve_ssao_program_state(BackendState &backend,
+                                const RenderDevice *dev) noexcept;
+
+/// Depth-tested debug line program.
+bool resolve_debug_line_program_state(BackendState &backend,
+                                      const RenderDevice *dev) noexcept;
+
+/// Auto-exposure luminance program.
+bool resolve_luminance_program_state(BackendState &backend,
+                                     const RenderDevice *dev) noexcept;
+
+/// Re-resolves every cached program id, uniform location, and uniform-
+/// block binding from the shader-system handles after a hot reload, and
+/// downgrades availability flags whose program lost a required uniform.
+/// Called by flush_renderer when shader_reload_epoch() moves past
+/// BackendState::programCacheEpoch.
+void refresh_backend_program_state(BackendState &backend,
+                                   const RenderDevice *dev) noexcept;
+
 } // namespace engine::renderer
