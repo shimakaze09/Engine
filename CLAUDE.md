@@ -183,9 +183,14 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   speculative contacts, clipped contact manifolds (`contact_clip`,
   `contact_resolution`, `narrow_phase`, `physics_step`,
   `physics_payloads` TUs), sequential-impulse contact solver plus six public
-  joint APIs (`src/joints/`; hinge/fixed/slider are currently positional
-  prototype constraints until standard rotational, anchor-frame, and limit
-  semantics land), queries, materials, primitive hull builders
+  joint APIs (`src/joints/`; H-05 rework 2026-08-01: position-projection
+  constraints with velocity projection over shared generalized-inverse-mass
+  helpers in `joint_projection` — body-local anchor frames, hinge
+  axis-alignment + radian twist limits, fixed/slider relative-orientation
+  locks, prismatic rail Jacobian; Jacobian/effective-mass derivations in
+  per-file comments; joint motors remain unimplemented, and joints are
+  runtime-only state, never serialized), queries, materials, primitive hull
+  builders
   (`primitive_hulls` — cylinder/pyramid spawn shapes collide as mesh-matched
   convex hulls; box/sphere/capsule stay analytic, mirroring the Unity/Unreal
   collider model), and a blocked-body warning diagnostic
