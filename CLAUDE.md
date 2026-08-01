@@ -147,9 +147,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   touch, cheat, debug, persist, entity pool/script/handle, `binding_util`).
   ~180 functions on one global `engine` table.
 - `runtime/` — public `engine::bootstrap/run/shutdown` + `EngineConfig`,
-  `EnginePipeline` (14 named frame stages, fixed 1/60 step, job-graph frame;
+  `EnginePipeline` (15 named frame stages, fixed 1/60 step, job-graph frame;
   animation evaluates per fixed step BEFORE the frame graph so render prep
-  bakes current-frame palette slots),
+  bakes current-frame palette slots; frame pacing waits out r_max_fps as
+  the final stage),
   `World` ECS (14 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
   (shared `serialization_util`, reflection-backed components), physics/
@@ -320,10 +321,15 @@ stutter) at 60 Hz sim.
   built-in primitives (grid snapping, material presets), the Island Hopper
   starter template itself, and a bundled mini asset pack (1 rigged
   character, ~20 props, ~15 sounds). CUT: CSG tools.
-- **Frame pacing (pulled forward from P1-M12)**: vsync modes, frame cap,
-  fixed-step render interpolation — the renderer currently runs uncapped
-  against the 60 Hz sim with no interpolation, which shows the moment
-  anything moves fast; the slice cannot feel right without this.
+- **Frame pacing (pulled forward from P1-M12) — LANDED 2026-08-01**:
+  `r_vsync` (0/1/adaptive, applied live), `r_max_fps` sleep-then-spin cap
+  (verified 60 frames per wall second), and fixed-step render
+  interpolation — render prep blends model matrices between the previous
+  and current fixed-step world TRS (epoch-validated World history,
+  cleared on play start/scene load) and the active camera interpolates
+  between fixed-step samples. The FPS overlay now reports the presented
+  frame rate (the old stat measured pre-render stages only and hid
+  vsync entirely).
 
 ### v0.5 — "Runs everywhere" (the replatform slice)
 
