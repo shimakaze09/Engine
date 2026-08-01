@@ -6,11 +6,14 @@
 
 #include "anim_cook.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <vector>
 
+#include "engine/core/animation_asset.h"
 #include "engine/core/hash.h"
 #include "engine/core/vfs.h"
 #include "engine/runtime/animation.h"
@@ -341,6 +344,50 @@ int check_bad_magic_rejected() {
   return 0;
 }
 
+/// EXPECTATION (audit H-17): a cooked clip whose header carries a
+/// non-finite duration is rejected at load, before any state machine can
+/// divide or wrap by it.
+int check_non_finite_duration_rejected() {
+  std::vector<std::uint32_t> remap{};
+  if (!cook_and_mount(&remap)) {
+    std::puts("cook_and_mount failed");
+    return 1;
+  }
+
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kAnimPath, "rb+") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kAnimPath, "rb+");
+#endif
+  if (file == nullptr) {
+    std::puts("could not reopen cooked clip");
+    return 1;
+  }
+  const float nanDuration = std::numeric_limits<float>::quiet_NaN();
+  bool wrote =
+      std::fseek(file, static_cast<long>(offsetof(
+                           engine::core::AnimClipAssetHeader,
+                           durationSeconds)),
+                 SEEK_SET) == 0;
+  wrote = wrote &&
+          (std::fwrite(&nanDuration, sizeof(nanDuration), 1U, file) == 1U);
+  static_cast<void>(std::fclose(file));
+  if (!wrote) {
+    std::puts("could not corrupt cooked clip duration");
+    return 1;
+  }
+
+  AnimationClip clip{};
+  if (engine::runtime::load_animation_clip_asset(kAnimVirtualPath, &clip)) {
+    std::puts("loader accepted a non-finite clip duration");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -362,6 +409,12 @@ int main() {
     return result;
   }
   result = check_bad_magic_rejected();
+  if (result != 0) {
+    remove_file(kSkelPath);
+    remove_file(kAnimPath);
+    return result;
+  }
+  result = check_non_finite_duration_rejected();
   remove_file(kSkelPath);
   remove_file(kAnimPath);
   return result;

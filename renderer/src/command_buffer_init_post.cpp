@@ -35,6 +35,125 @@
 
 namespace engine::renderer {
 
+bool resolve_fxaa_program_state(BackendState &backend,
+                                const RenderDevice *dev) noexcept {
+  backend.fxaaProgram = shader_gpu_program(backend.fxaaShaderHandle);
+  const std::uint32_t fxaaProg = backend.fxaaProgram;
+  if (fxaaProg == 0U) {
+    return false;
+  }
+  backend.fxaaInputTextureLocation =
+      dev->uniform_location(fxaaProg, "u_inputTexture");
+  backend.fxaaTexelSizeLocation =
+      dev->uniform_location(fxaaProg, "u_texelSize");
+  return true;
+}
+
+bool resolve_bloom_program_state(BackendState &backend,
+                                 const RenderDevice *dev) noexcept {
+  bool ok = true;
+  if (backend.bloomThresholdShaderHandle != kInvalidShaderProgram) {
+    backend.bloomThresholdProgram =
+        shader_gpu_program(backend.bloomThresholdShaderHandle);
+    const std::uint32_t prog = backend.bloomThresholdProgram;
+    if (prog != 0U) {
+      backend.bloomThreshSceneColorLoc =
+          dev->uniform_location(prog, "u_sceneColor");
+      backend.bloomThreshThresholdLoc =
+          dev->uniform_location(prog, "u_threshold");
+    } else {
+      ok = false;
+    }
+  }
+  if (backend.bloomDownsampleShaderHandle != kInvalidShaderProgram) {
+    backend.bloomDownsampleProgram =
+        shader_gpu_program(backend.bloomDownsampleShaderHandle);
+    const std::uint32_t prog = backend.bloomDownsampleProgram;
+    if (prog != 0U) {
+      backend.bloomDownInputLoc = dev->uniform_location(prog, "u_input");
+      backend.bloomDownTexelSizeLoc =
+          dev->uniform_location(prog, "u_texelSize");
+    } else {
+      ok = false;
+    }
+  }
+  if (backend.bloomUpsampleShaderHandle != kInvalidShaderProgram) {
+    backend.bloomUpsampleProgram =
+        shader_gpu_program(backend.bloomUpsampleShaderHandle);
+    const std::uint32_t prog = backend.bloomUpsampleProgram;
+    if (prog != 0U) {
+      backend.bloomUpInputLoc = dev->uniform_location(prog, "u_input");
+      backend.bloomUpTexelSizeLoc =
+          dev->uniform_location(prog, "u_texelSize");
+    } else {
+      ok = false;
+    }
+  }
+  return ok;
+}
+
+bool resolve_ssao_program_state(BackendState &backend,
+                                const RenderDevice *dev) noexcept {
+  bool ok = true;
+  if (backend.ssaoShaderHandle != kInvalidShaderProgram) {
+    backend.ssaoProgram = shader_gpu_program(backend.ssaoShaderHandle);
+    const std::uint32_t prog = backend.ssaoProgram;
+    if (prog != 0U) {
+      backend.ssaoDepthLoc = dev->uniform_location(prog, "u_gBufferDepth");
+      backend.ssaoNormalLoc = dev->uniform_location(prog, "u_gBufferNormal");
+      backend.ssaoNoiseLoc = dev->uniform_location(prog, "u_noiseTexture");
+      backend.ssaoProjectionLoc = dev->uniform_location(prog, "u_projection");
+      backend.ssaoViewLoc = dev->uniform_location(prog, "u_view");
+      backend.ssaoNoiseScaleLoc = dev->uniform_location(prog, "u_noiseScale");
+      backend.ssaoRadiusLoc = dev->uniform_location(prog, "u_radius");
+      backend.ssaoBiasLoc = dev->uniform_location(prog, "u_bias");
+      for (int i = 0; i < 32; ++i) {
+        char nm[64] = {};
+        std::snprintf(nm, sizeof(nm), "u_samples[%d]", i);
+        backend.ssaoSampleLocs[static_cast<std::size_t>(i)] =
+            dev->uniform_location(prog, nm);
+      }
+    } else {
+      ok = false;
+    }
+  }
+  if (backend.ssaoBlurShaderHandle != kInvalidShaderProgram) {
+    backend.ssaoBlurProgram = shader_gpu_program(backend.ssaoBlurShaderHandle);
+    const std::uint32_t prog = backend.ssaoBlurProgram;
+    if (prog != 0U) {
+      backend.ssaoBlurInputLoc = dev->uniform_location(prog, "u_ssaoInput");
+      backend.ssaoBlurTexelSizeLoc =
+          dev->uniform_location(prog, "u_texelSize");
+    } else {
+      ok = false;
+    }
+  }
+  return ok;
+}
+
+bool resolve_debug_line_program_state(BackendState &backend,
+                                      const RenderDevice *dev) noexcept {
+  backend.debugLineProgram = shader_gpu_program(backend.debugLineShaderHandle);
+  const std::uint32_t prog = backend.debugLineProgram;
+  if (prog == 0U) {
+    return false;
+  }
+  backend.debugLineViewProjectionLoc =
+      dev->uniform_location(prog, "uViewProjection");
+  return true;
+}
+
+bool resolve_luminance_program_state(BackendState &backend,
+                                     const RenderDevice *dev) noexcept {
+  backend.luminanceProgram = shader_gpu_program(backend.luminanceShaderHandle);
+  const std::uint32_t prog = backend.luminanceProgram;
+  if (prog == 0U) {
+    return false;
+  }
+  backend.lumSceneColorLoc = dev->uniform_location(prog, "u_sceneColor");
+  return true;
+}
+
 void init_backend_post(BackendState &backend,
                        const RenderDevice *dev) noexcept {
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
@@ -42,15 +161,9 @@ void init_backend_post(BackendState &backend,
   const ShaderProgramHandle fxaaShader = load_configured_shader_program(
       "fullscreen.vert", "fxaa.frag");
   if (fxaaShader != kInvalidShaderProgram) {
-    const std::uint32_t fxaaProg = shader_gpu_program(fxaaShader);
-    if (fxaaProg != 0U) {
-      backend.fxaaShaderHandle = fxaaShader;
-      backend.fxaaProgram = fxaaProg;
-      backend.fxaaInputTextureLocation =
-          dev->uniform_location(fxaaProg, "u_inputTexture");
-      backend.fxaaTexelSizeLocation =
-          dev->uniform_location(fxaaProg, "u_texelSize");
-    } else {
+    backend.fxaaShaderHandle = fxaaShader;
+    if (!resolve_fxaa_program_state(backend, dev)) {
+      backend.fxaaShaderHandle = ShaderProgramHandle{};
       destroy_shader_program(fxaaShader);
     }
   } else {
@@ -68,49 +181,23 @@ void init_backend_post(BackendState &backend,
         load_configured_shader_program("fullscreen.vert",
                             "bloom_threshold.frag");
     if (threshShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(threshShader);
-      if (prog != 0U) {
-        backend.bloomThresholdShaderHandle = threshShader;
-        backend.bloomThresholdProgram = prog;
-        backend.bloomThreshSceneColorLoc =
-            dev->uniform_location(prog, "u_sceneColor");
-        backend.bloomThreshThresholdLoc =
-            dev->uniform_location(prog, "u_threshold");
-      } else {
-        destroy_shader_program(threshShader);
-      }
+      backend.bloomThresholdShaderHandle = threshShader;
     }
 
     const ShaderProgramHandle downShader =
         load_configured_shader_program("fullscreen.vert",
                             "bloom_downsample.frag");
     if (downShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(downShader);
-      if (prog != 0U) {
-        backend.bloomDownsampleShaderHandle = downShader;
-        backend.bloomDownsampleProgram = prog;
-        backend.bloomDownInputLoc = dev->uniform_location(prog, "u_input");
-        backend.bloomDownTexelSizeLoc =
-            dev->uniform_location(prog, "u_texelSize");
-      } else {
-        destroy_shader_program(downShader);
-      }
+      backend.bloomDownsampleShaderHandle = downShader;
     }
 
     const ShaderProgramHandle upShader = load_configured_shader_program(
         "fullscreen.vert", "bloom_upsample.frag");
     if (upShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(upShader);
-      if (prog != 0U) {
-        backend.bloomUpsampleShaderHandle = upShader;
-        backend.bloomUpsampleProgram = prog;
-        backend.bloomUpInputLoc = dev->uniform_location(prog, "u_input");
-        backend.bloomUpTexelSizeLoc =
-            dev->uniform_location(prog, "u_texelSize");
-      } else {
-        destroy_shader_program(upShader);
-      }
+      backend.bloomUpsampleShaderHandle = upShader;
     }
+
+    static_cast<void>(resolve_bloom_program_state(backend, dev));
 
     if (backend.bloomThresholdProgram == 0U ||
         backend.bloomDownsampleProgram == 0U ||
@@ -120,14 +207,6 @@ void init_backend_post(BackendState &backend,
     }
   }
 
-  // Resolve tonemap bloom-integration uniforms (tonemap shader already loaded).
-  backend.tonemapBloomTextureLoc =
-      dev->uniform_location(backend.tonemapProgram, "u_bloomTexture");
-  backend.tonemapBloomIntensityLoc =
-      dev->uniform_location(backend.tonemapProgram, "u_bloomIntensity");
-  backend.tonemapBloomEnabledLoc =
-      dev->uniform_location(backend.tonemapProgram, "u_bloomEnabled");
-
   // SSAO shaders (soft-fail: SSAO simply disabled if shaders unavailable).
   core::cvar_register_bool("r_ssao", true, "Enable SSAO");
   core::cvar_register_float("r_ssao_radius", 0.5F, "SSAO sample radius");
@@ -136,43 +215,16 @@ void init_backend_post(BackendState &backend,
     const ShaderProgramHandle ssaoShader = load_configured_shader_program(
         "fullscreen.vert", "ssao.frag");
     if (ssaoShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(ssaoShader);
-      if (prog != 0U) {
-        backend.ssaoShaderHandle = ssaoShader;
-        backend.ssaoProgram = prog;
-        backend.ssaoDepthLoc = dev->uniform_location(prog, "u_gBufferDepth");
-        backend.ssaoNormalLoc = dev->uniform_location(prog, "u_gBufferNormal");
-        backend.ssaoNoiseLoc = dev->uniform_location(prog, "u_noiseTexture");
-        backend.ssaoProjectionLoc = dev->uniform_location(prog, "u_projection");
-        backend.ssaoViewLoc = dev->uniform_location(prog, "u_view");
-        backend.ssaoNoiseScaleLoc = dev->uniform_location(prog, "u_noiseScale");
-        backend.ssaoRadiusLoc = dev->uniform_location(prog, "u_radius");
-        backend.ssaoBiasLoc = dev->uniform_location(prog, "u_bias");
-        for (int i = 0; i < 32; ++i) {
-          char nm[64] = {};
-          std::snprintf(nm, sizeof(nm), "u_samples[%d]", i);
-          backend.ssaoSampleLocs[static_cast<std::size_t>(i)] =
-              dev->uniform_location(prog, nm);
-        }
-      } else {
-        destroy_shader_program(ssaoShader);
-      }
+      backend.ssaoShaderHandle = ssaoShader;
     }
 
     const ShaderProgramHandle ssaoBlurShader = load_configured_shader_program(
         "fullscreen.vert", "ssao_blur.frag");
     if (ssaoBlurShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(ssaoBlurShader);
-      if (prog != 0U) {
-        backend.ssaoBlurShaderHandle = ssaoBlurShader;
-        backend.ssaoBlurProgram = prog;
-        backend.ssaoBlurInputLoc = dev->uniform_location(prog, "u_ssaoInput");
-        backend.ssaoBlurTexelSizeLoc =
-            dev->uniform_location(prog, "u_texelSize");
-      } else {
-        destroy_shader_program(ssaoBlurShader);
-      }
+      backend.ssaoBlurShaderHandle = ssaoBlurShader;
     }
+
+    static_cast<void>(resolve_ssao_program_state(backend, dev));
 
     if (backend.ssaoProgram != 0U && backend.ssaoBlurProgram != 0U) {
       backend.ssaoAvailable = true;
@@ -194,12 +246,8 @@ void init_backend_post(BackendState &backend,
     const ShaderProgramHandle lineShader =
         load_configured_shader_program("debug_line.vert", "debug_line.frag");
     if (lineShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(lineShader);
-      if (prog != 0U) {
-        backend.debugLineShaderHandle = lineShader;
-        backend.debugLineProgram = prog;
-        backend.debugLineViewProjectionLoc =
-            dev->uniform_location(prog, "uViewProjection");
+      backend.debugLineShaderHandle = lineShader;
+      if (resolve_debug_line_program_state(backend, dev)) {
         backend.debugLineVao = dev->create_vertex_array();
         backend.debugLineVbo = dev->create_buffer();
         if ((backend.debugLineVao != 0U) && (backend.debugLineVbo != 0U)) {
@@ -218,6 +266,7 @@ void init_backend_post(BackendState &backend,
           backend.debugLineAvailable = true;
         }
       } else {
+        backend.debugLineShaderHandle = ShaderProgramHandle{};
         destroy_shader_program(lineShader);
       }
     } else {
@@ -240,13 +289,11 @@ void init_backend_post(BackendState &backend,
     const ShaderProgramHandle lumShader = load_configured_shader_program(
         "fullscreen.vert", "luminance.frag");
     if (lumShader != kInvalidShaderProgram) {
-      const std::uint32_t prog = shader_gpu_program(lumShader);
-      if (prog != 0U) {
-        backend.luminanceShaderHandle = lumShader;
-        backend.luminanceProgram = prog;
-        backend.lumSceneColorLoc = dev->uniform_location(prog, "u_sceneColor");
+      backend.luminanceShaderHandle = lumShader;
+      if (resolve_luminance_program_state(backend, dev)) {
         backend.autoExposureAvailable = true;
       } else {
+        backend.luminanceShaderHandle = ShaderProgramHandle{};
         destroy_shader_program(lumShader);
       }
     } else {

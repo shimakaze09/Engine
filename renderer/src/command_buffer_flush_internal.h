@@ -109,6 +109,14 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept;
 
+/// Returns lights with point/spot counts clamped to the fixed array
+/// capacities: valid counts pass the original through untouched, while
+/// oversized public counts fill and return `storage` so no flush pass can
+/// index the light arrays out of bounds (audit H-10).
+const SceneLightData &
+sanitize_scene_light_counts(const SceneLightData &lights,
+                            SceneLightData &storage) noexcept;
+
 /// Uploads distance fog settings to the forward PBR program.
 void upload_pbr_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,

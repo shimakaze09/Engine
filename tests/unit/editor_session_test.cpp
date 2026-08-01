@@ -119,6 +119,54 @@ int check_snapshot_never_restores_into_other_world() {
   return 0;
 }
 
+/// EXPECTATION: a malformed same-world snapshot must not destroy the live
+/// world on Stop — scene loading is transactional, so the play world and
+/// the snapshot survive, and the failure is surfaced loudly.
+int check_malformed_snapshot_preserves_world() {
+  using namespace engine::editor;
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 20;
+  }
+
+  editor_set_world(world.get());
+  if (!add_named_entity(*world, "Survivor")) {
+    editor_set_world(nullptr);
+    return 21;
+  }
+  if (!capture_play_snapshot()) {
+    editor_set_world(nullptr);
+    return 22;
+  }
+  editor_session().playState = PlayState::Playing;
+  select_entity(1U, false);
+
+  std::memcpy(editor_session().playSnapshotBuffer.get(), "garbage!", 8U);
+
+  stop_play_mode();
+
+  if (world->find_entity_by_name("Survivor") == kInvalidEntity) {
+    editor_set_world(nullptr);
+    return 23;
+  }
+  if (!editor_session().worldRestoreFailed ||
+      !editor_session().hasPlaySnapshot ||
+      (editor_session().playState != PlayState::Stopped)) {
+    editor_set_world(nullptr);
+    return 24;
+  }
+  if ((editor_session().selectedEntityIndex != 0U) ||
+      (editor_session().selectedEntityCount != 0U)) {
+    editor_set_world(nullptr);
+    return 25;
+  }
+
+  editor_set_world(nullptr);
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -130,6 +178,12 @@ int main() {
   }
 
   result = check_snapshot_never_restores_into_other_world();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_session_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_malformed_snapshot_preserves_world();
   if (result != 0) {
     std::fprintf(stderr, "editor_session_test failed: %d\n", result);
     return result;

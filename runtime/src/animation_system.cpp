@@ -5,6 +5,7 @@
 
 #include "engine/runtime/animation_system.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -144,6 +145,9 @@ bool parse_controller_states(const core::JsonParser &parser,
     core::JsonValue speedValue{};
     if (parser.get_object_field(stateValue, "speed", &speedValue) &&
         !parser.as_float(speedValue, &state.speed)) {
+      return false;
+    }
+    if (!std::isfinite(state.speed)) {
       return false;
     }
   }
@@ -390,14 +394,24 @@ float advance_state_time(const AnimControllerData &controller,
   const float duration = clip.durationSeconds;
   float newTime = time + (dt * state.speed);
   *outWrapped = false;
-  if (duration <= 0.0F) {
+  if ((duration <= 0.0F) || !std::isfinite(duration)) {
     return 0.0F;
+  }
+  // A non-finite time (overflowed accumulation or a poisoned dt) would
+  // otherwise spin the wrap below forever or corrupt every later sample.
+  if (!std::isfinite(newTime)) {
+    return 0.0F;
+  }
+  if (newTime < 0.0F) {
+    if (!state.loop) {
+      return 0.0F;
+    }
+    newTime = std::fmod(newTime, duration);
+    return (newTime < 0.0F) ? (newTime + duration) : newTime;
   }
   if (newTime > duration) {
     if (state.loop) {
-      while (newTime > duration) {
-        newTime -= duration;
-      }
+      newTime = std::fmod(newTime, duration);
       *outWrapped = true;
     } else {
       newTime = duration;

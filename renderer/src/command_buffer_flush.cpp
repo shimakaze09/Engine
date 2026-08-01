@@ -39,6 +39,7 @@
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
 #include "command_buffer_flush_internal.h"
+#include "command_buffer_init_internal.h"
 
 
 namespace engine::renderer {
@@ -52,15 +53,47 @@ constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
 
 } // namespace
 
+const SceneLightData &
+sanitize_scene_light_counts(const SceneLightData &lights,
+                            SceneLightData &storage) noexcept {
+  if ((lights.pointLightCount <= kMaxPointLights) &&
+      (lights.spotLightCount <= kMaxSpotLights)) {
+    return lights;
+  }
+  core::log_message(core::LogLevel::Warning, "renderer",
+                    "scene light counts exceed fixed capacities; clamped");
+  storage = lights;
+  storage.pointLightCount =
+      std::min(lights.pointLightCount, kMaxPointLights);
+  storage.spotLightCount = std::min(lights.spotLightCount, kMaxSpotLights);
+  return storage;
+}
+
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
-                    const SceneLightData &lights) noexcept {
+                    const SceneLightData &rawLights) noexcept {
   if (!initialize_backend()) {
     return;
   }
 
+  // The flush runs on the render thread only, so one static sanitized
+  // copy backs the rare oversized-count case without per-frame cost.
+  static SceneLightData sanitizedLightStorage;
+  const SceneLightData &lights =
+      sanitize_scene_light_counts(rawLights, sanitizedLightStorage);
+
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();
+
+  // A hot reload replaced GL program objects, so every cached program id
+  // and uniform location must be re-resolved before any pass binds one
+  // (audit H-09).
+  const std::uint64_t reloadEpoch = shader_reload_epoch();
+  if (backend.programCacheEpoch != reloadEpoch) {
+    refresh_backend_program_state(backend, dev);
+    backend.programCacheEpoch = reloadEpoch;
+  }
+
   RendererFrameStats frameStats{};
   backend.lastUploadedBonePalette = 0xFFFFFFFFU;
   gpu_profiler_begin_frame();
@@ -82,13 +115,17 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   if (backend.lastWidth != drawableWidth ||
       backend.lastHeight != drawableHeight) {
-    if (backend.lastWidth == 0 && backend.lastHeight == 0) {
-      initialize_pass_resources(drawableWidth, drawableHeight);
-    } else {
-      resize_pass_resources(drawableWidth, drawableHeight);
+    // Record the size only when the targets actually exist at it, so a
+    // failed create/resize retries next frame instead of rendering into
+    // stale or missing targets forever (audit H-12).
+    const bool resourcesReady =
+        (backend.lastWidth == 0 && backend.lastHeight == 0)
+            ? initialize_pass_resources(drawableWidth, drawableHeight)
+            : resize_pass_resources(drawableWidth, drawableHeight);
+    if (resourcesReady) {
+      backend.lastWidth = drawableWidth;
+      backend.lastHeight = drawableHeight;
     }
-    backend.lastWidth = drawableWidth;
-    backend.lastHeight = drawableHeight;
   }
 
   const PassResources &passRes = get_pass_resources();

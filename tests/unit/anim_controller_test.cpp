@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 #include <vector>
@@ -397,6 +398,56 @@ int check_missing_controller() {
   return 0;
 }
 
+/// EXPECTATION (audit H-17): non-finite or extreme playback speeds cannot
+/// hang update_animations — an infinite speed resets the state time to
+/// zero, and a huge finite speed wraps in constant time to a finite state
+/// time inside [0, duration) of the looping 1.0s idle clip.
+int check_extreme_speed_cannot_hang() {
+  engine::runtime::reset_anim_controllers();
+  std::unique_ptr<engine::runtime::World> world(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const auto entity = world->create_entity();
+  AnimationComponent component{};
+  std::snprintf(component.controllerPath, sizeof(component.controllerPath),
+                "%s", kControllerVirtualPath);
+  if (!world->add_animation_component(entity, component)) {
+    std::puts("add_animation_component failed");
+    return 1;
+  }
+  engine::runtime::update_animations(*world, kFixedDt);
+
+  AnimationComponent *mutableComponent =
+      world->get_animation_component_ptr(entity);
+  if (mutableComponent == nullptr) {
+    return 1;
+  }
+  mutableComponent->playbackSpeed = std::numeric_limits<float>::infinity();
+  engine::runtime::update_animations(*world, kFixedDt);
+  const AnimationComponent *afterInfinite =
+      world->get_animation_component_ptr(entity);
+  if ((afterInfinite == nullptr) || (afterInfinite->stateTime != 0.0F)) {
+    std::puts("infinite speed did not reset the state time");
+    return 1;
+  }
+
+  mutableComponent = world->get_animation_component_ptr(entity);
+  mutableComponent->playbackSpeed = 1.0e30F;
+  engine::runtime::update_animations(*world, kFixedDt);
+  const AnimationComponent *afterExtreme =
+      world->get_animation_component_ptr(entity);
+  if ((afterExtreme == nullptr) || !(afterExtreme->stateTime >= 0.0F) ||
+      !(afterExtreme->stateTime < 1.0F)) {
+    std::puts("extreme speed did not wrap into the clip duration");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -419,6 +470,9 @@ int main() {
   }
   if (result == 0) {
     result = check_missing_controller();
+  }
+  if (result == 0) {
+    result = check_extreme_speed_cannot_hang();
   }
   engine::runtime::reset_anim_controllers();
   cleanup_files();

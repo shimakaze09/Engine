@@ -143,75 +143,21 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
 
 } // namespace
 
-bool init_backend_core(BackendState &backend) noexcept {
-  if (!initialize_render_device()) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to initialize render device");
-    reset_backend_on_failure();
-    return false;
-  }
+bool resolve_default_program_state(BackendState &backend,
+                                   const RenderDevice *dev) noexcept {
+  static_cast<void>(dev);
+  backend.defaultProgram = shader_gpu_program(backend.defaultShaderHandle);
+  return backend.defaultProgram != 0U;
+}
 
-  if (!initialize_shader_system()) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to initialize shader system");
-    shutdown_render_device();
-    reset_backend_on_failure();
-    return false;
-  }
-
-  const RenderDevice *dev = render_device();
-
-  // Load default fallback shader.
-  const ShaderProgramHandle defaultShaderHandle = load_configured_shader_program(
-      "default.vert", "default.frag");
-  if (defaultShaderHandle == kInvalidShaderProgram) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to load default shader program");
-    shutdown_shader_system();
-    shutdown_render_device();
-    reset_backend_on_failure();
-    return false;
-  }
-
-  const std::uint32_t defaultProgram = shader_gpu_program(defaultShaderHandle);
-  if (defaultProgram == 0U) {
-    destroy_shader_program(defaultShaderHandle);
-    shutdown_shader_system();
-    shutdown_render_device();
-    reset_backend_on_failure();
-    return false;
-  }
-
-  backend.defaultShaderHandle = defaultShaderHandle;
-  backend.defaultProgram = defaultProgram;
-
-  // Load PBR shader.
-  const ShaderProgramHandle pbrShaderHandle =
-      load_configured_shader_program("pbr.vert", "pbr.frag");
-  if (pbrShaderHandle == kInvalidShaderProgram) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to load PBR shader program");
-    destroy_shader_program(defaultShaderHandle);
-    shutdown_shader_system();
-    shutdown_render_device();
-    reset_backend_on_failure();
-    return false;
-  }
-
-  const std::uint32_t pbrProgram = shader_gpu_program(pbrShaderHandle);
+bool resolve_pbr_program_state(BackendState &backend,
+                               const RenderDevice *dev) noexcept {
+  backend.pbrProgram = shader_gpu_program(backend.pbrShaderHandle);
+  const std::uint32_t pbrProgram = backend.pbrProgram;
   if (pbrProgram == 0U) {
-    destroy_shader_program(pbrShaderHandle);
-    destroy_shader_program(defaultShaderHandle);
-    shutdown_shader_system();
-    shutdown_render_device();
-    reset_backend_on_failure();
     return false;
   }
 
-  backend.pbrShaderHandle = pbrShaderHandle;
-  backend.pbrProgram = pbrProgram;
-
-  // Resolve PBR uniform locations.
   backend.pbrModelLocation = dev->uniform_location(pbrProgram, "u_model");
   backend.pbrMvpLocation = dev->uniform_location(pbrProgram, "u_mvp");
   backend.pbrNormalMatrixLocation =
@@ -264,11 +210,93 @@ bool init_backend_core(BackendState &backend) noexcept {
   backend.pbrHeightFogStepCountLocation =
       dev->uniform_location(pbrProgram, "uHeightFogStepCount");
 
-  if ((backend.pbrMvpLocation < 0) || (backend.pbrNormalMatrixLocation < 0) ||
-      (backend.pbrAlbedoLocation < 0) || (backend.pbrOpacityLocation < 0) ||
-      (backend.pbrViewLocation < 0) ||
-      (backend.pbrViewProjectionLocation < 0) ||
-      (backend.pbrUseInstancingLocation < 0)) {
+  resolve_pbr_light_uniforms(backend, dev);
+  resolve_pbr_shadow_uniforms(backend, dev);
+
+  return (backend.pbrMvpLocation >= 0) &&
+         (backend.pbrNormalMatrixLocation >= 0) &&
+         (backend.pbrAlbedoLocation >= 0) && (backend.pbrOpacityLocation >= 0) &&
+         (backend.pbrViewLocation >= 0) &&
+         (backend.pbrViewProjectionLocation >= 0) &&
+         (backend.pbrUseInstancingLocation >= 0);
+}
+
+bool resolve_tonemap_program_state(BackendState &backend,
+                                   const RenderDevice *dev) noexcept {
+  backend.tonemapProgram = shader_gpu_program(backend.tonemapShaderHandle);
+  const std::uint32_t tonemapProgram = backend.tonemapProgram;
+  if (tonemapProgram == 0U) {
+    return false;
+  }
+  backend.tonemapSceneColorLocation =
+      dev->uniform_location(tonemapProgram, "u_sceneColor");
+  backend.tonemapExposureLocation =
+      dev->uniform_location(tonemapProgram, "u_exposure");
+  backend.tonemapOperatorLocation =
+      dev->uniform_location(tonemapProgram, "u_tonemapOperator");
+  backend.tonemapBloomTextureLoc =
+      dev->uniform_location(tonemapProgram, "u_bloomTexture");
+  backend.tonemapBloomIntensityLoc =
+      dev->uniform_location(tonemapProgram, "u_bloomIntensity");
+  backend.tonemapBloomEnabledLoc =
+      dev->uniform_location(tonemapProgram, "u_bloomEnabled");
+  return true;
+}
+
+bool init_backend_core(BackendState &backend) noexcept {
+  if (!initialize_render_device()) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to initialize render device");
+    reset_backend_on_failure();
+    return false;
+  }
+
+  if (!initialize_shader_system()) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to initialize shader system");
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  const RenderDevice *dev = render_device();
+
+  // Load default fallback shader.
+  const ShaderProgramHandle defaultShaderHandle = load_configured_shader_program(
+      "default.vert", "default.frag");
+  if (defaultShaderHandle == kInvalidShaderProgram) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to load default shader program");
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  backend.defaultShaderHandle = defaultShaderHandle;
+  if (!resolve_default_program_state(backend, dev)) {
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  // Load PBR shader.
+  const ShaderProgramHandle pbrShaderHandle =
+      load_configured_shader_program("pbr.vert", "pbr.frag");
+  if (pbrShaderHandle == kInvalidShaderProgram) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to load PBR shader program");
+    destroy_shader_program(defaultShaderHandle);
+    shutdown_shader_system();
+    shutdown_render_device();
+    reset_backend_on_failure();
+    return false;
+  }
+
+  backend.pbrShaderHandle = pbrShaderHandle;
+  if (!resolve_pbr_program_state(backend, dev)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to locate required PBR shader uniforms");
     destroy_shader_program(pbrShaderHandle);
@@ -278,9 +306,6 @@ bool init_backend_core(BackendState &backend) noexcept {
     reset_backend_on_failure();
     return false;
   }
-
-  resolve_pbr_light_uniforms(backend, dev);
-  resolve_pbr_shadow_uniforms(backend, dev);
 
   // Load tonemap shader.
   const ShaderProgramHandle tonemapShaderHandle = load_configured_shader_program(
@@ -296,8 +321,8 @@ bool init_backend_core(BackendState &backend) noexcept {
     return false;
   }
 
-  const std::uint32_t tonemapProgram = shader_gpu_program(tonemapShaderHandle);
-  if (tonemapProgram == 0U) {
+  backend.tonemapShaderHandle = tonemapShaderHandle;
+  if (!resolve_tonemap_program_state(backend, dev)) {
     destroy_shader_program(tonemapShaderHandle);
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
@@ -306,15 +331,6 @@ bool init_backend_core(BackendState &backend) noexcept {
     reset_backend_on_failure();
     return false;
   }
-
-  backend.tonemapShaderHandle = tonemapShaderHandle;
-  backend.tonemapProgram = tonemapProgram;
-  backend.tonemapSceneColorLocation =
-      dev->uniform_location(tonemapProgram, "u_sceneColor");
-  backend.tonemapExposureLocation =
-      dev->uniform_location(tonemapProgram, "u_exposure");
-  backend.tonemapOperatorLocation =
-      dev->uniform_location(tonemapProgram, "u_tonemapOperator");
 
   core::cvar_register_int(
       "r_tonemap_operator", 1,

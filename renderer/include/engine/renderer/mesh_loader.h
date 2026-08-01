@@ -53,6 +53,12 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept;
 /// Decodes a cooked mesh file without touching GPU state.
 bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
                               std::uint64_t *outSizeBytes = nullptr) noexcept;
+/// Validates a CpuMeshData payload against its declared layout: stride
+/// matches the UV/skin flags exactly (6/8/16 floats), vertexFloatCount
+/// equals vertexCount times stride under checked multiplication, indices
+/// exist and address live vertices, and skinned joint indices are finite
+/// and inside the bone palette with finite weights (audit H-11).
+bool mesh_data_valid(const CpuMeshData &meshData) noexcept;
 /// Uploads decoded CPU mesh data to the current render context.
 bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                              GpuMesh *outMesh) noexcept;

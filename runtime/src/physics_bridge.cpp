@@ -2,6 +2,8 @@
 
 #include "engine/runtime/physics_bridge.h"
 
+#include <cmath>
+
 #include "engine/core/logging.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/constraint_solver.h"
@@ -72,6 +74,11 @@ bool resolve_collisions(World &world, float deltaSeconds) noexcept {
 /// Sets the requested value for gravity.
 void set_gravity(World &world, float x, float y, float z) noexcept {
   if (!require_phase(world, WorldPhase::Input, "set_gravity")) {
+    return;
+  }
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+    core::log_message(core::LogLevel::Error, "physics",
+                      "set_gravity rejected non-finite components");
     return;
   }
   physics::set_gravity(world, x, y, z);

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
+#include <new>
 
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/mesh_loader.h"
@@ -431,6 +433,7 @@ int check_gpu_upload_cleans_index_buffer_failure() {
 
 constexpr const char *kV3ValidPath = "mesh_loader_v3_valid.mesh";
 constexpr const char *kV3TruncatedPath = "mesh_loader_v3_truncated.mesh";
+constexpr const char *kV3BadJointPath = "mesh_loader_v3_bad_joint.mesh";
 
 /// EXPECTATION: a v3 file decodes with the 16-float stride, both hasUVs
 /// and hasSkin set, and a byte-exact vertex payload roundtrip.
@@ -515,6 +518,151 @@ int check_gpu_upload_rejects_missing_indices() {
           g_destroyBufferCalls == 0U)
              ? 0
              : 133;
+}
+
+/// Builds a single-vertex skinned CpuMeshData matching the v3 layout
+/// (stride 16, joints 2/1/0/2 at floats 8-11, weights at 12-15); callers
+/// corrupt one field to probe the H-11 validation.
+bool make_skinned_mesh_data(engine::renderer::CpuMeshData *outData) {
+  if (outData == nullptr) {
+    return false;
+  }
+  outData->vertices.reset(new (std::nothrow) float[16]{
+      1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.75F, 2.0F, 1.0F, 0.0F,
+      2.0F, 0.5F, 0.25F, 0.25F, 0.0F});
+  if (outData->vertices == nullptr) {
+    return false;
+  }
+  outData->indices.reset();
+  outData->vertexCount = 1U;
+  outData->indexCount = 0U;
+  outData->strideFloats = 16U;
+  outData->vertexFloatCount = 16U;
+  outData->hasUVs = true;
+  outData->hasSkin = true;
+  return true;
+}
+
+/// EXPECTATION (audit H-11): upload_mesh_data_to_gpu rejects a payload
+/// whose declared float count disagrees with vertexCount times stride,
+/// a stride that disagrees with its layout flags, and a skin flag
+/// without UVs — all without touching the device.
+int check_upload_rejects_inconsistent_layout() {
+  configure_fake_render_device(1U, 2U, 3U);
+
+  engine::renderer::CpuMeshData meshData{};
+  engine::renderer::GpuMesh mesh{};
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 160;
+  }
+  meshData.vertexFloatCount = 8U;
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 161;
+  }
+  if (g_createBufferCalls != 0U) {
+    return 162;
+  }
+
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 163;
+  }
+  meshData.hasSkin = false;
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 164;
+  }
+
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 165;
+  }
+  meshData.hasUVs = false;
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 166;
+  }
+  return g_createBufferCalls == 0U ? 0 : 167;
+}
+
+/// EXPECTATION (audit H-11): skinned joint indices at or past the bone
+/// palette bound, negative joints, and non-finite joints or weights all
+/// reject; the joint index one below the bound uploads through the fake
+/// device with the mesh fields intact.
+int check_upload_validates_skin_payload() {
+  configure_fake_render_device(1U, 2U, 3U);
+
+  engine::renderer::CpuMeshData meshData{};
+  engine::renderer::GpuMesh mesh{};
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 170;
+  }
+  meshData.vertices[8] =
+      static_cast<float>(engine::renderer::kMaxSkinPaletteJoints);
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 171;
+  }
+
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 172;
+  }
+  meshData.vertices[9] = -1.0F;
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 173;
+  }
+
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 174;
+  }
+  meshData.vertices[10] = std::numeric_limits<float>::quiet_NaN();
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 175;
+  }
+
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 176;
+  }
+  meshData.vertices[12] = std::numeric_limits<float>::quiet_NaN();
+  if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 177;
+  }
+
+  if (!make_skinned_mesh_data(&meshData)) {
+    return 178;
+  }
+  meshData.vertices[8] =
+      static_cast<float>(engine::renderer::kMaxSkinPaletteJoints) - 1.0F;
+  if (!engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
+    return 179;
+  }
+  if ((mesh.vertexArray != 1U) || (mesh.vertexBuffer != 2U) ||
+      (mesh.vertexCount != 1U) || !mesh.hasSkin || !mesh.hasUVs) {
+    return 180;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-11): a cooked v3 mesh file carrying a joint index
+/// outside the bone palette fails to decode.
+int check_v3_decode_rejects_out_of_palette_joint() {
+  remove_file(kV3BadJointPath);
+
+  engine::core::MeshAssetHeader header{};
+  header.magic = engine::core::kMeshAssetMagic;
+  header.version = engine::core::kMeshAssetVersion3;
+  header.vertexCount = 1U;
+  header.indexCount = 0U;
+
+  const std::array<float, 16U> vertexData = {
+      1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.75F,
+      999.0F, 1.0F, 0.0F, 2.0F, 0.5F, 0.25F, 0.25F, 0.0F};
+  if (!write_mesh_file(kV3BadJointPath, header, vertexData.data(),
+                       vertexData.size() * sizeof(float))) {
+    remove_file(kV3BadJointPath);
+    return 181;
+  }
+
+  engine::renderer::CpuMeshData meshData{};
+  const bool loaded =
+      engine::renderer::load_mesh_data_from_file(kV3BadJointPath, &meshData);
+  remove_file(kV3BadJointPath);
+  return loaded ? 182 : 0;
 }
 
 } // namespace
@@ -611,5 +759,20 @@ int main() {
     return result;
   }
 
-  return check_v3_file_size_validation();
+  result = check_v3_file_size_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_upload_rejects_inconsistent_layout();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_upload_validates_skin_payload();
+  if (result != 0) {
+    return result;
+  }
+
+  return check_v3_decode_rejects_out_of_palette_joint();
 }

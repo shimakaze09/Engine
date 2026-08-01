@@ -18,6 +18,7 @@
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
@@ -47,6 +48,7 @@ constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kNameFieldKey = "name";
 constexpr const char *kMeshAssetIdKey = "meshAssetId";
+constexpr const char *kGravityKey = "gravity";
 
 // File IO and vec/quat/foliage JSON helpers are shared with the prefab
 // serializer via serialization_util.h.
@@ -744,6 +746,14 @@ bool copy_world_contents(const World &sourceWorld,
     }
   }
 
+  // World gravity rides the commit copy like the components do.
+  if (success) {
+    math::Vec3 gravity(0.0F, -9.8F, 0.0F);
+    if (get_gravity(sourceWorld, &gravity.x, &gravity.y, &gravity.z)) {
+      set_gravity(targetWorld, gravity.x, gravity.y, gravity.z);
+    }
+  }
+
   return success;
 }
 
@@ -772,8 +782,19 @@ bool serialize_scene_to_writer(const World &world,
   writer.reset();
   writer.begin_object();
   writer.write_uint(kVersionKey, kCurrentSceneVersion);
+
+  // World gravity is authored state; written only when it differs from the
+  // default so existing scenes stay byte-identical.
+  math::Vec3 gravity(0.0F, -9.8F, 0.0F);
+  static_cast<void>(get_gravity(world, &gravity.x, &gravity.y, &gravity.z));
+  if ((gravity.x != 0.0F) || (gravity.y != -9.8F) || (gravity.z != 0.0F)) {
+    write_vec3(writer, kGravityKey, gravity);
+  }
+
   writer.begin_array(kEntitiesKey);
 
+  std::size_t unserializedHullCount = 0U;
+  std::size_t unserializedHeightfieldCount = 0U;
   bool writeFailed = false;
   world.for_each_alive([&](Entity entity) {
     if (writeFailed) {
@@ -806,10 +827,18 @@ bool serialize_scene_to_writer(const World &world,
     }
 
     Collider collider{};
-    if (world.get_collider(entity, &collider) &&
-        !write_collider_component(writer, collider)) {
-      writeFailed = true;
-      return;
+    if (world.get_collider(entity, &collider)) {
+      if (!write_collider_component(writer, collider)) {
+        writeFailed = true;
+        return;
+      }
+      if ((collider.shape == ColliderShape::ConvexHull) &&
+          (collider.hullSource == math::HullSource::None)) {
+        ++unserializedHullCount;
+      }
+      if (collider.shape == ColliderShape::Heightfield) {
+        ++unserializedHeightfieldCount;
+      }
     }
 
     MeshComponent mesh{};
@@ -941,6 +970,32 @@ bool serialize_scene_to_writer(const World &world,
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "failed to build scene JSON");
     return false;
+  }
+
+  // Unsupported-state visibility (audit H-01): these carry runtime-only
+  // payloads the format cannot reproduce, so their loss is announced with
+  // precise counts instead of happening silently.
+  if (unserializedHullCount > 0U) {
+    char message[128];
+    std::snprintf(message, sizeof(message),
+                  "%zu convex-hull payload(s) without builder provenance "
+                  "are not serialized",
+                  unserializedHullCount);
+    core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
+  }
+  if (unserializedHeightfieldCount > 0U) {
+    char message[128];
+    std::snprintf(message, sizeof(message),
+                  "%zu heightfield payload(s) are not serialized",
+                  unserializedHeightfieldCount);
+    core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
+  }
+  const std::size_t jointCount = world.physics_context().jointCount;
+  if (jointCount > 0U) {
+    char message[128];
+    std::snprintf(message, sizeof(message),
+                  "%zu physics joint(s) are not serialized", jointCount);
+    core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
   }
 
   return true;
@@ -1110,6 +1165,16 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
 
   if (!deserialize_scene_entities(parser, entities, descs, *stagedWorld)) {
     return false;
+  }
+
+  // World gravity: optional root field, default when absent.
+  core::JsonValue gravityValue{};
+  if (parser.get_object_field(*root, kGravityKey, &gravityValue)) {
+    math::Vec3 gravity{};
+    if (!read_vec3(parser, gravityValue, &gravity)) {
+      return log_scene_error("invalid gravity field");
+    }
+    set_gravity(*stagedWorld, gravity.x, gravity.y, gravity.z);
   }
 
   // Restore timers from scene JSON (timing metadata only).

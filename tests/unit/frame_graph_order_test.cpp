@@ -185,6 +185,157 @@ int run_round(StepState *steps, MarkerData *markers) noexcept {
   return 0;
 }
 
+/// Per-step state for the zero-chunk variant: with no update jobs, the
+/// resolve job must still order after the step's begin.
+struct ZeroChunkStepState final {
+  std::atomic<bool> beginDone{false};
+  std::atomic<bool> resolveDone{false};
+  std::atomic<bool> commitDone{false};
+  std::atomic<int> violations{0};
+};
+
+/// Zero-chunk payload: the step array plus this job's step index.
+struct ZeroChunkMarkerData final {
+  ZeroChunkStepState *steps = nullptr;
+  std::size_t step = 0U;
+};
+
+/// Zero-chunk begin marker: the prior commit must already be done.
+void zero_chunk_begin_job(void *userData) noexcept {
+  auto *data = static_cast<ZeroChunkMarkerData *>(userData);
+  ZeroChunkStepState &state = data->steps[data->step];
+  if ((data->step > 0U) &&
+      !data->steps[data->step - 1U].commitDone.load(
+          std::memory_order_acquire)) {
+    state.violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (state.resolveDone.load(std::memory_order_acquire)) {
+    state.violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  state.beginDone.store(true, std::memory_order_release);
+}
+
+/// Zero-chunk resolve marker: the step's begin must have completed.
+void zero_chunk_resolve_job(void *userData) noexcept {
+  auto *data = static_cast<ZeroChunkMarkerData *>(userData);
+  ZeroChunkStepState &state = data->steps[data->step];
+  if (!state.beginDone.load(std::memory_order_acquire)) {
+    state.violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  state.resolveDone.store(true, std::memory_order_release);
+}
+
+/// Zero-chunk commit marker: the step's resolve must have completed.
+void zero_chunk_commit_job(void *userData) noexcept {
+  auto *data = static_cast<ZeroChunkMarkerData *>(userData);
+  ZeroChunkStepState &state = data->steps[data->step];
+  if (!state.resolveDone.load(std::memory_order_acquire)) {
+    state.violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  state.commitDone.store(true, std::memory_order_release);
+}
+
+/// Builds one catch-up frame with ZERO update chunks per step, mirroring
+/// the pipeline's wiring where resolve gates directly on the step begin;
+/// returns a nonzero code on the first defect.
+int run_zero_chunk_round(ZeroChunkStepState *steps,
+                         ZeroChunkMarkerData *markers) noexcept {
+  for (std::size_t i = 0U; i < kSteps; ++i) {
+    steps[i].beginDone.store(false);
+    steps[i].resolveDone.store(false);
+    steps[i].commitDone.store(false);
+    steps[i].violations.store(0);
+  }
+  steps[0].beginDone.store(true, std::memory_order_release);
+
+  if (!engine::core::begin_frame_graph()) {
+    return 40;
+  }
+
+  engine::core::JobHandle previousCommit{};
+  engine::core::JobHandle lastCommit{};
+  std::size_t markerCursor = 0U;
+
+  for (std::size_t step = 0U; step < kSteps; ++step) {
+    ZeroChunkMarkerData &commitData = markers[markerCursor++];
+    commitData.steps = steps;
+    commitData.step = step;
+    engine::core::Job commit{};
+    commit.function = &zero_chunk_commit_job;
+    commit.data = &commitData;
+    const engine::core::JobHandle commitHandle = engine::core::submit(commit);
+    if (!engine::core::is_valid_handle(commitHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 41;
+    }
+    if (engine::core::is_valid_handle(previousCommit) &&
+        !engine::core::add_dependency(previousCommit, commitHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 42;
+    }
+
+    engine::core::JobHandle beginHandle{};
+    if (step > 0U) {
+      ZeroChunkMarkerData &beginData = markers[markerCursor++];
+      beginData.steps = steps;
+      beginData.step = step;
+      engine::core::Job begin{};
+      begin.function = &zero_chunk_begin_job;
+      begin.data = &beginData;
+      beginHandle = engine::core::submit(begin);
+      if (!engine::core::is_valid_handle(beginHandle) ||
+          !engine::core::add_dependency(previousCommit, beginHandle) ||
+          !engine::core::add_dependency(beginHandle, commitHandle)) {
+        static_cast<void>(engine::core::end_frame_graph());
+        return 43;
+      }
+    }
+    const engine::core::JobHandle updateGate =
+        engine::core::is_valid_handle(beginHandle) ? beginHandle
+                                                   : previousCommit;
+
+    ZeroChunkMarkerData &resolveData = markers[markerCursor++];
+    resolveData.steps = steps;
+    resolveData.step = step;
+    engine::core::Job resolve{};
+    resolve.function = &zero_chunk_resolve_job;
+    resolve.data = &resolveData;
+    const engine::core::JobHandle resolveHandle =
+        engine::core::submit(resolve);
+    if (!engine::core::is_valid_handle(resolveHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 44;
+    }
+    if (engine::core::is_valid_handle(updateGate) &&
+        !engine::core::add_dependency(updateGate, resolveHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 45;
+    }
+    if (!engine::core::add_dependency(resolveHandle, commitHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 46;
+    }
+
+    previousCommit = commitHandle;
+    lastCommit = commitHandle;
+  }
+
+  engine::core::wait(lastCommit);
+  if (!engine::core::end_frame_graph()) {
+    return 47;
+  }
+
+  for (std::size_t i = 0U; i < kSteps; ++i) {
+    if (steps[i].violations.load() != 0) {
+      return 48;
+    }
+    if (!steps[i].resolveDone.load() || !steps[i].commitDone.load()) {
+      return 49;
+    }
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -196,10 +347,19 @@ int main() {
 
   static StepState steps[kSteps];
   static MarkerData markers[kSteps * (kChunks + 2U)];
+  static ZeroChunkStepState zeroChunkSteps[kSteps];
+  static ZeroChunkMarkerData zeroChunkMarkers[kSteps * 3U];
 
   int result = 0;
   for (int iteration = 0; iteration < kIterations; ++iteration) {
     result = run_round(steps, markers);
+    if (result != 0) {
+      std::fprintf(stderr,
+                   "frame_graph_order_test failed: %d (iteration %d)\n",
+                   result, iteration);
+      break;
+    }
+    result = run_zero_chunk_round(zeroChunkSteps, zeroChunkMarkers);
     if (result != 0) {
       std::fprintf(stderr,
                    "frame_graph_order_test failed: %d (iteration %d)\n",

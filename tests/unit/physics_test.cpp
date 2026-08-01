@@ -2092,6 +2092,89 @@ int check_heightfield_vs_sphere_collision() {
 }
 
 // ---------------------------------------------------------------------------
+// Heightfield: object wholly outside the grid on the negative side.
+// ---------------------------------------------------------------------------
+
+/// EXPECTATION: with declared collider extents wider than the payload
+/// grid, an object entirely in negative grid coordinates produces no
+/// contact and resolve completes — the cell bounds must clamp in signed
+/// space instead of wrapping through size_t (audit H-04).
+int check_heightfield_object_outside_grid_negative() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 3400;
+  }
+
+  engine::physics::HeightfieldData hf{};
+  hf.rows = 5U;
+  hf.columns = 5U;
+  hf.spacingX = 2.0F;
+  hf.spacingZ = 2.0F;
+  hf.minY = 0.0F;
+  hf.maxY = 0.0F;
+
+  world->end_frame_phase();
+
+  const engine::runtime::Entity terrain = world->create_entity();
+  const engine::runtime::Entity sphere = world->create_entity();
+  if ((terrain == engine::runtime::kInvalidEntity) ||
+      (sphere == engine::runtime::kInvalidEntity)) {
+    return 3401;
+  }
+
+  engine::runtime::Transform tTerrain{};
+  engine::runtime::Transform tSphere{};
+  tSphere.position = engine::math::Vec3(-50.0F, -0.3F, -50.0F);
+
+  engine::runtime::Collider terrainCol{};
+  terrainCol.shape = engine::runtime::ColliderShape::Heightfield;
+  terrainCol.halfExtents = engine::math::Vec3(100.0F, 1.0F, 100.0F);
+
+  engine::runtime::Collider sphCol{};
+  sphCol.shape = engine::runtime::ColliderShape::Sphere;
+  sphCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+
+  if (!world->add_transform(terrain, tTerrain) ||
+      !world->add_transform(sphere, tSphere) ||
+      !world->add_collider(terrain, terrainCol) ||
+      !world->add_collider(sphere, sphCol) ||
+      !world->add_rigid_body(sphere, body)) {
+    return 3402;
+  }
+  if (!engine::runtime::set_heightfield_data(*world, terrain, hf)) {
+    return 3403;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F)) {
+    world->end_frame_phase();
+    return 3404;
+  }
+  if (!engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 3405;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform outSph{};
+  if (!world->get_transform(sphere, &outSph)) {
+    return 3406;
+  }
+  if ((outSph.position.x != -50.0F) || (outSph.position.y != -0.3F) ||
+      (outSph.position.z != -50.0F)) {
+    return 3407;
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Raycast hits a flat heightfield.
 // ---------------------------------------------------------------------------
 int check_raycast_hits_heightfield() {
@@ -2712,6 +2795,11 @@ int main() {
   }
 
   result = check_heightfield_vs_sphere_collision();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_heightfield_object_outside_grid_negative();
   if (result != 0) {
     return result;
   }

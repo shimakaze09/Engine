@@ -40,8 +40,10 @@ struct PassResources final {
 bool initialize_pass_resources(int width, int height) noexcept;
 /// Shuts down the owning system for pass resources.
 void shutdown_pass_resources() noexcept;
-/// Recreates size-dependent targets for the new drawable size.
-void resize_pass_resources(int width, int height) noexcept;
+/// Recreates size-dependent targets for the new drawable size; false when
+/// recreation failed and the previous valid targets were kept so the
+/// caller can retry at the next size change (audit H-12).
+bool resize_pass_resources(int width, int height) noexcept;
 
 /// Current pass-resource set.
 const PassResources &get_pass_resources() noexcept;

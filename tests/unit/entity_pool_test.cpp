@@ -196,6 +196,146 @@ bool test_pool_release_stale_generation() {
   return pool.release(acquired) && (pool.available() == 2U);
 }
 
+/// EXPECTATION: releasing an entity carrying every component type leaves
+/// nothing behind for the next acquire — the pool must go through the
+/// World's exhaustive teardown, not a partial removal list (audit H-02).
+bool test_pool_release_removes_every_component() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (!world) {
+    return false;
+  }
+  EntityPool pool;
+  if (!pool.init(world.get(), 2U)) {
+    return false;
+  }
+
+  const Entity entity = pool.acquire();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  Transform transform{};
+  NameComponent name{};
+  std::snprintf(name.name, sizeof(name.name), "%s", "Pooled");
+  AnimationComponent animation{};
+  std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
+                "%s", "assets/character.animctrl.json");
+  if (!world->add_transform(entity, transform) ||
+      !world->add_rigid_body(entity, RigidBody{}) ||
+      !world->add_collider(entity, Collider{}) ||
+      !world->add_mesh_component(entity, MeshComponent{}) ||
+      !world->add_name_component(entity, name) ||
+      !world->add_script_component(entity, ScriptComponent{}) ||
+      !world->add_light_component(entity, LightComponent{}) ||
+      !world->add_point_light_component(entity, PointLightComponent{}) ||
+      !world->add_spot_light_component(entity, SpotLightComponent{}) ||
+      !world->add_reflection_probe_component(entity,
+                                             ReflectionProbeComponent{}) ||
+      !world->add_scene_capture_component(entity, SceneCaptureComponent{}) ||
+      !world->add_foliage_patch_component(entity, FoliagePatchComponent{}) ||
+      !world->add_spring_arm(entity, SpringArmComponent{}) ||
+      !world->add_animation_component(entity, animation)) {
+    return false;
+  }
+
+  if (!pool.release(entity)) {
+    return false;
+  }
+  const Entity reused = pool.acquire();
+  if (reused == kInvalidEntity) {
+    return false;
+  }
+
+  Transform outTransform{};
+  RigidBody outBody{};
+  Collider outCollider{};
+  MeshComponent outMesh{};
+  NameComponent outName{};
+  ScriptComponent outScript{};
+  LightComponent outLight{};
+  PointLightComponent outPointLight{};
+  SpotLightComponent outSpotLight{};
+  ReflectionProbeComponent outProbe{};
+  SceneCaptureComponent outCapture{};
+  FoliagePatchComponent outFoliage{};
+  SpringArmComponent outSpringArm{};
+  AnimationComponent outAnimation{};
+  if (world->get_transform(reused, &outTransform) ||
+      world->get_rigid_body(reused, &outBody) ||
+      world->get_collider(reused, &outCollider) ||
+      world->get_mesh_component(reused, &outMesh) ||
+      world->get_name_component(reused, &outName) ||
+      world->get_script_component(reused, &outScript) ||
+      world->get_light_component(reused, &outLight) ||
+      world->get_point_light_component(reused, &outPointLight) ||
+      world->get_spot_light_component(reused, &outSpotLight) ||
+      world->get_reflection_probe_component(reused, &outProbe) ||
+      world->get_scene_capture_component(reused, &outCapture) ||
+      world->get_foliage_patch_component(reused, &outFoliage) ||
+      world->get_spring_arm(reused, &outSpringArm) ||
+      world->get_animation_component(reused, &outAnimation)) {
+    std::fprintf(stderr, "FAIL: reused pool entity inherited a component\n");
+    return false;
+  }
+  return true;
+}
+
+/// EXPECTATION: releasing during Simulation is refused without publishing
+/// the slot or touching components, and succeeds once a mutation phase
+/// returns (audit H-02: cleanup is phase-sensitive and must never be
+/// half-applied).
+bool test_pool_release_refused_mid_simulation() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (!world) {
+    return false;
+  }
+  EntityPool pool;
+  if (!pool.init(world.get(), 2U)) {
+    return false;
+  }
+
+  const Entity entity = pool.acquire();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+  NameComponent name{};
+  std::snprintf(name.name, sizeof(name.name), "%s", "MidSim");
+  if (!world->add_transform(entity, Transform{}) ||
+      !world->add_name_component(entity, name)) {
+    return false;
+  }
+  const std::size_t availableBefore = pool.available();
+
+  world->begin_update_phase();
+  if (pool.release(entity)) {
+    world->end_frame_phase();
+    std::fprintf(stderr, "FAIL: release succeeded mid-simulation\n");
+    return false;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->begin_render_phase();
+  world->end_frame_phase();
+
+  NameComponent survivingName{};
+  if ((pool.available() != availableBefore) ||
+      !world->get_name_component(entity, &survivingName)) {
+    std::fprintf(stderr, "FAIL: refused release mutated state\n");
+    return false;
+  }
+
+  if (!pool.release(entity) || (pool.available() != availableBefore + 1U)) {
+    std::fprintf(stderr, "FAIL: release after simulation phase failed\n");
+    return false;
+  }
+  NameComponent removedName{};
+  if (world->get_name_component(entity, &removedName)) {
+    std::fprintf(stderr, "FAIL: released entity kept its name\n");
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -212,6 +352,10 @@ int main() {
       {"pool_double_init", test_pool_double_init},
       {"pool_release_unknown", test_pool_release_unknown},
       {"pool_release_stale_generation", test_pool_release_stale_generation},
+      {"pool_release_removes_every_component",
+       test_pool_release_removes_every_component},
+      {"pool_release_refused_mid_simulation",
+       test_pool_release_refused_mid_simulation},
   };
 
   int failures = 0;

@@ -1,6 +1,7 @@
 // Verifies runtime world test behavior for the Engine test suite.
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -774,6 +775,90 @@ int verify_destroy_removes_script_component() {
   return 0;
 }
 
+/// EXPECTATION (audit H-06): component and gravity ingress rejects
+/// non-finite, non-positive-extent, and negative-mass/material values with
+/// the destination unchanged, while valid values keep being accepted.
+int verify_physics_ingress_validation() {
+  using namespace engine::runtime;
+  constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+  constexpr float kInf = std::numeric_limits<float>::infinity();
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 900;
+  }
+  const Entity entity = world->create_entity();
+  if (entity == kInvalidEntity) {
+    return 901;
+  }
+
+  Transform badTransform{};
+  badTransform.position.x = kNaN;
+  if (world->add_transform(entity, badTransform)) {
+    return 902;
+  }
+  Transform probe{};
+  if (world->get_transform(entity, &probe)) {
+    return 903;
+  }
+  Transform goodTransform{};
+  if (!world->add_transform(entity, goodTransform)) {
+    return 904;
+  }
+
+  RigidBody badBody{};
+  badBody.velocity.y = kInf;
+  if (world->add_rigid_body(entity, badBody)) {
+    return 905;
+  }
+  badBody = RigidBody{};
+  badBody.inverseMass = -1.0F;
+  if (world->add_rigid_body(entity, badBody)) {
+    return 906;
+  }
+  RigidBody goodBody{};
+  goodBody.inverseMass = 0.0F;
+  goodBody.inverseInertia = 0.0F;
+  if (!world->add_rigid_body(entity, goodBody)) {
+    return 907;
+  }
+
+  Collider badCollider{};
+  badCollider.halfExtents.z = kNaN;
+  if (world->add_collider(entity, badCollider)) {
+    return 908;
+  }
+  badCollider = Collider{};
+  badCollider.halfExtents.y = 0.0F;
+  if (world->add_collider(entity, badCollider)) {
+    return 909;
+  }
+  badCollider = Collider{};
+  badCollider.restitution = -0.5F;
+  if (world->add_collider(entity, badCollider)) {
+    return 910;
+  }
+  Collider probeCollider{};
+  if (world->get_collider(entity, &probeCollider)) {
+    return 911;
+  }
+  if (!world->add_collider(entity, Collider{})) {
+    return 912;
+  }
+
+  set_gravity(*world, 0.5F, -5.0F, 0.0F);
+  set_gravity(*world, kNaN, 0.0F, 0.0F);
+  float gx = 0.0F;
+  float gy = 0.0F;
+  float gz = 0.0F;
+  if (!get_gravity(*world, &gx, &gy, &gz) || (gx != 0.5F) || (gy != -5.0F) ||
+      (gz != 0.0F)) {
+    return 913;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -824,6 +909,11 @@ int main() {
   }
 
   result = verify_cascade_destroy_subtree();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_physics_ingress_validation();
   if (result != 0) {
     return result;
   }

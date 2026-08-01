@@ -9,6 +9,7 @@
 #include <new>
 
 #include "engine/core/json.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -1234,6 +1235,61 @@ int check_every_component_type_survives_load() {
   return 0;
 }
 
+/// EXPECTATION: non-default world gravity survives a save/load round trip
+/// exactly, and a default-gravity scene loads back to the default.
+int check_gravity_round_trip() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  if (source == nullptr) {
+    return 320;
+  }
+  set_gravity(*source, 1.5F, -3.0F, 0.25F);
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      buffer(new (std::nothrow)
+                 std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  if (buffer == nullptr) {
+    return 321;
+  }
+  std::size_t size = 0U;
+  if (!save_scene(*source, buffer->data(), buffer->size(), &size)) {
+    return 322;
+  }
+
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((loaded == nullptr) || !load_scene(*loaded, buffer->data(), size)) {
+    return 323;
+  }
+  float gx = 0.0F;
+  float gy = 0.0F;
+  float gz = 0.0F;
+  if (!get_gravity(*loaded, &gx, &gy, &gz) || (gx != 1.5F) ||
+      (gy != -3.0F) || (gz != 0.25F)) {
+    return 324;
+  }
+
+  std::unique_ptr<World> defaultWorld(new (std::nothrow) World());
+  if (defaultWorld == nullptr) {
+    return 325;
+  }
+  size = 0U;
+  if (!save_scene(*defaultWorld, buffer->data(), buffer->size(), &size)) {
+    return 326;
+  }
+  std::unique_ptr<World> defaultLoaded(new (std::nothrow) World());
+  if ((defaultLoaded == nullptr) ||
+      !load_scene(*defaultLoaded, buffer->data(), size)) {
+    return 327;
+  }
+  if (!get_gravity(*defaultLoaded, &gx, &gy, &gz) || (gx != 0.0F) ||
+      (gy != -9.8F) || (gz != 0.0F)) {
+    return 328;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -1340,6 +1396,13 @@ int main() {
   }
 
   result = check_every_component_type_survives_load();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = check_gravity_round_trip();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

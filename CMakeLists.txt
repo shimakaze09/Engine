@@ -218,7 +218,6 @@ if(CPPCHECK_EXE)
         --suppress=unmatchedSuppression
         --suppress=preprocessorErrorDirective
         --suppress=*:*_deps/*
-        --suppress=objectIndex:*/math/include/engine/math/ray.h
         --suppress=arithOperationsOnVoidPointer:*/core/src/json.cpp
         --suppress=duplInheritedMember:*/runtime/include/engine/runtime/world.h
         --suppress=duplInheritedMember:*/runtime/src/world.cpp

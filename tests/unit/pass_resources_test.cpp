@@ -188,6 +188,42 @@ void test_resize_failure_keeps_existing_resources() noexcept {
   CHECK(no_live_resources(), "shutdown releases resources after resize failure");
 }
 
+/// EXPECTATION (audit H-12): resize reports its outcome — true for a
+/// same-size no-op and a successful swap (which destroys exactly the old
+/// target set), false for a failed recreation — so the flush can retry
+/// instead of recording a size the targets never reached.
+void test_resize_reports_status_and_swaps() noexcept {
+  reset_device();
+
+  CHECK(initialize_pass_resources(640, 480), "initial resources created");
+  const PassResources resources = get_pass_resources();
+  const std::uint32_t oldSceneColor =
+      pass_resource_gpu_texture(resources.sceneColor);
+  const int oldTextureCount = g_stats.aliveTextures;
+  const int oldFramebufferCount = g_stats.aliveFramebuffers;
+
+  CHECK(resize_pass_resources(640, 480), "same-size resize reports success");
+  CHECK(pass_resource_gpu_texture(resources.sceneColor) == oldSceneColor,
+        "same-size resize keeps targets");
+
+  g_stats.failCreateCall = g_stats.createCalls + 3U;
+  CHECK(!resize_pass_resources(1024, 768), "failed resize reports false");
+  CHECK(pass_resource_gpu_texture(resources.sceneColor) == oldSceneColor,
+        "failed resize keeps old targets");
+
+  g_stats.failCreateCall = 0U;
+  CHECK(resize_pass_resources(1024, 768), "retried resize reports success");
+  CHECK(pass_resource_gpu_texture(resources.sceneColor) != oldSceneColor,
+        "successful resize swaps to new targets");
+  CHECK(g_stats.aliveTextures == oldTextureCount,
+        "successful resize destroys exactly the old textures");
+  CHECK(g_stats.aliveFramebuffers == oldFramebufferCount,
+        "successful resize destroys exactly the old framebuffers");
+
+  shutdown_pass_resources();
+  CHECK(no_live_resources(), "shutdown releases resources after retry");
+}
+
 } // namespace
 
 int main() {
@@ -197,6 +233,7 @@ int main() {
   test_partial_failure_releases_created_resources();
   test_incomplete_framebuffer_releases_created_resources();
   test_resize_failure_keeps_existing_resources();
+  test_resize_reports_status_and_swaps();
 
   std::printf("\n%s (%d failure(s))\n",
               g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);

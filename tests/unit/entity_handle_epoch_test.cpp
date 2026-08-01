@@ -116,6 +116,86 @@ int check_handle_encoding_bounds() {
   return 0;
 }
 
+/// EXPECTATION: encoding requires the entity to be alive in the bound
+/// world — dead entities and unbound worlds produce no handle.
+int check_encode_requires_live_entity() {
+  using namespace engine::runtime;
+  using namespace engine::scripting;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 30;
+  }
+  runtime_binding().world = world.get();
+  const auto finish = [](int result) noexcept {
+    runtime_binding().world = nullptr;
+    return result;
+  };
+
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return finish(31);
+  }
+  std::uint64_t handle = 0ULL;
+  if (!encode_entity_handle_value(entity, &handle)) {
+    return finish(32);
+  }
+  if (!world->destroy_entity(entity)) {
+    return finish(33);
+  }
+  if (encode_entity_handle_value(entity, &handle)) {
+    return finish(34);
+  }
+
+  runtime_binding().world = nullptr;
+  const Entity fresh{1U, 1U};
+  if (encode_entity_handle_value(fresh, &handle)) {
+    return finish(35);
+  }
+  return finish(0);
+}
+
+/// EXPECTATION: the 17-bit epoch field wraps after 131072 replacements —
+/// a handle exactly one wrap old aliases again. This pins the documented
+/// bound of the stale-handle guarantee (an exhaustion warning fires when
+/// the raw epoch first exceeds the field).
+int check_epoch_wrap_documented_alias() {
+  using namespace engine::runtime;
+  using namespace engine::scripting;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 40;
+  }
+  runtime_binding().world = world.get();
+  const auto finish = [](int result) noexcept {
+    runtime_binding().world = nullptr;
+    return result;
+  };
+
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return finish(41);
+  }
+  std::uint64_t epochZeroHandle = 0ULL;
+  if (!encode_entity_handle_value(entity, &epochZeroHandle)) {
+    return finish(42);
+  }
+
+  world->mark_content_replaced(0U);
+  Entity decoded{};
+  if (decode_entity_handle_value(epochZeroHandle, &decoded)) {
+    return finish(43);
+  }
+
+  world->mark_content_replaced((1U << 17U) - 1U);
+  if (!decode_entity_handle_value(epochZeroHandle, &decoded) ||
+      (decoded.index != entity.index)) {
+    return finish(44);
+  }
+  return finish(0);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -127,6 +207,18 @@ int main() {
   }
 
   result = check_handle_encoding_bounds();
+  if (result != 0) {
+    std::fprintf(stderr, "entity_handle_epoch_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_encode_requires_live_entity();
+  if (result != 0) {
+    std::fprintf(stderr, "entity_handle_epoch_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_epoch_wrap_documented_alias();
   if (result != 0) {
     std::fprintf(stderr, "entity_handle_epoch_test failed: %d\n", result);
     return result;
