@@ -47,6 +47,16 @@ enum class ColliderShape : std::uint8_t {
   Heightfield = 4,
 };
 
+/// Provenance of a ConvexHull collider's payload: which canonical primitive
+/// builder reproduces it. Serialized with the collider so every install path
+/// (scene/prefab load, world copy, editor undo) can rebuild the hull data,
+/// which lives outside the component in the world-owned physics context.
+enum class HullSource : std::uint8_t {
+  None = 0,
+  Cylinder = 1,
+  Pyramid = 2,
+};
+
 /// Shape + half extents + material/filter fields for collision.
 struct Collider final {
   Vec3 localPosition = Vec3(0.0F, 0.0F, 0.0F);
@@ -59,6 +69,7 @@ struct Collider final {
   std::uint32_t collisionLayer = 1U;
   std::uint32_t collisionMask = 0xFFFFFFFFU;
   ColliderShape shape = ColliderShape::AABB;
+  HullSource hullSource = HullSource::None;
 };
 
 /// Enumerates movement authority values used by the engine.

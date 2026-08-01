@@ -4,6 +4,7 @@
 #include "editor_transform_util.h"
 #include "engine/editor/command_history.h"
 #include "engine/math/transform.h"
+#include "engine/physics/primitive_hulls.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
@@ -905,7 +906,6 @@ int check_foliage_instance_edit_round_trip() noexcept {
 /// convex-hull payload on every execute so redo restores physics.
 int check_primitive_spawn_rebuilds_hull() noexcept {
   using engine::editor::EntityCreateCommand;
-  using engine::editor::SpawnHullKind;
   using engine::runtime::Collider;
   using engine::runtime::Entity;
   using engine::runtime::World;
@@ -930,8 +930,13 @@ int check_primitive_spawn_rebuilds_hull() noexcept {
   command->hasMesh = true;
   command->mesh.meshAssetId = 5ULL;
   command->hasCollider = true;
-  command->colliderComponent.shape = engine::math::ColliderShape::Capsule;
-  command->hullKind = SpawnHullKind::Cylinder;
+  engine::physics::ConvexHullData seededHull{};
+  if (!engine::physics::build_cylinder_hull(&seededHull)) {
+    return finish(158);
+  }
+  command->colliderComponent.shape = engine::math::ColliderShape::ConvexHull;
+  command->colliderComponent.hullSource = engine::math::HullSource::Cylinder;
+  command->colliderComponent.halfExtents = seededHull.localHalfExtents;
 
   engine::editor::CommandHistory history{};
   history.execute(command);

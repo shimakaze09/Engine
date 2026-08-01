@@ -9,6 +9,8 @@
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/transform.h"
+#include "engine/physics/physics.h"
+#include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/reflect_types.h"
 #include "world_internal.h"
 
@@ -18,6 +20,46 @@
 #include <cstring>
 
 namespace engine::runtime {
+
+namespace {
+
+// Rebuilds the canonical primitive hull recorded in Collider::hullSource so
+// every collider install path (scene/prefab load, world copy, editor undo,
+// script spawn) restores the payload the component cannot carry itself. On
+// failure the component stays as authored and narrow phase falls back to box
+// behavior — loudly, never silently.
+void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
+                             const Collider &collider) noexcept {
+  if ((collider.shape != ColliderShape::ConvexHull) ||
+      (collider.hullSource == HullSource::None)) {
+    return;
+  }
+
+  physics::ConvexHullData hull{};
+  bool built = false;
+  switch (collider.hullSource) {
+  case HullSource::Cylinder:
+    built = physics::build_cylinder_hull(&hull);
+    break;
+  case HullSource::Pyramid:
+    built = physics::build_pyramid_hull(&hull);
+    break;
+  default:
+    break;
+  }
+
+  if (!built || !physics::set_convex_hull_data(context, entity, hull)) {
+    char message[128] = {};
+    std::snprintf(message, sizeof(message),
+                  "convex hull rebuild failed for entity %u (source %u) — "
+                  "collider falls back to box behavior",
+                  entity.index,
+                  static_cast<unsigned>(collider.hullSource));
+    core::log_message(core::LogLevel::Warning, "world", message);
+  }
+}
+
+} // namespace
 
 
 template <typename Set, typename Component>
@@ -269,7 +311,12 @@ World::rigid_body_owner(Entity colliderEntity,
 }
 
 bool World::add_collider(Entity entity, const Collider &collider) noexcept {
-  return add_component_checked(m_colliders, entity, collider, "add_collider");
+  if (!add_component_checked(m_colliders, entity, collider, "add_collider")) {
+    return false;
+  }
+
+  install_provenance_hull(m_physicsContext, entity, collider);
+  return true;
 }
 
 bool World::remove_collider(Entity entity) noexcept {
