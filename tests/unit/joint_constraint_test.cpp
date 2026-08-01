@@ -562,6 +562,103 @@ int test_static_anchor_ignores_default_inertia() noexcept {
   return 0;
 }
 
+// ---- Boundary: zero-length constraint spans stay finite and still ----------
+
+int test_zero_length_spans_stay_finite() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  const math::Vec3 shared(1.0F, 2.0F, 3.0F);
+  Entity bodies[2] = {
+      make_free_body(*world, shared, math::Quat(), 1.0F, 1.0F),
+      make_free_body(*world, shared, math::Quat(), 1.0F, 1.0F)};
+
+  if ((physics::add_ball_socket_joint(*world, bodies[0], bodies[1], shared) ==
+       physics::kInvalidJointId) ||
+      (engine::runtime::add_distance_joint(*world, bodies[0], bodies[1],
+                                           0.0F) ==
+       physics::kInvalidJointId)) {
+    return 2;
+  }
+
+  for (int i = 0; i < 60; ++i) {
+    if (!step_world(*world, bodies, 2)) {
+      return 3;
+    }
+  }
+
+  for (const Entity entity : bodies) {
+    Transform t{};
+    if (!world->get_transform(entity, &t)) {
+      return 4;
+    }
+    if (!std::isfinite(t.position.x) || !std::isfinite(t.position.y) ||
+        !std::isfinite(t.position.z) || !std::isfinite(t.rotation.w)) {
+      return 5;
+    }
+    if (math::length(math::sub(t.position, shared)) > 1e-6F) {
+      std::printf("FAIL zero_span: body moved %.6f\n",
+                  static_cast<double>(
+                      math::length(math::sub(t.position, shared))));
+      return 6;
+    }
+  }
+  return 0;
+}
+
+// ---- Boundary: joint table capacity rejects, then recovers on release ------
+
+int test_joint_capacity_rejects_then_recovers() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  Entity bodies[2] = {
+      make_free_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat(),
+                     1.0F, 1.0F),
+      make_free_body(*world, math::Vec3(2.0F, 0.0F, 0.0F), math::Quat(),
+                     1.0F, 1.0F)};
+
+  physics::JointId lastId = physics::kInvalidJointId;
+  for (std::size_t i = 0U; i < physics::kMaxPhysicsJoints; ++i) {
+    lastId = engine::runtime::add_distance_joint(*world, bodies[0], bodies[1],
+                                                 2.0F);
+    if (lastId == physics::kInvalidJointId) {
+      std::printf("FAIL capacity: rejected at slot %zu\n", i);
+      return 2;
+    }
+  }
+
+  if (engine::runtime::add_distance_joint(*world, bodies[0], bodies[1],
+                                          2.0F) !=
+      physics::kInvalidJointId) {
+    return 3;
+  }
+
+  engine::runtime::remove_joint(*world, lastId);
+  const physics::JointId recovered =
+      engine::runtime::add_distance_joint(*world, bodies[0], bodies[1], 2.0F);
+  if ((recovered == physics::kInvalidJointId) || (recovered == lastId)) {
+    return 4;
+  }
+
+  if (!step_world(*world, bodies, 2)) {
+    return 5;
+  }
+  Transform tA{};
+  Transform tB{};
+  world->get_transform(bodies[0], &tA);
+  world->get_transform(bodies[1], &tB);
+  if (std::fabs(math::length(math::sub(tB.position, tA.position)) - 2.0F) >
+      1e-4F) {
+    return 6;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -588,6 +685,9 @@ int main() {
        test_two_link_pendulum_settles_to_rest},
       {"static_anchor_ignores_default_inertia",
        test_static_anchor_ignores_default_inertia},
+      {"zero_length_spans_stay_finite", test_zero_length_spans_stay_finite},
+      {"joint_capacity_rejects_then_recovers",
+       test_joint_capacity_rejects_then_recovers},
   };
 
   int failures = 0;
