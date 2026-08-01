@@ -161,9 +161,14 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   scripting/editor bridges, render-prep pipeline, skeletal animation (CPU
   pose evaluation in `animation.cpp`, cooked .skel/.anim loaders, the
   controller state machine + palette handoff in `animation_system.cpp`),
-  service registry, timers, cameras, spring arms, game mode/state, player
-  controllers, entity pool.
-- `editor/` — ImGui editor: `editor_session` (state + play lifecycle),
+  fixed-step render interpolation (per-entity world-TRS history in the
+  World, blended in render prep; `frame_pacing.{h,cpp}` holds the
+  vsync/cap helpers), the single-slot game save (`save_data.{h,cpp}` over
+  `platform_get_save_dir`), service registry, timers, cameras, spring
+  arms, game mode/state, player controllers, entity pool.
+- `editor/` — ImGui editor: `editor_session` (state + play lifecycle,
+  multi-selection), hierarchy tree panel (drag-drop reparent through the
+  undoable ReparentCommand),
   `editor_commands` (undoable edits), panel TUs (main/inspector/diagnostics/
   assets/viewport), editor + debug cameras, command history.
 - `assets/` — GLSL shaders, sample Lua scripts, sample meshes (synced to the
@@ -313,12 +318,13 @@ stutter) at 60 Hz sim.
   character walks with footstep animation events playing positional
   sounds over a streamed ambient loop. CUT: HRTF, DSP
   (reverb/filters/occlusion), Doppler, snapshots/ducking.
-- **Editor (from P1-M9, cut down)**: scene hierarchy panel (tree,
-  drag-drop reparent, multi-select), asset browser drag-to-viewport,
-  inspector nested structs/arrays, undo covering every operation the
-  slice's authoring flow uses, PIE pause/step. The commercial-grade UX
-  pass continues throughout. CUT: prefab overrides/nesting, editor Lua
-  API.
+- **Editor (from P1-M9, cut down) — IN PROGRESS (feat/editor-authoring)**:
+  scene hierarchy panel (tree, drag-drop reparent, multi-select) LANDED
+  2026-08-01; still open: asset browser drag-to-viewport, inspector
+  nested structs/arrays, undo covering every operation the slice's
+  authoring flow uses (entity create/delete undo remains), PIE
+  pause/step. The commercial-grade UX pass continues throughout. CUT:
+  prefab overrides/nesting, editor Lua API.
 - **Scenes (from P1-M10, cut down) — LANDED 2026-08-01**: the exclusive
   scene transition flow is pinned end to end by an integration test
   (`engine.load_scene` from a playing script → pending-op commit →
