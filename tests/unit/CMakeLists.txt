@@ -427,6 +427,15 @@ engine_add_test_executable(engine_unit_ccd
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_blocked_body_warning
+    SOURCES
+    blocked_body_warning_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_speculative_contacts
     SOURCES
     speculative_contacts_test.cpp

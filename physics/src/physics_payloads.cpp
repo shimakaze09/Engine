@@ -46,6 +46,13 @@ bool register_physics_cvars() noexcept {
              "Minimum velocity magnitude (m/s) to trigger CCD") &&
          ok;
   }
+  if (!cvar_exists("physics.blocked_warn_steps")) {
+    ok = core::cvar_register_float(
+             "physics.blocked_warn_steps", 30.0F,
+             "Consecutive blocked steps before warning that a "
+             "velocity-driven body is not moving (0 disables)") &&
+         ok;
+  }
   return ok;
 }
 

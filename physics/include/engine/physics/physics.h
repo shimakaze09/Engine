@@ -11,9 +11,23 @@
 namespace engine::physics {
 
 struct PhysicsContext;
+class PhysicsWorldView;
 
 /// Registers physics runtime CVars. Call after core::initialize_cvars().
 bool register_physics_cvars() noexcept;
+
+// Blocked-body warning diagnostic ---------------------------------------------
+/// Counters published by the blocked-body warning (physics.blocked_warn_steps):
+/// total warnings emitted plus the blocked entity and blocking-partner
+/// indices from the most recent warning (0 when unknown).
+struct BlockedBodyWarningStats final {
+  std::uint32_t totalWarnings = 0U;
+  std::uint32_t lastBlockedEntityIndex = 0U;
+  std::uint32_t lastBlockingEntityIndex = 0U;
+};
+/// Returns the world's blocked-body warning counters.
+BlockedBodyWarningStats
+blocked_body_warning_stats(const PhysicsWorldView &world) noexcept;
 /// Opaque generation-bearing joint identifier; never use it as a slot index.
 
 // Joints / Constraints --------------------------------------------------------

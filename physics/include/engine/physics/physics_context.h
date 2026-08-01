@@ -95,6 +95,18 @@ struct PhysicsShapeStore final {
   // rejection must not read live RigidBody::velocity, which parallel chunk
   // jobs are integrating concurrently.
   std::array<math::Vec3, kMaxColliders> ccdColliderVelocities{};
+
+  // Blocked-body warning diagnostic (physics.blocked_warn_steps): commanded
+  // speeds captured at resolve entry keyed by dense rigid-body index
+  // (negative = ineligible this step), and consecutive-blocked-step episode
+  // counters keyed by entity index. A counter can survive an entity-index
+  // reuse, which at worst fires one warning early — acceptable for a
+  // log-only diagnostic that never feeds back into simulation.
+  std::array<float, kMaxColliders> blockedCommandedSpeeds{};
+  std::array<std::uint8_t, ENGINE_MAX_ENTITIES + 1U> blockedStepCounts{};
+  std::uint32_t blockedWarningCount = 0U;
+  std::uint32_t blockedLastEntityIndex = 0U;
+  std::uint32_t blockedLastBlockerIndex = 0U;
 };
 
 /// World-owned physics storage: gravity, joints, pair/stamp scratch,
