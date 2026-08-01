@@ -54,6 +54,17 @@
 
 namespace engine::editor {
 
+runtime::Entity resolve_command_target(
+    runtime::Entity entity, runtime::PersistentId persistentId) noexcept {
+  if ((editor_session().world == nullptr) ||
+      (persistentId == runtime::kInvalidPersistentId)) {
+    return entity;
+  }
+  const runtime::Entity resolved =
+      editor_session().world->find_entity_by_persistent_id(persistentId);
+  return (resolved == runtime::kInvalidEntity) ? entity : resolved;
+}
+
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
                                 ComponentEditSnapshot *out) noexcept {
   if ((editor_session().world == nullptr) || (out == nullptr)) {
@@ -190,6 +201,9 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
   }
 
   cmd->entity = entity;
+  cmd->persistentId = (editor_session().world != nullptr)
+                          ? editor_session().world->persistent_id(entity)
+                          : runtime::kInvalidPersistentId;
   cmd->type = type;
   cmd->beforeExists = beforeExists;
   cmd->before = before;
@@ -213,6 +227,7 @@ void execute_component_remove(runtime::Entity entity,
   }
 
   cmd->entity = entity;
+  cmd->persistentId = editor_session().world->persistent_id(entity);
   cmd->type = type;
   cmd->beforeExists = true;
   cmd->before = before;
@@ -242,11 +257,13 @@ static bool apply_parent_id(runtime::Entity child,
 }
 
 void ReparentCommand::execute() noexcept {
-  static_cast<void>(apply_parent_id(child, afterParentId));
+  static_cast<void>(apply_parent_id(
+      resolve_command_target(child, childPersistentId), afterParentId));
 }
 
 void ReparentCommand::undo() noexcept {
-  static_cast<void>(apply_parent_id(child, beforeParentId));
+  static_cast<void>(apply_parent_id(
+      resolve_command_target(child, childPersistentId), beforeParentId));
 }
 
 bool execute_reparent(runtime::Entity child,
@@ -306,6 +323,7 @@ bool execute_reparent(runtime::Entity child,
     return false;
   }
   command->child = child;
+  command->childPersistentId = world->persistent_id(child);
   command->beforeParentId = before.parentId;
   command->afterParentId = afterId;
   editor_session().commandHistory.execute(command);

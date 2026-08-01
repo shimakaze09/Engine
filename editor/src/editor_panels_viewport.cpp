@@ -379,6 +379,8 @@ void draw_scene_viewport_panel() noexcept {
       auto *cmd = new (std::nothrow) TransformEditCommand();
       if (cmd != nullptr) {
         cmd->entity = selectedEntity;
+        cmd->persistentId =
+            editor_session().world->persistent_id(selectedEntity);
         cmd->oldTransform = editor_session().gizmoStartTransform;
         editor_session().world->get_transform(selectedEntity,
                                               &cmd->newTransform);

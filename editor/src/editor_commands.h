@@ -8,20 +8,30 @@
 
 namespace engine::editor {
 
+/// Resolves a command's target: by persistent id when one was captured
+/// (so undo/redo survives the entity being deleted and re-created), else
+/// the recorded handle (stale generations are rejected downstream).
+runtime::Entity resolve_command_target(
+    runtime::Entity entity, runtime::PersistentId persistentId) noexcept;
+
+/// Undoable transform edit stored as before/after local TRS values.
 struct TransformEditCommand final : EditorCommand {
   runtime::Entity entity{};
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
   runtime::Transform oldTransform{};
   runtime::Transform newTransform{};
 
   void execute() noexcept override {
     if (editor_session().world != nullptr) {
-      static_cast<void>(editor_session().world->add_transform(entity, newTransform));
+      static_cast<void>(editor_session().world->add_transform(
+          resolve_command_target(entity, persistentId), newTransform));
     }
   }
 
   void undo() noexcept override {
     if (editor_session().world != nullptr) {
-      static_cast<void>(editor_session().world->add_transform(entity, oldTransform));
+      static_cast<void>(editor_session().world->add_transform(
+          resolve_command_target(entity, persistentId), oldTransform));
     }
   }
 };
@@ -83,6 +93,7 @@ void execute_component_remove(runtime::Entity entity,
 /// snapshots.
 struct ComponentEditCommand final : EditorCommand {
   runtime::Entity entity{};
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
   ComponentEditType type = ComponentEditType::Transform;
   bool beforeExists = false;
   bool afterExists = false;
@@ -90,13 +101,15 @@ struct ComponentEditCommand final : EditorCommand {
   ComponentEditSnapshot after{};
 
   void execute() noexcept override {
-    static_cast<void>(
-        apply_component_snapshot(type, entity, afterExists, after));
+    static_cast<void>(apply_component_snapshot(
+        type, resolve_command_target(entity, persistentId), afterExists,
+        after));
   }
 
   void undo() noexcept override {
-    static_cast<void>(
-        apply_component_snapshot(type, entity, beforeExists, before));
+    static_cast<void>(apply_component_snapshot(
+        type, resolve_command_target(entity, persistentId), beforeExists,
+        before));
   }
 };
 
@@ -105,6 +118,7 @@ struct ComponentEditCommand final : EditorCommand {
 /// reparent simply fails and the command records no change).
 struct ReparentCommand final : EditorCommand {
   runtime::Entity child{};
+  runtime::PersistentId childPersistentId = runtime::kInvalidPersistentId;
   runtime::PersistentId beforeParentId = runtime::kInvalidPersistentId;
   runtime::PersistentId afterParentId = runtime::kInvalidPersistentId;
 
