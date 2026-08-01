@@ -518,6 +518,15 @@ engine_add_test_executable(engine_unit_command_buffer
     engine_core
 )
 
+engine_add_test_executable(engine_unit_mesh_primitives
+    SOURCES
+    mesh_primitives_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+    engine_core
+)
+
 # ---- P1-M5-C: Shadow Maps ----
 
 engine_add_test_executable(engine_unit_shadow_map
