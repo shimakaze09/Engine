@@ -4,7 +4,9 @@
 
 #include "engine/runtime/animation.h"
 
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -112,14 +114,19 @@ bool load_animation_clip_asset(const char *virtualPath,
   core::AnimClipAssetHeader header{};
   if (size >= sizeof(header)) {
     std::memcpy(&header, data, sizeof(header));
-    const std::size_t expected =
-        sizeof(header) +
-        (static_cast<std::size_t>(header.trackCount) *
+    // 64-bit arithmetic so hostile counts cannot wrap a 32-bit size_t
+    // into a passing size check and then a multi-gigabyte allocation.
+    const std::uint64_t expected =
+        static_cast<std::uint64_t>(sizeof(header)) +
+        (static_cast<std::uint64_t>(header.trackCount) *
          sizeof(core::AnimClipAssetTrack)) +
-        (static_cast<std::size_t>(header.payloadFloatCount) * sizeof(float));
+        (static_cast<std::uint64_t>(header.payloadFloatCount) * sizeof(float));
     if ((header.magic == core::kAnimClipAssetMagic) &&
         (header.version == core::kAnimClipAssetVersion) &&
-        (header.trackCount <= kMaxAnimTracks) && (size >= expected)) {
+        (header.trackCount <= kMaxAnimTracks) &&
+        (static_cast<std::uint64_t>(size) >= expected) &&
+        std::isfinite(header.durationSeconds) &&
+        (header.durationSeconds >= 0.0F)) {
       AnimationClip clip{};
       clip.durationSeconds = header.durationSeconds;
       clip.trackCount = header.trackCount;
