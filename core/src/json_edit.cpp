@@ -7,6 +7,8 @@
 
 #include <cstddef>
 #include <cstring>
+#include <memory>
+#include <new>
 
 namespace engine::core {
 
@@ -96,6 +98,31 @@ bool json_replace_top_level_field(const char *documentText,
     return false;
   }
 
+  // Contract hardening (review item 8): both inputs must fully parse
+  // before any splice — a malformed document (including mismatched
+  // container delimiters the byte scanner alone would tolerate as
+  // balanced depth) or an invalid replacement value is rejected. The
+  // parser is heap-allocated: its fixed scratch is too large for a
+  // library function to demand from every caller's stack.
+  bool fieldPresentInParse = false;
+  {
+    std::unique_ptr<JsonParser> parser(new (std::nothrow) JsonParser());
+    if (parser == nullptr) {
+      return false;
+    }
+    if (!parser->parse(documentText, documentLength) ||
+        (parser->root() == nullptr) ||
+        (parser->root()->type != JsonValue::Type::Object)) {
+      return false;
+    }
+    fieldPresentInParse =
+        parser->get_object_field(*parser->root(), fieldName) != nullptr;
+    if (!parser->parse(valueText, std::strlen(valueText)) ||
+        (parser->root() == nullptr)) {
+      return false;
+    }
+  }
+
   const std::size_t nameLength = std::strlen(fieldName);
   const std::size_t rootBegin =
       skip_json_whitespace(documentText, documentLength, 0U);
@@ -138,6 +165,13 @@ bool json_replace_top_level_field(const char *documentText,
       return false;
     }
     const std::size_t keyLength = keyClose - 1U - keyBegin;
+    // Keys are matched as raw bytes (the engine parser does the same);
+    // an escape-spelled key could alias the target after decoding, so
+    // such documents are refused rather than risking a duplicate field
+    // (review item 8).
+    if (std::memchr(documentText + keyBegin, '\\', keyLength) != nullptr) {
+      return false;
+    }
     cursor = skip_json_whitespace(documentText, documentLength, keyClose);
     if ((cursor >= documentLength) || (documentText[cursor] != ':')) {
       return false;
@@ -153,6 +187,13 @@ bool json_replace_top_level_field(const char *documentText,
       found = true;
     }
     cursor = valueEnd;
+  }
+
+  // The raw scan compares undecoded key bytes; a key spelled with JSON
+  // escapes would read as absent here while the parser sees it, and an
+  // insert would then create a duplicate key. Refuse the disagreement.
+  if (found != fieldPresentInParse) {
+    return false;
   }
 
   const std::size_t valueLength = std::strlen(valueText);

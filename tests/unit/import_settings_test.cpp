@@ -438,6 +438,42 @@ int test_json_splice_insert_and_rejection() {
   return 0;
 }
 
+/// EXPECTATION (review item 8): the splice validates its own contract —
+/// mismatched container delimiters (which raw depth counting would call
+/// balanced), invalid replacement values, and escape-spelled keys the
+/// byte scanner cannot match are all rejected before any output.
+int test_json_splice_validates_contract() {
+  char output[1024] = {};
+  std::size_t outputLength = 0U;
+
+  const char *mismatched = "{ \"a\": [1, 2 }, \"b\": 3 ]";
+  if (engine::core::json_replace_top_level_field(
+          mismatched, std::strlen(mismatched), "b", "4", output,
+          sizeof(output), &outputLength)) {
+    std::fprintf(stderr, "FAIL: mismatched delimiters accepted\n");
+    return 1;
+  }
+
+  const char *valid = "{ \"a\": 1 }";
+  if (engine::core::json_replace_top_level_field(
+          valid, std::strlen(valid), "a", "{ broken", output, sizeof(output),
+          &outputLength)) {
+    std::fprintf(stderr, "FAIL: invalid replacement value accepted\n");
+    return 1;
+  }
+
+  const char *escapedKey = "{ \"\\u0069mportSettings\": 1 }";
+  if (engine::core::json_replace_top_level_field(
+          escapedKey, std::strlen(escapedKey), "importSettings", "2", output,
+          sizeof(output), &outputLength)) {
+    std::fprintf(stderr, "FAIL: escape-spelled key produced a splice\n");
+    return 1;
+  }
+
+  std::printf("PASS: splice validates its contract\n");
+  return 0;
+}
+
 /// Runs this executable or test program.
 int main() {
   int failures = 0;
@@ -449,6 +485,7 @@ int main() {
   failures += test_json_parser_rejects_excessive_depth();
   failures += test_json_splice_preserves_unknown_fields();
   failures += test_json_splice_insert_and_rejection();
+  failures += test_json_splice_validates_contract();
   if (failures > 0) {
     std::fprintf(stderr, "FAILED: %d test(s) failed\n", failures);
   }
