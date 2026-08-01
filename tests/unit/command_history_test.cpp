@@ -806,6 +806,99 @@ int check_create_edit_chain_survives_undo_redo() noexcept {
   return finish(0);
 }
 
+/// A foliage-instance structural edit recorded as before/after snapshots
+/// must undo back to the original instance list and redo the change.
+int check_foliage_instance_edit_round_trip() noexcept {
+  using engine::editor::ComponentEditCommand;
+  using engine::editor::ComponentEditSnapshot;
+  using engine::editor::ComponentEditType;
+  using engine::runtime::Entity;
+  using engine::runtime::FoliagePatchComponent;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 140;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity entity = world->create_scene_object();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return finish(141);
+  }
+
+  FoliagePatchComponent original{};
+  original.instanceCount = 2U;
+  original.instances[0].offset = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  original.instances[0].scale = 0.5F;
+  original.instances[1].offset = engine::math::Vec3(0.0F, 0.0F, 2.0F);
+  original.instances[1].scale = 0.75F;
+  if (!world->add_foliage_patch_component(entity, original)) {
+    return finish(142);
+  }
+
+  ComponentEditSnapshot before{};
+  if (!engine::editor::capture_component_snapshot(
+          ComponentEditType::FoliagePatch, entity, &before)) {
+    return finish(143);
+  }
+  ComponentEditSnapshot after = before;
+  after.foliagePatch.instances[0] = after.foliagePatch.instances[1];
+  after.foliagePatch.instanceCount = 1U;
+  after.foliagePatch.instances[1] = engine::runtime::FoliageInstance{};
+
+  auto *command = new (std::nothrow) ComponentEditCommand();
+  if (command == nullptr) {
+    return finish(144);
+  }
+  command->entity = entity;
+  command->persistentId = world->persistent_id(entity);
+  command->type = ComponentEditType::FoliagePatch;
+  command->beforeExists = true;
+  command->before = before;
+  command->afterExists = true;
+  command->after = after;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  FoliagePatchComponent removed{};
+  if (!world->get_foliage_patch_component(entity, &removed) ||
+      (removed.instanceCount != 1U) ||
+      (removed.instances[0].offset.z != 2.0F) ||
+      (removed.instances[0].scale != 0.75F)) {
+    return finish(145);
+  }
+
+  history.undo();
+  FoliagePatchComponent restored{};
+  if (!world->get_foliage_patch_component(entity, &restored) ||
+      (restored.instanceCount != 2U) ||
+      (restored.instances[0].offset.x != 1.0F) ||
+      (restored.instances[0].scale != 0.5F) ||
+      (restored.instances[1].offset.z != 2.0F) ||
+      (restored.instances[1].scale != 0.75F)) {
+    return finish(146);
+  }
+
+  history.redo();
+  FoliagePatchComponent redone{};
+  if (!world->get_foliage_patch_component(entity, &redone) ||
+      (redone.instanceCount != 1U) ||
+      (redone.instances[0].offset.z != 2.0F)) {
+    return finish(147);
+  }
+
+  return finish(0);
+}
+
 } // namespace
 
 static_assert(!std::is_copy_constructible_v<engine::editor::CommandHistory>);
@@ -881,6 +974,12 @@ int main() {
   }
 
   result = check_create_edit_chain_survives_undo_redo();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_foliage_instance_edit_round_trip();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

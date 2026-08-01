@@ -419,7 +419,8 @@ void draw_add_component_combo(runtime::Entity entity, bool editable) noexcept {
   ImGui::EndCombo();
 }
 
-void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
+void draw_foliage_patch_fields(runtime::Entity entity,
+                               runtime::FoliagePatchComponent &foliage,
                                bool editable, bool *modified) noexcept {
   if (!editable) {
     ImGui::BeginDisabled();
@@ -469,15 +470,19 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
       visibleCount = static_cast<std::uint32_t>(
           runtime::FoliagePatchComponent::kMaxInstances);
     }
-    if (visibleCount > 16U) {
-      visibleCount = 16U;
-    }
 
+    std::uint32_t removeIndex = visibleCount;
     for (std::uint32_t i = 0U; i < visibleCount; ++i) {
       runtime::FoliageInstance &instance = foliage.instances[i];
       ImGui::PushID(static_cast<int>(i));
       ImGui::Separator();
       ImGui::Text("Instance %u", i);
+      if (editable) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Remove")) {
+          removeIndex = i;
+        }
+      }
       draw_vec3_field("Offset", instance.offset, modified);
       mark_modified(modified, ImGui::DragFloat("Scale", &instance.scale, 0.01F,
                                                0.05F, 10.0F, "%.2f"));
@@ -494,9 +499,34 @@ void draw_foliage_patch_fields(runtime::FoliagePatchComponent &foliage,
       ImGui::PopID();
     }
 
-    if (foliage.instanceCount > visibleCount) {
-      ImGui::Text("%u more instances stored",
-                  foliage.instanceCount - visibleCount);
+    if (editable && (removeIndex < visibleCount)) {
+      // The structural edit routes through the command history from the
+      // local copy (which carries any same-frame scrubs), so the caller's
+      // direct apply is suppressed to keep the recorded edit authoritative.
+      ComponentEditSnapshot after{};
+      after.foliagePatch = foliage;
+      runtime::FoliagePatchComponent &patch = after.foliagePatch;
+      for (std::uint32_t i = removeIndex + 1U; i < visibleCount; ++i) {
+        patch.instances[i - 1U] = patch.instances[i];
+      }
+      patch.instanceCount = visibleCount - 1U;
+      patch.instances[patch.instanceCount] = runtime::FoliageInstance{};
+      execute_component_add(entity, ComponentEditType::FoliagePatch, after);
+      *modified = false;
+    }
+
+    const bool atCapacity =
+        foliage.instanceCount >=
+        static_cast<std::uint32_t>(
+            runtime::FoliagePatchComponent::kMaxInstances);
+    if (editable && !atCapacity && ImGui::Button("Add Instance")) {
+      ComponentEditSnapshot after{};
+      after.foliagePatch = foliage;
+      runtime::FoliagePatchComponent &patch = after.foliagePatch;
+      patch.instances[visibleCount] = runtime::FoliageInstance{};
+      patch.instanceCount = visibleCount + 1U;
+      execute_component_add(entity, ComponentEditType::FoliagePatch, after);
+      *modified = false;
     }
     ImGui::TreePop();
   }
@@ -885,7 +915,8 @@ void draw_inspector_panel() noexcept {
 
     bool foliageModified = false;
     if (sectionOpen) {
-      draw_foliage_patch_fields(foliagePatch, editable, &foliageModified);
+      draw_foliage_patch_fields(entity, foliagePatch, editable,
+                                &foliageModified);
     }
     ImGui::PopID();
 
