@@ -879,6 +879,39 @@ void draw_inspector_panel() noexcept {
                   : 0U;
           meshModified = true;
         }
+        // Blockout material presets: named albedo/roughness/metallic/
+        // opacity sets applied as one undoable edit through the history
+        // (the caller's direct apply is suppressed for that frame).
+        static const struct {
+          const char *name;
+          math::Vec3 albedo;
+          float roughness;
+          float metallic;
+          float opacity;
+        } kMaterialPresets[] = {
+            {"Grass", math::Vec3(0.22F, 0.55F, 0.21F), 0.90F, 0.0F, 1.0F},
+            {"Stone", math::Vec3(0.45F, 0.45F, 0.47F), 0.85F, 0.0F, 1.0F},
+            {"Sand", math::Vec3(0.83F, 0.75F, 0.55F), 0.95F, 0.0F, 1.0F},
+            {"Wood", math::Vec3(0.48F, 0.33F, 0.19F), 0.80F, 0.0F, 1.0F},
+            {"Snow", math::Vec3(0.92F, 0.94F, 0.97F), 0.70F, 0.0F, 1.0F},
+            {"Metal", math::Vec3(0.75F, 0.77F, 0.80F), 0.30F, 1.0F, 1.0F},
+            {"Water", math::Vec3(0.12F, 0.35F, 0.55F), 0.15F, 0.0F, 0.75F},
+        };
+        if (ImGui::BeginCombo("Preset", "Apply preset...")) {
+          for (const auto &preset : kMaterialPresets) {
+            if (ImGui::Selectable(preset.name)) {
+              ComponentEditSnapshot after{};
+              after.mesh = mesh;
+              after.mesh.albedo = preset.albedo;
+              after.mesh.roughness = preset.roughness;
+              after.mesh.metallic = preset.metallic;
+              after.mesh.opacity = preset.opacity;
+              execute_component_add(entity, ComponentEditType::Mesh, after);
+              meshModified = false;
+            }
+          }
+          ImGui::EndCombo();
+        }
       } else {
         ImGui::BeginDisabled();
         static_cast<void>(ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
