@@ -269,6 +269,16 @@ public:
   /// Number of live alive entity components.
   std::size_t alive_entity_count() const noexcept;
 
+  /// Content epoch: advances every time this world's entire contents are
+  /// replaced (scene load commit, reset), so externally retained entity
+  /// handles from the previous contents can be rejected even when index
+  /// and generation collide.
+  std::uint32_t content_epoch() const noexcept;
+  /// Records a whole-content replacement by installing previousEpoch + 1
+  /// (copy assignment copies the source's epoch, so replacement sites
+  /// capture the destination's epoch first and restore it through this).
+  void mark_content_replaced(std::uint32_t previousEpoch) noexcept;
+
   /// Invokes fn(Entity) for every alive entity in index order.
   template <typename Fn> void for_each_alive(Fn &&fn) const noexcept {
     if (m_aliveEntityCount == 0U) {
@@ -1193,6 +1203,7 @@ private:
   WorldPhase m_phase = WorldPhase::Input;
   std::uint32_t m_nextEntityIndex = 1U;
   PersistentId m_nextPersistentId = 1U;
+  std::uint32_t m_contentEpoch = 0U;
   std::array<std::uint32_t, kMaxEntities + 1U> m_entityGenerations{};
   std::array<PersistentId, kMaxEntities + 1U> m_entityPersistentIds{};
   std::array<MovementAuthority, kMaxEntities + 1U> m_movementAuthorities{};

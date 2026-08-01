@@ -9,13 +9,43 @@
 namespace engine::scripting {
 namespace {
 
-constexpr std::uint64_t kLuaEntityIndexMask = 0xFFFFFFFFULL;
-constexpr unsigned kLuaEntityGenerationShift = 32U;
+// Handle layout inside a positive 63-bit Lua integer: entity index in the
+// low bits, generation above it, and the bound world's content epoch on
+// top so handles retained across a whole-world replacement are rejected
+// even when index and generation collide (audit C-03).
+constexpr unsigned kLuaEntityIndexBits = 20U;
+constexpr unsigned kLuaEntityGenerationBits = 26U;
+constexpr unsigned kLuaEntityEpochBits = 17U;
+constexpr std::uint64_t kLuaEntityIndexMask =
+    (1ULL << kLuaEntityIndexBits) - 1ULL;
+constexpr std::uint64_t kLuaEntityGenerationMask =
+    (1ULL << kLuaEntityGenerationBits) - 1ULL;
+constexpr std::uint64_t kLuaEntityEpochMask =
+    (1ULL << kLuaEntityEpochBits) - 1ULL;
+constexpr unsigned kLuaEntityGenerationShift = kLuaEntityIndexBits;
+constexpr unsigned kLuaEntityEpochShift =
+    kLuaEntityIndexBits + kLuaEntityGenerationBits;
+static_assert(kLuaEntityIndexBits + kLuaEntityGenerationBits +
+                      kLuaEntityEpochBits ==
+                  63U,
+              "handle layout must fit a positive lua_Integer");
+static_assert(static_cast<std::uint64_t>(runtime::World::kMaxEntities) <=
+                  kLuaEntityIndexMask,
+              "entity index field too small for the configured capacity");
+
+/// Content epoch of the bound world, masked to the handle field width.
+std::uint64_t bound_world_epoch() noexcept {
+  const runtime::World *world = runtime_binding().world;
+  return (world != nullptr)
+             ? (static_cast<std::uint64_t>(world->content_epoch()) &
+                kLuaEntityEpochMask)
+             : 0ULL;
+}
 
 } // namespace
 
-bool encode_lua_entity_handle(runtime::Entity entity,
-                              lua_Integer *outHandle) noexcept {
+bool encode_entity_handle_value(runtime::Entity entity,
+                                std::uint64_t *outHandle) noexcept {
   if ((outHandle == nullptr) || (entity.index == 0U) ||
       (entity.index >
        static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
@@ -25,10 +55,23 @@ bool encode_lua_entity_handle(runtime::Entity entity,
 
   const std::uint64_t encodedGeneration =
       static_cast<std::uint64_t>(entity.generation - 1U);
-  const std::uint64_t rawHandle =
-      (encodedGeneration << kLuaEntityGenerationShift) |
-      static_cast<std::uint64_t>(entity.index);
-  if ((rawHandle == 0ULL) ||
+  if (encodedGeneration > kLuaEntityGenerationMask) {
+    return false;
+  }
+  *outHandle = (bound_world_epoch() << kLuaEntityEpochShift) |
+               (encodedGeneration << kLuaEntityGenerationShift) |
+               static_cast<std::uint64_t>(entity.index);
+  return *outHandle != 0ULL;
+}
+
+bool encode_lua_entity_handle(runtime::Entity entity,
+                              lua_Integer *outHandle) noexcept {
+  if (outHandle == nullptr) {
+    return false;
+  }
+
+  std::uint64_t rawHandle = 0ULL;
+  if (!encode_entity_handle_value(entity, &rawHandle) ||
       (rawHandle >
        static_cast<std::uint64_t>(std::numeric_limits<lua_Integer>::max()))) {
     return false;
@@ -62,20 +105,21 @@ void push_entity_handle_from_index(lua_State *state,
 
 bool decode_entity_handle_value(std::uint64_t rawHandle,
                                 runtime::Entity *outEntity) noexcept {
-  if ((outEntity == nullptr) || (rawHandle == 0ULL)) {
+  if ((outEntity == nullptr) || (rawHandle == 0ULL) ||
+      (runtime_binding().world == nullptr)) {
     return false;
   }
 
   const std::uint32_t entityIndex =
       static_cast<std::uint32_t>(rawHandle & kLuaEntityIndexMask);
   const std::uint64_t encodedGeneration =
-      rawHandle >> kLuaEntityGenerationShift;
+      (rawHandle >> kLuaEntityGenerationShift) & kLuaEntityGenerationMask;
+  const std::uint64_t encodedEpoch =
+      (rawHandle >> kLuaEntityEpochShift) & kLuaEntityEpochMask;
   if ((entityIndex == 0U) ||
       (entityIndex >
        static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
-      (encodedGeneration >
-       static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max() -
-                                  1U))) {
+      (encodedEpoch != bound_world_epoch())) {
     return false;
   }
 

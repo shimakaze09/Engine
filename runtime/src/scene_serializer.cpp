@@ -972,6 +972,7 @@ void reset_world(World &world) noexcept {
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();
+  world.mark_content_replaced(world.content_epoch());
   reset_anim_controllers();
 }
 
@@ -1171,7 +1172,9 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
+  const std::uint32_t previousEpoch = world.content_epoch();
   world = *committedWorld;
+  world.mark_content_replaced(previousEpoch);
   // The replaced world's components are gone, so their cached animation
   // controllers are released; the loaded scene's components re-acquire
   // lazily on the next animation update (controllerSlot is runtime state

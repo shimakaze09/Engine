@@ -168,6 +168,16 @@ engine_add_test_executable(engine_unit_scene_serializer
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_entity_handle_epoch
+    SOURCES
+    entity_handle_epoch_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/scripting/src
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_hull_provenance
     SOURCES
     hull_provenance_test.cpp
