@@ -859,6 +859,187 @@ int test_hinge_limits_reject_outside_pi() noexcept {
   return 0;
 }
 
+// Final dynamic-body state of one scenario run, expressed in the run's own
+// world frame.
+struct FrameRunResult {
+  bool ok = false;
+  Transform tB{};
+  math::Vec3 velB{};
+  math::Vec3 angVelB{};
+};
+
+// Helper: hinge scenario (limits, gravity, angular + linear kick) built
+// rigidly transformed by a frame rotation and offset.
+FrameRunResult run_hinge_scenario(const math::Quat &frameRot,
+                                  const math::Vec3 &frameOffset) noexcept {
+  FrameRunResult result{};
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return result;
+  }
+  const math::Vec3 gravity =
+      math::rotate_vector(math::Vec3(0.0F, -10.0F, 0.0F), frameRot);
+  engine::runtime::set_gravity(*world, gravity.x, gravity.y, gravity.z);
+
+  Entity bodies[2] = {
+      make_free_body(*world, frameOffset, frameRot, 0.0F, 0.0F),
+      make_free_body(
+          *world,
+          math::add(math::rotate_vector(math::Vec3(1.0F, 0.0F, 0.0F),
+                                        frameRot),
+                    frameOffset),
+          frameRot, 1.0F, 1.0F)};
+
+  const physics::JointId jid = physics::add_hinge_joint(
+      *world, bodies[0], bodies[1],
+      math::add(math::rotate_vector(math::Vec3(1.0F, 0.0F, 0.0F), frameRot),
+                frameOffset),
+      math::rotate_vector(math::Vec3(0.0F, 0.0F, 1.0F), frameRot));
+  if (jid == physics::kInvalidJointId) {
+    return result;
+  }
+  physics::set_joint_limits(*world, jid, -0.5F, 0.5F);
+
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(bodies[1]);
+    if (rb == nullptr) {
+      return result;
+    }
+    rb->angularVelocity =
+        math::rotate_vector(math::Vec3(0.0F, 0.0F, 5.0F), frameRot);
+    rb->velocity = math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), frameRot);
+  }
+
+  for (int i = 0; i < 60; ++i) {
+    if (!step_world(*world, bodies, 2)) {
+      return result;
+    }
+  }
+
+  const RigidBody *rb = world->get_rigid_body_ptr(bodies[1]);
+  if ((rb == nullptr) || !world->get_transform(bodies[1], &result.tB)) {
+    return result;
+  }
+  result.velB = rb->velocity;
+  result.angVelB = rb->angularVelocity;
+  result.ok = true;
+  return result;
+}
+
+// Helper: slider scenario (orientation lock, travel limits, kick) built
+// rigidly transformed by a frame rotation and offset.
+FrameRunResult run_slider_scenario(const math::Quat &frameRot,
+                                   const math::Vec3 &frameOffset) noexcept {
+  FrameRunResult result{};
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return result;
+  }
+
+  Entity bodies[2] = {
+      make_free_body(*world, frameOffset, frameRot, 0.0F, 0.0F),
+      make_free_body(
+          *world,
+          math::add(math::rotate_vector(math::Vec3(2.0F, 0.5F, 0.25F),
+                                        frameRot),
+                    frameOffset),
+          frameRot, 1.0F, 1.0F)};
+
+  const physics::JointId jid = physics::add_slider_joint(
+      *world, bodies[0], bodies[1],
+      math::rotate_vector(math::Vec3(1.0F, 0.0F, 0.0F), frameRot));
+  if (jid == physics::kInvalidJointId) {
+    return result;
+  }
+  physics::set_joint_limits(*world, jid, 0.5F, 1.5F);
+
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(bodies[1]);
+    if (rb == nullptr) {
+      return result;
+    }
+    rb->velocity = math::rotate_vector(math::Vec3(0.0F, 1.0F, 1.0F), frameRot);
+  }
+
+  for (int i = 0; i < 90; ++i) {
+    if (!step_world(*world, bodies, 2)) {
+      return result;
+    }
+  }
+
+  const RigidBody *rb = world->get_rigid_body_ptr(bodies[1]);
+  if ((rb == nullptr) || !world->get_transform(bodies[1], &result.tB)) {
+    return result;
+  }
+  result.velB = rb->velocity;
+  result.angVelB = rb->angularVelocity;
+  result.ok = true;
+  return result;
+}
+
+// Maps a frame-run result back into the identity frame and compares it to
+// the reference run within the given absolute tolerance.
+int compare_frame_runs(const FrameRunResult &reference,
+                       const FrameRunResult &transformed,
+                       const math::Quat &frameRot,
+                       const math::Vec3 &frameOffset, float tolerance,
+                       const char *label) noexcept {
+  if (!reference.ok || !transformed.ok) {
+    return 1;
+  }
+  const math::Quat invRot = math::conjugate(frameRot);
+  const math::Vec3 mappedPos = math::rotate_vector(
+      math::sub(transformed.tB.position, frameOffset), invRot);
+  const math::Vec3 mappedVel =
+      math::rotate_vector(transformed.velB, invRot);
+  const math::Vec3 mappedAngVel =
+      math::rotate_vector(transformed.angVelB, invRot);
+  const math::Quat mappedRot =
+      math::mul(invRot, transformed.tB.rotation);
+
+  const float posErr =
+      math::length(math::sub(mappedPos, reference.tB.position));
+  const float velErr = math::length(math::sub(mappedVel, reference.velB));
+  const float angVelErr =
+      math::length(math::sub(mappedAngVel, reference.angVelB));
+  const float rotAlign = quat_alignment(mappedRot, reference.tB.rotation);
+  if ((posErr > tolerance) || (velErr > tolerance) ||
+      (angVelErr > tolerance) || (rotAlign < 1.0F - 1e-4F)) {
+    std::printf(
+        "FAIL %s: posErr=%.6f velErr=%.6f angVelErr=%.6f rotAlign=%.6f\n",
+        label, static_cast<double>(posErr), static_cast<double>(velErr),
+        static_cast<double>(angVelErr), static_cast<double>(rotAlign));
+    return 2;
+  }
+  return 0;
+}
+
+// ---- Frame invariance: rigidly transformed scenarios evolve identically ----
+
+int test_hinge_behavior_is_frame_invariant() noexcept {
+  const FrameRunResult reference =
+      run_hinge_scenario(math::Quat(), math::Vec3(0.0F, 0.0F, 0.0F));
+  const math::Quat frameRot = math::from_axis_angle(
+      math::normalize(math::Vec3(1.0F, 2.0F, 3.0F)), 1.1F);
+  const math::Vec3 frameOffset(10.0F, -7.0F, 4.0F);
+  const FrameRunResult transformed =
+      run_hinge_scenario(frameRot, frameOffset);
+  return compare_frame_runs(reference, transformed, frameRot, frameOffset,
+                            5e-3F, "hinge_frame");
+}
+
+int test_slider_behavior_is_frame_invariant() noexcept {
+  const FrameRunResult reference =
+      run_slider_scenario(math::Quat(), math::Vec3(0.0F, 0.0F, 0.0F));
+  const math::Quat frameRot = math::from_axis_angle(
+      math::normalize(math::Vec3(-2.0F, 1.0F, 2.0F)), 0.9F);
+  const math::Vec3 frameOffset(-6.0F, 9.0F, -11.0F);
+  const FrameRunResult transformed =
+      run_slider_scenario(frameRot, frameOffset);
+  return compare_frame_runs(reference, transformed, frameRot, frameOffset,
+                            5e-3F, "slider_frame");
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -894,6 +1075,10 @@ int main() {
        test_hinge_recovers_from_anti_parallel_flip},
       {"hinge_limits_reject_outside_pi",
        test_hinge_limits_reject_outside_pi},
+      {"hinge_behavior_is_frame_invariant",
+       test_hinge_behavior_is_frame_invariant},
+      {"slider_behavior_is_frame_invariant",
+       test_slider_behavior_is_frame_invariant},
   };
 
   int failures = 0;
