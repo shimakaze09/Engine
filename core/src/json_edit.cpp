@@ -54,7 +54,8 @@ std::size_t json_value_end(const char *text, std::size_t length,
     return skip_json_string(text, length, i);
   }
   if ((first == '{') || (first == '[')) {
-    std::size_t depth = 0U;
+    std::size_t depth = 1U;
+    ++i;
     while (i < length) {
       const char c = text[i];
       if (c == '"') {
