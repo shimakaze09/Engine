@@ -490,6 +490,11 @@ void narrow_phase_heightfield(const PairContext &pair) noexcept {
   if (hf == nullptr) {
     return;
   }
+  if ((hf->columns < 2U) || (hf->rows < 2U) ||
+      (hf->columns > HeightfieldData::kMaxResolution) ||
+      (hf->rows > HeightfieldData::kMaxResolution)) {
+    return;
+  }
   if (pair.requiresAffineNarrowPhase) {
     narrow_phase_affine_heightfield(pair, aIsHF, *hf);
     return;
@@ -513,14 +518,28 @@ void narrow_phase_heightfield(const PairContext &pair) noexcept {
   heightfield_world_to_grid(*hf, hfPos, objPos.x + objRadius,
                             objPos.z + objRadius, gColMax, gRowMax);
 
-  const auto cMin =
-      static_cast<std::size_t>(std::max(0.0F, std::floor(gColMin)));
-  const auto rMin =
-      static_cast<std::size_t>(std::max(0.0F, std::floor(gRowMin)));
-  const auto cMax = static_cast<std::size_t>(
-      std::min(static_cast<float>(hf->columns - 2U), std::floor(gColMax)));
-  const auto rMax = static_cast<std::size_t>(
-      std::min(static_cast<float>(hf->rows - 2U), std::floor(gRowMax)));
+  // Clamp in signed space before any size_t conversion: a footprint wholly
+  // outside the grid (declared collider extents can exceed the payload
+  // dimensions) must produce no cells, never a wrapped huge loop bound.
+  if (!std::isfinite(gColMin) || !std::isfinite(gRowMin) ||
+      !std::isfinite(gColMax) || !std::isfinite(gRowMax)) {
+    return;
+  }
+  const float maxColumnCell = static_cast<float>(hf->columns - 2U);
+  const float maxRowCell = static_cast<float>(hf->rows - 2U);
+  const float colLo = std::floor(gColMin);
+  const float rowLo = std::floor(gRowMin);
+  const float colHi = std::floor(gColMax);
+  const float rowHi = std::floor(gRowMax);
+  if ((colHi < 0.0F) || (rowHi < 0.0F) || (colLo > maxColumnCell) ||
+      (rowLo > maxRowCell)) {
+    return;
+  }
+  const auto cMin = static_cast<std::size_t>(std::max(0.0F, colLo));
+  const auto rMin = static_cast<std::size_t>(std::max(0.0F, rowLo));
+  const auto cMax =
+      static_cast<std::size_t>(std::min(maxColumnCell, colHi));
+  const auto rMax = static_cast<std::size_t>(std::min(maxRowCell, rowHi));
 
   float bestOverlap = 0.0F;
   engine::math::Vec3 bestNormal(0.0F, 1.0F, 0.0F);
