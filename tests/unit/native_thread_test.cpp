@@ -6,6 +6,7 @@
 #include "engine/core/native_thread.h"
 
 #include <atomic>
+#include <utility>
 
 namespace {
 
