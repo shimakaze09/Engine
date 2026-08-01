@@ -175,14 +175,12 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
   core::SkeletonAssetHeader header{};
   header.jointCount = static_cast<std::uint32_t>(skeleton.joints.size());
 
-  // Assemble in memory and commit atomically so an interrupted cook can
-  // never leave a truncated .skel behind (audit H-20).
-  std::vector<unsigned char> buffer(
-      sizeof(header) +
-      (skeleton.joints.size() * sizeof(core::SkeletonAssetJoint)));
-  std::memcpy(buffer.data(), &header, sizeof(header));
-
-  for (std::size_t i = 0U; i < skeleton.joints.size(); ++i) {
+  // Streamed atomic commit (review item 9): records go straight to the
+  // staged temporary, so nothing is double-buffered and an interrupted
+  // cook still cannot leave a truncated .skel behind.
+  core::AtomicFileWriter writer{};
+  bool ok = writer.begin(outputPath) && writer.write(&header, sizeof(header));
+  for (std::size_t i = 0U; ok && (i < skeleton.joints.size()); ++i) {
     const SkeletonJoint &joint = skeleton.joints[i];
     core::SkeletonAssetJoint record{};
     record.parent = joint.parent;
@@ -199,12 +197,10 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
     record.restScale[0] = joint.restScale.x;
     record.restScale[1] = joint.restScale.y;
     record.restScale[2] = joint.restScale.z;
-    std::memcpy(buffer.data() + sizeof(header) +
-                    (i * sizeof(core::SkeletonAssetJoint)),
-                &record, sizeof(record));
+    ok = writer.write(&record, sizeof(record));
   }
 
-  return core::atomic_write_file(outputPath, buffer.data(), buffer.size());
+  return ok && writer.commit();
 }
 
 bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
@@ -230,23 +226,19 @@ bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
   header.payloadFloatCount = static_cast<std::uint32_t>(payload.size());
   header.durationSeconds = clip.durationSeconds;
 
-  // Assemble in memory and commit atomically so an interrupted cook can
-  // never leave a truncated .anim behind (audit H-20).
-  const std::size_t recordBytes =
-      records.size() * sizeof(core::AnimClipAssetTrack);
-  const std::size_t payloadBytes = payload.size() * sizeof(float);
-  std::vector<unsigned char> buffer(sizeof(header) + recordBytes +
-                                    payloadBytes);
-  std::memcpy(buffer.data(), &header, sizeof(header));
-  if (!records.empty()) {
-    std::memcpy(buffer.data() + sizeof(header), records.data(), recordBytes);
+  // Streamed atomic commit (review item 9): the resident records and
+  // payload spans go straight to the staged temporary without another
+  // contiguous copy.
+  core::AtomicFileWriter writer{};
+  bool ok = writer.begin(outputPath) && writer.write(&header, sizeof(header));
+  if (ok && !records.empty()) {
+    ok = writer.write(records.data(),
+                      records.size() * sizeof(core::AnimClipAssetTrack));
   }
-  if (!payload.empty()) {
-    std::memcpy(buffer.data() + sizeof(header) + recordBytes, payload.data(),
-                payloadBytes);
+  if (ok && !payload.empty()) {
+    ok = writer.write(payload.data(), payload.size() * sizeof(float));
   }
-
-  return core::atomic_write_file(outputPath, buffer.data(), buffer.size());
+  return ok && writer.commit();
 }
 
 } // namespace engine::tools

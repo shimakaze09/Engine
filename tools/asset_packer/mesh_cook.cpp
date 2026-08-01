@@ -337,24 +337,20 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   header.vertexCount = static_cast<std::uint32_t>(vertexCount);
   header.indexCount = static_cast<std::uint32_t>(data.indices.size());
 
-  // Assemble in memory and commit atomically so an interrupted cook can
-  // never leave a truncated .mesh behind (audit H-20).
+  // Streamed atomic commit (review item 9): chunks go straight to the
+  // staged temporary, so the resident payload is never double-buffered.
   const std::size_t vertexBytes =
       data.interleavedVertices.size() * sizeof(float);
   const std::size_t indexBytes = data.indices.size() * sizeof(std::uint32_t);
-  std::vector<unsigned char> buffer(sizeof(header) + vertexBytes + indexBytes);
-  std::memcpy(buffer.data(), &header, sizeof(header));
-  if (vertexBytes > 0U) {
-    std::memcpy(buffer.data() + sizeof(header),
-                data.interleavedVertices.data(), vertexBytes);
+  engine::core::AtomicFileWriter writer{};
+  bool ok = writer.begin(outputPath) && writer.write(&header, sizeof(header));
+  if (ok && (vertexBytes > 0U)) {
+    ok = writer.write(data.interleavedVertices.data(), vertexBytes);
   }
-  if (indexBytes > 0U) {
-    std::memcpy(buffer.data() + sizeof(header) + vertexBytes,
-                data.indices.data(), indexBytes);
+  if (ok && (indexBytes > 0U)) {
+    ok = writer.write(data.indices.data(), indexBytes);
   }
-
-  if (!engine::core::atomic_write_file(outputPath, buffer.data(),
-                                       buffer.size())) {
+  if (!ok || !writer.commit()) {
     std::fprintf(stderr, "error: failed to write output file: %s\n",
                  outputPath);
     return false;
@@ -505,27 +501,20 @@ bool cook_and_write_convex_hull(const char *outputPath,
   const std::uint32_t vertCount32 =
       static_cast<std::uint32_t>(hull.vertexCount);
 
-  std::vector<unsigned char> buffer{};
-  buffer.reserve(36U + (hull.planeCount * 16U) + (hull.vertexCount * 12U));
-  auto appendBytes = [&buffer](const void *bytes, std::size_t size) {
-    const auto *begin = static_cast<const unsigned char *>(bytes);
-    buffer.insert(buffer.end(), begin, begin + size);
-  };
-  appendBytes(&kHullMagic, 4U);
-  appendBytes(&planeCount32, 4U);
-  appendBytes(&vertCount32, 4U);
-  appendBytes(&hull.localCenter, sizeof(float) * 3U);
-  appendBytes(&hull.localHalfExtents, sizeof(float) * 3U);
-  for (std::size_t i = 0U; i < hull.planeCount; ++i) {
-    appendBytes(&hull.planes[i].normal, sizeof(float) * 3U);
-    appendBytes(&hull.planes[i].distance, sizeof(float));
+  engine::core::AtomicFileWriter writer{};
+  bool ok = writer.begin(hullPath) && writer.write(&kHullMagic, 4U) &&
+            writer.write(&planeCount32, 4U) && writer.write(&vertCount32, 4U) &&
+            writer.write(&hull.localCenter, sizeof(float) * 3U) &&
+            writer.write(&hull.localHalfExtents, sizeof(float) * 3U);
+  for (std::size_t i = 0U; ok && (i < hull.planeCount); ++i) {
+    ok = writer.write(&hull.planes[i].normal, sizeof(float) * 3U) &&
+         writer.write(&hull.planes[i].distance, sizeof(float));
   }
-  for (std::size_t i = 0U; i < hull.vertexCount; ++i) {
-    appendBytes(&hull.vertices[i], sizeof(float) * 3U);
+  for (std::size_t i = 0U; ok && (i < hull.vertexCount); ++i) {
+    ok = writer.write(&hull.vertices[i], sizeof(float) * 3U);
   }
 
-  if (!engine::core::atomic_write_file(hullPath, buffer.data(),
-                                       buffer.size())) {
+  if (!ok || !writer.commit()) {
     std::fprintf(stderr, "error: failed to write hull data\n");
     return false;
   }
