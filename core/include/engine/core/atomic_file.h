@@ -8,10 +8,12 @@
 
 namespace engine::core {
 
-/// Writes the payload to a sibling temporary file (flushed, synced, and
-/// closed with every step checked) and atomically renames it over the
-/// destination; on any failure the previous destination file is left
-/// intact and the temporary is removed.
+/// Writes the payload to a uniquely named sibling temporary file (flushed,
+/// synced, and closed with every step checked) and atomically renames it
+/// over the destination; on any failure the previous destination file is
+/// left intact and the temporary is removed. Concurrent writers never
+/// share a temporary; concurrent commits to the same destination resolve
+/// as last-writer-wins.
 bool atomic_write_file(const char *path, const void *data,
                        std::size_t size) noexcept;
 

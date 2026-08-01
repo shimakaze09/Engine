@@ -6,17 +6,37 @@
 
 #include "engine/core/atomic_file.h"
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <system_error>
 
 #ifdef _WIN32
 #include <io.h>
+#include <process.h>
 #else
 #include <unistd.h>
 #endif
 
 namespace engine::core {
+
+namespace {
+
+/// Per-call temporary suffix counter so concurrent writers to the same
+/// destination never share a temporary; the final rename still resolves
+/// concurrent commits as last-writer-wins on the destination.
+std::atomic<std::uint32_t> g_tempSerial{0U};
+
+/// Process id for the temporary-file suffix.
+unsigned long current_process_id() noexcept {
+#ifdef _WIN32
+  return static_cast<unsigned long>(_getpid());
+#else
+  return static_cast<unsigned long>(getpid());
+#endif
+}
+
+} // namespace
 
 bool atomic_write_file(const char *path, const void *data,
                        std::size_t size) noexcept {
@@ -24,9 +44,12 @@ bool atomic_write_file(const char *path, const void *data,
     return false;
   }
 
+  const std::uint32_t serial =
+      g_tempSerial.fetch_add(1U, std::memory_order_relaxed);
   char tempPath[1024];
   const int formatted =
-      std::snprintf(tempPath, sizeof(tempPath), "%s.new", path);
+      std::snprintf(tempPath, sizeof(tempPath), "%s.new.%lu.%u", path,
+                    current_process_id(), serial);
   if ((formatted <= 0) ||
       (static_cast<std::size_t>(formatted) >= sizeof(tempPath))) {
     return false;

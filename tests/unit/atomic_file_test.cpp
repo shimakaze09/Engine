@@ -14,7 +14,21 @@
 namespace {
 
 constexpr const char *kPath = "atomic_file_test_tmp.json";
-constexpr const char *kTempPath = "atomic_file_test_tmp.json.new";
+constexpr const char *kTempPrefix = "atomic_file_test_tmp.json.new";
+
+/// Counts leftover temporaries for a destination (any ".new.*" sibling).
+std::size_t leftover_temporaries(const char *prefix) {
+  std::size_t count = 0U;
+  std::error_code ec{};
+  for (const auto &entry :
+       std::filesystem::directory_iterator(".", ec)) {
+    const std::string name = entry.path().filename().string();
+    if (name.rfind(prefix, 0U) == 0U) {
+      ++count;
+    }
+  }
+  return count;
+}
 
 /// Reads the whole file; empty string when missing.
 std::string read_all(const char *path) {
@@ -35,10 +49,18 @@ std::string read_all(const char *path) {
   return std::string(buffer, read);
 }
 
-/// Removes both the destination and any leftover temporary.
+/// Removes the destination and any leftover temporaries.
 void cleanup() {
   static_cast<void>(std::remove(kPath));
-  static_cast<void>(std::remove(kTempPath));
+  std::error_code ec{};
+  for (const auto &entry :
+       std::filesystem::directory_iterator(".", ec)) {
+    const std::string name = entry.path().filename().string();
+    if (name.rfind(kTempPrefix, 0U) == 0U) {
+      std::error_code removeEc{};
+      std::filesystem::remove(entry.path(), removeEc);
+    }
+  }
 }
 
 /// EXPECTATION: a fresh write creates the file with exactly the payload
@@ -53,7 +75,7 @@ int check_fresh_write() {
   if (read_all(kPath) != payload) {
     return 2;
   }
-  if (std::filesystem::exists(kTempPath)) {
+  if (leftover_temporaries(kTempPrefix) != 0U) {
     return 3;
   }
   return 0;
@@ -113,7 +135,7 @@ int check_rename_failure_cleans_temporary() {
       engine::core::atomic_write_file(directoryTarget, "x", 1U);
   const bool stillDirectory = std::filesystem::is_directory(directoryTarget);
   const bool tempGone =
-      !std::filesystem::exists(std::string(directoryTarget) + ".new");
+      leftover_temporaries("atomic_file_test_dir_target.new") == 0U;
   std::filesystem::remove_all(directoryTarget, ec);
 
   if (wrote || !stillDirectory || !tempGone) {
