@@ -115,13 +115,17 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   if (backend.lastWidth != drawableWidth ||
       backend.lastHeight != drawableHeight) {
-    if (backend.lastWidth == 0 && backend.lastHeight == 0) {
-      initialize_pass_resources(drawableWidth, drawableHeight);
-    } else {
-      resize_pass_resources(drawableWidth, drawableHeight);
+    // Record the size only when the targets actually exist at it, so a
+    // failed create/resize retries next frame instead of rendering into
+    // stale or missing targets forever (audit H-12).
+    const bool resourcesReady =
+        (backend.lastWidth == 0 && backend.lastHeight == 0)
+            ? initialize_pass_resources(drawableWidth, drawableHeight)
+            : resize_pass_resources(drawableWidth, drawableHeight);
+    if (resourcesReady) {
+      backend.lastWidth = drawableWidth;
+      backend.lastHeight = drawableHeight;
     }
-    backend.lastWidth = drawableWidth;
-    backend.lastHeight = drawableHeight;
   }
 
   const PassResources &passRes = get_pass_resources();

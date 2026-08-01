@@ -335,6 +335,7 @@ using GlFramebufferTexture2DProc = void(APIENTRYP)(GLenum, GLenum, GLenum,
                                                    GLuint, GLint);
 using GlCheckFramebufferStatusProc = GLenum(APIENTRYP)(GLenum);
 using GlDrawBuffersProc = void(APIENTRYP)(GLsizei, const GLenum *);
+using GlReadBufferProc = void(APIENTRYP)(GLenum);
 using GlBlitFramebufferProc = void(APIENTRYP)(GLint, GLint, GLint, GLint, GLint,
                                               GLint, GLint, GLint, GLbitfield,
                                               GLenum);
@@ -429,6 +430,7 @@ struct GlTable final {
   GlFramebufferTexture2DProc framebufferTexture2D = nullptr;
   GlCheckFramebufferStatusProc checkFramebufferStatus = nullptr;
   GlDrawBuffersProc drawBuffers = nullptr;
+  GlReadBufferProc readBuffer = nullptr;
   GlBlitFramebufferProc blitFramebuffer = nullptr;
   GlTexSubImage2DProc texSubImage2D = nullptr;
 
@@ -554,6 +556,7 @@ bool load_all_gl_functions() noexcept {
          load_proc(&gl_table().framebufferTexture2D, "glFramebufferTexture2D") &&
          load_proc(&gl_table().checkFramebufferStatus, "glCheckFramebufferStatus") &&
          load_proc(&gl_table().drawBuffers, "glDrawBuffers") &&
+         load_proc(&gl_table().readBuffer, "glReadBuffer") &&
          load_proc(&gl_table().blitFramebuffer, "glBlitFramebuffer") &&
          load_proc(&gl_table().texSubImage2D, "glTexSubImage2D") &&
          load_proc(&gl_table().blendFunc, "glBlendFunc") &&
@@ -1063,11 +1066,30 @@ std::uint32_t gl_create_framebuffer(std::uint32_t colorTex,
   if (colorTex != 0U) {
     gl_table().framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                               GL_TEXTURE_2D, static_cast<GLuint>(colorTex), 0);
+  } else {
+    // Depth-only (and deferred-attachment) FBOs must disable the color
+    // draw/read buffers, or strict drivers report the framebuffer
+    // incomplete because attachment 0 has no image (audit H-12).
+    const GLenum none = GL_NONE;
+    gl_table().drawBuffers(1, &none);
+    gl_table().readBuffer(GL_NONE);
   }
 
   if (depthTex != 0U) {
     gl_table().framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                               GL_TEXTURE_2D, static_cast<GLuint>(depthTex), 0);
+  }
+
+  // An FBO created with no attachments has faces attached later, so
+  // completeness can only be judged once something is attached.
+  if (((colorTex != 0U) || (depthTex != 0U)) &&
+      (gl_table().checkFramebufferStatus(GL_FRAMEBUFFER) !=
+       GL_FRAMEBUFFER_COMPLETE)) {
+    gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);
+    gl_table().deleteFramebuffers(1, &fbo);
+    core::log_message(core::LogLevel::Error, "render_device",
+                      "framebuffer incomplete at creation — rejected");
+    return 0U;
   }
 
   gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);
@@ -1134,6 +1156,15 @@ std::uint32_t gl_create_framebuffer_mrt(const std::uint32_t *colorTextures,
   }
 
   gl_table().drawBuffers(static_cast<GLsizei>(colorCount), kAttachments);
+
+  if (gl_table().checkFramebufferStatus(GL_FRAMEBUFFER) !=
+      GL_FRAMEBUFFER_COMPLETE) {
+    gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);
+    gl_table().deleteFramebuffers(1, &fbo);
+    core::log_message(core::LogLevel::Error, "render_device",
+                      "MRT framebuffer incomplete at creation — rejected");
+    return 0U;
+  }
 
   gl_table().bindFramebuffer(GL_FRAMEBUFFER, 0U);
   return static_cast<std::uint32_t>(fbo);

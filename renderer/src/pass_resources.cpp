@@ -281,32 +281,38 @@ void shutdown_pass_resources() noexcept {
     return;
   }
 
+  if (render_device() == nullptr) {
+    core::log_message(core::LogLevel::Error, "pass_resources",
+                      "shutdown without a render device leaks GPU targets");
+  }
   destroy_gpu_resources(g_state);
   g_state = PassResourceState{};
 }
 
-void resize_pass_resources(int width, int height) noexcept {
+bool resize_pass_resources(int width, int height) noexcept {
   if (!g_state.initialized) {
-    return;
+    return false;
   }
 
   if ((width <= 0) || (height <= 0)) {
-    return;
+    return false;
   }
 
   if ((width == g_state.width) && (height == g_state.height)) {
-    return;
+    return true;
   }
 
   PassResourceState next{};
   if (!create_gpu_resources(&next, width, height)) {
     core::log_message(core::LogLevel::Error, "pass_resources",
-                      "failed to recreate pass resources on resize");
-    return;
+                      "failed to recreate pass resources on resize — "
+                      "keeping previous targets");
+    return false;
   }
 
   destroy_gpu_resources(g_state);
   g_state = next;
+  return true;
 }
 
 const PassResources &get_pass_resources() noexcept { return g_state.resources; }
