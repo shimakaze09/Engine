@@ -1,4 +1,20 @@
-// Implements hinge joint behavior for the Engine physics system.
+// Hinge joint: pins the anchors together and permits relative rotation
+// only about one shared axis, with optional twist limits in radians.
+// Point block: C = pB - pA = 0 exactly as ball_joint.cpp (see that file
+// for the row Jacobian and anchor-mass derivation).
+// Axis block: with world axes aA = RA a_local and aB = RB b_local the
+// constraint is aB x aA = 0 (two angular DOF). For the correction axis
+// h = (aB x aA) / |aB x aA| the Jacobian is J = [0, -h^T, 0, h^T] with
+// effective inverse mass J M^-1 J^T = iA + iB, so the misalignment angle
+// atan2(|aB x aA|, aB . aA) is consumed inertia-split each iteration.
+// Limit block: the twist angle about the common axis is measured between
+// creation-time reference vectors projected into the hinge plane,
+// phi = atan2((uA x uB) . a, uA . uB); the violation
+// phi - clamp(phi, min, max) is an angular correction about a with the
+// same Jacobian shape as the axis block.
+// Velocity projection removes the off-axis relative angular velocity, the
+// relative anchor velocity, and - only while a limit is violated - the
+// outward axial rate, mirroring how contacts absorb approach velocity.
 
 #include "joint_solvers.h"
 
@@ -6,59 +22,93 @@
 
 #include <cmath>
 
+#include "joint_projection.h"
+
 namespace engine::physics {
 
-/// Hinge joint: a ball-socket positional constraint holding the anchors
-/// together, plus (when limited) an axis constraint — without angular
-/// velocity the relative displacement is clamped along the hinge axis.
-float solve_hinge_joint(JointSolveContext &ctx, const math::Vec3 &anchorA,
-                        const math::Vec3 &anchorB, const math::Vec3 &axis,
-                        bool hasLimits, float minAngle, float maxAngle,
-                        float &accumulatedImpulse) noexcept {
+constexpr float kHingeEpsilon = 1.0e-6F;
+
+/// Signed twist of B relative to A about `axis` from the projected
+/// creation-time references; false when a reference degenerates.
+static bool measure_twist(const math::Vec3 &axis, const math::Vec3 &refA,
+                          const math::Vec3 &refB, float *outAngle) noexcept {
+  const math::Vec3 planarA =
+      math::sub(refA, math::mul(axis, math::dot(refA, axis)));
+  const math::Vec3 planarB =
+      math::sub(refB, math::mul(axis, math::dot(refB, axis)));
+  if ((math::length_sq(planarA) <= kHingeEpsilon * kHingeEpsilon) ||
+      (math::length_sq(planarB) <= kHingeEpsilon * kHingeEpsilon)) {
+    return false;
+  }
+  *outAngle = std::atan2(math::dot(math::cross(planarA, planarB), axis),
+                         math::dot(planarA, planarB));
+  return true;
+}
+
+float solve_hinge_joint(JointSolveContext &ctx,
+                        PhysicsJointSlot &joint) noexcept {
   if ((ctx.tA == nullptr) || (ctx.tB == nullptr)) {
     return 0.0F;
   }
 
-  const float invMassSum = ctx.invMassA + ctx.invMassB;
-  if (invMassSum <= 0.0F) {
-    return 0.0F;
+  const math::Vec3 axisA = joint_world_lever(*ctx.tA, joint.axis);
+  const math::Vec3 axisB = joint_world_lever(*ctx.tB, joint.axisB);
+  const math::Vec3 misalign = math::cross(axisB, axisA);
+  const float misalignLen = math::length(misalign);
+  if (misalignLen > kHingeEpsilon) {
+    const float angle = std::atan2(misalignLen, math::dot(axisB, axisA));
+    apply_relative_orientation_delta(
+        ctx, math::mul(math::div(misalign, misalignLen), angle));
   }
 
-  const math::Vec3 worldA = math::add(ctx.tA->position, anchorA);
-  const math::Vec3 worldB = math::add(ctx.tB->position, anchorB);
-  const math::Vec3 posError = math::sub(worldB, worldA);
-  const float posErrorLen = math::length(posError);
-
-  float lambda = 0.0F;
-  if (posErrorLen > 1e-6F) {
-    const math::Vec3 dir = math::div(posError, posErrorLen);
-    lambda = posErrorLen;
-    ctx.tA->position = math::add(
-        ctx.tA->position, math::mul(dir, lambda * ctx.invMassA / invMassSum));
-    ctx.tB->position = math::sub(
-        ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
-  }
-
-  if (hasLimits) {
-    const math::Vec3 relPos = math::sub(ctx.tB->position, ctx.tA->position);
-    const float projOnAxis = math::dot(relPos, axis);
-    const float clampedProj =
-        (projOnAxis < minAngle)
-            ? minAngle
-            : ((projOnAxis > maxAngle) ? maxAngle : projOnAxis);
-    const float limitError = projOnAxis - clampedProj;
-
-    if (std::fabs(limitError) > 1e-6F) {
-      const math::Vec3 correction = math::mul(axis, limitError);
-      ctx.tA->position = math::add(
-          ctx.tA->position, math::mul(correction, ctx.invMassA / invMassSum));
-      ctx.tB->position = math::sub(
-          ctx.tB->position, math::mul(correction, ctx.invMassB / invMassSum));
-      lambda += std::fabs(limitError);
+  const math::Vec3 hingeAxis = joint_world_lever(*ctx.tA, joint.axis);
+  float twistExcess = 0.0F;
+  if (joint.hasLimits) {
+    float twist = 0.0F;
+    if (measure_twist(hingeAxis, joint_world_lever(*ctx.tA, joint.twistRefA),
+                      joint_world_lever(*ctx.tB, joint.twistRefB), &twist)) {
+      const float clamped =
+          (twist < joint.minLimit)
+              ? joint.minLimit
+              : ((twist > joint.maxLimit) ? joint.maxLimit : twist);
+      twistExcess = twist - clamped;
+      if (std::fabs(twistExcess) > kHingeEpsilon) {
+        apply_relative_orientation_delta(ctx,
+                                         math::mul(hingeAxis, -twistExcess));
+      }
     }
   }
 
-  accumulatedImpulse += lambda;
+  math::Vec3 leverA = joint_world_lever(*ctx.tA, joint.anchorA);
+  math::Vec3 leverB = joint_world_lever(*ctx.tB, joint.anchorB);
+  const math::Vec3 error =
+      math::sub(math::add(ctx.tB->position, leverB),
+                math::add(ctx.tA->position, leverA));
+  const float lambda = project_point_position(ctx, leverA, leverB, error);
+
+  leverA = joint_world_lever(*ctx.tA, joint.anchorA);
+  leverB = joint_world_lever(*ctx.tB, joint.anchorB);
+  project_point_velocity(ctx, leverA, leverB,
+                         relative_anchor_velocity(ctx, leverA, leverB));
+
+  math::Vec3 angularRel{};
+  if (ctx.bodyB != nullptr) {
+    angularRel = ctx.bodyB->angularVelocity;
+  }
+  if (ctx.bodyA != nullptr) {
+    angularRel = math::sub(angularRel, ctx.bodyA->angularVelocity);
+  }
+  const math::Vec3 currentAxis = joint_world_lever(*ctx.tA, joint.axis);
+  const float axialRate = math::dot(angularRel, currentAxis);
+  project_relative_angular_velocity(
+      ctx, math::sub(angularRel, math::mul(currentAxis, axialRate)));
+  if (((twistExcess > kHingeEpsilon) && (axialRate > 0.0F)) ||
+      ((twistExcess < -kHingeEpsilon) && (axialRate < 0.0F))) {
+    project_relative_angular_velocity(ctx,
+                                      math::mul(currentAxis, axialRate));
+  }
+
+  joint.accumulatedImpulse += lambda + std::fabs(twistExcess);
   return lambda;
 }
 

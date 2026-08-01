@@ -1,4 +1,15 @@
-// Implements distance joint behavior for the Engine physics system.
+// Distance joint: keeps the body origins at a fixed separation.
+// Model: C = |xB - xA| - L = 0 with unit axis n = (xB - xA) / |xB - xA|.
+// The Jacobian is J = [-n^T, 0, n^T, 0] (the anchors are the mass centers,
+// so no angular terms arise), giving effective inverse mass
+// J M^-1 J^T = mA^-1 + mB^-1. Each iteration applies the full positional
+// correction lambda = -C split by inverse mass, then removes the radial
+// relative velocity n . (vB - vA) with a momentum-conserving impulse so
+// integration cannot re-stretch the rod it just corrected; tangential
+// velocity (swing) lies in the projection's null space. The accumulated
+// impulse keeps the SIGNED error: the warm start replays it along the
+// center line, so compression (negative) must push apart, not pull
+// together.
 
 #include "joint_solvers.h"
 
@@ -6,13 +17,12 @@
 
 #include <cmath>
 
+#include "joint_projection.h"
+
 namespace engine::physics {
 
-/// Positional distance constraint. The accumulated impulse keeps the SIGNED
-/// error: the warm start replays it along the center line, so compression
-/// (negative) must push apart, not pull together.
-float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
-                           float &accumulatedImpulse) noexcept {
+float solve_distance_joint(JointSolveContext &ctx,
+                           PhysicsJointSlot &joint) noexcept {
   if ((ctx.tA == nullptr) || (ctx.tB == nullptr)) {
     return 0.0F;
   }
@@ -28,7 +38,7 @@ float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
     return 0.0F;
   }
 
-  const float error = currentDist - targetDistance;
+  const float error = currentDist - joint.distance;
   const math::Vec3 dir = math::div(delta, currentDist);
   const math::Vec3 correction = math::mul(dir, error);
 
@@ -37,7 +47,12 @@ float solve_distance_joint(JointSolveContext &ctx, float targetDistance,
   ctx.tB->position = math::sub(
       ctx.tB->position, math::mul(correction, ctx.invMassB / invMassSum));
 
-  accumulatedImpulse += error;
+  const math::Vec3 zeroLever{};
+  const math::Vec3 relVel = relative_anchor_velocity(ctx, zeroLever, zeroLever);
+  project_point_velocity(ctx, zeroLever, zeroLever,
+                         math::mul(dir, math::dot(relVel, dir)));
+
+  joint.accumulatedImpulse += error;
   return std::fabs(error);
 }
 

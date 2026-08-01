@@ -13,6 +13,7 @@
 #include "engine/core/entity.h"
 #include "engine/math/aabb.h"
 #include "engine/math/component_types.h"
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 
@@ -44,7 +45,7 @@ enum class JointType : std::uint8_t {
   Fixed = 5,
 };
 
-/// One joint's type, bodies, parameters, and warm-start impulse.
+/// One joint's type, bodies, constraint frame, parameters, and impulse.
 struct PhysicsJointSlot final {
   Entity entityA = kInvalidEntity;
   Entity entityB = kInvalidEntity;
@@ -53,15 +54,26 @@ struct PhysicsJointSlot final {
   bool active = false;
   bool hasLimits = false;
 
-  // Local-space anchor offsets on each body.
+  // Body-local anchor offsets, rotated by each body's current orientation
+  // when solved so anchors track rotating bodies.
   math::Vec3 anchorA{};
   math::Vec3 anchorB{};
 
   // Distance / Spring rest length.
   float distance = 1.0F;
 
-  // Hinge / Slider axis (world-space direction, normalized).
+  // Hinge / Slider axis in body A's local frame (normalized); axisB is the
+  // hinge axis expressed in body B's local frame for the alignment block.
   math::Vec3 axis = math::Vec3(0.0F, 1.0F, 0.0F);
+  math::Vec3 axisB = math::Vec3(0.0F, 1.0F, 0.0F);
+
+  // Hinge twist references: one shared creation-time vector perpendicular
+  // to the axis, stored per body in that body's local frame.
+  math::Vec3 twistRefA{};
+  math::Vec3 twistRefB{};
+
+  // Fixed / Slider lock: body B's orientation relative to A at creation.
+  math::Quat referenceRotation{};
 
   // Angle or distance limits (hinge: radians, slider: distance).
   float minLimit = 0.0F;
@@ -71,7 +83,9 @@ struct PhysicsJointSlot final {
   float stiffness = 100.0F;
   float damping = 1.0F;
 
-  // Warm starting: accumulated impulse from previous frame.
+  // Distance / Spring warm-start impulse (signed, replayed along the
+  // center line); other types accumulate their step's correction
+  // magnitudes here as a diagnostic only.
   float accumulatedImpulse = 0.0F;
 };
 

@@ -1,4 +1,15 @@
-// Implements spring joint behavior for the Engine physics system.
+// Spring joint: soft distance constraint between the body origins driven
+// by Hooke's law with axial damping.
+// Model: along n = (xB - xA) / |xB - xA| the force is
+// F = -k (|xB - xA| - L) - c (n . (vB - vA)); the same center-line
+// Jacobian as the distance joint applies (J = [-n^T, 0, n^T, 0], effective
+// inverse mass mA^-1 + mB^-1), but the correction is the integrated force,
+// not a projection: a positional nudge dx = F dt^2 (semi-implicit) plus a
+// velocity impulse F dt split by inverse mass so damping carries into the
+// next frame. No velocity projection runs - the joint is soft by
+// contract, and removing radial velocity would turn it rigid. The
+// accumulated impulse keeps the SIGNED correction: the warm start replays
+// it along the center line, so its direction must survive.
 
 #include "joint_solvers.h"
 
@@ -8,14 +19,8 @@
 
 namespace engine::physics {
 
-/// Position-based spring: Hooke's force with velocity damping, converted to
-/// a positional correction (dx = F·dt²/m, semi-implicit) plus a velocity
-/// impulse so damping carries into the next frame. The accumulated impulse
-/// keeps the SIGNED correction: the warm start replays it along the center
-/// line, so its direction must survive.
-float solve_spring_joint(JointSolveContext &ctx, float restLength,
-                         float stiffness, float damping, float deltaSeconds,
-                         float &accumulatedImpulse) noexcept {
+float solve_spring_joint(JointSolveContext &ctx, PhysicsJointSlot &joint,
+                         float deltaSeconds) noexcept {
   if ((ctx.tA == nullptr) || (ctx.tB == nullptr)) {
     return 0.0F;
   }
@@ -32,15 +37,15 @@ float solve_spring_joint(JointSolveContext &ctx, float restLength,
   }
 
   const math::Vec3 dir = math::div(delta, currentDist);
-  const float displacement = currentDist - restLength;
+  const float displacement = currentDist - joint.distance;
 
-  float springForce = -stiffness * displacement;
+  float springForce = -joint.stiffness * displacement;
 
   if ((ctx.bodyA != nullptr) && (ctx.bodyB != nullptr)) {
     const math::Vec3 relVel =
         math::sub(ctx.bodyB->velocity, ctx.bodyA->velocity);
     const float relVelAlongDir = math::dot(relVel, dir);
-    springForce -= damping * relVelAlongDir;
+    springForce -= joint.damping * relVelAlongDir;
   }
 
   const float lambda = -springForce * deltaSeconds * deltaSeconds;
@@ -58,7 +63,7 @@ float solve_spring_joint(JointSolveContext &ctx, float restLength,
         math::add(ctx.bodyB->velocity, math::mul(dir, impulse * ctx.invMassB));
   }
 
-  accumulatedImpulse += lambda;
+  joint.accumulatedImpulse += lambda;
   return std::fabs(lambda);
 }
 

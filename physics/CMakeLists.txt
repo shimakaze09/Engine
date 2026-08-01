@@ -22,6 +22,7 @@ engine_add_module_library(engine_physics
     src/joints/slider_joint.cpp
     src/joints/spring_joint.cpp
     src/joints/fixed_joint.cpp
+    src/joints/joint_projection.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE_INCLUDE_DIRS

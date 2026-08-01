@@ -4,6 +4,7 @@
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
@@ -45,6 +46,35 @@ static JointId allocate_joint(PhysicsWorldView &world,
   return claim_joint_slot(world.physics_context(), outSlot);
 }
 
+/// Maps a world offset from a body's origin into that body's local frame.
+static math::Vec3 to_body_local(const Transform &transform,
+                                const math::Vec3 &worldOffset) noexcept {
+  return math::rotate_vector(worldOffset,
+                             math::conjugate(transform.rotation));
+}
+
+/// Creation-time relative orientation of B in A's frame (qA^-1 qB).
+static math::Quat relative_rotation(const Transform &transformA,
+                                    const Transform &transformB) noexcept {
+  return math::mul(math::conjugate(transformA.rotation),
+                   transformB.rotation);
+}
+
+/// Any unit vector perpendicular to a unit axis, from its least-aligned
+/// basis vector; seeds the hinge twist references.
+static math::Vec3 perpendicular_reference(const math::Vec3 &axis) noexcept {
+  const float absX = (axis.x < 0.0F) ? -axis.x : axis.x;
+  const float absY = (axis.y < 0.0F) ? -axis.y : axis.y;
+  const float absZ = (axis.z < 0.0F) ? -axis.z : axis.z;
+  math::Vec3 basis(1.0F, 0.0F, 0.0F);
+  if ((absY <= absX) && (absY <= absZ)) {
+    basis = math::Vec3(0.0F, 1.0F, 0.0F);
+  } else if (absZ <= absX) {
+    basis = math::Vec3(0.0F, 0.0F, 1.0F);
+  }
+  return math::normalize(math::cross(axis, basis));
+}
+
 JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
                         const math::Vec3 &pivot,
                         const math::Vec3 &axis) noexcept {
@@ -68,9 +98,16 @@ JointId add_hinge_joint(PhysicsWorldView &world, Entity entityA, Entity entityB,
   joint->entityB = entityB;
   joint->type = JointType::Hinge;
   joint->active = true;
-  joint->anchorA = math::sub(pivot, transformA.position);
-  joint->anchorB = math::sub(pivot, transformB.position);
-  joint->axis = math::normalize(axis);
+  joint->anchorA =
+      to_body_local(transformA, math::sub(pivot, transformA.position));
+  joint->anchorB =
+      to_body_local(transformB, math::sub(pivot, transformB.position));
+  const math::Vec3 worldAxis = math::normalize(axis);
+  const math::Vec3 worldRef = perpendicular_reference(worldAxis);
+  joint->axis = to_body_local(transformA, worldAxis);
+  joint->axisB = to_body_local(transformB, worldAxis);
+  joint->twistRefA = to_body_local(transformA, worldRef);
+  joint->twistRefB = to_body_local(transformB, worldRef);
   joint->accumulatedImpulse = 0.0F;
   return id;
 }
@@ -96,8 +133,10 @@ JointId add_ball_socket_joint(PhysicsWorldView &world, Entity entityA,
   joint->entityB = entityB;
   joint->type = JointType::BallSocket;
   joint->active = true;
-  joint->anchorA = math::sub(pivot, transformA.position);
-  joint->anchorB = math::sub(pivot, transformB.position);
+  joint->anchorA =
+      to_body_local(transformA, math::sub(pivot, transformA.position));
+  joint->anchorB =
+      to_body_local(transformB, math::sub(pivot, transformB.position));
   joint->accumulatedImpulse = 0.0F;
   return id;
 }
@@ -124,7 +163,10 @@ JointId add_slider_joint(PhysicsWorldView &world, Entity entityA,
   joint->entityB = entityB;
   joint->type = JointType::Slider;
   joint->active = true;
-  joint->axis = math::normalize(axis);
+  joint->axis = to_body_local(transformA, math::normalize(axis));
+  joint->anchorA = math::Vec3(0.0F, 0.0F, 0.0F);
+  joint->anchorB = math::Vec3(0.0F, 0.0F, 0.0F);
+  joint->referenceRotation = relative_rotation(transformA, transformB);
   joint->accumulatedImpulse = 0.0F;
   return id;
 }
@@ -178,8 +220,10 @@ JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
   joint->entityB = entityB;
   joint->type = JointType::Fixed;
   joint->active = true;
-  joint->anchorA = math::sub(transformB.position, transformA.position);
+  joint->anchorA = to_body_local(
+      transformA, math::sub(transformB.position, transformA.position));
   joint->anchorB = math::Vec3(0.0F, 0.0F, 0.0F);
+  joint->referenceRotation = relative_rotation(transformA, transformB);
   joint->accumulatedImpulse = 0.0F;
   return id;
 }
@@ -226,11 +270,17 @@ static void retire_missing_joint_endpoints(PhysicsWorldView &world,
   }
 }
 
-/// Iteratively solves all active joints for the step. Warm starting replays
-/// 80% of the previous frame's accumulated impulse along the body center
-/// line, and only distance and spring joints participate — the other joint
-/// types store anchor/axis-relative magnitudes, so a center-line replay
-/// would displace them in directions their solvers never correct.
+/// Iteratively solves all active joints for the step: per iteration each
+/// joint projects its position constraints and removes violating relative
+/// velocity (models and Jacobians are documented per solver file). Warm
+/// starting is deliberately limited to the center-line joints (Distance,
+/// Spring), which replay 80% of the previous frame's SIGNED impulse along
+/// the current center line to speed convergence under persistent load; the
+/// multi-DOF joints converge by exact projection, and replaying stale
+/// multi-DOF corrections would inject drift at rest that their solvers
+/// never remove. A body with zero inverse mass is treated as fully static:
+/// its inverse inertia is forced to zero so joint torques cannot spin a
+/// static anchor whose RigidBody kept the default inertia.
 void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
   PhysicsContext &ctx = world.physics_context();
@@ -312,31 +362,33 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       solveCtx.bodyB = bodyB;
       solveCtx.invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
       solveCtx.invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
+      solveCtx.invInertiaA = ((bodyA != nullptr) && (bodyA->inverseMass > 0.0F))
+                                 ? bodyA->inverseInertia
+                                 : 0.0F;
+      solveCtx.invInertiaB = ((bodyB != nullptr) && (bodyB->inverseMass > 0.0F))
+                                 ? bodyB->inverseInertia
+                                 : 0.0F;
 
       const auto jointType = static_cast<JointType>(j.type);
 
       switch (jointType) {
       case JointType::Distance:
-        solve_distance_joint(solveCtx, j.distance, j.accumulatedImpulse);
+        solve_distance_joint(solveCtx, j);
         break;
       case JointType::Hinge:
-        solve_hinge_joint(solveCtx, j.anchorA, j.anchorB, j.axis, j.hasLimits,
-                          j.minLimit, j.maxLimit, j.accumulatedImpulse);
+        solve_hinge_joint(solveCtx, j);
         break;
       case JointType::BallSocket:
-        solve_ball_socket_joint(solveCtx, j.anchorA, j.anchorB,
-                                j.accumulatedImpulse);
+        solve_ball_socket_joint(solveCtx, j);
         break;
       case JointType::Slider:
-        solve_slider_joint(solveCtx, j.axis, j.hasLimits, j.minLimit,
-                           j.maxLimit, j.accumulatedImpulse);
+        solve_slider_joint(solveCtx, j);
         break;
       case JointType::Spring:
-        solve_spring_joint(solveCtx, j.distance, j.stiffness, j.damping,
-                           deltaSeconds, j.accumulatedImpulse);
+        solve_spring_joint(solveCtx, j, deltaSeconds);
         break;
       case JointType::Fixed:
-        solve_fixed_joint(solveCtx, j.anchorA, j.anchorB, j.accumulatedImpulse);
+        solve_fixed_joint(solveCtx, j);
         break;
       }
     }
