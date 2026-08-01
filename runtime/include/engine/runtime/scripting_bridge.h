@@ -202,6 +202,10 @@ struct RuntimeServices final {
   bool (*play_music)(const char *path, float volume,
                      bool loop) noexcept = nullptr;
   void (*stop_music)() noexcept = nullptr;
+  bool (*save_game_data)(const char *json,
+                         std::size_t length) noexcept = nullptr;
+  bool (*load_game_data)(char *out, std::size_t capacity,
+                         std::size_t *outLength) noexcept = nullptr;
 
   bool (*save_scene)(const runtime::World *world,
                      const char *path) noexcept = nullptr;

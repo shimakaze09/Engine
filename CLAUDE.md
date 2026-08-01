@@ -319,11 +319,17 @@ stutter) at 60 Hz sim.
   slice's authoring flow uses, PIE pause/step. The commercial-grade UX
   pass continues throughout. CUT: prefab overrides/nesting, editor Lua
   API.
-- **Scenes (from P1-M10, cut down)**: exclusive scene transition API
-  (title → island → win), stable cross-scene references where the
-  templates need them, one save slot with platform-aware paths (best
-  time). CUT: additive scenes, streaming volumes, LOD hysteresis,
-  multi-slot saves.
+- **Scenes (from P1-M10, cut down) — LANDED 2026-08-01**: the exclusive
+  scene transition flow is pinned end to end by an integration test
+  (`engine.load_scene` from a playing script → pending-op commit →
+  scene B `on_begin_play` refires → `engine.new_scene` teardown);
+  cross-scene state rides Lua globals, which survive transitions because
+  the VM persists across scene loads (the templates' handoff channel);
+  and the single save slot lands as `engine.save_data(table)` /
+  `engine.load_data()` — a flat string-keyed table (number/string/bool)
+  as JSON in the per-user platform save directory
+  (`runtime/save_data.{h,cpp}`, `platform_get_save_dir`). CUT: additive
+  scenes, streaming volumes, LOD hysteresis, multi-slot saves.
 - **Creator kit v1 (elevated by the vision)**: blockout authoring with the
   built-in primitives (grid snapping, material presets), the Island Hopper
   starter template itself, and a bundled mini asset pack (1 rigged

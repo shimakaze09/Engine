@@ -63,6 +63,18 @@ engine_add_test_executable(engine_integration_lifecycle
     integration
 )
 
+engine_add_test_executable(engine_integration_scene_flow
+    SOURCES
+    scene_flow_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_lua_lifecycle
     SOURCES
     lua_lifecycle_test.cpp
