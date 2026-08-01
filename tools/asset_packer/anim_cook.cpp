@@ -12,6 +12,31 @@
 
 namespace engine::tools {
 
+std::string sanitize_clip_name(const std::string &name, std::size_t index) {
+  std::string cleaned{};
+  cleaned.reserve(name.size());
+  for (const char c : name) {
+    const bool keep = ((c >= 'a') && (c <= 'z')) ||
+                      ((c >= 'A') && (c <= 'Z')) ||
+                      ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-');
+    cleaned.push_back(keep ? c : '_');
+  }
+  if (cleaned.empty()) {
+    cleaned = "clip" + std::to_string(index);
+  }
+  return cleaned;
+}
+
+bool derive_unique_clip_name(const std::string &clipName, std::size_t index,
+                             std::unordered_set<std::string> *usedNames,
+                             std::string *outName) {
+  if ((usedNames == nullptr) || (outName == nullptr)) {
+    return false;
+  }
+  *outName = sanitize_clip_name(clipName, index);
+  return usedNames->insert(*outName).second;
+}
+
 namespace {
 
 /// Opens a binary file for writing, portably across CRTs.

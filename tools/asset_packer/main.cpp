@@ -63,23 +63,6 @@ void print_usage() {
                "[--force]\n");
 }
 
-/// Replaces every character outside [A-Za-z0-9_-] so clip names cook to
-/// portable file names; empty names fall back to "clip<index>".
-std::string sanitize_clip_name(const std::string &name, std::size_t index) {
-  std::string cleaned{};
-  cleaned.reserve(name.size());
-  for (const char c : name) {
-    const bool keep = ((c >= 'a') && (c <= 'z')) ||
-                      ((c >= 'A') && (c <= 'Z')) ||
-                      ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-');
-    cleaned.push_back(keep ? c : '_');
-  }
-  if (cleaned.empty()) {
-    cleaned = "clip" + std::to_string(index);
-  }
-  return cleaned;
-}
-
 /// Strips the mesh output's extension so cooked skeletal assets land
 /// beside it ("chars/hero.mesh" -> "chars/hero").
 std::string cooked_output_base(const char *outputPath) {
@@ -125,6 +108,7 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
   std::printf("cooked skeleton: %s (%zu joints)\n", skeletonPath.c_str(),
               skeleton.joints.size());
 
+  std::unordered_set<std::string> usedClipNames{};
   for (std::size_t animIndex = 0U; animIndex < data->animations_count;
        ++animIndex) {
     engine::tools::AnimClip clip{};
@@ -138,8 +122,16 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
           engine::tools::animation_import_result_message(animationResult));
       return 15;
     }
-    const std::string clipPath =
-        base + "." + sanitize_clip_name(clip.name, animIndex) + ".anim";
+    std::string clipName{};
+    if (!engine::tools::derive_unique_clip_name(clip.name, animIndex,
+                                                &usedClipNames, &clipName)) {
+      std::fprintf(stderr,
+                   "error: animation %zu (\"%s\") sanitizes to \"%s\", "
+                   "colliding with an earlier clip's cooked output name\n",
+                   animIndex, clip.name.c_str(), clipName.c_str());
+      return 15;
+    }
+    const std::string clipPath = base + "." + clipName + ".anim";
     if (!engine::tools::write_anim_clip_asset(clipPath.c_str(), clip,
                                               jointRemap)) {
       std::fprintf(stderr, "error: failed to write cooked animation: %s\n",

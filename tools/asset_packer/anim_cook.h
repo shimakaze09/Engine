@@ -6,12 +6,26 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "animation_import.h"
 #include "skeleton_import.h"
 
 namespace engine::tools {
+
+/// Replaces every character outside [A-Za-z0-9_-] so clip names cook to
+/// portable file names; empty names fall back to "clip<index>".
+std::string sanitize_clip_name(const std::string &name, std::size_t index);
+
+/// Derives the sanitized output name for clip `index` and records it in
+/// usedNames; false when it collides with an earlier clip's sanitized
+/// name, which would silently overwrite that clip's cooked output
+/// (audit H-20).
+bool derive_unique_clip_name(const std::string &clipName, std::size_t index,
+                             std::unordered_set<std::string> *usedNames,
+                             std::string *outName);
 
 /// Reorders the skeleton's joints parent-before-child (stable: among ready
 /// joints the lowest original index goes first) and rewrites parent links.
