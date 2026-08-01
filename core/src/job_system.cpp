@@ -3,6 +3,7 @@
 #include "engine/core/job_system.h"
 
 #include "engine/core/logging.h"
+#include "engine/core/native_thread.h"
 
 #include <array>
 #include <atomic>
@@ -13,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
+#include <new>
 #include <thread>
 
 namespace engine::core {
@@ -90,8 +92,29 @@ public:
       m_graphActive = false;
     }
 
+    // Spawn through NativeThread so an OS refusal rolls this worker set
+    // back instead of terminating the no-exception build (audit H-14).
     for (std::uint32_t i = 0U; i < m_workerCount; ++i) {
-      m_workers[i] = std::thread(&JobSystem::worker_loop, this, i + 1U);
+      auto *start = new (std::nothrow) WorkerStart{this, i + 1U};
+      const bool spawned = (start != nullptr) &&
+                           m_workers[i].spawn(&worker_thread_entry, start);
+      if (!spawned) {
+        delete start;
+        log_message(LogLevel::Error, "job_system",
+                    "worker thread creation failed — rolling back");
+        m_running.store(false, std::memory_order_release);
+        {
+          // Same wait-predicate synchronization as shutdown: a worker
+          // that read m_running before the store is inside wait() once
+          // this lock is held, so the notify below cannot be lost.
+          std::lock_guard<std::mutex> lock(m_queueMutex);
+        }
+        m_workAvailable.notify_all();
+        for (std::uint32_t j = 0U; j < i; ++j) {
+          m_workers[j].join();
+        }
+        return false;
+      }
     }
 
     m_initialized.store(true, std::memory_order_release);
@@ -652,7 +675,22 @@ private:
     }
   }
 
-  std::array<std::thread, kMaxWorkers> m_workers{};
+  /// Heap start context for one worker; the entry trampoline frees it.
+  struct WorkerStart final {
+    JobSystem *system = nullptr;
+    std::uint32_t threadIndex = 0U;
+  };
+
+  /// NativeThread entry: unpacks the start context into worker_loop.
+  static void worker_thread_entry(void *userData) noexcept {
+    auto *start = static_cast<WorkerStart *>(userData);
+    JobSystem *system = start->system;
+    const std::uint32_t threadIndex = start->threadIndex;
+    delete start;
+    system->worker_loop(threadIndex);
+  }
+
+  std::array<NativeThread, kMaxWorkers> m_workers{};
   std::array<JobNode, kMaxJobs> m_nodes{};
   std::array<DependencyEdge, kMaxEdges> m_edges{};
   std::array<std::uint32_t, kMaxJobs> m_readyQueue{};

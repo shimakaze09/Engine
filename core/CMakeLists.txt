@@ -14,6 +14,7 @@ engine_add_module_library(engine_core
     src/atomic_file.cpp
     src/json.cpp
     src/json_edit.cpp
+    src/native_thread.cpp
     src/job_system.cpp
     src/linear_allocator.cpp
     src/logging.cpp

@@ -589,6 +589,13 @@ engine_add_test_executable(engine_unit_command_buffer
     engine_core
 )
 
+engine_add_test_executable(engine_unit_native_thread
+    SOURCES
+    native_thread_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_shader_reload
     SOURCES
     shader_reload_test.cpp
