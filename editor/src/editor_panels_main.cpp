@@ -393,6 +393,33 @@ void draw_entities_panel() noexcept {
     }
   }
 
+  ImGui::SameLine();
+  if (ImGui::Button("Add Primitive") && editable) {
+    ImGui::OpenPopup("AddPrimitivePopup");
+  }
+  if (ImGui::BeginPopup("AddPrimitivePopup")) {
+    constexpr struct {
+      const char *label;
+      EditorPrimitive primitive;
+    } kPrimitiveItems[] = {
+        {"Cube", EditorPrimitive::Cube},
+        {"Sphere", EditorPrimitive::Sphere},
+        {"Cylinder", EditorPrimitive::Cylinder},
+        {"Capsule", EditorPrimitive::Capsule},
+        {"Pyramid", EditorPrimitive::Pyramid},
+        {"Plane", EditorPrimitive::Plane},
+    };
+    for (const auto &item : kPrimitiveItems) {
+      if (ImGui::MenuItem(item.label) && editable) {
+        const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
+        if (spawned != runtime::kInvalidEntity) {
+          select_entity(spawned.index, false);
+        }
+      }
+    }
+    ImGui::EndPopup();
+  }
+
   if (!editable) {
     ImGui::EndDisabled();
   }

@@ -139,15 +139,24 @@ struct ReparentCommand final : EditorCommand {
 bool execute_reparent(runtime::Entity child,
                       runtime::Entity newParent) noexcept;
 
-/// Undoable scene-object creation (optionally carrying an initial mesh for
-/// asset spawns); redo re-creates the entity under its original persistent
-/// id so later history entries keep resolving.
+/// Convex-hull payload kinds a create command rebuilds on each execute
+/// (the payload lives in the PhysicsContext, outside component snapshots,
+/// so redo must reconstruct it from the primitive builders).
+enum class SpawnHullKind : std::uint8_t { None, Cylinder, Pyramid };
+
+/// Undoable scene-object creation (optionally carrying an initial mesh
+/// and collider for asset/primitive spawns); redo re-creates the entity
+/// under its original persistent id so later history entries keep
+/// resolving.
 struct EntityCreateCommand final : EditorCommand {
   runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
   runtime::NameComponent name{};
   runtime::Transform transform{};
   bool hasMesh = false;
   runtime::MeshComponent mesh{};
+  bool hasCollider = false;
+  runtime::Collider colliderComponent{};
+  SpawnHullKind hullKind = SpawnHullKind::None;
 
   void execute() noexcept override;
   void undo() noexcept override;
@@ -180,6 +189,22 @@ runtime::Entity execute_entity_create() noexcept;
 /// returns the new entity (kInvalidEntity on failure).
 runtime::Entity execute_asset_spawn(const char *virtualPath,
                                     const runtime::Transform &transform) noexcept;
+
+/// Enumerates the built-in blockout primitives the editor can spawn.
+enum class EditorPrimitive : std::uint8_t {
+  Cube,
+  Sphere,
+  Cylinder,
+  Capsule,
+  Pyramid,
+  Plane,
+};
+
+/// Spawns the built-in primitive as an undoable scene object (mesh plus
+/// the matching collider; cylinder/pyramid hull payloads are rebuilt on
+/// every execute) resting on the ground plane at the editor camera's
+/// focus point; returns the new entity (kInvalidEntity on failure).
+runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept;
 /// Captures the entity's transform subtree into a delete command; null on
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *
