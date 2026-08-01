@@ -294,6 +294,64 @@ void World::flush_deferred_destroys() noexcept {
   m_pendingDestroyCount = 0U;
 }
 
+bool World::recycle_entity(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::BeginPlay) &&
+      (m_phase != WorldPhase::EndPlay)) {
+    core::log_message(core::LogLevel::Warning, "world",
+                      "recycle_entity refused outside a mutation phase");
+    return false;
+  }
+  // A queued deferred destroy would fire after the slot re-publishes and
+  // tear down whoever acquires the recycled entity next.
+  for (std::size_t i = 0U; i < m_pendingDestroyCount; ++i) {
+    if (m_pendingDestroyEntities[i] == entity) {
+      core::log_message(core::LogLevel::Warning, "world",
+                        "recycle_entity refused: destroy already queued");
+      return false;
+    }
+  }
+
+  // Children never survive their parent's teardown; the pool owns only
+  // the root, so descendants are fully destroyed, not recycled.
+  if (mark_hierarchy_descendants(entity) > 0U) {
+    const std::uint32_t upperBound = m_nextEntityIndex;
+    for (std::uint32_t index = 1U; index < upperBound; ++index) {
+      if (m_cascadeMarks[index] && (index != entity.index) &&
+          m_entityAlive[index]) {
+        static_cast<void>(destroy_single_entity(
+            Entity{index, m_entityGenerations[index]}));
+      }
+    }
+  }
+
+  remove_all_components(entity);
+  return true;
+}
+
+bool World::activate_recycled_entity(Entity entity) noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::BeginPlay) &&
+      (m_phase != WorldPhase::EndPlay)) {
+    core::log_message(core::LogLevel::Warning, "world",
+                      "activate_recycled_entity refused outside a mutation "
+                      "phase");
+    return false;
+  }
+  // Dormant pool entities keep their fired flag set so the per-frame
+  // BeginPlay dispatch skips them; activation re-arms it exactly once so
+  // components attached after acquisition get fresh-entity callbacks.
+  if (m_entityBeginPlayFired[entity.index]) {
+    m_entityBeginPlayFired[entity.index] = false;
+    ++m_beginPlayPendingCount;
+  }
+  return true;
+}
+
 bool World::destroy_entity(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     core::log_message(core::LogLevel::Error, "world",

@@ -258,10 +258,17 @@ public:
   /// Destroys the entity and its whole transform subtree (children never
   /// survive their parent); defers during Simulation so EndPlay fires.
   bool destroy_entity(Entity entity) noexcept;
-  /// Removes every component, physics payload, and manager reference from
-  /// the entity while keeping its slot alive — the single authoritative
-  /// teardown shared by entity destruction and pool recycling.
-  void remove_all_components(Entity entity) noexcept;
+  /// Returns a pool-owned entity to its dormant state: mutation phases
+  /// only, refused while a deferred destroy is queued for it; attached
+  /// children are fully destroyed (children never survive their parent's
+  /// teardown) and every component is removed. Deliberately fires no
+  /// EndPlay — recycling is immediate teardown for transient pooled
+  /// entities; use destroy_entity when lifecycle callbacks must run.
+  bool recycle_entity(Entity entity) noexcept;
+  /// Re-arms BeginPlay for a recycled dormant entity being activated, so
+  /// components attached after acquisition receive their lifecycle
+  /// callbacks like a fresh entity; mutation phases only.
+  bool activate_recycled_entity(Entity entity) noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
   /// Finds the matching object or resource for entity by index.
@@ -892,6 +899,12 @@ private:
   bool is_valid_entity(Entity entity) const noexcept;
   /// Destroys the entity and its whole transform subtree right now.
   bool destroy_entity_immediate(Entity entity) noexcept;
+  /// Removes every component, physics payload, and manager reference from
+  /// the entity while keeping its slot alive — the single authoritative
+  /// teardown shared by entity destruction and recycling. Private so no
+  /// caller can bypass the phase and hierarchy rules recycle_entity and
+  /// destroy_entity enforce.
+  void remove_all_components(Entity entity) noexcept;
   /// Queues the entity and its transform subtree for the EndPlay flush.
   bool queue_deferred_destroy(Entity entity) noexcept;
   /// Destroys exactly one entity without cascading to its children.

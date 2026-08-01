@@ -339,6 +339,139 @@ bool test_pool_release_refused_mid_simulation() {
 } // namespace
 
 /// Runs this executable or test program.
+/// Runs one production-style BeginPlay dispatch pass: every entity still
+/// needing begin_play is marked done, as the scripting dispatcher does.
+void run_begin_play_pass(World *world) {
+  world->begin_begin_play_phase();
+  world->for_each_needs_begin_play(
+      [&](Entity entity) noexcept { world->mark_begin_play_done(entity); });
+  world->end_begin_play_phase();
+}
+
+/// EXPECTATION (review item 5): dormant pool entities keep BeginPlay
+/// consumed so the per-frame dispatch skips them, and acquisition
+/// re-arms it so components attached afterwards get fresh-entity
+/// callbacks — including after a release/re-acquire cycle.
+bool test_pool_acquire_rearms_begin_play() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  run_begin_play_pass(world.get());
+
+  const Entity entity = pool.acquire();
+  if (entity == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire\n");
+    return false;
+  }
+  if (world->has_begun_play(entity)) {
+    std::fprintf(stderr, "FAIL: acquire did not re-arm BeginPlay\n");
+    return false;
+  }
+
+  run_begin_play_pass(world.get());
+  if (!world->has_begun_play(entity)) {
+    std::fprintf(stderr, "FAIL: dispatch did not fire re-armed BeginPlay\n");
+    return false;
+  }
+
+  if (!pool.release(entity)) {
+    std::fprintf(stderr, "FAIL: release\n");
+    return false;
+  }
+  const Entity again = pool.acquire();
+  if ((again == kInvalidEntity) || world->has_begun_play(again)) {
+    std::fprintf(stderr, "FAIL: re-acquire did not re-arm BeginPlay\n");
+    return false;
+  }
+  return true;
+}
+
+/// EXPECTATION (review item 5): releasing a pooled parent destroys its
+/// attached children (children never survive their parent's teardown)
+/// while the pooled root itself stays alive dormant.
+bool test_pool_release_destroys_children() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  const Entity parent = pool.acquire();
+  if ((parent == kInvalidEntity) ||
+      !world->add_transform(parent, Transform{})) {
+    std::fprintf(stderr, "FAIL: parent setup\n");
+    return false;
+  }
+  const Entity child = world->create_scene_object();
+  Transform childLocal{};
+  childLocal.parentId = world->persistent_id(parent);
+  if ((child == kInvalidEntity) ||
+      !world->add_transform(child, childLocal)) {
+    std::fprintf(stderr, "FAIL: child setup\n");
+    return false;
+  }
+
+  if (!pool.release(parent)) {
+    std::fprintf(stderr, "FAIL: release with child refused\n");
+    return false;
+  }
+  if (world->is_alive(child)) {
+    std::fprintf(stderr, "FAIL: child survived the parent's recycle\n");
+    return false;
+  }
+  if (!world->is_alive(parent)) {
+    std::fprintf(stderr, "FAIL: recycled parent died\n");
+    return false;
+  }
+  return true;
+}
+
+/// EXPECTATION (review item 5): a pooled entity with a deferred destroy
+/// queued cannot be recycled — the release is refused, the slot stays in
+/// use, and the flush then destroys the entity without touching a
+/// re-published slot.
+bool test_pool_release_refused_when_destroy_queued() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  const Entity entity = pool.acquire();
+  if ((entity == kInvalidEntity) ||
+      !world->add_transform(entity, Transform{})) {
+    std::fprintf(stderr, "FAIL: acquire\n");
+    return false;
+  }
+
+  world->begin_update_phase();
+  if (!world->destroy_entity(entity)) {
+    std::fprintf(stderr, "FAIL: deferred destroy not queued\n");
+    return false;
+  }
+  world->begin_end_play_phase();
+  if (pool.release(entity)) {
+    std::fprintf(stderr, "FAIL: release accepted with destroy queued\n");
+    return false;
+  }
+  if (pool.available() != 1U) {
+    std::fprintf(stderr, "FAIL: refused release changed the free list\n");
+    return false;
+  }
+  world->end_end_play_phase();
+  if (world->is_alive(entity)) {
+    std::fprintf(stderr, "FAIL: flush did not destroy the entity\n");
+    return false;
+  }
+  return true;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -356,6 +489,10 @@ int main() {
        test_pool_release_removes_every_component},
       {"pool_release_refused_mid_simulation",
        test_pool_release_refused_mid_simulation},
+      {"pool_acquire_rearms_begin_play", test_pool_acquire_rearms_begin_play},
+      {"pool_release_destroys_children", test_pool_release_destroys_children},
+      {"pool_release_refused_when_destroy_queued",
+       test_pool_release_refused_when_destroy_queued},
   };
 
   int failures = 0;
