@@ -412,6 +412,14 @@ int check_duplicate_sanitized_clip_names_rejected() {
     std::puts("distinct clip name rejected");
     return 1;
   }
+  // Case-only variants are one file on Windows/macOS filesystems
+  // (review item 2): the collision key folds case while the accepted
+  // name keeps its original spelling.
+  if (engine::tools::derive_unique_clip_name("walk-fast", 5U, &usedNames,
+                                             &name)) {
+    std::puts("case-only clip name collision accepted");
+    return 1;
+  }
   if (!engine::tools::derive_unique_clip_name("", 3U, &usedNames, &name) ||
       (name != "clip3")) {
     std::puts("empty clip name fallback wrong");

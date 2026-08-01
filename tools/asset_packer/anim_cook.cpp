@@ -35,7 +35,18 @@ bool derive_unique_clip_name(const std::string &clipName, std::size_t index,
     return false;
   }
   *outName = sanitize_clip_name(clipName, index);
-  return usedNames->insert(*outName).second;
+
+  // Collision detection folds case: "Walk" and "walk" are one file on
+  // Windows and default macOS filesystems, so the second would silently
+  // overwrite the first there. The cooked file keeps the original
+  // sanitized spelling.
+  std::string collisionKey = *outName;
+  for (char &c : collisionKey) {
+    if ((c >= 'A') && (c <= 'Z')) {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+  }
+  return usedNames->insert(collisionKey).second;
 }
 
 namespace {
