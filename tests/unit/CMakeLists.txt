@@ -717,6 +717,19 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
     )
 
+    engine_add_test_executable(engine_unit_cook_stamp
+        SOURCES
+        cook_stamp_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+        PRIVATE_DEPS
+        engine_core
+        COMPILE_DEFINITIONS
+        _CRT_SECURE_NO_WARNINGS
+    )
+
     engine_add_test_executable(engine_unit_anim_controller
         SOURCES
         anim_controller_test.cpp

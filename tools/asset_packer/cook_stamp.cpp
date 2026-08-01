@@ -294,6 +294,8 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   }
 
   std::fprintf(file, "SCHEMA 2\n");
+  std::fprintf(file, "TOOL_VERSION %u\n",
+               static_cast<unsigned int>(kCookToolVersion));
   std::fprintf(file, "SOURCE_HASH %016llx\n",
                static_cast<unsigned long long>(sourceHash));
   std::fprintf(file, "IMPORT_HASH %016llx\n",
@@ -308,10 +310,12 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   return true;
 }
 
-/// Reads cook stamp data.
+/// Reads cook stamp data. outToolVersion reports 0 for stamps written
+/// before the TOOL_VERSION key existed, which forces one recook.
 bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
                      std::vector<DependencyDigest> *outDependencies,
-                     std::uint64_t *outImportSettingsHash) {
+                     std::uint64_t *outImportSettingsHash,
+                     std::uint32_t *outToolVersion) {
   if ((outSourceHash == nullptr) || (outDependencies == nullptr)) {
     return false;
   }
@@ -338,10 +342,20 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   if (outImportSettingsHash != nullptr) {
     *outImportSettingsHash = 0ULL;
   }
+  if (outToolVersion != nullptr) {
+    *outToolVersion = 0U;
+  }
 
   char line[1024] = {};
   while (std::fgets(line, static_cast<int>(sizeof(line)), file) != nullptr) {
     unsigned long long hash = 0ULL;
+    unsigned int toolVersion = 0U;
+    if (std::sscanf(line, "TOOL_VERSION %u", &toolVersion) == 1) {
+      if (outToolVersion != nullptr) {
+        *outToolVersion = static_cast<std::uint32_t>(toolVersion);
+      }
+      continue;
+    }
     if (std::sscanf(line, "SOURCE_HASH %llx", &hash) == 1) {
       *outSourceHash = static_cast<std::uint64_t>(hash);
       continue;
@@ -393,8 +407,13 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
   std::uint64_t previousSourceHash = 0ULL;
   std::vector<DependencyDigest> previousDependencies{};
   std::uint64_t previousImportHash = 0ULL;
+  std::uint32_t previousToolVersion = 0U;
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
-                       &previousImportHash)) {
+                       &previousImportHash, &previousToolVersion)) {
+    return true;
+  }
+
+  if (previousToolVersion != kCookToolVersion) {
     return true;
   }
 

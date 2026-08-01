@@ -31,6 +31,13 @@ struct DependencyDigest final {
   std::uint64_t hash = 0ULL;
 };
 
+/// Importer contract version baked into every cook stamp: bump whenever
+/// the cooked output format or import semantics change, so existing
+/// outputs recook once instead of silently keeping stale bytes (audit
+/// H-20). Stamps written before this key existed read as version 0 and
+/// therefore always recook.
+inline constexpr std::uint32_t kCookToolVersion = 1U;
+
 /// Import settings read from an asset's .meta.json sidecar.
 struct ImportSettings final {
   int meshIndex = 0;
