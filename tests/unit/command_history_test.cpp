@@ -4,6 +4,8 @@
 #include "editor_transform_util.h"
 #include "engine/editor/command_history.h"
 #include "engine/math/transform.h"
+#include "engine/renderer/asset_database.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
 #include <cmath>
@@ -899,6 +901,132 @@ int check_foliage_instance_edit_round_trip() noexcept {
   return finish(0);
 }
 
+/// A primitive spawn command must attach its collider and rebuild the
+/// convex-hull payload on every execute so redo restores physics.
+int check_primitive_spawn_rebuilds_hull() noexcept {
+  using engine::editor::EntityCreateCommand;
+  using engine::editor::SpawnHullKind;
+  using engine::runtime::Collider;
+  using engine::runtime::Entity;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 150;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    return finish(151);
+  }
+  command->hasMesh = true;
+  command->mesh.meshAssetId = 5ULL;
+  command->hasCollider = true;
+  command->colliderComponent.shape = engine::math::ColliderShape::Capsule;
+  command->hullKind = SpawnHullKind::Cylinder;
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+
+  const Entity spawned =
+      world->find_entity_by_persistent_id(command->persistentId);
+  if (spawned == engine::runtime::kInvalidEntity) {
+    return finish(152);
+  }
+  Collider collider{};
+  if (!world->get_collider(spawned, &collider) ||
+      (collider.shape != engine::math::ColliderShape::ConvexHull)) {
+    return finish(153);
+  }
+  const engine::physics::ConvexHullData *hull =
+      engine::runtime::get_convex_hull_data(*world, spawned);
+  if ((hull == nullptr) || (hull->vertexCount < 4U)) {
+    return finish(154);
+  }
+  if ((collider.halfExtents.x != hull->localHalfExtents.x) ||
+      (collider.halfExtents.y != hull->localHalfExtents.y) ||
+      (collider.halfExtents.z != hull->localHalfExtents.z)) {
+    return finish(155);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != 0U) {
+    return finish(156);
+  }
+
+  history.redo();
+  const Entity redone =
+      world->find_entity_by_persistent_id(command->persistentId);
+  Collider redoneCollider{};
+  if ((redone == engine::runtime::kInvalidEntity) ||
+      !world->get_collider(redone, &redoneCollider) ||
+      (redoneCollider.shape != engine::math::ColliderShape::ConvexHull) ||
+      (engine::runtime::get_convex_hull_data(*world, redone) == nullptr)) {
+    return finish(157);
+  }
+
+  return finish(0);
+}
+
+/// The primitive spawn helper must produce a named scene object resting
+/// on the ground with the builtin mesh id, undoable through the session
+/// history.
+int check_execute_primitive_spawn_names_and_meshes() noexcept {
+  using engine::runtime::Entity;
+  using engine::runtime::MeshComponent;
+  using engine::runtime::NameComponent;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 160;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.commandHistory.clear();
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity cube = engine::editor::execute_primitive_spawn(
+      engine::editor::EditorPrimitive::Cube);
+  if (cube == engine::runtime::kInvalidEntity) {
+    return finish(161);
+  }
+
+  NameComponent cubeName{};
+  MeshComponent cubeMesh{};
+  Transform cubeTransform{};
+  if (!world->get_name_component(cube, &cubeName) ||
+      (std::strcmp(cubeName.name, "Cube") != 0) ||
+      !world->get_mesh_component(cube, &cubeMesh) ||
+      (cubeMesh.meshAssetId !=
+       engine::renderer::make_asset_id_from_path("builtin://cube")) ||
+      !world->get_transform(cube, &cubeTransform) ||
+      (cubeTransform.position.y != 0.5F)) {
+    return finish(162);
+  }
+
+  session.commandHistory.undo();
+  if (world->alive_entity_count() != 0U) {
+    return finish(163);
+  }
+
+  return finish(0);
+}
+
 } // namespace
 
 static_assert(!std::is_copy_constructible_v<engine::editor::CommandHistory>);
@@ -980,6 +1108,18 @@ int main() {
   }
 
   result = check_foliage_instance_edit_round_trip();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_primitive_spawn_rebuilds_hull();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_execute_primitive_spawn_names_and_meshes();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

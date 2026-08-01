@@ -39,9 +39,12 @@
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
+#include "engine/physics/primitive_hulls.h"
+#include "engine/renderer/asset_database.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -353,6 +356,28 @@ void EntityCreateCommand::execute() noexcept {
   if (hasMesh) {
     static_cast<void>(world->add_mesh_component(entity, mesh));
   }
+  if (hasCollider) {
+    runtime::Collider collider = colliderComponent;
+    physics::ConvexHullData hull{};
+    bool hullBuilt = false;
+    if (hullKind == SpawnHullKind::Cylinder) {
+      hullBuilt = physics::build_cylinder_hull(&hull);
+    } else if (hullKind == SpawnHullKind::Pyramid) {
+      hullBuilt = physics::build_pyramid_hull(&hull);
+    }
+    if (hullBuilt) {
+      collider.shape = math::ColliderShape::ConvexHull;
+      collider.halfExtents = hull.localHalfExtents;
+    }
+    static_cast<void>(world->add_collider(entity, collider));
+    if (hullBuilt && !runtime::set_convex_hull_data(*world, entity, hull)) {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "primitive spawn hull slots exhausted — falling back "
+                        "to the box collider");
+      collider = colliderComponent;
+      static_cast<void>(world->add_collider(entity, collider));
+    }
+  }
 }
 
 void EntityCreateCommand::undo() noexcept {
@@ -535,6 +560,95 @@ runtime::Entity execute_asset_spawn(
   make_asset_spawn_name(virtualPath, &command->name);
   command->hasMesh = true;
   command->mesh.meshAssetId = assetId;
+  editor_session().commandHistory.execute(command);
+  return world->find_entity_by_persistent_id(command->persistentId);
+}
+
+/// Per-primitive spawn description: display name, builtin mesh path,
+/// resting height, fallback collider, and hull rebuild kind.
+struct PrimitiveSpawnDesc final {
+  const char *name = nullptr;
+  const char *builtinPath = nullptr;
+  float groundY = 0.5F;
+  math::ColliderShape fallbackShape = math::ColliderShape::AABB;
+  math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  math::Vec3 colliderLocalPosition = math::Vec3(0.0F, 0.0F, 0.0F);
+  SpawnHullKind hullKind = SpawnHullKind::None;
+};
+
+/// Returns the spawn description for a built-in blockout primitive.
+static PrimitiveSpawnDesc primitive_spawn_desc(
+    EditorPrimitive primitive) noexcept {
+  PrimitiveSpawnDesc desc{};
+  switch (primitive) {
+  case EditorPrimitive::Cube:
+    desc.name = "Cube";
+    desc.builtinPath = "builtin://cube";
+    break;
+  case EditorPrimitive::Sphere:
+    desc.name = "Sphere";
+    desc.builtinPath = "builtin://sphere";
+    desc.fallbackShape = math::ColliderShape::Sphere;
+    break;
+  case EditorPrimitive::Cylinder:
+    desc.name = "Cylinder";
+    desc.builtinPath = "builtin://cylinder";
+    desc.fallbackShape = math::ColliderShape::Capsule;
+    desc.hullKind = SpawnHullKind::Cylinder;
+    break;
+  case EditorPrimitive::Capsule:
+    desc.name = "Capsule";
+    desc.builtinPath = "builtin://capsule";
+    desc.groundY = 1.0F;
+    desc.fallbackShape = math::ColliderShape::Capsule;
+    break;
+  case EditorPrimitive::Pyramid:
+    desc.name = "Pyramid";
+    desc.builtinPath = "builtin://pyramid";
+    desc.halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
+    desc.hullKind = SpawnHullKind::Pyramid;
+    break;
+  case EditorPrimitive::Plane:
+    desc.name = "Plane";
+    desc.builtinPath = "builtin://plane";
+    desc.groundY = -0.5F;
+    desc.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
+    desc.colliderLocalPosition = math::Vec3(0.0F, 0.4F, 0.0F);
+    break;
+  }
+  return desc;
+}
+
+runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+
+  const PrimitiveSpawnDesc desc = primitive_spawn_desc(primitive);
+  if ((desc.name == nullptr) || (desc.builtinPath == nullptr)) {
+    return runtime::kInvalidEntity;
+  }
+
+  auto *command = new (std::nothrow) EntityCreateCommand();
+  if (command == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+
+  const renderer::CameraState cam =
+      editor_camera_state(editor_session().editorCamera);
+  command->transform.position =
+      math::Vec3(cam.target.x, desc.groundY, cam.target.z);
+  std::snprintf(command->name.name, sizeof(command->name.name), "%s",
+                desc.name);
+  command->hasMesh = true;
+  command->mesh.meshAssetId =
+      renderer::make_asset_id_from_path(desc.builtinPath);
+  command->hasCollider = true;
+  command->colliderComponent.shape = desc.fallbackShape;
+  command->colliderComponent.halfExtents = desc.halfExtents;
+  command->colliderComponent.localPosition = desc.colliderLocalPosition;
+  command->hullKind = desc.hullKind;
   editor_session().commandHistory.execute(command);
   return world->find_entity_by_persistent_id(command->persistentId);
 }

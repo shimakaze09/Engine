@@ -1,0 +1,90 @@
+{
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 180,
+   "max": [
+    0.32,
+    0.9,
+    0.30433808521444916
+   ],
+   "min": [
+    -0.32,
+    0.0,
+    -0.30433808521444916
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 180,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5123,
+   "count": 324,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "gen_props.py",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteLength": 2160,
+   "byteOffset": 0,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 2160,
+   "byteOffset": 2160,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 648,
+   "byteOffset": 4320,
+   "target": 34963
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 4968,
+   "uri": "barrel.bin"
+  }
+ ],
+ "meshes": [
+  {
+   "name": "barrel",
+   "primitives": [
+    {
+     "attributes": {
+      "NORMAL": 1,
+      "POSITION": 0
+     },
+     "indices": 2
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "barrel"
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ]
+}

@@ -1,0 +1,90 @@
+{
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 108,
+   "max": [
+    0.34,
+    1.52,
+    0.34
+   ],
+   "min": [
+    -0.34,
+    0.0,
+    -0.34
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 108,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5123,
+   "count": 180,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "gen_props.py",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteLength": 1296,
+   "byteOffset": 0,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 1296,
+   "byteOffset": 1296,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 360,
+   "byteOffset": 2592,
+   "target": 34963
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 2952,
+   "uri": "pillar.bin"
+  }
+ ],
+ "meshes": [
+  {
+   "name": "pillar",
+   "primitives": [
+    {
+     "attributes": {
+      "NORMAL": 1,
+      "POSITION": 0
+     },
+     "indices": 2
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "pillar"
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ]
+}

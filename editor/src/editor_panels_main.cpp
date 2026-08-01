@@ -250,6 +250,20 @@ void draw_toolbar() noexcept {
     editor_session().gizmoOp = ImGuizmo::SCALE;
   }
 
+  ImGui::SameLine();
+  ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+  ImGui::SameLine();
+  ImGui::Checkbox("Snap", &editor_session().snapEnabled);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(64.0F);
+  if (editor_session().gizmoOp == ImGuizmo::ROTATE) {
+    ImGui::DragFloat("##SnapStep", &editor_session().snapAngleDegrees, 1.0F,
+                     1.0F, 90.0F, "%.0f deg");
+  } else {
+    ImGui::DragFloat("##SnapStep", &editor_session().snapStep, 0.05F, 0.05F,
+                     10.0F, "%.2f");
+  }
+
   ImGui::End();
 }
 
@@ -391,6 +405,33 @@ void draw_entities_panel() noexcept {
     if (newEntity != runtime::kInvalidEntity) {
       select_entity(newEntity.index, false);
     }
+  }
+
+  ImGui::SameLine();
+  if (ImGui::Button("Add Primitive") && editable) {
+    ImGui::OpenPopup("AddPrimitivePopup");
+  }
+  if (ImGui::BeginPopup("AddPrimitivePopup")) {
+    constexpr struct {
+      const char *label;
+      EditorPrimitive primitive;
+    } kPrimitiveItems[] = {
+        {"Cube", EditorPrimitive::Cube},
+        {"Sphere", EditorPrimitive::Sphere},
+        {"Cylinder", EditorPrimitive::Cylinder},
+        {"Capsule", EditorPrimitive::Capsule},
+        {"Pyramid", EditorPrimitive::Pyramid},
+        {"Plane", EditorPrimitive::Plane},
+    };
+    for (const auto &item : kPrimitiveItems) {
+      if (ImGui::MenuItem(item.label) && editable) {
+        const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
+        if (spawned != runtime::kInvalidEntity) {
+          select_entity(spawned.index, false);
+        }
+      }
+    }
+    ImGui::EndPopup();
   }
 
   if (!editable) {
