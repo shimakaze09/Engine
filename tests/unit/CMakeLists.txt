@@ -214,6 +214,13 @@ engine_add_test_executable(engine_unit_vfs
     engine_core
 )
 
+engine_add_test_executable(engine_unit_atomic_file
+    SOURCES
+    atomic_file_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_event_bus
     SOURCES
     event_bus_test.cpp

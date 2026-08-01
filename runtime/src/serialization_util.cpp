@@ -7,6 +7,7 @@
 
 #include <new>
 
+#include "engine/core/atomic_file.h"
 #include "engine/runtime/serialization_keys.h"
 
 namespace engine::runtime {
@@ -92,18 +93,7 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
 
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept {
-  if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-  if (!open_file_for_write(path, &file) || (file == nullptr)) {
-    return false;
-  }
-
-  const std::size_t written = std::fwrite(text, 1U, size, file);
-  std::fclose(file);
-  return written == size;
+  return core::atomic_write_file(path, text, size);
 }
 
 void write_vec2(core::JsonWriter &writer, const char *key,
