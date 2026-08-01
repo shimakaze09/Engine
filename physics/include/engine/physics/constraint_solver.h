@@ -66,7 +66,9 @@ JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept;
 
-/// Sets finite ordered limits on a live hinge or slider; invalid input is ignored.
+/// Sets finite ordered limits on a live hinge or slider; invalid input is
+/// ignored. Hinge limits are twist radians and must lie within [-pi, pi]
+/// (the wrapped twist measurement cannot enforce multi-turn ranges).
 void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept;
 

@@ -75,7 +75,8 @@ struct PhysicsJointSlot final {
   // Fixed / Slider lock: body B's orientation relative to A at creation.
   math::Quat referenceRotation{};
 
-  // Angle or distance limits (hinge: radians, slider: distance).
+  // Angle or distance limits (hinge: radians within [-pi, pi], slider:
+  // distance).
   float minLimit = 0.0F;
   float maxLimit = 0.0F;
 

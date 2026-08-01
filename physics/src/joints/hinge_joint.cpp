@@ -6,7 +6,11 @@
 // constraint is aB x aA = 0 (two angular DOF). For the correction axis
 // h = (aB x aA) / |aB x aA| the Jacobian is J = [0, -h^T, 0, h^T] with
 // effective inverse mass J M^-1 J^T = iA + iB, so the misalignment angle
-// atan2(|aB x aA|, aB . aA) is consumed inertia-split each iteration.
+// atan2(|aB x aA|, aB . aA) is consumed inertia-split each iteration. At
+// exact anti-parallel alignment the cross product vanishes and cannot
+// name a correction axis, so a pi rotation about body A's world twist
+// reference (perpendicular to the axis by construction, deterministic)
+// breaks the singularity instead of silently accepting the flip.
 // Limit block: the twist angle about the common axis is measured between
 // creation-time reference vectors projected into the hinge plane,
 // phi = atan2((uA x uB) . a, uA . uB); the violation
@@ -59,6 +63,10 @@ float solve_hinge_joint(JointSolveContext &ctx,
     const float angle = std::atan2(misalignLen, math::dot(axisB, axisA));
     apply_relative_orientation_delta(
         ctx, math::mul(math::div(misalign, misalignLen), angle));
+  } else if (math::dot(axisB, axisA) < 0.0F) {
+    apply_relative_orientation_delta(
+        ctx, math::mul(joint_world_lever(*ctx.tA, joint.twistRefA),
+                       3.14159265F));
   }
 
   const math::Vec3 hingeAxis = joint_world_lever(*ctx.tA, joint.axis);

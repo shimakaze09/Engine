@@ -69,8 +69,8 @@ physics::JointId add_spring_joint(World &world, Entity entityA, Entity entityB,
 /// Creates a fixed joint locking both bodies; kInvalidJointId on failure.
 physics::JointId add_fixed_joint(World &world, Entity entityA,
                                  Entity entityB) noexcept;
-/// Sets ordered joint limits: twist radians on hinges, travel distance on
-/// sliders.
+/// Sets ordered joint limits: twist radians within [-pi, pi] on hinges,
+/// travel distance on sliders.
 void set_joint_limits(World &world, physics::JointId id, float minLimit,
                       float maxLimit) noexcept;
 /// Releases the joint slot; safe with kInvalidJointId.

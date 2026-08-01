@@ -180,7 +180,8 @@ int test_hinge_realigns_axes_after_disturbance() noexcept {
   world->get_transform(bodies[1], &tB);
   const math::Vec3 worldAxisB =
       math::rotate_vector(math::Vec3(0.0F, 0.0F, 1.0F), tB.rotation);
-  if ((std::fabs(worldAxisB.x) > 1e-3F) || (std::fabs(worldAxisB.y) > 1e-3F)) {
+  if ((std::fabs(worldAxisB.x) > 1e-3F) ||
+      (std::fabs(worldAxisB.y) > 1e-3F) || (worldAxisB.z < 0.999F)) {
     std::printf("FAIL hinge_realign: axisB=(%.5f,%.5f,%.5f)\n",
                 static_cast<double>(worldAxisB.x),
                 static_cast<double>(worldAxisB.y),
@@ -659,6 +660,205 @@ int test_joint_capacity_rejects_then_recovers() noexcept {
   return 0;
 }
 
+// ---- Review fix: heavy bodies keep anchor-velocity enforcement -------------
+
+int test_heavy_body_anchor_velocity_removed() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  Entity bodies[2] = {
+      make_free_body(*world, math::Vec3(0.0F, 1.0F, 0.0F), math::Quat(),
+                     0.0F, 0.0F),
+      make_free_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat(),
+                     1e-6F, 1e-6F)};
+
+  if (physics::add_ball_socket_joint(*world, bodies[0], bodies[1],
+                                     math::Vec3(0.0F, 0.0F, 0.0F)) ==
+      physics::kInvalidJointId) {
+    return 2;
+  }
+
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(bodies[1]);
+    if (rb == nullptr) {
+      return 3;
+    }
+    rb->velocity = math::Vec3(1.0F, 0.0F, 0.0F);
+  }
+
+  for (int i = 0; i < 5; ++i) {
+    if (!step_world(*world, bodies, 2)) {
+      return 4;
+    }
+  }
+
+  const RigidBody *rb = world->get_rigid_body_ptr(bodies[1]);
+  Transform tB{};
+  world->get_transform(bodies[1], &tB);
+  if ((rb == nullptr) || (math::length(rb->velocity) > 1e-4F)) {
+    if (rb != nullptr) {
+      std::printf("FAIL heavy_velocity: residual v=%.6f\n",
+                  static_cast<double>(math::length(rb->velocity)));
+    }
+    return 5;
+  }
+  if (math::length(tB.position) > 1e-3F) {
+    return 6;
+  }
+
+  Entity pair[2] = {
+      make_free_body(*world, math::Vec3(5.0F, 0.0F, 0.0F), math::Quat(),
+                     1.0F, 1.0F),
+      make_free_body(*world, math::Vec3(5.0F, 1.0F, 0.0F), math::Quat(),
+                     1e-6F, 1e-6F)};
+  if (physics::add_ball_socket_joint(*world, pair[0], pair[1],
+                                     math::Vec3(5.0F, 1.0F, 0.0F)) ==
+      physics::kInvalidJointId) {
+    return 7;
+  }
+  {
+    RigidBody *rb1 = world->get_rigid_body_ptr(pair[1]);
+    if (rb1 == nullptr) {
+      return 8;
+    }
+    rb1->velocity = math::Vec3(1.0F, 0.0F, 0.0F);
+  }
+  for (int i = 0; i < 5; ++i) {
+    if (!step_world(*world, pair, 2)) {
+      return 9;
+    }
+  }
+  const RigidBody *rbLight = world->get_rigid_body_ptr(pair[0]);
+  const RigidBody *rbHeavy = world->get_rigid_body_ptr(pair[1]);
+  Transform tLight{};
+  Transform tHeavy{};
+  if ((rbLight == nullptr) || (rbHeavy == nullptr) ||
+      !world->get_transform(pair[0], &tLight) ||
+      !world->get_transform(pair[1], &tHeavy)) {
+    return 10;
+  }
+  const math::Vec3 leverLight =
+      math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), tLight.rotation);
+  const math::Vec3 anchorVelLight =
+      math::add(rbLight->velocity,
+                math::cross(rbLight->angularVelocity, leverLight));
+  const math::Vec3 relVel = math::sub(rbHeavy->velocity, anchorVelLight);
+  if (math::length(relVel) > 1e-4F) {
+    std::printf("FAIL heavy_velocity: unequal-mass anchor rel v=%.6f\n",
+                static_cast<double>(math::length(relVel)));
+    return 11;
+  }
+  return 0;
+}
+
+// ---- Review fix: exactly anti-parallel hinge axes recover ------------------
+
+int test_hinge_recovers_from_anti_parallel_flip() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  Entity bodies[2] = {
+      make_free_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat(),
+                     0.0F, 0.0F),
+      make_free_body(*world, math::Vec3(1.0F, 0.0F, 0.0F), math::Quat(),
+                     1.0F, 1.0F)};
+
+  if (physics::add_hinge_joint(*world, bodies[0], bodies[1],
+                               math::Vec3(1.0F, 0.0F, 0.0F),
+                               math::Vec3(0.0F, 0.0F, 1.0F)) ==
+      physics::kInvalidJointId) {
+    return 2;
+  }
+
+  Transform flipped{};
+  flipped.position = math::Vec3(1.0F, 0.0F, 0.0F);
+  flipped.rotation =
+      math::from_axis_angle(math::Vec3(1.0F, 0.0F, 0.0F), 3.14159265F);
+  if (!world->add_transform(bodies[1], flipped)) {
+    return 3;
+  }
+
+  for (int i = 0; i < 60; ++i) {
+    if (!step_world(*world, bodies, 2)) {
+      return 4;
+    }
+  }
+
+  Transform tB{};
+  world->get_transform(bodies[1], &tB);
+  const math::Vec3 worldAxisB =
+      math::rotate_vector(math::Vec3(0.0F, 0.0F, 1.0F), tB.rotation);
+  if (worldAxisB.z < 0.999F) {
+    std::printf("FAIL hinge_flip: axisB=(%.5f,%.5f,%.5f)\n",
+                static_cast<double>(worldAxisB.x),
+                static_cast<double>(worldAxisB.y),
+                static_cast<double>(worldAxisB.z));
+    return 5;
+  }
+  if (math::length(math::sub(tB.position, math::Vec3(1.0F, 0.0F, 0.0F))) >
+      1e-3F) {
+    return 6;
+  }
+  return 0;
+}
+
+// ---- Review fix: hinge limits outside [-pi, pi] are rejected ---------------
+
+int test_hinge_limits_reject_outside_pi() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  Entity bodies[2] = {
+      make_free_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat(),
+                     0.0F, 0.0F),
+      make_free_body(*world, math::Vec3(1.0F, 0.0F, 0.0F), math::Quat(),
+                     1.0F, 1.0F)};
+
+  const physics::JointId jid = physics::add_hinge_joint(
+      *world, bodies[0], bodies[1], math::Vec3(1.0F, 0.0F, 0.0F),
+      math::Vec3(0.0F, 0.0F, 1.0F));
+  if (jid == physics::kInvalidJointId) {
+    return 2;
+  }
+
+  physics::PhysicsJointSlot *slot = nullptr;
+  for (physics::PhysicsJointSlot &candidate :
+       world->physics_context().joints) {
+    if (candidate.active) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (slot == nullptr) {
+    return 3;
+  }
+
+  physics::set_joint_limits(*world, jid, 3.5F, 4.5F);
+  if (slot->hasLimits) {
+    std::printf("FAIL limit_range: wrapped range [3.5, 4.5] accepted\n");
+    return 4;
+  }
+
+  physics::set_joint_limits(*world, jid, -3.14159274F, 3.14159274F);
+  if (!slot->hasLimits || (slot->minLimit != -3.14159274F) ||
+      (slot->maxLimit != 3.14159274F)) {
+    return 5;
+  }
+
+  physics::set_joint_limits(*world, jid, -3.2F, 1.0F);
+  if (!slot->hasLimits || (slot->minLimit != -3.14159274F) ||
+      (slot->maxLimit != 3.14159274F)) {
+    return 6;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -688,6 +888,12 @@ int main() {
       {"zero_length_spans_stay_finite", test_zero_length_spans_stay_finite},
       {"joint_capacity_rejects_then_recovers",
        test_joint_capacity_rejects_then_recovers},
+      {"heavy_body_anchor_velocity_removed",
+       test_heavy_body_anchor_velocity_removed},
+      {"hinge_recovers_from_anti_parallel_flip",
+       test_hinge_recovers_from_anti_parallel_flip},
+      {"hinge_limits_reject_outside_pi",
+       test_hinge_limits_reject_outside_pi},
   };
 
   int failures = 0;

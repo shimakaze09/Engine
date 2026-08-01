@@ -19,29 +19,52 @@ namespace engine::physics {
 
 constexpr float kJointEpsilon = 1.0e-6F;
 
-/// Solves the symmetric positive-definite 3x3 system K x = b by cofactor
-/// inverse; returns false when K is numerically singular.
-static bool solve_symmetric3(const float k[3][3], const math::Vec3 &b,
-                             math::Vec3 *out) noexcept {
-  const float c00 = (k[1][1] * k[2][2]) - (k[1][2] * k[2][1]);
-  const float c01 = (k[1][2] * k[2][0]) - (k[1][0] * k[2][2]);
-  const float c02 = (k[1][0] * k[2][1]) - (k[1][1] * k[2][0]);
-  const float det = (k[0][0] * c00) + (k[0][1] * c01) + (k[0][2] * c02);
-  if (std::fabs(det) <= 1.0e-12F) {
+/// Solves the symmetric positive-definite 3x3 system K x = b by Cholesky
+/// factorization with pivots checked RELATIVE to the matrix scale (largest
+/// diagonal entry), so validity does not depend on absolute mass units:
+/// a matrix built from tiny inverse masses (very heavy bodies) still
+/// solves, while a genuinely rank-deficient matrix is rejected at any
+/// scale. Returns false when K is not positive definite at working
+/// precision.
+static bool solve_spd3(const float k[3][3], const math::Vec3 &b,
+                       math::Vec3 *out) noexcept {
+  constexpr float kRelativePivotEpsilon = 1.0e-7F;
+  const float maxDiag =
+      (k[0][0] > k[1][1]) ? ((k[0][0] > k[2][2]) ? k[0][0] : k[2][2])
+                          : ((k[1][1] > k[2][2]) ? k[1][1] : k[2][2]);
+  if (maxDiag <= 0.0F) {
     return false;
   }
+  const float pivotFloor = kRelativePivotEpsilon * maxDiag;
 
-  const float invDet = 1.0F / det;
-  const float c10 = (k[0][2] * k[2][1]) - (k[0][1] * k[2][2]);
-  const float c11 = (k[0][0] * k[2][2]) - (k[0][2] * k[2][0]);
-  const float c12 = (k[0][1] * k[2][0]) - (k[0][0] * k[2][1]);
-  const float c20 = (k[0][1] * k[1][2]) - (k[0][2] * k[1][1]);
-  const float c21 = (k[0][2] * k[1][0]) - (k[0][0] * k[1][2]);
-  const float c22 = (k[0][0] * k[1][1]) - (k[0][1] * k[1][0]);
+  const float d0 = k[0][0];
+  if (d0 <= pivotFloor) {
+    return false;
+  }
+  const float l00 = std::sqrt(d0);
+  const float l10 = k[0][1] / l00;
+  const float l20 = k[0][2] / l00;
 
-  out->x = ((c00 * b.x) + (c10 * b.y) + (c20 * b.z)) * invDet;
-  out->y = ((c01 * b.x) + (c11 * b.y) + (c21 * b.z)) * invDet;
-  out->z = ((c02 * b.x) + (c12 * b.y) + (c22 * b.z)) * invDet;
+  const float d1 = k[1][1] - (l10 * l10);
+  if (d1 <= pivotFloor) {
+    return false;
+  }
+  const float l11 = std::sqrt(d1);
+  const float l21 = (k[1][2] - (l20 * l10)) / l11;
+
+  const float d2 = k[2][2] - (l20 * l20) - (l21 * l21);
+  if (d2 <= pivotFloor) {
+    return false;
+  }
+  const float l22 = std::sqrt(d2);
+
+  const float y0 = b.x / l00;
+  const float y1 = (b.y - (l10 * y0)) / l11;
+  const float y2 = (b.z - (l20 * y0) - (l21 * y1)) / l22;
+
+  out->z = y2 / l22;
+  out->y = (y1 - (l21 * out->z)) / l11;
+  out->x = (y0 - (l10 * out->y) - (l20 * out->z)) / l00;
   return true;
 }
 
@@ -139,7 +162,7 @@ float project_point_velocity(JointSolveContext &ctx, const math::Vec3 &leverA,
   k[2][1] = k[1][2];
 
   math::Vec3 impulse{};
-  if (!solve_symmetric3(k, remove, &impulse)) {
+  if (!solve_spd3(k, remove, &impulse)) {
     return 0.0F;
   }
 
