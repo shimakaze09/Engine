@@ -589,8 +589,8 @@ void draw_inspector_panel() noexcept {
   }
 
   if (editable && deletePressed) {
-    static_cast<void>(editor_session().world->destroy_entity(entity));
-    editor_session().selectedEntityIndex = 0U;
+    static_cast<void>(execute_entity_delete(entity));
+    clear_entity_selection();
     ImGui::End();
     return;
   }

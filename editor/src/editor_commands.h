@@ -4,6 +4,11 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+
 #include "editor_session.h"
 
 namespace engine::editor {
@@ -53,6 +58,9 @@ enum class ComponentEditType : std::uint8_t {
   SceneCapture,
   Animation,
 };
+
+/// Number of ComponentEditType values (used to size per-type flag arrays).
+inline constexpr std::size_t kComponentEditTypeCount = 14U;
 
 /// Union-of-components value captured before/after an inspector edit.
 struct ComponentEditSnapshot final {
@@ -130,6 +138,46 @@ struct ReparentCommand final : EditorCommand {
 /// transform, the parent is invalid, or the reparent would cycle.
 bool execute_reparent(runtime::Entity child,
                       runtime::Entity newParent) noexcept;
+
+/// Undoable scene-object creation; redo re-creates the entity under its
+/// original persistent id so later history entries keep resolving.
+struct EntityCreateCommand final : EditorCommand {
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
+  runtime::NameComponent name{};
+
+  void execute() noexcept override;
+  void undo() noexcept override;
+};
+
+/// One captured subtree member of a deleted entity: its persistent id
+/// plus every component present at delete time.
+struct EntityDeleteRecord final {
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
+  std::array<bool, kComponentEditTypeCount> present{};
+  ComponentEditSnapshot components{};
+};
+
+/// Undoable entity deletion backed by parent-before-child subtree records;
+/// undo re-creates every member under its original persistent id so parent
+/// links and cross-references survive the round trip.
+struct EntityDeleteCommand final : EditorCommand {
+  std::unique_ptr<EntityDeleteRecord[]> records{};
+  std::size_t recordCount = 0U;
+
+  void execute() noexcept override;
+  void undo() noexcept override;
+};
+
+/// Creates a scene object with a default name through the command history;
+/// returns the new entity (kInvalidEntity on failure).
+runtime::Entity execute_entity_create() noexcept;
+/// Captures the entity's transform subtree into a delete command; null on
+/// allocation failure or when the entity is not alive.
+EntityDeleteCommand *
+build_entity_delete_command(runtime::Entity entity) noexcept;
+/// Deletes the entity subtree through the command history (falling back to
+/// a plain non-undoable destroy when the capture cannot be allocated).
+bool execute_entity_delete(runtime::Entity entity) noexcept;
 
 /// Returns the default-valued snapshot used when adding a component.
 ComponentEditSnapshot default_component_snapshot(

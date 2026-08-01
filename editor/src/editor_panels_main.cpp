@@ -374,14 +374,9 @@ void draw_entities_panel() noexcept {
   }
 
   if (ImGui::Button("Create Entity") && editable) {
-    const runtime::Entity newEntity =
-        editor_session().world->create_scene_object();
+    const runtime::Entity newEntity = execute_entity_create();
     if (newEntity != runtime::kInvalidEntity) {
-      runtime::NameComponent nameComponent{};
-      make_default_entity_name(newEntity.index, &nameComponent);
-      static_cast<void>(
-          editor_session().world->add_name_component(newEntity, nameComponent));
-      editor_session().selectedEntityIndex = newEntity.index;
+      select_entity(newEntity.index, false);
     }
   }
 
