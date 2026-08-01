@@ -151,6 +151,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   touch, cheat, debug, persist, entity pool/script/handle, `binding_util`).
   ~180 functions on one global `engine` table.
 - `runtime/` — public `engine::bootstrap/run/shutdown` + `EngineConfig`,
+  convex-hull provenance (`Collider::hullSource` serializes which primitive
+  builder made a ConvexHull payload; `World::add_collider` rebuilds it on
+  every install path — scene/prefab load, world copy, editor undo — while
+  Heightfield payloads remain unserialized, test-only reachable),
   `EnginePipeline` (15 named frame stages, fixed 1/60 step, job-graph frame;
   animation evaluates per fixed step BEFORE the frame graph so render prep
   bakes current-frame palette slots; frame pacing waits out r_max_fps as

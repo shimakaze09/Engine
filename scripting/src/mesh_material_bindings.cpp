@@ -113,6 +113,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   std::uint64_t meshId = g_defaultMeshAssetId;
   math::Vec3 halfExtents(0.5F, 0.5F, 0.5F);
   runtime::ColliderShape colliderShape = runtime::ColliderShape::AABB;
+  runtime::HullSource hullSource = runtime::HullSource::None;
   physics::ConvexHullData hull{};
   bool hasHull = false;
 
@@ -132,6 +133,8 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     hasHull = physics::build_cylinder_hull(&hull);
     colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
                             : runtime::ColliderShape::Capsule;
+    hullSource = hasHull ? runtime::HullSource::Cylinder
+                         : runtime::HullSource::None;
     halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.5F);
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0ULL) ? g_builtinCapsuleMesh
@@ -144,6 +147,8 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     hasHull = physics::build_pyramid_hull(&hull);
     colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
                             : runtime::ColliderShape::AABB;
+    hullSource = hasHull ? runtime::HullSource::Pyramid
+                         : runtime::HullSource::None;
     halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.58F);
   } else if (std::strcmp(shape, "plane") == 0) {
     meshId = (g_builtinPlaneMesh != 0ULL) ? g_builtinPlaneMesh
@@ -168,12 +173,14 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   runtime::Collider collider{};
   collider.halfExtents = halfExtents;
   collider.shape = colliderShape;
+  collider.hullSource = hullSource;
   static_cast<void>(runtime_binding().world->add_collider(entity, collider));
   if (hasHull && !runtime::set_convex_hull_data(*runtime_binding().world,
                                                 entity, hull)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "spawn_shape hull slots exhausted — using box collider");
     collider.shape = runtime::ColliderShape::AABB;
+    collider.hullSource = runtime::HullSource::None;
     static_cast<void>(runtime_binding().world->add_collider(entity, collider));
   }
 

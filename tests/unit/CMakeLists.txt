@@ -161,6 +161,14 @@ engine_add_test_executable(engine_unit_scene_serializer
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_hull_provenance
+    SOURCES
+    hull_provenance_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_runtime_world
     SOURCES
     runtime_world_test.cpp

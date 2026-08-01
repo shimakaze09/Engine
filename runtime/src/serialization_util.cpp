@@ -218,16 +218,26 @@ bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
   return true;
 }
 
+// Hull payloads round-trip via HullSource provenance (rebuilt by
+// World::add_collider on install); Heightfield payloads are NOT serialized —
+// they are reachable only from tests today, and terrain authoring is expected
+// to bring its own asset-backed provenance before that changes.
 bool write_collider_component(core::JsonWriter &writer,
                               const Collider &component) noexcept {
   const std::uint32_t shape = static_cast<std::uint32_t>(component.shape);
   if (shape > static_cast<std::uint32_t>(ColliderShape::Heightfield)) {
     return false;
   }
+  const std::uint32_t hullSource =
+      static_cast<std::uint32_t>(component.hullSource);
+  if (hullSource > static_cast<std::uint32_t>(HullSource::Pyramid)) {
+    return false;
+  }
 
   writer.write_key(kJsonKeyCollider);
   writer.begin_object();
   writer.write_uint("shape", shape);
+  writer.write_uint("hullSource", hullSource);
   write_vec3(writer, "localPosition", component.localPosition);
   write_quat(writer, "localRotation", component.localRotation);
   write_vec3(writer, "halfExtents", component.halfExtents);
@@ -258,6 +268,14 @@ bool read_collider_component(const core::JsonParser &parser,
       return false;
     }
     component.shape = static_cast<ColliderShape>(shape);
+  }
+  if (parser.get_object_field(colliderObject, "hullSource", &value)) {
+    std::uint32_t hullSource = 0U;
+    if (!parser.as_uint(value, &hullSource) ||
+        (hullSource > static_cast<std::uint32_t>(HullSource::Pyramid))) {
+      return false;
+    }
+    component.hullSource = static_cast<HullSource>(hullSource);
   }
   if (parser.get_object_field(colliderObject, "localPosition", &value) &&
       !read_vec3(parser, value, &component.localPosition)) {
