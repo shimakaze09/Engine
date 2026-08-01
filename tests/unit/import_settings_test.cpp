@@ -303,6 +303,141 @@ static int test_json_parser_rejects_excessive_depth() noexcept {
   return 0;
 }
 
+/// Realistic meta document with schema, mappings, and an unknown
+/// forward-compatible field, as the H-21 preservation fixture.
+constexpr const char *kMetaFixture =
+    "{\n"
+    "  \"schemaVersion\": 3,\n"
+    "  \"source\": \"props/crate.gltf\",\n"
+    "  \"outputs\": { \"mesh\": \"props/crate.mesh\", "
+    "\"importSettings\": \"nested-decoy\" },\n"
+    "  \"futureField\": [1, 2, {\"deep\": \"}\\\"{\"}],\n"
+    "  \"importSettings\": { \"meshIndex\": 0, \"scaleFactor\": 1.0 },\n"
+    "  \"tags\": [\"prop\", \"importSettings\"]\n"
+    "}\n";
+
+/// EXPECTATION (audit H-21): replacing the top-level importSettings value
+/// preserves every other field byte-for-byte — schema, mappings, the
+/// unknown forward-compatible field, a nested decoy key, and a string
+/// containing the key text all survive, and the result parses with the
+/// new settings readable.
+int test_json_splice_preserves_unknown_fields() {
+  char output[4096] = {};
+  std::size_t outputLength = 0U;
+  const char *newValue = "{ \"meshIndex\": 7, \"generateNormals\": true }";
+  if (!engine::core::json_replace_top_level_field(
+          kMetaFixture, std::strlen(kMetaFixture), "importSettings", newValue,
+          output, sizeof(output), &outputLength)) {
+    std::fprintf(stderr, "FAIL: splice rejected the fixture\n");
+    return 1;
+  }
+
+  if ((std::strstr(output, "\"schemaVersion\": 3") == nullptr) ||
+      (std::strstr(output, "\"source\": \"props/crate.gltf\"") == nullptr) ||
+      (std::strstr(output, "\"importSettings\": \"nested-decoy\"") ==
+       nullptr) ||
+      (std::strstr(output, "{\"deep\": \"}\\\"{\"}") == nullptr) ||
+      (std::strstr(output, "\"tags\": [\"prop\", \"importSettings\"]") ==
+       nullptr)) {
+    std::fprintf(stderr, "FAIL: splice destroyed a preserved field\n");
+    return 1;
+  }
+  if (std::strstr(output, newValue) == nullptr) {
+    std::fprintf(stderr, "FAIL: splice did not install the new value\n");
+    return 1;
+  }
+  if (std::strstr(output, "\"scaleFactor\": 1.0") != nullptr) {
+    std::fprintf(stderr, "FAIL: old settings value survived the splice\n");
+    return 1;
+  }
+
+  engine::core::JsonParser parser{};
+  if (!parser.parse(output, outputLength) || (parser.root() == nullptr)) {
+    std::fprintf(stderr, "FAIL: spliced document does not parse\n");
+    return 1;
+  }
+  const engine::core::JsonValue *settings =
+      parser.get_object_field(*parser.root(), "importSettings");
+  std::uint32_t meshIndex = 0U;
+  const engine::core::JsonValue *meshIndexValue =
+      (settings != nullptr) ? parser.get_object_field(*settings, "meshIndex")
+                            : nullptr;
+  if ((meshIndexValue == nullptr) ||
+      !parser.as_uint(*meshIndexValue, &meshIndex) || (meshIndex != 7U)) {
+    std::fprintf(stderr, "FAIL: new settings not readable after splice\n");
+    return 1;
+  }
+
+  std::printf("PASS: splice preserves unknown fields\n");
+  return 0;
+}
+
+/// EXPECTATION (audit H-21): a document without the field gains it at the
+/// top level (nested decoys and string occurrences are not matches), an
+/// empty object insert stays valid, and malformed documents, non-object
+/// roots, and undersized output buffers are rejected.
+int test_json_splice_insert_and_rejection() {
+  const char *withoutField =
+      "{\n  \"schemaVersion\": 3,\n"
+      "  \"outputs\": { \"importSettings\": \"nested-decoy\" },\n"
+      "  \"note\": \"importSettings\"\n}\n";
+  char output[2048] = {};
+  std::size_t outputLength = 0U;
+  if (!engine::core::json_replace_top_level_field(
+          withoutField, std::strlen(withoutField), "importSettings",
+          "{ \"meshIndex\": 2 }", output, sizeof(output), &outputLength)) {
+    std::fprintf(stderr, "FAIL: insert rejected a valid document\n");
+    return 1;
+  }
+  engine::core::JsonParser parser{};
+  if (!parser.parse(output, outputLength) || (parser.root() == nullptr) ||
+      (parser.get_object_field(*parser.root(), "importSettings") ==
+       nullptr) ||
+      (std::strstr(output, "\"importSettings\": \"nested-decoy\"") ==
+       nullptr) ||
+      (std::strstr(output, "\"note\": \"importSettings\"") == nullptr)) {
+    std::fprintf(stderr, "FAIL: insert result wrong or decoys touched\n");
+    return 1;
+  }
+
+  if (!engine::core::json_replace_top_level_field(
+          "{}", 2U, "importSettings", "{ \"meshIndex\": 1 }", output,
+          sizeof(output), &outputLength)) {
+    std::fprintf(stderr, "FAIL: empty-object insert rejected\n");
+    return 1;
+  }
+  engine::core::JsonParser emptyParser{};
+  if (!emptyParser.parse(output, outputLength)) {
+    std::fprintf(stderr, "FAIL: empty-object insert does not parse\n");
+    return 1;
+  }
+
+  const char *truncated = "{ \"a\": { \"b\": 1 }";
+  if (engine::core::json_replace_top_level_field(
+          truncated, std::strlen(truncated), "a", "2", output, sizeof(output),
+          &outputLength)) {
+    std::fprintf(stderr, "FAIL: malformed document accepted\n");
+    return 1;
+  }
+  const char *arrayRoot = "[1, 2, 3]";
+  if (engine::core::json_replace_top_level_field(
+          arrayRoot, std::strlen(arrayRoot), "a", "2", output, sizeof(output),
+          &outputLength)) {
+    std::fprintf(stderr, "FAIL: non-object root accepted\n");
+    return 1;
+  }
+  char tiny[8] = {};
+  if (engine::core::json_replace_top_level_field(
+          kMetaFixture, std::strlen(kMetaFixture), "importSettings",
+          "{ \"meshIndex\": 7 }", tiny, sizeof(tiny), &outputLength)) {
+    std::fprintf(stderr, "FAIL: undersized buffer accepted\n");
+    return 1;
+  }
+
+  std::printf("PASS: splice insert and rejection paths\n");
+  return 0;
+}
+
 /// Runs this executable or test program.
 int main() {
   int failures = 0;
@@ -312,6 +447,8 @@ int main() {
   failures += test_import_settings_hash_roundtrip();
   failures += test_json_parser_rejects_invalid_strings();
   failures += test_json_parser_rejects_excessive_depth();
+  failures += test_json_splice_preserves_unknown_fields();
+  failures += test_json_splice_insert_and_rejection();
   if (failures > 0) {
     std::fprintf(stderr, "FAILED: %d test(s) failed\n", failures);
   }

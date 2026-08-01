@@ -30,6 +30,7 @@
 #include <memory>
 #include <vector>
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
@@ -121,10 +122,11 @@ void draw_asset_tree(const std::filesystem::path &dir) noexcept {
 }
 
 /// Draw import settings inspector for mesh assets.
-/// Reads the .meta.json sidecar, displays current import settings, and allows
-/// editing. On modification it writes a minimal importSettings-only stub —
-/// the asset packer regenerates the full meta file on the next cook and
-/// detects the changed import-settings hash.
+/// Reads the .meta.json sidecar, displays current import settings, and
+/// allows editing. On modification only the importSettings field is
+/// spliced into the existing document (every other field survives) and
+/// the file is replaced atomically; the packer detects the changed
+/// import-settings hash on the next cook.
 void draw_import_settings_inspector(const char *assetPath) noexcept {
   if (assetPath == nullptr || assetPath[0] == '\0') {
     return;
@@ -273,28 +275,42 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
     scaleFactor = 0.001F;
   }
 
-  std::FILE *outFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&outFile, metaPath, "wb") != 0) {
-    outFile = nullptr;
+  // Parse-update-preserve: splice only the importSettings value into the
+  // original document so schema, output mappings, and unknown
+  // forward-compatible fields survive, validate the result, and replace
+  // the file atomically (audit H-21; the old path truncated the meta to
+  // an importSettings-only stub with fopen "wb").
+  char newSettings[512] = {};
+  std::snprintf(newSettings, sizeof(newSettings),
+                "{\n"
+                "    \"meshIndex\": %d,\n"
+                "    \"primitiveIndex\": %d,\n"
+                "    \"scaleFactor\": %.6g,\n"
+                "    \"upAxis\": %d,\n"
+                "    \"generateNormals\": %s\n"
+                "  }",
+                meshIndex, primitiveIndex, static_cast<double>(scaleFactor),
+                upAxis, generateNormals ? "true" : "false");
+
+  // The meta read path caps documents at 64 KiB; this leaves headroom
+  // for the spliced settings block. Editor UI runs single-threaded.
+  static char updatedDocument[80U * 1024U];
+  std::size_t updatedLength = 0U;
+  bool staged = core::json_replace_top_level_field(
+      metaBuffer.data(), readCount, "importSettings", newSettings,
+      updatedDocument, sizeof(updatedDocument), &updatedLength);
+  if (staged) {
+    core::JsonParser validator{};
+    staged = validator.parse(updatedDocument, updatedLength) &&
+             (validator.root() != nullptr) &&
+             (validator.root()->type == core::JsonValue::Type::Object);
   }
-#else
-  outFile = std::fopen(metaPath, "wb");
-#endif
-  if (outFile != nullptr) {
-    std::fprintf(outFile,
-                 "{\n"
-                 "  \"importSettings\": {\n"
-                 "    \"meshIndex\": %d,\n"
-                 "    \"primitiveIndex\": %d,\n"
-                 "    \"scaleFactor\": %.6g,\n"
-                 "    \"upAxis\": %d,\n"
-                 "    \"generateNormals\": %s\n"
-                 "  }\n"
-                 "}\n",
-                 meshIndex, primitiveIndex, static_cast<double>(scaleFactor),
-                 upAxis, generateNormals ? "true" : "false");
-    std::fclose(outFile);
+  if (staged) {
+    staged = core::atomic_write_file(metaPath, updatedDocument, updatedLength);
+  }
+  if (!staged) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "import settings save failed — .meta.json preserved");
   }
 }
 

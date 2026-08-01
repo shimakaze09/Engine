@@ -124,6 +124,20 @@ private:
 };
 
 /// Parses JSON into fixed storage; query values via JsonValue handles.
+/// Replaces (or inserts) the value of one top-level field in a JSON
+/// object document while preserving every other byte — unknown and
+/// forward-compatible fields, ordering, and formatting all survive
+/// (audit H-21). `fieldName` must be a plain unescaped key. `valueText`
+/// is spliced verbatim and must be valid JSON. False on malformed
+/// documents, non-object roots, or insufficient output capacity; the
+/// output buffer is null-terminated on success.
+bool json_replace_top_level_field(const char *documentText,
+                                  std::size_t documentLength,
+                                  const char *fieldName,
+                                  const char *valueText, char *outBuffer,
+                                  std::size_t outCapacity,
+                                  std::size_t *outLength) noexcept;
+
 class JsonParser final {
 public:
   /// Parses text into the engine representation.
