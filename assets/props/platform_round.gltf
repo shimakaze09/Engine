@@ -1,0 +1,90 @@
+{
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 84,
+   "max": [
+    0.9,
+    0.2,
+    0.8774351209636413
+   ],
+   "min": [
+    -0.9,
+    0.0,
+    -0.8774351209636415
+   ],
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 84,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5123,
+   "count": 156,
+   "type": "SCALAR"
+  }
+ ],
+ "asset": {
+  "generator": "gen_props.py",
+  "version": "2.0"
+ },
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteLength": 1008,
+   "byteOffset": 0,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 1008,
+   "byteOffset": 1008,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteLength": 312,
+   "byteOffset": 2016,
+   "target": 34963
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 2328,
+   "uri": "platform_round.bin"
+  }
+ ],
+ "meshes": [
+  {
+   "name": "platform_round",
+   "primitives": [
+    {
+     "attributes": {
+      "NORMAL": 1,
+      "POSITION": 0
+     },
+     "indices": 2
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "mesh": 0,
+   "name": "platform_round"
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ]
+}
