@@ -163,14 +163,18 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   controller state machine + palette handoff in `animation_system.cpp`),
   fixed-step render interpolation (per-entity world-TRS history in the
   World, blended in render prep; `frame_pacing.{h,cpp}` holds the
-  vsync/cap helpers), the single-slot game save (`save_data.{h,cpp}` over
+  vsync/cap helpers and the fixed-step count decision incl. the paused
+  editor's single step), the single-slot game save (`save_data.{h,cpp}` over
   `platform_get_save_dir`), service registry, timers, cameras, spring
   arms, game mode/state, player controllers, entity pool.
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle,
-  multi-selection), hierarchy tree panel (drag-drop reparent through the
-  undoable ReparentCommand),
-  `editor_commands` (undoable edits), panel TUs (main/inspector/diagnostics/
-  assets/viewport), editor + debug cameras, command history.
+  multi-selection, single-step request), hierarchy tree panel (drag-drop
+  reparent through the undoable ReparentCommand), `editor_commands`
+  (undoable edits incl. entity create/delete with persistent-id-preserving
+  subtree restore and asset drag-spawn; commands resolve targets by
+  persistent id), panel TUs (main/inspector/diagnostics/assets/viewport;
+  asset browser drags .mesh entries onto the viewport), editor + debug
+  cameras, command history.
 - `assets/` — GLSL shaders, sample Lua scripts, sample meshes (synced to the
   build dir by CMake). `tools/` — asset_packer (deterministic cook,
   thumbnails, glTF mesh/skeleton/animation import, dependency graph), binding
@@ -318,13 +322,22 @@ stutter) at 60 Hz sim.
   character walks with footstep animation events playing positional
   sounds over a streamed ambient loop. CUT: HRTF, DSP
   (reverb/filters/occlusion), Doppler, snapshots/ducking.
-- **Editor (from P1-M9, cut down) — IN PROGRESS (feat/editor-authoring)**:
-  scene hierarchy panel (tree, drag-drop reparent, multi-select) LANDED
-  2026-08-01; still open: asset browser drag-to-viewport, inspector
-  nested structs/arrays, undo covering every operation the slice's
-  authoring flow uses (entity create/delete undo remains), PIE
-  pause/step. The commercial-grade UX pass continues throughout. CUT:
-  prefab overrides/nesting, editor Lua API.
+- **Editor (from P1-M9, cut down) — LANDED 2026-08-01**: scene hierarchy
+  panel (tree, drag-drop reparent, multi-select); undoable entity
+  create/delete — delete captures the transform subtree as per-member
+  component snapshots and undo re-creates every member under its
+  original persistent id, and all undo commands re-target entities by
+  persistent id so redo chains survive a delete/re-create round trip;
+  asset browser drag-to-viewport spawn (.mesh entries drop onto the
+  scene at the ground-plane hit and request their async load through
+  the editor bridge's published asset service); the full foliage
+  instance list with undoable per-entry add/remove (the nested-array
+  driving case; nested structs render via the reflection field kinds);
+  PIE pause plus a Step button that simulates exactly one fixed step
+  while paused (`fixed_step_decision` in frame_pacing); gizmo edits
+  were already undoable via TransformEditCommand. The commercial-grade
+  UX pass continues throughout. CUT: prefab overrides/nesting, editor
+  Lua API.
 - **Scenes (from P1-M10, cut down) — LANDED 2026-08-01**: the exclusive
   scene transition flow is pinned end to end by an integration test
   (`engine.load_scene` from a playing script → pending-op commit →
