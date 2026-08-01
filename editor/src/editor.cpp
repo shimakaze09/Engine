@@ -346,18 +346,22 @@ void editor_process_event(void *sdlEvent) noexcept {
 }
 
 void editor_set_world(runtime::World *world) noexcept {
+  // Every world change is a full session transition: history, selection,
+  // play state, and the Play snapshot all belong to the previous world, so
+  // none of them may survive a rebind (a retained snapshot would let Stop
+  // restore world A's contents into world B).
   if (editor_session().world != world) {
     editor_session().commandHistory.clear();
     editor_session().gizmoWasUsing = false;
-  }
-  editor_session().world = world;
-  if (world == nullptr) {
-    editor_session().selectedEntityIndex = 0U;
+    clear_entity_selection();
     editor_session().playState = PlayState::Stopped;
+    editor_session().stepRequested = false;
     editor_session().playSnapshotSize = 0U;
     editor_session().hasPlaySnapshot = false;
+    editor_session().playSnapshotWorld = nullptr;
     editor_session().worldRestoreFailed = false;
   }
+  editor_session().world = world;
 }
 
 bool editor_is_playing() noexcept { return editor_session().playState == PlayState::Playing; }

@@ -221,6 +221,7 @@ bool capture_play_snapshot() noexcept {
       editor_session().playSnapshotCapacity = capacity;
       editor_session().playSnapshotSize = snapshotSize;
       editor_session().hasPlaySnapshot = true;
+      editor_session().playSnapshotWorld = editor_session().world;
       return true;
     }
 
@@ -325,6 +326,13 @@ void stop_play_mode() noexcept {
   if (!editor_session().hasPlaySnapshot || (editor_session().playSnapshotSize == 0U)) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "stop requested without pre-play snapshot");
+    restored = false;
+  } else if (editor_session().playSnapshotWorld != editor_session().world) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "play snapshot belongs to a different world; discarded");
+    editor_session().hasPlaySnapshot = false;
+    editor_session().playSnapshotSize = 0U;
+    editor_session().playSnapshotWorld = nullptr;
     restored = false;
   } else if (!runtime::load_scene(*editor_session().world, editor_session().playSnapshotBuffer.get(),
                                   editor_session().playSnapshotSize)) {
