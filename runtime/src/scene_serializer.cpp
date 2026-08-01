@@ -631,6 +631,47 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
   return true;
 }
 
+/// Counts alive entities carrying the component through the public get
+/// accessor, so commit invariants can compare worlds without new World API.
+template <typename Component>
+std::size_t count_components(
+    const World &world,
+    bool (World::*getComponent)(Entity, Component *) const noexcept) noexcept {
+  std::size_t count = 0U;
+  world.for_each_alive([&](Entity entity) noexcept {
+    Component component{};
+    if ((world.*getComponent)(entity, &component)) {
+      ++count;
+    }
+  });
+  return count;
+}
+
+/// True when source and target agree on the per-type component count for
+/// every persistent component type; a mismatch means the commit copy lost
+/// or invented data.
+bool world_component_counts_match(const World &sourceWorld,
+                                  const World &targetWorld) noexcept {
+  const auto matches = [&](auto getComponent) noexcept {
+    return count_components(sourceWorld, getComponent) ==
+           count_components(targetWorld, getComponent);
+  };
+  return matches(&World::get_transform) &&
+         matches(&World::get_rigid_body) &&
+         matches(&World::get_collider) &&
+         matches(&World::get_mesh_component) &&
+         matches(&World::get_foliage_patch_component) &&
+         matches(&World::get_light_component) &&
+         matches(&World::get_point_light_component) &&
+         matches(&World::get_spot_light_component) &&
+         matches(&World::get_reflection_probe_component) &&
+         matches(&World::get_scene_capture_component) &&
+         matches(&World::get_name_component) &&
+         matches(&World::get_script_component) &&
+         matches(&World::get_spring_arm) &&
+         matches(&World::get_animation_component);
+}
+
 /// Copies one component type between worlds through the World get/add pair.
 /// Returns true when the source entity has no such component or the copy
 /// succeeded; false only when a present component fails to add.
@@ -689,7 +730,8 @@ bool copy_world_contents(const World &sourceWorld,
              &World::add_scene_capture_component) &&
         copy(&World::get_name_component, &World::add_name_component) &&
         copy(&World::get_script_component, &World::add_script_component) &&
-        copy(&World::get_spring_arm, &World::add_spring_arm);
+        copy(&World::get_spring_arm, &World::add_spring_arm) &&
+        copy(&World::get_animation_component, &World::add_animation_component);
   });
 
   // Copy timer timing metadata (callbacks must be re-wired by caller).
@@ -930,6 +972,7 @@ void reset_world(World &world) noexcept {
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();
+  world.mark_content_replaced(world.content_epoch());
   reset_anim_controllers();
 }
 
@@ -1123,15 +1166,15 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
 
   if ((committedWorld->alive_entity_count() !=
        stagedWorld->alive_entity_count()) ||
-      (committedWorld->transform_count() != stagedWorld->transform_count()) ||
-      (committedWorld->rigid_body_count() != stagedWorld->rigid_body_count()) ||
-      (committedWorld->collider_count() != stagedWorld->collider_count())) {
+      !world_component_counts_match(*stagedWorld, *committedWorld)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "scene commit invariant mismatch after copy");
     return false;
   }
 
+  const std::uint32_t previousEpoch = world.content_epoch();
   world = *committedWorld;
+  world.mark_content_replaced(previousEpoch);
   // The replaced world's components are gone, so their cached animation
   // controllers are released; the loaded scene's components re-acquire
   // lazily on the next animation update (controllerSlot is runtime state

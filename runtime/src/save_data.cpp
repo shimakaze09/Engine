@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #endif
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 
@@ -87,19 +88,12 @@ bool save_game_data_to(const char *directory, const char *json,
   }
 
   create_directory_recursive(directory);
-  std::FILE *file = open_save_file(path, "wb");
-  if (file == nullptr) {
-    core::log_message(core::LogLevel::Error, "save",
-                      "failed to open save file for writing");
-    return false;
-  }
-  const bool ok = std::fwrite(json, 1U, length, file) == length;
-  const bool closed = std::fclose(file) == 0;
-  if (!ok || !closed) {
+  if (!core::atomic_write_file(path, json, length)) {
     core::log_message(core::LogLevel::Error, "save",
                       "failed to write save file");
+    return false;
   }
-  return ok && closed;
+  return true;
 }
 
 bool load_game_data_from(const char *directory, char *out,

@@ -11,6 +11,7 @@ engine_add_module_library(engine_core
     src/event_bus.cpp
     src/input.cpp
     src/input_map.cpp
+    src/atomic_file.cpp
     src/json.cpp
     src/job_system.cpp
     src/linear_allocator.cpp

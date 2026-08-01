@@ -311,6 +311,12 @@ bool World::is_alive(Entity entity) const noexcept {
   return is_valid_entity(entity);
 }
 
+std::uint32_t World::content_epoch() const noexcept { return m_contentEpoch; }
+
+void World::mark_content_replaced(std::uint32_t previousEpoch) noexcept {
+  m_contentEpoch = previousEpoch + 1U;
+}
+
 Entity World::find_entity_by_index(std::uint32_t index) const noexcept {
   if ((index == 0U) || (index > static_cast<std::uint32_t>(kMaxEntities))) {
     return kInvalidEntity;

@@ -189,19 +189,9 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     return false;
   }
 
-  FILE *file = nullptr;
-  if (!open_file_for_write(path, &file) || (file == nullptr)) {
+  if (!write_text_file(path, w.result(), w.result_size())) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to open file for writing");
-    return false;
-  }
-
-  const std::size_t sz = w.result_size();
-  const std::size_t written = std::fwrite(w.result(), 1U, sz, file);
-  std::fclose(file);
-  if (written != sz) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: file write incomplete");
+                      "save_prefab: failed to write file");
     return false;
   }
 

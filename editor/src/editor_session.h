@@ -59,6 +59,9 @@ struct EditorSession final {
   std::size_t playSnapshotCapacity = 0U;
   std::size_t playSnapshotSize = 0U;
   bool hasPlaySnapshot = false;
+  // World the Play snapshot was captured from; Stop refuses to restore
+  // into any other world.
+  const runtime::World *playSnapshotWorld = nullptr;
   bool worldRestoreFailed = false;
   EditorCamera editorCamera{};
   ImGuizmo::OPERATION gizmoOp = ImGuizmo::TRANSLATE;

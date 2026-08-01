@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "engine/runtime/world.h"
+#include "entity_handle_value.h"
 
 extern "C" {
 #include "lua.h"
@@ -25,10 +26,6 @@ runtime::Entity entity_from_index(std::uint32_t entityIndex) noexcept;
 /// Pushes the current live entity for an index as a Lua handle.
 void push_entity_handle_from_index(lua_State *state,
                                    std::uint32_t entityIndex) noexcept;
-
-/// Decodes Lua's numeric entity handle format without checking liveness.
-bool decode_entity_handle_value(std::uint64_t rawHandle,
-                                runtime::Entity *outEntity) noexcept;
 
 /// Decodes a Lua stack value as an entity handle without checking liveness.
 bool decode_lua_entity_handle(lua_State *state, int index,

@@ -1094,6 +1094,146 @@ int verify_collider_scene_round_trip() {
   return 0;
 }
 
+/// EXPECTATION: a world carrying every persistent component type survives
+/// a save/load round trip with every component present and its marker
+/// values intact — the commit copy must never silently drop a type
+/// (regression: AnimationComponent was omitted from copy_world_contents).
+int check_every_component_type_survives_load() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  if (source == nullptr) {
+    return 300;
+  }
+
+  Transform transform{};
+  transform.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  const Entity entity = source->create_scene_object(transform);
+  if (entity == kInvalidEntity) {
+    return 301;
+  }
+
+  NameComponent name{};
+  std::snprintf(name.name, sizeof(name.name), "%s", "Everything");
+  RigidBody body{};
+  body.inverseMass = 0.5F;
+  Collider collider{};
+  collider.halfExtents = engine::math::Vec3(0.25F, 0.5F, 0.75F);
+  MeshComponent mesh{};
+  mesh.meshAssetId = 4242ULL;
+  FoliagePatchComponent foliage{};
+  foliage.instanceCount = 1U;
+  foliage.instances[0].scale = 0.625F;
+  LightComponent light{};
+  light.intensity = 2.5F;
+  PointLightComponent pointLight{};
+  pointLight.radius = 7.0F;
+  SpotLightComponent spotLight{};
+  spotLight.outerConeAngle = 0.75F;
+  ReflectionProbeComponent probe{};
+  probe.intensity = 1.25F;
+  SceneCaptureComponent capture{};
+  capture.width = 128U;
+  capture.height = 64U;
+  ScriptComponent script{};
+  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+                "assets/scripts/marker.lua");
+  SpringArmComponent springArm{};
+  springArm.armLength = 4.5F;
+  AnimationComponent animation{};
+  std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
+                "%s", "assets/character.animctrl.json");
+
+  if (!source->add_name_component(entity, name) ||
+      !source->add_rigid_body(entity, body) ||
+      !source->add_collider(entity, collider) ||
+      !source->add_mesh_component(entity, mesh) ||
+      !source->add_foliage_patch_component(entity, foliage) ||
+      !source->add_light_component(entity, light) ||
+      !source->add_point_light_component(entity, pointLight) ||
+      !source->add_spot_light_component(entity, spotLight) ||
+      !source->add_reflection_probe_component(entity, probe) ||
+      !source->add_scene_capture_component(entity, capture) ||
+      !source->add_script_component(entity, script) ||
+      !source->add_spring_arm(entity, springArm) ||
+      !source->add_animation_component(entity, animation)) {
+    return 302;
+  }
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      buffer(new (std::nothrow)
+                 std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  if (buffer == nullptr) {
+    return 303;
+  }
+  std::size_t size = 0U;
+  if (!save_scene(*source, buffer->data(), buffer->size(), &size) ||
+      (size == 0U)) {
+    return 304;
+  }
+
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((loaded == nullptr) ||
+      !load_scene(*loaded, buffer->data(), size)) {
+    return 305;
+  }
+  const Entity found = loaded->find_entity_by_name("Everything");
+  if (found == kInvalidEntity) {
+    return 306;
+  }
+
+  Transform loadedTransform{};
+  RigidBody loadedBody{};
+  Collider loadedCollider{};
+  MeshComponent loadedMesh{};
+  FoliagePatchComponent loadedFoliage{};
+  LightComponent loadedLight{};
+  PointLightComponent loadedPointLight{};
+  SpotLightComponent loadedSpotLight{};
+  ReflectionProbeComponent loadedProbe{};
+  SceneCaptureComponent loadedCapture{};
+  ScriptComponent loadedScript{};
+  SpringArmComponent loadedSpringArm{};
+  AnimationComponent loadedAnimation{};
+
+  if (!loaded->get_transform(found, &loadedTransform) ||
+      (loadedTransform.position.x != 1.0F) ||
+      !loaded->get_rigid_body(found, &loadedBody) ||
+      (loadedBody.inverseMass != 0.5F) ||
+      !loaded->get_collider(found, &loadedCollider) ||
+      (loadedCollider.halfExtents.z != 0.75F) ||
+      !loaded->get_mesh_component(found, &loadedMesh) ||
+      (loadedMesh.meshAssetId != 4242ULL) ||
+      !loaded->get_foliage_patch_component(found, &loadedFoliage) ||
+      (loadedFoliage.instanceCount != 1U) ||
+      (loadedFoliage.instances[0].scale != 0.625F) ||
+      !loaded->get_light_component(found, &loadedLight) ||
+      (loadedLight.intensity != 2.5F) ||
+      !loaded->get_point_light_component(found, &loadedPointLight) ||
+      (loadedPointLight.radius != 7.0F) ||
+      !loaded->get_spot_light_component(found, &loadedSpotLight) ||
+      (loadedSpotLight.outerConeAngle != 0.75F) ||
+      !loaded->get_reflection_probe_component(found, &loadedProbe) ||
+      (loadedProbe.intensity != 1.25F) ||
+      !loaded->get_scene_capture_component(found, &loadedCapture) ||
+      (loadedCapture.width != 128U) || (loadedCapture.height != 64U) ||
+      !loaded->get_script_component(found, &loadedScript) ||
+      (std::strcmp(loadedScript.scriptPath, "assets/scripts/marker.lua") !=
+       0) ||
+      !loaded->get_spring_arm(found, &loadedSpringArm) ||
+      (loadedSpringArm.armLength != 4.5F)) {
+    return 307;
+  }
+
+  if (!loaded->get_animation_component(found, &loadedAnimation) ||
+      (std::strcmp(loadedAnimation.controllerPath,
+                   "assets/character.animctrl.json") != 0)) {
+    return 308;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -1193,6 +1333,13 @@ int main() {
   }
 
   result = verify_collider_scene_round_trip();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = check_every_component_type_survives_load();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
