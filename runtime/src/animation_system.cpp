@@ -409,7 +409,10 @@ float advance_state_time(const AnimControllerData &controller,
     newTime = std::fmod(newTime, duration);
     return (newTime < 0.0F) ? (newTime + duration) : newTime;
   }
-  if (newTime > duration) {
+  // >= so a time landing exactly on the duration wraps this step (fmod
+  // yields 0), instead of parking on the boundary for one tick and
+  // firing wrap events late.
+  if (newTime >= duration) {
     if (state.loop) {
       newTime = std::fmod(newTime, duration);
       *outWrapped = true;

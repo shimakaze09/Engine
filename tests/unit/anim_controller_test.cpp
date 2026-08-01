@@ -448,6 +448,47 @@ int check_extreme_speed_cannot_hang() {
   return 0;
 }
 
+/// EXPECTATION (review item 10): a looping state whose time lands
+/// exactly on the clip duration wraps that same step to exactly zero
+/// instead of parking on the boundary for one tick.
+int check_exact_duration_wraps() {
+  engine::runtime::reset_anim_controllers();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  const auto entity = world->create_entity();
+  AnimationComponent component{};
+  std::snprintf(component.controllerPath, sizeof(component.controllerPath),
+                "%s", kControllerVirtualPath);
+  if (!world->add_animation_component(entity, component)) {
+    std::puts("add_animation_component failed");
+    return 1;
+  }
+  engine::runtime::update_animations(*world, kFixedDt);
+
+  // Freeze advancement, then place the looping 1.0s idle clip exactly on
+  // its duration: the wrap must land on exactly zero this update.
+  AnimationComponent *mutableComponent =
+      world->get_animation_component_ptr(entity);
+  if (mutableComponent == nullptr) {
+    return 1;
+  }
+  mutableComponent->playbackSpeed = 0.0F;
+  mutableComponent->stateTime = 1.0F;
+  engine::runtime::update_animations(*world, kFixedDt);
+  const AnimationComponent *wrapped =
+      world->get_animation_component_ptr(entity);
+  if ((wrapped == nullptr) || (wrapped->stateTime != 0.0F)) {
+    std::puts("exact-duration time did not wrap to zero");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -473,6 +514,9 @@ int main() {
   }
   if (result == 0) {
     result = check_extreme_speed_cannot_hang();
+  }
+  if (result == 0) {
+    result = check_exact_duration_wraps();
   }
   engine::runtime::reset_anim_controllers();
   cleanup_files();
