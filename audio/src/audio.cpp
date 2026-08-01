@@ -56,15 +56,123 @@ struct SoundEntry final {
   ma_decoder decoder{};
   ma_sound sound{};
   void *fileData = nullptr;
+  std::size_t fileSize = 0U;
+};
+
+constexpr std::size_t kMaxOneShotInstances = 32U;
+
+/// One fire-and-forget playback: its own decoder over the source sound's
+/// retained file buffer plus the playing ma_sound; sourceSlot lets
+/// unload_sound kill instances whose buffer is going away.
+struct OneShotInstance final {
+  bool active = false;
+  std::size_t sourceSlot = 0U;
+  ma_decoder decoder{};
+  ma_sound sound{};
 };
 
 struct AudioState final {
   bool initialized = false;
+  bool busesReady = false;
   ma_engine engine{};
+  ma_sound_group musicGroup{};
+  ma_sound_group sfxGroup{};
+  float busVolumes[3] = {1.0F, 1.0F, 1.0F};
   SoundEntry sounds[kMaxSounds] = {};
+  OneShotInstance oneShots[kMaxOneShotInstances] = {};
+  bool musicActive = false;
+  ma_sound music{};
 };
 
 AudioState g_audio{};
+
+/// Releases one one-shot instance's playback resources.
+void reset_one_shot(OneShotInstance &instance) noexcept {
+  if (!instance.active) {
+    return;
+  }
+  ma_sound_uninit(&instance.sound);
+  ma_decoder_uninit(&instance.decoder);
+  instance = OneShotInstance{};
+}
+
+/// Group routing for a bus; nullptr = the engine endpoint (Master).
+ma_sound_group *bus_group(AudioBus bus) noexcept {
+  if (!g_audio.busesReady) {
+    return nullptr;
+  }
+  switch (bus) {
+  case AudioBus::Music:
+    return &g_audio.musicGroup;
+  case AudioBus::Sfx:
+    return &g_audio.sfxGroup;
+  case AudioBus::Master:
+    break;
+  }
+  return nullptr;
+}
+
+/// Starts a pooled one-shot from the entry's retained buffer; positional
+/// playback spatializes at `position`.
+bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
+                    const PlayParams &params, AudioBus bus, bool positional,
+                    const math::Vec3 &position) noexcept {
+  if ((entry == nullptr) || (entry->fileData == nullptr)) {
+    return false;
+  }
+
+  std::size_t slot = kMaxOneShotInstances;
+  for (std::size_t i = 0U; i < kMaxOneShotInstances; ++i) {
+    if (!g_audio.oneShots[i].active) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot == kMaxOneShotInstances) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      core::log_message(core::LogLevel::Warning, "audio",
+                        "one-shot pool exhausted; sound dropped");
+    }
+    return false;
+  }
+
+  OneShotInstance &instance = g_audio.oneShots[slot];
+  ma_decoder_config decoderConfig = ma_decoder_config_init_default();
+  if (ma_decoder_init_memory(entry->fileData, entry->fileSize, &decoderConfig,
+                             &instance.decoder) != MA_SUCCESS) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "failed to decode one-shot instance");
+    return false;
+  }
+
+  const ma_uint32 flags =
+      positional ? 0U : static_cast<ma_uint32>(MA_SOUND_FLAG_NO_SPATIALIZATION);
+  if (ma_sound_init_from_data_source(
+          &g_audio.engine, &instance.decoder, flags,
+          bus_group(bus), &instance.sound) != MA_SUCCESS) {
+    ma_decoder_uninit(&instance.decoder);
+    core::log_message(core::LogLevel::Error, "audio",
+                      "failed to create one-shot instance");
+    return false;
+  }
+
+  instance.active = true;
+  instance.sourceSlot = sourceSlot;
+  ma_sound_set_volume(&instance.sound, params.volume);
+  ma_sound_set_pitch(&instance.sound, params.pitch);
+  ma_sound_set_looping(&instance.sound, MA_FALSE);
+  if (positional) {
+    ma_sound_set_position(&instance.sound, position.x, position.y,
+                          position.z);
+  }
+  if (ma_sound_start(&instance.sound) != MA_SUCCESS) {
+    reset_one_shot(instance);
+    return false;
+  }
+  return true;
+}
 
 /// Advances a generation counter within the handle-encodable width,
 /// skipping zero.
@@ -131,6 +239,19 @@ bool initialize_audio() noexcept {
     return false;
   }
 
+  g_audio.busesReady =
+      (ma_sound_group_init(&g_audio.engine, 0U, nullptr,
+                           &g_audio.musicGroup) == MA_SUCCESS) &&
+      (ma_sound_group_init(&g_audio.engine, 0U, nullptr, &g_audio.sfxGroup) ==
+       MA_SUCCESS);
+  if (!g_audio.busesReady) {
+    core::log_message(core::LogLevel::Warning, "audio",
+                      "bus groups unavailable; routing through the engine");
+  }
+  g_audio.busVolumes[0] = 1.0F;
+  g_audio.busVolumes[1] = 1.0F;
+  g_audio.busVolumes[2] = 1.0F;
+
   g_audio.initialized = true;
   core::log_message(core::LogLevel::Info, "audio", "audio initialized");
   return true;
@@ -140,6 +261,16 @@ bool initialize_audio() noexcept {
 void shutdown_audio() noexcept {
   if (!g_audio.initialized) {
     return;
+  }
+
+  for (auto &instance : g_audio.oneShots) {
+    reset_one_shot(instance);
+  }
+  stop_music();
+  if (g_audio.busesReady) {
+    ma_sound_group_uninit(&g_audio.musicGroup);
+    ma_sound_group_uninit(&g_audio.sfxGroup);
+    g_audio.busesReady = false;
   }
 
   for (auto &entry : g_audio.sounds) {
@@ -162,10 +293,19 @@ void shutdown_audio() noexcept {
   core::log_message(core::LogLevel::Info, "audio", "audio shut down");
 }
 
-/// Per-frame audio hook. miniaudio's device-driven mode plays back on
-/// its own thread, so nothing needs pumping yet; the hook exists for
-/// future per-frame work (spatial position updates, etc.).
-void update_audio() noexcept {}
+/// Per-frame audio hook: recycles finished one-shot instances so the
+/// pool never leaks slots (device-driven playback needs no other pump).
+void update_audio() noexcept {
+  if (!g_audio.initialized) {
+    return;
+  }
+  for (auto &instance : g_audio.oneShots) {
+    if (instance.active &&
+        (ma_sound_is_playing(&instance.sound) == MA_FALSE)) {
+      reset_one_shot(instance);
+    }
+  }
+}
 
 /// Loads the requested resource for sound.
 SoundHandle load_sound(const char *virtualPath) noexcept {
@@ -196,6 +336,7 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
 
   SoundEntry &entry = g_audio.sounds[slot];
   entry.fileData = fileData;
+  entry.fileSize = fileSize;
 
   ma_decoder_config decoderConfig = ma_decoder_config_init_default();
   ma_result res = ma_decoder_init_memory(
@@ -226,6 +367,14 @@ void unload_sound(SoundHandle handle) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
     return;
+  }
+
+  const std::size_t sourceSlot =
+      static_cast<std::size_t>(entry - &g_audio.sounds[0]);
+  for (auto &instance : g_audio.oneShots) {
+    if (instance.active && (instance.sourceSlot == sourceSlot)) {
+      reset_one_shot(instance);
+    }
   }
 
   ma_sound_uninit(&entry->sound);
@@ -279,6 +428,111 @@ void set_master_volume(float volume) noexcept {
   }
 
   ma_engine_set_volume(&g_audio.engine, volume);
+}
+
+void set_bus_volume(AudioBus bus, float volume) noexcept {
+  if (!g_audio.initialized) {
+    return;
+  }
+  const float clamped = (volume > 0.0F) ? volume : 0.0F;
+  g_audio.busVolumes[static_cast<std::size_t>(bus)] = clamped;
+  switch (bus) {
+  case AudioBus::Master:
+    ma_engine_set_volume(&g_audio.engine, clamped);
+    break;
+  case AudioBus::Music:
+    if (g_audio.busesReady) {
+      ma_sound_group_set_volume(&g_audio.musicGroup, clamped);
+    }
+    break;
+  case AudioBus::Sfx:
+    if (g_audio.busesReady) {
+      ma_sound_group_set_volume(&g_audio.sfxGroup, clamped);
+    }
+    break;
+  }
+}
+
+float bus_volume(AudioBus bus) noexcept {
+  if (!g_audio.initialized) {
+    return 1.0F;
+  }
+  return g_audio.busVolumes[static_cast<std::size_t>(bus)];
+}
+
+void set_listener(const math::Vec3 &position, const math::Vec3 &forward,
+                  const math::Vec3 &up) noexcept {
+  if (!g_audio.initialized) {
+    return;
+  }
+  ma_engine_listener_set_position(&g_audio.engine, 0U, position.x, position.y,
+                                  position.z);
+  ma_engine_listener_set_direction(&g_audio.engine, 0U, forward.x, forward.y,
+                                   forward.z);
+  ma_engine_listener_set_world_up(&g_audio.engine, 0U, up.x, up.y, up.z);
+}
+
+bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
+                   const PlayParams &params, AudioBus bus) noexcept {
+  SoundEntry *entry = lookup_sound_entry(handle);
+  if (entry == nullptr) {
+    return false;
+  }
+  const std::size_t sourceSlot =
+      static_cast<std::size_t>(entry - &g_audio.sounds[0]);
+  return start_one_shot(entry, sourceSlot, params, bus, true, position);
+}
+
+bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
+                        AudioBus bus) noexcept {
+  SoundEntry *entry = lookup_sound_entry(handle);
+  if (entry == nullptr) {
+    return false;
+  }
+  const std::size_t sourceSlot =
+      static_cast<std::size_t>(entry - &g_audio.sounds[0]);
+  return start_one_shot(entry, sourceSlot, params, bus, false,
+                        math::Vec3(0.0F, 0.0F, 0.0F));
+}
+
+bool play_music(const char *virtualPath, float volume, bool loop) noexcept {
+  if ((virtualPath == nullptr) || !g_audio.initialized) {
+    return false;
+  }
+
+  char osPath[1024] = {};
+  if (!core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath))) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "music path did not resolve");
+    return false;
+  }
+
+  stop_music();
+  if (ma_sound_init_from_file(&g_audio.engine, osPath,
+                              MA_SOUND_FLAG_STREAM, bus_group(AudioBus::Music),
+                              nullptr, &g_audio.music) != MA_SUCCESS) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "failed to open music stream");
+    return false;
+  }
+  g_audio.musicActive = true;
+  ma_sound_set_volume(&g_audio.music, volume);
+  ma_sound_set_looping(&g_audio.music, loop ? MA_TRUE : MA_FALSE);
+  if (ma_sound_start(&g_audio.music) != MA_SUCCESS) {
+    stop_music();
+    return false;
+  }
+  return true;
+}
+
+void stop_music() noexcept {
+  if (!g_audio.musicActive) {
+    return;
+  }
+  ma_sound_stop(&g_audio.music);
+  ma_sound_uninit(&g_audio.music);
+  g_audio.music = ma_sound{};
+  g_audio.musicActive = false;
 }
 
 } // namespace engine::audio

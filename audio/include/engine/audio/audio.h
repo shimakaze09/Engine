@@ -1,8 +1,12 @@
-// Declares audio types and APIs for the Engine audio system.
+// Declares audio types and APIs for the Engine audio system: loaded
+// sound handles, mixer buses, 3D one-shot playback from a fixed instance
+// pool, the camera-following listener, and streamed music.
 
 #pragma once
 
 #include <cstdint>
+
+#include "engine/math/vec3.h"
 
 namespace engine::audio {
 
@@ -45,5 +49,42 @@ void stop_all() noexcept;
 
 /// Sets the requested value for master volume.
 void set_master_volume(float volume) noexcept;
+
+/// Mixer buses one-shot and music playback routes through; Master scales
+/// everything (it forwards to the engine volume).
+enum class AudioBus : std::uint8_t {
+  Master = 0,
+  Music = 1,
+  Sfx = 2,
+};
+
+/// Sets one bus's volume (clamped at 0; Master forwards to the engine).
+void set_bus_volume(AudioBus bus, float volume) noexcept;
+/// Last volume set on the bus (1 when audio is unavailable).
+float bus_volume(AudioBus bus) noexcept;
+
+/// Places the 3D listener; the pipeline follows the active camera each
+/// frame (forward need not be normalized).
+void set_listener(const math::Vec3 &position, const math::Vec3 &forward,
+                  const math::Vec3 &up) noexcept;
+
+/// Fire-and-forget spatialized one-shot at a world position on the given
+/// bus. Instances come from a fixed pool recycled by update_audio; loop
+/// is ignored so a one-shot can never pin a pool slot. False when the
+/// handle is stale or the pool is exhausted (logged once).
+bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
+                   const PlayParams &params,
+                   AudioBus bus = AudioBus::Sfx) noexcept;
+
+/// Fire-and-forget 2D one-shot on the given bus (same pool and loop rule
+/// as play_sound_at).
+bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
+                        AudioBus bus = AudioBus::Sfx) noexcept;
+
+/// Streams a music file from the VFS on the Music bus; one track plays
+/// at a time and a new call replaces the current track.
+bool play_music(const char *virtualPath, float volume, bool loop) noexcept;
+/// Stops and releases the streamed music track.
+void stop_music() noexcept;
 
 } // namespace engine::audio

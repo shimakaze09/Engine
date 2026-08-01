@@ -91,6 +91,60 @@ static void test_update_without_init() {
   g_tests.check(true, "update without init");
 }
 
+/// EXPECTATION: every new bus/3D/music API is a safe no-op before init —
+/// bus_volume falls back to 1, one-shots and music report false.
+static void test_extended_api_without_init() {
+  using namespace engine::audio;
+  set_bus_volume(AudioBus::Music, 0.5F);
+  TEST_ASSERT(bus_volume(AudioBus::Music) == 1.0F);
+  set_listener(engine::math::Vec3(0.0F, 0.0F, 0.0F),
+               engine::math::Vec3(0.0F, 0.0F, -1.0F),
+               engine::math::Vec3(0.0F, 1.0F, 0.0F));
+  PlayParams params{};
+  TEST_ASSERT(!play_sound_at(kInvalidSound,
+                             engine::math::Vec3(0.0F, 0.0F, 0.0F), params,
+                             AudioBus::Sfx));
+  TEST_ASSERT(!play_sound_oneshot(kInvalidSound, params, AudioBus::Sfx));
+  TEST_ASSERT(!play_music("assets/sounds/ambient.wav", 1.0F, true));
+  stop_music();
+  g_tests.check(true, "extended API without init");
+}
+
+/// EXPECTATION: with a live engine, bus volumes round-trip exactly
+/// (negative input clamps to 0) and stale-handle one-shots still fail.
+/// Init may fail in CI (no audio device) — the checks run only when it
+/// succeeds.
+static void test_bus_volume_roundtrip() {
+  using namespace engine::audio;
+  if (!initialize_audio()) {
+    g_tests.check(true, "bus volume roundtrip (skipped, no device)");
+    return;
+  }
+
+  set_bus_volume(AudioBus::Music, 0.25F);
+  TEST_ASSERT(bus_volume(AudioBus::Music) == 0.25F);
+  set_bus_volume(AudioBus::Sfx, 2.0F);
+  TEST_ASSERT(bus_volume(AudioBus::Sfx) == 2.0F);
+  set_bus_volume(AudioBus::Sfx, -1.0F);
+  TEST_ASSERT(bus_volume(AudioBus::Sfx) == 0.0F);
+  set_bus_volume(AudioBus::Master, 0.75F);
+  TEST_ASSERT(bus_volume(AudioBus::Master) == 0.75F);
+
+  PlayParams params{};
+  TEST_ASSERT(!play_sound_at(SoundHandle{12345U},
+                             engine::math::Vec3(1.0F, 2.0F, 3.0F), params,
+                             AudioBus::Sfx));
+  TEST_ASSERT(!play_music("assets/does_not_exist.wav", 1.0F, false));
+
+  set_listener(engine::math::Vec3(1.0F, 2.0F, 3.0F),
+               engine::math::Vec3(0.0F, 0.0F, -1.0F),
+               engine::math::Vec3(0.0F, 1.0F, 0.0F));
+  update_audio();
+
+  shutdown_audio();
+  g_tests.check(true, "bus volume roundtrip");
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -100,6 +154,8 @@ int main() {
   RUN_TEST(test_stop_without_init);
   RUN_TEST(test_set_master_volume_without_init);
   RUN_TEST(test_update_without_init);
+  RUN_TEST(test_extended_api_without_init);
+  RUN_TEST(test_bus_volume_roundtrip);
 
   return g_tests.finish("Audio tests");
 }

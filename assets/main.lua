@@ -139,6 +139,36 @@ function M.on_begin_play(_self)
 
     g_scene_initialized = true
     engine.log("scene setup done - " .. engine.get_entity_count() .. " entities")
+
+    setup_audio_demo()
+end
+
+-- Audio slice demo: the bundled character walks in place firing footstep
+-- animation events, each one playing a positional footstep on the sfx
+-- bus, over a quiet streamed ambient loop.
+function setup_audio_demo()
+    if g_footstep_sound ~= nil then
+        return
+    end
+    g_footstep_sound = engine.load_sound("assets/sounds/footstep.wav")
+    if g_footstep_sound ~= nil and g_footstep_sound ~= 0 then
+        engine.on_anim_event_handler(function(entity, name)
+            if name == "footstep" and entity ~= nil then
+                local x, y, z = engine.get_position(entity)
+                if x ~= nil then
+                    engine.play_sound_at(g_footstep_sound, x, y, z, 0.8)
+                end
+            end
+        end)
+    end
+
+    local character = engine.find_entity_by_name("Character")
+    if character ~= nil then
+        engine.set_anim_param(character, "speed", 1.0)
+    end
+
+    engine.set_bus_volume("music", 0.35)
+    engine.play_music("assets/sounds/ambient.wav", 1.0, true)
 end
 
 -- Runs per-frame scene coordinator logic.
