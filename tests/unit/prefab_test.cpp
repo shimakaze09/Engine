@@ -214,6 +214,48 @@ int verify_collider_prefab_round_trip() {
   return 0;
 }
 
+/// EXPECTATION: a SpringArmComponent survives the prefab round trip with
+/// every field intact (regression: prefabs silently dropped spring arms).
+int verify_spring_arm_prefab_round_trip() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 90;
+  }
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return 91;
+  }
+  SpringArmComponent springArm{};
+  springArm.armLength = 4.5F;
+  springArm.currentLength = 3.25F;
+  springArm.offset = engine::math::Vec3(0.5F, 1.5F, -0.75F);
+  springArm.lagSpeed = 7.0F;
+  springArm.collisionRadius = 0.35F;
+  springArm.collisionEnabled = true;
+  if (!world->add_spring_arm(entity, springArm)) {
+    return 92;
+  }
+
+  if (!save_prefab(*world, entity, kPrefabPath)) {
+    return 93;
+  }
+  const Entity spawned = instantiate_prefab(*world, kPrefabPath);
+  if (spawned == kInvalidEntity) {
+    return 94;
+  }
+  SpringArmComponent loaded{};
+  if (!world->get_spring_arm(spawned, &loaded) ||
+      (loaded.armLength != 4.5F) || (loaded.currentLength != 3.25F) ||
+      (loaded.offset.x != 0.5F) || (loaded.offset.y != 1.5F) ||
+      (loaded.offset.z != -0.75F) || (loaded.lagSpeed != 7.0F) ||
+      (loaded.collisionRadius != 0.35F) || !loaded.collisionEnabled) {
+    return 95;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -498,6 +540,12 @@ int main() {
   }
 
   result = verify_collider_prefab_round_trip();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_spring_arm_prefab_round_trip();
   if (result != 0) {
     remove_prefab_file();
     return result;

@@ -138,6 +138,19 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     w.end_object();
   }
 
+  SpringArmComponent springArm{};
+  if (world.get_spring_arm(entity, &springArm)) {
+    w.write_key("SpringArmComponent");
+    w.begin_object();
+    w.write_float("armLength", springArm.armLength);
+    w.write_float("currentLength", springArm.currentLength);
+    write_vec3(w, "offset", springArm.offset);
+    w.write_float("lagSpeed", springArm.lagSpeed);
+    w.write_float("collisionRadius", springArm.collisionRadius);
+    w.write_bool("collisionEnabled", springArm.collisionEnabled);
+    w.end_object();
+  }
+
   ReflectionProbeComponent reflectionProbe{};
   if (world.get_reflection_probe_component(entity, &reflectionProbe)) {
     w.write_key(kJsonKeyReflectionProbeComponent);
@@ -451,6 +464,27 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
         !world.add_spot_light_component(entity, spotLight)) {
       return failComponent(
           "instantiate_prefab: failed to add SpotLightComponent");
+    }
+  }
+
+  if (!readComponentObject("SpringArmComponent", &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid SpringArmComponent");
+  }
+  if (hasComponent) {
+    SpringArmComponent springArm{};
+    if (!readFloatField(componentValue, "armLength", &springArm.armLength) ||
+        !readFloatField(componentValue, "currentLength",
+                        &springArm.currentLength) ||
+        !readVec3Field(componentValue, "offset", &springArm.offset) ||
+        !readFloatField(componentValue, "lagSpeed", &springArm.lagSpeed) ||
+        !readFloatField(componentValue, "collisionRadius",
+                        &springArm.collisionRadius) ||
+        !readBoolField(componentValue, "collisionEnabled",
+                       &springArm.collisionEnabled) ||
+        !world.add_spring_arm(entity, springArm)) {
+      return failComponent(
+          "instantiate_prefab: failed to add SpringArmComponent");
     }
   }
 
