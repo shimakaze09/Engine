@@ -5,7 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <vector>
 
 #include "engine/renderer/command_buffer.h"
 
@@ -29,13 +29,15 @@ struct GpuMeshRegistry final {
   std::array<bool, kMaxSlots> occupied{};
 };
 
-/// CPU-side mesh payload decoded from a cooked mesh asset file.
+/// CPU-side mesh payload decoded from a cooked mesh asset file. The
+/// vectors are the single source of allocation truth: float and index
+/// counts derive from their sizes, so metadata can never claim more data
+/// than is owned (review follow-up to audit H-11 — the former raw-array
+/// fields carried independently editable counts with no capacity).
 struct CpuMeshData final {
-  std::unique_ptr<float[]> vertices{};
-  std::unique_ptr<std::uint32_t[]> indices{};
+  std::vector<float> vertices{};
+  std::vector<std::uint32_t> indices{};
   std::uint32_t vertexCount = 0U;
-  std::uint32_t indexCount = 0U;
-  std::size_t vertexFloatCount = 0U;
   std::size_t strideFloats = 6U;
   bool hasUVs = false;
   bool hasSkin = false;

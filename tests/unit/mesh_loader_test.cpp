@@ -274,9 +274,8 @@ int check_out_of_range_index() {
   if (loaded) {
     return 143;
   }
-  return ((meshData.vertexCount == 0U) && (meshData.indexCount == 0U) &&
-          (meshData.vertices == nullptr) && (meshData.indices == nullptr) &&
-          (sizeBytes == 0ULL))
+  return ((meshData.vertexCount == 0U) && meshData.indices.empty() &&
+          meshData.vertices.empty() && (sizeBytes == 0ULL))
              ? 0
              : 144;
 }
@@ -323,9 +322,8 @@ int check_cpu_decode_valid_mesh() {
   if (!loaded) {
     return 92;
   }
-  if ((meshData.vertexCount != 1U) || (meshData.indexCount != 0U) ||
-      (meshData.vertexFloatCount != vertexData.size()) || meshData.hasUVs ||
-      (meshData.vertices == nullptr)) {
+  if ((meshData.vertexCount != 1U) || !meshData.indices.empty() ||
+      (meshData.vertices.size() != vertexData.size()) || meshData.hasUVs) {
     return 93;
   }
   const std::uint64_t expectedSize =
@@ -463,8 +461,8 @@ int check_v3_cpu_decode() {
     return 142;
   }
   if ((meshData.vertexCount != 1U) || (meshData.strideFloats != 16U) ||
-      (meshData.vertexFloatCount != 16U) || !meshData.hasUVs ||
-      !meshData.hasSkin || (meshData.vertices == nullptr)) {
+      (meshData.vertices.size() != 16U) || !meshData.hasUVs ||
+      !meshData.hasSkin) {
     return 143;
   }
   for (std::size_t i = 0U; i < vertexData.size(); ++i) {
@@ -527,17 +525,11 @@ bool make_skinned_mesh_data(engine::renderer::CpuMeshData *outData) {
   if (outData == nullptr) {
     return false;
   }
-  outData->vertices.reset(new (std::nothrow) float[16]{
-      1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.75F, 2.0F, 1.0F, 0.0F,
-      2.0F, 0.5F, 0.25F, 0.25F, 0.0F});
-  if (outData->vertices == nullptr) {
-    return false;
-  }
-  outData->indices.reset();
+  outData->vertices = {1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.75F,
+                       2.0F, 1.0F, 0.0F, 2.0F, 0.5F, 0.25F, 0.25F, 0.0F};
+  outData->indices.clear();
   outData->vertexCount = 1U;
-  outData->indexCount = 0U;
   outData->strideFloats = 16U;
-  outData->vertexFloatCount = 16U;
   outData->hasUVs = true;
   outData->hasSkin = true;
   return true;
@@ -555,7 +547,9 @@ int check_upload_rejects_inconsistent_layout() {
   if (!make_skinned_mesh_data(&meshData)) {
     return 160;
   }
-  meshData.vertexFloatCount = 8U;
+  // Undersized allocation: the vector IS the capacity, so shrinking it
+  // is the review's deliberately-short-buffer regression.
+  meshData.vertices.resize(8U);
   if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
     return 161;
   }

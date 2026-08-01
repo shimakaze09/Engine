@@ -263,35 +263,25 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
 
   // Heap allocation here is intentional: mesh data is variable-size and may
   // exceed the frame allocator budget. This function performs CPU IO only.
-  std::unique_ptr<float[]> vertices{};
+  // The vectors are the allocation truth for every later bounds check.
+  CpuMeshData decoded{};
+  decoded.vertices.resize(vertexFloatCount);
   if (vertexFloatCount > 0U) {
-    vertices.reset(new (std::nothrow) float[vertexFloatCount]);
-    if (vertices == nullptr) {
-      std::fclose(file);
-      return false;
-    }
-
-    if (!read_exact(file, vertices.get(), vertexBytes)) {
+    if (!read_exact(file, decoded.vertices.data(), vertexBytes)) {
       std::fclose(file);
       return false;
     }
   }
 
-  std::unique_ptr<std::uint32_t[]> indices{};
   const std::size_t indexCount = static_cast<std::size_t>(header.indexCount);
+  decoded.indices.resize(indexCount);
   if (indexCount > 0U) {
-    indices.reset(new (std::nothrow) std::uint32_t[indexCount]);
-    if (indices == nullptr) {
+    if (!read_exact(file, decoded.indices.data(), indexBytes)) {
       std::fclose(file);
       return false;
     }
 
-    if (!read_exact(file, indices.get(), indexBytes)) {
-      std::fclose(file);
-      return false;
-    }
-
-    if (!mesh_indices_in_range(indices.get(), header.indexCount,
+    if (!mesh_indices_in_range(decoded.indices.data(), header.indexCount,
                                header.vertexCount)) {
       std::fclose(file);
       return false;
@@ -300,15 +290,10 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
 
   std::fclose(file);
 
-  CpuMeshData decoded{};
   decoded.vertexCount = header.vertexCount;
-  decoded.indexCount = header.indexCount;
-  decoded.vertexFloatCount = vertexFloatCount;
   decoded.strideFloats = strideFloats;
   decoded.hasUVs = isV2 || isV3;
   decoded.hasSkin = isV3;
-  decoded.vertices = std::move(vertices);
-  decoded.indices = std::move(indices);
   if (!mesh_data_valid(decoded)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "mesh asset payload failed validation");
@@ -343,7 +328,7 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
 }
 
 bool mesh_data_valid(const CpuMeshData &meshData) noexcept {
-  if ((meshData.vertexCount == 0U) || (meshData.vertices == nullptr)) {
+  if ((meshData.vertexCount == 0U) || meshData.vertices.empty()) {
     return false;
   }
 
@@ -362,20 +347,28 @@ bool mesh_data_valid(const CpuMeshData &meshData) noexcept {
     return false;
   }
 
+  // The vector size IS the allocation, so this equality proves every
+  // per-vertex access below (and the GPU upload) stays in bounds.
   std::size_t expectedFloatCount = 0U;
   if (!checked_mul(static_cast<std::size_t>(meshData.vertexCount),
                    meshData.strideFloats, &expectedFloatCount) ||
-      (meshData.vertexFloatCount != expectedFloatCount)) {
+      (meshData.vertices.size() != expectedFloatCount)) {
     return false;
   }
 
-  if (!mesh_indices_in_range(meshData.indices.get(), meshData.indexCount,
-                             meshData.vertexCount)) {
+  if (meshData.indices.size() >
+      static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+    return false;
+  }
+  if (!mesh_indices_in_range(
+          meshData.indices.data(),
+          static_cast<std::uint32_t>(meshData.indices.size()),
+          meshData.vertexCount)) {
     return false;
   }
 
   if (meshData.hasSkin) {
-    const float *vertices = meshData.vertices.get();
+    const float *vertices = meshData.vertices.data();
     const float paletteBound = static_cast<float>(kMaxSkinPaletteJoints);
     for (std::size_t vertex = 0U; vertex < meshData.vertexCount; ++vertex) {
       const float *joints =
@@ -437,8 +430,8 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
   }
   dev->bind_array_buffer(mesh.vertexBuffer);
   dev->buffer_data_array(
-      meshData.vertices.get(),
-      static_cast<std::ptrdiff_t>(meshData.vertexFloatCount * sizeof(float)));
+      meshData.vertices.data(),
+      static_cast<std::ptrdiff_t>(meshData.vertices.size() * sizeof(float)));
 
   dev->enable_vertex_attrib(0U);
   dev->vertex_attrib_float(0U, 3, stride, nullptr);
@@ -464,26 +457,22 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
         reinterpret_cast<const void *>(sizeof(float) * 12U));
   }
 
-  if (meshData.indexCount > 0U) {
-    if (meshData.indices == nullptr) {
-      return fail_mesh_upload(dev, &mesh, outMesh);
-    }
+  if (!meshData.indices.empty()) {
     mesh.indexBuffer = dev->create_buffer();
     if (mesh.indexBuffer == 0U) {
       return fail_mesh_upload(dev, &mesh, outMesh);
     }
     dev->bind_element_buffer(mesh.indexBuffer);
     dev->buffer_data_element(
-        meshData.indices.get(),
-        static_cast<std::ptrdiff_t>(static_cast<std::size_t>(
-                                        meshData.indexCount) *
+        meshData.indices.data(),
+        static_cast<std::ptrdiff_t>(meshData.indices.size() *
                                     sizeof(std::uint32_t)));
   }
 
   unbind_mesh_upload_state(dev);
 
   mesh.vertexCount = meshData.vertexCount;
-  mesh.indexCount = meshData.indexCount;
+  mesh.indexCount = static_cast<std::uint32_t>(meshData.indices.size());
   *outMesh = mesh;
   return true;
 }
