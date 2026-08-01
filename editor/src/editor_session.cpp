@@ -336,15 +336,16 @@ void stop_play_mode() noexcept {
     restored = false;
   } else if (!runtime::load_scene(*editor_session().world, editor_session().playSnapshotBuffer.get(),
                                   editor_session().playSnapshotSize)) {
+    // Scene loading is transactional, so the live world is intact after a
+    // failed restore; keep it and the snapshot for recovery/diagnostics
+    // instead of destroying the only remaining copy of the user's work.
     core::log_message(core::LogLevel::Error, "editor",
-                      "failed to restore pre-play scene snapshot");
-    runtime::reset_world(*editor_session().world);
-    core::log_message(core::LogLevel::Warning, "editor",
-                      "world reset to empty after restore failure");
-    editor_session().selectedEntityIndex = 0U;
-    // restored stays true: world is clean and usable, just empty
+                      "failed to restore pre-play scene snapshot; the play "
+                      "world is preserved");
+    clear_entity_selection();
+    restored = false;
   } else {
-    editor_session().selectedEntityIndex = 0U;
+    clear_entity_selection();
   }
 
   editor_session().playState = PlayState::Stopped;
