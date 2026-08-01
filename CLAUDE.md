@@ -125,7 +125,11 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   (`src/joints/`), queries, materials, primitive hull builders
   (`primitive_hulls` — cylinder/pyramid spawn shapes collide as mesh-matched
   convex hulls; box/sphere/capsule stay analytic, mirroring the Unity/Unreal
-  collider model). Talks to the world ONLY through
+  collider model), and a blocked-body warning diagnostic
+  (`blocked_body_diagnostic` TU: logs once per episode when a
+  velocity-driven body's achieved displacement persistently falls below its
+  command; `physics.blocked_warn_steps` cvar, 0 disables). Talks to the
+  world ONLY through
   `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`;
   `collider.cpp` centralizes affine world geometry for every shape.
 - `renderer/` — asset database/manager/streaming (fixed slots + tombstones,

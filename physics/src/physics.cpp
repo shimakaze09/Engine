@@ -24,6 +24,7 @@
 
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "blocked_body_diagnostic.h"
 #include "contact_resolution.h"
 #include "narrow_phase.h"
 #include "physics_internal.h"
@@ -142,6 +143,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                       "resolve_collisions scratch allocation failed");
     return false;
   }
+
+  capture_blocked_body_commands(world);
 
   auto &geometries = resolveScratch->geometries;
   auto &bodyOwners = resolveScratch->bodyOwners;
@@ -533,6 +536,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                                            : math::Vec3(0.0F, 0.0F, 0.0F);
     }
   }
+
+  report_blocked_bodies(world, deltaSeconds);
 
   return true;
 }

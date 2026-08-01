@@ -5,6 +5,7 @@ engine_add_module_library(engine_physics
     src/physics.cpp
     src/physics_payloads.cpp
     src/physics_step.cpp
+    src/blocked_body_diagnostic.cpp
     src/collider.cpp
     src/contact_clip.cpp
     src/contact_resolution.cpp
