@@ -163,6 +163,16 @@ bool extract_primitive(const cgltf_primitive *primitive,
     return false;
   }
 
+  // The cooked format and the index/normal pipeline assume triangle
+  // lists; other modes would cook silently wrong geometry (audit H-19).
+  if (primitive->type != cgltf_primitive_type_triangles) {
+    std::fprintf(stderr,
+                 "error: primitive mode %d unsupported — only triangle "
+                 "lists cook\n",
+                 static_cast<int>(primitive->type));
+    return false;
+  }
+
   const cgltf_accessor *positions =
       find_attribute_accessor(primitive, cgltf_attribute_type_position);
   const cgltf_accessor *normals =

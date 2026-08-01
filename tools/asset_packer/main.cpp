@@ -341,6 +341,17 @@ int main(int argc, char **argv) {
           ? static_cast<cgltf_size>(importSettings.meshIndex)
           : 0U;
   const cgltf_mesh &selectedMesh = data->meshes[meshIdx];
+  // Only mesh 0 is validated at load; a meta-selected mesh needs its own
+  // primitive check or primitives[0] below indexes an empty array
+  // (audit H-19).
+  if (selectedMesh.primitives_count == 0U) {
+    std::fprintf(stderr,
+                 "error: selected mesh %zu has no primitives "
+                 "(importSettings.meshIndex in %s.meta.json)\n",
+                 static_cast<std::size_t>(meshIdx), outputPath);
+    cgltf_free(data);
+    return 5;
+  }
   const cgltf_size primIdx =
       (importSettings.primitiveIndex >= 0 &&
        static_cast<cgltf_size>(importSettings.primitiveIndex) <

@@ -282,6 +282,36 @@ int check_v3_mesh_file_header() {
   return 0;
 }
 
+/// EXPECTATION (audit H-19): a non-triangle primitive mode is rejected
+/// by extraction instead of cooking its data as if it were a triangle
+/// list; the same primitive extracts fine as triangles.
+int check_non_triangle_mode_rejected() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  data->meshes[0].primitives[0].type = cgltf_primitive_type_line_strip;
+  PrimitiveData rejected{};
+  if (extract_primitive(primitive, &rejected, nullptr)) {
+    cgltf_free(data);
+    std::puts("line-strip primitive was accepted");
+    return 1;
+  }
+
+  data->meshes[0].primitives[0].type = cgltf_primitive_type_triangles;
+  PrimitiveData accepted{};
+  const bool ok = extract_primitive(primitive, &accepted, nullptr);
+  cgltf_free(data);
+  if (!ok) {
+    std::puts("triangle primitive was rejected");
+    return 1;
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-20): upAxis conversion rotates positions and
 /// normals with proper rotations — Z-up (0,0,1) lands exactly on Y-up
 /// (0,1,0), X-up (1,0,0) likewise — and Y-up plus unknown values no-op.
@@ -457,6 +487,9 @@ int main() {
   }
   if (result == 0) {
     result = check_generate_normals_applied();
+  }
+  if (result == 0) {
+    result = check_non_triangle_mode_rejected();
   }
   cleanup_fixture_files();
   return result;
