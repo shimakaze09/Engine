@@ -440,6 +440,15 @@ engine_add_test_executable(engine_unit_joints
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_joint_constraints
+    SOURCES
+    joint_constraint_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_manifold
     SOURCES
     manifold_test.cpp

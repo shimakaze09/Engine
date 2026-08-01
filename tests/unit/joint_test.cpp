@@ -6,6 +6,7 @@
 #include <limits>
 #include <new>
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
 #include "engine/physics/physics.h"
@@ -170,6 +171,12 @@ int test_ball_socket_joint() noexcept {
 
 // ---- Slider joint ----------------------------------------------------------
 
+// H-05 rework: the slider's rail is carried by body A (prismatic Jacobian
+// lever rA + d), so correcting a free-floating pair with an off-rail pin
+// legitimately tilts the assembly; the old world-fixed-axis yDiff bound
+// pinned the missing-Jacobian behavior. The contract now asserted: body B
+// converges onto the rail defined by body A's CURRENT orientation, and the
+// relative orientation stays locked to its creation value.
 int test_slider_joint() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
@@ -194,16 +201,29 @@ int test_slider_joint() noexcept {
     world->end_frame_phase();
   }
 
-  // The perpendicular component (Y) should converge towards zero.
   Transform tA{};
   Transform tB{};
   world->get_transform(a, &tA);
   world->get_transform(b, &tB);
 
-  const float yDiff = std::fabs(tA.position.y - tB.position.y);
-  if (yDiff > 0.5F) {
-    std::printf("FAIL slider_joint: yDiff=%.3f\n", yDiff);
+  const math::Vec3 rail = math::rotate_vector(axis, tA.rotation);
+  const math::Vec3 delta = math::sub(tB.position, tA.position);
+  const math::Vec3 perp =
+      math::sub(delta, math::mul(rail, math::dot(delta, rail)));
+  if (math::length(perp) > 1e-3F) {
+    std::printf("FAIL slider_joint: perp=%.5f\n",
+                static_cast<double>(math::length(perp)));
     return 3;
+  }
+
+  const float lockDot = (tA.rotation.x * tB.rotation.x) +
+                        (tA.rotation.y * tB.rotation.y) +
+                        (tA.rotation.z * tB.rotation.z) +
+                        (tA.rotation.w * tB.rotation.w);
+  if (std::fabs(lockDot) < 1.0F - 1e-4F) {
+    std::printf("FAIL slider_joint: lockDot=%.6f\n",
+                static_cast<double>(lockDot));
+    return 4;
   }
   return 0;
 }
