@@ -238,6 +238,27 @@ void render_prep_chunk_job(void *userData) noexcept {
               }
             }
             command.modelMatrix = transforms[i].matrix;
+            if (jobData->interpolationAlpha < 1.0F) {
+              math::Vec3 previousPosition{};
+              math::Quat previousRotation{};
+              math::Vec3 previousScale{};
+              if (jobData->world->get_previous_world_trs(
+                      entities[i], &previousPosition, &previousRotation,
+                      &previousScale)) {
+                const float alpha = jobData->interpolationAlpha;
+                const WorldTransform &current = transforms[i];
+                command.modelMatrix = math::compose_trs(
+                    math::add(previousPosition,
+                              math::mul(math::sub(current.position,
+                                                  previousPosition),
+                                        alpha)),
+                    math::slerp(previousRotation, current.rotation, alpha),
+                    math::add(previousScale,
+                              math::mul(math::sub(current.scale,
+                                                  previousScale),
+                                        alpha)));
+              }
+            }
             static_assert(renderer::kInvalidSkinPalette == kInvalidAnimSlot,
                           "paletteSlot passes through to DrawCommand "
                           "unchanged, so the two invalid sentinels must "
@@ -373,6 +394,7 @@ bool enqueue_render_prep_pipeline(
     core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
     std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
     std::size_t chunkSize, const math::Mat4 &viewProjection,
+    float interpolationAlpha,
     core::JobHandle *outMergeHandle) noexcept {
   if ((context == nullptr) || (world == nullptr) ||
       (mergedCommandBuffer == nullptr) || (assetDatabase == nullptr) ||
@@ -420,6 +442,7 @@ bool enqueue_render_prep_pipeline(
     prepData.meshRegistry = meshRegistry;
     prepData.frameGraphFailed = frameGraphFailed;
     prepData.viewProjection = viewProjection;
+    prepData.interpolationAlpha = interpolationAlpha;
 
     core::Job renderPrepJob{};
     renderPrepJob.function = &render_prep_chunk_job;

@@ -116,6 +116,13 @@ engine_add_test_executable(engine_unit_frame_pacing
     ${CMAKE_SOURCE_DIR}/runtime/src
 )
 
+engine_add_test_executable(engine_unit_world_transform_history
+    SOURCES
+    world_transform_history_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp

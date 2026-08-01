@@ -25,6 +25,7 @@ struct RenderPrepChunkJobData final {
   const renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::atomic<bool> *frameGraphFailed = nullptr;
   math::Mat4 viewProjection{};
+  float interpolationAlpha = 1.0F;
 };
 
 /// Inputs for the merge job combining per-thread buffers.
@@ -55,6 +56,7 @@ bool enqueue_render_prep_pipeline(
     core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
     std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
     std::size_t chunkSize, const math::Mat4 &viewProjection,
+    float interpolationAlpha,
     core::JobHandle *outMergeHandle) noexcept;
 
 } // namespace engine::runtime
