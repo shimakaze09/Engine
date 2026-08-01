@@ -1,15 +1,20 @@
 # CLAUDE.md — Engine
 
-The single project document: instructions, repository map, conventions, and
-roadmap. It replaced the former `PROJECT_INDEX.md`, `TODO.md`,
-`REVIEW_FINDINGS.md`, and the `AGENTS.md` mirror (their full text lives in
-git history). Keep this file updated in the same commit as any change to
-module structure, build commands, test layout, or roadmap status.
+This is the canonical contributor contract for the Engine repository. Keep it
+updated in the same commit as changes to architecture, module structure,
+build commands, test layout, supported behavior, or roadmap status.
+
+Normative sections take precedence in this order: release safety and finding
+closure, hard rules, architecture invariants, working conventions, then the
+roadmap. A roadmap status or historical note never overrides a safety rule.
+When this document conflicts with code or tests, report and resolve the
+mismatch instead of assuming the document is correct.
 
 ## What this is
 
-C++23 game engine built from scratch: SDL3 window/input, OpenGL renderer
-(deferred+forward, PBR/IBL, GLSL 330 core), fixed-capacity ECS (65,536
+C++23 game engine built from scratch: SDL3 window/input, OpenGL 4.5 renderer
+(deferred+forward, PBR/IBL; shaders are predominantly GLSL 330 core while
+`default.frag` currently requires GLSL 450), fixed-capacity ECS (65,536
 entities, double-buffered transforms), CPU-deterministic physics, Lua 5.4
 scripting, miniaudio, ImGui editor. Goal: production level. Game authors work
 through Lua and the editor; engine contributors work in C++ under the rules
@@ -19,55 +24,111 @@ Third-party (all SHA-pinned via FetchContent in the root CMakeLists.txt):
 SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
 (tools only), stb snapshot, miniaudio 0.11.21, OpenGL 4.5+.
 
-## Hard rules (enforced)
+## Hard rules
 
-- C++23 only. No exceptions, no RTTI, no `dynamic_cast`/`typeid`
-  (`/EHs-c- /GR-`, `_HAS_EXCEPTIONS=0`; `/W4 /WX` or `-Werror`).
-  Language features must compile on every CI lane (AppleClang is the
-  laggard — no deducing `this` until its Xcode catches up). Error paths
-  prefer `std::expected<T, E>` in new APIs; never call `.value()` — with
-  exceptions disabled it aborts. Use `has_value()`/`operator*`/`error()`.
-- Engine APIs `noexcept`; explicit return values + logged failure paths.
-  No silent failure; no process termination for recoverable errors.
-- No heap allocation on hot paths (ECS iteration, transform propagation,
-  physics stepping, render prep, command buffers, streaming, input, jobs).
-  Fixed-size/preallocated storage; no unordered containers, locks, or virtual
-  dispatch on hot paths without justification.
-- Dependency flow strictly downward, no cycles or sideways deps:
+Rule labels state how they are enforced:
+
+- **[CI]** has a named mechanical gate.
+- **[REVIEW]** must be demonstrated in the PR and checked by a reviewer.
+- **[OWNER]** requires explicit project-owner approval.
+
+Calling a rule "enforced" without a CI gate, review evidence, or owner decision
+is prohibited.
+
+- **[CI]** C++23 only. No exceptions, no RTTI, no `dynamic_cast`/`typeid`
+  (`/EHs-c- /GR-`, `_HAS_EXCEPTIONS=0`; `/W4 /WX` or `-Werror`). Language
+  features must compile on every CI lane (AppleClang is the laggard — no
+  deducing `this` until its Xcode catches up). Error paths prefer
+  `std::expected<T, E>` in new APIs; never call `.value()` — with exceptions
+  disabled it aborts. Use `has_value()`/`operator*`/`error()`.
+- **[REVIEW]** Public real-time and leaf runtime APIs are `noexcept` only when
+  every operation they invoke is proven non-throwing. A recoverable `noexcept`
+  path must not call allocation-, filesystem-, or thread-creation operations
+  that can terminate under the no-exception build. Cold initialization,
+  editor, tool, and filesystem work uses staged RAII transactions, explicit
+  error results, and rollback. No silent failure and no process termination
+  for recoverable errors.
+- **[REVIEW]** No heap allocation on hot paths (ECS iteration, transform
+  propagation, physics stepping, render prep, command buffers, streaming,
+  input, jobs). Fixed-size/preallocated storage; no unordered containers,
+  locks, or virtual dispatch on hot paths without justification backed by a
+  profile and budget.
+- **[REVIEW]** Dependency flow strictly downward, no cycles or sideways deps:
   `app → editor → runtime → renderer/physics/scripting/audio → core/math`.
-- Public headers are self-contained and never leak SDL/OpenGL/Lua/ImGui/
-  ImGuizmo types. GL stays inside renderer impl; Lua inside scripting impl;
-  editor-only behavior stays in `editor/` behind explicit bridges.
-- Every file needs a REAL file-level purpose comment, and declarations keep
-  concise purpose comments. Both are CI-enforced:
+- **[REVIEW]** Public headers are self-contained and never leak SDL/OpenGL/
+  Lua/ImGui/ImGuizmo types. GL stays inside renderer impl; Lua inside scripting
+  impl; editor-only behavior stays in `editor/` behind explicit bridges.
+- **[CI]** Every source/header file needs a real file-level purpose comment,
+  and declarations keep concise purpose comments. Both are CI-enforced:
   `tools/check_source_comments.py` (presence) and
   `tools/check_comment_quality.py` (no filler patterns; must stay at zero).
-  Comments live ONLY in those two places — file top and above declarations;
-  no comments inside function bodies or on variables unless a constraint
-  genuinely cannot be expressed at the declaration.
-- Changes to math/ECS/physics/renderer/scripting behavior require tests.
-  Determinism-sensitive areas (world, serialization, physics, render-prep,
-  Lua API) pair changes with determinism tests.
-- Test strictness: assert the tested behavior EXACTLY (no loose tolerances on
-  the subject under test); never assert wall-clock timing/throughput in
-  functional tests — only dedicated `engine_bench_*` tests hold performance
-  thresholds (gated against `tests/benchmark/perf_baseline.json`).
-- Tests are append-only: adding tests is always welcome, but an existing
-  test may only be modified when the test itself is defective. A deliberate
-  behavior change that invalidates a pinned test is a decision for the
-  project owner, not a silent test edit.
-- No god files: one responsibility per translation unit. When a TU accretes
-  a second concern, split it (the `command_buffer_*` backend split is the
-  model); ~1,000 lines is the review trigger for engine sources. The
+  Function-body comments are reserved for non-obvious invariants, ordering,
+  units, ownership, or external constraints and explain why, not what.
+- **[CI][REVIEW]** Changes to math/ECS/physics/renderer/scripting behavior
+  require tests. Determinism-sensitive areas (world, serialization, physics,
+  render-prep, Lua API) pair changes with determinism tests.
+- **[REVIEW]** Tests assert the semantic contract at the strictest valid
+  precision. Integer state, serialized data, and promised deterministic hashes
+  are exact. Floating-point physics/render tests use justified absolute and/or
+  relative tolerances plus invariants; arbitrary loose tolerances are
+  forbidden. Functional tests never assert wall-clock timing or throughput —
+  only dedicated `engine_bench_*` tests hold performance thresholds (gated
+  against `tests/benchmark/perf_baseline.json`).
+- **[OWNER]** Existing behavioral tests are contracts, not append-only relics.
+  They may change only when the old contract is defective or an intentional
+  behavior/version migration is approved. The change explains old versus new
+  behavior, proves the new contract, and preserves a legacy mode when content
+  compatibility requires it. Never weaken or delete a test merely to make a
+  change pass.
+- **[REVIEW]** No god files: one responsibility per translation unit. When a TU
+  accretes a second concern, split it (the `command_buffer_*` backend split is
+  the model); ~1,000 lines is the review trigger for engine sources. The
   2026-07-30 split campaign resolved the then-standing offenders; the
   2026-07-31 review found nine TUs back over the trigger (json,
-  render_device_gl, engine_pipeline, world.h, scene_serializer,
-  narrow_phase, editor_panels_inspector, dap_server, asset_database) —
-  queued for the next split pass, owner directs each split. Test files
-  grow by appending (rule above) — split them by starting new suite
-  files, never by relocating existing tests.
-- No new third-party dependencies without confirmation; never ones requiring
-  exceptions/RTTI in engine code.
+  render_device_gl, engine_pipeline, world.h, scene_serializer, narrow_phase,
+  editor_panels_inspector, dap_server, asset_database) — queued for the next
+  split pass, owner directs each split. Split growing tests into focused suite
+  files while preserving test names/history unless an approved contract
+  migration requires a move.
+- **[OWNER]** No new third-party dependencies without confirmation; never ones
+  requiring exceptions/RTTI in engine code.
+- **[REVIEW]** Beginner-friendly APIs never justify incorrect internal
+  semantics. Simplicity comes from presets, defaults, validation, diagnostics,
+  undo/recovery, and progressive disclosure. Standard physics names such as
+  hinge, slider, ball socket, and fixed implement their standard degrees of
+  freedom; simplified alternatives use explicit names and serialized behavior
+  versions.
+- **[REVIEW]** Authored user data is never written by truncating the final
+  destination. Scene, prefab, save, project, metadata, editor settings, input
+  maps, and cooked/generated outputs use staged sibling writes with checked
+  write/flush/sync/close and atomic replacement. Multi-file outputs commit as a
+  transaction or manifest. Failed load, restore, migration, or save preserves
+  the previous valid state.
+
+## Release-safety and finding-closure contract
+
+- A Critical or High finding is closed only when every evidence location and
+  impact in its original scope is addressed. A partial fix may merge, but the
+  unresolved scope remains open under an explicitly linked finding.
+- A regression fails on the base revision and passes on the fixed revision.
+  Record the reproduction and the exact test that proves closure.
+- Tests exercise the production entry point and real dependency wiring. A
+  copied model of a scheduler, serializer, parser, or state machine is useful
+  only as supplementary coverage and never proves the production path.
+- Boundary coverage is mandatory where applicable: zero work, one item, many
+  items, capacity, malformed input, partial failure, cancellation, concurrent
+  access, and repeated lifecycle/world transitions.
+- Data-loss fixes include fault injection for write, flush, sync, close,
+  rename, parse, restore, and rollback boundaries relevant to the change.
+- Concurrency fixes prove happens-before relationships for every branch,
+  including empty ranges, disabled subsystems, submission failure, and
+  catch-up/repeated steps. TSAN is supporting evidence, not proof of the DAG.
+- A PR description distinguishes fixed, partially fixed, deferred, and
+  pre-existing behavior. It must not say "all," "never," "production-ready,"
+  or "closed" beyond what tests and scope demonstrate.
+- "Verified," "landed," and "production-ready" status claims name the commit,
+  test/acceptance evidence, platform scope, and date. Contradicting audit or CI
+  evidence reopens the claim immediately.
 
 ## Build / test (Windows, clang-cl + Ninja; build/ dir already configured)
 
@@ -121,8 +182,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
   speculative contacts, clipped contact manifolds (`contact_clip`,
   `contact_resolution`, `narrow_phase`, `physics_step`,
-  `physics_payloads` TUs), sequential-impulse solver + joints
-  (`src/joints/`), queries, materials, primitive hull builders
+  `physics_payloads` TUs), sequential-impulse contact solver plus six public
+  joint APIs (`src/joints/`; hinge/fixed/slider are currently positional
+  prototype constraints until standard rotational, anchor-frame, and limit
+  semantics land), queries, materials, primitive hull builders
   (`primitive_hulls` — cylinder/pyramid spawn shapes collide as mesh-matched
   convex hulls; box/sphere/capsule stay analytic, mirroring the Unity/Unreal
   collider model), and a blocked-body warning diagnostic
@@ -145,7 +208,8 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - `audio/` — miniaudio-backed: loaded-sound handles, master/music/sfx
   bus groups, a fixed one-shot instance pool (spatialized
   `play_sound_at` + 2D `play_sound_oneshot`), the camera-following 3D
-  listener, and VFS-streamed music (`tools/gen_sounds.py` generates the
+  listener, and VFS-resolved loose-file streaming music (archive-backed
+  streaming remains pending; `tools/gen_sounds.py` generates the
   bundled placeholder WAVs in `assets/sounds/`).
 - `scripting/` — Lua runtime + sandbox (instruction/memory caps), DAP
   debugger, hot reload with state persist, generated bindings
@@ -199,10 +263,14 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 
 ## Architecture invariants
 
-- Entity = `{index, generation}`; index 0 invalid. Component mutation is only
-  legal in `WorldPhase::Input`; writable transforms during Simulation require
-  the `SimulationAccessToken`. Never break transform double-buffering,
-  persistent-id behavior, or entity-capacity assumptions.
+- Internal Entity = `{index, generation}`; index 0 invalid. Any entity handle
+  that can outlive, cross, or be rebound between Worlds also carries and
+  validates World identity. Generation reuse must not silently alias a stale
+  handle within the supported lifetime; capacity and wrap behavior require
+  explicit tests. Component mutation is only legal in `WorldPhase::Input`;
+  writable transforms during Simulation require the
+  `SimulationAccessToken`. Never break transform double-buffering or
+  persistent-id behavior.
 - User-facing scene objects are created through `create_scene_object` and
   always own a non-removable Transform (position, rotation, scale);
   `create_entity` is the internal bare-ECS escape hatch. Spatial components
@@ -216,12 +284,24 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   Transform as non-removable identity. Destroying an entity destroys its
   whole transform subtree (deferred destruction queues the subtree so
   EndPlay fires for every member).
-- Frame: per fixed step, chunked update jobs → chunked physics jobs → one
-  resolve_collisions job → commit swap; then render-prep jobs fill per-thread
-  command buffers merged for the GL flush. Preserve deterministic stepping
-  and thread-count independence.
-- Serialization format changes need migration handling + tests; scene loads
-  stage into a replacement World and commit only on success.
+- Frame: every fixed step has one explicit dependency chain:
+  `begin[n]` → all update/physics work → collision resolve → `commit[n]` →
+  `begin[n+1]`. The happens-before relation must hold for zero jobs, disabled
+  systems, submission failure, catch-up steps, and every worker count. Then
+  render-prep jobs fill per-thread command buffers merged for the GL flush.
+  Preserve deterministic stepping and thread-count independence, and test the
+  production pipeline rather than a copied scheduler model.
+- Serialization has one authoritative persistent-component registry from
+  which parse, copy, reset, migration, and codec coverage are generated or
+  mechanically validated. Format changes require migrations and production-
+  path tests. Parse/load/restore failure leaves the destination unchanged;
+  scene loads stage into a replacement World and commit only on success.
+- Public physics joint names follow their conventional degrees of freedom,
+  anchor-frame, limit, and motor semantics. A simpler constraint must use a
+  different public name. Correcting serialized joint behavior requires an
+  explicit behavior version, migration policy, and before/after tests.
+- Authored files use staged atomic replacement; related multi-file outputs
+  use a manifest or transaction so interruption cannot create a mixed state.
 - Renderer: command construction stays separate from GL execution; preserve
   forward fallback and transparency behavior when touching deferred paths;
   prefer CPU-verifiable renderer tests (GPU tests carry the `gpu` label).
@@ -229,8 +309,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   stack usage; preserve traceback, sandbox, and hot-reload behavior.
 - Private headers in `src/` are the established pattern for module-internal
   APIs — keep using it; do not move them into `include/`.
-- When adding shared utilities, put them in `core` and migrate ALL duplicate
-  call sites in the same series.
+- When adding shared utilities, put them in `core`. Migrate all in-scope
+  duplicate call sites in the same series; if a safe full migration is too
+  broad, enumerate the remaining sites and keep the deduplication finding
+  explicitly open.
 
 ## Working conventions
 
@@ -241,41 +323,59 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   build failures.
 - Verification per change: zero-warning build → headless ctest → targeted
   determinism/bench suites when the area is sensitive → both comment audits.
-  New behavior requires a new or extended test (or an explanation).
+  A correctness fix needs a production-path regression that is red on the
+  base revision and green on the proposed revision, plus applicable boundary
+  cases. If that evidence is impossible, record why and do not claim closure.
+- Every PR carries a scope/closure table for findings it references: fixed,
+  partially fixed, deferred, or pre-existing, with the exact evidence for
+  each status. Reviewers reject broader claims than the patch proves.
 - Prefer `bool`+log, small status objects, or optional-like returns;
   assertions only for programmer errors.
 
-## Product vision (2026-07-19 — priorities derive from this)
+## Product vision (2026-08-01 — priorities derive from this)
 
-The engine's users are beginners making games, scenes, and interactive
-things with no game-dev or modeling background, on whatever hardware they
-have — and the same tool must scale to professional use ("absolute beginner
-to master in the game industry"). What that implies, in priority order:
-device reach over high-end rendering; a commercial-grade editor experience;
-built-in creation tools so no external DCC is ever required (shape/blockout
-tools, starter templates, bundled assets); radically good defaults; and
-one-click sharing, with web export as the headline distribution feature.
-Platforms follow the vision: Windows/Linux editor first, iOS/iPadOS
-runtime, web export once the bgfx migration lands; a macOS editor is likely
-(creators and students use Macs) even though shipping games on macOS stays
-a non-goal; Android is a low-cost later option (bgfx GLES), not a
-commitment.
+The engine has two co-equal goals: a high-end, next-generation-capable core
+and an editor/Lua creation workflow usable by complete beginners. Beginner
+ease comes from strong defaults, presets, templates, validation, guidance,
+undo, and recovery—not from weaker correctness, hidden ambiguity, or
+nonstandard semantics. Advanced users must be able to inspect, profile,
+override, and scale the same systems instead of graduating to a different
+engine architecture.
+
+Priorities are: correctness and user-data safety; a clear beginner creation
+loop; scalable, physically coherent rendering/physics/runtime foundations;
+measured performance budgets and quality tiers; a commercial-grade editor
+with built-in blockout and starter content; and one-click sharing. Device
+reach is delivered through explicit quality tiers and fallbacks, not by
+setting a permanent ceiling on the high-end path. Platforms follow the
+vision: Windows/Linux editor first, web export after the RHI migration, and
+an iOS/iPadOS runtime proof. A macOS editor remains likely; macOS game
+shipping and Android remain product decisions rather than commitments.
 
 ## Roadmap
 
-Production-ready foundations (verified; details in git history of the former
-TODO.md): build/CI/determinism/profiling baseline, ECS + gameplay loop
+Implemented foundations (inventory, not release certification; details live
+in code, tests, and git history): build/CI/determinism/profiling baseline,
+ECS + gameplay loop
 (lifecycle, input incl. touch/rebinding, game mode/state, timers, cameras,
 coroutines, DAP + sandbox + hot reload, binding generator), physics (all
-collider shapes incl. capsule/hull/heightfield, warm-started solver, 6 joint
-types, manifolds, materials/layers, queries, CCD + speculative contacts),
+collider shapes incl. capsule/hull/heightfield, warm-started contact solver,
+six public joint APIs, manifolds, materials/layers, queries, CCD + speculative
+contacts; standard hinge/fixed/slider rotational and anchor-frame semantics
+remain open),
 asset pipeline (64-bit ids, metadata/tags, dependency graph, async streaming
 with budgets, LRU, deterministic cook + thumbnails), renderer through
 deferred+forward, shadows (cascade/spot/point), sky (cubemap/Preetham/
 procedural scatter — `procedural_sky.frag`, the default),
 IBL + reflection probes, fog, instancing + foliage, post stack; 2026-07
-production-hardening campaign (27 findings: correctness, perf, dedup,
-architecture splits, comment quality — all closed, quality CI-enforced).
+production-hardening campaign (27 findings recorded as closed at that time).
+Current audits and regressions supersede historical blanket closure claims;
+any unresolved scope remains open until it meets the closure contract above.
+
+Roadmap status labels describe integration state, not release certification.
+`LANDED` means the named change is present on the stated date; it is
+`VERIFIED` or `PRODUCTION-READY` only when the required commit, production-
+path test evidence, platform scope, and acceptance result are also recorded.
 
 North star — the v1.0 acceptance test (2026-07-30, supersedes the former
 milestone list; priorities derive from the product vision above):
@@ -329,7 +429,8 @@ stutter) at 60 Hz sim.
 - **Audio (from P1-M8, cut down) — LANDED 2026-08-01**: 3D positional
   one-shots from a fixed instance pool (attenuation + pan, listener
   follows the presented camera), master/music/sfx buses with volumes,
-  VFS-streamed music, and Lua audio (`engine.play_sound_at`,
+  VFS-resolved loose-file streaming music (archive-backed streaming is
+  still pending), and Lua audio (`engine.play_sound_at`,
   `set_bus_volume`, `play_music`, `stop_music`); the sample scene's
   character walks with footstep animation events playing positional
   sounds over a streamed ambient loop. CUT: HRTF, DSP
