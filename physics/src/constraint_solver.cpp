@@ -24,14 +24,32 @@ static bool is_finite_joint_vector(const math::Vec3 &value) noexcept {
          std::isfinite(value.z);
 }
 
-/// Reads exact generation-bearing endpoint transforms and rejects self-joints.
+/// Reads exact generation-bearing endpoint poses and rejects self-joints.
+/// Endpoint frames are the hierarchy-COMPOSED world poses, matching what
+/// colliders and queries consume, so a parented endpoint's joint frame is
+/// captured where the entity actually sits (scale is not consumed: anchors
+/// are stored in world metres derived from the world-space pivot).
 static bool read_joint_endpoints(PhysicsWorldView &world, Entity entityA,
                                  Entity entityB, Transform *outTransformA,
                                  Transform *outTransformB) noexcept {
-  return (outTransformA != nullptr) && (outTransformB != nullptr) &&
-         (entityA != kInvalidEntity) && (entityB != kInvalidEntity) &&
-         (entityA != entityB) && world.get_transform(entityA, outTransformA) &&
-         world.get_transform(entityB, outTransformB);
+  if ((outTransformA == nullptr) || (outTransformB == nullptr) ||
+      (entityA == kInvalidEntity) || (entityB == kInvalidEntity) ||
+      (entityA == entityB)) {
+    return false;
+  }
+  PhysicsTransform composedA{};
+  PhysicsTransform composedB{};
+  if (!world.get_physics_transform(entityA, &composedA) ||
+      !world.get_physics_transform(entityB, &composedB)) {
+    return false;
+  }
+  *outTransformA = Transform{};
+  outTransformA->position = composedA.position;
+  outTransformA->rotation = composedA.rotation;
+  *outTransformB = Transform{};
+  outTransformB->position = composedB.position;
+  outTransformB->rotation = composedB.rotation;
+  return true;
 }
 
 /// Logs an invalid joint request and returns the sentinel ID.
@@ -47,17 +65,21 @@ static JointId allocate_joint(PhysicsWorldView &world,
 }
 
 /// Maps a world offset from a body's origin into that body's local frame.
+/// The rotation is normalized on use: the public Transform API accepts
+/// non-unit quaternions and rotate_vector requires unit length.
 static math::Vec3 to_body_local(const Transform &transform,
                                 const math::Vec3 &worldOffset) noexcept {
-  return math::rotate_vector(worldOffset,
-                             math::conjugate(transform.rotation));
+  return math::rotate_vector(
+      worldOffset, math::conjugate(math::normalize(transform.rotation)));
 }
 
-/// Creation-time relative orientation of B in A's frame (qA^-1 qB).
+/// Creation-time relative orientation of B in A's frame (qA^-1 qB), unit
+/// length regardless of the input quaternions' scale.
 static math::Quat relative_rotation(const Transform &transformA,
                                     const Transform &transformB) noexcept {
-  return math::mul(math::conjugate(transformA.rotation),
-                   transformB.rotation);
+  return math::normalize(
+      math::mul(math::conjugate(math::normalize(transformA.rotation)),
+                math::normalize(transformB.rotation)));
 }
 
 /// Any unit vector perpendicular to a unit axis, from its least-aligned
@@ -259,6 +281,30 @@ void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
 
 // --- Main constraint solver -------------------------------------------------
 
+/// Resolves one endpoint's solve frame: a dynamic endpoint (nonzero inverse
+/// mass) is a hierarchy root by the World invariant, so its writable local
+/// transform is used directly; a static endpoint copies its hierarchy-
+/// composed simulation pose into the caller's scratch so a parented anchor
+/// is solved where it actually sits and follows parent motion. Static
+/// endpoints never receive corrections (zero mass share), so writes to the
+/// scratch are inert.
+static Transform *resolve_endpoint_pose(
+    PhysicsWorldView &world, Entity entity,
+    const PhysicsWorldView::SimulationAccessToken &simToken, float invMass,
+    Transform *writable, Transform *scratch) noexcept {
+  if (invMass > 0.0F) {
+    return writable;
+  }
+  PhysicsTransform composed{};
+  if (!world.get_simulation_physics_transform(entity, simToken, &composed)) {
+    return nullptr;
+  }
+  *scratch = Transform{};
+  scratch->position = composed.position;
+  scratch->rotation = composed.rotation;
+  return scratch;
+}
+
 /// Retires constraints whose exact generation-bearing endpoint disappeared.
 static void retire_missing_joint_endpoints(PhysicsWorldView &world,
                                            PhysicsContext &context) noexcept {
@@ -290,7 +336,11 @@ static void retire_missing_joint_endpoints(PhysicsWorldView &world,
 /// multi-DOF corrections would inject drift at rest that their solvers
 /// never remove. A body with zero inverse mass is treated as fully static:
 /// its inverse inertia is forced to zero so joint torques cannot spin a
-/// static anchor whose RigidBody kept the default inertia.
+/// static anchor whose RigidBody kept the default inertia. Static
+/// endpoints read their hierarchy-COMPOSED simulation pose each iteration
+/// so a parented anchor follows its parent; dynamic endpoints are
+/// hierarchy roots by the World invariant, so their writable local
+/// transform IS their world pose and corrections write through unchanged.
 void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
   PhysicsContext &ctx = world.physics_context();
@@ -331,17 +381,27 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       continue;
     }
 
-    const math::Vec3 delta = math::sub(tB->position, tA->position);
+    Transform scratchA{};
+    Transform scratchB{};
+    Transform *poseA = resolve_endpoint_pose(world, j.entityA, simToken,
+                                             invMassA, tA, &scratchA);
+    Transform *poseB = resolve_endpoint_pose(world, j.entityB, simToken,
+                                             invMassB, tB, &scratchB);
+    if ((poseA == nullptr) || (poseB == nullptr)) {
+      continue;
+    }
+
+    const math::Vec3 delta = math::sub(poseB->position, poseA->position);
     const float dist = math::length(delta);
     if (dist < 1e-8F) {
       continue;
     }
     const math::Vec3 dir = math::div(delta, dist);
     const float warmImpulse = j.accumulatedImpulse * 0.8F;
-    tA->position = math::add(
-        tA->position, math::mul(dir, warmImpulse * invMassA / invMassSum));
-    tB->position = math::sub(
-        tB->position, math::mul(dir, warmImpulse * invMassB / invMassSum));
+    poseA->position = math::add(
+        poseA->position, math::mul(dir, warmImpulse * invMassA / invMassSum));
+    poseB->position = math::sub(
+        poseB->position, math::mul(dir, warmImpulse * invMassB / invMassSum));
   }
 
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
@@ -366,8 +426,6 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       RigidBody *bodyB = world.get_rigid_body_ptr(j.entityB);
 
       JointSolveContext solveCtx{};
-      solveCtx.tA = tA;
-      solveCtx.tB = tB;
       solveCtx.bodyA = bodyA;
       solveCtx.bodyB = bodyB;
       solveCtx.invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
@@ -378,6 +436,16 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       solveCtx.invInertiaB = ((bodyB != nullptr) && (bodyB->inverseMass > 0.0F))
                                  ? bodyB->inverseInertia
                                  : 0.0F;
+
+      Transform scratchA{};
+      Transform scratchB{};
+      solveCtx.tA = resolve_endpoint_pose(world, j.entityA, simToken,
+                                          solveCtx.invMassA, tA, &scratchA);
+      solveCtx.tB = resolve_endpoint_pose(world, j.entityB, simToken,
+                                          solveCtx.invMassB, tB, &scratchB);
+      if ((solveCtx.tA == nullptr) || (solveCtx.tB == nullptr)) {
+        continue;
+      }
 
       const auto jointType = static_cast<JointType>(j.type);
 

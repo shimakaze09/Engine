@@ -83,7 +83,8 @@ static void accumulate_anchor_mass(float k[3][3], float invMass,
 
 math::Vec3 joint_world_lever(const Transform &transform,
                              const math::Vec3 &localAnchor) noexcept {
-  return math::rotate_vector(localAnchor, transform.rotation);
+  return math::rotate_vector(localAnchor,
+                             math::normalize(transform.rotation));
 }
 
 void apply_orientation_delta(Transform &transform,
@@ -223,9 +224,10 @@ float project_relative_angular_velocity(JointSolveContext &ctx,
 math::Vec3 relative_orientation_correction(
     const Transform &transformA, const Transform &transformB,
     const math::Quat &reference) noexcept {
-  const math::Quat target = math::mul(transformA.rotation, reference);
-  math::Quat correction =
-      math::mul(target, math::conjugate(transformB.rotation));
+  const math::Quat target =
+      math::mul(math::normalize(transformA.rotation), reference);
+  math::Quat correction = math::mul(
+      target, math::conjugate(math::normalize(transformB.rotation)));
   if (correction.w < 0.0F) {
     correction = math::Quat(-correction.x, -correction.y, -correction.z,
                             -correction.w);

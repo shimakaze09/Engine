@@ -1040,6 +1040,131 @@ int test_slider_behavior_is_frame_invariant() noexcept {
                             5e-3F, "slider_frame");
 }
 
+// ---- Review fix: parented static endpoints follow their parent -------------
+
+int test_parented_static_joint_anchor_follows_parent() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  const Entity parent = world->create_entity();
+  Transform parentT{};
+  parentT.position = math::Vec3(10.0F, 0.0F, 0.0F);
+  if (!world->add_transform(parent, parentT)) {
+    return 2;
+  }
+
+  const Entity child = world->create_entity();
+  Transform childT{};
+  childT.position = math::Vec3(1.0F, 0.0F, 0.0F);
+  childT.parentId = world->persistent_id(parent);
+  if (!world->add_transform(child, childT)) {
+    return 3;
+  }
+
+  Entity mover[1] = {make_free_body(
+      *world, math::Vec3(11.0F, 1.0F, 0.0F), math::Quat(), 1.0F, 1.0F)};
+
+  if (physics::add_ball_socket_joint(*world, child, mover[0],
+                                     math::Vec3(11.0F, 0.0F, 0.0F)) ==
+      physics::kInvalidJointId) {
+    return 4;
+  }
+
+  parentT.position = math::Vec3(15.0F, 0.0F, 0.0F);
+  if (!world->add_transform(parent, parentT)) {
+    return 5;
+  }
+
+  if (!step_world(*world, mover, 1)) {
+    return 6;
+  }
+
+  Transform tB{};
+  world->get_transform(mover[0], &tB);
+  const math::Vec3 worldAnchor = math::add(
+      tB.position,
+      math::rotate_vector(math::Vec3(0.0F, -1.0F, 0.0F), tB.rotation));
+  const math::Vec3 movedPivot(16.0F, 0.0F, 0.0F);
+  if (math::length(math::sub(worldAnchor, movedPivot)) > 1e-3F) {
+    std::printf("FAIL parented_anchor: anchor=(%.5f,%.5f,%.5f)\n",
+                static_cast<double>(worldAnchor.x),
+                static_cast<double>(worldAnchor.y),
+                static_cast<double>(worldAnchor.z));
+    return 7;
+  }
+  if (tB.position.x < 15.0F) {
+    std::printf("FAIL parented_anchor: body stayed at x=%.5f\n",
+                static_cast<double>(tB.position.x));
+    return 8;
+  }
+  return 0;
+}
+
+// ---- Review fix: non-unit input rotations behave as their unit form --------
+
+int run_scaled_rotation_scenario(bool scaleRotation,
+                                 math::Vec3 *outPosition) noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    return 1;
+  }
+
+  math::Quat rotA =
+      math::from_axis_angle(math::Vec3(0.0F, 0.0F, 1.0F), 1.5707963F);
+  if (scaleRotation) {
+    rotA = math::Quat(2.0F * rotA.x, 2.0F * rotA.y, 2.0F * rotA.z,
+                      2.0F * rotA.w);
+  }
+
+  Entity bodies[2] = {
+      make_free_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), rotA, 0.0F, 0.0F),
+      make_free_body(*world, math::Vec3(2.0F, 0.0F, 0.0F), math::Quat(),
+                     1.0F, 1.0F)};
+
+  if (physics::add_ball_socket_joint(*world, bodies[0], bodies[1],
+                                     math::Vec3(1.0F, 0.0F, 0.0F)) ==
+      physics::kInvalidJointId) {
+    return 2;
+  }
+
+  if (!step_world(*world, bodies, 2)) {
+    return 3;
+  }
+
+  Transform tB{};
+  if (!world->get_transform(bodies[1], &tB)) {
+    return 4;
+  }
+  *outPosition = tB.position;
+  return 0;
+}
+
+int test_joint_frame_normalizes_input_rotation() noexcept {
+  math::Vec3 unitRun{};
+  math::Vec3 scaledRun{};
+  if ((run_scaled_rotation_scenario(false, &unitRun) != 0) ||
+      (run_scaled_rotation_scenario(true, &scaledRun) != 0)) {
+    return 1;
+  }
+
+  const math::Vec3 start(2.0F, 0.0F, 0.0F);
+  if (math::length(math::sub(scaledRun, start)) > 1e-4F) {
+    std::printf("FAIL quat_norm: scaled-q displacement %.6f\n",
+                static_cast<double>(
+                    math::length(math::sub(scaledRun, start))));
+    return 2;
+  }
+  if (math::length(math::sub(scaledRun, unitRun)) > 1e-6F) {
+    std::printf("FAIL quat_norm: q vs 2q diverge by %.7f\n",
+                static_cast<double>(
+                    math::length(math::sub(scaledRun, unitRun))));
+    return 3;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -1079,6 +1204,10 @@ int main() {
        test_hinge_behavior_is_frame_invariant},
       {"slider_behavior_is_frame_invariant",
        test_slider_behavior_is_frame_invariant},
+      {"parented_static_joint_anchor_follows_parent",
+       test_parented_static_joint_anchor_follows_parent},
+      {"joint_frame_normalizes_input_rotation",
+       test_joint_frame_normalizes_input_rotation},
   };
 
   int failures = 0;

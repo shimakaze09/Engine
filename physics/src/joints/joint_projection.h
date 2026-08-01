@@ -14,7 +14,9 @@
 
 namespace engine::physics {
 
-/// World-space lever arm of a body-local anchor under the body's rotation.
+/// World-space lever arm of a body-local anchor under the body's rotation,
+/// normalized on use: the public Transform API accepts non-unit
+/// quaternions, and rotate_vector requires unit length.
 math::Vec3 joint_world_lever(const Transform &transform,
                              const math::Vec3 &localAnchor) noexcept;
 
