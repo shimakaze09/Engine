@@ -210,6 +210,19 @@ void draw_toolbar() noexcept {
   }
 
   ImGui::SameLine();
+  const bool canStep =
+      hasWorld && (editor_session().playState == PlayState::Paused);
+  if (!canStep) {
+    ImGui::BeginDisabled();
+  }
+  if (ImGui::Button("Step") && canStep) {
+    editor_session().stepRequested = true;
+  }
+  if (!canStep) {
+    ImGui::EndDisabled();
+  }
+
+  ImGui::SameLine();
   if (!canStop) {
     ImGui::BeginDisabled();
   }

@@ -52,6 +52,9 @@ struct EditorSession final {
   std::array<std::uint32_t, kMaxSelectedEntities> selectedEntities{};
   std::size_t selectedEntityCount = 0U;
   PlayState playState = PlayState::Stopped;
+  // Set by the toolbar Step button while paused; the runtime consumes it
+  // through the editor bridge to simulate exactly one fixed step.
+  bool stepRequested = false;
   std::unique_ptr<char[]> playSnapshotBuffer{};
   std::size_t playSnapshotCapacity = 0U;
   std::size_t playSnapshotSize = 0U;

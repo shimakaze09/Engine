@@ -364,6 +364,16 @@ bool editor_is_playing() noexcept { return editor_session().playState == PlaySta
 
 bool editor_is_paused() noexcept { return editor_session().playState == PlayState::Paused; }
 
+/// Hands one pending Step click to the runtime; only fires while paused.
+bool editor_consume_step_request() noexcept {
+  EditorSession &session = editor_session();
+  if ((session.playState != PlayState::Paused) || !session.stepRequested) {
+    return false;
+  }
+  session.stepRequested = false;
+  return true;
+}
+
 namespace {
 
 bool editor_wants_capture_keyboard() noexcept {
@@ -393,6 +403,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_is_paused,
     &editor_wants_capture_keyboard,
     &editor_wants_capture_mouse,
+    &editor_consume_step_request,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {

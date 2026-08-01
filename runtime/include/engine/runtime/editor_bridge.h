@@ -23,6 +23,9 @@ struct EditorBridge final {
   bool (*is_paused)() noexcept = nullptr;
   bool (*wants_capture_keyboard)() noexcept = nullptr;
   bool (*wants_capture_mouse)() noexcept = nullptr;
+  // True at most once per Step click while paused: the pipeline consumes
+  // the request and simulates exactly one fixed step that frame.
+  bool (*consume_step_request)() noexcept = nullptr;
 };
 
 /// Sets the requested value for editor bridge.

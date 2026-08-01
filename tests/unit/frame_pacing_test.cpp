@@ -1,6 +1,7 @@
 // Verifies the pure frame pacing helpers: vsync interval normalization
-// to the supported set and exact frame-cap wait computation (uncapped,
-// under budget, exactly on budget, and over budget).
+// to the supported set, exact frame-cap wait computation (uncapped,
+// under budget, exactly on budget, and over budget), and the fixed-step
+// count decision including the paused editor's single-step path.
 
 #include "frame_pacing.h"
 
@@ -63,6 +64,59 @@ int check_frame_cap_wait() {
   return 0;
 }
 
+using engine::runtime::fixed_step_decision;
+using engine::runtime::FixedStepDecision;
+
+/// EXPECTATION: a single-step frame simulates exactly one step with the
+/// accumulator cleared, regardless of the accumulator's contents.
+int check_single_step_decision() {
+  const FixedStepDecision paused =
+      fixed_step_decision(true, true, 0.0, 1.0 / 60.0, 4U);
+  if ((paused.stepCount != 1U) || (paused.remainingAccumulator != 0.0)) {
+    return 20;
+  }
+
+  const FixedStepDecision banked =
+      fixed_step_decision(true, true, 0.5, 1.0 / 60.0, 4U);
+  if ((banked.stepCount != 1U) || (banked.remainingAccumulator != 0.0)) {
+    return 21;
+  }
+  return 0;
+}
+
+/// EXPECTATION: playing frames drain whole fixedDelta chunks (clamped to
+/// maxSteps) and keep the exact remainder; non-playing frames without a
+/// step request simulate nothing and clear the accumulator. Exactly
+/// representable values keep every subtraction exact.
+int check_playing_step_decision() {
+  const double delta = 0.25;
+
+  const FixedStepDecision idle =
+      fixed_step_decision(false, false, 0.5, delta, 4U);
+  if ((idle.stepCount != 0U) || (idle.remainingAccumulator != 0.0)) {
+    return 30;
+  }
+
+  const FixedStepDecision under =
+      fixed_step_decision(true, false, 0.125, delta, 4U);
+  if ((under.stepCount != 0U) || (under.remainingAccumulator != 0.125)) {
+    return 31;
+  }
+
+  const FixedStepDecision two =
+      fixed_step_decision(true, false, 0.625, delta, 4U);
+  if ((two.stepCount != 2U) || (two.remainingAccumulator != 0.125)) {
+    return 32;
+  }
+
+  const FixedStepDecision clamped =
+      fixed_step_decision(true, false, 10.0, delta, 4U);
+  if ((clamped.stepCount != 4U) || (clamped.remainingAccumulator != 0.0)) {
+    return 33;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -75,6 +129,16 @@ int main() {
   result = check_frame_cap_wait();
   if (result != 0) {
     std::printf("frame cap wait failed: %d\n", result);
+    return result;
+  }
+  result = check_single_step_decision();
+  if (result != 0) {
+    std::printf("single step decision failed: %d\n", result);
+    return result;
+  }
+  result = check_playing_step_decision();
+  if (result != 0) {
+    std::printf("playing step decision failed: %d\n", result);
     return result;
   }
   return 0;

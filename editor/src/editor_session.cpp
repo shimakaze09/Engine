@@ -302,6 +302,7 @@ void start_play_mode() noexcept {
   }
 
   editor_session().playState = PlayState::Playing;
+  editor_session().stepRequested = false;
   core::log_message(core::LogLevel::Info, "editor", "play");
 }
 
@@ -339,6 +340,7 @@ void stop_play_mode() noexcept {
   }
 
   editor_session().playState = PlayState::Stopped;
+  editor_session().stepRequested = false;
   editor_session().worldRestoreFailed = !restored;
 
   core::log_message(core::LogLevel::Info, "editor", "stop");
