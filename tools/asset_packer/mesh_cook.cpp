@@ -493,6 +493,38 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
   std::unordered_set<const cgltf_image *> seenImages{};
   bool graphValid = true;
 
+  // Registers one external file (image or buffer payload) in the graph
+  // and the digest list so edits to it force a recook.
+  auto addExternalFile = [&](const char *uri) {
+    char resolvedPath[512] = {};
+    if (!resolve_image_path(inputPath, uri, resolvedPath,
+                            sizeof(resolvedPath))) {
+      return;
+    }
+
+    const std::uint64_t depAssetId = hash_path_to_asset_id(resolvedPath);
+    if (depAssetId == 0ULL) {
+      return;
+    }
+
+    engine::tools::register_asset_path(graph, depAssetId, resolvedPath);
+    if (!engine::tools::add_dependency(graph, meshAssetId, depAssetId)) {
+      graphValid = false;
+      return;
+    }
+
+    if (autoDepDigests != nullptr) {
+      bool hashOk = false;
+      const std::uint64_t fileHash = hash_file_contents(resolvedPath, &hashOk);
+      if (hashOk) {
+        DependencyDigest digest{};
+        digest.path = resolvedPath;
+        digest.hash = fileHash;
+        autoDepDigests->push_back(digest);
+      }
+    }
+  };
+
   auto processTexture = [&](const cgltf_texture_view &texView) {
     if ((texView.texture == nullptr) || (texView.texture->image == nullptr)) {
       return;
@@ -504,35 +536,19 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
     if (!seenImages.insert(image).second) {
       return;
     }
-
-    char resolvedPath[512] = {};
-    if (!resolve_image_path(inputPath, image->uri, resolvedPath,
-                            sizeof(resolvedPath))) {
-      return;
-    }
-
-    const std::uint64_t texAssetId = hash_path_to_asset_id(resolvedPath);
-    if (texAssetId == 0ULL) {
-      return;
-    }
-
-    engine::tools::register_asset_path(graph, texAssetId, resolvedPath);
-    if (!engine::tools::add_dependency(graph, meshAssetId, texAssetId)) {
-      graphValid = false;
-      return;
-    }
-
-      if (autoDepDigests != nullptr) {
-      bool hashOk = false;
-      const std::uint64_t fileHash = hash_file_contents(resolvedPath, &hashOk);
-      if (hashOk) {
-        DependencyDigest digest{};
-        digest.path = resolvedPath;
-        digest.hash = fileHash;
-        autoDepDigests->push_back(digest);
-      }
-    }
+    addExternalFile(image->uri);
   };
+
+  // External buffer payloads (.bin) carry the actual vertex data; a
+  // payload edit without a .gltf change must still recook (audit H-20).
+  for (cgltf_size bi = 0U; bi < data->buffers_count; ++bi) {
+    const cgltf_buffer &buffer = data->buffers[bi];
+    if ((buffer.uri == nullptr) ||
+        (std::strncmp(buffer.uri, "data:", 5U) == 0)) {
+      continue; // GLB-embedded or inline base64 payloads have no file.
+    }
+    addExternalFile(buffer.uri);
+  }
 
   for (cgltf_size mi = 0U; mi < data->meshes_count; ++mi) {
     const cgltf_mesh &mesh = data->meshes[mi];

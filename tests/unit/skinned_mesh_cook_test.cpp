@@ -282,6 +282,62 @@ int check_v3_mesh_file_header() {
   return 0;
 }
 
+/// EXPECTATION (audit H-20): the external .bin buffer payload the glTF
+/// references lands in both the dependency graph and the auto digest
+/// list, so editing vertex data without touching the .gltf still forces
+/// a recook.
+int check_external_buffer_becomes_dependency() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  engine::tools::DependencyGraph graph{};
+  std::vector<DependencyDigest> digests{};
+  const std::uint64_t meshAssetId = hash_path_to_asset_id(kGltfPath);
+  const bool extracted = extract_gltf_dependencies(data, kGltfPath,
+                                                   meshAssetId, &graph,
+                                                   &digests);
+  cgltf_free(data);
+  if (!extracted) {
+    std::puts("dependency extraction failed");
+    return 1;
+  }
+
+  bool binDigested = false;
+  for (const DependencyDigest &digest : digests) {
+    if ((digest.path.find(kBinPath) != std::string::npos) &&
+        (digest.hash != 0ULL)) {
+      binDigested = true;
+      break;
+    }
+  }
+  if (!binDigested) {
+    std::puts("external buffer missing from dependency digests");
+    return 1;
+  }
+
+  engine::tools::DependencyGraph::AssetId depIds[8] = {};
+  const std::size_t depCount =
+      engine::tools::get_dependencies(&graph, meshAssetId, depIds, 8U);
+  bool binInGraph = false;
+  for (std::size_t i = 0U; i < depCount; ++i) {
+    auto pathIt = graph.assetPaths.find(depIds[i]);
+    if ((pathIt != graph.assetPaths.end()) &&
+        (pathIt->second.find(kBinPath) != std::string::npos)) {
+      binInGraph = true;
+      break;
+    }
+  }
+  if (!binInGraph) {
+    std::puts("external buffer missing from the dependency graph");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -295,6 +351,9 @@ int main() {
   }
   if (result == 0) {
     result = check_v3_mesh_file_header();
+  }
+  if (result == 0) {
+    result = check_external_buffer_becomes_dependency();
   }
   cleanup_fixture_files();
   return result;
