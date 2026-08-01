@@ -145,6 +145,27 @@ static void test_bus_volume_roundtrip() {
   g_tests.check(true, "bus volume roundtrip");
 }
 
+/// EXPECTATION (audit H-22): a forged out-of-range AudioBus value is
+/// rejected at the public API boundary — set_bus_volume must not write
+/// past the three-bus volume array and bus_volume must return the 1.0
+/// fallback — both before and after initialization.
+static void test_out_of_range_bus_rejected() {
+  using namespace engine::audio;
+  const auto forgedBus = static_cast<AudioBus>(7);
+
+  set_bus_volume(forgedBus, 123.0F);
+  TEST_ASSERT(bus_volume(forgedBus) == 1.0F);
+
+  if (initialize_audio()) {
+    set_bus_volume(AudioBus::Sfx, 0.5F);
+    set_bus_volume(forgedBus, 123.0F);
+    TEST_ASSERT(bus_volume(forgedBus) == 1.0F);
+    TEST_ASSERT(bus_volume(AudioBus::Sfx) == 0.5F);
+    shutdown_audio();
+  }
+  g_tests.check(true, "out-of-range bus rejected");
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -156,6 +177,7 @@ int main() {
   RUN_TEST(test_update_without_init);
   RUN_TEST(test_extended_api_without_init);
   RUN_TEST(test_bus_volume_roundtrip);
+  RUN_TEST(test_out_of_range_bus_rejected);
 
   return g_tests.finish("Audio tests");
 }

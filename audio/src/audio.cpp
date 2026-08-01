@@ -96,6 +96,15 @@ void reset_one_shot(OneShotInstance &instance) noexcept {
   instance = OneShotInstance{};
 }
 
+/// Rejects enum values outside the declared buses before any array
+/// indexing — AudioBus arrives across the public API boundary and a
+/// caller-forged value would otherwise write past busVolumes (audit
+/// H-22).
+bool bus_valid(AudioBus bus) noexcept {
+  return static_cast<std::uint8_t>(bus) <=
+         static_cast<std::uint8_t>(AudioBus::Sfx);
+}
+
 /// Group routing for a bus; nullptr = the engine endpoint (Master).
 ma_sound_group *bus_group(AudioBus bus) noexcept {
   if (!g_audio.busesReady) {
@@ -239,11 +248,20 @@ bool initialize_audio() noexcept {
     return false;
   }
 
-  g_audio.busesReady =
-      (ma_sound_group_init(&g_audio.engine, 0U, nullptr,
-                           &g_audio.musicGroup) == MA_SUCCESS) &&
+  // Both groups or neither: a partial pair would leak the first group,
+  // because shutdown releases them only when busesReady is set (audit
+  // H-22).
+  const bool musicGroupReady =
+      ma_sound_group_init(&g_audio.engine, 0U, nullptr, &g_audio.musicGroup) ==
+      MA_SUCCESS;
+  const bool sfxGroupReady =
+      musicGroupReady &&
       (ma_sound_group_init(&g_audio.engine, 0U, nullptr, &g_audio.sfxGroup) ==
        MA_SUCCESS);
+  if (musicGroupReady && !sfxGroupReady) {
+    ma_sound_group_uninit(&g_audio.musicGroup);
+  }
+  g_audio.busesReady = musicGroupReady && sfxGroupReady;
   if (!g_audio.busesReady) {
     core::log_message(core::LogLevel::Warning, "audio",
                       "bus groups unavailable; routing through the engine");
@@ -431,7 +449,7 @@ void set_master_volume(float volume) noexcept {
 }
 
 void set_bus_volume(AudioBus bus, float volume) noexcept {
-  if (!g_audio.initialized) {
+  if (!g_audio.initialized || !bus_valid(bus)) {
     return;
   }
   const float clamped = (volume > 0.0F) ? volume : 0.0F;
@@ -454,7 +472,7 @@ void set_bus_volume(AudioBus bus, float volume) noexcept {
 }
 
 float bus_volume(AudioBus bus) noexcept {
-  if (!g_audio.initialized) {
+  if (!g_audio.initialized || !bus_valid(bus)) {
     return 1.0F;
   }
   return g_audio.busVolumes[static_cast<std::size_t>(bus)];
