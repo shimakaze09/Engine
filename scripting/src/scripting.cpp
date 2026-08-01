@@ -257,6 +257,11 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_remove_anim_event_handler);
   lua_setfield(state, -2, "remove_anim_event_handler");
 
+  lua_pushcfunction(state, &lua_engine_save_data);
+  lua_setfield(state, -2, "save_data");
+  lua_pushcfunction(state, &lua_engine_load_data);
+  lua_setfield(state, -2, "load_data");
+
   lua_pushcfunction(state, &lua_engine_set_timeout);
   lua_setfield(state, -2, "set_timeout");
   lua_pushcfunction(state, &lua_engine_set_interval);

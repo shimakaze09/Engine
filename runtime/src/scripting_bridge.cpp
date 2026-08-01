@@ -14,6 +14,7 @@
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/prefab_serializer.h"
+#include "engine/runtime/save_data.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
@@ -530,6 +531,16 @@ bool scripting_play_music(const char *path, float volume,
 
 void scripting_stop_music() noexcept { audio::stop_music(); }
 
+bool scripting_save_game_data(const char *json,
+                              std::size_t length) noexcept {
+  return runtime::save_game_data(json, length);
+}
+
+bool scripting_load_game_data(char *out, std::size_t capacity,
+                              std::size_t *outLength) noexcept {
+  return runtime::load_game_data(out, capacity, outLength);
+}
+
 bool scripting_save_scene(const runtime::World *world,
                           const char *path) noexcept {
   return (world != nullptr) && runtime::save_scene(*world, path);
@@ -927,6 +938,8 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_set_bus_volume,
     &scripting_play_music,
     &scripting_stop_music,
+    &scripting_save_game_data,
+    &scripting_load_game_data,
     &scripting_save_scene,
     &scripting_save_prefab,
     &scripting_instantiate_prefab,
