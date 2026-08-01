@@ -2,6 +2,7 @@
 
 #include "engine/renderer/mesh_loader.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -25,6 +26,11 @@ constexpr std::size_t kVertexStrideV3Floats = 16U;
 /// 3-7 are reserved for the per-instance model matrix and foliage data.
 constexpr std::uint32_t kSkinJointsAttrib = 8U;
 constexpr std::uint32_t kSkinWeightsAttrib = 9U;
+
+/// Float offsets of the joint-index and weight attributes inside a
+/// stride-16 skinned vertex (position 0-2, normal 3-5, uv 6-7).
+constexpr std::size_t kSkinJointOffsetFloats = 8U;
+constexpr std::size_t kSkinWeightOffsetFloats = 12U;
 constexpr std::uint32_t kMaxMeshVertexCount = 1000000U;
 constexpr std::uint32_t kMaxMeshIndexCount = 3000000U;
 
@@ -294,14 +300,22 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
 
   std::fclose(file);
 
-  outData->vertexCount = header.vertexCount;
-  outData->indexCount = header.indexCount;
-  outData->vertexFloatCount = vertexFloatCount;
-  outData->strideFloats = strideFloats;
-  outData->hasUVs = isV2 || isV3;
-  outData->hasSkin = isV3;
-  outData->vertices = std::move(vertices);
-  outData->indices = std::move(indices);
+  CpuMeshData decoded{};
+  decoded.vertexCount = header.vertexCount;
+  decoded.indexCount = header.indexCount;
+  decoded.vertexFloatCount = vertexFloatCount;
+  decoded.strideFloats = strideFloats;
+  decoded.hasUVs = isV2 || isV3;
+  decoded.hasSkin = isV3;
+  decoded.vertices = std::move(vertices);
+  decoded.indices = std::move(indices);
+  if (!mesh_data_valid(decoded)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "mesh asset payload failed validation");
+    return false;
+  }
+
+  *outData = std::move(decoded);
   if (outSizeBytes != nullptr) {
     *outSizeBytes = static_cast<std::uint64_t>(expectedSize);
   }
@@ -328,18 +342,72 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   return upload_mesh_data_to_gpu(meshData, outMesh);
 }
 
+bool mesh_data_valid(const CpuMeshData &meshData) noexcept {
+  if ((meshData.vertexCount == 0U) || (meshData.vertices == nullptr)) {
+    return false;
+  }
+
+  // Skinned vertices carry joints/weights behind the UV slot, so a skin
+  // flag without UVs would misdeclare the attribute offsets.
+  if (meshData.hasSkin && !meshData.hasUVs) {
+    return false;
+  }
+  std::size_t expectedStride = kVertexStrideV1Floats;
+  if (meshData.hasSkin) {
+    expectedStride = kVertexStrideV3Floats;
+  } else if (meshData.hasUVs) {
+    expectedStride = kVertexStrideV2Floats;
+  }
+  if (meshData.strideFloats != expectedStride) {
+    return false;
+  }
+
+  std::size_t expectedFloatCount = 0U;
+  if (!checked_mul(static_cast<std::size_t>(meshData.vertexCount),
+                   meshData.strideFloats, &expectedFloatCount) ||
+      (meshData.vertexFloatCount != expectedFloatCount)) {
+    return false;
+  }
+
+  if (!mesh_indices_in_range(meshData.indices.get(), meshData.indexCount,
+                             meshData.vertexCount)) {
+    return false;
+  }
+
+  if (meshData.hasSkin) {
+    const float *vertices = meshData.vertices.get();
+    const float paletteBound = static_cast<float>(kMaxSkinPaletteJoints);
+    for (std::size_t vertex = 0U; vertex < meshData.vertexCount; ++vertex) {
+      const float *joints =
+          vertices + (vertex * meshData.strideFloats) + kSkinJointOffsetFloats;
+      const float *weights =
+          vertices + (vertex * meshData.strideFloats) + kSkinWeightOffsetFloats;
+      for (std::size_t component = 0U; component < 4U; ++component) {
+        if (!std::isfinite(joints[component]) || (joints[component] < 0.0F) ||
+            (joints[component] >= paletteBound)) {
+          return false;
+        }
+        if (!std::isfinite(weights[component])) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 // Precondition: caller must own the GL context before calling this function.
 bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                              GpuMesh *outMesh) noexcept {
-  if ((outMesh == nullptr) || (meshData.vertexCount == 0U) ||
-      (meshData.vertices == nullptr)) {
+  if (outMesh == nullptr) {
     return false;
   }
 
   *outMesh = GpuMesh{};
 
-  if (!mesh_indices_in_range(meshData.indices.get(), meshData.indexCount,
-                             meshData.vertexCount)) {
+  if (!mesh_data_valid(meshData)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "mesh upload rejected inconsistent CpuMeshData");
     return false;
   }
 
