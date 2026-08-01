@@ -44,7 +44,6 @@
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
-#include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -357,26 +356,7 @@ void EntityCreateCommand::execute() noexcept {
     static_cast<void>(world->add_mesh_component(entity, mesh));
   }
   if (hasCollider) {
-    runtime::Collider collider = colliderComponent;
-    physics::ConvexHullData hull{};
-    bool hullBuilt = false;
-    if (hullKind == SpawnHullKind::Cylinder) {
-      hullBuilt = physics::build_cylinder_hull(&hull);
-    } else if (hullKind == SpawnHullKind::Pyramid) {
-      hullBuilt = physics::build_pyramid_hull(&hull);
-    }
-    if (hullBuilt) {
-      collider.shape = math::ColliderShape::ConvexHull;
-      collider.halfExtents = hull.localHalfExtents;
-    }
-    static_cast<void>(world->add_collider(entity, collider));
-    if (hullBuilt && !runtime::set_convex_hull_data(*world, entity, hull)) {
-      core::log_message(core::LogLevel::Warning, "editor",
-                        "primitive spawn hull slots exhausted — falling back "
-                        "to the box collider");
-      collider = colliderComponent;
-      static_cast<void>(world->add_collider(entity, collider));
-    }
+    static_cast<void>(world->add_collider(entity, colliderComponent));
   }
 }
 
@@ -565,7 +545,7 @@ runtime::Entity execute_asset_spawn(
 }
 
 /// Per-primitive spawn description: display name, builtin mesh path,
-/// resting height, fallback collider, and hull rebuild kind.
+/// resting height, fallback collider, and hull provenance.
 struct PrimitiveSpawnDesc final {
   const char *name = nullptr;
   const char *builtinPath = nullptr;
@@ -573,7 +553,7 @@ struct PrimitiveSpawnDesc final {
   math::ColliderShape fallbackShape = math::ColliderShape::AABB;
   math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
   math::Vec3 colliderLocalPosition = math::Vec3(0.0F, 0.0F, 0.0F);
-  SpawnHullKind hullKind = SpawnHullKind::None;
+  math::HullSource hullSource = math::HullSource::None;
 };
 
 /// Returns the spawn description for a built-in blockout primitive.
@@ -594,7 +574,7 @@ static PrimitiveSpawnDesc primitive_spawn_desc(
     desc.name = "Cylinder";
     desc.builtinPath = "builtin://cylinder";
     desc.fallbackShape = math::ColliderShape::Capsule;
-    desc.hullKind = SpawnHullKind::Cylinder;
+    desc.hullSource = math::HullSource::Cylinder;
     break;
   case EditorPrimitive::Capsule:
     desc.name = "Capsule";
@@ -606,7 +586,7 @@ static PrimitiveSpawnDesc primitive_spawn_desc(
     desc.name = "Pyramid";
     desc.builtinPath = "builtin://pyramid";
     desc.halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
-    desc.hullKind = SpawnHullKind::Pyramid;
+    desc.hullSource = math::HullSource::Pyramid;
     break;
   case EditorPrimitive::Plane:
     desc.name = "Plane";
@@ -648,7 +628,18 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->colliderComponent.shape = desc.fallbackShape;
   command->colliderComponent.halfExtents = desc.halfExtents;
   command->colliderComponent.localPosition = desc.colliderLocalPosition;
-  command->hullKind = desc.hullKind;
+  physics::ConvexHullData hull{};
+  bool hullBuilt = false;
+  if (desc.hullSource == math::HullSource::Cylinder) {
+    hullBuilt = physics::build_cylinder_hull(&hull);
+  } else if (desc.hullSource == math::HullSource::Pyramid) {
+    hullBuilt = physics::build_pyramid_hull(&hull);
+  }
+  if (hullBuilt) {
+    command->colliderComponent.shape = math::ColliderShape::ConvexHull;
+    command->colliderComponent.hullSource = desc.hullSource;
+    command->colliderComponent.halfExtents = hull.localHalfExtents;
+  }
   editor_session().commandHistory.execute(command);
   return world->find_entity_by_persistent_id(command->persistentId);
 }

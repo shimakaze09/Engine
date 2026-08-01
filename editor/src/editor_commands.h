@@ -139,15 +139,11 @@ struct ReparentCommand final : EditorCommand {
 bool execute_reparent(runtime::Entity child,
                       runtime::Entity newParent) noexcept;
 
-/// Convex-hull payload kinds a create command rebuilds on each execute
-/// (the payload lives in the PhysicsContext, outside component snapshots,
-/// so redo must reconstruct it from the primitive builders).
-enum class SpawnHullKind : std::uint8_t { None, Cylinder, Pyramid };
-
 /// Undoable scene-object creation (optionally carrying an initial mesh
 /// and collider for asset/primitive spawns); redo re-creates the entity
 /// under its original persistent id so later history entries keep
-/// resolving.
+/// resolving. Hull payloads ride Collider::hullSource — World::add_collider
+/// rebuilds them on every execute, so the command carries no hull state.
 struct EntityCreateCommand final : EditorCommand {
   runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
   runtime::NameComponent name{};
@@ -156,7 +152,6 @@ struct EntityCreateCommand final : EditorCommand {
   runtime::MeshComponent mesh{};
   bool hasCollider = false;
   runtime::Collider colliderComponent{};
-  SpawnHullKind hullKind = SpawnHullKind::None;
 
   void execute() noexcept override;
   void undo() noexcept override;
