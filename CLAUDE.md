@@ -175,10 +175,14 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   persistent id), panel TUs (main/inspector/diagnostics/assets/viewport;
   asset browser drags .mesh entries onto the viewport), editor + debug
   cameras, command history.
-- `assets/` — GLSL shaders, sample Lua scripts, sample meshes (synced to the
-  build dir by CMake). `tools/` — asset_packer (deterministic cook,
-  thumbnails, glTF mesh/skeleton/animation import, dependency graph), binding
-  generator, comment audits, CI helpers. `tests/` — unit / integration /
+- `assets/` — GLSL shaders, sample Lua scripts, sample meshes, the bundled
+  prop pack (`props/`, cooked from generated glTFs), sounds, and the Island
+  Hopper template (`templates/island_hopper.json`, installed as
+  `scene.json`) — synced to the build dir by CMake. `tools/` — asset_packer
+  (deterministic cook, thumbnails, glTF mesh/skeleton/animation import,
+  dependency graph), binding generator, asset generators (`gen_character`,
+  `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, CI
+  helpers. `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
   `.github/workflows/ci.yml` — 10 jobs: build matrix (3 OS × 2 configs),
   determinism hash compare, static analysis + comment audits, clang-tidy,
@@ -349,10 +353,23 @@ stutter) at 60 Hz sim.
   as JSON in the per-user platform save directory
   (`runtime/save_data.{h,cpp}`, `platform_get_save_dir`). CUT: additive
   scenes, streaming volumes, LOD hysteresis, multi-slot saves.
-- **Creator kit v1 (elevated by the vision)**: blockout authoring with the
-  built-in primitives (grid snapping, material presets), the Island Hopper
-  starter template itself, and a bundled mini asset pack (1 rigged
-  character, ~20 props, ~15 sounds). CUT: CSG tools.
+- **Creator kit v1 (elevated by the vision) — LANDED 2026-08-01**:
+  blockout authoring (the Entities panel's Add Primitive menu spawns the
+  built-in shapes as undoable static scene objects with matching
+  colliders — cylinder/pyramid hull payloads are rebuilt on redo; a
+  toolbar Snap toggle drives ImGuizmo grid/angle snapping; the mesh
+  inspector applies named material presets as undoable edits); the
+  bundled asset pack (`tools/gen_props.py` → 21 cooked blocky props in
+  `assets/props/`, `tools/gen_sounds.py` → 15 deterministic WAVs, plus
+  the rigged character); and the Island Hopper starter template
+  (`tools/gen_island_scene.py` → `assets/templates/island_hopper.json`,
+  also installed as `assets/scene.json` so File → Load Scene → Play runs
+  it out of the box): island blockout, coins + bonus gem, hop route with
+  moving platform and falling-rock hazard, goal flag with best-time save
+  via `engine.save_data`, and the animated character with follow camera
+  (`assets/scripts/island_*.lua`, `moving_platform.lua`,
+  `falling_rock.lua`). The v1.0 "new project from template" flow will
+  formalize template instantiation. CUT: CSG tools.
 - **Frame pacing (pulled forward from P1-M12) — LANDED 2026-08-01**:
   `r_vsync` (0/1/adaptive, applied live), `r_max_fps` sleep-then-spin cap
   (verified 60 frames per wall second), and fixed-step render
