@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <system_error>
 
@@ -41,38 +42,50 @@ unsigned long current_process_id() noexcept {
 
 AtomicFileWriter::~AtomicFileWriter() noexcept { abort(); }
 
+// Member state is committed only after every validation and the open
+// succeed, so a refused begin can never arm cleanup with a truncated
+// path that aliases the destination or an unrelated file.
 bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
   if ((destinationPath == nullptr) || (m_file != nullptr)) {
     return false;
   }
 
+  char destination[sizeof(m_destinationPath)] = {};
   const int destinationFormatted =
-      std::snprintf(m_destinationPath, sizeof(m_destinationPath), "%s",
-                    destinationPath);
+      std::snprintf(destination, sizeof(destination), "%s", destinationPath);
   if ((destinationFormatted <= 0) ||
       (static_cast<std::size_t>(destinationFormatted) >=
-       sizeof(m_destinationPath))) {
+       sizeof(destination))) {
     return false;
   }
 
   const std::uint32_t serial =
       g_tempSerial.fetch_add(1U, std::memory_order_relaxed);
+  char temp[sizeof(m_tempPath)] = {};
   const int tempFormatted =
-      std::snprintf(m_tempPath, sizeof(m_tempPath), "%s.new.%lu.%u",
-                    destinationPath, current_process_id(), serial);
+      std::snprintf(temp, sizeof(temp), "%s.new.%lu.%u", destinationPath,
+                    current_process_id(), serial);
   if ((tempFormatted <= 0) ||
-      (static_cast<std::size_t>(tempFormatted) >= sizeof(m_tempPath))) {
+      (static_cast<std::size_t>(tempFormatted) >= sizeof(temp))) {
     return false;
   }
 
+  std::FILE *file = nullptr;
 #ifdef _WIN32
-  if (fopen_s(&m_file, m_tempPath, "wb") != 0) {
-    m_file = nullptr;
+  if (fopen_s(&file, temp, "wb") != 0) {
+    file = nullptr;
   }
 #else
-  m_file = std::fopen(m_tempPath, "wb");
+  file = std::fopen(temp, "wb");
 #endif
-  return m_file != nullptr;
+  if (file == nullptr) {
+    return false;
+  }
+
+  std::memcpy(m_destinationPath, destination, sizeof(m_destinationPath));
+  std::memcpy(m_tempPath, temp, sizeof(m_tempPath));
+  m_file = file;
+  return true;
 }
 
 bool AtomicFileWriter::write(const void *data, std::size_t sizeBytes) noexcept {
@@ -112,6 +125,8 @@ bool AtomicFileWriter::commit() noexcept {
     std::error_code removeError{};
     std::filesystem::remove(m_tempPath, removeError);
   }
+  m_tempPath[0] = '\0';
+  m_destinationPath[0] = '\0';
   return ok;
 }
 
@@ -125,6 +140,7 @@ void AtomicFileWriter::abort() noexcept {
     std::filesystem::remove(m_tempPath, removeError);
     m_tempPath[0] = '\0';
   }
+  m_destinationPath[0] = '\0';
 }
 
 bool atomic_write_file(const char *path, const void *data,

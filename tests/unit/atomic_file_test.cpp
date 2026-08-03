@@ -216,6 +216,77 @@ int check_streaming_writer() {
   return 0;
 }
 
+/// EXPECTATION (PR #51 review): a destination path that fits the writer's
+/// buffer while its ".new" temporary name does not is refused by begin
+/// without arming cleanup — the truncated temporary aliases the
+/// destination byte-for-byte at the boundary, so the base revision's
+/// destructor deleted the destination file a failed begin promised to
+/// leave untouched.
+int check_overlong_temp_path_leaves_destination() {
+  const char *baseDirectory = "atomic_file_test_overlong_dir";
+  std::error_code ec{};
+  std::filesystem::remove_all(baseDirectory, ec);
+  if (!std::filesystem::create_directory(baseDirectory, ec) || ec) {
+    return 50;
+  }
+
+  char victimPath[1100] = {};
+  std::snprintf(victimPath, sizeof(victimPath), "%s", baseDirectory);
+  std::size_t length = std::strlen(victimPath);
+  char segment[102] = {};
+  segment[0] = '/';
+  std::memset(segment + 1, 'd', 100U);
+  while ((length + 101U + 2U) <= 1023U) {
+    std::memcpy(victimPath + length, segment, 101U);
+    length += 101U;
+    victimPath[length] = '\0';
+    if (!std::filesystem::create_directory(victimPath, ec) || ec) {
+      std::printf("overlong-path setup unsupported here — skipped\n");
+      std::filesystem::remove_all(baseDirectory, ec);
+      return 0;
+    }
+  }
+  victimPath[length] = '/';
+  ++length;
+  while (length < 1023U) {
+    victimPath[length] = 'f';
+    ++length;
+  }
+  victimPath[length] = '\0';
+
+  std::FILE *victim = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&victim, victimPath, "wb") != 0) {
+    victim = nullptr;
+  }
+#else
+  victim = std::fopen(victimPath, "wb");
+#endif
+  if (victim == nullptr) {
+    std::printf("overlong-path setup unsupported here — skipped\n");
+    std::filesystem::remove_all(baseDirectory, ec);
+    return 0;
+  }
+  std::fputs("victim", victim);
+  std::fclose(victim);
+
+  {
+    engine::core::AtomicFileWriter writer{};
+    if (writer.begin(victimPath)) {
+      writer.abort();
+      std::filesystem::remove_all(baseDirectory, ec);
+      return 53;
+    }
+  }
+
+  const std::string survivor = read_all(victimPath);
+  std::filesystem::remove_all(baseDirectory, ec);
+  if (survivor != "victim") {
+    return 54;
+  }
+  return 0;
+}
+
 int main() {
   int result = check_fresh_write();
   if (result == 0) {
@@ -229,6 +300,9 @@ int main() {
   }
   if (result == 0) {
     result = check_streaming_writer();
+  }
+  if (result == 0) {
+    result = check_overlong_temp_path_leaves_destination();
   }
   cleanup();
 
