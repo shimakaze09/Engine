@@ -128,9 +128,14 @@ float ccd_velocity_threshold() noexcept {
 /// resolve's snapshot: snapshot AABBs (expanded by one step of positional
 /// correction drift) reject most pairs before the expensive geometry build,
 /// and candidate velocities come from the snapshot because reading live
-/// RigidBody::velocity races with the parallel integration chunks. A pair
-/// missed because the OTHER body races toward a slow mover is covered by
-/// that body's own sweep.
+/// RigidBody::velocity races with the parallel integration chunks. When
+/// the snapshot cannot vouch for an entry (first step after play start or
+/// scene load, collider add/remove since the last resolve, sparse-set
+/// reorder) the other body is treated as static — never read live — which
+/// is deterministic and conservative: the speculative-contact path still
+/// catches the encounter on the next resolved step. A pair missed because
+/// the OTHER body races toward a slow mover is covered by that body's own
+/// sweep.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity, const RigidBody &body,
                                      const Collider &collider,
@@ -234,11 +239,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     if (snapshotUsable &&
         (snapshotStore->ccdColliderEntities[i] == entities[i])) {
       otherVel = snapshotStore->ccdColliderVelocities[i];
-    } else if (otherOwner != kInvalidEntity) {
-      const RigidBody *otherBody = world.get_rigid_body_ptr(otherOwner);
-      if (otherBody != nullptr) {
-        otherVel = otherBody->velocity;
-      }
     }
     const math::Vec3 relVel = math::sub(body.velocity, otherVel);
     const float relSpeed = math::length(relVel);
