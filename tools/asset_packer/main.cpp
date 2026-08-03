@@ -63,23 +63,6 @@ void print_usage() {
                "[--force]\n");
 }
 
-/// Replaces every character outside [A-Za-z0-9_-] so clip names cook to
-/// portable file names; empty names fall back to "clip<index>".
-std::string sanitize_clip_name(const std::string &name, std::size_t index) {
-  std::string cleaned{};
-  cleaned.reserve(name.size());
-  for (const char c : name) {
-    const bool keep = ((c >= 'a') && (c <= 'z')) ||
-                      ((c >= 'A') && (c <= 'Z')) ||
-                      ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-');
-    cleaned.push_back(keep ? c : '_');
-  }
-  if (cleaned.empty()) {
-    cleaned = "clip" + std::to_string(index);
-  }
-  return cleaned;
-}
-
 /// Strips the mesh output's extension so cooked skeletal assets land
 /// beside it ("chars/hero.mesh" -> "chars/hero").
 std::string cooked_output_base(const char *outputPath) {
@@ -125,6 +108,7 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
   std::printf("cooked skeleton: %s (%zu joints)\n", skeletonPath.c_str(),
               skeleton.joints.size());
 
+  std::unordered_set<std::string> usedClipNames{};
   for (std::size_t animIndex = 0U; animIndex < data->animations_count;
        ++animIndex) {
     engine::tools::AnimClip clip{};
@@ -138,8 +122,16 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
           engine::tools::animation_import_result_message(animationResult));
       return 15;
     }
-    const std::string clipPath =
-        base + "." + sanitize_clip_name(clip.name, animIndex) + ".anim";
+    std::string clipName{};
+    if (!engine::tools::derive_unique_clip_name(clip.name, animIndex,
+                                                &usedClipNames, &clipName)) {
+      std::fprintf(stderr,
+                   "error: animation %zu (\"%s\") sanitizes to \"%s\", "
+                   "colliding with an earlier clip's cooked output name\n",
+                   animIndex, clip.name.c_str(), clipName.c_str());
+      return 15;
+    }
+    const std::string clipPath = base + "." + clipName + ".anim";
     if (!engine::tools::write_anim_clip_asset(clipPath.c_str(), clip,
                                               jointRemap)) {
       std::fprintf(stderr, "error: failed to write cooked animation: %s\n",
@@ -284,6 +276,46 @@ int main(int argc, char **argv) {
     }
   }
 
+  // External glTF payloads (.bin buffers, images) must force a recook
+  // even when no --graph is supplied: dependency correctness is an
+  // invariant of the cooker, the graph only persists the relationships
+  // (PR #51 review). A parse failure here is not fatal — the cook path
+  // below reports it with its usual diagnostics.
+  {
+    const char *ext = std::strrchr(inputPath, '.');
+    const bool isGltfInput =
+        (ext != nullptr) && ((std::strcmp(ext, ".gltf") == 0) ||
+                             (std::strcmp(ext, ".glb") == 0));
+    if (isGltfInput && (meshAssetId != 0ULL)) {
+      cgltf_options discoverOptions{};
+      cgltf_data *discoverData = nullptr;
+      if ((cgltf_parse_file(&discoverOptions, inputPath, &discoverData) ==
+           cgltf_result_success) &&
+          (discoverData != nullptr)) {
+        engine::tools::DependencyGraph discoveryGraph{};
+        std::vector<DependencyDigest> discovered{};
+        static_cast<void>(extract_gltf_dependencies(
+            discoverData, inputPath, meshAssetId, &discoveryGraph,
+            &discovered));
+        for (const auto &dep : discovered) {
+          bool alreadyTracked = false;
+          for (const auto &existing : dependencyDigests) {
+            if (existing.path == dep.path) {
+              alreadyTracked = true;
+              break;
+            }
+          }
+          if (!alreadyTracked) {
+            dependencyDigests.push_back(dep);
+          }
+        }
+      }
+      if (discoverData != nullptr) {
+        cgltf_free(discoverData);
+      }
+    }
+  }
+
   ImportSettings importSettings{};
   read_import_settings_from_meta(outputPath, &importSettings);
   const std::uint64_t importSettingsHash = hash_import_settings(importSettings);
@@ -349,6 +381,17 @@ int main(int argc, char **argv) {
           ? static_cast<cgltf_size>(importSettings.meshIndex)
           : 0U;
   const cgltf_mesh &selectedMesh = data->meshes[meshIdx];
+  // Only mesh 0 is validated at load; a meta-selected mesh needs its own
+  // primitive check or primitives[0] below indexes an empty array
+  // (audit H-19).
+  if (selectedMesh.primitives_count == 0U) {
+    std::fprintf(stderr,
+                 "error: selected mesh %zu has no primitives "
+                 "(importSettings.meshIndex in %s.meta.json)\n",
+                 static_cast<std::size_t>(meshIdx), outputPath);
+    cgltf_free(data);
+    return 5;
+  }
   const cgltf_size primIdx =
       (importSettings.primitiveIndex >= 0 &&
        static_cast<cgltf_size>(importSettings.primitiveIndex) <
@@ -359,11 +402,29 @@ int main(int argc, char **argv) {
   const cgltf_primitive *primitive = &selectedMesh.primitives[primIdx];
   PrimitiveData primitiveData{};
   if (!extract_primitive(primitive, &primitiveData,
-                         jointRemap.empty() ? nullptr : &jointRemap)) {
+                         jointRemap.empty() ? nullptr : &jointRemap,
+                         importSettings.generateNormals)) {
     cgltf_free(data);
     return 5;
   }
 
+  if (primitiveData.hasSkin && (importSettings.upAxis != 1)) {
+    // The skeleton's inverse binds are not rotated with the mesh, so an
+    // axis conversion would desync the two; reject rather than desync.
+    std::fprintf(stderr,
+                 "error: upAxis conversion is unsupported for skinned "
+                 "meshes — re-export the source Y-up\n");
+    cgltf_free(data);
+    return 5;
+  }
+  if ((importSettings.upAxis < 0) || (importSettings.upAxis > 2)) {
+    std::fprintf(stderr, "warning: unknown upAxis %d ignored (treated Y-up)\n",
+                 importSettings.upAxis);
+  }
+  apply_up_axis_to_primitive(&primitiveData, importSettings.upAxis);
+  if (importSettings.generateNormals) {
+    generate_normals_for_primitive(&primitiveData);
+  }
   apply_scale_to_primitive(&primitiveData, importSettings.scaleFactor);
 
   std::vector<DependencyDigest> autoDiscoveredDeps{};
@@ -435,13 +496,12 @@ int main(int argc, char **argv) {
     return 12;
   }
 
-  if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
-                        importSettingsHash)) {
-    std::fprintf(stderr, "error: failed to write cook stamp\n");
-    return 13;
+  // Hull-less geometry reports success; only a write failure blocks the
+  // stamp below so a broken sidecar can never be certified complete.
+  if (!cook_and_write_convex_hull(outputPath, primitiveData)) {
+    std::fprintf(stderr, "error: failed to write convex hull sidecar\n");
+    return 17;
   }
-
-  cook_and_write_convex_hull(outputPath, primitiveData);
 
   generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
 
@@ -452,6 +512,15 @@ int main(int argc, char **argv) {
                    graphPath.c_str());
       return 16;
     }
+  }
+
+  // The stamp is the cook's commit marker: written only after every
+  // output above landed, so any interruption leaves no stamp and the
+  // next run recooks the full output set (audit H-20).
+  if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
+                        importSettingsHash)) {
+    std::fprintf(stderr, "error: failed to write cook stamp\n");
+    return 13;
   }
 
   std::printf(

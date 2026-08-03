@@ -8,24 +8,48 @@
 #include <cstring>
 
 #include "engine/core/animation_asset.h"
+#include "engine/core/atomic_file.h"
 #include "engine/core/hash.h"
 
 namespace engine::tools {
 
-namespace {
-
-/// Opens a binary file for writing, portably across CRTs.
-std::FILE *open_write(const char *path) {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
+std::string sanitize_clip_name(const std::string &name, std::size_t index) {
+  std::string cleaned{};
+  cleaned.reserve(name.size());
+  for (const char c : name) {
+    const bool keep = ((c >= 'a') && (c <= 'z')) ||
+                      ((c >= 'A') && (c <= 'Z')) ||
+                      ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-');
+    cleaned.push_back(keep ? c : '_');
   }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  return file;
+  if (cleaned.empty()) {
+    cleaned = "clip" + std::to_string(index);
+  }
+  return cleaned;
 }
+
+bool derive_unique_clip_name(const std::string &clipName, std::size_t index,
+                             std::unordered_set<std::string> *usedNames,
+                             std::string *outName) {
+  if ((usedNames == nullptr) || (outName == nullptr)) {
+    return false;
+  }
+  *outName = sanitize_clip_name(clipName, index);
+
+  // Collision detection folds case: "Walk" and "walk" are one file on
+  // Windows and default macOS filesystems, so the second would silently
+  // overwrite the first there. The cooked file keeps the original
+  // sanitized spelling.
+  std::string collisionKey = *outName;
+  for (char &c : collisionKey) {
+    if ((c >= 'A') && (c <= 'Z')) {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+  }
+  return usedNames->insert(collisionKey).second;
+}
+
+namespace {
 
 /// Appends one track's keys to the payload and fills its cooked record.
 void pack_track(const AnimTrack &track, std::uint32_t cookedJoint,
@@ -148,15 +172,14 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
     return false;
   }
 
-  std::FILE *file = open_write(outputPath);
-  if (file == nullptr) {
-    return false;
-  }
-
   core::SkeletonAssetHeader header{};
   header.jointCount = static_cast<std::uint32_t>(skeleton.joints.size());
-  bool ok = std::fwrite(&header, sizeof(header), 1U, file) == 1U;
 
+  // Streamed atomic commit (review item 9): records go straight to the
+  // staged temporary, so nothing is double-buffered and an interrupted
+  // cook still cannot leave a truncated .skel behind.
+  core::AtomicFileWriter writer{};
+  bool ok = writer.begin(outputPath) && writer.write(&header, sizeof(header));
   for (std::size_t i = 0U; ok && (i < skeleton.joints.size()); ++i) {
     const SkeletonJoint &joint = skeleton.joints[i];
     core::SkeletonAssetJoint record{};
@@ -174,11 +197,10 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
     record.restScale[0] = joint.restScale.x;
     record.restScale[1] = joint.restScale.y;
     record.restScale[2] = joint.restScale.z;
-    ok = std::fwrite(&record, sizeof(record), 1U, file) == 1U;
+    ok = writer.write(&record, sizeof(record));
   }
 
-  ok = (std::fclose(file) == 0) && ok;
-  return ok;
+  return ok && writer.commit();
 }
 
 bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
@@ -199,28 +221,24 @@ bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
     records.push_back(record);
   }
 
-  std::FILE *file = open_write(outputPath);
-  if (file == nullptr) {
-    return false;
-  }
-
   core::AnimClipAssetHeader header{};
   header.trackCount = static_cast<std::uint32_t>(records.size());
   header.payloadFloatCount = static_cast<std::uint32_t>(payload.size());
   header.durationSeconds = clip.durationSeconds;
 
-  bool ok = std::fwrite(&header, sizeof(header), 1U, file) == 1U;
+  // Streamed atomic commit (review item 9): the resident records and
+  // payload spans go straight to the staged temporary without another
+  // contiguous copy.
+  core::AtomicFileWriter writer{};
+  bool ok = writer.begin(outputPath) && writer.write(&header, sizeof(header));
   if (ok && !records.empty()) {
-    ok = std::fwrite(records.data(), sizeof(records[0]), records.size(),
-                     file) == records.size();
+    ok = writer.write(records.data(),
+                      records.size() * sizeof(core::AnimClipAssetTrack));
   }
   if (ok && !payload.empty()) {
-    ok = std::fwrite(payload.data(), sizeof(float), payload.size(), file) ==
-         payload.size();
+    ok = writer.write(payload.data(), payload.size() * sizeof(float));
   }
-
-  ok = (std::fclose(file) == 0) && ok;
-  return ok;
+  return ok && writer.commit();
 }
 
 } // namespace engine::tools

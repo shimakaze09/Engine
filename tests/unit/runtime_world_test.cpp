@@ -6,6 +6,7 @@
 #include <new>
 
 #include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -862,6 +863,60 @@ int verify_physics_ingress_validation() {
 } // namespace
 
 /// Runs this executable or test program.
+/// EXPECTATION (audit H-18): reset_world is a full destructive reset in
+/// any phase — called mid-Simulation it destroys every entity
+/// immediately (the old path deferred them, leaving live components over
+/// cleared managers and a reset controller registry) and drops the
+/// pending deferred-destroy queue so completing the frame cannot fire a
+/// stale destroy into replacement content, which stays creatable.
+int verify_reset_world_phase_independent() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 950;
+  }
+  world->end_frame_phase();
+
+  const auto first = world->create_scene_object();
+  const auto second = world->create_scene_object();
+  const auto third = world->create_scene_object();
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity)) {
+    return 951;
+  }
+
+  world->begin_update_phase();
+  // Queues a deferred destroy; the entity must stay alive until a flush.
+  if (!world->destroy_entity(first) || !world->is_alive(first)) {
+    return 952;
+  }
+
+  engine::runtime::reset_world(*world);
+  if (world->alive_entity_count() != 0U) {
+    return 953;
+  }
+  if (world->is_alive(first) || world->is_alive(second) ||
+      world->is_alive(third)) {
+    return 954;
+  }
+
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->begin_render_phase();
+  world->end_frame_phase();
+  if (world->alive_entity_count() != 0U) {
+    return 955;
+  }
+
+  const auto replacement = world->create_scene_object();
+  if ((replacement == engine::runtime::kInvalidEntity) ||
+      (world->alive_entity_count() != 1U)) {
+    return 956;
+  }
+  return 0;
+}
+
 int main() {
   int result = verify_raw_and_scene_object_creation();
   if (result != 0) {
@@ -914,6 +969,11 @@ int main() {
   }
 
   result = verify_physics_ingress_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_reset_world_phase_independent();
   if (result != 0) {
     return result;
   }

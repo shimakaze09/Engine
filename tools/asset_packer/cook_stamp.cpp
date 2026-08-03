@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 
 namespace {
@@ -39,27 +40,13 @@ bool file_exists(const char *path) {
   return true;
 }
 
-/// Writes a complete text buffer to a file.
+/// Writes a complete text buffer through a staged atomic replacement so
+/// interrupted cooks cannot leave truncated outputs (audit H-20).
 bool write_text_file(const char *path, const char *text, std::size_t textSize) {
   if ((path == nullptr) || (text == nullptr)) {
     return false;
   }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  const bool ok = (std::fwrite(text, 1U, textSize, file) == textSize);
-  std::fclose(file);
-  return ok;
+  return engine::core::atomic_write_file(path, text, textSize);
 }
 
 void format_hex_u64(std::uint64_t value, char (&out)[17]) noexcept {
@@ -281,37 +268,36 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
     return false;
   }
 
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, stampPath, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(stampPath, "wb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  std::fprintf(file, "SCHEMA 2\n");
-  std::fprintf(file, "SOURCE_HASH %016llx\n",
-               static_cast<unsigned long long>(sourceHash));
-  std::fprintf(file, "IMPORT_HASH %016llx\n",
-               static_cast<unsigned long long>(importSettingsHash));
+  // The stamp is the cook's commit marker (written after every output),
+  // so it must itself land atomically or not at all (audit H-20).
+  std::string stamp{};
+  char line[1024] = {};
+  std::snprintf(line, sizeof(line), "SCHEMA 2\nTOOL_VERSION %u\n",
+                static_cast<unsigned int>(kCookToolVersion));
+  stamp += line;
+  std::snprintf(line, sizeof(line), "SOURCE_HASH %016llx\n",
+                static_cast<unsigned long long>(sourceHash));
+  stamp += line;
+  std::snprintf(line, sizeof(line), "IMPORT_HASH %016llx\n",
+                static_cast<unsigned long long>(importSettingsHash));
+  stamp += line;
   for (const DependencyDigest &dependency : dependencies) {
-    std::fprintf(file, "DEP_HASH %016llx %s\n",
-                 static_cast<unsigned long long>(dependency.hash),
-                 dependency.path.c_str());
+    std::snprintf(line, sizeof(line), "DEP_HASH %016llx %s\n",
+                  static_cast<unsigned long long>(dependency.hash),
+                  dependency.path.c_str());
+    stamp += line;
   }
 
-  std::fclose(file);
-  return true;
+  return engine::core::atomic_write_file(stampPath, stamp.data(),
+                                         stamp.size());
 }
 
-/// Reads cook stamp data.
+/// Reads cook stamp data. outToolVersion reports 0 for stamps written
+/// before the TOOL_VERSION key existed, which forces one recook.
 bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
                      std::vector<DependencyDigest> *outDependencies,
-                     std::uint64_t *outImportSettingsHash) {
+                     std::uint64_t *outImportSettingsHash,
+                     std::uint32_t *outToolVersion) {
   if ((outSourceHash == nullptr) || (outDependencies == nullptr)) {
     return false;
   }
@@ -338,10 +324,20 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   if (outImportSettingsHash != nullptr) {
     *outImportSettingsHash = 0ULL;
   }
+  if (outToolVersion != nullptr) {
+    *outToolVersion = 0U;
+  }
 
   char line[1024] = {};
   while (std::fgets(line, static_cast<int>(sizeof(line)), file) != nullptr) {
     unsigned long long hash = 0ULL;
+    unsigned int toolVersion = 0U;
+    if (std::sscanf(line, "TOOL_VERSION %u", &toolVersion) == 1) {
+      if (outToolVersion != nullptr) {
+        *outToolVersion = static_cast<std::uint32_t>(toolVersion);
+      }
+      continue;
+    }
     if (std::sscanf(line, "SOURCE_HASH %llx", &hash) == 1) {
       *outSourceHash = static_cast<std::uint64_t>(hash);
       continue;
@@ -393,8 +389,13 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
   std::uint64_t previousSourceHash = 0ULL;
   std::vector<DependencyDigest> previousDependencies{};
   std::uint64_t previousImportHash = 0ULL;
+  std::uint32_t previousToolVersion = 0U;
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
-                       &previousImportHash)) {
+                       &previousImportHash, &previousToolVersion)) {
+    return true;
+  }
+
+  if (previousToolVersion != kCookToolVersion) {
     return true;
   }
 

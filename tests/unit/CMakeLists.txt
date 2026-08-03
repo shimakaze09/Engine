@@ -589,6 +589,13 @@ engine_add_test_executable(engine_unit_command_buffer
     engine_core
 )
 
+engine_add_test_executable(engine_unit_native_thread
+    SOURCES
+    native_thread_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_shader_reload
     SOURCES
     shader_reload_test.cpp
@@ -715,6 +722,19 @@ if(ENGINE_BUILD_TOOLS)
         engine_math
         PRIVATE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
+    )
+
+    engine_add_test_executable(engine_unit_cook_stamp
+        SOURCES
+        cook_stamp_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+        PRIVATE_DEPS
+        engine_core
+        COMPILE_DEFINITIONS
+        _CRT_SECURE_NO_WARNINGS
     )
 
     engine_add_test_executable(engine_unit_anim_controller

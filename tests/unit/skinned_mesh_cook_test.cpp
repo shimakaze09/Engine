@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 
 #include <cgltf.h>
@@ -282,6 +283,287 @@ int check_v3_mesh_file_header() {
   return 0;
 }
 
+/// EXPECTATION (review item 1): a glTF primitive without a NORMAL
+/// accessor extracts when normal generation will follow — normals come
+/// out zeroed, and generation then produces exact face normals — while
+/// the default path still rejects the missing accessor.
+int check_missing_normals_with_generation() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  for (cgltf_size i = 0U; i < primitive->attributes_count; ++i) {
+    if (data->meshes[0].primitives[0].attributes[i].type ==
+        cgltf_attribute_type_normal) {
+      data->meshes[0].primitives[0].attributes[i].type =
+          cgltf_attribute_type_invalid;
+    }
+  }
+
+  PrimitiveData rejected{};
+  if (extract_primitive(primitive, &rejected, nullptr, false)) {
+    cgltf_free(data);
+    std::puts("missing NORMAL accepted without generation");
+    return 1;
+  }
+
+  PrimitiveData extracted{};
+  const bool ok = extract_primitive(primitive, &extracted, nullptr, true);
+  cgltf_free(data);
+  if (!ok) {
+    std::puts("missing NORMAL rejected despite generation");
+    return 1;
+  }
+  const std::size_t stride = primitive_stride_floats(extracted);
+  const std::size_t vertexCount =
+      extracted.interleavedVertices.size() / stride;
+  for (std::size_t v = 0U; v < vertexCount; ++v) {
+    const std::size_t base = v * stride;
+    if ((extracted.interleavedVertices[base + 3U] != 0.0F) ||
+        (extracted.interleavedVertices[base + 4U] != 0.0F) ||
+        (extracted.interleavedVertices[base + 5U] != 0.0F)) {
+      std::puts("missing NORMAL did not zero the normal fields");
+      return 1;
+    }
+  }
+
+  generate_normals_for_primitive(&extracted);
+  bool anyUnit = false;
+  for (std::size_t v = 0U; v < vertexCount; ++v) {
+    const std::size_t base = v * stride;
+    const float x = extracted.interleavedVertices[base + 3U];
+    const float y = extracted.interleavedVertices[base + 4U];
+    const float z = extracted.interleavedVertices[base + 5U];
+    const float lengthSquared = (x * x) + (y * y) + (z * z);
+    if ((lengthSquared < 0.99F) || (lengthSquared > 1.01F)) {
+      std::puts("generated normal is not unit length");
+      return 1;
+    }
+    anyUnit = true;
+  }
+  return anyUnit ? 0 : 1;
+}
+
+/// EXPECTATION (review item 3): a hull write failure is reported so the
+/// cook cannot stamp a missing sidecar complete — injected here by
+/// occupying the .hull path with a directory — while structurally
+/// hull-less geometry (too few vertices) reports success.
+int check_hull_write_failure_reported() {
+  PrimitiveData tetrahedron{};
+  tetrahedron.interleavedVertices = {
+      0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0.0F};
+
+  const char *blockedOutput = "hull_block_test.mesh";
+  const char *blockedHullPath = "hull_block_test.mesh.hull";
+  std::error_code ec{};
+  std::filesystem::remove_all(blockedHullPath, ec);
+  if (!std::filesystem::create_directory(blockedHullPath, ec) || ec) {
+    std::puts("could not stage hull-path blocker");
+    return 1;
+  }
+  const bool blocked = cook_and_write_convex_hull(blockedOutput, tetrahedron);
+  std::filesystem::remove_all(blockedHullPath, ec);
+  if (blocked) {
+    std::puts("blocked hull write reported success");
+    return 1;
+  }
+
+  PrimitiveData degenerate{};
+  degenerate.interleavedVertices = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  if (!cook_and_write_convex_hull("hull_skip_test.mesh", degenerate)) {
+    std::puts("structurally hull-less geometry reported failure");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-19): a non-triangle primitive mode is rejected
+/// by extraction instead of cooking its data as if it were a triangle
+/// list; the same primitive extracts fine as triangles.
+int check_non_triangle_mode_rejected() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  data->meshes[0].primitives[0].type = cgltf_primitive_type_line_strip;
+  PrimitiveData rejected{};
+  if (extract_primitive(primitive, &rejected, nullptr)) {
+    cgltf_free(data);
+    std::puts("line-strip primitive was accepted");
+    return 1;
+  }
+
+  data->meshes[0].primitives[0].type = cgltf_primitive_type_triangles;
+  PrimitiveData accepted{};
+  const bool ok = extract_primitive(primitive, &accepted, nullptr);
+  cgltf_free(data);
+  if (!ok) {
+    std::puts("triangle primitive was rejected");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-20): upAxis conversion rotates positions and
+/// normals with proper rotations — Z-up (0,0,1) lands exactly on Y-up
+/// (0,1,0), X-up (1,0,0) likewise — and Y-up plus unknown values no-op.
+/// Sign/swap maps are exact in floats, so assertions are exact.
+int check_up_axis_applied() {
+  PrimitiveData data{};
+  data.interleavedVertices = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F,
+                              2.0F, 3.0F, 5.0F, 0.0F, 1.0F, 0.0F};
+
+  apply_up_axis_to_primitive(&data, 2);
+  if ((data.interleavedVertices[0] != 0.0F) ||
+      (data.interleavedVertices[1] != 1.0F) ||
+      (data.interleavedVertices[2] != 0.0F) ||
+      (data.interleavedVertices[4] != 1.0F) ||
+      (data.interleavedVertices[5] != 0.0F)) {
+    std::puts("Z-up conversion wrong for first vertex");
+    return 1;
+  }
+  if ((data.interleavedVertices[6] != 2.0F) ||
+      (data.interleavedVertices[7] != 5.0F) ||
+      (data.interleavedVertices[8] != -3.0F) ||
+      (data.interleavedVertices[10] != 0.0F) ||
+      (data.interleavedVertices[11] != -1.0F)) {
+    std::puts("Z-up conversion wrong for second vertex");
+    return 1;
+  }
+
+  PrimitiveData xUp{};
+  xUp.interleavedVertices = {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+  apply_up_axis_to_primitive(&xUp, 0);
+  if ((xUp.interleavedVertices[0] != 0.0F) ||
+      (xUp.interleavedVertices[1] != 1.0F) ||
+      (xUp.interleavedVertices[2] != 0.0F) ||
+      (xUp.interleavedVertices[4] != 1.0F)) {
+    std::puts("X-up conversion wrong");
+    return 1;
+  }
+
+  PrimitiveData untouched{};
+  untouched.interleavedVertices = {1.0F, 2.0F, 3.0F, 0.0F, 1.0F, 0.0F};
+  const std::vector<float> before = untouched.interleavedVertices;
+  apply_up_axis_to_primitive(&untouched, 1);
+  apply_up_axis_to_primitive(&untouched, 7);
+  if (untouched.interleavedVertices != before) {
+    std::puts("Y-up or unknown axis modified the primitive");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-20): generateNormals recomputes per-vertex
+/// normals from triangle geometry — a CCW triangle in the XY plane gets
+/// exactly (0,0,1) at every corner through both the indexed and the
+/// sequential-triple paths, and a malformed index leaves normals zeroed
+/// instead of reading out of bounds.
+int check_generate_normals_applied() {
+  PrimitiveData data{};
+  data.hasUVs = true;
+  data.interleavedVertices = {
+      0.0F, 0.0F, 0.0F, 9.0F, 9.0F, 9.0F, 0.0F, 0.0F,
+      1.0F, 0.0F, 0.0F, 9.0F, 9.0F, 9.0F, 0.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 9.0F, 9.0F, 9.0F, 0.0F, 0.0F};
+  data.indices = {0U, 1U, 2U};
+
+  generate_normals_for_primitive(&data);
+  for (std::size_t v = 0U; v < 3U; ++v) {
+    const std::size_t base = v * 8U;
+    if ((data.interleavedVertices[base + 3U] != 0.0F) ||
+        (data.interleavedVertices[base + 4U] != 0.0F) ||
+        (data.interleavedVertices[base + 5U] != 1.0F)) {
+      std::puts("indexed normal generation wrong");
+      return 1;
+    }
+  }
+
+  data.indices.clear();
+  generate_normals_for_primitive(&data);
+  if ((data.interleavedVertices[5U] != 1.0F) ||
+      (data.interleavedVertices[13U] != 1.0F)) {
+    std::puts("unindexed normal generation wrong");
+    return 1;
+  }
+
+  data.indices = {0U, 1U, 5U};
+  generate_normals_for_primitive(&data);
+  for (std::size_t v = 0U; v < 3U; ++v) {
+    const std::size_t base = v * 8U;
+    if ((data.interleavedVertices[base + 3U] != 0.0F) ||
+        (data.interleavedVertices[base + 4U] != 0.0F) ||
+        (data.interleavedVertices[base + 5U] != 0.0F)) {
+      std::puts("malformed index did not leave normals zeroed");
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-20): the external .bin buffer payload the glTF
+/// references lands in both the dependency graph and the auto digest
+/// list, so editing vertex data without touching the .gltf still forces
+/// a recook.
+int check_external_buffer_becomes_dependency() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  engine::tools::DependencyGraph graph{};
+  std::vector<DependencyDigest> digests{};
+  const std::uint64_t meshAssetId = hash_path_to_asset_id(kGltfPath);
+  const bool extracted = extract_gltf_dependencies(data, kGltfPath,
+                                                   meshAssetId, &graph,
+                                                   &digests);
+  cgltf_free(data);
+  if (!extracted) {
+    std::puts("dependency extraction failed");
+    return 1;
+  }
+
+  bool binDigested = false;
+  for (const DependencyDigest &digest : digests) {
+    if ((digest.path.find(kBinPath) != std::string::npos) &&
+        (digest.hash != 0ULL)) {
+      binDigested = true;
+      break;
+    }
+  }
+  if (!binDigested) {
+    std::puts("external buffer missing from dependency digests");
+    return 1;
+  }
+
+  engine::tools::DependencyGraph::AssetId depIds[8] = {};
+  const std::size_t depCount =
+      engine::tools::get_dependencies(&graph, meshAssetId, depIds, 8U);
+  bool binInGraph = false;
+  for (std::size_t i = 0U; i < depCount; ++i) {
+    auto pathIt = graph.assetPaths.find(depIds[i]);
+    if ((pathIt != graph.assetPaths.end()) &&
+        (pathIt->second.find(kBinPath) != std::string::npos)) {
+      binInGraph = true;
+      break;
+    }
+  }
+  if (!binInGraph) {
+    std::puts("external buffer missing from the dependency graph");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -296,6 +578,25 @@ int main() {
   if (result == 0) {
     result = check_v3_mesh_file_header();
   }
+  if (result == 0) {
+    result = check_external_buffer_becomes_dependency();
+  }
+  if (result == 0) {
+    result = check_up_axis_applied();
+  }
+  if (result == 0) {
+    result = check_generate_normals_applied();
+  }
+  if (result == 0) {
+    result = check_non_triangle_mode_rejected();
+  }
+  if (result == 0) {
+    result = check_missing_normals_with_generation();
+  }
+  if (result == 0) {
+    result = check_hull_write_failure_reported();
+  }
+  remove_file("hull_skip_test.mesh.hull");
   cleanup_fixture_files();
   return result;
 }

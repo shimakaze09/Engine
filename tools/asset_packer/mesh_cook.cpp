@@ -7,9 +7,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 #include "engine/core/mesh_asset.h"
 #include "engine/math/vec3.h"
@@ -21,6 +24,105 @@ std::size_t primitive_stride_floats(const PrimitiveData &data) {
     return 16U;
   }
   return data.hasUVs ? 8U : 6U;
+}
+
+void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis) {
+  if ((data == nullptr) || ((upAxis != 0) && (upAxis != 2))) {
+    return; // 1 = already Y-up; unknown values are ignored upstream.
+  }
+
+  const std::size_t strideFloats = primitive_stride_floats(*data);
+  const std::size_t vertexCount =
+      data->interleavedVertices.size() / strideFloats;
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    const std::size_t base = i * strideFloats;
+    // Positions at 0-2 and normals at 3-5 rotate identically; both maps
+    // are proper rotations (determinant +1) so winding is preserved.
+    for (std::size_t offset = 0U; offset <= 3U; offset += 3U) {
+      float &x = data->interleavedVertices[base + offset + 0U];
+      float &y = data->interleavedVertices[base + offset + 1U];
+      float &z = data->interleavedVertices[base + offset + 2U];
+      if (upAxis == 2) {
+        // Z-up source to Y-up: rotate -90 degrees about X.
+        const float oldY = y;
+        y = z;
+        z = -oldY;
+      } else {
+        // X-up source to Y-up: rotate +90 degrees about Z.
+        const float oldX = x;
+        x = -y;
+        y = oldX;
+      }
+    }
+  }
+}
+
+void generate_normals_for_primitive(PrimitiveData *data) {
+  if (data == nullptr) {
+    return;
+  }
+
+  const std::size_t strideFloats = primitive_stride_floats(*data);
+  const std::size_t vertexCount =
+      data->interleavedVertices.size() / strideFloats;
+  if (vertexCount == 0U) {
+    return;
+  }
+
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    const std::size_t base = i * strideFloats;
+    data->interleavedVertices[base + 3U] = 0.0F;
+    data->interleavedVertices[base + 4U] = 0.0F;
+    data->interleavedVertices[base + 5U] = 0.0F;
+  }
+
+  // Area-weighted accumulation: each triangle adds its unnormalized
+  // cross product to its three corners; sequential triples when the
+  // primitive is unindexed.
+  const std::size_t triangleCount = data->indices.empty()
+                                        ? (vertexCount / 3U)
+                                        : (data->indices.size() / 3U);
+  for (std::size_t t = 0U; t < triangleCount; ++t) {
+    std::uint32_t corners[3] = {};
+    for (std::size_t c = 0U; c < 3U; ++c) {
+      corners[c] = data->indices.empty()
+                       ? static_cast<std::uint32_t>((t * 3U) + c)
+                       : data->indices[(t * 3U) + c];
+      if (corners[c] >= vertexCount) {
+        return; // Malformed index; leave zeroed rather than read OOB.
+      }
+    }
+
+    const float *a = &data->interleavedVertices[corners[0] * strideFloats];
+    const float *b = &data->interleavedVertices[corners[1] * strideFloats];
+    const float *c = &data->interleavedVertices[corners[2] * strideFloats];
+    const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    const float e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+    const float normal[3] = {(e1[1] * e2[2]) - (e1[2] * e2[1]),
+                             (e1[2] * e2[0]) - (e1[0] * e2[2]),
+                             (e1[0] * e2[1]) - (e1[1] * e2[0])};
+    for (const std::uint32_t corner : corners) {
+      float *out = &data->interleavedVertices[(corner * strideFloats) + 3U];
+      out[0] += normal[0];
+      out[1] += normal[1];
+      out[2] += normal[2];
+    }
+  }
+
+  for (std::size_t i = 0U; i < vertexCount; ++i) {
+    float *normal = &data->interleavedVertices[(i * strideFloats) + 3U];
+    const float lengthSquared = (normal[0] * normal[0]) +
+                                (normal[1] * normal[1]) +
+                                (normal[2] * normal[2]);
+    if (lengthSquared > 0.0F) {
+      const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+      normal[0] *= inverseLength;
+      normal[1] *= inverseLength;
+      normal[2] *= inverseLength;
+    } else {
+      normal[1] = 1.0F; // Degenerate-only vertex: any unit vector works.
+    }
+  }
 }
 
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor) {
@@ -58,8 +160,19 @@ const cgltf_accessor *find_attribute_accessor(const cgltf_primitive *primitive,
 
 bool extract_primitive(const cgltf_primitive *primitive,
                        PrimitiveData *outData,
-                       const std::vector<std::uint32_t> *jointRemap) {
+                       const std::vector<std::uint32_t> *jointRemap,
+                       bool allowMissingNormals) {
   if ((primitive == nullptr) || (outData == nullptr)) {
+    return false;
+  }
+
+  // The cooked format and the index/normal pipeline assume triangle
+  // lists; other modes would cook silently wrong geometry (audit H-19).
+  if (primitive->type != cgltf_primitive_type_triangles) {
+    std::fprintf(stderr,
+                 "error: primitive mode %d unsupported — only triangle "
+                 "lists cook\n",
+                 static_cast<int>(primitive->type));
     return false;
   }
 
@@ -69,19 +182,24 @@ bool extract_primitive(const cgltf_primitive *primitive,
       find_attribute_accessor(primitive, cgltf_attribute_type_normal);
   const cgltf_accessor *texcoords =
       find_attribute_accessor(primitive, cgltf_attribute_type_texcoord);
-  if ((positions == nullptr) || (normals == nullptr)) {
+  // A missing NORMAL accessor is acceptable only when the caller will
+  // generate normals afterwards; the fields stay zero-initialized until
+  // then (review item 1: generateNormals' primary use case is sources
+  // without normals).
+  if ((positions == nullptr) ||
+      ((normals == nullptr) && !allowMissingNormals)) {
     std::fprintf(stderr,
                  "error: primitive must have POSITION and NORMAL accessors\n");
     return false;
   }
 
   if ((positions->type != cgltf_type_vec3) ||
-      (normals->type != cgltf_type_vec3)) {
+      ((normals != nullptr) && (normals->type != cgltf_type_vec3))) {
     std::fprintf(stderr, "error: POSITION and NORMAL must be vec3\n");
     return false;
   }
 
-  if (positions->count != normals->count) {
+  if ((normals != nullptr) && (positions->count != normals->count)) {
     std::fprintf(stderr,
                  "error: POSITION and NORMAL vertex counts do not match\n");
     return false;
@@ -117,8 +235,9 @@ bool extract_primitive(const cgltf_primitive *primitive,
   for (std::size_t i = 0U; i < vertexCount; ++i) {
     if (!cgltf_accessor_read_float(positions, static_cast<cgltf_size>(i),
                                    position.data(), position.size()) ||
-        !cgltf_accessor_read_float(normals, static_cast<cgltf_size>(i),
-                                   normal.data(), normal.size())) {
+        ((normals != nullptr) &&
+         !cgltf_accessor_read_float(normals, static_cast<cgltf_size>(i),
+                                    normal.data(), normal.size()))) {
       std::fprintf(stderr, "error: failed to decode vertex attributes\n");
       return false;
     }
@@ -127,9 +246,11 @@ bool extract_primitive(const cgltf_primitive *primitive,
     outData->interleavedVertices[base + 0U] = position[0U];
     outData->interleavedVertices[base + 1U] = position[1U];
     outData->interleavedVertices[base + 2U] = position[2U];
-    outData->interleavedVertices[base + 3U] = normal[0U];
-    outData->interleavedVertices[base + 4U] = normal[1U];
-    outData->interleavedVertices[base + 5U] = normal[2U];
+    if (normals != nullptr) {
+      outData->interleavedVertices[base + 3U] = normal[0U];
+      outData->interleavedVertices[base + 4U] = normal[1U];
+      outData->interleavedVertices[base + 5U] = normal[2U];
+    }
 
     if (hasUVs) {
       if (!cgltf_accessor_read_float(texcoords, static_cast<cgltf_size>(i),
@@ -209,19 +330,6 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
     return false;
   }
 
-  FILE *outputFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&outputFile, outputPath, "wb") != 0) {
-    outputFile = nullptr;
-  }
-#else
-  outputFile = std::fopen(outputPath, "wb");
-#endif
-  if (outputFile == nullptr) {
-    std::fprintf(stderr, "error: failed to open output file: %s\n", outputPath);
-    return false;
-  }
-
   engine::core::MeshAssetHeader header{};
   header.magic = engine::core::kMeshAssetMagic;
   header.version = data.hasSkin
@@ -231,34 +339,24 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   header.vertexCount = static_cast<std::uint32_t>(vertexCount);
   header.indexCount = static_cast<std::uint32_t>(data.indices.size());
 
-  if (std::fwrite(&header, sizeof(header), 1U, outputFile) != 1U) {
-    std::fprintf(stderr, "error: failed to write mesh header\n");
-    std::fclose(outputFile);
+  // Streamed atomic commit (review item 9): chunks go straight to the
+  // staged temporary, so the resident payload is never double-buffered.
+  const std::size_t vertexBytes =
+      data.interleavedVertices.size() * sizeof(float);
+  const std::size_t indexBytes = data.indices.size() * sizeof(std::uint32_t);
+  engine::core::AtomicFileWriter writer{};
+  bool ok = writer.begin(outputPath) && writer.write(&header, sizeof(header));
+  if (ok && (vertexBytes > 0U)) {
+    ok = writer.write(data.interleavedVertices.data(), vertexBytes);
+  }
+  if (ok && (indexBytes > 0U)) {
+    ok = writer.write(data.indices.data(), indexBytes);
+  }
+  if (!ok || !writer.commit()) {
+    std::fprintf(stderr, "error: failed to write output file: %s\n",
+                 outputPath);
     return false;
   }
-
-  if (!data.interleavedVertices.empty()) {
-    const std::size_t vertexBytes =
-        data.interleavedVertices.size() * sizeof(float);
-    if (std::fwrite(data.interleavedVertices.data(), 1U, vertexBytes,
-                    outputFile) != vertexBytes) {
-      std::fprintf(stderr, "error: failed to write vertex data\n");
-      std::fclose(outputFile);
-      return false;
-    }
-  }
-
-  if (!data.indices.empty()) {
-    const std::size_t indexBytes = data.indices.size() * sizeof(std::uint32_t);
-    if (std::fwrite(data.indices.data(), 1U, indexBytes, outputFile) !=
-        indexBytes) {
-      std::fprintf(stderr, "error: failed to write index data\n");
-      std::fclose(outputFile);
-      return false;
-    }
-  }
-
-  std::fclose(outputFile);
   return true;
 }
 
@@ -359,13 +457,36 @@ bool cook_and_write_convex_hull(const char *outputPath,
     return false;
   }
 
+  char hullPath[512] = {};
+  const int pathLen =
+      std::snprintf(hullPath, sizeof(hullPath), "%s.hull", outputPath);
+  if ((pathLen <= 0) || (pathLen >= static_cast<int>(sizeof(hullPath)))) {
+    return false;
+  }
+
+  // Structurally hull-less geometry is not a cook failure — the mesh is
+  // valid without a sidecar — but a hull from an earlier cook of this
+  // asset must not survive under the fresh stamp, so the stale sidecar
+  // is removed and a failed removal blocks the commit marker
+  // (PR #51 review).
+  auto removeStaleHull = [&hullPath]() {
+    std::error_code removeError{};
+    std::filesystem::remove(hullPath, removeError);
+    if (removeError) {
+      std::fprintf(stderr, "error: failed to remove stale hull sidecar: %s\n",
+                   hullPath);
+      return false;
+    }
+    return true;
+  };
+
   const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
       data.interleavedVertices.size() / strideFloats;
   if (vertexCount < 4U) {
     std::fprintf(stderr, "warning: too few vertices (%zu) for convex hull\n",
                  vertexCount);
-    return false;
+    return removeStaleHull();
   }
 
   std::vector<engine::math::Vec3> positions(vertexCount);
@@ -379,63 +500,36 @@ bool cook_and_write_convex_hull(const char *outputPath,
   engine::physics::ConvexHullData hull{};
   if (!engine::physics::build_convex_hull(positions.data(), vertexCount,
                                           hull)) {
+    // Degenerate geometry cannot produce a hull; the cook proceeds
+    // without the sidecar, matching the too-few-vertices skip above.
     std::fprintf(stderr, "warning: convex hull build failed\n");
-    return false;
-  }
-
-  char hullPath[512] = {};
-  const int pathLen =
-      std::snprintf(hullPath, sizeof(hullPath), "%s.hull", outputPath);
-  if ((pathLen <= 0) || (pathLen >= static_cast<int>(sizeof(hullPath)))) {
-    return false;
-  }
-
-  FILE *hullFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&hullFile, hullPath, "wb") != 0) {
-    hullFile = nullptr;
-  }
-#else
-  hullFile = std::fopen(hullPath, "wb");
-#endif
-  if (hullFile == nullptr) {
-    std::fprintf(stderr, "error: failed to open hull file: %s\n", hullPath);
-    return false;
+    return removeStaleHull();
   }
 
   // Header: magic (4 bytes) + planeCount (4) + vertexCount (4) + localCenter
-  // (12) + localHalfExtents (12) = 36 bytes.
+  // (12) + localHalfExtents (12) = 36 bytes; then 16-byte planes and
+  // 12-byte vertices. Assembled in memory and committed atomically so an
+  // interrupted cook cannot leave a truncated hull (audit H-20).
   constexpr std::uint32_t kHullMagic = 0x48554C4CU; // 'HULL'
   const std::uint32_t planeCount32 =
       static_cast<std::uint32_t>(hull.planeCount);
   const std::uint32_t vertCount32 =
       static_cast<std::uint32_t>(hull.vertexCount);
 
-  bool ok = true;
-  ok = ok && (std::fwrite(&kHullMagic, 4U, 1U, hullFile) == 1U);
-  ok = ok && (std::fwrite(&planeCount32, 4U, 1U, hullFile) == 1U);
-  ok = ok && (std::fwrite(&vertCount32, 4U, 1U, hullFile) == 1U);
-  ok =
-      ok && (std::fwrite(&hull.localCenter, sizeof(float), 3U, hullFile) == 3U);
-  ok = ok &&
-       (std::fwrite(&hull.localHalfExtents, sizeof(float), 3U, hullFile) == 3U);
-
-  // Planes: each is (normal.x, normal.y, normal.z, distance) = 16 bytes.
-  for (std::size_t i = 0U; i < hull.planeCount && ok; ++i) {
-    ok = ok && (std::fwrite(&hull.planes[i].normal, sizeof(float), 3U,
-                            hullFile) == 3U);
-    ok = ok && (std::fwrite(&hull.planes[i].distance, sizeof(float), 1U,
-                            hullFile) == 1U);
+  engine::core::AtomicFileWriter writer{};
+  bool ok = writer.begin(hullPath) && writer.write(&kHullMagic, 4U) &&
+            writer.write(&planeCount32, 4U) && writer.write(&vertCount32, 4U) &&
+            writer.write(&hull.localCenter, sizeof(float) * 3U) &&
+            writer.write(&hull.localHalfExtents, sizeof(float) * 3U);
+  for (std::size_t i = 0U; ok && (i < hull.planeCount); ++i) {
+    ok = writer.write(&hull.planes[i].normal, sizeof(float) * 3U) &&
+         writer.write(&hull.planes[i].distance, sizeof(float));
+  }
+  for (std::size_t i = 0U; ok && (i < hull.vertexCount); ++i) {
+    ok = writer.write(&hull.vertices[i], sizeof(float) * 3U);
   }
 
-  // Vertices: each is (x, y, z) = 12 bytes.
-  for (std::size_t i = 0U; i < hull.vertexCount && ok; ++i) {
-    ok = ok &&
-         (std::fwrite(&hull.vertices[i], sizeof(float), 3U, hullFile) == 3U);
-  }
-
-  std::fclose(hullFile);
-  if (!ok) {
+  if (!ok || !writer.commit()) {
     std::fprintf(stderr, "error: failed to write hull data\n");
     return false;
   }
@@ -493,6 +587,38 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
   std::unordered_set<const cgltf_image *> seenImages{};
   bool graphValid = true;
 
+  // Registers one external file (image or buffer payload) in the graph
+  // and the digest list so edits to it force a recook.
+  auto addExternalFile = [&](const char *uri) {
+    char resolvedPath[512] = {};
+    if (!resolve_image_path(inputPath, uri, resolvedPath,
+                            sizeof(resolvedPath))) {
+      return;
+    }
+
+    const std::uint64_t depAssetId = hash_path_to_asset_id(resolvedPath);
+    if (depAssetId == 0ULL) {
+      return;
+    }
+
+    engine::tools::register_asset_path(graph, depAssetId, resolvedPath);
+    if (!engine::tools::add_dependency(graph, meshAssetId, depAssetId)) {
+      graphValid = false;
+      return;
+    }
+
+    if (autoDepDigests != nullptr) {
+      bool hashOk = false;
+      const std::uint64_t fileHash = hash_file_contents(resolvedPath, &hashOk);
+      if (hashOk) {
+        DependencyDigest digest{};
+        digest.path = resolvedPath;
+        digest.hash = fileHash;
+        autoDepDigests->push_back(digest);
+      }
+    }
+  };
+
   auto processTexture = [&](const cgltf_texture_view &texView) {
     if ((texView.texture == nullptr) || (texView.texture->image == nullptr)) {
       return;
@@ -504,35 +630,19 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
     if (!seenImages.insert(image).second) {
       return;
     }
-
-    char resolvedPath[512] = {};
-    if (!resolve_image_path(inputPath, image->uri, resolvedPath,
-                            sizeof(resolvedPath))) {
-      return;
-    }
-
-    const std::uint64_t texAssetId = hash_path_to_asset_id(resolvedPath);
-    if (texAssetId == 0ULL) {
-      return;
-    }
-
-    engine::tools::register_asset_path(graph, texAssetId, resolvedPath);
-    if (!engine::tools::add_dependency(graph, meshAssetId, texAssetId)) {
-      graphValid = false;
-      return;
-    }
-
-      if (autoDepDigests != nullptr) {
-      bool hashOk = false;
-      const std::uint64_t fileHash = hash_file_contents(resolvedPath, &hashOk);
-      if (hashOk) {
-        DependencyDigest digest{};
-        digest.path = resolvedPath;
-        digest.hash = fileHash;
-        autoDepDigests->push_back(digest);
-      }
-    }
+    addExternalFile(image->uri);
   };
+
+  // External buffer payloads (.bin) carry the actual vertex data; a
+  // payload edit without a .gltf change must still recook (audit H-20).
+  for (cgltf_size bi = 0U; bi < data->buffers_count; ++bi) {
+    const cgltf_buffer &buffer = data->buffers[bi];
+    if ((buffer.uri == nullptr) ||
+        (std::strncmp(buffer.uri, "data:", 5U) == 0)) {
+      continue; // GLB-embedded or inline base64 payloads have no file.
+    }
+    addExternalFile(buffer.uri);
+  }
 
   for (cgltf_size mi = 0U; mi < data->meshes_count; ++mi) {
     const cgltf_mesh &mesh = data->meshes[mi];

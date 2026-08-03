@@ -388,6 +388,51 @@ int check_non_finite_duration_rejected() {
   return 0;
 }
 
+/// EXPECTATION (audit H-20): clip names that sanitize to the same cooked
+/// file name are rejected instead of silently overwriting the earlier
+/// clip's output; distinct names and the empty-name fallback pass.
+int check_duplicate_sanitized_clip_names_rejected() {
+  std::unordered_set<std::string> usedNames{};
+  std::string name{};
+
+  if (!engine::tools::derive_unique_clip_name("Walk Fast", 0U, &usedNames,
+                                              &name) ||
+      (name != "Walk_Fast")) {
+    std::puts("first clip name rejected or sanitized wrong");
+    return 1;
+  }
+  if (engine::tools::derive_unique_clip_name("Walk/Fast", 1U, &usedNames,
+                                             &name)) {
+    std::puts("colliding sanitized clip name accepted");
+    return 1;
+  }
+  if (!engine::tools::derive_unique_clip_name("Walk-Fast", 2U, &usedNames,
+                                              &name) ||
+      (name != "Walk-Fast")) {
+    std::puts("distinct clip name rejected");
+    return 1;
+  }
+  // Case-only variants are one file on Windows/macOS filesystems
+  // (review item 2): the collision key folds case while the accepted
+  // name keeps its original spelling.
+  if (engine::tools::derive_unique_clip_name("walk-fast", 5U, &usedNames,
+                                             &name)) {
+    std::puts("case-only clip name collision accepted");
+    return 1;
+  }
+  if (!engine::tools::derive_unique_clip_name("", 3U, &usedNames, &name) ||
+      (name != "clip3")) {
+    std::puts("empty clip name fallback wrong");
+    return 1;
+  }
+  if (engine::tools::derive_unique_clip_name("clip3", 4U, &usedNames,
+                                             &name)) {
+    std::puts("fallback-name collision accepted");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -415,6 +460,12 @@ int main() {
     return result;
   }
   result = check_non_finite_duration_rejected();
+  if (result != 0) {
+    remove_file(kSkelPath);
+    remove_file(kAnimPath);
+    return result;
+  }
+  result = check_duplicate_sanitized_clip_names_rejected();
   remove_file(kSkelPath);
   remove_file(kAnimPath);
   return result;

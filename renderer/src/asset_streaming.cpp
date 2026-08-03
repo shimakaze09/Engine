@@ -156,6 +156,9 @@ std::uint32_t find_worker_job_unlocked(const AssetStreamingQueue *queue)
   return LoadHandle::kInvalid;
 }
 
+/// NativeThread entry adapter for streaming_worker_main.
+void streaming_worker_entry(void *userData) noexcept;
+
 /// Runs CPU-side load callbacks on the streaming worker thread.
 void streaming_worker_main(AssetStreamingQueue *queue) noexcept {
   while (true) {
@@ -219,6 +222,10 @@ void streaming_worker_main(AssetStreamingQueue *queue) noexcept {
   }
 }
 
+void streaming_worker_entry(void *userData) noexcept {
+  streaming_worker_main(static_cast<AssetStreamingQueue *>(userData));
+}
+
 } // namespace
 
 // ---- Lifecycle ----
@@ -248,8 +255,24 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
     queue->workerRunning = true;
   }
 
-  for (std::thread &workerThread : queue->workerThreads) {
-    workerThread = std::thread(streaming_worker_main, queue);
+  // Spawn through NativeThread so an OS refusal rolls the worker set
+  // back instead of terminating the no-exception build (audit H-14).
+  for (std::size_t i = 0U; i < queue->workerThreads.size(); ++i) {
+    if (!queue->workerThreads[i].spawn(&streaming_worker_entry, queue)) {
+      core::log_message(core::LogLevel::Error, "asset_streaming",
+                        "worker thread creation failed — rolling back");
+      {
+        std::lock_guard<std::mutex> lock(queue->mutex);
+        queue->workerStopRequested = true;
+      }
+      queue->stateChanged.notify_all();
+      for (std::size_t j = 0U; j < i; ++j) {
+        queue->workerThreads[j].join();
+      }
+      std::lock_guard<std::mutex> lock(queue->mutex);
+      queue->workerRunning = false;
+      return false;
+    }
   }
   return true;
 }
@@ -266,7 +289,7 @@ void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept {
   }
   queue->stateChanged.notify_all();
 
-  for (std::thread &workerThread : queue->workerThreads) {
+  for (core::NativeThread &workerThread : queue->workerThreads) {
     if (workerThread.joinable()) {
       workerThread.join();
     }

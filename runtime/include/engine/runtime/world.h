@@ -258,6 +258,13 @@ public:
   /// Destroys the entity and its whole transform subtree (children never
   /// survive their parent); defers during Simulation so EndPlay fires.
   bool destroy_entity(Entity entity) noexcept;
+  /// Whole-content destructive reset: tears down every live entity
+  /// immediately in any phase with no per-entity failure mode, and drops
+  /// queued deferred destroys so they cannot fire into replacement
+  /// content. Reset/scene-replacement use only — EndPlay ordering and
+  /// phase gating deliberately do not apply (audit H-18); surviving
+  /// EntityPools are wedged until shutdown/reinit (tracked in #57).
+  void reset_all_entities() noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
   /// Finds the matching object or resource for entity by index.

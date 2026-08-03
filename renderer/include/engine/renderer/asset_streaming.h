@@ -7,7 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
-#include <thread>
+
+#include "engine/core/native_thread.h"
 
 #include "engine/renderer/asset_database.h"
 
@@ -94,7 +95,7 @@ struct AssetStreamingQueue final {
 
   mutable std::mutex mutex{};
   mutable std::condition_variable stateChanged{};
-  std::array<std::thread, kWorkerCount> workerThreads{};
+  std::array<core::NativeThread, kWorkerCount> workerThreads{};
   bool workerRunning = false;
   bool workerStopRequested = false;
 };

@@ -147,6 +147,146 @@ int check_rename_failure_cleans_temporary() {
 } // namespace
 
 /// Runs this executable or test program.
+/// EXPECTATION (review item 9): the streaming writer concatenates its
+/// chunks into exactly the destination bytes on commit, an abort (or
+/// destruction mid-stage) leaves the previous destination intact with
+/// no temporary behind, misuse (write/commit without begin, double
+/// begin) fails by return value, and a commit whose rename target is a
+/// directory fails while preserving it.
+int check_streaming_writer() {
+  cleanup();
+
+  engine::core::AtomicFileWriter writer{};
+  if (writer.write("x", 1U) || writer.commit()) {
+    return 30;
+  }
+  if (!writer.begin(kPath) || writer.begin(kPath)) {
+    return 31;
+  }
+  if (!writer.write("chunk-a|", 8U) || !writer.write("chunk-b", 7U) ||
+      !writer.commit()) {
+    return 32;
+  }
+  if (read_all(kPath) != "chunk-a|chunk-b") {
+    return 33;
+  }
+  if (leftover_temporaries(kTempPrefix) != 0U) {
+    return 34;
+  }
+
+  {
+    engine::core::AtomicFileWriter aborted{};
+    if (!aborted.begin(kPath) || !aborted.write("doomed", 6U)) {
+      return 35;
+    }
+    aborted.abort();
+    if (aborted.commit()) {
+      return 36;
+    }
+  }
+  {
+    engine::core::AtomicFileWriter destructed{};
+    if (!destructed.begin(kPath) || !destructed.write("doomed", 6U)) {
+      return 37;
+    }
+    // Destructor must discard the stage.
+  }
+  if (read_all(kPath) != "chunk-a|chunk-b") {
+    return 38;
+  }
+  if (leftover_temporaries(kTempPrefix) != 0U) {
+    return 39;
+  }
+
+  const char *directoryTarget = "atomic_file_test_writer_dir";
+  std::error_code ec{};
+  std::filesystem::remove_all(directoryTarget, ec);
+  if (!std::filesystem::create_directory(directoryTarget, ec) || ec) {
+    return 40;
+  }
+  engine::core::AtomicFileWriter blocked{};
+  const bool blockedCommit = blocked.begin(directoryTarget) &&
+                             blocked.write("data", 4U) && blocked.commit();
+  const bool directorySurvived = std::filesystem::is_directory(
+      directoryTarget, ec);
+  std::filesystem::remove_all(directoryTarget, ec);
+  if (blockedCommit || !directorySurvived) {
+    return 41;
+  }
+  return 0;
+}
+
+/// EXPECTATION (PR #51 review): a destination path that fits the writer's
+/// buffer while its ".new" temporary name does not is refused by begin
+/// without arming cleanup — the truncated temporary aliases the
+/// destination byte-for-byte at the boundary, so the base revision's
+/// destructor deleted the destination file a failed begin promised to
+/// leave untouched.
+int check_overlong_temp_path_leaves_destination() {
+  const char *baseDirectory = "atomic_file_test_overlong_dir";
+  std::error_code ec{};
+  std::filesystem::remove_all(baseDirectory, ec);
+  if (!std::filesystem::create_directory(baseDirectory, ec) || ec) {
+    return 50;
+  }
+
+  char victimPath[1100] = {};
+  std::snprintf(victimPath, sizeof(victimPath), "%s", baseDirectory);
+  std::size_t length = std::strlen(victimPath);
+  char segment[102] = {};
+  segment[0] = '/';
+  std::memset(segment + 1, 'd', 100U);
+  while ((length + 101U + 2U) <= 1023U) {
+    std::memcpy(victimPath + length, segment, 101U);
+    length += 101U;
+    victimPath[length] = '\0';
+    if (!std::filesystem::create_directory(victimPath, ec) || ec) {
+      std::printf("overlong-path setup unsupported here — skipped\n");
+      std::filesystem::remove_all(baseDirectory, ec);
+      return 0;
+    }
+  }
+  victimPath[length] = '/';
+  ++length;
+  while (length < 1023U) {
+    victimPath[length] = 'f';
+    ++length;
+  }
+  victimPath[length] = '\0';
+
+  std::FILE *victim = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&victim, victimPath, "wb") != 0) {
+    victim = nullptr;
+  }
+#else
+  victim = std::fopen(victimPath, "wb");
+#endif
+  if (victim == nullptr) {
+    std::printf("overlong-path setup unsupported here — skipped\n");
+    std::filesystem::remove_all(baseDirectory, ec);
+    return 0;
+  }
+  std::fputs("victim", victim);
+  std::fclose(victim);
+
+  {
+    engine::core::AtomicFileWriter writer{};
+    if (writer.begin(victimPath)) {
+      writer.abort();
+      std::filesystem::remove_all(baseDirectory, ec);
+      return 53;
+    }
+  }
+
+  const std::string survivor = read_all(victimPath);
+  std::filesystem::remove_all(baseDirectory, ec);
+  if (survivor != "victim") {
+    return 54;
+  }
+  return 0;
+}
+
 int main() {
   int result = check_fresh_write();
   if (result == 0) {
@@ -157,6 +297,12 @@ int main() {
   }
   if (result == 0) {
     result = check_rename_failure_cleans_temporary();
+  }
+  if (result == 0) {
+    result = check_streaming_writer();
+  }
+  if (result == 0) {
+    result = check_overlong_temp_path_leaves_destination();
   }
   cleanup();
 

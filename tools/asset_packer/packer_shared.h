@@ -31,6 +31,13 @@ struct DependencyDigest final {
   std::uint64_t hash = 0ULL;
 };
 
+/// Importer contract version baked into every cook stamp: bump whenever
+/// the cooked output format or import semantics change, so existing
+/// outputs recook once instead of silently keeping stale bytes (audit
+/// H-20). Stamps written before this key existed read as version 0 and
+/// therefore always recook.
+inline constexpr std::uint32_t kCookToolVersion = 2U;
+
 /// Import settings read from an asset's .meta.json sidecar.
 struct ImportSettings final {
   int meshIndex = 0;
@@ -72,15 +79,26 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
                    std::uint64_t importSettingsHash);
 
+/// Rotates positions and normals from the declared source up axis
+/// (0 = X-up, 2 = Z-up) into engine Y-up; 1 and unknown values no-op.
+/// Proper rotations only, so triangle winding is preserved (audit H-20:
+/// the setting was hashed but never applied).
+void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis);
+/// Recomputes per-vertex normals as area-weighted face-normal averages
+/// over the primitive's triangles (audit H-20: the setting was hashed
+/// but never applied).
+void generate_normals_for_primitive(PrimitiveData *data);
 /// Uniform scale applied in place to an extracted primitive.
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor);
 /// Extracts one glTF primitive into interleaved vertices and indices.
 /// When jointRemap is non-null and the primitive carries JOINTS_0 and
 /// WEIGHTS_0, cooks the skinned v3 layout with joint indices remapped to
-/// the reordered skeleton.
+/// the reordered skeleton. allowMissingNormals accepts sources without a
+/// NORMAL accessor, leaving zeroed normals for the caller to generate.
 bool extract_primitive(const cgltf_primitive *primitive,
                        PrimitiveData *outData,
-                       const std::vector<std::uint32_t> *jointRemap = nullptr);
+                       const std::vector<std::uint32_t> *jointRemap = nullptr,
+                       bool allowMissingNormals = false);
 /// Writes the cooked .mesh file.
 bool write_mesh_file(const char *outputPath, const PrimitiveData &data);
 /// Writes the .meta.json metadata sidecar.
@@ -89,7 +107,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
                          std::uint64_t sourceHash,
                          const std::vector<DependencyDigest> &dependencies,
                          const ImportSettings &importSettings);
-/// Cooks and writes the collision convex hull beside the mesh.
+/// Cooks and writes the collision convex hull beside the mesh. True when
+/// the sidecar was written OR the geometry structurally has no hull
+/// (too few vertices, degenerate); false only on a write failure, which
+/// must block the cook-stamp commit marker.
 bool cook_and_write_convex_hull(const char *outputPath,
                                 const PrimitiveData &data);
 /// Resolves a glTF image URI relative to the input file.
