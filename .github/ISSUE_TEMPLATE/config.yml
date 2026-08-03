@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Finding-closure contract
+    url: https://github.com/shimakaze09/Engine/blob/main/CLAUDE.md#release-safety-and-finding-closure-contract
+    about: How Critical/High findings are closed — read before marking an audit issue done.

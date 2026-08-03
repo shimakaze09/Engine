@@ -1,0 +1,63 @@
+name: Audit finding
+description: A defect found by a code audit or review sweep (correctness, safety, security, determinism)
+title: "[Audit] <short defect statement>"
+labels: ["audit"]
+body:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: P0 crash/corruption/security, P1 serious correctness, P2 robustness/performance, P3 maintainability
+      options:
+        - P0 — crash, data loss, memory safety, security
+        - P1 — serious correctness or architectural defect
+        - P2 — robustness, determinism, or performance defect
+        - P3 — maintainability or minor cleanup
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - core
+        - math
+        - physics
+        - renderer
+        - audio
+        - scripting
+        - runtime
+        - editor
+        - tools / asset pipeline
+        - build / CI
+        - tests
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Exact file:line references and what the code does wrong. Cite the audit report section if one exists.
+      placeholder: "physics/src/ccd.cpp:233-242 — reads live RigidBody::velocity while chunk jobs write it; audit/audit_2026-08-03_followup.md N-08"
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: Failure scenario
+      description: Concrete inputs/state → wrong output, crash, or corruption. What does a user or test observe?
+    validations:
+      required: true
+  - type: textarea
+    id: closure
+    attributes:
+      label: Closure requirements
+      description: Per CLAUDE.md's finding-closure contract — the regression that must be red on base and green on the fix, plus required boundary/fault-injection coverage. Partial fixes must link a follow-up issue for the remaining scope.
+    validations:
+      required: true
+  - type: input
+    id: origin
+    attributes:
+      label: Origin
+      description: Audit report / PR review / sweep that produced this finding
+      placeholder: "audit/audit_2026-08-03_followup.md N-08; PR #63 review"

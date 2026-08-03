@@ -1,0 +1,48 @@
+name: Weakness / tech debt
+description: A maintainability, test-coverage, performance, or design weakness that is not an active defect
+title: "[Debt] <what is weak and where>"
+labels: ["tech-debt"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Missing test coverage
+        - Performance / scalability risk
+        - Design / architecture debt
+        - Documentation gap
+        - Tooling / CI gap
+        - Duplication (open migration per CLAUDE.md)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - core
+        - math
+        - physics
+        - renderer
+        - audio
+        - scripting
+        - runtime
+        - editor
+        - tools / asset pipeline
+        - build / CI
+        - tests
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What is weak, and where
+      description: File/system references plus why it matters (what it blocks, what it risks, what it costs later).
+    validations:
+      required: true
+  - type: textarea
+    id: direction
+    attributes:
+      label: Suggested direction
+      description: Sketch of the fix or the decision needed; note if it requires an owner decision or a behavior version.
