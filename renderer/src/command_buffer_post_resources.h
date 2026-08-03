@@ -11,11 +11,15 @@
 namespace engine::renderer {
 
 /// (Re)allocates the bloom mip chain when the drawable size changes.
-void ensure_bloom_resources(BackendState &b, int width, int height) noexcept;
+/// Transactional: any creation failure releases the partial chain, records
+/// the failed size so the retry happens on resize instead of every frame,
+/// and returns false; true means the full chain is ready (audit N-10).
+bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept;
 /// Releases the bloom mip chain textures and framebuffers.
 void destroy_bloom_resources(BackendState &b) noexcept;
-/// (Re)allocates the luminance averaging mip chain when the size changes.
-void ensure_luminance_resources(BackendState &b, int width,
+/// (Re)allocates the luminance averaging mip chain when the size changes;
+/// same transactional creation and failure contract as the bloom chain.
+bool ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept;
 /// Releases the luminance mip chain textures and framebuffers.
 void destroy_luminance_resources(BackendState &b) noexcept;
