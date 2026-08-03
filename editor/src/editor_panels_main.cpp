@@ -283,9 +283,15 @@ static bool entity_has_parent(runtime::Entity entity,
   return transform.parentId == parentId;
 }
 
+/// Hard bound on hierarchy tree nesting drawn per frame; deeper nodes
+/// render as leaves so corrupted or absurdly deep parent chains cannot
+/// grow the render call stack without limit.
+constexpr std::size_t kMaxHierarchyDrawDepth = 64U;
+
 /// Draws one hierarchy node with selection, drag-drop reparenting, and
-/// its children as a subtree.
-static void draw_entity_node(runtime::Entity entity) noexcept {
+/// its children as a subtree (depth-capped by kMaxHierarchyDrawDepth).
+static void draw_entity_node(runtime::Entity entity,
+                             std::size_t depth) noexcept {
   char label[160] = {};
   runtime::NameComponent name{};
   if (editor_session().world->get_name_component(entity, &name) &&
@@ -300,7 +306,8 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
   const runtime::PersistentId ownId =
       editor_session().world->persistent_id(entity);
   bool hasChildren = false;
-  if (ownId != runtime::kInvalidPersistentId) {
+  if ((depth < kMaxHierarchyDrawDepth) &&
+      (ownId != runtime::kInvalidPersistentId)) {
     editor_session().world->for_each_alive([&](runtime::Entity candidate) {
       if (!hasChildren && (candidate != entity) &&
           entity_has_parent(candidate, ownId)) {
@@ -351,7 +358,7 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
     if (hasChildren) {
       editor_session().world->for_each_alive([&](runtime::Entity candidate) {
         if ((candidate != entity) && entity_has_parent(candidate, ownId)) {
-          draw_entity_node(candidate);
+          draw_entity_node(candidate, depth + 1U);
         }
       });
     }
@@ -363,7 +370,7 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
 static void draw_entity_hierarchy() noexcept {
   editor_session().world->for_each_alive([](runtime::Entity entity) {
     if (entity_has_parent(entity, runtime::kInvalidPersistentId)) {
-      draw_entity_node(entity);
+      draw_entity_node(entity, 0U);
     }
   });
 }

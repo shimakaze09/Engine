@@ -281,19 +281,26 @@ bool execute_reparent(runtime::Entity child,
       return false;
     }
     runtime::Entity cursor = newParent;
-    for (std::size_t depth = 0U; depth < 256U; ++depth) {
+    const std::size_t maxAncestors = world->alive_entity_count() + 1U;
+    bool reachedRoot = false;
+    for (std::size_t depth = 0U; depth < maxAncestors; ++depth) {
       runtime::Transform cursorTransform{};
       if (!world->get_transform(cursor, &cursorTransform) ||
           (cursorTransform.parentId == runtime::kInvalidPersistentId)) {
+        reachedRoot = true;
         break;
       }
       cursor = world->find_entity_by_persistent_id(cursorTransform.parentId);
       if (cursor == runtime::kInvalidEntity) {
+        reachedRoot = true;
         break;
       }
       if (cursor == child) {
         return false;
       }
+    }
+    if (!reachedRoot) {
+      return false;
     }
   }
 
@@ -372,54 +379,42 @@ void EntityCreateCommand::undo() noexcept {
   static_cast<void>(world->destroy_entity(entity));
 }
 
-/// Counts the entity plus all its transform descendants.
-static std::size_t count_subtree_entities(runtime::World &world,
-                                          runtime::Entity entity) noexcept {
-  std::size_t count = 1U;
-  const runtime::PersistentId ownId = world.persistent_id(entity);
-  world.for_each_alive([&](runtime::Entity candidate) {
-    if (candidate == entity) {
-      return;
+/// Collects the entity's transform subtree into members (root first,
+/// every parent before its children) with an iterative breadth-first
+/// frontier and per-index visited marks, so corrupted parent links
+/// (cycles, self-parenting) are captured once and 1000+-deep chains
+/// cannot grow the call stack; returns the member count (bounded by
+/// capacity).
+static std::size_t collect_subtree_members(runtime::World &world,
+                                           runtime::Entity root,
+                                           runtime::Entity *members,
+                                           std::size_t capacity,
+                                           bool *visited) noexcept {
+  if ((members == nullptr) || (visited == nullptr) || (capacity == 0U) ||
+      !world.is_alive(root)) {
+    return 0U;
+  }
+  std::size_t count = 0U;
+  members[count++] = root;
+  visited[root.index] = true;
+  for (std::size_t cursor = 0U; cursor < count; ++cursor) {
+    const runtime::PersistentId ownId = world.persistent_id(members[cursor]);
+    if (ownId == runtime::kInvalidPersistentId) {
+      continue;
     }
-    runtime::Transform transform{};
-    if (world.get_transform(candidate, &transform) &&
-        (transform.parentId == ownId)) {
-      count += count_subtree_entities(world, candidate);
-    }
-  });
+    world.for_each_alive([&](runtime::Entity candidate) {
+      if ((count >= capacity) || visited[candidate.index]) {
+        return;
+      }
+      runtime::Transform transform{};
+      if (world.get_transform(candidate, &transform) &&
+          (transform.parentId == ownId)) {
+        visited[candidate.index] = true;
+        members[count++] = candidate;
+      }
+    });
+  }
   return count;
-}
-
-/// Fills delete records for the subtree in parent-before-child order so
-/// undo can restore parents ahead of the children that link to them.
-static void capture_subtree_records(runtime::World &world,
-                                    runtime::Entity entity,
-                                    EntityDeleteRecord *records,
-                                    std::size_t capacity,
-                                    std::size_t *written) noexcept {
-  if (*written >= capacity) {
-    return;
-  }
-  EntityDeleteRecord &record = records[*written];
-  ++(*written);
-  record.persistentId = world.persistent_id(entity);
-  for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
-       ++typeIndex) {
-    record.present[typeIndex] = capture_component_snapshot(
-        static_cast<ComponentEditType>(typeIndex), entity,
-        &record.components);
-  }
-  const runtime::PersistentId ownId = record.persistentId;
-  world.for_each_alive([&](runtime::Entity candidate) {
-    if (candidate == entity) {
-      return;
-    }
-    runtime::Transform transform{};
-    if (world.get_transform(candidate, &transform) &&
-        (transform.parentId == ownId)) {
-      capture_subtree_records(world, candidate, records, capacity, written);
-    }
-  });
 }
 
 void EntityDeleteCommand::execute() noexcept {
@@ -648,7 +643,19 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
   if ((world == nullptr) || !world->is_alive(entity)) {
     return nullptr;
   }
-  const std::size_t count = count_subtree_entities(*world, entity);
+  const std::size_t capacity = world->alive_entity_count();
+  std::unique_ptr<runtime::Entity[]> members(
+      new (std::nothrow) runtime::Entity[capacity]);
+  std::unique_ptr<bool[]> visited(
+      new (std::nothrow) bool[runtime::World::kMaxEntities + 1U]());
+  if ((members == nullptr) || (visited == nullptr)) {
+    return nullptr;
+  }
+  const std::size_t count = collect_subtree_members(
+      *world, entity, members.get(), capacity, visited.get());
+  if (count == 0U) {
+    return nullptr;
+  }
   auto *command = new (std::nothrow) EntityDeleteCommand();
   if (command == nullptr) {
     return nullptr;
@@ -658,10 +665,17 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
     delete command;
     return nullptr;
   }
-  std::size_t written = 0U;
-  capture_subtree_records(*world, entity, command->records.get(), count,
-                          &written);
-  command->recordCount = written;
+  for (std::size_t i = 0U; i < count; ++i) {
+    EntityDeleteRecord &record = command->records[i];
+    record.persistentId = world->persistent_id(members[i]);
+    for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
+         ++typeIndex) {
+      record.present[typeIndex] = capture_component_snapshot(
+          static_cast<ComponentEditType>(typeIndex), members[i],
+          &record.components);
+    }
+  }
+  command->recordCount = count;
   return command;
 }
 
