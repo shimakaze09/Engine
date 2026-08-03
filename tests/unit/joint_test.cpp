@@ -6,6 +6,7 @@
 #include <limits>
 #include <new>
 
+#include "engine/core/cvar.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
@@ -330,6 +331,110 @@ int test_spring_joint() noexcept {
   return 0;
 }
 
+// Helper: dynamic body with no collider so contact paths stay out of the
+// spring measurements.
+Entity make_plain_body(World &w, const math::Vec3 &pos) noexcept {
+  const Entity e = w.create_entity();
+  Transform t{};
+  t.position = pos;
+  w.add_transform(e, t);
+  RigidBody rb{};
+  rb.inverseMass = 1.0F;
+  w.add_rigid_body(e, rb);
+  return e;
+}
+
+// N-11 regression: authored spring constants must mean the same thing at
+// every physics.solver_iterations value (set through the real cvar so the
+// per-step cache refresh in begin_update_phase is the path under test).
+// The spring integrates its force exactly once per full step, so with no
+// other constraints in the world the trajectory is bit-identical across
+// iteration counts — exact float equality is the strictest valid tolerance
+// and is asserted. The settle bound follows from the authored damped
+// oscillator: k=50, c=8, mA=mB=1 (reduced mass 0.5) gives wn=10 rad/s,
+// zeta=0.8, settle time ~4/(zeta*wn) = 0.5 s, so after 5 s the distance
+// must sit within 0.05 of the rest length (generous against semi-implicit
+// integration bias at dt=1/60).
+int test_spring_stiffness_iteration_invariant() noexcept {
+  const int iterationCounts[3] = {1, 8, 16};
+  math::Vec3 finalA[3] = {};
+  math::Vec3 finalB[3] = {};
+  float finalDist[3] = {};
+  float transientDist[3] = {};
+
+  physics::register_physics_cvars();
+  for (int run = 0; run < 3; ++run) {
+    std::unique_ptr<World> world(new (std::nothrow) World());
+    if (world == nullptr) {
+      return 1;
+    }
+    world->end_frame_phase();
+    engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+    if (!engine::core::cvar_set_int("physics.solver_iterations",
+                                    iterationCounts[run])) {
+      return 6;
+    }
+
+    const Entity a = make_plain_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+    const Entity b = make_plain_body(*world, math::Vec3(5.0F, 0.0F, 0.0F));
+    if (physics::add_spring_joint(*world, a, b, 2.0F, 50.0F, 8.0F) ==
+        physics::kInvalidJointId) {
+      return 2;
+    }
+
+    for (int i = 0; i < 300; ++i) {
+      world->begin_update_phase();
+      engine::runtime::step_physics(*world, 1.0F / 60.0F);
+      physics::solve_constraints(*world, 1.0F / 60.0F);
+      world->commit_update_phase();
+      world->begin_render_prep_phase();
+      world->end_frame_phase();
+      if (i == 19) {
+        Transform sampleA{};
+        Transform sampleB{};
+        if (world->get_transform(a, &sampleA) &&
+            world->get_transform(b, &sampleB)) {
+          transientDist[run] = vec_distance(sampleA.position, sampleB.position);
+        }
+      }
+    }
+
+    Transform tA{};
+    Transform tB{};
+    if (!world->get_transform(a, &tA) || !world->get_transform(b, &tB)) {
+      return 3;
+    }
+    finalA[run] = tA.position;
+    finalB[run] = tB.position;
+    finalDist[run] = vec_distance(tA.position, tB.position);
+  }
+  engine::core::cvar_set_int("physics.solver_iterations", 8);
+
+  for (int run = 1; run < 3; ++run) {
+    if ((transientDist[run] != transientDist[0]) ||
+        (finalA[run].x != finalA[0].x) || (finalA[run].y != finalA[0].y) ||
+        (finalA[run].z != finalA[0].z) || (finalB[run].x != finalB[0].x) ||
+        (finalB[run].y != finalB[0].y) || (finalB[run].z != finalB[0].z)) {
+      std::printf("FAIL spring_iteration_invariant: iters=%d transient=%.4f "
+                  "final=%.4f vs iters=1 transient=%.4f final=%.4f\n",
+                  iterationCounts[run],
+                  static_cast<double>(transientDist[run]),
+                  static_cast<double>(finalDist[run]),
+                  static_cast<double>(transientDist[0]),
+                  static_cast<double>(finalDist[0]));
+      return 4;
+    }
+  }
+
+  if (std::fabs(finalDist[0] - 2.0F) > 0.05F) {
+    std::printf("FAIL spring_iteration_invariant: settled dist=%.4f "
+                "(expected 2.0 +/- 0.05)\n",
+                static_cast<double>(finalDist[0]));
+    return 5;
+  }
+  return 0;
+}
+
 // ---- Fixed joint -----------------------------------------------------------
 
 int test_fixed_joint() noexcept {
@@ -596,6 +701,8 @@ int main() {
       {"ball_socket_joint", test_ball_socket_joint},
       {"slider_joint", test_slider_joint},
       {"spring_joint", test_spring_joint},
+      {"spring_stiffness_iteration_invariant",
+       test_spring_stiffness_iteration_invariant},
       {"slider_settled_no_warm_start_drift",
        test_slider_settled_no_warm_start_drift},
       {"fixed_joint", test_fixed_joint},

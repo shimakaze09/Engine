@@ -6,10 +6,13 @@
 // inverse mass mA^-1 + mB^-1), but the correction is the integrated force,
 // not a projection: a positional nudge dx = F dt^2 (semi-implicit) plus a
 // velocity impulse F dt split by inverse mass so damping carries into the
-// next frame. No velocity projection runs - the joint is soft by
-// contract, and removing radial velocity would turn it rigid. The
-// accumulated impulse keeps the SIGNED correction: the warm start replays
-// it along the center line, so its direction must survive.
+// next frame. The force integrates over the FULL step, so the solver runs
+// this joint exactly once per step (first Gauss-Seidel iteration only);
+// running it per iteration would scale the authored stiffness and damping
+// by the physics.solver_iterations cvar. No velocity projection runs -
+// the joint is soft by contract, and removing radial velocity would turn
+// it rigid. The accumulated impulse keeps the SIGNED correction: the warm
+// start replays it along the center line, so its direction must survive.
 
 #include "joint_solvers.h"
 
