@@ -60,7 +60,7 @@ void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
                "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
-               "[--force]\n");
+               "[--force] [--verify]\n");
 }
 
 /// Strips the mesh output's extension so cooked skeletal assets land
@@ -78,10 +78,12 @@ std::string cooked_output_base(const char *outputPath) {
 
 /// Cooks skin 0 and every animation into "<base>.skel" and
 /// "<base>.<clip>.anim" beside the mesh output, filling outJointRemap for
-/// skinned vertex extraction; returns 0 on success or the packer exit
-/// code (14 skeleton, 15 animation).
+/// skinned vertex extraction and appending every committed path to
+/// outCookedPaths for the stamp's output manifest (issue #55); returns 0
+/// on success or the packer exit code (14 skeleton, 15 animation).
 int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
-                         std::vector<std::uint32_t> *outJointRemap) {
+                         std::vector<std::uint32_t> *outJointRemap,
+                         std::vector<std::string> *outCookedPaths) {
   engine::tools::Skeleton skeleton{};
   engine::tools::SkeletonImportResult skeletonResult =
       engine::tools::SkeletonImportResult::Ok;
@@ -107,6 +109,7 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
   }
   std::printf("cooked skeleton: %s (%zu joints)\n", skeletonPath.c_str(),
               skeleton.joints.size());
+  outCookedPaths->push_back(skeletonPath);
 
   std::unordered_set<std::string> usedClipNames{};
   for (std::size_t animIndex = 0U; animIndex < data->animations_count;
@@ -141,6 +144,7 @@ int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
     std::printf("cooked animation: %s (%zu tracks, %.3fs)\n",
                 clipPath.c_str(), clip.tracks.size(),
                 static_cast<double>(clip.durationSeconds));
+    outCookedPaths->push_back(clipPath);
   }
   return 0;
 }
@@ -188,6 +192,7 @@ int main(int argc, char **argv) {
   const char *outputPath = argv[2];
 
   bool forceRepack = false;
+  bool verifyOutputs = false;
   std::vector<std::string> dependencyPaths{};
   std::string graphPath{};
   for (int i = 3; i < argc; ++i) {
@@ -213,6 +218,11 @@ int main(int argc, char **argv) {
 
     if (std::strcmp(argv[i], "--force") == 0) {
       forceRepack = true;
+      continue;
+    }
+
+    if (std::strcmp(argv[i], "--verify") == 0) {
+      verifyOutputs = true;
       continue;
     }
 
@@ -324,7 +334,7 @@ int main(int argc, char **argv) {
   sort_dependency_digests(dependencyDigests);
 
   if (!forceRepack && !should_repack(outputPath, sourceHash, dependencyDigests,
-                                     importSettingsHash)) {
+                                     importSettingsHash, verifyOutputs)) {
     std::printf("asset up-to-date; skipped recook: %s\n", outputPath);
     return 0;
   }
@@ -365,10 +375,11 @@ int main(int argc, char **argv) {
     return 4;
   }
 
+  std::vector<std::string> cookedOutputs{};
   std::vector<std::uint32_t> jointRemap{};
   if (data->skins_count > 0U) {
     const int skeletalExitCode =
-        cook_skeletal_assets(data, outputPath, &jointRemap);
+        cook_skeletal_assets(data, outputPath, &jointRemap, &cookedOutputs);
     if (skeletalExitCode != 0) {
       cgltf_free(data);
       return skeletalExitCode;
@@ -489,12 +500,14 @@ int main(int argc, char **argv) {
   if (!writeOk) {
     return 6;
   }
+  cookedOutputs.emplace_back(outputPath);
 
   if (!write_metadata_file(inputPath, outputPath, primitiveData, sourceHash,
                            dependencyDigests, importSettings)) {
     std::fprintf(stderr, "error: failed to write metadata sidecar\n");
     return 12;
   }
+  cookedOutputs.push_back(std::string(outputPath) + ".meta.json");
 
   // Hull-less geometry reports success; only a write failure blocks the
   // stamp below so a broken sidecar can never be certified complete.
@@ -502,8 +515,23 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: failed to write convex hull sidecar\n");
     return 17;
   }
+  const std::string hullPath = std::string(outputPath) + ".hull";
+  if (file_exists(hullPath.c_str())) {
+    cookedOutputs.push_back(hullPath);
+  }
 
   generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
+  char thumbPath[512] = {};
+  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
+  if (file_exists(thumbPath)) {
+    cookedOutputs.emplace_back(thumbPath);
+    char thumbChecksumPath[512] = {};
+    build_thumbnail_checksum_path(thumbPath, thumbChecksumPath,
+                                  sizeof(thumbChecksumPath));
+    if (file_exists(thumbChecksumPath)) {
+      cookedOutputs.emplace_back(thumbChecksumPath);
+    }
+  }
 
   if (hasGraphPath) {
     if (!engine::tools::write_dependency_graph_json(&depGraph,
@@ -514,11 +542,16 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (!remove_stale_outputs(outputPath, cookedOutputs)) {
+    return 18;
+  }
+
   // The stamp is the cook's commit marker: written only after every
-  // output above landed, so any interruption leaves no stamp and the
-  // next run recooks the full output set (audit H-20).
+  // output above landed (and stale outputs of the previous manifest were
+  // retired), so any interruption leaves no fresh stamp and the next run
+  // recooks the full output set (audit H-20, issue #55).
   if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
-                        importSettingsHash)) {
+                        importSettingsHash, cookedOutputs)) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");
     return 13;
   }
