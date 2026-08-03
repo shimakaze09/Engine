@@ -604,6 +604,67 @@ bool test_file_round_trip_and_default_path() noexcept {
   return restored;
 }
 
+/// Wrong-shape rejection (audit P2-9): valid JSON without the expected
+/// top-level actions/axes arrays — including "{}" — is refused and the
+/// current bindings survive untouched; a well-formed document still
+/// loads afterwards.
+bool test_wrong_shape_load_preserves_bindings() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  InputAxisSource src{};
+  src.type = AxisSourceType::KeyPair;
+  src.negativeKey = kKey_A;
+  src.positiveKey = kKey_D;
+  src.scale = 1.0F;
+  add_input_axis("move_x", &src, 1U);
+
+  const char *rejected[] = {
+      "{}",
+      "{\"actions\":3,\"axes\":[]}",
+      "{\"actions\":[],\"axes\":{}}",
+      "{\"wrong\":[]}",
+      "[1,2,3]",
+      "{\"actions\":[",
+  };
+  for (const char *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  sim_key_down(kKey_D);
+  end_input_frame();
+  const bool actionIntact = is_mapped_action_down("jump");
+  const bool axisIntact = mapped_axis_value("move_x") == 1.0F;
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_up(kKey_D);
+  end_input_frame();
+  if (!actionIntact || !axisIntact) {
+    shutdown_all();
+    return false;
+  }
+
+  const char *valid = "{\"actions\":[],\"axes\":[]}";
+  if (!load_input_bindings_from_buffer(valid, std::strlen(valid))) {
+    shutdown_all();
+    return false;
+  }
+  const bool cleared = !is_mapped_action_down("jump");
+  shutdown_all();
+  return cleared;
+}
+
 /// Fault injection (audit N-05): a save whose sibling temporary cannot
 /// be staged (read-only parent directory) fails and leaves the
 /// pre-existing destination bytes untouched. Skips silently when the
@@ -722,6 +783,8 @@ int main() {
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",
       &test_file_round_trip_and_default_path);
+  run("wrong_shape_load_preserves_bindings",
+      &test_wrong_shape_load_preserves_bindings);
   run("save_failure_preserves_existing_file",
       &test_save_failure_preserves_existing_file);
   run("save_to_directory_destination_fails",

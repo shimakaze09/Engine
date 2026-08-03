@@ -28,6 +28,12 @@ std::array<InputAxisMapping, kMaxInputAxes> g_mappedAxes{};
 std::array<bool, kMaxInputActions> g_actionDown{};
 std::array<bool, kMaxInputActions> g_prevActionDown{};
 
+/// Staging for a parsed bindings document; committed only after it validates.
+struct StagedBindings final {
+  std::array<InputAction, kMaxInputActions> actions{};
+  std::array<InputAxisMapping, kMaxInputAxes> axes{};
+};
+
 // Current-frame mouse delta (accumulated).
 float g_mouseDeltaX = 0.0F;
 float g_mouseDeltaY = 0.0F;
@@ -649,17 +655,30 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
   const JsonValue *root = parser.root();
   if ((root == nullptr) || (root->type != JsonValue::Type::Object)) {
+    log_message(LogLevel::Error, kLogChannel,
+                "load_input_bindings: root is not an object");
     return false;
   }
 
-  g_mappedActions = {};
-  g_mappedAxes = {};
-  g_actionDown = {};
-  g_prevActionDown = {};
-
   JsonValue actionsVal{};
-  if (parser.get_object_field(*root, "actions", &actionsVal) &&
-      (actionsVal.type == JsonValue::Type::Array)) {
+  JsonValue axesVal{};
+  const bool shapeValid =
+      parser.get_object_field(*root, "actions", &actionsVal) &&
+      (actionsVal.type == JsonValue::Type::Array) &&
+      parser.get_object_field(*root, "axes", &axesVal) &&
+      (axesVal.type == JsonValue::Type::Array);
+  if (!shapeValid) {
+    log_message(LogLevel::Error, kLogChannel,
+                "load_input_bindings: missing actions/axes arrays");
+    return false;
+  }
+
+  std::unique_ptr<StagedBindings> staged(new (std::nothrow) StagedBindings());
+  if (staged == nullptr) {
+    return false;
+  }
+
+  {
     const std::size_t count = parser.array_size(actionsVal);
     for (std::size_t i = 0; i < count && i < kMaxInputActions; ++i) {
       JsonValue actionVal{};
@@ -722,7 +741,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
         }
       }
 
-      for (auto &slot : g_mappedActions) {
+      for (auto &slot : staged->actions) {
         if (!slot.occupied) {
           slot = action;
           break;
@@ -731,9 +750,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
     }
   }
 
-  JsonValue axesVal{};
-  if (parser.get_object_field(*root, "axes", &axesVal) &&
-      (axesVal.type == JsonValue::Type::Array)) {
+  {
     const std::size_t count = parser.array_size(axesVal);
     for (std::size_t i = 0; i < count && i < kMaxInputAxes; ++i) {
       JsonValue axisVal{};
@@ -804,7 +821,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
         }
       }
 
-      for (auto &slot : g_mappedAxes) {
+      for (auto &slot : staged->axes) {
         if (!slot.occupied) {
           slot = axis;
           break;
@@ -813,6 +830,10 @@ bool load_input_bindings_from_buffer(const char *buffer,
     }
   }
 
+  g_mappedActions = staged->actions;
+  g_mappedAxes = staged->axes;
+  g_actionDown = {};
+  g_prevActionDown = {};
   return true;
 }
 
