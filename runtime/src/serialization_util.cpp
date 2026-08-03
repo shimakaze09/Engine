@@ -8,6 +8,8 @@
 #include <new>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/logging.h"
+#include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
 
 namespace engine::runtime {
@@ -207,6 +209,386 @@ bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
   outQuat->w = fields[3];
   return true;
 }
+
+// Fully-qualified reflection registration names for the reflected component
+// descriptor lookups below.
+constexpr const char *kTransformTypeName = "engine::runtime::Transform";
+constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
+constexpr const char *kSpringArmTypeName =
+    "engine::runtime::SpringArmComponent";
+constexpr const char *kReflectionProbeTypeName =
+    "engine::runtime::ReflectionProbeComponent";
+constexpr const char *kPointLightTypeName =
+    "engine::runtime::PointLightComponent";
+constexpr const char *kSpotLightTypeName =
+    "engine::runtime::SpotLightComponent";
+constexpr const char *kSceneCaptureTypeName =
+    "engine::runtime::SceneCaptureComponent";
+
+bool find_reflected_component_descriptors(
+    ReflectedComponentDescriptors *outDescs, const char *logChannel) noexcept {
+  if (outDescs == nullptr) {
+    return false;
+  }
+  ensure_runtime_reflection_registered();
+  const core::TypeRegistry &registry = core::global_type_registry();
+  outDescs->transform = registry.find_type(kTransformTypeName);
+  outDescs->rigidBody = registry.find_type(kRigidBodyTypeName);
+  outDescs->springArm = registry.find_type(kSpringArmTypeName);
+  outDescs->reflectionProbe = registry.find_type(kReflectionProbeTypeName);
+  outDescs->pointLight = registry.find_type(kPointLightTypeName);
+  outDescs->spotLight = registry.find_type(kSpotLightTypeName);
+  outDescs->sceneCapture = registry.find_type(kSceneCaptureTypeName);
+  if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
+      (outDescs->springArm == nullptr) ||
+      (outDescs->reflectionProbe == nullptr) ||
+      (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr) ||
+      (outDescs->sceneCapture == nullptr)) {
+    if (logChannel != nullptr) {
+      core::log_message(core::LogLevel::Error, logChannel,
+                        "missing runtime reflection descriptors");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool write_reflected_component(core::JsonWriter &writer,
+                               const char *componentName,
+                               const core::TypeDescriptor &descriptor,
+                               const void *instance) noexcept {
+  if ((componentName == nullptr) || (instance == nullptr)) {
+    return false;
+  }
+
+  writer.write_key(componentName);
+  writer.begin_object();
+
+  for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
+    const core::TypeField &field = descriptor.fields[i];
+    if (field.name == nullptr) {
+      continue;
+    }
+
+    switch (field.kind) {
+    case core::TypeField::Kind::Float: {
+      const float *value = descriptor.field_ptr<float>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      writer.write_float(field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Uint32: {
+      const std::uint32_t *value =
+          descriptor.field_ptr<std::uint32_t>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      writer.write_uint(field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Bool: {
+      const bool *value = descriptor.field_ptr<bool>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      writer.write_bool(field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Vec2: {
+      const math::Vec2 *value =
+          descriptor.field_ptr<math::Vec2>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_vec2(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Vec3: {
+      const math::Vec3 *value =
+          descriptor.field_ptr<math::Vec3>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_vec3(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Vec4: {
+      const math::Vec4 *value =
+          descriptor.field_ptr<math::Vec4>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_vec4(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Quat: {
+      const math::Quat *value =
+          descriptor.field_ptr<math::Quat>(instance, field);
+      if (value == nullptr) {
+        return false;
+      }
+
+      write_quat(writer, field.name, *value);
+      break;
+    }
+    case core::TypeField::Kind::Int32:
+      // Current scene components do not contain signed integer fields.
+      return false;
+    }
+
+    if (writer.failed()) {
+      return false;
+    }
+  }
+
+  writer.end_object();
+  return !writer.failed();
+}
+
+bool read_reflected_component(const core::JsonParser &parser,
+                              const core::JsonValue &componentObject,
+                              const core::TypeDescriptor &descriptor,
+                              void *instance) noexcept {
+  if ((instance == nullptr) ||
+      (componentObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
+    const core::TypeField &field = descriptor.fields[i];
+    if (field.name == nullptr) {
+      continue;
+    }
+
+    core::JsonValue fieldValue{};
+    if (!parser.get_object_field(componentObject, field.name, &fieldValue)) {
+      continue;
+    }
+
+    switch (field.kind) {
+    case core::TypeField::Kind::Float: {
+      float *value = descriptor.field_ptr<float>(instance, field);
+      if ((value == nullptr) || !parser.as_float(fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Uint32: {
+      std::uint32_t *value =
+          descriptor.field_ptr<std::uint32_t>(instance, field);
+      if ((value == nullptr) || !parser.as_uint(fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Bool: {
+      bool *value = descriptor.field_ptr<bool>(instance, field);
+      if ((value == nullptr) || !parser.as_bool(fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Vec2: {
+      math::Vec2 *value = descriptor.field_ptr<math::Vec2>(instance, field);
+      if ((value == nullptr) || !read_vec2(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Vec3: {
+      math::Vec3 *value = descriptor.field_ptr<math::Vec3>(instance, field);
+      if ((value == nullptr) || !read_vec3(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Vec4: {
+      math::Vec4 *value = descriptor.field_ptr<math::Vec4>(instance, field);
+      if ((value == nullptr) || !read_vec4(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Quat: {
+      math::Quat *value = descriptor.field_ptr<math::Quat>(instance, field);
+      if ((value == nullptr) || !read_quat(parser, fieldValue, value)) {
+        return false;
+      }
+      break;
+    }
+    case core::TypeField::Kind::Int32:
+      // Current scene components do not contain signed integer fields.
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Reflection-path coverage (S7): Transform, RigidBody, SpringArm,
+// ReflectionProbe, PointLight, SpotLight, and SceneCapture serialize through
+// the field descriptors registered in reflect_types.cpp; the scene and
+// prefab serializers both consume these shared codecs. The remaining
+// component types stay hand-written deliberately:
+//  - Collider: shape has an 8-bit enum representation, so the dedicated reader
+//    validates a uint32 temporary before assigning the enum.
+//  - MeshComponent: meshAssetId is 64-bit (reflection has no Uint64 field
+//    kind) and the reader keeps a legacy "meshId" fallback for content
+//    authored before asset ids.
+//  - LightComponent: `type` is an enum that must clamp to a valid LightType
+//    on load rather than round-tripping arbitrary integers.
+//  - FoliagePatchComponent, NameComponent, ScriptComponent,
+//    AnimationComponent: fixed-size arrays and bounded strings; reflection
+//    has no array/string field kinds (their zero-field descriptors are
+//    documented in reflect_types.cpp).
+
+void write_mesh_component(core::JsonWriter &writer,
+                          const MeshComponent &component) noexcept {
+  writer.write_key(kJsonKeyMeshComponent);
+  writer.begin_object();
+  writer.write_uint64("meshAssetId", component.meshAssetId);
+  // Written only when set so pre-material files stay byte-identical.
+  if (component.materialAssetId != 0ULL) {
+    writer.write_uint64("materialAssetId", component.materialAssetId);
+  }
+  write_vec3(writer, "albedo", component.albedo);
+  writer.write_float("roughness", component.roughness);
+  writer.write_float("metallic", component.metallic);
+  writer.write_float("opacity", component.opacity);
+  // Written only when set so pre-capture files stay byte-identical.
+  if (component.sceneCaptureSourceId != 0U) {
+    writer.write_uint("sceneCaptureSourceId", component.sceneCaptureSourceId);
+  }
+  writer.end_object();
+}
+
+bool read_mesh_component(const core::JsonParser &parser,
+                         const core::JsonValue &meshObject,
+                         MeshComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (meshObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  MeshComponent component{};
+
+  core::JsonValue meshIdValue{};
+  if (parser.get_object_field(meshObject, "meshAssetId", &meshIdValue)) {
+    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
+      return false;
+    }
+  } else if (parser.get_object_field(meshObject, "meshId", &meshIdValue)) {
+    // Backward-compatible read path for content authored before asset IDs.
+    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
+      return false;
+    }
+  }
+
+  core::JsonValue materialIdValue{};
+  if (parser.get_object_field(meshObject, "materialAssetId",
+                              &materialIdValue)) {
+    if (!parser.as_uint64(materialIdValue, &component.materialAssetId)) {
+      return false;
+    }
+  }
+
+  core::JsonValue albedoValue{};
+  if (parser.get_object_field(meshObject, "albedo", &albedoValue)) {
+    if (!read_vec3(parser, albedoValue, &component.albedo)) {
+      return false;
+    }
+  }
+
+  core::JsonValue roughnessValue{};
+  if (parser.get_object_field(meshObject, "roughness", &roughnessValue)) {
+    static_cast<void>(parser.as_float(roughnessValue, &component.roughness));
+  }
+
+  core::JsonValue metallicValue{};
+  if (parser.get_object_field(meshObject, "metallic", &metallicValue)) {
+    static_cast<void>(parser.as_float(metallicValue, &component.metallic));
+  }
+
+  core::JsonValue opacityValue{};
+  if (parser.get_object_field(meshObject, "opacity", &opacityValue)) {
+    static_cast<void>(parser.as_float(opacityValue, &component.opacity));
+  }
+
+  core::JsonValue captureSourceValue{};
+  if (parser.get_object_field(meshObject, "sceneCaptureSourceId",
+                              &captureSourceValue)) {
+    if (!parser.as_uint(captureSourceValue, &component.sceneCaptureSourceId)) {
+      return false;
+    }
+  }
+
+  *outComponent = component;
+  return true;
+}
+
+void write_light_component(core::JsonWriter &writer,
+                           const LightComponent &component) noexcept {
+  writer.write_key(kJsonKeyLightComponent);
+  writer.begin_object();
+  write_vec3(writer, "color", component.color);
+  write_vec3(writer, "direction", component.direction);
+  writer.write_float("intensity", component.intensity);
+  writer.write_uint("type", static_cast<std::uint32_t>(component.type));
+  writer.end_object();
+}
+
+bool read_light_component(const core::JsonParser &parser,
+                          const core::JsonValue &lightObject,
+                          LightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (lightObject.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+
+  LightComponent component{};
+
+  core::JsonValue colorValue{};
+  if (parser.get_object_field(lightObject, "color", &colorValue)) {
+    if (!read_vec3(parser, colorValue, &component.color)) {
+      return false;
+    }
+  }
+
+  core::JsonValue dirValue{};
+  if (parser.get_object_field(lightObject, "direction", &dirValue)) {
+    if (!read_vec3(parser, dirValue, &component.direction)) {
+      return false;
+    }
+  }
+
+  core::JsonValue intensityValue{};
+  if (parser.get_object_field(lightObject, "intensity", &intensityValue)) {
+    static_cast<void>(parser.as_float(intensityValue, &component.intensity));
+  }
+
+  core::JsonValue typeValue{};
+  std::uint32_t type = static_cast<std::uint32_t>(LightType::Directional);
+  if (parser.get_object_field(lightObject, "type", &typeValue)) {
+    if (!parser.as_uint(typeValue, &type)) {
+      return false;
+    }
+  }
+  component.type = (type == static_cast<std::uint32_t>(LightType::Point))
+                       ? LightType::Point
+                       : LightType::Directional;
+
+  *outComponent = component;
+  return true;
+}
+
 
 // Hull payloads round-trip via HullSource provenance (rebuilt by
 // World::add_collider on install); Heightfield payloads are NOT serialized —

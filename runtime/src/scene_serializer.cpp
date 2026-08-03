@@ -22,6 +22,7 @@
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
+#include "component_registry.h"
 #include "serialization_util.h"
 
 namespace engine::runtime {
@@ -34,332 +35,11 @@ constexpr std::uint32_t kCurrentSceneVersion = 2U;
 constexpr const char *kEntitiesKey = "entities";
 constexpr const char *kComponentsKey = "components";
 constexpr const char *kPersistentIdKey = "persistentId";
-constexpr const char *kTransformTypeName = "engine::runtime::Transform";
-constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
-constexpr const char *kSpringArmTypeName =
-    "engine::runtime::SpringArmComponent";
-constexpr const char *kReflectionProbeTypeName =
-    "engine::runtime::ReflectionProbeComponent";
-constexpr const char *kPointLightTypeName =
-    "engine::runtime::PointLightComponent";
-constexpr const char *kSpotLightTypeName =
-    "engine::runtime::SpotLightComponent";
-constexpr const char *kSceneCaptureTypeName =
-    "engine::runtime::SceneCaptureComponent";
 constexpr const char *kNameFieldKey = "name";
-constexpr const char *kMeshAssetIdKey = "meshAssetId";
 constexpr const char *kGravityKey = "gravity";
 
 // File IO and vec/quat/foliage JSON helpers are shared with the prefab
 // serializer via serialization_util.h.
-
-/// Writes reflected component data.
-bool write_reflected_component(core::JsonWriter &writer,
-                               const char *componentName,
-                               const core::TypeDescriptor &descriptor,
-                               const void *instance) noexcept {
-  if ((componentName == nullptr) || (instance == nullptr)) {
-    return false;
-  }
-
-  writer.write_key(componentName);
-  writer.begin_object();
-
-  for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
-    const core::TypeField &field = descriptor.fields[i];
-    if (field.name == nullptr) {
-      continue;
-    }
-
-    switch (field.kind) {
-    case core::TypeField::Kind::Float: {
-      const float *value = descriptor.field_ptr<float>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      writer.write_float(field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Uint32: {
-      const std::uint32_t *value =
-          descriptor.field_ptr<std::uint32_t>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      writer.write_uint(field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Bool: {
-      const bool *value = descriptor.field_ptr<bool>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      writer.write_bool(field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Vec2: {
-      const math::Vec2 *value =
-          descriptor.field_ptr<math::Vec2>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      write_vec2(writer, field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Vec3: {
-      const math::Vec3 *value =
-          descriptor.field_ptr<math::Vec3>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      write_vec3(writer, field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Vec4: {
-      const math::Vec4 *value =
-          descriptor.field_ptr<math::Vec4>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      write_vec4(writer, field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Quat: {
-      const math::Quat *value =
-          descriptor.field_ptr<math::Quat>(instance, field);
-      if (value == nullptr) {
-        return false;
-      }
-
-      write_quat(writer, field.name, *value);
-      break;
-    }
-    case core::TypeField::Kind::Int32:
-      // Current scene components do not contain signed integer fields.
-      return false;
-    }
-
-    if (writer.failed()) {
-      return false;
-    }
-  }
-
-  writer.end_object();
-  return !writer.failed();
-}
-
-/// Reads reflected component data.
-bool read_reflected_component(const core::JsonParser &parser,
-                              const core::JsonValue &componentObject,
-                              const core::TypeDescriptor &descriptor,
-                              void *instance) noexcept {
-  if ((instance == nullptr) ||
-      (componentObject.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
-    const core::TypeField &field = descriptor.fields[i];
-    if (field.name == nullptr) {
-      continue;
-    }
-
-    core::JsonValue fieldValue{};
-    if (!parser.get_object_field(componentObject, field.name, &fieldValue)) {
-      continue;
-    }
-
-    switch (field.kind) {
-    case core::TypeField::Kind::Float: {
-      float *value = descriptor.field_ptr<float>(instance, field);
-      if ((value == nullptr) || !parser.as_float(fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Uint32: {
-      std::uint32_t *value =
-          descriptor.field_ptr<std::uint32_t>(instance, field);
-      if ((value == nullptr) || !parser.as_uint(fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Bool: {
-      bool *value = descriptor.field_ptr<bool>(instance, field);
-      if ((value == nullptr) || !parser.as_bool(fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Vec2: {
-      math::Vec2 *value = descriptor.field_ptr<math::Vec2>(instance, field);
-      if ((value == nullptr) || !read_vec2(parser, fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Vec3: {
-      math::Vec3 *value = descriptor.field_ptr<math::Vec3>(instance, field);
-      if ((value == nullptr) || !read_vec3(parser, fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Vec4: {
-      math::Vec4 *value = descriptor.field_ptr<math::Vec4>(instance, field);
-      if ((value == nullptr) || !read_vec4(parser, fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Quat: {
-      math::Quat *value = descriptor.field_ptr<math::Quat>(instance, field);
-      if ((value == nullptr) || !read_quat(parser, fieldValue, value)) {
-        return false;
-      }
-      break;
-    }
-    case core::TypeField::Kind::Int32:
-      // Current scene components do not contain signed integer fields.
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/// Reads mesh component data.
-bool read_mesh_component(const core::JsonParser &parser,
-                         const core::JsonValue &meshObject,
-                         MeshComponent *outComponent) noexcept {
-  if ((outComponent == nullptr) ||
-      (meshObject.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  MeshComponent component{};
-
-  core::JsonValue meshIdValue{};
-  if (parser.get_object_field(meshObject, kMeshAssetIdKey, &meshIdValue)) {
-    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
-      return false;
-    }
-  } else if (parser.get_object_field(meshObject, "meshId", &meshIdValue)) {
-    // Backward-compatible read path for scenes authored before asset IDs.
-    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
-      return false;
-    }
-  }
-
-  core::JsonValue materialIdValue{};
-  if (parser.get_object_field(meshObject, "materialAssetId",
-                              &materialIdValue)) {
-    if (!parser.as_uint64(materialIdValue, &component.materialAssetId)) {
-      return false;
-    }
-  }
-
-  core::JsonValue albedoValue{};
-  if (parser.get_object_field(meshObject, "albedo", &albedoValue)) {
-    if (!read_vec3(parser, albedoValue, &component.albedo)) {
-      return false;
-    }
-  }
-
-  core::JsonValue roughnessValue{};
-  if (parser.get_object_field(meshObject, "roughness", &roughnessValue)) {
-    static_cast<void>(parser.as_float(roughnessValue, &component.roughness));
-  }
-
-  core::JsonValue metallicValue{};
-  if (parser.get_object_field(meshObject, "metallic", &metallicValue)) {
-    static_cast<void>(parser.as_float(metallicValue, &component.metallic));
-  }
-
-  core::JsonValue opacityValue{};
-  if (parser.get_object_field(meshObject, "opacity", &opacityValue)) {
-    static_cast<void>(parser.as_float(opacityValue, &component.opacity));
-  }
-
-  core::JsonValue captureSourceValue{};
-  if (parser.get_object_field(meshObject, "sceneCaptureSourceId",
-                              &captureSourceValue)) {
-    if (!parser.as_uint(captureSourceValue, &component.sceneCaptureSourceId)) {
-      return false;
-    }
-  }
-
-  *outComponent = component;
-  return true;
-}
-
-/// Reads light component data.
-bool read_light_component(const core::JsonParser &parser,
-                          const core::JsonValue &lightObject,
-                          LightComponent *outComponent) noexcept {
-  if ((outComponent == nullptr) ||
-      (lightObject.type != core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  LightComponent component{};
-
-  core::JsonValue colorValue{};
-  if (parser.get_object_field(lightObject, "color", &colorValue)) {
-    if (!read_vec3(parser, colorValue, &component.color)) {
-      return false;
-    }
-  }
-
-  core::JsonValue dirValue{};
-  if (parser.get_object_field(lightObject, "direction", &dirValue)) {
-    if (!read_vec3(parser, dirValue, &component.direction)) {
-      return false;
-    }
-  }
-
-  core::JsonValue intensityValue{};
-  if (parser.get_object_field(lightObject, "intensity", &intensityValue)) {
-    static_cast<void>(parser.as_float(intensityValue, &component.intensity));
-  }
-
-  core::JsonValue typeValue{};
-  std::uint32_t type = static_cast<std::uint32_t>(LightType::Directional);
-  if (parser.get_object_field(lightObject, "type", &typeValue)) {
-    if (!parser.as_uint(typeValue, &type)) {
-      return false;
-    }
-  }
-  component.type = (type == static_cast<std::uint32_t>(LightType::Point))
-                       ? LightType::Point
-                       : LightType::Directional;
-
-  *outComponent = component;
-  return true;
-}
-
-// Reflection-path coverage (S7): Transform, RigidBody, SpringArm,
-// ReflectionProbe, PointLight, and SpotLight serialize through the field
-// descriptors registered in reflect_types.cpp. The remaining component types
-// stay hand-written deliberately:
-//  - Collider: shape has an 8-bit enum representation, so the dedicated reader
-//    validates a uint32 temporary before assigning the enum.
-//  - MeshComponent: meshAssetId is 64-bit (reflection has no Uint64 field
-//    kind) and the reader keeps a legacy "meshId" fallback for scenes
-//    authored before asset ids.
-//  - LightComponent: `type` is an enum that must clamp to a valid LightType
-//    on load rather than round-tripping arbitrary integers.
-//  - FoliagePatchComponent, NameComponent, ScriptComponent,
-//    AnimationComponent: fixed-size arrays and bounded strings; reflection
-//    has no array/string field kinds (their zero-field descriptors are
-//    documented in reflect_types.cpp).
 
 bool log_scene_error(const char *message) noexcept {
   if (message != nullptr) {
@@ -369,45 +49,9 @@ bool log_scene_error(const char *message) noexcept {
   return false;
 }
 
-/// Bundles the reflection descriptors used by scene component serialization.
-struct SceneComponentDescriptors final {
-  const core::TypeDescriptor *transform = nullptr;
-  const core::TypeDescriptor *rigidBody = nullptr;
-  const core::TypeDescriptor *springArm = nullptr;
-  const core::TypeDescriptor *reflectionProbe = nullptr;
-  const core::TypeDescriptor *pointLight = nullptr;
-  const core::TypeDescriptor *spotLight = nullptr;
-  const core::TypeDescriptor *sceneCapture = nullptr;
-};
-
-/// Looks up every reflected scene-component descriptor; logs and fails when
-/// any registration is missing.
-bool find_scene_descriptors(SceneComponentDescriptors *outDescs) noexcept {
-  if (outDescs == nullptr) {
-    return false;
-  }
-  ensure_runtime_reflection_registered();
-  const core::TypeRegistry &registry = core::global_type_registry();
-  outDescs->transform = registry.find_type(kTransformTypeName);
-  outDescs->rigidBody = registry.find_type(kRigidBodyTypeName);
-  outDescs->springArm = registry.find_type(kSpringArmTypeName);
-  outDescs->reflectionProbe = registry.find_type(kReflectionProbeTypeName);
-  outDescs->pointLight = registry.find_type(kPointLightTypeName);
-  outDescs->spotLight = registry.find_type(kSpotLightTypeName);
-  outDescs->sceneCapture = registry.find_type(kSceneCaptureTypeName);
-  if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
-      (outDescs->springArm == nullptr) ||
-      (outDescs->reflectionProbe == nullptr) ||
-      (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr) ||
-      (outDescs->sceneCapture == nullptr)) {
-    return log_scene_error("missing runtime reflection descriptors");
-  }
-  return true;
-}
-
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
-                                const SceneComponentDescriptors &descs,
+                                const ReflectedComponentDescriptors &descs,
                                 World &targetWorld) noexcept {
   const core::TypeDescriptor &transformDesc = *descs.transform;
   const core::TypeDescriptor &rigidBodyDesc = *descs.rigidBody;
@@ -491,7 +135,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue meshValue{};
-    if (parser.get_object_field(components, "MeshComponent", &meshValue)) {
+    if (parser.get_object_field(components, kJsonKeyMeshComponent, &meshValue)) {
       MeshComponent mesh{};
       if (!read_mesh_component(parser, meshValue, &mesh) ||
           !targetWorld.add_mesh_component(entity, mesh)) {
@@ -524,7 +168,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue plVal{};
-    if (parser.get_object_field(components, "PointLightComponent", &plVal)) {
+    if (parser.get_object_field(components, kJsonKeyPointLightComponent, &plVal)) {
       PointLightComponent pc{};
       if (!read_reflected_component(parser, plVal, pointLightDesc, &pc) ||
           !targetWorld.add_point_light_component(entity, pc)) {
@@ -534,7 +178,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue slVal{};
-    if (parser.get_object_field(components, "SpotLightComponent", &slVal)) {
+    if (parser.get_object_field(components, kJsonKeySpotLightComponent, &slVal)) {
       SpotLightComponent sc{};
       if (!read_reflected_component(parser, slVal, spotLightDesc, &sc) ||
           !targetWorld.add_spot_light_component(entity, sc)) {
@@ -618,7 +262,7 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     }
 
     core::JsonValue springArmValue{};
-    if (parser.get_object_field(components, "SpringArmComponent",
+    if (parser.get_object_field(components, kJsonKeySpringArmComponent,
                                 &springArmValue)) {
       SpringArmComponent springArm{};
       if (!read_reflected_component(parser, springArmValue, springArmDesc,
@@ -650,28 +294,21 @@ std::size_t count_components(
 }
 
 /// True when source and target agree on the per-type component count for
-/// every persistent component type; a mismatch means the commit copy lost
-/// or invented data.
+/// every persistent-component registry row; a mismatch means the commit copy
+/// lost or invented data. Expanded from ENGINE_PERSISTENT_COMPONENT_TABLE so
+/// a new component type cannot be silently missed here.
 bool world_component_counts_match(const World &sourceWorld,
                                   const World &targetWorld) noexcept {
   const auto matches = [&](auto getComponent) noexcept {
     return count_components(sourceWorld, getComponent) ==
            count_components(targetWorld, getComponent);
   };
-  return matches(&World::get_transform) &&
-         matches(&World::get_rigid_body) &&
-         matches(&World::get_collider) &&
-         matches(&World::get_mesh_component) &&
-         matches(&World::get_foliage_patch_component) &&
-         matches(&World::get_light_component) &&
-         matches(&World::get_point_light_component) &&
-         matches(&World::get_spot_light_component) &&
-         matches(&World::get_reflection_probe_component) &&
-         matches(&World::get_scene_capture_component) &&
-         matches(&World::get_name_component) &&
-         matches(&World::get_script_component) &&
-         matches(&World::get_spring_arm) &&
-         matches(&World::get_animation_component);
+  bool countsMatch = true;
+#define ENGINE_PCR_COUNT_MATCH(Type, Key, GetFn, AddFn)                        \
+  countsMatch = countsMatch && matches(&World::GetFn);
+  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PCR_COUNT_MATCH)
+#undef ENGINE_PCR_COUNT_MATCH
+  return countsMatch;
 }
 
 /// Copies one component type between worlds through the World get/add pair.
@@ -708,32 +345,18 @@ bool copy_world_contents(const World &sourceWorld,
       return;
     }
 
-    // One line per copyable component type; copy_component supplies the
-    // guard/copy body once.
+    // One registry row per copyable component type; copy_component supplies
+    // the guard/copy body once and ENGINE_PERSISTENT_COMPONENT_TABLE keeps
+    // the row set complete by construction.
     const auto copy = [&](auto getComponent, auto addComponent) noexcept {
       return copy_component(sourceWorld, targetWorld, sourceEntity,
                             targetEntity, getComponent, addComponent);
     };
-    success =
-        copy(&World::get_transform, &World::add_transform) &&
-        copy(&World::get_rigid_body, &World::add_rigid_body) &&
-        copy(&World::get_collider, &World::add_collider) &&
-        copy(&World::get_mesh_component, &World::add_mesh_component) &&
-        copy(&World::get_foliage_patch_component,
-             &World::add_foliage_patch_component) &&
-        copy(&World::get_light_component, &World::add_light_component) &&
-        copy(&World::get_point_light_component,
-             &World::add_point_light_component) &&
-        copy(&World::get_spot_light_component,
-             &World::add_spot_light_component) &&
-        copy(&World::get_reflection_probe_component,
-             &World::add_reflection_probe_component) &&
-        copy(&World::get_scene_capture_component,
-             &World::add_scene_capture_component) &&
-        copy(&World::get_name_component, &World::add_name_component) &&
-        copy(&World::get_script_component, &World::add_script_component) &&
-        copy(&World::get_spring_arm, &World::add_spring_arm) &&
-        copy(&World::get_animation_component, &World::add_animation_component);
+    success = true;
+#define ENGINE_PCR_COPY_COMPONENT(Type, Key, GetFn, AddFn)                     \
+  success = success && copy(&World::GetFn, &World::AddFn);
+    ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PCR_COPY_COMPONENT)
+#undef ENGINE_PCR_COPY_COMPONENT
   });
 
   // Copy timer timing metadata (callbacks must be re-wired by caller).
@@ -769,8 +392,8 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
-  SceneComponentDescriptors descs{};
-  if (!find_scene_descriptors(&descs)) {
+  ReflectedComponentDescriptors descs{};
+  if (!find_reflected_component_descriptors(&descs, kSceneLogChannel)) {
     return false;
   }
   const core::TypeDescriptor *transformDesc = descs.transform;
@@ -843,22 +466,7 @@ bool serialize_scene_to_writer(const World &world,
 
     MeshComponent mesh{};
     if (world.get_mesh_component(entity, &mesh)) {
-      writer.write_key("MeshComponent");
-      writer.begin_object();
-      writer.write_uint64(kMeshAssetIdKey, mesh.meshAssetId);
-      // Written only when set so pre-material scenes stay byte-identical.
-      if (mesh.materialAssetId != 0ULL) {
-        writer.write_uint64("materialAssetId", mesh.materialAssetId);
-      }
-      write_vec3(writer, "albedo", mesh.albedo);
-      writer.write_float("roughness", mesh.roughness);
-      writer.write_float("metallic", mesh.metallic);
-      writer.write_float("opacity", mesh.opacity);
-      // Written only when set so pre-capture scenes stay byte-identical.
-      if (mesh.sceneCaptureSourceId != 0U) {
-        writer.write_uint("sceneCaptureSourceId", mesh.sceneCaptureSourceId);
-      }
-      writer.end_object();
+      write_mesh_component(writer, mesh);
     }
 
     FoliagePatchComponent foliage{};
@@ -868,18 +476,12 @@ bool serialize_scene_to_writer(const World &world,
 
     LightComponent light{};
     if (world.get_light_component(entity, &light)) {
-      writer.write_key(kJsonKeyLightComponent);
-      writer.begin_object();
-      write_vec3(writer, "color", light.color);
-      write_vec3(writer, "direction", light.direction);
-      writer.write_float("intensity", light.intensity);
-      writer.write_uint("type", static_cast<std::uint32_t>(light.type));
-      writer.end_object();
+      write_light_component(writer, light);
     }
 
     PointLightComponent pointLight{};
     if (world.get_point_light_component(entity, &pointLight) &&
-        !write_reflected_component(writer, "PointLightComponent",
+        !write_reflected_component(writer, kJsonKeyPointLightComponent,
                                    *descs.pointLight, &pointLight)) {
       writeFailed = true;
       return;
@@ -887,7 +489,7 @@ bool serialize_scene_to_writer(const World &world,
 
     SpotLightComponent spotLight{};
     if (world.get_spot_light_component(entity, &spotLight) &&
-        !write_reflected_component(writer, "SpotLightComponent",
+        !write_reflected_component(writer, kJsonKeySpotLightComponent,
                                    *descs.spotLight, &spotLight)) {
       writeFailed = true;
       return;
@@ -929,7 +531,7 @@ bool serialize_scene_to_writer(const World &world,
 
     SpringArmComponent springArm{};
     if (world.get_spring_arm(entity, &springArm) &&
-        !write_reflected_component(writer, "SpringArmComponent", *springArmDesc,
+        !write_reflected_component(writer, kJsonKeySpringArmComponent, *springArmDesc,
                                    &springArm)) {
       writeFailed = true;
       return;
@@ -1152,8 +754,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
     return false;
   }
 
-  SceneComponentDescriptors descs{};
-  if (!find_scene_descriptors(&descs)) {
+  ReflectedComponentDescriptors descs{};
+  if (!find_reflected_component_descriptors(&descs, kSceneLogChannel)) {
     return false;
   }
 
