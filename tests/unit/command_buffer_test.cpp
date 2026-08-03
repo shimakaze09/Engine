@@ -580,12 +580,18 @@ int check_scene_capture_requests() {
     engine::renderer::shutdown_texture_system();
     return 105;
   }
-  // Renderer shutdown releases the slot handles even before GL init.
+  // Renderer shutdown releases the slot handles even before GL init, and
+  // (audit R-5) actually unloads them from the texture system: the old
+  // handle must be stale afterwards, not a leaked live registration.
   engine::renderer::shutdown_renderer();
   if (engine::renderer::scene_capture_texture_handle(0U) !=
       engine::renderer::kInvalidTextureHandle) {
     engine::renderer::shutdown_texture_system();
     return 106;
+  }
+  if (engine::renderer::update_external_texture(slotHandle, 7U)) {
+    engine::renderer::shutdown_texture_system();
+    return 107;
   }
   engine::renderer::shutdown_texture_system();
 
