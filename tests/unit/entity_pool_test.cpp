@@ -472,6 +472,79 @@ bool test_pool_release_refused_when_destroy_queued() {
   return true;
 }
 
+/// EXPECTATION (PR #52 review): a pooled entity whose descendants are
+/// queued for deferred destruction cannot be recycled — the release is
+/// refused with the free list unchanged so the flush still fires EndPlay
+/// for every queued member, and the release succeeds after the flush.
+bool test_pool_release_refused_when_descendant_destroy_queued() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  const Entity parent = pool.acquire();
+  if ((parent == kInvalidEntity) ||
+      !world->add_transform(parent, Transform{})) {
+    std::fprintf(stderr, "FAIL: parent setup\n");
+    return false;
+  }
+  const Entity child = world->create_scene_object();
+  Transform childLocal{};
+  childLocal.parentId = world->persistent_id(parent);
+  if ((child == kInvalidEntity) ||
+      !world->add_transform(child, childLocal)) {
+    std::fprintf(stderr, "FAIL: child setup\n");
+    return false;
+  }
+  const Entity grandchild = world->create_scene_object();
+  Transform grandchildLocal{};
+  grandchildLocal.parentId = world->persistent_id(child);
+  if ((grandchild == kInvalidEntity) ||
+      !world->add_transform(grandchild, grandchildLocal)) {
+    std::fprintf(stderr, "FAIL: grandchild setup\n");
+    return false;
+  }
+
+  world->begin_update_phase();
+  if (!world->destroy_entity(child)) {
+    std::fprintf(stderr, "FAIL: deferred subtree destroy not queued\n");
+    return false;
+  }
+  world->begin_end_play_phase();
+  if (pool.release(parent)) {
+    std::fprintf(stderr, "FAIL: release accepted with descendants queued\n");
+    return false;
+  }
+  if (pool.available() != 1U) {
+    std::fprintf(stderr, "FAIL: refused release changed the free list\n");
+    return false;
+  }
+  if (!world->is_alive(child) || !world->is_alive(grandchild)) {
+    std::fprintf(stderr, "FAIL: refused release destroyed queued members\n");
+    return false;
+  }
+  world->end_end_play_phase();
+  if (world->is_alive(child) || world->is_alive(grandchild)) {
+    std::fprintf(stderr, "FAIL: flush did not destroy the queued subtree\n");
+    return false;
+  }
+  if (!world->is_alive(parent)) {
+    std::fprintf(stderr, "FAIL: flush destroyed the pooled parent\n");
+    return false;
+  }
+  if (!pool.release(parent)) {
+    std::fprintf(stderr, "FAIL: release refused after the flush\n");
+    return false;
+  }
+  if (pool.available() != 2U) {
+    std::fprintf(stderr, "FAIL: post-flush release missed the free list\n");
+    return false;
+  }
+  return true;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -493,6 +566,8 @@ int main() {
       {"pool_release_destroys_children", test_pool_release_destroys_children},
       {"pool_release_refused_when_destroy_queued",
        test_pool_release_refused_when_destroy_queued},
+      {"pool_release_refused_when_descendant_destroy_queued",
+       test_pool_release_refused_when_descendant_destroy_queued},
   };
 
   int failures = 0;

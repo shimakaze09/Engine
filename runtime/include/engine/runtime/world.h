@@ -258,17 +258,6 @@ public:
   /// Destroys the entity and its whole transform subtree (children never
   /// survive their parent); defers during Simulation so EndPlay fires.
   bool destroy_entity(Entity entity) noexcept;
-  /// Returns a pool-owned entity to its dormant state: mutation phases
-  /// only, refused while a deferred destroy is queued for it; attached
-  /// children are fully destroyed (children never survive their parent's
-  /// teardown) and every component is removed. Deliberately fires no
-  /// EndPlay — recycling is immediate teardown for transient pooled
-  /// entities; use destroy_entity when lifecycle callbacks must run.
-  bool recycle_entity(Entity entity) noexcept;
-  /// Re-arms BeginPlay for a recycled dormant entity being activated, so
-  /// components attached after acquisition receive their lifecycle
-  /// callbacks like a fresh entity; mutation phases only.
-  bool activate_recycled_entity(Entity entity) noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
   /// Finds the matching object or resource for entity by index.
@@ -892,6 +881,24 @@ private:
            std::is_same_v<C, FoliagePatchComponent> ||
            std::is_same_v<C, AnimationComponent>;
   }
+
+  // EntityPool is the sole client of the recycle/activate lifecycle
+  // primitives: they bypass EndPlay by design, so no other caller may
+  // reach them (PR #52 review — the public surface was itself a bypass).
+  friend class EntityPool;
+
+  /// Returns a pool-owned entity to its dormant state: mutation phases
+  /// only, refused while a deferred destroy is queued for it or any
+  /// subtree member; attached children are fully destroyed (children
+  /// never survive their parent's teardown) and every component is
+  /// removed. Deliberately fires no EndPlay — recycling is immediate
+  /// teardown for transient pooled entities; use destroy_entity when
+  /// lifecycle callbacks must run.
+  bool recycle_entity(Entity entity) noexcept;
+  /// Re-arms BeginPlay for a recycled dormant entity being activated, so
+  /// components attached after acquisition receive their lifecycle
+  /// callbacks like a fresh entity; mutation phases only.
+  bool activate_recycled_entity(Entity entity) noexcept;
 
   /// Returns whether is mutation phase.
   bool is_mutation_phase() const noexcept;

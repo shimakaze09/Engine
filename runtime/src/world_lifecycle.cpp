@@ -304,10 +304,13 @@ bool World::recycle_entity(Entity entity) noexcept {
                       "recycle_entity refused outside a mutation phase");
     return false;
   }
-  // A queued deferred destroy would fire after the slot re-publishes and
-  // tear down whoever acquires the recycled entity next.
+  // A queued deferred destroy anywhere in the subtree would either tear
+  // down whoever acquires the recycled slot next or silently lose that
+  // member's EndPlay, so recycling is refused while any member is queued.
+  const std::size_t descendantCount = mark_hierarchy_descendants(entity);
   for (std::size_t i = 0U; i < m_pendingDestroyCount; ++i) {
-    if (m_pendingDestroyEntities[i] == entity) {
+    const Entity pending = m_pendingDestroyEntities[i];
+    if (m_cascadeMarks[pending.index] && is_valid_entity(pending)) {
       core::log_message(core::LogLevel::Warning, "world",
                         "recycle_entity refused: destroy already queued");
       return false;
@@ -316,7 +319,7 @@ bool World::recycle_entity(Entity entity) noexcept {
 
   // Children never survive their parent's teardown; the pool owns only
   // the root, so descendants are fully destroyed, not recycled.
-  if (mark_hierarchy_descendants(entity) > 0U) {
+  if (descendantCount > 0U) {
     const std::uint32_t upperBound = m_nextEntityIndex;
     for (std::uint32_t index = 1U; index < upperBound; ++index) {
       if (m_cascadeMarks[index] && (index != entity.index) &&
