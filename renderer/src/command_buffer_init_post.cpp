@@ -264,6 +264,15 @@ void init_backend_post(BackendState &backend,
           dev->bind_vertex_array(0U);
           dev->bind_array_buffer(0U);
           backend.debugLineAvailable = true;
+        } else {
+          if (backend.debugLineVao != 0U) {
+            dev->destroy_vertex_array(backend.debugLineVao);
+            backend.debugLineVao = 0U;
+          }
+          if (backend.debugLineVbo != 0U) {
+            dev->destroy_buffer(backend.debugLineVbo);
+            backend.debugLineVbo = 0U;
+          }
         }
       } else {
         backend.debugLineShaderHandle = ShaderProgramHandle{};

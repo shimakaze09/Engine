@@ -233,7 +233,8 @@ void refresh_backend_program_state(BackendState &backend,
       &backend.debugLineAvailable,
       (backend.debugLineShaderHandle != kInvalidShaderProgram) &&
           resolve_debug_line_program_state(backend, dev),
-      backend.debugLineVao != 0U, "debug lines");
+      (backend.debugLineVao != 0U) && (backend.debugLineVbo != 0U),
+      "debug lines");
   recompute_availability(
       &backend.autoExposureAvailable,
       (backend.luminanceShaderHandle != kInvalidShaderProgram) &&
