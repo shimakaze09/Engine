@@ -34,6 +34,9 @@ constexpr std::size_t kMaxEntityScriptModules = 32U;
 constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
 constexpr std::size_t kMaxModuleLoadDepth = 32U;
 constexpr std::size_t kInvalidModuleSlot = kMaxEntityScriptModules;
+constexpr std::size_t kMaxScriptDispatchEntries = ENGINE_MAX_ENTITIES;
+constexpr std::size_t kScriptPathSize =
+    runtime::ScriptComponent::kMaxPathLength + 1U;
 
 /// Owns one per-entity table captured while replacing a Lua module.
 struct EntitySavedState final {
@@ -52,6 +55,7 @@ EntitySavedState g_entitySavedState[kMaxFaultedEntities]{};
 char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
 int g_endPlayDispatchDepth = 0;
+core::Entity g_scriptDispatchOrder[kMaxScriptDispatchEntries]{};
 
 /// Returns the file modification timestamp from the configured callback.
 std::int64_t file_mtime(const char *path) noexcept {
@@ -81,6 +85,37 @@ void push_entity_handle(lua_State *state, core::Entity entity) noexcept {
   } else {
     lua_pushnil(state);
   }
+}
+
+/// Snapshots the entities that carry a non-empty script path, in dense
+/// component order, so dispatch loops survive callbacks that destroy or
+/// create scripted entities mid-iteration (swap-and-pop invalidation).
+std::size_t snapshot_script_dispatch_order() noexcept {
+  std::size_t count = 0U;
+  runtime_binding().world->for_each<runtime::ScriptComponent>(
+      [&count](runtime::Entity entity,
+               const runtime::ScriptComponent &sc) noexcept {
+        if ((sc.scriptPath[0] == '\0') ||
+            (count >= kMaxScriptDispatchEntries)) {
+          return;
+        }
+        g_scriptDispatchOrder[count] = entity;
+        ++count;
+      });
+  return count;
+}
+
+/// Copies an entity's live script path into caller-owned storage so
+/// re-entrant Lua cannot mutate the dense component slot it points into;
+/// false when the component is missing or the path is empty.
+bool copy_entity_script_path(runtime::World *world, runtime::Entity entity,
+                             char (&outPath)[kScriptPathSize]) noexcept {
+  const auto *sc = world->get_script_component_ptr(entity);
+  if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+    return false;
+  }
+  std::snprintf(outPath, sizeof(outPath), "%s", sc->scriptPath);
+  return true;
 }
 
 /// Returns whether this exact entity generation has faulted.
@@ -502,11 +537,11 @@ void dispatch_entity_end_play(runtime::World *world,
   if (!world->has_begun_play(entity)) {
     return;
   }
-  const auto *sc = world->get_script_component_ptr(entity);
-  if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+  char path[kScriptPathSize] = {};
+  if (!copy_entity_script_path(world, entity, path)) {
     return;
   }
-  const int ref = get_or_load_entity_script_module(sc->scriptPath);
+  const int ref = get_or_load_entity_script_module(path);
   if (ref == LUA_NOREF) {
     return;
   }
@@ -544,22 +579,25 @@ void dispatch_entity_scripts_start() noexcept {
     return;
   }
 
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        if (entity_is_faulted(entity)) {
-          return;
-        }
-        runtime_binding().world->mark_begin_play_done(entity);
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        call_module_function(ref, "on_begin_play", "on_start", entity, false,
-                             0.0F);
-      });
+  runtime::World *world = runtime_binding().world;
+  const std::size_t count = snapshot_script_dispatch_order();
+  for (std::size_t i = 0U; i < count; ++i) {
+    const runtime::Entity entity = g_scriptDispatchOrder[i];
+    char path[kScriptPathSize] = {};
+    if (!world->is_alive(entity) ||
+        !copy_entity_script_path(world, entity, path) ||
+        entity_is_faulted(entity)) {
+      continue;
+    }
+    world->mark_begin_play_done(entity);
+    arm_debug_lua_hook(g_state);
+    const int ref = get_or_load_entity_script_module(path);
+    if (ref == LUA_NOREF) {
+      continue;
+    }
+    call_module_function(ref, "on_begin_play", "on_start", entity, false,
+                         0.0F);
+  }
 }
 
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
@@ -569,14 +607,12 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
 
   world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
     world->mark_begin_play_done(entity);
-    const auto *sc = world->get_script_component_ptr(entity);
-    if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+    char path[kScriptPathSize] = {};
+    if (!copy_entity_script_path(world, entity, path) ||
+        entity_is_faulted(entity)) {
       return;
     }
-    if (entity_is_faulted(entity)) {
-      return;
-    }
-    const int ref = get_or_load_entity_script_module(sc->scriptPath);
+    const int ref = get_or_load_entity_script_module(path);
     if (ref == LUA_NOREF) {
       return;
     }
@@ -614,22 +650,26 @@ void dispatch_entity_scripts_update(float dt) noexcept {
 
   dispatch_pending_entity_reloads();
 
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [dt](runtime::Entity entity,
-           const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        dispatch_pending_entity_reloads();
-        if (entity_is_faulted(entity)) {
-          return;
-        }
-        call_module_function(ref, "on_tick", "on_update", entity, true, dt);
-      });
+  runtime::World *world = runtime_binding().world;
+  const std::size_t count = snapshot_script_dispatch_order();
+  for (std::size_t i = 0U; i < count; ++i) {
+    const runtime::Entity entity = g_scriptDispatchOrder[i];
+    char path[kScriptPathSize] = {};
+    if (!world->is_alive(entity) ||
+        !copy_entity_script_path(world, entity, path)) {
+      continue;
+    }
+    arm_debug_lua_hook(g_state);
+    const int ref = get_or_load_entity_script_module(path);
+    if (ref == LUA_NOREF) {
+      continue;
+    }
+    dispatch_pending_entity_reloads();
+    if (!world->is_alive(entity) || entity_is_faulted(entity)) {
+      continue;
+    }
+    call_module_function(ref, "on_tick", "on_update", entity, true, dt);
+  }
 }
 
 void dispatch_entity_scripts_end() noexcept {
@@ -637,18 +677,23 @@ void dispatch_entity_scripts_end() noexcept {
     return;
   }
 
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [](runtime::Entity entity, const runtime::ScriptComponent &sc) noexcept {
-        if (sc.scriptPath[0] == '\0') {
-          return;
-        }
-        const int ref = get_or_load_entity_script_module(sc.scriptPath);
-        if (ref == LUA_NOREF) {
-          return;
-        }
-        static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                               entity, false, 0.0F));
-      });
+  runtime::World *world = runtime_binding().world;
+  const std::size_t count = snapshot_script_dispatch_order();
+  for (std::size_t i = 0U; i < count; ++i) {
+    const runtime::Entity entity = g_scriptDispatchOrder[i];
+    char path[kScriptPathSize] = {};
+    if (!world->is_alive(entity) ||
+        !copy_entity_script_path(world, entity, path)) {
+      continue;
+    }
+    arm_debug_lua_hook(g_state);
+    const int ref = get_or_load_entity_script_module(path);
+    if (ref == LUA_NOREF) {
+      continue;
+    }
+    static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
+                                           entity, false, 0.0F));
+  }
 }
 
 void clear_entity_script_modules() noexcept {

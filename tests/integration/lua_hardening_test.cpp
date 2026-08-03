@@ -38,10 +38,65 @@ bool write_script(const char *code) noexcept {
 
 void remove_script() noexcept { std::remove(kTempScript); }
 
+/// Writes contents to an arbitrary relative path.
+bool write_file_at(const char *path, const char *contents) noexcept {
+  FILE *f = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&f, path, "w") != 0 || f == nullptr) {
+    return false;
+  }
+#else
+  f = std::fopen(path, "w");
+  if (f == nullptr) {
+    return false;
+  }
+#endif
+  std::fputs(contents, f);
+  std::fclose(f);
+  return true;
+}
+
+// Minimal RuntimeServices wiring so Lua entity operations reach the world.
+engine::runtime::World *g_testWorld = nullptr;
+
+engine::runtime::WorldPhase get_phase(engine::runtime::World *w) noexcept {
+  return (w != nullptr) ? w->current_phase()
+                        : engine::runtime::WorldPhase::Input;
+}
+
+/// Creates a scene object for the Lua-facing spawn operation.
+std::uint32_t create_scene_object(engine::runtime::World *w) noexcept {
+  return (w != nullptr) ? w->create_scene_object().index : 0U;
+}
+
+/// Destroys the entity currently occupying the requested index.
+bool destroy_entity(engine::runtime::World *w, std::uint32_t idx) noexcept {
+  if (w == nullptr) {
+    return false;
+  }
+  return w->destroy_entity(w->find_entity_by_index(idx));
+}
+
+std::uint32_t get_entity_count(engine::runtime::World *w) noexcept {
+  return (w != nullptr) ? static_cast<std::uint32_t>(w->alive_entity_count())
+                        : 0U;
+}
+
+/// Builds the requested runtime data for test services.
+engine::scripting::RuntimeServices build_test_services() noexcept {
+  engine::scripting::RuntimeServices svc{};
+  svc.get_current_phase = &get_phase;
+  svc.create_scene_object_op = &create_scene_object;
+  svc.destroy_entity_op = &destroy_entity;
+  svc.get_entity_count = &get_entity_count;
+  return svc;
+}
+
 /// Owns one scripting session bound to a fresh world for a test case.
 struct ScriptingSession final {
   std::unique_ptr<engine::runtime::World> world;
   engine::core::ServiceLocator serviceLocator{};
+  engine::scripting::RuntimeServices services{};
   bool ok = false;
 
   ScriptingSession() noexcept {
@@ -53,7 +108,10 @@ struct ScriptingSession final {
     if (world == nullptr) {
       return;
     }
+    g_testWorld = world.get();
     engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    services = build_test_services();
+    engine::scripting::bind_runtime_services(&services, serviceLocator);
     engine::scripting::set_sandbox_enabled(true);
     ok = true;
   }
@@ -62,6 +120,7 @@ struct ScriptingSession final {
     engine::scripting::set_instruction_limit(1000000);
     engine::scripting::clear_entity_script_modules();
     engine::scripting::shutdown_scripting();
+    g_testWorld = nullptr;
   }
 };
 
@@ -243,6 +302,153 @@ bool test_tick_dispatch_survives_hostile_module_metatable() noexcept {
              "verify_alive_after_module_boom");
 }
 
+/// Adds a script component pointing at path to a fresh scene entity.
+engine::runtime::Entity add_scripted_entity(engine::runtime::World *world,
+                                            const char *path) noexcept {
+  const engine::runtime::Entity entity = world->create_entity();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return engine::runtime::kInvalidEntity;
+  }
+  engine::runtime::ScriptComponent sc{};
+  std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", path);
+  if (!world->add_script_component(entity, sc)) {
+    return engine::runtime::kInvalidEntity;
+  }
+  return entity;
+}
+
+// -----------------------------------------------------------------------
+// N-14: a script's on_tick synchronously destroying another scripted
+// entity must not skip surviving entities' ticks that frame (dense-array
+// swap-and-pop moved the last component into the destroyed slot), and
+// each surviving script must keep running its own module (distinct
+// per-module counters would cross on cache pollution). Both orderings:
+// victim before killer, and killer before victim.
+// -----------------------------------------------------------------------
+bool test_tick_destroy_no_skipped_ticks() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *victim = "local M = {}\n"
+                       "function M.on_begin_play(self)\n"
+                       "  victim_handle = self\n"
+                       "end\n"
+                       "function M.on_tick(self, dt)\n"
+                       "  victim_ticks = victim_ticks + 1\n"
+                       "end\n"
+                       "return M\n";
+  const char *killer = "local M = {}\n"
+                       "function M.on_tick(self, dt)\n"
+                       "  killer_ticks = killer_ticks + 1\n"
+                       "  if victim_handle ~= nil then\n"
+                       "    engine.destroy_entity(victim_handle)\n"
+                       "    victim_handle = nil\n"
+                       "  end\n"
+                       "end\n"
+                       "return M\n";
+  const char *counterA = "local M = {}\n"
+                         "function M.on_tick(self, dt)\n"
+                         "  a_ticks = a_ticks + 1\n"
+                         "end\n"
+                         "return M\n";
+  const char *counterB = "local M = {}\n"
+                         "function M.on_tick(self, dt)\n"
+                         "  b_ticks = b_ticks + 1\n"
+                         "end\n"
+                         "return M\n";
+  const char *prelude =
+      "victim_ticks = 0\n"
+      "killer_ticks = 0\n"
+      "a_ticks = 0\n"
+      "b_ticks = 0\n"
+      "function verify_first_frame()\n"
+      "  if victim_ticks ~= 1 then error('victim ' .. victim_ticks) end\n"
+      "  if killer_ticks ~= 1 then error('killer ' .. killer_ticks) end\n"
+      "  if a_ticks ~= 1 then error('a ' .. a_ticks) end\n"
+      "  if b_ticks ~= 1 then error('b ' .. b_ticks) end\n"
+      "end\n"
+      "function verify_second_frame()\n"
+      "  if victim_ticks ~= 1 then error('victim2 ' .. victim_ticks) end\n"
+      "  if killer_ticks ~= 2 then error('killer2 ' .. killer_ticks) end\n"
+      "  if a_ticks ~= 2 then error('a2 ' .. a_ticks) end\n"
+      "  if b_ticks ~= 2 then error('b2 ' .. b_ticks) end\n"
+      "end\n"
+      "function verify_reversed_frame()\n"
+      "  if victim_ticks ~= 0 then error('victimR ' .. victim_ticks) end\n"
+      "  if killer_ticks ~= 1 then error('killerR ' .. killer_ticks) end\n"
+      "  if a_ticks ~= 1 then error('aR ' .. a_ticks) end\n"
+      "  if b_ticks ~= 1 then error('bR ' .. b_ticks) end\n"
+      "end\n";
+
+  if (!write_file_at("hardening_victim.lua", victim) ||
+      !write_file_at("hardening_killer.lua", killer) ||
+      !write_file_at("hardening_counter_a.lua", counterA) ||
+      !write_file_at("hardening_counter_b.lua", counterB) ||
+      !write_script(prelude) ||
+      !engine::scripting::load_script(kTempScript)) {
+    return false;
+  }
+
+  engine::runtime::World *world = session.world.get();
+  engine::runtime::Entity firstWave[4] = {
+      add_scripted_entity(world, "hardening_victim.lua"),
+      add_scripted_entity(world, "hardening_killer.lua"),
+      add_scripted_entity(world, "hardening_counter_a.lua"),
+      add_scripted_entity(world, "hardening_counter_b.lua")};
+  bool ok = (firstWave[0] != engine::runtime::kInvalidEntity) &&
+            (firstWave[1] != engine::runtime::kInvalidEntity) &&
+            (firstWave[2] != engine::runtime::kInvalidEntity) &&
+            (firstWave[3] != engine::runtime::kInvalidEntity);
+
+  if (ok) {
+    world->begin_begin_play_phase();
+    engine::scripting::dispatch_entity_scripts_begin_play(world);
+    world->end_begin_play_phase();
+
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    ok = engine::scripting::call_script_function("verify_first_frame");
+  }
+
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    ok = engine::scripting::call_script_function("verify_second_frame");
+  }
+
+  if (ok) {
+    for (const engine::runtime::Entity entity : firstWave) {
+      static_cast<void>(world->destroy_entity(entity));
+    }
+    engine::scripting::clear_entity_script_modules();
+    ok = engine::scripting::load_script(kTempScript) &&
+         (add_scripted_entity(world, "hardening_killer.lua") !=
+          engine::runtime::kInvalidEntity) &&
+         (add_scripted_entity(world, "hardening_victim.lua") !=
+          engine::runtime::kInvalidEntity) &&
+         (add_scripted_entity(world, "hardening_counter_a.lua") !=
+          engine::runtime::kInvalidEntity) &&
+         (add_scripted_entity(world, "hardening_counter_b.lua") !=
+          engine::runtime::kInvalidEntity);
+  }
+
+  if (ok) {
+    world->begin_begin_play_phase();
+    engine::scripting::dispatch_entity_scripts_begin_play(world);
+    world->end_begin_play_phase();
+
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    ok = engine::scripting::call_script_function("verify_reversed_frame");
+  }
+
+  std::remove("hardening_victim.lua");
+  std::remove("hardening_killer.lua");
+  std::remove("hardening_counter_a.lua");
+  std::remove("hardening_counter_b.lua");
+  remove_script();
+  return ok;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -264,6 +470,7 @@ int main() {
        test_anim_event_dispatch_survives_hostile_metatable},
       {"tick_dispatch_survives_hostile_module_metatable",
        test_tick_dispatch_survives_hostile_module_metatable},
+      {"tick_destroy_no_skipped_ticks", test_tick_destroy_no_skipped_ticks},
   };
 
   for (const auto &tc : tests) {
