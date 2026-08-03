@@ -102,6 +102,7 @@ void draw_main_menu_bar() noexcept {
         core::log_message(core::LogLevel::Error, "editor",
                           "failed to load configured editor scene");
       } else {
+        inspector_abandon_pending_edit();
         clear_entity_selection();
         editor_session().worldRestoreFailed = false;
         editor_session().commandHistory.clear();

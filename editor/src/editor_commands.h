@@ -210,6 +210,27 @@ build_entity_delete_command(runtime::Entity entity) noexcept;
 /// a plain non-undoable destroy when the capture cannot be allocated).
 bool execute_entity_delete(runtime::Entity entity) noexcept;
 
+/// Applies an inspector field edit through World validation immediately
+/// and folds it into the pending edit gesture (opened on the first change,
+/// keyed by target entity + component type; a different key commits the
+/// previous gesture first). Sanitizes state that direct writes could
+/// corrupt (a changed animation controller path resets the cached
+/// controller binding; transform rotations are renormalized). Returns
+/// false when the world rejected the value.
+bool inspector_stage_component_edit(
+    runtime::Entity entity, ComponentEditType type,
+    const ComponentEditSnapshot &before,
+    const ComponentEditSnapshot &after) noexcept;
+/// Commits the pending edit gesture (if any) to the command history as one
+/// undoable command spanning the gesture's opening snapshot to the
+/// entity's current component value.
+void inspector_commit_pending_edit() noexcept;
+/// Drops the pending edit gesture without recording it (world rebind or
+/// scene replacement invalidates the captured target).
+void inspector_abandon_pending_edit() noexcept;
+/// True when an inspector edit gesture is pending.
+bool inspector_has_pending_edit() noexcept;
+
 /// Returns the default-valued snapshot used when adding a component.
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept;

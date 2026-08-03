@@ -189,8 +189,131 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
 }
 
 
+/// Pending inspector edit gesture: the opening component snapshot plus
+/// the target identity, committed as one undoable command when the
+/// gesture ends (widget deactivation, target switch, or panel handoff).
+struct PendingInspectorEdit final {
+  bool active = false;
+  bool applied = false;
+  ComponentEditType type = ComponentEditType::Transform;
+  runtime::Entity entity{};
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
+  ComponentEditSnapshot before{};
+};
+
+/// Process-wide pending gesture behind the inspector_*_edit functions.
+static PendingInspectorEdit g_pendingInspectorEdit{};
+
+/// Repairs state a raw field write could corrupt before it reaches the
+/// world: a changed controller path drops the cached controller binding
+/// and state-machine position, and an editable non-zero rotation is
+/// renormalized (a zeroed rotation falls back to the pre-edit value).
+static void sanitize_staged_component(ComponentEditType type,
+                                      const ComponentEditSnapshot &before,
+                                      ComponentEditSnapshot *after) noexcept {
+  if (type == ComponentEditType::Animation) {
+    if (std::strcmp(before.animation.controllerPath,
+                    after->animation.controllerPath) != 0) {
+      after->animation.controllerSlot = runtime::kInvalidAnimSlot;
+      after->animation.currentState = 0U;
+      after->animation.previousState = 0U;
+      after->animation.stateTime = 0.0F;
+      after->animation.previousStateTime = 0.0F;
+      after->animation.blendRemaining = 0.0F;
+      after->animation.blendDuration = 0.0F;
+    }
+    return;
+  }
+  if (type == ComponentEditType::Transform) {
+    math::Quat &rotation = after->transform.rotation;
+    const float lengthSq =
+        (rotation.x * rotation.x) + (rotation.y * rotation.y) +
+        (rotation.z * rotation.z) + (rotation.w * rotation.w);
+    if (lengthSq > 1.0e-6F) {
+      rotation = math::normalize(rotation);
+    } else {
+      rotation = before.transform.rotation;
+    }
+  }
+}
+
+bool inspector_stage_component_edit(
+    runtime::Entity entity, ComponentEditType type,
+    const ComponentEditSnapshot &before,
+    const ComponentEditSnapshot &after) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
+    return false;
+  }
+  const runtime::PersistentId persistentId = world->persistent_id(entity);
+  PendingInspectorEdit &pending = g_pendingInspectorEdit;
+  if (pending.active &&
+      ((pending.type != type) || (pending.entity != entity) ||
+       (pending.persistentId != persistentId))) {
+    inspector_commit_pending_edit();
+  }
+  ComponentEditSnapshot sanitized = after;
+  sanitize_staged_component(type, before, &sanitized);
+  if (!apply_component_snapshot(type, entity, true, sanitized)) {
+    return false;
+  }
+  if (!pending.active) {
+    pending.active = true;
+    pending.applied = false;
+    pending.type = type;
+    pending.entity = entity;
+    pending.persistentId = persistentId;
+    pending.before = before;
+  }
+  pending.applied = true;
+  return true;
+}
+
+void inspector_commit_pending_edit() noexcept {
+  PendingInspectorEdit &pending = g_pendingInspectorEdit;
+  if (!pending.active) {
+    return;
+  }
+  pending.active = false;
+  if (!pending.applied) {
+    return;
+  }
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return;
+  }
+  const runtime::Entity target =
+      resolve_command_target(pending.entity, pending.persistentId);
+  ComponentEditSnapshot current{};
+  if (!capture_component_snapshot(pending.type, target, &current)) {
+    return;
+  }
+  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  if (cmd == nullptr) {
+    return;
+  }
+  cmd->entity = pending.entity;
+  cmd->persistentId = pending.persistentId;
+  cmd->type = pending.type;
+  cmd->beforeExists = true;
+  cmd->before = pending.before;
+  cmd->afterExists = true;
+  cmd->after = current;
+  editor_session().commandHistory.execute(cmd);
+}
+
+void inspector_abandon_pending_edit() noexcept {
+  g_pendingInspectorEdit.active = false;
+  g_pendingInspectorEdit.applied = false;
+}
+
+bool inspector_has_pending_edit() noexcept {
+  return g_pendingInspectorEdit.active;
+}
+
 void execute_component_add(runtime::Entity entity, ComponentEditType type,
                            const ComponentEditSnapshot &after) noexcept {
+  inspector_commit_pending_edit();
   ComponentEditSnapshot before{};
   const bool beforeExists = capture_component_snapshot(type, entity, &before);
 
@@ -215,6 +338,7 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
 
 void execute_component_remove(runtime::Entity entity,
                               ComponentEditType type) noexcept {
+  inspector_commit_pending_edit();
   ComponentEditSnapshot before{};
   if (!capture_component_snapshot(type, entity, &before)) {
     return;
@@ -680,6 +804,7 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
 }
 
 bool execute_entity_delete(runtime::Entity entity) noexcept {
+  inspector_commit_pending_edit();
   EntityDeleteCommand *const command = build_entity_delete_command(entity);
   if (command == nullptr) {
     return (editor_session().world != nullptr) &&

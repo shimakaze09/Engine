@@ -351,6 +351,7 @@ void editor_set_world(runtime::World *world) noexcept {
   // none of them may survive a rebind (a retained snapshot would let Stop
   // restore world A's contents into world B).
   if (editor_session().world != world) {
+    inspector_abandon_pending_edit();
     editor_session().commandHistory.clear();
     editor_session().gizmoWasUsing = false;
     clear_entity_selection();
