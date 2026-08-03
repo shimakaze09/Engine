@@ -1,6 +1,7 @@
 // Implements input map behavior for the Engine core engine.
 
 #include "engine/core/input_map.h"
+#include "engine/core/atomic_file.h"
 #include "engine/core/input.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -118,19 +119,6 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
-bool open_file_for_write(const char *path, FILE **outFile) noexcept {
-  if ((path == nullptr) || (outFile == nullptr)) {
-    return false;
-  }
-#if defined(_MSC_VER) || defined(_WIN32)
-  *outFile = nullptr;
-  return fopen_s(outFile, path, "wb") == 0;
-#else
-  *outFile = std::fopen(path, "wb");
-  return *outFile != nullptr;
-#endif
-}
-
 /// Reads text file data.
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
@@ -161,21 +149,6 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
   *outSize = size;
   outBuffer->swap(buffer);
   return true;
-}
-
-/// Writes text file data.
-bool write_text_file(const char *path, const char *text,
-                     std::size_t size) noexcept {
-  if ((path == nullptr) || (text == nullptr) || (size == 0U)) {
-    return false;
-  }
-  FILE *file = nullptr;
-  if (!open_file_for_write(path, &file) || (file == nullptr)) {
-    return false;
-  }
-  const std::size_t written = std::fwrite(text, 1U, size, file);
-  std::fclose(file);
-  return written == size;
 }
 
 } // namespace
@@ -563,7 +536,13 @@ bool save_input_bindings(const char *path) noexcept {
     return false;
   }
 
-  return write_text_file(path, writer.result(), writer.result_size());
+  if ((path == nullptr) ||
+      !atomic_write_file(path, writer.result(), writer.result_size())) {
+    log_message(LogLevel::Error, kLogChannel,
+                "save_input_bindings: atomic file write failed");
+    return false;
+  }
+  return true;
 }
 
 /// Loads the requested resource for input bindings.
