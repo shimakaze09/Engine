@@ -43,8 +43,25 @@ void init_backend_post(BackendState &backend,
 // Per-program resolvers shared by initialization and hot-reload refresh
 // (audit H-09): each re-reads the GPU program id from its stored handle
 // and re-queries every cached uniform location (and uniform-block binding
-// where the program uses one). Return value is false when a required
-// uniform is missing from the current link.
+// where the program uses one). Every queried name is classified REQUIRED
+// (looked up through required_location; the pass cannot render
+// meaningfully without it) or OPTIONAL (safe shader default or
+// conditionally used; plain uniform_location). A resolver returns false
+// when any REQUIRED location is -1 or a required block is absent, so
+// init leaves the family unavailable and refresh downgrades it.
+
+/// Looks up a REQUIRED uniform: returns the location and clears *ok when
+/// the current link no longer exposes it, so resolvers accumulate one
+/// verdict instead of silently caching -1.
+inline std::int32_t required_location(bool *ok, const RenderDevice *dev,
+                                      std::uint32_t program,
+                                      const char *name) noexcept {
+  const std::int32_t location = dev->uniform_location(program, name);
+  if (location < 0) {
+    *ok = false;
+  }
+  return location;
+}
 
 /// Default fallback program: id only, no cached uniforms.
 bool resolve_default_program_state(BackendState &backend,

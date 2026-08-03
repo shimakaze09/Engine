@@ -34,6 +34,10 @@
 
 namespace engine::renderer {
 
+// REQUIRED: the transform set, the instancing switch, and the base
+// material color. OPTIONAL: time/foliage wind animation, the albedo
+// texture path (uHasAlbedoTexture=0 falls back to flat color), and the
+// scalar material tuning channels.
 bool resolve_gbuffer_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
   backend.gbufferProgram = shader_gpu_program(backend.gbufferShaderHandle);
@@ -41,13 +45,15 @@ bool resolve_gbuffer_program_state(BackendState &backend,
   if (gbufProg == 0U) {
     return false;
   }
-  backend.gbufModelLoc = dev->uniform_location(gbufProg, "uModel");
-  backend.gbufViewLoc = dev->uniform_location(gbufProg, "uView");
-  backend.gbufProjectionLoc = dev->uniform_location(gbufProg, "uProjection");
+  bool ok = true;
+  backend.gbufModelLoc = required_location(&ok, dev, gbufProg, "uModel");
+  backend.gbufViewLoc = required_location(&ok, dev, gbufProg, "uView");
+  backend.gbufProjectionLoc =
+      required_location(&ok, dev, gbufProg, "uProjection");
   backend.gbufNormalMatrixLoc =
-      dev->uniform_location(gbufProg, "uNormalMatrix");
+      required_location(&ok, dev, gbufProg, "uNormalMatrix");
   backend.gbufUseInstancingLoc =
-      dev->uniform_location(gbufProg, "uUseInstancing");
+      required_location(&ok, dev, gbufProg, "uUseInstancing");
   backend.gbufTimeLoc = dev->uniform_location(gbufProg, "uTime");
   backend.gbufFoliageWindStrengthLoc =
       dev->uniform_location(gbufProg, "uFoliageWindStrength");
@@ -55,7 +61,7 @@ bool resolve_gbuffer_program_state(BackendState &backend,
       dev->uniform_location(gbufProg, "uFoliageWindFrequency");
   backend.gbufFoliagePhaseLoc =
       dev->uniform_location(gbufProg, "uFoliagePhase");
-  backend.gbufAlbedoLoc = dev->uniform_location(gbufProg, "uAlbedo");
+  backend.gbufAlbedoLoc = required_location(&ok, dev, gbufProg, "uAlbedo");
   backend.gbufHasAlbedoTextureLoc =
       dev->uniform_location(gbufProg, "uHasAlbedoTexture");
   backend.gbufAlbedoTextureLoc =
@@ -64,9 +70,15 @@ bool resolve_gbuffer_program_state(BackendState &backend,
   backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
   backend.gbufAOLoc = dev->uniform_location(gbufProg, "uAO");
   backend.gbufEmissiveLoc = dev->uniform_location(gbufProg, "uEmissive");
-  return true;
+  return ok;
 }
 
+// REQUIRED: the four G-Buffer samplers (samplers default to unit 0, so a
+// dropped binding silently reads the wrong texture), the tile/light-data
+// textures with their counts, the inverse view/projection
+// reconstruction matrices, the directional light, camera position, and
+// screen size. OPTIONAL: fog and height fog (uFogMode=0 / enable flag
+// off), IBL, SSAO, and every shadow family behind their enable flags.
 bool resolve_deferred_light_program_state(BackendState &backend,
                                           const RenderDevice *dev) noexcept {
   backend.deferredLightProgram =
@@ -75,23 +87,25 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   if (dlProg == 0U) {
     return false;
   }
-  backend.dlGBufAlbedoLoc = dev->uniform_location(dlProg, "uGBufferAlbedo");
-  backend.dlGBufNormalLoc = dev->uniform_location(dlProg, "uGBufferNormal");
+  bool ok = true;
+  backend.dlGBufAlbedoLoc = required_location(&ok, dev, dlProg, "uGBufferAlbedo");
+  backend.dlGBufNormalLoc = required_location(&ok, dev, dlProg, "uGBufferNormal");
   backend.dlGBufEmissiveLoc =
-      dev->uniform_location(dlProg, "uGBufferEmissive");
-  backend.dlGBufDepthLoc = dev->uniform_location(dlProg, "uGBufferDepth");
-  backend.dlTileLightTexLoc = dev->uniform_location(dlProg, "uTileLightTex");
-  backend.dlTileCountXLoc = dev->uniform_location(dlProg, "uTileCountX");
-  backend.dlTileCountYLoc = dev->uniform_location(dlProg, "uTileCountY");
+      required_location(&ok, dev, dlProg, "uGBufferEmissive");
+  backend.dlGBufDepthLoc = required_location(&ok, dev, dlProg, "uGBufferDepth");
+  backend.dlTileLightTexLoc =
+      required_location(&ok, dev, dlProg, "uTileLightTex");
+  backend.dlTileCountXLoc = required_location(&ok, dev, dlProg, "uTileCountX");
+  backend.dlTileCountYLoc = required_location(&ok, dev, dlProg, "uTileCountY");
   backend.dlInvProjectionLoc =
-      dev->uniform_location(dlProg, "uInvProjection");
-  backend.dlInvViewLoc = dev->uniform_location(dlProg, "uInvView");
+      required_location(&ok, dev, dlProg, "uInvProjection");
+  backend.dlInvViewLoc = required_location(&ok, dev, dlProg, "uInvView");
   backend.dlDirLightDirLoc =
-      dev->uniform_location(dlProg, "uDirLightDirection");
+      required_location(&ok, dev, dlProg, "uDirLightDirection");
   backend.dlDirLightColorLoc =
-      dev->uniform_location(dlProg, "uDirLightColor");
-  backend.dlCameraPosLoc = dev->uniform_location(dlProg, "uCameraPos");
-  backend.dlScreenSizeLoc = dev->uniform_location(dlProg, "uScreenSize");
+      required_location(&ok, dev, dlProg, "uDirLightColor");
+  backend.dlCameraPosLoc = required_location(&ok, dev, dlProg, "uCameraPos");
+  backend.dlScreenSizeLoc = required_location(&ok, dev, dlProg, "uScreenSize");
   backend.dlFogModeLoc = dev->uniform_location(dlProg, "uFogMode");
   backend.dlFogStartLoc = dev->uniform_location(dlProg, "uFogStart");
   backend.dlFogEndLoc = dev->uniform_location(dlProg, "uFogEnd");
@@ -108,10 +122,11 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlHeightFogStepCountLoc =
       dev->uniform_location(dlProg, "uHeightFogStepCount");
   backend.dlPointLightCountLoc =
-      dev->uniform_location(dlProg, "uPointLightCount");
+      required_location(&ok, dev, dlProg, "uPointLightCount");
   backend.dlSpotLightCountLoc =
-      dev->uniform_location(dlProg, "uSpotLightCount");
-  backend.dlLightDataTexLoc = dev->uniform_location(dlProg, "uLightDataTex");
+      required_location(&ok, dev, dlProg, "uSpotLightCount");
+  backend.dlLightDataTexLoc =
+      required_location(&ok, dev, dlProg, "uLightDataTex");
   backend.dlIblEnabledLoc = dev->uniform_location(dlProg, "uIblEnabled");
   backend.dlIrradianceMapLoc =
       dev->uniform_location(dlProg, "uIrradianceMap");
@@ -160,9 +175,13 @@ bool resolve_deferred_light_program_state(BackendState &backend,
     std::snprintf(nm, sizeof(nm), "uPointShadowLightIdx[%zu]", i);
     backend.dlPointShadowLightIdxLocs[i] = dev->uniform_location(dlProg, nm);
   }
-  return true;
+  return ok;
 }
 
+// REQUIRED: the four G-Buffer samplers and the mode selector — the
+// visualization is meaningless without any of them. On failure the
+// cached program id is zeroed because the debug pass gates on it rather
+// than on an availability flag.
 bool resolve_gbuffer_debug_program_state(BackendState &backend,
                                          const RenderDevice *dev) noexcept {
   backend.gbufferDebugProgram =
@@ -171,15 +190,25 @@ bool resolve_gbuffer_debug_program_state(BackendState &backend,
   if (dbgProg == 0U) {
     return false;
   }
-  backend.dbgGBufAlbedoLoc = dev->uniform_location(dbgProg, "uGBufferAlbedo");
-  backend.dbgGBufNormalLoc = dev->uniform_location(dbgProg, "uGBufferNormal");
+  bool ok = true;
+  backend.dbgGBufAlbedoLoc =
+      required_location(&ok, dev, dbgProg, "uGBufferAlbedo");
+  backend.dbgGBufNormalLoc =
+      required_location(&ok, dev, dbgProg, "uGBufferNormal");
   backend.dbgGBufEmissiveLoc =
-      dev->uniform_location(dbgProg, "uGBufferEmissive");
-  backend.dbgGBufDepthLoc = dev->uniform_location(dbgProg, "uGBufferDepth");
-  backend.dbgModeLoc = dev->uniform_location(dbgProg, "uDebugMode");
-  return true;
+      required_location(&ok, dev, dbgProg, "uGBufferEmissive");
+  backend.dbgGBufDepthLoc =
+      required_location(&ok, dev, dbgProg, "uGBufferDepth");
+  backend.dbgModeLoc = required_location(&ok, dev, dbgProg, "uDebugMode");
+  if (!ok) {
+    backend.gbufferDebugProgram = 0U;
+  }
+  return ok;
 }
 
+// REQUIRED: u_lightMVP (the CPU pre-multiplies the model matrix into
+// it). OPTIONAL: u_model, a compatibility lookup shadow_depth.vert does
+// not declare today; the upload is guarded on a resolved location.
 bool resolve_shadow_depth_program_state(BackendState &backend,
                                         const RenderDevice *dev) noexcept {
   backend.shadowDepthProgram =
@@ -188,11 +217,15 @@ bool resolve_shadow_depth_program_state(BackendState &backend,
   if (prog == 0U) {
     return false;
   }
-  backend.shadowLightMvpLoc = dev->uniform_location(prog, "u_lightMVP");
+  bool ok = true;
+  backend.shadowLightMvpLoc = required_location(&ok, dev, prog, "u_lightMVP");
   backend.shadowModelLoc = dev->uniform_location(prog, "u_model");
-  return true;
+  return ok;
 }
 
+// REQUIRED: all four uniforms — the cubemap face MVP, the model matrix
+// the fragment distance needs, and the light position/far plane the
+// depth normalization divides by. No OPTIONAL uniforms.
 bool resolve_shadow_depth_point_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.shadowDepthPointProgram =
@@ -201,13 +234,21 @@ bool resolve_shadow_depth_point_program_state(
   if (prog == 0U) {
     return false;
   }
-  backend.shadowPointLightMvpLoc = dev->uniform_location(prog, "u_lightMVP");
-  backend.shadowPointModelLoc = dev->uniform_location(prog, "u_model");
-  backend.shadowPointLightPosLoc = dev->uniform_location(prog, "u_lightPos");
-  backend.shadowPointFarPlaneLoc = dev->uniform_location(prog, "u_farPlane");
-  return true;
+  bool ok = true;
+  backend.shadowPointLightMvpLoc =
+      required_location(&ok, dev, prog, "u_lightMVP");
+  backend.shadowPointModelLoc = required_location(&ok, dev, prog, "u_model");
+  backend.shadowPointLightPosLoc =
+      required_location(&ok, dev, prog, "u_lightPos");
+  backend.shadowPointFarPlaneLoc =
+      required_location(&ok, dev, prog, "u_farPlane");
+  return ok;
 }
 
+// REQUIRED: the same transform/instancing/base-color set as the static
+// G-Buffer resolver plus the BonePalette block binding (skinning is only
+// initialized on UBO-capable devices). OPTIONAL: the same animation,
+// texture-path, and material-tuning uniforms.
 bool resolve_gbuffer_skinned_program_state(BackendState &backend,
                                            const RenderDevice *dev) noexcept {
   backend.gbufferSkinnedProgram =
@@ -216,17 +257,20 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
   if (skinnedProg == 0U) {
     return false;
   }
-  backend.gbufSkinnedModelLoc = dev->uniform_location(skinnedProg, "uModel");
-  backend.gbufSkinnedViewLoc = dev->uniform_location(skinnedProg, "uView");
+  bool ok = true;
+  backend.gbufSkinnedModelLoc =
+      required_location(&ok, dev, skinnedProg, "uModel");
+  backend.gbufSkinnedViewLoc =
+      required_location(&ok, dev, skinnedProg, "uView");
   backend.gbufSkinnedProjectionLoc =
-      dev->uniform_location(skinnedProg, "uProjection");
+      required_location(&ok, dev, skinnedProg, "uProjection");
   backend.gbufSkinnedNormalMatrixLoc =
-      dev->uniform_location(skinnedProg, "uNormalMatrix");
+      required_location(&ok, dev, skinnedProg, "uNormalMatrix");
   backend.gbufSkinnedUseInstancingLoc =
-      dev->uniform_location(skinnedProg, "uUseInstancing");
+      required_location(&ok, dev, skinnedProg, "uUseInstancing");
   backend.gbufSkinnedTimeLoc = dev->uniform_location(skinnedProg, "uTime");
   backend.gbufSkinnedAlbedoLoc =
-      dev->uniform_location(skinnedProg, "uAlbedo");
+      required_location(&ok, dev, skinnedProg, "uAlbedo");
   backend.gbufSkinnedHasAlbedoTextureLoc =
       dev->uniform_location(skinnedProg, "uHasAlbedoTexture");
   backend.gbufSkinnedAlbedoTextureLoc =
@@ -238,13 +282,18 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
   backend.gbufSkinnedAOLoc = dev->uniform_location(skinnedProg, "uAO");
   backend.gbufSkinnedEmissiveLoc =
       dev->uniform_location(skinnedProg, "uEmissive");
-  if (dev->bind_uniform_block != nullptr) {
-    dev->bind_uniform_block(skinnedProg, "BonePalette",
-                            kBonePaletteUboBinding);
+  if ((dev->bind_uniform_block == nullptr) ||
+      !dev->bind_uniform_block(skinnedProg, "BonePalette",
+                               kBonePaletteUboBinding)) {
+    ok = false;
   }
-  return true;
+  return ok;
 }
 
+// REQUIRED: u_lightMVP and the BonePalette block binding — without the
+// palette the variant renders bind-pose depth, which the static program
+// already provides. On failure the cached program id is zeroed because
+// skinned shadow draws gate on it rather than on an availability flag.
 bool resolve_shadow_depth_skinned_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.shadowDepthSkinnedProgram =
@@ -253,13 +302,18 @@ bool resolve_shadow_depth_skinned_program_state(
   if (skinnedShadowProg == 0U) {
     return false;
   }
+  bool ok = true;
   backend.shadowSkinnedLightMvpLoc =
-      dev->uniform_location(skinnedShadowProg, "u_lightMVP");
-  if (dev->bind_uniform_block != nullptr) {
-    dev->bind_uniform_block(skinnedShadowProg, "BonePalette",
-                            kBonePaletteUboBinding);
+      required_location(&ok, dev, skinnedShadowProg, "u_lightMVP");
+  if ((dev->bind_uniform_block == nullptr) ||
+      !dev->bind_uniform_block(skinnedShadowProg, "BonePalette",
+                               kBonePaletteUboBinding)) {
+    ok = false;
   }
-  return true;
+  if (!ok) {
+    backend.shadowDepthSkinnedProgram = 0U;
+  }
+  return ok;
 }
 
 void init_backend_lighting(BackendState &backend,
@@ -327,17 +381,33 @@ void init_backend_lighting(BackendState &backend,
   }
 
   if (deferredOk) {
-    backend.deferredAvailable = true;
-
     backend.gbufferShaderHandle = gbufferShader;
-    static_cast<void>(resolve_gbuffer_program_state(backend, dev));
+    const bool gbufferUniformsOk = resolve_gbuffer_program_state(backend, dev);
 
     backend.deferredLightShaderHandle = deferredLightShader;
-    static_cast<void>(resolve_deferred_light_program_state(backend, dev));
+    const bool deferredLightUniformsOk =
+        resolve_deferred_light_program_state(backend, dev);
 
-    if (gbufferDebugShader != kInvalidShaderProgram) {
-      backend.gbufferDebugShaderHandle = gbufferDebugShader;
-      static_cast<void>(resolve_gbuffer_debug_program_state(backend, dev));
+    if (gbufferUniformsOk && deferredLightUniformsOk) {
+      backend.deferredAvailable = true;
+      if (gbufferDebugShader != kInvalidShaderProgram) {
+        backend.gbufferDebugShaderHandle = gbufferDebugShader;
+        static_cast<void>(resolve_gbuffer_debug_program_state(backend, dev));
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "deferred shaders missing required uniforms — "
+                        "deferred path disabled");
+      if (gbufferDebugShader != kInvalidShaderProgram) {
+        destroy_shader_program(gbufferDebugShader);
+      }
+      destroy_shader_program(deferredLightShader);
+      destroy_shader_program(gbufferShader);
+      backend.gbufferShaderHandle = ShaderProgramHandle{};
+      backend.deferredLightShaderHandle = ShaderProgramHandle{};
+      backend.gbufferProgram = 0U;
+      backend.deferredLightProgram = 0U;
+      deferredOk = false;
     }
   }
 
@@ -451,14 +521,22 @@ void init_backend_lighting(BackendState &backend,
                                              &skinnedDefine, 1U);
           backend.shadowDepthSkinnedShaderHandle = skinnedShadowShader;
           if (!resolve_shadow_depth_skinned_program_state(backend, dev)) {
+            if (skinnedShadowShader != kInvalidShaderProgram) {
+              destroy_shader_program(skinnedShadowShader);
+            }
             backend.shadowDepthSkinnedShaderHandle = ShaderProgramHandle{};
+            backend.shadowDepthSkinnedProgram = 0U;
             core::log_message(core::LogLevel::Warning, "renderer",
                               "skinned shadow shader not available — skinned "
                               "meshes cast bind-pose shadows");
           }
         }
       } else {
+        if (skinnedGbufferShader != kInvalidShaderProgram) {
+          destroy_shader_program(skinnedGbufferShader);
+        }
         backend.gbufferSkinnedShaderHandle = ShaderProgramHandle{};
+        backend.gbufferSkinnedProgram = 0U;
         core::log_message(core::LogLevel::Warning, "renderer",
                           "skinned G-buffer shader not available — GPU "
                           "skinning disabled");

@@ -59,7 +59,9 @@ struct RenderDevice final {
                                   std::ptrdiff_t sizeBytes) noexcept = nullptr;
   void (*bind_uniform_buffer_base)(std::uint32_t binding,
                                    std::uint32_t buffer) noexcept = nullptr;
-  void (*bind_uniform_block)(std::uint32_t program, const char *blockName,
+  // Returns false when the program does not expose the named block, so
+  // resolvers can treat a required block like a missing uniform location.
+  bool (*bind_uniform_block)(std::uint32_t program, const char *blockName,
                              std::uint32_t binding) noexcept = nullptr;
 
   // Vertex attributes.
