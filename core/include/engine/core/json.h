@@ -197,6 +197,15 @@ private:
   bool m_hasRoot = false;
   mutable std::array<JsonValue, 1024U> m_scratch{};
   mutable std::size_t m_scratchCursor = 0U;
+  // Sequential-access memo for get_array_element: the lazy representation
+  // rescans an array from its opening bracket, which made per-index walks
+  // quadratic (31 s to iterate an 8k-entity scene, audit N-17); resuming
+  // from the last returned element makes ascending walks amortized O(1).
+  // Single-threaded like the scratch ring; invalidated by parse().
+  mutable const char *m_arrayMemoBegin = nullptr;
+  mutable const char *m_arrayMemoEnd = nullptr;
+  mutable const char *m_arrayMemoCursor = nullptr;
+  mutable std::size_t m_arrayMemoIndex = 0U;
 };
 
 } // namespace engine::core

@@ -477,6 +477,98 @@ int test_json_splice_validates_contract() {
 /// EXPECTATION (PR #51 review): field names are spliced verbatim between
 /// quotes, so a name carrying a quote, backslash, or control byte — or an
 /// empty name — is refused before it can produce malformed JSON.
+/// EXPECTATION (audit N-17): array element access stays exact across the
+/// sequential-walk memo — ascending walks, backward jumps, switching
+/// arrays mid-walk, and a re-parse that invalidates memoized pointers all
+/// return the same values as a cold scan.
+int test_json_array_access_memo_correctness() {
+  std::string doc = "{ \"a\": [";
+  for (int i = 0; i < 200; ++i) {
+    doc += (i != 0) ? "," : "";
+    doc += "{ \"v\": " + std::to_string(i) + " }";
+  }
+  doc += "], \"b\": [10, 11, 12] }";
+
+  engine::core::JsonParser parser{};
+  if (!parser.parse(doc.c_str(), doc.size())) {
+    std::fprintf(stderr, "FAIL: memo fixture does not parse\n");
+    return 1;
+  }
+  const engine::core::JsonValue *arrayA =
+      parser.get_object_field(*parser.root(), "a");
+  engine::core::JsonValue arrayB{};
+  if ((arrayA == nullptr) ||
+      !parser.get_object_field(*parser.root(), "b", &arrayB)) {
+    std::fprintf(stderr, "FAIL: memo fixture arrays missing\n");
+    return 1;
+  }
+  const engine::core::JsonValue arrayACopy = *arrayA;
+
+  auto elementValue = [&](const engine::core::JsonValue &array,
+                          std::size_t index, double *out) {
+    engine::core::JsonValue element{};
+    if (!parser.get_array_element(array, index, &element)) {
+      return false;
+    }
+    engine::core::JsonValue field{};
+    if (element.type == engine::core::JsonValue::Type::Object) {
+      if (!parser.get_object_field(element, "v", &field)) {
+        return false;
+      }
+    } else {
+      field = element;
+    }
+    float value = 0.0F;
+    if (!parser.as_float(field, &value)) {
+      return false;
+    }
+    *out = static_cast<double>(value);
+    return true;
+  };
+
+  for (std::size_t i = 0U; i < 200U; ++i) {
+    double value = -1.0;
+    if (!elementValue(arrayACopy, i, &value) ||
+        (value != static_cast<double>(i))) {
+      std::fprintf(stderr, "FAIL: sequential element %zu wrong\n", i);
+      return 1;
+    }
+  }
+
+  double value = -1.0;
+  if (!elementValue(arrayACopy, 5U, &value) || (value != 5.0)) {
+    std::fprintf(stderr, "FAIL: backward jump after walk\n");
+    return 1;
+  }
+  if (!elementValue(arrayB, 2U, &value) || (value != 12.0)) {
+    std::fprintf(stderr, "FAIL: switching arrays mid-walk\n");
+    return 1;
+  }
+  if (!elementValue(arrayACopy, 6U, &value) || (value != 6.0)) {
+    std::fprintf(stderr, "FAIL: return to first array after switch\n");
+    return 1;
+  }
+  if (elementValue(arrayB, 3U, &value)) {
+    std::fprintf(stderr, "FAIL: out-of-range index accepted after walk\n");
+    return 1;
+  }
+
+  const char *replacement = "{ \"a\": [42] }";
+  if (!parser.parse(replacement, std::strlen(replacement))) {
+    std::fprintf(stderr, "FAIL: replacement doc does not parse\n");
+    return 1;
+  }
+  engine::core::JsonValue replacementArray{};
+  if (!parser.get_object_field(*parser.root(), "a", &replacementArray) ||
+      !elementValue(replacementArray, 0U, &value) || (value != 42.0)) {
+    std::fprintf(stderr, "FAIL: memo survived re-parse\n");
+    return 1;
+  }
+
+  std::printf("PASS: array access memo correctness\n");
+  return 0;
+}
+
 int test_json_splice_rejects_unsafe_field_names() {
   char output[1024] = {};
   std::size_t outputLength = 0U;
@@ -521,6 +613,7 @@ int main() {
   failures += test_json_splice_preserves_unknown_fields();
   failures += test_json_splice_insert_and_rejection();
   failures += test_json_splice_validates_contract();
+  failures += test_json_array_access_memo_correctness();
   failures += test_json_splice_rejects_unsafe_field_names();
   if (failures > 0) {
     std::fprintf(stderr, "FAILED: %d test(s) failed\n", failures);

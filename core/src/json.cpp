@@ -889,6 +889,10 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_hasRoot = false;
   m_root = JsonValue{};
   m_scratchCursor = 0U;
+  m_arrayMemoBegin = nullptr;
+  m_arrayMemoEnd = nullptr;
+  m_arrayMemoCursor = nullptr;
+  m_arrayMemoIndex = 0U;
 
   if ((input == nullptr) || (length == 0U)) {
     return false;
@@ -1017,12 +1021,18 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
 
   const char *cursor = array.begin + 1;
   const char *end = array.end - 1;
-  skip_whitespace(cursor, end);
+  std::size_t currentIndex = 0U;
+  if ((m_arrayMemoBegin == array.begin) && (m_arrayMemoEnd == array.end) &&
+      (m_arrayMemoCursor != nullptr) && (index >= m_arrayMemoIndex)) {
+    cursor = m_arrayMemoCursor;
+    currentIndex = m_arrayMemoIndex;
+  } else {
+    skip_whitespace(cursor, end);
+  }
   if (cursor >= end) {
     return false;
   }
 
-  std::size_t currentIndex = 0U;
   while (cursor < end) {
     JsonValue value{};
     if (!parse_value(cursor, end, &value, 1U)) {
@@ -1031,6 +1041,15 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
 
     if (currentIndex == index) {
       *outValue = value;
+      skip_whitespace(cursor, end);
+      if ((cursor < end) && (*cursor == ',')) {
+        ++cursor;
+        skip_whitespace(cursor, end);
+      }
+      m_arrayMemoBegin = array.begin;
+      m_arrayMemoEnd = array.end;
+      m_arrayMemoCursor = cursor;
+      m_arrayMemoIndex = index + 1U;
       return true;
     }
 
