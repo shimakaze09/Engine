@@ -493,10 +493,16 @@ bool load_script(const char *path) noexcept {
     return false;
   }
 
-  refresh_lua_hook();
+  arm_debug_lua_hook(state);
 
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("load_script");
+    return false;
+  }
+
+  if (debug_instruction_budget_exhausted()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "load_script: CPU instruction budget exhausted");
     return false;
   }
 
@@ -652,9 +658,17 @@ bool reload_script_transactionally(const char *path) noexcept {
   }
 
   const int snapshotReference = snapshot_global_bindings(state);
-  refresh_lua_hook();
+  arm_debug_lua_hook(state);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("hot_reload");
+    restore_global_bindings(state, snapshotReference);
+    luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
+    return false;
+  }
+
+  if (debug_instruction_budget_exhausted()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "hot_reload: CPU instruction budget exhausted");
     restore_global_bindings(state, snapshotReference);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
     return false;
@@ -707,7 +721,7 @@ void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 
 void tick_coroutines() noexcept {
   tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
-                      apply_debug_lua_hook);
+                      arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
