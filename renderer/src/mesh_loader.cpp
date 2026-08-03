@@ -263,9 +263,13 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
 
   // Heap allocation here is intentional: mesh data is variable-size and may
   // exceed the frame allocator budget. This function performs CPU IO only.
-  // The vectors are the allocation truth for every later bounds check.
+  // The buffers are the allocation truth for every later bounds check, and
+  // allocation failure stays a recoverable load failure.
   CpuMeshData decoded{};
-  decoded.vertices.resize(vertexFloatCount);
+  if (!decoded.vertices.allocate(vertexFloatCount)) {
+    std::fclose(file);
+    return false;
+  }
   if (vertexFloatCount > 0U) {
     if (!read_exact(file, decoded.vertices.data(), vertexBytes)) {
       std::fclose(file);
@@ -274,7 +278,10 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
   }
 
   const std::size_t indexCount = static_cast<std::size_t>(header.indexCount);
-  decoded.indices.resize(indexCount);
+  if (!decoded.indices.allocate(indexCount)) {
+    std::fclose(file);
+    return false;
+  }
   if (indexCount > 0U) {
     if (!read_exact(file, decoded.indices.data(), indexBytes)) {
       std::fclose(file);

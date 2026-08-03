@@ -525,8 +525,11 @@ bool make_skinned_mesh_data(engine::renderer::CpuMeshData *outData) {
   if (outData == nullptr) {
     return false;
   }
-  outData->vertices = {1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.75F,
-                       2.0F, 1.0F, 0.0F, 2.0F, 0.5F, 0.25F, 0.25F, 0.0F};
+  if (!outData->vertices.assign({1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 1.0F, 0.25F,
+                                 0.75F, 2.0F, 1.0F, 0.0F, 2.0F, 0.5F, 0.25F,
+                                 0.25F, 0.0F})) {
+    return false;
+  }
   outData->indices.clear();
   outData->vertexCount = 1U;
   outData->strideFloats = 16U;
@@ -547,9 +550,11 @@ int check_upload_rejects_inconsistent_layout() {
   if (!make_skinned_mesh_data(&meshData)) {
     return 160;
   }
-  // Undersized allocation: the vector IS the capacity, so shrinking it
-  // is the review's deliberately-short-buffer regression.
-  meshData.vertices.resize(8U);
+  // Undersized allocation: the buffer IS the capacity, so reallocating it
+  // short is the review's deliberately-short-buffer regression.
+  if (!meshData.vertices.allocate(8U)) {
+    return 168;
+  }
   if (engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
     return 161;
   }
