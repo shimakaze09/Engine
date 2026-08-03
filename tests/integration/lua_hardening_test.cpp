@@ -144,6 +144,105 @@ bool test_budget_resets_at_next_dispatch() noexcept {
   return loadOk;
 }
 
+/// Installs a hostile _G metatable whose __index raises from any lookup of
+/// an undefined global, then defines a sanity probe for later dispatches.
+bool install_hostile_global_metatable() noexcept {
+  const char *code =
+      "boom_count = 0\n"
+      "setmetatable(_G, { __index = function() error('boom') end })\n"
+      "function probe_after_boom()\n"
+      "  boom_count = boom_count + 1\n"
+      "end\n";
+  return write_script(code) && engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("probe_after_boom");
+}
+
+// -----------------------------------------------------------------------
+// N-04: a hostile _G metatable must not reach lua_atpanic — the collision
+// dispatch looks up the global on_collision fallback under protection.
+// -----------------------------------------------------------------------
+bool test_collision_dispatch_survives_hostile_metatable() noexcept {
+  ScriptingSession session{};
+  if (!session.ok || !install_hostile_global_metatable()) {
+    return false;
+  }
+
+  const std::uint32_t pairData[2] = {1U, 2U};
+  engine::scripting::dispatch_physics_callbacks(pairData, 1U);
+  remove_script();
+  return engine::scripting::call_script_function("probe_after_boom");
+}
+
+std::size_t hostile_fired_event_count() noexcept { return 1U; }
+
+bool hostile_fired_event_at(std::size_t index, engine::core::Entity *outEntity,
+                            const char **outName) noexcept {
+  if ((index != 0U) || (outEntity == nullptr) || (outName == nullptr)) {
+    return false;
+  }
+  *outEntity = engine::core::Entity{};
+  *outName = "footstep";
+  return true;
+}
+
+// -----------------------------------------------------------------------
+// N-04: the animation-event dispatch looks up the global on_anim_event
+// fallback under protection, so the hostile metatable cannot abort.
+// -----------------------------------------------------------------------
+bool test_anim_event_dispatch_survives_hostile_metatable() noexcept {
+  ScriptingSession session{};
+  if (!session.ok || !install_hostile_global_metatable()) {
+    return false;
+  }
+
+  engine::scripting::AnimationScriptBridge bridge{};
+  bridge.firedEventCount = &hostile_fired_event_count;
+  bridge.firedEventAt = &hostile_fired_event_at;
+  engine::scripting::set_animation_script_bridge(bridge);
+  engine::scripting::dispatch_animation_event_callbacks();
+  engine::scripting::set_animation_script_bridge(
+      engine::scripting::AnimationScriptBridge{});
+
+  remove_script();
+  return engine::scripting::call_script_function("probe_after_boom");
+}
+
+// -----------------------------------------------------------------------
+// N-04: a script module with a hostile metatable on its returned table
+// raises from the on_tick field lookup — the tick dispatch must log and
+// survive instead of aborting, and the entity is marked faulted.
+// -----------------------------------------------------------------------
+bool test_tick_dispatch_survives_hostile_module_metatable() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *code =
+      "return setmetatable({}, { __index = function() error('boom') end })\n";
+  if (!write_script(code)) {
+    return false;
+  }
+
+  const engine::runtime::Entity entity = session.world->create_entity();
+  engine::runtime::ScriptComponent sc{};
+  std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", kTempScript);
+  if ((entity == engine::runtime::kInvalidEntity) ||
+      !session.world->add_script_component(entity, sc)) {
+    remove_script();
+    return false;
+  }
+
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  remove_script();
+
+  const char *sane = "function verify_alive_after_module_boom()\n"
+                     "end\n";
+  return write_script(sane) && engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function(
+             "verify_alive_after_module_boom");
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -159,6 +258,12 @@ int main() {
       {"pcall_wedge_terminates", test_pcall_wedge_terminates},
       {"coroutine_wedge_terminates", test_coroutine_wedge_terminates},
       {"budget_resets_at_next_dispatch", test_budget_resets_at_next_dispatch},
+      {"collision_dispatch_survives_hostile_metatable",
+       test_collision_dispatch_survives_hostile_metatable},
+      {"anim_event_dispatch_survives_hostile_metatable",
+       test_anim_event_dispatch_survives_hostile_metatable},
+      {"tick_dispatch_survives_hostile_module_metatable",
+       test_tick_dispatch_survives_hostile_module_metatable},
   };
 
   for (const auto &tc : tests) {

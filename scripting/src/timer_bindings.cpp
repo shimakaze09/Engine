@@ -2,15 +2,15 @@
 
 #include "timer_bindings.h"
 
+#include "binding_util.h"
+
 extern "C" {
 #include "lauxlib.h"
 #include "lua.h"
 }
 
 #include <cstddef>
-#include <cstdio>
 
-#include "engine/core/logging.h"
 #include "engine/runtime/timer_manager.h"
 #include "engine/runtime/world.h"
 #include "runtime_binding.h"
@@ -54,32 +54,20 @@ void release_timer_ref(LuaTimerRef &timerRef, lua_State *state) noexcept {
   timerRef = LuaTimerRef{};
 }
 
-/// Logs a Lua timer callback error with traceback and pops error values.
-void log_timer_lua_error(lua_State *state, const char *context) noexcept {
-  if (state == nullptr) {
-    return;
-  }
+/// Carries one fired timer callback ref into the protected trampoline.
+struct TimerCallArgs final {
+  int registryRef = LUA_NOREF;
+};
 
-  const char *message = lua_tostring(state, -1);
-  if (message == nullptr) {
-    message = "unknown lua error";
+/// Protected trampoline: resolves the timer callback ref and calls it.
+int timer_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<TimerCallArgs *>(lua_touserdata(state, 1));
+  lua_rawgeti(state, LUA_REGISTRYINDEX, args->registryRef);
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
   }
-
-  luaL_traceback(state, state, message, 1);
-  const char *trace = lua_tostring(state, -1);
-  if (trace == nullptr) {
-    trace = message;
-  }
-
-  char logBuffer[1024] = {};
-  if ((context != nullptr) && (context[0] != '\0')) {
-    std::snprintf(logBuffer, sizeof(logBuffer), "lua error (%s): %s", context,
-                  trace);
-  } else {
-    std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", trace);
-  }
-  core::log_message(core::LogLevel::Error, "scripting", logBuffer);
-  lua_pop(state, 2);
+  lua_call(state, 0, 0);
+  return 0;
 }
 
 /// Invokes a Lua callback for a fired runtime timer.
@@ -102,14 +90,10 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
     return;
   }
 
-  lua_rawgeti(g_timerLuaState, LUA_REGISTRYINDEX, firedRef.registryRef);
-  if (lua_isfunction(g_timerLuaState, -1)) {
-    if (lua_pcall(g_timerLuaState, 0, 0, 0) != LUA_OK) {
-      log_timer_lua_error(g_timerLuaState, "timer");
-    }
-  } else {
-    lua_pop(g_timerLuaState, 1);
-  }
+  TimerCallArgs args{};
+  args.registryRef = firedRef.registryRef;
+  static_cast<void>(protected_engine_dispatch(
+      g_timerLuaState, &timer_call_trampoline, &args, 0, "timer"));
 
   if (runtime_binding().world == nullptr) {
     return;

@@ -2,6 +2,8 @@
 
 #include "touch_bindings.h"
 
+#include "binding_util.h"
+
 extern "C" {
 #include "lauxlib.h"
 #include "lua.h"
@@ -54,35 +56,83 @@ void clear_main_state_if_unused() noexcept {
 void unregister_lua_touch_callback() noexcept;
 void unregister_lua_gesture_callback(int index) noexcept;
 
+/// Carries one touch event into the protected dispatch trampoline.
+struct TouchCallArgs final {
+  const core::TouchEvent *event = nullptr;
+  int callbackRef = LUA_NOREF;
+};
+
+/// Protected trampoline: builds the touch event table and calls the
+/// registered handler, so table allocation failures stay catchable.
+int touch_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<TouchCallArgs *>(lua_touserdata(state, 1));
+  lua_rawgeti(state, LUA_REGISTRYINDEX, args->callbackRef);
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
+  }
+  const core::TouchEvent &event = *args->event;
+  lua_newtable(state);
+  lua_pushinteger(state, static_cast<lua_Integer>(event.touchId));
+  lua_setfield(state, -2, "id");
+  lua_pushnumber(state, static_cast<lua_Number>(event.x));
+  lua_setfield(state, -2, "x");
+  lua_pushnumber(state, static_cast<lua_Number>(event.y));
+  lua_setfield(state, -2, "y");
+  lua_pushnumber(state, static_cast<lua_Number>(event.pressure));
+  lua_setfield(state, -2, "pressure");
+  lua_pushinteger(state, static_cast<lua_Integer>(event.phase));
+  lua_setfield(state, -2, "phase");
+  lua_call(state, 1, 0);
+  return 0;
+}
+
 void lua_touch_handler(const core::TouchEvent &event,
                        void * /*userData*/) noexcept {
   if ((g_touchMainState == nullptr) || (g_touchCallbackRef == LUA_NOREF)) {
     return;
   }
 
-  lua_rawgeti(g_touchMainState, LUA_REGISTRYINDEX, g_touchCallbackRef);
-  if (!lua_isfunction(g_touchMainState, -1)) {
-    lua_pop(g_touchMainState, 1);
-    return;
-  }
+  TouchCallArgs args{};
+  args.event = &event;
+  args.callbackRef = g_touchCallbackRef;
+  static_cast<void>(protected_engine_dispatch(
+      g_touchMainState, &touch_call_trampoline, &args, 0, "touch callback"));
+}
 
-  lua_newtable(g_touchMainState);
-  lua_pushinteger(g_touchMainState, static_cast<lua_Integer>(event.touchId));
-  lua_setfield(g_touchMainState, -2, "id");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.x));
-  lua_setfield(g_touchMainState, -2, "x");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.y));
-  lua_setfield(g_touchMainState, -2, "y");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.pressure));
-  lua_setfield(g_touchMainState, -2, "pressure");
-  lua_pushinteger(g_touchMainState, static_cast<lua_Integer>(event.phase));
-  lua_setfield(g_touchMainState, -2, "phase");
-  if (lua_pcall(g_touchMainState, 1, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(g_touchMainState, -1);
-    core::log_message(core::LogLevel::Error, "Scripting",
-                      err ? err : "touch callback error");
-    lua_pop(g_touchMainState, 1);
+/// Carries one gesture event into the protected dispatch trampoline.
+struct GestureCallArgs final {
+  const core::GestureEvent *event = nullptr;
+  int callbackRef = LUA_NOREF;
+};
+
+/// Protected trampoline: builds the gesture event table and calls the
+/// registered handler, so table allocation failures stay catchable.
+int gesture_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<GestureCallArgs *>(lua_touserdata(state, 1));
+  lua_rawgeti(state, LUA_REGISTRYINDEX, args->callbackRef);
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
   }
+  const core::GestureEvent &event = *args->event;
+  lua_newtable(state);
+  lua_pushinteger(state, static_cast<lua_Integer>(event.type));
+  lua_setfield(state, -2, "type");
+  lua_pushnumber(state, static_cast<lua_Number>(event.tapX));
+  lua_setfield(state, -2, "tap_x");
+  lua_pushnumber(state, static_cast<lua_Number>(event.tapY));
+  lua_setfield(state, -2, "tap_y");
+  lua_pushinteger(state, static_cast<lua_Integer>(event.tapCount));
+  lua_setfield(state, -2, "tap_count");
+  lua_pushinteger(state, static_cast<lua_Integer>(event.swipeDir));
+  lua_setfield(state, -2, "swipe_dir");
+  lua_pushnumber(state, static_cast<lua_Number>(event.swipeVelocity));
+  lua_setfield(state, -2, "swipe_velocity");
+  lua_pushnumber(state, static_cast<lua_Number>(event.pinchScale));
+  lua_setfield(state, -2, "pinch_scale");
+  lua_pushnumber(state, static_cast<lua_Number>(event.rotationRadians));
+  lua_setfield(state, -2, "rotation");
+  lua_call(state, 1, 0);
+  return 0;
 }
 
 void lua_gesture_handler(const core::GestureEvent &event,
@@ -96,37 +146,12 @@ void lua_gesture_handler(const core::GestureEvent &event,
     return;
   }
 
-  lua_rawgeti(g_touchMainState, LUA_REGISTRYINDEX,
-              g_gestureCallbackRefs[idx]);
-  if (!lua_isfunction(g_touchMainState, -1)) {
-    lua_pop(g_touchMainState, 1);
-    return;
-  }
-
-  lua_newtable(g_touchMainState);
-  lua_pushinteger(g_touchMainState, static_cast<lua_Integer>(event.type));
-  lua_setfield(g_touchMainState, -2, "type");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.tapX));
-  lua_setfield(g_touchMainState, -2, "tap_x");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.tapY));
-  lua_setfield(g_touchMainState, -2, "tap_y");
-  lua_pushinteger(g_touchMainState, static_cast<lua_Integer>(event.tapCount));
-  lua_setfield(g_touchMainState, -2, "tap_count");
-  lua_pushinteger(g_touchMainState, static_cast<lua_Integer>(event.swipeDir));
-  lua_setfield(g_touchMainState, -2, "swipe_dir");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.swipeVelocity));
-  lua_setfield(g_touchMainState, -2, "swipe_velocity");
-  lua_pushnumber(g_touchMainState, static_cast<lua_Number>(event.pinchScale));
-  lua_setfield(g_touchMainState, -2, "pinch_scale");
-  lua_pushnumber(g_touchMainState,
-                 static_cast<lua_Number>(event.rotationRadians));
-  lua_setfield(g_touchMainState, -2, "rotation");
-  if (lua_pcall(g_touchMainState, 1, 0, 0) != LUA_OK) {
-    const char *err = lua_tostring(g_touchMainState, -1);
-    core::log_message(core::LogLevel::Error, "Scripting",
-                      err ? err : "gesture callback error");
-    lua_pop(g_touchMainState, 1);
-  }
+  GestureCallArgs args{};
+  args.event = &event;
+  args.callbackRef = g_gestureCallbackRefs[idx];
+  static_cast<void>(protected_engine_dispatch(g_touchMainState,
+                                              &gesture_call_trampoline, &args,
+                                              0, "gesture callback"));
 }
 
 core::GestureType gesture_type_from_index(int index) noexcept {

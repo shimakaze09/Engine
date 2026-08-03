@@ -196,6 +196,9 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
     }
 
     luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
+    if (refreshLuaHook != nullptr) {
+      refreshLuaHook(state);
+    }
     if (lua_isstring(thread, -1) != 0) {
       lua_xmove(thread, state, 1);
     } else {

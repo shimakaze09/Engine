@@ -2,6 +2,8 @@
 
 #include "collision_bindings.h"
 
+#include "binding_util.h"
+
 extern "C" {
 #include "lauxlib.h"
 #include "lua.h"
@@ -14,6 +16,33 @@ constexpr std::size_t kMaxCollisionHandlers = 8U;
 int g_collisionHandlers[kMaxCollisionHandlers] = {
     LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF,
     LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
+
+/// Carries one collision callback invocation into the protected trampoline.
+struct CollisionCallArgs final {
+  PushEntityHandleFromIndexFn pushEntityHandleFromIndex = nullptr;
+  std::uint32_t entityIndexA = 0U;
+  std::uint32_t entityIndexB = 0U;
+  int handlerRef = LUA_NOREF;
+};
+
+/// Protected trampoline: resolves one handler (registry ref or the global
+/// on_collision fallback), pushes both entity handles, and calls it, so
+/// metamethods and allocation failures stay catchable.
+int collision_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<CollisionCallArgs *>(lua_touserdata(state, 1));
+  if (args->handlerRef != LUA_NOREF) {
+    lua_rawgeti(state, LUA_REGISTRYINDEX, args->handlerRef);
+  } else {
+    lua_getglobal(state, "on_collision");
+  }
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
+  }
+  args->pushEntityHandleFromIndex(state, args->entityIndexA);
+  args->pushEntityHandleFromIndex(state, args->entityIndexB);
+  lua_call(state, 2, 0);
+  return 0;
+}
 
 } // namespace
 
@@ -64,43 +93,32 @@ void clear_collision_handlers(lua_State *state) noexcept {
 
 void dispatch_collision_handlers(
     lua_State *state, const std::uint32_t *pairData, std::size_t pairCount,
-    PushEntityHandleFromIndexFn pushEntityHandleFromIndex,
-    LogLuaErrorFn logLuaError) noexcept {
+    PushEntityHandleFromIndexFn pushEntityHandleFromIndex) noexcept {
   if ((state == nullptr) || (pairData == nullptr) || (pairCount == 0U) ||
-      (pushEntityHandleFromIndex == nullptr) || (logLuaError == nullptr)) {
+      (pushEntityHandleFromIndex == nullptr)) {
     return;
   }
 
   for (std::size_t i = 0U; i < pairCount; ++i) {
-    const std::uint32_t entityIndexA = pairData[i * 2U];
-    const std::uint32_t entityIndexB = pairData[i * 2U + 1U];
+    CollisionCallArgs args{};
+    args.pushEntityHandleFromIndex = pushEntityHandleFromIndex;
+    args.entityIndexA = pairData[i * 2U];
+    args.entityIndexB = pairData[i * 2U + 1U];
 
     for (std::size_t h = 0U; h < kMaxCollisionHandlers; ++h) {
       if (g_collisionHandlers[h] == LUA_NOREF) {
         continue;
       }
-      lua_rawgeti(state, LUA_REGISTRYINDEX, g_collisionHandlers[h]);
-      if (!lua_isfunction(state, -1)) {
-        lua_pop(state, 1);
-        continue;
-      }
-      pushEntityHandleFromIndex(state, entityIndexA);
-      pushEntityHandleFromIndex(state, entityIndexB);
-      if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
-        logLuaError("on_collision_handler");
-      }
+      args.handlerRef = g_collisionHandlers[h];
+      static_cast<void>(protected_engine_dispatch(state,
+                                                  &collision_call_trampoline,
+                                                  &args, 0,
+                                                  "on_collision_handler"));
     }
 
-    lua_getglobal(state, "on_collision");
-    if (lua_isfunction(state, -1)) {
-      pushEntityHandleFromIndex(state, entityIndexA);
-      pushEntityHandleFromIndex(state, entityIndexB);
-      if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
-        logLuaError("on_collision");
-      }
-    } else {
-      lua_pop(state, 1);
-    }
+    args.handlerRef = LUA_NOREF;
+    static_cast<void>(protected_engine_dispatch(
+        state, &collision_call_trampoline, &args, 0, "on_collision"));
   }
 }
 
