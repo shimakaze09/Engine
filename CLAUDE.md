@@ -234,7 +234,11 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   the final stage),
   `World` ECS (14 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
-  (shared `serialization_util`, reflection-backed components), physics/
+  (one authoritative persistent-component registry —
+  `src/component_registry.h` X-macro table, compile-time cross-checked
+  against `World::PersistentComponentTypes` and cross-validated per row by
+  `engine_unit_component_registry`; shared `serialization_util` codecs;
+  reflection-backed components), physics/
   scripting/editor bridges, render-prep pipeline, skeletal animation (CPU
   pose evaluation in `animation.cpp`, cooked .skel/.anim loaders, the
   controller state machine + palette handoff in `animation_system.cpp`),
