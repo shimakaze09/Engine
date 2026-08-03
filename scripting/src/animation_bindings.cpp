@@ -29,6 +29,32 @@ int g_animEventHandlers[kMaxAnimEventHandlers] = {
 
 AnimationScriptBridge g_animationBridge{};
 
+/// Carries one animation-event callback invocation into the trampoline.
+struct AnimEventCallArgs final {
+  core::Entity entity{};
+  const char *eventName = nullptr;
+  int handlerRef = LUA_NOREF;
+};
+
+/// Protected trampoline: resolves one handler (registry ref or the global
+/// on_anim_event fallback), pushes the entity handle and event name, and
+/// calls it, so metamethods and allocation failures stay catchable.
+int anim_event_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<AnimEventCallArgs *>(lua_touserdata(state, 1));
+  if (args->handlerRef != LUA_NOREF) {
+    lua_rawgeti(state, LUA_REGISTRYINDEX, args->handlerRef);
+  } else {
+    lua_getglobal(state, "on_anim_event");
+  }
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
+  }
+  push_entity_handle(state, args->entity);
+  lua_pushstring(state, args->eventName);
+  lua_call(state, 2, 0);
+  return 0;
+}
+
 } // namespace
 
 void set_animation_script_bridge(
@@ -116,32 +142,24 @@ void dispatch_anim_event_handlers() noexcept {
       continue;
     }
 
+    AnimEventCallArgs args{};
+    args.entity = entity;
+    args.eventName = eventName;
+
     for (std::size_t h = 0U; h < kMaxAnimEventHandlers; ++h) {
       if (g_animEventHandlers[h] == LUA_NOREF) {
         continue;
       }
-      lua_rawgeti(state, LUA_REGISTRYINDEX, g_animEventHandlers[h]);
-      if (!lua_isfunction(state, -1)) {
-        lua_pop(state, 1);
-        continue;
-      }
-      push_entity_handle(state, entity);
-      lua_pushstring(state, eventName);
-      if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
-        log_lua_error("on_anim_event_handler");
-      }
+      args.handlerRef = g_animEventHandlers[h];
+      static_cast<void>(protected_engine_dispatch(state,
+                                                  &anim_event_call_trampoline,
+                                                  &args, 0,
+                                                  "on_anim_event_handler"));
     }
 
-    lua_getglobal(state, "on_anim_event");
-    if (lua_isfunction(state, -1)) {
-      push_entity_handle(state, entity);
-      lua_pushstring(state, eventName);
-      if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
-        log_lua_error("on_anim_event");
-      }
-    } else {
-      lua_pop(state, 1);
-    }
+    args.handlerRef = LUA_NOREF;
+    static_cast<void>(protected_engine_dispatch(
+        state, &anim_event_call_trampoline, &args, 0, "on_anim_event"));
   }
 }
 
