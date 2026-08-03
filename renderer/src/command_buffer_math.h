@@ -29,4 +29,10 @@ std::uint64_t directional_shadow_cache_key(
 void extract_normal_matrix(const math::Mat4 &model,
                            float *normalMatrixOut) noexcept;
 
+/// Position of the point light a shadow slot references, or a zero vector
+/// when the slot is empty (-1) or its index is outside the live light
+/// count — a stale slot must never sample another light's data (audit R-3).
+math::Vec3 point_shadow_slot_light_position(
+    int slotLightIndex, const SceneLightData &lights) noexcept;
+
 } // namespace engine::renderer

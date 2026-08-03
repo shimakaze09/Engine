@@ -435,6 +435,7 @@ void shutdown_renderer() noexcept {
   if (!backend.initialized && !backend.failed) {
     // No GL resources exist yet, but capture slots may hold texture-system
     // handles that would go stale across a texture-system restart.
+    destroy_scene_capture_targets(backend, nullptr);
     backend.sceneCaptureTargets = {};
     reset_renderer_public_state();
     return;

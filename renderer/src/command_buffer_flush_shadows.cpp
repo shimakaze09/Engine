@@ -293,12 +293,11 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
   const bool doPointShadows =
       backend.pointShadowAvailable && core::cvar_get_bool("r_point_shadows");
+  for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
+    backend.pointShadowState.slots[i].lightIndex = -1;
+  }
   if (doPointShadows && (lights.pointLightCount > 0U)) {
     gpu_profiler_begin_pass(GpuPassId::PointShadowMap);
-
-    for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
-      backend.pointShadowState.slots[i].lightIndex = -1;
-    }
 
     std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
     std::size_t pointCandidateCount = 0U;
