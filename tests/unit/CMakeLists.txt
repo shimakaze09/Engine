@@ -161,6 +161,14 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_input_config_lua
+    SOURCES
+    input_config_lua_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_scene_serializer
     SOURCES
     scene_serializer_test.cpp
