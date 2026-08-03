@@ -990,11 +990,19 @@ bool serialize_scene_to_writer(const World &world,
                   unserializedHeightfieldCount);
     core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
   }
-  const std::size_t jointCount = world.physics_context().jointCount;
-  if (jointCount > 0U) {
+  // jointCount is a slot high-water mark; removed joints leave inactive
+  // slots behind, so only active joints are worth warning about.
+  const auto &physicsContext = world.physics_context();
+  std::size_t activeJointCount = 0U;
+  for (std::size_t i = 0U; i < physicsContext.jointCount; ++i) {
+    if (physicsContext.joints[i].active) {
+      ++activeJointCount;
+    }
+  }
+  if (activeJointCount > 0U) {
     char message[128];
     std::snprintf(message, sizeof(message),
-                  "%zu physics joint(s) are not serialized", jointCount);
+                  "%zu physics joint(s) are not serialized", activeJointCount);
     core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
   }
 
