@@ -551,18 +551,11 @@ void draw_inspector_panel() noexcept {
     ImGui::Separator();
   }
 
+  const runtime::Entity entity = selected_entity();
   if ((editor_session().world == nullptr) ||
-      (editor_session().selectedEntityIndex == 0U)) {
+      (entity == runtime::kInvalidEntity)) {
+    inspector_commit_pending_edit();
     ImGui::TextUnformatted("No entity selected");
-    ImGui::End();
-    return;
-  }
-
-  const runtime::Entity entity = editor_session().world->find_entity_by_index(
-      editor_session().selectedEntityIndex);
-  if (entity == runtime::kInvalidEntity) {
-    ImGui::TextUnformatted("Selected entity is no longer alive");
-    editor_session().selectedEntityIndex = 0U;
     ImGui::End();
     return;
   }
@@ -574,6 +567,7 @@ void draw_inspector_panel() noexcept {
   if (hasNameComponent) {
     // The name is entity identity, not a removable behavior — it can be
     // edited but never deleted from the inspector.
+    const runtime::NameComponent nameBefore = nameComponent;
     bool nameChanged = false;
     if (!editable) {
       ImGui::BeginDisabled();
@@ -587,8 +581,12 @@ void draw_inspector_panel() noexcept {
     }
 
     if (editable && nameChanged) {
-      static_cast<void>(
-          editor_session().world->add_name_component(entity, nameComponent));
+      ComponentEditSnapshot before{};
+      before.name = nameBefore;
+      ComponentEditSnapshot after{};
+      after.name = nameComponent;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Name, before, after));
     }
   } else {
     if (!editable) {
@@ -633,6 +631,7 @@ void draw_inspector_panel() noexcept {
   if (editor_session().world->get_transform(entity, &transform)) {
     // The transform is entity identity (position/axis) — editable in place
     // but never removable, matching the empty-object mental model.
+    const runtime::Transform transformBefore = transform;
     ImGui::PushID("TransformSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kTransformSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -652,8 +651,12 @@ void draw_inspector_panel() noexcept {
     ImGui::PopID();
 
     if (editable && transformModified) {
-      static_cast<void>(
-          editor_session().world->add_transform(entity, transform));
+      ComponentEditSnapshot before{};
+      before.transform = transformBefore;
+      ComponentEditSnapshot after{};
+      after.transform = transform;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Transform, before, after));
     }
   } else {
     ImGui::TextUnformatted("Transform: <none>");
@@ -661,6 +664,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::RigidBody rigidBody{};
   if (editor_session().world->get_rigid_body(entity, &rigidBody)) {
+    const runtime::RigidBody rigidBodyBefore = rigidBody;
     ImGui::PushID("RigidBodySection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kRigidBodySectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -683,8 +687,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::RigidBody);
     } else if (editable && rigidBodyModified) {
-      static_cast<void>(
-          editor_session().world->add_rigid_body(entity, rigidBody));
+      ComponentEditSnapshot before{};
+      before.rigidBody = rigidBodyBefore;
+      ComponentEditSnapshot after{};
+      after.rigidBody = rigidBody;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::RigidBody, before, after));
     }
   } else {
     ImGui::TextUnformatted("RigidBody: <none>");
@@ -692,6 +700,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::Collider collider{};
   if (editor_session().world->get_collider(entity, &collider)) {
+    const runtime::Collider colliderBefore = collider;
     ImGui::PushID("ColliderSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kColliderSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -703,15 +712,26 @@ void draw_inspector_panel() noexcept {
         ImGui::BeginDisabled();
       }
 
+      // Only the analytically authorable shapes are selectable: a convex
+      // hull needs a provenance payload only primitive spawns carry, and
+      // heightfield payloads are not editor-authorable at all, so
+      // switching into either would create a payload-less collider.
       constexpr const char *kColliderShapeNames[] = {
           "Box", "Sphere", "Capsule", "Convex Hull", "Heightfield"};
+      constexpr int kAuthorableShapeCount = 3;
       int shapeIndex = static_cast<int>(collider.shape);
       if ((shapeIndex < 0) || (shapeIndex >= 5)) {
         shapeIndex = 0;
       }
-      if (ImGui::Combo("Shape", &shapeIndex, kColliderShapeNames, 5)) {
-        collider.shape = static_cast<runtime::ColliderShape>(shapeIndex);
-        colliderModified = true;
+      if (ImGui::BeginCombo("Shape", kColliderShapeNames[shapeIndex])) {
+        for (int i = 0; i < kAuthorableShapeCount; ++i) {
+          if (ImGui::Selectable(kColliderShapeNames[i], shapeIndex == i) &&
+              (shapeIndex != i)) {
+            collider.shape = static_cast<runtime::ColliderShape>(i);
+            colliderModified = true;
+          }
+        }
+        ImGui::EndCombo();
       }
       colliderModified =
           draw_reflected_component(kColliderTypeName, &collider) ||
@@ -726,7 +746,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::Collider);
     } else if (editable && colliderModified) {
-      static_cast<void>(editor_session().world->add_collider(entity, collider));
+      ComponentEditSnapshot before{};
+      before.collider = colliderBefore;
+      ComponentEditSnapshot after{};
+      after.collider = collider;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Collider, before, after));
     }
   } else {
     ImGui::TextUnformatted("Collider: <none>");
@@ -734,6 +759,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::LightComponent light{};
   if (editor_session().world->get_light_component(entity, &light)) {
+    const runtime::LightComponent lightBefore = light;
     ImGui::PushID("LightComponentSection");
     const bool lightOpen = ImGui::CollapsingHeader(
         kLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -767,8 +793,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removeLightPressed) {
       execute_component_remove(entity, ComponentEditType::Light);
     } else if (editable && lightModified) {
-      static_cast<void>(
-          editor_session().world->add_light_component(entity, light));
+      ComponentEditSnapshot before{};
+      before.light = lightBefore;
+      ComponentEditSnapshot after{};
+      after.light = light;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Light, before, after));
     }
   } else {
     ImGui::TextUnformatted("LightComponent: <none>");
@@ -776,6 +806,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::PointLightComponent pointLight{};
   if (editor_session().world->get_point_light_component(entity, &pointLight)) {
+    const runtime::PointLightComponent pointLightBefore = pointLight;
     ImGui::PushID("PointLightComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kPointLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -798,8 +829,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::PointLight);
     } else if (editable && pointLightModified) {
-      static_cast<void>(editor_session().world->add_point_light_component(
-          entity, pointLight));
+      ComponentEditSnapshot before{};
+      before.pointLight = pointLightBefore;
+      ComponentEditSnapshot after{};
+      after.pointLight = pointLight;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::PointLight, before, after));
     }
   } else {
     ImGui::TextUnformatted("PointLightComponent: <none>");
@@ -807,6 +842,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::SpotLightComponent spotLight{};
   if (editor_session().world->get_spot_light_component(entity, &spotLight)) {
+    const runtime::SpotLightComponent spotLightBefore = spotLight;
     ImGui::PushID("SpotLightComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kSpotLightSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -829,8 +865,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SpotLight);
     } else if (editable && spotLightModified) {
-      static_cast<void>(
-          editor_session().world->add_spot_light_component(entity, spotLight));
+      ComponentEditSnapshot before{};
+      before.spotLight = spotLightBefore;
+      ComponentEditSnapshot after{};
+      after.spotLight = spotLight;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::SpotLight, before, after));
     }
   } else {
     ImGui::TextUnformatted("SpotLightComponent: <none>");
@@ -838,6 +878,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::MeshComponent mesh{};
   if (editor_session().world->get_mesh_component(entity, &mesh)) {
+    const runtime::MeshComponent meshBefore = mesh;
     ImGui::PushID("MeshComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kMeshSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -853,8 +894,18 @@ void draw_inspector_panel() noexcept {
       // rendered output feeds this mesh's albedo texture (0 = none).
       int captureSourceId = static_cast<int>(mesh.sceneCaptureSourceId);
       // Material path entry converts to the path-derived id on Enter
-      // (e.g. assets/materials/rock.json); empty clears the reference.
+      // (e.g. assets/materials/rock.json); empty clears the reference. The
+      // buffer is keyed to the inspected entity so text typed for one
+      // selection can never be committed against another.
       static char materialPathBuffer[196] = {};
+      static runtime::PersistentId materialPathOwner =
+          runtime::kInvalidPersistentId;
+      const runtime::PersistentId inspectedId =
+          editor_session().world->persistent_id(entity);
+      if (materialPathOwner != inspectedId) {
+        materialPathOwner = inspectedId;
+        materialPathBuffer[0] = '\0';
+      }
       if (editable) {
         if (ImGui::InputText("Material Path", materialPathBuffer,
                              sizeof(materialPathBuffer),
@@ -931,8 +982,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::Mesh);
     } else if (editable && meshModified) {
-      static_cast<void>(
-          editor_session().world->add_mesh_component(entity, mesh));
+      ComponentEditSnapshot before{};
+      before.mesh = meshBefore;
+      ComponentEditSnapshot after{};
+      after.mesh = mesh;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Mesh, before, after));
     }
   } else {
     ImGui::TextUnformatted("MeshComponent: <none>");
@@ -941,6 +996,7 @@ void draw_inspector_panel() noexcept {
   runtime::FoliagePatchComponent foliagePatch{};
   if (editor_session().world->get_foliage_patch_component(entity,
                                                           &foliagePatch)) {
+    const runtime::FoliagePatchComponent foliagePatchBefore = foliagePatch;
     ImGui::PushID("FoliagePatchComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kFoliagePatchSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -956,8 +1012,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::FoliagePatch);
     } else if (editable && foliageModified) {
-      static_cast<void>(editor_session().world->add_foliage_patch_component(
-          entity, foliagePatch));
+      ComponentEditSnapshot before{};
+      before.foliagePatch = foliagePatchBefore;
+      ComponentEditSnapshot after{};
+      after.foliagePatch = foliagePatch;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::FoliagePatch, before, after));
     }
   } else {
     ImGui::TextUnformatted("FoliagePatchComponent: <none>");
@@ -966,6 +1026,8 @@ void draw_inspector_panel() noexcept {
   runtime::ReflectionProbeComponent reflectionProbe{};
   if (editor_session().world->get_reflection_probe_component(
           entity, &reflectionProbe)) {
+    const runtime::ReflectionProbeComponent reflectionProbeBefore =
+        reflectionProbe;
     ImGui::PushID("ReflectionProbeComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kReflectionProbeSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -988,8 +1050,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::ReflectionProbe);
     } else if (editable && probeModified) {
-      static_cast<void>(editor_session().world->add_reflection_probe_component(
-          entity, reflectionProbe));
+      ComponentEditSnapshot before{};
+      before.reflectionProbe = reflectionProbeBefore;
+      ComponentEditSnapshot after{};
+      after.reflectionProbe = reflectionProbe;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::ReflectionProbe, before, after));
     }
   } else {
     ImGui::TextUnformatted("ReflectionProbeComponent: <none>");
@@ -998,6 +1064,7 @@ void draw_inspector_panel() noexcept {
   runtime::SceneCaptureComponent sceneCapture{};
   if (editor_session().world->get_scene_capture_component(entity,
                                                           &sceneCapture)) {
+    const runtime::SceneCaptureComponent sceneCaptureBefore = sceneCapture;
     ImGui::PushID("SceneCaptureComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kSceneCaptureSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1046,8 +1113,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SceneCapture);
     } else if (editable && captureModified) {
-      static_cast<void>(editor_session().world->add_scene_capture_component(
-          entity, sceneCapture));
+      ComponentEditSnapshot before{};
+      before.sceneCapture = sceneCaptureBefore;
+      ComponentEditSnapshot after{};
+      after.sceneCapture = sceneCapture;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::SceneCapture, before, after));
     }
   } else {
     ImGui::TextUnformatted("SceneCaptureComponent: <none>");
@@ -1055,6 +1126,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::ScriptComponent script{};
   if (editor_session().world->get_script_component(entity, &script)) {
+    const runtime::ScriptComponent scriptBefore = script;
     ImGui::PushID("ScriptComponentSection");
     const bool scriptOpen = ImGui::CollapsingHeader(
         kScriptSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1083,8 +1155,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removeScriptPressed) {
       execute_component_remove(entity, ComponentEditType::Script);
     } else if (editable && scriptModified) {
-      static_cast<void>(
-          editor_session().world->add_script_component(entity, script));
+      ComponentEditSnapshot before{};
+      before.script = scriptBefore;
+      ComponentEditSnapshot after{};
+      after.script = script;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Script, before, after));
     }
   } else {
     ImGui::TextUnformatted("ScriptComponent: <none>");
@@ -1092,6 +1168,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::AnimationComponent animation{};
   if (editor_session().world->get_animation_component(entity, &animation)) {
+    const runtime::AnimationComponent animationBefore = animation;
     ImGui::PushID("AnimationComponentSection");
     const bool animationOpen = ImGui::CollapsingHeader(
         kAnimationSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1130,8 +1207,12 @@ void draw_inspector_panel() noexcept {
     if (editable && removeAnimationPressed) {
       execute_component_remove(entity, ComponentEditType::Animation);
     } else if (editable && animationModified) {
-      static_cast<void>(
-          editor_session().world->add_animation_component(entity, animation));
+      ComponentEditSnapshot before{};
+      before.animation = animationBefore;
+      ComponentEditSnapshot after{};
+      after.animation = animation;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::Animation, before, after));
     }
   } else {
     ImGui::TextUnformatted("AnimationComponent: <none>");
@@ -1139,6 +1220,7 @@ void draw_inspector_panel() noexcept {
 
   runtime::SpringArmComponent springArm{};
   if (editor_session().world->get_spring_arm(entity, &springArm)) {
+    const runtime::SpringArmComponent springArmBefore = springArm;
     ImGui::PushID("SpringArmComponentSection");
     const bool sectionOpen = ImGui::CollapsingHeader(
         kSpringArmSectionLabel, ImGuiTreeNodeFlags_DefaultOpen);
@@ -1161,14 +1243,22 @@ void draw_inspector_panel() noexcept {
     if (editable && removePressed) {
       execute_component_remove(entity, ComponentEditType::SpringArm);
     } else if (editable && springArmModified) {
-      static_cast<void>(
-          editor_session().world->add_spring_arm(entity, springArm));
+      ComponentEditSnapshot before{};
+      before.springArm = springArmBefore;
+      ComponentEditSnapshot after{};
+      after.springArm = springArm;
+      static_cast<void>(inspector_stage_component_edit(
+          entity, ComponentEditType::SpringArm, before, after));
     }
   } else {
     ImGui::TextUnformatted("SpringArmComponent: <none>");
   }
 
   draw_add_component_combo(entity, editable);
+
+  if (inspector_has_pending_edit() && !ImGui::IsAnyItemActive()) {
+    inspector_commit_pending_edit();
+  }
 
   ImGui::End();
 }

@@ -241,42 +241,111 @@ bool capture_play_snapshot() noexcept {
   return false;
 }
 
-bool is_entity_selected(std::uint32_t entityIndex) noexcept {
+/// True when retained selection handles may still be dereferenced: the
+/// world is attached and its content epoch matches the capture epoch.
+static bool selection_epoch_valid() noexcept {
   const EditorSession &session = editor_session();
+  return (session.world != nullptr) &&
+         (session.selectionEpoch == session.world->content_epoch());
+}
+
+bool is_entity_selected(runtime::Entity entity) noexcept {
+  if (!selection_epoch_valid()) {
+    return false;
+  }
+  const EditorSession &session = editor_session();
+  if (!session.world->is_alive(entity)) {
+    return false;
+  }
   for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
-    if (session.selectedEntities[i] == entityIndex) {
+    if (session.selectedEntities[i] == entity) {
       return true;
     }
   }
   return false;
 }
 
-void select_entity(std::uint32_t entityIndex, bool additive) noexcept {
+void select_entity(runtime::Entity entity, bool additive) noexcept {
   EditorSession &session = editor_session();
+  if (!selection_epoch_valid()) {
+    clear_entity_selection();
+  }
+  if (session.world != nullptr) {
+    session.selectionEpoch = session.world->content_epoch();
+  }
   if (!additive) {
     session.selectedEntityCount = 0U;
   }
-  if (additive && is_entity_selected(entityIndex)) {
+  if (additive && is_entity_selected(entity)) {
     std::size_t write = 0U;
     for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
-      if (session.selectedEntities[i] != entityIndex) {
+      if (session.selectedEntities[i] != entity) {
         session.selectedEntities[write++] = session.selectedEntities[i];
       }
     }
     session.selectedEntityCount = write;
-    session.selectedEntityIndex =
-        (write > 0U) ? session.selectedEntities[write - 1U] : 0U;
+    session.selectedEntity =
+        (write > 0U) ? session.selectedEntities[write - 1U]
+                     : runtime::kInvalidEntity;
     return;
   }
   if (session.selectedEntityCount < EditorSession::kMaxSelectedEntities) {
-    session.selectedEntities[session.selectedEntityCount++] = entityIndex;
+    session.selectedEntities[session.selectedEntityCount++] = entity;
   }
-  session.selectedEntityIndex = entityIndex;
+  session.selectedEntity = entity;
 }
 
 void clear_entity_selection() noexcept {
   editor_session().selectedEntityCount = 0U;
-  editor_session().selectedEntityIndex = 0U;
+  editor_session().selectedEntity = runtime::kInvalidEntity;
+}
+
+runtime::Entity selected_entity() noexcept {
+  EditorSession &session = editor_session();
+  if (!selection_epoch_valid()) {
+    clear_entity_selection();
+    return runtime::kInvalidEntity;
+  }
+  if (session.selectedEntity == runtime::kInvalidEntity) {
+    return runtime::kInvalidEntity;
+  }
+  if (!session.world->is_alive(session.selectedEntity)) {
+    prune_entity_selection();
+    return runtime::kInvalidEntity;
+  }
+  return session.selectedEntity;
+}
+
+void prune_entity_selection() noexcept {
+  EditorSession &session = editor_session();
+  if (!selection_epoch_valid()) {
+    clear_entity_selection();
+    return;
+  }
+  std::size_t write = 0U;
+  for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
+    if (session.world->is_alive(session.selectedEntities[i])) {
+      session.selectedEntities[write++] = session.selectedEntities[i];
+    }
+  }
+  session.selectedEntityCount = write;
+  if ((session.selectedEntity != runtime::kInvalidEntity) &&
+      !session.world->is_alive(session.selectedEntity)) {
+    session.selectedEntity = (write > 0U) ? session.selectedEntities[write - 1U]
+                                          : runtime::kInvalidEntity;
+  }
+}
+
+void editor_history_undo() noexcept {
+  if (world_is_editable()) {
+    editor_session().commandHistory.undo();
+  }
+}
+
+void editor_history_redo() noexcept {
+  if (world_is_editable()) {
+    editor_session().commandHistory.redo();
+  }
 }
 
 void start_play_mode() noexcept {

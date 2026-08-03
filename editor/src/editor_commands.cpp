@@ -62,9 +62,7 @@ runtime::Entity resolve_command_target(
       (persistentId == runtime::kInvalidPersistentId)) {
     return entity;
   }
-  const runtime::Entity resolved =
-      editor_session().world->find_entity_by_persistent_id(persistentId);
-  return (resolved == runtime::kInvalidEntity) ? entity : resolved;
+  return editor_session().world->find_entity_by_persistent_id(persistentId);
 }
 
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
@@ -191,8 +189,131 @@ bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
 }
 
 
+/// Pending inspector edit gesture: the opening component snapshot plus
+/// the target identity, committed as one undoable command when the
+/// gesture ends (widget deactivation, target switch, or panel handoff).
+struct PendingInspectorEdit final {
+  bool active = false;
+  bool applied = false;
+  ComponentEditType type = ComponentEditType::Transform;
+  runtime::Entity entity{};
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
+  ComponentEditSnapshot before{};
+};
+
+/// Process-wide pending gesture behind the inspector_*_edit functions.
+static PendingInspectorEdit g_pendingInspectorEdit{};
+
+/// Repairs state a raw field write could corrupt before it reaches the
+/// world: a changed controller path drops the cached controller binding
+/// and state-machine position, and an editable non-zero rotation is
+/// renormalized (a zeroed rotation falls back to the pre-edit value).
+static void sanitize_staged_component(ComponentEditType type,
+                                      const ComponentEditSnapshot &before,
+                                      ComponentEditSnapshot *after) noexcept {
+  if (type == ComponentEditType::Animation) {
+    if (std::strcmp(before.animation.controllerPath,
+                    after->animation.controllerPath) != 0) {
+      after->animation.controllerSlot = runtime::kInvalidAnimSlot;
+      after->animation.currentState = 0U;
+      after->animation.previousState = 0U;
+      after->animation.stateTime = 0.0F;
+      after->animation.previousStateTime = 0.0F;
+      after->animation.blendRemaining = 0.0F;
+      after->animation.blendDuration = 0.0F;
+    }
+    return;
+  }
+  if (type == ComponentEditType::Transform) {
+    math::Quat &rotation = after->transform.rotation;
+    const float lengthSq =
+        (rotation.x * rotation.x) + (rotation.y * rotation.y) +
+        (rotation.z * rotation.z) + (rotation.w * rotation.w);
+    if (lengthSq > 1.0e-6F) {
+      rotation = math::normalize(rotation);
+    } else {
+      rotation = before.transform.rotation;
+    }
+  }
+}
+
+bool inspector_stage_component_edit(
+    runtime::Entity entity, ComponentEditType type,
+    const ComponentEditSnapshot &before,
+    const ComponentEditSnapshot &after) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
+    return false;
+  }
+  const runtime::PersistentId persistentId = world->persistent_id(entity);
+  PendingInspectorEdit &pending = g_pendingInspectorEdit;
+  if (pending.active &&
+      ((pending.type != type) || (pending.entity != entity) ||
+       (pending.persistentId != persistentId))) {
+    inspector_commit_pending_edit();
+  }
+  ComponentEditSnapshot sanitized = after;
+  sanitize_staged_component(type, before, &sanitized);
+  if (!apply_component_snapshot(type, entity, true, sanitized)) {
+    return false;
+  }
+  if (!pending.active) {
+    pending.active = true;
+    pending.applied = false;
+    pending.type = type;
+    pending.entity = entity;
+    pending.persistentId = persistentId;
+    pending.before = before;
+  }
+  pending.applied = true;
+  return true;
+}
+
+void inspector_commit_pending_edit() noexcept {
+  PendingInspectorEdit &pending = g_pendingInspectorEdit;
+  if (!pending.active) {
+    return;
+  }
+  pending.active = false;
+  if (!pending.applied) {
+    return;
+  }
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return;
+  }
+  const runtime::Entity target =
+      resolve_command_target(pending.entity, pending.persistentId);
+  ComponentEditSnapshot current{};
+  if (!capture_component_snapshot(pending.type, target, &current)) {
+    return;
+  }
+  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  if (cmd == nullptr) {
+    return;
+  }
+  cmd->entity = pending.entity;
+  cmd->persistentId = pending.persistentId;
+  cmd->type = pending.type;
+  cmd->beforeExists = true;
+  cmd->before = pending.before;
+  cmd->afterExists = true;
+  cmd->after = current;
+  editor_session().commandHistory.execute(cmd);
+}
+
+void inspector_abandon_pending_edit() noexcept {
+  g_pendingInspectorEdit.active = false;
+  g_pendingInspectorEdit.applied = false;
+}
+
+bool inspector_has_pending_edit() noexcept {
+  return g_pendingInspectorEdit.active;
+}
+
 void execute_component_add(runtime::Entity entity, ComponentEditType type,
                            const ComponentEditSnapshot &after) noexcept {
+  inspector_commit_pending_edit();
   ComponentEditSnapshot before{};
   const bool beforeExists = capture_component_snapshot(type, entity, &before);
 
@@ -217,6 +338,7 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
 
 void execute_component_remove(runtime::Entity entity,
                               ComponentEditType type) noexcept {
+  inspector_commit_pending_edit();
   ComponentEditSnapshot before{};
   if (!capture_component_snapshot(type, entity, &before)) {
     return;
@@ -283,19 +405,26 @@ bool execute_reparent(runtime::Entity child,
       return false;
     }
     runtime::Entity cursor = newParent;
-    for (std::size_t depth = 0U; depth < 256U; ++depth) {
+    const std::size_t maxAncestors = world->alive_entity_count() + 1U;
+    bool reachedRoot = false;
+    for (std::size_t depth = 0U; depth < maxAncestors; ++depth) {
       runtime::Transform cursorTransform{};
       if (!world->get_transform(cursor, &cursorTransform) ||
           (cursorTransform.parentId == runtime::kInvalidPersistentId)) {
+        reachedRoot = true;
         break;
       }
       cursor = world->find_entity_by_persistent_id(cursorTransform.parentId);
       if (cursor == runtime::kInvalidEntity) {
+        reachedRoot = true;
         break;
       }
       if (cursor == child) {
         return false;
       }
+    }
+    if (!reachedRoot) {
+      return false;
     }
   }
 
@@ -374,54 +503,42 @@ void EntityCreateCommand::undo() noexcept {
   static_cast<void>(world->destroy_entity(entity));
 }
 
-/// Counts the entity plus all its transform descendants.
-static std::size_t count_subtree_entities(runtime::World &world,
-                                          runtime::Entity entity) noexcept {
-  std::size_t count = 1U;
-  const runtime::PersistentId ownId = world.persistent_id(entity);
-  world.for_each_alive([&](runtime::Entity candidate) {
-    if (candidate == entity) {
-      return;
+/// Collects the entity's transform subtree into members (root first,
+/// every parent before its children) with an iterative breadth-first
+/// frontier and per-index visited marks, so corrupted parent links
+/// (cycles, self-parenting) are captured once and 1000+-deep chains
+/// cannot grow the call stack; returns the member count (bounded by
+/// capacity).
+static std::size_t collect_subtree_members(runtime::World &world,
+                                           runtime::Entity root,
+                                           runtime::Entity *members,
+                                           std::size_t capacity,
+                                           bool *visited) noexcept {
+  if ((members == nullptr) || (visited == nullptr) || (capacity == 0U) ||
+      !world.is_alive(root)) {
+    return 0U;
+  }
+  std::size_t count = 0U;
+  members[count++] = root;
+  visited[root.index] = true;
+  for (std::size_t cursor = 0U; cursor < count; ++cursor) {
+    const runtime::PersistentId ownId = world.persistent_id(members[cursor]);
+    if (ownId == runtime::kInvalidPersistentId) {
+      continue;
     }
-    runtime::Transform transform{};
-    if (world.get_transform(candidate, &transform) &&
-        (transform.parentId == ownId)) {
-      count += count_subtree_entities(world, candidate);
-    }
-  });
+    world.for_each_alive([&](runtime::Entity candidate) {
+      if ((count >= capacity) || visited[candidate.index]) {
+        return;
+      }
+      runtime::Transform transform{};
+      if (world.get_transform(candidate, &transform) &&
+          (transform.parentId == ownId)) {
+        visited[candidate.index] = true;
+        members[count++] = candidate;
+      }
+    });
+  }
   return count;
-}
-
-/// Fills delete records for the subtree in parent-before-child order so
-/// undo can restore parents ahead of the children that link to them.
-static void capture_subtree_records(runtime::World &world,
-                                    runtime::Entity entity,
-                                    EntityDeleteRecord *records,
-                                    std::size_t capacity,
-                                    std::size_t *written) noexcept {
-  if (*written >= capacity) {
-    return;
-  }
-  EntityDeleteRecord &record = records[*written];
-  ++(*written);
-  record.persistentId = world.persistent_id(entity);
-  for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
-       ++typeIndex) {
-    record.present[typeIndex] = capture_component_snapshot(
-        static_cast<ComponentEditType>(typeIndex), entity,
-        &record.components);
-  }
-  const runtime::PersistentId ownId = record.persistentId;
-  world.for_each_alive([&](runtime::Entity candidate) {
-    if (candidate == entity) {
-      return;
-    }
-    runtime::Transform transform{};
-    if (world.get_transform(candidate, &transform) &&
-        (transform.parentId == ownId)) {
-      capture_subtree_records(world, candidate, records, capacity, written);
-    }
-  });
 }
 
 void EntityDeleteCommand::execute() noexcept {
@@ -650,7 +767,19 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
   if ((world == nullptr) || !world->is_alive(entity)) {
     return nullptr;
   }
-  const std::size_t count = count_subtree_entities(*world, entity);
+  const std::size_t capacity = world->alive_entity_count();
+  std::unique_ptr<runtime::Entity[]> members(
+      new (std::nothrow) runtime::Entity[capacity]);
+  std::unique_ptr<bool[]> visited(
+      new (std::nothrow) bool[runtime::World::kMaxEntities + 1U]());
+  if ((members == nullptr) || (visited == nullptr)) {
+    return nullptr;
+  }
+  const std::size_t count = collect_subtree_members(
+      *world, entity, members.get(), capacity, visited.get());
+  if (count == 0U) {
+    return nullptr;
+  }
   auto *command = new (std::nothrow) EntityDeleteCommand();
   if (command == nullptr) {
     return nullptr;
@@ -660,14 +789,22 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
     delete command;
     return nullptr;
   }
-  std::size_t written = 0U;
-  capture_subtree_records(*world, entity, command->records.get(), count,
-                          &written);
-  command->recordCount = written;
+  for (std::size_t i = 0U; i < count; ++i) {
+    EntityDeleteRecord &record = command->records[i];
+    record.persistentId = world->persistent_id(members[i]);
+    for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
+         ++typeIndex) {
+      record.present[typeIndex] = capture_component_snapshot(
+          static_cast<ComponentEditType>(typeIndex), members[i],
+          &record.components);
+    }
+  }
+  command->recordCount = count;
   return command;
 }
 
 bool execute_entity_delete(runtime::Entity entity) noexcept {
+  inspector_commit_pending_edit();
   EntityDeleteCommand *const command = build_entity_delete_command(entity);
   if (command == nullptr) {
     return (editor_session().world != nullptr) &&
