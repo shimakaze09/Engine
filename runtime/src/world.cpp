@@ -6,6 +6,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/transform.h"
+#include "engine/physics/physics.h"
 #include "engine/runtime/reflect_types.h"
 
 #include <array>
@@ -53,6 +54,7 @@ void World::begin_update_phase() noexcept {
     return;
   }
 
+  physics::refresh_step_cvar_cache(physics_context());
   snapshot_world_transform_history();
   m_writeStateIndex = (m_readStateIndex + 1U) % kStateBufferCount;
   m_updateSwapPending = true;
@@ -70,6 +72,7 @@ void World::begin_update_step() noexcept {
                       "begin_update_step called with pending update");
     return;
   }
+  physics::refresh_step_cvar_cache(physics_context());
   snapshot_world_transform_history();
   m_updateSwapPending = true;
 }

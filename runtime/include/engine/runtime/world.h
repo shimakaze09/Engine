@@ -640,9 +640,12 @@ public:
   /// stale or the component is absent (no logging).
   const SpringArmComponent *get_spring_arm_ptr(Entity entity) const noexcept;
 
-  /// Begins the requested operation or profiling range for update phase.
+  /// Enters Simulation for the frame's first fixed step: refreshes the
+  /// physics per-step cvar cache, snapshots TRS history, opens the write
+  /// buffer.
   void begin_update_phase() noexcept;
-  /// Begins the requested operation or profiling range for update step.
+  /// Serial begin of each catch-up fixed step: refreshes the physics
+  /// per-step cvar cache and snapshots TRS history before chunk jobs run.
   void begin_update_step() noexcept;
   /// Publishes the written transform state as the new read state (swap).
   void commit_update_phase() noexcept;
