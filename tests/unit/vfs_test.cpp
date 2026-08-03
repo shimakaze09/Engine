@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <string>
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -195,6 +197,56 @@ bool test_mtime() noexcept {
   return mtime > 0;
 }
 
+/// Fault injection (audit P2-7): a write whose atomic rename cannot
+/// replace its destination (a directory) fails, a pre-existing sibling
+/// file written earlier keeps its bytes after a failed overwrite of a
+/// directory-shadowed name, and no ".new" temporary survives.
+bool test_write_failure_preserves_existing() noexcept {
+  namespace fs = std::filesystem;
+  if (!initialize_vfs()) {
+    return false;
+  }
+  if (!mount("root", ".")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  const char *previous = "previous-bytes";
+  bool ok = vfs_write_binary("root/_vfs_atomic_keep.dat", previous,
+                             std::strlen(previous));
+
+  std::error_code ec{};
+  fs::remove_all("_vfs_atomic_dir", ec);
+  ec.clear();
+  ok = ok && fs::create_directory("_vfs_atomic_dir", ec) && !ec;
+
+  ok = ok && !vfs_write_binary("root/_vfs_atomic_dir", "x", 1U);
+  ok = ok && fs::is_directory("_vfs_atomic_dir", ec);
+
+  char *readBack = nullptr;
+  std::size_t readSize = 0U;
+  if (ok && vfs_read_text("root/_vfs_atomic_keep.dat", &readBack, &readSize)) {
+    ok = (readSize == std::strlen(previous)) &&
+         (std::memcmp(readBack, previous, readSize) == 0);
+    vfs_free(readBack);
+  } else {
+    ok = false;
+  }
+
+  std::size_t leftovers = 0U;
+  for (const auto &entry : fs::directory_iterator(".", ec)) {
+    const std::string name = entry.path().filename().string();
+    if (name.rfind("_vfs_atomic_dir.new", 0U) == 0U) {
+      ++leftovers;
+    }
+  }
+
+  fs::remove_all("_vfs_atomic_dir", ec);
+  std::remove("_vfs_atomic_keep.dat");
+  shutdown_vfs();
+  return ok && (leftovers == 0U);
+}
+
 bool test_longest_prefix_match() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -262,6 +314,9 @@ int main() {
   }
   if (!test_longest_prefix_match()) {
     return 7;
+  }
+  if (!test_write_failure_preserves_existing()) {
+    return 8;
   }
   return 0;
 }

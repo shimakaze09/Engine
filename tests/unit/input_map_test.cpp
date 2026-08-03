@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <string>
 
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
@@ -83,6 +85,43 @@ void sim_key_up(KeyScancode key) noexcept {
   ev.type = SDL_EVENT_KEY_UP;
   ev.key.scancode = static_cast<SDL_Scancode>(key);
   input_process_event(&ev);
+}
+
+/// Writes raw bytes to a file for save fault-injection fixtures.
+bool write_raw_file(const char *path, const char *content) noexcept {
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const std::size_t len = std::strlen(content);
+  const bool ok = (std::fwrite(content, 1U, len, file) == len);
+  return (std::fclose(file) == 0) && ok;
+}
+
+/// Reads the whole file; empty string when missing.
+std::string read_raw_file(const char *path) {
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return {};
+  }
+  char buffer[512] = {};
+  const std::size_t read = std::fread(buffer, 1U, sizeof(buffer) - 1U, file);
+  std::fclose(file);
+  return std::string(buffer, read);
 }
 
 // ---------------------------------------------------------------------------
@@ -565,6 +604,156 @@ bool test_file_round_trip_and_default_path() noexcept {
   return restored;
 }
 
+/// Wrong-shape rejection (audit P2-9): valid JSON without the expected
+/// top-level actions/axes arrays — including "{}" — is refused and the
+/// current bindings survive untouched; a well-formed document still
+/// loads afterwards.
+bool test_wrong_shape_load_preserves_bindings() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  InputAxisSource src{};
+  src.type = AxisSourceType::KeyPair;
+  src.negativeKey = kKey_A;
+  src.positiveKey = kKey_D;
+  src.scale = 1.0F;
+  add_input_axis("move_x", &src, 1U);
+
+  const char *rejected[] = {
+      "{}",
+      "{\"actions\":3,\"axes\":[]}",
+      "{\"actions\":[],\"axes\":{}}",
+      "{\"wrong\":[]}",
+      "[1,2,3]",
+      "{\"actions\":[",
+  };
+  for (const char *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  sim_key_down(kKey_D);
+  end_input_frame();
+  const bool actionIntact = is_mapped_action_down("jump");
+  const bool axisIntact = mapped_axis_value("move_x") == 1.0F;
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_up(kKey_D);
+  end_input_frame();
+  if (!actionIntact || !axisIntact) {
+    shutdown_all();
+    return false;
+  }
+
+  const char *valid = "{\"actions\":[],\"axes\":[]}";
+  if (!load_input_bindings_from_buffer(valid, std::strlen(valid))) {
+    shutdown_all();
+    return false;
+  }
+  const bool cleared = !is_mapped_action_down("jump");
+  shutdown_all();
+  return cleared;
+}
+
+/// Fault injection (audit N-05): a save whose sibling temporary cannot
+/// be staged (read-only parent directory) fails and leaves the
+/// pre-existing destination bytes untouched. Skips silently when the
+/// environment cannot enforce the read-only fault (e.g. running as
+/// root or on Windows directory attributes).
+bool test_save_failure_preserves_existing_file() noexcept {
+  namespace fs = std::filesystem;
+  const char *dirPath = "input_map_test_ro_dir";
+  const char *filePath = "input_map_test_ro_dir/bindings.json";
+  const char *probePath = "input_map_test_ro_dir/probe.tmp";
+  const char *previous = "{\"previous\":true}";
+
+  std::error_code ec{};
+  fs::remove_all(dirPath, ec);
+  ec.clear();
+  if (!fs::create_directory(dirPath, ec) || ec) {
+    return false;
+  }
+  if (!write_raw_file(filePath, previous)) {
+    fs::remove_all(dirPath, ec);
+    return false;
+  }
+  fs::permissions(dirPath,
+                  fs::perms::owner_read | fs::perms::owner_exec,
+                  fs::perm_options::replace, ec);
+  if (ec) {
+    fs::remove_all(dirPath, ec);
+    return false;
+  }
+
+  const bool faultActive = !write_raw_file(probePath, "probe");
+  bool ok = true;
+  if (faultActive) {
+    if (!init_all()) {
+      ok = false;
+    } else {
+      InputBinding binding{};
+      binding.type = InputBindingType::Key;
+      binding.code = kKey_Space;
+      add_input_action("jump", &binding, 1U);
+      ok = !save_input_bindings(filePath);
+      shutdown_all();
+    }
+    ok = ok && (read_raw_file(filePath) == previous);
+  }
+
+  fs::permissions(dirPath, fs::perms::owner_all, fs::perm_options::replace,
+                  ec);
+  ec.clear();
+  static_cast<void>(std::remove(probePath));
+  fs::remove_all(dirPath, ec);
+  return ok;
+}
+
+/// Fault injection (audit N-05): a save whose atomic rename cannot
+/// replace its destination (a directory) fails, preserves the
+/// directory, and leaves no sibling temporary behind.
+bool test_save_to_directory_destination_fails() noexcept {
+  namespace fs = std::filesystem;
+  const char *dirTarget = "input_map_test_dir_target";
+  std::error_code ec{};
+  fs::remove_all(dirTarget, ec);
+  ec.clear();
+  if (!fs::create_directory(dirTarget, ec) || ec) {
+    return false;
+  }
+
+  bool ok = init_all();
+  if (ok) {
+    InputBinding binding{};
+    binding.type = InputBindingType::Key;
+    binding.code = kKey_Space;
+    add_input_action("jump", &binding, 1U);
+    ok = !save_input_bindings(dirTarget);
+    shutdown_all();
+  }
+
+  ok = ok && fs::is_directory(dirTarget, ec);
+  std::size_t leftovers = 0U;
+  for (const auto &entry : fs::directory_iterator(".", ec)) {
+    const std::string name = entry.path().filename().string();
+    if (name.rfind("input_map_test_dir_target.new", 0U) == 0U) {
+      ++leftovers;
+    }
+  }
+  fs::remove_all(dirTarget, ec);
+  return ok && (leftovers == 0U);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -594,6 +783,12 @@ int main() {
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",
       &test_file_round_trip_and_default_path);
+  run("wrong_shape_load_preserves_bindings",
+      &test_wrong_shape_load_preserves_bindings);
+  run("save_failure_preserves_existing_file",
+      &test_save_failure_preserves_existing_file);
+  run("save_to_directory_destination_fails",
+      &test_save_to_directory_destination_fails);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <new>
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
 
 #if defined(_WIN32)
@@ -364,28 +365,14 @@ bool vfs_write_binary(const char *virtualPath, const void *data,
     return false;
   }
 
-  FILE *file = nullptr;
-#if defined(_WIN32)
-  if (fopen_s(&file, osPath, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(osPath, "wb");
-#endif
-  if (file == nullptr) {
+  AtomicFileWriter writer{};
+  if (!writer.begin(osPath)) {
     return false;
   }
-
-  if (size > 0U) {
-    const std::size_t written = std::fwrite(data, 1U, size, file);
-    if (written != size) {
-      std::fclose(file);
-      return false;
-    }
+  if ((size > 0U) && !writer.write(data, size)) {
+    return false;
   }
-
-  std::fclose(file);
-  return true;
+  return writer.commit();
 }
 
 bool vfs_write_text(const char *virtualPath, const char *text,
