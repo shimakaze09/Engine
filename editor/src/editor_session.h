@@ -44,13 +44,18 @@ struct ThumbnailEntry final {
 constexpr std::size_t kMaxThumbnails = 128U;
 
 /// Owns editor UI/session state for the currently attached runtime world.
+/// Selection stores full generation-checked entity handles plus the world
+/// content epoch they were captured under: scene loads commit by whole-world
+/// assignment, which resets generations, so an epoch mismatch invalidates
+/// every retained handle even when index+generation would appear to match.
 struct EditorSession final {
   bool initialized = false;
   runtime::World *world = nullptr;
-  std::uint32_t selectedEntityIndex = 0U;
+  runtime::Entity selectedEntity{};
   static constexpr std::size_t kMaxSelectedEntities = 64U;
-  std::array<std::uint32_t, kMaxSelectedEntities> selectedEntities{};
+  std::array<runtime::Entity, kMaxSelectedEntities> selectedEntities{};
   std::size_t selectedEntityCount = 0U;
+  std::uint32_t selectionEpoch = 0U;
   PlayState playState = PlayState::Stopped;
   // Set by the toolbar Step button while paused; the runtime consumes it
   // through the editor bridge to simulate exactly one fixed step.
@@ -116,13 +121,26 @@ constexpr const char *kAnimationSectionLabel = "AnimationComponent";
 /// Returns the process-wide editor session state.
 EditorSession &editor_session() noexcept;
 
-/// True when the entity index is in the multi-selection.
-bool is_entity_selected(std::uint32_t entityIndex) noexcept;
+/// True when the exact entity handle is in the multi-selection and the
+/// selection still belongs to the attached world's current content epoch.
+bool is_entity_selected(runtime::Entity entity) noexcept;
 /// Selects an entity: replaces the selection, or toggles membership when
 /// additive (Ctrl-click). The primary selection follows the last pick.
-void select_entity(std::uint32_t entityIndex, bool additive) noexcept;
+void select_entity(runtime::Entity entity, bool additive) noexcept;
 /// Clears the multi-selection and the primary selection.
 void clear_entity_selection() noexcept;
+/// Returns the validated primary selection: kInvalidEntity (after clearing
+/// the stale state) unless the handle is alive in the attached world under
+/// the epoch the selection was captured in.
+runtime::Entity selected_entity() noexcept;
+/// Drops selection entries whose entity died or whose world content epoch
+/// changed (scene load / world restore reset generations).
+void prune_entity_selection() noexcept;
+/// Undoes the last command only while the world accepts edits (never
+/// during play, after a failed restore, or outside the Input phase).
+void editor_history_undo() noexcept;
+/// Redoes the last undone command under the same editability gate.
+void editor_history_redo() noexcept;
 
 /// Returns the configured editor scene path ("" when unset).
 const char *editor_scene_path() noexcept;

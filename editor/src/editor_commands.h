@@ -14,8 +14,10 @@
 namespace engine::editor {
 
 /// Resolves a command's target: by persistent id when one was captured
-/// (so undo/redo survives the entity being deleted and re-created), else
-/// the recorded handle (stale generations are rejected downstream).
+/// (so undo/redo survives the entity being deleted and re-created) with no
+/// raw-handle fallback, because generations reset when a scene load
+/// replaces the world's contents; a handle-only command (no id captured)
+/// keeps its recorded handle and stale generations are rejected downstream.
 runtime::Entity resolve_command_target(
     runtime::Entity entity, runtime::PersistentId persistentId) noexcept;
 

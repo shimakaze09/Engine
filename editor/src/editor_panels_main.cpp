@@ -102,7 +102,7 @@ void draw_main_menu_bar() noexcept {
         core::log_message(core::LogLevel::Error, "editor",
                           "failed to load configured editor scene");
       } else {
-        editor_session().selectedEntityIndex = 0U;
+        clear_entity_selection();
         editor_session().worldRestoreFailed = false;
         editor_session().commandHistory.clear();
       }
@@ -116,23 +116,27 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("Edit")) {
-    if (!editor_session().commandHistory.can_undo()) {
+    const bool canUndo =
+        world_is_editable() && editor_session().commandHistory.can_undo();
+    const bool canRedo =
+        world_is_editable() && editor_session().commandHistory.can_redo();
+    if (!canUndo) {
       ImGui::BeginDisabled();
     }
     if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-      editor_session().commandHistory.undo();
+      editor_history_undo();
     }
-    if (!editor_session().commandHistory.can_undo()) {
+    if (!canUndo) {
       ImGui::EndDisabled();
     }
 
-    if (!editor_session().commandHistory.can_redo()) {
+    if (!canRedo) {
       ImGui::BeginDisabled();
     }
     if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z")) {
-      editor_session().commandHistory.redo();
+      editor_history_redo();
     }
-    if (!editor_session().commandHistory.can_redo()) {
+    if (!canRedo) {
       ImGui::EndDisabled();
     }
 
@@ -311,15 +315,15 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
   if (!hasChildren) {
     flags |= ImGuiTreeNodeFlags_Leaf;
   }
-  if (is_entity_selected(entity.index) ||
-      (editor_session().selectedEntityIndex == entity.index)) {
+  if (is_entity_selected(entity) ||
+      (selected_entity() == entity)) {
     flags |= ImGuiTreeNodeFlags_Selected;
   }
 
   const bool open = ImGui::TreeNodeEx(label, flags);
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
-    select_entity(entity.index, ImGui::GetIO().KeyCtrl);
+    select_entity(entity, ImGui::GetIO().KeyCtrl);
   }
 
   if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
@@ -376,6 +380,7 @@ void draw_entities_panel() noexcept {
     return;
   }
 
+  prune_entity_selection();
   draw_entity_hierarchy();
 
   // Dropping onto the panel background clears the parent.
@@ -403,7 +408,7 @@ void draw_entities_panel() noexcept {
   if (ImGui::Button("Create Entity") && editable) {
     const runtime::Entity newEntity = execute_entity_create();
     if (newEntity != runtime::kInvalidEntity) {
-      select_entity(newEntity.index, false);
+      select_entity(newEntity, false);
     }
   }
 
@@ -427,7 +432,7 @@ void draw_entities_panel() noexcept {
       if (ImGui::MenuItem(item.label) && editable) {
         const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
         if (spawned != runtime::kInvalidEntity) {
-          select_entity(spawned.index, false);
+          select_entity(spawned, false);
         }
       }
     }

@@ -551,18 +551,10 @@ void draw_inspector_panel() noexcept {
     ImGui::Separator();
   }
 
+  const runtime::Entity entity = selected_entity();
   if ((editor_session().world == nullptr) ||
-      (editor_session().selectedEntityIndex == 0U)) {
+      (entity == runtime::kInvalidEntity)) {
     ImGui::TextUnformatted("No entity selected");
-    ImGui::End();
-    return;
-  }
-
-  const runtime::Entity entity = editor_session().world->find_entity_by_index(
-      editor_session().selectedEntityIndex);
-  if (entity == runtime::kInvalidEntity) {
-    ImGui::TextUnformatted("Selected entity is no longer alive");
-    editor_session().selectedEntityIndex = 0U;
     ImGui::End();
     return;
   }

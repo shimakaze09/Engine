@@ -351,7 +351,7 @@ void draw_scene_viewport_panel() noexcept {
         const runtime::Entity spawned =
             execute_asset_spawn(virtualPath, spawnTransform);
         if (spawned != runtime::kInvalidEntity) {
-          select_entity(spawned.index, false);
+          select_entity(spawned, false);
         }
       }
     }
@@ -359,12 +359,7 @@ void draw_scene_viewport_panel() noexcept {
   }
 
   const bool editable = world_is_editable();
-  const runtime::Entity selectedEntity =
-      (editor_session().world != nullptr &&
-       editor_session().selectedEntityIndex != 0U)
-          ? editor_session().world->find_entity_by_index(
-                editor_session().selectedEntityIndex)
-          : runtime::kInvalidEntity;
+  const runtime::Entity selectedEntity = selected_entity();
 
   const bool hasTransform = (selectedEntity != runtime::kInvalidEntity) &&
                             (editor_session().world != nullptr) &&

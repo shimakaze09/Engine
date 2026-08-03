@@ -62,9 +62,7 @@ runtime::Entity resolve_command_target(
       (persistentId == runtime::kInvalidPersistentId)) {
     return entity;
   }
-  const runtime::Entity resolved =
-      editor_session().world->find_entity_by_persistent_id(persistentId);
-  return (resolved == runtime::kInvalidEntity) ? entity : resolved;
+  return editor_session().world->find_entity_by_persistent_id(persistentId);
 }
 
 bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
