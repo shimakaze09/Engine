@@ -332,7 +332,6 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
     }
   }
   core::debug_draw_tick();
-  core::debug_draw_tick();
 }
 
 } // namespace engine::renderer

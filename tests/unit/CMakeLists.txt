@@ -604,6 +604,20 @@ engine_add_test_executable(engine_unit_command_buffer_post_chain
     engine_math
 )
 
+engine_add_test_executable(engine_unit_command_buffer_debug_overlay
+    SOURCES
+    command_buffer_debug_overlay_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_forward.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_native_thread
     SOURCES
     native_thread_test.cpp
