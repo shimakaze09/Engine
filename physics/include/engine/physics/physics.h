@@ -16,6 +16,12 @@ class PhysicsWorldView;
 /// Registers physics runtime CVars. Call after core::initialize_cvars().
 bool register_physics_cvars() noexcept;
 
+/// Copies the physics cvars consumed during stepping into the context's
+/// per-step cache. Must run once per fixed step on the serial begin-step
+/// path (before any physics chunk job) so the parallel section never
+/// touches the global cvar mutex.
+void refresh_step_cvar_cache(PhysicsContext &context) noexcept;
+
 // Blocked-body warning diagnostic ---------------------------------------------
 /// Counters published by the blocked-body warning (physics.blocked_warn_steps):
 /// total warnings emitted plus the blocked entity and blocking-partner

@@ -636,10 +636,10 @@ private:
       edgeIndex = m_edges[edgeIndex].nextEdge;
     }
 
+    node.completed.store(true, std::memory_order_release);
+
     const bool wasLastJob =
         (m_pendingJobs.fetch_sub(1U, std::memory_order_acq_rel) == 1U);
-
-    node.completed.store(true, std::memory_order_release);
 
     if (wasLastJob) {
       std::lock_guard<std::mutex> lock(m_completionMutex);

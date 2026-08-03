@@ -30,6 +30,12 @@ namespace {
 constexpr int kMaxBilateralIterations = 32;
 constexpr float kTolerance = 1e-4F;
 
+/// Clamps a raw physics.ccd_threshold value: non-finite or negative values
+/// fall back to the registered default.
+float validated_ccd_threshold(float raw) noexcept {
+  return (std::isfinite(raw) && (raw >= 0.0F)) ? raw : 2.0F;
+}
+
 /// Returns positive axis separation, or a non-positive overlap measure.
 float aabb_separating_distance(const math::AABB &a,
                                const math::AABB &b) noexcept {
@@ -116,21 +122,27 @@ math::Vec3 contact_point(const ColliderWorldGeometry &a,
 } // namespace
 
 float ccd_velocity_threshold() noexcept {
-  const float threshold = core::cvar_get_float("physics.ccd_threshold", 2.0F);
-  return (std::isfinite(threshold) && (threshold >= 0.0F)) ? threshold : 2.0F;
+  return validated_ccd_threshold(
+      core::cvar_get_float("physics.ccd_threshold", 2.0F));
 }
 
 /// Bilateral advancement CCD (Erwin Coumans, GDC 2013): sweeps the moving
 /// collider through dt-normalized time, advancing by conservative separation
-/// bounds until contact or the current-best TOI. Only fast movers sweep — the
-/// physics.ccd_threshold cvar gates speed, and the step's travel must exceed
-/// half the collider's smallest extent. Candidates are gated on the previous
+/// bounds until contact or the current-best TOI. Only fast movers sweep —
+/// the per-step cached physics.ccd_threshold value gates speed (the global
+/// cvar mutex must never be taken inside parallel chunk jobs), and the
+/// step's travel must exceed half the collider's smallest extent. Candidates are gated on the previous
 /// resolve's snapshot: snapshot AABBs (expanded by one step of positional
 /// correction drift) reject most pairs before the expensive geometry build,
 /// and candidate velocities come from the snapshot because reading live
-/// RigidBody::velocity races with the parallel integration chunks. A pair
-/// missed because the OTHER body races toward a slow mover is covered by
-/// that body's own sweep.
+/// RigidBody::velocity races with the parallel integration chunks. When
+/// the snapshot cannot vouch for an entry (first step after play start or
+/// scene load, collider add/remove since the last resolve, sparse-set
+/// reorder) the other body is treated as static — never read live — which
+/// is deterministic and conservative: the speculative-contact path still
+/// catches the encounter on the next resolved step. A pair missed because
+/// the OTHER body races toward a slow mover is covered by that body's own
+/// sweep.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity, const RigidBody &body,
                                      const Collider &collider,
@@ -153,7 +165,8 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     return result;
   }
 
-  const float threshold = ccd_velocity_threshold();
+  const PhysicsContext &physicsCtx = world.physics_context();
+  const float threshold = validated_ccd_threshold(physicsCtx.ccdThresholdCvar);
   if (speed < threshold) {
     return result;
   }
@@ -183,7 +196,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   std::uint32_t bestHitEntity = 0U;
   const Entity movingOwner = world.rigid_body_owner(entity);
 
-  const PhysicsContext &physicsCtx = world.physics_context();
   const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
   const bool snapshotUsable =
       (snapshotStore != nullptr) && (physicsCtx.ccdColliderCount == count);
@@ -234,11 +246,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     if (snapshotUsable &&
         (snapshotStore->ccdColliderEntities[i] == entities[i])) {
       otherVel = snapshotStore->ccdColliderVelocities[i];
-    } else if (otherOwner != kInvalidEntity) {
-      const RigidBody *otherBody = world.get_rigid_body_ptr(otherOwner);
-      if (otherBody != nullptr) {
-        otherVel = otherBody->velocity;
-      }
     }
     const math::Vec3 relVel = math::sub(body.velocity, otherVel);
     const float relSpeed = math::length(relVel);

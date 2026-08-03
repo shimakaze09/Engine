@@ -287,7 +287,8 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
   record.state = state;
   if (state == AssetState::Ready) {
     record.runtimeMesh = runtimeMesh;
-    record.lastAccessFrame = database->currentFrame;
+    record.lastAccessFrame.store(database->currentFrame,
+                                 std::memory_order_relaxed);
   } else {
     record.runtimeMesh = kInvalidMeshHandle;
   }
@@ -339,14 +340,15 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
           (record.sizeBytes == 0ULL)) {
         continue;
       }
-      if ((record.lastAccessFrame + kMeshEvictionMinAgeFrames) >
-          database->currentFrame) {
+      const std::uint64_t lastAccess =
+          record.lastAccessFrame.load(std::memory_order_relaxed);
+      if ((lastAccess + kMeshEvictionMinAgeFrames) > database->currentFrame) {
         continue;
       }
       if ((coldestSlot == database->meshAssets.size()) ||
-          (record.lastAccessFrame < coldestFrame)) {
+          (lastAccess < coldestFrame)) {
         coldestSlot = i;
-        coldestFrame = record.lastAccessFrame;
+        coldestFrame = lastAccess;
       }
     }
 
@@ -392,7 +394,8 @@ MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
     return kInvalidMeshHandle;
   }
 
-  record.lastAccessFrame = database->currentFrame;
+  record.lastAccessFrame.store(database->currentFrame,
+                               std::memory_order_relaxed);
   return record.runtimeMesh;
 }
 

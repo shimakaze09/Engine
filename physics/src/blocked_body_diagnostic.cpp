@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
@@ -33,10 +32,9 @@ constexpr float kBlockedAchievedFraction = 0.25F;
 // Episode counters saturate at 255, so thresholds clamp safely below it.
 constexpr int kMaxWarnThreshold = 250;
 
-/// Consecutive-blocked-step threshold from physics.blocked_warn_steps;
-/// 0 disables the diagnostic.
-int blocked_warn_step_threshold() noexcept {
-  const float value = core::cvar_get_float("physics.blocked_warn_steps", 30.0F);
+/// Consecutive-blocked-step threshold from the per-step cached
+/// physics.blocked_warn_steps value; 0 disables the diagnostic.
+int blocked_warn_step_threshold(float value) noexcept {
   if (!(value > 0.0F) || !std::isfinite(value)) {
     return 0;
   }
@@ -60,8 +58,10 @@ std::uint32_t find_blocking_partner(const PhysicsContext &ctx,
 } // namespace
 
 void capture_blocked_body_commands(PhysicsWorldView &world) noexcept {
-  PhysicsShapeStore *store = world.physics_context().shapeStore.get();
-  if ((store == nullptr) || (blocked_warn_step_threshold() <= 0)) {
+  const PhysicsContext &physicsCtx = world.physics_context();
+  PhysicsShapeStore *store = physicsCtx.shapeStore.get();
+  if ((store == nullptr) ||
+      (blocked_warn_step_threshold(physicsCtx.blockedWarnStepsCvar) <= 0)) {
     return;
   }
 
@@ -86,8 +86,9 @@ void capture_blocked_body_commands(PhysicsWorldView &world) noexcept {
 
 void report_blocked_bodies(PhysicsWorldView &world,
                            float deltaSeconds) noexcept {
-  const int threshold = blocked_warn_step_threshold();
   PhysicsContext &physicsCtx = world.physics_context();
+  const int threshold =
+      blocked_warn_step_threshold(physicsCtx.blockedWarnStepsCvar);
   PhysicsShapeStore *store = physicsCtx.shapeStore.get();
   if ((store == nullptr) || (threshold <= 0) || (deltaSeconds <= 0.0F)) {
     return;
