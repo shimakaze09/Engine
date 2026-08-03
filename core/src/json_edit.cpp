@@ -123,7 +123,19 @@ bool json_replace_top_level_field(const char *documentText,
     }
   }
 
+  // The name is spliced verbatim between quotes, so anything JSON would
+  // escape (quote, backslash, control bytes) or an empty name would
+  // produce a malformed or aliased key.
   const std::size_t nameLength = std::strlen(fieldName);
+  if (nameLength == 0U) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < nameLength; ++i) {
+    const unsigned char nameByte = static_cast<unsigned char>(fieldName[i]);
+    if ((nameByte < 0x20U) || (nameByte == '"') || (nameByte == '\\')) {
+      return false;
+    }
+  }
   const std::size_t rootBegin =
       skip_json_whitespace(documentText, documentLength, 0U);
   if ((rootBegin >= documentLength) || (documentText[rootBegin] != '{')) {

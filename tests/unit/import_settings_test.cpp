@@ -474,6 +474,41 @@ int test_json_splice_validates_contract() {
   return 0;
 }
 
+/// EXPECTATION (PR #51 review): field names are spliced verbatim between
+/// quotes, so a name carrying a quote, backslash, or control byte — or an
+/// empty name — is refused before it can produce malformed JSON.
+int test_json_splice_rejects_unsafe_field_names() {
+  char output[1024] = {};
+  std::size_t outputLength = 0U;
+  const char *valid = "{ \"a\": 1 }";
+
+  const char *unsafeNames[] = {"", "quote\"name", "back\\slash", "ctrl\nname",
+                               "tab\tname"};
+  for (const char *name : unsafeNames) {
+    if (engine::core::json_replace_top_level_field(
+            valid, std::strlen(valid), name, "2", output, sizeof(output),
+            &outputLength)) {
+      std::fprintf(stderr, "FAIL: unsafe field name accepted: '%s'\n", name);
+      return 1;
+    }
+  }
+
+  if (!engine::core::json_replace_top_level_field(
+          valid, std::strlen(valid), "safe_name-01", "2", output,
+          sizeof(output), &outputLength)) {
+    std::fprintf(stderr, "FAIL: safe field name rejected\n");
+    return 1;
+  }
+  engine::core::JsonParser parser{};
+  if (!parser.parse(output, outputLength)) {
+    std::fprintf(stderr, "FAIL: safe-name insert does not parse\n");
+    return 1;
+  }
+
+  std::printf("PASS: splice rejects unsafe field names\n");
+  return 0;
+}
+
 /// Runs this executable or test program.
 int main() {
   int failures = 0;
@@ -486,6 +521,7 @@ int main() {
   failures += test_json_splice_preserves_unknown_fields();
   failures += test_json_splice_insert_and_rejection();
   failures += test_json_splice_validates_contract();
+  failures += test_json_splice_rejects_unsafe_field_names();
   if (failures > 0) {
     std::fprintf(stderr, "FAILED: %d test(s) failed\n", failures);
   }
