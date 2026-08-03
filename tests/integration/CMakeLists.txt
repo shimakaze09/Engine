@@ -179,6 +179,35 @@ if(ENGINE_BUILD_TOOLS)
         engine_integration_asset_packer_rejects_corrupt_graph
         PROPERTIES LABELS integration
     )
+
+    add_test(
+        NAME engine_integration_asset_packer_bin_dependency
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/bin_dep_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_bin_dependency_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_bin_dependency
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_stale_hull_removed
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DHULLLESS_GLTF=${CMAKE_SOURCE_DIR}/tests/data/hullless_triangle.gltf"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/stale_hull_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_stale_hull_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_stale_hull_removed
+        PROPERTIES LABELS integration
+    )
 endif()
 
 engine_add_test_executable(engine_integration_hotreload

@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "engine/core/atomic_file.h"
@@ -455,16 +457,36 @@ bool cook_and_write_convex_hull(const char *outputPath,
     return false;
   }
 
+  char hullPath[512] = {};
+  const int pathLen =
+      std::snprintf(hullPath, sizeof(hullPath), "%s.hull", outputPath);
+  if ((pathLen <= 0) || (pathLen >= static_cast<int>(sizeof(hullPath)))) {
+    return false;
+  }
+
+  // Structurally hull-less geometry is not a cook failure — the mesh is
+  // valid without a sidecar — but a hull from an earlier cook of this
+  // asset must not survive under the fresh stamp, so the stale sidecar
+  // is removed and a failed removal blocks the commit marker
+  // (PR #51 review).
+  auto removeStaleHull = [&hullPath]() {
+    std::error_code removeError{};
+    std::filesystem::remove(hullPath, removeError);
+    if (removeError) {
+      std::fprintf(stderr, "error: failed to remove stale hull sidecar: %s\n",
+                   hullPath);
+      return false;
+    }
+    return true;
+  };
+
   const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
       data.interleavedVertices.size() / strideFloats;
-  // Structurally hull-less geometry is not a cook failure — the mesh is
-  // valid without a sidecar — so the stamp gate below treats it as
-  // success; only an actual write failure must block the commit marker.
   if (vertexCount < 4U) {
     std::fprintf(stderr, "warning: too few vertices (%zu) for convex hull\n",
                  vertexCount);
-    return true;
+    return removeStaleHull();
   }
 
   std::vector<engine::math::Vec3> positions(vertexCount);
@@ -481,14 +503,7 @@ bool cook_and_write_convex_hull(const char *outputPath,
     // Degenerate geometry cannot produce a hull; the cook proceeds
     // without the sidecar, matching the too-few-vertices skip above.
     std::fprintf(stderr, "warning: convex hull build failed\n");
-    return true;
-  }
-
-  char hullPath[512] = {};
-  const int pathLen =
-      std::snprintf(hullPath, sizeof(hullPath), "%s.hull", outputPath);
-  if ((pathLen <= 0) || (pathLen >= static_cast<int>(sizeof(hullPath)))) {
-    return false;
+    return removeStaleHull();
   }
 
   // Header: magic (4 bytes) + planeCount (4) + vertexCount (4) + localCenter

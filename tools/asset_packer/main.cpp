@@ -276,6 +276,46 @@ int main(int argc, char **argv) {
     }
   }
 
+  // External glTF payloads (.bin buffers, images) must force a recook
+  // even when no --graph is supplied: dependency correctness is an
+  // invariant of the cooker, the graph only persists the relationships
+  // (PR #51 review). A parse failure here is not fatal — the cook path
+  // below reports it with its usual diagnostics.
+  {
+    const char *ext = std::strrchr(inputPath, '.');
+    const bool isGltfInput =
+        (ext != nullptr) && ((std::strcmp(ext, ".gltf") == 0) ||
+                             (std::strcmp(ext, ".glb") == 0));
+    if (isGltfInput && (meshAssetId != 0ULL)) {
+      cgltf_options discoverOptions{};
+      cgltf_data *discoverData = nullptr;
+      if ((cgltf_parse_file(&discoverOptions, inputPath, &discoverData) ==
+           cgltf_result_success) &&
+          (discoverData != nullptr)) {
+        engine::tools::DependencyGraph discoveryGraph{};
+        std::vector<DependencyDigest> discovered{};
+        static_cast<void>(extract_gltf_dependencies(
+            discoverData, inputPath, meshAssetId, &discoveryGraph,
+            &discovered));
+        for (const auto &dep : discovered) {
+          bool alreadyTracked = false;
+          for (const auto &existing : dependencyDigests) {
+            if (existing.path == dep.path) {
+              alreadyTracked = true;
+              break;
+            }
+          }
+          if (!alreadyTracked) {
+            dependencyDigests.push_back(dep);
+          }
+        }
+      }
+      if (discoverData != nullptr) {
+        cgltf_free(discoverData);
+      }
+    }
+  }
+
   ImportSettings importSettings{};
   read_import_settings_from_meta(outputPath, &importSettings);
   const std::uint64_t importSettingsHash = hash_import_settings(importSettings);
