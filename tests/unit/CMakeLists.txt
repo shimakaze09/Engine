@@ -355,6 +355,15 @@ engine_add_test_executable(engine_unit_prefab
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_component_registry
+    SOURCES
+    component_registry_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M1: Engine Production Baseline ----
 
 engine_add_test_executable(engine_unit_cvar_console
