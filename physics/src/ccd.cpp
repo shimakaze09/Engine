@@ -131,18 +131,21 @@ float ccd_velocity_threshold() noexcept {
 /// bounds until contact or the current-best TOI. Only fast movers sweep —
 /// the per-step cached physics.ccd_threshold value gates speed (the global
 /// cvar mutex must never be taken inside parallel chunk jobs), and the
-/// step's travel must exceed half the collider's smallest extent. Candidates are gated on the previous
-/// resolve's snapshot: snapshot AABBs (expanded by one step of positional
-/// correction drift) reject most pairs before the expensive geometry build,
-/// and candidate velocities come from the snapshot because reading live
+/// step's travel must exceed half the collider's smallest extent.
+/// Candidates are gated on the previous resolve's snapshot, matched by
+/// ENTITY IDENTITY through the published entity-index -> slot map (slot in
+/// range and stored entity equal in index AND generation), so sparse-set
+/// reorders between the publish and this sweep cannot mismatch entries:
+/// snapshot AABBs (expanded by one step of positional correction drift)
+/// reject most pairs before the expensive geometry build, and candidate
+/// velocities come from the snapshot because reading live
 /// RigidBody::velocity races with the parallel integration chunks. When
-/// the snapshot cannot vouch for an entry (first step after play start or
-/// scene load, collider add/remove since the last resolve, sparse-set
-/// reorder) the other body is treated as static — never read live — which
-/// is deterministic and conservative: the speculative-contact path still
-/// catches the encounter on the next resolved step. A pair missed because
-/// the OTHER body races toward a slow mover is covered by that body's own
-/// sweep.
+/// no snapshot entry vouches for a candidate (first step after play start
+/// or scene load, collider added since the last resolve) that body is
+/// treated as static — never read live — which is deterministic and
+/// conservative: the speculative-contact path still catches the encounter
+/// on the next resolved step. A pair missed because the OTHER body races
+/// toward a slow mover is covered by that body's own sweep.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity, const RigidBody &body,
                                      const Collider &collider,
@@ -197,8 +200,8 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   const Entity movingOwner = world.rigid_body_owner(entity);
 
   const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
-  const bool snapshotUsable =
-      (snapshotStore != nullptr) && (physicsCtx.ccdColliderCount == count);
+  const std::size_t snapshotCount = physicsCtx.ccdColliderCount;
+  constexpr std::uint32_t kNoSnapshotSlot = 0xFFFFFFFFU;
 
   constexpr float kSnapshotDriftSlop = 0.1F;
   const math::Vec3 gateDisplacement = math::mul(body.velocity, dt);
@@ -215,8 +218,20 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    if (snapshotUsable) {
-      const math::AABB &otherBounds = snapshotStore->ccdColliderAabbs[i];
+    std::uint32_t snapshotSlot = kNoSnapshotSlot;
+    if ((snapshotStore != nullptr) &&
+        (entities[i].index < snapshotStore->ccdSlotByEntityIndex.size())) {
+      const std::uint32_t slot =
+          snapshotStore->ccdSlotByEntityIndex[entities[i].index];
+      if ((slot < snapshotCount) &&
+          (snapshotStore->ccdColliderEntities[slot] == entities[i])) {
+        snapshotSlot = slot;
+      }
+    }
+
+    if (snapshotSlot != kNoSnapshotSlot) {
+      const math::AABB &otherBounds =
+          snapshotStore->ccdColliderAabbs[snapshotSlot];
       if ((gateBounds.min.x > otherBounds.max.x) ||
           (gateBounds.max.x < otherBounds.min.x) ||
           (gateBounds.min.y > otherBounds.max.y) ||
@@ -234,18 +249,16 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     }
 
     const Entity otherOwner =
-        (snapshotUsable &&
-         (snapshotStore->ccdColliderEntities[i] == entities[i]))
-            ? snapshotStore->ccdColliderOwners[i]
+        (snapshotSlot != kNoSnapshotSlot)
+            ? snapshotStore->ccdColliderOwners[snapshotSlot]
             : world.rigid_body_owner(entities[i]);
     if ((movingOwner != kInvalidEntity) && (movingOwner == otherOwner)) {
       continue;
     }
 
     math::Vec3 otherVel(0.0F, 0.0F, 0.0F);
-    if (snapshotUsable &&
-        (snapshotStore->ccdColliderEntities[i] == entities[i])) {
-      otherVel = snapshotStore->ccdColliderVelocities[i];
+    if (snapshotSlot != kNoSnapshotSlot) {
+      otherVel = snapshotStore->ccdColliderVelocities[snapshotSlot];
     }
     const math::Vec3 relVel = math::sub(body.velocity, otherVel);
     const float relSpeed = math::length(relVel);

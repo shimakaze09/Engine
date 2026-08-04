@@ -17,10 +17,6 @@
 
 namespace engine::physics {
 
-// Cap fast enough for a knocked-over box to slam down naturally; it exists
-// to stop numeric runaway, not to art-direct tumbles.
-constexpr float kMaxAngularSpeed = 12.0F;
-
 void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
                      float vB2) noexcept {
   if ((bodyA != nullptr) && bodyA->sleeping && (vB2 > kSleepThreshold)) {
@@ -37,6 +33,12 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 // Applies the contact impulse with friction. Restitution only acts above a
 // 1 m/s approach speed: slow pushing/resting contacts absorb fully, or
 // driven bodies would pump bounce energy every step and ratchet airborne.
+// When angular transfer is active (both bodies dynamic with rotational
+// inertia) the normal row is the full J = [-n, -(rA x n), n, (rB x n)]:
+// relative velocity includes the contact-point angular terms and the
+// effective mass includes i |r x n|^2, so the impulse removes exactly the
+// point approach speed instead of overshooting. Static-environment
+// contacts keep the linear-only row, matching the applied response.
 void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
@@ -405,20 +407,42 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                             const engine::math::Vec3 &contactOffsetB,
                             float restitution, float staticFric,
                             float dynamicFric) noexcept {
-  const engine::math::Vec3 velA = (bodyA != nullptr)
-                                      ? bodyA->velocity
-                                      : engine::math::Vec3(0.0F, 0.0F, 0.0F);
-  const engine::math::Vec3 velB = (bodyB != nullptr)
-                                      ? bodyB->velocity
-                                      : engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 zeroVec(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 velA = (bodyA != nullptr) ? bodyA->velocity : zeroVec;
+  const engine::math::Vec3 velB = (bodyB != nullptr) ? bodyB->velocity : zeroVec;
+  const engine::math::Vec3 angVelA =
+      (bodyA != nullptr) ? bodyA->angularVelocity : zeroVec;
+  const engine::math::Vec3 angVelB =
+      (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
+  const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
+  const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
+  const bool angularA =
+      (invMassA > 0.0F) && (invInertiaA > 0.0F) && (invMassB > 0.0F);
+  const bool angularB =
+      (invMassB > 0.0F) && (invInertiaB > 0.0F) && (invMassA > 0.0F);
+  const engine::math::Vec3 pointVelA = engine::math::add(
+      velA, angularA ? engine::math::cross(angVelA, contactOffsetA) : zeroVec);
+  const engine::math::Vec3 pointVelB = engine::math::add(
+      velB, angularB ? engine::math::cross(angVelB, contactOffsetB) : zeroVec);
   const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
-  const float relVelAlongNormal = engine::math::dot(relVel, normal);
+  const float relVelAlongNormal =
+      engine::math::dot(engine::math::sub(pointVelB, pointVelA), normal);
   if (relVelAlongNormal < 0.0F) {
     constexpr float kRestitutionSpeedThreshold = 1.0F;
     const float effectiveRestitution =
         (-relVelAlongNormal > kRestitutionSpeedThreshold) ? restitution : 0.0F;
+    const float effectiveMass =
+        invMassSum +
+        (angularA ? invInertiaA * engine::math::length_sq(
+                                      engine::math::cross(contactOffsetA,
+                                                          normal))
+                  : 0.0F) +
+        (angularB ? invInertiaB * engine::math::length_sq(
+                                      engine::math::cross(contactOffsetB,
+                                                          normal))
+                  : 0.0F);
     const float impulseMagnitude =
-        -(1.0F + effectiveRestitution) * relVelAlongNormal / invMassSum;
+        -(1.0F + effectiveRestitution) * relVelAlongNormal / effectiveMass;
     const engine::math::Vec3 impulseVec =
         engine::math::mul(normal, impulseMagnitude);
     if ((bodyA != nullptr) && (invMassA > 0.0F)) {
@@ -462,8 +486,9 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       }
     }
 
-    const engine::math::Vec3 tangentVel =
-        engine::math::sub(relVel, engine::math::mul(normal, relVelAlongNormal));
+    const engine::math::Vec3 tangentVel = engine::math::sub(
+        relVel,
+        engine::math::mul(normal, engine::math::dot(relVel, normal)));
     const float tangentSpeedSq = engine::math::length_sq(tangentVel);
     if (tangentSpeedSq > 1e-12F) {
       const float tangentSpeed = std::sqrt(tangentSpeedSq);

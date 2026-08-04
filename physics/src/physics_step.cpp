@@ -27,12 +27,14 @@ bool step_physics(PhysicsWorldView &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
 }
 
-/// Integrates one dense-index chunk: gravity, then a CCD sweep over every
-/// collider owned by each fast rigid-body root (compound children
-/// included) keeping the earliest impact — ownership comes from the
-/// previous resolve's snapshot, with a direct hierarchy walk only on the
-/// first step before a snapshot exists — then positional advance and
-/// angular integration.
+/// Integrates one dense-index chunk: gravity (with the integrated speed
+/// clamped to kMaxLinearSpeed so scripted accelerations cannot run the
+/// velocity past what broad-phase expansion and CCD travel assume), then
+/// a CCD sweep over every collider owned by each fast rigid-body root
+/// (compound children included) keeping the earliest impact — ownership
+/// comes from the previous resolve's snapshot, with a direct hierarchy
+/// walk only on the first step before a snapshot exists — then positional
+/// advance and angular integration.
 bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept {
   const PhysicsContext &physicsCtx = world.physics_context();
@@ -65,6 +67,11 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
           engine::math::add(body->acceleration, physicsCtx.gravity);
       body->velocity = engine::math::add(
           body->velocity, engine::math::mul(totalAccel, deltaSeconds));
+      const float speedSq = engine::math::length_sq(body->velocity);
+      if (speedSq > (kMaxLinearSpeed * kMaxLinearSpeed)) {
+        body->velocity = engine::math::mul(
+            body->velocity, kMaxLinearSpeed / std::sqrt(speedSq));
+      }
 
       const engine::math::Vec3 displacement =
           engine::math::mul(body->velocity, deltaSeconds);

@@ -5,6 +5,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -860,6 +861,108 @@ int verify_physics_ingress_validation() {
   return 0;
 }
 
+/// EXPECTATION (audit P-5, H-06 remainder): finite but out-of-envelope
+/// material and velocity values are accepted with a clamp instead of a
+/// silent pass-through: restitution clamps to 1 (max-combined and
+/// multiplied into approach speed, so e > 1 injects energy per bounce),
+/// dynamic friction clamps down to static (sliding force must not exceed
+/// the stick threshold), inverse inertia clamps to kMaxInverseInertia,
+/// and linear/angular velocity clamp to kMaxLinearSpeed/kMaxAngularSpeed
+/// both at ingress and after integration. Clamp factors in the cases
+/// below are exactly representable (0.5), so stored values are asserted
+/// exactly; boundary values at the caps must pass through unchanged.
+int verify_physics_ingress_clamps() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 920;
+  }
+
+  const Entity entity = world->create_entity();
+  Transform transform{};
+  if ((entity == kInvalidEntity) || !world->add_transform(entity, transform)) {
+    return 921;
+  }
+
+  Collider hotCollider{};
+  hotCollider.restitution = 1.5F;
+  hotCollider.staticFriction = 0.2F;
+  hotCollider.dynamicFriction = 0.9F;
+  Collider stored{};
+  if (!world->add_collider(entity, hotCollider) ||
+      !world->get_collider(entity, &stored) || (stored.restitution != 1.0F) ||
+      (stored.dynamicFriction != 0.2F) || (stored.staticFriction != 0.2F)) {
+    return 922;
+  }
+  if (!world->remove_collider(entity)) {
+    return 923;
+  }
+
+  Collider boundaryCollider{};
+  boundaryCollider.restitution = 1.0F;
+  boundaryCollider.staticFriction = 0.5F;
+  boundaryCollider.dynamicFriction = 0.5F;
+  if (!world->add_collider(entity, boundaryCollider) ||
+      !world->get_collider(entity, &stored) || (stored.restitution != 1.0F) ||
+      (stored.dynamicFriction != 0.5F)) {
+    return 924;
+  }
+
+  RigidBody hotBody{};
+  hotBody.inverseMass = 1.0F;
+  hotBody.inverseInertia = 1.0e6F;
+  hotBody.velocity = engine::math::Vec3(600.0F, 800.0F, 0.0F);
+  hotBody.angularVelocity = engine::math::Vec3(0.0F, 24.0F, 0.0F);
+  RigidBody storedBody{};
+  if (!world->add_rigid_body(entity, hotBody) ||
+      !world->get_rigid_body(entity, &storedBody) ||
+      (storedBody.inverseInertia != engine::physics::kMaxInverseInertia) ||
+      (storedBody.velocity.x != 300.0F) || (storedBody.velocity.y != 400.0F) ||
+      (storedBody.velocity.z != 0.0F) ||
+      (storedBody.angularVelocity.y != 12.0F)) {
+    return 925;
+  }
+  if (!world->remove_rigid_body(entity)) {
+    return 926;
+  }
+
+  RigidBody boundaryBody{};
+  boundaryBody.inverseMass = 1.0F;
+  boundaryBody.inverseInertia = engine::physics::kMaxInverseInertia;
+  boundaryBody.velocity =
+      engine::math::Vec3(0.0F, 0.0F, engine::physics::kMaxLinearSpeed);
+  if (!world->add_rigid_body(entity, boundaryBody) ||
+      !world->get_rigid_body(entity, &storedBody) ||
+      (storedBody.velocity.z != engine::physics::kMaxLinearSpeed) ||
+      (storedBody.inverseInertia != engine::physics::kMaxInverseInertia)) {
+    return 927;
+  }
+
+  set_gravity(*world, 0.0F, 0.0F, 0.0F);
+  {
+    RigidBody *live = world->get_rigid_body_ptr(entity);
+    if (live == nullptr) {
+      return 928;
+    }
+    live->velocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+    live->acceleration = engine::math::Vec3(0.0F, 0.0F, 60000.0F);
+  }
+  world->begin_update_phase();
+  if (!step_physics(*world, 1.0F / 60.0F)) {
+    return 929;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  if (!world->get_rigid_body(entity, &storedBody) ||
+      (storedBody.velocity.z != engine::physics::kMaxLinearSpeed)) {
+    return 930;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -969,6 +1072,11 @@ int main() {
   }
 
   result = verify_physics_ingress_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_physics_ingress_clamps();
   if (result != 0) {
     return result;
   }

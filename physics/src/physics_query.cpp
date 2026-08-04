@@ -14,6 +14,7 @@
 
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "narrow_phase.h"
 
 #include <algorithm>
 #include <cmath>
@@ -532,6 +533,50 @@ bool convex_geometries_overlap(const ColliderWorldGeometry &a,
   return false;
 }
 
+/// Boolean GJK that also reports a separation lower bound when the shapes
+/// do not intersect: the support-plane distance along the final search
+/// direction never exceeds the true gap, which is exactly what a
+/// conservative-advancement sweep may advance by (moving along any
+/// direction cannot close a Euclidean gap faster than the distance
+/// itself). A bound of zero (iteration exhaustion) degrades the caller to
+/// tolerance-sized steps.
+bool convex_geometries_separation(const ColliderWorldGeometry &a,
+                                  const ColliderWorldGeometry &b,
+                                  float *outSeparation) noexcept {
+  *outSeparation = 0.0F;
+  math::Vec3 direction = math::sub(b.center, a.center);
+  if (math::length_sq(direction) <= 1.0e-16F) {
+    direction = math::Vec3(1.0F, 0.0F, 0.0F);
+  }
+  QuerySimplex simplex{};
+  const auto support = [&](const math::Vec3 &axis) noexcept {
+    return math::sub(collider_support_point(a, axis),
+                     collider_support_point(b, math::mul(axis, -1.0F)));
+  };
+  simplex.push(support(direction));
+  direction = math::mul(simplex.points[0], -1.0F);
+
+  for (std::size_t iteration = 0U; iteration < 32U; ++iteration) {
+    const float directionLengthSq = math::length_sq(direction);
+    if (directionLengthSq <= 1.0e-16F) {
+      return true;
+    }
+    const math::Vec3 point = support(direction);
+    const float alongDirection = math::dot(point, direction);
+    if (alongDirection < 0.0F) {
+      *outSeparation = -alongDirection / std::sqrt(directionLengthSq);
+      return false;
+    }
+    simplex.push(point);
+    if ((simplex.count == 2U && reduce_line(simplex, &direction)) ||
+        (simplex.count == 3U && reduce_triangle(simplex, &direction)) ||
+        (simplex.count == 4U && reduce_tetrahedron(simplex, &direction))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Builds a world-axis query collider with identity local pose.
 bool query_geometry(ColliderShape shape, const math::Vec3 &center,
                     const math::Vec3 &halfExtents,
@@ -556,6 +601,81 @@ bool geometries_overlap(const ColliderWorldGeometry &query,
     return true;
   }
   return convex_geometries_overlap(query, target);
+}
+
+/// Translates convex world geometry along a world offset without
+/// rebuilding local shape data (identity-linear query geometry only).
+ColliderWorldGeometry
+translated_query_geometry(const ColliderWorldGeometry &source,
+                          const math::Vec3 &translation) noexcept {
+  ColliderWorldGeometry result = source;
+  result.localToWorld.columns[3].x += translation.x;
+  result.localToWorld.columns[3].y += translation.y;
+  result.localToWorld.columns[3].z += translation.z;
+  result.center = math::add(result.center, translation);
+  result.worldAabb.min = math::add(result.worldAabb.min, translation);
+  result.worldAabb.max = math::add(result.worldAabb.max, translation);
+  return result;
+}
+
+/// Largest per-axis AABB gap; non-positive when the boxes overlap.
+float aabb_separation_distance(const math::AABB &a,
+                               const math::AABB &b) noexcept {
+  const float dx = std::max(b.min.x - a.max.x, a.min.x - b.max.x);
+  const float dy = std::max(b.min.y - a.max.y, a.min.y - b.max.y);
+  const float dz = std::max(b.min.z - a.max.z, a.min.z - b.max.z);
+  return std::max({dx, dy, dz});
+}
+
+/// Conservative-advancement sweep of a convex query geometry against one
+/// target's REAL shape (H-08: the AABB-only sweep reported false hits on
+/// sphere/capsule/hull corners). Each iteration advances by a proven
+/// lower bound on the remaining travel — the larger of the AABB gap and
+/// the support-projected axial gap — so impacts are never overshot and
+/// reported impact times sit within ~2e-5 of the surface; grazing
+/// contacts that stall the bounds for 128 tolerance steps are dropped as
+/// misses (a documented approximation of this scheme).
+bool sweep_geometry_conservative(const ColliderWorldGeometry &query,
+                                 const math::Vec3 &direction, float maxT,
+                                 const ColliderWorldGeometry &target,
+                                 float *outT) noexcept {
+  constexpr int kMaxSweepIterations = 128;
+  constexpr float kSweepTolerance = 1.0e-5F;
+  float t = 0.0F;
+  for (int iteration = 0; iteration < kMaxSweepIterations; ++iteration) {
+    const ColliderWorldGeometry advanced =
+        translated_query_geometry(query, math::mul(direction, t));
+    float separation = 0.0F;
+    if (convex_geometries_separation(advanced, target, &separation)) {
+      *outT = t;
+      return true;
+    }
+    const math::Vec3 front = collider_support_point(advanced, direction);
+    const math::Vec3 back =
+        collider_support_point(target, math::mul(direction, -1.0F));
+    const float axialGap = math::dot(math::sub(back, front), direction);
+    const float boundsGap =
+        aabb_separation_distance(advanced.worldAabb, target.worldAabb);
+    t += std::max({axialGap, boundsGap, separation, kSweepTolerance});
+    if (t > maxT) {
+      return false;
+    }
+  }
+  return false;
+}
+
+/// Approximate contact normal for shape-accurate sweep hits: from the
+/// target center toward the query center at impact, falling back to the
+/// reversed sweep direction for coincident centers.
+math::Vec3 sweep_contact_normal(const math::Vec3 &queryCenterAtHit,
+                                const ColliderWorldGeometry &target,
+                                const math::Vec3 &direction) noexcept {
+  const math::Vec3 delta = math::sub(queryCenterAtHit, target.center);
+  const float lengthSquared = math::length_sq(delta);
+  if (lengthSquared > 1.0e-12F) {
+    return math::mul(delta, 1.0F / std::sqrt(lengthSquared));
+  }
+  return math::mul(direction, -1.0F);
 }
 
 /// Normalizes a finite query direction and validates its world-space range.
@@ -856,6 +976,12 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
     return false;
   }
 
+  ColliderWorldGeometry queryGeometry{};
+  if (!query_geometry(ColliderShape::Sphere, origin,
+                      math::Vec3(radius, radius, radius), &queryGeometry)) {
+    return false;
+  }
+
   bool found = false;
   float bestT = maxDistance;
 
@@ -878,6 +1004,14 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
       continue;
     }
 
+    const bool exactBoxTarget = (geometry.shape == ColliderShape::AABB) &&
+                                !has_non_identity_linear_transform(geometry);
+    if (!exactBoxTarget &&
+        !sweep_geometry_conservative(queryGeometry, normalizedDirection, bestT,
+                                     geometry, &hitT)) {
+      continue;
+    }
+
     if (hitT <= bestT) {
       bestT = hitT;
       found = true;
@@ -887,12 +1021,17 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
         outHit->distance = hitT;
         outHit->contactPoint =
             math::add(origin, math::mul(normalizedDirection, hitT));
-        const math::Vec3 boxCenter =
-            math::mul(math::add(targetBox.min, targetBox.max), 0.5F);
-        const math::Vec3 boxHalfExtents =
-            math::mul(math::sub(targetBox.max, targetBox.min), 0.5F);
-        outHit->normal =
-            aabb_hit_normal(outHit->contactPoint, boxCenter, boxHalfExtents);
+        if (exactBoxTarget) {
+          const math::Vec3 boxCenter =
+              math::mul(math::add(targetBox.min, targetBox.max), 0.5F);
+          const math::Vec3 boxHalfExtents =
+              math::mul(math::sub(targetBox.max, targetBox.min), 0.5F);
+          outHit->normal =
+              aabb_hit_normal(outHit->contactPoint, boxCenter, boxHalfExtents);
+        } else {
+          outHit->normal = sweep_contact_normal(outHit->contactPoint, geometry,
+                                                normalizedDirection);
+        }
       }
     }
   }
@@ -926,6 +1065,12 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
     return false;
   }
 
+  ColliderWorldGeometry queryGeometry{};
+  if (!query_geometry(ColliderShape::AABB, center, halfExtents,
+                      &queryGeometry)) {
+    return false;
+  }
+
   bool found = false;
   float bestT = maxDistance;
 
@@ -948,6 +1093,14 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
       continue;
     }
 
+    const bool exactBoxTarget = (geometry.shape == ColliderShape::AABB) &&
+                                !has_non_identity_linear_transform(geometry);
+    if (!exactBoxTarget &&
+        !sweep_geometry_conservative(queryGeometry, normalizedDirection, bestT,
+                                     geometry, &hitT)) {
+      continue;
+    }
+
     if (hitT <= bestT) {
       bestT = hitT;
       found = true;
@@ -957,12 +1110,17 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
         outHit->distance = hitT;
         outHit->contactPoint =
             math::add(center, math::mul(normalizedDirection, hitT));
-        const math::Vec3 boxCenter =
-            math::mul(math::add(targetBox.min, targetBox.max), 0.5F);
-        const math::Vec3 boxHalfExtents =
-            math::mul(math::sub(targetBox.max, targetBox.min), 0.5F);
-        outHit->normal =
-            aabb_hit_normal(outHit->contactPoint, boxCenter, boxHalfExtents);
+        if (exactBoxTarget) {
+          const math::Vec3 boxCenter =
+              math::mul(math::add(targetBox.min, targetBox.max), 0.5F);
+          const math::Vec3 boxHalfExtents =
+              math::mul(math::sub(targetBox.max, targetBox.min), 0.5F);
+          outHit->normal =
+              aabb_hit_normal(outHit->contactPoint, boxCenter, boxHalfExtents);
+        } else {
+          outHit->normal = sweep_contact_normal(outHit->contactPoint, geometry,
+                                                normalizedDirection);
+        }
       }
     }
   }

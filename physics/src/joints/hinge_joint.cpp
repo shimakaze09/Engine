@@ -15,7 +15,13 @@
 // creation-time reference vectors projected into the hinge plane,
 // phi = atan2((uA x uB) . a, uA . uB); the violation
 // phi - clamp(phi, min, max) is an angular correction about a with the
-// same Jacobian shape as the axis block.
+// same Jacobian shape as the axis block. Because atan2 wraps at +/-pi,
+// the clamp runs on a CONTINUOUS twist accumulated from shortest-arc
+// deltas of successive measurements (per-step rotation is far below pi,
+// so the shortest arc is the true delta): with limits near +/-pi the
+// wrapped value alone lands on the far side of the thin forbidden arc,
+// clamps against the wrong boundary, and flips the outward-rate gate's
+// sign, turning the limit into a turnstile for fast spins.
 // Velocity projection removes the off-axis relative angular velocity, the
 // relative anchor velocity, and - only while a limit is violated - the
 // outward axial rate, mirroring how contacts absorb approach velocity.
@@ -31,6 +37,20 @@
 namespace engine::physics {
 
 constexpr float kHingeEpsilon = 1.0e-6F;
+constexpr float kHingePi = 3.14159265F;
+constexpr float kHingeTwoPi = 6.28318531F;
+
+/// Wraps an angle into [-pi, pi]; inputs stay within a few turns, so the
+/// bounded correction loop is exact and deterministic.
+static float wrap_to_pi(float angle) noexcept {
+  while (angle > kHingePi) {
+    angle -= kHingeTwoPi;
+  }
+  while (angle < -kHingePi) {
+    angle += kHingeTwoPi;
+  }
+  return angle;
+}
 
 /// Signed twist of B relative to A about `axis` from the projected
 /// creation-time references; false when a reference degenerates.
@@ -75,11 +95,20 @@ float solve_hinge_joint(JointSolveContext &ctx,
     float twist = 0.0F;
     if (measure_twist(hingeAxis, joint_world_lever(*ctx.tA, joint.twistRefA),
                       joint_world_lever(*ctx.tB, joint.twistRefB), &twist)) {
+      if (!joint.twistTracked) {
+        joint.twistContinuous = twist;
+        joint.twistTracked = true;
+      } else {
+        joint.twistContinuous +=
+            wrap_to_pi(twist - wrap_to_pi(joint.twistContinuous));
+      }
       const float clamped =
-          (twist < joint.minLimit)
+          (joint.twistContinuous < joint.minLimit)
               ? joint.minLimit
-              : ((twist > joint.maxLimit) ? joint.maxLimit : twist);
-      twistExcess = twist - clamped;
+              : ((joint.twistContinuous > joint.maxLimit)
+                     ? joint.maxLimit
+                     : joint.twistContinuous);
+      twistExcess = joint.twistContinuous - clamped;
       if (std::fabs(twistExcess) > kHingeEpsilon) {
         apply_relative_orientation_delta(ctx,
                                          math::mul(hingeAxis, -twistExcess));

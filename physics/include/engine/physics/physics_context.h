@@ -80,6 +80,14 @@ struct PhysicsJointSlot final {
   float minLimit = 0.0F;
   float maxLimit = 0.0F;
 
+  // Hinge limit tracking: the continuous (unwrapped) twist accumulated
+  // from shortest-arc deltas of the wrapped atan2 measurement, so limits
+  // near +/-pi clamp against the boundary the body actually crossed
+  // instead of the one the wrap teleports it to. twistTracked latches
+  // after the first measurement seeds the accumulator.
+  float twistContinuous = 0.0F;
+  bool twistTracked = false;
+
   // Spring parameters.
   float stiffness = 100.0F;
   float damping = 1.0F;
@@ -106,6 +114,14 @@ struct PhysicsShapeStore final {
   std::array<Entity, kMaxColliders> ccdColliderEntities{};
   std::array<Entity, kMaxColliders> ccdColliderOwners{};
   std::array<math::AABB, kMaxColliders> ccdColliderAabbs{};
+  // Entity-index -> snapshot-slot map so CCD matches snapshot entries by
+  // identity instead of dense position: sparse-set reorders between the
+  // publish and the next step's sweep would otherwise mismatch every
+  // shifted entry. Stale slots are harmless — a lookup is valid only when
+  // the slot is in range AND ccdColliderEntities[slot] equals the queried
+  // entity (index and generation), so entries are overwritten, never
+  // cleared.
+  std::array<std::uint32_t, ENGINE_MAX_ENTITIES> ccdSlotByEntityIndex{};
   // Owner body velocities captured with the snapshot: CCD's candidate
   // rejection must not read live RigidBody::velocity, which parallel chunk
   // jobs are integrating concurrently.
@@ -159,6 +175,23 @@ struct PhysicsContext final {
   // no compound colliders exist, CCD sweeps each body's own collider.
   std::size_t ccdColliderCount = 0U;
   bool ccdHasCompoundColliders = false;
+
+  // Broad-phase overflow diagnostic: overflowActive is set while any
+  // collider is served by the brute-force overflow list (per-collider
+  // cell-span cap or spatial-node pool exhaustion) and logs once per
+  // episode; the episode counter is observable by tests. Overflowed
+  // colliders lose no pairs — they are tested against every collider.
+  bool broadphaseOverflowActive = false;
+  std::uint32_t broadphaseOverflowEpisodes = 0U;
+
+  // Collision-pair buffer diagnostic: pairs recorded past
+  // kMaxCollisionPairs are counted per step and reported once per
+  // overflow episode. The kept set is the first kMaxCollisionPairs in
+  // deterministic traversal order; callbacks past the cap are dropped
+  // (loudly), never reordered.
+  std::uint32_t collisionPairDropCount = 0U;
+  bool collisionPairOverflowActive = false;
+  std::uint32_t collisionPairOverflowEpisodes = 0U;
 
   // Raw per-step cvar cache written by refresh_step_cvar_cache on the
   // serial begin-step path so step/resolve code never takes the global

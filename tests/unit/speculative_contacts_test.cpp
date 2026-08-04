@@ -222,12 +222,92 @@ static void test_speculative_approaching_spheres() noexcept {
 }
 
 /// Runs this executable or test program.
+/// H-07 regression: speculative pair discovery must not depend on dense
+/// index order. The mover (240 m/s, cell 0) and the static target
+/// (cell 1) share no unexpanded grid cell — only the mover's velocity
+/// expansion bridges them — so the pre-fix scan (which expanded only the
+/// insert pass) found the pair solely when the mover held the LARGER
+/// index. Both insertion orders must now produce the same speculative
+/// impulse: gap 3.0 m at dt=1/60 allows 180 m/s of approach, so the
+/// mover's 240 m/s is cut to ~180. Tolerance 0.01 covers the two float
+/// roundings (gap/dt division and the impulse multiply) at 1e-5 relative
+/// scale; the two orderings run identical arithmetic on one pair, so
+/// cross-world equality is asserted exactly.
+static void test_speculative_pair_order_independent() noexcept {
+  float velocities[2] = {0.0F, 0.0F};
+
+  for (int order = 0; order < 2; ++order) {
+    auto world = std::unique_ptr<engine::runtime::World>(
+        new (std::nothrow) engine::runtime::World());
+    if (world == nullptr) {
+      check(false, "Order-independence world allocation");
+      return;
+    }
+    world->end_frame_phase();
+    engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+    engine::runtime::Entity mover{};
+    engine::runtime::Entity target{};
+    auto make_mover = [&world, &mover]() noexcept {
+      mover = world->create_entity();
+      engine::runtime::Transform t{};
+      t.position = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+      world->add_transform(mover, t);
+      engine::runtime::Collider col{};
+      col.halfExtents = engine::math::Vec3(0.25F, 0.25F, 0.25F);
+      world->add_collider(mover, col);
+      engine::runtime::RigidBody rb{};
+      rb.inverseMass = 1.0F;
+      rb.velocity = engine::math::Vec3(240.0F, 0.0F, 0.0F);
+      world->add_rigid_body(mover, rb);
+    };
+    auto make_target = [&world, &target]() noexcept {
+      target = world->create_entity();
+      engine::runtime::Transform t{};
+      t.position = engine::math::Vec3(4.5F, 0.0F, 0.0F);
+      world->add_transform(target, t);
+      engine::runtime::Collider col{};
+      col.halfExtents = engine::math::Vec3(0.25F, 0.25F, 0.25F);
+      world->add_collider(target, col);
+    };
+
+    if (order == 0) {
+      make_mover();
+      make_target();
+    } else {
+      make_target();
+      make_mover();
+    }
+
+    world->begin_update_phase();
+    engine::runtime::resolve_collisions(*world);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+
+    const engine::runtime::RigidBody *body = world->get_rigid_body_ptr(mover);
+    if (body == nullptr) {
+      check(false, "Order-independence mover body");
+      return;
+    }
+    velocities[order] = body->velocity.x;
+  }
+
+  check(std::fabs(velocities[0] - 180.0F) <= 0.01F,
+        "Speculative impulse applies with mover at the smaller index");
+  check(std::fabs(velocities[1] - 180.0F) <= 0.01F,
+        "Speculative impulse applies with mover at the larger index");
+  check(velocities[0] == velocities[1],
+        "Speculative impulse identical for both insertion orders");
+}
+
 int main() {
   std::printf("=== Speculative Contacts Tests (P1-M3-E2) ===\n");
 
   test_ball_approaching_wall_no_penetration();
   test_speculative_no_ghost_collision();
   test_speculative_approaching_spheres();
+  test_speculative_pair_order_independent();
 
   std::printf("\n%d passed, %d failed\n", g_passed, g_failed);
   return (g_failed > 0) ? 1 : 0;

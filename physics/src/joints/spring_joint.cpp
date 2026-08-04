@@ -6,10 +6,17 @@
 // inverse mass mA^-1 + mB^-1), but the correction is the integrated force,
 // not a projection: a positional nudge dx = F dt^2 (semi-implicit) plus a
 // velocity impulse F dt split by inverse mass so damping carries into the
-// next frame. No velocity projection runs - the joint is soft by
-// contract, and removing radial velocity would turn it rigid. The
-// accumulated impulse keeps the SIGNED correction: the warm start replays
-// it along the center line, so its direction must survive.
+// next frame. The force integrates over the FULL step, so the solver runs
+// this joint exactly once per step (first Gauss-Seidel iteration only);
+// running it per iteration would scale the authored stiffness and damping
+// by the physics.solver_iterations cvar. No velocity projection runs -
+// the joint is soft by contract, and removing radial velocity would turn
+// it rigid. The accumulated impulse keeps the SIGNED correction: the warm
+// start replays it along the center line, so its direction must survive.
+// A body-less endpoint follows the joint_projection convention: it
+// contributes zero velocity and zero inverse mass (an infinitely heavy
+// static anchor), so damping and the velocity impulse still act on the
+// endpoint that does have a rigid body instead of switching off.
 
 #include "joint_solvers.h"
 
@@ -41,12 +48,14 @@ float solve_spring_joint(JointSolveContext &ctx, PhysicsJointSlot &joint,
 
   float springForce = -joint.stiffness * displacement;
 
-  if ((ctx.bodyA != nullptr) && (ctx.bodyB != nullptr)) {
-    const math::Vec3 relVel =
-        math::sub(ctx.bodyB->velocity, ctx.bodyA->velocity);
-    const float relVelAlongDir = math::dot(relVel, dir);
-    springForce -= joint.damping * relVelAlongDir;
-  }
+  const math::Vec3 velA = (ctx.bodyA != nullptr)
+                              ? ctx.bodyA->velocity
+                              : math::Vec3(0.0F, 0.0F, 0.0F);
+  const math::Vec3 velB = (ctx.bodyB != nullptr)
+                              ? ctx.bodyB->velocity
+                              : math::Vec3(0.0F, 0.0F, 0.0F);
+  const float relVelAlongDir = math::dot(math::sub(velB, velA), dir);
+  springForce -= joint.damping * relVelAlongDir;
 
   const float lambda = -springForce * deltaSeconds * deltaSeconds;
 
@@ -55,10 +64,12 @@ float solve_spring_joint(JointSolveContext &ctx, PhysicsJointSlot &joint,
   ctx.tB->position = math::sub(
       ctx.tB->position, math::mul(dir, lambda * ctx.invMassB / invMassSum));
 
-  if ((ctx.bodyA != nullptr) && (ctx.bodyB != nullptr)) {
-    const float impulse = springForce * deltaSeconds;
+  const float impulse = springForce * deltaSeconds;
+  if ((ctx.bodyA != nullptr) && (ctx.invMassA > 0.0F)) {
     ctx.bodyA->velocity =
         math::sub(ctx.bodyA->velocity, math::mul(dir, impulse * ctx.invMassA));
+  }
+  if ((ctx.bodyB != nullptr) && (ctx.invMassB > 0.0F)) {
     ctx.bodyB->velocity =
         math::add(ctx.bodyB->velocity, math::mul(dir, impulse * ctx.invMassB));
   }

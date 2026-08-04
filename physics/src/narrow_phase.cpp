@@ -63,6 +63,7 @@ void record_collision_pair(PhysicsWorldView &world, std::uint32_t idxA,
                            std::uint32_t idxB) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if (ctx.collisionPairCount >= kMaxCollisionPairs) {
+    ++ctx.collisionPairDropCount;
     return;
   }
 
@@ -478,7 +479,10 @@ void narrow_phase_affine_heightfield(
 }
 
 /// Heightfield vs Sphere/AABB/Capsule: sweeps the terrain triangles under the
-/// object footprint and resolves against the deepest penetration.
+/// object footprint and resolves against the deepest penetration. Convex
+/// hulls always route through the affine path: the fast path would model
+/// them as their declared-halfExtents box (an H-08 shape degradation),
+/// while the affine path consumes the hull's real support function.
 void narrow_phase_heightfield(const PairContext &pair) noexcept {
   const bool aIsHF = (pair.colliderA.shape == ColliderShape::Heightfield);
   const engine::math::Vec3 hfPos = aIsHF ? pair.posA : pair.posB;
@@ -495,7 +499,8 @@ void narrow_phase_heightfield(const PairContext &pair) noexcept {
       (hf->rows > HeightfieldData::kMaxResolution)) {
     return;
   }
-  if (pair.requiresAffineNarrowPhase) {
+  if (pair.requiresAffineNarrowPhase ||
+      (objCol.shape == ColliderShape::ConvexHull)) {
     narrow_phase_affine_heightfield(pair, aIsHF, *hf);
     return;
   }
@@ -663,13 +668,37 @@ support_affine_collider(const void *shapeData,
 /// Generic GJK/EPA path for convex shapes carrying any affine hierarchy TRS.
 /// Faceted pairs (box/hull) resolve through a clipped multi-point manifold so
 /// resting contacts get face support; other shapes keep the EPA point.
+/// EPA output is validated before use (H-08): a degenerate polytope can
+/// report a non-finite or absurd depth and an unnormalized normal, and an
+/// unchecked positional correction of that size teleports both bodies.
+/// The normal must be finite and near-unit or the contact is skipped for
+/// this step (the pair is still overlapping and re-resolves next step);
+/// the depth is clamped to the maximum geometrically possible penetration
+/// (the two shapes' bounding-radius sum).
 void narrow_phase_convex_gjk(const PairContext &pair) noexcept {
-  const GjkResult gjk =
+  GjkResult gjk =
       gjk_epa(&pair.geometryA, pair.posA, &support_affine_collider,
               &pair.geometryB, pair.posB, &support_affine_collider);
 
   if (!gjk.intersecting || gjk.depth < 1e-6F) {
     return;
+  }
+
+  const float normalLengthSq = engine::math::length_sq(gjk.normal);
+  if (!std::isfinite(normalLengthSq) || (normalLengthSq < 0.81F) ||
+      (normalLengthSq > 1.21F)) {
+    return;
+  }
+  const engine::math::Vec3 halfA =
+      engine::math::aabb_half_extents(pair.geometryA.worldAabb);
+  const engine::math::Vec3 halfB =
+      engine::math::aabb_half_extents(pair.geometryB.worldAabb);
+  const float maxPlausibleDepth =
+      engine::math::length(halfA) + engine::math::length(halfB);
+  if (!(gjk.depth <= maxPlausibleDepth)) {
+    gjk.depth = maxPlausibleDepth;
+    gjk.contactPoint = engine::math::mul(
+        engine::math::add(pair.geometryA.center, pair.geometryB.center), 0.5F);
   }
 
   if (!record_pair_and_wake(pair)) {
@@ -831,7 +860,10 @@ void narrow_phase_capsule_aabb(const PairContext &pair) noexcept {
   resolve_pair_contact(pair, normal, overlap, contactPt);
 }
 
-/// Sphere vs Sphere: distance test with a speculative contact for near misses.
+/// Sphere vs Sphere: distance test with a speculative contact for near
+/// misses. Exactly coincident centers cannot name a separation direction,
+/// so they separate along the documented deterministic fallback +Y (the
+/// same convention as the capsule and box degenerate paths).
 void narrow_phase_sphere_sphere(const PairContext &pair) noexcept {
   const float rA = pair.colliderA.halfExtents.x;
   const float rB = pair.colliderB.halfExtents.x;
@@ -859,9 +891,9 @@ void narrow_phase_sphere_sphere(const PairContext &pair) noexcept {
   }
 
   const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
-  const float nx = dx / dist;
-  const float ny = dy / dist;
-  const float nz = dz / dist;
+  const float nx = (dist2 > 0.0F) ? (dx / dist) : 0.0F;
+  const float ny = (dist2 > 0.0F) ? (dy / dist) : 1.0F;
+  const float nz = (dist2 > 0.0F) ? (dz / dist) : 0.0F;
   const float overlap = sumR - dist;
   const float moveA = overlap * (pair.invMassA / pair.invMassSum);
   const float moveB = overlap * (pair.invMassB / pair.invMassSum);
@@ -897,7 +929,11 @@ void narrow_phase_sphere_sphere(const PairContext &pair) noexcept {
 }
 
 /// AABB vs Sphere (either ordering): clamped closest point on the box, with a
-/// speculative contact for near misses.
+/// speculative contact for near misses. A sphere center INSIDE the box has
+/// no clamped-point direction, so the contact pushes out through the
+/// nearest face: penetration is the face distance plus the radius and the
+/// normal is that face's axis (ties break deterministically x before y
+/// before z, positive face on a centered tie).
 void narrow_phase_aabb_sphere(const PairContext &pair) noexcept {
   const bool aIsBox = (pair.colliderA.shape == ColliderShape::AABB);
   const float boxX = aIsBox ? pair.posA.x : pair.posB.x;
@@ -941,11 +977,37 @@ void narrow_phase_aabb_sphere(const PairContext &pair) noexcept {
     return;
   }
 
-  const float dist = (dist2 > 0.0F) ? std::sqrt(dist2) : 0.0001F;
-  float nx = (dist2 > 0.0F) ? (dx / dist) : 0.0F;
-  float ny = (dist2 > 0.0F) ? (dy / dist) : 1.0F;
-  float nz = (dist2 > 0.0F) ? (dz / dist) : 0.0F;
-  const float overlap = radius - dist;
+  float nx = 0.0F;
+  float ny = 0.0F;
+  float nz = 0.0F;
+  float overlap = 0.0F;
+  if (dist2 > 0.0F) {
+    const float dist = std::sqrt(dist2);
+    nx = dx / dist;
+    ny = dy / dist;
+    nz = dz / dist;
+    overlap = radius - dist;
+  } else {
+    const float exitXPos = (boxX + boxCol.halfExtents.x) - sphX;
+    const float exitXNeg = sphX - (boxX - boxCol.halfExtents.x);
+    const float exitYPos = (boxY + boxCol.halfExtents.y) - sphY;
+    const float exitYNeg = sphY - (boxY - boxCol.halfExtents.y);
+    const float exitZPos = (boxZ + boxCol.halfExtents.z) - sphZ;
+    const float exitZNeg = sphZ - (boxZ - boxCol.halfExtents.z);
+    const float exitX = std::min(exitXPos, exitXNeg);
+    const float exitY = std::min(exitYPos, exitYNeg);
+    const float exitZ = std::min(exitZPos, exitZNeg);
+    if ((exitX <= exitY) && (exitX <= exitZ)) {
+      nx = (exitXPos <= exitXNeg) ? 1.0F : -1.0F;
+      overlap = exitX + radius;
+    } else if (exitY <= exitZ) {
+      ny = (exitYPos <= exitYNeg) ? 1.0F : -1.0F;
+      overlap = exitY + radius;
+    } else {
+      nz = (exitZPos <= exitZNeg) ? 1.0F : -1.0F;
+      overlap = exitZ + radius;
+    }
+  }
 
   if (!aIsBox) {
     nx = -nx;

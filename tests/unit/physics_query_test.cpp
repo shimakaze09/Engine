@@ -432,6 +432,79 @@ int test_parented_trs_collider_queries() noexcept {
   return 0;
 }
 
+// H-08 regression: sweeps must test the target's real shape, not its
+// AABB. A 0.1-radius sphere swept along +X at lateral offset
+// (y,z)=(0.85,0.85) misses a unit sphere at the origin (lateral distance
+// 1.202 > combined radius 1.1) but passes inside the target's expanded
+// AABB corner, which the old bounds-only sweep reported as a hit. The
+// same sweep at (0.7,0) must still hit: entry at x = -sqrt(1.1^2-0.7^2)
+// = -0.8485, so distance = 5 - 0.8485 = 4.1515 from x=-5; tolerance 1e-3
+// covers the conservative-advancement step bound (~2e-5) with margin.
+int test_sweep_sphere_shape_accurate() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  make_sphere(*world, math::Vec3(0.0F, 0.0F, 0.0F), 1.0F);
+
+  physics::SweepHit hit{};
+  if (physics::sweep_sphere(*world, math::Vec3(-5.0F, 0.85F, 0.85F), 0.1F,
+                            math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_sphere_shape_accurate: corner false positive\n");
+    return 2;
+  }
+
+  if (!physics::sweep_sphere(*world, math::Vec3(-5.0F, 0.7F, 0.0F), 0.1F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_sphere_shape_accurate: real hit missed\n");
+    return 3;
+  }
+  if (std::fabs(hit.distance - 4.1515F) > 1.0e-3F) {
+    std::printf("FAIL sweep_sphere_shape_accurate: dist=%.4f\n",
+                static_cast<double>(hit.distance));
+    return 4;
+  }
+  return 0;
+}
+
+// H-08 regression: sweep_box against a sphere target must miss when only
+// the target's AABB corner lies in the path. A 0.1-half-extent box swept
+// along +X at (y,z)=(1.05,1.05) clears a unit sphere (nearest sphere
+// point at lateral distance sqrt(2)*1.05-1 = 0.485 > 0.1*sqrt(2)) but
+// intersects the AABB-expanded corner the old sweep tested. The centered
+// sweep must still hit at x = -(1+0.1) => distance 5-1.1 = 3.9 (face
+// contact; tolerance 1e-3 as above).
+int test_sweep_box_shape_accurate() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  make_sphere(*world, math::Vec3(0.0F, 0.0F, 0.0F), 1.0F);
+
+  physics::SweepHit hit{};
+  if (physics::sweep_box(*world, math::Vec3(-5.0F, 1.05F, 1.05F),
+                         math::Vec3(0.1F, 0.1F, 0.1F),
+                         math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_box_shape_accurate: corner false positive\n");
+    return 2;
+  }
+
+  if (!physics::sweep_box(*world, math::Vec3(-5.0F, 0.0F, 0.0F),
+                          math::Vec3(0.1F, 0.1F, 0.1F),
+                          math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_box_shape_accurate: real hit missed\n");
+    return 3;
+  }
+  if (std::fabs(hit.distance - 3.9F) > 1.0e-3F) {
+    std::printf("FAIL sweep_box_shape_accurate: dist=%.4f\n",
+                static_cast<double>(hit.distance));
+    return 4;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -453,6 +526,8 @@ int main() {
       {"overlap_sphere_mask", test_overlap_sphere_mask},
       {"sweep_sphere_wall", test_sweep_sphere_wall},
       {"sweep_box_wall", test_sweep_box_wall},
+      {"sweep_sphere_shape_accurate", test_sweep_sphere_shape_accurate},
+      {"sweep_box_shape_accurate", test_sweep_box_shape_accurate},
       {"parented_trs_collider_queries", test_parented_trs_collider_queries},
   };
 

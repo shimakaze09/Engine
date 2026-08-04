@@ -277,6 +277,8 @@ void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
   joint->hasLimits = true;
   joint->minLimit = minLimit;
   joint->maxLimit = maxLimit;
+  joint->twistContinuous = 0.0F;
+  joint->twistTracked = false;
 }
 
 // --- Main constraint solver -------------------------------------------------
@@ -328,7 +330,10 @@ static void retire_missing_joint_endpoints(PhysicsWorldView &world,
 
 /// Iteratively solves all active joints for the step: per iteration each
 /// joint projects its position constraints and removes violating relative
-/// velocity (models and Jacobians are documented per solver file). Warm
+/// velocity (models and Jacobians are documented per solver file). Spring
+/// joints integrate a full-step force instead of projecting, so they solve
+/// exactly once per step (first iteration only) and authored stiffness/
+/// damping stay independent of the iteration count. Warm
 /// starting is deliberately limited to the center-line joints (Distance,
 /// Spring), which replay 80% of the previous frame's SIGNED impulse along
 /// the current center line to speed convergence under persistent load; the
@@ -470,7 +475,9 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
         solve_slider_joint(solveCtx, j);
         break;
       case JointType::Spring:
-        solve_spring_joint(solveCtx, j, deltaSeconds);
+        if (iter == 0U) {
+          solve_spring_joint(solveCtx, j, deltaSeconds);
+        }
         break;
       case JointType::Fixed:
         solve_fixed_joint(solveCtx, j);

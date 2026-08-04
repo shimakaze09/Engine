@@ -55,6 +55,53 @@ bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
          (rigidBody.inverseInertia >= 0.0F);
 }
 
+/// Ingress clamping (audit P-5, H-06 remainder): accept-and-clamp values
+/// that are finite but outside the solver's stable envelope, warning so
+/// nothing changes silently. Restitution is combined with max(a, b) and
+/// multiplied into the approach speed, so e > 1 injects energy on every
+/// bounce and clamps to 1. Friction combines as sqrt(a*b) with
+/// staticFriction*jn the stick threshold and dynamicFriction*jn the
+/// sliding magnitude, so dynamic > static inverts the Coulomb model
+/// (sliding force above the stick threshold) and dynamic clamps down to
+/// static. Linear/angular velocity and inverse inertia clamp to the
+/// runaway guards shared with the solver (physics.h).
+bool sanitize_rigid_body_ingress(RigidBody &rigidBody) noexcept {
+  bool changed = false;
+  const float speedSq = math::length_sq(rigidBody.velocity);
+  if (speedSq > (physics::kMaxLinearSpeed * physics::kMaxLinearSpeed)) {
+    rigidBody.velocity = math::mul(
+        rigidBody.velocity, physics::kMaxLinearSpeed / std::sqrt(speedSq));
+    changed = true;
+  }
+  const float angSpeedSq = math::length_sq(rigidBody.angularVelocity);
+  if (angSpeedSq > (physics::kMaxAngularSpeed * physics::kMaxAngularSpeed)) {
+    rigidBody.angularVelocity =
+        math::mul(rigidBody.angularVelocity,
+                  physics::kMaxAngularSpeed / std::sqrt(angSpeedSq));
+    changed = true;
+  }
+  if (rigidBody.inverseInertia > physics::kMaxInverseInertia) {
+    rigidBody.inverseInertia = physics::kMaxInverseInertia;
+    changed = true;
+  }
+  return changed;
+}
+
+/// Companion collider clamp for sanitize_rigid_body_ingress (see its
+/// group comment for the solver-combination reasoning per field).
+bool sanitize_collider_ingress(Collider &collider) noexcept {
+  bool changed = false;
+  if (collider.restitution > 1.0F) {
+    collider.restitution = 1.0F;
+    changed = true;
+  }
+  if (collider.dynamicFriction > collider.staticFriction) {
+    collider.dynamicFriction = collider.staticFriction;
+    changed = true;
+  }
+  return changed;
+}
+
 /// Ingress validation (audit H-06): collider geometry must be finite with
 /// strictly positive extents, and material terms finite and non-negative.
 bool validate_collider_ingress(const Collider &collider) noexcept {
@@ -294,7 +341,16 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
     return false;
   }
 
-  return m_rigidBodies.add(entity, rigidBody);
+  RigidBody sanitized = rigidBody;
+  if (sanitize_rigid_body_ingress(sanitized)) {
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "add_rigid_body clamped out-of-range velocity or inverse "
+                  "inertia for entity %u",
+                  entity.index);
+    core::log_message(core::LogLevel::Warning, "world", message);
+  }
+  return m_rigidBodies.add(entity, sanitized);
 }
 
 bool World::remove_rigid_body(Entity entity) noexcept {
@@ -379,11 +435,20 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
     return false;
   }
 
-  if (!add_component_checked(m_colliders, entity, collider, "add_collider")) {
+  Collider sanitized = collider;
+  if (sanitize_collider_ingress(sanitized)) {
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "add_collider clamped restitution or dynamic friction for "
+                  "entity %u",
+                  entity.index);
+    core::log_message(core::LogLevel::Warning, "world", message);
+  }
+  if (!add_component_checked(m_colliders, entity, sanitized, "add_collider")) {
     return false;
   }
 
-  install_provenance_hull(m_physicsContext, entity, collider);
+  install_provenance_hull(m_physicsContext, entity, sanitized);
   return true;
 }
 

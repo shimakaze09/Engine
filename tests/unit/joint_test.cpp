@@ -6,6 +6,7 @@
 #include <limits>
 #include <new>
 
+#include "engine/core/cvar.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
@@ -330,6 +331,172 @@ int test_spring_joint() noexcept {
   return 0;
 }
 
+// Helper: dynamic body with no collider so contact paths stay out of the
+// spring measurements.
+Entity make_plain_body(World &w, const math::Vec3 &pos) noexcept {
+  const Entity e = w.create_entity();
+  Transform t{};
+  t.position = pos;
+  w.add_transform(e, t);
+  RigidBody rb{};
+  rb.inverseMass = 1.0F;
+  w.add_rigid_body(e, rb);
+  return e;
+}
+
+// N-11 regression: authored spring constants must mean the same thing at
+// every physics.solver_iterations value (set through the real cvar so the
+// per-step cache refresh in begin_update_phase is the path under test).
+// The spring integrates its force exactly once per full step, so with no
+// other constraints in the world the trajectory is bit-identical across
+// iteration counts — exact float equality is the strictest valid tolerance
+// and is asserted. The settle bound follows from the authored damped
+// oscillator: k=50, c=8, mA=mB=1 (reduced mass 0.5) gives wn=10 rad/s,
+// zeta=0.8, settle time ~4/(zeta*wn) = 0.5 s, so after 5 s the distance
+// must sit within 0.05 of the rest length (generous against semi-implicit
+// integration bias at dt=1/60).
+int test_spring_stiffness_iteration_invariant() noexcept {
+  const int iterationCounts[3] = {1, 8, 16};
+  math::Vec3 finalA[3] = {};
+  math::Vec3 finalB[3] = {};
+  float finalDist[3] = {};
+  float transientDist[3] = {};
+
+  physics::register_physics_cvars();
+  for (int run = 0; run < 3; ++run) {
+    std::unique_ptr<World> world(new (std::nothrow) World());
+    if (world == nullptr) {
+      return 1;
+    }
+    world->end_frame_phase();
+    engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+    if (!engine::core::cvar_set_int("physics.solver_iterations",
+                                    iterationCounts[run])) {
+      return 6;
+    }
+
+    const Entity a = make_plain_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+    const Entity b = make_plain_body(*world, math::Vec3(5.0F, 0.0F, 0.0F));
+    if (physics::add_spring_joint(*world, a, b, 2.0F, 50.0F, 8.0F) ==
+        physics::kInvalidJointId) {
+      return 2;
+    }
+
+    for (int i = 0; i < 300; ++i) {
+      world->begin_update_phase();
+      engine::runtime::step_physics(*world, 1.0F / 60.0F);
+      physics::solve_constraints(*world, 1.0F / 60.0F);
+      world->commit_update_phase();
+      world->begin_render_prep_phase();
+      world->end_frame_phase();
+      if (i == 19) {
+        Transform sampleA{};
+        Transform sampleB{};
+        if (world->get_transform(a, &sampleA) &&
+            world->get_transform(b, &sampleB)) {
+          transientDist[run] = vec_distance(sampleA.position, sampleB.position);
+        }
+      }
+    }
+
+    Transform tA{};
+    Transform tB{};
+    if (!world->get_transform(a, &tA) || !world->get_transform(b, &tB)) {
+      return 3;
+    }
+    finalA[run] = tA.position;
+    finalB[run] = tB.position;
+    finalDist[run] = vec_distance(tA.position, tB.position);
+  }
+  engine::core::cvar_set_int("physics.solver_iterations", 8);
+
+  for (int run = 1; run < 3; ++run) {
+    if ((transientDist[run] != transientDist[0]) ||
+        (finalA[run].x != finalA[0].x) || (finalA[run].y != finalA[0].y) ||
+        (finalA[run].z != finalA[0].z) || (finalB[run].x != finalB[0].x) ||
+        (finalB[run].y != finalB[0].y) || (finalB[run].z != finalB[0].z)) {
+      std::printf("FAIL spring_iteration_invariant: iters=%d transient=%.4f "
+                  "final=%.4f vs iters=1 transient=%.4f final=%.4f\n",
+                  iterationCounts[run],
+                  static_cast<double>(transientDist[run]),
+                  static_cast<double>(finalDist[run]),
+                  static_cast<double>(transientDist[0]),
+                  static_cast<double>(finalDist[0]));
+      return 4;
+    }
+  }
+
+  if (std::fabs(finalDist[0] - 2.0F) > 0.05F) {
+    std::printf("FAIL spring_iteration_invariant: settled dist=%.4f "
+                "(expected 2.0 +/- 0.05)\n",
+                static_cast<double>(finalDist[0]));
+    return 5;
+  }
+  return 0;
+}
+
+// N-12 regression: a spring whose other endpoint is a transform-only anchor
+// (no RigidBody — add_spring_joint only requires transforms) must still damp
+// and impulse the endpoint that does have a body, following the
+// joint_projection convention of zero velocity / zero inverse mass for the
+// missing body. A launched body must therefore settle at the rest length.
+// Bounds: with only A dynamic (m=1, k=50, c=8) wn=sqrt(50)=7.07 rad/s and
+// zeta=8/(2*sqrt(50))=0.57, settle time ~4/(zeta*wn)=1 s, so after 10 s the
+// distance must sit within 0.1 of rest length 2 (covers dt=1/60
+// discretization bias) and residual speed below 0.05 m/s (well under the
+// 5 m/s launch; without the fix the speed never decays at all).
+int test_spring_bodyless_anchor_damps() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const Entity anchor = world->create_entity();
+  Transform anchorT{};
+  world->add_transform(anchor, anchorT);
+  const Entity body = make_plain_body(*world, math::Vec3(4.0F, 0.0F, 0.0F));
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(body);
+    if (rb == nullptr) {
+      return 2;
+    }
+    rb->velocity = math::Vec3(5.0F, 0.0F, 0.0F);
+  }
+
+  if (physics::add_spring_joint(*world, anchor, body, 2.0F, 50.0F, 8.0F) ==
+      physics::kInvalidJointId) {
+    return 3;
+  }
+
+  for (int i = 0; i < 600; ++i) {
+    world->begin_update_phase();
+    engine::runtime::step_physics(*world, 1.0F / 60.0F);
+    physics::solve_constraints(*world, 1.0F / 60.0F);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+  }
+
+  Transform anchorAfter{};
+  Transform bodyAfter{};
+  if (!world->get_transform(anchor, &anchorAfter) ||
+      !world->get_transform(body, &bodyAfter)) {
+    return 4;
+  }
+  const float dist = vec_distance(anchorAfter.position, bodyAfter.position);
+  const RigidBody *rb = world->get_rigid_body_ptr(body);
+  const float speed =
+      (rb != nullptr) ? std::sqrt(math::dot(rb->velocity, rb->velocity)) : -1.0F;
+  if ((std::fabs(dist - 2.0F) > 0.1F) || (speed < 0.0F) || (speed > 0.05F)) {
+    std::printf("FAIL spring_bodyless_anchor: dist=%.3f speed=%.3f\n",
+                static_cast<double>(dist), static_cast<double>(speed));
+    return 5;
+  }
+  return 0;
+}
+
 // ---- Fixed joint -----------------------------------------------------------
 
 int test_fixed_joint() noexcept {
@@ -373,6 +540,104 @@ int test_fixed_joint() noexcept {
   if (dist > 0.5F) {
     std::printf("FAIL fixed_joint: dist=%.3f (expected ~0)\n", dist);
     return 3;
+  }
+  return 0;
+}
+
+// P-4 regression: hinge limits at +/-3.1 leave a 0.083 rad forbidden arc
+// while a 12 rad/s spin covers 0.2 rad per fixed step, so one step can jump
+// clean across the arc and the wrapped atan2 twist lands back inside the
+// limits on the far side — the wrapped-only clamp then sees no violation
+// (or clamps against the wrong boundary with a flipped outward-rate sign)
+// and the limit behaves as a turnstile that free spins pass through.
+// Assertions: (1) total accumulated rotation of the spinning body stays
+// below one full turn — a hard stop bounds travel by the 3.1 rad limit
+// plus correction chatter, while a turnstile racks up many turns at
+// ~0.2 rad/step over 300 steps; (2) the final wrapped twist lies within
+// the limits plus 0.05 rad slack — the solver corrects the full excess
+// every step, so at most the residual below the solver epsilon plus
+// reference-projection rounding remains, and 0.05 bounds both.
+int test_hinge_limit_wrap_stop() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const Entity anchor = world->create_entity();
+  Transform anchorT{};
+  world->add_transform(anchor, anchorT);
+  const Entity spinner = make_plain_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(spinner);
+    if (rb == nullptr) {
+      return 2;
+    }
+    rb->angularVelocity = math::Vec3(0.0F, 12.0F, 0.0F);
+  }
+
+  const physics::JointId jid = physics::add_hinge_joint(
+      *world, anchor, spinner, math::Vec3(0.0F, 0.0F, 0.0F),
+      math::Vec3(0.0F, 1.0F, 0.0F));
+  if (jid == physics::kInvalidJointId) {
+    return 3;
+  }
+  physics::set_joint_limits(*world, jid, -3.1F, 3.1F);
+
+  math::Quat previous{};
+  {
+    Transform t{};
+    if (!world->get_transform(spinner, &t)) {
+      return 4;
+    }
+    previous = t.rotation;
+  }
+
+  double accumulated = 0.0;
+  for (int i = 0; i < 300; ++i) {
+    world->begin_update_phase();
+    engine::runtime::step_physics(*world, 1.0F / 60.0F);
+    physics::solve_constraints(*world, 1.0F / 60.0F);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+
+    Transform t{};
+    if (!world->get_transform(spinner, &t)) {
+      return 5;
+    }
+    const float quatDot = (previous.x * t.rotation.x) +
+                          (previous.y * t.rotation.y) +
+                          (previous.z * t.rotation.z) +
+                          (previous.w * t.rotation.w);
+    const float clampedDot = std::fmin(1.0F, std::fabs(quatDot));
+    accumulated += 2.0 * std::acos(static_cast<double>(clampedDot));
+    previous = t.rotation;
+  }
+
+  const double twoPi = 6.28318530717958647692;
+  Transform finalT{};
+  if (!world->get_transform(spinner, &finalT)) {
+    return 6;
+  }
+  double yaw = 2.0 * std::atan2(static_cast<double>(finalT.rotation.y),
+                                static_cast<double>(finalT.rotation.w));
+  while (yaw > twoPi / 2.0) {
+    yaw -= twoPi;
+  }
+  while (yaw < -twoPi / 2.0) {
+    yaw += twoPi;
+  }
+
+  if (accumulated >= twoPi) {
+    std::printf("FAIL hinge_limit_wrap_stop: accumulated=%.2f rad (turnstile)\n",
+                accumulated);
+    return 7;
+  }
+  if (std::fabs(yaw) > 3.1 + 0.05) {
+    std::printf("FAIL hinge_limit_wrap_stop: final twist=%.3f rad\n", yaw);
+    return 8;
   }
   return 0;
 }
@@ -596,10 +861,14 @@ int main() {
       {"ball_socket_joint", test_ball_socket_joint},
       {"slider_joint", test_slider_joint},
       {"spring_joint", test_spring_joint},
+      {"spring_stiffness_iteration_invariant",
+       test_spring_stiffness_iteration_invariant},
+      {"spring_bodyless_anchor_damps", test_spring_bodyless_anchor_damps},
       {"slider_settled_no_warm_start_drift",
        test_slider_settled_no_warm_start_drift},
       {"fixed_joint", test_fixed_joint},
       {"joint_limits", test_joint_limits},
+      {"hinge_limit_wrap_stop", test_hinge_limit_wrap_stop},
       {"destroyed_endpoint_retires_joint",
        test_destroyed_endpoint_retires_joint},
       {"joint_validation_and_stale_ids", test_joint_validation_and_stale_ids},
