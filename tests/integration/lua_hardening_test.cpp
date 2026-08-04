@@ -744,6 +744,88 @@ bool test_save_state_capture_survives_destroy() noexcept {
   return ok;
 }
 
+// -----------------------------------------------------------------------
+// S-8: a broken save must not retry the reload every frame — the failed
+// attempt (which re-runs every entity's on_save_state capture and logs a
+// traceback) latches the broken file's mtime and retries only when the
+// file changes again. A subsequent good save reloads successfully.
+// -----------------------------------------------------------------------
+bool test_failed_reload_does_not_retry_every_frame() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *prelude = "storm_saves = 0\n"
+                        "storm_marker = 0\n";
+  const char *v1 = "local M = {}\n"
+                   "function M.on_save_state(self)\n"
+                   "  storm_saves = storm_saves + 1\n"
+                   "  return { ok = true }\n"
+                   "end\n"
+                   "function M.on_tick(self, dt)\n"
+                   "  storm_marker = 1\n"
+                   "end\n"
+                   "return M\n";
+  if (!write_script(prelude) || !engine::scripting::load_script(kTempScript) ||
+      !write_file_at("hardening_reload_storm.lua", v1)) {
+    remove_script();
+    return false;
+  }
+
+  bool ok = add_scripted_entity(session.world.get(),
+                                "hardening_reload_storm.lua") !=
+            engine::runtime::kInvalidEntity;
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *broken = "error('intentional reload failure')\n";
+    ok = write_file_at("hardening_reload_storm.lua", broken);
+  }
+
+  if (ok) {
+    for (int i = 0; i < 3; ++i) {
+      engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    }
+    const char *verifyOnce =
+        "function verify_single_attempt()\n"
+        "  if storm_saves ~= 1 then error('saves ' .. storm_saves) end\n"
+        "end\n";
+    ok = write_script(verifyOnce) &&
+         engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_single_attempt");
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *v2 = "local M = {}\n"
+                     "function M.on_reload(self, state)\n"
+                     "  if state ~= nil and state.ok == true then\n"
+                     "    storm_marker = 2\n"
+                     "  end\n"
+                     "end\n"
+                     "function M.on_tick(self, dt) end\n"
+                     "return M\n";
+    ok = write_file_at("hardening_reload_storm.lua", v2);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    const char *verifyRecovered =
+        "function verify_storm_recovered()\n"
+        "  if storm_saves ~= 2 then error('saves2 ' .. storm_saves) end\n"
+        "  if storm_marker ~= 2 then error('marker ' .. storm_marker) end\n"
+        "end\n";
+    ok = ok && write_script(verifyRecovered) &&
+         engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_storm_recovered");
+  }
+
+  std::remove("hardening_reload_storm.lua");
+  remove_script();
+  return ok;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -774,6 +856,8 @@ int main() {
        test_reload_hook_destroy_delivers_exactly_once},
       {"save_state_capture_survives_destroy",
        test_save_state_capture_survives_destroy},
+      {"failed_reload_does_not_retry_every_frame",
+       test_failed_reload_does_not_retry_every_frame},
   };
 
   for (const auto &tc : tests) {

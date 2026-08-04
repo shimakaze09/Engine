@@ -23,10 +23,15 @@ namespace engine::scripting {
 namespace {
 
 /// Stores one cached Lua module table for entity script dispatch.
+/// lastFailedMtime latches the mtime of a save whose reload failed so the
+/// attempt (including its per-entity on_save_state captures) runs once
+/// per broken save instead of every frame until the file is fixed; the
+/// next mtime change retries.
 struct EntityScriptModule final {
   char path[128] = {};
   int registryRef = LUA_NOREF;
   std::int64_t mtime = 0;
+  std::int64_t lastFailedMtime = 0;
   bool reloaded = false;
 };
 
@@ -303,7 +308,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
       EntityScriptModule &mod = g_entityScriptModules[i];
       const std::int64_t currentMtime = file_mtime(path);
       if ((currentMtime != 0) && (mod.mtime != 0) &&
-          (currentMtime != mod.mtime)) {
+          (currentMtime != mod.mtime) &&
+          (currentMtime != mod.lastFailedMtime)) {
         // The reload chunk (and its on_save_state hooks) can require this
         // module again before the new mtime is recorded; the load stack
         // turns that recursion into a logged circular-dependency failure.
@@ -317,6 +323,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         ++g_moduleLoadDepth;
 
         if (!protected_load_chunk(g_state, path, "reload entity script")) {
+          mod.lastFailedMtime = currentMtime;
           --g_moduleLoadDepth;
           return mod.registryRef;
         }
@@ -326,6 +333,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
 
         if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
           log_script_error("reload entity script");
+          mod.lastFailedMtime = currentMtime;
           clear_entity_saved_state_for_module(i);
           --g_moduleLoadDepth;
           return mod.registryRef;
@@ -335,6 +343,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
           core::log_message(core::LogLevel::Error, "scripting",
                             "entity script must return a module table");
           lua_pop(g_state, 1);
+          mod.lastFailedMtime = currentMtime;
           clear_entity_saved_state_for_module(i);
           --g_moduleLoadDepth;
           return mod.registryRef;
@@ -344,6 +353,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         int newRef = LUA_NOREF;
         if (!protected_registry_ref(g_state, &newRef,
                                     "ref entity script module")) {
+          mod.lastFailedMtime = currentMtime;
           clear_entity_saved_state_for_module(i);
           return mod.registryRef;
         }
@@ -352,6 +362,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         }
         mod.registryRef = newRef;
         mod.mtime = currentMtime;
+        mod.lastFailedMtime = 0;
         mod.reloaded = true;
         g_hasPendingEntityReloads = true;
 
