@@ -43,7 +43,9 @@ struct TileLightData final {
 /// @param screenW    Screen width in pixels.
 /// @param screenH    Screen height in pixels.
 /// @param outData    Output tile data (caller provides buffer).
-/// @return true on success.
+/// @return true on success. On failure (null matrices, non-positive or
+/// overflow-large screen size, missing/undersized buffer) the tile counts
+/// in outData are zeroed so callers cannot consume stale dimensions.
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
                        const float *projMatrix, int screenW, int screenH,
                        TileLightData &outData) noexcept;

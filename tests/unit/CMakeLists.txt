@@ -286,6 +286,17 @@ engine_add_test_executable(engine_unit_gpu_profiler
     engine_renderer
 )
 
+engine_add_test_executable(engine_unit_gpu_profiler_ring
+    SOURCES
+    gpu_profiler_ring_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/gpu_profiler.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/core/include
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_pass_resources
     SOURCES
     pass_resources_test.cpp
