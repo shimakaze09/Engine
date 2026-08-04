@@ -210,6 +210,10 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     dev->bind_vertex_array(0U);
     dev->bind_program(0U);
   }
+  if ((captureCount > 0U) && (dev != nullptr) &&
+      (dev->bind_framebuffer != nullptr)) {
+    dev->bind_framebuffer(0U);
+  }
 }
 
 } // namespace engine::renderer

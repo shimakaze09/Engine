@@ -803,6 +803,24 @@ void gl_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
                 static_cast<GLsizei>(w), static_cast<GLsizei>(h));
 }
 
+void gl_get_viewport(std::int32_t *x, std::int32_t *y, std::int32_t *w,
+                     std::int32_t *h) noexcept {
+  GLint viewport[4] = {0, 0, 0, 0};
+  gl_table().getIntegerv(GL_VIEWPORT, viewport);
+  if (x != nullptr) {
+    *x = static_cast<std::int32_t>(viewport[0]);
+  }
+  if (y != nullptr) {
+    *y = static_cast<std::int32_t>(viewport[1]);
+  }
+  if (w != nullptr) {
+    *w = static_cast<std::int32_t>(viewport[2]);
+  }
+  if (h != nullptr) {
+    *h = static_cast<std::int32_t>(viewport[3]);
+  }
+}
+
 void gl_enable_depth_test() noexcept { gl_table().enable(GL_DEPTH_TEST); }
 
 void gl_disable_depth_test() noexcept { gl_table().disable(GL_DEPTH_TEST); }
@@ -1041,6 +1059,9 @@ void gl_framebuffer_cubemap_face(std::uint32_t fbo, std::uint32_t cubeTex,
       static_cast<GLuint>(cubeTex), 0);
 }
 
+// Deferred-attachment FBOs are created with GL_NONE draw/read buffers
+// (audit H-12); attaching a color face must re-enable attachment 0 or the
+// bake's fragment output is discarded (audit M-05).
 void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
                                            std::uint32_t cubeTex,
                                            std::int32_t face,
@@ -1050,6 +1071,9 @@ void gl_framebuffer_cubemap_color_face_mip(std::uint32_t fbo,
       GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
       static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face),
       static_cast<GLuint>(cubeTex), static_cast<GLint>(mipLevel));
+  const GLenum colorAttachment = GL_COLOR_ATTACHMENT0;
+  gl_table().drawBuffers(1, &colorAttachment);
+  gl_table().readBuffer(GL_COLOR_ATTACHMENT0);
 }
 
 // --- Framebuffers ---
@@ -1367,6 +1391,7 @@ bool initialize_render_device() noexcept {
   render_device_state().query_result_available = &gl_query_result_available;
   render_device_state().query_result_u64 = &gl_query_result_u64;
   render_device_state().set_viewport = &gl_set_viewport;
+  render_device_state().get_viewport = &gl_get_viewport;
   render_device_state().enable_depth_test = &gl_enable_depth_test;
   render_device_state().disable_depth_test = &gl_disable_depth_test;
   render_device_state().set_depth_func_less = &gl_set_depth_func_less;

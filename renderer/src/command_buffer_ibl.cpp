@@ -51,6 +51,43 @@ std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
   return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
 }
 
+/// Saved fixed-function state around an offscreen bake. restore() returns
+/// the device to the engine's ambient scene state — default framebuffer,
+/// depth test and face culling enabled — and re-applies the entry viewport
+/// when the device can report it (audit M-05).
+struct BakeStateScope final {
+  std::int32_t viewport[4] = {0, 0, 0, 0};
+  bool hasViewport = false;
+
+  /// Captures the entry viewport when the device exposes a getter.
+  void save(const RenderDevice *dev) noexcept {
+    if (dev->get_viewport != nullptr) {
+      dev->get_viewport(&viewport[0], &viewport[1], &viewport[2],
+                        &viewport[3]);
+      hasViewport = true;
+    }
+  }
+
+  /// Restores framebuffer, depth/cull enables, and the saved viewport.
+  void restore(const RenderDevice *dev) const noexcept {
+    dev->bind_framebuffer(0U);
+    dev->enable_depth_test();
+    dev->enable_face_culling();
+    if (hasViewport) {
+      dev->set_viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    }
+  }
+};
+
+/// Attaches face 0 of the target cubemap and reports FBO completeness;
+/// devices without a completeness query pass by default.
+bool bake_target_complete(const RenderDevice *dev, std::uint32_t fbo,
+                          std::uint32_t cubeTex) noexcept {
+  dev->framebuffer_cubemap_color_face_mip(fbo, cubeTex, 0, 0);
+  return (dev->check_framebuffer_complete == nullptr) ||
+         dev->check_framebuffer_complete();
+}
+
 void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
   const math::Vec3 origin{};
   outViews[0] = math::look_at(origin, math::Vec3(1.0F, 0.0F, 0.0F),
@@ -110,6 +147,7 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   if ((dev == nullptr) || !backend.environmentPrefilterAvailable ||
       !core::cvar_get_bool("r_env_prefilter", true) || (sourceCubemap == 0U) ||
       (dev->create_cubemap_hdr_empty == nullptr) ||
+      (dev->create_framebuffer == nullptr) ||
       (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
       (dev->bind_texture_cubemap == nullptr)) {
     return 0U;
@@ -141,6 +179,18 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   const std::uint32_t prefiltered =
       dev->create_cubemap_hdr_empty(faceSize, mipLevels);
   if (prefiltered == 0U) {
+    return 0U;
+  }
+
+  BakeStateScope scope{};
+  scope.save(dev);
+  if (!bake_target_complete(dev, backend.environmentPrefilterFbo,
+                            prefiltered)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment prefilter framebuffer incomplete; bake "
+                      "aborted");
+    dev->destroy_texture(prefiltered);
+    scope.restore(dev);
     return 0U;
   }
 
@@ -189,6 +239,7 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   dev->bind_texture_cubemap(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
+  scope.restore(dev);
 
   backend.prefilteredEnvironmentTexture = prefiltered;
   backend.prefilteredEnvironmentSource = sourceCubemap;
@@ -225,6 +276,7 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   if ((dev == nullptr) || !backend.environmentIrradianceAvailable ||
       !core::cvar_get_bool("r_env_irradiance", true) || (sourceCubemap == 0U) ||
       (dev->create_cubemap_hdr_empty == nullptr) ||
+      (dev->create_framebuffer == nullptr) ||
       (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
       (dev->bind_texture_cubemap == nullptr)) {
     return 0U;
@@ -253,6 +305,18 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
 
   const std::uint32_t irradiance = dev->create_cubemap_hdr_empty(faceSize, 1);
   if (irradiance == 0U) {
+    return 0U;
+  }
+
+  BakeStateScope scope{};
+  scope.save(dev);
+  if (!bake_target_complete(dev, backend.environmentIrradianceFbo,
+                            irradiance)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment irradiance framebuffer incomplete; bake "
+                      "aborted");
+    dev->destroy_texture(irradiance);
+    scope.restore(dev);
     return 0U;
   }
 
@@ -289,6 +353,7 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   dev->bind_texture_cubemap(0, 0U);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
+  scope.restore(dev);
 
   backend.irradianceEnvironmentTexture = irradiance;
   backend.irradianceEnvironmentSource = sourceCubemap;
@@ -352,6 +417,8 @@ std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
     return 0U;
   }
 
+  BakeStateScope scope{};
+  scope.save(dev);
   dev->bind_framebuffer(lutFbo);
   dev->set_viewport(0, 0, lutSize, lutSize);
   dev->disable_depth_test();
@@ -361,7 +428,7 @@ std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
   dev->draw_arrays_triangles(0, 3);
   dev->bind_vertex_array(0U);
   dev->bind_program(0U);
-  dev->bind_framebuffer(0U);
+  scope.restore(dev);
 
   backend.brdfLutTexture = lutTexture;
   backend.brdfLutFbo = lutFbo;
