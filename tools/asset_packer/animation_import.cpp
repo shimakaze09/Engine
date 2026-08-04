@@ -3,6 +3,7 @@
 #include "animation_import.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 
 #include <cgltf.h>
@@ -207,6 +208,51 @@ bool decode_track_values(const cgltf_accessor *output,
   return true;
 }
 
+/// Validates decoded key times: finite, non-negative, and non-decreasing,
+/// so runtime binary search over sorted keys stays well-defined (audit
+/// M-26).
+bool validate_track_times(const std::vector<float> &times) noexcept {
+  float previous = 0.0F;
+  for (std::size_t i = 0U; i < times.size(); ++i) {
+    const float time = times[i];
+    if (!std::isfinite(time) || (time < 0.0F)) {
+      return false;
+    }
+    if ((i > 0U) && (time < previous)) {
+      return false;
+    }
+    previous = time;
+  }
+  return true;
+}
+
+/// Reports whether every decoded sample and tangent is finite (audit
+/// M-26: NaN/Inf samples used to cook silently and poison runtime poses).
+bool track_values_finite(const AnimTrack &track) noexcept {
+  const auto vec3Finite = [](const std::vector<math::Vec3> &values) noexcept {
+    for (const math::Vec3 &value : values) {
+      if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
+          !std::isfinite(value.z)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const auto quatFinite = [](const std::vector<math::Quat> &values) noexcept {
+    for (const math::Quat &value : values) {
+      if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
+          !std::isfinite(value.z) || !std::isfinite(value.w)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return vec3Finite(track.vec3Values) && vec3Finite(track.inVec3Tangents) &&
+         vec3Finite(track.outVec3Tangents) && quatFinite(track.quatValues) &&
+         quatFinite(track.inQuatTangents) &&
+         quatFinite(track.outQuatTangents);
+}
+
 } // namespace
 
 /// Returns a stable message for an animation import result.
@@ -237,6 +283,12 @@ const char *animation_import_result_message(
     return "animation output accessor is invalid";
   case AnimationImportResult::DecodeFailed:
     return "failed to decode animation accessor";
+  case AnimationImportResult::InvalidKeyTimes:
+    return "animation key times are non-finite, negative, or unsorted";
+  case AnimationImportResult::NonFiniteValue:
+    return "animation sample values contain non-finite floats";
+  case AnimationImportResult::DuplicateChannel:
+    return "animation has duplicate channels for one joint transform";
   }
 
   return "unknown animation import result";
@@ -284,6 +336,7 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
   }
   parsed.tracks.reserve(static_cast<std::size_t>(animation.channels_count));
 
+  std::array<bool, kMaxSkeletonJoints * 3U> channelSeen{};
   for (cgltf_size i = 0U; i < animation.channels_count; ++i) {
     const cgltf_animation_channel &channel = animation.channels[i];
     if ((channel.sampler == nullptr) || (channel.target_node == nullptr)) {
@@ -301,6 +354,17 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
     if (joint == kInvalidSkeletonJoint) {
       set_result(outResult, AnimationImportResult::TargetNotInSkin);
       return false;
+    }
+
+    const std::size_t channelKey =
+        (static_cast<std::size_t>(joint) * 3U) +
+        static_cast<std::size_t>(target);
+    if ((channelKey < channelSeen.size()) && channelSeen[channelKey]) {
+      set_result(outResult, AnimationImportResult::DuplicateChannel);
+      return false;
+    }
+    if (channelKey < channelSeen.size()) {
+      channelSeen[channelKey] = true;
     }
 
     const cgltf_animation_sampler &sampler = *channel.sampler;
@@ -334,6 +398,14 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
                              static_cast<std::size_t>(input->count),
                              &track)) {
       set_result(outResult, AnimationImportResult::DecodeFailed);
+      return false;
+    }
+    if (!validate_track_times(track.times)) {
+      set_result(outResult, AnimationImportResult::InvalidKeyTimes);
+      return false;
+    }
+    if (!track_values_finite(track)) {
+      set_result(outResult, AnimationImportResult::NonFiniteValue);
       return false;
     }
 

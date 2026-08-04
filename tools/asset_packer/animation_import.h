@@ -66,6 +66,9 @@ enum class AnimationImportResult : std::uint8_t {
   InvalidInputAccessor,
   InvalidOutputAccessor,
   DecodeFailed,
+  InvalidKeyTimes,
+  NonFiniteValue,
+  DuplicateChannel,
 };
 
 /// Returns a stable message for an animation import result.
