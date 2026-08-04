@@ -4,10 +4,12 @@
 // panic-safe engine-to-Lua dispatch under hostile metatables, and script
 // dispatch surviving synchronous entity destruction from callbacks.
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
+#include <thread>
 
 #include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
@@ -449,6 +451,133 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
   return ok;
 }
 
+// -----------------------------------------------------------------------
+// #65 item 1: a first-time module load under an exhausted sandbox memory
+// cap raises LUA_ERRMEM from C context (luaL_loadfile's chunk-name push,
+// the module-table luaL_ref) — it must fail cleanly and the engine must
+// keep running instead of hitting lua_atpanic/abort. Once memory is
+// available again the module loads and ticks normally.
+// -----------------------------------------------------------------------
+bool test_module_load_survives_memory_exhaustion() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *prelude = "memcap_ticks = 0\n"
+                        "function verify_alive_after_memcap() end\n";
+  const char *mod = "local M = {}\n"
+                    "function M.on_tick(self, dt)\n"
+                    "  memcap_ticks = memcap_ticks + 1\n"
+                    "end\n"
+                    "return M\n";
+  if (!write_script(prelude) || !engine::scripting::load_script(kTempScript) ||
+      !write_file_at("hardening_memcap.lua", mod)) {
+    remove_script();
+    return false;
+  }
+
+  const engine::runtime::Entity entity =
+      add_scripted_entity(session.world.get(), "hardening_memcap.lua");
+  bool ok = entity != engine::runtime::kInvalidEntity;
+
+  if (ok) {
+    engine::scripting::set_memory_limit(1024U);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::scripting::set_memory_limit(64U * 1024U * 1024U);
+    ok = engine::scripting::call_script_function("verify_alive_after_memcap");
+  }
+
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    const char *verify = "function verify_memcap_recovered()\n"
+                         "  if memcap_ticks ~= 1 then\n"
+                         "    error('ticks ' .. memcap_ticks)\n"
+                         "  end\n"
+                         "end\n";
+    ok = write_script(verify) && engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_memcap_recovered");
+  }
+
+  std::remove("hardening_memcap.lua");
+  remove_script();
+  return ok;
+}
+
+// -----------------------------------------------------------------------
+// #65 item 1: a hot-reload attempt (mtime changed) under an exhausted
+// memory cap fails cleanly — the old module stays installed, the engine
+// keeps running — and a later good save under normal memory reloads.
+// -----------------------------------------------------------------------
+bool test_module_reload_survives_memory_exhaustion() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *prelude = "reload_memcap_marker = 0\n"
+                        "function verify_alive_after_reload_memcap() end\n";
+  const char *v1 = "local M = {}\n"
+                   "function M.on_tick(self, dt)\n"
+                   "  reload_memcap_marker = 1\n"
+                   "end\n"
+                   "return M\n";
+  if (!write_script(prelude) || !engine::scripting::load_script(kTempScript) ||
+      !write_file_at("hardening_reload_memcap.lua", v1)) {
+    remove_script();
+    return false;
+  }
+
+  const engine::runtime::Entity entity =
+      add_scripted_entity(session.world.get(), "hardening_reload_memcap.lua");
+  bool ok = entity != engine::runtime::kInvalidEntity;
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *v2 = "local M = {}\n"
+                     "function M.on_tick(self, dt)\n"
+                     "  reload_memcap_marker = 2\n"
+                     "end\n"
+                     "return M\n";
+    ok = write_file_at("hardening_reload_memcap.lua", v2);
+  }
+
+  if (ok) {
+    engine::scripting::set_memory_limit(1024U);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::scripting::set_memory_limit(64U * 1024U * 1024U);
+    ok = engine::scripting::call_script_function(
+        "verify_alive_after_reload_memcap");
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *v3 = "local M = {}\n"
+                     "function M.on_tick(self, dt)\n"
+                     "  reload_memcap_marker = 3\n"
+                     "end\n"
+                     "return M\n";
+    ok = write_file_at("hardening_reload_memcap.lua", v3);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    const char *verify = "function verify_reload_recovered()\n"
+                         "  if reload_memcap_marker ~= 3 then\n"
+                         "    error('marker ' .. reload_memcap_marker)\n"
+                         "  end\n"
+                         "end\n";
+    ok = ok && write_script(verify) &&
+         engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_reload_recovered");
+  }
+
+  std::remove("hardening_reload_memcap.lua");
+  remove_script();
+  return ok;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -471,6 +600,10 @@ int main() {
       {"tick_dispatch_survives_hostile_module_metatable",
        test_tick_dispatch_survives_hostile_module_metatable},
       {"tick_destroy_no_skipped_ticks", test_tick_destroy_no_skipped_ticks},
+      {"module_load_survives_memory_exhaustion",
+       test_module_load_survives_memory_exhaustion},
+      {"module_reload_survives_memory_exhaustion",
+       test_module_reload_survives_memory_exhaustion},
   };
 
   for (const auto &tc : tests) {

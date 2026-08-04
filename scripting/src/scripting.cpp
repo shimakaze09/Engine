@@ -553,8 +553,7 @@ bool load_script(const char *path) noexcept {
     return false;
   }
 
-  if (luaL_loadfile(state, path) != LUA_OK) {
-    log_lua_error("load_script");
+  if (!protected_load_chunk(state, path, "load_script")) {
     return false;
   }
 
@@ -636,8 +635,17 @@ void dispatch_animation_event_callbacks() noexcept {
 
 namespace {
 
-/// Captures the current top-level globals for rollback after a failed reload.
-int snapshot_global_bindings(lua_State *state) noexcept {
+/// Carries the globals snapshot registry reference across the protected
+/// snapshot/restore trampolines.
+struct GlobalsSnapshotArgs final {
+  int ref = LUA_NOREF;
+};
+
+/// Protected trampoline: copies every top-level global into a fresh table
+/// and refs it into the registry, so table growth or registry allocation
+/// failure while snapshotting stays catchable.
+int snapshot_globals_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
   lua_newtable(state);
   const int snapshotIndex = lua_absindex(state, -1);
   lua_pushglobaltable(state);
@@ -652,17 +660,33 @@ int snapshot_global_bindings(lua_State *state) noexcept {
   }
 
   lua_pop(state, 1);
-  return luaL_ref(state, LUA_REGISTRYINDEX);
+  args->ref = luaL_ref(state, LUA_REGISTRYINDEX);
+  return 0;
 }
 
-/// Restores top-level globals exactly, including removing newly introduced
-/// keys.
-void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
+/// Captures the current top-level globals for rollback after a failed
+/// reload; false (with the error logged) when snapshotting itself fails.
+bool snapshot_global_bindings(lua_State *state, int *outReference) noexcept {
+  GlobalsSnapshotArgs args{};
+  if (!protected_c_operation(state, &snapshot_globals_trampoline, &args, 0,
+                             "hot_reload globals snapshot")) {
+    return false;
+  }
+  *outReference = args.ref;
+  return true;
+}
+
+/// Protected trampoline: restores top-level globals exactly, including
+/// removing newly introduced keys, so allocation failure while rebuilding
+/// the globals table stays catchable.
+int restore_globals_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
+  const int snapshotReference = args->ref;
   const int originalTop = lua_gettop(state);
   lua_rawgeti(state, LUA_REGISTRYINDEX, snapshotReference);
   if (!lua_istable(state, -1)) {
     lua_settop(state, originalTop);
-    return;
+    return 0;
   }
   const int snapshotIndex = lua_absindex(state, -1);
 
@@ -701,6 +725,18 @@ void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
   }
 
   lua_settop(state, originalTop);
+  return 0;
+}
+
+/// Restores top-level globals from the snapshot under protection; a
+/// restore that itself hits allocation failure is logged (globals may
+/// then be partially restored — unavoidable under OOM).
+void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
+  GlobalsSnapshotArgs args{};
+  args.ref = snapshotReference;
+  static_cast<void>(protected_c_operation(state, &restore_globals_trampoline,
+                                          &args, 0,
+                                          "hot_reload globals restore"));
 }
 
 /// Executes a reload while rolling back all top-level bindings on failure.
@@ -710,12 +746,15 @@ bool reload_script_transactionally(const char *path) noexcept {
     return false;
   }
 
-  if (luaL_loadfile(state, path) != LUA_OK) {
-    log_lua_error("hot_reload");
+  if (!protected_load_chunk(state, path, "hot_reload")) {
     return false;
   }
 
-  const int snapshotReference = snapshot_global_bindings(state);
+  int snapshotReference = LUA_NOREF;
+  if (!snapshot_global_bindings(state, &snapshotReference)) {
+    lua_pop(state, 1);
+    return false;
+  }
   arm_debug_lua_hook(state);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("hot_reload");

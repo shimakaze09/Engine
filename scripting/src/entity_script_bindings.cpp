@@ -238,11 +238,16 @@ void capture_entity_saved_state(std::size_t moduleSlot,
           return;
         }
 
+        int stateRef = LUA_NOREF;
+        if (!protected_registry_ref(g_state, &stateRef,
+                                    "ref on_save_state result")) {
+          return;
+        }
         EntitySavedState &savedState = g_entitySavedState[entity.index];
         release_entity_saved_state(savedState);
         savedState.owner = entity;
         savedState.moduleSlot = moduleSlot;
-        savedState.registryRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
+        savedState.registryRef = stateRef;
       });
 }
 
@@ -278,8 +283,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
                       sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
         ++g_moduleLoadDepth;
 
-        if (luaL_loadfile(g_state, path) != LUA_OK) {
-          log_script_error("reload entity script");
+        if (!protected_load_chunk(g_state, path, "reload entity script")) {
           --g_moduleLoadDepth;
           return mod.registryRef;
         }
@@ -304,7 +308,12 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         }
 
         --g_moduleLoadDepth;
-        const int newRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
+        int newRef = LUA_NOREF;
+        if (!protected_registry_ref(g_state, &newRef,
+                                    "ref entity script module")) {
+          clear_entity_saved_state_for_module(i);
+          return mod.registryRef;
+        }
         if (mod.registryRef != LUA_NOREF) {
           luaL_unref(g_state, LUA_REGISTRYINDEX, mod.registryRef);
         }
@@ -338,8 +347,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
                 sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
   ++g_moduleLoadDepth;
 
-  if (luaL_loadfile(g_state, path) != LUA_OK) {
-    log_script_error("load entity script");
+  if (!protected_load_chunk(g_state, path, "load entity script")) {
     --g_moduleLoadDepth;
     return LUA_NOREF;
   }
@@ -360,7 +368,11 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
-  const int ref = luaL_ref(g_state, LUA_REGISTRYINDEX);
+  int ref = LUA_NOREF;
+  if (!protected_registry_ref(g_state, &ref, "ref entity script module")) {
+    --g_moduleLoadDepth;
+    return LUA_NOREF;
+  }
   EntityScriptModule &mod = g_entityScriptModules[g_entityScriptModuleCount];
   const std::size_t maxPath = sizeof(mod.path) - 1U;
   const std::size_t pathLen = std::strlen(path);
