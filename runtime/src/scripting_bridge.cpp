@@ -20,6 +20,10 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
+#include "component_registry.h"
+
+#include <cstring>
+
 namespace engine {
 
 namespace {
@@ -703,6 +707,102 @@ std::uint32_t scripting_create_scene_object_op(runtime::World *world) noexcept {
   return entity.index;
 }
 
+/// Writes "<source> (clone)" into destination, truncating the prefix rather
+/// than the suffix so the clone marker always survives.
+void copy_clone_name(char *destination, std::size_t destinationSize,
+                     const char *source) noexcept {
+  constexpr const char *kCloneSuffix = " (clone)";
+  constexpr std::size_t kCloneSuffixLength = 8U;
+
+  if ((destination == nullptr) || (destinationSize == 0U)) {
+    return;
+  }
+
+  destination[0] = '\0';
+  if (source == nullptr) {
+    return;
+  }
+
+  const std::size_t maxPrefixLength =
+      (destinationSize > (kCloneSuffixLength + 1U))
+          ? (destinationSize - kCloneSuffixLength - 1U)
+          : 0U;
+  const std::size_t sourceLength = std::strlen(source);
+  const std::size_t prefixLength =
+      (sourceLength < maxPrefixLength) ? sourceLength : maxPrefixLength;
+  if (prefixLength > 0U) {
+    std::memcpy(destination, source, prefixLength);
+  }
+  if ((prefixLength + kCloneSuffixLength) < destinationSize) {
+    std::memcpy(destination + prefixLength, kCloneSuffix, kCloneSuffixLength);
+    destination[prefixLength + kCloneSuffixLength] = '\0';
+  }
+}
+
+/// Copies one persistent component when the source carries it; false only
+/// when a present component fails to install on the clone.
+template <typename Component>
+bool clone_component(
+    runtime::World &world, runtime::Entity source, runtime::Entity clone,
+    bool (runtime::World::*getComponent)(runtime::Entity, Component *)
+        const noexcept,
+    bool (runtime::World::*addComponent)(runtime::Entity,
+                                         const Component &) noexcept) noexcept {
+  Component component{};
+  if ((world.*getComponent)(source, &component) &&
+      !(world.*addComponent)(clone, component)) {
+    return false;
+  }
+  return true;
+}
+
+/// Clones every persistent component type through the authoritative
+/// registry, so a component added to the World is cloned by construction
+/// instead of being forgotten by a hand-maintained list. The clone is
+/// transactional: the first failed component copy destroys the partial
+/// clone so no half-built entity is ever handed back.
+std::uint32_t scripting_clone_entity_op(runtime::World *world,
+                                        std::uint32_t sourceIndex) noexcept {
+  if (world == nullptr) {
+    return 0U;
+  }
+  const runtime::Entity source = world->find_entity_by_index(sourceIndex);
+  if (!world->is_alive(source)) {
+    return 0U;
+  }
+
+  const runtime::Entity clone = world->create_scene_object();
+  if (clone == runtime::kInvalidEntity) {
+    return 0U;
+  }
+
+  bool success = true;
+  const auto copy = [&](auto getComponent, auto addComponent) noexcept {
+    return clone_component(*world, source, clone, getComponent, addComponent);
+  };
+#define ENGINE_PCR_CLONE_COMPONENT(Type, Key, GetFn, AddFn)                    \
+  success = success && copy(&runtime::World::GetFn, &runtime::World::AddFn);
+  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PCR_CLONE_COMPONENT)
+#undef ENGINE_PCR_CLONE_COMPONENT
+
+  if (success) {
+    runtime::NameComponent name{};
+    if (world->get_name_component(source, &name)) {
+      runtime::NameComponent cloneName{};
+      copy_clone_name(cloneName.name, sizeof(cloneName.name), name.name);
+      success = world->add_name_component(clone, cloneName);
+    }
+  }
+
+  if (!success) {
+    static_cast<void>(world->destroy_entity(clone));
+    core::log_message(core::LogLevel::Warning, "runtime",
+                      "clone_entity rolled back: component copy failed");
+    return 0U;
+  }
+  return clone.index;
+}
+
 const runtime::Transform *
 scripting_get_transform_read_ptr(runtime::World *world,
                                  std::uint32_t entityIndex) noexcept {
@@ -892,6 +992,7 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_get_entity_index,
     &scripting_get_entity_count,
     &scripting_create_scene_object_op,
+    &scripting_clone_entity_op,
     &scripting_get_transform_read_ptr,
     &scripting_get_transform_op,
     &scripting_get_rigid_body_op,

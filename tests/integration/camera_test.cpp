@@ -365,6 +365,147 @@ bool test_spring_arm_updates_camera_position() noexcept {
          nearly(active->position.y, 4.0F) && nearly(active->position.z, 11.0F);
 }
 
+/// Rotated + scaled owner: the pivot offset must scale then rotate with the
+/// entity's world transform, matching child-transform composition.
+bool test_spring_arm_composes_rotation_and_scale() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  Transform transform{};
+  transform.position = math::Vec3(1.0F, 2.0F, 3.0F);
+  transform.rotation = math::Quat(0.0F, 1.0F, 0.0F, 0.0F);
+  transform.scale = math::Vec3(2.0F, 2.0F, 2.0F);
+  const Entity entity = world->create_scene_object(transform);
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.armLength = 8.0F;
+  arm.currentLength = 8.0F;
+  arm.offset = math::Vec3(1.0F, 0.0F, 0.0F);
+  arm.lagSpeed = 100.0F;
+  arm.collisionEnabled = false;
+  if (!world->add_spring_arm(entity, arm)) {
+    return false;
+  }
+
+  update_spring_arm_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if (active == nullptr) {
+    return false;
+  }
+
+  return nearly(active->target.x, -1.0F) && nearly(active->target.y, 2.0F) &&
+         nearly(active->target.z, 3.0F) && nearly(active->position.x, -1.0F) &&
+         nearly(active->position.y, 2.0F) && nearly(active->position.z, -5.0F);
+}
+
+/// Parented owner: the arm must consume the hierarchy-composed world
+/// transform, not the child's local transform.
+bool test_spring_arm_uses_parent_composed_transform() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  Transform parentLocal{};
+  parentLocal.position = math::Vec3(10.0F, 0.0F, 0.0F);
+  const Entity parent = world->create_scene_object(parentLocal);
+  if (parent == kInvalidEntity) {
+    return false;
+  }
+
+  Transform childLocal{};
+  childLocal.parentId = world->persistent_id(parent);
+  const Entity child = world->create_scene_object(childLocal);
+  if (child == kInvalidEntity) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.armLength = 4.0F;
+  arm.currentLength = 4.0F;
+  arm.offset = math::Vec3(0.0F, 2.0F, 0.0F);
+  arm.lagSpeed = 100.0F;
+  arm.collisionEnabled = false;
+  if (!world->add_spring_arm(child, arm)) {
+    return false;
+  }
+
+  world->begin_transform_phase();
+  world->end_frame_phase();
+
+  update_spring_arm_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if (active == nullptr) {
+    return false;
+  }
+
+  return nearly(active->target.x, 10.0F) && nearly(active->target.y, 2.0F) &&
+         nearly(active->target.z, 0.0F) && nearly(active->position.x, 10.0F) &&
+         nearly(active->position.y, 2.0F) && nearly(active->position.z, 4.0F);
+}
+
+/// Collision sweep: a wall between pivot and camera clamps the arm to the
+/// hit distance while the owner's own collider is skipped; disabling
+/// collision keeps the authored length.
+bool test_spring_arm_collision_clamps_length() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity owner = world->create_scene_object();
+  if (owner == kInvalidEntity) {
+    return false;
+  }
+  Collider ownCollider{};
+  ownCollider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  if (!world->add_collider(owner, ownCollider)) {
+    return false;
+  }
+
+  Transform wallLocal{};
+  wallLocal.position = math::Vec3(0.0F, 0.0F, 4.0F);
+  const Entity wall = world->create_scene_object(wallLocal);
+  if (wall == kInvalidEntity) {
+    return false;
+  }
+  Collider wallCollider{};
+  wallCollider.halfExtents = math::Vec3(2.0F, 2.0F, 0.5F);
+  if (!world->add_collider(wall, wallCollider)) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.armLength = 8.0F;
+  arm.currentLength = 8.0F;
+  arm.offset = math::Vec3(0.0F, 0.0F, 0.0F);
+  arm.lagSpeed = 100.0F;
+  arm.collisionRadius = 0.25F;
+  arm.collisionEnabled = true;
+  if (!world->add_spring_arm(owner, arm)) {
+    return false;
+  }
+
+  update_spring_arm_cameras(*world, 1.0F);
+  SpringArmComponent clamped{};
+  if (!world->get_spring_arm(owner, &clamped)) {
+    return false;
+  }
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if (active == nullptr) {
+    return false;
+  }
+  if (!nearly(clamped.currentLength, 3.25F) ||
+      !nearly(active->position.z, 3.25F)) {
+    return false;
+  }
+
+  SpringArmComponent *armPtr = world->get_spring_arm_ptr(owner);
+  if (armPtr == nullptr) {
+    return false;
+  }
+  armPtr->collisionEnabled = false;
+  armPtr->currentLength = 8.0F;
+  world->camera_manager().clear();
+
+  update_spring_arm_cameras(*world, 1.0F);
+  const CameraEntry *uncapped = world->camera_manager().active_camera();
+  return (uncapped != nullptr) && nearly(uncapped->position.z, 8.0F);
+}
+
 bool test_clear() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -409,6 +550,12 @@ int main() {
   run("test_spring_arm_crud", test_spring_arm_crud);
   run("test_spring_arm_updates_camera_position",
       test_spring_arm_updates_camera_position);
+  run("test_spring_arm_composes_rotation_and_scale",
+      test_spring_arm_composes_rotation_and_scale);
+  run("test_spring_arm_uses_parent_composed_transform",
+      test_spring_arm_uses_parent_composed_transform);
+  run("test_spring_arm_collision_clamps_length",
+      test_spring_arm_collision_clamps_length);
   run("test_destroyed_owner_removes_camera",
       test_destroyed_owner_removes_camera);
   run("test_clear", test_clear);

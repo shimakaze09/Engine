@@ -9,9 +9,14 @@ struct lua_State;
 
 namespace engine::scripting {
 
-/// Reads three consecutive number args starting at startIndex into a Vec3.
+/// Reads three consecutive finite number args starting at startIndex into a
+/// Vec3; fails on a non-number or non-finite component.
 bool read_vec3_args(lua_State *state, int startIndex,
                     math::Vec3 *outVec) noexcept;
+
+/// Reads one finite number arg; fails on a non-number or non-finite value.
+bool read_finite_number_arg(lua_State *state, int index,
+                            float *outValue) noexcept;
 
 /// Logs the Lua error on top of the stack with a traceback, then pops it.
 void log_lua_error(const char *context) noexcept;

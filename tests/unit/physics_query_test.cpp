@@ -508,6 +508,65 @@ int test_sweep_box_shape_accurate() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+// Sweep skip: skipEntity excludes the entity's own collider plus compound
+// colliders it owns via rigid_body_owner, while other colliders still hit.
+int test_sweep_sphere_skip_entity() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+
+  Transform selfLocal{};
+  const Entity self = world->create_scene_object(selfLocal);
+  Collider selfCol{};
+  selfCol.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  if (!world->add_collider(self, selfCol)) {
+    return 2;
+  }
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+  if (!world->add_rigid_body(self, body)) {
+    return 3;
+  }
+
+  Transform childLocal{};
+  childLocal.position = math::Vec3(2.0F, 0.0F, 0.0F);
+  childLocal.parentId = world->persistent_id(self);
+  const Entity child = world->create_scene_object(childLocal);
+  Collider childCol{};
+  childCol.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  if (!world->add_collider(child, childCol)) {
+    return 4;
+  }
+
+  make_box(*world, math::Vec3(6.0F, 0.0F, 0.0F),
+           math::Vec3(0.5F, 2.0F, 2.0F));
+  world->begin_transform_phase();
+  world->end_frame_phase();
+
+  physics::SweepHit hit{};
+  if (!physics::sweep_sphere(*world, math::Vec3(-3.0F, 0.0F, 0.0F), 0.5F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit,
+                             0xFFFFFFFFU, self)) {
+    std::printf("FAIL sweep_sphere_skip_entity: no hit past compound\n");
+    return 5;
+  }
+  if (std::fabs(hit.distance - 8.0F) > 0.0001F) {
+    std::printf("FAIL sweep_sphere_skip_entity: dist=%.3f (expected 8.0)\n",
+                hit.distance);
+    return 6;
+  }
+
+  physics::SweepHit unskipped{};
+  if (!physics::sweep_sphere(*world, math::Vec3(-3.0F, 0.0F, 0.0F), 0.5F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &unskipped) ||
+      (unskipped.entityIndex != self.index)) {
+    std::printf("FAIL sweep_sphere_skip_entity: default sweep missed self\n");
+    return 7;
+  }
+  return 0;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -529,6 +588,7 @@ int main() {
       {"sweep_sphere_shape_accurate", test_sweep_sphere_shape_accurate},
       {"sweep_box_shape_accurate", test_sweep_box_shape_accurate},
       {"parented_trs_collider_queries", test_parented_trs_collider_queries},
+      {"sweep_sphere_skip_entity", test_sweep_sphere_skip_entity},
   };
 
   int failures = 0;

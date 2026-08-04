@@ -583,6 +583,47 @@ int verify_persistent_index_tombstones() {
   return 0;
 }
 
+/// for_each_alive must visit every entity that was alive when the walk
+/// started even when the callback destroys entities: the loop bound is a
+/// snapshot, not the live alive count.
+int verify_for_each_alive_visits_all_while_destroying() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 340;
+  }
+
+  constexpr std::size_t kEntityCount = 16U;
+  for (std::size_t i = 0U; i < kEntityCount; ++i) {
+    if (world->create_scene_object() == engine::runtime::kInvalidEntity) {
+      return 341;
+    }
+  }
+  if (world->alive_entity_count() != kEntityCount) {
+    return 342;
+  }
+
+  std::size_t visited = 0U;
+  std::size_t destroyed = 0U;
+  world->for_each_alive([&](engine::runtime::Entity entity) noexcept {
+    ++visited;
+    if (world->destroy_entity(entity)) {
+      ++destroyed;
+    }
+  });
+
+  if (visited != kEntityCount) {
+    return 343;
+  }
+  if (destroyed != kEntityCount) {
+    return 344;
+  }
+  if (world->alive_entity_count() != 0U) {
+    return 345;
+  }
+  return 0;
+}
+
 int verify_variadic_for_each() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -858,6 +899,47 @@ int verify_physics_ingress_validation() {
     return 913;
   }
 
+  // Audit M-21/X-1: NaN opacity fails the `opacity < 1` transparency test
+  // and reaches the sort key's float-to-uint16_t depth conversion, which is
+  // undefined behavior, so mesh material factors validate and clamp too.
+  engine::runtime::MeshComponent badMesh{};
+  badMesh.opacity = kNaN;
+  if (world->add_mesh_component(entity, badMesh)) {
+    return 914;
+  }
+  badMesh = engine::runtime::MeshComponent{};
+  badMesh.roughness = kInf;
+  if (world->add_mesh_component(entity, badMesh)) {
+    return 915;
+  }
+  badMesh = engine::runtime::MeshComponent{};
+  badMesh.albedo.x = kNaN;
+  if (world->add_mesh_component(entity, badMesh)) {
+    return 916;
+  }
+  engine::runtime::MeshComponent probeMesh{};
+  if (world->get_mesh_component(entity, &probeMesh)) {
+    return 917;
+  }
+
+  engine::runtime::MeshComponent outOfRange{};
+  outOfRange.opacity = 4.0F;
+  outOfRange.roughness = -2.0F;
+  outOfRange.metallic = 8.0F;
+  outOfRange.albedo = engine::math::Vec3(-1.0F, 3.0F, 0.5F);
+  if (!world->add_mesh_component(entity, outOfRange)) {
+    return 918;
+  }
+  engine::runtime::MeshComponent storedMesh{};
+  if (!world->get_mesh_component(entity, &storedMesh)) {
+    return 919;
+  }
+  if ((storedMesh.opacity != 1.0F) || (storedMesh.roughness != 0.0F) ||
+      (storedMesh.metallic != 1.0F) || (storedMesh.albedo.x != 0.0F) ||
+      (storedMesh.albedo.y != 1.0F) || (storedMesh.albedo.z != 0.5F)) {
+    return 920;
+  }
+
   return 0;
 }
 
@@ -1082,6 +1164,11 @@ int main() {
   }
 
   result = verify_reset_world_phase_independent();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_for_each_alive_visits_all_while_destroying();
   if (result != 0) {
     return result;
   }

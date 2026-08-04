@@ -11,6 +11,7 @@ extern "C" {
 #include "lua.h"
 }
 
+#include <cmath>
 #include <cstdio>
 
 #include "engine/core/logging.h"
@@ -57,7 +58,9 @@ int registry_ref_trampoline(lua_State *state) noexcept {
 
 } // namespace
 
-/// Reads vec3 args data.
+/// Reads vec3 args data. Non-finite components are rejected here so a NaN
+/// or infinity from Lua fails at the call that produced it rather than
+/// being logged by whichever World ingress it eventually reaches.
 bool read_vec3_args(lua_State *state, int startIndex,
                     math::Vec3 *outVec) noexcept {
   if ((outVec == nullptr) || !lua_isnumber(state, startIndex) ||
@@ -69,7 +72,25 @@ bool read_vec3_args(lua_State *state, int startIndex,
   const float x = static_cast<float>(lua_tonumber(state, startIndex));
   const float y = static_cast<float>(lua_tonumber(state, startIndex + 1));
   const float z = static_cast<float>(lua_tonumber(state, startIndex + 2));
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+    return false;
+  }
   *outVec = math::Vec3(x, y, z);
+  return true;
+}
+
+/// Reads finite number args data: the scalar counterpart of
+/// read_vec3_args, so scalar bindings reject non-finite input the same way.
+bool read_finite_number_arg(lua_State *state, int index,
+                            float *outValue) noexcept {
+  if ((outValue == nullptr) || !lua_isnumber(state, index)) {
+    return false;
+  }
+  const float value = static_cast<float>(lua_tonumber(state, index));
+  if (!std::isfinite(value)) {
+    return false;
+  }
+  *outValue = value;
   return true;
 }
 

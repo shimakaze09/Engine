@@ -54,9 +54,12 @@ std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
 
 /// Sweeps a sphere along a normalized copy of direction.
 /// Returns the earliest hit when maxDistance is finite and positive.
+/// skipEntity excludes that entity's colliders and every collider whose
+/// rigid-body owner it is (compound bodies are skipped as one unit).
 bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
-                  SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+                  SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU,
+                  Entity skipEntity = kInvalidEntity) noexcept;
 
 /// Sweeps an AABB along a normalized copy of direction.
 /// Returns the earliest hit when maxDistance is finite and positive.

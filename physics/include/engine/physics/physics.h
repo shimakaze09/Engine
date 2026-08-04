@@ -71,6 +71,11 @@ const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
                                         Entity entity) noexcept;
 /// Removes non-primitive shape payload data for an entity.
 void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept;
+/// Drops the payloads that the given collider shape cannot consume, so a
+/// collider replaced with a different shape never keeps a stale hull or
+/// heightfield resident. Analytic shapes keep no payload at all.
+void prune_incompatible_shape_payloads(PhysicsContext &context, Entity entity,
+                                       ColliderShape shape) noexcept;
 /// Sets the requested value for heightfield payload data.
 bool set_heightfield_data(PhysicsContext &context, Entity entity,
                           const HeightfieldData &heightfield) noexcept;

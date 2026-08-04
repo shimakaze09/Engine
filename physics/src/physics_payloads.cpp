@@ -287,6 +287,16 @@ void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept {
   remove_heightfield_data(context, entity);
 }
 
+void prune_incompatible_shape_payloads(PhysicsContext &context, Entity entity,
+                                       ColliderShape shape) noexcept {
+  if (shape != ColliderShape::ConvexHull) {
+    remove_hull_data(context, entity);
+  }
+  if (shape != ColliderShape::Heightfield) {
+    remove_heightfield_data(context, entity);
+  }
+}
+
 /// Sets the requested value for heightfield data impl.
 bool set_heightfield_data(PhysicsContext &context, Entity entity,
                           const HeightfieldData &hf) noexcept {

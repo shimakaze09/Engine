@@ -802,17 +802,28 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
           snap.timerId = static_cast<TimerId>(timerId);
         }
       }
+      // A rejected numeric token must not fall back to the zero default:
+      // remaining 0 fires immediately and interval 0 with repeat spins, so
+      // an unparsable field drops the timer instead.
+      bool timerFieldsValid = true;
       core::JsonValue remainVal{};
       if (parser.get_object_field(timerVal, "remaining", &remainVal)) {
-        static_cast<void>(parser.as_float(remainVal, &snap.remainingSeconds));
+        timerFieldsValid = parser.as_float(remainVal, &snap.remainingSeconds);
       }
       core::JsonValue intervalVal{};
-      if (parser.get_object_field(timerVal, "interval", &intervalVal)) {
-        static_cast<void>(parser.as_float(intervalVal, &snap.intervalSeconds));
+      if (timerFieldsValid &&
+          parser.get_object_field(timerVal, "interval", &intervalVal)) {
+        timerFieldsValid = parser.as_float(intervalVal, &snap.intervalSeconds);
       }
       core::JsonValue repeatVal{};
-      if (parser.get_object_field(timerVal, "repeat", &repeatVal)) {
-        static_cast<void>(parser.as_bool(repeatVal, &snap.repeat));
+      if (timerFieldsValid &&
+          parser.get_object_field(timerVal, "repeat", &repeatVal)) {
+        timerFieldsValid = parser.as_bool(repeatVal, &snap.repeat);
+      }
+      if (!timerFieldsValid) {
+        core::log_message(core::LogLevel::Warning, kSceneLogChannel,
+                          "scene load dropped a timer with unparsable timing");
+        continue;
       }
 
       static_cast<void>(stagedWorld->timer_manager().restore(&snap, 1U));

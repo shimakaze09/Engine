@@ -227,9 +227,14 @@ bool is_sleeping(const World &world, Entity entity) noexcept {
   return physics::is_sleeping(world, entity);
 }
 
-/// Sets the requested value for convex hull data.
+/// Sets the requested value for convex hull data. Payloads are component
+/// state, so they follow the same Input-phase mutation rule as the Collider
+/// they belong to.
 bool set_convex_hull_data(World &world, Entity entity,
                           const physics::ConvexHullData &hull) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "set_convex_hull_data")) {
+    return false;
+  }
   if (!world.is_alive(entity)) {
     return false;
   }
@@ -244,9 +249,14 @@ const physics::ConvexHullData *get_convex_hull_data(const World &world,
   return physics::get_convex_hull_data(world.physics_context(), entity);
 }
 
-/// Sets the requested value for heightfield data.
+/// Sets the requested value for heightfield data. Payloads are component
+/// state, so they follow the same Input-phase mutation rule as the Collider
+/// they belong to.
 bool set_heightfield_data(World &world, Entity entity,
                           const physics::HeightfieldData &hf) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "set_heightfield_data")) {
+    return false;
+  }
   if (!world.is_alive(entity)) {
     return false;
   }
@@ -289,9 +299,10 @@ std::size_t overlap_box(const World &world, const math::Vec3 &center,
 
 bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,
                   const math::Vec3 &direction, float maxDistance,
-                  physics::SweepHit *outHit, std::uint32_t mask) noexcept {
+                  physics::SweepHit *outHit, std::uint32_t mask,
+                  Entity skipEntity) noexcept {
   return physics::sweep_sphere(world, origin, radius, direction, maxDistance,
-                               outHit, mask);
+                               outHit, mask, skipEntity);
 }
 
 bool sweep_box(const World &world, const math::Vec3 &center,

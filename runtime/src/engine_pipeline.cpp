@@ -454,6 +454,12 @@ struct EnginePipeline::Impl final {
   double utilizationPct = 0.0;
   core::JobSystemStats jobStats{};
 
+  /// Total simulated time this frame: the dt every per-frame gameplay system
+  /// receives, so one dispatch still accounts for every catch-up step.
+  double step_seconds() const noexcept {
+    return static_cast<double>(updateStepCount) * kFixedDeltaSeconds;
+  }
+
   // --- Stage methods ---
   bool initialize(std::uint32_t maxFrameCount) noexcept;
   bool execute_frame() noexcept;
@@ -766,18 +772,33 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 
 // ---------------------------------------------------------------------------
 // Stage: scripting
+//
+// Cadence contract (audit M-01). Two classes of system exist in this frame:
+//   * per-fixed-step: transform propagation, physics, collision resolve, and
+//     animation each run exactly updateStepCount times with kFixedDeltaSeconds
+//     apiece, so their integration is independent of the render rate.
+//   * per-frame: entity script on_tick, Lua timers, coroutines, spring arms,
+//     and camera evaluation run once per rendered frame. They are dispatched
+//     once — re-entrant script dispatch per catch-up step would multiply
+//     gameplay callbacks and their deferred mutations — but they receive
+//     step_seconds(), the total time simulated this frame, so their dt equals
+//     the time the world actually advanced. Passing the bare fixed delta made
+//     timers and script-driven motion run slow whenever catch-up stepped more
+//     than once.
+// Not yet addressed: spring-arm/camera work still runs after the frame graph,
+// so render prep culls against the previous frame's camera (see stage_post_frame).
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_scripting() noexcept {
   scripting::set_frame_index(frameIndex);
 
   if (isPlaying && (updateStepCount > 0U)) {
-    scripting::set_frame_time(static_cast<float>(kFixedDeltaSeconds),
+    scripting::set_frame_time(static_cast<float>(step_seconds()),
                               static_cast<float>(simulationTimeSeconds));
     scripting::tick_timers();
     scripting::tick_coroutines();
     scripting::dispatch_entity_scripts_update(
-        static_cast<float>(kFixedDeltaSeconds));
+        static_cast<float>(step_seconds()));
   }
 
   scripting::flush_deferred_mutations();
@@ -1146,6 +1167,16 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
 
 // ---------------------------------------------------------------------------
 // Stage: post-frame (collision callbacks, end-play, spring arm, scene ops)
+//
+// Spring arms and camera evaluation are per-frame systems and take
+// step_seconds() (see the cadence contract above stage_scripting). They run
+// here, after the frame graph, so they observe this frame's simulated
+// transforms — but render prep inside the frame graph has already culled
+// against renderer::get_active_camera(), i.e. the camera this stage published
+// last frame. Closing that one-frame staleness means splitting the frame
+// graph so camera work lands between the last fixed step and render prep;
+// that restructure is deliberately not attempted here because it changes the
+// step -> render-prep dependency chain the frame-graph order tests pin.
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_post_frame() noexcept {
@@ -1165,12 +1196,12 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
 
   if (isPlaying) {
     runtime::update_spring_arm_cameras(*world,
-                                       static_cast<float>(kFixedDeltaSeconds));
+                                       static_cast<float>(step_seconds()));
     math::Vec3 camPos, camTarget, camUp;
     float camFov = 0.0F;
     float camNear = 0.0F;
     float camFar = 0.0F;
-    world->camera_manager().evaluate(static_cast<float>(kFixedDeltaSeconds),
+    world->camera_manager().evaluate(static_cast<float>(step_seconds()),
                                      &camPos, &camTarget, &camUp, &camFov,
                                      &camNear, &camFar);
     if (world->camera_manager().camera_count() > 0U) {

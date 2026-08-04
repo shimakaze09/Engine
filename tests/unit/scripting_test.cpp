@@ -999,16 +999,19 @@ int main() {
   // Step 4.3 Test: clone_entity copies all components including light
   // =========================================================================
   {
-    const char *cloneScript = "function on_start()\n"
-                              "    local src = engine.spawn_entity()\n"
-                              "    engine.set_name(src, 'clone_source')\n"
-                              "    engine.add_light(src, 'directional')\n"
-                              "    engine.set_light_color(src, 0.1, 0.2, 0.3)\n"
-                              "    local c = engine.clone_entity(src)\n"
-                              "    if c ~= nil then\n"
-                              "        engine.set_name(c, 'clone_result')\n"
-                              "    end\n"
-                              "end\n";
+    const char *cloneScript =
+        "function on_start()\n"
+        "    local src = engine.spawn_entity()\n"
+        "    engine.set_name(src, 'clone_source')\n"
+        "    engine.add_light(src, 'directional')\n"
+        "    engine.set_light_color(src, 0.1, 0.2, 0.3)\n"
+        "    engine.add_spring_arm(src, 7.5, 0.0, 2.0, 0.0)\n"
+        "    engine.add_script_component(src, 'scripts/cloned.lua')\n"
+        "    local c = engine.clone_entity(src)\n"
+        "    if c ~= nil then\n"
+        "        engine.set_name(c, 'clone_result')\n"
+        "    end\n"
+        "end\n";
     if (!write_script_file(cloneScript)) {
       engine::scripting::shutdown_scripting();
       remove_script_file();
@@ -1045,6 +1048,73 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 60;
+    }
+    // Registry-driven clone: component types the old hand-written clone
+    // silently dropped must now come across.
+    engine::runtime::SpringArmComponent clonedArm{};
+    if (!world->get_spring_arm(cloneEntity, &clonedArm) ||
+        !nearly_equal(clonedArm.armLength, 7.5F) ||
+        !nearly_equal(clonedArm.offset.y, 2.0F)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 251;
+    }
+    engine::runtime::ScriptComponent clonedScript{};
+    if (!world->get_script_component(cloneEntity, &clonedScript) ||
+        (std::strcmp(clonedScript.scriptPath, "scripts/cloned.lua") != 0)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 252;
+    }
+  }
+
+  // =========================================================================
+  // Audit M-21: bindings reject non-finite and unknown-enum arguments rather
+  // than passing them through to World ingress or defaulting silently. The
+  // script raises on any accepted bad argument, so a failed expectation
+  // surfaces as a failed call_script_function.
+  // =========================================================================
+  {
+    const char *badArgScript =
+        "function on_start()\n"
+        "    local e = engine.spawn_entity()\n"
+        "    engine.add_collider(e, 0.5, 0.5, 0.5)\n"
+        "    engine.set_mesh(e, engine.get_default_mesh_asset_id())\n"
+        "    engine.set_velocity(e, 0.0, 0.0, 0.0)\n"
+        "    local nan = 0.0 / 0.0\n"
+        "    local inf = 1.0 / 0.0\n"
+        "    if engine.set_opacity(e, nan) ~= false then\n"
+        "        error('NaN opacity accepted')\n"
+        "    end\n"
+        "    if engine.set_roughness(e, inf) ~= false then\n"
+        "        error('Inf roughness accepted')\n"
+        "    end\n"
+        "    if engine.set_metallic(e, nan) ~= false then\n"
+        "        error('NaN metallic accepted')\n"
+        "    end\n"
+        "    if engine.set_albedo(e, nan, 0.5, 0.5) ~= false then\n"
+        "        error('NaN albedo accepted')\n"
+        "    end\n"
+        "    if engine.set_velocity(e, 0.0, nan, 0.0) ~= false then\n"
+        "        error('NaN velocity accepted')\n"
+        "    end\n"
+        "    if engine.spawn_shape('not_a_shape', 0, 0, 0) ~= nil then\n"
+        "        error('unknown shape name accepted')\n"
+        "    end\n"
+        "    if engine.set_opacity(e, 0.25) ~= true then\n"
+        "        error('valid opacity rejected')\n"
+        "    end\n"
+        "end\n";
+    if (!write_script_file(badArgScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 253;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 254;
     }
   }
 

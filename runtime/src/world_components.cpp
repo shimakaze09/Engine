@@ -118,6 +118,39 @@ bool validate_collider_ingress(const Collider &collider) noexcept {
          std::isfinite(collider.density) && (collider.density >= 0.0F);
 }
 
+/// Ingress validation (audit M-21/X-1): mesh material factors must be
+/// finite. NaN opacity is the sharp edge — render prep classifies a draw as
+/// transparent with `opacity < 1.0F`, which NaN fails, and the depth term of
+/// the sort key converts a float to uint16_t, so a NaN that reaches the key
+/// is undefined behavior rather than a mis-sorted draw.
+bool validate_mesh_component_ingress(const MeshComponent &component) noexcept {
+  return finite_vec3(component.albedo) && std::isfinite(component.roughness) &&
+         std::isfinite(component.metallic) && std::isfinite(component.opacity);
+}
+
+/// Companion clamp: albedo is a reflectance factor and roughness, metallic,
+/// and opacity are normalized factors, so all of them clamp into [0, 1]
+/// rather than feeding out-of-range energy into shading and sort keys.
+bool sanitize_mesh_component_ingress(MeshComponent &component) noexcept {
+  bool changed = false;
+  const auto clamp_unit = [&changed](float &value) noexcept {
+    if (value < 0.0F) {
+      value = 0.0F;
+      changed = true;
+    } else if (value > 1.0F) {
+      value = 1.0F;
+      changed = true;
+    }
+  };
+  clamp_unit(component.albedo.x);
+  clamp_unit(component.albedo.y);
+  clamp_unit(component.albedo.z);
+  clamp_unit(component.roughness);
+  clamp_unit(component.metallic);
+  clamp_unit(component.opacity);
+  return changed;
+}
+
 // Rebuilds the canonical primitive hull recorded in Collider::hullSource so
 // every collider install path (scene/prefab load, world copy, editor undo,
 // script spawn) restores the payload the component cannot carry itself. On
@@ -448,6 +481,11 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
     return false;
   }
 
+  // Order matters: drop payloads the new shape cannot consume before the
+  // provenance rebuild installs the one it can, so replacing a collider's
+  // shape can never leave a stale hull or heightfield resident.
+  physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
+                                             sanitized.shape);
   install_provenance_hull(m_physicsContext, entity, sanitized);
   return true;
 }
@@ -471,7 +509,21 @@ bool World::get_collider(Entity entity, Collider *outCollider) const noexcept {
 
 bool World::add_mesh_component(Entity entity,
                                const MeshComponent &component) noexcept {
-  return add_component_checked(m_meshComponents, entity, component,
+  if (!validate_mesh_component_ingress(component)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_mesh_component rejected non-finite fields");
+    return false;
+  }
+
+  MeshComponent sanitized = component;
+  if (sanitize_mesh_component_ingress(sanitized)) {
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "add_mesh_component clamped material factors for entity %u",
+                  entity.index);
+    core::log_message(core::LogLevel::Warning, "world", message);
+  }
+  return add_component_checked(m_meshComponents, entity, sanitized,
                                "add_mesh_component");
 }
 
