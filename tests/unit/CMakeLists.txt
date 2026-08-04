@@ -523,6 +523,14 @@ engine_add_test_executable(engine_unit_ccd
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_gjk_axis_aligned
+    SOURCES
+    gjk_axis_aligned_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_blocked_body_warning
     SOURCES
     blocked_body_warning_test.cpp
