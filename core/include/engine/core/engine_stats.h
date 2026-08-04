@@ -20,11 +20,13 @@ struct EngineStats final {
   float jobUtilizationPct = 0.0F;
 };
 
-/// Resets this object back to its reusable empty state for engine stats.
+/// Resets this object back to its reusable empty state for engine stats
+/// (mutex-guarded; safe from any thread).
 void reset_engine_stats() noexcept;
-/// Sets the requested value for engine stats.
+/// Publishes a whole-struct snapshot (mutex-guarded; safe from any thread).
 void set_engine_stats(const EngineStats &stats) noexcept;
-/// Snapshot of the current stats (thread-safe).
+/// Consistent snapshot of the last published stats (mutex-guarded; a reader
+/// never observes a torn mix of two publications).
 EngineStats get_engine_stats() noexcept;
 
 } // namespace engine::core
