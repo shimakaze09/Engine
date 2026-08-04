@@ -8,8 +8,11 @@
 // CVar (Console Variable) system.
 // Provides named, typed, runtime-mutable configuration variables.
 // Variables are registered once at startup with a default value; subsequent
-// get/set calls look up by name.  All functions are noexcept and safe to call
-// from any thread after initialize_cvars().
+// get/set calls look up by name.  All functions are noexcept, mutex-guarded,
+// and safe to call from any thread; the storage is process-global and needs
+// no prior initialize_cvars() call.  initialize_cvars/shutdown_cvars reset
+// the registry to empty and exist for owners of the full lifecycle (tests,
+// process teardown) — resetting while cvars are registered discards them.
 
 namespace engine::core {
 
@@ -66,7 +69,11 @@ bool cvar_set_float(const char *name, float value) noexcept;
 bool cvar_set_string(const char *name, const char *value) noexcept;
 
 // Set from a string literal, parsing according to the registered type.
-// Used by the console command "set <name> <value>".
+// Used by the console command "set <name> <value>".  The whole token must
+// parse: bool accepts exactly 1/true/0/false, int/float reject trailing
+// text, out-of-range magnitudes, and non-finite floats, and strings longer
+// than the stored capacity are rejected rather than truncated.  Failures
+// log a diagnostic with the cvar name and input and leave the value as-is.
 bool cvar_set_from_string(const char *name, const char *valueStr) noexcept;
 
 // Enumerate all registered CVars.  Returns the number of entries written.
