@@ -2736,6 +2736,347 @@ int check_broadphase_overflow_lossless_and_loud() {
   return 0;
 }
 
+/// H-08 regression: exactly coincident spheres have no center-difference
+/// direction, so the contact must use the documented deterministic +Y
+/// fallback instead of a zero normal that leaves both bodies embedded.
+/// After one resolve the full overlap is corrected, so the pair must sit
+/// ~sumR apart along Y (0.9 lower bound leaves room for the 1e-4 internal
+/// distance epsilon) with X/Z untouched (exact: the +Y normal has zero
+/// X/Z components by construction).
+int check_coincident_spheres_separate() {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1050;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Entity spheres[2] = {};
+  for (int i = 0; i < 2; ++i) {
+    spheres[i] = world->create_entity();
+    engine::runtime::Transform t{};
+    t.position = engine::math::Vec3(3.0F, 3.0F, 3.0F);
+    world->add_transform(spheres[i], t);
+    engine::runtime::Collider col{};
+    col.shape = engine::runtime::ColliderShape::Sphere;
+    col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+    world->add_collider(spheres[i], col);
+    engine::runtime::RigidBody rb{};
+    rb.inverseMass = 1.0F;
+    world->add_rigid_body(spheres[i], rb);
+  }
+
+  world->begin_update_phase();
+  const bool resolved = engine::runtime::resolve_collisions(*world);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  if (!resolved) {
+    return 1051;
+  }
+
+  engine::runtime::Transform tA{};
+  engine::runtime::Transform tB{};
+  if (!world->get_transform(spheres[0], &tA) ||
+      !world->get_transform(spheres[1], &tB)) {
+    return 1052;
+  }
+  const float dy = tB.position.y - tA.position.y;
+  if ((dy < 0.9F) || (tA.position.x != 3.0F) || (tB.position.x != 3.0F) ||
+      (tA.position.z != 3.0F) || (tB.position.z != 3.0F)) {
+    return 1053;
+  }
+  return 0;
+}
+
+/// H-08 regression: a sphere whose center lies INSIDE a box must exit
+/// through the nearest face with penetration = face distance + radius.
+/// Sphere r=0.25 at (0.8, 0.1, 0) inside a unit-half-extent static box:
+/// nearest face is +X at 0.2, so the sphere must land at x = 1.25
+/// (touching the face) with Y/Z unchanged. Tolerance 1e-4 covers the
+/// clamped-closest-point float arithmetic; the old fallback pushed +Y by
+/// only the radius, leaving the sphere embedded.
+int check_sphere_inside_box_exits_nearest_face() {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1060;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const auto box = world->create_entity();
+  engine::runtime::Transform boxT{};
+  world->add_transform(box, boxT);
+  engine::runtime::Collider boxCol{};
+  boxCol.shape = engine::runtime::ColliderShape::AABB;
+  boxCol.halfExtents = engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  world->add_collider(box, boxCol);
+
+  const auto sphere = world->create_entity();
+  engine::runtime::Transform sphT{};
+  sphT.position = engine::math::Vec3(0.8F, 0.1F, 0.0F);
+  world->add_transform(sphere, sphT);
+  engine::runtime::Collider sphCol{};
+  sphCol.shape = engine::runtime::ColliderShape::Sphere;
+  sphCol.halfExtents = engine::math::Vec3(0.25F, 0.25F, 0.25F);
+  world->add_collider(sphere, sphCol);
+  engine::runtime::RigidBody rb{};
+  rb.inverseMass = 1.0F;
+  world->add_rigid_body(sphere, rb);
+
+  world->begin_update_phase();
+  const bool resolved = engine::runtime::resolve_collisions(*world);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  if (!resolved) {
+    return 1061;
+  }
+
+  engine::runtime::Transform after{};
+  if (!world->get_transform(sphere, &after)) {
+    return 1062;
+  }
+  if ((std::fabs(after.position.x - 1.25F) > 1.0e-4F) ||
+      (after.position.y != 0.1F) || (after.position.z != 0.0F)) {
+    return 1063;
+  }
+  return 0;
+}
+
+/// H-08 regression: when both bodies are dynamic the contact impulse must
+/// use the full normal-row Jacobian (point relative velocity and the
+/// i |r x n|^2 effective-mass terms). Box A (invMass 1, invInertia 1) at
+/// origin, sphere B approaching a tangentially offset face point at
+/// 0.5 m/s (below the restitution threshold, so the target normal speed
+/// is exactly zero). After one resolve the recomputed point-relative
+/// normal velocity must sit within 5e-3 of zero (float roundings across
+/// the impulse chain); the old linear-only effective mass with an angular
+/// response applied overshot by ~2e-2.
+int check_angular_effective_mass_no_overshoot() {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1070;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const auto boxEntity = world->create_entity();
+  engine::runtime::Transform boxT{};
+  world->add_transform(boxEntity, boxT);
+  engine::runtime::Collider boxCol{};
+  boxCol.shape = engine::runtime::ColliderShape::AABB;
+  boxCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  world->add_collider(boxEntity, boxCol);
+  engine::runtime::RigidBody boxRB{};
+  boxRB.inverseMass = 1.0F;
+  boxRB.inverseInertia = 1.0F;
+  world->add_rigid_body(boxEntity, boxRB);
+
+  const auto sphereEntity = world->create_entity();
+  engine::runtime::Transform sphT{};
+  sphT.position = engine::math::Vec3(0.7F, 0.3F, 0.0F);
+  world->add_transform(sphereEntity, sphT);
+  engine::runtime::Collider sphCol{};
+  sphCol.shape = engine::runtime::ColliderShape::Sphere;
+  sphCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  world->add_collider(sphereEntity, sphCol);
+  engine::runtime::RigidBody sphRB{};
+  sphRB.inverseMass = 1.0F;
+  sphRB.inverseInertia = 1.0F;
+  sphRB.velocity = engine::math::Vec3(-0.5F, 0.0F, 0.0F);
+  world->add_rigid_body(sphereEntity, sphRB);
+
+  world->begin_update_phase();
+  const bool resolved = engine::runtime::resolve_collisions(*world);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  if (!resolved) {
+    return 1071;
+  }
+
+  engine::runtime::Transform boxAfter{};
+  engine::runtime::Transform sphAfter{};
+  const engine::runtime::RigidBody *bodyA =
+      world->get_rigid_body_ptr(boxEntity);
+  const engine::runtime::RigidBody *bodyB =
+      world->get_rigid_body_ptr(sphereEntity);
+  if (!world->get_transform(boxEntity, &boxAfter) ||
+      !world->get_transform(sphereEntity, &sphAfter) || (bodyA == nullptr) ||
+      (bodyB == nullptr)) {
+    return 1072;
+  }
+
+  const engine::math::Vec3 contact(0.5F, 0.3F, 0.0F);
+  const engine::math::Vec3 normal(1.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 rA =
+      engine::math::sub(contact, boxAfter.position);
+  const engine::math::Vec3 rB =
+      engine::math::sub(contact, sphAfter.position);
+  const engine::math::Vec3 pointVelA = engine::math::add(
+      bodyA->velocity, engine::math::cross(bodyA->angularVelocity, rA));
+  const engine::math::Vec3 pointVelB = engine::math::add(
+      bodyB->velocity, engine::math::cross(bodyB->angularVelocity, rB));
+  const float residual = engine::math::dot(
+      engine::math::sub(pointVelB, pointVelA), normal);
+  if (std::fabs(residual) > 5.0e-3F) {
+    return 1073;
+  }
+  return 0;
+}
+
+/// H-08 regression: a convex hull against a heightfield must consume the
+/// hull's real support function, not its declared-halfExtents box. A
+/// 16-slice cylinder hull (r=0.5, hh=0.5) floats above a 45-degree
+/// diagonal slope (plane y = x + z, normal (-1,1,-1)/sqrt(3)) at plane
+/// distance 0.78: the box model reaches 0.866 along the normal (false
+/// contact) while the true cylinder support reaches at most ~0.70, so a
+/// correct narrow phase reports nothing and the body must stay bitwise
+/// unmoved with zero recorded pairs.
+int check_heightfield_hull_uses_real_shape() {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1080;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const auto terrain = world->create_entity();
+  engine::runtime::Transform terrainT{};
+  world->add_transform(terrain, terrainT);
+  engine::runtime::Collider terrainCol{};
+  terrainCol.shape = engine::runtime::ColliderShape::Heightfield;
+  terrainCol.halfExtents = engine::math::Vec3(2.0F, 3.0F, 2.0F);
+  world->add_collider(terrain, terrainCol);
+  auto heightfield = std::unique_ptr<engine::physics::HeightfieldData>(
+      new (std::nothrow) engine::physics::HeightfieldData());
+  if (heightfield == nullptr) {
+    return 1081;
+  }
+  heightfield->rows = 2U;
+  heightfield->columns = 2U;
+  heightfield->spacingX = 2.0F;
+  heightfield->spacingZ = 2.0F;
+  heightfield->heights[0] = -2.0F;
+  heightfield->heights[1] = 0.0F;
+  heightfield->heights[2] = 0.0F;
+  heightfield->heights[3] = 2.0F;
+  if (!engine::physics::set_heightfield_data(world->physics_context(), terrain,
+                                             *heightfield)) {
+    return 1082;
+  }
+
+  const auto hullEntity = world->create_entity();
+  engine::runtime::Transform hullT{};
+  hullT.position = engine::math::Vec3(0.0F, 1.352F, 0.0F);
+  world->add_transform(hullEntity, hullT);
+  engine::runtime::Collider hullCol{};
+  hullCol.shape = engine::runtime::ColliderShape::ConvexHull;
+  hullCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  hullCol.hullSource = engine::runtime::HullSource::Cylinder;
+  world->add_collider(hullEntity, hullCol);
+  engine::runtime::RigidBody hullRB{};
+  hullRB.inverseMass = 1.0F;
+  world->add_rigid_body(hullEntity, hullRB);
+
+  world->begin_update_phase();
+  const bool resolved = engine::runtime::resolve_collisions(*world);
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  if (!resolved) {
+    return 1083;
+  }
+
+  engine::runtime::Transform after{};
+  if (!world->get_transform(hullEntity, &after)) {
+    return 1084;
+  }
+  if ((after.position.x != 0.0F) || (after.position.y != 1.352F) ||
+      (after.position.z != 0.0F) ||
+      (world->physics_context().collisionPairCount != 0U)) {
+    return 1085;
+  }
+  return 0;
+}
+
+/// H-08 boundary: contacts past kMaxCollisionPairs must be counted and
+/// reported once per overflow episode instead of vanishing silently, the
+/// kept set must fill the buffer exactly, and a workload trimmed back to
+/// the cap must clear the episode without logging a new one. 1030
+/// well-separated static overlapping pairs produce 6 drops; removing six
+/// pairs' colliders lands exactly at capacity (the zero-drop boundary).
+int check_collision_pair_cap_loud() {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 1090;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  constexpr int kPairCount = 1030;
+  engine::runtime::Entity extras[12] = {};
+  int extraCount = 0;
+  for (int p = 0; p < kPairCount; ++p) {
+    for (int half = 0; half < 2; ++half) {
+      const auto entity = world->create_entity();
+      engine::runtime::Transform t{};
+      t.position = engine::math::Vec3(static_cast<float>(p) * 10.0F +
+                                          (static_cast<float>(half) * 0.5F),
+                                      0.0F, 0.0F);
+      world->add_transform(entity, t);
+      engine::runtime::Collider col{};
+      col.shape = engine::runtime::ColliderShape::Sphere;
+      col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+      world->add_collider(entity, col);
+      if ((p >= kPairCount - 6) && (extraCount < 12)) {
+        extras[extraCount] = entity;
+        ++extraCount;
+      }
+    }
+  }
+
+  auto run_resolve = [&world]() noexcept -> bool {
+    world->begin_update_phase();
+    const bool resolved = engine::runtime::resolve_collisions(*world);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+    return resolved;
+  };
+
+  const engine::physics::PhysicsContext &ctx = world->physics_context();
+  if (!run_resolve() ||
+      (ctx.collisionPairCount != engine::physics::kMaxCollisionPairs) ||
+      (ctx.collisionPairDropCount != 6U) ||
+      (ctx.collisionPairOverflowEpisodes != 1U)) {
+    return 1091;
+  }
+  if (!run_resolve() || (ctx.collisionPairOverflowEpisodes != 1U)) {
+    return 1092;
+  }
+
+  for (int i = 0; i < extraCount; ++i) {
+    if (!world->remove_collider(extras[i])) {
+      return 1093;
+    }
+  }
+  if (!run_resolve() ||
+      (ctx.collisionPairCount != engine::physics::kMaxCollisionPairs) ||
+      (ctx.collisionPairDropCount != 0U) ||
+      ctx.collisionPairOverflowActive ||
+      (ctx.collisionPairOverflowEpisodes != 1U)) {
+    return 1094;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -2866,6 +3207,31 @@ int main() {
   }
 
   result = check_broadphase_overflow_lossless_and_loud();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_coincident_spheres_separate();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_sphere_inside_box_exits_nearest_face();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_angular_effective_mass_no_overshoot();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_heightfield_hull_uses_real_shape();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_collision_pair_cap_loud();
   if (result != 0) {
     return result;
   }

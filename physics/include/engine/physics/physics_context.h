@@ -184,6 +184,15 @@ struct PhysicsContext final {
   bool broadphaseOverflowActive = false;
   std::uint32_t broadphaseOverflowEpisodes = 0U;
 
+  // Collision-pair buffer diagnostic: pairs recorded past
+  // kMaxCollisionPairs are counted per step and reported once per
+  // overflow episode. The kept set is the first kMaxCollisionPairs in
+  // deterministic traversal order; callbacks past the cap are dropped
+  // (loudly), never reordered.
+  std::uint32_t collisionPairDropCount = 0U;
+  bool collisionPairOverflowActive = false;
+  std::uint32_t collisionPairOverflowEpisodes = 0U;
+
   // Raw per-step cvar cache written by refresh_step_cvar_cache on the
   // serial begin-step path so step/resolve code never takes the global
   // cvar mutex inside the parallel section; each consumer keeps its own

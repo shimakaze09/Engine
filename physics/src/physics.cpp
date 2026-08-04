@@ -149,6 +149,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   }
 
   physicsCtx.collisionPairCount = 0U;
+  physicsCtx.collisionPairDropCount = 0U;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
                    physicsCtx.pairHashStamps.size());
@@ -569,6 +570,18 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     }
   } else {
     physicsCtx.broadphaseOverflowActive = false;
+  }
+
+  if (physicsCtx.collisionPairDropCount > 0U) {
+    if (!physicsCtx.collisionPairOverflowActive) {
+      physicsCtx.collisionPairOverflowActive = true;
+      ++physicsCtx.collisionPairOverflowEpisodes;
+      core::log_message(core::LogLevel::Warning, "physics",
+                        "collision pair buffer full; contacts past "
+                        "kMaxCollisionPairs report no callbacks this episode");
+    }
+  } else {
+    physicsCtx.collisionPairOverflowActive = false;
   }
 
   solve_constraints(world, deltaSeconds);
