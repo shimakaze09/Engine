@@ -2386,6 +2386,75 @@ int check_shape_payloads_do_not_survive_entity_reuse() {
   return 0;
 }
 
+/// Replacing a collider's shape must drop the payload the new shape cannot
+/// consume, and the payload setters must honor the Input-phase mutation rule.
+int check_collider_replacement_prunes_payloads() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 560;
+  }
+  world->end_frame_phase();
+  const engine::runtime::Entity entity = world->create_scene_object();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 561;
+  }
+
+  engine::runtime::Collider heightfieldCollider{};
+  heightfieldCollider.shape = engine::runtime::ColliderShape::Heightfield;
+  if (!world->add_collider(entity, heightfieldCollider)) {
+    return 562;
+  }
+  engine::physics::HeightfieldData heightfield{};
+  heightfield.rows = 2U;
+  heightfield.columns = 2U;
+  heightfield.spacingX = 1.0F;
+  heightfield.spacingZ = 1.0F;
+  if (!engine::runtime::set_heightfield_data(*world, entity, heightfield)) {
+    return 563;
+  }
+  if (engine::runtime::get_heightfield_data(*world, entity) == nullptr) {
+    return 564;
+  }
+
+  engine::runtime::Collider boxCollider{};
+  boxCollider.shape = engine::runtime::ColliderShape::AABB;
+  if (!world->add_collider(entity, boxCollider)) {
+    return 565;
+  }
+  if (engine::runtime::get_heightfield_data(*world, entity) != nullptr) {
+    return 566;
+  }
+
+  engine::runtime::Collider hullCollider{};
+  hullCollider.shape = engine::runtime::ColliderShape::ConvexHull;
+  hullCollider.hullSource = engine::runtime::HullSource::Cylinder;
+  if (!world->add_collider(entity, hullCollider)) {
+    return 567;
+  }
+  if (engine::runtime::get_convex_hull_data(*world, entity) == nullptr) {
+    return 568;
+  }
+  if (!world->add_collider(entity, boxCollider)) {
+    return 569;
+  }
+  if (engine::runtime::get_convex_hull_data(*world, entity) != nullptr) {
+    return 570;
+  }
+
+  world->begin_transform_phase();
+  engine::physics::HeightfieldData rejected{};
+  rejected.rows = 2U;
+  rejected.columns = 2U;
+  rejected.spacingX = 1.0F;
+  rejected.spacingZ = 1.0F;
+  if (engine::runtime::set_heightfield_data(*world, entity, rejected)) {
+    return 571;
+  }
+  world->end_frame_phase();
+  return 0;
+}
+
 int check_invalid_shape_payloads_rejected() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -3292,6 +3361,11 @@ int main() {
   }
 
   result = check_shape_payloads_do_not_survive_entity_reuse();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_collider_replacement_prunes_payloads();
   if (result != 0) {
     return result;
   }

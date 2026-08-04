@@ -448,6 +448,11 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
     return false;
   }
 
+  // Order matters: drop payloads the new shape cannot consume before the
+  // provenance rebuild installs the one it can, so replacing a collider's
+  // shape can never leave a stale hull or heightfield resident.
+  physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
+                                             sanitized.shape);
   install_provenance_hull(m_physicsContext, entity, sanitized);
   return true;
 }
