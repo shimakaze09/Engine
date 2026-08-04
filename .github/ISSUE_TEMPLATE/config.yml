@@ -1,3 +1,4 @@
+# Issue template chooser configuration: keeps blank issues enabled and links the finding-closure contract.
 blank_issues_enabled: true
 contact_links:
   - name: Finding-closure contract
