@@ -161,7 +161,14 @@ void configure_fake_device() noexcept {
 bool write_shader_file(const char *fileName, const char *text) noexcept {
   char path[256] = {};
   std::snprintf(path, sizeof(path), "%s/%s", kShaderDir, fileName);
-  FILE *file = std::fopen(path, "wb");
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
   if (file == nullptr) {
     return false;
   }
