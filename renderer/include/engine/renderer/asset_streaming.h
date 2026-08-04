@@ -136,11 +136,18 @@ bool is_load_ready(const AssetStreamingQueue *queue,
 LoadingState get_load_state(const AssetStreamingQueue *queue,
                             LoadHandle handle) noexcept;
 
-/// Blocking wait until the request reaches Ready or Failed.
-/// Uses the queue condition variable; callers must still drive
-/// update_asset_streaming so loaded requests can be uploaded on the main thread.
-void wait_for_load(const AssetStreamingQueue *queue,
-                   LoadHandle handle) noexcept;
+/// Default bound for wait_for_load before it gives up with a diagnostic.
+inline constexpr std::uint32_t kWaitForLoadDefaultTimeoutMs = 5000U;
+
+/// Blocking wait until the request reaches Ready or Failed, bounded by
+/// timeoutMs. Progress requires the main thread to pump
+/// update_asset_streaming; a caller that owns that pump (or a headless frame
+/// that skips it) would otherwise deadlock, so the wait times out with an
+/// error diagnostic. Returns the request state observed on exit (Failed for
+/// stale or invalid handles); shutdown wakes all waiters.
+LoadingState wait_for_load(const AssetStreamingQueue *queue, LoadHandle handle,
+                           std::uint32_t timeoutMs =
+                               kWaitForLoadDefaultTimeoutMs) noexcept;
 
 // ---- Per-frame processing ----
 
