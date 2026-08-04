@@ -254,6 +254,98 @@ int test_invalid_inverse_bind_accessor_fails() noexcept {
              : 34;
 }
 
+/// EXPECTATION (audit M-26): a mirrored joint (negative scale) is rejected
+/// as UnsupportedTransform instead of silently cooking a corrupt rotation.
+int test_negative_scale_rejected() noexcept {
+  remove_file(kGltfPath);
+
+  const char *gltf =
+      "{"
+      "\"asset\":{\"version\":\"2.0\"},"
+      "\"nodes\":[{\"children\":[1],\"scale\":[-1.0,1.0,1.0]},{}],"
+      "\"skins\":[{\"joints\":[0,1]}]"
+      "}";
+
+  if (!write_text_file(kGltfPath, gltf)) {
+    return 41;
+  }
+
+  cgltf_data *data = nullptr;
+  if (!parse_gltf_file(kGltfPath, false, &data)) {
+    remove_file(kGltfPath);
+    return 42;
+  }
+
+  engine::tools::Skeleton skeleton{};
+  engine::tools::SkeletonImportResult result =
+      engine::tools::SkeletonImportResult::Ok;
+  const bool parsed =
+      engine::tools::parse_gltf_skeleton(data, 0U, &skeleton, &result);
+  cgltf_free(data);
+  remove_file(kGltfPath);
+
+  if (parsed) {
+    return 43;
+  }
+  return (result ==
+          engine::tools::SkeletonImportResult::UnsupportedTransform)
+             ? 0
+             : 44;
+}
+
+/// EXPECTATION (audit M-26): a non-joint node between two joints is
+/// flattened into the child joint's rest pose (its translation composes
+/// in) and the child's parent resolves to the nearest joint ancestor.
+int test_intermediary_node_flattened() noexcept {
+  remove_file(kGltfPath);
+
+  const char *gltf =
+      "{"
+      "\"asset\":{\"version\":\"2.0\"},"
+      "\"nodes\":["
+      "{\"name\":\"Root\",\"children\":[1]},"
+      "{\"name\":\"Offset\",\"children\":[2],"
+      "\"translation\":[0.0,5.0,0.0]},"
+      "{\"name\":\"Tip\",\"translation\":[0.0,1.0,0.0]}"
+      "],"
+      "\"skins\":[{\"joints\":[0,2]}]"
+      "}";
+
+  if (!write_text_file(kGltfPath, gltf)) {
+    return 51;
+  }
+
+  cgltf_data *data = nullptr;
+  if (!parse_gltf_file(kGltfPath, false, &data)) {
+    remove_file(kGltfPath);
+    return 52;
+  }
+
+  engine::tools::Skeleton skeleton{};
+  engine::tools::SkeletonImportResult result =
+      engine::tools::SkeletonImportResult::Ok;
+  const bool parsed =
+      engine::tools::parse_gltf_skeleton(data, 0U, &skeleton, &result);
+  cgltf_free(data);
+  remove_file(kGltfPath);
+
+  if (!parsed || (result != engine::tools::SkeletonImportResult::Ok)) {
+    return 53;
+  }
+  if (skeleton.joints.size() != 2U) {
+    return 54;
+  }
+  if (skeleton.joints[1U].parent != 0U) {
+    return 55;
+  }
+  if (!almost_equal(skeleton.joints[1U].restTranslation.x, 0.0F) ||
+      !almost_equal(skeleton.joints[1U].restTranslation.y, 6.0F) ||
+      !almost_equal(skeleton.joints[1U].restTranslation.z, 0.0F)) {
+    return 56;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -274,6 +366,18 @@ int main() {
   result = test_invalid_inverse_bind_accessor_fails();
   if (result != 0) {
     std::fprintf(stderr, "FAIL skin import validation: %d\n", result);
+    return result;
+  }
+
+  result = test_negative_scale_rejected();
+  if (result != 0) {
+    std::fprintf(stderr, "FAIL negative scale rejection: %d\n", result);
+    return result;
+  }
+
+  result = test_intermediary_node_flattened();
+  if (result != 0) {
+    std::fprintf(stderr, "FAIL intermediary node flattening: %d\n", result);
     return result;
   }
 

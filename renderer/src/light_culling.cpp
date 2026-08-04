@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace engine::renderer {
@@ -111,8 +112,10 @@ std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept {
   if (screenW <= 0 || screenH <= 0) {
     return 0;
   }
-  const int tileCountX = (screenW + kTileSize - 1) / kTileSize;
-  const int tileCountY = (screenH + kTileSize - 1) / kTileSize;
+  const std::int64_t tileCountX =
+      (static_cast<std::int64_t>(screenW) + kTileSize - 1) / kTileSize;
+  const std::int64_t tileCountY =
+      (static_cast<std::int64_t>(screenH) + kTileSize - 1) / kTileSize;
   return static_cast<std::size_t>(tileCountX) *
          static_cast<std::size_t>(tileCountY) *
          static_cast<std::size_t>(kTileDataWidth);
@@ -121,18 +124,25 @@ std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept {
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
                        const float *projMatrix, int screenW, int screenH,
                        TileLightData &outData) noexcept {
+  outData.tileCountX = 0;
+  outData.tileCountY = 0;
+  outData.totalTiles = 0;
   if ((viewMatrix == nullptr) || (projMatrix == nullptr) || (screenW <= 0) ||
       (screenH <= 0)) {
     return false;
   }
 
-  const int tileCountX = (screenW + kTileSize - 1) / kTileSize;
-  const int tileCountY = (screenH + kTileSize - 1) / kTileSize;
-  const int totalTiles = tileCountX * tileCountY;
-
-  outData.tileCountX = tileCountX;
-  outData.tileCountY = tileCountY;
-  outData.totalTiles = totalTiles;
+  const std::int64_t wideCountX =
+      (static_cast<std::int64_t>(screenW) + kTileSize - 1) / kTileSize;
+  const std::int64_t wideCountY =
+      (static_cast<std::int64_t>(screenH) + kTileSize - 1) / kTileSize;
+  const std::int64_t wideTotal = wideCountX * wideCountY;
+  if (wideTotal > static_cast<std::int64_t>(INT32_MAX)) {
+    return false;
+  }
+  const int tileCountX = static_cast<int>(wideCountX);
+  const int tileCountY = static_cast<int>(wideCountY);
+  const int totalTiles = static_cast<int>(wideTotal);
 
   const std::size_t requiredSize = static_cast<std::size_t>(totalTiles) *
                                    static_cast<std::size_t>(kTileDataWidth);
@@ -140,6 +150,10 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
   if ((outData.data == nullptr) || (outData.dataSize < requiredSize)) {
     return false;
   }
+
+  outData.tileCountX = tileCountX;
+  outData.tileCountY = tileCountY;
+  outData.totalTiles = totalTiles;
 
   std::memset(outData.data, 0, requiredSize * sizeof(float));
 

@@ -250,7 +250,8 @@ static void test_stale_handles_do_not_alias_reused_slots() noexcept {
         "stale handle cannot update priority");
   CHECK(!cancel_load(queue.get(), original), "stale handle cannot cancel");
   CHECK(!release_load(queue.get(), original), "stale handle cannot release");
-  wait_for_load(queue.get(), original);
+  CHECK(wait_for_load(queue.get(), original) == LoadingState::Failed,
+        "stale handle wait reports failed state");
 
   CHECK(cancel_load(queue.get(), reused), "current reused handle still works");
 
@@ -393,6 +394,66 @@ static void test_worker_pool_runs_concurrent_loads() noexcept {
   engine::core::shutdown_cvars();
 }
 
+// Waiting without any main-thread pump must time out with the request still
+// non-terminal instead of deadlocking (audit M-07).
+static void test_wait_without_pump_times_out() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  LoadHandle h = load_asset_async(queue.get(), make_id(0), "unpumped.mesh",
+                                  LoadPriority::Normal);
+  CHECK(h.valid(), "unpumped handle valid");
+  CHECK(wait_for_load(queue.get(), h, 50U) == LoadingState::Queued,
+        "wait without pump returns queued state after timeout");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
+// A terminal request satisfies the wait immediately with its final state.
+static void test_wait_returns_terminal_state() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  LoadHandle h = load_asset_async(queue.get(), make_id(0), "terminal.mesh",
+                                  LoadPriority::Normal);
+  pump_until_terminal(queue.get(), h, &ok_load, &ok_upload, nullptr);
+  CHECK(wait_for_load(queue.get(), h) == LoadingState::Ready,
+        "wait on terminal request returns ready");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
+// Shutdown must wake a blocked waiter; the test hangs on regression.
+static void test_shutdown_wakes_waiter() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  LoadHandle h = load_asset_async(queue.get(), make_id(0), "waiter.mesh",
+                                  LoadPriority::Normal);
+  CHECK(h.valid(), "waiter handle valid");
+
+  std::atomic<bool> waiterReturned{false};
+  std::thread waiter([&]() noexcept {
+    static_cast<void>(wait_for_load(queue.get(), h, 60000U));
+    waiterReturned.store(true, std::memory_order_release);
+  });
+
+  for (std::size_t i = 0U; i < 50U; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  shutdown_asset_streaming(queue.get());
+  waiter.join();
+  CHECK(waiterReturned.load(std::memory_order_acquire),
+        "shutdown released the blocked waiter");
+
+  engine::core::shutdown_cvars();
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
@@ -408,6 +469,9 @@ int main() {
   test_pending_count();
   test_load_callback_is_async();
   test_worker_pool_runs_concurrent_loads();
+  test_wait_without_pump_times_out();
+  test_wait_returns_terminal_state();
+  test_shutdown_wakes_waiter();
 
   return g_tests.finish("Async Streaming Unit Tests");
 }

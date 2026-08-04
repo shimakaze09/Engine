@@ -1,5 +1,8 @@
 // Implements the forward path (opaque batches, sky, transparent pass)
-// and the depth-tested debug line overlay both paths share.
+// and the depth-tested debug overlay both paths share; the overlay draws
+// lines directly and wire spheres as three tessellated great circles
+// through the same line pipeline, while text primitives log a one-time
+// unsupported diagnostic (audit M-08).
 #include "engine/renderer/command_buffer.h"
 
 #include "command_buffer_capture.h"
@@ -16,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <numbers>
 #include <vector>
 
 #include "engine/core/cvar.h"
@@ -276,6 +280,44 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::Scene);
 }
 
+namespace {
+
+constexpr std::size_t kMaxDebugLineDraws = 1024U;
+constexpr std::size_t kMaxDebugSphereDraws = 512U;
+constexpr std::size_t kDebugSphereCircleSegments = 16U;
+constexpr std::size_t kDebugSegmentChunk = 1024U;
+constexpr std::size_t kDebugFloatsPerSegment = 14U;
+
+/// Uploads and draws one accumulated chunk of debug line segments.
+void draw_debug_segment_chunk(const RenderDevice *dev, const float *vertices,
+                              std::size_t segmentCount) noexcept {
+  dev->buffer_data_array(vertices,
+                         static_cast<std::ptrdiff_t>(
+                             segmentCount * kDebugFloatsPerSegment *
+                             sizeof(float)));
+  dev->draw_arrays_lines(0, static_cast<std::int32_t>(segmentCount * 2U));
+}
+
+/// Returns a point on one of a sphere's three axis-aligned great circles.
+core::DebugVec3 debug_sphere_circle_point(const core::DebugSphere &sphere,
+                                          std::size_t plane,
+                                          std::size_t segment) noexcept {
+  const float angle =
+      (2.0F * std::numbers::pi_v<float> * static_cast<float>(segment)) /
+      static_cast<float>(kDebugSphereCircleSegments);
+  const float c = sphere.radius * std::cos(angle);
+  const float s = sphere.radius * std::sin(angle);
+  if (plane == 0U) {
+    return {sphere.center.x + c, sphere.center.y + s, sphere.center.z};
+  }
+  if (plane == 1U) {
+    return {sphere.center.x + c, sphere.center.y, sphere.center.z + s};
+  }
+  return {sphere.center.x, sphere.center.y + c, sphere.center.z + s};
+}
+
+} // namespace
+
 void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
   BackendState &backend = ctx.backend;
   const RenderDevice *dev = ctx.dev;
@@ -285,26 +327,35 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
   const math::Mat4 &viewMat = ctx.viewMat;
   const math::Mat4 &projMat = ctx.projMat;
   if (backend.debugLineAvailable) {
-    constexpr std::size_t kMaxDebugLineDraws = 1024U;
     thread_local static std::array<core::DebugLine, kMaxDebugLineDraws>
         debugLines{};
+    thread_local static std::array<core::DebugSphere, kMaxDebugSphereDraws>
+        debugSpheres{};
     const std::size_t debugLineCount =
         core::debug_draw_get_lines(debugLines.data(), kMaxDebugLineDraws);
-    if (debugLineCount > 0U) {
-      thread_local static std::array<float, kMaxDebugLineDraws * 14U>
-          debugLineVertices{};
-      std::size_t floatIndex = 0U;
-      for (std::size_t i = 0U; i < debugLineCount; ++i) {
-        const core::DebugLine &line = debugLines[i];
-        const float endpoints[14] = {
-            line.from.x,    line.from.y,    line.from.z,    line.color.r,
-            line.color.g,   line.color.b,   line.color.a,   line.to.x,
-            line.to.y,      line.to.z,      line.color.r,   line.color.g,
-            line.color.b,   line.color.a};
-        for (float value : endpoints) {
-          debugLineVertices[floatIndex++] = value;
+    const std::size_t debugSphereCount =
+        core::debug_draw_get_spheres(debugSpheres.data(), kMaxDebugSphereDraws);
+    if ((debugLineCount > 0U) || (debugSphereCount > 0U)) {
+      thread_local static std::array<
+          float, kDebugSegmentChunk * kDebugFloatsPerSegment>
+          chunkVertices{};
+      std::size_t chunkCount = 0U;
+      const auto appendSegment = [&](const core::DebugVec3 &from,
+                                     const core::DebugVec3 &to,
+                                     const core::DebugColor &color) noexcept {
+        const std::size_t base = chunkCount * kDebugFloatsPerSegment;
+        const float endpoints[kDebugFloatsPerSegment] = {
+            from.x,  from.y,  from.z,  color.r, color.g, color.b, color.a,
+            to.x,    to.y,    to.z,    color.r, color.g, color.b, color.a};
+        for (std::size_t f = 0U; f < kDebugFloatsPerSegment; ++f) {
+          chunkVertices[base + f] = endpoints[f];
         }
-      }
+        ++chunkCount;
+        if (chunkCount == kDebugSegmentChunk) {
+          draw_debug_segment_chunk(dev, chunkVertices.data(), chunkCount);
+          chunkCount = 0U;
+        }
+      };
 
       const math::Mat4 debugLineViewProjection = math::mul(projMat, viewMat);
       dev->bind_framebuffer(pass_resource_framebuffer(passRes.sceneColor));
@@ -320,15 +371,42 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
       }
       dev->bind_vertex_array(backend.debugLineVao);
       dev->bind_array_buffer(backend.debugLineVbo);
-      dev->buffer_data_array(debugLineVertices.data(),
-                             static_cast<std::ptrdiff_t>(floatIndex *
-                                                         sizeof(float)));
-      dev->draw_arrays_lines(0, static_cast<std::int32_t>(debugLineCount * 2U));
+
+      for (std::size_t i = 0U; i < debugLineCount; ++i) {
+        appendSegment(debugLines[i].from, debugLines[i].to,
+                      debugLines[i].color);
+      }
+      for (std::size_t i = 0U; i < debugSphereCount; ++i) {
+        const core::DebugSphere &sphere = debugSpheres[i];
+        for (std::size_t plane = 0U; plane < 3U; ++plane) {
+          core::DebugVec3 prev = debug_sphere_circle_point(sphere, plane, 0U);
+          for (std::size_t seg = 1U; seg <= kDebugSphereCircleSegments;
+               ++seg) {
+            const core::DebugVec3 next = debug_sphere_circle_point(
+                sphere, plane, seg % kDebugSphereCircleSegments);
+            appendSegment(prev, next, sphere.color);
+            prev = next;
+          }
+        }
+      }
+      if (chunkCount > 0U) {
+        draw_debug_segment_chunk(dev, chunkVertices.data(), chunkCount);
+      }
 
       dev->bind_array_buffer(0U);
       dev->bind_vertex_array(0U);
       dev->bind_program(0U);
       dev->disable_blending();
+    }
+  }
+  static bool warnedTextUnsupported = false;
+  if (!warnedTextUnsupported) {
+    core::DebugText textProbe[1]{};
+    if (core::debug_draw_get_texts(textProbe, 1U) > 0U) {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "debug text primitives are collected but not "
+                        "rendered; no font pipeline exists yet");
+      warnedTextUnsupported = true;
     }
   }
   core::debug_draw_tick();

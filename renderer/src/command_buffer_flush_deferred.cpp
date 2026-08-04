@@ -342,30 +342,60 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     tileData.data = backend.tileBuffer.data();
     tileData.dataSize = backend.tileBuffer.size();
 
-    cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
-                      drawableWidth, drawableHeight, tileData);
-
-    if ((backend.tileLightTex != 0U) &&
-        (tileData.totalTiles > backend.tileLightTexRows)) {
-      dev->destroy_texture(backend.tileLightTex);
-      backend.tileLightTex = 0U;
-      backend.tileLightTexRows = 0;
-    }
-    if (backend.tileLightTex == 0U) {
-      backend.tileLightTex = dev->create_texture_2d_r32f(
-          kTileDataWidth, tileData.totalTiles, backend.tileBuffer.data());
+    const bool tileDataValid =
+        cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
+                          drawableWidth, drawableHeight, tileData);
+    if (!tileDataValid) {
+      static bool warnedCullFailure = false;
+      if (!warnedCullFailure) {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "tiled light culling failed; deferred lighting "
+                          "renders without local lights");
+        warnedCullFailure = true;
+      }
       if (backend.tileLightTex != 0U) {
-        backend.tileLightTexRows = tileData.totalTiles;
+        dev->destroy_texture(backend.tileLightTex);
+        backend.tileLightTex = 0U;
+        backend.tileLightTexRows = 0;
       }
     } else {
-      dev->update_texture_2d_r32f(backend.tileLightTex, kTileDataWidth,
-                                  tileData.totalTiles,
-                                  backend.tileBuffer.data());
+      if ((backend.tileLightTex != 0U) &&
+          (tileData.totalTiles > backend.tileLightTexRows)) {
+        dev->destroy_texture(backend.tileLightTex);
+        backend.tileLightTex = 0U;
+        backend.tileLightTexRows = 0;
+      }
+      if (backend.tileLightTex == 0U) {
+        backend.tileLightTex = dev->create_texture_2d_r32f(
+            kTileDataWidth, tileData.totalTiles, backend.tileBuffer.data());
+        if (backend.tileLightTex != 0U) {
+          backend.tileLightTexRows = tileData.totalTiles;
+        } else {
+          static bool warnedTileTexFailure = false;
+          if (!warnedTileTexFailure) {
+            core::log_message(core::LogLevel::Warning, "renderer",
+                              "tile light texture creation failed; deferred "
+                              "lighting renders without local lights");
+            warnedTileTexFailure = true;
+          }
+        }
+      } else {
+        dev->update_texture_2d_r32f(backend.tileLightTex, kTileDataWidth,
+                                    tileData.totalTiles,
+                                    backend.tileBuffer.data());
+      }
     }
 
-    static_cast<void>(pack_light_data(lights, backend.lightDataBuffer.data(),
-                                      backend.lightDataBuffer.size()));
-    if (backend.lightDataTex == 0U) {
+    if (!pack_light_data(lights, backend.lightDataBuffer.data(),
+                         backend.lightDataBuffer.size())) {
+      static bool warnedPackFailure = false;
+      if (!warnedPackFailure) {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "light data packing failed; per-light texture "
+                          "keeps its previous contents");
+        warnedPackFailure = true;
+      }
+    } else if (backend.lightDataTex == 0U) {
       backend.lightDataTex = dev->create_texture_2d_r32f(
           kLightDataTexWidth, kLightDataTexHeight,
           backend.lightDataBuffer.data());

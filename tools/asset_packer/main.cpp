@@ -520,7 +520,11 @@ int main(int argc, char **argv) {
     cookedOutputs.push_back(hullPath);
   }
 
-  generate_mesh_thumbnail(inputPath, outputPath, primitiveData);
+  if (!generate_mesh_thumbnail(inputPath, outputPath, primitiveData,
+                               importSettingsHash)) {
+    std::fprintf(stderr, "warning: mesh thumbnail generation failed: %s\n",
+                 outputPath);
+  }
   char thumbPath[512] = {};
   build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
   if (file_exists(thumbPath)) {

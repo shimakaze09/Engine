@@ -45,6 +45,7 @@ enum class SkeletonImportResult : std::uint8_t {
   MissingJoint,
   InvalidInverseBindAccessor,
   DecodeFailed,
+  UnsupportedTransform,
 };
 
 /// Returns a stable message for a skeleton import result.

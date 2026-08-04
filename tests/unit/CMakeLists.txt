@@ -286,6 +286,17 @@ engine_add_test_executable(engine_unit_gpu_profiler
     engine_renderer
 )
 
+engine_add_test_executable(engine_unit_gpu_profiler_ring
+    SOURCES
+    gpu_profiler_ring_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/gpu_profiler.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/core/include
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_pass_resources
     SOURCES
     pass_resources_test.cpp
@@ -670,6 +681,20 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
     ${CMAKE_SOURCE_DIR}/renderer/include
     ${CMAKE_SOURCE_DIR}/renderer/src
     ${ENGINE_STB_INCLUDE_DIR}
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
+engine_add_test_executable(engine_unit_command_buffer_ibl_bake
+    SOURCES
+    command_buffer_ibl_bake_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
     PRIVATE_DEPS
     engine_core
     engine_math

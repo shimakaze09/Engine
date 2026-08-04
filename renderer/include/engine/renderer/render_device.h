@@ -159,6 +159,8 @@ struct RenderDevice final {
   // State.
   void (*set_viewport)(std::int32_t x, std::int32_t y, std::int32_t w,
                        std::int32_t h) noexcept = nullptr;
+  void (*get_viewport)(std::int32_t *x, std::int32_t *y, std::int32_t *w,
+                       std::int32_t *h) noexcept = nullptr;
   void (*enable_depth_test)() noexcept = nullptr;
   void (*disable_depth_test)() noexcept = nullptr;
   void (*set_depth_func_less)() noexcept = nullptr;

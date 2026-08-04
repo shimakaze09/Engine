@@ -212,8 +212,25 @@ void build_thumbnail_path(const char *outputPath, char *thumbPath,
   std::snprintf(thumbPath, thumbPathSize, "%s/%s.png", thumbDir, basename);
 }
 
+// Folds the import-settings hash into the source-content hash so the
+// skip-gate sidecar reflects every semantic thumbnail input (audit M-28).
+static std::uint64_t combine_thumbnail_hash(std::uint64_t srcHash,
+                                            std::uint64_t settingsHash)
+    noexcept {
+  std::uint64_t hash = 1469598103934665603ULL;
+  const std::uint64_t inputs[2] = {srcHash, settingsHash};
+  for (std::uint64_t input : inputs) {
+    for (std::size_t byteIndex = 0U; byteIndex < 8U; ++byteIndex) {
+      hash ^= (input >> (byteIndex * 8U)) & 0xFFULL;
+      hash *= 1099511628211ULL;
+    }
+  }
+  return hash;
+}
+
 bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
-                             const PrimitiveData &data) {
+                             const PrimitiveData &data,
+                             std::uint64_t importSettingsHash) {
   if (outputPath == nullptr) {
     return false;
   }
@@ -229,7 +246,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
       build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
       std::uint64_t storedHash = 0U;
       if (read_thumbnail_checksum(checksumPath, &storedHash) &&
-          storedHash == srcHash) {
+          storedHash == combine_thumbnail_hash(srcHash, importSettingsHash)) {
         std::printf("thumbnail up-to-date; skipped: %s\n", thumbPath);
         return true;
       }
@@ -460,7 +477,9 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     if (hashOk) {
       char checksumPath[512] = {};
       build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
-      write_thumbnail_checksum(checksumPath, srcHash);
+      write_thumbnail_checksum(checksumPath,
+                               combine_thumbnail_hash(srcHash,
+                                                      importSettingsHash));
     }
   }
 

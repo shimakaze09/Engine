@@ -2,6 +2,7 @@
 
 #include "engine/renderer/asset_streaming.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -301,6 +302,7 @@ void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept {
     queue->workerRunning = false;
     queue->workerStopRequested = false;
   }
+  queue->stateChanged.notify_all();
 }
 
 // ---- Request management ----
@@ -447,24 +449,39 @@ LoadingState get_load_state(const AssetStreamingQueue *queue,
   return req.state;
 }
 
-void wait_for_load(const AssetStreamingQueue *queue,
-                   LoadHandle handle) noexcept {
+LoadingState wait_for_load(const AssetStreamingQueue *queue, LoadHandle handle,
+                           std::uint32_t timeoutMs) noexcept {
   if ((queue == nullptr) || !handle.valid()) {
-    return;
+    return LoadingState::Failed;
   }
 
   std::unique_lock<std::mutex> lock(queue->mutex);
   if (!is_current_handle_unlocked(queue, handle)) {
-    return;
+    return LoadingState::Failed;
   }
-  queue->stateChanged.wait(lock, [&]() noexcept {
-    if (!is_current_handle_unlocked(queue, handle)) {
-      return true;
-    }
-    const LoadRequest &request = queue->requests[handle.index];
-    return !request.occupied || (request.state == LoadingState::Ready) ||
-           (request.state == LoadingState::Failed);
-  });
+  const bool settled = queue->stateChanged.wait_for(
+      lock, std::chrono::milliseconds(timeoutMs), [&]() noexcept {
+        if (queue->workerStopRequested ||
+            !is_current_handle_unlocked(queue, handle)) {
+          return true;
+        }
+        const LoadRequest &request = queue->requests[handle.index];
+        return !request.occupied || (request.state == LoadingState::Ready) ||
+               (request.state == LoadingState::Failed);
+      });
+  if (!is_current_handle_unlocked(queue, handle)) {
+    return LoadingState::Failed;
+  }
+  const LoadRequest &request = queue->requests[handle.index];
+  if (!request.occupied) {
+    return LoadingState::Failed;
+  }
+  if (!settled) {
+    core::log_message(core::LogLevel::Error, "streaming",
+                      "wait_for_load timed out; the main thread must pump "
+                      "update_asset_streaming for a load to progress");
+  }
+  return request.state;
 }
 
 // ---- Per-frame processing ----

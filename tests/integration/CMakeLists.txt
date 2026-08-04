@@ -162,6 +162,18 @@ engine_add_test_executable(engine_integration_streaming_budget
     integration
 )
 
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME engine_integration_tool_gates
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/test_tool_gates.py
+    )
+    set_tests_properties(
+        engine_integration_tool_gates
+        PROPERTIES LABELS integration
+    )
+endif()
+
 if(ENGINE_BUILD_TOOLS)
     add_test(
         NAME engine_integration_asset_packer_rejects_corrupt_texture
@@ -201,6 +213,20 @@ if(ENGINE_BUILD_TOOLS)
     )
     set_tests_properties(
         engine_integration_asset_packer_bin_dependency
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_thumbnail_settings
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/thumb_settings_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_thumbnail_settings_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_thumbnail_settings
         PROPERTIES LABELS integration
     )
 

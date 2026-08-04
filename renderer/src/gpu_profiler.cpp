@@ -20,11 +20,13 @@ struct QueryRange final {
   std::uint32_t beginQuery = 0U;
   std::uint32_t endQuery = 0U;
   bool submitted = false;
+  bool beginIssued = false;
 };
 
 struct GpuProfilerState final {
   bool initialized = false;
   bool supported = false;
+  bool writeBlocked = false;
   std::size_t writeFrame = 0U;
   std::size_t readFrame = 0U;
   std::array<std::array<QueryRange, kPassCount>, kFrameLag> queryFrames{};
@@ -34,9 +36,11 @@ struct GpuProfilerState final {
 
 GpuProfilerState g_gpuProfiler{};
 
+/// Maps a pass id to its slot; kPassCount marks an out-of-range id so
+/// callers skip it instead of silently corrupting the Scene slot.
 std::size_t pass_index(GpuPassId pass) noexcept {
   const std::size_t idx = static_cast<std::size_t>(pass);
-  return (idx < kPassCount) ? idx : 0U;
+  return (idx < kPassCount) ? idx : kPassCount;
 }
 
 bool query_range_ready(const RenderDevice *dev,
@@ -155,8 +159,18 @@ void gpu_profiler_begin_frame() noexcept {
   g_gpuProfiler.readFrame = (g_gpuProfiler.writeFrame + 1U) % kFrameLag;
 
   auto &writeRanges = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame];
+  bool unresolved = false;
+  for (const QueryRange &range : writeRanges) {
+    unresolved = unresolved || range.submitted;
+  }
+  g_gpuProfiler.writeBlocked = unresolved;
+  if (unresolved) {
+    ++g_gpuProfiler.debugStats.droppedFrames;
+    return;
+  }
   for (QueryRange &range : writeRanges) {
     range.submitted = false;
+    range.beginIssued = false;
   }
 }
 
@@ -169,7 +183,7 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
     ++g_gpuProfiler.debugStats.beginMarksGBuffer;
   }
 
-  if (!g_gpuProfiler.supported) {
+  if (!g_gpuProfiler.supported || g_gpuProfiler.writeBlocked) {
     return;
   }
 
@@ -178,9 +192,13 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
     return;
   }
 
-  QueryRange &range =
-      g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][pass_index(pass)];
+  const std::size_t idx = pass_index(pass);
+  if (idx >= kPassCount) {
+    return;
+  }
+  QueryRange &range = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][idx];
   dev->query_counter_timestamp(range.beginQuery);
+  range.beginIssued = true;
 }
 
 void gpu_profiler_end_pass(GpuPassId pass) noexcept {
@@ -192,7 +210,7 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
     ++g_gpuProfiler.debugStats.endMarksGBuffer;
   }
 
-  if (!g_gpuProfiler.supported) {
+  if (!g_gpuProfiler.supported || g_gpuProfiler.writeBlocked) {
     return;
   }
 
@@ -201,14 +219,21 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
     return;
   }
 
-  QueryRange &range =
-      g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][pass_index(pass)];
+  const std::size_t idx = pass_index(pass);
+  if (idx >= kPassCount) {
+    return;
+  }
+  QueryRange &range = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][idx];
+  if (!range.beginIssued) {
+    return;
+  }
   dev->query_counter_timestamp(range.endQuery);
   range.submitted = true;
 }
 
 float gpu_profiler_pass_ms(GpuPassId pass) noexcept {
-  return g_gpuProfiler.passDurationsMs[pass_index(pass)];
+  const std::size_t idx = pass_index(pass);
+  return (idx < kPassCount) ? g_gpuProfiler.passDurationsMs[idx] : 0.0F;
 }
 
 GpuProfilerDebugStats gpu_profiler_debug_stats() noexcept {

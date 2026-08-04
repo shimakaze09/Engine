@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 
 #include <cgltf.h>
@@ -359,6 +360,154 @@ int test_invalid_output_accessor_fails() noexcept {
 
 } // namespace
 
+/// Parses a one-channel translation clip whose payload the caller wrote to
+/// the shared bin sidecar; duplicateChannel adds a second identical
+/// channel. Returns the import result through outResult.
+bool run_single_channel_clip(bool duplicateChannel,
+                             engine::tools::AnimationImportResult *outResult)
+    noexcept {
+  const char *gltf =
+      duplicateChannel
+          ? "{"
+            "\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"uri\":\"animation_import_test.bin\","
+            "\"byteLength\":32}],"
+            "\"bufferViews\":["
+            "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":8},"
+            "{\"buffer\":0,\"byteOffset\":8,\"byteLength\":24}],"
+            "\"accessors\":["
+            "{\"bufferView\":0,\"componentType\":5126,\"count\":2,"
+            "\"type\":\"SCALAR\"},"
+            "{\"bufferView\":1,\"componentType\":5126,\"count\":2,"
+            "\"type\":\"VEC3\"}],"
+            "\"nodes\":[{\"name\":\"Root\",\"children\":[1]},"
+            "{\"name\":\"Child\"}],"
+            "\"skins\":[{\"skeleton\":0,\"joints\":[0,1]}],"
+            "\"animations\":[{\"samplers\":["
+            "{\"input\":0,\"output\":1}],\"channels\":["
+            "{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}},"
+            "{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}}"
+            "]}]"
+            "}"
+          : "{"
+            "\"asset\":{\"version\":\"2.0\"},"
+            "\"buffers\":[{\"uri\":\"animation_import_test.bin\","
+            "\"byteLength\":32}],"
+            "\"bufferViews\":["
+            "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":8},"
+            "{\"buffer\":0,\"byteOffset\":8,\"byteLength\":24}],"
+            "\"accessors\":["
+            "{\"bufferView\":0,\"componentType\":5126,\"count\":2,"
+            "\"type\":\"SCALAR\"},"
+            "{\"bufferView\":1,\"componentType\":5126,\"count\":2,"
+            "\"type\":\"VEC3\"}],"
+            "\"nodes\":[{\"name\":\"Root\",\"children\":[1]},"
+            "{\"name\":\"Child\"}],"
+            "\"skins\":[{\"skeleton\":0,\"joints\":[0,1]}],"
+            "\"animations\":[{\"samplers\":["
+            "{\"input\":0,\"output\":1}],\"channels\":["
+            "{\"sampler\":0,\"target\":{\"node\":1,\"path\":\"translation\"}}"
+            "]}]"
+            "}";
+
+  if (!write_text_file(kGltfPath, gltf)) {
+    return false;
+  }
+
+  cgltf_data *data = nullptr;
+  if (!parse_gltf_file(kGltfPath, true, &data)) {
+    return false;
+  }
+
+  engine::tools::AnimClip clip{};
+  static_cast<void>(
+      engine::tools::parse_gltf_animation(data, 0U, 0U, &clip, outResult));
+  cgltf_free(data);
+  return true;
+}
+
+/// EXPECTATION (audit M-26): unsorted key times are rejected instead of
+/// cooking a clip whose runtime binary search is undefined.
+int test_unsorted_times_rejected() noexcept {
+  remove_file(kGltfPath);
+  remove_file(kBinPath);
+
+  std::array<float, 8U> payload{};
+  payload[0U] = 1.0F;
+  payload[1U] = 0.5F;
+  if (!write_binary_file(kBinPath, payload.data(),
+                         payload.size() * sizeof(float))) {
+    return 61;
+  }
+
+  engine::tools::AnimationImportResult result =
+      engine::tools::AnimationImportResult::Ok;
+  const bool ran = run_single_channel_clip(false, &result);
+  remove_file(kGltfPath);
+  remove_file(kBinPath);
+  if (!ran) {
+    return 62;
+  }
+  return (result == engine::tools::AnimationImportResult::InvalidKeyTimes)
+             ? 0
+             : 63;
+}
+
+/// EXPECTATION (audit M-26): non-finite sample values are rejected instead
+/// of poisoning runtime poses.
+int test_non_finite_value_rejected() noexcept {
+  remove_file(kGltfPath);
+  remove_file(kBinPath);
+
+  std::array<float, 8U> payload{};
+  payload[0U] = 0.0F;
+  payload[1U] = 1.0F;
+  payload[3U] = std::numeric_limits<float>::quiet_NaN();
+  if (!write_binary_file(kBinPath, payload.data(),
+                         payload.size() * sizeof(float))) {
+    return 71;
+  }
+
+  engine::tools::AnimationImportResult result =
+      engine::tools::AnimationImportResult::Ok;
+  const bool ran = run_single_channel_clip(false, &result);
+  remove_file(kGltfPath);
+  remove_file(kBinPath);
+  if (!ran) {
+    return 72;
+  }
+  return (result == engine::tools::AnimationImportResult::NonFiniteValue)
+             ? 0
+             : 73;
+}
+
+/// EXPECTATION (audit M-26): duplicate channels for one joint transform
+/// are rejected instead of cooking last-writer-wins ambiguity.
+int test_duplicate_channel_rejected() noexcept {
+  remove_file(kGltfPath);
+  remove_file(kBinPath);
+
+  std::array<float, 8U> payload{};
+  payload[0U] = 0.0F;
+  payload[1U] = 1.0F;
+  if (!write_binary_file(kBinPath, payload.data(),
+                         payload.size() * sizeof(float))) {
+    return 81;
+  }
+
+  engine::tools::AnimationImportResult result =
+      engine::tools::AnimationImportResult::Ok;
+  const bool ran = run_single_channel_clip(true, &result);
+  remove_file(kGltfPath);
+  remove_file(kBinPath);
+  if (!ran) {
+    return 82;
+  }
+  return (result == engine::tools::AnimationImportResult::DuplicateChannel)
+             ? 0
+             : 83;
+}
+
 /// Runs this executable or test program.
 int main() {
   int result = test_transform_channels_import();
@@ -376,6 +525,24 @@ int main() {
   result = test_invalid_output_accessor_fails();
   if (result != 0) {
     std::fprintf(stderr, "FAIL animation validation: %d\n", result);
+    return result;
+  }
+
+  result = test_unsorted_times_rejected();
+  if (result != 0) {
+    std::fprintf(stderr, "FAIL unsorted key time rejection: %d\n", result);
+    return result;
+  }
+
+  result = test_non_finite_value_rejected();
+  if (result != 0) {
+    std::fprintf(stderr, "FAIL non-finite value rejection: %d\n", result);
+    return result;
+  }
+
+  result = test_duplicate_channel_rejected();
+  if (result != 0) {
+    std::fprintf(stderr, "FAIL duplicate channel rejection: %d\n", result);
     return result;
   }
 

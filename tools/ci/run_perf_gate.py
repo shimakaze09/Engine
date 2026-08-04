@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-# Runs the run perf gate Python helper for Engine tooling.
+# Perf gate for Engine tooling: runs the ECS/physics benchmarks and
+# compares against a baseline JSON. Measurements and baselines must be
+# positive and finite — NaN compares false against any allowance, so an
+# unchecked NaN measurement or baseline used to pass silently (audit
+# M-27).
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -44,12 +49,40 @@ def run_benchmark(executable: Path, metric_key: str) -> float:
         if metric_key not in data:
             raise KeyError(f"Metric '{metric_key}' missing in benchmark output {tmp_path}")
 
-        return float(data[metric_key])
+        value = float(data[metric_key])
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"Metric '{metric_key}' must be positive and finite, got {value}")
+        return value
     finally:
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+# Compares measured metrics against the baseline; returns True when the
+# gate passes. Rejects non-finite or non-positive measurements and
+# baselines so NaN can never satisfy the comparison by vacuity.
+def evaluate(measured, baseline, threshold) -> bool:
+    print("\nPerformance gate summary:")
+    failed = False
+    for key, current in measured.items():
+        base = float(baseline[key])
+        if not math.isfinite(current) or current <= 0.0:
+            print(f"- {key}: FAIL measurement must be positive and finite, got {current}")
+            failed = True
+            continue
+        if not math.isfinite(base) or base <= 0.0:
+            print(f"- {key}: FAIL baseline must be positive and finite, got {base}")
+            failed = True
+            continue
+        allowed = base * (1.0 + threshold)
+        ratio = current / base
+        print(f"- {key}: baseline={base:.4f} current={current:.4f} ratio={ratio:.3f} allowed_max={allowed:.4f}")
+        if current > allowed:
+            failed = True
+    return not failed
 
 
 # Runs this executable or test program.
@@ -60,6 +93,10 @@ def main() -> int:
     parser.add_argument("--threshold", type=float, default=0.10,
                         help="Allowed regression ratio; default 0.10 for 10%%")
     args = parser.parse_args()
+
+    if not math.isfinite(args.threshold) or args.threshold < 0.0:
+        print(f"FAIL: --threshold must be non-negative and finite, got {args.threshold}")
+        return 1
 
     build_dir = Path(args.build_dir).resolve()
     baseline_path = Path(args.baseline).resolve()
@@ -72,17 +109,7 @@ def main() -> int:
         "physics_step_ms": run_benchmark(find_executable(build_dir, "engine_bench_physics_perf"), "physics_step_ms"),
     }
 
-    print("\nPerformance gate summary:")
-    failed = False
-    for key, current in measured.items():
-        base = float(baseline[key])
-        allowed = base * (1.0 + args.threshold)
-        ratio = (current / base) if base > 0.0 else 0.0
-        print(f"- {key}: baseline={base:.4f} current={current:.4f} ratio={ratio:.3f} allowed_max={allowed:.4f}")
-        if current > allowed:
-            failed = True
-
-    if failed:
+    if not evaluate(measured, baseline, args.threshold):
         print("\nFAIL: performance regression exceeded threshold")
         return 1
 

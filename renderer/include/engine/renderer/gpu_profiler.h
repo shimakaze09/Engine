@@ -23,6 +23,8 @@ enum class GpuPassId : std::uint8_t {
 };
 
 /// Query-pool bookkeeping counters for debugging the GPU profiler.
+/// droppedFrames counts frames whose timing was skipped because the query
+/// ring slot still held unresolved GPU results (back-pressure, audit M-06).
 struct GpuProfilerDebugStats final {
   std::uint64_t beginMarksScene = 0U;
   std::uint64_t endMarksScene = 0U;
@@ -30,6 +32,7 @@ struct GpuProfilerDebugStats final {
   std::uint64_t endMarksTonemap = 0U;
   std::uint64_t beginMarksGBuffer = 0U;
   std::uint64_t endMarksGBuffer = 0U;
+  std::uint64_t droppedFrames = 0U;
 };
 
 /// Initializes the owning system for gpu profiler.

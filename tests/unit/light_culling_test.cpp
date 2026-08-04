@@ -399,6 +399,72 @@ int verify_pack_light_data() {
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Test 6 (audit M-06): failed culling zeroes the output tile counts so a
+// caller can never consume stale dimensions, and tile arithmetic is checked
+// instead of overflowing int before validation.
+// ---------------------------------------------------------------------------
+
+int verify_cull_failure_zeroes_output() {
+  engine::renderer::SceneLightData lights{};
+  float identity[16] = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
+                        0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+
+  std::vector<float> tiny(1U, 0.0F);
+  engine::renderer::TileLightData undersized{};
+  undersized.totalTiles = 123;
+  undersized.tileCountX = 7;
+  undersized.tileCountY = 9;
+  undersized.data = tiny.data();
+  undersized.dataSize = tiny.size();
+  if (engine::renderer::cull_lights_tiled(lights, identity, identity, 640, 480,
+                                          undersized)) {
+    return 600;
+  }
+  if ((undersized.totalTiles != 0) || (undersized.tileCountX != 0) ||
+      (undersized.tileCountY != 0)) {
+    return 601;
+  }
+
+  engine::renderer::TileLightData nullMats{};
+  nullMats.totalTiles = 55;
+  if (engine::renderer::cull_lights_tiled(lights, nullptr, nullptr, 640, 480,
+                                          nullMats)) {
+    return 602;
+  }
+  if (nullMats.totalTiles != 0) {
+    return 603;
+  }
+
+  std::vector<float> buffer(1024U, 0.0F);
+  engine::renderer::TileLightData huge{};
+  huge.totalTiles = 77;
+  huge.data = buffer.data();
+  huge.dataSize = buffer.size();
+  const int hugeDim = 0x7FFFFFF0;
+  if (engine::renderer::cull_lights_tiled(lights, identity, identity, hugeDim,
+                                          hugeDim, huge)) {
+    return 604;
+  }
+  if (huge.totalTiles != 0) {
+    return 605;
+  }
+
+  const std::size_t bytesForMax =
+      engine::renderer::compute_tile_buffer_size(hugeDim, 1);
+  const std::size_t expectedTiles =
+      (static_cast<std::size_t>(hugeDim) +
+       static_cast<std::size_t>(engine::renderer::kTileSize) - 1U) /
+      static_cast<std::size_t>(engine::renderer::kTileSize);
+  if (bytesForMax !=
+      expectedTiles *
+          static_cast<std::size_t>(engine::renderer::kTileDataWidth)) {
+    return 606;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -423,5 +489,10 @@ int main() {
     return result;
   }
 
-  return verify_pack_light_data();
+  result = verify_pack_light_data();
+  if (result != 0) {
+    return result;
+  }
+
+  return verify_cull_failure_zeroes_output();
 }

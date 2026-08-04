@@ -5,6 +5,7 @@
 #include "engine_bootstrap_content.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -48,6 +49,12 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
   if (!renderer::register_mesh_asset(database, id, builtinPath, handle)) {
     return renderer::kInvalidAssetId;
   }
+  const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
+  const std::uint64_t sizeEstimate =
+      (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *
+       sizeof(float)) +
+      (static_cast<std::uint64_t>(mesh.indexCount) * sizeof(std::uint32_t));
+  static_cast<void>(renderer::set_mesh_asset_size(database, id, sizeEstimate));
   return id;
 }
 

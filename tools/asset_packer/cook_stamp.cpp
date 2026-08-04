@@ -88,7 +88,11 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
     }
   }
 
-  std::fclose(file);
+  const bool readFailed = std::ferror(file) != 0;
+  const bool closeFailed = std::fclose(file) != 0;
+  if (readFailed || closeFailed) {
+    return 0ULL;
+  }
   if (ok != nullptr) {
     *ok = true;
   }

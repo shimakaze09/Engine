@@ -38,6 +38,7 @@ struct MeshAssetRecord final {
     sizeBytes = other.sizeBytes;
     state = other.state;
     requestedResident = other.requestedResident;
+    pinned = other.pinned;
     return *this;
   }
 
@@ -49,6 +50,7 @@ struct MeshAssetRecord final {
   std::uint64_t sizeBytes = 0ULL;
   AssetState state = AssetState::Unloaded;
   bool requestedResident = false;
+  bool pinned = false;
 };
 
 /// One texture slot: id, GPU handle, source path, refcount, state.
@@ -118,9 +120,15 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
 
 /// 64-bit FNV-1a id from the canonicalized path.
 AssetId make_asset_id_from_path(const char *path) noexcept;
-/// 64-bit content-hash id from the file bytes; 0 on read failure.
+/// 64-bit content-hash id from the file bytes. When the file cannot be
+/// opened or a read error would leave a partial hash, falls back to the
+/// canonicalized path hash with a logged warning (contract pinned by
+/// asset_database_test; the old "0 on read failure" doc was stale).
 AssetId make_asset_id_from_file(const char *path) noexcept;
-/// Inserts or updates a mesh record; false when the table is full.
+/// Inserts or updates a mesh record; false when the table is full. Records
+/// registered here are already Ready with no streaming reload path
+/// (builtin/synchronous meshes), so they are pinned: counted against the
+/// cache budget but never evicted (audit M-28).
 bool register_mesh_asset(AssetDatabase *database, AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept;
