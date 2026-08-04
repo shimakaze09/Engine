@@ -63,9 +63,15 @@ public:
   /// Write up to @p maxOut snapshots into @p out. Returns count written.
   std::size_t snapshot(TimerSnapshot *out, std::size_t maxOut) const noexcept;
 
-  /// Restore timers from snapshots. Callback/userData must be re-wired by the
-  /// caller (e.g. scripting layer) after deserialization.
-  /// Returns count of timers restored.
+  /// Restore timers from snapshots. Snapshots carry timing only — callback
+  /// identity is never serialized — so every restored timer starts with a
+  /// null callback and the owning layer must re-wire it (the scripting layer
+  /// does so each tick from its live registry refs, which only resolves
+  /// within the same VM). A restored timer that comes due still unresolved
+  /// is dropped with a warning rather than counted as fired or, when
+  /// repeating, re-armed forever. Timing is validated like the live setters:
+  /// non-finite values, and repeating snapshots with a non-positive
+  /// interval, are rejected. Returns the count of timers restored.
   std::size_t restore(const TimerSnapshot *in, std::size_t count) noexcept;
 
   /// Reconnect active timers that have no callback after restore.

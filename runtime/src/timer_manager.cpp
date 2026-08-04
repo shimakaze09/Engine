@@ -2,6 +2,7 @@
 
 #include "engine/runtime/timer_manager.h"
 
+#include <cmath>
 #include <cstring>
 
 #include "engine/core/logging.h"
@@ -83,6 +84,13 @@ TimerId TimerManager::set_timeout(float delaySeconds, Callback callback,
                       "set_timeout: null callback");
     return kInvalidTimerId;
   }
+  // NaN would make every fireAt comparison false and Inf would never fire,
+  // so both must be rejected here rather than leaking a wedged slot.
+  if (!std::isfinite(delaySeconds) || (delaySeconds < 0.0F)) {
+    core::log_message(core::LogLevel::Warning, kLogChannel,
+                      "set_timeout: delay must be finite and non-negative");
+    return kInvalidTimerId;
+  }
   for (std::size_t i = 0U; i < kMaxTimers; ++i) {
     if (!m_timers[i].active) {
       ensure_generation(i);
@@ -107,9 +115,11 @@ TimerId TimerManager::set_interval(float intervalSeconds, Callback callback,
                       "set_interval: null callback");
     return kInvalidTimerId;
   }
-  if (intervalSeconds <= 0.0F) {
+  // NaN fails every ordered comparison, so the <= 0 guard alone lets it
+  // through and the timer then fires on every tick forever.
+  if (!std::isfinite(intervalSeconds) || (intervalSeconds <= 0.0F)) {
     core::log_message(core::LogLevel::Warning, kLogChannel,
-                      "set_interval: interval must be > 0");
+                      "set_interval: interval must be finite and > 0");
     return kInvalidTimerId;
   }
   for (std::size_t i = 0U; i < kMaxTimers; ++i) {
@@ -164,9 +174,18 @@ std::size_t TimerManager::tick(float dt) noexcept {
     const TimerId firedId = make_timer_id(i);
     const bool wasRepeating = m_timers[i].repeat;
 
-    if (m_timers[i].callback != nullptr) {
-      m_timers[i].callback(firedId, m_timers[i].userData);
+    // A due timer whose callback was never resolved (restored from a scene
+    // into a VM that cannot re-register it) is a lost event, not a fired
+    // one: drop it loudly instead of counting it and, when repeating,
+    // re-arming an empty callback on every interval forever.
+    if (m_timers[i].callback == nullptr) {
+      core::log_message(core::LogLevel::Warning, kLogChannel,
+                        "tick: dropped restored timer with no callback");
+      release_slot(i);
+      continue;
     }
+
+    m_timers[i].callback(firedId, m_timers[i].userData);
     ++fired;
 
     if ((slot_for_id(firedId) != i) || !m_timers[i].active) {
@@ -231,6 +250,16 @@ std::size_t TimerManager::restore(const TimerSnapshot *in,
   std::size_t restored = 0U;
   for (std::size_t i = 0U; i < count; ++i) {
     if (!in[i].active) {
+      continue;
+    }
+    // Snapshots arrive from serialized scenes, so they get the same finite
+    // and positive-interval contract as the live setters; a repeating timer
+    // with a non-positive interval would re-arm on every tick forever.
+    if (!std::isfinite(in[i].remainingSeconds) ||
+        !std::isfinite(in[i].intervalSeconds) ||
+        (in[i].repeat && (in[i].intervalSeconds <= 0.0F))) {
+      core::log_message(core::LogLevel::Warning, kLogChannel,
+                        "restore: rejected timer with invalid timing");
       continue;
     }
     const std::size_t preferredSlot = preferred_restore_slot(in[i].timerId);

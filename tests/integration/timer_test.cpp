@@ -1,6 +1,7 @@
 // Verifies timer test behavior for the Engine test suite.
 
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -343,6 +344,84 @@ bool test_null_callback_rejected() noexcept {
   return true;
 }
 
+/// Non-finite timings are rejected at every ingress: NaN passes the old
+/// `<= 0` interval guard and would fire on every tick forever, Inf would
+/// never fire and leak its slot.
+bool test_non_finite_timings_rejected() noexcept {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return false;
+  }
+  auto &tm = world->timer_manager();
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+
+  if (tm.set_timeout(nan, on_timeout, nullptr) !=
+      engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  if (tm.set_timeout(inf, on_timeout, nullptr) !=
+      engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  if (tm.set_interval(nan, on_interval, nullptr) !=
+      engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  if (tm.set_interval(inf, on_interval, nullptr) !=
+      engine::runtime::kInvalidTimerId) {
+    return false;
+  }
+  if (tm.active_count() != 0U) {
+    return false;
+  }
+
+  engine::runtime::TimerManager::TimerSnapshot bad[3]{};
+  bad[0].active = true;
+  bad[0].remainingSeconds = nan;
+  bad[1].active = true;
+  bad[1].intervalSeconds = inf;
+  bad[1].repeat = true;
+  bad[2].active = true;
+  bad[2].remainingSeconds = 1.0F;
+  bad[2].intervalSeconds = 0.0F;
+  bad[2].repeat = true;
+  return tm.restore(bad, 3U) == 0U;
+}
+
+/// A restored timer whose callback was never re-wired is dropped when it
+/// comes due, instead of counting as fired and (when repeating) re-arming
+/// an empty callback on every interval forever.
+bool test_unresolved_restored_timer_is_dropped() noexcept {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return false;
+  }
+  auto &tm = world->timer_manager();
+
+  engine::runtime::TimerManager::TimerSnapshot snap{};
+  snap.active = true;
+  snap.remainingSeconds = 0.1F;
+  snap.intervalSeconds = 0.1F;
+  snap.repeat = true;
+  if (tm.restore(&snap, 1U) != 1U) {
+    return false;
+  }
+  if (tm.active_count() != 1U) {
+    return false;
+  }
+
+  if (tm.tick(0.2F) != 0U) {
+    return false;
+  }
+  if (tm.active_count() != 0U) {
+    return false;
+  }
+  return tm.tick(1.0F) == 0U;
+}
+
 bool test_timer_per_world() noexcept {
   // Two separate worlds have independent timer managers.
   std::unique_ptr<engine::runtime::World> worldA(new (std::nothrow)
@@ -397,6 +476,9 @@ int main() {
   run("test_restore_preserves_slots_and_rewires_callbacks",
       test_restore_preserves_slots_and_rewires_callbacks);
   run("test_null_callback_rejected", test_null_callback_rejected);
+  run("test_non_finite_timings_rejected", test_non_finite_timings_rejected);
+  run("test_unresolved_restored_timer_is_dropped",
+      test_unresolved_restored_timer_is_dropped);
   run("test_timer_per_world", test_timer_per_world);
 
   if (failures > 0) {
