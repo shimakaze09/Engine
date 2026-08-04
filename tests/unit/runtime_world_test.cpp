@@ -583,6 +583,47 @@ int verify_persistent_index_tombstones() {
   return 0;
 }
 
+/// for_each_alive must visit every entity that was alive when the walk
+/// started even when the callback destroys entities: the loop bound is a
+/// snapshot, not the live alive count.
+int verify_for_each_alive_visits_all_while_destroying() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 340;
+  }
+
+  constexpr std::size_t kEntityCount = 16U;
+  for (std::size_t i = 0U; i < kEntityCount; ++i) {
+    if (world->create_scene_object() == engine::runtime::kInvalidEntity) {
+      return 341;
+    }
+  }
+  if (world->alive_entity_count() != kEntityCount) {
+    return 342;
+  }
+
+  std::size_t visited = 0U;
+  std::size_t destroyed = 0U;
+  world->for_each_alive([&](engine::runtime::Entity entity) noexcept {
+    ++visited;
+    if (world->destroy_entity(entity)) {
+      ++destroyed;
+    }
+  });
+
+  if (visited != kEntityCount) {
+    return 343;
+  }
+  if (destroyed != kEntityCount) {
+    return 344;
+  }
+  if (world->alive_entity_count() != 0U) {
+    return 345;
+  }
+  return 0;
+}
+
 int verify_variadic_for_each() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -1082,6 +1123,11 @@ int main() {
   }
 
   result = verify_reset_world_phase_independent();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_for_each_alive_visits_all_while_destroying();
   if (result != 0) {
     return result;
   }

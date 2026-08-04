@@ -81,7 +81,10 @@ void cmd_spawn(const char *const *args, int argCount,
   core::console_print(buffer);
 }
 
-/// Destroys all non-player entities from the console.
+/// Destroys all non-player entities from the console. The reported count is
+/// the world's alive-count delta, so cascaded subtree members are included,
+/// queued (deferred) destroys are not double-reported, and rejected destroy
+/// operations surface as failures instead of inflating the count.
 void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
                   void * /*userData*/) noexcept {
   if ((runtime_binding().world == nullptr) ||
@@ -90,18 +93,30 @@ void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
     core::console_print("Cannot kill_all: world not ready");
     return;
   }
-  std::size_t destroyed = 0U;
+  const std::size_t aliveBefore =
+      runtime_binding().world->alive_entity_count();
+  std::size_t failedOps = 0U;
   runtime_binding().world->for_each_alive(
-      [&destroyed](runtime::Entity entity) noexcept {
+      [&failedOps](runtime::Entity entity) noexcept {
         if (is_player_controller_entity(entity)) {
           return;
         }
-        runtime_binding().services->destroy_entity_op(runtime_binding().world,
-                                                      entity.index);
-        ++destroyed;
+        if (!runtime_binding().services->destroy_entity_op(
+                runtime_binding().world, entity.index)) {
+          ++failedOps;
+        }
       });
-  char buffer[64] = {};
-  std::snprintf(buffer, sizeof(buffer), "Destroyed %zu entities", destroyed);
+  const std::size_t aliveAfter = runtime_binding().world->alive_entity_count();
+  const std::size_t destroyed =
+      (aliveBefore > aliveAfter) ? (aliveBefore - aliveAfter) : 0U;
+  char buffer[96] = {};
+  if (failedOps > 0U) {
+    std::snprintf(buffer, sizeof(buffer),
+                  "Destroyed %zu entities (%zu destroy ops failed)", destroyed,
+                  failedOps);
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "Destroyed %zu entities", destroyed);
+  }
   core::console_print(buffer);
 }
 

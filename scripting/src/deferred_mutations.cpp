@@ -10,6 +10,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <mutex>
 
 namespace engine::scripting {
 namespace {
@@ -52,9 +54,13 @@ struct DeferredMutation final {
 constexpr std::size_t kMaxDeferredMutations = 2048U;
 DeferredMutation g_deferredMutations[kMaxDeferredMutations]{};
 std::size_t g_deferredMutationCount = 0U;
+std::mutex g_deferredMutationMutex{};
 
-/// Queues one deferred mutation for the next safe flush point.
+/// Queues one deferred mutation for the next safe flush point. The queue
+/// state is mutex-guarded; flush releases the lock around each apply so
+/// on_end_play callbacks queueing further mutations cannot deadlock.
 bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
+  std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
   if (g_deferredMutationCount >= kMaxDeferredMutations) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "deferred mutation queue overflow");
@@ -377,130 +383,144 @@ bool apply_or_queue_remove_spot_light_component(
 
 /// Flushes queued mutations against a snapshot of the current count:
 /// applying a destroy runs on_end_play, which may queue new mutations —
-/// those append past the snapshot and survive into the next flush.
+/// those append past the snapshot and survive into the next flush. Each
+/// mutation is copied out under the queue lock and applied unlocked so
+/// re-entrant queueing cannot deadlock. Apply failures and mutations
+/// dropped because their target entity died are counted and reported in
+/// one summary log instead of being silently discarded.
 void flush_deferred_mutations() noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr) ||
-      (g_deferredMutationCount == 0U) || !can_apply_mutations_now()) {
+      !can_apply_mutations_now()) {
     return;
   }
 
-  const std::size_t count = g_deferredMutationCount;
+  std::size_t count = 0U;
+  {
+    std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+    count = g_deferredMutationCount;
+  }
+  if (count == 0U) {
+    return;
+  }
+
+  std::size_t failedApplies = 0U;
+  std::size_t deadTargets = 0U;
+  const auto note = [&failedApplies](bool applied) noexcept {
+    if (!applied) {
+      ++failedApplies;
+    }
+  };
+
   for (std::size_t i = 0U; i < count; ++i) {
-    const DeferredMutation &mutation = g_deferredMutations[i];
+    DeferredMutation mutation{};
+    {
+      std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+      mutation = g_deferredMutations[i];
+    }
+    if (!is_deferred_entity_current(binding.world, mutation.entity)) {
+      ++deadTargets;
+      continue;
+    }
     switch (mutation.type) {
     case DeferredMutationType::DestroyEntity:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        dispatch_entity_subtree_end_play(binding.world, mutation.entity);
-        static_cast<void>(
-            binding.services->destroy_entity_op(binding.world,
-                                                mutation.entity.index));
-      }
+      dispatch_entity_subtree_end_play(binding.world, mutation.entity);
+      note(binding.services->destroy_entity_op(binding.world,
+                                               mutation.entity.index));
       break;
     case DeferredMutationType::SetTransform: {
-      if (!is_deferred_entity_current(binding.world, mutation.entity)) {
-        break;
-      }
       const bool transformUpdated = binding.services->add_transform_op(
           binding.world, mutation.entity.index, mutation.transform);
+      note(transformUpdated);
       if (transformUpdated && mutation.setMovementAuthority) {
-        static_cast<void>(binding.services->set_movement_authority_op(
+        note(binding.services->set_movement_authority_op(
             binding.world, mutation.entity.index, mutation.movementAuthority));
       }
       break;
     }
-    case DeferredMutationType::AddRigidBody:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        const bool bodyUpdated = binding.services->add_rigid_body_op(
-            binding.world, mutation.entity.index, mutation.rigidBody);
-        if (bodyUpdated && mutation.setMovementAuthority) {
-          static_cast<void>(binding.services->set_movement_authority_op(
-              binding.world, mutation.entity.index,
-              mutation.movementAuthority));
-        }
+    case DeferredMutationType::AddRigidBody: {
+      const bool bodyUpdated = binding.services->add_rigid_body_op(
+          binding.world, mutation.entity.index, mutation.rigidBody);
+      note(bodyUpdated);
+      if (bodyUpdated && mutation.setMovementAuthority) {
+        note(binding.services->set_movement_authority_op(
+            binding.world, mutation.entity.index, mutation.movementAuthority));
       }
       break;
+    }
     case DeferredMutationType::AddCollider:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->add_collider_op(
-            binding.world, mutation.entity.index, mutation.collider));
-      }
+      note(binding.services->add_collider_op(binding.world,
+                                             mutation.entity.index,
+                                             mutation.collider));
       break;
     case DeferredMutationType::AddMeshComponent:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->add_mesh_component_op(
-            binding.world, mutation.entity.index, mutation.meshComponent));
-      }
+      note(binding.services->add_mesh_component_op(binding.world,
+                                                   mutation.entity.index,
+                                                   mutation.meshComponent));
       break;
     case DeferredMutationType::AddNameComponent:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->add_name_component_op(
-            binding.world, mutation.entity.index, mutation.nameComponent));
-      }
+      note(binding.services->add_name_component_op(binding.world,
+                                                   mutation.entity.index,
+                                                   mutation.nameComponent));
       break;
     case DeferredMutationType::AddLightComponent:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->add_light_component_op(
-            binding.world, mutation.entity.index, mutation.lightComponent));
-      }
+      note(binding.services->add_light_component_op(binding.world,
+                                                    mutation.entity.index,
+                                                    mutation.lightComponent));
       break;
     case DeferredMutationType::RemoveLightComponent:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->remove_light_component_op(
-            binding.world, mutation.entity.index));
-      }
+      note(binding.services->remove_light_component_op(binding.world,
+                                                       mutation.entity.index));
       break;
     case DeferredMutationType::AddScriptComponent:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->add_script_component_op(
-            binding.world, mutation.entity.index, mutation.scriptComponent));
-      }
+      note(binding.services->add_script_component_op(binding.world,
+                                                     mutation.entity.index,
+                                                     mutation.scriptComponent));
       break;
     case DeferredMutationType::RemoveScriptComponent:
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.services->remove_script_component_op(
-            binding.world, mutation.entity.index));
-      }
+      note(binding.services->remove_script_component_op(
+          binding.world, mutation.entity.index));
       break;
-    case DeferredMutationType::AddPointLightComponent: {
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.world->add_point_light_component(
-            mutation.entity, mutation.pointLightComponent));
-      }
+    case DeferredMutationType::AddPointLightComponent:
+      note(binding.world->add_point_light_component(
+          mutation.entity, mutation.pointLightComponent));
       break;
-    }
-    case DeferredMutationType::RemovePointLightComponent: {
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(
-            binding.world->remove_point_light_component(mutation.entity));
-      }
+    case DeferredMutationType::RemovePointLightComponent:
+      note(binding.world->remove_point_light_component(mutation.entity));
       break;
-    }
-    case DeferredMutationType::AddSpotLightComponent: {
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(binding.world->add_spot_light_component(
-            mutation.entity, mutation.spotLightComponent));
-      }
+    case DeferredMutationType::AddSpotLightComponent:
+      note(binding.world->add_spot_light_component(
+          mutation.entity, mutation.spotLightComponent));
       break;
-    }
-    case DeferredMutationType::RemoveSpotLightComponent: {
-      if (is_deferred_entity_current(binding.world, mutation.entity)) {
-        static_cast<void>(
-            binding.world->remove_spot_light_component(mutation.entity));
-      }
+    case DeferredMutationType::RemoveSpotLightComponent:
+      note(binding.world->remove_spot_light_component(mutation.entity));
       break;
-    }
     }
   }
 
-  const std::size_t appended = g_deferredMutationCount - count;
-  for (std::size_t i = 0U; i < appended; ++i) {
-    g_deferredMutations[i] = g_deferredMutations[count + i];
+  {
+    std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+    const std::size_t appended = g_deferredMutationCount - count;
+    for (std::size_t i = 0U; i < appended; ++i) {
+      g_deferredMutations[i] = g_deferredMutations[count + i];
+    }
+    g_deferredMutationCount = appended;
   }
-  g_deferredMutationCount = appended;
+
+  if ((failedApplies > 0U) || (deadTargets > 0U)) {
+    char buffer[128] = {};
+    std::snprintf(buffer, sizeof(buffer),
+                  "deferred mutation flush: %zu applies failed, %zu targets "
+                  "already destroyed",
+                  failedApplies, deadTargets);
+    core::log_message(core::LogLevel::Warning, "scripting", buffer);
+  }
 }
 
 /// Clears queued deferred mutations without applying them.
-void clear_deferred_mutations() noexcept { g_deferredMutationCount = 0U; }
+void clear_deferred_mutations() noexcept {
+  std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+  g_deferredMutationCount = 0U;
+}
 
 } // namespace engine::scripting

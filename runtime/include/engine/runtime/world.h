@@ -318,16 +318,21 @@ public:
   /// capture the destination's epoch first and restore it through this).
   void mark_content_replaced(std::uint32_t previousEpoch) noexcept;
 
-  /// Invokes fn(Entity) for every alive entity in index order.
+  /// Invokes fn(Entity) for every alive entity in index order. The alive
+  /// count is captured before the walk so callbacks that destroy entities
+  /// (including subtrees) cannot shrink the bound and truncate the visit;
+  /// entities destroyed mid-walk are skipped, entities created mid-walk may
+  /// or may not be visited.
   template <typename Fn> void for_each_alive(Fn &&fn) const noexcept {
-    if (m_aliveEntityCount == 0U) {
+    const std::size_t aliveAtStart = m_aliveEntityCount;
+    if (aliveAtStart == 0U) {
       return;
     }
 
     std::size_t visited = 0U;
     const std::uint32_t upperBound = m_nextEntityIndex;
     for (std::uint32_t index = 1U;
-         (index < upperBound) && (visited < m_aliveEntityCount); ++index) {
+         (index < upperBound) && (visited < aliveAtStart); ++index) {
       if (!m_entityAlive[index]) {
         continue;
       }
