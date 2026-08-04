@@ -17,10 +17,6 @@
 
 namespace engine::physics {
 
-// Cap fast enough for a knocked-over box to slam down naturally; it exists
-// to stop numeric runaway, not to art-direct tumbles.
-constexpr float kMaxAngularSpeed = 12.0F;
-
 void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
                      float vB2) noexcept {
   if ((bodyA != nullptr) && bodyA->sleeping && (vB2 > kSleepThreshold)) {

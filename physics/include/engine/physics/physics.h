@@ -36,6 +36,20 @@ BlockedBodyWarningStats
 blocked_body_warning_stats(const PhysicsWorldView &world) noexcept;
 /// Opaque generation-bearing joint identifier; never use it as a slot index.
 
+// Runaway guards --------------------------------------------------------------
+// Numeric-runaway caps shared by ingress validation and the solver; they
+// exist to stop divergence, not to art-direct motion. Contact resolution
+// clamps angular speed to kMaxAngularSpeed after every impulse.
+// kMaxLinearSpeed is the matching linear guard (~mach 1.5, 8.3 m per fixed
+// step — far above gameplay speeds while keeping broad-phase velocity
+// expansion and CCD travel bounded), applied at rigid-body ingress and
+// after velocity integration. kMaxInverseInertia bounds the scalar inverse
+// inertia that scales lever^2 effective-mass terms and angular impulses
+// (a 1 kg body of 2 cm radius is ~6e3, comfortably inside the bound).
+constexpr float kMaxAngularSpeed = 12.0F;
+constexpr float kMaxLinearSpeed = 500.0F;
+constexpr float kMaxInverseInertia = 1.0e4F;
+
 // Joints / Constraints --------------------------------------------------------
 using JointId = std::uint32_t;
 constexpr JointId kInvalidJointId = 0xFFFFFFFFU;
