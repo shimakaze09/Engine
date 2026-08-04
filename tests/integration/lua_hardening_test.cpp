@@ -578,6 +578,172 @@ bool test_module_reload_survives_memory_exhaustion() noexcept {
   return ok;
 }
 
+// -----------------------------------------------------------------------
+// #65 item 3: an on_reload hook that destroys a scripted entity mid-walk
+// must not skip any surviving pre-walk entity (dense-array swap-and-pop
+// moved the last component into the destroyed slot, so the direct
+// for_each walk skipped it). Every surviving pre-walk entity gets its
+// reload delivered exactly once; the destroyed entity gets none after
+// destruction. The killer destroys the FIRST entity (already delivered),
+// which on the base walk relocates the last, not-yet-visited entity into
+// a visited slot.
+// -----------------------------------------------------------------------
+bool test_reload_hook_destroy_delivers_exactly_once() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *prelude = "reload_counts = {}\n"
+                        "spawn_order = {}\n"
+                        "reload_total = 0\n"
+                        "reload_killed = false\n";
+  const char *v1 = "local M = {}\n"
+                   "function M.on_begin_play(self)\n"
+                   "  spawn_order[#spawn_order + 1] = self\n"
+                   "end\n"
+                   "function M.on_tick(self, dt) end\n"
+                   "return M\n";
+  if (!write_script(prelude) || !engine::scripting::load_script(kTempScript) ||
+      !write_file_at("hardening_reload_walk.lua", v1)) {
+    remove_script();
+    return false;
+  }
+
+  engine::runtime::World *world = session.world.get();
+  bool ok = true;
+  for (int i = 0; i < 4 && ok; ++i) {
+    ok = add_scripted_entity(world, "hardening_reload_walk.lua") !=
+         engine::runtime::kInvalidEntity;
+  }
+
+  if (ok) {
+    world->begin_begin_play_phase();
+    engine::scripting::dispatch_entity_scripts_begin_play(world);
+    world->end_begin_play_phase();
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *v2 =
+        "local M = {}\n"
+        "function M.on_reload(self, state)\n"
+        "  reload_total = reload_total + 1\n"
+        "  reload_counts[self] = (reload_counts[self] or 0) + 1\n"
+        "  if self == spawn_order[2] and not reload_killed then\n"
+        "    reload_killed = true\n"
+        "    engine.destroy_entity(spawn_order[1])\n"
+        "  end\n"
+        "end\n"
+        "function M.on_tick(self, dt) end\n"
+        "return M\n";
+    ok = write_file_at("hardening_reload_walk.lua", v2);
+  }
+
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    const char *verify =
+        "function verify_reload_walk()\n"
+        "  if reload_total ~= 4 then error('total ' .. reload_total) end\n"
+        "  for i = 1, 4 do\n"
+        "    local expected = 1\n"
+        "    local got = reload_counts[spawn_order[i]] or 0\n"
+        "    if got ~= expected then\n"
+        "      error('entity ' .. i .. ' delivered ' .. got)\n"
+        "    end\n"
+        "  end\n"
+        "end\n";
+    ok = write_script(verify) && engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_reload_walk");
+  }
+
+  std::remove("hardening_reload_walk.lua");
+  remove_script();
+  return ok;
+}
+
+// -----------------------------------------------------------------------
+// #65 item 3: an on_save_state hook that destroys a scripted entity
+// mid-capture-walk must not skip any surviving pre-walk entity's state
+// capture — every surviving entity's on_reload then receives its own
+// captured state table.
+// -----------------------------------------------------------------------
+bool test_save_state_capture_survives_destroy() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+
+  const char *prelude = "cap_order = {}\n"
+                        "saves_total = 0\n"
+                        "save_killed = false\n"
+                        "states_received = 0\n";
+  const char *v1 = "local M = {}\n"
+                   "function M.on_begin_play(self)\n"
+                   "  cap_order[#cap_order + 1] = self\n"
+                   "end\n"
+                   "function M.on_save_state(self)\n"
+                   "  saves_total = saves_total + 1\n"
+                   "  if self == cap_order[2] and not save_killed then\n"
+                   "    save_killed = true\n"
+                   "    engine.destroy_entity(cap_order[1])\n"
+                   "  end\n"
+                   "  return { marker = true }\n"
+                   "end\n"
+                   "function M.on_tick(self, dt) end\n"
+                   "return M\n";
+  if (!write_script(prelude) || !engine::scripting::load_script(kTempScript) ||
+      !write_file_at("hardening_capture_walk.lua", v1)) {
+    remove_script();
+    return false;
+  }
+
+  engine::runtime::World *world = session.world.get();
+  bool ok = true;
+  for (int i = 0; i < 4 && ok; ++i) {
+    ok = add_scripted_entity(world, "hardening_capture_walk.lua") !=
+         engine::runtime::kInvalidEntity;
+  }
+
+  if (ok) {
+    world->begin_begin_play_phase();
+    engine::scripting::dispatch_entity_scripts_begin_play(world);
+    world->end_begin_play_phase();
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *v2 = "local M = {}\n"
+                     "function M.on_reload(self, state)\n"
+                     "  if state ~= nil and state.marker == true then\n"
+                     "    states_received = states_received + 1\n"
+                     "  end\n"
+                     "end\n"
+                     "function M.on_tick(self, dt) end\n"
+                     "return M\n";
+    ok = write_file_at("hardening_capture_walk.lua", v2);
+  }
+
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    const char *verify =
+        "function verify_capture_walk()\n"
+        "  if saves_total ~= 4 then error('saves ' .. saves_total) end\n"
+        "  if states_received ~= 3 then\n"
+        "    error('states ' .. states_received)\n"
+        "  end\n"
+        "end\n";
+    ok = write_script(verify) && engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_capture_walk");
+  }
+
+  std::remove("hardening_capture_walk.lua");
+  remove_script();
+  return ok;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -604,6 +770,10 @@ int main() {
        test_module_load_survives_memory_exhaustion},
       {"module_reload_survives_memory_exhaustion",
        test_module_reload_survives_memory_exhaustion},
+      {"reload_hook_destroy_delivers_exactly_once",
+       test_reload_hook_destroy_delivers_exactly_once},
+      {"save_state_capture_survives_destroy",
+       test_save_state_capture_survives_destroy},
   };
 
   for (const auto &tc : tests) {
