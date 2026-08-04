@@ -31,6 +31,9 @@ public:
   static constexpr std::size_t kMaxServices = 64U;
 
   // Register a service pointer. A null pointer removes that service type.
+  // Re-registering a type replaces the stored pointer (last writer wins);
+  // a scoped owner that shares the locator must remove its entry only while
+  // get_service still returns the pointer it registered.
   // Returns false if the registry is full and the type is new.
   template <typename T> bool register_service(T *service) noexcept {
     return register_raw(type_id<T>(), static_cast<void *>(service));

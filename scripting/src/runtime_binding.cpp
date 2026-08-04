@@ -1,4 +1,7 @@
 // Owns runtime binding state and service-locator registration for scripting.
+// Locator entries follow last-writer-wins on bind; unbind only removes an
+// entry this binding still owns (the registered pointer is unchanged), so a
+// newer provider registered by someone else is never clobbered (audit M-14).
 
 #include "runtime_binding.h"
 
@@ -13,6 +16,25 @@ ScriptingRuntimeBinding &binding_storage() noexcept {
   return binding;
 }
 
+/// Removes the locator's World entry only while it still holds `world`.
+void remove_world_if_owned(core::ServiceLocator *locator,
+                           runtime::World *world) noexcept {
+  if ((locator != nullptr) && (world != nullptr) &&
+      (locator->get_service<runtime::World>() == world)) {
+    static_cast<void>(locator->remove_service<runtime::World>());
+  }
+}
+
+/// Removes the locator's RuntimeServices entry only while it still holds
+/// `services`.
+void remove_services_if_owned(core::ServiceLocator *locator,
+                              const RuntimeServices *services) noexcept {
+  if ((locator != nullptr) && (services != nullptr) &&
+      (locator->get_service<RuntimeServices>() == services)) {
+    static_cast<void>(locator->remove_service<RuntimeServices>());
+  }
+}
+
 } // namespace
 
 /// Returns the process-local runtime binding state for scripting internals.
@@ -23,17 +45,18 @@ void bind_runtime_world(runtime::World *world,
                         core::ServiceLocator &locator) noexcept {
   ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.worldLocator != nullptr) && (binding.worldLocator != &locator)) {
-    static_cast<void>(binding.worldLocator->remove_service<runtime::World>());
+    remove_world_if_owned(binding.worldLocator, binding.world);
   }
 
-  binding.world = world;
   if (world != nullptr) {
+    binding.world = world;
     locator.register_service<runtime::World>(world);
     binding.worldLocator = &locator;
   } else {
     core::ServiceLocator *target =
         (binding.worldLocator != nullptr) ? binding.worldLocator : &locator;
-    static_cast<void>(target->remove_service<runtime::World>());
+    remove_world_if_owned(target, binding.world);
+    binding.world = nullptr;
     binding.worldLocator = nullptr;
   }
 }
@@ -44,33 +67,29 @@ void bind_runtime_services(const RuntimeServices *services,
   ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.servicesLocator != nullptr) &&
       (binding.servicesLocator != &locator)) {
-    static_cast<void>(
-        binding.servicesLocator->remove_service<RuntimeServices>());
+    remove_services_if_owned(binding.servicesLocator, binding.services);
   }
 
-  binding.services = services;
   if (services != nullptr) {
+    binding.services = services;
     locator.register_service<RuntimeServices>(
         const_cast<RuntimeServices *>(services));
     binding.servicesLocator = &locator;
   } else {
     core::ServiceLocator *target =
         (binding.servicesLocator != nullptr) ? binding.servicesLocator : &locator;
-    static_cast<void>(target->remove_service<RuntimeServices>());
+    remove_services_if_owned(target, binding.services);
+    binding.services = nullptr;
     binding.servicesLocator = nullptr;
   }
 }
 
-/// Clears runtime binding pointers and any locator entries they registered.
+/// Clears runtime binding pointers and any locator entries this binding
+/// still owns.
 void clear_runtime_binding() noexcept {
   ScriptingRuntimeBinding &binding = runtime_binding();
-  if (binding.worldLocator != nullptr) {
-    static_cast<void>(binding.worldLocator->remove_service<runtime::World>());
-  }
-  if (binding.servicesLocator != nullptr) {
-    static_cast<void>(
-        binding.servicesLocator->remove_service<RuntimeServices>());
-  }
+  remove_world_if_owned(binding.worldLocator, binding.world);
+  remove_services_if_owned(binding.servicesLocator, binding.services);
   binding.world = nullptr;
   binding.services = nullptr;
   binding.worldLocator = nullptr;
