@@ -1,3 +1,4 @@
+# Issue template chooser configuration: disables blank issues for this repo.
 blank_issues_enabled: true
 contact_links:
   - name: Finding-closure contract

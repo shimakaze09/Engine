@@ -1,3 +1,4 @@
+# Structured issue form for runtime/editor bug reports with reproduction steps.
 name: Bug report
 description: Observed misbehavior in the engine, editor, tools, or a sample
 title: "[Bug] <what goes wrong>"

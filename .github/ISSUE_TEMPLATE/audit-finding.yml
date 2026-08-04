@@ -1,3 +1,4 @@
+# Structured issue form for defects found by code audits or review sweeps.
 name: Audit finding
 description: A defect found by a code audit or review sweep (correctness, safety, security, determinism)
 title: "[Audit] <short defect statement>"
