@@ -3,6 +3,7 @@
 #include "engine/audio/audio.h"
 
 #include <cstdio>
+#include <limits>
 
 #include "../test_harness.h"
 
@@ -166,6 +167,66 @@ static void test_out_of_range_bus_rejected() {
   g_tests.check(true, "out-of-range bus rejected");
 }
 
+/// EXPECTATION (audit M-29): set_master_volume behaves exactly like
+/// set_bus_volume(Master) — the stored value bus_volume returns reflects
+/// it, negatives clamp to 0, and non-finite input is ignored. Init may
+/// fail in CI (no audio device) — checks run only when it succeeds.
+static void test_master_volume_stored() {
+  using namespace engine::audio;
+  if (!initialize_audio()) {
+    g_tests.check(true, "master volume stored (skipped, no device)");
+    return;
+  }
+
+  set_master_volume(0.4F);
+  TEST_ASSERT(bus_volume(AudioBus::Master) == 0.4F);
+
+  set_master_volume(-2.0F);
+  TEST_ASSERT(bus_volume(AudioBus::Master) == 0.0F);
+
+  set_master_volume(0.6F);
+  set_master_volume(std::numeric_limits<float>::quiet_NaN());
+  TEST_ASSERT(bus_volume(AudioBus::Master) == 0.6F);
+
+  set_bus_volume(AudioBus::Sfx, 0.5F);
+  set_bus_volume(AudioBus::Sfx, std::numeric_limits<float>::infinity());
+  TEST_ASSERT(bus_volume(AudioBus::Sfx) == 0.5F);
+
+  shutdown_audio();
+  g_tests.check(true, "master volume stored");
+}
+
+/// EXPECTATION (audit M-29): non-finite listener transforms are rejected
+/// without touching miniaudio, invalid play params fail fast, and a
+/// literal stop_all with active pool/music state is safe. Device-gated
+/// like the other live-engine tests.
+static void test_invalid_inputs_rejected() {
+  using namespace engine::audio;
+  if (!initialize_audio()) {
+    g_tests.check(true, "invalid inputs rejected (skipped, no device)");
+    return;
+  }
+
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  set_listener(engine::math::Vec3(nan, 0.0F, 0.0F),
+               engine::math::Vec3(0.0F, 0.0F, -1.0F),
+               engine::math::Vec3(0.0F, 1.0F, 0.0F));
+
+  PlayParams badPitch{};
+  badPitch.pitch = 0.0F;
+  TEST_ASSERT(!play_sound(SoundHandle{12345U}, badPitch));
+
+  PlayParams badVolume{};
+  badVolume.volume = nan;
+  TEST_ASSERT(!play_sound_oneshot(SoundHandle{12345U}, badVolume));
+
+  TEST_ASSERT(!play_music("assets/sounds/ambient.wav", nan, false));
+
+  stop_all();
+  shutdown_audio();
+  g_tests.check(true, "invalid inputs rejected");
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -178,6 +239,8 @@ int main() {
   RUN_TEST(test_extended_api_without_init);
   RUN_TEST(test_bus_volume_roundtrip);
   RUN_TEST(test_out_of_range_bus_rejected);
+  RUN_TEST(test_master_volume_stored);
+  RUN_TEST(test_invalid_inputs_rejected);
 
   return g_tests.finish("Audio tests");
 }

@@ -20,7 +20,9 @@ struct SoundHandle final {
 
 inline constexpr SoundHandle kInvalidSound{};
 
-/// Playback settings: volume, pitch, and looping.
+/// Playback settings: volume, pitch, and looping. Playback calls validate
+/// them: volume must be finite and >= 0, pitch finite and > 0; invalid
+/// params make the call return false with a logged diagnostic.
 struct PlayParams final {
   float volume = 1.0F;
   float pitch = 1.0F;
@@ -40,14 +42,17 @@ SoundHandle load_sound(const char *virtualPath) noexcept;
 /// Releases the sound's slot; the handle becomes stale.
 void unload_sound(SoundHandle handle) noexcept;
 
-/// Starts playback with the given params; false for stale handles.
+/// Starts playback with the given params; false for stale handles or
+/// invalid params.
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept;
 /// Stops all playback of this sound.
 void stop_sound(SoundHandle handle) noexcept;
-/// Stops every playing sound.
+/// Stops everything audible: direct playback of loaded sounds, all pooled
+/// one-shot instances, and the streamed music track.
 void stop_all() noexcept;
 
-/// Sets the requested value for master volume.
+/// Sets the Master bus volume; identical to set_bus_volume(Master, v) —
+/// clamped at 0, stored for bus_volume, non-finite input ignored.
 void set_master_volume(float volume) noexcept;
 
 /// Mixer buses one-shot and music playback routes through; Master scales
@@ -58,13 +63,15 @@ enum class AudioBus : std::uint8_t {
   Sfx = 2,
 };
 
-/// Sets one bus's volume (clamped at 0; Master forwards to the engine).
+/// Sets one bus's volume (clamped at 0, non-finite ignored; Master
+/// forwards to the engine endpoint).
 void set_bus_volume(AudioBus bus, float volume) noexcept;
 /// Last volume set on the bus (1 when audio is unavailable).
 float bus_volume(AudioBus bus) noexcept;
 
 /// Places the 3D listener; the pipeline follows the active camera each
-/// frame (forward need not be normalized).
+/// frame (forward need not be normalized). Non-finite vectors are
+/// rejected and the previous listener transform is kept.
 void set_listener(const math::Vec3 &position, const math::Vec3 &forward,
                   const math::Vec3 &up) noexcept;
 
@@ -81,8 +88,10 @@ bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
 bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
                         AudioBus bus = AudioBus::Sfx) noexcept;
 
-/// Streams a music file from the VFS on the Music bus; one track plays
-/// at a time and a new call replaces the current track.
+/// Streams a music file on the Music bus; one track plays at a time and a
+/// new call replaces the current track. The virtual path resolves through
+/// the VFS to a loose OS file (archive-backed streaming is still pending);
+/// volume must be finite and >= 0 or the call fails.
 bool play_music(const char *virtualPath, float volume, bool loop) noexcept;
 /// Stops and releases the streamed music track.
 void stop_music() noexcept;
