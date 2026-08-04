@@ -35,6 +35,9 @@
 
 namespace engine::renderer {
 
+// REQUIRED: both uniforms — the input sampler and the texel size the
+// edge taps offset by. On failure the cached program id is zeroed
+// because the FXAA pass gates on it rather than on an availability flag.
 bool resolve_fxaa_program_state(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   backend.fxaaProgram = shader_gpu_program(backend.fxaaShaderHandle);
@@ -42,13 +45,21 @@ bool resolve_fxaa_program_state(BackendState &backend,
   if (fxaaProg == 0U) {
     return false;
   }
+  bool ok = true;
   backend.fxaaInputTextureLocation =
-      dev->uniform_location(fxaaProg, "u_inputTexture");
+      required_location(&ok, dev, fxaaProg, "u_inputTexture");
   backend.fxaaTexelSizeLocation =
-      dev->uniform_location(fxaaProg, "u_texelSize");
-  return true;
+      required_location(&ok, dev, fxaaProg, "u_texelSize");
+  if (!ok) {
+    backend.fxaaProgram = 0U;
+  }
+  return ok;
 }
 
+// REQUIRED per program: every uniform (input sampler plus threshold or
+// filter texel size — a dropped upload reads as 0 and breaks the
+// pyramid). A failing program's cached id is zeroed because the bloom
+// pass gates on all three ids rather than on an availability flag.
 bool resolve_bloom_program_state(BackendState &backend,
                                  const RenderDevice *dev) noexcept {
   bool ok = true;
@@ -56,12 +67,15 @@ bool resolve_bloom_program_state(BackendState &backend,
     backend.bloomThresholdProgram =
         shader_gpu_program(backend.bloomThresholdShaderHandle);
     const std::uint32_t prog = backend.bloomThresholdProgram;
-    if (prog != 0U) {
+    bool programOk = prog != 0U;
+    if (programOk) {
       backend.bloomThreshSceneColorLoc =
-          dev->uniform_location(prog, "u_sceneColor");
+          required_location(&programOk, dev, prog, "u_sceneColor");
       backend.bloomThreshThresholdLoc =
-          dev->uniform_location(prog, "u_threshold");
-    } else {
+          required_location(&programOk, dev, prog, "u_threshold");
+    }
+    if (!programOk) {
+      backend.bloomThresholdProgram = 0U;
       ok = false;
     }
   }
@@ -69,11 +83,15 @@ bool resolve_bloom_program_state(BackendState &backend,
     backend.bloomDownsampleProgram =
         shader_gpu_program(backend.bloomDownsampleShaderHandle);
     const std::uint32_t prog = backend.bloomDownsampleProgram;
-    if (prog != 0U) {
-      backend.bloomDownInputLoc = dev->uniform_location(prog, "u_input");
+    bool programOk = prog != 0U;
+    if (programOk) {
+      backend.bloomDownInputLoc =
+          required_location(&programOk, dev, prog, "u_input");
       backend.bloomDownTexelSizeLoc =
-          dev->uniform_location(prog, "u_texelSize");
-    } else {
+          required_location(&programOk, dev, prog, "u_texelSize");
+    }
+    if (!programOk) {
+      backend.bloomDownsampleProgram = 0U;
       ok = false;
     }
   }
@@ -81,17 +99,26 @@ bool resolve_bloom_program_state(BackendState &backend,
     backend.bloomUpsampleProgram =
         shader_gpu_program(backend.bloomUpsampleShaderHandle);
     const std::uint32_t prog = backend.bloomUpsampleProgram;
-    if (prog != 0U) {
-      backend.bloomUpInputLoc = dev->uniform_location(prog, "u_input");
+    bool programOk = prog != 0U;
+    if (programOk) {
+      backend.bloomUpInputLoc =
+          required_location(&programOk, dev, prog, "u_input");
       backend.bloomUpTexelSizeLoc =
-          dev->uniform_location(prog, "u_texelSize");
-    } else {
+          required_location(&programOk, dev, prog, "u_texelSize");
+    }
+    if (!programOk) {
+      backend.bloomUpsampleProgram = 0U;
       ok = false;
     }
   }
   return ok;
 }
 
+// REQUIRED: every scalar/matrix uniform (radius and bias upload from
+// cvars each frame; dropped uploads read as 0 and null the occlusion
+// term) and kernel element u_samples[0]; higher kernel elements stay
+// OPTIONAL because a driver may legitimately trim the active array.
+// Blur: both uniforms REQUIRED.
 bool resolve_ssao_program_state(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   bool ok = true;
@@ -99,19 +126,25 @@ bool resolve_ssao_program_state(BackendState &backend,
     backend.ssaoProgram = shader_gpu_program(backend.ssaoShaderHandle);
     const std::uint32_t prog = backend.ssaoProgram;
     if (prog != 0U) {
-      backend.ssaoDepthLoc = dev->uniform_location(prog, "u_gBufferDepth");
-      backend.ssaoNormalLoc = dev->uniform_location(prog, "u_gBufferNormal");
-      backend.ssaoNoiseLoc = dev->uniform_location(prog, "u_noiseTexture");
-      backend.ssaoProjectionLoc = dev->uniform_location(prog, "u_projection");
-      backend.ssaoViewLoc = dev->uniform_location(prog, "u_view");
-      backend.ssaoNoiseScaleLoc = dev->uniform_location(prog, "u_noiseScale");
-      backend.ssaoRadiusLoc = dev->uniform_location(prog, "u_radius");
-      backend.ssaoBiasLoc = dev->uniform_location(prog, "u_bias");
+      backend.ssaoDepthLoc = required_location(&ok, dev, prog, "u_gBufferDepth");
+      backend.ssaoNormalLoc =
+          required_location(&ok, dev, prog, "u_gBufferNormal");
+      backend.ssaoNoiseLoc = required_location(&ok, dev, prog, "u_noiseTexture");
+      backend.ssaoProjectionLoc =
+          required_location(&ok, dev, prog, "u_projection");
+      backend.ssaoViewLoc = required_location(&ok, dev, prog, "u_view");
+      backend.ssaoNoiseScaleLoc =
+          required_location(&ok, dev, prog, "u_noiseScale");
+      backend.ssaoRadiusLoc = required_location(&ok, dev, prog, "u_radius");
+      backend.ssaoBiasLoc = required_location(&ok, dev, prog, "u_bias");
       for (int i = 0; i < 32; ++i) {
         char nm[64] = {};
         std::snprintf(nm, sizeof(nm), "u_samples[%d]", i);
         backend.ssaoSampleLocs[static_cast<std::size_t>(i)] =
             dev->uniform_location(prog, nm);
+      }
+      if (backend.ssaoSampleLocs[0] < 0) {
+        ok = false;
       }
     } else {
       ok = false;
@@ -121,9 +154,10 @@ bool resolve_ssao_program_state(BackendState &backend,
     backend.ssaoBlurProgram = shader_gpu_program(backend.ssaoBlurShaderHandle);
     const std::uint32_t prog = backend.ssaoBlurProgram;
     if (prog != 0U) {
-      backend.ssaoBlurInputLoc = dev->uniform_location(prog, "u_ssaoInput");
+      backend.ssaoBlurInputLoc =
+          required_location(&ok, dev, prog, "u_ssaoInput");
       backend.ssaoBlurTexelSizeLoc =
-          dev->uniform_location(prog, "u_texelSize");
+          required_location(&ok, dev, prog, "u_texelSize");
     } else {
       ok = false;
     }
@@ -131,6 +165,8 @@ bool resolve_ssao_program_state(BackendState &backend,
   return ok;
 }
 
+// REQUIRED: uViewProjection — the only uniform; lines cannot project
+// without it.
 bool resolve_debug_line_program_state(BackendState &backend,
                                       const RenderDevice *dev) noexcept {
   backend.debugLineProgram = shader_gpu_program(backend.debugLineShaderHandle);
@@ -138,11 +174,14 @@ bool resolve_debug_line_program_state(BackendState &backend,
   if (prog == 0U) {
     return false;
   }
+  bool ok = true;
   backend.debugLineViewProjectionLoc =
-      dev->uniform_location(prog, "uViewProjection");
-  return true;
+      required_location(&ok, dev, prog, "uViewProjection");
+  return ok;
 }
 
+// REQUIRED: u_sceneColor — the only uniform; the average-luminance
+// reduction has no other input.
 bool resolve_luminance_program_state(BackendState &backend,
                                      const RenderDevice *dev) noexcept {
   backend.luminanceProgram = shader_gpu_program(backend.luminanceShaderHandle);
@@ -150,8 +189,10 @@ bool resolve_luminance_program_state(BackendState &backend,
   if (prog == 0U) {
     return false;
   }
-  backend.lumSceneColorLoc = dev->uniform_location(prog, "u_sceneColor");
-  return true;
+  bool ok = true;
+  backend.lumSceneColorLoc =
+      required_location(&ok, dev, prog, "u_sceneColor");
+  return ok;
 }
 
 void init_backend_post(BackendState &backend,
@@ -224,9 +265,10 @@ void init_backend_post(BackendState &backend,
       backend.ssaoBlurShaderHandle = ssaoBlurShader;
     }
 
-    static_cast<void>(resolve_ssao_program_state(backend, dev));
+    const bool ssaoUniformsOk = resolve_ssao_program_state(backend, dev);
 
-    if (backend.ssaoProgram != 0U && backend.ssaoBlurProgram != 0U) {
+    if (ssaoUniformsOk && backend.ssaoProgram != 0U &&
+        backend.ssaoBlurProgram != 0U) {
       backend.ssaoAvailable = true;
       generate_ssao_kernel(backend.ssaoKernel, 32);
       backend.ssaoNoiseTexture = create_ssao_noise_texture();

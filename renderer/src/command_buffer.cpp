@@ -148,7 +148,10 @@ void refresh_backend_program_state(BackendState &backend,
     core::log_message(core::LogLevel::Error, "renderer",
                       "required PBR uniforms missing after shader reload");
   }
-  static_cast<void>(resolve_tonemap_program_state(backend, dev));
+  if (!resolve_tonemap_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "required tonemap uniforms missing after shader reload");
+  }
 
   // Every family recomputes availability from scratch: reflection is
   // re-evaluated on each reload while resource readiness (geometry,
@@ -195,8 +198,15 @@ void refresh_backend_program_state(BackendState &backend,
   recompute_availability(&backend.deferredAvailable,
                          gbufferOk && deferredLightOk, true,
                          "deferred path");
-  if (backend.gbufferDebugShaderHandle != kInvalidShaderProgram) {
-    static_cast<void>(resolve_gbuffer_debug_program_state(backend, dev));
+  // Program-gated families (no availability flag): their resolvers zero
+  // the cached program id on a broken interface, which is what their
+  // draw paths gate on, so a failure here disables the pass and a
+  // corrected reload restores it from the retained handle.
+  if ((backend.gbufferDebugShaderHandle != kInvalidShaderProgram) &&
+      !resolve_gbuffer_debug_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "G-Buffer debug lost required uniforms on shader "
+                      "reload — disabled");
   }
 
   recompute_availability(
@@ -217,15 +227,24 @@ void refresh_backend_program_state(BackendState &backend,
       (backend.gbufferSkinnedShaderHandle != kInvalidShaderProgram) &&
           resolve_gbuffer_skinned_program_state(backend, dev),
       backend.bonePaletteUbo != 0U, "GPU skinning");
-  if (backend.shadowDepthSkinnedShaderHandle != kInvalidShaderProgram) {
-    static_cast<void>(
-        resolve_shadow_depth_skinned_program_state(backend, dev));
+  if ((backend.shadowDepthSkinnedShaderHandle != kInvalidShaderProgram) &&
+      !resolve_shadow_depth_skinned_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "skinned shadow variant lost required state on shader "
+                      "reload — skinned meshes cast bind-pose shadows");
   }
 
-  if (backend.fxaaShaderHandle != kInvalidShaderProgram) {
-    static_cast<void>(resolve_fxaa_program_state(backend, dev));
+  if ((backend.fxaaShaderHandle != kInvalidShaderProgram) &&
+      !resolve_fxaa_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "FXAA lost required uniforms on shader reload — "
+                      "disabled");
   }
-  static_cast<void>(resolve_bloom_program_state(backend, dev));
+  if (!resolve_bloom_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "bloom lost required state on shader reload — "
+                      "disabled");
+  }
   recompute_availability(&backend.ssaoAvailable,
                          resolve_ssao_program_state(backend, dev),
                          backend.ssaoNoiseTexture != 0U, "SSAO");

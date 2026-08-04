@@ -34,6 +34,8 @@
 
 namespace engine::renderer {
 
+// REQUIRED: view/projection and the cubemap sampler — every skybox-pass
+// uniform. No OPTIONAL uniforms.
 bool resolve_skybox_program_state(BackendState &backend,
                                   const RenderDevice *dev) noexcept {
   backend.skyboxProgram = shader_gpu_program(backend.skyboxShaderHandle);
@@ -41,14 +43,17 @@ bool resolve_skybox_program_state(BackendState &backend,
   if (skyboxProgram == 0U) {
     return false;
   }
-  backend.skyboxViewLoc = dev->uniform_location(skyboxProgram, "u_view");
+  bool ok = true;
+  backend.skyboxViewLoc = required_location(&ok, dev, skyboxProgram, "u_view");
   backend.skyboxProjectionLoc =
-      dev->uniform_location(skyboxProgram, "u_projection");
-  backend.skyboxTextureLoc = dev->uniform_location(skyboxProgram, "u_skybox");
-  return (backend.skyboxViewLoc >= 0) && (backend.skyboxProjectionLoc >= 0) &&
-         (backend.skyboxTextureLoc >= 0);
+      required_location(&ok, dev, skyboxProgram, "u_projection");
+  backend.skyboxTextureLoc =
+      required_location(&ok, dev, skyboxProgram, "u_skybox");
+  return ok;
 }
 
+// REQUIRED: view/projection, sun direction, and turbidity — every
+// Preetham uniform. No OPTIONAL uniforms.
 bool resolve_preetham_sky_program_state(BackendState &backend,
                                         const RenderDevice *dev) noexcept {
   backend.preethamSkyProgram =
@@ -57,19 +62,20 @@ bool resolve_preetham_sky_program_state(BackendState &backend,
   if (preethamProgram == 0U) {
     return false;
   }
-  backend.preethamSkyViewLoc = dev->uniform_location(preethamProgram, "u_view");
+  bool ok = true;
+  backend.preethamSkyViewLoc =
+      required_location(&ok, dev, preethamProgram, "u_view");
   backend.preethamSkyProjectionLoc =
-      dev->uniform_location(preethamProgram, "u_projection");
+      required_location(&ok, dev, preethamProgram, "u_projection");
   backend.preethamSkySunDirectionLoc =
-      dev->uniform_location(preethamProgram, "u_sunDirection");
+      required_location(&ok, dev, preethamProgram, "u_sunDirection");
   backend.preethamSkyTurbidityLoc =
-      dev->uniform_location(preethamProgram, "u_turbidity");
-  return (backend.preethamSkyViewLoc >= 0) &&
-         (backend.preethamSkyProjectionLoc >= 0) &&
-         (backend.preethamSkySunDirectionLoc >= 0) &&
-         (backend.preethamSkyTurbidityLoc >= 0);
+      required_location(&ok, dev, preethamProgram, "u_turbidity");
+  return ok;
 }
 
+// REQUIRED: view/projection, sun direction, turbidity, and ground albedo
+// — every procedural-scatter uniform. No OPTIONAL uniforms.
 bool resolve_hosek_sky_program_state(BackendState &backend,
                                      const RenderDevice *dev) noexcept {
   backend.hosekSkyProgram = shader_gpu_program(backend.hosekSkyShaderHandle);
@@ -77,22 +83,21 @@ bool resolve_hosek_sky_program_state(BackendState &backend,
   if (hosekProgram == 0U) {
     return false;
   }
-  backend.hosekSkyViewLoc = dev->uniform_location(hosekProgram, "u_view");
+  bool ok = true;
+  backend.hosekSkyViewLoc = required_location(&ok, dev, hosekProgram, "u_view");
   backend.hosekSkyProjectionLoc =
-      dev->uniform_location(hosekProgram, "u_projection");
+      required_location(&ok, dev, hosekProgram, "u_projection");
   backend.hosekSkySunDirectionLoc =
-      dev->uniform_location(hosekProgram, "u_sunDirection");
+      required_location(&ok, dev, hosekProgram, "u_sunDirection");
   backend.hosekSkyTurbidityLoc =
-      dev->uniform_location(hosekProgram, "u_turbidity");
+      required_location(&ok, dev, hosekProgram, "u_turbidity");
   backend.hosekSkyGroundAlbedoLoc =
-      dev->uniform_location(hosekProgram, "u_groundAlbedo");
-  return (backend.hosekSkyViewLoc >= 0) &&
-         (backend.hosekSkyProjectionLoc >= 0) &&
-         (backend.hosekSkySunDirectionLoc >= 0) &&
-         (backend.hosekSkyTurbidityLoc >= 0) &&
-         (backend.hosekSkyGroundAlbedoLoc >= 0);
+      required_location(&ok, dev, hosekProgram, "u_groundAlbedo");
+  return ok;
 }
 
+// REQUIRED: view/projection, the source environment sampler, and the
+// per-mip roughness — every prefilter uniform. No OPTIONAL uniforms.
 bool resolve_environment_prefilter_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.environmentPrefilterProgram =
@@ -101,20 +106,20 @@ bool resolve_environment_prefilter_program_state(
   if (prefilterProgram == 0U) {
     return false;
   }
+  bool ok = true;
   backend.environmentPrefilterViewLoc =
-      dev->uniform_location(prefilterProgram, "u_view");
+      required_location(&ok, dev, prefilterProgram, "u_view");
   backend.environmentPrefilterProjectionLoc =
-      dev->uniform_location(prefilterProgram, "u_projection");
+      required_location(&ok, dev, prefilterProgram, "u_projection");
   backend.environmentPrefilterTextureLoc =
-      dev->uniform_location(prefilterProgram, "u_environmentMap");
+      required_location(&ok, dev, prefilterProgram, "u_environmentMap");
   backend.environmentPrefilterRoughnessLoc =
-      dev->uniform_location(prefilterProgram, "u_roughness");
-  return (backend.environmentPrefilterViewLoc >= 0) &&
-         (backend.environmentPrefilterProjectionLoc >= 0) &&
-         (backend.environmentPrefilterTextureLoc >= 0) &&
-         (backend.environmentPrefilterRoughnessLoc >= 0);
+      required_location(&ok, dev, prefilterProgram, "u_roughness");
+  return ok;
 }
 
+// REQUIRED: view/projection and the source environment sampler — every
+// irradiance-convolution uniform. No OPTIONAL uniforms.
 bool resolve_environment_irradiance_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.environmentIrradianceProgram =
@@ -123,17 +128,18 @@ bool resolve_environment_irradiance_program_state(
   if (irradianceProgram == 0U) {
     return false;
   }
+  bool ok = true;
   backend.environmentIrradianceViewLoc =
-      dev->uniform_location(irradianceProgram, "u_view");
+      required_location(&ok, dev, irradianceProgram, "u_view");
   backend.environmentIrradianceProjectionLoc =
-      dev->uniform_location(irradianceProgram, "u_projection");
+      required_location(&ok, dev, irradianceProgram, "u_projection");
   backend.environmentIrradianceTextureLoc =
-      dev->uniform_location(irradianceProgram, "u_environmentMap");
-  return (backend.environmentIrradianceViewLoc >= 0) &&
-         (backend.environmentIrradianceProjectionLoc >= 0) &&
-         (backend.environmentIrradianceTextureLoc >= 0);
+      required_location(&ok, dev, irradianceProgram, "u_environmentMap");
+  return ok;
 }
 
+// The split-sum LUT bake has no uniforms: a nonzero link is the whole
+// contract.
 bool resolve_environment_brdf_lut_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   static_cast<void>(dev);
