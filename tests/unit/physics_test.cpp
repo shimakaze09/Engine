@@ -13,6 +13,7 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_context.h"
 #include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
@@ -2630,6 +2631,111 @@ int check_restitution_speed_threshold() {
   return 0;
 }
 
+/// H-07 boundary: a collider whose expanded cell footprint exceeds the
+/// per-collider cell budget (a compound child 200*sqrt(2) m from its
+/// spinning root sees omega x r ~ 3400 m/s of point velocity, a ~484-cell
+/// footprint against the 256 cap) must divert to the brute-force overflow
+/// list: its overlapping pair is still detected (lossless), exactly one
+/// warning episode is recorded while the condition persists across steps,
+/// and a second episode is counted only after the condition clears and
+/// returns. The wall collider carries a small local rotation because the
+/// compound pair routes through GJK, whose support ties on exactly
+/// axis-aligned face-face overlaps collapse the simplex (pre-existing
+/// narrow-phase limitation, tracked separately from this broad-phase
+/// coverage).
+int check_broadphase_overflow_lossless_and_loud() {
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 960;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const auto root = world->create_entity();
+  engine::runtime::Transform rootT{};
+  world->add_transform(root, rootT);
+  engine::runtime::RigidBody rootRB{};
+  rootRB.inverseMass = 1.0F;
+  rootRB.angularVelocity = engine::math::Vec3(0.0F, 0.0F, 12.0F);
+  world->add_rigid_body(root, rootRB);
+
+  const auto child = world->create_entity();
+  engine::runtime::Transform childT{};
+  childT.position = engine::math::Vec3(200.0F, 200.0F, 0.0F);
+  childT.parentId = world->persistent_id(root);
+  world->add_transform(child, childT);
+  engine::runtime::Collider childCol{};
+  childCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  world->add_collider(child, childCol);
+
+  const auto wall = world->create_entity();
+  engine::runtime::Transform wallT{};
+  wallT.position = engine::math::Vec3(200.6F, 200.0F, 0.0F);
+  world->add_transform(wall, wallT);
+  engine::runtime::Collider wallCol{};
+  wallCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  wallCol.localRotation = engine::math::from_axis_angle(
+      engine::math::normalize(engine::math::Vec3(1.0F, 1.0F, 1.0F)), 0.2F);
+  world->add_collider(wall, wallCol);
+
+  auto run_resolve = [&world]() noexcept -> bool {
+    world->begin_update_phase();
+    const bool resolved = engine::runtime::resolve_collisions(*world);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+    return resolved;
+  };
+
+  if (!run_resolve()) {
+    return 961;
+  }
+  const engine::physics::PhysicsContext &ctx = world->physics_context();
+  if (ctx.broadphaseOverflowEpisodes != 1U) {
+    return 962;
+  }
+  if (ctx.collisionPairCount < 1U) {
+    return 963;
+  }
+
+  {
+    engine::runtime::RigidBody *rb = world->get_rigid_body_ptr(root);
+    if (rb == nullptr) {
+      return 964;
+    }
+    rb->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 12.0F);
+  }
+  if (!run_resolve() || (ctx.broadphaseOverflowEpisodes != 1U)) {
+    return 965;
+  }
+
+  {
+    engine::runtime::RigidBody *rb = world->get_rigid_body_ptr(root);
+    if (rb == nullptr) {
+      return 966;
+    }
+    rb->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  }
+  if (!run_resolve() || (ctx.broadphaseOverflowEpisodes != 1U) ||
+      ctx.broadphaseOverflowActive) {
+    return 967;
+  }
+
+  {
+    engine::runtime::RigidBody *rb = world->get_rigid_body_ptr(root);
+    if (rb == nullptr) {
+      return 968;
+    }
+    rb->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 12.0F);
+  }
+  if (!run_resolve() || (ctx.broadphaseOverflowEpisodes != 2U)) {
+    return 969;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -2755,6 +2861,11 @@ int main() {
   }
 
   result = check_collision_bookkeeping_scale();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_broadphase_overflow_lossless_and_loud();
   if (result != 0) {
     return result;
   }
