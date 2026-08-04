@@ -26,8 +26,17 @@ constexpr std::size_t kMaxSaveJsonBytes = 16U * 1024U;
 
 } // namespace
 
+/// Lua binding: engine.persist(key, value) stores value under key in the
+/// hot-reload persist table. Calling with no value argument is an error
+/// (a forgotten value must not silently delete data); the documented
+/// deletion form is an explicit engine.persist(key, nil).
 int lua_engine_persist(lua_State *state) noexcept {
   const char *key = luaL_checkstring(state, 1);
+  if (lua_gettop(state) < 2) {
+    return luaL_error(state,
+                      "engine.persist(key, value) requires a value argument; "
+                      "pass an explicit nil to delete the key");
+  }
   if (g_persistRef == LUA_NOREF) {
     lua_newtable(state);
     g_persistRef = luaL_ref(state, LUA_REGISTRYINDEX);

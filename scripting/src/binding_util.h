@@ -32,4 +32,26 @@ bool protected_engine_dispatch(lua_State *state, LuaDispatchFn trampoline,
                                void *args, int nresults,
                                const char *context) noexcept;
 
+/// Runs an allocation-hazardous engine C operation (chunk loads, registry
+/// refs, table snapshots) inside one pcall WITHOUT arming a fresh
+/// instruction budget — it executes no user Lua code but can still raise
+/// LUA_ERRMEM, which is logged and absorbed instead of reaching the panic
+/// handler. Returns success with the results left on the stack.
+bool protected_c_operation(lua_State *state, LuaDispatchFn trampoline,
+                           void *args, int nresults,
+                           const char *context) noexcept;
+
+/// Loads a Lua chunk from path under protection (luaL_loadfile can raise
+/// LUA_ERRMEM building the chunk name before the protected parse); on
+/// success the chunk function is left on the stack, on failure the error
+/// is logged and the stack is balanced.
+bool protected_load_chunk(lua_State *state, const char *path,
+                          const char *context) noexcept;
+
+/// Pops the value on top of the stack and stores it in the registry under
+/// protection (luaL_ref can raise LUA_ERRMEM growing the registry). The
+/// value is consumed either way; outRef holds LUA_NOREF on failure.
+bool protected_registry_ref(lua_State *state, int *outRef,
+                            const char *context) noexcept;
+
 } // namespace engine::scripting

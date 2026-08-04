@@ -27,6 +27,34 @@ int traceback_trampoline(lua_State *state) noexcept {
   return 1;
 }
 
+/// Carries a chunk path into the protected load trampoline.
+struct ChunkLoadArgs final {
+  const char *path = nullptr;
+};
+
+/// Protected trampoline: loads the chunk file, re-raising the load error
+/// (syntax, I/O, or memory) so the wrapping pcall catches it.
+int chunk_load_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<ChunkLoadArgs *>(lua_touserdata(state, 1));
+  if (luaL_loadfile(state, args->path) != LUA_OK) {
+    return lua_error(state);
+  }
+  return 1;
+}
+
+/// Carries the created registry reference out of the ref trampoline.
+struct RegistryRefArgs final {
+  int ref = LUA_NOREF;
+};
+
+/// Protected trampoline: refs the value argument into the registry so a
+/// registry-growth allocation failure stays catchable.
+int registry_ref_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<RegistryRefArgs *>(lua_touserdata(state, 1));
+  args->ref = luaL_ref(state, LUA_REGISTRYINDEX);
+  return 0;
+}
+
 } // namespace
 
 /// Reads vec3 args data.
@@ -81,6 +109,54 @@ void log_lua_error(lua_State *state, const char *context) noexcept {
   lua_pop(state, 2);
 }
 
+bool protected_c_operation(lua_State *state, LuaDispatchFn trampoline,
+                           void *args, int nresults,
+                           const char *context) noexcept {
+  if ((state == nullptr) || (trampoline == nullptr)) {
+    return false;
+  }
+
+  lua_pushcfunction(state, trampoline);
+  lua_pushlightuserdata(state, args);
+  if (lua_pcall(state, 1, nresults, 0) != LUA_OK) {
+    log_lua_error(state, context);
+    return false;
+  }
+  return true;
+}
+
+bool protected_load_chunk(lua_State *state, const char *path,
+                          const char *context) noexcept {
+  if ((state == nullptr) || (path == nullptr)) {
+    return false;
+  }
+  ChunkLoadArgs args{};
+  args.path = path;
+  return protected_c_operation(state, &chunk_load_trampoline, &args, 1,
+                               context);
+}
+
+bool protected_registry_ref(lua_State *state, int *outRef,
+                            const char *context) noexcept {
+  if (outRef != nullptr) {
+    *outRef = LUA_NOREF;
+  }
+  if ((state == nullptr) || (outRef == nullptr) || (lua_gettop(state) < 1)) {
+    return false;
+  }
+
+  RegistryRefArgs args{};
+  lua_pushcfunction(state, &registry_ref_trampoline);
+  lua_pushlightuserdata(state, &args);
+  lua_rotate(state, -3, 2);
+  if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
+    log_lua_error(state, context);
+    return false;
+  }
+  *outRef = args.ref;
+  return true;
+}
+
 bool protected_engine_dispatch(lua_State *state, LuaDispatchFn trampoline,
                                void *args, int nresults,
                                const char *context) noexcept {
@@ -89,10 +165,7 @@ bool protected_engine_dispatch(lua_State *state, LuaDispatchFn trampoline,
   }
 
   arm_debug_lua_hook(state);
-  lua_pushcfunction(state, trampoline);
-  lua_pushlightuserdata(state, args);
-  if (lua_pcall(state, 1, nresults, 0) != LUA_OK) {
-    log_lua_error(state, context);
+  if (!protected_c_operation(state, trampoline, args, nresults, context)) {
     return false;
   }
 

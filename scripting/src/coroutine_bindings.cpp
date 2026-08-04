@@ -2,6 +2,8 @@
 
 #include "coroutine_bindings.h"
 
+#include "binding_util.h"
+
 extern "C" {
 #include "lauxlib.h"
 #include "lua.h"
@@ -38,7 +40,11 @@ class CoroutineScheduler final {
 public:
   static constexpr std::size_t kCapacity = 32U;
 
-  /// Parses yield values and stores the next wake criteria.
+  /// Parses yield values and stores the next wake criteria. The wait_until
+  /// condition is ref'd under protection (this runs from the C-context
+  /// scheduler tick where a raising luaL_ref would reach the panic
+  /// handler); on ref failure the entry degrades to an immediate timed
+  /// wake.
   void parse_yield(lua_State *state, lua_State *thread, int nresults,
                    CoroutineEntry &entry, float totalSeconds,
                    std::uint32_t frameIndex) noexcept {
@@ -59,8 +65,10 @@ public:
         entry.wakeAtFrame = frameIndex + frames;
       } else if (tag == static_cast<void *>(&kWaitConditionTag)) {
         lua_pushvalue(thread, -2);
-        entry.conditionRef = luaL_ref(thread, LUA_REGISTRYINDEX);
-        entry.mode = WaitMode::Condition;
+        if (protected_registry_ref(thread, &entry.conditionRef,
+                                   "wait_until condition ref")) {
+          entry.mode = WaitMode::Condition;
+        }
       }
       lua_pop(thread, nresults);
     } else if ((nresults >= 1) && (lua_isnumber(thread, -1) != 0)) {

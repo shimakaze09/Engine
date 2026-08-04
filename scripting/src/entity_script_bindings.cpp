@@ -23,10 +23,15 @@ namespace engine::scripting {
 namespace {
 
 /// Stores one cached Lua module table for entity script dispatch.
+/// lastFailedMtime latches the mtime of a save whose reload failed so the
+/// attempt (including its per-entity on_save_state captures) runs once
+/// per broken save instead of every frame until the file is fixed; the
+/// next mtime change retries.
 struct EntityScriptModule final {
   char path[128] = {};
   int registryRef = LUA_NOREF;
   std::int64_t mtime = 0;
+  std::int64_t lastFailedMtime = 0;
   bool reloaded = false;
 };
 
@@ -35,6 +40,7 @@ constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
 constexpr std::size_t kMaxModuleLoadDepth = 32U;
 constexpr std::size_t kInvalidModuleSlot = kMaxEntityScriptModules;
 constexpr std::size_t kMaxScriptDispatchEntries = ENGINE_MAX_ENTITIES;
+constexpr std::size_t kMaxCaptureDepth = 2U;
 constexpr std::size_t kScriptPathSize =
     runtime::ScriptComponent::kMaxPathLength + 1U;
 
@@ -56,6 +62,9 @@ char g_moduleLoadStack[kMaxModuleLoadDepth][128]{};
 std::size_t g_moduleLoadDepth = 0U;
 int g_endPlayDispatchDepth = 0;
 core::Entity g_scriptDispatchOrder[kMaxScriptDispatchEntries]{};
+core::Entity g_reloadDispatchOrder[kMaxScriptDispatchEntries]{};
+core::Entity g_captureOrder[kMaxCaptureDepth][kMaxScriptDispatchEntries]{};
+std::size_t g_captureDepth = 0U;
 
 /// Returns the file modification timestamp from the configured callback.
 std::int64_t file_mtime(const char *path) noexcept {
@@ -87,22 +96,29 @@ void push_entity_handle(lua_State *state, core::Entity entity) noexcept {
   }
 }
 
-/// Snapshots the entities that carry a non-empty script path, in dense
-/// component order, so dispatch loops survive callbacks that destroy or
-/// create scripted entities mid-iteration (swap-and-pop invalidation).
-std::size_t snapshot_script_dispatch_order() noexcept {
+/// Snapshots the entities that carry a non-empty script path into the
+/// given array, in dense component order, so walk loops survive callbacks
+/// that destroy or create scripted entities mid-iteration (swap-and-pop
+/// invalidation); entities created after the snapshot are excluded.
+std::size_t snapshot_scripted_entities(
+    core::Entity (&out)[kMaxScriptDispatchEntries]) noexcept {
   std::size_t count = 0U;
   runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [&count](runtime::Entity entity,
-               const runtime::ScriptComponent &sc) noexcept {
+      [&count, &out](runtime::Entity entity,
+                     const runtime::ScriptComponent &sc) noexcept {
         if ((sc.scriptPath[0] == '\0') ||
             (count >= kMaxScriptDispatchEntries)) {
           return;
         }
-        g_scriptDispatchOrder[count] = entity;
+        out[count] = entity;
         ++count;
       });
   return count;
+}
+
+/// Snapshots scripted entities into the tick/start/end dispatch order.
+std::size_t snapshot_script_dispatch_order() noexcept {
+  return snapshot_scripted_entities(g_scriptDispatchOrder);
 }
 
 /// Copies an entity's live script path into caller-owned storage so
@@ -208,7 +224,12 @@ int module_save_state_trampoline(lua_State *state) noexcept {
   return 1;
 }
 
-/// Captures state from every live entity using one cached module.
+/// Captures state from every live entity using one cached module. The
+/// walk runs over a pre-walk snapshot with per-entity revalidation
+/// (alive + path match against a local copy) because on_save_state can
+/// destroy scripted entities mid-walk; nested captures (an on_save_state
+/// hook requiring another changed module) get their own snapshot buffer
+/// up to kMaxCaptureDepth, beyond which capture is skipped with an error.
 void capture_entity_saved_state(std::size_t moduleSlot,
                                 const EntityScriptModule &mod) noexcept {
   clear_entity_saved_state_for_module(moduleSlot);
@@ -216,34 +237,57 @@ void capture_entity_saved_state(std::size_t moduleSlot,
       (mod.registryRef == LUA_NOREF)) {
     return;
   }
+  if (g_captureDepth >= kMaxCaptureDepth) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "save-state capture nested too deep; skipping capture");
+    return;
+  }
 
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [moduleSlot, &mod](runtime::Entity entity,
-                         const runtime::ScriptComponent &sc) noexcept {
-        if ((std::strcmp(sc.scriptPath, mod.path) != 0) ||
-            (entity.index == 0U) || (entity.index >= kMaxFaultedEntities)) {
-          return;
-        }
+  char modPath[sizeof(mod.path)] = {};
+  std::snprintf(modPath, sizeof(modPath), "%.*s",
+                static_cast<int>(sizeof(modPath) - 1U), mod.path);
+  const int moduleRef = mod.registryRef;
 
-        ModuleCallArgs args{};
-        args.moduleRef = mod.registryRef;
-        args.entity = entity;
-        if (!protected_engine_dispatch(g_state, &module_save_state_trampoline,
-                                       &args, 1, "on_save_state")) {
-          return;
-        }
+  runtime::World *world = runtime_binding().world;
+  core::Entity(&order)[kMaxScriptDispatchEntries] =
+      g_captureOrder[g_captureDepth];
+  ++g_captureDepth;
+  const std::size_t count = snapshot_scripted_entities(order);
+  for (std::size_t i = 0U; i < count; ++i) {
+    const core::Entity entity = order[i];
+    char path[kScriptPathSize] = {};
+    if ((entity.index == 0U) || (entity.index >= kMaxFaultedEntities) ||
+        !world->is_alive(entity) ||
+        !copy_entity_script_path(world, entity, path) ||
+        (std::strcmp(path, modPath) != 0)) {
+      continue;
+    }
 
-        if (lua_istable(g_state, -1) == 0) {
-          lua_pop(g_state, 1);
-          return;
-        }
+    ModuleCallArgs args{};
+    args.moduleRef = moduleRef;
+    args.entity = entity;
+    if (!protected_engine_dispatch(g_state, &module_save_state_trampoline,
+                                   &args, 1, "on_save_state")) {
+      continue;
+    }
 
-        EntitySavedState &savedState = g_entitySavedState[entity.index];
-        release_entity_saved_state(savedState);
-        savedState.owner = entity;
-        savedState.moduleSlot = moduleSlot;
-        savedState.registryRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
-      });
+    if (lua_istable(g_state, -1) == 0) {
+      lua_pop(g_state, 1);
+      continue;
+    }
+
+    int stateRef = LUA_NOREF;
+    if (!protected_registry_ref(g_state, &stateRef,
+                                "ref on_save_state result")) {
+      continue;
+    }
+    EntitySavedState &savedState = g_entitySavedState[entity.index];
+    release_entity_saved_state(savedState);
+    savedState.owner = entity;
+    savedState.moduleSlot = moduleSlot;
+    savedState.registryRef = stateRef;
+  }
+  --g_captureDepth;
 }
 
 /// Loads a Lua module table, reusing or hot-reloading cache entries.
@@ -265,7 +309,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
       EntityScriptModule &mod = g_entityScriptModules[i];
       const std::int64_t currentMtime = file_mtime(path);
       if ((currentMtime != 0) && (mod.mtime != 0) &&
-          (currentMtime != mod.mtime)) {
+          (currentMtime != mod.mtime) &&
+          (currentMtime != mod.lastFailedMtime)) {
         // The reload chunk (and its on_save_state hooks) can require this
         // module again before the new mtime is recorded; the load stack
         // turns that recursion into a logged circular-dependency failure.
@@ -278,8 +323,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
                       sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
         ++g_moduleLoadDepth;
 
-        if (luaL_loadfile(g_state, path) != LUA_OK) {
-          log_script_error("reload entity script");
+        if (!protected_load_chunk(g_state, path, "reload entity script")) {
+          mod.lastFailedMtime = currentMtime;
           --g_moduleLoadDepth;
           return mod.registryRef;
         }
@@ -289,6 +334,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
 
         if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
           log_script_error("reload entity script");
+          mod.lastFailedMtime = currentMtime;
           clear_entity_saved_state_for_module(i);
           --g_moduleLoadDepth;
           return mod.registryRef;
@@ -298,18 +344,26 @@ int get_or_load_entity_script_module(const char *path) noexcept {
           core::log_message(core::LogLevel::Error, "scripting",
                             "entity script must return a module table");
           lua_pop(g_state, 1);
+          mod.lastFailedMtime = currentMtime;
           clear_entity_saved_state_for_module(i);
           --g_moduleLoadDepth;
           return mod.registryRef;
         }
 
         --g_moduleLoadDepth;
-        const int newRef = luaL_ref(g_state, LUA_REGISTRYINDEX);
+        int newRef = LUA_NOREF;
+        if (!protected_registry_ref(g_state, &newRef,
+                                    "ref entity script module")) {
+          mod.lastFailedMtime = currentMtime;
+          clear_entity_saved_state_for_module(i);
+          return mod.registryRef;
+        }
         if (mod.registryRef != LUA_NOREF) {
           luaL_unref(g_state, LUA_REGISTRYINDEX, mod.registryRef);
         }
         mod.registryRef = newRef;
         mod.mtime = currentMtime;
+        mod.lastFailedMtime = 0;
         mod.reloaded = true;
         g_hasPendingEntityReloads = true;
 
@@ -338,8 +392,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
                 sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
   ++g_moduleLoadDepth;
 
-  if (luaL_loadfile(g_state, path) != LUA_OK) {
-    log_script_error("load entity script");
+  if (!protected_load_chunk(g_state, path, "load entity script")) {
     --g_moduleLoadDepth;
     return LUA_NOREF;
   }
@@ -360,7 +413,11 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
-  const int ref = luaL_ref(g_state, LUA_REGISTRYINDEX);
+  int ref = LUA_NOREF;
+  if (!protected_registry_ref(g_state, &ref, "ref entity script module")) {
+    --g_moduleLoadDepth;
+    return LUA_NOREF;
+  }
   EntityScriptModule &mod = g_entityScriptModules[g_entityScriptModuleCount];
   const std::size_t maxPath = sizeof(mod.path) - 1U;
   const std::size_t pathLen = std::strlen(path);
@@ -480,6 +537,12 @@ ReloadHookResult call_module_reload_hook(int moduleRef, runtime::Entity entity,
 }
 
 /// Delivers pending module reloads before any new-module tick callback.
+/// Each module's delivery walk runs over a pre-walk snapshot with
+/// per-entity revalidation (alive + path match against a local copy) so a
+/// reload hook that destroys or creates scripted entities mid-walk still
+/// delivers to every surviving pre-walk entity exactly once; entities
+/// created during the walk are excluded by the snapshot. The walk cannot
+/// nest with itself (only C callers reach it), so one buffer suffices.
 void dispatch_pending_entity_reloads() noexcept {
   if (!g_hasPendingEntityReloads || (g_state == nullptr) ||
       (runtime_binding().world == nullptr)) {
@@ -493,38 +556,45 @@ void dispatch_pending_entity_reloads() noexcept {
       continue;
     }
 
-    runtime_binding().world->for_each<runtime::ScriptComponent>(
-        [i, &module](runtime::Entity entity,
-                     const runtime::ScriptComponent &sc) noexcept {
-          if (std::strcmp(sc.scriptPath, module.path) != 0) {
-            return;
-          }
+    char modPath[sizeof(module.path)] = {};
+    std::snprintf(modPath, sizeof(modPath), "%.*s",
+                  static_cast<int>(sizeof(modPath) - 1U), module.path);
+    runtime::World *world = runtime_binding().world;
+    const std::size_t count = snapshot_scripted_entities(g_reloadDispatchOrder);
+    for (std::size_t j = 0U; j < count; ++j) {
+      const core::Entity entity = g_reloadDispatchOrder[j];
+      char path[kScriptPathSize] = {};
+      if (!world->is_alive(entity) ||
+          !copy_entity_script_path(world, entity, path) ||
+          (std::strcmp(path, modPath) != 0)) {
+        continue;
+      }
 
-          EntitySavedState *savedState = nullptr;
-          int savedStateRef = LUA_NOREF;
-          if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
-            EntitySavedState &candidate = g_entitySavedState[entity.index];
-            if (candidate.moduleSlot == i) {
-              savedState = &candidate;
-              if (candidate.owner == entity) {
-                savedStateRef = candidate.registryRef;
-              }
-            }
+      EntitySavedState *savedState = nullptr;
+      int savedStateRef = LUA_NOREF;
+      if ((entity.index > 0U) && (entity.index < kMaxFaultedEntities)) {
+        EntitySavedState &candidate = g_entitySavedState[entity.index];
+        if (candidate.moduleSlot == i) {
+          savedState = &candidate;
+          if (candidate.owner == entity) {
+            savedStateRef = candidate.registryRef;
           }
+        }
+      }
 
-          clear_entity_fault(entity);
-          const ReloadHookResult result = call_module_reload_hook(
-              module.registryRef, entity, savedStateRef);
-          if (result == ReloadHookResult::Missing) {
-            static_cast<void>(call_module_function(module.registryRef,
-                                                   "on_begin_play", "on_start",
-                                                   entity, false, 0.0F));
-          }
+      clear_entity_fault(entity);
+      const ReloadHookResult result =
+          call_module_reload_hook(module.registryRef, entity, savedStateRef);
+      if (result == ReloadHookResult::Missing) {
+        static_cast<void>(call_module_function(module.registryRef,
+                                               "on_begin_play", "on_start",
+                                               entity, false, 0.0F));
+      }
 
-          if (savedState != nullptr) {
-            release_entity_saved_state(*savedState);
-          }
-        });
+      if (savedState != nullptr) {
+        release_entity_saved_state(*savedState);
+      }
+    }
 
     clear_entity_saved_state_for_module(i);
     module.reloaded = false;
@@ -721,6 +791,7 @@ void clear_entity_script_modules() noexcept {
 void reset_entity_script_bindings() noexcept {
   clear_entity_script_modules();
   g_moduleLoadDepth = 0U;
+  g_captureDepth = 0U;
 }
 
 } // namespace engine::scripting

@@ -284,6 +284,42 @@ bool test_persist_table() noexcept {
   return result;
 }
 
+// -----------------------------------------------------------------------
+// 6. S-6: engine.persist(key) with no value argument raises instead of
+//    silently deleting; engine.persist(key, nil) stays the deletion form
+// -----------------------------------------------------------------------
+bool test_persist_missing_value_errors() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  const char *code =
+      "engine.persist('guarded', 7)\n"
+      "local ok = pcall(function() engine.persist('guarded') end)\n"
+      "if ok then error('persist without a value should raise') end\n"
+      "if engine.restore('guarded') ~= 7 then\n"
+      "  error('errored persist must not delete the key')\n"
+      "end\n"
+      "engine.persist('guarded', nil)\n"
+      "if engine.restore('guarded') ~= nil then\n"
+      "  error('explicit nil should delete the key')\n"
+      "end\n";
+
+  if (!write_script(code)) {
+    return false;
+  }
+
+  bool result = engine::scripting::load_script(kTempScript);
+  remove_script();
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -301,6 +337,7 @@ int main() {
       {"error_recovery", test_error_recovery},
       {"runtime_error_reload_rollback", test_runtime_error_reload_rollback},
       {"persist_table", test_persist_table},
+      {"persist_missing_value_errors", test_persist_missing_value_errors},
   };
 
   for (const auto &tc : tests) {
