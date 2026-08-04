@@ -42,7 +42,8 @@ bool end_frame_graph() noexcept;
 JobHandle submit(Job job) noexcept;
 /// Orders prerequisite before dependent; false for invalid handles.
 bool add_dependency(JobHandle prerequisite, JobHandle dependent) noexcept;
-/// Blocks until the job completes, executing ready jobs meanwhile.
+/// Blocks until the job completes, executing any ready job from the current
+/// graph meanwhile (global helping); never alters current_thread_index().
 void wait(JobHandle handle) noexcept;
 /// Returns whether is valid handle.
 bool is_valid_handle(JobHandle handle) noexcept;

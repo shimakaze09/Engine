@@ -1,12 +1,23 @@
-// Implements cvar behavior for the Engine core engine.
+// Implements cvar behavior for the Engine core engine. Textual values are
+// parsed as full tokens with range and finiteness checks (audit M-10):
+// trailing garbage, overflow, non-finite floats, and unrecognized boolean
+// words are rejected with a diagnostic naming the variable and input, and
+// the stored value stays unchanged.
 
 #include "engine/core/cvar.h"
 
+#include "engine/core/logging.h"
+
 #include <array>
+#include <cctype>
+#include <cerrno>
+#include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <system_error>
 
 namespace engine::core {
 
@@ -260,6 +271,63 @@ bool cvar_set_string(const char *name, const char *value) noexcept {
   return true;
 }
 
+// ---- textual parsing ----
+
+/// Logs one set_from_string rejection with the variable name and raw input.
+void log_parse_rejection(const char *name, const char *valueStr,
+                         const char *reason) noexcept {
+  char msg[192] = {};
+  std::snprintf(msg, sizeof(msg), "set '%.63s' rejected: %s value '%.63s'",
+                name, reason, valueStr);
+  log_message(LogLevel::Error, "cvar", msg);
+}
+
+/// Parses exactly "1"/"true" or "0"/"false"; anything else is rejected.
+bool parse_bool_token(const char *valueStr, bool *outValue) noexcept {
+  if ((std::strcmp(valueStr, "1") == 0) ||
+      (std::strcmp(valueStr, "true") == 0)) {
+    *outValue = true;
+    return true;
+  }
+  if ((std::strcmp(valueStr, "0") == 0) ||
+      (std::strcmp(valueStr, "false") == 0)) {
+    *outValue = false;
+    return true;
+  }
+  return false;
+}
+
+/// Parses a whole-token base-10 int, rejecting trailing text and overflow.
+bool parse_int_token(const char *valueStr, int *outValue) noexcept {
+  const char *end = valueStr + std::strlen(valueStr);
+  int parsed = 0;
+  const auto result = std::from_chars(valueStr, end, parsed, 10);
+  if ((result.ec != std::errc{}) || (result.ptr != end)) {
+    return false;
+  }
+  *outValue = parsed;
+  return true;
+}
+
+/// Parses a whole-token finite float, rejecting trailing text, overflow,
+/// and inf/nan spellings. strtof instead of std::from_chars because
+/// AppleClang's libc++ still deletes the floating-point overload.
+bool parse_float_token(const char *valueStr, float *outValue) noexcept {
+  if ((valueStr[0] == '\0') || (std::isspace(
+          static_cast<unsigned char>(valueStr[0])) != 0)) {
+    return false;
+  }
+  errno = 0;
+  char *parseEnd = nullptr;
+  const float parsed = std::strtof(valueStr, &parseEnd);
+  if ((parseEnd != valueStr + std::strlen(valueStr)) || (errno == ERANGE) ||
+      !std::isfinite(parsed)) {
+    return false;
+  }
+  *outValue = parsed;
+  return true;
+}
+
 bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   if ((name == nullptr) || (valueStr == nullptr)) {
     return false;
@@ -267,37 +335,48 @@ bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   const int idx = find_cvar_unlocked(name);
   if (idx < 0) {
+    log_parse_rejection(name, valueStr, "unknown cvar for");
     return false;
   }
 
   CVarEntry &e = g_entries[idx];
   switch (e.type) {
-  case CVarType::Bool:
-    e.value.b =
-        (std::strcmp(valueStr, "1") == 0 || std::strcmp(valueStr, "true") == 0);
-    return true;
-  case CVarType::Int: {
-    char *end = nullptr;
-    const long parsed = std::strtol(valueStr, &end, 10);
-    if ((end == nullptr) || (end == valueStr)) {
+  case CVarType::Bool: {
+    bool parsed = false;
+    if (!parse_bool_token(valueStr, &parsed)) {
+      log_parse_rejection(name, valueStr, "invalid bool");
       return false;
     }
-    e.value.i = static_cast<int>(parsed);
+    e.value.b = parsed;
+    return true;
+  }
+  case CVarType::Int: {
+    int parsed = 0;
+    if (!parse_int_token(valueStr, &parsed)) {
+      log_parse_rejection(name, valueStr, "invalid int");
+      return false;
+    }
+    e.value.i = parsed;
     return true;
   }
   case CVarType::Float: {
-    char *end = nullptr;
-    const float parsed = std::strtof(valueStr, &end);
-    if ((end == nullptr) || (end == valueStr)) {
+    float parsed = 0.0F;
+    if (!parse_float_token(valueStr, &parsed)) {
+      log_parse_rejection(name, valueStr, "invalid float");
       return false;
     }
     e.value.f = parsed;
     return true;
   }
-  case CVarType::String:
+  case CVarType::String: {
+    if (std::strlen(valueStr) >= kMaxStringValLen) {
+      log_parse_rejection(name, valueStr, "overlong string");
+      return false;
+    }
     std::snprintf(e.value.str, kMaxStringValLen - 1U + 1U, "%s", valueStr);
     e.value.str[kMaxStringValLen - 1U] = '\0';
     return true;
+  }
   default:
     return false;
   }

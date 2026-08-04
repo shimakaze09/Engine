@@ -22,6 +22,13 @@ engine_add_test_executable(engine_unit_frame_graph_order
     engine_core
 )
 
+engine_add_test_executable(engine_unit_job_wait_tls
+    SOURCES
+    job_wait_tls_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_sparse_set
     SOURCES
     sparse_set_test.cpp
@@ -164,6 +171,14 @@ engine_add_test_executable(engine_unit_scripting
 engine_add_test_executable(engine_unit_input_config_lua
     SOURCES
     input_config_lua_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_runtime_binding
+    SOURCES
+    runtime_binding_test.cpp
     PRIVATE_DEPS
     engine_scripting
     engine_runtime

@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "engine/core/input.h"
+#include "engine/core/touch_input.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -330,6 +331,36 @@ bool test_bounds_check() noexcept {
   return true;
 }
 
+/// Touch belongs to the general input lifecycle (audit M-11):
+/// initialize_input alone must enable touch event processing through
+/// input_process_event, and shutdown_input must disable and clear it.
+bool test_touch_integrated_lifecycle() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+
+  SDL_Event ev{};
+  ev.type = SDL_EVENT_FINGER_DOWN;
+  ev.tfinger.fingerID = 7;
+  ev.tfinger.x = 0.25F;
+  ev.tfinger.y = 0.25F;
+  ev.tfinger.pressure = 1.0F;
+  input_process_event(&ev);
+
+  if (active_touch_count() != 1U) {
+    shutdown_input();
+    return false;
+  }
+
+  shutdown_input();
+  if (active_touch_count() != 0U) {
+    return false;
+  }
+
+  input_process_event(&ev);
+  return active_touch_count() == 0U;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -359,6 +390,7 @@ int main() {
   run("gamepad_axis_deadzone", &test_gamepad_axis_deadzone);
   run("gamepad_button_state", &test_gamepad_button_state);
   run("bounds_check", &test_bounds_check);
+  run("touch_integrated_lifecycle", &test_touch_integrated_lifecycle);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);
   return (failed > 0) ? 1 : 0;

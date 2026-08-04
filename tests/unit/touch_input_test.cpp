@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "engine/core/input.h"
+#include "engine/core/platform.h"
 #include "engine/core/touch_input.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -386,6 +387,21 @@ bool test_mouse_emulation() noexcept {
 
   // Mouse button 0 (left) should be down.
   if (!is_mouse_button_down(0)) {
+    shutdown_all();
+    return false;
+  }
+
+  // The emulated cursor scales by the live drawable size, never a
+  // hard-coded resolution (audit M-11); headless render_drawable_size
+  // reports the 1280x720 fallback, so a centered touch lands at its center.
+  begin_input_frame();
+  sim_finger_move(1, 0.5F, 0.5F, 0.0F, 0.0F);
+  end_input_frame();
+  int surfaceW = 0;
+  int surfaceH = 0;
+  render_drawable_size(&surfaceW, &surfaceH);
+  const MouseState ms = mouse_state();
+  if ((ms.x != (surfaceW / 2)) || (ms.y != (surfaceH / 2))) {
     shutdown_all();
     return false;
   }

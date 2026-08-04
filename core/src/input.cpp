@@ -120,6 +120,7 @@ bool initialize_input() noexcept {
   g_inputInitialized = true;
 
   static_cast<void>(initialize_input_mapper());
+  static_cast<void>(initialize_touch_input());
 
   char bindingsPath[512] = {};
   if (input_bindings_default_path(bindingsPath, sizeof(bindingsPath))) {
@@ -139,8 +140,10 @@ bool initialize_input() noexcept {
   return true;
 }
 
-/// Shuts down the owning system for input.
+/// Shuts down the owning system for input, including the touch subsystem
+/// whose events and frames route through the general input entry points.
 void shutdown_input() noexcept {
+  shutdown_touch_input();
   shutdown_input_mapper();
   g_inputInitialized = false;
   g_keyState = {};

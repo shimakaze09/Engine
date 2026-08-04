@@ -222,10 +222,14 @@ struct RuntimeServices final {
   bool (*is_asset_ready)(std::uint32_t handleIndex) noexcept = nullptr;
 };
 
-/// Binds the runtime world into an explicit service locator.
+/// Binds the runtime world into an explicit service locator. Binding
+/// replaces any current World entry (last writer wins); passing nullptr
+/// unbinds, removing the entry only while it still holds the world this
+/// bridge registered so a newer provider is never clobbered.
 void bind_runtime_world(runtime::World *world,
                         core::ServiceLocator &locator) noexcept;
-/// Binds runtime services into an explicit service locator.
+/// Binds runtime services into an explicit service locator; same
+/// last-writer-wins bind and ownership-checked unbind as bind_runtime_world.
 void bind_runtime_services(const RuntimeServices *services,
                            core::ServiceLocator &locator) noexcept;
 

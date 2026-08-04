@@ -2,6 +2,7 @@
 
 #include "engine/audio/audio.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -96,6 +97,26 @@ void reset_one_shot(OneShotInstance &instance) noexcept {
   instance = OneShotInstance{};
 }
 
+/// True when every component is a finite float; positions and listener
+/// vectors cross the public API boundary and a NaN would silently poison
+/// the spatializer (audit M-29).
+bool finite_vec(const math::Vec3 &v) noexcept {
+  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+/// Validates playback params: volume finite and non-negative, pitch finite
+/// and positive (miniaudio requires pitch > 0). Invalid params reject the
+/// playback call (audit M-29).
+bool valid_play_params(const PlayParams &params) noexcept {
+  if (!std::isfinite(params.volume) || (params.volume < 0.0F) ||
+      !std::isfinite(params.pitch) || (params.pitch <= 0.0F)) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "rejected non-finite/out-of-range play params");
+    return false;
+  }
+  return true;
+}
+
 /// Rejects enum values outside the declared buses before any array
 /// indexing — AudioBus arrives across the public API boundary and a
 /// caller-forged value would otherwise write past busVolumes (audit
@@ -127,6 +148,9 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
                     const PlayParams &params, AudioBus bus, bool positional,
                     const math::Vec3 &position) noexcept {
   if ((entry == nullptr) || (entry->fileData == nullptr)) {
+    return false;
+  }
+  if (!valid_play_params(params) || (positional && !finite_vec(position))) {
     return false;
   }
 
@@ -406,7 +430,7 @@ void unload_sound(SoundHandle handle) noexcept {
 
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
-  if (entry == nullptr) {
+  if ((entry == nullptr) || !valid_play_params(params)) {
     return false;
   }
 
@@ -427,6 +451,9 @@ void stop_sound(SoundHandle handle) noexcept {
   }
 }
 
+/// Stops everything that can be audible: direct playback of every loaded
+/// sound, every pooled one-shot instance, and the streamed music track
+/// (audit M-29 — the name is now literal).
 void stop_all() noexcept {
   if (!g_audio.initialized) {
     return;
@@ -437,19 +464,26 @@ void stop_all() noexcept {
       ma_sound_stop(&entry.sound);
     }
   }
+  for (auto &instance : g_audio.oneShots) {
+    reset_one_shot(instance);
+  }
+  stop_music();
 }
 
-/// Sets the requested value for master volume.
+/// Master volume routes through the Master bus so the stored value,
+/// clamping, and validation stay consistent with set_bus_volume
+/// (audit M-29).
 void set_master_volume(float volume) noexcept {
-  if (!g_audio.initialized) {
-    return;
-  }
-
-  ma_engine_set_volume(&g_audio.engine, volume);
+  set_bus_volume(AudioBus::Master, volume);
 }
 
 void set_bus_volume(AudioBus bus, float volume) noexcept {
   if (!g_audio.initialized || !bus_valid(bus)) {
+    return;
+  }
+  if (!std::isfinite(volume)) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "rejected non-finite bus volume");
     return;
   }
   const float clamped = (volume > 0.0F) ? volume : 0.0F;
@@ -481,6 +515,11 @@ float bus_volume(AudioBus bus) noexcept {
 void set_listener(const math::Vec3 &position, const math::Vec3 &forward,
                   const math::Vec3 &up) noexcept {
   if (!g_audio.initialized) {
+    return;
+  }
+  if (!finite_vec(position) || !finite_vec(forward) || !finite_vec(up)) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "rejected non-finite listener transform");
     return;
   }
   ma_engine_listener_set_position(&g_audio.engine, 0U, position.x, position.y,
@@ -515,6 +554,11 @@ bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
 
 bool play_music(const char *virtualPath, float volume, bool loop) noexcept {
   if ((virtualPath == nullptr) || !g_audio.initialized) {
+    return false;
+  }
+  if (!std::isfinite(volume) || (volume < 0.0F)) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "rejected non-finite/negative music volume");
     return false;
   }
 

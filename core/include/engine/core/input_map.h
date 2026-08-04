@@ -157,13 +157,17 @@ bool input_bindings_default_path(char *outBuffer,
                                  std::size_t bufferCapacity) noexcept;
 
 bool save_input_bindings(const char *path) noexcept;
-/// Loads the requested resource for input bindings.
+/// Loads bindings from a JSON file; validation and transactional commit
+/// follow load_input_bindings_from_buffer.
 bool load_input_bindings(const char *path) noexcept;
 
 // Save/load from in-memory buffers (for tests without file I/O).
 bool save_input_bindings_to_buffer(char *buffer, std::size_t capacity,
                                    std::size_t *outSize) noexcept;
-/// Loads the requested resource for input bindings from buffer.
+/// Loads bindings from a JSON buffer. The document is staged and validated
+/// before commit: malformed shape, non-object entries, missing/empty/
+/// overlong names, and out-of-range binding/source type enums reject the
+/// whole load with a diagnostic and leave current bindings untouched.
 bool load_input_bindings_from_buffer(const char *buffer,
                                      std::size_t size) noexcept;
 

@@ -133,6 +133,86 @@ static bool test_cvar_set_from_string() noexcept {
   return true;
 }
 
+/// Malformed textual values must be rejected whole with the stored value
+/// unchanged: no partial application, trailing garbage, overflow,
+/// non-finite floats, loose booleans, or silent string truncation
+/// (audit M-10).
+static bool test_cvar_set_from_string_rejects_malformed() noexcept {
+  initialize_cvars();
+
+  cvar_register_bool("m.b", true, "d");
+  cvar_register_int("m.i", 42, "d");
+  cvar_register_float("m.f", 1.5F, "d");
+  cvar_register_string("m.s", "keep", "d");
+
+  const char *badBools[] = {"banana", "yes", "TRUE", "2", ""};
+  for (const char *bad : badBools) {
+    if (cvar_set_from_string("m.b", bad) || !cvar_get_bool("m.b", false)) {
+      shutdown_cvars();
+      return false;
+    }
+  }
+  if (!cvar_set_from_string("m.b", "0") || cvar_get_bool("m.b", true)) {
+    shutdown_cvars();
+    return false;
+  }
+  if (!cvar_set_from_string("m.b", "1") || !cvar_get_bool("m.b", false)) {
+    shutdown_cvars();
+    return false;
+  }
+
+  const char *badInts[] = {"12abc", "", " 7", "7 ", "99999999999",
+                           "-99999999999", "1.5"};
+  for (const char *bad : badInts) {
+    if (cvar_set_from_string("m.i", bad) || (cvar_get_int("m.i", 0) != 42)) {
+      shutdown_cvars();
+      return false;
+    }
+  }
+  if (!cvar_set_from_string("m.i", "-5") || (cvar_get_int("m.i", 0) != -5)) {
+    shutdown_cvars();
+    return false;
+  }
+
+  const char *badFloats[] = {"1.5x", "", "inf", "-inf", "nan", "1e40"};
+  for (const char *bad : badFloats) {
+    if (cvar_set_from_string("m.f", bad) ||
+        (cvar_get_float("m.f", 0.0F) != 1.5F)) {
+      shutdown_cvars();
+      return false;
+    }
+  }
+  if (!cvar_set_from_string("m.f", "-0.25") ||
+      (cvar_get_float("m.f", 0.0F) != -0.25F)) {
+    shutdown_cvars();
+    return false;
+  }
+
+  char longValue[80] = {};
+  for (std::size_t i = 0U; i < 64U; ++i) {
+    longValue[i] = 'x';
+  }
+  if (cvar_set_from_string("m.s", longValue) ||
+      (std::strcmp(cvar_get_string("m.s", ""), "keep") != 0)) {
+    shutdown_cvars();
+    return false;
+  }
+  longValue[63] = '\0';
+  if (!cvar_set_from_string("m.s", longValue) ||
+      (std::strcmp(cvar_get_string("m.s", ""), longValue) != 0)) {
+    shutdown_cvars();
+    return false;
+  }
+
+  if (cvar_set_from_string("m.unknown", "1")) {
+    shutdown_cvars();
+    return false;
+  }
+
+  shutdown_cvars();
+  return true;
+}
+
 static bool test_cvar_duplicate_rejected() noexcept {
   initialize_cvars();
   cvar_register_int("dup", 1, "d");
@@ -414,6 +494,8 @@ int main() {
       {"cvar_register_and_get", test_cvar_register_and_get},
       {"cvar_set", test_cvar_set},
       {"cvar_set_from_string", test_cvar_set_from_string},
+      {"cvar_set_from_string_rejects_malformed",
+       test_cvar_set_from_string_rejects_malformed},
       {"cvar_duplicate_rejected", test_cvar_duplicate_rejected},
       {"cvar_enumerate", test_cvar_enumerate},
       {"cvar_null_names_after_registration",
