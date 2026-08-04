@@ -3,6 +3,7 @@
 #include "engine/core/touch_input.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -78,6 +79,17 @@ std::uint32_t g_frameCounter = 0U;
 float g_prevTwoFingerDist = 0.0F;
 float g_prevTwoFingerAngle = 0.0F;
 bool g_twoFingerTracking = false;
+
+/// Live drawable extent for mouse emulation; touch coordinates are
+/// normalized so the emulated cursor must scale by the real surface size,
+/// not a hard-coded resolution (audit M-11).
+void emulated_mouse_extent(float *outWidth, float *outHeight) noexcept {
+  int width = 0;
+  int height = 0;
+  render_drawable_size(&width, &height);
+  *outWidth = static_cast<float>(width);
+  *outHeight = static_cast<float>(height);
+}
 
 void fire_touch_callbacks(const TouchEvent &event) noexcept {
   for (const auto &entry : g_touchCallbacks) {
@@ -290,7 +302,7 @@ void shutdown_touch_input() noexcept {
 // ---------------------------------------------------------------------------
 
 void touch_process_event(const void *nativeEvent) noexcept {
-  if (nativeEvent == nullptr) {
+  if ((nativeEvent == nullptr) || !g_touchInitialized) {
     return;
   }
   const auto *event = static_cast<const SDL_Event *>(nativeEvent);
@@ -341,11 +353,14 @@ void touch_process_event(const void *nativeEvent) noexcept {
     fire_touch_callbacks(te);
 
     if (g_mouseEmulation && (slot == &g_touches[0])) {
+      float surfaceW = 0.0F;
+      float surfaceH = 0.0F;
+      emulated_mouse_extent(&surfaceW, &surfaceH);
       SDL_Event fakeEvent{};
       fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
       fakeEvent.button.button = SDL_BUTTON_LEFT;
-      fakeEvent.button.x = x * 1920.0F;
-      fakeEvent.button.y = y * 1080.0F;
+      fakeEvent.button.x = x * surfaceW;
+      fakeEvent.button.y = y * surfaceH;
       input_process_event(&fakeEvent);
     }
     break;
@@ -370,12 +385,15 @@ void touch_process_event(const void *nativeEvent) noexcept {
     fire_touch_callbacks(te);
 
     if (g_mouseEmulation && (touch == &g_touches[0])) {
+      float surfaceW = 0.0F;
+      float surfaceH = 0.0F;
+      emulated_mouse_extent(&surfaceW, &surfaceH);
       SDL_Event fakeEvent{};
       fakeEvent.type = SDL_EVENT_MOUSE_MOTION;
-      fakeEvent.motion.x = event->tfinger.x * 1920.0F;
-      fakeEvent.motion.y = event->tfinger.y * 1080.0F;
-      fakeEvent.motion.xrel = event->tfinger.dx * 1920.0F;
-      fakeEvent.motion.yrel = event->tfinger.dy * 1080.0F;
+      fakeEvent.motion.x = event->tfinger.x * surfaceW;
+      fakeEvent.motion.y = event->tfinger.y * surfaceH;
+      fakeEvent.motion.xrel = event->tfinger.dx * surfaceW;
+      fakeEvent.motion.yrel = event->tfinger.dy * surfaceH;
       input_process_event(&fakeEvent);
     }
 

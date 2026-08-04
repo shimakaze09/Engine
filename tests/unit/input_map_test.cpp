@@ -604,6 +604,62 @@ bool test_file_round_trip_and_default_path() noexcept {
   return restored;
 }
 
+/// Entry-level rejection (audit M-11): entries with missing/empty/overlong
+/// names, non-object entries, and out-of-range binding/source type enums
+/// refuse the whole load, and the current bindings survive untouched.
+bool test_invalid_entry_load_preserves_bindings() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  char overlongDoc[512] = {};
+  {
+    char longName[80] = {};
+    for (std::size_t i = 0U; i < 64U; ++i) {
+      longName[i] = 'n';
+    }
+    std::snprintf(overlongDoc, sizeof(overlongDoc),
+                  "{\"actions\":[{\"name\":\"%s\",\"bindings\":[]}],"
+                  "\"axes\":[]}",
+                  longName);
+  }
+
+  const char *rejected[] = {
+      "{\"actions\":[7],\"axes\":[]}",
+      "{\"actions\":[{\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"\",\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[3]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":4,"
+      "\"code\":1}]}],\"axes\":[]}",
+      "{\"actions\":[],\"axes\":[{\"sources\":[]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":7}]}"
+      "]}",
+      overlongDoc,
+  };
+  for (const char *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool actionIntact = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+
+  shutdown_all();
+  return actionIntact;
+}
+
 /// Wrong-shape rejection (audit P2-9): valid JSON without the expected
 /// top-level actions/axes arrays — including "{}" — is refused and the
 /// current bindings survive untouched; a well-formed document still
@@ -785,6 +841,8 @@ int main() {
       &test_file_round_trip_and_default_path);
   run("wrong_shape_load_preserves_bindings",
       &test_wrong_shape_load_preserves_bindings);
+  run("invalid_entry_load_preserves_bindings",
+      &test_invalid_entry_load_preserves_bindings);
   run("save_failure_preserves_existing_file",
       &test_save_failure_preserves_existing_file);
   run("save_to_directory_destination_fails",

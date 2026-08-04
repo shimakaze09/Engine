@@ -18,7 +18,7 @@ namespace {
 // ---------------------------------------------------------------------------
 constexpr std::size_t kMaxEventTypes = 64U;
 constexpr std::size_t kMaxSubscribersPerType = 16U;
-[[maybe_unused]] constexpr std::uint32_t kMaxEmitDepth = 64U;
+constexpr std::uint32_t kMaxEmitDepth = 64U;
 
 struct TypedSubscriber final {
   RawEventHandler handler = nullptr;
@@ -106,6 +106,18 @@ struct EmitDepthScope final {
     }
   }
 };
+
+/// Release-enforced recursion cap (audit M-11): a handler chain deeper than
+/// kMaxEmitDepth drops the emit with a diagnostic instead of relying on a
+/// debug-only assertion while the stack unwinds toward overflow.
+bool emit_depth_available() noexcept {
+  if (g_emitDepth < kMaxEmitDepth) {
+    return true;
+  }
+  log_message(LogLevel::Error, "events",
+              "emit recursion cap reached; event dropped");
+  return false;
+}
 
 /// Finds the matching object or resource for channel slot.
 ChannelSlot *find_channel_slot(const char *name, std::uint32_t hash) noexcept {
@@ -220,6 +232,9 @@ bool unsubscribe_raw(EventTypeId typeId, RawEventHandler handler,
 /// Emits an event to the type's subscribers; the subscriber list is
 /// snapshotted first so subscribe/unsubscribe during emit is safe.
 void emit_raw(EventTypeId typeId, const void *eventData) noexcept {
+  if (!emit_depth_available()) {
+    return;
+  }
   EmitDepthScope emitDepthScope{};
   static_cast<void>(emitDepthScope);
 
@@ -296,6 +311,9 @@ bool unsubscribe_channel(const char *channelName, ChannelHandler handler,
 /// Emits an event or message to subscribers for channel.
 void emit_channel(const char *channelName, const void *data,
                   std::size_t size) noexcept {
+  if (!emit_depth_available()) {
+    return;
+  }
   EmitDepthScope emitDepthScope{};
   static_cast<void>(emitDepthScope);
 

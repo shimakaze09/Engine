@@ -636,6 +636,68 @@ bool test_empty_bus_edge_cases() noexcept {
   return true;
 }
 
+int g_unboundedChannelCalls = 0;
+int g_unboundedTypedCalls = 0;
+
+/// Re-emits its own channel forever; only the release-enforced depth cap
+/// can stop it.
+void on_unbounded_channel(const void *, std::size_t, void *) noexcept {
+  ++g_unboundedChannelCalls;
+  emit_channel("unbounded", nullptr, 0U);
+}
+
+/// Event used by the typed-recursion cap test.
+struct UnboundedEvent final {
+  int value = 0;
+};
+
+/// Typed twin of on_unbounded_channel.
+void on_unbounded_typed(const UnboundedEvent &, void *) noexcept {
+  ++g_unboundedTypedCalls;
+  emit(UnboundedEvent{1});
+}
+
+/// Unbounded recursive dispatch must terminate at the enforced cap in every
+/// build configuration, not only via the debug assertion (audit M-11); the
+/// cap is 64 nested emits, so the handler runs exactly 64 times.
+bool test_recursion_cap_enforced() noexcept {
+  if (!initialize_event_bus()) {
+    return false;
+  }
+
+  g_unboundedChannelCalls = 0;
+  g_unboundedTypedCalls = 0;
+
+  if (!subscribe_channel("unbounded", &on_unbounded_channel, nullptr)) {
+    shutdown_event_bus();
+    return false;
+  }
+  emit_channel("unbounded", nullptr, 0U);
+  if (g_unboundedChannelCalls != 64) {
+    shutdown_event_bus();
+    return false;
+  }
+
+  if (!subscribe<UnboundedEvent, on_unbounded_typed>()) {
+    shutdown_event_bus();
+    return false;
+  }
+  emit(UnboundedEvent{1});
+  if (g_unboundedTypedCalls != 64) {
+    shutdown_event_bus();
+    return false;
+  }
+
+  emit_channel("unbounded", nullptr, 0U);
+  if (g_unboundedChannelCalls != 128) {
+    shutdown_event_bus();
+    return false;
+  }
+
+  shutdown_event_bus();
+  return true;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -670,6 +732,7 @@ int main() {
       &test_unsubscribe_then_nested_emit_uses_fresh_snapshot);
   run("multiple_nested_levels", &test_multiple_nested_levels);
   run("empty_bus_edge_cases", &test_empty_bus_edge_cases);
+  run("recursion_cap_enforced", &test_recursion_cap_enforced);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);
   return (failed > 0) ? 1 : 0;

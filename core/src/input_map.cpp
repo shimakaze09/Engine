@@ -34,6 +34,29 @@ struct StagedBindings final {
   std::array<InputAxisMapping, kMaxInputAxes> axes{};
 };
 
+/// Copies a parsed entry name after validating presence and length; a
+/// missing, empty, or overlong name rejects the whole load instead of
+/// committing a truncated or blank identity (audit M-11).
+bool parse_entry_name(const JsonParser &parser, const JsonValue &entry,
+                      char *outName, const char *what) noexcept {
+  JsonValue nameVal{};
+  const char *str = nullptr;
+  std::size_t strLen = 0U;
+  if (!parser.get_object_field(entry, "name", &nameVal) ||
+      !parser.as_string(nameVal, &str, &strLen) || (strLen == 0U) ||
+      (strLen > kMaxInputNameLen)) {
+    char msg[128] = {};
+    std::snprintf(msg, sizeof(msg),
+                  "load_input_bindings: %s entry has a missing/invalid name",
+                  what);
+    log_message(LogLevel::Error, kLogChannel, msg);
+    return false;
+  }
+  std::memcpy(outName, str, strLen);
+  outName[strLen] = '\0';
+  return true;
+}
+
 // Current-frame mouse delta (accumulated).
 float g_mouseDeltaX = 0.0F;
 float g_mouseDeltaY = 0.0F;
@@ -684,23 +707,16 @@ bool load_input_bindings_from_buffer(const char *buffer,
       JsonValue actionVal{};
       if (!parser.get_array_element(actionsVal, i, &actionVal) ||
           (actionVal.type != JsonValue::Type::Object)) {
-        continue;
+        log_message(LogLevel::Error, kLogChannel,
+                    "load_input_bindings: action entry is not an object");
+        return false;
       }
 
       InputAction action{};
       action.occupied = true;
 
-      JsonValue nameVal{};
-      if (parser.get_object_field(actionVal, "name", &nameVal)) {
-        const char *str = nullptr;
-        std::size_t strLen = 0;
-        if (parser.as_string(nameVal, &str, &strLen)) {
-          if (strLen > kMaxInputNameLen) {
-            strLen = kMaxInputNameLen;
-          }
-          std::memcpy(action.name, str, strLen);
-          action.name[strLen] = '\0';
-        }
+      if (!parse_entry_name(parser, actionVal, action.name, "action")) {
+        return false;
       }
 
       JsonValue bindingsVal{};
@@ -711,7 +727,9 @@ bool load_input_bindings_from_buffer(const char *buffer,
           JsonValue bVal{};
           if (!parser.get_array_element(bindingsVal, b, &bVal) ||
               (bVal.type != JsonValue::Type::Object)) {
-            continue;
+            log_message(LogLevel::Error, kLogChannel,
+                        "load_input_bindings: binding is not an object");
+            return false;
           }
 
           InputBinding binding{};
@@ -721,6 +739,12 @@ bool load_input_bindings_from_buffer(const char *buffer,
           JsonValue field{};
           if (parser.get_object_field(bVal, "type", &field) &&
               parser.as_uint(field, &uval)) {
+            if (uval > static_cast<std::uint32_t>(
+                           InputBindingType::GamepadAxis)) {
+              log_message(LogLevel::Error, kLogChannel,
+                          "load_input_bindings: binding type out of range");
+              return false;
+            }
             binding.type = static_cast<InputBindingType>(uval);
           }
           if (parser.get_object_field(bVal, "code", &field) &&
@@ -756,23 +780,16 @@ bool load_input_bindings_from_buffer(const char *buffer,
       JsonValue axisVal{};
       if (!parser.get_array_element(axesVal, i, &axisVal) ||
           (axisVal.type != JsonValue::Type::Object)) {
-        continue;
+        log_message(LogLevel::Error, kLogChannel,
+                    "load_input_bindings: axis entry is not an object");
+        return false;
       }
 
       InputAxisMapping axis{};
       axis.occupied = true;
 
-      JsonValue nameVal{};
-      if (parser.get_object_field(axisVal, "name", &nameVal)) {
-        const char *str = nullptr;
-        std::size_t strLen = 0;
-        if (parser.as_string(nameVal, &str, &strLen)) {
-          if (strLen > kMaxInputNameLen) {
-            strLen = kMaxInputNameLen;
-          }
-          std::memcpy(axis.name, str, strLen);
-          axis.name[strLen] = '\0';
-        }
+      if (!parse_entry_name(parser, axisVal, axis.name, "axis")) {
+        return false;
       }
 
       JsonValue sourcesVal{};
@@ -783,7 +800,9 @@ bool load_input_bindings_from_buffer(const char *buffer,
           JsonValue sVal{};
           if (!parser.get_array_element(sourcesVal, s, &sVal) ||
               (sVal.type != JsonValue::Type::Object)) {
-            continue;
+            log_message(LogLevel::Error, kLogChannel,
+                        "load_input_bindings: axis source is not an object");
+            return false;
           }
 
           InputAxisSource src{};
@@ -793,6 +812,12 @@ bool load_input_bindings_from_buffer(const char *buffer,
           JsonValue field{};
           if (parser.get_object_field(sVal, "type", &field) &&
               parser.as_uint(field, &uval)) {
+            if (uval >
+                static_cast<std::uint32_t>(AxisSourceType::MouseDeltaY)) {
+              log_message(LogLevel::Error, kLogChannel,
+                          "load_input_bindings: axis source type out of range");
+              return false;
+            }
             src.type = static_cast<AxisSourceType>(uval);
           }
           if (parser.get_object_field(sVal, "negative_key", &field) &&
