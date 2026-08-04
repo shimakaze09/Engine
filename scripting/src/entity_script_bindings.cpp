@@ -244,7 +244,8 @@ void capture_entity_saved_state(std::size_t moduleSlot,
   }
 
   char modPath[sizeof(mod.path)] = {};
-  std::snprintf(modPath, sizeof(modPath), "%s", mod.path);
+  std::snprintf(modPath, sizeof(modPath), "%.*s",
+                static_cast<int>(sizeof(modPath) - 1U), mod.path);
   const int moduleRef = mod.registryRef;
 
   runtime::World *world = runtime_binding().world;
@@ -556,7 +557,8 @@ void dispatch_pending_entity_reloads() noexcept {
     }
 
     char modPath[sizeof(module.path)] = {};
-    std::snprintf(modPath, sizeof(modPath), "%s", module.path);
+    std::snprintf(modPath, sizeof(modPath), "%.*s",
+                  static_cast<int>(sizeof(modPath) - 1U), module.path);
     runtime::World *world = runtime_binding().world;
     const std::size_t count = snapshot_scripted_entities(g_reloadDispatchOrder);
     for (std::size_t j = 0U; j < count; ++j) {
