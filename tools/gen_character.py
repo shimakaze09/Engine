@@ -3,6 +3,7 @@
 # skinned-character pipeline verification.
 import json
 import math
+import os
 import struct
 import sys
 
@@ -217,10 +218,18 @@ gltf = {
     "animations": gltf_animations,
 }
 
-with open(OUT_BIN, "wb") as f:
+# Stage both outputs, then commit atomically so an interrupted run can
+# never leave a mixed-generation .gltf/.bin pair (audit M-27).
+with open(OUT_BIN + ".tmp", "wb") as f:
     f.write(bytes(blob))
-with open(OUT_GLTF, "w", newline="\n") as f:
+    f.flush()
+    os.fsync(f.fileno())
+with open(OUT_GLTF + ".tmp", "w", newline="\n") as f:
     json.dump(gltf, f, separators=(",", ":"))
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(OUT_BIN + ".tmp", OUT_BIN)
+os.replace(OUT_GLTF + ".tmp", OUT_GLTF)
 print(f"wrote {OUT_GLTF} ({vcount} verts, {icount} indices, "
       f"{len(JOINTS)} joints, {len(gltf_animations)} clips, "
       f"bin {len(blob)} bytes)")

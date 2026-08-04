@@ -3,7 +3,9 @@
 # pickups, decorations) built from boxes/cylinders/cones with flat CCW-outward
 # normals, sized ~1-2 units with their base resting at y = 0. Deterministic
 # output; cook each glTF to .mesh with asset_packer.
+import json
 import math
+import os
 import struct
 import sys
 
@@ -245,17 +247,30 @@ def write_gltf(name, builder):
         "accessors": accessors,
     }
 
-    import json
-    with open(f"{OUT_DIR}/{name}.gltf", "w", newline="\n") as f:
+    gltf_path = f"{OUT_DIR}/{name}.gltf"
+    bin_path = f"{OUT_DIR}/{bin_name}"
+    with open(gltf_path + ".tmp", "w", newline="\n") as f:
         json.dump(gltf, f, indent=1, sort_keys=True)
         f.write("\n")
-    with open(f"{OUT_DIR}/{bin_name}", "wb") as f:
+        f.flush()
+        os.fsync(f.fileno())
+    with open(bin_path + ".tmp", "wb") as f:
         f.write(bytes(blob))
-    print(f"wrote {OUT_DIR}/{name}.gltf ({len(positions)} verts, "
+        f.flush()
+        os.fsync(f.fileno())
+    print(f"staged {gltf_path} ({len(positions)} verts, "
           f"{len(indices) // 3} tris)")
+    return [(gltf_path + ".tmp", gltf_path), (bin_path + ".tmp", bin_path)]
 
 
+# Stage every prop's .gltf/.bin pair, then commit the whole set atomically
+# so an interrupted run can never leave a mixed-generation prop pack
+# (audit M-27).
+os.makedirs(OUT_DIR, exist_ok=True)
 props = build_props()
+staged = []
 for prop_name in sorted(props):
-    write_gltf(prop_name, props[prop_name])
+    staged.extend(write_gltf(prop_name, props[prop_name]))
+for tmp_path, final_path in staged:
+    os.replace(tmp_path, final_path)
 print(f"generated {len(props)} props")

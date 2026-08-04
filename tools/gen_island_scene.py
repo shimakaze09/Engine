@@ -6,6 +6,7 @@
 # script entity. Mesh references use the same FNV-1a-64 path ids as
 # renderer::make_asset_id_from_path.
 import json
+import os
 import sys
 
 OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else "assets/templates/island_hopper.json"
@@ -203,8 +204,16 @@ entity("Player", (0.0, 0.15, 5.0), mesh="assets/character.mesh",
 entity("IslandController", (0.0, 0.0, 0.0),
        script="assets/scripts/island_hopper.lua")
 
+# Staged write + atomic replace so an interrupted run never truncates the
+# installed template (audit M-27).
 scene = {"version": 2, "entities": entities}
-with open(OUT_PATH, "w", newline="\n") as f:
+out_dir = os.path.dirname(OUT_PATH)
+if out_dir:
+    os.makedirs(out_dir, exist_ok=True)
+with open(OUT_PATH + ".tmp", "w", newline="\n") as f:
     json.dump(scene, f, indent=1, sort_keys=True)
     f.write("\n")
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(OUT_PATH + ".tmp", OUT_PATH)
 print(f"wrote {OUT_PATH} ({len(entities)} entities)")

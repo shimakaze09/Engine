@@ -3,6 +3,7 @@
 # lose jingles, ambient loops) for game authoring without external tools.
 # Deterministic output (seeded noise).
 import math
+import os
 import random
 import struct
 import sys
@@ -11,9 +12,13 @@ import wave
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "assets/sounds"
 RATE = 22050
 
+# (tmp, final) pairs staged by write_wav and committed atomically at the
+# end so an interrupted run can never leave truncated WAVs (audit M-27).
+STAGED = []
+
 
 def write_wav(path, samples):
-    with wave.open(path, "wb") as f:
+    with wave.open(path + ".tmp", "wb") as f:
         f.setnchannels(1)
         f.setsampwidth(2)
         f.setframerate(RATE)
@@ -22,7 +27,8 @@ def write_wav(path, samples):
             clamped = max(-1.0, min(1.0, s))
             frames += struct.pack("<h", int(clamped * 32767))
         f.writeframes(bytes(frames))
-    print(f"wrote {path} ({len(samples) / RATE:.2f}s)")
+    STAGED.append((path + ".tmp", path))
+    print(f"staged {path} ({len(samples) / RATE:.2f}s)")
 
 
 def footstep():
@@ -215,6 +221,7 @@ def waves():
     return out
 
 
+os.makedirs(OUT_DIR, exist_ok=True)
 write_wav(f"{OUT_DIR}/footstep.wav", footstep())
 write_wav(f"{OUT_DIR}/pickup.wav", pickup())
 write_wav(f"{OUT_DIR}/ambient.wav", ambient())
@@ -230,3 +237,6 @@ write_wav(f"{OUT_DIR}/lose.wav", lose())
 write_wav(f"{OUT_DIR}/chirp.wav", chirp())
 write_wav(f"{OUT_DIR}/wind.wav", wind())
 write_wav(f"{OUT_DIR}/waves.wav", waves())
+for tmp_path, final_path in STAGED:
+    os.replace(tmp_path, final_path)
+print(f"committed {len(STAGED)} sounds")

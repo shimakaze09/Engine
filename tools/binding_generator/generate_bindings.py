@@ -30,6 +30,7 @@ Usage:
     python generate_bindings.py <input_header> [<input_header2> ...] -o <output.cpp>
 """
 
+import os
 import re
 import sys
 import argparse
@@ -41,6 +42,13 @@ BIND_RE = re.compile(
     r'\(([^)]*)\)'                       # params (may be empty)
     r'\s*->\s*(\w+)'                     # return type
 )
+
+# Every name interpolated into generated C++ must be a plain identifier;
+# annotation text is otherwise a code-injection vector (audit M-27).
+IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+# Parameter names that would shadow or collide with generated locals.
+RESERVED_PARAM_NAMES = {'L', 'result'}
 
 # Regex for a C++ function declaration following the annotation.
 FUNC_RE = re.compile(
@@ -78,6 +86,12 @@ def parse_params(param_str):
         name, typ = part.split(':', 1)
         name = name.strip()
         typ = typ.strip()
+        if not IDENT_RE.match(name):
+            raise ValueError(f"Parameter name '{name}' is not a valid identifier")
+        if name in RESERVED_PARAM_NAMES:
+            raise ValueError(f"Parameter name '{name}' is reserved in generated wrappers")
+        if any(existing == name for existing, _ in params):
+            raise ValueError(f"Duplicate parameter name '{name}'")
         if typ not in TYPE_MAP:
             raise ValueError(f"Unknown type '{typ}' for parameter '{name}'")
         params.append((name, typ))
@@ -96,6 +110,12 @@ def parse_header(path):
             lua_name = m.group(1)
             params_str = m.group(2)
             ret_type = m.group(3)
+            if not IDENT_RE.match(lua_name):
+                raise ValueError(
+                    f"Lua name '{lua_name}' is not a valid identifier at line {i+1}")
+            if ret_type != 'void' and ret_type not in TYPE_MAP:
+                raise ValueError(
+                    f"Unknown return type '{ret_type}' at line {i+1}")
             # Next non-empty line should be the C++ declaration.
             j = i + 1
             cpp_func = None
@@ -239,6 +259,17 @@ def main():
             print(f'  ERROR parsing {inp}: {e}', file=sys.stderr)
             return 1
 
+    seen_names = {}
+    for b in all_bindings:
+        previous = seen_names.get(b['lua_name'])
+        if previous is not None:
+            print(f"  ERROR: duplicate Lua name '{b['lua_name']}' at "
+                  f"{b['source']}:{b['line']} (first defined at "
+                  f"{previous['source']}:{previous['line']}); generated "
+                  f"wrappers would not compile", file=sys.stderr)
+            return 1
+        seen_names[b['lua_name']] = b
+
     if not all_bindings:
         print('  No LUA_BIND annotations found.')
         # Still write an empty registration function.
@@ -254,8 +285,14 @@ def main():
     else:
         output = generate_output(all_bindings, args.inputs)
 
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.output).write_text(output, encoding='utf-8')
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_name(out_path.name + '.tmp')
+    with tmp_path.open('w', encoding='utf-8', newline='\n') as f:
+        f.write(output)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, out_path)
     print(f'  Generated {len(all_bindings)} bindings -> {args.output}')
     return 0
 
