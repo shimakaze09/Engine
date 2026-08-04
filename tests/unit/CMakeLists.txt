@@ -22,6 +22,13 @@ engine_add_test_executable(engine_unit_frame_graph_order
     engine_core
 )
 
+engine_add_test_executable(engine_unit_job_ready_queue_capacity
+    SOURCES
+    job_ready_queue_capacity_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_job_wait_tls
     SOURCES
     job_wait_tls_test.cpp

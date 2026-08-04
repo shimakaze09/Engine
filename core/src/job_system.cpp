@@ -37,6 +37,18 @@ constexpr std::uint32_t kGenerationMask = (1U << kGenerationBits) - 1U;
 static_assert(kMaxJobs <= (1ULL << kIndexBits),
               "job indices must fit the handle index bits");
 
+// Ready-queue capacity invariant (issue #71): a node enters the ready queue
+// at most once — either at dispatch with zero remaining dependencies or on
+// its unique last-dependency-retired transition in execute_job — so queue
+// occupancy never exceeds the graph's node count, which submit_job caps at
+// kMaxJobs. Capacity below kMaxJobs would let push_ready_job fail and
+// silently strand a readied dependent, hanging every waiter.
+constexpr std::size_t kReadyQueueCapacity = kMaxJobs;
+
+static_assert(kReadyQueueCapacity >= kMaxJobs,
+              "ready queue must hold every job node so a readied job can "
+              "never be dropped");
+
 thread_local std::uint32_t g_threadIndex = 0U;
 
 struct alignas(64) ThreadStats final {
@@ -375,6 +387,10 @@ private:
     }
 
     while (m_pendingJobs.load(std::memory_order_acquire) != 0U) {
+      if (m_graphDispatchFailed.load(std::memory_order_acquire)) {
+        break;
+      }
+
       std::uint32_t nodeIndex = kInvalidIndex;
       if (pop_ready_job(&nodeIndex)) {
         execute_job(nodeIndex);
@@ -470,7 +486,9 @@ private:
       m_pendingJobs.fetch_add(1U, std::memory_order_acq_rel);
       if (m_nodes[i].remainingDependencies.load(std::memory_order_acquire) ==
           0U) {
-        static_cast<void>(push_ready_job(static_cast<std::uint32_t>(i)));
+        if (!push_ready_job(static_cast<std::uint32_t>(i))) {
+          fail_graph_on_ready_overflow(static_cast<std::uint32_t>(i));
+        }
       }
     }
 
@@ -502,6 +520,26 @@ private:
     if (m_generation == 0U) {
       m_generation = 1U;
     }
+  }
+
+  // Defense in depth for the statically-impossible ready-queue overflow
+  // (issue #71): the dropped job can never execute, so fail the graph the
+  // way dispatch failure does — loudly, releasing the dropped job's pending
+  // count and waking every waiter so nothing polls forever. Transitive
+  // dependents of the dropped job keep their pending counts; waiters bail
+  // on m_graphDispatchFailed instead of waiting for zero.
+  void fail_graph_on_ready_overflow(std::uint32_t nodeIndex) noexcept {
+    char msg[96] = {};
+    std::snprintf(msg, sizeof(msg),
+                  "ready queue overflow dropped job %u — failing graph",
+                  nodeIndex);
+    log_message(LogLevel::Error, "jobs", msg);
+    m_graphDispatchFailed.store(true, std::memory_order_release);
+    m_pendingJobs.fetch_sub(1U, std::memory_order_acq_rel);
+    {
+      std::lock_guard<std::mutex> lock(m_completionMutex);
+    }
+    m_completed.notify_all();
   }
 
   bool push_ready_job(std::uint32_t nodeIndex) noexcept {
@@ -631,8 +669,11 @@ private:
 
       if (dependentNode.remainingDependencies.fetch_sub(
               1U, std::memory_order_acq_rel) == 1U) {
-        static_cast<void>(push_ready_job(dependentIndex));
-        m_workAvailable.notify_one();
+        if (push_ready_job(dependentIndex)) {
+          m_workAvailable.notify_one();
+        } else {
+          fail_graph_on_ready_overflow(dependentIndex);
+        }
       }
 
       edgeIndex = m_edges[edgeIndex].nextEdge;
@@ -695,7 +736,7 @@ private:
   std::array<NativeThread, kMaxWorkers> m_workers{};
   std::array<JobNode, kMaxJobs> m_nodes{};
   std::array<DependencyEdge, kMaxEdges> m_edges{};
-  std::array<std::uint32_t, kMaxJobs> m_readyQueue{};
+  std::array<std::uint32_t, kReadyQueueCapacity> m_readyQueue{};
   std::array<ThreadStats, kMaxWorkers + 1U> m_threadStats{};
 
   std::atomic<bool> m_initialized = false;
