@@ -410,18 +410,20 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
   const engine::math::Vec3 zeroVec(0.0F, 0.0F, 0.0F);
   const engine::math::Vec3 velA = (bodyA != nullptr) ? bodyA->velocity : zeroVec;
   const engine::math::Vec3 velB = (bodyB != nullptr) ? bodyB->velocity : zeroVec;
-  const bool angularA = (bodyA != nullptr) && (invMassA > 0.0F) &&
-                        (bodyA->inverseInertia > 0.0F) && (invMassB > 0.0F);
-  const bool angularB = (bodyB != nullptr) && (invMassB > 0.0F) &&
-                        (bodyB->inverseInertia > 0.0F) && (invMassA > 0.0F);
+  const engine::math::Vec3 angVelA =
+      (bodyA != nullptr) ? bodyA->angularVelocity : zeroVec;
+  const engine::math::Vec3 angVelB =
+      (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
+  const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
+  const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
+  const bool angularA =
+      (invMassA > 0.0F) && (invInertiaA > 0.0F) && (invMassB > 0.0F);
+  const bool angularB =
+      (invMassB > 0.0F) && (invInertiaB > 0.0F) && (invMassA > 0.0F);
   const engine::math::Vec3 pointVelA = engine::math::add(
-      velA, angularA ? engine::math::cross(bodyA->angularVelocity,
-                                           contactOffsetA)
-                     : zeroVec);
+      velA, angularA ? engine::math::cross(angVelA, contactOffsetA) : zeroVec);
   const engine::math::Vec3 pointVelB = engine::math::add(
-      velB, angularB ? engine::math::cross(bodyB->angularVelocity,
-                                           contactOffsetB)
-                     : zeroVec);
+      velB, angularB ? engine::math::cross(angVelB, contactOffsetB) : zeroVec);
   const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
   const float relVelAlongNormal =
       engine::math::dot(engine::math::sub(pointVelB, pointVelA), normal);
@@ -431,13 +433,13 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
         (-relVelAlongNormal > kRestitutionSpeedThreshold) ? restitution : 0.0F;
     const float effectiveMass =
         invMassSum +
-        (angularA ? bodyA->inverseInertia *
-                        engine::math::length_sq(
-                            engine::math::cross(contactOffsetA, normal))
+        (angularA ? invInertiaA * engine::math::length_sq(
+                                      engine::math::cross(contactOffsetA,
+                                                          normal))
                   : 0.0F) +
-        (angularB ? bodyB->inverseInertia *
-                        engine::math::length_sq(
-                            engine::math::cross(contactOffsetB, normal))
+        (angularB ? invInertiaB * engine::math::length_sq(
+                                      engine::math::cross(contactOffsetB,
+                                                          normal))
                   : 0.0F);
     const float impulseMagnitude =
         -(1.0F + effectiveRestitution) * relVelAlongNormal / effectiveMass;
