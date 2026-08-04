@@ -278,12 +278,13 @@ public:
     return true;
   }
 
+  // Waiting helps globally: the caller drains any ready job from the current
+  // graph while it waits, whatever thread it is, and never mutates the
+  // caller's thread-local worker index (audit M-12).
   void wait_for_handle(JobHandle handle) noexcept {
     if (!is_initialized()) {
       return;
     }
-
-    g_threadIndex = 0U;
 
     std::uint32_t nodeIndex = kInvalidIndex;
 
@@ -363,6 +364,8 @@ public:
   }
 
 private:
+  // Same global-helping and thread-index-preserving contract as
+  // wait_for_handle.
   void wait_for_all_jobs() noexcept {
     {
       std::lock_guard<std::mutex> lock(m_graphMutex);
@@ -371,7 +374,6 @@ private:
       }
     }
 
-    g_threadIndex = 0U;
     while (m_pendingJobs.load(std::memory_order_acquire) != 0U) {
       std::uint32_t nodeIndex = kInvalidIndex;
       if (pop_ready_job(&nodeIndex)) {
