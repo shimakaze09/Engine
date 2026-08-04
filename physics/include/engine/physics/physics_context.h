@@ -160,6 +160,14 @@ struct PhysicsContext final {
   std::size_t ccdColliderCount = 0U;
   bool ccdHasCompoundColliders = false;
 
+  // Raw per-step cvar cache written by refresh_step_cvar_cache on the
+  // serial begin-step path so step/resolve code never takes the global
+  // cvar mutex inside the parallel section; each consumer keeps its own
+  // validation. Defaults mirror the registered cvar defaults.
+  float ccdThresholdCvar = 2.0F;
+  float blockedWarnStepsCvar = 30.0F;
+  int solverIterationsCvar = 8;
+
   // Heap-backed so large heightfield buffers do not inflate World stack size.
   std::unique_ptr<PhysicsShapeStore> shapeStore;
 };

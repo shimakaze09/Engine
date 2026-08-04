@@ -33,6 +33,11 @@ int lua_engine_debugger_last_watch_values(lua_State *state) noexcept;
 void set_debug_lua_state(lua_State *state) noexcept;
 /// Refreshes debugger/profiler/sandbox hooks on the owning Lua state.
 void refresh_debug_lua_hook() noexcept;
+/// Arms hooks for an engine-side dispatch boundary: clears the exhausted
+/// instruction-budget latch (the only place it resets) and applies hooks.
+void arm_debug_lua_hook(lua_State *state) noexcept;
+/// True once the current dispatch has exhausted its instruction budget.
+bool debug_instruction_budget_exhausted() noexcept;
 /// Applies the current hook configuration to an explicit Lua thread; hooks
 /// are per-thread in Lua 5.4, so coroutines must arm them before resuming.
 void apply_debug_lua_hook(lua_State *state) noexcept;

@@ -11,7 +11,6 @@ namespace engine::scripting {
 
 using PushEntityHandleFromIndexFn =
     void (*)(lua_State *state, std::uint32_t entityIndex) noexcept;
-using LogLuaErrorFn = void (*)(const char *context) noexcept;
 
 /// Lua binding: Lua engine.on_collision_register(callback).
 int lua_engine_on_collision_register(lua_State *state) noexcept;
@@ -24,7 +23,6 @@ void clear_collision_handlers(lua_State *state) noexcept;
 /// Dispatches registered and legacy global collision callbacks.
 void dispatch_collision_handlers(
     lua_State *state, const std::uint32_t *pairData, std::size_t pairCount,
-    PushEntityHandleFromIndexFn pushEntityHandleFromIndex,
-    LogLuaErrorFn logLuaError) noexcept;
+    PushEntityHandleFromIndexFn pushEntityHandleFromIndex) noexcept;
 
 } // namespace engine::scripting

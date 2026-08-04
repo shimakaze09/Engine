@@ -107,4 +107,13 @@ void extract_normal_matrix(const math::Mat4 &model,
   normalMatrixOut[8] = normalSource.columns[2].z;
 }
 
+math::Vec3 point_shadow_slot_light_position(
+    int slotLightIndex, const SceneLightData &lights) noexcept {
+  if ((slotLightIndex < 0) ||
+      (static_cast<std::size_t>(slotLightIndex) >= lights.pointLightCount)) {
+    return math::Vec3{};
+  }
+  return lights.pointLights[static_cast<std::size_t>(slotLightIndex)].position;
+}
+
 } // namespace engine::renderer

@@ -362,7 +362,6 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
                          spotShadowEnabled ? 1 : 0);
   }
 
-  const math::Vec3 zero{};
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
     const auto &slot = backend.pointShadowState.slots[s];
     const int texUnit = 14 + static_cast<int>(s);
@@ -373,14 +372,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
       dev->set_uniform_int(backend.pbrPointShadowMapLocs[s], texUnit);
     }
     if (backend.pbrPointShadowLightPosLocs[s] >= 0) {
-      const bool validLight =
-          (slot.lightIndex >= 0) &&
-          (static_cast<std::size_t>(slot.lightIndex) < lights.pointLightCount);
-      const math::Vec3 &lightPos =
-          validLight
-              ? lights.pointLights[static_cast<std::size_t>(slot.lightIndex)]
-                    .position
-              : zero;
+      const math::Vec3 lightPos =
+          point_shadow_slot_light_position(slot.lightIndex, lights);
       dev->set_uniform_vec3(backend.pbrPointShadowLightPosLocs[s], &lightPos.x);
     }
     if (backend.pbrPointShadowFarPlaneLocs[s] >= 0) {

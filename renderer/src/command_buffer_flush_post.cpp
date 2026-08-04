@@ -50,11 +50,12 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   const bool bloomAvailable = backend.bloomThresholdProgram != 0U &&
                               backend.bloomDownsampleProgram != 0U &&
                               backend.bloomUpsampleProgram != 0U;
-  const bool bloomEnabled = bloomAvailable && core::cvar_get_bool("r_bloom");
+  const bool bloomEnabled =
+      bloomAvailable && core::cvar_get_bool("r_bloom") &&
+      ensure_bloom_resources(backend, drawableWidth, drawableHeight);
 
   if (bloomEnabled) {
     gpu_profiler_begin_pass(GpuPassId::Bloom);
-    ensure_bloom_resources(backend, drawableWidth, drawableHeight);
 
     const std::uint32_t sceneColorTexBloom =
         pass_resource_gpu_texture(passRes.sceneColor);
@@ -119,10 +120,10 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
 
   const bool autoExposureEnabled =
       backend.autoExposureAvailable &&
-      core::cvar_get_bool("r_auto_exposure", true);
+      core::cvar_get_bool("r_auto_exposure", true) &&
+      ensure_luminance_resources(backend, drawableWidth, drawableHeight);
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
-    ensure_luminance_resources(backend, drawableWidth, drawableHeight);
 
     dev->bind_framebuffer(backend.lumMipFbos[0]);
     dev->set_viewport(0, 0, backend.lumMipWidths[0], backend.lumMipHeights[0]);

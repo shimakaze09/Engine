@@ -123,6 +123,45 @@ void refresh_lua_hook() noexcept;
 
 void refresh_lua_hook() noexcept { refresh_debug_lua_hook(); }
 
+/// Last-resort panic logger: an unprotected Lua error is about to abort
+/// the process, so record the error message before Lua calls abort().
+int scripting_lua_panic(lua_State *state) noexcept {
+  const char *message = lua_tostring(state, -1);
+  char logBuffer[512] = {};
+  std::snprintf(logBuffer, sizeof(logBuffer),
+                "unprotected lua error, aborting: %s",
+                (message != nullptr) ? message : "unknown lua error");
+  core::log_message(core::LogLevel::Fatal, "scripting", logBuffer);
+  return 0;
+}
+
+/// Carries one global-function invocation into the protected trampoline.
+struct GlobalCallArgs final {
+  const char *name = nullptr;
+  bool hasArg = false;
+  float arg = 0.0F;
+  bool called = false;
+};
+
+/// Protected trampoline: looks up the named global, pushes the optional
+/// float argument, and calls it; records whether a function was found so
+/// metamethods and allocation failures stay catchable.
+int global_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<GlobalCallArgs *>(lua_touserdata(state, 1));
+  lua_getglobal(state, args->name);
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
+  }
+  args->called = true;
+  int nargs = 0;
+  if (args->hasArg) {
+    lua_pushnumber(state, static_cast<lua_Number>(args->arg));
+    nargs = 1;
+  }
+  lua_call(state, nargs, 0);
+  return 0;
+}
+
 int lua_engine_delta_time(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(g_deltaSeconds));
   return 1;
@@ -140,7 +179,7 @@ int lua_engine_frame_count(lua_State *state) noexcept {
 
 int lua_engine_start_coroutine(lua_State *state) noexcept {
   return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
-                             log_lua_error, apply_debug_lua_hook);
+                             log_lua_error, arm_debug_lua_hook);
 }
 
 // --- Entity lifecycle completeness ---
@@ -406,6 +445,7 @@ bool initialize_scripting() noexcept {
                       "failed to create Lua state");
     return false;
   }
+  lua_atpanic(state, &scripting_lua_panic);
   set_debug_lua_state(state);
   configure_entity_script_bindings(
       state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
@@ -493,10 +533,16 @@ bool load_script(const char *path) noexcept {
     return false;
   }
 
-  refresh_lua_hook();
+  arm_debug_lua_hook(state);
 
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("load_script");
+    return false;
+  }
+
+  if (debug_instruction_budget_exhausted()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "load_script: CPU instruction budget exhausted");
     return false;
   }
 
@@ -517,18 +563,14 @@ bool call_script_function(const char *name) noexcept {
     return false;
   }
 
-  lua_getglobal(state, name);
-  if (!lua_isfunction(state, -1)) {
-    lua_pop(state, 1);
+  GlobalCallArgs args{};
+  args.name = name;
+  if (!protected_engine_dispatch(state, &global_call_trampoline, &args, 0,
+                                 "call_script_function")) {
     return false;
   }
 
-  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
-    log_lua_error("call_script_function");
-    return false;
-  }
-
-  return true;
+  return args.called;
 }
 
 bool call_script_function_float(const char *name, float arg) noexcept {
@@ -545,25 +587,22 @@ bool call_script_function_float(const char *name, float arg) noexcept {
     return false;
   }
 
-  lua_getglobal(state, name);
-  if (!lua_isfunction(state, -1)) {
-    lua_pop(state, 1);
+  GlobalCallArgs args{};
+  args.name = name;
+  args.hasArg = true;
+  args.arg = arg;
+  if (!protected_engine_dispatch(state, &global_call_trampoline, &args, 0,
+                                 "call_script_function_float")) {
     return false;
   }
 
-  lua_pushnumber(state, static_cast<lua_Number>(arg));
-  if (lua_pcall(state, 1, 0, 0) != LUA_OK) {
-    log_lua_error("call_script_function_float");
-    return false;
-  }
-
-  return true;
+  return args.called;
 }
 
 void dispatch_physics_callbacks(const std::uint32_t *pairData,
                                 std::size_t pairCount) noexcept {
   dispatch_collision_handlers(lua_state(), pairData, pairCount,
-                              push_entity_handle_from_index, log_lua_error);
+                              push_entity_handle_from_index);
 }
 
 void dispatch_animation_event_callbacks() noexcept {
@@ -652,9 +691,17 @@ bool reload_script_transactionally(const char *path) noexcept {
   }
 
   const int snapshotReference = snapshot_global_bindings(state);
-  refresh_lua_hook();
+  arm_debug_lua_hook(state);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("hot_reload");
+    restore_global_bindings(state, snapshotReference);
+    luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
+    return false;
+  }
+
+  if (debug_instruction_budget_exhausted()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "hot_reload: CPU instruction budget exhausted");
     restore_global_bindings(state, snapshotReference);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
     return false;
@@ -707,7 +754,7 @@ void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 
 void tick_coroutines() noexcept {
   tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
-                      apply_debug_lua_hook);
+                      arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }

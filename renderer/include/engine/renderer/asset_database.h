@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -17,13 +18,34 @@ namespace engine::renderer {
 
 enum class AssetState : std::uint8_t { Unloaded, Loading, Ready, Failed };
 
-/// One mesh slot: id, GPU handle, source path, refcount, residency.
+/// One mesh slot: id, GPU handle, source path, refcount, residency. The
+/// last-access stamp is atomic because parallel render-prep chunk jobs
+/// touch it through resolve_mesh_asset (relaxed ordering: it is an LRU
+/// hint read only by the single-threaded eviction pass). Copies transfer
+/// the stamp with relaxed loads/stores; slots are only copied during
+/// single-threaded slot reset/reuse, never during render prep.
 struct MeshAssetRecord final {
+  MeshAssetRecord() noexcept = default;
+  MeshAssetRecord(const MeshAssetRecord &other) noexcept { *this = other; }
+  MeshAssetRecord &operator=(const MeshAssetRecord &other) noexcept {
+    id = other.id;
+    runtimeMesh = other.runtimeMesh;
+    sourcePath = other.sourcePath;
+    refCount = other.refCount;
+    lastAccessFrame.store(
+        other.lastAccessFrame.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
+    sizeBytes = other.sizeBytes;
+    state = other.state;
+    requestedResident = other.requestedResident;
+    return *this;
+  }
+
   AssetId id = kInvalidAssetId;
   MeshHandle runtimeMesh = kInvalidMeshHandle;
   std::array<char, 260U> sourcePath{};
   std::uint32_t refCount = 0U;
-  std::uint64_t lastAccessFrame = 0ULL;
+  std::atomic<std::uint64_t> lastAccessFrame = 0ULL;
   std::uint64_t sizeBytes = 0ULL;
   AssetState state = AssetState::Unloaded;
   bool requestedResident = false;

@@ -33,12 +33,14 @@ bool vfs_read_text(const char *virtualPath,
                    char **outText,
                    std::size_t *outSize) noexcept;
 
-/// Writes bytes to the resolved path; false on IO failure.
+/// Atomically replaces the resolved path via a staged sibling write;
+/// false on any IO failure (incl. close-flush), previous file kept.
 bool vfs_write_binary(const char *virtualPath,
                       const void *data,
                       std::size_t size) noexcept;
 
-/// Writes text to the resolved path; false on IO failure.
+/// Atomically replaces the resolved path with text; same contract as
+/// vfs_write_binary.
 bool vfs_write_text(const char *virtualPath,
                     const char *text,
                     std::size_t size) noexcept;

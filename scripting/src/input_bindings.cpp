@@ -7,9 +7,13 @@ extern "C" {
 }
 
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
+#include "engine/core/logging.h"
+#include "engine/core/platform.h"
 
 namespace engine::scripting {
 namespace {
@@ -279,33 +283,67 @@ int lua_engine_rebind_action(lua_State *state) noexcept {
   return 1;
 }
 
-/// Lua binding: Lua engine.save_input_config([path]); defaults to the
-/// per-user bindings file the engine reloads at boot.
-int lua_engine_save_input_config(lua_State *state) noexcept {
-  const char *path = lua_tostring(state, 1);
-  char defaultPath[512] = {};
-  if (path == nullptr) {
-    if (!core::input_bindings_default_path(defaultPath, sizeof(defaultPath))) {
-      lua_pushboolean(state, 0);
-      return 1;
+/// Confines a script-supplied config name strictly under the save directory.
+bool resolve_input_config_path(const char *name, char *out,
+                               std::size_t capacity) noexcept {
+  if ((name == nullptr) || (name[0] == '\0') || (name[0] == '/') ||
+      (std::strchr(name, '\\') != nullptr) ||
+      (std::strchr(name, ':') != nullptr)) {
+    return false;
+  }
+  const char *segment = name;
+  while (segment != nullptr) {
+    if ((segment[0] == '.') && (segment[1] == '.') &&
+        ((segment[2] == '/') || (segment[2] == '\0'))) {
+      return false;
     }
-    path = defaultPath;
+    const char *slash = std::strchr(segment, '/');
+    segment = (slash != nullptr) ? (slash + 1) : nullptr;
+  }
+  char saveDir[512] = {};
+  if (!core::platform_get_save_dir(saveDir, sizeof(saveDir))) {
+    return false;
+  }
+  const int written = std::snprintf(out, capacity, "%s/%s", saveDir, name);
+  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+}
+
+/// Picks the per-user default path or the sandboxed name; false refuses.
+bool resolve_lua_config_path(const char *name, char *out,
+                             std::size_t capacity) noexcept {
+  if (name == nullptr) {
+    return core::input_bindings_default_path(out, capacity);
+  }
+  if (!resolve_input_config_path(name, out, capacity)) {
+    core::log_message(core::LogLevel::Error, "Scripting",
+                      "input config path refused: must be a relative "
+                      "name under the save directory");
+    return false;
+  }
+  return true;
+}
+
+/// Lua binding: Lua engine.save_input_config([name]); defaults to the
+/// per-user bindings file; a name resolves under the save directory.
+int lua_engine_save_input_config(lua_State *state) noexcept {
+  const char *name = lua_tostring(state, 1);
+  char path[512] = {};
+  if (!resolve_lua_config_path(name, path, sizeof(path))) {
+    lua_pushboolean(state, 0);
+    return 1;
   }
   lua_pushboolean(state, core::save_input_bindings(path) ? 1 : 0);
   return 1;
 }
 
-/// Lua binding: Lua engine.load_input_config([path]); defaults to the
-/// per-user bindings file.
+/// Lua binding: Lua engine.load_input_config([name]); defaults to the
+/// per-user bindings file; a name resolves under the save directory.
 int lua_engine_load_input_config(lua_State *state) noexcept {
-  const char *path = lua_tostring(state, 1);
-  char defaultPath[512] = {};
-  if (path == nullptr) {
-    if (!core::input_bindings_default_path(defaultPath, sizeof(defaultPath))) {
-      lua_pushboolean(state, 0);
-      return 1;
-    }
-    path = defaultPath;
+  const char *name = lua_tostring(state, 1);
+  char path[512] = {};
+  if (!resolve_lua_config_path(name, path, sizeof(path))) {
+    lua_pushboolean(state, 0);
+    return 1;
   }
   lua_pushboolean(state, core::load_input_bindings(path) ? 1 : 0);
   return 1;

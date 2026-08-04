@@ -56,6 +56,13 @@ bool register_physics_cvars() noexcept {
   return ok;
 }
 
+void refresh_step_cvar_cache(PhysicsContext &context) noexcept {
+  context.ccdThresholdCvar = core::cvar_get_float("physics.ccd_threshold", 2.0F);
+  context.solverIterationsCvar = core::cvar_get_int("physics.solver_iterations");
+  context.blockedWarnStepsCvar =
+      core::cvar_get_float("physics.blocked_warn_steps", 30.0F);
+}
+
 PhysicsContext::PhysicsContext() noexcept
     : shapeStore(new (std::nothrow) PhysicsShapeStore()) {}
 
@@ -83,6 +90,9 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   testedGeneration = other.testedGeneration;
   ccdColliderCount = other.ccdColliderCount;
   ccdHasCompoundColliders = other.ccdHasCompoundColliders;
+  ccdThresholdCvar = other.ccdThresholdCvar;
+  blockedWarnStepsCvar = other.blockedWarnStepsCvar;
+  solverIterationsCvar = other.solverIterationsCvar;
 
   if (other.shapeStore == nullptr) {
     shapeStore.reset();

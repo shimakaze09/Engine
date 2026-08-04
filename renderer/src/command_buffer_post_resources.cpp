@@ -54,14 +54,18 @@ void destroy_bloom_resources(BackendState &b) noexcept {
   b.bloomAllocatedHeight = 0;
 }
 
-void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
+bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
-    return;
+    return b.bloomMipFbos[0] != 0U;
   }
   destroy_bloom_resources(b);
   const auto *dev = render_device();
+  if (dev == nullptr) {
+    return false;
+  }
   int w = width / 2;
   int h = height / 2;
+  bool complete = true;
   for (int i = 0; i < BackendState::kBloomMipLevels; ++i) {
     if (w < 1) {
       w = 1;
@@ -72,12 +76,25 @@ void ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
     b.bloomMipWidths[i] = w;
     b.bloomMipHeights[i] = h;
     b.bloomMipTextures[i] = dev->create_texture_2d_hdr(w, h, 4, nullptr);
-    b.bloomMipFbos[i] = dev->create_framebuffer(b.bloomMipTextures[i], 0U);
+    b.bloomMipFbos[i] = (b.bloomMipTextures[i] != 0U)
+                            ? dev->create_framebuffer(b.bloomMipTextures[i], 0U)
+                            : 0U;
+    if (b.bloomMipFbos[i] == 0U) {
+      complete = false;
+      break;
+    }
     w /= 2;
     h /= 2;
   }
+  if (!complete) {
+    destroy_bloom_resources(b);
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "bloom mip chain creation failed; bloom stays off "
+                      "until the drawable size changes");
+  }
   b.bloomAllocatedWidth = width;
   b.bloomAllocatedHeight = height;
+  return complete;
 }
 
 /// Destroys or releases the requested object, handle, or resource for luminance resources.
@@ -100,15 +117,19 @@ void destroy_luminance_resources(BackendState &b) noexcept {
   b.lumAllocatedHeight = 0;
 }
 
-void ensure_luminance_resources(BackendState &b, int width,
+bool ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept {
   if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
-    return;
+    return b.lumMipFbos[0] != 0U;
   }
   destroy_luminance_resources(b);
   const auto *dev = render_device();
+  if (dev == nullptr) {
+    return false;
+  }
   int w = width / 2;
   int h = height / 2;
+  bool complete = true;
   for (int i = 0; i < BackendState::kLuminanceMipLevels; ++i) {
     if (w < 1) {
       w = 1;
@@ -119,12 +140,25 @@ void ensure_luminance_resources(BackendState &b, int width,
     b.lumMipWidths[i] = w;
     b.lumMipHeights[i] = h;
     b.lumMipTextures[i] = dev->create_texture_2d_hdr(w, h, 4, nullptr);
-    b.lumMipFbos[i] = dev->create_framebuffer(b.lumMipTextures[i], 0U);
+    b.lumMipFbos[i] = (b.lumMipTextures[i] != 0U)
+                          ? dev->create_framebuffer(b.lumMipTextures[i], 0U)
+                          : 0U;
+    if (b.lumMipFbos[i] == 0U) {
+      complete = false;
+      break;
+    }
     w /= 2;
     h /= 2;
   }
+  if (!complete) {
+    destroy_luminance_resources(b);
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "luminance mip chain creation failed; auto exposure "
+                      "stays off until the drawable size changes");
+  }
   b.lumAllocatedWidth = width;
   b.lumAllocatedHeight = height;
+  return complete;
 }
 
 void generate_ssao_kernel(float *kernel, int count) noexcept {

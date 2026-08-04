@@ -216,6 +216,18 @@ enum class WorldPhase : std::uint8_t {
   EndPlay,
 };
 
+namespace detail {
+
+/// True when C matches an element type of the std::tuple type Tuple; used to
+/// derive the World's supported-component gate from its persistent type list.
+template <typename C, typename Tuple>
+inline constexpr bool kTupleContainsV = false;
+template <typename C, typename... Ts>
+inline constexpr bool kTupleContainsV<C, std::tuple<Ts...>> =
+    (std::is_same_v<C, Ts> || ...);
+
+} // namespace detail
+
 /// Fixed-capacity ECS world: entity lifetimes, component storage, phase
 /// gating, and the physics-facing world view.
 class World final : public physics::PhysicsWorldView {
@@ -239,6 +251,23 @@ public:
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
+
+  /// Single authoritative list of every persistent (scene/prefab-serialized)
+  /// component type the World stores. The serialization registry
+  /// (runtime/src/component_registry.h) binds each listed type to its stable
+  /// serialized name and World accessor pair and static-asserts exact
+  /// agreement with this list, so extending the World's serializable set
+  /// without a registry row (or vice versa) fails to compile.
+  using PersistentComponentTypes =
+      std::tuple<Transform, RigidBody, Collider, MeshComponent, NameComponent,
+                 LightComponent, ScriptComponent, SpringArmComponent,
+                 PointLightComponent, SpotLightComponent,
+                 ReflectionProbeComponent, SceneCaptureComponent,
+                 FoliagePatchComponent, AnimationComponent>;
+  /// Number of persistent component types, derived from the list above.
+  static constexpr std::size_t kPersistentComponentTypeCount =
+      std::tuple_size_v<PersistentComponentTypes>;
+
   World() noexcept;
 
   /// Allocates a raw entity without components for low-level ECS use.
@@ -640,9 +669,12 @@ public:
   /// stale or the component is absent (no logging).
   const SpringArmComponent *get_spring_arm_ptr(Entity entity) const noexcept;
 
-  /// Begins the requested operation or profiling range for update phase.
+  /// Enters Simulation for the frame's first fixed step: refreshes the
+  /// physics per-step cvar cache, snapshots TRS history, opens the write
+  /// buffer.
   void begin_update_phase() noexcept;
-  /// Begins the requested operation or profiling range for update step.
+  /// Serial begin of each catch-up fixed step: refreshes the physics
+  /// per-step cvar cache and snapshots TRS history before chunk jobs run.
   void begin_update_step() noexcept;
   /// Publishes the written transform state as the new read state (swap).
   void commit_update_phase() noexcept;
@@ -871,22 +903,13 @@ private:
       core::SparseSet<Entity, AnimationComponent, kMaxEntities,
                       kMaxAnimationComponents>;
 
-  /// Returns whether is supported component.
+  /// True for every persistent component type plus the derived
+  /// WorldTransform; membership comes from PersistentComponentTypes so the
+  /// storage gate cannot drift from the serialization registry.
   template <typename Component> static consteval bool is_supported_component() {
     using C = std::remove_cv_t<Component>;
-    return std::is_same_v<C, Transform> || std::is_same_v<C, RigidBody> ||
-           std::is_same_v<C, WorldTransform> || std::is_same_v<C, Collider> ||
-           std::is_same_v<C, MeshComponent> ||
-           std::is_same_v<C, NameComponent> ||
-           std::is_same_v<C, LightComponent> ||
-           std::is_same_v<C, ScriptComponent> ||
-           std::is_same_v<C, SpringArmComponent> ||
-           std::is_same_v<C, PointLightComponent> ||
-           std::is_same_v<C, SpotLightComponent> ||
-           std::is_same_v<C, ReflectionProbeComponent> ||
-           std::is_same_v<C, SceneCaptureComponent> ||
-           std::is_same_v<C, FoliagePatchComponent> ||
-           std::is_same_v<C, AnimationComponent>;
+    return std::is_same_v<C, WorldTransform> ||
+           detail::kTupleContainsV<C, PersistentComponentTypes>;
   }
 
   // EntityPool is the sole client of the recycle/activate lifecycle

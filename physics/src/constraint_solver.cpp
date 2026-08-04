@@ -2,7 +2,6 @@
 
 #include "engine/physics/constraint_solver.h"
 
-#include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
@@ -350,11 +349,12 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return;
   }
 
-  // Iterations clamp to a documented safe range: non-positive falls back
-  // to the default and the upper bound keeps a misconfigured cvar from
-  // hanging the frame.
+  // Iterations come from the per-step cvar cache (the global cvar mutex is
+  // off-limits during stepping) and clamp to a documented safe range:
+  // non-positive falls back to the default and the upper bound keeps a
+  // misconfigured cvar from hanging the frame.
   constexpr int kMaxSolverIterations = 64;
-  const int iterations = core::cvar_get_int("physics.solver_iterations");
+  const int iterations = ctx.solverIterationsCvar;
   const std::size_t iterCount =
       (iterations > 0)
           ? static_cast<std::size_t>(std::min(iterations, kMaxSolverIterations))

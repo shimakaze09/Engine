@@ -102,7 +102,8 @@ void draw_main_menu_bar() noexcept {
         core::log_message(core::LogLevel::Error, "editor",
                           "failed to load configured editor scene");
       } else {
-        editor_session().selectedEntityIndex = 0U;
+        inspector_abandon_pending_edit();
+        clear_entity_selection();
         editor_session().worldRestoreFailed = false;
         editor_session().commandHistory.clear();
       }
@@ -116,23 +117,27 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("Edit")) {
-    if (!editor_session().commandHistory.can_undo()) {
+    const bool canUndo =
+        world_is_editable() && editor_session().commandHistory.can_undo();
+    const bool canRedo =
+        world_is_editable() && editor_session().commandHistory.can_redo();
+    if (!canUndo) {
       ImGui::BeginDisabled();
     }
     if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-      editor_session().commandHistory.undo();
+      editor_history_undo();
     }
-    if (!editor_session().commandHistory.can_undo()) {
+    if (!canUndo) {
       ImGui::EndDisabled();
     }
 
-    if (!editor_session().commandHistory.can_redo()) {
+    if (!canRedo) {
       ImGui::BeginDisabled();
     }
     if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z")) {
-      editor_session().commandHistory.redo();
+      editor_history_redo();
     }
-    if (!editor_session().commandHistory.can_redo()) {
+    if (!canRedo) {
       ImGui::EndDisabled();
     }
 
@@ -279,9 +284,15 @@ static bool entity_has_parent(runtime::Entity entity,
   return transform.parentId == parentId;
 }
 
+/// Hard bound on hierarchy tree nesting drawn per frame; deeper nodes
+/// render as leaves so corrupted or absurdly deep parent chains cannot
+/// grow the render call stack without limit.
+constexpr std::size_t kMaxHierarchyDrawDepth = 64U;
+
 /// Draws one hierarchy node with selection, drag-drop reparenting, and
-/// its children as a subtree.
-static void draw_entity_node(runtime::Entity entity) noexcept {
+/// its children as a subtree (depth-capped by kMaxHierarchyDrawDepth).
+static void draw_entity_node(runtime::Entity entity,
+                             std::size_t depth) noexcept {
   char label[160] = {};
   runtime::NameComponent name{};
   if (editor_session().world->get_name_component(entity, &name) &&
@@ -296,7 +307,8 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
   const runtime::PersistentId ownId =
       editor_session().world->persistent_id(entity);
   bool hasChildren = false;
-  if (ownId != runtime::kInvalidPersistentId) {
+  if ((depth < kMaxHierarchyDrawDepth) &&
+      (ownId != runtime::kInvalidPersistentId)) {
     editor_session().world->for_each_alive([&](runtime::Entity candidate) {
       if (!hasChildren && (candidate != entity) &&
           entity_has_parent(candidate, ownId)) {
@@ -311,15 +323,15 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
   if (!hasChildren) {
     flags |= ImGuiTreeNodeFlags_Leaf;
   }
-  if (is_entity_selected(entity.index) ||
-      (editor_session().selectedEntityIndex == entity.index)) {
+  if (is_entity_selected(entity) ||
+      (selected_entity() == entity)) {
     flags |= ImGuiTreeNodeFlags_Selected;
   }
 
   const bool open = ImGui::TreeNodeEx(label, flags);
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
-    select_entity(entity.index, ImGui::GetIO().KeyCtrl);
+    select_entity(entity, ImGui::GetIO().KeyCtrl);
   }
 
   if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
@@ -347,7 +359,7 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
     if (hasChildren) {
       editor_session().world->for_each_alive([&](runtime::Entity candidate) {
         if ((candidate != entity) && entity_has_parent(candidate, ownId)) {
-          draw_entity_node(candidate);
+          draw_entity_node(candidate, depth + 1U);
         }
       });
     }
@@ -359,7 +371,7 @@ static void draw_entity_node(runtime::Entity entity) noexcept {
 static void draw_entity_hierarchy() noexcept {
   editor_session().world->for_each_alive([](runtime::Entity entity) {
     if (entity_has_parent(entity, runtime::kInvalidPersistentId)) {
-      draw_entity_node(entity);
+      draw_entity_node(entity, 0U);
     }
   });
 }
@@ -376,6 +388,7 @@ void draw_entities_panel() noexcept {
     return;
   }
 
+  prune_entity_selection();
   draw_entity_hierarchy();
 
   // Dropping onto the panel background clears the parent.
@@ -403,7 +416,7 @@ void draw_entities_panel() noexcept {
   if (ImGui::Button("Create Entity") && editable) {
     const runtime::Entity newEntity = execute_entity_create();
     if (newEntity != runtime::kInvalidEntity) {
-      select_entity(newEntity.index, false);
+      select_entity(newEntity, false);
     }
   }
 
@@ -427,7 +440,7 @@ void draw_entities_panel() noexcept {
       if (ImGui::MenuItem(item.label) && editable) {
         const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
         if (spawned != runtime::kInvalidEntity) {
-          select_entity(spawned.index, false);
+          select_entity(spawned, false);
         }
       }
     }

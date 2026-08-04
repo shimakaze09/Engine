@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "engine/core/json.h"
+#include "engine/core/reflect.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
@@ -64,6 +65,57 @@ bool read_vec4(const core::JsonParser &parser, const core::JsonValue &value,
 /// Reads a Quat from a 4-element float array (x, y, z, w).
 bool read_quat(const core::JsonParser &parser, const core::JsonValue &value,
                math::Quat *outQuat) noexcept;
+
+// --- Reflection-backed component codecs ------------------------------------
+
+/// Reflection descriptors for the component types both serializers encode
+/// through core reflection metadata (registered in reflect_types.cpp).
+struct ReflectedComponentDescriptors final {
+  const core::TypeDescriptor *transform = nullptr;
+  const core::TypeDescriptor *rigidBody = nullptr;
+  const core::TypeDescriptor *springArm = nullptr;
+  const core::TypeDescriptor *reflectionProbe = nullptr;
+  const core::TypeDescriptor *pointLight = nullptr;
+  const core::TypeDescriptor *spotLight = nullptr;
+  const core::TypeDescriptor *sceneCapture = nullptr;
+};
+
+/// Looks up every reflected component descriptor; logs under `logChannel`
+/// and fails when any registration is missing.
+bool find_reflected_component_descriptors(
+    ReflectedComponentDescriptors *outDescs, const char *logChannel) noexcept;
+
+/// Writes `instance` as a JSON object keyed `componentName`, one entry per
+/// reflection field descriptor.
+bool write_reflected_component(core::JsonWriter &writer,
+                               const char *componentName,
+                               const core::TypeDescriptor &descriptor,
+                               const void *instance) noexcept;
+/// Reads reflected fields into `instance`; missing fields keep the caller's
+/// defaults, present-but-malformed fields fail the read.
+bool read_reflected_component(const core::JsonParser &parser,
+                              const core::JsonValue &componentObject,
+                              const core::TypeDescriptor &descriptor,
+                              void *instance) noexcept;
+
+// --- MeshComponent / LightComponent ----------------------------------------
+
+/// Writes the mesh component under kJsonKeyMeshComponent (material/capture
+/// ids only when set, keeping pre-feature files byte-identical).
+void write_mesh_component(core::JsonWriter &writer,
+                          const MeshComponent &component) noexcept;
+/// Reads a mesh component, including the legacy "meshId" fallback for
+/// content authored before asset ids.
+bool read_mesh_component(const core::JsonParser &parser,
+                         const core::JsonValue &meshObject,
+                         MeshComponent *outComponent) noexcept;
+/// Writes the light component under kJsonKeyLightComponent.
+void write_light_component(core::JsonWriter &writer,
+                           const LightComponent &component) noexcept;
+/// Reads a light component; `type` clamps to a valid LightType on load.
+bool read_light_component(const core::JsonParser &parser,
+                          const core::JsonValue &lightObject,
+                          LightComponent *outComponent) noexcept;
 
 // --- Collider -------------------------------------------------------------
 

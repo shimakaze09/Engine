@@ -161,6 +161,14 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_input_config_lua
+    SOURCES
+    input_config_lua_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_scene_serializer
     SOURCES
     scene_serializer_test.cpp
@@ -298,6 +306,18 @@ engine_add_test_executable(engine_unit_editor_session
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_inspector_edit
+    SOURCES
+    editor_inspector_edit_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_shader_system
     SOURCES
     shader_system_test.cpp
@@ -343,6 +363,15 @@ engine_add_test_executable(engine_unit_texture_loader_handles
 engine_add_test_executable(engine_unit_prefab
     SOURCES
     prefab_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_component_registry
+    SOURCES
+    component_registry_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
     PRIVATE_DEPS
     engine_runtime
 )
@@ -587,6 +616,35 @@ engine_add_test_executable(engine_unit_command_buffer
     engine_renderer
     engine_math
     engine_core
+)
+
+engine_add_test_executable(engine_unit_command_buffer_post_chain
+    SOURCES
+    command_buffer_post_chain_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_post.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
+engine_add_test_executable(engine_unit_command_buffer_debug_overlay
+    SOURCES
+    command_buffer_debug_overlay_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_forward.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
 )
 
 engine_add_test_executable(engine_unit_native_thread

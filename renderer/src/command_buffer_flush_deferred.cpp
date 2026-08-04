@@ -554,10 +554,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
           }
           if (backend.dlPointShadowLightPosLocs[s] >= 0) {
-            const auto &lp = lights
-                                 .pointLights[static_cast<std::size_t>(
-                                     std::max(slot.lightIndex, 0))]
-                                 .position;
+            const math::Vec3 lp =
+                point_shadow_slot_light_position(slot.lightIndex, lights);
             dev->set_uniform_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
           }
           if (backend.dlPointShadowFarPlaneLocs[s] >= 0) {

@@ -1,6 +1,7 @@
 // Verifies command buffer test behavior for the Engine test suite.
 
 #include "command_buffer_flush_internal.h"
+#include "command_buffer_math.h"
 #include "engine/core/cvar.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
@@ -579,12 +580,18 @@ int check_scene_capture_requests() {
     engine::renderer::shutdown_texture_system();
     return 105;
   }
-  // Renderer shutdown releases the slot handles even before GL init.
+  // Renderer shutdown releases the slot handles even before GL init, and
+  // (audit R-5) actually unloads them from the texture system: the old
+  // handle must be stale afterwards, not a leaked live registration.
   engine::renderer::shutdown_renderer();
   if (engine::renderer::scene_capture_texture_handle(0U) !=
       engine::renderer::kInvalidTextureHandle) {
     engine::renderer::shutdown_texture_system();
     return 106;
+  }
+  if (engine::renderer::update_external_texture(slotHandle, 7U)) {
+    engine::renderer::shutdown_texture_system();
+    return 107;
   }
   engine::renderer::shutdown_texture_system();
 
@@ -689,6 +696,50 @@ int check_scene_light_count_sanitizer() {
   return 0;
 }
 
+/// Audit R-3: point_shadow_slot_light_position (the lighting passes' slot
+/// read) must return the referenced light's position only while the slot
+/// index is live, and a zero vector for empty (-1) slots, indices at or
+/// past the live count, and the emptied-family case (count back to zero)
+/// where the old code read pointLights[0] regardless.
+int check_point_shadow_slot_liveness() {
+  static engine::renderer::SceneLightData lights{};
+  lights.pointLightCount = 2U;
+  lights.pointLights[0].position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  lights.pointLights[1].position = engine::math::Vec3(4.0F, 5.0F, 6.0F);
+
+  const engine::math::Vec3 empty =
+      engine::renderer::point_shadow_slot_light_position(-1, lights);
+  if ((empty.x != 0.0F) || (empty.y != 0.0F) || (empty.z != 0.0F)) {
+    return 130;
+  }
+
+  const engine::math::Vec3 first =
+      engine::renderer::point_shadow_slot_light_position(0, lights);
+  if ((first.x != 1.0F) || (first.y != 2.0F) || (first.z != 3.0F)) {
+    return 131;
+  }
+  const engine::math::Vec3 second =
+      engine::renderer::point_shadow_slot_light_position(1, lights);
+  if ((second.x != 4.0F) || (second.y != 5.0F) || (second.z != 6.0F)) {
+    return 132;
+  }
+
+  const engine::math::Vec3 pastCount =
+      engine::renderer::point_shadow_slot_light_position(2, lights);
+  if ((pastCount.x != 0.0F) || (pastCount.y != 0.0F) ||
+      (pastCount.z != 0.0F)) {
+    return 133;
+  }
+
+  lights.pointLightCount = 0U;
+  const engine::math::Vec3 stale =
+      engine::renderer::point_shadow_slot_light_position(0, lights);
+  if ((stale.x != 0.0F) || (stale.y != 0.0F) || (stale.z != 0.0F)) {
+    return 134;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -737,5 +788,9 @@ int main() {
   if (result != 0) {
     return result;
   }
-  return check_scene_light_count_sanitizer();
+  result = check_scene_light_count_sanitizer();
+  if (result != 0) {
+    return result;
+  }
+  return check_point_shadow_slot_liveness();
 }

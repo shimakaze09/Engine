@@ -83,7 +83,16 @@ bool is_spawnable_mesh_asset(const std::string &filename) noexcept {
   return (dot != nullptr) && (std::strcmp(dot, ".mesh") == 0);
 }
 
-void draw_asset_tree(const std::filesystem::path &dir) noexcept {
+/// Hard bound on asset tree nesting; combined with never following
+/// directory symlinks it keeps browsing loop-free even on filesystems
+/// with linked or absurdly deep directory layouts.
+constexpr std::size_t kMaxAssetTreeDepth = 32U;
+
+void draw_asset_tree(const std::filesystem::path &dir,
+                     std::size_t depth) noexcept {
+  if (depth >= kMaxAssetTreeDepth) {
+    return;
+  }
   std::error_code ec{};
   for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
     if (ec) {
@@ -92,9 +101,11 @@ void draw_asset_tree(const std::filesystem::path &dir) noexcept {
 
     const std::string filename = entry.path().filename().string();
 
-    if (entry.is_directory(ec) && !ec) {
+    std::error_code symlinkEc{};
+    const bool isSymlink = entry.is_symlink(symlinkEc) && !symlinkEc;
+    if (!isSymlink && entry.is_directory(ec) && !ec) {
       if (ImGui::TreeNode(filename.c_str())) {
-        draw_asset_tree(entry.path());
+        draw_asset_tree(entry.path(), depth + 1U);
         ImGui::TreePop();
       }
     } else if (!ec) {
@@ -326,7 +337,7 @@ void draw_asset_browser_panel() noexcept {
   const std::filesystem::path assetsDir(editor_asset_root());
   std::error_code ec{};
   if (std::filesystem::is_directory(assetsDir, ec) && !ec) {
-    draw_asset_tree(assetsDir);
+    draw_asset_tree(assetsDir, 0U);
   } else {
     ImGui::Text("Asset directory not found: %s", editor_asset_root());
   }

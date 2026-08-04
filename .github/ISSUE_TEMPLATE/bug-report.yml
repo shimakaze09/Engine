@@ -1,0 +1,49 @@
+name: Bug report
+description: Observed misbehavior in the engine, editor, tools, or a sample
+title: "[Bug] <what goes wrong>"
+labels: ["bug"]
+body:
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps from a fresh checkout or the shipped template. Include the scene/asset/script if content-dependent.
+      placeholder: |
+        1. File → Load Scene → assets/scene.json
+        2. Press Play
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include log output, stack traces, or screenshots.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform / build
+      description: OS, compiler, Debug/Release, commit SHA
+      placeholder: "Windows 11, clang-cl, Debug, 14f9d1b"
+    validations:
+      required: true
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Is this a regression?
+      options:
+        - Unknown
+        - "Yes — worked in an earlier commit (name it below)"
+        - "No — never worked"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context

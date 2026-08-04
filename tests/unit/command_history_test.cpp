@@ -981,6 +981,201 @@ int check_primitive_spawn_rebuilds_hull() noexcept {
   return finish(0);
 }
 
+/// Deleting an entity whose parent links form a cycle (corrupted data
+/// reachable through production add_transform calls) must terminate,
+/// capture each member exactly once, and round-trip through undo.
+int check_delete_capture_terminates_on_parent_cycle() noexcept {
+  using engine::editor::EntityDeleteCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 170;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  const Entity a = world->create_scene_object();
+  const Entity b = world->create_scene_object();
+  if ((a == engine::runtime::kInvalidEntity) ||
+      (b == engine::runtime::kInvalidEntity)) {
+    return finish(171);
+  }
+  Transform linkA{};
+  linkA.parentId = world->persistent_id(b);
+  Transform linkB{};
+  linkB.parentId = world->persistent_id(a);
+  if (!world->add_transform(a, linkA) || !world->add_transform(b, linkB)) {
+    return finish(172);
+  }
+
+  EntityDeleteCommand *const command =
+      engine::editor::build_entity_delete_command(a);
+  if ((command == nullptr) || (command->recordCount != 2U)) {
+    delete command;
+    return finish(173);
+  }
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+  if (world->alive_entity_count() != 0U) {
+    return finish(174);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != 2U) {
+    return finish(175);
+  }
+
+  return finish(0);
+}
+
+/// A 1000+-deep parent chain must be captured iteratively (no stack
+/// growth proportional to depth), deleted, and fully restored with its
+/// parent links on undo.
+int check_deep_chain_delete_round_trip() noexcept {
+  using engine::editor::EntityDeleteCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  constexpr std::size_t kChainLength = 1100U;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 180;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  Entity root = engine::runtime::kInvalidEntity;
+  engine::runtime::PersistentId previousId =
+      engine::runtime::kInvalidPersistentId;
+  engine::runtime::PersistentId midParentId =
+      engine::runtime::kInvalidPersistentId;
+  engine::runtime::PersistentId midId = engine::runtime::kInvalidPersistentId;
+  for (std::size_t i = 0U; i < kChainLength; ++i) {
+    Transform transform{};
+    transform.parentId = previousId;
+    const Entity entity = world->create_scene_object(transform);
+    if (entity == engine::runtime::kInvalidEntity) {
+      return finish(181);
+    }
+    if (i == 0U) {
+      root = entity;
+    }
+    if (i == (kChainLength / 2U)) {
+      midParentId = previousId;
+      midId = world->persistent_id(entity);
+    }
+    previousId = world->persistent_id(entity);
+  }
+
+  EntityDeleteCommand *const command =
+      engine::editor::build_entity_delete_command(root);
+  if ((command == nullptr) || (command->recordCount != kChainLength)) {
+    delete command;
+    return finish(182);
+  }
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+  if (world->alive_entity_count() != 0U) {
+    return finish(183);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != kChainLength) {
+    return finish(184);
+  }
+  const Entity restoredMid = world->find_entity_by_persistent_id(midId);
+  Transform restoredLink{};
+  if ((restoredMid == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(restoredMid, &restoredLink) ||
+      (restoredLink.parentId != midParentId)) {
+    return finish(185);
+  }
+
+  return finish(0);
+}
+
+/// Reparenting an entity under its own descendant must be refused at any
+/// depth (the historical guard walked at most 256 ancestors and then
+/// allowed the cycle).
+int check_reparent_refuses_deep_descendant() noexcept {
+  using engine::runtime::Entity;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  constexpr std::size_t kChainLength = 300U;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 190;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.commandHistory.clear();
+    session.world = previousWorld;
+    return result;
+  };
+
+  Entity root = engine::runtime::kInvalidEntity;
+  Entity deepest = engine::runtime::kInvalidEntity;
+  engine::runtime::PersistentId previousId =
+      engine::runtime::kInvalidPersistentId;
+  for (std::size_t i = 0U; i < kChainLength; ++i) {
+    Transform transform{};
+    transform.parentId = previousId;
+    const Entity entity = world->create_scene_object(transform);
+    if (entity == engine::runtime::kInvalidEntity) {
+      return finish(191);
+    }
+    if (i == 0U) {
+      root = entity;
+    }
+    deepest = entity;
+    previousId = world->persistent_id(entity);
+  }
+
+  if (engine::editor::execute_reparent(root, deepest)) {
+    return finish(192);
+  }
+  Transform rootLink{};
+  if (!world->get_transform(root, &rootLink) ||
+      (rootLink.parentId != engine::runtime::kInvalidPersistentId)) {
+    return finish(193);
+  }
+
+  if (!engine::editor::execute_reparent(deepest, root)) {
+    return finish(194);
+  }
+  Transform deepestLink{};
+  if (!world->get_transform(deepest, &deepestLink) ||
+      (deepestLink.parentId != world->persistent_id(root))) {
+    return finish(195);
+  }
+
+  return finish(0);
+}
+
 /// The primitive spawn helper must produce a named scene object resting
 /// on the ground with the builtin mesh id, undoable through the session
 /// history.
@@ -1125,6 +1320,24 @@ int main() {
   }
 
   result = check_execute_primitive_spawn_names_and_meshes();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_delete_capture_terminates_on_parent_cycle();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_deep_chain_delete_round_trip();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_reparent_refuses_deep_descendant();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

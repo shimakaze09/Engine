@@ -34,6 +34,11 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     return false;
   }
 
+  ReflectedComponentDescriptors descs{};
+  if (!find_reflected_component_descriptors(&descs, kPrefabLogChannel)) {
+    return false;
+  }
+
   core::JsonWriter w{};
   w.begin_object();
   w.write_uint("version", kPrefabVersion);
@@ -41,25 +46,21 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   w.begin_object();
 
   Transform transform{};
-  if (world.get_transform(entity, &transform)) {
-    w.write_key(kJsonKeyTransform);
-    w.begin_object();
-    write_vec3(w, "position", transform.position);
-    write_quat(w, "rotation", transform.rotation);
-    write_vec3(w, "scale", transform.scale);
-    w.end_object();
+  if (world.get_transform(entity, &transform) &&
+      !write_reflected_component(w, kJsonKeyTransform, *descs.transform,
+                                 &transform)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write Transform");
+    return false;
   }
 
   RigidBody rigidBody{};
-  if (world.get_rigid_body(entity, &rigidBody)) {
-    w.write_key(kJsonKeyRigidBody);
-    w.begin_object();
-    write_vec3(w, "velocity", rigidBody.velocity);
-    write_vec3(w, "acceleration", rigidBody.acceleration);
-    write_vec3(w, "angularVelocity", rigidBody.angularVelocity);
-    w.write_float("inverseMass", rigidBody.inverseMass);
-    w.write_float("inverseInertia", rigidBody.inverseInertia);
-    w.end_object();
+  if (world.get_rigid_body(entity, &rigidBody) &&
+      !write_reflected_component(w, kJsonKeyRigidBody, *descs.rigidBody,
+                                 &rigidBody)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write RigidBody");
+    return false;
   }
 
   Collider collider{};
@@ -81,22 +82,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
 
   MeshComponent mesh{};
   if (world.get_mesh_component(entity, &mesh)) {
-    w.write_key("MeshComponent");
-    w.begin_object();
-    w.write_uint64("meshAssetId", mesh.meshAssetId);
-    // Written only when set so pre-material prefabs stay byte-identical.
-    if (mesh.materialAssetId != 0ULL) {
-      w.write_uint64("materialAssetId", mesh.materialAssetId);
-    }
-    write_vec3(w, "albedo", mesh.albedo);
-    w.write_float("roughness", mesh.roughness);
-    w.write_float("metallic", mesh.metallic);
-    w.write_float("opacity", mesh.opacity);
-    // Written only when set so pre-capture prefabs stay byte-identical.
-    if (mesh.sceneCaptureSourceId != 0U) {
-      w.write_uint("sceneCaptureSourceId", mesh.sceneCaptureSourceId);
-    }
-    w.end_object();
+    write_mesh_component(w, mesh);
   }
 
   FoliagePatchComponent foliage{};
@@ -106,79 +92,52 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
 
   LightComponent light{};
   if (world.get_light_component(entity, &light)) {
-    w.write_key(kJsonKeyLightComponent);
-    w.begin_object();
-    write_vec3(w, "color", light.color);
-    write_vec3(w, "direction", light.direction);
-    w.write_float("intensity", light.intensity);
-    w.write_uint("type", static_cast<std::uint32_t>(light.type));
-    w.end_object();
+    write_light_component(w, light);
   }
 
   PointLightComponent pointLight{};
-  if (world.get_point_light_component(entity, &pointLight)) {
-    w.write_key("PointLightComponent");
-    w.begin_object();
-    write_vec3(w, "color", pointLight.color);
-    w.write_float("intensity", pointLight.intensity);
-    w.write_float("radius", pointLight.radius);
-    w.end_object();
+  if (world.get_point_light_component(entity, &pointLight) &&
+      !write_reflected_component(w, kJsonKeyPointLightComponent,
+                                 *descs.pointLight, &pointLight)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write PointLightComponent");
+    return false;
   }
 
   SpotLightComponent spotLight{};
-  if (world.get_spot_light_component(entity, &spotLight)) {
-    w.write_key("SpotLightComponent");
-    w.begin_object();
-    write_vec3(w, "color", spotLight.color);
-    write_vec3(w, "direction", spotLight.direction);
-    w.write_float("intensity", spotLight.intensity);
-    w.write_float("radius", spotLight.radius);
-    w.write_float("innerConeAngle", spotLight.innerConeAngle);
-    w.write_float("outerConeAngle", spotLight.outerConeAngle);
-    w.end_object();
+  if (world.get_spot_light_component(entity, &spotLight) &&
+      !write_reflected_component(w, kJsonKeySpotLightComponent,
+                                 *descs.spotLight, &spotLight)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write SpotLightComponent");
+    return false;
   }
 
   SpringArmComponent springArm{};
-  if (world.get_spring_arm(entity, &springArm)) {
-    w.write_key("SpringArmComponent");
-    w.begin_object();
-    w.write_float("armLength", springArm.armLength);
-    w.write_float("currentLength", springArm.currentLength);
-    write_vec3(w, "offset", springArm.offset);
-    w.write_float("lagSpeed", springArm.lagSpeed);
-    w.write_float("collisionRadius", springArm.collisionRadius);
-    w.write_bool("collisionEnabled", springArm.collisionEnabled);
-    w.end_object();
+  if (world.get_spring_arm(entity, &springArm) &&
+      !write_reflected_component(w, kJsonKeySpringArmComponent,
+                                 *descs.springArm, &springArm)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write SpringArmComponent");
+    return false;
   }
 
   ReflectionProbeComponent reflectionProbe{};
-  if (world.get_reflection_probe_component(entity, &reflectionProbe)) {
-    w.write_key(kJsonKeyReflectionProbeComponent);
-    w.begin_object();
-    write_vec3(w, "boxExtents", reflectionProbe.boxExtents);
-    w.write_float("radius", reflectionProbe.radius);
-    w.write_float("intensity", reflectionProbe.intensity);
-    w.write_uint("prefilteredResolution",
-                 reflectionProbe.prefilteredResolution);
-    w.write_uint("irradianceResolution", reflectionProbe.irradianceResolution);
-    w.write_uint("brdfLutResolution", reflectionProbe.brdfLutResolution);
-    w.write_uint("mipLevels", reflectionProbe.mipLevels);
-    w.write_bool("boxProjection", reflectionProbe.boxProjection);
-    w.write_bool("needsBake", reflectionProbe.needsBake);
-    w.end_object();
+  if (world.get_reflection_probe_component(entity, &reflectionProbe) &&
+      !write_reflected_component(w, kJsonKeyReflectionProbeComponent,
+                                 *descs.reflectionProbe, &reflectionProbe)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write ReflectionProbeComponent");
+    return false;
   }
 
   SceneCaptureComponent sceneCapture{};
-  if (world.get_scene_capture_component(entity, &sceneCapture)) {
-    w.write_key(kJsonKeySceneCaptureComponent);
-    w.begin_object();
-    w.write_uint("width", sceneCapture.width);
-    w.write_uint("height", sceneCapture.height);
-    w.write_float("fovRadians", sceneCapture.fovRadians);
-    w.write_float("nearPlane", sceneCapture.nearPlane);
-    w.write_float("farPlane", sceneCapture.farPlane);
-    w.write_bool("enabled", sceneCapture.enabled);
-    w.end_object();
+  if (world.get_scene_capture_component(entity, &sceneCapture) &&
+      !write_reflected_component(w, kJsonKeySceneCaptureComponent,
+                                 *descs.sceneCapture, &sceneCapture)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write SceneCaptureComponent");
+    return false;
   }
 
   ScriptComponent scriptComp{};
@@ -249,6 +208,11 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     return kInvalidEntity;
   }
 
+  ReflectedComponentDescriptors descs{};
+  if (!find_reflected_component_descriptors(&descs, kPrefabLogChannel)) {
+    return kInvalidEntity;
+  }
+
   const Entity entity = world.create_scene_object();
   if (entity == kInvalidEntity) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
@@ -280,43 +244,6 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     return true;
   };
 
-  auto readVec3Field = [&](const core::JsonValue &object, const char *key,
-                           math::Vec3 *out) noexcept -> bool {
-    core::JsonValue value{};
-    return !parser.get_object_field(object, key, &value) ||
-           read_vec3(parser, value, out);
-  };
-  auto readQuatField = [&](const core::JsonValue &object, const char *key,
-                           math::Quat *out) noexcept -> bool {
-    core::JsonValue value{};
-    return !parser.get_object_field(object, key, &value) ||
-           read_quat(parser, value, out);
-  };
-  auto readFloatField = [&](const core::JsonValue &object, const char *key,
-                            float *out) noexcept -> bool {
-    core::JsonValue value{};
-    return !parser.get_object_field(object, key, &value) ||
-           parser.as_float(value, out);
-  };
-  auto readUintField = [&](const core::JsonValue &object, const char *key,
-                           std::uint32_t *out) noexcept -> bool {
-    core::JsonValue value{};
-    return !parser.get_object_field(object, key, &value) ||
-           parser.as_uint(value, out);
-  };
-  auto readUint64Field = [&](const core::JsonValue &object, const char *key,
-                             std::uint64_t *out) noexcept -> bool {
-    core::JsonValue value{};
-    return !parser.get_object_field(object, key, &value) ||
-           parser.as_uint64(value, out);
-  };
-  auto readBoolField = [&](const core::JsonValue &object, const char *key,
-                           bool *out) noexcept -> bool {
-    core::JsonValue value{};
-    return !parser.get_object_field(object, key, &value) ||
-           parser.as_bool(value, out);
-  };
-
   bool hasComponent = false;
   core::JsonValue componentValue{};
 
@@ -325,9 +252,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     Transform transform{};
-    if (!readVec3Field(componentValue, "position", &transform.position) ||
-        !readQuatField(componentValue, "rotation", &transform.rotation) ||
-        !readVec3Field(componentValue, "scale", &transform.scale) ||
+    if (!read_reflected_component(parser, componentValue, *descs.transform,
+                                  &transform) ||
         !world.add_transform(entity, transform)) {
       return failComponent("instantiate_prefab: failed to add Transform");
     }
@@ -338,15 +264,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     RigidBody rigidBody{};
-    if (!readVec3Field(componentValue, "velocity", &rigidBody.velocity) ||
-        !readVec3Field(componentValue, "acceleration",
-                       &rigidBody.acceleration) ||
-        !readVec3Field(componentValue, "angularVelocity",
-                       &rigidBody.angularVelocity) ||
-        !readFloatField(componentValue, "inverseMass",
-                        &rigidBody.inverseMass) ||
-        !readFloatField(componentValue, "inverseInertia",
-                        &rigidBody.inverseInertia) ||
+    if (!read_reflected_component(parser, componentValue, *descs.rigidBody,
+                                  &rigidBody) ||
         !world.add_rigid_body(entity, rigidBody)) {
       return failComponent("instantiate_prefab: failed to add RigidBody");
     }
@@ -381,20 +300,13 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     }
   }
 
-  if (!readComponentObject("MeshComponent", &componentValue, &hasComponent)) {
+  if (!readComponentObject(kJsonKeyMeshComponent, &componentValue,
+                           &hasComponent)) {
     return failComponent("instantiate_prefab: invalid MeshComponent");
   }
   if (hasComponent) {
     MeshComponent mesh{};
-    if (!readUint64Field(componentValue, "meshAssetId", &mesh.meshAssetId) ||
-        !readUint64Field(componentValue, "materialAssetId",
-                         &mesh.materialAssetId) ||
-        !readVec3Field(componentValue, "albedo", &mesh.albedo) ||
-        !readFloatField(componentValue, "roughness", &mesh.roughness) ||
-        !readFloatField(componentValue, "metallic", &mesh.metallic) ||
-        !readFloatField(componentValue, "opacity", &mesh.opacity) ||
-        !readUintField(componentValue, "sceneCaptureSourceId",
-                       &mesh.sceneCaptureSourceId) ||
+    if (!read_mesh_component(parser, componentValue, &mesh) ||
         !world.add_mesh_component(entity, mesh)) {
       return failComponent("instantiate_prefab: failed to add MeshComponent");
     }
@@ -419,69 +331,48 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     LightComponent light{};
-    std::uint32_t typeVal = 0U;
-    if (!readVec3Field(componentValue, "color", &light.color) ||
-        !readVec3Field(componentValue, "direction", &light.direction) ||
-        !readFloatField(componentValue, "intensity", &light.intensity) ||
-        !readUintField(componentValue, "type", &typeVal)) {
-      return failComponent("instantiate_prefab: failed to add LightComponent");
-    }
-    light.type = (typeVal == 1U) ? LightType::Point : LightType::Directional;
-    if (!world.add_light_component(entity, light)) {
+    if (!read_light_component(parser, componentValue, &light) ||
+        !world.add_light_component(entity, light)) {
       return failComponent("instantiate_prefab: failed to add LightComponent");
     }
   }
 
-  if (!readComponentObject("PointLightComponent", &componentValue,
+  if (!readComponentObject(kJsonKeyPointLightComponent, &componentValue,
                            &hasComponent)) {
     return failComponent("instantiate_prefab: invalid PointLightComponent");
   }
   if (hasComponent) {
     PointLightComponent pointLight{};
-    if (!readVec3Field(componentValue, "color", &pointLight.color) ||
-        !readFloatField(componentValue, "intensity", &pointLight.intensity) ||
-        !readFloatField(componentValue, "radius", &pointLight.radius) ||
+    if (!read_reflected_component(parser, componentValue, *descs.pointLight,
+                                  &pointLight) ||
         !world.add_point_light_component(entity, pointLight)) {
       return failComponent(
           "instantiate_prefab: failed to add PointLightComponent");
     }
   }
 
-  if (!readComponentObject("SpotLightComponent", &componentValue,
+  if (!readComponentObject(kJsonKeySpotLightComponent, &componentValue,
                            &hasComponent)) {
     return failComponent("instantiate_prefab: invalid SpotLightComponent");
   }
   if (hasComponent) {
     SpotLightComponent spotLight{};
-    if (!readVec3Field(componentValue, "color", &spotLight.color) ||
-        !readVec3Field(componentValue, "direction", &spotLight.direction) ||
-        !readFloatField(componentValue, "intensity", &spotLight.intensity) ||
-        !readFloatField(componentValue, "radius", &spotLight.radius) ||
-        !readFloatField(componentValue, "innerConeAngle",
-                        &spotLight.innerConeAngle) ||
-        !readFloatField(componentValue, "outerConeAngle",
-                        &spotLight.outerConeAngle) ||
+    if (!read_reflected_component(parser, componentValue, *descs.spotLight,
+                                  &spotLight) ||
         !world.add_spot_light_component(entity, spotLight)) {
       return failComponent(
           "instantiate_prefab: failed to add SpotLightComponent");
     }
   }
 
-  if (!readComponentObject("SpringArmComponent", &componentValue,
+  if (!readComponentObject(kJsonKeySpringArmComponent, &componentValue,
                            &hasComponent)) {
     return failComponent("instantiate_prefab: invalid SpringArmComponent");
   }
   if (hasComponent) {
     SpringArmComponent springArm{};
-    if (!readFloatField(componentValue, "armLength", &springArm.armLength) ||
-        !readFloatField(componentValue, "currentLength",
-                        &springArm.currentLength) ||
-        !readVec3Field(componentValue, "offset", &springArm.offset) ||
-        !readFloatField(componentValue, "lagSpeed", &springArm.lagSpeed) ||
-        !readFloatField(componentValue, "collisionRadius",
-                        &springArm.collisionRadius) ||
-        !readBoolField(componentValue, "collisionEnabled",
-                       &springArm.collisionEnabled) ||
+    if (!read_reflected_component(parser, componentValue, *descs.springArm,
+                                  &springArm) ||
         !world.add_spring_arm(entity, springArm)) {
       return failComponent(
           "instantiate_prefab: failed to add SpringArmComponent");
@@ -495,23 +386,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     ReflectionProbeComponent reflectionProbe{};
-    if (!readVec3Field(componentValue, "boxExtents",
-                       &reflectionProbe.boxExtents) ||
-        !readFloatField(componentValue, "radius", &reflectionProbe.radius) ||
-        !readFloatField(componentValue, "intensity",
-                        &reflectionProbe.intensity) ||
-        !readUintField(componentValue, "prefilteredResolution",
-                       &reflectionProbe.prefilteredResolution) ||
-        !readUintField(componentValue, "irradianceResolution",
-                       &reflectionProbe.irradianceResolution) ||
-        !readUintField(componentValue, "brdfLutResolution",
-                       &reflectionProbe.brdfLutResolution) ||
-        !readUintField(componentValue, "mipLevels",
-                       &reflectionProbe.mipLevels) ||
-        !readBoolField(componentValue, "boxProjection",
-                       &reflectionProbe.boxProjection) ||
-        !readBoolField(componentValue, "needsBake",
-                       &reflectionProbe.needsBake) ||
+    if (!read_reflected_component(parser, componentValue,
+                                  *descs.reflectionProbe, &reflectionProbe) ||
         !world.add_reflection_probe_component(entity, reflectionProbe)) {
       return failComponent(
           "instantiate_prefab: failed to add ReflectionProbeComponent");
@@ -524,13 +400,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   }
   if (hasComponent) {
     SceneCaptureComponent sceneCapture{};
-    if (!readUintField(componentValue, "width", &sceneCapture.width) ||
-        !readUintField(componentValue, "height", &sceneCapture.height) ||
-        !readFloatField(componentValue, "fovRadians",
-                        &sceneCapture.fovRadians) ||
-        !readFloatField(componentValue, "nearPlane", &sceneCapture.nearPlane) ||
-        !readFloatField(componentValue, "farPlane", &sceneCapture.farPlane) ||
-        !readBoolField(componentValue, "enabled", &sceneCapture.enabled) ||
+    if (!read_reflected_component(parser, componentValue, *descs.sceneCapture,
+                                  &sceneCapture) ||
         !world.add_scene_capture_component(entity, sceneCapture)) {
       return failComponent(
           "instantiate_prefab: failed to add SceneCaptureComponent");
