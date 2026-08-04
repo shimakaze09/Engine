@@ -1,10 +1,12 @@
 // Verifies the production flush_debug_overlay pass ages core debug-draw
 // primitives by exactly one frame per flush, so a lifeFrames=N primitive
 // survives N flushes (audit R-2: the TU split had doubled the tick,
-// halving every debug primitive's lifetime). Links the real forward-pass
-// TU; the sibling forward-path symbols it carries are satisfied by no-op
-// stubs below, and the overlay runs with the debug-line pipeline
-// unavailable so only the aging contract executes.
+// halving every debug primitive's lifetime), and that submitted spheres
+// reach the GPU as tessellated line segments through the shared line
+// pipeline instead of being silently dropped (audit M-08). Links the real
+// forward-pass TU; the sibling forward-path symbols it carries are
+// satisfied by no-op stubs below. The aging test runs with the debug-line
+// pipeline unavailable; the geometry tests install a counting fake device.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -114,6 +116,42 @@ FrameFlushContext make_context(const SceneLightData &lights,
                            .gbufferDebugMode = 0};
 }
 
+// Counters recorded by the fake device while the overlay draws.
+struct FakeOverlayStats final {
+  std::size_t drawCalls = 0U;
+  std::int32_t vertexTotal = 0;
+};
+
+FakeOverlayStats g_stats{};
+
+void fake_bind_framebuffer(std::uint32_t) noexcept {}
+void fake_set_viewport(std::int32_t, std::int32_t, std::int32_t,
+                       std::int32_t) noexcept {}
+void fake_state_toggle() noexcept {}
+void fake_bind_id(std::uint32_t) noexcept {}
+void fake_buffer_data_array(const void *, std::ptrdiff_t) noexcept {}
+void fake_draw_arrays_lines(std::int32_t, std::int32_t count) noexcept {
+  ++g_stats.drawCalls;
+  g_stats.vertexTotal += count;
+}
+
+/// Builds a device table stubbing exactly the entry points the overlay uses.
+RenderDevice make_fake_device() noexcept {
+  RenderDevice device{};
+  device.bind_framebuffer = &fake_bind_framebuffer;
+  device.set_viewport = &fake_set_viewport;
+  device.enable_depth_test = &fake_state_toggle;
+  device.enable_blending = &fake_state_toggle;
+  device.set_blend_func_alpha = &fake_state_toggle;
+  device.disable_blending = &fake_state_toggle;
+  device.bind_program = &fake_bind_id;
+  device.bind_vertex_array = &fake_bind_id;
+  device.bind_array_buffer = &fake_bind_id;
+  device.buffer_data_array = &fake_buffer_data_array;
+  device.draw_arrays_lines = &fake_draw_arrays_lines;
+  return device;
+}
+
 /// EXPECTATION (audit R-2): one flush ages debug primitives exactly one
 /// frame, so a lifeFrames=3 line is still returned after two flushes and
 /// expires only after the third.
@@ -147,6 +185,88 @@ void test_one_age_step_per_flush() noexcept {
   engine::core::shutdown_debug_draw();
 }
 
+/// EXPECTATION (audit M-08): a submitted sphere is drawn as three great
+/// circles of 16 segments each through the line pipeline (96 vertices),
+/// not silently dropped.
+void test_sphere_renders_through_line_pipeline() noexcept {
+  CHECK(engine::core::initialize_debug_draw(), "debug draw initializes");
+  backend_state() = BackendState{};
+  backend_state().debugLineAvailable = true;
+  backend_state().debugLineProgram = 1U;
+  backend_state().debugLineVao = 1U;
+  backend_state().debugLineVbo = 1U;
+  backend_state().debugLineViewProjectionLoc = -1;
+  static const SceneLightData lights{};
+  static const PassResources passRes{};
+  const RenderDevice device = make_fake_device();
+  g_stats = FakeOverlayStats{};
+
+  engine::core::debug_draw_sphere({}, 2.0F, {}, 1U);
+  FrameFlushContext ctx = make_context(lights, passRes, &device);
+  flush_debug_overlay(ctx);
+
+  CHECK(g_stats.drawCalls == 1U, "sphere produces one line draw call");
+  CHECK(g_stats.vertexTotal == 96, "sphere tessellates to 48 segments");
+
+  engine::core::shutdown_debug_draw();
+}
+
+/// EXPECTATION (audit M-08): lines and spheres share one vertex stream, and
+/// text submission does not disturb the drawn geometry.
+void test_lines_and_spheres_share_stream() noexcept {
+  CHECK(engine::core::initialize_debug_draw(), "debug draw initializes");
+  backend_state() = BackendState{};
+  backend_state().debugLineAvailable = true;
+  backend_state().debugLineProgram = 1U;
+  backend_state().debugLineVao = 1U;
+  backend_state().debugLineVbo = 1U;
+  backend_state().debugLineViewProjectionLoc = -1;
+  static const SceneLightData lights{};
+  static const PassResources passRes{};
+  const RenderDevice device = make_fake_device();
+  g_stats = FakeOverlayStats{};
+
+  engine::core::debug_draw_line({}, {1.0F, 0.0F, 0.0F}, {}, 1U);
+  engine::core::debug_draw_line({}, {0.0F, 1.0F, 0.0F}, {}, 1U);
+  engine::core::debug_draw_sphere({}, 1.0F, {}, 1U);
+  engine::core::debug_draw_text({}, "label", {}, 1U);
+  FrameFlushContext ctx = make_context(lights, passRes, &device);
+  flush_debug_overlay(ctx);
+
+  CHECK(g_stats.drawCalls == 1U, "combined batch fits one chunk");
+  CHECK(g_stats.vertexTotal == 100, "two lines plus 48 sphere segments");
+
+  engine::core::shutdown_debug_draw();
+}
+
+/// EXPECTATION (audit M-08): geometry beyond one 1024-segment chunk is
+/// drawn in additional chunks rather than truncated.
+void test_segment_chunking_draws_everything() noexcept {
+  CHECK(engine::core::initialize_debug_draw(), "debug draw initializes");
+  backend_state() = BackendState{};
+  backend_state().debugLineAvailable = true;
+  backend_state().debugLineProgram = 1U;
+  backend_state().debugLineVao = 1U;
+  backend_state().debugLineVbo = 1U;
+  backend_state().debugLineViewProjectionLoc = -1;
+  static const SceneLightData lights{};
+  static const PassResources passRes{};
+  const RenderDevice device = make_fake_device();
+  g_stats = FakeOverlayStats{};
+
+  for (std::size_t i = 0U; i < 1024U; ++i) {
+    engine::core::debug_draw_line({}, {1.0F, 0.0F, 0.0F}, {}, 1U);
+  }
+  engine::core::debug_draw_sphere({}, 1.0F, {}, 1U);
+  FrameFlushContext ctx = make_context(lights, passRes, &device);
+  flush_debug_overlay(ctx);
+
+  CHECK(g_stats.drawCalls == 2U, "overflow spills into a second chunk");
+  CHECK(g_stats.vertexTotal == 2144, "all 1072 segments are drawn");
+
+  engine::core::shutdown_debug_draw();
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -154,6 +274,9 @@ int main() {
   std::printf("=== Command Buffer Debug Overlay Unit Tests ===\n");
 
   test_one_age_step_per_flush();
+  test_sphere_renders_through_line_pipeline();
+  test_lines_and_spheres_share_stream();
+  test_segment_chunking_draws_everything();
 
   std::printf("\n%s (%d failure(s))\n",
               g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);
