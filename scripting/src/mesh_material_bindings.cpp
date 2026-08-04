@@ -155,6 +155,13 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
                                           : g_defaultMeshAssetId;
     halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
     colliderShape = runtime::ColliderShape::AABB;
+  } else {
+    // An unrecognized shape name previously fell through to the default cube
+    // mesh with a box collider, so a typo silently produced the wrong object.
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "spawn_shape rejected an unknown shape name");
+    lua_pushnil(state);
+    return 1;
   }
 
   runtime::Transform transform{};
@@ -253,7 +260,9 @@ int lua_engine_get_mesh(lua_State *state) noexcept {
 
 int lua_engine_set_roughness(lua_State *state) noexcept {
   runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
+  float value = 0.0F;
+  if (!read_entity(state, 1, &entity) ||
+      !read_finite_number_arg(state, 2, &value)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -262,7 +271,7 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  mesh.roughness = static_cast<float>(lua_tonumber(state, 2));
+  mesh.roughness = value;
   lua_pushboolean(state, apply_or_queue_mesh_component(entity, mesh) ? 1 : 0);
   return 1;
 }
@@ -285,7 +294,9 @@ int lua_engine_get_roughness(lua_State *state) noexcept {
 
 int lua_engine_set_metallic(lua_State *state) noexcept {
   runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
+  float value = 0.0F;
+  if (!read_entity(state, 1, &entity) ||
+      !read_finite_number_arg(state, 2, &value)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -294,7 +305,7 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  mesh.metallic = static_cast<float>(lua_tonumber(state, 2));
+  mesh.metallic = value;
   lua_pushboolean(state, apply_or_queue_mesh_component(entity, mesh) ? 1 : 0);
   return 1;
 }
@@ -317,7 +328,9 @@ int lua_engine_get_metallic(lua_State *state) noexcept {
 
 int lua_engine_set_opacity(lua_State *state) noexcept {
   runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
+  float value = 0.0F;
+  if (!read_entity(state, 1, &entity) ||
+      !read_finite_number_arg(state, 2, &value)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -326,7 +339,7 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  mesh.opacity = static_cast<float>(lua_tonumber(state, 2));
+  mesh.opacity = value;
   lua_pushboolean(state, apply_or_queue_mesh_component(entity, mesh) ? 1 : 0);
   return 1;
 }

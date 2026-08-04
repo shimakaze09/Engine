@@ -1069,6 +1069,56 @@ int main() {
   }
 
   // =========================================================================
+  // Audit M-21: bindings reject non-finite and unknown-enum arguments rather
+  // than passing them through to World ingress or defaulting silently. The
+  // script raises on any accepted bad argument, so a failed expectation
+  // surfaces as a failed call_script_function.
+  // =========================================================================
+  {
+    const char *badArgScript =
+        "function on_start()\n"
+        "    local e = engine.spawn_entity()\n"
+        "    engine.add_collider(e, 0.5, 0.5, 0.5)\n"
+        "    engine.set_mesh(e, engine.get_default_mesh_asset_id())\n"
+        "    engine.set_velocity(e, 0.0, 0.0, 0.0)\n"
+        "    local nan = 0.0 / 0.0\n"
+        "    local inf = 1.0 / 0.0\n"
+        "    if engine.set_opacity(e, nan) ~= false then\n"
+        "        error('NaN opacity accepted')\n"
+        "    end\n"
+        "    if engine.set_roughness(e, inf) ~= false then\n"
+        "        error('Inf roughness accepted')\n"
+        "    end\n"
+        "    if engine.set_metallic(e, nan) ~= false then\n"
+        "        error('NaN metallic accepted')\n"
+        "    end\n"
+        "    if engine.set_albedo(e, nan, 0.5, 0.5) ~= false then\n"
+        "        error('NaN albedo accepted')\n"
+        "    end\n"
+        "    if engine.set_velocity(e, 0.0, nan, 0.0) ~= false then\n"
+        "        error('NaN velocity accepted')\n"
+        "    end\n"
+        "    if engine.spawn_shape('not_a_shape', 0, 0, 0) ~= nil then\n"
+        "        error('unknown shape name accepted')\n"
+        "    end\n"
+        "    if engine.set_opacity(e, 0.25) ~= true then\n"
+        "        error('valid opacity rejected')\n"
+        "    end\n"
+        "end\n";
+    if (!write_script_file(badArgScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 253;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 254;
+    }
+  }
+
+  // =========================================================================
   // Step 4.5 Test: registered collision handler is dispatched
   // =========================================================================
   {

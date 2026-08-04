@@ -238,6 +238,12 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
     return 1;
   }
   rigidBody.angularVelocity = angVel;
+  // Match set_velocity: commanding motion on a sleeping body has to wake it
+  // or the command is integrated only once the body happens to wake.
+  if ((angVel.x != 0.0F) || (angVel.y != 0.0F) || (angVel.z != 0.0F)) {
+    rigidBody.sleeping = false;
+    rigidBody.sleepFrameCount = 0U;
+  }
 
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
   lua_pushboolean(state, ok ? 1 : 0);
