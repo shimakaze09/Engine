@@ -1,8 +1,11 @@
 // Verifies entity pool test behavior for the Engine test suite.
 
+#include "engine/core/json.h"
 #include "engine/runtime/entity_pool.h"
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
+#include <array>
 #include <cstdio>
 #include <memory>
 #include <new>
@@ -336,6 +339,222 @@ bool test_pool_release_refused_mid_simulation() {
   return true;
 }
 
+/// EXPECTATION (#57): a whole-content reset through the production
+/// reset_world path expires a surviving pool — initialised(),
+/// available(), and capacity() report the expired state, acquire and
+/// release fail closed, and a stale handle can never reach replacement
+/// content (the reset path bumps generations, so on the base revision
+/// the pool was wedged-but-safe here; the initialised()/available()
+/// assertions are what fail on base).
+bool test_pool_expires_after_reset_world() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 3U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  const Entity acquired = pool.acquire();
+  if (acquired == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire\n");
+    return false;
+  }
+
+  reset_world(*world);
+
+  if (pool.initialised()) {
+    std::fprintf(stderr, "FAIL: expired pool reports initialised\n");
+    return false;
+  }
+  if ((pool.available() != 0U) || (pool.capacity() != 0U)) {
+    std::fprintf(stderr, "FAIL: expired pool reports live capacity\n");
+    return false;
+  }
+  if (pool.acquire() != kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire succeeded on expired pool\n");
+    return false;
+  }
+  if (pool.release(acquired)) {
+    std::fprintf(stderr, "FAIL: release succeeded on expired pool\n");
+    return false;
+  }
+
+  const Entity replacement = world->create_scene_object();
+  NameComponent name{};
+  std::snprintf(name.name, sizeof(name.name), "%s", "Replacement");
+  if ((replacement == kInvalidEntity) ||
+      !world->add_name_component(replacement, name)) {
+    std::fprintf(stderr, "FAIL: replacement setup\n");
+    return false;
+  }
+  if (pool.release(acquired)) {
+    std::fprintf(stderr, "FAIL: stale release reached replacement world\n");
+    return false;
+  }
+  NameComponent survivor{};
+  if (!world->get_name_component(replacement, &survivor)) {
+    std::fprintf(stderr, "FAIL: replacement entity lost its components\n");
+    return false;
+  }
+  return true;
+}
+
+/// EXPECTATION (#57): re-initialising an expired pool succeeds and the
+/// pool operates normally against the replacement contents, while
+/// double-init on a live pool keeps failing. On the base revision init()
+/// refused the expired pool ("already initialised") and it stayed wedged
+/// until destruction.
+bool test_pool_reinit_after_expiry() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+  if (pool.acquire() == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire\n");
+    return false;
+  }
+
+  reset_world(*world);
+
+  if (!pool.init(world.get(), 3U)) {
+    std::fprintf(stderr, "FAIL: re-init refused on expired pool\n");
+    return false;
+  }
+  if (!pool.initialised() || (pool.capacity() != 3U) ||
+      (pool.available() != 3U)) {
+    std::fprintf(stderr, "FAIL: re-seeded pool state wrong\n");
+    return false;
+  }
+  const Entity fresh = pool.acquire();
+  if (fresh == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire after re-init\n");
+    return false;
+  }
+  if (!pool.release(fresh) || (pool.available() != 3U)) {
+    std::fprintf(stderr, "FAIL: release after re-init\n");
+    return false;
+  }
+  if (pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: double init on live re-seeded pool\n");
+    return false;
+  }
+  return true;
+}
+
+/// EXPECTATION (#57): a scene load through the production serializer
+/// replaces the world's contents while reusing the same entity index and
+/// generation; a surviving pool must expire rather than treat the
+/// numerically equal replacement entity as pool-owned. On the base
+/// revision release() recycled the replacement scene entity — stripping
+/// an innocent entity's components — and acquire() could hand out a
+/// handle aliasing scene content; this is the aliasing the epoch stamp
+/// closes.
+bool test_pool_expires_after_load_scene_no_aliasing() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool pool;
+  if (!world || !pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  const Entity acquired = pool.acquire();
+  NameComponent name{};
+  std::snprintf(name.name, sizeof(name.name), "%s", "PoolVictim");
+  if ((acquired == kInvalidEntity) ||
+      !world->add_transform(acquired, Transform{}) ||
+      !world->add_name_component(acquired, name)) {
+    std::fprintf(stderr, "FAIL: victim setup\n");
+    return false;
+  }
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      buffer(new (std::nothrow)
+                 std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  std::size_t size = 0U;
+  if (!buffer || !save_scene(*world, buffer->data(), buffer->size(), &size) ||
+      !load_scene(*world, buffer->data(), size)) {
+    std::fprintf(stderr, "FAIL: scene round trip\n");
+    return false;
+  }
+
+  const Entity reloaded = world->find_entity_by_name("PoolVictim");
+  if (reloaded == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: reloaded victim missing\n");
+    return false;
+  }
+  if ((reloaded.index != acquired.index) ||
+      (reloaded.generation != acquired.generation)) {
+    std::fprintf(stderr, "FAIL: reload did not reuse index/generation\n");
+    return false;
+  }
+
+  if (pool.initialised()) {
+    std::fprintf(stderr, "FAIL: pool survived the scene load\n");
+    return false;
+  }
+  if (pool.acquire() != kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire aliased replacement content\n");
+    return false;
+  }
+  if (pool.release(acquired)) {
+    std::fprintf(stderr, "FAIL: release recycled a scene entity\n");
+    return false;
+  }
+  NameComponent survivor{};
+  if (!world->get_name_component(reloaded, &survivor)) {
+    std::fprintf(stderr, "FAIL: scene entity lost components to the pool\n");
+    return false;
+  }
+
+  if (!pool.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: re-init against loaded scene refused\n");
+    return false;
+  }
+  const Entity fresh = pool.acquire();
+  if ((fresh == kInvalidEntity) || (fresh == reloaded)) {
+    std::fprintf(stderr, "FAIL: re-seeded pool aliased scene content\n");
+    return false;
+  }
+  return true;
+}
+
+/// EXPECTATION (#57 / PR #52 review): a pool releases only entities
+/// recorded in its own slot array — an entity acquired from pool A is
+/// refused by pool B with B's free list untouched, then A releases it
+/// normally. Pins the full-handle slot scan that closes the cross-pool
+/// gap (already green on base; kept as the contract's regression).
+bool test_pool_cross_pool_release_refused() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  EntityPool poolA;
+  EntityPool poolB;
+  if (!world || !poolA.init(world.get(), 2U) ||
+      !poolB.init(world.get(), 2U)) {
+    std::fprintf(stderr, "FAIL: setup\n");
+    return false;
+  }
+
+  const Entity fromA = poolA.acquire();
+  if (fromA == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: acquire\n");
+    return false;
+  }
+  if (poolB.release(fromA)) {
+    std::fprintf(stderr, "FAIL: pool B released pool A's entity\n");
+    return false;
+  }
+  if ((poolB.available() != 2U) || (poolA.available() != 1U)) {
+    std::fprintf(stderr, "FAIL: refused cross-pool release mutated state\n");
+    return false;
+  }
+  if (!poolA.release(fromA) || (poolA.available() != 2U)) {
+    std::fprintf(stderr, "FAIL: owner release after refusal\n");
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -568,6 +787,12 @@ int main() {
        test_pool_release_refused_when_destroy_queued},
       {"pool_release_refused_when_descendant_destroy_queued",
        test_pool_release_refused_when_descendant_destroy_queued},
+      {"pool_expires_after_reset_world", test_pool_expires_after_reset_world},
+      {"pool_reinit_after_expiry", test_pool_reinit_after_expiry},
+      {"pool_expires_after_load_scene_no_aliasing",
+       test_pool_expires_after_load_scene_no_aliasing},
+      {"pool_cross_pool_release_refused",
+       test_pool_cross_pool_release_refused},
   };
 
   int failures = 0;

@@ -291,8 +291,9 @@ public:
   /// immediately in any phase with no per-entity failure mode, and drops
   /// queued deferred destroys so they cannot fire into replacement
   /// content. Reset/scene-replacement use only — EndPlay ordering and
-  /// phase gating deliberately do not apply (audit H-18); surviving
-  /// EntityPools are wedged until shutdown/reinit (tracked in #57).
+  /// phase gating deliberately do not apply (audit H-18); callers must
+  /// follow with mark_content_replaced so retained handles and surviving
+  /// EntityPools expire against the new contents (#57).
   void reset_all_entities() noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
