@@ -435,6 +435,68 @@ int test_spring_stiffness_iteration_invariant() noexcept {
   return 0;
 }
 
+// N-12 regression: a spring whose other endpoint is a transform-only anchor
+// (no RigidBody — add_spring_joint only requires transforms) must still damp
+// and impulse the endpoint that does have a body, following the
+// joint_projection convention of zero velocity / zero inverse mass for the
+// missing body. A launched body must therefore settle at the rest length.
+// Bounds: with only A dynamic (m=1, k=50, c=8) wn=sqrt(50)=7.07 rad/s and
+// zeta=8/(2*sqrt(50))=0.57, settle time ~4/(zeta*wn)=1 s, so after 10 s the
+// distance must sit within 0.1 of rest length 2 (covers dt=1/60
+// discretization bias) and residual speed below 0.05 m/s (well under the
+// 5 m/s launch; without the fix the speed never decays at all).
+int test_spring_bodyless_anchor_damps() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const Entity anchor = world->create_entity();
+  Transform anchorT{};
+  world->add_transform(anchor, anchorT);
+  const Entity body = make_plain_body(*world, math::Vec3(4.0F, 0.0F, 0.0F));
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(body);
+    if (rb == nullptr) {
+      return 2;
+    }
+    rb->velocity = math::Vec3(5.0F, 0.0F, 0.0F);
+  }
+
+  if (physics::add_spring_joint(*world, anchor, body, 2.0F, 50.0F, 8.0F) ==
+      physics::kInvalidJointId) {
+    return 3;
+  }
+
+  for (int i = 0; i < 600; ++i) {
+    world->begin_update_phase();
+    engine::runtime::step_physics(*world, 1.0F / 60.0F);
+    physics::solve_constraints(*world, 1.0F / 60.0F);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+  }
+
+  Transform anchorAfter{};
+  Transform bodyAfter{};
+  if (!world->get_transform(anchor, &anchorAfter) ||
+      !world->get_transform(body, &bodyAfter)) {
+    return 4;
+  }
+  const float dist = vec_distance(anchorAfter.position, bodyAfter.position);
+  const RigidBody *rb = world->get_rigid_body_ptr(body);
+  const float speed =
+      (rb != nullptr) ? std::sqrt(math::dot(rb->velocity, rb->velocity)) : -1.0F;
+  if ((std::fabs(dist - 2.0F) > 0.1F) || (speed < 0.0F) || (speed > 0.05F)) {
+    std::printf("FAIL spring_bodyless_anchor: dist=%.3f speed=%.3f\n",
+                static_cast<double>(dist), static_cast<double>(speed));
+    return 5;
+  }
+  return 0;
+}
+
 // ---- Fixed joint -----------------------------------------------------------
 
 int test_fixed_joint() noexcept {
@@ -703,6 +765,7 @@ int main() {
       {"spring_joint", test_spring_joint},
       {"spring_stiffness_iteration_invariant",
        test_spring_stiffness_iteration_invariant},
+      {"spring_bodyless_anchor_damps", test_spring_bodyless_anchor_damps},
       {"slider_settled_no_warm_start_drift",
        test_slider_settled_no_warm_start_drift},
       {"fixed_joint", test_fixed_joint},
