@@ -8,6 +8,54 @@ serialization/data safety, renderer/physics/scripting). Method: local Linux
 build + headless ctest, PR-diff review at head revisions, and code-verified
 spot checks on main for every Critical/High closure claim.
 
+## Resolution addendum — 2026-08-04
+
+Everything below this section is the 2026-08-03 snapshot, preserved as the
+historical record. The fix campaign that followed closed the backlog across
+19 PRs merged 2026-08-03/04, each carrying production-path regressions that
+are red on their base revision per the closure contract (plus the earlier
+2026-08-01 wave #48–#50). Ledger:
+
+| PR | Scope closed |
+|---|---|
+| #51 | P1 tranche 2: H-21, H-20 (all slices), H-14/H-18/H-19; packer adopts `AtomicFileWriter` (N-01/N-02); review items incl. begin-state boundary defect, JSON field-name encoding |
+| #52 | PR #50 review blockers (items 4–7, 10), nothrow mesh allocation restored |
+| #58 | N-15 — `ecs_stress_50k` gates on simulation invariants, not wall-clock |
+| #59 | N-17 — JSON sequential array-access memo; scene-entity walks linear |
+| #60 | N-05/N-06/N-07 — atomic input-bindings save, sandboxed Lua config paths, staged loads |
+| #61 | N-10 + P2 renderer robustness — transactional post targets, single debug tick, stale shadow slots, capture leak |
+| #62 | N-16 — single authoritative persistent-component registry |
+| #63 | N-08/N-09 + P2 concurrency — CCD snapshot-only velocities, atomic LRU touch, job-order fix, per-step cvar cache |
+| #64 | N-04/N-13/N-14 — protected dispatch, `lua_atpanic` handler, latched instruction cap, snapshot iteration |
+| #66 | P2 editor — epoch-safe selection/history, gesture-undoable inspector edits, bounded traversals |
+| #67 | N-18 remainder (issue #55) — cook-output manifest closes stale-sidecar and mixed-generation windows |
+| #68 | Issue #56 — program resolvers enforce required-vs-optional uniform contracts |
+| #69 | Issue #57 — EntityPool content-epoch ownership contract (found and fixed a real `load_scene` pool-handle aliasing bug) |
+| #70 | M-10/M-11/M-12/M-13/M-14/M-29 — cvar parsing, input edges, wait TLS, stats, services, audio |
+| #73 | Issue #65 — protected C-context Lua ops, snapshot reload walks, late sandbox allocator |
+| #74 | Issues #53/#54 (the re-opened H-07/H-08, §2.1 below) + N-11/N-12, hinge ±π wrap, ingress clamps |
+| #75 | Renderer/tools mediums — IBL bake FBO ownership (latent H-12 regression), profiler/tile math, wait timeout, N-03 importer validation, generator gates, cache limits |
+| #76 | M-01 (partial), M-02, M-15, M-16, M-18, M-21 (partial), M-22 |
+| #77 | Issues #71/#72 — job ready-queue static-capacity proof + loud graph failure; GJK degenerate-simplex recovery, EPA sentinel-depth elimination |
+
+The §2.1 action item is done: H-07/H-08 were re-opened as issues #53/#54 and
+closed by PR #74 with red-on-base evidence for every scope item.
+
+Residual open scope is tracked as linked issues, not in PR bodies:
+**#78** (camera/spring-arm updates after the frame graph — M-01 remainder),
+**#79** (script module lifecycle + Lua allocator — M-19/M-20 remainder),
+**#80** (`set_lock_rotation` hard-coded inertia + input ingress — M-21
+remainder), **#81** (runtime cook-stamp consultation, pre-manifest orphans,
+platform cook key). Owner decisions pending: **#82** (H-13 macOS GL claim),
+**#83** (H-15 Lua trust model), **#84** (coroutine instruction-budget refill,
+the N-13 residual — decide with #83). The last open High from the 2026-08-01
+report is tracked as **#85** (H-16 scene-transition lifecycle), and the
+L-01..L-08 remainders plus this report's P3 build/tooling list as **#86**.
+
+Process change: findings are now filed as GitHub issues via the structured
+templates in `.github/ISSUE_TEMPLATE/` — the tracker, not this file, is the
+source of truth for open scope going forward.
+
 ## Executive summary
 
 - Local Linux (gcc) build is warning-clean; headless tests pass 111/112. The one

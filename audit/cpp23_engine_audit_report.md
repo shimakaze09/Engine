@@ -5,6 +5,8 @@ Repository: D:/dev/Engine
 Revision inspected: 5c9e99aca10c8bb0843415c9979b0028eee4b4b3d  
 Method: static, read-only audit following the supplied C++23 Game Engine Audit Checklist and the cpp-project-review skill.
 
+> **Status (2026-08-04):** historical record. The findings below were reconciled and closed by the 2026-08 campaign — see the resolution addendum in `audit/audit_2026-08-03_followup.md` for the finding→PR ledger. Note that PR #50's closure table misnumbered two rows: its "H-07"/"H-08" entries were actually H-02/H-01; the real H-07/H-08 were re-opened as issues #53/#54 and closed by PR #74. Remaining open scope lives in the issue tracker (#78–#86), which is the source of truth going forward.
+
 ## Review Scope
 
 The audit proceeded in the requested order: inventory and build contract; ownership and lifetime; undefined behavior; concurrency and frame ordering; persistence and file I/O; physics; renderer; runtime; scripting; editor; tools; tests; portability; performance; then maintainability.

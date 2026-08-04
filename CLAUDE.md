@@ -84,10 +84,11 @@ is prohibited.
   accretes a second concern, split it (the `command_buffer_*` backend split is
   the model); ~1,000 lines is the review trigger for engine sources. The
   2026-07-30 split campaign resolved the then-standing offenders; the
-  2026-07-31 review found nine TUs back over the trigger (json,
-  render_device_gl, engine_pipeline, world.h, scene_serializer, narrow_phase,
-  editor_panels_inspector, dap_server, asset_database) — queued for the next
-  split pass, owner directs each split. Split growing tests into focused suite
+  2026-07-31 review found nine TUs back over the trigger, of which
+  scene_serializer dropped back under during the 2026-08 audit campaign —
+  eight remain (json, render_device_gl, engine_pipeline, world.h,
+  narrow_phase, editor_panels_inspector, dap_server, asset_database), queued
+  for the next split pass, owner directs each split. Split growing tests into focused suite
   files while preserving test names/history unless an approved contract
   migration requires a move.
 - **[OWNER]** No new third-party dependencies without confirmation; never ones
@@ -338,6 +339,11 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - Every PR carries a scope/closure table for findings it references: fixed,
   partially fixed, deferred, or pre-existing, with the exact evidence for
   each status. Reviewers reject broader claims than the patch proves.
+- Audit findings, bugs, and tech-debt are queued as GitHub issues through the
+  structured templates in `.github/ISSUE_TEMPLATE/` (audit finding, bug
+  report, weakness). Residual scope from a partial fix gets its own linked
+  issue rather than living only in a PR body or a closed issue's comments;
+  the tracker, not the audit reports, is the source of truth for open scope.
 - Prefer `bool`+log, small status objects, or optional-like returns;
   assertions only for programmer errors.
 
@@ -370,8 +376,8 @@ ECS + gameplay loop
 coroutines, DAP + sandbox + hot reload, binding generator), physics (all
 collider shapes incl. capsule/hull/heightfield, warm-started contact solver,
 six public joint APIs, manifolds, materials/layers, queries, CCD + speculative
-contacts; standard hinge/fixed/slider rotational and anchor-frame semantics
-remain open),
+contacts; the H-05 rework closed the standard hinge/fixed/slider rotational
+and anchor-frame semantics gap 2026-08-01, joint motors remain unimplemented),
 asset pipeline (64-bit ids, metadata/tags, dependency graph, async streaming
 with budgets, LRU, deterministic cook + thumbnails), renderer through
 deferred+forward, shadows (cascade/spot/point), sky (cubemap/Preetham/
@@ -380,6 +386,13 @@ IBL + reflection probes, fog, instancing + foliage, post stack; 2026-07
 production-hardening campaign (27 findings recorded as closed at that time).
 Current audits and regressions supersede historical blanket closure claims;
 any unresolved scope remains open until it meets the closure contract above.
+2026-08 audit campaign: the 2026-08-01 audit and 2026-08-03 follow-up
+(`audit/`) were closed across PRs #48–#52 and #58–#77 (merged 2026-08-01
+through 2026-08-04), each fix carrying red-on-base production-path
+regressions per the closure contract; the finding→PR ledger is the
+resolution addendum in `audit/audit_2026-08-03_followup.md`, and all
+residual scope and pending owner decisions are tracked as open GitHub
+issues (#78–#86 as of 2026-08-04).
 
 Roadmap status labels describe integration state, not release certification.
 `LANDED` means the named change is present on the stated date; it is
