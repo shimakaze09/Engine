@@ -89,9 +89,13 @@ lua_State *lua_state() noexcept { return current_lua_state(); }
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
 std::size_t g_memoryLimit = kDefaultMemoryLimit;
 std::size_t g_memoryUsed = 0U;
+bool g_sandboxAllocInstalled = false;
 
-// Custom allocator wrapper that enforces memory limit. Per the lua_Alloc
-// contract, osize is an object type tag (not a size) when ptr is null.
+// Custom allocator wrapper that enforces memory limit (0 = unlimited, per
+// the public set_memory_limit contract) while the sandbox is enabled;
+// accounting always runs once installed so a later re-enable keeps an
+// accurate byte count. Per the lua_Alloc contract, osize is an object type
+// tag (not a size) when ptr is null.
 void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
                     std::size_t nsize) noexcept {
   if (ptr == nullptr) {
@@ -104,7 +108,8 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
     std::free(ptr);
     return nullptr;
   }
-  if (nsize > osize && (g_memoryUsed + (nsize - osize)) > g_memoryLimit) {
+  if (nsize > osize && debug_sandbox_enabled() && (g_memoryLimit != 0U) &&
+      (g_memoryUsed + (nsize - osize)) > g_memoryLimit) {
     return nullptr;
   }
   void *newPtr = std::realloc(ptr, nsize);
@@ -117,6 +122,24 @@ void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
     }
   }
   return newPtr;
+}
+
+/// Installs the accounting/capping allocator on a live state. Swapping
+/// allocators mid-state is legal in Lua 5.4 because both the default
+/// allocator and the wrapper resolve to realloc/free; the accounted
+/// baseline is seeded from lua_gc(LUA_GCCOUNT) so blocks allocated before
+/// installation neither instantly exceed the cap nor silently bypass it.
+void install_sandbox_allocator(lua_State *state) noexcept {
+  if ((state == nullptr) || g_sandboxAllocInstalled) {
+    return;
+  }
+  const std::size_t kilobytes =
+      static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNT));
+  const std::size_t remainder =
+      static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNTB));
+  g_memoryUsed = (kilobytes * 1024U) + remainder;
+  lua_setallocf(state, sandbox_alloc, nullptr);
+  g_sandboxAllocInstalled = true;
 }
 
 void refresh_lua_hook() noexcept;
@@ -467,7 +490,7 @@ bool initialize_scripting() noexcept {
   register_cheat_commands();
 
   if (debug_sandbox_enabled()) {
-    lua_setallocf(state, sandbox_alloc, nullptr);
+    install_sandbox_allocator(state);
   }
 
   refresh_lua_hook();
@@ -489,6 +512,8 @@ void shutdown_scripting() noexcept {
     shutdown_lua_state();
   }
 
+  g_memoryUsed = 0U;
+  g_sandboxAllocInstalled = false;
   clear_runtime_binding();
   reset_mesh_material_bindings();
   clear_deferred_mutations();
@@ -807,8 +832,14 @@ void check_script_reload() noexcept {
 
 // --- Sandbox configuration ---
 
+/// Enables/disables the sandbox; enabling after initialize_scripting
+/// installs the capping allocator on the live state so the memory limit
+/// is enforced regardless of when the sandbox was switched on.
 void set_sandbox_enabled(bool enabled) noexcept {
   set_debug_sandbox_enabled(enabled);
+  if (enabled) {
+    install_sandbox_allocator(lua_state());
+  }
   refresh_lua_hook();
 }
 
@@ -827,5 +858,7 @@ int get_instruction_limit() noexcept { return debug_instruction_limit(); }
 void set_memory_limit(std::size_t limit) noexcept { g_memoryLimit = limit; }
 
 std::size_t get_memory_limit() noexcept { return g_memoryLimit; }
+
+std::size_t get_memory_used() noexcept { return g_memoryUsed; }
 
 } // namespace engine::scripting

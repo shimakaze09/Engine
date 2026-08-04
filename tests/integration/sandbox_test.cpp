@@ -242,6 +242,85 @@ bool test_memory_limit() noexcept {
 }
 
 // -----------------------------------------------------------------------
+// 4b. S-4: enabling the sandbox AFTER initialize_scripting must install
+//     the capping allocator on the live state, not just flip the flag
+// -----------------------------------------------------------------------
+bool test_memory_limit_enabled_post_init() noexcept {
+  engine::scripting::set_sandbox_enabled(false);
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+  engine::scripting::set_memory_limit(256U * 1024U);
+
+  const char *code = "local ok, err = pcall(function()\n"
+                     "  local t = {}\n"
+                     "  for i = 1, 1000000 do\n"
+                     "    t[i] = string.rep('x', 1024)\n"
+                     "  end\n"
+                     "end)\n"
+                     "if ok then\n"
+                     "  error('memory limit should have triggered')\n"
+                     "end\n";
+
+  if (!write_script(code)) {
+    return false;
+  }
+
+  bool result = engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  engine::scripting::set_memory_limit(64U * 1024U * 1024U);
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
+// -----------------------------------------------------------------------
+// 4c. S-4: allocator accounting is seeded from the live state's real size
+//     when installed and cleared by shutdown, so a re-initialized session
+//     starts from a clean, accurate baseline
+// -----------------------------------------------------------------------
+bool test_memory_accounting_lifecycle() noexcept {
+  engine::scripting::set_sandbox_enabled(true);
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  const std::size_t baseline = engine::scripting::get_memory_used();
+  bool result = baseline > 0U;
+
+  const char *code = "lifecycle_marker = string.rep('y', 4096)\n";
+  result = result && write_script(code) &&
+           engine::scripting::load_script(kTempScript);
+  remove_script();
+  result = result && (engine::scripting::get_memory_used() > baseline);
+
+  engine::scripting::shutdown_scripting();
+  result = result && (engine::scripting::get_memory_used() == 0U);
+
+  engine::scripting::initialize_scripting();
+  const std::size_t rebaseline = engine::scripting::get_memory_used();
+  result = result && (rebaseline > 0U);
+  const char *again = "lifecycle_marker2 = string.rep('z', 4096)\n";
+  result = result && write_script(again) &&
+           engine::scripting::load_script(kTempScript);
+  remove_script();
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
+// -----------------------------------------------------------------------
 // 5. debug library is NOT available
 // -----------------------------------------------------------------------
 bool test_debug_blocked() noexcept {
@@ -290,6 +369,8 @@ int main() {
       {"instruction_limit", test_instruction_limit},
       {"coroutine_instruction_limit", test_coroutine_instruction_limit},
       {"memory_limit", test_memory_limit},
+      {"memory_limit_enabled_post_init", test_memory_limit_enabled_post_init},
+      {"memory_accounting_lifecycle", test_memory_accounting_lifecycle},
       {"debug_blocked", test_debug_blocked},
   };
 
