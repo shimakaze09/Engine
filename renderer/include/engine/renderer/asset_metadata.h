@@ -76,24 +76,26 @@ inline bool asset_metadata_has_tag(const AssetMetadata *metadata,
   return false;
 }
 
-/// Adds a tag (bounded copy); false when full or args are invalid.
+/// Adds a tag; false when full, args are invalid, or the tag text exceeds
+/// kMaxTagLength-1 characters (a truncated tag would silently alias
+/// queries, audit M-28).
 inline bool asset_metadata_add_tag(AssetMetadata *metadata,
                                    const char *tag) noexcept {
   if ((metadata == nullptr) || (tag == nullptr) ||
       (metadata->tagCount >= AssetMetadata::kMaxTags)) {
     return false;
   }
+  const std::size_t len = std::strlen(tag);
+  if (len >= AssetMetadata::kMaxTagLength) {
+    return false;
+  }
   if (asset_metadata_has_tag(metadata, tag)) {
     return true;
   }
-  const std::size_t len = std::strlen(tag);
-  const std::size_t copyLen = (len >= AssetMetadata::kMaxTagLength)
-                                  ? (AssetMetadata::kMaxTagLength - 1U)
-                                  : len;
   auto &dest = metadata->tags[metadata->tagCount];
   dest.fill('\0');
-  std::memcpy(dest.data(), tag, copyLen);
-  dest[copyLen] = '\0';
+  std::memcpy(dest.data(), tag, len);
+  dest[len] = '\0';
   ++metadata->tagCount;
   return true;
 }

@@ -153,6 +153,9 @@ void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
 /// Renders/copies a texture asset thumbnail; skipped when up to date.
 bool generate_texture_thumbnail(const char *inputPath,
                                 const char *outputPath) noexcept;
-/// Rasterizes a mesh thumbnail; skipped when up to date.
+/// Rasterizes a mesh thumbnail; skipped only when both the source bytes
+/// and the import-settings hash match the stored sidecar, so a settings
+/// change (scale, mesh/primitive index) regenerates it (audit M-28).
 bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
-                             const PrimitiveData &data);
+                             const PrimitiveData &data,
+                             std::uint64_t importSettingsHash);

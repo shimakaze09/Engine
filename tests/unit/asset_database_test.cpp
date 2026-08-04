@@ -213,10 +213,101 @@ int verify_mesh_cache_eviction() {
   return 0;
 }
 
+/// Verifies register_mesh_asset records are pinned (audit M-28): their
+/// size counts against the cache budget, but budget pressure evicts only
+/// streamed records and never the pinned builtin, which has no reload
+/// path.
+int verify_pinned_registration_budget() {
+  using engine::renderer::AssetDatabase;
+  using engine::renderer::AssetId;
+  using engine::renderer::AssetState;
+  using engine::renderer::MeshHandle;
+
+  std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
+  if (database == nullptr) {
+    return 700;
+  }
+  engine::renderer::clear_asset_database(database.get());
+
+  constexpr AssetId kBuiltin = 601ULL;
+  constexpr AssetId kStreamed = 602ULL;
+
+  if (!engine::renderer::register_mesh_asset(database.get(), kBuiltin,
+                                             "builtin://cube",
+                                             MeshHandle{1U}) ||
+      !engine::renderer::set_mesh_asset_size(database.get(), kBuiltin, 20ULL)) {
+    return 701;
+  }
+  if (!engine::renderer::request_mesh_asset_streaming_load(
+          database.get(), kStreamed, "assets/streamed.mesh") ||
+      !engine::renderer::set_mesh_asset_state(database.get(), kStreamed,
+                                              AssetState::Ready,
+                                              MeshHandle{2U}) ||
+      !engine::renderer::set_mesh_asset_size(database.get(), kStreamed,
+                                             10ULL)) {
+    return 702;
+  }
+
+  for (std::uint64_t i = 0ULL; i < 100ULL; ++i) {
+    engine::renderer::advance_asset_database_frame(database.get());
+  }
+
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 25ULL) !=
+      1U) {
+    return 703;
+  }
+  if (!engine::renderer::mesh_asset_requested_resident(database.get(),
+                                                       kBuiltin) ||
+      engine::renderer::mesh_asset_requested_resident(database.get(),
+                                                      kStreamed)) {
+    return 704;
+  }
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(), 0ULL) !=
+      0U) {
+    return 705;
+  }
+  if (!engine::renderer::mesh_asset_requested_resident(database.get(),
+                                                       kBuiltin)) {
+    return 706;
+  }
+
+  return 0;
+}
+
+/// Verifies an over-long tag is rejected instead of silently truncated
+/// into an aliasing tag (audit M-28).
+int verify_overlong_tag_rejected() {
+  engine::renderer::AssetMetadata metadata{};
+  char longTag[64] = {};
+  for (std::size_t i = 0U; i < 40U; ++i) {
+    longTag[i] = 'a';
+  }
+  if (engine::renderer::asset_metadata_add_tag(&metadata, longTag)) {
+    return 800;
+  }
+  if (metadata.tagCount != 0U) {
+    return 801;
+  }
+  if (!engine::renderer::asset_metadata_add_tag(&metadata, "short")) {
+    return 802;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  const int pinned = verify_pinned_registration_budget();
+  if (pinned != 0) {
+    std::fprintf(stderr, "pinned registration budget failed: %d\n", pinned);
+    return pinned;
+  }
+  const int tagCheck = verify_overlong_tag_rejected();
+  if (tagCheck != 0) {
+    std::fprintf(stderr, "overlong tag rejection failed: %d\n", tagCheck);
+    return tagCheck;
+  }
   const int reclamation = verify_mesh_slot_reclamation();
   if (reclamation != 0) {
     std::fprintf(stderr, "mesh slot reclamation failed: %d\n", reclamation);

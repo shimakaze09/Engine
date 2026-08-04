@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "engine/core/hash.h"
+#include "engine/core/logging.h"
 
 namespace engine::renderer {
 
@@ -94,6 +95,8 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
   file = std::fopen(path, "rb");
 #endif
   if (file == nullptr) {
+    core::log_message(core::LogLevel::Warning, "assets",
+                      "asset id falls back to path hash: file unreadable");
     return make_asset_id_from_path(path);
   }
 
@@ -109,7 +112,17 @@ AssetId make_asset_id_from_file(const char *path) noexcept {
     }
   }
 
-  std::fclose(file);
+  const bool readFailed = std::ferror(file) != 0;
+  if (std::fclose(file) != 0) {
+    core::log_message(core::LogLevel::Warning, "assets",
+                      "asset id hashing: close failed after read");
+  }
+  if (readFailed) {
+    core::log_message(core::LogLevel::Warning, "assets",
+                      "asset id falls back to path hash: read error left a "
+                      "partial content hash");
+    return make_asset_id_from_path(path);
+  }
   if (hash == kInvalidAssetId) {
     hash = 1ULL;
   }
@@ -222,6 +235,7 @@ bool register_mesh_asset(AssetDatabase *database, AssetId id,
   record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
   record.state = AssetState::Ready;
   record.requestedResident = true;
+  record.pinned = true;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
 }
@@ -336,8 +350,8 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
     for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
       const MeshAssetRecord &record = database->meshAssets[i];
       if (!database->occupied[i] || (record.state != AssetState::Ready) ||
-          !record.requestedResident || (record.refCount > 1U) ||
-          (record.sizeBytes == 0ULL)) {
+          !record.requestedResident || record.pinned ||
+          (record.refCount > 1U) || (record.sizeBytes == 0ULL)) {
         continue;
       }
       const std::uint64_t lastAccess =

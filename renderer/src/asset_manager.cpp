@@ -66,6 +66,11 @@ bool push_request(AssetManager *manager,
 
   if (manager->requestCount >= manager->requests.size()) {
     ++manager->droppedRequests;
+    if (manager->droppedRequests == 1U) {
+      core::log_message(core::LogLevel::Warning, "assets",
+                        "asset request ring full; requests are being "
+                        "dropped (droppedRequests counts the total)");
+    }
     return false;
   }
 
