@@ -196,10 +196,12 @@ struct AnimationComponent final {
 struct SpringArmComponent final {
   float armLength = 5.0F;     ///< Desired arm length (world units).
   float currentLength = 5.0F; ///< Interpolated length after collision.
-  math::Vec3 offset = math::Vec3(0.0F, 1.0F, 0.0F); ///< Pivot offset.
+  math::Vec3 offset =
+      math::Vec3(0.0F, 1.0F, 0.0F); ///< Entity-local pivot offset (scaled and
+                                    ///< rotated into world space).
   float lagSpeed = 8.0F;         ///< Smoothing interpolation rate.
   float collisionRadius = 0.25F; ///< Sphere sweep radius.
-  bool collisionEnabled = true;
+  bool collisionEnabled = true;  ///< Sweep-clamp the arm against colliders.
 };
 
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,

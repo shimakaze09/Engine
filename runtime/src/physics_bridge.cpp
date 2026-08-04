@@ -289,9 +289,10 @@ std::size_t overlap_box(const World &world, const math::Vec3 &center,
 
 bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,
                   const math::Vec3 &direction, float maxDistance,
-                  physics::SweepHit *outHit, std::uint32_t mask) noexcept {
+                  physics::SweepHit *outHit, std::uint32_t mask,
+                  Entity skipEntity) noexcept {
   return physics::sweep_sphere(world, origin, radius, direction, maxDistance,
-                               outHit, mask);
+                               outHit, mask, skipEntity);
 }
 
 bool sweep_box(const World &world, const math::Vec3 &center,

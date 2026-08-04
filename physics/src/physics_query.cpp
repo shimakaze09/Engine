@@ -957,7 +957,8 @@ std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
 
 bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
-                  SweepHit *outHit, std::uint32_t mask) noexcept {
+                  SweepHit *outHit, std::uint32_t mask,
+                  Entity skipEntity) noexcept {
   math::Vec3 normalizedDirection{};
   if (!std::isfinite(radius) || (radius < 0.0F) ||
       !normalize_query_direction(direction, maxDistance,
@@ -988,6 +989,11 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
   for (std::size_t i = 0U; i < count; ++i) {
     const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
+      continue;
+    }
+    if ((skipEntity != kInvalidEntity) &&
+        ((entities[i] == skipEntity) ||
+         (world.rigid_body_owner(entities[i]) == skipEntity))) {
       continue;
     }
 

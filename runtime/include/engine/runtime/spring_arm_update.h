@@ -6,9 +6,10 @@ namespace engine::runtime {
 
 class World;
 
-/// Iterate all SpringArmComponents, compute camera boom positions from entity
-/// transforms, and push resulting cameras to the world's CameraManager.
-/// Call once per frame after simulation, before render prep.
+/// Iterate all SpringArmComponents, compute camera boom positions from the
+/// composed world transforms (with a sphere-sweep collision clamp when
+/// enabled), and push resulting cameras to the world's CameraManager.
+/// Call once per fixed simulation step, after simulation for that step.
 void update_spring_arm_cameras(World &world, float dt) noexcept;
 
 } // namespace engine::runtime
