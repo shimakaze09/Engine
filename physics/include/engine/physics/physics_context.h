@@ -80,6 +80,14 @@ struct PhysicsJointSlot final {
   float minLimit = 0.0F;
   float maxLimit = 0.0F;
 
+  // Hinge limit tracking: the continuous (unwrapped) twist accumulated
+  // from shortest-arc deltas of the wrapped atan2 measurement, so limits
+  // near +/-pi clamp against the boundary the body actually crossed
+  // instead of the one the wrap teleports it to. twistTracked latches
+  // after the first measurement seeds the accumulator.
+  float twistContinuous = 0.0F;
+  bool twistTracked = false;
+
   // Spring parameters.
   float stiffness = 100.0F;
   float damping = 1.0F;

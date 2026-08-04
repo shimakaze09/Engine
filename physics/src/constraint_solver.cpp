@@ -277,6 +277,8 @@ void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
   joint->hasLimits = true;
   joint->minLimit = minLimit;
   joint->maxLimit = maxLimit;
+  joint->twistContinuous = 0.0F;
+  joint->twistTracked = false;
 }
 
 // --- Main constraint solver -------------------------------------------------

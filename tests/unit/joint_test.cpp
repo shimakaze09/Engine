@@ -544,6 +544,104 @@ int test_fixed_joint() noexcept {
   return 0;
 }
 
+// P-4 regression: hinge limits at +/-3.1 leave a 0.083 rad forbidden arc
+// while a 12 rad/s spin covers 0.2 rad per fixed step, so one step can jump
+// clean across the arc and the wrapped atan2 twist lands back inside the
+// limits on the far side — the wrapped-only clamp then sees no violation
+// (or clamps against the wrong boundary with a flipped outward-rate sign)
+// and the limit behaves as a turnstile that free spins pass through.
+// Assertions: (1) total accumulated rotation of the spinning body stays
+// below one full turn — a hard stop bounds travel by the 3.1 rad limit
+// plus correction chatter, while a turnstile racks up many turns at
+// ~0.2 rad/step over 300 steps; (2) the final wrapped twist lies within
+// the limits plus 0.05 rad slack — the solver corrects the full excess
+// every step, so at most the residual below the solver epsilon plus
+// reference-projection rounding remains, and 0.05 bounds both.
+int test_hinge_limit_wrap_stop() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+
+  const Entity anchor = world->create_entity();
+  Transform anchorT{};
+  world->add_transform(anchor, anchorT);
+  const Entity spinner = make_plain_body(*world, math::Vec3(0.0F, 0.0F, 0.0F));
+  {
+    RigidBody *rb = world->get_rigid_body_ptr(spinner);
+    if (rb == nullptr) {
+      return 2;
+    }
+    rb->angularVelocity = math::Vec3(0.0F, 12.0F, 0.0F);
+  }
+
+  const physics::JointId jid = physics::add_hinge_joint(
+      *world, anchor, spinner, math::Vec3(0.0F, 0.0F, 0.0F),
+      math::Vec3(0.0F, 1.0F, 0.0F));
+  if (jid == physics::kInvalidJointId) {
+    return 3;
+  }
+  physics::set_joint_limits(*world, jid, -3.1F, 3.1F);
+
+  math::Quat previous{};
+  {
+    Transform t{};
+    if (!world->get_transform(spinner, &t)) {
+      return 4;
+    }
+    previous = t.rotation;
+  }
+
+  double accumulated = 0.0;
+  for (int i = 0; i < 300; ++i) {
+    world->begin_update_phase();
+    engine::runtime::step_physics(*world, 1.0F / 60.0F);
+    physics::solve_constraints(*world, 1.0F / 60.0F);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+
+    Transform t{};
+    if (!world->get_transform(spinner, &t)) {
+      return 5;
+    }
+    const float quatDot = (previous.x * t.rotation.x) +
+                          (previous.y * t.rotation.y) +
+                          (previous.z * t.rotation.z) +
+                          (previous.w * t.rotation.w);
+    const float clampedDot = std::fmin(1.0F, std::fabs(quatDot));
+    accumulated += 2.0 * std::acos(static_cast<double>(clampedDot));
+    previous = t.rotation;
+  }
+
+  const double twoPi = 6.28318530717958647692;
+  Transform finalT{};
+  if (!world->get_transform(spinner, &finalT)) {
+    return 6;
+  }
+  double yaw = 2.0 * std::atan2(static_cast<double>(finalT.rotation.y),
+                                static_cast<double>(finalT.rotation.w));
+  while (yaw > twoPi / 2.0) {
+    yaw -= twoPi;
+  }
+  while (yaw < -twoPi / 2.0) {
+    yaw += twoPi;
+  }
+
+  if (accumulated >= twoPi) {
+    std::printf("FAIL hinge_limit_wrap_stop: accumulated=%.2f rad (turnstile)\n",
+                accumulated);
+    return 7;
+  }
+  if (std::fabs(yaw) > 3.1 + 0.05) {
+    std::printf("FAIL hinge_limit_wrap_stop: final twist=%.3f rad\n", yaw);
+    return 8;
+  }
+  return 0;
+}
+
 // ---- Joint limits ----------------------------------------------------------
 
 int test_joint_limits() noexcept {
@@ -770,6 +868,7 @@ int main() {
        test_slider_settled_no_warm_start_drift},
       {"fixed_joint", test_fixed_joint},
       {"joint_limits", test_joint_limits},
+      {"hinge_limit_wrap_stop", test_hinge_limit_wrap_stop},
       {"destroyed_endpoint_retires_joint",
        test_destroyed_endpoint_retires_joint},
       {"joint_validation_and_stale_ids", test_joint_validation_and_stale_ids},
