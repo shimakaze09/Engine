@@ -31,12 +31,20 @@ struct DependencyDigest final {
   std::uint64_t hash = 0ULL;
 };
 
+/// One manifest-listed cooked output with the content hash recorded when
+/// the stamp committed the cook (issue #55).
+struct OutputRecord final {
+  std::string path{};
+  std::uint64_t hash = 0ULL;
+};
+
 /// Importer contract version baked into every cook stamp: bump whenever
 /// the cooked output format or import semantics change, so existing
 /// outputs recook once instead of silently keeping stale bytes (audit
 /// H-20). Stamps written before this key existed read as version 0 and
-/// therefore always recook.
-inline constexpr std::uint32_t kCookToolVersion = 2U;
+/// therefore always recook. Version 3 introduced the output manifest
+/// (issue #55); pre-manifest stamps recook once through this gate.
+inline constexpr std::uint32_t kCookToolVersion = 3U;
 
 /// Import settings read from an asset's .meta.json sidecar.
 struct ImportSettings final {
@@ -70,14 +78,26 @@ void sort_dependency_digests(std::vector<DependencyDigest> &digests);
 /// Reads import settings from the output's .meta.json when present.
 bool read_import_settings_from_meta(const char *outputPath,
                                     ImportSettings *outSettings);
-/// Writes the cook stamp recording source/settings hashes and digests.
+/// Writes the cook stamp recording source/settings hashes, dependency
+/// digests, and the output manifest hashed from the committed files;
+/// an unreadable listed output fails the write so the stamp can never
+/// certify an output set it could not fingerprint (issue #55).
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
-                      std::uint64_t importSettingsHash);
-/// True when the output must be recooked (stamp missing or stale).
+                      std::uint64_t importSettingsHash,
+                      const std::vector<std::string> &outputPaths);
+/// True when the output must be recooked: stamp missing, legacy, or
+/// stale hashes, a manifest-listed output missing, or (with
+/// verifyOutputHashes) a manifest-listed output whose bytes changed.
 bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
-                   std::uint64_t importSettingsHash);
+                   std::uint64_t importSettingsHash,
+                   bool verifyOutputHashes = false);
+/// Deletes previous-manifest outputs the current cook no longer
+/// produces (renamed/removed clips, hull-less recooks); a failed
+/// deletion returns false and must block the new stamp (issue #55).
+bool remove_stale_outputs(const char *outputPath,
+                          const std::vector<std::string> &currentOutputs);
 
 /// Rotates positions and normals from the declared source up axis
 /// (0 = X-up, 2 = Z-up) into engine Y-up; 1 and unknown values no-op.
@@ -126,6 +146,10 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
 /// Thumbnail output path beside the cooked asset (.thumbnails/<name>.png).
 void build_thumbnail_path(const char *outputPath, char *thumbPath,
                           std::size_t thumbPathSize) noexcept;
+/// Checksum sidecar path for a thumbnail (".../foo.png" ->
+/// ".../foo.checksum"), shared so the cook manifest can list it.
+void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
+                                   std::size_t size) noexcept;
 /// Renders/copies a texture asset thumbnail; skipped when up to date.
 bool generate_texture_thumbnail(const char *inputPath,
                                 const char *outputPath) noexcept;

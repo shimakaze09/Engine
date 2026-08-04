@@ -218,6 +218,48 @@ if(ENGINE_BUILD_TOOLS)
         engine_integration_asset_packer_stale_hull_removed
         PROPERTIES LABELS integration
     )
+
+    add_test(
+        NAME engine_integration_asset_packer_stale_anim_removed
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/stale_anim_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_stale_anim_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_stale_anim_removed
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_missing_sidecar_recook
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/missing_sidecar_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_missing_sidecar_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_missing_sidecar_recook
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_legacy_stamp_recook
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/legacy_stamp_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_legacy_stamp_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_legacy_stamp_recook
+        PROPERTIES LABELS integration
+    )
 endif()
 
 engine_add_test_executable(engine_integration_hotreload

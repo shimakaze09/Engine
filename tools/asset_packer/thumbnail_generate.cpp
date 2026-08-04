@@ -13,9 +13,10 @@
 
 #include "thumbnail_resample.h"
 
-// E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.png.checksum".
-static void build_checksum_path(const char *thumbPath, char *checksumPath,
-                                std::size_t size) noexcept {
+// E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.checksum"; shared with
+// main so the cook manifest can list the sidecar (issue #55).
+void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
+                                   std::size_t size) noexcept {
   std::strncpy(checksumPath, thumbPath, size - 1U);
   checksumPath[size - 1U] = '\0';
   char *dot = std::strrchr(checksumPath, '.');
@@ -85,7 +86,7 @@ bool generate_texture_thumbnail(const char *inputPath,
   const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
   if (hashOk) {
     char checksumPath[512] = {};
-    build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+    build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
     std::uint64_t storedHash = 0U;
     if (read_thumbnail_checksum(checksumPath, &storedHash) &&
         storedHash == srcHash) {
@@ -174,7 +175,7 @@ bool generate_texture_thumbnail(const char *inputPath,
 
   if (hashOk) {
     char checksumPath[512] = {};
-    build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+    build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
     write_thumbnail_checksum(checksumPath, srcHash);
   }
 
@@ -225,7 +226,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
     if (hashOk) {
       char checksumPath[512] = {};
-      build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+      build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
       std::uint64_t storedHash = 0U;
       if (read_thumbnail_checksum(checksumPath, &storedHash) &&
           storedHash == srcHash) {
@@ -458,7 +459,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
     if (hashOk) {
       char checksumPath[512] = {};
-      build_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
+      build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
       write_thumbnail_checksum(checksumPath, srcHash);
     }
   }
