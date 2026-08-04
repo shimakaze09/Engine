@@ -34,36 +34,6 @@ namespace engine::scripting {
 
 namespace {
 
-void copy_clone_name(char *destination, std::size_t destinationSize,
-                     const char *source) noexcept {
-  constexpr const char *kCloneSuffix = " (clone)";
-  constexpr std::size_t kCloneSuffixLength = 8U;
-
-  if ((destination == nullptr) || (destinationSize == 0U)) {
-    return;
-  }
-
-  destination[0] = '\0';
-  if (source == nullptr) {
-    return;
-  }
-
-  const std::size_t maxPrefixLength =
-      (destinationSize > (kCloneSuffixLength + 1U))
-          ? (destinationSize - kCloneSuffixLength - 1U)
-          : 0U;
-  const std::size_t sourceLength = std::strlen(source);
-  const std::size_t prefixLength =
-      (sourceLength < maxPrefixLength) ? sourceLength : maxPrefixLength;
-  if (prefixLength > 0U) {
-    std::memcpy(destination, source, prefixLength);
-  }
-  if ((prefixLength + kCloneSuffixLength) < destinationSize) {
-    std::memcpy(destination + prefixLength, kCloneSuffix, kCloneSuffixLength);
-    destination[prefixLength + kCloneSuffixLength] = '\0';
-  }
-}
-
 int lua_engine_log(lua_State *state) noexcept {
   const char *message = lua_tostring(state, 1);
   if (message == nullptr) {
@@ -110,8 +80,13 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  clear_player_controller_entity(entity);
+  // Ownership is released only once the destroy is applied or committed to
+  // the deferred queue: a rejected destroy must leave the entity alive AND
+  // still possessed rather than silently unpossessing a live pawn.
   const bool ok = apply_or_queue_destroy_entity(entity);
+  if (ok) {
+    clear_player_controller_entity(entity);
+  }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -202,7 +177,10 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
 }
 
 int lua_engine_clone_entity(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !can_apply_mutations_now()) {
+  if ((runtime_binding().world == nullptr) ||
+      (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->clone_entity_op == nullptr) ||
+      !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -212,52 +190,15 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Entity newEntity =
-      runtime_binding().world->create_scene_object();
-  if (newEntity == runtime::kInvalidEntity) {
+  const std::uint32_t cloneIndex = runtime_binding().services->clone_entity_op(
+      runtime_binding().world, source.index);
+  if (cloneIndex == 0U) {
     lua_pushnil(state);
     return 1;
   }
 
-  runtime::Transform transform{};
-  if (runtime_binding().world->get_transform(source, &transform)) {
-    static_cast<void>(
-        runtime_binding().world->add_transform(newEntity, transform));
-  }
-
-  runtime::RigidBody rigidBody{};
-  if (runtime_binding().world->get_rigid_body(source, &rigidBody)) {
-    static_cast<void>(
-        runtime_binding().world->add_rigid_body(newEntity, rigidBody));
-  }
-
-  runtime::Collider collider{};
-  if (runtime_binding().world->get_collider(source, &collider)) {
-    static_cast<void>(
-        runtime_binding().world->add_collider(newEntity, collider));
-  }
-
-  runtime::MeshComponent mesh{};
-  if (runtime_binding().world->get_mesh_component(source, &mesh)) {
-    static_cast<void>(
-        runtime_binding().world->add_mesh_component(newEntity, mesh));
-  }
-
-  runtime::NameComponent name{};
-  if (runtime_binding().world->get_name_component(source, &name)) {
-    runtime::NameComponent cloneName{};
-    copy_clone_name(cloneName.name, sizeof(cloneName.name), name.name);
-    static_cast<void>(
-        runtime_binding().world->add_name_component(newEntity, cloneName));
-  }
-
-  runtime::LightComponent light{};
-  if (runtime_binding().world->get_light_component(source, &light)) {
-    static_cast<void>(
-        runtime_binding().world->add_light_component(newEntity, light));
-  }
-
-  push_entity_handle(state, newEntity);
+  push_entity_handle(
+      state, runtime_binding().world->find_entity_by_index(cloneIndex));
   return 1;
 }
 

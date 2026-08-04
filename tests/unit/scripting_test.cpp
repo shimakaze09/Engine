@@ -999,16 +999,19 @@ int main() {
   // Step 4.3 Test: clone_entity copies all components including light
   // =========================================================================
   {
-    const char *cloneScript = "function on_start()\n"
-                              "    local src = engine.spawn_entity()\n"
-                              "    engine.set_name(src, 'clone_source')\n"
-                              "    engine.add_light(src, 'directional')\n"
-                              "    engine.set_light_color(src, 0.1, 0.2, 0.3)\n"
-                              "    local c = engine.clone_entity(src)\n"
-                              "    if c ~= nil then\n"
-                              "        engine.set_name(c, 'clone_result')\n"
-                              "    end\n"
-                              "end\n";
+    const char *cloneScript =
+        "function on_start()\n"
+        "    local src = engine.spawn_entity()\n"
+        "    engine.set_name(src, 'clone_source')\n"
+        "    engine.add_light(src, 'directional')\n"
+        "    engine.set_light_color(src, 0.1, 0.2, 0.3)\n"
+        "    engine.add_spring_arm(src, 7.5, 0.0, 2.0, 0.0)\n"
+        "    engine.add_script_component(src, 'scripts/cloned.lua')\n"
+        "    local c = engine.clone_entity(src)\n"
+        "    if c ~= nil then\n"
+        "        engine.set_name(c, 'clone_result')\n"
+        "    end\n"
+        "end\n";
     if (!write_script_file(cloneScript)) {
       engine::scripting::shutdown_scripting();
       remove_script_file();
@@ -1045,6 +1048,23 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 60;
+    }
+    // Registry-driven clone: component types the old hand-written clone
+    // silently dropped must now come across.
+    engine::runtime::SpringArmComponent clonedArm{};
+    if (!world->get_spring_arm(cloneEntity, &clonedArm) ||
+        !nearly_equal(clonedArm.armLength, 7.5F) ||
+        !nearly_equal(clonedArm.offset.y, 2.0F)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 251;
+    }
+    engine::runtime::ScriptComponent clonedScript{};
+    if (!world->get_script_component(cloneEntity, &clonedScript) ||
+        (std::strcmp(clonedScript.scriptPath, "scripts/cloned.lua") != 0)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 252;
     }
   }
 

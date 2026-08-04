@@ -74,6 +74,12 @@ struct RuntimeServices final {
   std::uint32_t (*get_entity_count)(runtime::World *world) noexcept = nullptr;
   std::uint32_t (*create_scene_object_op)(runtime::World *world) noexcept =
       nullptr;
+  /// Clones every persistent component of sourceIndex onto a fresh scene
+  /// object, renaming the copy. Transactional: any component copy failure
+  /// destroys the partial clone and returns 0.
+  std::uint32_t (*clone_entity_op)(runtime::World *world,
+                                   std::uint32_t sourceIndex) noexcept =
+      nullptr;
   const runtime::Transform *(*get_transform_read_ptr)(
       runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
   bool (*get_transform_op)(runtime::World *world, std::uint32_t entityIndex,
