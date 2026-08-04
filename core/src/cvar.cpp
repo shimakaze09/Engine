@@ -9,6 +9,8 @@
 #include "engine/core/logging.h"
 
 #include <array>
+#include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -308,12 +310,17 @@ bool parse_int_token(const char *valueStr, int *outValue) noexcept {
 }
 
 /// Parses a whole-token finite float, rejecting trailing text, overflow,
-/// and inf/nan spellings.
+/// and inf/nan spellings. strtof instead of std::from_chars because
+/// AppleClang's libc++ still deletes the floating-point overload.
 bool parse_float_token(const char *valueStr, float *outValue) noexcept {
-  const char *end = valueStr + std::strlen(valueStr);
-  float parsed = 0.0F;
-  const auto result = std::from_chars(valueStr, end, parsed);
-  if ((result.ec != std::errc{}) || (result.ptr != end) ||
+  if ((valueStr[0] == '\0') || (std::isspace(
+          static_cast<unsigned char>(valueStr[0])) != 0)) {
+    return false;
+  }
+  errno = 0;
+  char *parseEnd = nullptr;
+  const float parsed = std::strtof(valueStr, &parseEnd);
+  if ((parseEnd != valueStr + std::strlen(valueStr)) || (errno == ERANGE) ||
       !std::isfinite(parsed)) {
     return false;
   }
