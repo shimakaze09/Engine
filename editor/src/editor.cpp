@@ -288,7 +288,7 @@ void shutdown_editor() noexcept {
 
   editor_session().initialized = false;
   editor_session().world = nullptr;
-  editor_session().selectedEntityIndex = 0U;
+  clear_entity_selection();
   editor_session().playState = PlayState::Stopped;
   editor_session().playSnapshotBuffer.reset();
   editor_session().playSnapshotCapacity = 0U;
@@ -310,10 +310,10 @@ void editor_new_frame() noexcept {
   const ImGuiIO &io = ImGui::GetIO();
   if (!io.WantTextInput) {
     if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      editor_session().commandHistory.undo();
+      editor_history_undo();
     }
     if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      editor_session().commandHistory.redo();
+      editor_history_redo();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_W)) {
       editor_session().gizmoOp = ImGuizmo::TRANSLATE;
@@ -351,6 +351,7 @@ void editor_set_world(runtime::World *world) noexcept {
   // none of them may survive a rebind (a retained snapshot would let Stop
   // restore world A's contents into world B).
   if (editor_session().world != world) {
+    inspector_abandon_pending_edit();
     editor_session().commandHistory.clear();
     editor_session().gizmoWasUsing = false;
     clear_entity_selection();

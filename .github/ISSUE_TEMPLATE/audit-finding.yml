@@ -1,4 +1,4 @@
-# Structured issue form for defects found by code audits or review sweeps.
+# Issue form for audit findings: severity, area, evidence, failure scenario, and closure requirements per the CLAUDE.md contract.
 name: Audit finding
 description: A defect found by a code audit or review sweep (correctness, safety, security, determinism)
 title: "[Audit] <short defect statement>"

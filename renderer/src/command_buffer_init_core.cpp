@@ -150,6 +150,11 @@ bool resolve_default_program_state(BackendState &backend,
   return backend.defaultProgram != 0U;
 }
 
+// REQUIRED: transforms, instancing switch, core material color/opacity,
+// and the camera position the specular terms need. OPTIONAL: textures
+// (flat-color fallback via u_hasAlbedoTexture=0), material tuning, time/
+// foliage animation, fog (uFogMode=0 disables), lights (warned per slot),
+// IBL and every shadow family (their enable flags default to off).
 bool resolve_pbr_program_state(BackendState &backend,
                                const RenderDevice *dev) noexcept {
   backend.pbrProgram = shader_gpu_program(backend.pbrShaderHandle);
@@ -158,27 +163,32 @@ bool resolve_pbr_program_state(BackendState &backend,
     return false;
   }
 
-  backend.pbrModelLocation = dev->uniform_location(pbrProgram, "u_model");
-  backend.pbrMvpLocation = dev->uniform_location(pbrProgram, "u_mvp");
+  bool ok = true;
+  backend.pbrModelLocation =
+      required_location(&ok, dev, pbrProgram, "u_model");
+  backend.pbrMvpLocation = required_location(&ok, dev, pbrProgram, "u_mvp");
   backend.pbrNormalMatrixLocation =
-      dev->uniform_location(pbrProgram, "u_normalMatrix");
-  backend.pbrAlbedoLocation = dev->uniform_location(pbrProgram, "u_albedo");
+      required_location(&ok, dev, pbrProgram, "u_normalMatrix");
+  backend.pbrAlbedoLocation =
+      required_location(&ok, dev, pbrProgram, "u_albedo");
   backend.pbrRoughnessLocation =
       dev->uniform_location(pbrProgram, "u_roughness");
   backend.pbrMetallicLocation = dev->uniform_location(pbrProgram, "u_metallic");
   backend.pbrTimeLocation = dev->uniform_location(pbrProgram, "u_time");
   backend.pbrCameraPosLocation =
-      dev->uniform_location(pbrProgram, "u_cameraPos");
+      required_location(&ok, dev, pbrProgram, "u_cameraPos");
   backend.pbrHasAlbedoTextureLocation =
       dev->uniform_location(pbrProgram, "u_hasAlbedoTexture");
   backend.pbrAlbedoMapLocation =
       dev->uniform_location(pbrProgram, "u_albedoMap");
-  backend.pbrOpacityLocation = dev->uniform_location(pbrProgram, "u_opacity");
-  backend.pbrViewLocation = dev->uniform_location(pbrProgram, "u_viewMatrix");
+  backend.pbrOpacityLocation =
+      required_location(&ok, dev, pbrProgram, "u_opacity");
+  backend.pbrViewLocation =
+      required_location(&ok, dev, pbrProgram, "u_viewMatrix");
   backend.pbrViewProjectionLocation =
-      dev->uniform_location(pbrProgram, "u_viewProjection");
+      required_location(&ok, dev, pbrProgram, "u_viewProjection");
   backend.pbrUseInstancingLocation =
-      dev->uniform_location(pbrProgram, "uUseInstancing");
+      required_location(&ok, dev, pbrProgram, "uUseInstancing");
   backend.pbrIblEnabledLoc = dev->uniform_location(pbrProgram, "uIblEnabled");
   backend.pbrIrradianceMapLoc =
       dev->uniform_location(pbrProgram, "uIrradianceMap");
@@ -213,14 +223,13 @@ bool resolve_pbr_program_state(BackendState &backend,
   resolve_pbr_light_uniforms(backend, dev);
   resolve_pbr_shadow_uniforms(backend, dev);
 
-  return (backend.pbrMvpLocation >= 0) &&
-         (backend.pbrNormalMatrixLocation >= 0) &&
-         (backend.pbrAlbedoLocation >= 0) && (backend.pbrOpacityLocation >= 0) &&
-         (backend.pbrViewLocation >= 0) &&
-         (backend.pbrViewProjectionLocation >= 0) &&
-         (backend.pbrUseInstancingLocation >= 0);
+  return ok;
 }
 
+// REQUIRED: the scene-color sampler and exposure (a dropped u_exposure
+// upload reads as 0 and blacks the frame). OPTIONAL: the operator
+// (0 = Reinhard is valid) and the bloom-composite trio, which
+// u_bloomEnabled=0 keeps inert.
 bool resolve_tonemap_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
   backend.tonemapProgram = shader_gpu_program(backend.tonemapShaderHandle);
@@ -228,10 +237,11 @@ bool resolve_tonemap_program_state(BackendState &backend,
   if (tonemapProgram == 0U) {
     return false;
   }
+  bool ok = true;
   backend.tonemapSceneColorLocation =
-      dev->uniform_location(tonemapProgram, "u_sceneColor");
+      required_location(&ok, dev, tonemapProgram, "u_sceneColor");
   backend.tonemapExposureLocation =
-      dev->uniform_location(tonemapProgram, "u_exposure");
+      required_location(&ok, dev, tonemapProgram, "u_exposure");
   backend.tonemapOperatorLocation =
       dev->uniform_location(tonemapProgram, "u_tonemapOperator");
   backend.tonemapBloomTextureLoc =
@@ -240,7 +250,7 @@ bool resolve_tonemap_program_state(BackendState &backend,
       dev->uniform_location(tonemapProgram, "u_bloomIntensity");
   backend.tonemapBloomEnabledLoc =
       dev->uniform_location(tonemapProgram, "u_bloomEnabled");
-  return true;
+  return ok;
 }
 
 bool init_backend_core(BackendState &backend) noexcept {
@@ -323,6 +333,8 @@ bool init_backend_core(BackendState &backend) noexcept {
 
   backend.tonemapShaderHandle = tonemapShaderHandle;
   if (!resolve_tonemap_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to locate required tonemap shader uniforms");
     destroy_shader_program(tonemapShaderHandle);
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);

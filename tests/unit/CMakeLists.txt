@@ -306,6 +306,18 @@ engine_add_test_executable(engine_unit_editor_session
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_inspector_edit
+    SOURCES
+    editor_inspector_edit_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_shader_system
     SOURCES
     shader_system_test.cpp
@@ -616,6 +628,33 @@ engine_add_test_executable(engine_unit_command_buffer_post_chain
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
     ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
+engine_add_test_executable(engine_unit_command_buffer_reload_contract
+    SOURCES
+    command_buffer_reload_contract_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_core.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_environment.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_lighting.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_post.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_sky.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/post_process_stack.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
     engine_core
     engine_math

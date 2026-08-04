@@ -740,18 +740,19 @@ void gl_bind_uniform_buffer_base(std::uint32_t binding,
                             static_cast<GLuint>(buffer));
 }
 
-void gl_bind_uniform_block(std::uint32_t program, const char *blockName,
+bool gl_bind_uniform_block(std::uint32_t program, const char *blockName,
                            std::uint32_t binding) noexcept {
   if ((program == 0U) || (blockName == nullptr)) {
-    return;
+    return false;
   }
   const GLuint blockIndex = gl_table().getUniformBlockIndex(
       static_cast<GLuint>(program), blockName);
   if (blockIndex == GL_INVALID_INDEX) {
-    return;
+    return false;
   }
   gl_table().uniformBlockBinding(static_cast<GLuint>(program), blockIndex,
                                  static_cast<GLuint>(binding));
+  return true;
 }
 
 void gl_enable_vertex_attrib(std::uint32_t index) noexcept {

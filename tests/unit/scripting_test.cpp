@@ -20,6 +20,7 @@
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/asset_streaming.h"
 #include "engine/runtime/engine_pipeline.h"
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
@@ -1722,6 +1723,77 @@ int main() {
     }
     engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
     engine::scripting::set_default_mesh_asset_id(kDefaultMeshAssetId);
+  }
+
+  // =========================================================================
+  // #57 Test: a Lua-held entity pool fails closed after a whole-content
+  // world replacement (production reset_world epoch bump) — pool_spawn
+  // returns nil and pool_release returns false instead of reaching the
+  // replacement contents, and scripts keep running normally afterwards.
+  // =========================================================================
+  {
+    engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    const char *poolEpochScript =
+        "function pool_setup()\n"
+        "    pool57 = engine.pool_create(4)\n"
+        "    pooled57 = engine.pool_spawn(pool57)\n"
+        "    if pool57 ~= nil and pooled57 ~= nil then\n"
+        "        local marker = engine.spawn_entity()\n"
+        "        engine.set_name(marker, 'pool57_setup_ok')\n"
+        "    end\n"
+        "end\n"
+        "function pool_check()\n"
+        "    if engine.pool_spawn(pool57) == nil and\n"
+        "        not engine.pool_release(pool57, pooled57) then\n"
+        "        local marker = engine.spawn_entity()\n"
+        "        engine.set_name(marker, 'pool57_failed_closed')\n"
+        "    end\n"
+        "end\n";
+    if (!write_script_file(poolEpochScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 220;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("pool_setup")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 221;
+    }
+    bool setupOk = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc) &&
+          std::strcmp(nc.name, "pool57_setup_ok") == 0) {
+        setupOk = true;
+      }
+    });
+    if (!setupOk) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 222;
+    }
+
+    engine::runtime::reset_world(*world);
+
+    if (!engine::scripting::call_script_function("pool_check")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 223;
+    }
+    bool failedClosed = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc) &&
+          std::strcmp(nc.name, "pool57_failed_closed") == 0) {
+        failedClosed = true;
+      }
+    });
+    if (!failedClosed) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 224;
+    }
   }
 
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);

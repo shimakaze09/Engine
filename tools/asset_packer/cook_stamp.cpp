@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -259,10 +260,13 @@ bool make_cookstamp_path(const char *outputPath, char *outPath,
   return (written > 0) && (written < static_cast<int>(outPathSize));
 }
 
-/// Writes cook stamp data.
+/// Writes cook stamp data including the output manifest: every listed
+/// output is re-hashed from its committed bytes, so an unreadable
+/// output blocks the commit marker instead of being certified.
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
-                      std::uint64_t importSettingsHash) {
+                      std::uint64_t importSettingsHash,
+                      const std::vector<std::string> &outputPaths) {
   char stampPath[512] = {};
   if (!make_cookstamp_path(outputPath, stampPath, sizeof(stampPath))) {
     return false;
@@ -272,7 +276,7 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   // so it must itself land atomically or not at all (audit H-20).
   std::string stamp{};
   char line[1024] = {};
-  std::snprintf(line, sizeof(line), "SCHEMA 2\nTOOL_VERSION %u\n",
+  std::snprintf(line, sizeof(line), "SCHEMA 3\nTOOL_VERSION %u\n",
                 static_cast<unsigned int>(kCookToolVersion));
   stamp += line;
   std::snprintf(line, sizeof(line), "SOURCE_HASH %016llx\n",
@@ -287,17 +291,35 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                   dependency.path.c_str());
     stamp += line;
   }
+  for (const std::string &producedPath : outputPaths) {
+    bool hashOk = false;
+    const std::uint64_t producedHash =
+        hash_file_contents(producedPath.c_str(), &hashOk);
+    if (!hashOk) {
+      std::fprintf(stderr,
+                   "error: cooked output missing at stamp time: %s\n",
+                   producedPath.c_str());
+      return false;
+    }
+    std::snprintf(line, sizeof(line), "OUTPUT %016llx %s\n",
+                  static_cast<unsigned long long>(producedHash),
+                  producedPath.c_str());
+    stamp += line;
+  }
 
   return engine::core::atomic_write_file(stampPath, stamp.data(),
                                          stamp.size());
 }
 
 /// Reads cook stamp data. outToolVersion reports 0 for stamps written
-/// before the TOOL_VERSION key existed, which forces one recook.
+/// before the TOOL_VERSION key existed, which forces one recook;
+/// outOutputs (nullable) receives the output manifest, empty for
+/// pre-manifest stamps.
 bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
                      std::vector<DependencyDigest> *outDependencies,
                      std::uint64_t *outImportSettingsHash,
-                     std::uint32_t *outToolVersion) {
+                     std::uint32_t *outToolVersion,
+                     std::vector<OutputRecord> *outOutputs) {
   if ((outSourceHash == nullptr) || (outDependencies == nullptr)) {
     return false;
   }
@@ -326,6 +348,9 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   }
   if (outToolVersion != nullptr) {
     *outToolVersion = 0U;
+  }
+  if (outOutputs != nullptr) {
+    outOutputs->clear();
   }
 
   char line[1024] = {};
@@ -356,6 +381,15 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
       dep.path = depPath;
       dep.hash = static_cast<std::uint64_t>(hash);
       outDependencies->push_back(dep);
+      continue;
+    }
+
+    if ((std::sscanf(line, "OUTPUT %llx %899[^\n]", &hash, depPath) == 2) &&
+        (outOutputs != nullptr)) {
+      OutputRecord record{};
+      record.path = depPath;
+      record.hash = static_cast<std::uint64_t>(hash);
+      outOutputs->push_back(record);
     }
   }
 
@@ -378,10 +412,15 @@ bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
   return true;
 }
 
-/// Returns whether should repack.
+/// Returns whether the output set must be recooked. A current-version
+/// stamp without a manifest never certifies a cook (issue #55: legacy
+/// or tampered stamps recook instead of hiding missing sidecars), and
+/// every manifest-listed output must exist — verifyOutputHashes
+/// additionally re-hashes each one against its recorded fingerprint.
 bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
-                   std::uint64_t importSettingsHash) {
+                   std::uint64_t importSettingsHash,
+                   bool verifyOutputHashes) {
   if (!file_exists(outputPath)) {
     return true;
   }
@@ -390,8 +429,10 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
   std::vector<DependencyDigest> previousDependencies{};
   std::uint64_t previousImportHash = 0ULL;
   std::uint32_t previousToolVersion = 0U;
+  std::vector<OutputRecord> previousOutputs{};
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
-                       &previousImportHash, &previousToolVersion)) {
+                       &previousImportHash, &previousToolVersion,
+                       &previousOutputs)) {
     return true;
   }
 
@@ -407,7 +448,65 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
     return true;
   }
 
+  if (previousOutputs.empty()) {
+    return true;
+  }
+
+  for (const OutputRecord &record : previousOutputs) {
+    if (!file_exists(record.path.c_str())) {
+      return true;
+    }
+    if (verifyOutputHashes) {
+      bool hashOk = false;
+      const std::uint64_t currentHash =
+          hash_file_contents(record.path.c_str(), &hashOk);
+      if (!hashOk || (currentHash != record.hash)) {
+        return true;
+      }
+    }
+  }
+
   return !dependency_digests_equal(previousDependencies, dependencies);
+}
+
+/// Retires previous-manifest outputs the current cook no longer
+/// produces, after the new outputs committed and before the new stamp:
+/// a failed deletion must block the stamp so it can never certify an
+/// output set still containing stale files (issue #55). Pre-manifest
+/// stamps list nothing, so their strays are out of reach here and are
+/// retired by the one-time tool-version recook only going forward.
+bool remove_stale_outputs(const char *outputPath,
+                          const std::vector<std::string> &currentOutputs) {
+  std::uint64_t previousSourceHash = 0ULL;
+  std::vector<DependencyDigest> previousDependencies{};
+  std::vector<OutputRecord> previousOutputs{};
+  if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
+                       nullptr, nullptr, &previousOutputs)) {
+    return true;
+  }
+
+  for (const OutputRecord &record : previousOutputs) {
+    const bool stillProduced =
+        std::find(currentOutputs.begin(), currentOutputs.end(), record.path) !=
+        currentOutputs.end();
+    if (stillProduced) {
+      continue;
+    }
+    std::error_code removeError{};
+    const bool removed =
+        std::filesystem::remove(std::filesystem::path(record.path),
+                                removeError);
+    if (removeError) {
+      std::fprintf(stderr, "error: failed to remove stale cooked output: %s\n",
+                   record.path.c_str());
+      return false;
+    }
+    if (removed) {
+      std::printf("removed stale cooked output: %s\n", record.path.c_str());
+    }
+  }
+
+  return true;
 }
 
 

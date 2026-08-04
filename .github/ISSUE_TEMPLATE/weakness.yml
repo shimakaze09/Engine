@@ -1,4 +1,4 @@
-# Structured issue form for design weaknesses and tech-debt findings.
+# Issue form for maintainability, coverage, performance, and design weaknesses that are not active defects.
 name: Weakness / tech debt
 description: A maintainability, test-coverage, performance, or design weakness that is not an active defect
 title: "[Debt] <what is weak and where>"
