@@ -249,6 +249,26 @@ bool unmount(const char *virtualPrefix) noexcept {
   return false;
 }
 
+/// Rejects absolute paths, backslashes, drive designators, and ".."
+/// segments so a script-supplied path can never address outside the jail.
+bool vfs_path_is_jailed(const char *virtualPath) noexcept {
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
+      (virtualPath[0] == '/') || (std::strchr(virtualPath, '\\') != nullptr) ||
+      (std::strchr(virtualPath, ':') != nullptr)) {
+    return false;
+  }
+  const char *segment = virtualPath;
+  while (segment != nullptr) {
+    if ((segment[0] == '.') && (segment[1] == '.') &&
+        ((segment[2] == '/') || (segment[2] == '\0'))) {
+      return false;
+    }
+    const char *slash = std::strchr(segment, '/');
+    segment = (slash != nullptr) ? (slash + 1) : nullptr;
+  }
+  return true;
+}
+
 bool vfs_file_exists(const char *virtualPath) noexcept {
   char osPath[kMaxResolvedPathLength] = {};
   if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {

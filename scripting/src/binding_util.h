@@ -25,6 +25,11 @@ bool read_finite_number_arg(lua_State *state, int index,
 bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
                       const char *context) noexcept;
 
+/// True when a script-supplied filesystem path stays inside the VFS jail
+/// (relative, no "..", no drive/backslash); refusal logs one Error naming
+/// the call site per the H-15 defence-in-depth decision (issue #83).
+bool script_path_in_jail(const char *path, const char *context) noexcept;
+
 /// Logs the Lua error on top of the stack with a traceback, then pops it.
 void log_lua_error(const char *context) noexcept;
 

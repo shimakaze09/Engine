@@ -388,7 +388,8 @@ int get_or_load_entity_script_module(const char *path) noexcept {
 
   char stagedPath[sizeof(g_entityScriptModules[0].path)] = {};
   if (!copy_path_strict(stagedPath, sizeof(stagedPath), path,
-                        "entity script module load")) {
+                        "entity script module load") ||
+      !script_path_in_jail(stagedPath, "entity script module load")) {
     return LUA_NOREF;
   }
 

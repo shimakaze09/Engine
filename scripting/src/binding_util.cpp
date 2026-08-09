@@ -16,6 +16,7 @@ extern "C" {
 #include <cstring>
 
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 
 namespace engine::scripting {
 namespace {
@@ -114,6 +115,20 @@ bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
   }
   std::memcpy(dst, src, length + 1U);
   return true;
+}
+
+/// Jails script-facing filesystem paths as defence-in-depth (issue #83).
+bool script_path_in_jail(const char *path, const char *context) noexcept {
+  if (core::vfs_path_is_jailed(path)) {
+    return true;
+  }
+  char logBuffer[192] = {};
+  std::snprintf(logBuffer, sizeof(logBuffer),
+                "%s: path refused; must be relative with forward slashes "
+                "and no '..' segments",
+                context);
+  core::log_message(core::LogLevel::Error, "scripting", logBuffer);
+  return false;
 }
 
 void log_lua_error(const char *context) noexcept {

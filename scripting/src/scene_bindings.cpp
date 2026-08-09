@@ -24,7 +24,7 @@ int lua_engine_save_scene(lua_State *state) noexcept {
     return 1;
   }
   const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
+  if ((path == nullptr) || !script_path_in_jail(path, "save_scene")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -47,7 +47,8 @@ int lua_engine_load_scene(lua_State *state) noexcept {
   if (path == nullptr) {
     return 0;
   }
-  if (!copy_path_strict(g_pendingScenePath, sizeof(g_pendingScenePath), path,
+  if (!script_path_in_jail(path, "load_scene") ||
+      !copy_path_strict(g_pendingScenePath, sizeof(g_pendingScenePath), path,
                         "load_scene")) {
     return 0;
   }

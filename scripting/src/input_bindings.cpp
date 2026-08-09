@@ -16,6 +16,7 @@ extern "C" {
 #include "engine/core/input_map.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/vfs.h"
 
 namespace engine::scripting {
 namespace {
@@ -382,19 +383,8 @@ int lua_engine_rebind_action(lua_State *state) noexcept {
 /// Confines a script-supplied config name strictly under the save directory.
 bool resolve_input_config_path(const char *name, char *out,
                                std::size_t capacity) noexcept {
-  if ((name == nullptr) || (name[0] == '\0') || (name[0] == '/') ||
-      (std::strchr(name, '\\') != nullptr) ||
-      (std::strchr(name, ':') != nullptr)) {
+  if (!core::vfs_path_is_jailed(name)) {
     return false;
-  }
-  const char *segment = name;
-  while (segment != nullptr) {
-    if ((segment[0] == '.') && (segment[1] == '.') &&
-        ((segment[2] == '/') || (segment[2] == '\0'))) {
-      return false;
-    }
-    const char *slash = std::strchr(segment, '/');
-    segment = (slash != nullptr) ? (slash + 1) : nullptr;
   }
   char saveDir[512] = {};
   if (!core::platform_get_save_dir(saveDir, sizeof(saveDir))) {

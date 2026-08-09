@@ -38,7 +38,7 @@ int lua_engine_load_sound(lua_State *state) noexcept {
     return 1;
   }
   const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
+  if ((path == nullptr) || !script_path_in_jail(path, "load_sound")) {
     lua_pushinteger(state, 0);
     return 1;
   }
@@ -171,6 +171,11 @@ int lua_engine_play_music(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  const char *path = lua_tostring(state, 1);
+  if ((path == nullptr) || !script_path_in_jail(path, "play_music")) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   bool ok = false;
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->play_music != nullptr)) {
@@ -179,8 +184,7 @@ int lua_engine_play_music(lua_State *state) noexcept {
                                : 1.0F;
     const bool loop = (lua_isboolean(state, 3) == 0) ||
                       (lua_toboolean(state, 3) != 0);
-    ok = runtime_binding().services->play_music(lua_tostring(state, 1),
-                                                volume, loop);
+    ok = runtime_binding().services->play_music(path, volume, loop);
   }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;

@@ -45,7 +45,7 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
     return 1;
   }
   const char *path = lua_tostring(state, 2);
-  if (path == nullptr) {
+  if ((path == nullptr) || !script_path_in_jail(path, "save_prefab")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -63,7 +63,7 @@ int lua_engine_instantiate(lua_State *state) noexcept {
     return 1;
   }
   const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
+  if ((path == nullptr) || !script_path_in_jail(path, "instantiate")) {
     lua_pushnil(state);
     return 1;
   }
@@ -97,7 +97,7 @@ int lua_engine_load_asset_async(lua_State *state) noexcept {
     return 1;
   }
   const char *path = lua_tostring(state, 1);
-  if (path == nullptr) {
+  if ((path == nullptr) || !script_path_in_jail(path, "load_asset_async")) {
     lua_pushnil(state);
     return 1;
   }
@@ -148,7 +148,8 @@ int lua_engine_add_script_component(lua_State *state) noexcept {
 
   runtime::ScriptComponent comp{};
   if (!copy_path_strict(comp.scriptPath, sizeof(comp.scriptPath), path,
-                        "add_script_component")) {
+                        "add_script_component") ||
+      !script_path_in_jail(comp.scriptPath, "add_script_component")) {
     lua_pushboolean(state, 0);
     return 1;
   }
