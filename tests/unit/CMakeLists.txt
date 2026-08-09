@@ -184,6 +184,14 @@ engine_add_test_executable(engine_unit_input_config_lua
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_input_ingress_lua
+    SOURCES
+    input_ingress_lua_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_scripting_allocator
     SOURCES
     scripting_allocator_test.cpp
