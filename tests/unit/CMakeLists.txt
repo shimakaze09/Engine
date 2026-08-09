@@ -947,3 +947,10 @@ engine_add_test_executable(engine_unit_asset_load_recovery
     engine_scripting
     engine_runtime
 )
+
+engine_add_test_executable(engine_unit_scene_path_length
+    SOURCES
+    scene_path_length_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)

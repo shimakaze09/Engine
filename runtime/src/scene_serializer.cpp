@@ -233,8 +233,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     if (parser.get_object_field(components, kJsonKeyScriptComponent,
                                 &scriptValue)) {
       ScriptComponent scriptComp{};
-      if (!parser.copy_string(scriptValue, scriptComp.scriptPath,
-                              sizeof(scriptComp.scriptPath))) {
+      if (!parser.copy_string_strict(scriptValue, scriptComp.scriptPath,
+                                     sizeof(scriptComp.scriptPath))) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to parse ScriptComponent path");
       }
@@ -249,8 +249,9 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     if (parser.get_object_field(components, kJsonKeyAnimationComponent,
                                 &animationValue)) {
       AnimationComponent animationComp{};
-      if (!parser.copy_string(animationValue, animationComp.controllerPath,
-                              sizeof(animationComp.controllerPath))) {
+      if (!parser.copy_string_strict(animationValue,
+                                     animationComp.controllerPath,
+                                     sizeof(animationComp.controllerPath))) {
         targetWorld.destroy_entity(entity);
         return log_scene_error("failed to parse AnimationComponent path");
       }

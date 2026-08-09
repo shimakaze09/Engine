@@ -315,6 +315,12 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
                       "load_asset_async: null queue or invalid id");
     return kInvalidLoadHandle;
   }
+  if ((sourcePath != nullptr) &&
+      (std::strlen(sourcePath) >= sizeof(LoadRequest::sourcePath))) {
+    core::log_message(core::LogLevel::Error, "streaming",
+                      "load_asset_async: source path too long; rejected");
+    return kInvalidLoadHandle;
+  }
 
   std::lock_guard<std::mutex> lock(queue->mutex);
 

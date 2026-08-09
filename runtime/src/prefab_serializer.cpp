@@ -415,13 +415,13 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     bool gotPath = false;
 
     if (scriptValue.type == core::JsonValue::Type::String) {
-      gotPath = parser.copy_string(scriptValue, script.scriptPath,
-                                   sizeof(script.scriptPath));
+      gotPath = parser.copy_string_strict(scriptValue, script.scriptPath,
+                                          sizeof(script.scriptPath));
     } else if (scriptValue.type == core::JsonValue::Type::Object) {
       core::JsonValue pathValue{};
       if (parser.get_object_field(scriptValue, "scriptPath", &pathValue)) {
-        gotPath = parser.copy_string(pathValue, script.scriptPath,
-                                     sizeof(script.scriptPath));
+        gotPath = parser.copy_string_strict(pathValue, script.scriptPath,
+                                            sizeof(script.scriptPath));
       }
     } else {
       return failComponent("instantiate_prefab: invalid ScriptComponent");
@@ -441,8 +441,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
                               &animationValue)) {
     AnimationComponent animation{};
     if ((animationValue.type != core::JsonValue::Type::String) ||
-        !parser.copy_string(animationValue, animation.controllerPath,
-                            sizeof(animation.controllerPath)) ||
+        !parser.copy_string_strict(animationValue, animation.controllerPath,
+                                   sizeof(animation.controllerPath)) ||
         (animation.controllerPath[0] == '\0')) {
       return failComponent("instantiate_prefab: invalid AnimationComponent");
     }

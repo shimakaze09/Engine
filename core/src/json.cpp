@@ -1258,7 +1258,8 @@ bool JsonParser::as_string(const JsonValue &value, const char **outBegin,
 }
 
 bool JsonParser::copy_string(const JsonValue &value, char *out,
-                             std::size_t outCapacity) const noexcept {
+                             std::size_t outCapacity,
+                             std::size_t *outRequiredLength) const noexcept {
   if ((out == nullptr) || (outCapacity == 0U) ||
       (value.type != JsonValue::Type::String) || (value.begin == nullptr) ||
       (value.end == nullptr) || (value.end < value.begin)) {
@@ -1384,6 +1385,22 @@ bool JsonParser::copy_string(const JsonValue &value, char *out,
   }
 
   out[(outLength < outCapacity) ? outLength : (outCapacity - 1U)] = '\0';
+  if (outRequiredLength != nullptr) {
+    *outRequiredLength = outLength;
+  }
+  return true;
+}
+
+bool JsonParser::copy_string_strict(const JsonValue &value, char *out,
+                                    std::size_t outCapacity) const noexcept {
+  std::size_t requiredLength = 0U;
+  if (!copy_string(value, out, outCapacity, &requiredLength)) {
+    return false;
+  }
+  if (requiredLength >= outCapacity) {
+    out[0] = '\0';
+    return false;
+  }
   return true;
 }
 
