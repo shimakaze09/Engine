@@ -95,6 +95,16 @@ engine_add_test_executable(engine_integration_script_begin_play_retry
     integration
 )
 
+engine_add_test_executable(engine_integration_script_module_cache
+    SOURCES
+    script_module_cache_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_game_mode
     SOURCES
     game_mode_test.cpp

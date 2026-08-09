@@ -58,6 +58,7 @@ lua_State *g_state = nullptr;
 EntityScriptBindingCallbacks g_callbacks{};
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
+bool g_moduleCapacityWarned = false;
 bool g_hasPendingEntityReloads = false;
 core::Entity g_entityFaulted[kMaxFaultedEntities]{};
 EntitySavedState g_entitySavedState[kMaxFaultedEntities]{};
@@ -362,6 +363,23 @@ int retry_negative_module_entry(EntityScriptModule &mod,
   return ref;
 }
 
+/// Picks a never-loaded cache entry to evict when the cache is full,
+/// preferring one whose retry budget is exhausted; kInvalidModuleSlot when
+/// every entry holds a loaded module (loaded modules are never evicted).
+std::size_t find_evictable_negative_slot() noexcept {
+  std::size_t fallback = kInvalidModuleSlot;
+  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
+    if (g_entityScriptModules[i].registryRef != LUA_NOREF) {
+      continue;
+    }
+    if (g_entityScriptModules[i].loadAttempts >= kMaxModuleLoadAttempts) {
+      return i;
+    }
+    fallback = i;
+  }
+  return fallback;
+}
+
 /// Loads a Lua module table, reusing or hot-reloading cache entries.
 int get_or_load_entity_script_module(const char *path) noexcept {
   if ((g_state == nullptr) || (path == nullptr) || (path[0] == '\0')) {
@@ -452,24 +470,36 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     }
   }
 
-  if (g_entityScriptModuleCount >= kMaxEntityScriptModules) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "entity script module limit reached");
-    return LUA_NOREF;
+  std::size_t slot = kInvalidModuleSlot;
+  if (g_entityScriptModuleCount < kMaxEntityScriptModules) {
+    slot = g_entityScriptModuleCount;
+    ++g_entityScriptModuleCount;
+  } else {
+    slot = find_evictable_negative_slot();
+    if (slot == kInvalidModuleSlot) {
+      if (!g_moduleCapacityWarned) {
+        char msg[256] = {};
+        std::snprintf(msg, sizeof(msg),
+                      "entity script module cache full (%u loaded): cannot "
+                      "load %s; further capacity errors suppressed until the "
+                      "cache is cleared",
+                      static_cast<unsigned>(kMaxEntityScriptModules), path);
+        core::log_message(core::LogLevel::Error, "scripting", msg);
+        g_moduleCapacityWarned = true;
+      }
+      return LUA_NOREF;
+    }
+    clear_entity_saved_state_for_module(slot);
   }
 
-  EntityScriptModule &mod = g_entityScriptModules[g_entityScriptModuleCount];
+  EntityScriptModule &mod = g_entityScriptModules[slot];
+  mod = EntityScriptModule{};
   const std::size_t maxPath = sizeof(mod.path) - 1U;
   const std::size_t pathLen = std::strlen(path);
   const std::size_t copyLen = (pathLen > maxPath) ? maxPath : pathLen;
   std::memcpy(mod.path, path, copyLen);
   mod.path[copyLen] = '\0';
-  mod.mtime = 0;
   mod.lastFailedMtime = -1;
-  mod.loadAttempts = 0U;
-  mod.reloaded = false;
-  mod.registryRef = LUA_NOREF;
-  ++g_entityScriptModuleCount;
   return retry_negative_module_entry(mod, path);
 }
 
@@ -806,6 +836,7 @@ void dispatch_entity_scripts_end() noexcept {
 
 void clear_entity_script_modules() noexcept {
   clear_entity_saved_state();
+  g_moduleCapacityWarned = false;
   g_hasPendingEntityReloads = false;
   for (core::Entity &faultedEntity : g_entityFaulted) {
     faultedEntity = core::kInvalidEntity;
