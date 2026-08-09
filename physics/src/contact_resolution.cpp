@@ -33,12 +33,11 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 // Applies the contact impulse with friction. Restitution only acts above a
 // 1 m/s approach speed: slow pushing/resting contacts absorb fully, or
 // driven bodies would pump bounce energy every step and ratchet airborne.
-// When angular transfer is active (both bodies dynamic with rotational
-// inertia) the normal row is the full J = [-n, -(rA x n), n, (rB x n)]:
-// relative velocity includes the contact-point angular terms and the
-// effective mass includes i |r x n|^2, so the impulse removes exactly the
-// point approach speed instead of overshooting. Static-environment
-// contacts keep the linear-only row, matching the applied response.
+// Every dynamic endpoint with rotational inertia carries its angular
+// Jacobian row — including against static geometry (issue #111) — so the
+// normal row is the full J = [-n, -(rA x n), n, (rB x n)] and friction
+// applies torque through the contact lever arm, letting off-center static
+// impacts rotate the body and floor friction roll a sliding sphere.
 void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
@@ -416,15 +415,12 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
   const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
   const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
-  const bool angularA =
-      (invMassA > 0.0F) && (invInertiaA > 0.0F) && (invMassB > 0.0F);
-  const bool angularB =
-      (invMassB > 0.0F) && (invInertiaB > 0.0F) && (invMassA > 0.0F);
+  const bool angularA = (invMassA > 0.0F) && (invInertiaA > 0.0F);
+  const bool angularB = (invMassB > 0.0F) && (invInertiaB > 0.0F);
   const engine::math::Vec3 pointVelA = engine::math::add(
       velA, angularA ? engine::math::cross(angVelA, contactOffsetA) : zeroVec);
   const engine::math::Vec3 pointVelB = engine::math::add(
       velB, angularB ? engine::math::cross(angVelB, contactOffsetB) : zeroVec);
-  const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
   const float relVelAlongNormal =
       engine::math::dot(engine::math::sub(pointVelB, pointVelA), normal);
   if (relVelAlongNormal < 0.0F) {
@@ -449,69 +445,92 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       bodyA->velocity = engine::math::sub(
           bodyA->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassA));
-      // Keep static-environment contacts stable: only transfer angular
-      // impulse when both bodies are dynamic.
-      if ((bodyA->inverseInertia > 0.0F) && (invMassB > 0.0F)) {
-        const engine::math::Vec3 angImpulse =
+      if (angularA) {
+        bodyA->angularVelocity = engine::math::sub(
+            bodyA->angularVelocity,
             engine::math::mul(engine::math::cross(contactOffsetA, impulseVec),
-                              bodyA->inverseInertia);
-        bodyA->angularVelocity =
-            engine::math::sub(bodyA->angularVelocity, angImpulse);
-        const float angSpeedSq =
-            engine::math::length_sq(bodyA->angularVelocity);
-        if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
-          const float angSpeed = std::sqrt(angSpeedSq);
-          bodyA->angularVelocity = engine::math::mul(
-              bodyA->angularVelocity, kMaxAngularSpeed / angSpeed);
-        }
+                              invInertiaA));
       }
     }
     if ((bodyB != nullptr) && (invMassB > 0.0F)) {
       bodyB->velocity = engine::math::add(
           bodyB->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassB));
-      if ((bodyB->inverseInertia > 0.0F) && (invMassA > 0.0F)) {
-        const engine::math::Vec3 angImpulse =
+      if (angularB) {
+        bodyB->angularVelocity = engine::math::add(
+            bodyB->angularVelocity,
             engine::math::mul(engine::math::cross(contactOffsetB, impulseVec),
-                              bodyB->inverseInertia);
-        bodyB->angularVelocity =
-            engine::math::add(bodyB->angularVelocity, angImpulse);
-        const float angSpeedSq =
-            engine::math::length_sq(bodyB->angularVelocity);
-        if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
-          const float angSpeed = std::sqrt(angSpeedSq);
-          bodyB->angularVelocity = engine::math::mul(
-              bodyB->angularVelocity, kMaxAngularSpeed / angSpeed);
-        }
+                              invInertiaB));
       }
     }
 
+    // Friction consumes the post-normal-impulse contact-point velocities so
+    // it converges to rolling instead of braking a rolling body forever.
+    const engine::math::Vec3 postVelA =
+        (bodyA != nullptr) ? bodyA->velocity : zeroVec;
+    const engine::math::Vec3 postVelB =
+        (bodyB != nullptr) ? bodyB->velocity : zeroVec;
+    const engine::math::Vec3 postAngVelA =
+        (bodyA != nullptr) ? bodyA->angularVelocity : zeroVec;
+    const engine::math::Vec3 postAngVelB =
+        (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
+    const engine::math::Vec3 postPointVelA = engine::math::add(
+        postVelA,
+        angularA ? engine::math::cross(postAngVelA, contactOffsetA) : zeroVec);
+    const engine::math::Vec3 postPointVelB = engine::math::add(
+        postVelB,
+        angularB ? engine::math::cross(postAngVelB, contactOffsetB) : zeroVec);
+    const engine::math::Vec3 relPointVel =
+        engine::math::sub(postPointVelB, postPointVelA);
     const engine::math::Vec3 tangentVel = engine::math::sub(
-        relVel,
-        engine::math::mul(normal, engine::math::dot(relVel, normal)));
+        relPointVel,
+        engine::math::mul(normal, engine::math::dot(relPointVel, normal)));
     const float tangentSpeedSq = engine::math::length_sq(tangentVel);
     if (tangentSpeedSq > 1e-12F) {
       const float tangentSpeed = std::sqrt(tangentSpeedSq);
       const engine::math::Vec3 tangent =
           engine::math::div(tangentVel, tangentSpeed);
-      float frictionImpulse = -tangentSpeed / invMassSum;
-      if (std::fabs(frictionImpulse) < impulseMagnitude * staticFric) {
-        // Static friction: apply exact counter-impulse.
-      } else {
-        frictionImpulse =
-            sign_or_positive(frictionImpulse) * impulseMagnitude * dynamicFric;
+      const float frictionEffectiveMass =
+          invMassSum +
+          (angularA ? invInertiaA * engine::math::length_sq(
+                                        engine::math::cross(contactOffsetA,
+                                                            tangent))
+                    : 0.0F) +
+          (angularB ? invInertiaB * engine::math::length_sq(
+                                        engine::math::cross(contactOffsetB,
+                                                            tangent))
+                    : 0.0F);
+      float frictionImpulse = tangentSpeed / frictionEffectiveMass;
+      if (frictionImpulse >= impulseMagnitude * staticFric) {
+        frictionImpulse = impulseMagnitude * dynamicFric;
       }
+      const engine::math::Vec3 frictionVec =
+          engine::math::mul(tangent, -frictionImpulse);
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
-            bodyA->velocity,
-            engine::math::mul(tangent, frictionImpulse * invMassA));
+            bodyA->velocity, engine::math::mul(frictionVec, invMassA));
+        if (angularA) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(contactOffsetA,
+                                                    frictionVec),
+                                invInertiaA));
+        }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
         bodyB->velocity = engine::math::add(
-            bodyB->velocity,
-            engine::math::mul(tangent, frictionImpulse * invMassB));
+            bodyB->velocity, engine::math::mul(frictionVec, invMassB));
+        if (angularB) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(contactOffsetB,
+                                                    frictionVec),
+                                invInertiaB));
+        }
       }
     }
+    clamp_angular_speed((angularA && (bodyA != nullptr)) ? bodyA : nullptr);
+    clamp_angular_speed((angularB && (bodyB != nullptr)) ? bodyB : nullptr);
   }
 }
 
