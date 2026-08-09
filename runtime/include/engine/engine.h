@@ -20,14 +20,26 @@ struct EngineConfig final {
   const char *editorAssetRoot = "assets";
 };
 
+/// Outcome of engine::run for process exit-code mapping.
+enum class RunResult : std::uint8_t {
+  /// Graceful stop: quit request or the max-frame budget was reached.
+  Stopped = 0,
+  /// Runtime pipeline initialization failed before the first frame.
+  FatalInitialization,
+  /// A frame stage terminated the loop fatally.
+  FatalFrame,
+};
+
 /// Boots the engine with the default configuration.
 bool bootstrap() noexcept;
 /// Boots the engine with explicit app/runtime configuration.
 bool bootstrap(const EngineConfig &config) noexcept;
 /// Returns the active engine configuration for runtime/editor systems.
 const EngineConfig &active_config() noexcept;
-/// Runs the configured command, loop, or tool.
-void run(std::uint32_t maxFrames = 0U) noexcept;
+/// Runs the main loop; reports whether it stopped gracefully or fatally.
+RunResult run(std::uint32_t maxFrames = 0U) noexcept;
+/// Maps a run result to the process exit code (0 only for Stopped).
+int run_result_exit_code(RunResult result) noexcept;
 /// Shuts down the owning system.
 void shutdown() noexcept;
 

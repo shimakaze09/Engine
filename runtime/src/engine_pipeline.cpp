@@ -441,6 +441,8 @@ struct EnginePipeline::Impl final {
   std::uint32_t frameIndex = 0U;
   std::uint32_t maxFrames = 0U;
   bool running = true;
+  // Distinguishes fatal loop exits from graceful stops for engine::run (#96).
+  bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
   std::size_t previousAliveCount = 0U;
   std::size_t frameThreadCount = 0U;
@@ -642,11 +644,13 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 
   if (runFrameGraph) {
     if (!stage_simulation_graph()) {
+      fatalError = true;
       core::profiler_end_frame();
       return false;
     }
     stage_camera();
     if (!stage_render_prep_graph()) {
+      fatalError = true;
       core::profiler_end_frame();
       return false;
     }
@@ -1326,6 +1330,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
   if (!core::make_render_context_current()) {
     core::log_message(core::LogLevel::Error, "editor",
                       "failed to acquire OpenGL context for editor");
+    fatalError = true;
     running = false;
     return;
   }
@@ -1541,6 +1546,10 @@ bool EnginePipeline::initialize(std::uint32_t maxFrames) noexcept {
 
 bool EnginePipeline::execute_frame() noexcept {
   return m_impl && m_impl->execute_frame();
+}
+
+bool EnginePipeline::had_fatal_error() const noexcept {
+  return m_impl && m_impl->fatalError;
 }
 
 void EnginePipeline::teardown() noexcept {

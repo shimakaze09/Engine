@@ -8,7 +8,7 @@ int main() {
     return 1;
   }
 
-  engine::run(0);
+  const engine::RunResult result = engine::run(0);
   engine::shutdown();
-  return 0;
+  return engine::run_result_exit_code(result);
 }
