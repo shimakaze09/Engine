@@ -93,6 +93,7 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   testedGeneration = other.testedGeneration;
   ccdColliderCount = other.ccdColliderCount;
   ccdHasCompoundColliders = other.ccdHasCompoundColliders;
+  ccdSnapshotDirty = other.ccdSnapshotDirty;
   broadphaseOverflowActive = other.broadphaseOverflowActive;
   broadphaseOverflowEpisodes = other.broadphaseOverflowEpisodes;
   collisionPairDropCount = other.collisionPairDropCount;

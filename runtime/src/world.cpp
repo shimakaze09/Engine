@@ -55,6 +55,7 @@ void World::begin_update_phase() noexcept {
   }
 
   physics::refresh_step_cvar_cache(physics_context());
+  physics::prime_ccd_snapshot(*this);
   snapshot_world_transform_history();
   m_writeStateIndex = (m_readStateIndex + 1U) % kStateBufferCount;
   m_updateSwapPending = true;
@@ -73,6 +74,7 @@ void World::begin_update_step() noexcept {
     return;
   }
   physics::refresh_step_cvar_cache(physics_context());
+  physics::prime_ccd_snapshot(*this);
   snapshot_world_transform_history();
   m_updateSwapPending = true;
 }

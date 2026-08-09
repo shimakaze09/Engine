@@ -189,6 +189,12 @@ struct PhysicsContext final {
   std::size_t ccdColliderCount = 0U;
   bool ccdHasCompoundColliders = false;
 
+  // True until resolve_collisions publishes a snapshot (fresh world, scene
+  // load) or after Input-phase collider/body adds: the serial begin-step
+  // path then primes a conservative snapshot so the first sweep sees
+  // moving targets instead of a static world (issue #106).
+  bool ccdSnapshotDirty = true;
+
   // Broad-phase overflow diagnostic: overflowActive is set while any
   // collider is served by the brute-force overflow list (per-collider
   // cell-span cap or spatial-node pool exhaustion) and logs once per
