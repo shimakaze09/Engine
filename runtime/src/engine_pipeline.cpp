@@ -40,6 +40,7 @@
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
+#include "engine/physics/physics_context.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/physics_bridge.h"
@@ -147,6 +148,9 @@ namespace {
 constexpr double kFixedDeltaSeconds = 1.0 / 60.0;
 constexpr std::size_t kChunkSize = 256U;
 constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
+static_assert(kMaxUpdateStepsPerFrame <= physics::kMaxCollisionFrameSteps,
+              "the frame collision buffer must cover every catch-up step so "
+              "accumulation alone never drops callbacks (#103)");
 constexpr std::size_t kMaxChunkJobs = 1024U;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;

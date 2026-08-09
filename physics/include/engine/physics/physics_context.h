@@ -30,6 +30,9 @@ using engine::core::kInvalidEntity;
 // Capacity constants (previously World::kMax*).
 static constexpr std::size_t kMaxPhysicsJoints = 4096U;
 static constexpr std::size_t kMaxCollisionPairs = 1024U;
+// Fixed catch-up steps one rendered frame may accumulate callbacks for;
+// must cover the pipeline's step cap so accumulation alone never drops.
+static constexpr std::size_t kMaxCollisionFrameSteps = 8U;
 static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
 static constexpr std::size_t kMaxColliders = ENGINE_MAX_ENTITIES;
 static constexpr std::size_t kMaxConvexHulls = 256U;
@@ -160,6 +163,16 @@ struct PhysicsContext final {
   std::array<std::uint32_t, kMaxCollisionPairs * 2U> collisionPairData{};
   std::size_t collisionPairCount = 0U;
   CollisionDispatchFn collisionDispatch = nullptr;
+
+  // Frame-accumulated pairs (issue #103): every fixed step appends its kept
+  // pairs in step order and dispatch drains once per rendered frame, so a
+  // pair persisting across substeps repeats once per substep. Drops are
+  // counted per rendered frame (per-step caps plus append overflow).
+  std::array<std::uint32_t,
+             kMaxCollisionPairs * kMaxCollisionFrameSteps * 2U>
+      frameCollisionPairData{};
+  std::size_t frameCollisionPairCount = 0U;
+  std::uint32_t frameCollisionPairDropCount = 0U;
 
   // O(1) collision-pair dedupe via open addressing and generation stamps.
   std::array<std::uint64_t, kCollisionPairHashBuckets> pairHashKeys{};
