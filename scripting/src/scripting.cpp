@@ -636,31 +636,78 @@ struct GlobalsSnapshotArgs final {
   int ref = LUA_NOREF;
 };
 
-/// Protected trampoline: copies every top-level global into a fresh table
-/// and refs it into the registry, so table growth or registry allocation
-/// failure while snapshotting stays catchable.
-int snapshot_globals_trampoline(lua_State *state) noexcept {
-  auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
+// Rollback covers tables reachable from _G through table fields down to
+// this depth; deeper tables (and closure upvalues, metatables, userdata,
+// registry-only state) stay shared and are not rolled back.
+constexpr std::size_t kMaxReloadSnapshotDepth = 8U;
+
+/// Replaces the table on top of the stack with its snapshot copy,
+/// recording orig->copy in memo and copy->orig in rev; cycles reuse the
+/// memoized copy, and depth/stack limits fall back to a shared reference.
+void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
+                         std::size_t depth) noexcept {
+  const int origIndex = lua_absindex(state, -1);
+  lua_pushvalue(state, origIndex);
+  lua_rawget(state, memoIndex);
+  if (!lua_isnil(state, -1)) {
+    lua_replace(state, origIndex);
+    return;
+  }
+  lua_pop(state, 1);
+
   lua_newtable(state);
-  const int snapshotIndex = lua_absindex(state, -1);
-  lua_pushglobaltable(state);
-  const int globalsIndex = lua_absindex(state, -1);
+  const int copyIndex = lua_absindex(state, -1);
+  lua_pushvalue(state, origIndex);
+  lua_pushvalue(state, copyIndex);
+  lua_rawset(state, memoIndex);
+  lua_pushvalue(state, copyIndex);
+  lua_pushvalue(state, origIndex);
+  lua_rawset(state, revIndex);
 
   lua_pushnil(state);
-  while (lua_next(state, globalsIndex) != 0) {
+  while (lua_next(state, origIndex) != 0) {
+    if ((lua_istable(state, -1) != 0) &&
+        ((depth + 1U) < kMaxReloadSnapshotDepth) &&
+        (lua_checkstack(state, 8) != 0)) {
+      deep_snapshot_table(state, memoIndex, revIndex, depth + 1U);
+    }
     lua_pushvalue(state, -2);
     lua_pushvalue(state, -2);
-    lua_rawset(state, snapshotIndex);
+    lua_rawset(state, copyIndex);
     lua_pop(state, 1);
   }
 
+  lua_replace(state, origIndex);
+}
+
+/// Protected trampoline: deep-copies the globals table (and every nested
+/// table within the depth cap) into a memoized snapshot refed into the
+/// registry, so allocation failure while snapshotting stays catchable.
+int snapshot_globals_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
+  lua_createtable(state, 2, 0);
+  const int containerIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int memoIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int revIndex = lua_absindex(state, -1);
+
+  lua_pushglobaltable(state);
+  deep_snapshot_table(state, memoIndex, revIndex, 0U);
   lua_pop(state, 1);
+
+  lua_pushvalue(state, memoIndex);
+  lua_rawseti(state, containerIndex, 1);
+  lua_pushvalue(state, revIndex);
+  lua_rawseti(state, containerIndex, 2);
+  lua_pop(state, 2);
   args->ref = luaL_ref(state, LUA_REGISTRYINDEX);
   return 0;
 }
 
-/// Captures the current top-level globals for rollback after a failed
-/// reload; false (with the error logged) when snapshotting itself fails.
+/// Captures globals (nested tables included, up to the depth cap) for
+/// rollback after a failed reload; false (with the error logged) when
+/// snapshotting itself fails.
 bool snapshot_global_bindings(lua_State *state, int *outReference) noexcept {
   GlobalsSnapshotArgs args{};
   if (!protected_c_operation(state, &snapshot_globals_trampoline, &args, 0,
@@ -671,51 +718,71 @@ bool snapshot_global_bindings(lua_State *state, int *outReference) noexcept {
   return true;
 }
 
-/// Protected trampoline: restores top-level globals exactly, including
-/// removing newly introduced keys, so allocation failure while rebuilding
-/// the globals table stays catchable.
+/// Restores one snapshotted table in place from its copy: keys added
+/// since the snapshot are removed, snapshot keys are reassigned, and
+/// values that are copies of snapshotted tables map back (via rev) to the
+/// original table object so shared references keep their identity.
+void restore_table_in_place(lua_State *state, int revIndex, int origIndex,
+                            int copyIndex) noexcept {
+  lua_pushnil(state);
+  while (lua_next(state, origIndex) != 0) {
+    lua_pop(state, 1);
+    lua_pushvalue(state, -1);
+    lua_rawget(state, copyIndex);
+    const bool wasPresent = !lua_isnil(state, -1);
+    lua_pop(state, 1);
+    if (!wasPresent) {
+      lua_pushvalue(state, -1);
+      lua_pushnil(state);
+      lua_rawset(state, origIndex);
+    }
+  }
+
+  lua_pushnil(state);
+  while (lua_next(state, copyIndex) != 0) {
+    lua_pushvalue(state, -2);
+    if (lua_istable(state, -2) != 0) {
+      lua_pushvalue(state, -2);
+      lua_rawget(state, revIndex);
+      if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        lua_pushvalue(state, -2);
+      }
+    } else {
+      lua_pushvalue(state, -2);
+    }
+    lua_rawset(state, origIndex);
+    lua_pop(state, 1);
+  }
+}
+
+/// Protected trampoline: restores every snapshotted table in place (the
+/// globals table is one memo entry), so allocation failure while
+/// rebuilding tables stays catchable.
 int restore_globals_trampoline(lua_State *state) noexcept {
   auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
-  const int snapshotReference = args->ref;
   const int originalTop = lua_gettop(state);
-  lua_rawgeti(state, LUA_REGISTRYINDEX, snapshotReference);
+  lua_rawgeti(state, LUA_REGISTRYINDEX, args->ref);
   if (!lua_istable(state, -1)) {
     lua_settop(state, originalTop);
     return 0;
   }
-  const int snapshotIndex = lua_absindex(state, -1);
-
-  lua_pushglobaltable(state);
-  const int globalsIndex = lua_absindex(state, -1);
-  lua_newtable(state);
-  const int removalIndex = lua_absindex(state, -1);
-  lua_Integer removalCount = 0;
-
-  lua_pushnil(state);
-  while (lua_next(state, globalsIndex) != 0) {
-    lua_pushvalue(state, -2);
-    lua_rawget(state, snapshotIndex);
-    const bool wasPresent = !lua_isnil(state, -1);
-    lua_pop(state, 1);
-    if (!wasPresent) {
-      ++removalCount;
-      lua_pushvalue(state, -2);
-      lua_rawseti(state, removalIndex, removalCount);
-    }
-    lua_pop(state, 1);
-  }
-
-  for (lua_Integer index = 1; index <= removalCount; ++index) {
-    lua_rawgeti(state, removalIndex, index);
-    lua_pushnil(state);
-    lua_rawset(state, globalsIndex);
+  const int containerIndex = lua_absindex(state, -1);
+  lua_rawgeti(state, containerIndex, 1);
+  const int memoIndex = lua_absindex(state, -1);
+  lua_rawgeti(state, containerIndex, 2);
+  const int revIndex = lua_absindex(state, -1);
+  if ((lua_istable(state, memoIndex) == 0) ||
+      (lua_istable(state, revIndex) == 0) ||
+      (lua_checkstack(state, 16) == 0)) {
+    lua_settop(state, originalTop);
+    return 0;
   }
 
   lua_pushnil(state);
-  while (lua_next(state, snapshotIndex) != 0) {
-    lua_pushvalue(state, -2);
-    lua_pushvalue(state, -2);
-    lua_rawset(state, globalsIndex);
+  while (lua_next(state, memoIndex) != 0) {
+    restore_table_in_place(state, revIndex, lua_absindex(state, -2),
+                           lua_absindex(state, -1));
     lua_pop(state, 1);
   }
 
@@ -723,9 +790,9 @@ int restore_globals_trampoline(lua_State *state) noexcept {
   return 0;
 }
 
-/// Restores top-level globals from the snapshot under protection; a
-/// restore that itself hits allocation failure is logged (globals may
-/// then be partially restored — unavoidable under OOM).
+/// Restores snapshotted tables under protection; a restore that itself
+/// hits allocation failure is logged (tables may then be partially
+/// restored — unavoidable under OOM).
 void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
   GlobalsSnapshotArgs args{};
   args.ref = snapshotReference;
