@@ -110,7 +110,9 @@ void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept;
 
 // ---- Request management ----
 
-/// Queue an async load.  Returns a LoadHandle for polling.
+/// Queue an async load.  Returns a LoadHandle for polling.  Re-requesting an
+/// asset joins its live request; a Failed slot for the same asset is
+/// reclaimed (generation-bumped, stale handles rejected) instead of leaking.
 LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
                             const char *sourcePath,
                             LoadPriority priority) noexcept;

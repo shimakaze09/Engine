@@ -47,8 +47,7 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
 
   const renderer::AssetState state =
       renderer::mesh_asset_state(g_editorAssetService->database, assetId);
-  if ((state == renderer::AssetState::Ready) ||
-      (state == renderer::AssetState::Loading)) {
+  if (state == renderer::AssetState::Ready) {
     return assetId;
   }
 

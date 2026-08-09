@@ -101,6 +101,14 @@ InputEventRoute process_editor_input_event(const EditorBridge *bridge,
 }
 
 /// Processes a queued script scene operation, if one exists.
+/// Declared scene-transition reset order (audit H-16): (1) commit the
+/// replacement world — staged load_scene or reset_world, which already
+/// resets the world-owned managers in the H-18 order; (2) clear the
+/// outgoing scene's coroutines and per-entity script modules so no stale
+/// entity identity or Lua reference can act on the new world (globals
+/// persist by contract as the cross-scene handoff channel); (3) clear the
+/// pending op. A failed load skips every reset and leaves all state
+/// unchanged.
 bool process_pending_scene_op(World &world) noexcept {
   if (!scripting::has_pending_scene_op()) {
     return true;
@@ -121,6 +129,8 @@ bool process_pending_scene_op(World &world) noexcept {
   }
 
   if (processed) {
+    scripting::clear_coroutines();
+    scripting::clear_entity_script_modules();
     scripting::clear_pending_scene_op();
   }
   return processed;

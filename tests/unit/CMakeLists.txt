@@ -938,3 +938,20 @@ engine_add_test_executable(engine_unit_material_asset
     PRIVATE_DEPS
     engine_renderer
 )
+
+# ---- H-16 (#85): async-load handle reclamation ----
+
+engine_add_test_executable(engine_unit_asset_load_recovery
+    SOURCES
+    asset_load_recovery_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_scene_path_length
+    SOURCES
+    scene_path_length_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)

@@ -246,6 +246,12 @@ bool request_mesh_asset_streaming_load(AssetDatabase *database, AssetId id,
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return false;
   }
+  if ((sourcePath != nullptr) &&
+      (std::strlen(sourcePath) >= sizeof(MeshAssetRecord::sourcePath))) {
+    core::log_message(core::LogLevel::Error, "assets",
+                      "streaming load request rejected: source path too long");
+    return false;
+  }
 
   const std::size_t slot = claim_mesh_asset_record_slot(database, id);
   if (slot == database->meshAssets.size()) {

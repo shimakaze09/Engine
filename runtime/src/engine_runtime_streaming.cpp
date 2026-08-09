@@ -168,8 +168,42 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
   return true;
 }
 
-/// Mirrors terminal streaming failures into the asset database on the main
-/// thread.
+/// Retires script handles whose streaming request reached a terminal state.
+void retire_terminal_script_loads(
+    runtime::EngineAssetDatabaseService *service) noexcept {
+  if ((service == nullptr) || (service->database == nullptr) ||
+      (service->streamingQueue == nullptr)) {
+    return;
+  }
+
+  for (auto &handle : service->scriptLoadHandles) {
+    if (!handle.occupied || !handle.streamingHandle.valid() ||
+        (handle.assetId == renderer::kInvalidAssetId)) {
+      continue;
+    }
+
+    const renderer::LoadingState state = renderer::get_load_state(
+        service->streamingQueue, handle.streamingHandle);
+    if (state == renderer::LoadingState::Failed) {
+      static_cast<void>(renderer::set_mesh_asset_state(
+          service->database, handle.assetId, renderer::AssetState::Failed,
+          renderer::kInvalidMeshHandle));
+      static_cast<void>(renderer::release_load(service->streamingQueue,
+                                               handle.streamingHandle));
+      handle.streamingHandle = renderer::kInvalidLoadHandle;
+    } else if ((state == renderer::LoadingState::Ready) &&
+               (renderer::mesh_asset_state(service->database,
+                                           handle.assetId) ==
+                renderer::AssetState::Ready)) {
+      static_cast<void>(renderer::release_load(service->streamingQueue,
+                                               handle.streamingHandle));
+      handle.streamingHandle = renderer::kInvalidLoadHandle;
+    }
+  }
+}
+
+/// Mirrors terminal streaming results into the asset database on the main
+/// thread and releases the terminal queue slots for reuse.
 void sync_streaming_failures(
     runtime::EngineAssetDatabaseService *service) noexcept {
   if ((service == nullptr) || (service->database == nullptr) ||
@@ -177,19 +211,46 @@ void sync_streaming_failures(
     return;
   }
 
-  for (const auto &handle : service->scriptLoadHandles) {
-    if (!handle.occupied || !handle.streamingHandle.valid() ||
-        (handle.assetId == renderer::kInvalidAssetId)) {
-      continue;
-    }
+  retire_terminal_script_loads(service);
 
-    if (renderer::get_load_state(service->streamingQueue,
-                                 handle.streamingHandle) ==
-        renderer::LoadingState::Failed) {
+  renderer::AssetStreamingQueue *queue = service->streamingQueue;
+  struct TerminalRequest final {
+    renderer::LoadHandle handle{};
+    renderer::AssetId assetId = renderer::kInvalidAssetId;
+    renderer::LoadingState state = renderer::LoadingState::Queued;
+  };
+  std::array<TerminalRequest, renderer::AssetStreamingQueue::kMaxRequests>
+      terminals{};
+  std::size_t terminalCount = 0U;
+
+  {
+    std::lock_guard<std::mutex> lock(queue->mutex);
+    for (std::uint32_t i = 0U;
+         i < renderer::AssetStreamingQueue::kMaxRequests; ++i) {
+      const renderer::LoadRequest &request = queue->requests[i];
+      if (!request.occupied ||
+          ((request.state != renderer::LoadingState::Ready) &&
+           (request.state != renderer::LoadingState::Failed))) {
+        continue;
+      }
+      terminals[terminalCount].handle =
+          renderer::LoadHandle{i, request.generation};
+      terminals[terminalCount].assetId = request.assetId;
+      terminals[terminalCount].state = request.state;
+      ++terminalCount;
+    }
+  }
+
+  for (std::size_t i = 0U; i < terminalCount; ++i) {
+    if ((terminals[i].state == renderer::LoadingState::Failed) &&
+        (renderer::mesh_asset_state(service->database, terminals[i].assetId) ==
+         renderer::AssetState::Loading)) {
       static_cast<void>(renderer::set_mesh_asset_state(
-          service->database, handle.assetId, renderer::AssetState::Failed,
+          service->database, terminals[i].assetId, renderer::AssetState::Failed,
           renderer::kInvalidMeshHandle));
     }
+    static_cast<void>(
+        renderer::release_load(queue, terminals[i].handle));
   }
 }
 

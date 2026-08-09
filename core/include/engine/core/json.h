@@ -183,9 +183,14 @@ public:
   /// Unescaped string view (begin + length); false for non-strings.
   bool as_string(const JsonValue &value, const char **outBegin,
                  std::size_t *outLength) const noexcept;
-  /// Copies a decoded string value into a null-terminated output buffer.
-  bool copy_string(const JsonValue &value, char *out,
-                   std::size_t outCapacity) const noexcept;
+  /// Copies a decoded string value into a null-terminated output buffer,
+  /// truncating on overflow; outRequiredLength reports the full decoded length.
+  bool copy_string(const JsonValue &value, char *out, std::size_t outCapacity,
+                   std::size_t *outRequiredLength = nullptr) const noexcept;
+  /// Copies a decoded string value; fails with a cleared buffer instead of
+  /// truncating when the decoded string does not fit outCapacity.
+  bool copy_string_strict(const JsonValue &value, char *out,
+                          std::size_t outCapacity) const noexcept;
 
 private:
   /// Pushes an item onto the owning stack or queue for scratch.
