@@ -135,14 +135,12 @@ if(MSVC)
                 "CXX flags with default exception mode removed" FORCE)
         endif()
     endforeach()
-    add_compile_options(/W4 /WX /permissive- /GR- /EHs-c-)
-    # C4324: structure was padded due to alignment specifier — intentional for
-    # cache-aligned ECS data (Transform, WorldTransform, etc.).
-    add_compile_options(/wd4324)
     add_compile_definitions(_HAS_EXCEPTIONS=0)
-else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
 endif()
+
+# Warning/conformance flags are per-target: engine_apply_strict_compile_options
+# in cmake/EngineHelpers.cmake, applied by the module/executable helpers so
+# third-party FetchContent targets never inherit them.
 
 option(ENGINE_BUILD_TESTS "Build engine tests" ON)
 option(ENGINE_BUILD_TOOLS "Build engine tools" ON)

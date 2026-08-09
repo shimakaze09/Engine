@@ -176,7 +176,11 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
 `/fp:strict` / `-ffp-contract=off`), `ENGINE_SANITIZERS`,
 `ENGINE_BUILD_TESTS/TOOLS`. Helper functions live in
-`cmake/EngineHelpers.cmake` (module/static, header-only INTERFACE, exe, test).
+`cmake/EngineHelpers.cmake` (module/static, header-only INTERFACE, exe, test);
+they apply the warning/conformance flags per-target
+(`engine_apply_strict_compile_options`), so third-party FetchContent targets
+never inherit them — determinism, sanitizer, and platform-define flags stay
+directory-global by design.
 
 ## Repository map
 
