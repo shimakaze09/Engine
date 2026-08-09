@@ -31,8 +31,11 @@ bool process_pending_scene_op(World &world) noexcept;
 /// Decomposed engine main-loop pipeline.
 ///
 /// Each frame is split into named stages (input, play transitions, timing,
-/// scripting, assets, hot-reload, audio, simulation/frame-graph, post-frame,
-/// render, diagnostics, cleanup).  EnginePipeline owns the per-run resources
+/// scripting, assets, hot-reload, audio, animation, simulation graph, camera,
+/// render-prep graph, post-frame, render, diagnostics, cleanup, pacing).
+/// The camera stage runs between the last fixed step and render prep so
+/// culling and interpolation consume the frame's own camera.
+/// EnginePipeline owns the per-run resources
 /// (World, CommandBuffer, AssetDatabase, ...) and executes one frame at a time.
 ///
 /// Typical usage (from engine::run):

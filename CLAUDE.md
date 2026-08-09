@@ -233,9 +233,12 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
   builder made a ConvexHull payload; `World::add_collider` rebuilds it on
   every install path — scene/prefab load, world copy, editor undo — while
   Heightfield payloads remain unserialized, test-only reachable),
-  `EnginePipeline` (15 named frame stages, fixed 1/60 step, job-graph frame;
-  animation evaluates per fixed step BEFORE the frame graph so render prep
-  bakes current-frame palette slots; frame pacing waits out r_max_fps as
+  `EnginePipeline` (17 named frame stages, fixed 1/60 step, job-graph frame
+  split into a simulation graph and a render-prep graph; animation evaluates
+  per fixed step BEFORE the simulation graph so render prep bakes
+  current-frame palette slots; the camera stage runs spring arms and camera
+  evaluation between the last fixed step and render prep so culling and
+  interpolation see the frame's camera; frame pacing waits out r_max_fps as
   the final stage),
   `World` ECS (14 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
@@ -301,8 +304,10 @@ options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 - Frame: every fixed step has one explicit dependency chain:
   `begin[n]` → all update/physics work → collision resolve → `commit[n]` →
   `begin[n+1]`. The happens-before relation must hold for zero jobs, disabled
-  systems, submission failure, catch-up steps, and every worker count. Then
-  render-prep jobs fill per-thread command buffers merged for the GL flush.
+  systems, submission failure, catch-up steps, and every worker count. After
+  the last commit, transform propagation and camera/spring-arm publication
+  run on the main thread before any render-prep job; then render-prep jobs
+  fill per-thread command buffers merged for the GL flush.
   Preserve deterministic stepping and thread-count independence, and test the
   production pipeline rather than a copied scheduler model.
 - Serialization has one authoritative persistent-component registry from

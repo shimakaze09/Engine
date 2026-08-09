@@ -473,7 +473,9 @@ struct EnginePipeline::Impl final {
   void stage_hot_reload() noexcept;
   void stage_audio() noexcept;
   void stage_animation() noexcept;
-  bool stage_frame_graph() noexcept;
+  bool stage_simulation_graph() noexcept;
+  void stage_camera() noexcept;
+  bool stage_render_prep_graph() noexcept;
   void stage_post_frame() noexcept;
   void stage_measure_frame() noexcept;
   void stage_render() noexcept;
@@ -629,7 +631,12 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   stage_animation();
 
   if (runFrameGraph) {
-    if (!stage_frame_graph()) {
+    if (!stage_simulation_graph()) {
+      core::profiler_end_frame();
+      return false;
+    }
+    stage_camera();
+    if (!stage_render_prep_graph()) {
       core::profiler_end_frame();
       return false;
     }
@@ -785,8 +792,8 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 //     the time the world actually advanced. Passing the bare fixed delta made
 //     timers and script-driven motion run slow whenever catch-up stepped more
 //     than once.
-// Not yet addressed: spring-arm/camera work still runs after the frame graph,
-// so render prep culls against the previous frame's camera (see stage_post_frame).
+// Spring-arm/camera work runs in stage_camera, between the last fixed step
+// and render prep, so culling and interpolation see this frame's camera.
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_scripting() noexcept {
@@ -878,11 +885,17 @@ void EnginePipeline::Impl::stage_animation() noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// Stage: frame graph (job submission + execution)
+// Stage: simulation graph (fixed-step job submission + execution; ends the
+// graph after the last commit so the camera stage can run before render prep)
 // Returns false on fatal error; sets running = false internally.
 // ---------------------------------------------------------------------------
 
-bool EnginePipeline::Impl::stage_frame_graph() noexcept {
+bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
+  frameContext->frameGraphFailed.store(false, std::memory_order_release);
+  if (updateStepCount == 0U) {
+    return true;
+  }
+
   if (!core::begin_frame_graph()) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to begin frame graph");
@@ -893,12 +906,8 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
   std::size_t updateJobCursor = 0U;
   std::size_t physicsJobCursor = 0U;
   std::size_t phaseJobCursor = 0U;
-  frameContext->frameGraphFailed.store(false, std::memory_order_release);
 
-  const bool hasSimulationSteps = updateStepCount > 0U;
-  if (hasSimulationSteps) {
-    world->begin_update_phase();
-  }
+  world->begin_update_phase();
 
   core::JobHandle previousUpdateCommit{};
   bool graphFailed = false;
@@ -1078,15 +1087,93 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
     previousUpdateCommit = commitHandle;
   }
 
+  if (graphFailed) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "job graph assembly failed");
+    running = false;
+    static_cast<void>(core::end_frame_graph());
+    return false;
+  }
+
+  core::wait(previousUpdateCommit);
+  const bool stepJobsFailed =
+      frameContext->frameGraphFailed.load(std::memory_order_acquire);
+  if (!core::end_frame_graph()) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to end frame graph");
+    running = false;
+    return false;
+  }
+
+  if (stepJobsFailed) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "frame graph job execution failed");
+    running = false;
+    return false;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Stage: camera (propagates world transforms, then runs spring arms and
+// camera evaluation so render prep culls with this frame's camera; the
+// per-frame cadence contract above stage_scripting applies)
+// ---------------------------------------------------------------------------
+
+void EnginePipeline::Impl::stage_camera() noexcept {
+  world->begin_transform_phase();
+
+  if (!isPlaying) {
+    return;
+  }
+
+  runtime::update_spring_arm_cameras(*world,
+                                     static_cast<float>(step_seconds()));
+  math::Vec3 camPos, camTarget, camUp;
+  float camFov = 0.0F;
+  float camNear = 0.0F;
+  float camFar = 0.0F;
+  world->camera_manager().evaluate(static_cast<float>(step_seconds()),
+                                   &camPos, &camTarget, &camUp, &camFov,
+                                   &camNear, &camFar);
+  if (world->camera_manager().camera_count() > 0U) {
+    renderer::CameraState cam{};
+    cam.position = camPos;
+    cam.target = camTarget;
+    cam.up = camUp;
+    cam.fovRadians = camFov;
+    cam.nearPlane = camNear;
+    cam.farPlane = camFar;
+    renderer::set_active_camera(cam);
+  }
+
+  previousCameraSample =
+      cameraSampleValid ? currentCameraSample : renderer::get_active_camera();
+  currentCameraSample = renderer::get_active_camera();
+  cameraSampleValid = true;
+}
+
+// ---------------------------------------------------------------------------
+// Stage: render prep graph (render-prep/render phase jobs + command buffers)
+// Returns false on fatal error; sets running = false internally.
+// ---------------------------------------------------------------------------
+
+bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
+  if (!core::begin_frame_graph()) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "failed to begin frame graph");
+    running = false;
+    return false;
+  }
+
+  std::size_t phaseJobCursor = 0U;
+  bool graphFailed = false;
+
   core::JobHandle renderPrepPhaseHandle =
       submit_world_phase_job(frameContext.get(), world.get(), &phaseJobCursor,
                              &begin_render_prep_phase_job);
   if (!core::is_valid_handle(renderPrepPhaseHandle)) {
-    graphFailed = true;
-  }
-
-  if (!graphFailed && core::is_valid_handle(previousUpdateCommit) &&
-      !link_dependency(previousUpdateCommit, renderPrepPhaseHandle)) {
     graphFailed = true;
   }
 
@@ -1166,17 +1253,7 @@ bool EnginePipeline::Impl::stage_frame_graph() noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// Stage: post-frame (collision callbacks, end-play, spring arm, scene ops)
-//
-// Spring arms and camera evaluation are per-frame systems and take
-// step_seconds() (see the cadence contract above stage_scripting). They run
-// here, after the frame graph, so they observe this frame's simulated
-// transforms — but render prep inside the frame graph has already culled
-// against renderer::get_active_camera(), i.e. the camera this stage published
-// last frame. Closing that one-frame staleness means splitting the frame
-// graph so camera work lands between the last fixed step and render prep;
-// that restructure is deliberately not attempted here because it changes the
-// step -> render-prep dependency chain the frame-graph order tests pin.
+// Stage: post-frame (collision callbacks, end-play, scene ops)
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_post_frame() noexcept {
@@ -1193,33 +1270,6 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
   }
 
   scripting::flush_deferred_mutations();
-
-  if (isPlaying) {
-    runtime::update_spring_arm_cameras(*world,
-                                       static_cast<float>(step_seconds()));
-    math::Vec3 camPos, camTarget, camUp;
-    float camFov = 0.0F;
-    float camNear = 0.0F;
-    float camFar = 0.0F;
-    world->camera_manager().evaluate(static_cast<float>(step_seconds()),
-                                     &camPos, &camTarget, &camUp, &camFov,
-                                     &camNear, &camFar);
-    if (world->camera_manager().camera_count() > 0U) {
-      renderer::CameraState cam{};
-      cam.position = camPos;
-      cam.target = camTarget;
-      cam.up = camUp;
-      cam.fovRadians = camFov;
-      cam.nearPlane = camNear;
-      cam.farPlane = camFar;
-      renderer::set_active_camera(cam);
-    }
-
-    previousCameraSample =
-        cameraSampleValid ? currentCameraSample : renderer::get_active_camera();
-    currentCameraSample = renderer::get_active_camera();
-    cameraSampleValid = true;
-  }
 
   static_cast<void>(runtime::process_pending_scene_op(*world));
 }

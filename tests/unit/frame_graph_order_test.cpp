@@ -1,10 +1,12 @@
-// Pins the fixed-step catch-up DAG ordering contract (audit C-02): each
-// catch-up step's begin job completes before any of that step's update
-// jobs starts, all updates complete before the step's commit, and each
-// commit completes before the next step's begin. The test wires the exact
-// dependency shape engine_pipeline builds for multi-step frames onto the
-// real job system and proves the scheduler cannot interleave phase
-// preparation with chunk work across many randomized runs.
+// Pins the fixed-step catch-up DAG ordering contract (audit C-02) and the
+// split-frame contract (issue #78): each catch-up step's begin job completes
+// before any of that step's update jobs starts, all updates complete before
+// the step's commit, and each commit completes before the next step's begin;
+// the frame then splits into two graphs — the simulation graph is waited out
+// after the last commit, the main thread publishes the camera, and only then
+// does the render-prep graph run, so every render-prep job observes the
+// frame's camera. The test wires the exact dependency shape engine_pipeline
+// builds onto the real job system across many randomized runs.
 
 #include "engine/core/job_system.h"
 
@@ -336,6 +338,129 @@ int run_zero_chunk_round(ZeroChunkStepState *steps,
   return 0;
 }
 
+/// Shared state for the split-frame round: sim graph, then main-thread
+/// camera publish, then the render-prep graph.
+struct SplitFrameState final {
+  std::atomic<bool> lastCommitDone{false};
+  std::atomic<bool> cameraPublished{false};
+  std::atomic<bool> prepBeginDone{false};
+  std::atomic<int> prepChunksDone{0};
+  std::atomic<int> violations{0};
+};
+
+/// Sim commit marker for the split round; the last one flags completion.
+void split_commit_job(void *userData) noexcept {
+  auto *state = static_cast<SplitFrameState *>(userData);
+  if (state->cameraPublished.load(std::memory_order_acquire)) {
+    state->violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  state->lastCommitDone.store(true, std::memory_order_release);
+}
+
+/// Render-prep phase marker: the camera must already be published.
+void split_prep_begin_job(void *userData) noexcept {
+  auto *state = static_cast<SplitFrameState *>(userData);
+  if (!state->cameraPublished.load(std::memory_order_acquire) ||
+      !state->lastCommitDone.load(std::memory_order_acquire)) {
+    state->violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  state->prepBeginDone.store(true, std::memory_order_release);
+}
+
+/// Render-prep chunk marker: the prep phase begin must have completed.
+void split_prep_chunk_job(void *userData) noexcept {
+  auto *state = static_cast<SplitFrameState *>(userData);
+  if (!state->prepBeginDone.load(std::memory_order_acquire) ||
+      !state->cameraPublished.load(std::memory_order_acquire)) {
+    state->violations.fetch_add(1, std::memory_order_relaxed);
+  }
+  state->prepChunksDone.fetch_add(1, std::memory_order_acq_rel);
+}
+
+/// Runs one split frame mirroring the pipeline: simulation graph waited out
+/// after the last commit, main-thread camera publish, render-prep graph.
+int run_split_frame_round(SplitFrameState *state) noexcept {
+  state->lastCommitDone.store(false);
+  state->cameraPublished.store(false);
+  state->prepBeginDone.store(false);
+  state->prepChunksDone.store(0);
+  state->violations.store(0);
+
+  if (!engine::core::begin_frame_graph()) {
+    return 60;
+  }
+
+  engine::core::JobHandle previousCommit{};
+  for (std::size_t step = 0U; step < kSteps; ++step) {
+    engine::core::Job commit{};
+    commit.function = &split_commit_job;
+    commit.data = state;
+    const engine::core::JobHandle commitHandle = engine::core::submit(commit);
+    if (!engine::core::is_valid_handle(commitHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 61;
+    }
+    if (engine::core::is_valid_handle(previousCommit) &&
+        !engine::core::add_dependency(previousCommit, commitHandle)) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 62;
+    }
+    previousCommit = commitHandle;
+  }
+
+  engine::core::wait(previousCommit);
+  if (!engine::core::end_frame_graph()) {
+    return 63;
+  }
+
+  if (!state->lastCommitDone.load(std::memory_order_acquire)) {
+    return 64;
+  }
+  state->cameraPublished.store(true, std::memory_order_release);
+
+  if (!engine::core::begin_frame_graph()) {
+    return 65;
+  }
+
+  engine::core::Job prepBegin{};
+  prepBegin.function = &split_prep_begin_job;
+  prepBegin.data = state;
+  const engine::core::JobHandle prepBeginHandle =
+      engine::core::submit(prepBegin);
+  if (!engine::core::is_valid_handle(prepBeginHandle)) {
+    static_cast<void>(engine::core::end_frame_graph());
+    return 66;
+  }
+
+  engine::core::JobHandle chunkHandles[kChunks]{};
+  for (std::size_t chunk = 0U; chunk < kChunks; ++chunk) {
+    engine::core::Job prepChunk{};
+    prepChunk.function = &split_prep_chunk_job;
+    prepChunk.data = state;
+    chunkHandles[chunk] = engine::core::submit(prepChunk);
+    if (!engine::core::is_valid_handle(chunkHandles[chunk]) ||
+        !engine::core::add_dependency(prepBeginHandle, chunkHandles[chunk])) {
+      static_cast<void>(engine::core::end_frame_graph());
+      return 67;
+    }
+  }
+
+  for (std::size_t chunk = 0U; chunk < kChunks; ++chunk) {
+    engine::core::wait(chunkHandles[chunk]);
+  }
+  if (!engine::core::end_frame_graph()) {
+    return 68;
+  }
+
+  if (state->prepChunksDone.load() != static_cast<int>(kChunks)) {
+    return 70;
+  }
+  if (state->violations.load() != 0) {
+    return 69;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -349,6 +474,7 @@ int main() {
   static MarkerData markers[kSteps * (kChunks + 2U)];
   static ZeroChunkStepState zeroChunkSteps[kSteps];
   static ZeroChunkMarkerData zeroChunkMarkers[kSteps * 3U];
+  static SplitFrameState splitFrameState;
 
   int result = 0;
   for (int iteration = 0; iteration < kIterations; ++iteration) {
@@ -360,6 +486,13 @@ int main() {
       break;
     }
     result = run_zero_chunk_round(zeroChunkSteps, zeroChunkMarkers);
+    if (result != 0) {
+      std::fprintf(stderr,
+                   "frame_graph_order_test failed: %d (iteration %d)\n",
+                   result, iteration);
+      break;
+    }
+    result = run_split_frame_round(&splitFrameState);
     if (result != 0) {
       std::fprintf(stderr,
                    "frame_graph_order_test failed: %d (iteration %d)\n",

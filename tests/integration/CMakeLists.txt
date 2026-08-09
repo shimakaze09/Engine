@@ -9,6 +9,15 @@ engine_add_test_executable(engine_integration_ecs
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_camera_prep
+    SOURCES
+    pipeline_camera_prep_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    gpu;integration
+)
+
 engine_add_test_executable(engine_integration_vertical_slice
     SOURCES
     vertical_slice_integration.cpp
