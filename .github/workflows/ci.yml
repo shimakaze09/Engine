@@ -161,6 +161,9 @@ jobs:
       - name: Audit comment quality
         run: python3 tools/check_comment_quality.py
 
+      - name: Audit asset metadata paths
+        run: python3 tools/ci/check_asset_metadata_paths.py
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 
@@ -508,40 +511,12 @@ jobs:
           cat bench_results/physics.json
 
       - name: Perf regression check (>10% regression = fail)
-        run: |
-          python3 -c "
-          import json, math, sys
-
-          baseline = json.loads(open('tests/benchmark/perf_baseline.json').read())
-          ecs = json.loads(open('bench_results/ecs.json').read())
-          phys = json.loads(open('bench_results/physics.json').read())
-
-          failed = False
-          threshold = 1.10  # 10% regression
-
-          def check(name, current, base):
-              global failed
-              if not math.isfinite(current) or current <= 0:
-                  print(f'  FAIL: {name} measurement must be positive and finite, got {current}')
-                  failed = True
-                  return
-              if not math.isfinite(base) or base <= 0:
-                  print(f'  FAIL: {name} baseline must be positive and finite, got {base}')
-                  failed = True
-                  return
-              ratio = current / base
-              print(f'{name}: {current:.3f}ms (baseline: {base:.3f}ms, ratio: {ratio:.2f}x)')
-              if ratio > threshold:
-                  print(f'  FAIL: {name} regression {ratio:.2f}x > {threshold}x')
-                  failed = True
-
-          check('ECS', float(ecs['ecs_iterate_ms']), float(baseline['ecs_iterate_ms']))
-          check('Physics', float(phys['physics_step_ms']), float(baseline['physics_step_ms']))
-
-          if failed:
-              sys.exit(1)
-          print('PASS: no performance regressions detected')
-          "
+        run: >
+          python3 tools/ci/run_perf_gate.py
+          --build-dir build
+          --baseline tests/benchmark/perf_baseline.json
+          --threshold 0.10
+          --attempts 3
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v7

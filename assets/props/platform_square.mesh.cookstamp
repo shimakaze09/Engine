@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH e432b5c62177b5d1
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 9fe49d586e5b84dd assets/props/platform_square.bin
+OUTPUT f5fb367d0ebcc867 assets/props/platform_square.mesh
+OUTPUT 31f0ec799e931575 assets/props/platform_square.mesh.meta.json
+OUTPUT d796cdb66134c0ec assets/props/platform_square.mesh.hull
+OUTPUT 82d91682aeabdaa1 assets/props/.thumbnails/platform_square.mesh.png
+OUTPUT 2b865d25539a15f7 assets/props/.thumbnails/platform_square.mesh.checksum

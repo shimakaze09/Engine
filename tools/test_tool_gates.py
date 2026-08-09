@@ -2,7 +2,9 @@
 # Self-tests for the tooling quality gates (audit M-27): the coverage
 # gate must reject NaN/missing/non-numeric reports and thresholds, the
 # perf gate's evaluate() must reject non-finite or non-positive
-# measurements and baselines, and the Lua binding generator must reject
+# measurements and baselines, the asset metadata path audit must flag
+# absolute developer paths while passing repo-relative ones (audit L-03),
+# and the Lua binding generator must reject
 # duplicate Lua names and invalid or reserved parameter identifiers
 # instead of emitting uncompilable or injected C++. Run from ctest as
 # engine_integration_tool_gates.
@@ -77,6 +79,43 @@ def test_perf_gate_evaluate():
           "perf: infinite baseline fails")
 
 
+def test_metadata_path_check():
+    spec = importlib.util.spec_from_file_location(
+        "check_asset_metadata_paths",
+        TOOLS / "ci" / "check_asset_metadata_paths.py")
+    meta = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(meta)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        windows_abs = tmp / "windows.meta.json"
+        windows_abs.write_text(
+            '{"source":"D:\\\\dev\\\\Engine\\\\assets\\\\a.gltf"}',
+            encoding="utf-8")
+        unix_abs = tmp / "unix.meta.json"
+        unix_abs.write_text('{"source":"/home/dev/Engine/assets/a.gltf"}',
+                            encoding="utf-8")
+        relative = tmp / "relative.meta.json"
+        relative.write_text('{"source":"assets/props/a.gltf",'
+                            '"output":"assets/props/a.mesh"}',
+                            encoding="utf-8")
+        scheme = tmp / "scheme.meta.json"
+        scheme.write_text('{"source":"asset://props/a.gltf"}',
+                          encoding="utf-8")
+
+        check(meta.scan_file(windows_abs),
+              "metadata: Windows drive path is flagged")
+        check(meta.scan_file(unix_abs),
+              "metadata: Unix home path is flagged")
+        check(not meta.scan_file(relative),
+              "metadata: repo-relative paths pass")
+        check(not meta.scan_file(scheme),
+              "metadata: URI scheme is not a drive letter")
+
+    check(meta.main() == 0,
+          "metadata: tracked asset metadata is free of absolute paths")
+
+
 def test_binding_generator():
     gen = str(TOOLS / "binding_generator" / "generate_bindings.py")
     with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +150,7 @@ def test_binding_generator():
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
+    test_metadata_path_check()
     test_binding_generator()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")

@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH b33ad618bcfc59db
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH f861730af68cfd55 assets/props/coin.bin
+OUTPUT 4bf3ac429b207be3 assets/props/coin.mesh
+OUTPUT b9740235b5571ccd assets/props/coin.mesh.meta.json
+OUTPUT a3936b41ab788aaf assets/props/coin.mesh.hull
+OUTPUT 1ce35b1bfb2d7102 assets/props/.thumbnails/coin.mesh.png
+OUTPUT 668909908fc8b94f assets/props/.thumbnails/coin.mesh.checksum

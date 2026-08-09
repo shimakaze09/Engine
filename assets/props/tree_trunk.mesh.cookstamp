@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 8b177392c0193e5a
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH e8730bcca485fbdd assets/props/tree_trunk.bin
+OUTPUT 594a2a30ab47c11b assets/props/tree_trunk.mesh
+OUTPUT 89ca0a9c53c77fb9 assets/props/tree_trunk.mesh.meta.json
+OUTPUT b7fcebe94358f8a0 assets/props/tree_trunk.mesh.hull
+OUTPUT f1f5e5d3e6371cb0 assets/props/.thumbnails/tree_trunk.mesh.png
+OUTPUT 7a1d03d3d0cf1e42 assets/props/.thumbnails/tree_trunk.mesh.checksum

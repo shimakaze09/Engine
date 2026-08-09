@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 59189787ecf4e7c2
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH f04f63cb60644edd assets/props/crate.bin
+OUTPUT 65616304a1a9903b assets/props/crate.mesh
+OUTPUT 3e44856362c5fb3e assets/props/crate.mesh.meta.json
+OUTPUT cdf060eed910e7b8 assets/props/crate.mesh.hull
+OUTPUT 9ba4e63d48fcc8a0 assets/props/.thumbnails/crate.mesh.png
+OUTPUT 7c7af3805f6e5317 assets/props/.thumbnails/crate.mesh.checksum

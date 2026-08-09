@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH dbef8deb5d5e56b5
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 3d414d11b9145bcd assets/props/bush.bin
+OUTPUT c2b85e210c373767 assets/props/bush.mesh
+OUTPUT 1bf9639a98d6d605 assets/props/bush.mesh.meta.json
+OUTPUT 011114cafea7dae8 assets/props/bush.mesh.hull
+OUTPUT 9b6ee3f96251957a assets/props/.thumbnails/bush.mesh.png
+OUTPUT 68070d4f7898e922 assets/props/.thumbnails/bush.mesh.checksum

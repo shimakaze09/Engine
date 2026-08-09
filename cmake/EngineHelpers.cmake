@@ -6,6 +6,16 @@ function(engine_set_cxx23 target visibility)
     target_compile_features(${target} ${visibility} cxx_std_23)
 endfunction()
 
+# Applies first-party warning/conformance flags (third-party never inherits; /wd4324 allows intentional alignment padding).
+function(engine_apply_strict_compile_options target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /WX /permissive- /GR- /EHs-c- /wd4324)
+    else()
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+    endif()
+endfunction()
+
 function(engine_add_module_library target)
     set(options)
     set(oneValueArgs PCH)
@@ -18,6 +28,7 @@ function(engine_add_module_library target)
 
     add_library(${target} STATIC ${ENGINE_MOD_SOURCES})
     engine_set_cxx23(${target} PUBLIC)
+    engine_apply_strict_compile_options(${target})
 
     if(ENGINE_MOD_PUBLIC_INCLUDE_DIRS)
         target_include_directories(${target} PUBLIC ${ENGINE_MOD_PUBLIC_INCLUDE_DIRS})
@@ -70,6 +81,7 @@ function(engine_add_executable_target target)
 
     add_executable(${target} ${ENGINE_EXE_SOURCES})
     engine_set_cxx23(${target} PRIVATE)
+    engine_apply_strict_compile_options(${target})
 
     if(ENGINE_EXE_PUBLIC_INCLUDE_DIRS)
         target_include_directories(${target} PUBLIC ${ENGINE_EXE_PUBLIC_INCLUDE_DIRS})

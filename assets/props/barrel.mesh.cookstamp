@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 628cbf6f1afcaccb
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH da1beb72257e6729 assets/props/barrel.bin
+OUTPUT 760c984d5c2b3b7c assets/props/barrel.mesh
+OUTPUT 243e40bf685fd02c assets/props/barrel.mesh.meta.json
+OUTPUT 99d5540acc22b734 assets/props/barrel.mesh.hull
+OUTPUT a9f05fa1a7b1571c assets/props/.thumbnails/barrel.mesh.png
+OUTPUT 96645d0f8ad56ade assets/props/.thumbnails/barrel.mesh.checksum

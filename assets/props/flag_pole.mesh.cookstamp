@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH e58b53a32e34fb14
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH e18bdb103e0d7189 assets/props/flag_pole.bin
+OUTPUT abf95e8124062ce3 assets/props/flag_pole.mesh
+OUTPUT 39e24f61cc452368 assets/props/flag_pole.mesh.meta.json
+OUTPUT f82b0290bc443818 assets/props/flag_pole.mesh.hull
+OUTPUT d9ad99a29a8b6a3f assets/props/.thumbnails/flag_pole.mesh.png
+OUTPUT 8e7b46ecae26621a assets/props/.thumbnails/flag_pole.mesh.checksum

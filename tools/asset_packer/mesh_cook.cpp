@@ -360,6 +360,25 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   return true;
 }
 
+/// Relativizes a cook path against the working directory with forward
+/// slashes so tracked metadata never embeds a developer machine's absolute
+/// paths (audit L-03); paths outside the working tree stay as given.
+static std::string portable_metadata_path(const char *path) {
+  namespace fs = std::filesystem;
+  const fs::path input{path != nullptr ? path : ""};
+  std::error_code ec{};
+  const fs::path cwd = fs::current_path(ec);
+  fs::path result = input.lexically_normal();
+  if (!ec) {
+    const fs::path relative = fs::proximate(input, cwd, ec);
+    if (!ec && !relative.empty() &&
+        (relative.begin()->generic_string() != "..")) {
+      result = relative.lexically_normal();
+    }
+  }
+  return result.generic_string();
+}
+
 /// Writes metadata file data.
 bool write_metadata_file(const char *inputPath, const char *outputPath,
                          const PrimitiveData &data, std::uint64_t sourceHash,
@@ -406,8 +425,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   writer.write_uint("schemaVersion", 2U);
   writer.write_string("assetId", sourceHashText);
   writer.write_string("typeTag", "mesh");
-  writer.write_string("source", inputPath);
-  writer.write_string("output", outputPath);
+  const std::string portableSource = portable_metadata_path(inputPath);
+  const std::string portableOutput = portable_metadata_path(outputPath);
+  writer.write_string("source", portableSource.c_str());
+  writer.write_string("output", portableOutput.c_str());
   writer.write_string("assetFormat", "engine.mesh");
   writer.write_uint("assetFormatVersion",
                     data.hasSkin
@@ -424,8 +445,10 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
   for (const DependencyDigest &dependency : dependencies) {
     char dependencyHashText[17] = {};
     format_hex_u64(dependency.hash, dependencyHashText);
+    const std::string portableDependency =
+        portable_metadata_path(dependency.path.c_str());
     writer.begin_object();
-    writer.write_string("path", dependency.path.c_str());
+    writer.write_string("path", portableDependency.c_str());
     writer.write_string("hash", dependencyHashText);
     writer.end_object();
   }

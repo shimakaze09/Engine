@@ -1,5 +1,7 @@
-// Verifies ecs perf test behavior for the Engine test suite.
+// Benchmarks ECS sparse-set iteration: warm-up passes plus a median over
+// repeated samples so one-off scheduler jitter cannot skew the gate metric.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +29,13 @@ struct BenchRigidBody final {
 };
 
 constexpr std::size_t kEntityCount = 50000U;
+constexpr std::size_t kWarmupPasses = 3U;
+constexpr std::size_t kSamplePasses = 15U;
+
+using TransformSet = engine::core::SparseSet<BenchEntity, BenchTransform,
+                                             kEntityCount, kEntityCount>;
+using RigidBodySet = engine::core::SparseSet<BenchEntity, BenchRigidBody,
+                                             kEntityCount, kEntityCount>;
 
 /// Parses text into the engine representation for json out.
 bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
@@ -44,16 +53,55 @@ bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
   return true;
 }
 
-/// Runs the configured command, loop, or tool for benchmark.
-bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
+/// Returns the median of count samples, sorting them in place.
+double median_of(double *samples, std::size_t count) noexcept {
+  std::sort(samples, samples + count);
+  const std::size_t mid = count / 2U;
+  if ((count % 2U) == 0U) {
+    return 0.5 * (samples[mid - 1U] + samples[mid]);
+  }
+  return samples[mid];
+}
+
+/// Times a single iteration pass over both component sets.
+bool measure_pass(const TransformSet &transforms,
+                  const RigidBodySet &rigidBodies, double *outIterMs,
+                  std::size_t *outVisited) noexcept {
   if ((outIterMs == nullptr) || (outVisited == nullptr)) {
     return false;
   }
 
-  using TransformSet = engine::core::SparseSet<BenchEntity, BenchTransform,
-                                               kEntityCount, kEntityCount>;
-  using RigidBodySet = engine::core::SparseSet<BenchEntity, BenchRigidBody,
-                                               kEntityCount, kEntityCount>;
+  const auto start = Clock::now();
+  std::size_t visited = 0U;
+  float checksum = 0.0F;
+
+  for (std::size_t i = 0U; i < transforms.count(); ++i) {
+    const BenchEntity entity = transforms.entity_at(i);
+    const BenchRigidBody *body = rigidBodies.get_ptr(entity);
+    if (body == nullptr) {
+      continue;
+    }
+
+    const BenchTransform &transform = transforms.component_at(i);
+    checksum += transform.position.x + transform.position.z + body->velocity.x;
+    ++visited;
+  }
+
+  const auto end = Clock::now();
+  if (checksum <= 0.0F) {
+    return false;
+  }
+
+  *outIterMs = std::chrono::duration<double, std::milli>(end - start).count();
+  *outVisited = visited;
+  return visited == kEntityCount;
+}
+
+/// Populates the sets, warms up, then reports the median sampled pass time.
+bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
+  if ((outIterMs == nullptr) || (outVisited == nullptr)) {
+    return false;
+  }
 
   auto transforms =
       std::unique_ptr<TransformSet>(new (std::nothrow) TransformSet());
@@ -79,33 +127,21 @@ bool run_benchmark(double *outIterMs, std::size_t *outVisited) noexcept {
     }
   }
 
-  const auto start = Clock::now();
+  double samples[kSamplePasses] = {};
   std::size_t visited = 0U;
-  float checksum = 0.0F;
-
-  for (std::size_t i = 0U; i < transforms->count(); ++i) {
-    const BenchEntity entity = transforms->entity_at(i);
-    const BenchRigidBody *body = rigidBodies->get_ptr(entity);
-    if (body == nullptr) {
-      continue;
+  for (std::size_t pass = 0U; pass < (kWarmupPasses + kSamplePasses); ++pass) {
+    double passMs = 0.0;
+    if (!measure_pass(*transforms, *rigidBodies, &passMs, &visited)) {
+      return false;
     }
-
-    const BenchTransform &transform = transforms->component_at(i);
-    checksum += transform.position.x + transform.position.z + body->velocity.x;
-    ++visited;
+    if (pass >= kWarmupPasses) {
+      samples[pass - kWarmupPasses] = passMs;
+    }
   }
 
-  const auto end = Clock::now();
-  const double iterMs =
-      std::chrono::duration<double, std::milli>(end - start).count();
-
-  if (checksum <= 0.0F) {
-    return false;
-  }
-
-  *outIterMs = iterMs;
+  *outIterMs = median_of(samples, kSamplePasses);
   *outVisited = visited;
-  return visited == kEntityCount;
+  return true;
 }
 
 /// Writes json data.
@@ -130,9 +166,11 @@ bool write_json(const char *path, double iterMs, std::size_t visited) noexcept {
                                  "{\n"
                                  "  \"benchmark\": \"ecs\",\n"
                                  "  \"entities\": %zu,\n"
+                                 "  \"warmup_passes\": %zu,\n"
+                                 "  \"sample_passes\": %zu,\n"
                                  "  \"ecs_iterate_ms\": %.6f\n"
                                  "}\n",
-                                 visited, iterMs);
+                                 visited, kWarmupPasses, kSamplePasses, iterMs);
 
   std::fclose(file);
   return wrote > 0;
@@ -160,6 +198,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::printf("[ecs_perf] entities=%zu iterate_ms=%.6f\n", visited, iterMs);
+  std::printf("[ecs_perf] entities=%zu warmup=%zu samples=%zu "
+              "median_iterate_ms=%.6f\n",
+              visited, kWarmupPasses, kSamplePasses, iterMs);
   return 0;
 }

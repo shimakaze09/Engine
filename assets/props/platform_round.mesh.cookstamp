@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH a198e1f5fc503231
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH c966a5c8dca3c545 assets/props/platform_round.bin
+OUTPUT e9f4e2ce4f799b43 assets/props/platform_round.mesh
+OUTPUT f424fcef345cf5ef assets/props/platform_round.mesh.meta.json
+OUTPUT 78e3b97f3284f09f assets/props/platform_round.mesh.hull
+OUTPUT aec7779e60b101ce assets/props/.thumbnails/platform_round.mesh.png
+OUTPUT 499ded107f959c73 assets/props/.thumbnails/platform_round.mesh.checksum

@@ -1,0 +1,313 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 28,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "ninja-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "debug-base",
+            "hidden": true,
+            "inherits": "ninja-base",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release-base",
+            "hidden": true,
+            "inherits": "ninja-base",
+            "binaryDir": "${sourceDir}/build-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "ENGINE_BUILD_TESTS": "ON"
+            }
+        },
+        {
+            "name": "windows-clang-cl-debug",
+            "displayName": "Windows clang-cl Debug",
+            "description": "Documented Windows flow: clang-cl + Ninja into build/",
+            "inherits": "debug-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang-cl",
+                "CMAKE_CXX_COMPILER": "clang-cl"
+            }
+        },
+        {
+            "name": "windows-clang-cl-release",
+            "displayName": "Windows clang-cl Release",
+            "description": "Release benchmark builds into build-release/",
+            "inherits": "release-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang-cl",
+                "CMAKE_CXX_COMPILER": "clang-cl"
+            }
+        },
+        {
+            "name": "linux-clang-debug",
+            "displayName": "Linux clang Debug",
+            "description": "Documented Linux flow: clang + Ninja into build/",
+            "inherits": "debug-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "linux-clang-release",
+            "displayName": "Linux clang Release",
+            "description": "Release benchmark builds into build-release/",
+            "inherits": "release-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "linux-gcc-debug",
+            "displayName": "Linux gcc Debug",
+            "description": "Linux gcc + Ninja into build/ (CI werror lane compiler)",
+            "inherits": "debug-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++"
+            }
+        },
+        {
+            "name": "linux-gcc-release",
+            "displayName": "Linux gcc Release",
+            "description": "Release benchmark builds into build-release/",
+            "inherits": "release-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++"
+            }
+        },
+        {
+            "name": "macos-clang-debug",
+            "displayName": "macOS clang Debug",
+            "description": "Documented macOS flow: clang + Ninja into build/",
+            "inherits": "debug-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "macos-clang-release",
+            "displayName": "macOS clang Release",
+            "description": "Release benchmark builds into build-release/",
+            "inherits": "release-base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
+            "name": "linux-clang-asan",
+            "displayName": "Linux clang ASAN+UBSAN",
+            "description": "Documented sanitizer lane: adds ENGINE_SANITIZERS=ON to the Debug flow",
+            "inherits": "linux-clang-debug",
+            "binaryDir": "${sourceDir}/build-asan",
+            "cacheVariables": {
+                "ENGINE_SANITIZERS": "ON"
+            }
+        },
+        {
+            "name": "linux-gcc-asan",
+            "displayName": "Linux gcc ASAN+UBSAN",
+            "description": "Documented sanitizer lane: adds ENGINE_SANITIZERS=ON to the Debug flow",
+            "inherits": "linux-gcc-debug",
+            "binaryDir": "${sourceDir}/build-asan",
+            "cacheVariables": {
+                "ENGINE_SANITIZERS": "ON"
+            }
+        },
+        {
+            "name": "linux-gcc-nodetfp",
+            "displayName": "Linux gcc Debug, deterministic floats off",
+            "description": "Debug flow with ENGINE_DETERMINISTIC_FLOATS=OFF for float-flag comparisons",
+            "inherits": "linux-gcc-debug",
+            "binaryDir": "${sourceDir}/build-nodetfp",
+            "cacheVariables": {
+                "ENGINE_DETERMINISTIC_FLOATS": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-clang-cl-debug",
+            "configurePreset": "windows-clang-cl-debug"
+        },
+        {
+            "name": "windows-clang-cl-release",
+            "configurePreset": "windows-clang-cl-release"
+        },
+        {
+            "name": "linux-clang-debug",
+            "configurePreset": "linux-clang-debug"
+        },
+        {
+            "name": "linux-clang-release",
+            "configurePreset": "linux-clang-release"
+        },
+        {
+            "name": "linux-gcc-debug",
+            "configurePreset": "linux-gcc-debug"
+        },
+        {
+            "name": "linux-gcc-release",
+            "configurePreset": "linux-gcc-release"
+        },
+        {
+            "name": "macos-clang-debug",
+            "configurePreset": "macos-clang-debug"
+        },
+        {
+            "name": "macos-clang-release",
+            "configurePreset": "macos-clang-release"
+        },
+        {
+            "name": "linux-clang-asan",
+            "configurePreset": "linux-clang-asan"
+        },
+        {
+            "name": "linux-gcc-asan",
+            "configurePreset": "linux-gcc-asan"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "all-base",
+            "hidden": true,
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "headless-base",
+            "hidden": true,
+            "inherits": "all-base",
+            "filter": {
+                "exclude": {
+                    "label": "gpu"
+                }
+            }
+        },
+        {
+            "name": "bench-base",
+            "hidden": true,
+            "inherits": "all-base",
+            "filter": {
+                "include": {
+                    "name": "^engine_bench_"
+                }
+            }
+        },
+        {
+            "name": "windows-clang-cl-debug",
+            "configurePreset": "windows-clang-cl-debug",
+            "inherits": "all-base"
+        },
+        {
+            "name": "windows-clang-cl-debug-headless",
+            "configurePreset": "windows-clang-cl-debug",
+            "inherits": "headless-base"
+        },
+        {
+            "name": "linux-clang-debug",
+            "configurePreset": "linux-clang-debug",
+            "inherits": "all-base"
+        },
+        {
+            "name": "linux-clang-debug-headless",
+            "configurePreset": "linux-clang-debug",
+            "inherits": "headless-base"
+        },
+        {
+            "name": "linux-gcc-debug",
+            "configurePreset": "linux-gcc-debug",
+            "inherits": "all-base"
+        },
+        {
+            "name": "linux-gcc-debug-headless",
+            "configurePreset": "linux-gcc-debug",
+            "inherits": "headless-base"
+        },
+        {
+            "name": "macos-clang-debug",
+            "configurePreset": "macos-clang-debug",
+            "inherits": "all-base"
+        },
+        {
+            "name": "macos-clang-debug-headless",
+            "configurePreset": "macos-clang-debug",
+            "inherits": "headless-base"
+        },
+        {
+            "name": "linux-clang-release-bench",
+            "configurePreset": "linux-clang-release",
+            "inherits": "bench-base"
+        },
+        {
+            "name": "linux-gcc-release-bench",
+            "configurePreset": "linux-gcc-release",
+            "inherits": "bench-base"
+        },
+        {
+            "name": "windows-clang-cl-release-bench",
+            "configurePreset": "windows-clang-cl-release",
+            "inherits": "bench-base"
+        }
+    ]
+}
