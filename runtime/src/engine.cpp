@@ -137,18 +137,28 @@ bool bootstrap(const EngineConfig &config) noexcept {
 /// Returns the active engine configuration for runtime/editor systems.
 const EngineConfig &active_config() noexcept { return g_activeConfig; }
 
-/// Runs the configured command, loop, or tool.
-void run(std::uint32_t maxFrames) noexcept {
+/// Runs the main loop; reports whether it stopped gracefully or fatally.
+RunResult run(std::uint32_t maxFrames) noexcept {
   EnginePipeline pipeline;
   if (!pipeline.initialize(maxFrames)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "runtime pipeline initialization failed");
     pipeline.teardown();
-    return;
+    return RunResult::FatalInitialization;
   }
 
   while (pipeline.execute_frame()) {
   }
 
+  const RunResult result = pipeline.had_fatal_error() ? RunResult::FatalFrame
+                                                      : RunResult::Stopped;
   pipeline.teardown();
+  return result;
+}
+
+/// Maps a run result to the process exit code (0 only for Stopped).
+int run_result_exit_code(RunResult result) noexcept {
+  return (result == RunResult::Stopped) ? 0 : 1;
 }
 
 /// Shuts down the owning system.

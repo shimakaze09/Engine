@@ -99,7 +99,6 @@ int run_round(StepState *steps, MarkerData *markers) noexcept {
   }
 
   engine::core::JobHandle previousCommit{};
-  engine::core::JobHandle lastCommit{};
   std::size_t markerCursor = 0U;
 
   for (std::size_t step = 0U; step < kSteps; ++step) {
@@ -165,10 +164,9 @@ int run_round(StepState *steps, MarkerData *markers) noexcept {
     }
 
     previousCommit = commitHandle;
-    lastCommit = commitHandle;
   }
 
-  engine::core::wait(lastCommit);
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 17;
   }
@@ -255,7 +253,6 @@ int run_zero_chunk_round(ZeroChunkStepState *steps,
   }
 
   engine::core::JobHandle previousCommit{};
-  engine::core::JobHandle lastCommit{};
   std::size_t markerCursor = 0U;
 
   for (std::size_t step = 0U; step < kSteps; ++step) {
@@ -319,10 +316,9 @@ int run_zero_chunk_round(ZeroChunkStepState *steps,
     }
 
     previousCommit = commitHandle;
-    lastCommit = commitHandle;
   }
 
-  engine::core::wait(lastCommit);
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 47;
   }
@@ -408,7 +404,7 @@ int run_split_frame_round(SplitFrameState *state) noexcept {
     previousCommit = commitHandle;
   }
 
-  engine::core::wait(previousCommit);
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 63;
   }
@@ -445,9 +441,7 @@ int run_split_frame_round(SplitFrameState *state) noexcept {
     }
   }
 
-  for (std::size_t chunk = 0U; chunk < kChunks; ++chunk) {
-    engine::core::wait(chunkHandles[chunk]);
-  }
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 68;
   }

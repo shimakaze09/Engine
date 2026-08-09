@@ -36,7 +36,8 @@ bool get_gravity(const World &world, float *outX, float *outY,
 /// Sets the requested value for collision dispatch.
 void set_collision_dispatch(World &world,
                             physics::CollisionDispatchFn fn) noexcept;
-/// Forwards this step's collision pairs to the registered dispatch.
+/// Forwards the rendered frame's accumulated per-step collision pairs
+/// (once per substep, in step order) to the registered dispatch.
 void dispatch_collision_callbacks(World &world) noexcept;
 
 /// Closest-hit raycast using a normalized copy of direction; false when

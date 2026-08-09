@@ -40,6 +40,7 @@
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
+#include "engine/physics/physics_context.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/physics_bridge.h"
@@ -147,6 +148,9 @@ namespace {
 constexpr double kFixedDeltaSeconds = 1.0 / 60.0;
 constexpr std::size_t kChunkSize = 256U;
 constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
+static_assert(kMaxUpdateStepsPerFrame <= physics::kMaxCollisionFrameSteps,
+              "the frame collision buffer must cover every catch-up step so "
+              "accumulation alone never drops callbacks (#103)");
 constexpr std::size_t kMaxChunkJobs = 1024U;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
@@ -441,6 +445,8 @@ struct EnginePipeline::Impl final {
   std::uint32_t frameIndex = 0U;
   std::uint32_t maxFrames = 0U;
   bool running = true;
+  // Distinguishes fatal loop exits from graceful stops for engine::run (#96).
+  bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
   std::size_t previousAliveCount = 0U;
   std::size_t frameThreadCount = 0U;
@@ -642,11 +648,13 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 
   if (runFrameGraph) {
     if (!stage_simulation_graph()) {
+      fatalError = true;
       core::profiler_end_frame();
       return false;
     }
     stage_camera();
     if (!stage_render_prep_graph()) {
+      fatalError = true;
       core::profiler_end_frame();
       return false;
     }
@@ -1105,7 +1113,8 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
     return false;
   }
 
-  core::wait(previousUpdateCommit);
+  // end_frame_graph needs the whole graph drained, not one handle (#109).
+  core::wait_all();
   const bool stepJobsFailed =
       frameContext->frameGraphFailed.load(std::memory_order_acquire);
   if (!core::end_frame_graph()) {
@@ -1242,7 +1251,8 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     return false;
   }
 
-  core::wait(endFrameHandle);
+  // end_frame_graph needs the whole graph drained, not one handle (#109).
+  core::wait_all();
   const bool frameJobsFailed =
       frameContext->frameGraphFailed.load(std::memory_order_acquire);
   if (!core::end_frame_graph()) {
@@ -1324,6 +1334,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
   if (!core::make_render_context_current()) {
     core::log_message(core::LogLevel::Error, "editor",
                       "failed to acquire OpenGL context for editor");
+    fatalError = true;
     running = false;
     return;
   }
@@ -1539,6 +1550,10 @@ bool EnginePipeline::initialize(std::uint32_t maxFrames) noexcept {
 
 bool EnginePipeline::execute_frame() noexcept {
   return m_impl && m_impl->execute_frame();
+}
+
+bool EnginePipeline::had_fatal_error() const noexcept {
+  return m_impl && m_impl->fatalError;
 }
 
 void EnginePipeline::teardown() noexcept {

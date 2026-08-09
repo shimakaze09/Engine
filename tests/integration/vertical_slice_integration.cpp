@@ -217,7 +217,7 @@ bool run_render_prep_pipeline(
     return false;
   }
 
-  engine::core::wait(endFrameHandle);
+  engine::core::wait_all();
   const bool jobsFailed = frameGraphFailed.load(std::memory_order_acquire);
   const bool frameGraphEnded = engine::core::end_frame_graph();
 

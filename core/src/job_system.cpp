@@ -319,10 +319,8 @@ public:
         break;
       }
 
-      const bool handleCompleted = is_completed_fast(nodeIndex);
-      const bool noPendingJobs =
-          (m_pendingJobs.load(std::memory_order_acquire) == 0U);
-      if (handleCompleted && noPendingJobs) {
+      // Handle-specific exit (#109): whole-graph draining is wait_all's job.
+      if (is_completed_fast(nodeIndex)) {
         break;
       }
 
@@ -338,6 +336,15 @@ public:
       std::unique_lock<std::mutex> lock(m_completionMutex);
       m_completed.wait_for(lock, std::chrono::milliseconds(1));
     }
+  }
+
+  /// Public drain: blocks until the current graph has no pending jobs.
+  void wait_all() noexcept {
+    if (!is_initialized()) {
+      return;
+    }
+
+    wait_for_all_jobs();
   }
 
   bool is_valid_handle(JobHandle handle) noexcept {
@@ -806,6 +813,9 @@ bool add_dependency(JobHandle prerequisite, JobHandle dependent) noexcept {
 }
 
 void wait(JobHandle handle) noexcept { g_jobSystem.wait_for_handle(handle); }
+
+/// Blocks until every job in the current graph completes or the graph fails.
+void wait_all() noexcept { g_jobSystem.wait_all(); }
 
 /// Returns whether is valid handle.
 bool is_valid_handle(JobHandle handle) noexcept {

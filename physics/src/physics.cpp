@@ -572,7 +572,26 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.broadphaseOverflowActive = false;
   }
 
-  if (physicsCtx.collisionPairDropCount > 0U) {
+  // Append this step's kept pairs to the frame buffer in step order (#103).
+  std::uint32_t frameAppendDropCount = 0U;
+  for (std::size_t i = 0U; i < physicsCtx.collisionPairCount; ++i) {
+    if (physicsCtx.frameCollisionPairCount >=
+        (kMaxCollisionPairs * kMaxCollisionFrameSteps)) {
+      ++frameAppendDropCount;
+      continue;
+    }
+    const std::size_t dst = physicsCtx.frameCollisionPairCount * 2U;
+    physicsCtx.frameCollisionPairData[dst] =
+        physicsCtx.collisionPairData[i * 2U];
+    physicsCtx.frameCollisionPairData[dst + 1U] =
+        physicsCtx.collisionPairData[(i * 2U) + 1U];
+    ++physicsCtx.frameCollisionPairCount;
+  }
+  physicsCtx.frameCollisionPairDropCount +=
+      physicsCtx.collisionPairDropCount + frameAppendDropCount;
+
+  if ((physicsCtx.collisionPairDropCount > 0U) ||
+      (frameAppendDropCount > 0U)) {
     if (!physicsCtx.collisionPairOverflowActive) {
       physicsCtx.collisionPairOverflowActive = true;
       ++physicsCtx.collisionPairOverflowEpisodes;
@@ -651,11 +670,17 @@ void set_collision_dispatch(PhysicsWorldView &world,
   world.physics_context().collisionDispatch = fn;
 }
 
+// Drains the frame-accumulated pairs so every catch-up step's callbacks
+// reach the dispatch in step order once per rendered frame (#103).
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
   PhysicsContext &ctx = world.physics_context();
-  if ((ctx.collisionDispatch != nullptr) && (ctx.collisionPairCount > 0U)) {
-    ctx.collisionDispatch(ctx.collisionPairData.data(), ctx.collisionPairCount);
+  if ((ctx.collisionDispatch != nullptr) &&
+      (ctx.frameCollisionPairCount > 0U)) {
+    ctx.collisionDispatch(ctx.frameCollisionPairData.data(),
+                          ctx.frameCollisionPairCount);
   }
+  ctx.frameCollisionPairCount = 0U;
+  ctx.frameCollisionPairDropCount = 0U;
   ctx.collisionPairCount = 0U;
 }
 

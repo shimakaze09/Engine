@@ -234,7 +234,7 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
     }
   }
 
-  engine::core::wait(commitHandle);
+  engine::core::wait_all();
 
   if (!engine::core::end_frame_graph()) {
     world->end_frame_phase();

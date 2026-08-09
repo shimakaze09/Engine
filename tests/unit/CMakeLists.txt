@@ -39,6 +39,13 @@ engine_add_test_executable(engine_unit_job_wait_tls
     engine_core
 )
 
+engine_add_test_executable(engine_unit_job_wait_scope
+    SOURCES
+    job_wait_scope_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_sparse_set
     SOURCES
     sparse_set_test.cpp
@@ -104,6 +111,14 @@ engine_add_test_executable(engine_unit_collider_geometry
 engine_add_test_executable(engine_unit_physics_hierarchy_collision
     SOURCES
     physics_hierarchy_collision_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_collision_frame_events
+    SOURCES
+    collision_frame_events_test.cpp
     PRIVATE_DEPS
     engine_physics
     engine_runtime
@@ -949,6 +964,13 @@ engine_add_test_executable(engine_unit_engine_pipeline
     engine_pipeline_test.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_run_result
+    SOURCES
+    run_result_test.cpp
     PRIVATE_DEPS
     engine_runtime
 )

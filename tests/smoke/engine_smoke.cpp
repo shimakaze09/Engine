@@ -63,7 +63,12 @@ int main() {
     return 5;
   }
 
-  engine::run(20U);
+  const engine::RunResult runResult = engine::run(20U);
+  if ((runResult != engine::RunResult::Stopped) ||
+      (engine::run_result_exit_code(runResult) != 0)) {
+    engine::shutdown();
+    return 10;
+  }
 
   const engine::core::EngineStats stats = engine::core::get_engine_stats();
   if ((stats.frameTimeMs <= 0.0F) || (stats.fps <= 0.0F)) {

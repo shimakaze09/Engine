@@ -60,6 +60,9 @@ public:
   /// exit (max-frame reached, platform quit, or fatal error).
   bool execute_frame() noexcept;
 
+  /// True when the loop exited because a frame stage failed fatally.
+  bool had_fatal_error() const noexcept;
+
   /// Release per-run resources.  Safe to call even if initialize() failed.
   void teardown() noexcept;
 
