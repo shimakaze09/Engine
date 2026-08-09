@@ -173,8 +173,9 @@ bool test_coroutine_wedge_terminates() noexcept {
 }
 
 // -----------------------------------------------------------------------
-// N-13 boundary: the exhaustion latch clears at the next dispatch, so a
-// well-behaved script still runs after a wedged one was terminated.
+// N-13 boundary (migrated by issue #84): the exhaustion latch clears at the
+// next FRAME boundary — not the next dispatch — so a wedged script cannot
+// starve later frames while a well-behaved script still runs after it.
 // -----------------------------------------------------------------------
 bool test_budget_resets_at_next_dispatch() noexcept {
   ScriptingSession session{};
@@ -190,6 +191,15 @@ bool test_budget_resets_at_next_dispatch() noexcept {
     remove_script();
     return false;
   }
+
+  const char *stillWedged = "hardening_marker = 1\n";
+  if (!write_script(stillWedged) ||
+      engine::scripting::load_script(kTempScript)) {
+    remove_script();
+    return false;
+  }
+
+  engine::scripting::set_frame_index(1U);
 
   const char *sane = "hardening_marker = 41\n"
                      "hardening_marker = hardening_marker + 1\n"
@@ -840,7 +850,7 @@ int main() {
   const TestCase tests[] = {
       {"pcall_wedge_terminates", test_pcall_wedge_terminates},
       {"coroutine_wedge_terminates", test_coroutine_wedge_terminates},
-      {"budget_resets_at_next_dispatch", test_budget_resets_at_next_dispatch},
+      {"budget_resets_at_next_frame", test_budget_resets_at_next_dispatch},
       {"collision_dispatch_survives_hostile_metatable",
        test_collision_dispatch_survives_hostile_metatable},
       {"anim_event_dispatch_survives_hostile_metatable",

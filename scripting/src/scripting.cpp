@@ -871,9 +871,11 @@ std::int64_t get_file_mtime(const char *path) noexcept {
 }
 } // anonymous namespace
 
-/// Sets the requested value for frame index.
+/// Frame boundary: advances the frame index and refills the shared
+/// per-frame Lua instruction budget (issue #84, one budget per frame).
 void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
+  refill_debug_instruction_budget();
 }
 
 void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }

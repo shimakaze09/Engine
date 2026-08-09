@@ -146,9 +146,10 @@ void set_sandbox_enabled(bool enabled) noexcept;
 /// Returns whether is sandbox enabled.
 bool is_sandbox_enabled() noexcept;
 
-// CPU instruction limit per protected Lua call (0 = unlimited).
+// CPU instruction budget per frame, shared across all dispatches,
+// coroutines, and hooks; refilled at set_frame_index (0 = unlimited).
 void set_instruction_limit(int limit) noexcept;
-/// Current per-call Lua instruction cap (0 = unlimited).
+/// Current per-frame shared Lua instruction cap (0 = unlimited).
 int get_instruction_limit() noexcept;
 
 // Memory limit for the Lua allocator in bytes (0 = unlimited).

@@ -152,8 +152,9 @@ bool test_instruction_limit() noexcept {
 }
 
 // -----------------------------------------------------------------------
-// 3b. Coroutine threads inherit the instruction limit (hooks are
-//     per-thread in Lua 5.4, so each resume must re-arm them)
+// 3b. Coroutine threads share the per-frame instruction limit (hooks are
+//     per-thread in Lua 5.4, so each resume must re-arm them; issue #84
+//     contract migration: exhaustion latches until the next frame refill)
 // -----------------------------------------------------------------------
 bool test_coroutine_instruction_limit() noexcept {
   engine::scripting::initialize_scripting();
@@ -168,33 +169,99 @@ bool test_coroutine_instruction_limit() noexcept {
   engine::scripting::set_sandbox_enabled(true);
   engine::scripting::set_instruction_limit(10000);
 
-  // A runaway coroutine body must be terminated on its first resume, making
-  // start_coroutine return nil; without the per-thread hook this hangs.
-  const char *code = "local id = engine.start_coroutine(function()\n"
-                     "  while true do end\n"
-                     "end)\n"
-                     "if id ~= nil then\n"
-                     "  error('runaway coroutine survived first resume')\n"
+  // A runaway coroutine body must be terminated on its first resume without
+  // hanging; under the migrated contract the exhausted frame budget also
+  // stops the outer script (old: a per-resume refill let it continue), so
+  // the load itself reports failure.
+  const char *runaway = "started = true\n"
+                        "engine.start_coroutine(function()\n"
+                        "  while true do end\n"
+                        "end)\n";
+
+  if (!write_script(runaway)) {
+    return false;
+  }
+  bool result = !engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  // The runaway exhausted this frame's budget; a frame boundary refills it
+  // so the next coroutine can start (the migrated one-budget-per-frame
+  // contract; the old per-resume budget needed no refill here).
+  engine::scripting::set_frame_index(1U);
+
+  const char *yielding = "resumed_id = engine.start_coroutine(function()\n"
+                         "  engine.wait(0)\n"
+                         "  while true do end\n"
+                         "end)\n"
+                         "if resumed_id == nil then\n"
+                         "  error('yielding coroutine failed to start')\n"
+                         "end\n";
+
+  if (!write_script(yielding)) {
+    return false;
+  }
+  result = engine::scripting::load_script(kTempScript) && result;
+  remove_script();
+
+  // The second coroutine yields, then loops forever on its scheduler
+  // resume: tick_coroutines must terminate it and return.
+  engine::scripting::set_frame_index(2U);
+  engine::scripting::set_frame_time(1.0F, 1.0F);
+  engine::scripting::tick_coroutines();
+
+  engine::scripting::set_instruction_limit(1000000);
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
+// -----------------------------------------------------------------------
+// 3c. One instruction budget per frame, shared across all coroutines
+//     (issue #84): per-resume refills would let N coroutines burn
+//     N x limit instructions per frame
+// -----------------------------------------------------------------------
+bool test_coroutine_budget_shared_per_frame() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+  engine::scripting::set_instruction_limit(20000);
+
+  const char *code = "completed = 0\n"
+                     "for i = 1, 5 do\n"
+                     "  engine.start_coroutine(function()\n"
+                     "    engine.wait(0)\n"
+                     "    local x = 0\n"
+                     "    for j = 1, 3000 do x = x + 1 end\n"
+                     "    completed = completed + 1\n"
+                     "  end)\n"
                      "end\n"
-                     "resumed_id = engine.start_coroutine(function()\n"
-                     "  engine.wait(0)\n"
-                     "  while true do end\n"
-                     "end)\n"
-                     "if resumed_id == nil then\n"
-                     "  error('yielding coroutine failed to start')\n"
+                     "function check_shared()\n"
+                     "  if completed >= 5 then\n"
+                     "    error('per-resume budgets: all coroutines ran')\n"
+                     "  end\n"
+                     "  if completed < 1 then\n"
+                     "    error('no coroutine ran inside the frame budget')\n"
+                     "  end\n"
                      "end\n";
 
   if (!write_script(code)) {
     return false;
   }
-
   bool result = engine::scripting::load_script(kTempScript);
   remove_script();
 
-  // The second coroutine yields, then loops forever on its scheduler
-  // resume: tick_coroutines must terminate it and return.
+  engine::scripting::set_frame_index(1U);
   engine::scripting::set_frame_time(1.0F, 1.0F);
   engine::scripting::tick_coroutines();
+
+  engine::scripting::set_frame_index(2U);
+  result = engine::scripting::call_script_function("check_shared") && result;
 
   engine::scripting::set_instruction_limit(1000000);
   engine::scripting::shutdown_scripting();
@@ -368,6 +435,8 @@ int main() {
       {"safe_globals_available", test_safe_globals_available},
       {"instruction_limit", test_instruction_limit},
       {"coroutine_instruction_limit", test_coroutine_instruction_limit},
+      {"coroutine_budget_shared_per_frame",
+       test_coroutine_budget_shared_per_frame},
       {"memory_limit", test_memory_limit},
       {"memory_limit_enabled_post_init", test_memory_limit_enabled_post_init},
       {"memory_accounting_lifecycle", test_memory_accounting_lifecycle},
