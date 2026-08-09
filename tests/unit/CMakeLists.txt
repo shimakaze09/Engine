@@ -39,6 +39,13 @@ engine_add_test_executable(engine_unit_job_wait_tls
     engine_core
 )
 
+engine_add_test_executable(engine_unit_job_wait_scope
+    SOURCES
+    job_wait_scope_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_sparse_set
     SOURCES
     sparse_set_test.cpp

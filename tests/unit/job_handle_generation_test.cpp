@@ -43,6 +43,7 @@ int run_one_graph(bool checkExecution) noexcept {
     return 12;
   }
 
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 13;
   }

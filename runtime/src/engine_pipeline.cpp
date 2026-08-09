@@ -1105,7 +1105,8 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
     return false;
   }
 
-  core::wait(previousUpdateCommit);
+  // end_frame_graph needs the whole graph drained, not one handle (#109).
+  core::wait_all();
   const bool stepJobsFailed =
       frameContext->frameGraphFailed.load(std::memory_order_acquire);
   if (!core::end_frame_graph()) {
@@ -1242,7 +1243,8 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     return false;
   }
 
-  core::wait(endFrameHandle);
+  // end_frame_graph needs the whole graph drained, not one handle (#109).
+  core::wait_all();
   const bool frameJobsFailed =
       frameContext->frameGraphFailed.load(std::memory_order_acquire);
   if (!core::end_frame_graph()) {

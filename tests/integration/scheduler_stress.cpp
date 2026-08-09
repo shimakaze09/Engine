@@ -83,7 +83,7 @@ std::uint64_t run_stress_round(std::uint64_t *outExecutedJobs,
     }
   }
 
-  engine::core::wait(completionHandle);
+  engine::core::wait_all();
 
   if (!engine::core::end_frame_graph()) {
     return 0U;

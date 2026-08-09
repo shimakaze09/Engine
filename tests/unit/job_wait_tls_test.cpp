@@ -63,7 +63,7 @@ int run_observed_graph() noexcept {
     }
   }
 
-  engine::core::wait(lastHandle);
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return -3;
   }

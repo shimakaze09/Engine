@@ -175,7 +175,7 @@ int main() {
     return 15;
   }
 
-  engine::core::wait(thirdHandle);
+  engine::core::wait_all();
 
   if (!engine::core::end_frame_graph()) {
     engine::core::shutdown_core();
@@ -216,7 +216,7 @@ int main() {
     return 20;
   }
 
-  engine::core::wait(cycleHandleB);
+  engine::core::wait_all();
 
   if (!engine::core::end_frame_graph()) {
     engine::core::shutdown_core();

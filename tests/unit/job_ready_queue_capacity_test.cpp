@@ -52,7 +52,7 @@ int run_dispatch_boundary_round() noexcept {
     return 12;
   }
 
-  engine::core::wait(lastHandle);
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 13;
   }
@@ -92,7 +92,7 @@ int run_fan_in_boundary_round() noexcept {
     }
   }
 
-  engine::core::wait(lastHandle);
+  engine::core::wait_all();
   if (!engine::core::end_frame_graph()) {
     return 24;
   }
