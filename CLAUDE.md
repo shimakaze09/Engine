@@ -162,7 +162,11 @@ cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=cl
 
 `build/compile_commands.json` is the clangd source of truth (`.clangd` points
 at it); never hand-edit it, never commit `build/`. `build-release/` exists for
-Release benchmark runs. Linux/macOS: same flow with clang/clang++. CMake
+Release benchmark runs. Linux/macOS: same flow with clang/clang++. macOS is
+a build + headless-test lane only (owner decision 2026-08-09, issue #82):
+Apple caps OpenGL at 4.1 while `default.frag` needs GLSL 450, so the GL
+renderer runs on Windows/Linux until the v0.5 bgfx replatform — the lane's
+value is AppleClang conformance. CMake
 options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
 `/fp:strict` / `-ffp-contract=off`), `ENGINE_SANITIZERS`,
