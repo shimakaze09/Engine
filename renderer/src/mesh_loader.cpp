@@ -14,6 +14,8 @@
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/render_device.h"
 
+#include "asset_stale_check.h"
+
 namespace engine::renderer {
 
 namespace {
@@ -173,6 +175,8 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
   if (outSizeBytes != nullptr) {
     *outSizeBytes = 0ULL;
   }
+
+  warn_if_cooked_asset_stale(path);
 
   FILE *file = nullptr;
 #ifdef _WIN32

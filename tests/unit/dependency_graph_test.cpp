@@ -587,6 +587,101 @@ int main() {
     }
   }
 
+  // --- Test 15: Deterministic ordering (L-02, issue #86) ---
+  {
+    Graph graph{};
+    const AssetId insertOrder[] = {90ULL, 50ULL, 70ULL, 10ULL, 30ULL,
+                                   80ULL, 20ULL, 60ULL, 40ULL};
+    for (const AssetId dep : insertOrder) {
+      engine::tools::add_dependency(&graph, 1000ULL, dep);
+      engine::tools::add_dependency(&graph, dep, 2000ULL);
+    }
+
+    AssetId deps[16] = {};
+    const std::size_t depCount =
+        engine::tools::get_dependencies(&graph, 1000ULL, deps, 16);
+    if (depCount != 9U) {
+      return 140;
+    }
+    for (std::size_t i = 0U; i < depCount; ++i) {
+      if (deps[i] != (static_cast<AssetId>(i + 1U) * 10ULL)) {
+        return 141;
+      }
+    }
+
+    const std::size_t dependentCount =
+        engine::tools::get_dependents(&graph, 2000ULL, deps, 16);
+    if (dependentCount != 9U) {
+      return 142;
+    }
+    for (std::size_t i = 0U; i < dependentCount; ++i) {
+      if (deps[i] != (static_cast<AssetId>(i + 1U) * 10ULL)) {
+        return 143;
+      }
+    }
+
+    // Truncation must keep the smallest ids, not an arbitrary subset.
+    AssetId truncated[3] = {};
+    if (engine::tools::get_dependencies(&graph, 1000ULL, truncated, 3U) !=
+        3U) {
+      return 144;
+    }
+    if ((truncated[0] != 10ULL) || (truncated[1] != 20ULL) ||
+        (truncated[2] != 30ULL)) {
+      return 145;
+    }
+
+    const std::size_t recursiveCount =
+        engine::tools::get_all_dependents_recursive(&graph, 2000ULL, deps,
+                                                    16);
+    if (recursiveCount != 10U) {
+      return 146;
+    }
+    for (std::size_t i = 0U; i < 9U; ++i) {
+      if (deps[i] != (static_cast<AssetId>(i + 1U) * 10ULL)) {
+        return 147;
+      }
+    }
+    if (deps[9] != 1000ULL) {
+      return 147;
+    }
+
+    AssetId changed[] = {2000ULL};
+    const std::size_t invalidatedCount = engine::tools::compute_invalidation_set(
+        &graph, changed, 1U, deps, 16);
+    if (invalidatedCount != 10U) {
+      return 148;
+    }
+    for (std::size_t i = 0U; i < 9U; ++i) {
+      if (deps[i] != (static_cast<AssetId>(i + 1U) * 10ULL)) {
+        return 149;
+      }
+    }
+    if (deps[9] != 1000ULL) {
+      return 149;
+    }
+
+    // Kahn tie-break: every ready node emits smallest id first, so this
+    // graph has exactly one valid output sequence.
+    AssetId sorted[16] = {};
+    const std::size_t sortedCount =
+        engine::tools::topological_sort(&graph, sorted, 16);
+    if (sortedCount != 11U) {
+      return 150;
+    }
+    if (sorted[0] != 2000ULL) {
+      return 151;
+    }
+    for (std::size_t i = 0U; i < 9U; ++i) {
+      if (sorted[i + 1U] != (static_cast<AssetId>(i + 1U) * 10ULL)) {
+        return 152;
+      }
+    }
+    if (sorted[10] != 1000ULL) {
+      return 153;
+    }
+  }
+
   std::printf("dependency_graph_test: all tests passed\n");
   return 0;
 }
