@@ -13,6 +13,7 @@ extern "C" {
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 #include "engine/core/logging.h"
 
@@ -91,6 +92,27 @@ bool read_finite_number_arg(lua_State *state, int index,
     return false;
   }
   *outValue = value;
+  return true;
+}
+
+/// Copies a path or refuses over-long input so a truncated copy can never
+/// silently address a different file than the caller named.
+bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
+                      const char *context) noexcept {
+  if ((dst == nullptr) || (dstCapacity == 0U) || (src == nullptr)) {
+    return false;
+  }
+  const std::size_t length = std::strlen(src);
+  if (length >= dstCapacity) {
+    char logBuffer[192] = {};
+    std::snprintf(logBuffer, sizeof(logBuffer),
+                  "%s: path length %zu exceeds the %zu-character limit; "
+                  "rejected instead of truncated",
+                  context, length, dstCapacity - 1U);
+    core::log_message(core::LogLevel::Error, "scripting", logBuffer);
+    return false;
+  }
+  std::memcpy(dst, src, length + 1U);
   return true;
 }
 

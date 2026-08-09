@@ -5,6 +5,8 @@
 
 struct lua_State;
 
+#include <cstddef>
+
 #include "engine/math/vec3.h"
 
 namespace engine::scripting {
@@ -17,6 +19,11 @@ bool read_vec3_args(lua_State *state, int startIndex,
 /// Reads one finite number arg; fails on a non-number or non-finite value.
 bool read_finite_number_arg(lua_State *state, int index,
                             float *outValue) noexcept;
+
+/// Copies a NUL-terminated path into a fixed buffer; refuses with one
+/// Error diagnostic (destination untouched) when the path does not fit.
+bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
+                      const char *context) noexcept;
 
 /// Logs the Lua error on top of the stack with a traceback, then pops it.
 void log_lua_error(const char *context) noexcept;

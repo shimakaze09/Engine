@@ -2,6 +2,7 @@
 
 #include "scene_bindings.h"
 
+#include "binding_util.h"
 #include "runtime_binding.h"
 
 #include <cstdint>
@@ -46,8 +47,10 @@ int lua_engine_load_scene(lua_State *state) noexcept {
   if (path == nullptr) {
     return 0;
   }
-  std::snprintf(g_pendingScenePath, sizeof(g_pendingScenePath), "%s", path);
-  g_pendingScenePath[sizeof(g_pendingScenePath) - 1U] = '\0';
+  if (!copy_path_strict(g_pendingScenePath, sizeof(g_pendingScenePath), path,
+                        "load_scene")) {
+    return 0;
+  }
   g_pendingSceneOp = SceneOp::Load;
   return 0;
 }

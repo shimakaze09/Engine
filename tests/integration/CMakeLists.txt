@@ -115,6 +115,16 @@ engine_add_test_executable(engine_integration_script_module_cache
     integration
 )
 
+engine_add_test_executable(engine_integration_script_path_ingress
+    SOURCES
+    script_path_ingress_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_game_mode
     SOURCES
     game_mode_test.cpp

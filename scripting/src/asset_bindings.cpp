@@ -147,11 +147,11 @@ int lua_engine_add_script_component(lua_State *state) noexcept {
   }
 
   runtime::ScriptComponent comp{};
-  const std::size_t maxLen = sizeof(comp.scriptPath) - 1U;
-  const std::size_t len = std::strlen(path);
-  const std::size_t copy = (len > maxLen) ? maxLen : len;
-  std::memcpy(comp.scriptPath, path, copy);
-  comp.scriptPath[copy] = '\0';
+  if (!copy_path_strict(comp.scriptPath, sizeof(comp.scriptPath), path,
+                        "add_script_component")) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
 
   lua_pushboolean(state, apply_or_queue_script_component(entity, comp) ? 1 : 0);
   return 1;

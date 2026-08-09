@@ -907,7 +907,10 @@ void watch_script_file(const char *path) noexcept {
   }
 
   WatchedScript &entry = g_watchedScripts[g_watchedScriptCount];
-  core::copy_string(entry.path, sizeof(entry.path), path);
+  if (!copy_path_strict(entry.path, sizeof(entry.path), path,
+                        "watch_script_file")) {
+    return;
+  }
   entry.mtime = get_file_mtime(path);
   ++g_watchedScriptCount;
 }

@@ -386,6 +386,12 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
+  char stagedPath[sizeof(g_entityScriptModules[0].path)] = {};
+  if (!copy_path_strict(stagedPath, sizeof(stagedPath), path,
+                        "entity script module load")) {
+    return LUA_NOREF;
+  }
+
   if (module_is_currently_loading(path)) {
     char msg[256] = {};
     std::snprintf(msg, sizeof(msg), "circular module dependency detected: %s",
@@ -494,11 +500,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
 
   EntityScriptModule &mod = g_entityScriptModules[slot];
   mod = EntityScriptModule{};
-  const std::size_t maxPath = sizeof(mod.path) - 1U;
-  const std::size_t pathLen = std::strlen(path);
-  const std::size_t copyLen = (pathLen > maxPath) ? maxPath : pathLen;
-  std::memcpy(mod.path, path, copyLen);
-  mod.path[copyLen] = '\0';
+  std::memcpy(mod.path, stagedPath, sizeof(mod.path));
   mod.lastFailedMtime = -1;
   return retry_negative_module_entry(mod, path);
 }
