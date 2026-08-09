@@ -2,9 +2,10 @@
 // H-20, issue #55): a stamp written by the current tool is up to date,
 // while a missing stamp, a legacy stamp without a TOOL_VERSION key, a
 // stamp from a different tool version, changed source/dependency hashes,
-// a missing output manifest, or a missing/altered manifest-listed output
-// all force a recook; stale-manifest entries are retired at commit and a
-// failed retirement blocks.
+// a missing output manifest, a platform-tag mismatch (issue #81), or a
+// missing/altered manifest-listed output all force a recook;
+// stale-manifest entries are retired at commit and a failed retirement
+// blocks.
 
 #include "packer_shared.h"
 
@@ -17,6 +18,7 @@
 
 namespace {
 
+constexpr const char *kPlatform = "TestPlat";
 constexpr const char *kOutputPath = "cook_stamp_test_output.mesh";
 constexpr const char *kStampPath = "cook_stamp_test_output.mesh.cookstamp";
 constexpr const char *kSidecarPath = "cook_stamp_test_output.skel";
@@ -66,32 +68,33 @@ int check_tool_version_gates_recook() {
   dep.hash = 0x0102030405060708ULL;
   dependencies.push_back(dep);
 
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash) !=
-      true) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform) != true) {
     remove_files();
     return 402;
   }
 
   const std::vector<std::string> outputs{kOutputPath};
   if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
-                        outputs)) {
+                        kPlatform, outputs)) {
     remove_files();
     return 403;
   }
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash)) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform)) {
     remove_files();
     return 404;
   }
 
-  if (should_repack(kOutputPath, sourceHash + 1U, dependencies, importHash) !=
-      true) {
+  if (should_repack(kOutputPath, sourceHash + 1U, dependencies, importHash,
+                    kPlatform) != true) {
     remove_files();
     return 405;
   }
   std::vector<DependencyDigest> changedDependencies = dependencies;
   changedDependencies[0].hash ^= 1ULL;
   if (should_repack(kOutputPath, sourceHash, changedDependencies,
-                    importHash) != true) {
+                    importHash, kPlatform) != true) {
     remove_files();
     return 406;
   }
@@ -106,8 +109,8 @@ int check_tool_version_gates_recook() {
     remove_files();
     return 407;
   }
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash) !=
-      true) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform) != true) {
     remove_files();
     return 408;
   }
@@ -120,14 +123,15 @@ int check_tool_version_gates_recook() {
                 "TOOL_VERSION %u\n"
                 "SOURCE_HASH 1122334455667788\n"
                 "IMPORT_HASH 99aabbccddeeff00\n"
+                "PLATFORM TestPlat\n"
                 "DEP_HASH 0102030405060708 textures/crate.png\n",
                 static_cast<unsigned int>(kCookToolVersion));
   if (!write_file(kStampPath, strippedStamp)) {
     remove_files();
     return 411;
   }
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash) !=
-      true) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform) != true) {
     remove_files();
     return 412;
   }
@@ -142,10 +146,73 @@ int check_tool_version_gates_recook() {
     remove_files();
     return 409;
   }
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash) !=
-      true) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform) != true) {
     remove_files();
     return 410;
+  }
+
+  remove_files();
+  return 0;
+}
+
+/// EXPECTATION (issue #81): the platform tag is part of the cook key —
+/// a stamp cooked for one platform never certifies another platform's
+/// cook, and a pre-platform stamp (no PLATFORM line) recooks once.
+int check_platform_tag_gates_recook() {
+  remove_files();
+  if (!write_file(kOutputPath, "cooked-bytes")) {
+    return 601;
+  }
+
+  const std::uint64_t sourceHash = 0x1122334455667788ULL;
+  const std::uint64_t importHash = 0x99AABBCCDDEEFF00ULL;
+  const std::vector<DependencyDigest> dependencies{};
+  const std::vector<std::string> outputs{kOutputPath};
+
+  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+                        kPlatform, outputs)) {
+    remove_files();
+    return 602;
+  }
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform)) {
+    remove_files();
+    return 603;
+  }
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    "OtherPlat") != true) {
+    remove_files();
+    return 604;
+  }
+
+  char prePlatformStamp[512] = {};
+  std::snprintf(prePlatformStamp, sizeof(prePlatformStamp),
+                "SCHEMA 3\n"
+                "TOOL_VERSION %u\n"
+                "SOURCE_HASH 1122334455667788\n"
+                "IMPORT_HASH 99aabbccddeeff00\n"
+                "OUTPUT 0000000000000001 %s\n",
+                static_cast<unsigned int>(kCookToolVersion), kOutputPath);
+  if (!write_file(kStampPath, prePlatformStamp)) {
+    remove_files();
+    return 605;
+  }
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform) != true) {
+    remove_files();
+    return 606;
+  }
+
+  if (write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+                       "bad tag", outputs) != false) {
+    remove_files();
+    return 607;
+  }
+  if (is_valid_platform_tag(nullptr) || is_valid_platform_tag("") ||
+      is_valid_platform_tag("two words") || !is_valid_platform_tag("Web")) {
+    remove_files();
+    return 608;
   }
 
   remove_files();
@@ -171,18 +238,19 @@ int check_output_manifest_owns_output_set() {
   const std::vector<std::string> outputs{kOutputPath, kSidecarPath};
 
   if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
-                        outputs)) {
+                        kPlatform, outputs)) {
     remove_files();
     return 502;
   }
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash)) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform)) {
     remove_files();
     return 503;
   }
 
   static_cast<void>(std::remove(kSidecarPath));
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash) !=
-      true) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform) != true) {
     remove_files();
     return 504;
   }
@@ -191,12 +259,13 @@ int check_output_manifest_owns_output_set() {
     remove_files();
     return 505;
   }
-  if (should_repack(kOutputPath, sourceHash, dependencies, importHash)) {
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform)) {
     remove_files();
     return 506;
   }
   if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
-                    true) != true) {
+                    kPlatform, true) != true) {
     remove_files();
     return 507;
   }
@@ -248,6 +317,10 @@ int main() {
   const int toolVersionResult = check_tool_version_gates_recook();
   if (toolVersionResult != 0) {
     return toolVersionResult;
+  }
+  const int platformResult = check_platform_tag_gates_recook();
+  if (platformResult != 0) {
+    return platformResult;
   }
   return check_output_manifest_owns_output_set();
 }

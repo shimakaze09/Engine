@@ -267,12 +267,29 @@ bool make_cookstamp_path(const char *outputPath, char *outPath,
 /// Writes cook stamp data including the output manifest: every listed
 /// output is re-hashed from its committed bytes, so an unreadable
 /// output blocks the commit marker instead of being certified.
+bool is_valid_platform_tag(const char *platformTag) {
+  if ((platformTag == nullptr) || (platformTag[0] == '\0')) {
+    return false;
+  }
+  for (const char *c = platformTag; *c != '\0'; ++c) {
+    if ((*c == ' ') || (*c == '\t') || (*c == '\n') || (*c == '\r')) {
+      return false;
+    }
+  }
+  return std::strlen(platformTag) < 64U;
+}
+
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
+                      const char *platformTag,
                       const std::vector<std::string> &outputPaths) {
   char stampPath[512] = {};
   if (!make_cookstamp_path(outputPath, stampPath, sizeof(stampPath))) {
+    return false;
+  }
+  if (!is_valid_platform_tag(platformTag)) {
+    std::fprintf(stderr, "error: invalid cook platform tag\n");
     return false;
   }
 
@@ -288,6 +305,8 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   stamp += line;
   std::snprintf(line, sizeof(line), "IMPORT_HASH %016llx\n",
                 static_cast<unsigned long long>(importSettingsHash));
+  stamp += line;
+  std::snprintf(line, sizeof(line), "PLATFORM %s\n", platformTag);
   stamp += line;
   for (const DependencyDigest &dependency : dependencies) {
     std::snprintf(line, sizeof(line), "DEP_HASH %016llx %s\n",
@@ -318,12 +337,14 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
 /// Reads cook stamp data. outToolVersion reports 0 for stamps written
 /// before the TOOL_VERSION key existed, which forces one recook;
 /// outOutputs (nullable) receives the output manifest, empty for
-/// pre-manifest stamps.
+/// pre-manifest stamps; outPlatformTag (nullable) reads empty for
+/// stamps written before the platform tag joined the cook key.
 bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
                      std::vector<DependencyDigest> *outDependencies,
                      std::uint64_t *outImportSettingsHash,
                      std::uint32_t *outToolVersion,
-                     std::vector<OutputRecord> *outOutputs) {
+                     std::vector<OutputRecord> *outOutputs,
+                     std::string *outPlatformTag) {
   if ((outSourceHash == nullptr) || (outDependencies == nullptr)) {
     return false;
   }
@@ -356,6 +377,9 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   if (outOutputs != nullptr) {
     outOutputs->clear();
   }
+  if (outPlatformTag != nullptr) {
+    outPlatformTag->clear();
+  }
 
   char line[1024] = {};
   while (std::fgets(line, static_cast<int>(sizeof(line)), file) != nullptr) {
@@ -375,6 +399,14 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
     if (std::sscanf(line, "IMPORT_HASH %llx", &hash) == 1) {
       if (outImportSettingsHash != nullptr) {
         *outImportSettingsHash = static_cast<std::uint64_t>(hash);
+      }
+      continue;
+    }
+
+    char platformTag[64] = {};
+    if (std::sscanf(line, "PLATFORM %63s", platformTag) == 1) {
+      if (outPlatformTag != nullptr) {
+        *outPlatformTag = platformTag;
       }
       continue;
     }
@@ -423,7 +455,7 @@ bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
 /// additionally re-hashes each one against its recorded fingerprint.
 bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
-                   std::uint64_t importSettingsHash,
+                   std::uint64_t importSettingsHash, const char *platformTag,
                    bool verifyOutputHashes) {
   if (!file_exists(outputPath)) {
     return true;
@@ -434,13 +466,18 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
   std::uint64_t previousImportHash = 0ULL;
   std::uint32_t previousToolVersion = 0U;
   std::vector<OutputRecord> previousOutputs{};
+  std::string previousPlatformTag{};
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
                        &previousImportHash, &previousToolVersion,
-                       &previousOutputs)) {
+                       &previousOutputs, &previousPlatformTag)) {
     return true;
   }
 
   if (previousToolVersion != kCookToolVersion) {
+    return true;
+  }
+
+  if ((platformTag == nullptr) || (previousPlatformTag != platformTag)) {
     return true;
   }
 
@@ -485,7 +522,7 @@ bool remove_stale_outputs(const char *outputPath,
   std::vector<DependencyDigest> previousDependencies{};
   std::vector<OutputRecord> previousOutputs{};
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
-                       nullptr, nullptr, &previousOutputs)) {
+                       nullptr, nullptr, &previousOutputs, nullptr)) {
     return true;
   }
 
@@ -540,7 +577,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
   std::vector<DependencyDigest> stampDependencies{};
   std::vector<OutputRecord> stampOutputs{};
   if (!read_cook_stamp(outputPath, &stampSourceHash, &stampDependencies,
-                       nullptr, nullptr, &stampOutputs) ||
+                       nullptr, nullptr, &stampOutputs, nullptr) ||
       stampOutputs.empty()) {
     std::fprintf(stderr,
                  "error: orphan sweep needs a manifest-bearing cook stamp: "
@@ -579,7 +616,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
       std::vector<OutputRecord> siblingOutputs{};
       if (read_cook_stamp(ownerPath.c_str(), &siblingSourceHash,
                           &siblingDependencies, nullptr, nullptr,
-                          &siblingOutputs)) {
+                          &siblingOutputs, nullptr)) {
         for (const OutputRecord &record : siblingOutputs) {
           protectedNames.push_back(manifest_entry_filename(record.path));
         }

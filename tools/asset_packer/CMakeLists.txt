@@ -30,6 +30,9 @@ engine_add_executable_target(asset_packer
     engine_math
 )
 
+target_compile_definitions(asset_packer PRIVATE
+    ENGINE_COOK_PLATFORM="${ENGINE_TARGET_PLATFORM}")
+
 if(WIN32)
     target_compile_definitions(asset_packer PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()

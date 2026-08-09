@@ -288,6 +288,20 @@ if(ENGINE_BUILD_TOOLS)
     )
 
     add_test(
+        NAME engine_integration_asset_packer_platform_tag
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/platform_tag_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_platform_tag_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_platform_tag
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
         NAME engine_integration_asset_packer_orphan_sweep
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"

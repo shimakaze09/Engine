@@ -60,7 +60,8 @@ void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
                "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
-               "[--force] [--verify] [--sweep-orphans]\n");
+               "[--force] [--verify] [--sweep-orphans] "
+               "[--platform <tag>]\n");
 }
 
 /// Strips the mesh output's extension so cooked skeletal assets land
@@ -194,6 +195,7 @@ int main(int argc, char **argv) {
   bool forceRepack = false;
   bool verifyOutputs = false;
   bool sweepOrphans = false;
+  const char *platformTag = kCookPlatformTag;
   std::vector<std::string> dependencyPaths{};
   std::string graphPath{};
   for (int i = 3; i < argc; ++i) {
@@ -232,7 +234,23 @@ int main(int argc, char **argv) {
       continue;
     }
 
+    if (std::strcmp(argv[i], "--platform") == 0) {
+      if ((i + 1) >= argc) {
+        print_usage();
+        return 8;
+      }
+      platformTag = argv[i + 1];
+      ++i;
+      continue;
+    }
+
     print_usage();
+    return 9;
+  }
+
+  if (!is_valid_platform_tag(platformTag)) {
+    std::fprintf(stderr,
+                 "error: invalid platform tag (single token, <64 chars)\n");
     return 9;
   }
 
@@ -340,7 +358,8 @@ int main(int argc, char **argv) {
   sort_dependency_digests(dependencyDigests);
 
   if (!forceRepack && !should_repack(outputPath, sourceHash, dependencyDigests,
-                                     importSettingsHash, verifyOutputs)) {
+                                     importSettingsHash, platformTag,
+                                     verifyOutputs)) {
     std::printf("asset up-to-date; skipped recook: %s\n", outputPath);
     if (sweepOrphans && !sweep_orphan_outputs(outputPath)) {
       return 19;
@@ -564,7 +583,7 @@ int main(int argc, char **argv) {
   // retired), so any interruption leaves no fresh stamp and the next run
   // recooks the full output set (audit H-20, issue #55).
   if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
-                        importSettingsHash, cookedOutputs)) {
+                        importSettingsHash, platformTag, cookedOutputs)) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");
     return 13;
   }

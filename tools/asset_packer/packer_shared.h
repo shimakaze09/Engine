@@ -46,6 +46,14 @@ struct OutputRecord final {
 /// (issue #55); pre-manifest stamps recook once through this gate.
 inline constexpr std::uint32_t kCookToolVersion = 3U;
 
+#ifndef ENGINE_COOK_PLATFORM
+#define ENGINE_COOK_PLATFORM "Unknown"
+#endif
+
+/// Default target-platform tag in the cook key (issue #81): stamps for one
+/// platform never certify a cook for another; overridable via --platform.
+inline constexpr const char *kCookPlatformTag = ENGINE_COOK_PLATFORM;
+
 /// Import settings read from an asset's .meta.json sidecar.
 struct ImportSettings final {
   int meshIndex = 0;
@@ -85,14 +93,17 @@ bool read_import_settings_from_meta(const char *outputPath,
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
+                      const char *platformTag,
                       const std::vector<std::string> &outputPaths);
 /// True when the output must be recooked: stamp missing, legacy, or
-/// stale hashes, a manifest-listed output missing, or (with
-/// verifyOutputHashes) a manifest-listed output whose bytes changed.
+/// stale hashes, a platform-tag mismatch, a manifest-listed output
+/// missing, or (with verifyOutputHashes) one whose bytes changed.
 bool should_repack(const char *outputPath, std::uint64_t sourceHash,
                    const std::vector<DependencyDigest> &dependencies,
-                   std::uint64_t importSettingsHash,
+                   std::uint64_t importSettingsHash, const char *platformTag,
                    bool verifyOutputHashes = false);
+/// Whether the tag is a valid single-token platform name for the stamp.
+bool is_valid_platform_tag(const char *platformTag);
 /// Deletes previous-manifest outputs the current cook no longer
 /// produces (renamed/removed clips, hull-less recooks); a failed
 /// deletion returns false and must block the new stamp (issue #55).
