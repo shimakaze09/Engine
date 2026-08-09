@@ -555,6 +555,14 @@ engine_add_test_executable(engine_unit_manifold
     engine_physics
 )
 
+engine_add_test_executable(engine_unit_manifold_warmstart
+    SOURCES
+    manifold_warmstart_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_query
     SOURCES
     physics_query_test.cpp

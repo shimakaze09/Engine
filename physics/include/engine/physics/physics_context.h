@@ -15,6 +15,7 @@
 #include "engine/math/component_types.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/constraint_solver.h"
 #include "engine/physics/physics.h"
 
 #ifndef ENGINE_MAX_ENTITIES
@@ -130,6 +131,12 @@ struct PhysicsShapeStore final {
   // jobs are integrating concurrently.
   std::array<math::Vec3, kMaxColliders> ccdColliderVelocities{};
 
+  // Persistent contact-manifold cache (issue #110): world-scoped so
+  // separate worlds never share warm-start state; entries are keyed by
+  // full Entity so index reuse cannot inherit stale impulses.
+  std::array<ContactManifold, kMaxContactManifolds> contactManifolds{};
+  std::size_t contactManifoldCount = 0U;
+
   // Blocked-body warning diagnostic (physics.blocked_warn_steps): commanded
   // speeds captured at resolve entry keyed by dense rigid-body index
   // (negative = ineligible this step), and consecutive-blocked-step episode
@@ -194,6 +201,9 @@ struct PhysicsContext final {
   // path then primes a conservative snapshot so the first sweep sees
   // moving targets instead of a static world (issue #106).
   bool ccdSnapshotDirty = true;
+
+  // Monotonic resolve counter stamping manifold-cache use for eviction.
+  std::uint32_t solverFrameNumber = 0U;
 
   // Broad-phase overflow diagnostic: overflowActive is set while any
   // collider is served by the brute-force overflow list (per-collider

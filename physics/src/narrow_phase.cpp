@@ -286,9 +286,10 @@ void resolve_pair_contact(const PairContext &pair,
 void resolve_pair_manifold(const PairContext &pair,
                            const engine::math::Vec3 &normal,
                            const ClippedManifold &manifold) noexcept {
-  resolve_manifold_contact(pair.world, pair.simToken, pair.bodyEntityA,
-                           pair.bodyEntityB, pair.bodyCenterA, pair.bodyCenterB,
-                           pair.bodyA, pair.bodyB, pair.invMassA, pair.invMassB,
+  resolve_manifold_contact(pair.world, pair.simToken, pair.entityA,
+                           pair.entityB, pair.bodyEntityA, pair.bodyEntityB,
+                           pair.bodyCenterA, pair.bodyCenterB, pair.bodyA,
+                           pair.bodyB, pair.invMassA, pair.invMassB,
                            pair.invMassSum, normal, manifold, pair.colliderA,
                            pair.colliderB);
 }

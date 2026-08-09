@@ -10,7 +10,9 @@
 #include <cstddef>
 
 #include "engine/math/vec3.h"
+#include "engine/physics/constraint_solver.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
 #include "contact_clip.h"
 #include "physics_internal.h"
@@ -141,8 +143,8 @@ void clamp_angular_speed(RigidBody *body) noexcept {
 void resolve_manifold_contact(
     PhysicsWorldView &world,
     const PhysicsWorldView::SimulationAccessToken &simToken,
-    Entity bodyEntityA, Entity bodyEntityB,
-    const engine::math::Vec3 &bodyCenterA,
+    Entity colliderEntityA, Entity colliderEntityB, Entity bodyEntityA,
+    Entity bodyEntityB, const engine::math::Vec3 &bodyCenterA,
     const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA, RigidBody *bodyB,
     float invMassA, float invMassB, float invMassSum,
     const engine::math::Vec3 &normal, const ClippedManifold &manifold,
@@ -215,7 +217,71 @@ void resolve_manifold_contact(
           ? (combinedRest * -approachSpeed0)
           : 0.0F;
 
+  static_assert(ClippedManifold::kMaxPoints <= ContactManifold::kMaxContacts,
+                "cache writeback assumes every clipped point fits");
+  PhysicsContext &physicsCtx = world.physics_context();
+  ContactManifold *cached = manifold_acquire(
+      physicsCtx, colliderEntityA, colliderEntityB,
+      physicsCtx.solverFrameNumber);
+
   float accumulated[ClippedManifold::kMaxPoints] = {};
+  if (cached != nullptr) {
+    // Warm start: replay last step's solved impulse on each matched point
+    // (same proximity threshold as the cache's own contact matching, plus
+    // normal agreement) so resting stacks begin near their converged state
+    // instead of cold-starting every step.
+    constexpr float kWarmStartMatchDistSq = 0.01F;
+    for (std::size_t p = 0U; p < manifold.count; ++p) {
+      float bestDistSq = kWarmStartMatchDistSq;
+      std::size_t match = ContactManifold::kMaxContacts;
+      for (std::size_t c = 0U; c < cached->contactCount; ++c) {
+        const engine::math::Vec3 diff =
+            engine::math::sub(cached->contacts[c].pointOnA,
+                              manifold.points[p]);
+        const float distSq = engine::math::dot(diff, diff);
+        if ((distSq < bestDistSq) &&
+            (engine::math::dot(cached->contacts[c].normal, normal) > 0.9F)) {
+          bestDistSq = distSq;
+          match = c;
+        }
+      }
+      if (match >= ContactManifold::kMaxContacts) {
+        continue;
+      }
+      const float warmImpulse =
+          cached->contacts[match].accumulatedNormalImpulse;
+      if (warmImpulse <= 0.0F) {
+        continue;
+      }
+      accumulated[p] = warmImpulse;
+      const engine::math::Vec3 impulseVec =
+          engine::math::mul(normal, warmImpulse);
+      const engine::math::Vec3 rA =
+          engine::math::sub(manifold.points[p], centerA);
+      const engine::math::Vec3 rB =
+          engine::math::sub(manifold.points[p], centerB);
+      if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+        bodyA->velocity = engine::math::sub(
+            bodyA->velocity, engine::math::mul(impulseVec, invMassA));
+        if (invInertiaA > 0.0F) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(rA, impulseVec),
+                                invInertiaA));
+        }
+      }
+      if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+        bodyB->velocity = engine::math::add(
+            bodyB->velocity, engine::math::mul(impulseVec, invMassB));
+        if (invInertiaB > 0.0F) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(rB, impulseVec),
+                                invInertiaB));
+        }
+      }
+    }
+  }
   for (std::size_t iteration = 0U; iteration < kManifoldSolverIterations;
        ++iteration) {
     for (std::size_t p = 0U; p < manifold.count; ++p) {
@@ -341,6 +407,20 @@ void resolve_manifold_contact(
                                 invInertiaB));
         }
       }
+    }
+  }
+  if (cached != nullptr) {
+    // Write the solved state back so the next step's solve seeds from it;
+    // stale points fall away because the whole set is replaced.
+    cached->contactCount = manifold.count;
+    for (std::size_t p = 0U; p < manifold.count; ++p) {
+      ManifoldContact &c = cached->contacts[p];
+      c.pointOnA = manifold.points[p];
+      c.pointOnB = manifold.points[p];
+      c.normal = normal;
+      c.penetration = manifold.penetrations[p];
+      c.accumulatedNormalImpulse = accumulated[p];
+      c.featureId = 0U;
     }
   }
   clamp_angular_speed((invMassA > 0.0F) ? bodyA : nullptr);

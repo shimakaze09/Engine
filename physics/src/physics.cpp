@@ -201,6 +201,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
   physicsCtx.collisionPairCount = 0U;
   physicsCtx.collisionPairDropCount = 0U;
+  ++physicsCtx.solverFrameNumber;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
                    physicsCtx.pairHashStamps.size());
@@ -701,6 +702,10 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     }
     physicsCtx.ccdSnapshotDirty = false;
   }
+
+  // Manifolds no pair touched this resolve hold contacts that no longer
+  // exist; drop them so warm starts never replay a vanished contact.
+  manifold_evict_stale(physicsCtx, physicsCtx.solverFrameNumber);
 
   report_blocked_bodies(world, deltaSeconds);
 
