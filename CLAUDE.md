@@ -386,13 +386,14 @@ IBL + reflection probes, fog, instancing + foliage, post stack; 2026-07
 production-hardening campaign (27 findings recorded as closed at that time).
 Current audits and regressions supersede historical blanket closure claims;
 any unresolved scope remains open until it meets the closure contract above.
-2026-08 audit campaign: the 2026-08-01 audit and 2026-08-03 follow-up
-(`audit/`) were closed across PRs #48–#52 and #58–#77 (merged 2026-08-01
-through 2026-08-04), each fix carrying red-on-base production-path
-regressions per the closure contract; the finding→PR ledger is the
-resolution addendum in `audit/audit_2026-08-03_followup.md`, and all
-residual scope and pending owner decisions are tracked as open GitHub
-issues (#78–#86 as of 2026-08-04).
+2026-08 audit campaign: the 2026-08-01 audit and 2026-08-03 follow-up were
+closed across PRs #48–#52 and #58–#77 (merged 2026-08-01 through
+2026-08-04), each fix carrying red-on-base production-path regressions per
+the closure contract; the finding→PR ledger and git-history permalinks to
+the full reports live in reference issue #87 (the repo carries no audit
+report files — per the tracking policy, findings live only on the issue
+tracker), and all residual scope and pending owner decisions are tracked
+as open GitHub issues (#78–#86 as of 2026-08-09).
 
 Roadmap status labels describe integration state, not release certification.
 `LANDED` means the named change is present on the stated date; it is

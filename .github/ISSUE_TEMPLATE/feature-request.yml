@@ -1,0 +1,55 @@
+# Issue form for feature requirements — the only place feature scope is tracked (no local spec files).
+name: Feature request
+description: A feature requirement or enhancement — scoped against the product vision and roadmap slice
+title: "[Feature] <what and for whom>"
+labels: ["feature"]
+body:
+  - type: dropdown
+    id: slice
+    attributes:
+      label: Roadmap slice
+      description: Which acceptance slice this serves (per CLAUDE.md); parking-lot items are cut from v1, not canceled.
+      options:
+        - v0.1 — the slice plays
+        - v0.5 — runs everywhere
+        - v1.0 — the hour test
+        - Parking lot (post-1.0)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - core
+        - math
+        - physics
+        - renderer
+        - audio
+        - scripting
+        - runtime
+        - editor
+        - tools / asset pipeline
+        - build / CI
+        - tests
+    validations:
+      required: true
+  - type: textarea
+    id: requirement
+    attributes:
+      label: Requirement
+      description: What the user (game author or engine contributor) must be able to do, and why the Island Hopper slice or the hour test needs it.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How we know it is done — concrete, demonstrable behavior; note determinism/test obligations for sensitive areas.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and cut lines
+      description: Hard-rule interactions (hot paths, serialization versioning, joint naming, etc.), what is explicitly out of scope, and any owner decision required.

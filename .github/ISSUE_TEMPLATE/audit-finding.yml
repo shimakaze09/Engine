@@ -38,8 +38,8 @@ body:
     id: evidence
     attributes:
       label: Evidence
-      description: Exact file:line references and what the code does wrong. Cite the audit report section if one exists.
-      placeholder: "physics/src/ccd.cpp:233-242 — reads live RigidBody::velocity while chunk jobs write it; audit/audit_2026-08-03_followup.md N-08"
+      description: Exact file:line references and what the code does wrong. Cite the originating audit issue or sweep if one exists.
+      placeholder: "physics/src/ccd.cpp:233-242 — reads live RigidBody::velocity while chunk jobs write it; N-08 in campaign record #87"
     validations:
       required: true
   - type: textarea
@@ -60,5 +60,5 @@ body:
     id: origin
     attributes:
       label: Origin
-      description: Audit report / PR review / sweep that produced this finding
-      placeholder: "audit/audit_2026-08-03_followup.md N-08; PR #63 review"
+      description: Audit issue / PR review / sweep that produced this finding
+      placeholder: "N-08 (campaign record #87); PR #63 review"
