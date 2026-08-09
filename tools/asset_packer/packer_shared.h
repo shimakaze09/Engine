@@ -98,6 +98,8 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
 /// deletion returns false and must block the new stamp (issue #55).
 bool remove_stale_outputs(const char *outputPath,
                           const std::vector<std::string> &currentOutputs);
+/// Deletes pre-manifest orphan sidecars unaccounted for by any cookstamp manifest.
+bool sweep_orphan_outputs(const char *outputPath);
 
 /// Rotates positions and normals from the declared source up axis
 /// (0 = X-up, 2 = Z-up) into engine Y-up; 1 and unknown values no-op.

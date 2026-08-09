@@ -513,6 +513,156 @@ bool remove_stale_outputs(const char *outputPath,
   return true;
 }
 
+namespace {
+
+/// Filename component of a manifest or disk path (either separator).
+std::string manifest_entry_filename(const std::string &path) {
+  const std::size_t separator = path.find_last_of("/\\");
+  return (separator == std::string::npos) ? path : path.substr(separator + 1U);
+}
+
+/// Whether the name ends with the given suffix.
+bool name_ends_with(const std::string &name, const char *suffix) {
+  const std::size_t suffixLength = std::strlen(suffix);
+  return (name.size() >= suffixLength) &&
+         (name.compare(name.size() - suffixLength, suffixLength, suffix) == 0);
+}
+
+} // namespace
+
+/// Deletes same-base cooked sidecars no cookstamp manifest or sibling .mesh accounts for.
+bool sweep_orphan_outputs(const char *outputPath) {
+  if (outputPath == nullptr) {
+    return false;
+  }
+
+  std::uint64_t stampSourceHash = 0ULL;
+  std::vector<DependencyDigest> stampDependencies{};
+  std::vector<OutputRecord> stampOutputs{};
+  if (!read_cook_stamp(outputPath, &stampSourceHash, &stampDependencies,
+                       nullptr, nullptr, &stampOutputs) ||
+      stampOutputs.empty()) {
+    std::fprintf(stderr,
+                 "error: orphan sweep needs a manifest-bearing cook stamp: "
+                 "%s.cookstamp\n",
+                 outputPath);
+    return false;
+  }
+
+  const std::filesystem::path cookedPath(outputPath);
+  std::filesystem::path directory = cookedPath.parent_path();
+  if (directory.empty()) {
+    directory = ".";
+  }
+
+  std::string baseName = cookedPath.filename().string();
+  const std::size_t baseDot = baseName.rfind('.');
+  if (baseDot != std::string::npos) {
+    baseName.resize(baseDot);
+  }
+  const std::string basePrefix = baseName + ".";
+
+  const std::string outputFilename = cookedPath.filename().string();
+  std::vector<std::string> protectedNames{};
+  std::vector<std::string> siblingMeshNames{};
+  std::error_code scanError{};
+  for (std::filesystem::directory_iterator
+           entry(directory, scanError),
+       end{};
+       !scanError && (entry != end); entry.increment(scanError)) {
+    const std::string entryName = entry->path().filename().string();
+    if (name_ends_with(entryName, ".cookstamp")) {
+      const std::string ownerPath =
+          (directory / entryName.substr(0U, entryName.size() - 10U)).string();
+      std::uint64_t siblingSourceHash = 0ULL;
+      std::vector<DependencyDigest> siblingDependencies{};
+      std::vector<OutputRecord> siblingOutputs{};
+      if (read_cook_stamp(ownerPath.c_str(), &siblingSourceHash,
+                          &siblingDependencies, nullptr, nullptr,
+                          &siblingOutputs)) {
+        for (const OutputRecord &record : siblingOutputs) {
+          protectedNames.push_back(manifest_entry_filename(record.path));
+        }
+      }
+    }
+    if (name_ends_with(entryName, ".mesh") && (entryName != outputFilename)) {
+      siblingMeshNames.push_back(entryName);
+    }
+  }
+  if (scanError) {
+    std::fprintf(stderr, "error: orphan sweep failed to scan directory: %s\n",
+                 directory.string().c_str());
+    return false;
+  }
+
+  static constexpr const char *kSweptSuffixes[] = {".anim", ".skel", ".hull",
+                                                   ".meta.json"};
+  std::vector<std::string> orphanNames{};
+  scanError.clear();
+  for (std::filesystem::directory_iterator
+           entry(directory, scanError),
+       end{};
+       !scanError && (entry != end); entry.increment(scanError)) {
+    const std::string entryName = entry->path().filename().string();
+    if (entryName.compare(0U, basePrefix.size(), basePrefix) != 0) {
+      continue;
+    }
+    const char *matchedSuffix = nullptr;
+    for (const char *suffix : kSweptSuffixes) {
+      if (name_ends_with(entryName, suffix)) {
+        matchedSuffix = suffix;
+        break;
+      }
+    }
+    if (matchedSuffix == nullptr) {
+      continue;
+    }
+    if (std::find(protectedNames.begin(), protectedNames.end(), entryName) !=
+        protectedNames.end()) {
+      continue;
+    }
+    const std::string stem =
+        entryName.substr(0U, entryName.size() - std::strlen(matchedSuffix));
+    std::string owningMesh{};
+    if ((std::strcmp(matchedSuffix, ".hull") == 0) ||
+        (std::strcmp(matchedSuffix, ".meta.json") == 0)) {
+      owningMesh = stem;
+    } else if (std::strcmp(matchedSuffix, ".skel") == 0) {
+      owningMesh = stem + ".mesh";
+    } else {
+      const std::size_t clipDot = stem.rfind('.');
+      if (clipDot != std::string::npos) {
+        owningMesh = stem.substr(0U, clipDot) + ".mesh";
+      }
+    }
+    if (!owningMesh.empty() &&
+        (std::find(siblingMeshNames.begin(), siblingMeshNames.end(),
+                   owningMesh) != siblingMeshNames.end())) {
+      continue;
+    }
+    orphanNames.push_back(entryName);
+  }
+  if (scanError) {
+    std::fprintf(stderr, "error: orphan sweep failed to scan directory: %s\n",
+                 directory.string().c_str());
+    return false;
+  }
+
+  std::sort(orphanNames.begin(), orphanNames.end());
+  for (const std::string &orphanName : orphanNames) {
+    const std::filesystem::path orphanPath = directory / orphanName;
+    std::error_code removeError{};
+    if (!std::filesystem::remove(orphanPath, removeError) || removeError) {
+      std::fprintf(stderr, "error: failed to remove orphan cooked output: %s\n",
+                   orphanPath.string().c_str());
+      return false;
+    }
+    std::printf("removed orphan cooked output: %s\n",
+                orphanPath.string().c_str());
+  }
+
+  return true;
+}
 
 std::uint64_t hash_path_to_asset_id(const char *path) {
   if (path == nullptr) {

@@ -60,7 +60,7 @@ void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
                "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
-               "[--force] [--verify]\n");
+               "[--force] [--verify] [--sweep-orphans]\n");
 }
 
 /// Strips the mesh output's extension so cooked skeletal assets land
@@ -193,6 +193,7 @@ int main(int argc, char **argv) {
 
   bool forceRepack = false;
   bool verifyOutputs = false;
+  bool sweepOrphans = false;
   std::vector<std::string> dependencyPaths{};
   std::string graphPath{};
   for (int i = 3; i < argc; ++i) {
@@ -223,6 +224,11 @@ int main(int argc, char **argv) {
 
     if (std::strcmp(argv[i], "--verify") == 0) {
       verifyOutputs = true;
+      continue;
+    }
+
+    if (std::strcmp(argv[i], "--sweep-orphans") == 0) {
+      sweepOrphans = true;
       continue;
     }
 
@@ -336,6 +342,9 @@ int main(int argc, char **argv) {
   if (!forceRepack && !should_repack(outputPath, sourceHash, dependencyDigests,
                                      importSettingsHash, verifyOutputs)) {
     std::printf("asset up-to-date; skipped recook: %s\n", outputPath);
+    if (sweepOrphans && !sweep_orphan_outputs(outputPath)) {
+      return 19;
+    }
     return 0;
   }
 
@@ -558,6 +567,10 @@ int main(int argc, char **argv) {
                         importSettingsHash, cookedOutputs)) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");
     return 13;
+  }
+
+  if (sweepOrphans && !sweep_orphan_outputs(outputPath)) {
+    return 19;
   }
 
   std::printf(
