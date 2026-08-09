@@ -210,7 +210,6 @@ void resolve_manifold_contact(
       engine::math::dot(engine::math::sub(pointVelB0, pointVelA0), normal);
   const float combinedRest =
       std::max(colliderA.restitution, colliderB.restitution);
-  constexpr float kRestitutionSpeedThreshold = 1.0F;
   const float restitutionTarget =
       (-approachSpeed0 > kRestitutionSpeedThreshold)
           ? (combinedRest * -approachSpeed0)
@@ -424,7 +423,6 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
   const float relVelAlongNormal =
       engine::math::dot(engine::math::sub(pointVelB, pointVelA), normal);
   if (relVelAlongNormal < 0.0F) {
-    constexpr float kRestitutionSpeedThreshold = 1.0F;
     const float effectiveRestitution =
         (-relVelAlongNormal > kRestitutionSpeedThreshold) ? restitution : 0.0F;
     const float effectiveMass =

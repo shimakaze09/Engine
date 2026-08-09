@@ -18,6 +18,16 @@ struct CcdSweepResult {
   math::Vec3 contactPoint{};
   math::Vec3 contactNormal{};
   std::uint32_t hitEntityIndex = 0U;
+  /// Hit body's snapshot velocity (zero when no snapshot vouched for it).
+  math::Vec3 targetVelocity{};
+  /// Pair restitution combined with the discrete solver's max rule.
+  float combinedRestitution = 0.0F;
+  /// Hit owner's inverse mass (zero for static or ownerless targets).
+  float targetInverseMass = 0.0F;
+  /// True when the hit body is fast enough for its own sweep to apply the
+  /// symmetric impulse share; slow dynamic targets leave the exchange to
+  /// the discrete solver so momentum is never deleted one-sidedly.
+  bool targetRespondsInCcd = false;
 };
 
 /// Performs bilateral advancement for one collider owned by a moving body.

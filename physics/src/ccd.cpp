@@ -197,6 +197,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   math::Vec3 bestNormal(0.0F, 1.0F, 0.0F);
   math::Vec3 bestContactPt{};
   std::uint32_t bestHitEntity = 0U;
+  math::Vec3 bestOtherVel(0.0F, 0.0F, 0.0F);
+  Entity bestOtherOwner = kInvalidEntity;
+  float bestOtherRestitution = 0.0F;
   const Entity movingOwner = world.rigid_body_owner(entity);
 
   const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
@@ -339,6 +342,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
           contact_normal(contactGeometry, otherGeometry, contactIntersection);
       bestContactPt = contact_point(contactGeometry, otherGeometry, bestNormal);
       bestHitEntity = entities[i].index;
+      bestOtherVel = otherVel;
+      bestOtherOwner = otherOwner;
+      bestOtherRestitution = other.restitution;
     }
   }
 
@@ -348,6 +354,18 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     result.contactNormal = bestNormal;
     result.contactPoint = bestContactPt;
     result.hitEntityIndex = bestHitEntity;
+    result.targetVelocity = bestOtherVel;
+    result.combinedRestitution =
+        std::max(collider.restitution, bestOtherRestitution);
+    // inverseMass is Input-phase-only state, safe to read beside the
+    // parallel chunk jobs that only write velocities.
+    const RigidBody *otherBody = (bestOtherOwner != kInvalidEntity)
+                                     ? world.get_rigid_body_ptr(bestOtherOwner)
+                                     : nullptr;
+    result.targetInverseMass =
+        (otherBody != nullptr) ? otherBody->inverseMass : 0.0F;
+    result.targetRespondsInCcd = (result.targetInverseMass > 0.0F) &&
+                                 (math::length(bestOtherVel) >= threshold);
   }
 
   return result;

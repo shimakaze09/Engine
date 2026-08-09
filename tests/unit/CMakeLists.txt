@@ -571,6 +571,14 @@ engine_add_test_executable(engine_unit_ccd
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_ccd_response
+    SOURCES
+    ccd_response_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_contact_angular
     SOURCES
     contact_angular_test.cpp
