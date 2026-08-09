@@ -286,6 +286,28 @@ if(ENGINE_BUILD_TOOLS)
         engine_integration_asset_packer_legacy_stamp_recook
         PROPERTIES LABELS integration
     )
+
+    engine_add_executable_target(asset_stale_load_host
+        SOURCES
+        asset_stale_load_test.cpp
+        PRIVATE_DEPS
+        engine_renderer
+    )
+
+    add_test(
+        NAME engine_integration_asset_runtime_stale_warning
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSTALE_HOST=$<TARGET_FILE:asset_stale_load_host>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/runtime_stale_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_runtime_stale_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_runtime_stale_warning
+        PROPERTIES LABELS integration
+    )
 endif()
 
 engine_add_test_executable(engine_integration_hotreload

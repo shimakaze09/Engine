@@ -61,6 +61,7 @@ engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/asset_stale_check.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
     PRIVATE_DEPS
