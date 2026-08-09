@@ -122,7 +122,8 @@ void check_script_reload() noexcept;
 void dispatch_entity_scripts_start() noexcept;
 
 // Dispatch on_begin_play for entities that need it (newly created).
-// Also marks each entity's begin_play as done in the World.
+// Marks begin_play done on delivery; a failed module load leaves the
+// entity pending and retries under the mtime-gated attempt budget.
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;
 
 // Dispatch on_end_play(self) for entities pending deferred destruction.

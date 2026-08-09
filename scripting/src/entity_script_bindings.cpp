@@ -25,17 +25,20 @@ namespace {
 /// Stores one cached Lua module table for entity script dispatch.
 /// lastFailedMtime latches the mtime of a save whose reload failed so the
 /// attempt (including its per-entity on_save_state captures) runs once
-/// per broken save instead of every frame until the file is fixed; the
-/// next mtime change retries.
+/// per broken save; the next mtime change retries. registryRef LUA_NOREF
+/// marks a never-loaded negative entry whose first-load retries take a
+/// small per-file-version attempt budget re-armed by an mtime change.
 struct EntityScriptModule final {
   char path[128] = {};
   int registryRef = LUA_NOREF;
   std::int64_t mtime = 0;
   std::int64_t lastFailedMtime = 0;
+  std::uint8_t loadAttempts = 0U;
   bool reloaded = false;
 };
 
 constexpr std::size_t kMaxEntityScriptModules = 32U;
+constexpr std::uint8_t kMaxModuleLoadAttempts = 8U;
 constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
 constexpr std::size_t kMaxModuleLoadDepth = 32U;
 constexpr std::size_t kInvalidModuleSlot = kMaxEntityScriptModules;
@@ -290,6 +293,75 @@ void capture_entity_saved_state(std::size_t moduleSlot,
   --g_captureDepth;
 }
 
+/// Runs one chunk load + exec + registry-ref attempt for a module path.
+int attempt_module_load(const char *path) noexcept {
+  if (g_moduleLoadDepth >= kMaxModuleLoadDepth) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "module load stack overflow");
+    return LUA_NOREF;
+  }
+  std::snprintf(g_moduleLoadStack[g_moduleLoadDepth],
+                sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
+  ++g_moduleLoadDepth;
+
+  if (!protected_load_chunk(g_state, path, "load entity script")) {
+    --g_moduleLoadDepth;
+    return LUA_NOREF;
+  }
+
+  refresh_lua_hook();
+
+  if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
+    log_script_error("exec entity script");
+    --g_moduleLoadDepth;
+    return LUA_NOREF;
+  }
+
+  if (lua_istable(g_state, -1) == 0) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "entity script must return a module table");
+    lua_pop(g_state, 1);
+    --g_moduleLoadDepth;
+    return LUA_NOREF;
+  }
+
+  int ref = LUA_NOREF;
+  if (!protected_registry_ref(g_state, &ref, "ref entity script module")) {
+    --g_moduleLoadDepth;
+    return LUA_NOREF;
+  }
+  --g_moduleLoadDepth;
+  return ref;
+}
+
+/// Retries a never-loaded (negative) cache entry within its attempt budget.
+int retry_negative_module_entry(EntityScriptModule &mod,
+                                const char *path) noexcept {
+  const std::int64_t currentMtime = file_mtime(path);
+  if (currentMtime != mod.lastFailedMtime) {
+    mod.loadAttempts = 0U;
+  }
+  if (mod.loadAttempts >= kMaxModuleLoadAttempts) {
+    return LUA_NOREF;
+  }
+  ++mod.loadAttempts;
+  const int ref = attempt_module_load(path);
+  if (ref == LUA_NOREF) {
+    mod.lastFailedMtime = currentMtime;
+    return LUA_NOREF;
+  }
+  mod.registryRef = ref;
+  mod.mtime = currentMtime;
+  mod.lastFailedMtime = 0;
+  mod.loadAttempts = 0U;
+  mod.reloaded = false;
+
+  char logBuf[256] = {};
+  std::snprintf(logBuf, sizeof(logBuf), "loaded entity script: %s", path);
+  core::log_message(core::LogLevel::Info, "scripting", logBuf);
+  return ref;
+}
+
 /// Loads a Lua module table, reusing or hot-reloading cache entries.
 int get_or_load_entity_script_module(const char *path) noexcept {
   if ((g_state == nullptr) || (path == nullptr) || (path[0] == '\0')) {
@@ -307,6 +379,9 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
     if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
       EntityScriptModule &mod = g_entityScriptModules[i];
+      if (mod.registryRef == LUA_NOREF) {
+        return retry_negative_module_entry(mod, path);
+      }
       const std::int64_t currentMtime = file_mtime(path);
       if ((currentMtime != 0) && (mod.mtime != 0) &&
           (currentMtime != mod.mtime) &&
@@ -383,57 +458,19 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
-  if (g_moduleLoadDepth >= kMaxModuleLoadDepth) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "module load stack overflow");
-    return LUA_NOREF;
-  }
-  std::snprintf(g_moduleLoadStack[g_moduleLoadDepth],
-                sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
-  ++g_moduleLoadDepth;
-
-  if (!protected_load_chunk(g_state, path, "load entity script")) {
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  refresh_lua_hook();
-
-  if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-    log_script_error("exec entity script");
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  if (lua_istable(g_state, -1) == 0) {
-    core::log_message(core::LogLevel::Error, "scripting",
-                      "entity script must return a module table");
-    lua_pop(g_state, 1);
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
-
-  int ref = LUA_NOREF;
-  if (!protected_registry_ref(g_state, &ref, "ref entity script module")) {
-    --g_moduleLoadDepth;
-    return LUA_NOREF;
-  }
   EntityScriptModule &mod = g_entityScriptModules[g_entityScriptModuleCount];
   const std::size_t maxPath = sizeof(mod.path) - 1U;
   const std::size_t pathLen = std::strlen(path);
   const std::size_t copyLen = (pathLen > maxPath) ? maxPath : pathLen;
   std::memcpy(mod.path, path, copyLen);
   mod.path[copyLen] = '\0';
-  mod.registryRef = ref;
-  mod.mtime = file_mtime(path);
+  mod.mtime = 0;
+  mod.lastFailedMtime = -1;
+  mod.loadAttempts = 0U;
   mod.reloaded = false;
+  mod.registryRef = LUA_NOREF;
   ++g_entityScriptModuleCount;
-
-  char logBuf[256] = {};
-  std::snprintf(logBuf, sizeof(logBuf), "loaded entity script: %s", path);
-  core::log_message(core::LogLevel::Info, "scripting", logBuf);
-  --g_moduleLoadDepth;
-  return ref;
+  return retry_negative_module_entry(mod, path);
 }
 
 /// Protected trampoline: resolves funcName (or fallbackName) on the module
@@ -659,12 +696,12 @@ void dispatch_entity_scripts_start() noexcept {
         entity_is_faulted(entity)) {
       continue;
     }
-    world->mark_begin_play_done(entity);
     arm_debug_lua_hook(g_state);
     const int ref = get_or_load_entity_script_module(path);
     if (ref == LUA_NOREF) {
       continue;
     }
+    world->mark_begin_play_done(entity);
     call_module_function(ref, "on_begin_play", "on_start", entity, false,
                          0.0F);
   }
@@ -676,16 +713,17 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   }
 
   world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
-    world->mark_begin_play_done(entity);
     char path[kScriptPathSize] = {};
     if (!copy_entity_script_path(world, entity, path) ||
         entity_is_faulted(entity)) {
+      world->mark_begin_play_done(entity);
       return;
     }
     const int ref = get_or_load_entity_script_module(path);
     if (ref == LUA_NOREF) {
       return;
     }
+    world->mark_begin_play_done(entity);
     call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
   });
 }

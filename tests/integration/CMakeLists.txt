@@ -85,6 +85,16 @@ engine_add_test_executable(engine_integration_lua_lifecycle
     integration
 )
 
+engine_add_test_executable(engine_integration_script_begin_play_retry
+    SOURCES
+    script_begin_play_retry_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_game_mode
     SOURCES
     game_mode_test.cpp
