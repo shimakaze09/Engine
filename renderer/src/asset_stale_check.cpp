@@ -7,8 +7,10 @@
 #include "asset_stale_check.h"
 
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -93,9 +95,10 @@ bool parse_hex_u64(const char *text, std::uint64_t *outValue) noexcept {
   if ((text == nullptr) || (outValue == nullptr)) {
     return false;
   }
-  unsigned long long value = 0ULL;
-  char extra = '\0';
-  if (std::sscanf(text, "%llx%c", &value, &extra) != 1) {
+  errno = 0;
+  char *end = nullptr;
+  const unsigned long long value = std::strtoull(text, &end, 16);
+  if ((end == text) || (*end != '\0') || (errno == ERANGE)) {
     return false;
   }
   *outValue = static_cast<std::uint64_t>(value);
