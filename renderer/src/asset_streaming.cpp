@@ -318,22 +318,34 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
 
   std::lock_guard<std::mutex> lock(queue->mutex);
 
+  std::uint32_t failedMatch = LoadHandle::kInvalid;
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
-    if (queue->requests[i].occupied && (queue->requests[i].assetId == id) &&
-        (queue->requests[i].state != LoadingState::Failed)) {
-          if (static_cast<std::uint8_t>(priority) >
+    if (!queue->requests[i].occupied || (queue->requests[i].assetId != id)) {
+      continue;
+    }
+    if (queue->requests[i].state != LoadingState::Failed) {
+      if (static_cast<std::uint8_t>(priority) >
           static_cast<std::uint8_t>(queue->requests[i].priority)) {
         queue->requests[i].priority = priority;
       }
       return LoadHandle{i, queue->requests[i].generation};
     }
+    if (failedMatch == LoadHandle::kInvalid) {
+      failedMatch = i;
+    }
   }
 
-  const std::uint32_t slot = find_free_request(queue);
+  std::uint32_t slot = failedMatch;
   if (slot == LoadHandle::kInvalid) {
-    core::log_message(core::LogLevel::Error, "streaming",
-                      "load_asset_async: queue full");
-    return kInvalidLoadHandle;
+    slot = find_free_request(queue);
+    if (slot == LoadHandle::kInvalid) {
+      core::log_message(core::LogLevel::Error, "streaming",
+                        "load_asset_async: queue full");
+      return kInvalidLoadHandle;
+    }
+    ++queue->count;
+  } else {
+    reset_request_unlocked(queue, slot);
   }
 
   LoadRequest &req = queue->requests[slot];
@@ -342,7 +354,6 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
   req.priority = priority;
   req.state = LoadingState::Queued;
   req.occupied = true;
-  ++queue->count;
   queue->stateChanged.notify_all();
 
   return LoadHandle{slot, req.generation};

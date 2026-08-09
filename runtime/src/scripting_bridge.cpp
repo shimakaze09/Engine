@@ -21,6 +21,7 @@
 #include "engine/scripting/scripting.h"
 
 #include "component_registry.h"
+#include "engine_runtime_streaming.h"
 
 #include <cstring>
 
@@ -585,6 +586,8 @@ std::uint32_t scripting_load_asset_async(const char *path,
   if (assetId == renderer::kInvalidAssetId) {
     return kInvalidScriptAssetHandle;
   }
+
+  retire_terminal_script_loads(g_scriptingAssetDatabaseService);
 
   const bool alreadyReady =
       renderer::mesh_asset_state(g_scriptingAssetDatabaseService->database,
