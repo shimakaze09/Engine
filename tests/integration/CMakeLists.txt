@@ -332,3 +332,17 @@ engine_add_test_executable(engine_integration_asset_dep_load
     LABELS
     integration
 )
+
+# ---- H-16 (#85): scene-transition reset protocol ----
+
+engine_add_test_executable(engine_integration_scene_transition_reset
+    SOURCES
+    scene_transition_reset_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
