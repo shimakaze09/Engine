@@ -33,6 +33,15 @@ namespace engine::scripting {
 
 namespace {
 
+/// One captured pre-lock inverse inertia, generation-checked (issue #80).
+struct LockRotationCapture final {
+  core::Entity owner = core::kInvalidEntity;
+  float inverseInertia = 1.0F;
+};
+
+constexpr std::size_t kMaxLockCaptures = ENGINE_MAX_ENTITIES + 1U;
+LockRotationCapture g_lockRotationCaptures[kMaxLockCaptures]{};
+
 // engine.add_capsule_collider(entity, half_height, radius) → bool
 int lua_engine_add_capsule_collider(lua_State *state) noexcept {
   runtime::Entity entity{};
@@ -122,8 +131,10 @@ int lua_engine_set_friction(lua_State *state) noexcept {
 }
 
 // engine.set_lock_rotation(entity, locked) → bool
-// Freezes (or restores) the body's rotational response — the standard
-// player-controller setup, so driven actors slide instead of tumbling.
+// Freezes the body's rotational response, capturing its inverse inertia;
+// unlock restores exactly the captured value (owner decision, issue #80).
+// Without a capture, unlock of a locked body falls back to the 1.0 default
+// (pre-capture legacy) and unlock of an unlocked body leaves it unchanged.
 int lua_engine_set_lock_rotation(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isboolean(state, 2)) {
@@ -139,9 +150,23 @@ int lua_engine_set_lock_rotation(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  rigidBody.inverseInertia = locked ? 0.0F : 1.0F;
+  if (entity.index >= kMaxLockCaptures) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  LockRotationCapture &capture = g_lockRotationCaptures[entity.index];
   if (locked) {
+    if (rigidBody.inverseInertia != 0.0F) {
+      capture.owner = entity;
+      capture.inverseInertia = rigidBody.inverseInertia;
+    }
+    rigidBody.inverseInertia = 0.0F;
     rigidBody.angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
+  } else if (capture.owner == entity) {
+    rigidBody.inverseInertia = capture.inverseInertia;
+    capture = LockRotationCapture{};
+  } else if (rigidBody.inverseInertia == 0.0F) {
+    rigidBody.inverseInertia = 1.0F;
   }
 
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
@@ -753,6 +778,12 @@ int lua_engine_get_friction(lua_State *state) noexcept {
 // --- MeshComponent: material getters/setters ---
 
 } // namespace
+
+void clear_lock_rotation_captures() noexcept {
+  for (LockRotationCapture &capture : g_lockRotationCaptures) {
+    capture = LockRotationCapture{};
+  }
+}
 
 /// Registers this module's engine-table bindings; expects the table at the
 /// top of the Lua stack.

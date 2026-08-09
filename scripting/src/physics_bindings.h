@@ -12,4 +12,7 @@ namespace engine::scripting {
 /// top of the Lua stack.
 void register_physics_bindings(lua_State *state) noexcept;
 
+/// Drops all captured pre-lock inertia values (world/scene teardown).
+void clear_lock_rotation_captures() noexcept;
+
 } // namespace engine::scripting

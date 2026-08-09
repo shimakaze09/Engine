@@ -4,6 +4,7 @@
 
 #include "binding_util.h"
 #include "debug_bindings.h"
+#include "physics_bindings.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -838,6 +839,7 @@ void dispatch_entity_scripts_end() noexcept {
 }
 
 void clear_entity_script_modules() noexcept {
+  clear_lock_rotation_captures();
   clear_entity_saved_state();
   g_moduleCapacityWarned = false;
   g_hasPendingEntityReloads = false;
