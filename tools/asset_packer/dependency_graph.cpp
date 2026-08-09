@@ -6,6 +6,7 @@
 #include "engine/core/json.h"
 
 #include <algorithm>
+#include <functional>
 #include <queue>
 #include <stack>
 #include <utility>
@@ -134,6 +135,25 @@ bool read_asset_id_field(const engine::core::JsonParser &parser,
          parse_asset_id(text, out);
 }
 
+/// Copies an id set ascending so callers see a deterministic order and
+/// truncation keeps the smallest ids (L-02, issue #86).
+std::size_t copy_ids_sorted(
+    const std::unordered_set<DependencyGraph::AssetId> &ids,
+    DependencyGraph::AssetId *outIds, std::size_t maxIds) noexcept {
+  std::vector<DependencyGraph::AssetId> sortedIds(ids.begin(), ids.end());
+  std::sort(sortedIds.begin(), sortedIds.end());
+
+  std::size_t count = 0U;
+  for (const auto id : sortedIds) {
+    if (count >= maxIds) {
+      break;
+    }
+    outIds[count] = id;
+    ++count;
+  }
+  return count;
+}
+
 } // namespace
 
 bool add_dependency(DependencyGraph *graph, DependencyGraph::AssetId dependent,
@@ -245,15 +265,7 @@ std::size_t get_dependencies(const DependencyGraph *graph,
     return it->second.size();
   }
 
-  std::size_t count = 0U;
-  for (const auto dep : it->second) {
-    if (count >= maxIds) {
-      break;
-    }
-    outIds[count] = dep;
-    ++count;
-  }
-  return count;
+  return copy_ids_sorted(it->second, outIds, maxIds);
 }
 
 std::size_t get_dependents(const DependencyGraph *graph,
@@ -273,15 +285,7 @@ std::size_t get_dependents(const DependencyGraph *graph,
     return it->second.size();
   }
 
-  std::size_t count = 0U;
-  for (const auto dep : it->second) {
-    if (count >= maxIds) {
-      break;
-    }
-    outIds[count] = dep;
-    ++count;
-  }
-  return count;
+  return copy_ids_sorted(it->second, outIds, maxIds);
 }
 
 /// BFS over reverse edges from the asset's direct dependents.
@@ -320,15 +324,7 @@ std::size_t get_all_dependents_recursive(const DependencyGraph *graph,
     }
   }
 
-  std::size_t count = 0U;
-  for (const auto dep : visited) {
-    if (count >= maxIds) {
-      break;
-    }
-    outIds[count] = dep;
-    ++count;
-  }
-  return count;
+  return copy_ids_sorted(visited, outIds, maxIds);
 }
 
 /// A cycle would exist if the dependency already transitively depends on
@@ -431,7 +427,9 @@ bool has_cycle(const DependencyGraph *graph) noexcept {
 
 /// Converts topological sort into the target representation.
 /// Kahn's algorithm over all nodes (including leaf dependencies that
-/// appear only as edge targets), dependencies before dependents.
+/// appear only as edge targets), dependencies before dependents; the
+/// min-heap emits ready ties smallest id first so the order is unique
+/// and deterministic (L-02, issue #86).
 std::size_t topological_sort(const DependencyGraph *graph,
                              DependencyGraph::AssetId *outIds,
                              std::size_t maxIds) noexcept {
@@ -461,7 +459,10 @@ std::size_t topological_sort(const DependencyGraph *graph,
     inDegree[node] = deps.size();
   }
 
-  std::queue<DependencyGraph::AssetId> ready{};
+  std::priority_queue<DependencyGraph::AssetId,
+                      std::vector<DependencyGraph::AssetId>,
+                      std::greater<DependencyGraph::AssetId>>
+      ready{};
   for (const auto &[node, deg] : inDegree) {
     if (deg == 0U) {
       ready.push(node);
@@ -470,7 +471,7 @@ std::size_t topological_sort(const DependencyGraph *graph,
 
   std::size_t count = 0U;
   while (!ready.empty()) {
-    const auto current = ready.front();
+    const auto current = ready.top();
     ready.pop();
 
     if (count >= maxIds) {
@@ -706,15 +707,7 @@ std::size_t compute_invalidation_set(const DependencyGraph *graph,
     }
   }
 
-  std::size_t count = 0U;
-  for (const auto id : invalidated) {
-    if (count >= maxIds) {
-      break;
-    }
-    outIds[count] = id;
-    ++count;
-  }
-  return count;
+  return copy_ids_sorted(invalidated, outIds, maxIds);
 }
 
 } // namespace engine::tools
