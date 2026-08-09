@@ -15,11 +15,12 @@ ScriptingContext g_scriptingContext{};
 /// Returns the process-local scripting context.
 ScriptingContext &scripting_context() noexcept { return g_scriptingContext; }
 
-/// Creates the Lua state if needed and returns the current state.
+/// Creates the Lua state if needed and returns the current state; the
+/// accounting allocator is installed at creation so the GC baseline counts.
 lua_State *initialize_lua_state() noexcept {
   ScriptingContext &context = scripting_context();
   if (context.luaState == nullptr) {
-    context.luaState = luaL_newstate();
+    context.luaState = lua_newstate(&scripting_lua_alloc, nullptr);
   }
   return context.luaState;
 }

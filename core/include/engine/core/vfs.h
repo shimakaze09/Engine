@@ -19,6 +19,10 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept;
 /// Removes a mount; false when the prefix is unknown.
 bool unmount(const char *virtualPrefix) noexcept;
 
+/// True when a script-supplied path stays inside the VFS jail: non-empty,
+/// relative, forward slashes only, no drive designator, no ".." segment.
+bool vfs_path_is_jailed(const char *virtualPath) noexcept;
+
 /// True when the virtual path resolves to an existing file.
 bool vfs_file_exists(const char *virtualPath) noexcept;
 

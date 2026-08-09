@@ -478,6 +478,11 @@ private:
     m_graphDispatched = true;
     m_pendingJobs.store(0U, std::memory_order_release);
 
+    // Snapshot the ready set before the first push: once a job is queued,
+    // workers retire dependencies concurrently, and a live counter hitting
+    // zero mid-scan is indistinguishable from a dependency-free node — the
+    // scan would queue such nodes a second time.
+    std::size_t readyCount = 0U;
     for (std::size_t i = 0U; i < m_nodeCount; ++i) {
       if (!m_nodes[i].active) {
         continue;
@@ -486,9 +491,14 @@ private:
       m_pendingJobs.fetch_add(1U, std::memory_order_acq_rel);
       if (m_nodes[i].remainingDependencies.load(std::memory_order_acquire) ==
           0U) {
-        if (!push_ready_job(static_cast<std::uint32_t>(i))) {
-          fail_graph_on_ready_overflow(static_cast<std::uint32_t>(i));
-        }
+        m_initialReady[readyCount] = static_cast<std::uint32_t>(i);
+        ++readyCount;
+      }
+    }
+
+    for (std::size_t i = 0U; i < readyCount; ++i) {
+      if (!push_ready_job(m_initialReady[i])) {
+        fail_graph_on_ready_overflow(m_initialReady[i]);
       }
     }
 
@@ -737,6 +747,8 @@ private:
   std::array<JobNode, kMaxJobs> m_nodes{};
   std::array<DependencyEdge, kMaxEdges> m_edges{};
   std::array<std::uint32_t, kReadyQueueCapacity> m_readyQueue{};
+  // Dispatch-time ready-set snapshot; guarded by m_graphMutex.
+  std::array<std::uint32_t, kMaxJobs> m_initialReady{};
   std::array<ThreadStats, kMaxWorkers + 1U> m_threadStats{};
 
   std::atomic<bool> m_initialized = false;

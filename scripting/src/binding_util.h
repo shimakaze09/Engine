@@ -5,6 +5,8 @@
 
 struct lua_State;
 
+#include <cstddef>
+
 #include "engine/math/vec3.h"
 
 namespace engine::scripting {
@@ -18,6 +20,16 @@ bool read_vec3_args(lua_State *state, int startIndex,
 bool read_finite_number_arg(lua_State *state, int index,
                             float *outValue) noexcept;
 
+/// Copies a NUL-terminated path into a fixed buffer; refuses with one
+/// Error diagnostic (destination untouched) when the path does not fit.
+bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
+                      const char *context) noexcept;
+
+/// True when a script-supplied filesystem path stays inside the VFS jail
+/// (relative, no "..", no drive/backslash); refusal logs one Error naming
+/// the call site per the H-15 defence-in-depth decision (issue #83).
+bool script_path_in_jail(const char *path, const char *context) noexcept;
+
 /// Logs the Lua error on top of the stack with a traceback, then pops it.
 void log_lua_error(const char *context) noexcept;
 
@@ -28,11 +40,11 @@ void log_lua_error(lua_State *state, const char *context) noexcept;
 /// receives its argument struct as a light userdata at stack index 1.
 using LuaDispatchFn = int (*)(lua_State *state);
 
-/// Runs an engine-to-Lua dispatch inside one protected call with a fresh
-/// per-dispatch instruction budget: pushes the trampoline and args (both
-/// allocation-free), pcalls with nresults, and logs errors — including a
-/// budget exhausted by a latched instruction-limit trip. Returns success
-/// with the results left on the stack.
+/// Runs an engine-to-Lua dispatch inside one protected call charged against
+/// the shared per-frame instruction budget (issue #84): pushes the
+/// trampoline and args (both allocation-free), pcalls with nresults, and
+/// logs errors — including a budget exhausted by a latched
+/// instruction-limit trip. Returns success with the results on the stack.
 bool protected_engine_dispatch(lua_State *state, LuaDispatchFn trampoline,
                                void *args, int nresults,
                                const char *context) noexcept;

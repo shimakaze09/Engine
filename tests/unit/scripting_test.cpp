@@ -264,12 +264,18 @@ int main() {
     return 131;
   }
 
+  // Approved contract migration (issue #80): unlock restores the exact
+  // captured pre-lock inverse inertia (0.25 here), not a hard-coded 1.0.
   const char *lockRotationScript =
-      "function verify_lock_rotation()\n"
+      "function setup_lock_body()\n"
       "    local body = engine.spawn_entity()\n"
       "    if body == nil then error('spawn failed') end\n"
       "    engine.set_name(body, 'LockTest')\n"
       "    engine.add_rigid_body(body, 1.0)\n"
+      "end\n"
+      "function verify_lock_rotation()\n"
+      "    local body = engine.find_entity_by_name('LockTest')\n"
+      "    if body == nil then error('LockTest lookup failed') end\n"
       "    if not engine.set_lock_rotation(body, true) then\n"
       "        error('set_lock_rotation(true) failed')\n"
       "    end\n"
@@ -283,16 +289,23 @@ int main() {
       "end\n";
   if (!write_script_file(lockRotationScript) ||
       !engine::scripting::load_script(kTempScriptPath) ||
-      !engine::scripting::call_script_function("verify_lock_rotation")) {
+      !engine::scripting::call_script_function("setup_lock_body")) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 132;
   }
   const engine::runtime::Entity lockEntity =
       world->find_entity_by_name("LockTest");
-  const engine::runtime::RigidBody *lockedBody =
+  engine::runtime::RigidBody *lockedBody =
       world->get_rigid_body_ptr(lockEntity);
-  if ((lockedBody == nullptr) || (lockedBody->inverseInertia != 0.0F)) {
+  if (lockedBody == nullptr) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 132;
+  }
+  lockedBody->inverseInertia = 0.25F;
+  if (!engine::scripting::call_script_function("verify_lock_rotation") ||
+      (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.0F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 133;
@@ -302,10 +315,17 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 134;
   }
-  if (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 1.0F) {
+  if (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.25F) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 135;
+  }
+  if (!engine::scripting::call_script_function("verify_lock_rotation") ||
+      !engine::scripting::call_script_function("verify_unlock_rotation") ||
+      (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.25F)) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 136;
   }
 
   const char *asyncAssetScript =

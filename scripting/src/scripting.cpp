@@ -39,6 +39,7 @@ extern "C" {
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -89,58 +90,6 @@ lua_State *lua_state() noexcept { return current_lua_state(); }
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
 std::size_t g_memoryLimit = kDefaultMemoryLimit;
 std::size_t g_memoryUsed = 0U;
-bool g_sandboxAllocInstalled = false;
-
-// Custom allocator wrapper that enforces memory limit (0 = unlimited, per
-// the public set_memory_limit contract) while the sandbox is enabled;
-// accounting always runs once installed so a later re-enable keeps an
-// accurate byte count. Per the lua_Alloc contract, osize is an object type
-// tag (not a size) when ptr is null.
-void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
-                    std::size_t nsize) noexcept {
-  if (ptr == nullptr) {
-    osize = 0U;
-  }
-  if (nsize == 0U) {
-    if (osize > 0U) {
-      g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
-    }
-    std::free(ptr);
-    return nullptr;
-  }
-  if (nsize > osize && debug_sandbox_enabled() && (g_memoryLimit != 0U) &&
-      (g_memoryUsed + (nsize - osize)) > g_memoryLimit) {
-    return nullptr;
-  }
-  void *newPtr = std::realloc(ptr, nsize);
-  if (newPtr != nullptr) {
-    if (nsize > osize) {
-      g_memoryUsed += (nsize - osize);
-    } else {
-      const std::size_t freed = osize - nsize;
-      g_memoryUsed = (g_memoryUsed >= freed) ? (g_memoryUsed - freed) : 0U;
-    }
-  }
-  return newPtr;
-}
-
-/// Installs the accounting/capping allocator on a live state. Swapping
-/// allocators mid-state is legal in Lua 5.4 because both the default
-/// allocator and the wrapper resolve to realloc/free; the accounted
-/// baseline is seeded from lua_gc(LUA_GCCOUNT) so blocks allocated before
-/// installation neither instantly exceed the cap nor silently bypass it.
-void install_sandbox_allocator(lua_State *state) noexcept {
-  if ((state == nullptr) || g_sandboxAllocInstalled) {
-    return;
-  }
-  const std::size_t kilobytes =
-      static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNT));
-  const std::size_t remainder =
-      static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNTB));
-  g_memoryUsed = (kilobytes * 1024U) + remainder;
-  lua_setallocf(state, sandbox_alloc, nullptr);
-  g_sandboxAllocInstalled = true;
-}
 
 void refresh_lua_hook() noexcept;
 
@@ -361,7 +310,62 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setglobal(state, "engine");
 }
 
+/// Protected trampoline: opens the safe library set and registers bindings.
+int open_libraries_trampoline(lua_State *state) noexcept {
+  luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_STRLIBNAME, luaopen_string, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
+  lua_pop(state, 1);
+  register_engine_bindings(state);
+  return 0;
+}
+
 } // namespace
+
+/// Accounting lua_Alloc: sandbox-gated cap, wrap-safe, counted from creation.
+void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
+                          std::size_t nsize) noexcept {
+  if (ptr == nullptr) {
+    osize = 0U;
+  }
+  if (nsize == 0U) {
+    if (osize > 0U) {
+      g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
+    }
+    std::free(ptr);
+    return nullptr;
+  }
+  if (nsize > osize) {
+    const std::size_t growth = nsize - osize;
+    const std::size_t headroom =
+        std::numeric_limits<std::size_t>::max() - g_memoryUsed;
+    if (debug_sandbox_enabled() && (g_memoryLimit != 0U) &&
+        ((growth > headroom) || ((g_memoryUsed + growth) > g_memoryLimit))) {
+      return nullptr;
+    }
+    void *newPtr = std::realloc(ptr, nsize);
+    if (newPtr != nullptr) {
+      g_memoryUsed = (growth > headroom)
+                         ? std::numeric_limits<std::size_t>::max()
+                         : (g_memoryUsed + growth);
+    }
+    return newPtr;
+  }
+  void *newPtr = std::realloc(ptr, nsize);
+  if (newPtr != nullptr) {
+    const std::size_t freed = osize - nsize;
+    g_memoryUsed = (g_memoryUsed >= freed) ? (g_memoryUsed - freed) : 0U;
+  }
+  return newPtr;
+}
 
 float bindable_delta_time() noexcept { return g_deltaSeconds; }
 
@@ -455,8 +459,9 @@ void bindable_stop_all_sounds() noexcept {
 /// Initializes the scripting system. Only safe Lua libraries are opened
 /// (base, coroutine, table, string, math, utf8) — io, os, debug, and
 /// package are excluded so untrusted game scripts cannot touch the file
-/// system or execute system commands — and the sandboxed allocator is
-/// installed when the sandbox is enabled.
+/// system or execute system commands — and the accounting allocator is
+/// active from state creation, so registration runs under pcall to keep
+/// cap-induced allocation failure recoverable.
 bool initialize_scripting() noexcept {
   if (lua_state() != nullptr) {
     return true;
@@ -474,24 +479,15 @@ bool initialize_scripting() noexcept {
       state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
                                           &refresh_lua_hook, &get_file_mtime});
 
-  luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_STRLIBNAME, luaopen_string, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
-  lua_pop(state, 1);
-  register_engine_bindings(state);
-  register_cheat_commands();
-
-  if (debug_sandbox_enabled()) {
-    install_sandbox_allocator(state);
+  lua_pushcfunction(state, &open_libraries_trampoline);
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+    lua_pop(state, 1);
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "failed to open Lua libraries (memory limit too low?)");
+    shutdown_scripting();
+    return false;
   }
+  register_cheat_commands();
 
   refresh_lua_hook();
   return true;
@@ -513,7 +509,6 @@ void shutdown_scripting() noexcept {
   }
 
   g_memoryUsed = 0U;
-  g_sandboxAllocInstalled = false;
   clear_runtime_binding();
   reset_mesh_material_bindings();
   clear_deferred_mutations();
@@ -641,31 +636,78 @@ struct GlobalsSnapshotArgs final {
   int ref = LUA_NOREF;
 };
 
-/// Protected trampoline: copies every top-level global into a fresh table
-/// and refs it into the registry, so table growth or registry allocation
-/// failure while snapshotting stays catchable.
-int snapshot_globals_trampoline(lua_State *state) noexcept {
-  auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
+// Rollback covers tables reachable from _G through table fields down to
+// this depth; deeper tables (and closure upvalues, metatables, userdata,
+// registry-only state) stay shared and are not rolled back.
+constexpr std::size_t kMaxReloadSnapshotDepth = 8U;
+
+/// Replaces the table on top of the stack with its snapshot copy,
+/// recording orig->copy in memo and copy->orig in rev; cycles reuse the
+/// memoized copy, and depth/stack limits fall back to a shared reference.
+void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
+                         std::size_t depth) noexcept {
+  const int origIndex = lua_absindex(state, -1);
+  lua_pushvalue(state, origIndex);
+  lua_rawget(state, memoIndex);
+  if (!lua_isnil(state, -1)) {
+    lua_replace(state, origIndex);
+    return;
+  }
+  lua_pop(state, 1);
+
   lua_newtable(state);
-  const int snapshotIndex = lua_absindex(state, -1);
-  lua_pushglobaltable(state);
-  const int globalsIndex = lua_absindex(state, -1);
+  const int copyIndex = lua_absindex(state, -1);
+  lua_pushvalue(state, origIndex);
+  lua_pushvalue(state, copyIndex);
+  lua_rawset(state, memoIndex);
+  lua_pushvalue(state, copyIndex);
+  lua_pushvalue(state, origIndex);
+  lua_rawset(state, revIndex);
 
   lua_pushnil(state);
-  while (lua_next(state, globalsIndex) != 0) {
+  while (lua_next(state, origIndex) != 0) {
+    if ((lua_istable(state, -1) != 0) &&
+        ((depth + 1U) < kMaxReloadSnapshotDepth) &&
+        (lua_checkstack(state, 8) != 0)) {
+      deep_snapshot_table(state, memoIndex, revIndex, depth + 1U);
+    }
     lua_pushvalue(state, -2);
     lua_pushvalue(state, -2);
-    lua_rawset(state, snapshotIndex);
+    lua_rawset(state, copyIndex);
     lua_pop(state, 1);
   }
 
+  lua_replace(state, origIndex);
+}
+
+/// Protected trampoline: deep-copies the globals table (and every nested
+/// table within the depth cap) into a memoized snapshot refed into the
+/// registry, so allocation failure while snapshotting stays catchable.
+int snapshot_globals_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
+  lua_createtable(state, 2, 0);
+  const int containerIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int memoIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int revIndex = lua_absindex(state, -1);
+
+  lua_pushglobaltable(state);
+  deep_snapshot_table(state, memoIndex, revIndex, 0U);
   lua_pop(state, 1);
+
+  lua_pushvalue(state, memoIndex);
+  lua_rawseti(state, containerIndex, 1);
+  lua_pushvalue(state, revIndex);
+  lua_rawseti(state, containerIndex, 2);
+  lua_pop(state, 2);
   args->ref = luaL_ref(state, LUA_REGISTRYINDEX);
   return 0;
 }
 
-/// Captures the current top-level globals for rollback after a failed
-/// reload; false (with the error logged) when snapshotting itself fails.
+/// Captures globals (nested tables included, up to the depth cap) for
+/// rollback after a failed reload; false (with the error logged) when
+/// snapshotting itself fails.
 bool snapshot_global_bindings(lua_State *state, int *outReference) noexcept {
   GlobalsSnapshotArgs args{};
   if (!protected_c_operation(state, &snapshot_globals_trampoline, &args, 0,
@@ -676,51 +718,71 @@ bool snapshot_global_bindings(lua_State *state, int *outReference) noexcept {
   return true;
 }
 
-/// Protected trampoline: restores top-level globals exactly, including
-/// removing newly introduced keys, so allocation failure while rebuilding
-/// the globals table stays catchable.
+/// Restores one snapshotted table in place from its copy: keys added
+/// since the snapshot are removed, snapshot keys are reassigned, and
+/// values that are copies of snapshotted tables map back (via rev) to the
+/// original table object so shared references keep their identity.
+void restore_table_in_place(lua_State *state, int revIndex, int origIndex,
+                            int copyIndex) noexcept {
+  lua_pushnil(state);
+  while (lua_next(state, origIndex) != 0) {
+    lua_pop(state, 1);
+    lua_pushvalue(state, -1);
+    lua_rawget(state, copyIndex);
+    const bool wasPresent = !lua_isnil(state, -1);
+    lua_pop(state, 1);
+    if (!wasPresent) {
+      lua_pushvalue(state, -1);
+      lua_pushnil(state);
+      lua_rawset(state, origIndex);
+    }
+  }
+
+  lua_pushnil(state);
+  while (lua_next(state, copyIndex) != 0) {
+    lua_pushvalue(state, -2);
+    if (lua_istable(state, -2) != 0) {
+      lua_pushvalue(state, -2);
+      lua_rawget(state, revIndex);
+      if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        lua_pushvalue(state, -2);
+      }
+    } else {
+      lua_pushvalue(state, -2);
+    }
+    lua_rawset(state, origIndex);
+    lua_pop(state, 1);
+  }
+}
+
+/// Protected trampoline: restores every snapshotted table in place (the
+/// globals table is one memo entry), so allocation failure while
+/// rebuilding tables stays catchable.
 int restore_globals_trampoline(lua_State *state) noexcept {
   auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
-  const int snapshotReference = args->ref;
   const int originalTop = lua_gettop(state);
-  lua_rawgeti(state, LUA_REGISTRYINDEX, snapshotReference);
+  lua_rawgeti(state, LUA_REGISTRYINDEX, args->ref);
   if (!lua_istable(state, -1)) {
     lua_settop(state, originalTop);
     return 0;
   }
-  const int snapshotIndex = lua_absindex(state, -1);
-
-  lua_pushglobaltable(state);
-  const int globalsIndex = lua_absindex(state, -1);
-  lua_newtable(state);
-  const int removalIndex = lua_absindex(state, -1);
-  lua_Integer removalCount = 0;
-
-  lua_pushnil(state);
-  while (lua_next(state, globalsIndex) != 0) {
-    lua_pushvalue(state, -2);
-    lua_rawget(state, snapshotIndex);
-    const bool wasPresent = !lua_isnil(state, -1);
-    lua_pop(state, 1);
-    if (!wasPresent) {
-      ++removalCount;
-      lua_pushvalue(state, -2);
-      lua_rawseti(state, removalIndex, removalCount);
-    }
-    lua_pop(state, 1);
-  }
-
-  for (lua_Integer index = 1; index <= removalCount; ++index) {
-    lua_rawgeti(state, removalIndex, index);
-    lua_pushnil(state);
-    lua_rawset(state, globalsIndex);
+  const int containerIndex = lua_absindex(state, -1);
+  lua_rawgeti(state, containerIndex, 1);
+  const int memoIndex = lua_absindex(state, -1);
+  lua_rawgeti(state, containerIndex, 2);
+  const int revIndex = lua_absindex(state, -1);
+  if ((lua_istable(state, memoIndex) == 0) ||
+      (lua_istable(state, revIndex) == 0) ||
+      (lua_checkstack(state, 16) == 0)) {
+    lua_settop(state, originalTop);
+    return 0;
   }
 
   lua_pushnil(state);
-  while (lua_next(state, snapshotIndex) != 0) {
-    lua_pushvalue(state, -2);
-    lua_pushvalue(state, -2);
-    lua_rawset(state, globalsIndex);
+  while (lua_next(state, memoIndex) != 0) {
+    restore_table_in_place(state, revIndex, lua_absindex(state, -2),
+                           lua_absindex(state, -1));
     lua_pop(state, 1);
   }
 
@@ -728,9 +790,9 @@ int restore_globals_trampoline(lua_State *state) noexcept {
   return 0;
 }
 
-/// Restores top-level globals from the snapshot under protection; a
-/// restore that itself hits allocation failure is logged (globals may
-/// then be partially restored — unavoidable under OOM).
+/// Restores snapshotted tables under protection; a restore that itself
+/// hits allocation failure is logged (tables may then be partially
+/// restored — unavoidable under OOM).
 void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
   GlobalsSnapshotArgs args{};
   args.ref = snapshotReference;
@@ -809,9 +871,11 @@ std::int64_t get_file_mtime(const char *path) noexcept {
 }
 } // anonymous namespace
 
-/// Sets the requested value for frame index.
+/// Frame boundary: advances the frame index and refills the shared
+/// per-frame Lua instruction budget (issue #84, one budget per frame).
 void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
+  refill_debug_instruction_budget();
 }
 
 void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
@@ -845,7 +909,10 @@ void watch_script_file(const char *path) noexcept {
   }
 
   WatchedScript &entry = g_watchedScripts[g_watchedScriptCount];
-  core::copy_string(entry.path, sizeof(entry.path), path);
+  if (!copy_path_strict(entry.path, sizeof(entry.path), path,
+                        "watch_script_file")) {
+    return;
+  }
   entry.mtime = get_file_mtime(path);
   ++g_watchedScriptCount;
 }
@@ -871,14 +938,10 @@ void check_script_reload() noexcept {
 
 // --- Sandbox configuration ---
 
-/// Enables/disables the sandbox; enabling after initialize_scripting
-/// installs the capping allocator on the live state so the memory limit
-/// is enforced regardless of when the sandbox was switched on.
+/// Enables/disables the sandbox; the creation-time allocator enforces the
+/// memory cap immediately whenever the sandbox is switched on.
 void set_sandbox_enabled(bool enabled) noexcept {
   set_debug_sandbox_enabled(enabled);
-  if (enabled) {
-    install_sandbox_allocator(lua_state());
-  }
   refresh_lua_hook();
 }
 

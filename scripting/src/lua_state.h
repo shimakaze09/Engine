@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 struct lua_State;
 
 namespace engine::scripting {
@@ -13,6 +15,11 @@ struct ScriptingContext final {
 
 /// Returns the process-local scripting context.
 ScriptingContext &scripting_context() noexcept;
+
+/// Accounting/capping lua_Alloc for the scripting VM; installed at state
+/// creation so every allocation (including the GC baseline) is counted.
+void *scripting_lua_alloc(void *ud, void *ptr, std::size_t osize,
+                          std::size_t nsize) noexcept;
 
 /// Creates the Lua state if needed and returns the current state.
 lua_State *initialize_lua_state() noexcept;

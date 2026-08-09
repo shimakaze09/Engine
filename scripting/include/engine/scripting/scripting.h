@@ -122,7 +122,8 @@ void check_script_reload() noexcept;
 void dispatch_entity_scripts_start() noexcept;
 
 // Dispatch on_begin_play for entities that need it (newly created).
-// Also marks each entity's begin_play as done in the World.
+// Marks begin_play done on delivery; a failed module load leaves the
+// entity pending and retries under the mtime-gated attempt budget.
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;
 
 // Dispatch on_end_play(self) for entities pending deferred destruction.
@@ -145,17 +146,18 @@ void set_sandbox_enabled(bool enabled) noexcept;
 /// Returns whether is sandbox enabled.
 bool is_sandbox_enabled() noexcept;
 
-// CPU instruction limit per protected Lua call (0 = unlimited).
+// CPU instruction budget per frame, shared across all dispatches,
+// coroutines, and hooks; refilled at set_frame_index (0 = unlimited).
 void set_instruction_limit(int limit) noexcept;
-/// Current per-call Lua instruction cap (0 = unlimited).
+/// Current per-frame shared Lua instruction cap (0 = unlimited).
 int get_instruction_limit() noexcept;
 
 // Memory limit for the Lua allocator in bytes (0 = unlimited).
 void set_memory_limit(std::size_t limit) noexcept;
 /// Current Lua allocator byte cap (0 = unlimited).
 std::size_t get_memory_limit() noexcept;
-/// Bytes currently accounted by the sandbox allocator (0 until the
-/// sandbox allocator is installed; reset by shutdown_scripting).
+/// Bytes currently allocated by the scripting VM (accounted from state
+/// creation; reset by shutdown_scripting).
 std::size_t get_memory_used() noexcept;
 
 } // namespace engine::scripting

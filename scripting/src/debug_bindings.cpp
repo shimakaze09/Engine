@@ -37,6 +37,7 @@ struct DebugBreakpoint final {
 
 constexpr std::size_t kMaxDebugWatches = 32U;
 constexpr int kDefaultInstructionLimit = 1000000;
+constexpr int kInstructionQuantum = 1000;
 
 lua_State *g_hookState = nullptr;
 ProfilerEntry g_profilerEntries[kMaxProfilerEntries]{};
@@ -54,6 +55,7 @@ DapStepMode g_dapStepMode = DapStepMode::Continue;
 int g_dapStepDepth = 0;
 bool g_sandboxEnabled = true;
 int g_instructionLimit = kDefaultInstructionLimit;
+std::int64_t g_frameBudgetRemaining = kDefaultInstructionLimit;
 bool g_instructionBudgetExhausted = false;
 
 /// Records one profiler sample for the requested function name.
@@ -187,15 +189,20 @@ void scripting_debug_hook(lua_State *state, lua_Debug *ar) noexcept {
   }
 
   if (g_sandboxEnabled && ar->event == LUA_HOOKCOUNT) {
-    if (!g_instructionBudgetExhausted) {
-      g_instructionBudgetExhausted = true;
-      apply_debug_lua_hook(state);
-      if (g_hookState != state) {
-        apply_debug_lua_hook(g_hookState);
+    g_frameBudgetRemaining -= kInstructionQuantum;
+    if (g_frameBudgetRemaining <= 0) {
+      g_frameBudgetRemaining = 0;
+      if (!g_instructionBudgetExhausted) {
+        g_instructionBudgetExhausted = true;
+        apply_debug_lua_hook(state);
+        if (g_hookState != state) {
+          apply_debug_lua_hook(g_hookState);
+        }
       }
+      luaL_error(state,
+                 "CPU instruction limit exceeded (%d instructions per frame)",
+                 g_instructionLimit);
     }
-    luaL_error(state, "CPU instruction limit exceeded (%d instructions)",
-               g_instructionLimit);
     return;
   }
 
@@ -415,7 +422,7 @@ void apply_debug_lua_hook(lua_State *state) noexcept {
   }
   if (g_sandboxEnabled && g_instructionLimit > 0) {
     mask |= LUA_MASKCOUNT;
-    count = g_instructionBudgetExhausted ? 1 : g_instructionLimit;
+    count = g_instructionBudgetExhausted ? 1 : kInstructionQuantum;
   }
 
   if (mask == 0) {
@@ -429,12 +436,17 @@ void apply_debug_lua_hook(lua_State *state) noexcept {
 void refresh_debug_lua_hook() noexcept { apply_debug_lua_hook(g_hookState); }
 
 void arm_debug_lua_hook(lua_State *state) noexcept {
-  g_instructionBudgetExhausted = false;
   apply_debug_lua_hook(state);
 }
 
 bool debug_instruction_budget_exhausted() noexcept {
   return g_instructionBudgetExhausted;
+}
+
+void refill_debug_instruction_budget() noexcept {
+  g_frameBudgetRemaining = g_instructionLimit;
+  g_instructionBudgetExhausted = false;
+  refresh_debug_lua_hook();
 }
 
 void reset_debug_bindings() noexcept {
@@ -452,6 +464,7 @@ void reset_debug_bindings() noexcept {
   g_debuggerEnabled = false;
   g_dapStepMode = DapStepMode::Continue;
   g_dapStepDepth = 0;
+  g_frameBudgetRemaining = g_instructionLimit;
   g_instructionBudgetExhausted = false;
 }
 
@@ -494,13 +507,18 @@ bool debugger_add_breakpoint(const char *file, int line) noexcept {
 }
 
 void set_debug_sandbox_enabled(bool enabled) noexcept {
+  const bool wasEnabled = g_sandboxEnabled;
   g_sandboxEnabled = enabled;
+  if (enabled && !wasEnabled) {
+    refill_debug_instruction_budget();
+  }
 }
 
 bool debug_sandbox_enabled() noexcept { return g_sandboxEnabled; }
 
 void set_debug_instruction_limit(int limit) noexcept {
   g_instructionLimit = limit;
+  refill_debug_instruction_budget();
 }
 
 int debug_instruction_limit() noexcept { return g_instructionLimit; }

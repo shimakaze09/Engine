@@ -335,6 +335,12 @@ directory-global by design.
   prefer CPU-verifiable renderer tests (GPU tests carry the `gpu` label).
 - Scripting: don't break the Lua API without tests + doc updates; validate
   stack usage; preserve traceback, sandbox, and hot-reload behavior.
+  Trust model (owner decision 2026-08-09, issue #83): v0.x scripts are
+  author-local and trusted, but every script-reachable filesystem path is
+  VFS-jailed as defence-in-depth (`core::vfs_path_is_jailed` via
+  `script_path_in_jail`: relative, forward slashes, no drive designators,
+  no `..`); untrusted-content isolation for shared creations arrives with
+  the v0.5 web sandbox.
 - Private headers in `src/` are the established pattern for module-internal
   APIs — keep using it; do not move them into `include/`.
 - When adding shared utilities, put them in `core`. Migrate all in-scope
