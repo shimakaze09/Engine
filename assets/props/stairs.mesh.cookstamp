@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 4b586a1ff14fa543
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 23d3ef47a808ad7d assets/props/stairs.bin
+OUTPUT 2353abe010d78133 assets/props/stairs.mesh
+OUTPUT c365610a5e92a889 assets/props/stairs.mesh.meta.json
+OUTPUT fd417a9f0c77934b assets/props/stairs.mesh.hull
+OUTPUT 4c80228995cfc835 assets/props/.thumbnails/stairs.mesh.png
+OUTPUT a198efc190cda660 assets/props/.thumbnails/stairs.mesh.checksum

@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 5a443c2182acf1eb
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 6d92d8e89b3e5695 assets/props/rock_large.bin
+OUTPUT a7b21e3ad7e6a837 assets/props/rock_large.mesh
+OUTPUT 1c53bd9156dcc02c assets/props/rock_large.mesh.meta.json
+OUTPUT a2a95df7e2ae2c08 assets/props/rock_large.mesh.hull
+OUTPUT 43f77dc6c003ab63 assets/props/.thumbnails/rock_large.mesh.png
+OUTPUT 942b41188fbd602c assets/props/.thumbnails/rock_large.mesh.checksum

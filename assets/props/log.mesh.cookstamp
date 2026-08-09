@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH cae422e4e347db11
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 3e5083e0fe2ecec0 assets/props/log.bin
+OUTPUT 478095d4ac1b4b04 assets/props/log.mesh
+OUTPUT 4561b91168ad0f9d assets/props/log.mesh.meta.json
+OUTPUT 329dc08b19aafa7a assets/props/log.mesh.hull
+OUTPUT a799140aaf2e1b79 assets/props/.thumbnails/log.mesh.png
+OUTPUT d44b3f940d8d6db2 assets/props/.thumbnails/log.mesh.checksum

@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 23db258f5d0c2dc8
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 3c41acc21dddf46d assets/props/signpost.bin
+OUTPUT 54ba96ce334eab63 assets/props/signpost.mesh
+OUTPUT 519c529784842c20 assets/props/signpost.mesh.meta.json
+OUTPUT 244ff663833afad9 assets/props/signpost.mesh.hull
+OUTPUT c2cc1c17c8898dc9 assets/props/.thumbnails/signpost.mesh.png
+OUTPUT 4d138ad2ed94e3bb assets/props/.thumbnails/signpost.mesh.checksum

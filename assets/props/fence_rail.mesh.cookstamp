@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH f3bc10817a2e0c49
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 77b111fdac8ae865 assets/props/fence_rail.bin
+OUTPUT e473c8b31f5c1277 assets/props/fence_rail.mesh
+OUTPUT a5ed1aaaffa607d4 assets/props/fence_rail.mesh.meta.json
+OUTPUT 060326448b751528 assets/props/fence_rail.mesh.hull
+OUTPUT d26d119c8cf033c3 assets/props/.thumbnails/fence_rail.mesh.png
+OUTPUT 0d6bc0e79b7389f1 assets/props/.thumbnails/fence_rail.mesh.checksum

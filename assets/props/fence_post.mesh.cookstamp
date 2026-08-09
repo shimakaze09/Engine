@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 434be845877d8c2d
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH fda598099aa287a5 assets/props/fence_post.bin
+OUTPUT 916a3b2dfbf6db1f assets/props/fence_post.mesh
+OUTPUT 69cedde047f3f664 assets/props/fence_post.mesh.meta.json
+OUTPUT 4311dcd84acf9c98 assets/props/fence_post.mesh.hull
+OUTPUT 00b514ff07e65f9b assets/props/.thumbnails/fence_post.mesh.png
+OUTPUT 73bb8ed353304120 assets/props/.thumbnails/fence_post.mesh.checksum

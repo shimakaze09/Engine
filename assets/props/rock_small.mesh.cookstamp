@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH b2fa255653e955b4
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH c50d904c70adeb79 assets/props/rock_small.bin
+OUTPUT e28e69ba5f608807 assets/props/rock_small.mesh
+OUTPUT 0dfe569d306e0e62 assets/props/rock_small.mesh.meta.json
+OUTPUT a73bf92092ff7fb0 assets/props/rock_small.mesh.hull
+OUTPUT e7558674e3328e54 assets/props/.thumbnails/rock_small.mesh.png
+OUTPUT 6c0aafac1ef058ed assets/props/.thumbnails/rock_small.mesh.checksum

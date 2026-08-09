@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 6b5ccd2915dfbef4
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 7d091bb473a26d05 assets/props/plank.bin
+OUTPUT 2d2323a68363c51f assets/props/plank.mesh
+OUTPUT 0e2d668fd9f4f2fd assets/props/plank.mesh.meta.json
+OUTPUT 9587a0fe176e04b3 assets/props/plank.mesh.hull
+OUTPUT 52a3e484ffb59b5a assets/props/.thumbnails/plank.mesh.png
+OUTPUT 3148f1dd26c8f1d5 assets/props/.thumbnails/plank.mesh.checksum

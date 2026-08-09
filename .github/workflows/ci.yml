@@ -161,6 +161,9 @@ jobs:
       - name: Audit comment quality
         run: python3 tools/check_comment_quality.py
 
+      - name: Audit asset metadata paths
+        run: python3 tools/ci/check_asset_metadata_paths.py
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 

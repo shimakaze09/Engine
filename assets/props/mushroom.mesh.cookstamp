@@ -1,3 +1,10 @@
-SCHEMA 2
+SCHEMA 3
+TOOL_VERSION 3
 SOURCE_HASH 5705a945f17ab190
 IMPORT_HASH 57681263326bbe4b
+DEP_HASH 11ecd16fae9916ab assets/props/mushroom.bin
+OUTPUT a5f8ca22a4139e87 assets/props/mushroom.mesh
+OUTPUT 72edca25b9d5e940 assets/props/mushroom.mesh.meta.json
+OUTPUT 650744432c0ad81b assets/props/mushroom.mesh.hull
+OUTPUT 6e89529f8122b3ea assets/props/.thumbnails/mushroom.mesh.png
+OUTPUT d40befe6bec01b54 assets/props/.thumbnails/mushroom.mesh.checksum
