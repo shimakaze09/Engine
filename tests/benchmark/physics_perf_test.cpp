@@ -1,5 +1,8 @@
-// Verifies physics perf test behavior for the Engine test suite.
+// Benchmarks the fixed-step physics pipeline: one discarded warm-up
+// simulation plus a median over repeated full-simulation samples so a
+// single jittery run cannot skew the per-step gate metric.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +20,8 @@ using Clock = std::chrono::high_resolution_clock;
 
 constexpr std::size_t kBodyCount = 1000U;
 constexpr int kSimulationSteps = 120;
+constexpr std::size_t kWarmupRuns = 1U;
+constexpr std::size_t kSampleRuns = 5U;
 
 /// Parses text into the engine representation for json out.
 bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
@@ -32,6 +37,16 @@ bool parse_json_out(int argc, char **argv, const char **outPath) noexcept {
     }
   }
   return true;
+}
+
+/// Returns the median of count samples, sorting them in place.
+double median_of(double *samples, std::size_t count) noexcept {
+  std::sort(samples, samples + count);
+  const std::size_t mid = count / 2U;
+  if ((count % 2U) == 0U) {
+    return 0.5 * (samples[mid - 1U] + samples[mid]);
+  }
+  return samples[mid];
 }
 
 bool setup_world(engine::runtime::World *world) noexcept {
@@ -67,8 +82,8 @@ bool setup_world(engine::runtime::World *world) noexcept {
   return true;
 }
 
-/// Runs the configured command, loop, or tool for benchmark.
-bool run_benchmark(double *outStepMs) noexcept {
+/// Times one full fresh-world simulation and reports its mean per-step ms.
+bool measure_run(double *outStepMs) noexcept {
   if (outStepMs == nullptr) {
     return false;
   }
@@ -106,6 +121,27 @@ bool run_benchmark(double *outStepMs) noexcept {
   return true;
 }
 
+/// Discards warm-up runs, then reports the median sampled per-step time.
+bool run_benchmark(double *outStepMs) noexcept {
+  if (outStepMs == nullptr) {
+    return false;
+  }
+
+  double samples[kSampleRuns] = {};
+  for (std::size_t run = 0U; run < (kWarmupRuns + kSampleRuns); ++run) {
+    double runStepMs = 0.0;
+    if (!measure_run(&runStepMs)) {
+      return false;
+    }
+    if (run >= kWarmupRuns) {
+      samples[run - kWarmupRuns] = runStepMs;
+    }
+  }
+
+  *outStepMs = median_of(samples, kSampleRuns);
+  return true;
+}
+
 /// Writes json data.
 bool write_json(const char *path, double stepMs) noexcept {
   if (path == nullptr) {
@@ -128,9 +164,11 @@ bool write_json(const char *path, double stepMs) noexcept {
                                  "{\n"
                                  "  \"benchmark\": \"physics\",\n"
                                  "  \"bodies\": %zu,\n"
+                                 "  \"warmup_runs\": %zu,\n"
+                                 "  \"sample_runs\": %zu,\n"
                                  "  \"physics_step_ms\": %.6f\n"
                                  "}\n",
-                                 kBodyCount, stepMs);
+                                 kBodyCount, kWarmupRuns, kSampleRuns, stepMs);
 
   std::fclose(file);
   return wrote > 0;
@@ -157,6 +195,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::printf("[physics_perf] bodies=%zu step_ms=%.6f\n", kBodyCount, stepMs);
+  std::printf("[physics_perf] bodies=%zu warmup_runs=%zu sample_runs=%zu "
+              "median_step_ms=%.6f\n",
+              kBodyCount, kWarmupRuns, kSampleRuns, stepMs);
   return 0;
 }
