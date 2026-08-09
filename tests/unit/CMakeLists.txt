@@ -21,6 +21,9 @@ engine_add_test_executable(engine_unit_frame_graph_order
     PRIVATE_DEPS
     engine_core
 )
+# 200 stress iterations × 1ms condvar granularity sits near CI's 120s default
+# on loaded shared runners; headroom only, the contract is unchanged.
+set_tests_properties(engine_unit_frame_graph_order PROPERTIES TIMEOUT 300)
 
 engine_add_test_executable(engine_unit_job_ready_queue_capacity
     SOURCES
