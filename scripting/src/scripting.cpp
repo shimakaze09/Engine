@@ -39,6 +39,7 @@ extern "C" {
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -89,58 +90,6 @@ lua_State *lua_state() noexcept { return current_lua_state(); }
 constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
 std::size_t g_memoryLimit = kDefaultMemoryLimit;
 std::size_t g_memoryUsed = 0U;
-bool g_sandboxAllocInstalled = false;
-
-// Custom allocator wrapper that enforces memory limit (0 = unlimited, per
-// the public set_memory_limit contract) while the sandbox is enabled;
-// accounting always runs once installed so a later re-enable keeps an
-// accurate byte count. Per the lua_Alloc contract, osize is an object type
-// tag (not a size) when ptr is null.
-void *sandbox_alloc(void * /*ud*/, void *ptr, std::size_t osize,
-                    std::size_t nsize) noexcept {
-  if (ptr == nullptr) {
-    osize = 0U;
-  }
-  if (nsize == 0U) {
-    if (osize > 0U) {
-      g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
-    }
-    std::free(ptr);
-    return nullptr;
-  }
-  if (nsize > osize && debug_sandbox_enabled() && (g_memoryLimit != 0U) &&
-      (g_memoryUsed + (nsize - osize)) > g_memoryLimit) {
-    return nullptr;
-  }
-  void *newPtr = std::realloc(ptr, nsize);
-  if (newPtr != nullptr) {
-    if (nsize > osize) {
-      g_memoryUsed += (nsize - osize);
-    } else {
-      const std::size_t freed = osize - nsize;
-      g_memoryUsed = (g_memoryUsed >= freed) ? (g_memoryUsed - freed) : 0U;
-    }
-  }
-  return newPtr;
-}
-
-/// Installs the accounting/capping allocator on a live state. Swapping
-/// allocators mid-state is legal in Lua 5.4 because both the default
-/// allocator and the wrapper resolve to realloc/free; the accounted
-/// baseline is seeded from lua_gc(LUA_GCCOUNT) so blocks allocated before
-/// installation neither instantly exceed the cap nor silently bypass it.
-void install_sandbox_allocator(lua_State *state) noexcept {
-  if ((state == nullptr) || g_sandboxAllocInstalled) {
-    return;
-  }
-  const std::size_t kilobytes =
-      static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNT));
-  const std::size_t remainder =
-      static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNTB));
-  g_memoryUsed = (kilobytes * 1024U) + remainder;
-  lua_setallocf(state, sandbox_alloc, nullptr);
-  g_sandboxAllocInstalled = true;
-}
 
 void refresh_lua_hook() noexcept;
 
@@ -361,7 +310,62 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setglobal(state, "engine");
 }
 
+/// Protected trampoline: opens the safe library set and registers bindings.
+int open_libraries_trampoline(lua_State *state) noexcept {
+  luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_STRLIBNAME, luaopen_string, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
+  lua_pop(state, 1);
+  luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
+  lua_pop(state, 1);
+  register_engine_bindings(state);
+  return 0;
+}
+
 } // namespace
+
+/// Accounting lua_Alloc: sandbox-gated cap, wrap-safe, counted from creation.
+void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
+                          std::size_t nsize) noexcept {
+  if (ptr == nullptr) {
+    osize = 0U;
+  }
+  if (nsize == 0U) {
+    if (osize > 0U) {
+      g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
+    }
+    std::free(ptr);
+    return nullptr;
+  }
+  if (nsize > osize) {
+    const std::size_t growth = nsize - osize;
+    const std::size_t headroom =
+        std::numeric_limits<std::size_t>::max() - g_memoryUsed;
+    if (debug_sandbox_enabled() && (g_memoryLimit != 0U) &&
+        ((growth > headroom) || ((g_memoryUsed + growth) > g_memoryLimit))) {
+      return nullptr;
+    }
+    void *newPtr = std::realloc(ptr, nsize);
+    if (newPtr != nullptr) {
+      g_memoryUsed = (growth > headroom)
+                         ? std::numeric_limits<std::size_t>::max()
+                         : (g_memoryUsed + growth);
+    }
+    return newPtr;
+  }
+  void *newPtr = std::realloc(ptr, nsize);
+  if (newPtr != nullptr) {
+    const std::size_t freed = osize - nsize;
+    g_memoryUsed = (g_memoryUsed >= freed) ? (g_memoryUsed - freed) : 0U;
+  }
+  return newPtr;
+}
 
 float bindable_delta_time() noexcept { return g_deltaSeconds; }
 
@@ -455,8 +459,9 @@ void bindable_stop_all_sounds() noexcept {
 /// Initializes the scripting system. Only safe Lua libraries are opened
 /// (base, coroutine, table, string, math, utf8) — io, os, debug, and
 /// package are excluded so untrusted game scripts cannot touch the file
-/// system or execute system commands — and the sandboxed allocator is
-/// installed when the sandbox is enabled.
+/// system or execute system commands — and the accounting allocator is
+/// active from state creation, so registration runs under pcall to keep
+/// cap-induced allocation failure recoverable.
 bool initialize_scripting() noexcept {
   if (lua_state() != nullptr) {
     return true;
@@ -474,24 +479,15 @@ bool initialize_scripting() noexcept {
       state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
                                           &refresh_lua_hook, &get_file_mtime});
 
-  luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_STRLIBNAME, luaopen_string, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
-  lua_pop(state, 1);
-  luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
-  lua_pop(state, 1);
-  register_engine_bindings(state);
-  register_cheat_commands();
-
-  if (debug_sandbox_enabled()) {
-    install_sandbox_allocator(state);
+  lua_pushcfunction(state, &open_libraries_trampoline);
+  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+    lua_pop(state, 1);
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "failed to open Lua libraries (memory limit too low?)");
+    shutdown_scripting();
+    return false;
   }
+  register_cheat_commands();
 
   refresh_lua_hook();
   return true;
@@ -513,7 +509,6 @@ void shutdown_scripting() noexcept {
   }
 
   g_memoryUsed = 0U;
-  g_sandboxAllocInstalled = false;
   clear_runtime_binding();
   reset_mesh_material_bindings();
   clear_deferred_mutations();
@@ -871,14 +866,10 @@ void check_script_reload() noexcept {
 
 // --- Sandbox configuration ---
 
-/// Enables/disables the sandbox; enabling after initialize_scripting
-/// installs the capping allocator on the live state so the memory limit
-/// is enforced regardless of when the sandbox was switched on.
+/// Enables/disables the sandbox; the creation-time allocator enforces the
+/// memory cap immediately whenever the sandbox is switched on.
 void set_sandbox_enabled(bool enabled) noexcept {
   set_debug_sandbox_enabled(enabled);
-  if (enabled) {
-    install_sandbox_allocator(lua_state());
-  }
   refresh_lua_hook();
 }
 

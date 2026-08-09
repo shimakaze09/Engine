@@ -154,8 +154,8 @@ int get_instruction_limit() noexcept;
 void set_memory_limit(std::size_t limit) noexcept;
 /// Current Lua allocator byte cap (0 = unlimited).
 std::size_t get_memory_limit() noexcept;
-/// Bytes currently accounted by the sandbox allocator (0 until the
-/// sandbox allocator is installed; reset by shutdown_scripting).
+/// Bytes currently allocated by the scripting VM (accounted from state
+/// creation; reset by shutdown_scripting).
 std::size_t get_memory_used() noexcept;
 
 } // namespace engine::scripting

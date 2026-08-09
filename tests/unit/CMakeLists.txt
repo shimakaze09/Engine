@@ -184,6 +184,16 @@ engine_add_test_executable(engine_unit_input_config_lua
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_scripting_allocator
+    SOURCES
+    scripting_allocator_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/scripting/src
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_runtime_binding
     SOURCES
     runtime_binding_test.cpp
