@@ -182,8 +182,6 @@ int test_manifold_generation_reuse_isolated() noexcept {
   physics::PhysicsContext ctx{};
   physics::manifold_reset(ctx);
 
-  const math::Vec3 pt(0.0F, 0.0F, 0.0F);
-  const math::Vec3 normal(0.0F, 1.0F, 0.0F);
   const physics::Entity oldEntity = make_entity(7U, 1U);
   const physics::Entity partner = make_entity(2U, 1U);
 
