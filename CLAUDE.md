@@ -160,6 +160,11 @@ Reconfigure (only if the cache is broken):
 cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug
 ```
 
+`CMakePresets.json` mirrors these exact flows as named configure/build/test
+presets (e.g. `cmake --preset windows-clang-cl-debug`,
+`ctest --preset linux-clang-debug-headless`, `*-asan` for the sanitizer
+lane); presets add no flags beyond the documented commands.
+
 `build/compile_commands.json` is the clangd source of truth (`.clangd` points
 at it); never hand-edit it, never commit `build/`. `build-release/` exists for
 Release benchmark runs. Linux/macOS: same flow with clang/clang++. macOS is
