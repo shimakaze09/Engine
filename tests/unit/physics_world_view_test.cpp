@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <new>
 
 namespace {
@@ -123,9 +124,20 @@ private:
 
 // --- Tests ------------------------------------------------------------------
 
+// PhysicsContext is ~1 MB of fixed storage; the stub embeds it by value, so
+// fixtures heap-construct like production Worlds do — a stack instance
+// overflows Windows' 1 MB default thread stack.
+[[nodiscard]] std::unique_ptr<StubPhysicsWorld> make_stub() noexcept {
+  return std::unique_ptr<StubPhysicsWorld>(new (std::nothrow)
+                                               StubPhysicsWorld());
+}
+
 int check_interface_instantiation() {
-  StubPhysicsWorld stub;
-  PhysicsWorldView &view = stub;
+  const std::unique_ptr<StubPhysicsWorld> stub = make_stub();
+  if (stub == nullptr) {
+    return 90;
+  }
+  PhysicsWorldView &view = *stub;
 
   if (view.transform_count() != 0U) {
     return 1;
@@ -137,10 +149,13 @@ int check_interface_instantiation() {
 }
 
 int check_simulation_token_invalid() {
-  StubPhysicsWorld stub;
-  stub.m_inSimulation = false;
+  const std::unique_ptr<StubPhysicsWorld> stub = make_stub();
+  if (stub == nullptr) {
+    return 90;
+  }
+  stub->m_inSimulation = false;
 
-  const auto token = stub.simulation_access_token();
+  const auto token = stub->simulation_access_token();
   if (token.valid()) {
     return 1;
   }
@@ -148,10 +163,13 @@ int check_simulation_token_invalid() {
 }
 
 int check_simulation_token_valid() {
-  StubPhysicsWorld stub;
-  stub.m_inSimulation = true;
+  const std::unique_ptr<StubPhysicsWorld> stub = make_stub();
+  if (stub == nullptr) {
+    return 90;
+  }
+  stub->m_inSimulation = true;
 
-  const auto token = stub.simulation_access_token();
+  const auto token = stub->simulation_access_token();
   if (!token.valid()) {
     return 1;
   }
@@ -159,8 +177,11 @@ int check_simulation_token_valid() {
 }
 
 int check_physics_context_accessible() {
-  StubPhysicsWorld stub;
-  PhysicsWorldView &view = stub;
+  const std::unique_ptr<StubPhysicsWorld> stub = make_stub();
+  if (stub == nullptr) {
+    return 90;
+  }
+  PhysicsWorldView &view = *stub;
 
   PhysicsContext &ctx = view.physics_context();
   // Default gravity is (0, -9.8, 0).
