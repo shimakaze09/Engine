@@ -484,7 +484,28 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
   return 1;
 }
 
-// engine.sweep_sphere(ox,oy,oz, radius, dx,dy,dz, max_dist [, mask])
+/// Decodes the optional trailing skip-entity argument for a sweep binding.
+/// Returns false when a present argument is not a live entity handle.
+bool read_optional_skip_entity(lua_State *state, int index,
+                               std::uint32_t *outSkipIndex) noexcept {
+  *outSkipIndex = 0U;
+  if (lua_isnoneornil(state, index)) {
+    return true;
+  }
+  runtime::Entity skipEntity{};
+  if (!read_entity(state, index, &skipEntity)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "sweep skip entity is invalid or stale");
+    return false;
+  }
+  *outSkipIndex = skipEntity.index;
+  return true;
+}
+
+// engine.sweep_sphere(ox,oy,oz, radius, dx,dy,dz, max_dist
+//                     [, mask [, skip_entity]])
+// skip_entity excludes that entity's colliders and any compound-body
+// colliders it owns from the sweep.
 int lua_engine_sweep_sphere(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
       (runtime_binding().services->sweep_sphere == nullptr)) {
@@ -510,10 +531,15 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
       lua_isnumber(state, 9)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 9))
           : 0xFFFFFFFFU;
+  std::uint32_t skipIndex = 0U;
+  if (!read_optional_skip_entity(state, 10, &skipIndex)) {
+    lua_pushnil(state);
+    return 1;
+  }
 
   RuntimeRaycastHit hit{};
   if (!runtime_binding().services->sweep_sphere(runtime_binding().world, ox, oy, oz, radius, dx, dy, dz,
-                                maxDist, &hit, mask)) {
+                                maxDist, &hit, mask, skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -528,7 +554,10 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
   return 8;
 }
 
-// engine.sweep_box(cx,cy,cz, hx,hy,hz, dx,dy,dz, max_dist [, mask])
+// engine.sweep_box(cx,cy,cz, hx,hy,hz, dx,dy,dz, max_dist
+//                  [, mask [, skip_entity]])
+// skip_entity excludes that entity's colliders and any compound-body
+// colliders it owns from the sweep.
 int lua_engine_sweep_box(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
       (runtime_binding().services->sweep_box == nullptr)) {
@@ -557,10 +586,15 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
       lua_isnumber(state, 11)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 11))
           : 0xFFFFFFFFU;
+  std::uint32_t skipIndex = 0U;
+  if (!read_optional_skip_entity(state, 12, &skipIndex)) {
+    lua_pushnil(state);
+    return 1;
+  }
 
   RuntimeRaycastHit hit{};
   if (!runtime_binding().services->sweep_box(runtime_binding().world, cx, cy, cz, hx, hy, hz, dx, dy, dz,
-                             maxDist, &hit, mask)) {
+                             maxDist, &hit, mask, skipIndex)) {
     lua_pushnil(state);
     return 1;
   }

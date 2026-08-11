@@ -63,9 +63,12 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
 
 /// Sweeps an AABB along a normalized copy of direction.
 /// Returns the earliest hit when maxDistance is finite and positive.
+/// skipEntity excludes that entity's colliders and every collider whose
+/// rigid-body owner it is (compound bodies are skipped as one unit).
 bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, SweepHit *outHit,
-               std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+               std::uint32_t mask = 0xFFFFFFFFU,
+               Entity skipEntity = kInvalidEntity) noexcept;
 
 } // namespace engine::physics

@@ -320,13 +320,18 @@ bool scripting_sweep_sphere(runtime::World *world, float ox, float oy, float oz,
                             float radius, float dx, float dy, float dz,
                             float maxDistance,
                             scripting::RuntimeRaycastHit *outHit,
-                            std::uint32_t mask) noexcept {
+                            std::uint32_t mask,
+                            std::uint32_t skipEntityIndex) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
     return false;
   }
+  const runtime::Entity skipEntity =
+      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
+                              : runtime::kInvalidEntity;
   physics::SweepHit sh{};
   if (!runtime::sweep_sphere(*world, math::Vec3(ox, oy, oz), radius,
-                             math::Vec3(dx, dy, dz), maxDistance, &sh, mask)) {
+                             math::Vec3(dx, dy, dz), maxDistance, &sh, mask,
+                             skipEntity)) {
     return false;
   }
   outHit->entityIndex = sh.entityIndex;
@@ -344,14 +349,18 @@ bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
                          float hx, float hy, float hz, float dx, float dy,
                          float dz, float maxDistance,
                          scripting::RuntimeRaycastHit *outHit,
-                         std::uint32_t mask) noexcept {
+                         std::uint32_t mask,
+                         std::uint32_t skipEntityIndex) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
     return false;
   }
+  const runtime::Entity skipEntity =
+      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
+                              : runtime::kInvalidEntity;
   physics::SweepHit sh{};
   if (!runtime::sweep_box(*world, math::Vec3(cx, cy, cz),
                           math::Vec3(hx, hy, hz), math::Vec3(dx, dy, dz),
-                          maxDistance, &sh, mask)) {
+                          maxDistance, &sh, mask, skipEntity)) {
     return false;
   }
   outHit->entityIndex = sh.entityIndex;

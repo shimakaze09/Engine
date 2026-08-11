@@ -1049,8 +1049,8 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
 
 bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
-               float maxDistance, SweepHit *outHit,
-               std::uint32_t mask) noexcept {
+               float maxDistance, SweepHit *outHit, std::uint32_t mask,
+               Entity skipEntity) noexcept {
   math::Vec3 normalizedDirection{};
   if (!std::isfinite(halfExtents.x) || !std::isfinite(halfExtents.y) ||
       !std::isfinite(halfExtents.z) || (halfExtents.x < 0.0F) ||
@@ -1083,6 +1083,11 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
   for (std::size_t i = 0U; i < count; ++i) {
     const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
+      continue;
+    }
+    if ((skipEntity != kInvalidEntity) &&
+        ((entities[i] == skipEntity) ||
+         (world.rigid_body_owner(entities[i]) == skipEntity))) {
       continue;
     }
 
