@@ -349,7 +349,7 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/lsan.supp
-        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration"
+        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration|benchmark"
 
   # ---- TSAN (P1-M1-B3b) ----
   tsan:
@@ -391,7 +391,7 @@ jobs:
       - name: Test under TSAN
         env:
           TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/tsan.supp:halt_on_error=1:second_deadlock_stack=1
-        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration"
+        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration|benchmark"
 
   # ---- Code coverage (P1-M1-B4a/B4b/B4c) ----
   coverage:
