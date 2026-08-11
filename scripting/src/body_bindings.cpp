@@ -71,10 +71,7 @@ int lua_engine_set_position(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  if (runtime_binding().services != nullptr) {
-    static_cast<void>(
-        runtime_binding().services->get_transform_op(runtime_binding().world, entity.index, &transform));
-  }
+  static_cast<void>(latest_transform(entity, &transform));
   transform.position = position;
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -133,7 +130,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -193,7 +190,7 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_acceleration requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -223,7 +220,7 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_additional_acceleration requires an existing "
                       "RigidBody");
@@ -267,7 +264,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_angular_velocity requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -346,7 +343,7 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   const float qw = static_cast<float>(lua_tonumber(state, 5));
 
   runtime::Transform transform{};
-  static_cast<void>(runtime_binding().world->get_transform(entity, &transform));
+  static_cast<void>(latest_transform(entity, &transform));
   transform.rotation = math::Quat(qx, qy, qz, qw);
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -381,7 +378,7 @@ int lua_engine_set_scale(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  static_cast<void>(runtime_binding().world->get_transform(entity, &transform));
+  static_cast<void>(latest_transform(entity, &transform));
   transform.scale = scale;
 
   const bool ok = apply_or_queue_transform(entity, transform, true,
@@ -414,7 +411,7 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -452,7 +449,7 @@ int lua_engine_set_parent(lua_State *state) noexcept {
   }
 
   runtime::Transform transform{};
-  if (!world->get_transform(child, &transform)) {
+  if (!latest_transform(child, &transform)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_parent requires the child to have a Transform");
     lua_pushboolean(state, 0);

@@ -94,7 +94,7 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
   }
   const float value = static_cast<float>(lua_tonumber(state, 2));
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -118,7 +118,7 @@ int lua_engine_set_friction(lua_State *state) noexcept {
   const float staticF = static_cast<float>(lua_tonumber(state, 2));
   const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -144,7 +144,7 @@ int lua_engine_set_lock_rotation(lua_State *state) noexcept {
   const bool locked = lua_toboolean(state, 2) != 0;
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "set_lock_rotation requires an existing RigidBody");
     lua_pushboolean(state, 0);
@@ -209,7 +209,7 @@ int lua_engine_set_collider_material(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -255,7 +255,7 @@ int lua_engine_set_collision_layer(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -277,7 +277,7 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -778,7 +778,7 @@ int lua_engine_set_half_extents(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
     return 1;
   }

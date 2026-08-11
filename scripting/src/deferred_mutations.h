@@ -9,6 +9,30 @@ namespace engine::scripting {
 /// Returns whether script-driven world mutations may run immediately.
 bool can_apply_mutations_now() noexcept;
 
+// Read-through component reads: read-modify-write setters must see the
+// newest queued snapshot, or later deferred writes clobber earlier ones
+// with stale state (issue #105). A queued destroy/removal reads as absent.
+
+/// Reads the entity's transform through any pending queued write.
+bool latest_transform(runtime::Entity entity,
+                      runtime::Transform *outTransform) noexcept;
+
+/// Reads the entity's rigid body through any pending queued write.
+bool latest_rigid_body(runtime::Entity entity,
+                       runtime::RigidBody *outRigidBody) noexcept;
+
+/// Reads the entity's collider through any pending queued write.
+bool latest_collider(runtime::Entity entity,
+                     runtime::Collider *outCollider) noexcept;
+
+/// Reads the entity's mesh component through any pending queued write.
+bool latest_mesh_component(runtime::Entity entity,
+                           runtime::MeshComponent *outComponent) noexcept;
+
+/// Reads the entity's light component through any pending queued write.
+bool latest_light_component(runtime::Entity entity,
+                            runtime::LightComponent *outComponent) noexcept;
+
 /// Applies or queues entity destruction based on the current World phase.
 bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept;
 

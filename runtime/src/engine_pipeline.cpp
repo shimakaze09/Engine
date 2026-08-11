@@ -720,8 +720,10 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
       (world->begin_play_pending_count() > 0U)) {
     world->begin_begin_play_phase();
     scripting::dispatch_entity_scripts_begin_play(world.get());
-    scripting::flush_deferred_mutations();
     world->end_begin_play_phase();
+    // Flush after leaving the phase: mutations only apply in Input, so a
+    // flush inside BeginPlay is a no-op and the writes miss the first step.
+    scripting::flush_deferred_mutations();
   }
 
   if ((playState == LoopPlayState::Stopped) &&

@@ -81,7 +81,7 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!runtime_binding().world->get_light_component(entity, &light)) {
+  if (!latest_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -115,7 +115,7 @@ int lua_engine_set_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!runtime_binding().world->get_light_component(entity, &light)) {
+  if (!latest_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -148,7 +148,7 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!runtime_binding().world->get_light_component(entity, &light)) {
+  if (!latest_light_component(entity, &light)) {
     lua_pushboolean(state, 0);
     return 1;
   }

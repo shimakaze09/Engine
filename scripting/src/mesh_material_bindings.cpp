@@ -57,11 +57,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   }
 
   runtime::MeshComponent component{};
-  const runtime::MeshComponent *existing =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (existing != nullptr) {
-    component = *existing;
-  }
+  static_cast<void>(latest_mesh_component(entity, &component));
 
   component.meshAssetId = meshId;
   const bool ok = apply_or_queue_mesh_component(entity, component);
@@ -212,11 +208,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
   }
 
   runtime::MeshComponent component{};
-  const runtime::MeshComponent *existing =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (existing != nullptr) {
-    component = *existing;
-  }
+  static_cast<void>(latest_mesh_component(entity, &component));
 
   component.albedo = albedo;
   const bool ok = apply_or_queue_mesh_component(entity, component);
@@ -267,7 +259,7 @@ int lua_engine_set_roughness(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!runtime_binding().world->get_mesh_component(entity, &mesh)) {
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -301,7 +293,7 @@ int lua_engine_set_metallic(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!runtime_binding().world->get_mesh_component(entity, &mesh)) {
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -335,7 +327,7 @@ int lua_engine_set_opacity(lua_State *state) noexcept {
     return 1;
   }
   runtime::MeshComponent mesh{};
-  if (!runtime_binding().world->get_mesh_component(entity, &mesh)) {
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushboolean(state, 0);
     return 1;
   }
