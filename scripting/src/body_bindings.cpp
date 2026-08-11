@@ -151,9 +151,38 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
   return 1;
 }
 
+/// Current world gravity via the runtime service, defaulting when unbound.
+math::Vec3 current_world_gravity() noexcept {
+  float gx = 0.0F;
+  float gy = 0.0F;
+  float gz = 0.0F;
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->get_gravity != nullptr) &&
+      runtime_binding().services->get_gravity(runtime_binding().world, &gx,
+                                              &gy, &gz)) {
+    return math::Vec3(gx, gy, gz);
+  }
+  return kDefaultGravity;
+}
+
+/// Stores the additive acceleration term, waking the body when the term
+/// changes; identical rewrites leave a sleeping body asleep (issue #102).
+void store_acceleration_and_wake(runtime::RigidBody *rigidBody,
+                                 const math::Vec3 &acceleration) noexcept {
+  if ((rigidBody->acceleration.x != acceleration.x) ||
+      (rigidBody->acceleration.y != acceleration.y) ||
+      (rigidBody->acceleration.z != acceleration.z)) {
+    rigidBody->sleeping = false;
+    rigidBody->sleepFrameCount = 0U;
+  }
+  rigidBody->acceleration = acceleration;
+}
+
 // engine.set_acceleration(entity, x, y, z) → bool
 // Accepts total world acceleration and converts it to the runtime's
-// additive term used by physics integration (gravity is subtracted).
+// additive term used by physics integration (the current world gravity is
+// subtracted); a changed effective acceleration wakes the body, and like
+// set_velocity the motion command returns the body to physics control.
 int lua_engine_set_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 acceleration{};
@@ -170,15 +199,20 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  rigidBody.acceleration =
-      math::clamp(math::sub(acceleration, kDefaultGravity),
-                  -kMaxScriptAcceleration, kMaxScriptAcceleration);
+  store_acceleration_and_wake(
+      &rigidBody,
+      math::clamp(math::sub(acceleration, current_world_gravity()),
+                  -kMaxScriptAcceleration, kMaxScriptAcceleration));
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
+// engine.set_additional_acceleration(entity, x, y, z) → bool
+// Stores the additive term directly (applied on top of gravity), with the
+// same stable-envelope clamp, wake-on-change rule, and return of the body
+// to physics control as set_acceleration.
 int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 additionalAcceleration{};
@@ -196,9 +230,11 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  rigidBody.acceleration = additionalAcceleration;
+  store_acceleration_and_wake(
+      &rigidBody, math::clamp(additionalAcceleration, -kMaxScriptAcceleration,
+                              kMaxScriptAcceleration));
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
