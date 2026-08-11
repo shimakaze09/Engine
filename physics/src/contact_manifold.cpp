@@ -7,8 +7,10 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/physics_context.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace engine::physics {
 
@@ -20,27 +22,82 @@ PhysicsShapeStore *manifold_store(PhysicsContext &context) noexcept {
   return context.shapeStore.get();
 }
 
+// Order-independent hash key from the pair's entity indices; lookups verify
+// full Entity identity, so index reuse can never alias through the key.
+std::uint64_t manifold_pair_key(Entity entityA, Entity entityB) noexcept {
+  const std::uint32_t lo = std::min(entityA.index, entityB.index);
+  const std::uint32_t hi = std::max(entityA.index, entityB.index);
+  return (static_cast<std::uint64_t>(lo) << 32U) |
+         static_cast<std::uint64_t>(hi);
+}
+
+// Fibonacci-mixed starting bucket for a pair key.
+std::size_t manifold_bucket(std::uint64_t key) noexcept {
+  return static_cast<std::size_t>((key * 11400714819323198485ULL) %
+                                  kManifoldHashBuckets);
+}
+
+// Inserts a manifold slot into the first empty probe bucket.
+void manifold_index_insert(PhysicsShapeStore &store,
+                           std::uint32_t slot) noexcept {
+  const ContactManifold &m = store.contactManifolds[slot];
+  std::size_t bucket = manifold_bucket(manifold_pair_key(m.entityA, m.entityB));
+  for (std::size_t probe = 0U; probe < kManifoldHashBuckets; ++probe) {
+    if (store.contactManifoldHash[bucket] == kManifoldSlotEmpty) {
+      store.contactManifoldHash[bucket] = slot;
+      return;
+    }
+    bucket = (bucket + 1U) % kManifoldHashBuckets;
+  }
+}
+
+// Rebuilds the whole pair index from the live manifold set.
+void manifold_index_rebuild(PhysicsShapeStore &store) noexcept {
+  store.contactManifoldHash.fill(kManifoldSlotEmpty);
+  for (std::size_t i = 0U; i < store.contactManifoldCount; ++i) {
+    manifold_index_insert(store, static_cast<std::uint32_t>(i));
+  }
+}
+
 // Find an existing manifold for this entity pair (either order, exact
-// index+generation match), or return nullptr.
+// index+generation match) through the O(1) index, or return nullptr.
 ContactManifold *find_manifold(PhysicsShapeStore &store, Entity entityA,
                                Entity entityB) noexcept {
-  for (std::size_t i = 0U; i < store.contactManifoldCount; ++i) {
-    ContactManifold &m = store.contactManifolds[i];
-    if (((m.entityA == entityA) && (m.entityB == entityB)) ||
-        ((m.entityA == entityB) && (m.entityB == entityA))) {
-      return &m;
+  std::size_t bucket = manifold_bucket(manifold_pair_key(entityA, entityB));
+  for (std::size_t probe = 0U; probe < kManifoldHashBuckets; ++probe) {
+    const std::uint32_t slot = store.contactManifoldHash[bucket];
+    if (slot == kManifoldSlotEmpty) {
+      return nullptr;
     }
+    if (slot < store.contactManifoldCount) {
+      ContactManifold &m = store.contactManifolds[slot];
+      if (((m.entityA == entityA) && (m.entityB == entityB)) ||
+          ((m.entityA == entityB) && (m.entityB == entityA))) {
+        return &m;
+      }
+    }
+    bucket = (bucket + 1U) % kManifoldHashBuckets;
   }
   return nullptr;
 }
 
 // Allocate a new manifold slot, or evict the oldest (lowest lastFrameUsed)
-// if full.
-ContactManifold *allocate_manifold(PhysicsShapeStore &store) noexcept {
+// if full; the caller assigns the pair and must then index the slot (the
+// full-replacement path rebuilds so dead keys never accumulate). Returns
+// nullptr when every slot is live this frame — those pairs cold-start
+// rather than thrashing same-frame evictions, and the saturation stamp
+// caps the oldest-scan at once per resolve.
+ContactManifold *allocate_manifold(PhysicsShapeStore &store,
+                                   std::uint32_t frameNumber,
+                                   bool *outNeedsRebuild) noexcept {
+  *outNeedsRebuild = false;
   if (store.contactManifoldCount < kMaxContactManifolds) {
     ContactManifold *m = &store.contactManifolds[store.contactManifoldCount];
     ++store.contactManifoldCount;
     return m;
+  }
+  if (store.contactManifoldSaturatedFrame == frameNumber) {
+    return nullptr;
   }
 
   std::size_t oldestIdx = 0U;
@@ -51,8 +108,13 @@ ContactManifold *allocate_manifold(PhysicsShapeStore &store) noexcept {
       oldestIdx = i;
     }
   }
+  if (oldestFrame >= frameNumber) {
+    store.contactManifoldSaturatedFrame = frameNumber;
+    return nullptr;
+  }
 
   store.contactManifolds[oldestIdx] = ContactManifold{};
+  *outNeedsRebuild = true;
   return &store.contactManifolds[oldestIdx];
 }
 
@@ -188,13 +250,21 @@ ContactManifold *manifold_acquire(PhysicsContext &context, Entity entityA,
   }
   ContactManifold *m = find_manifold(*store, entityA, entityB);
   if (m == nullptr) {
-    m = allocate_manifold(*store);
+    bool needsRebuild = false;
+    m = allocate_manifold(*store, frameNumber, &needsRebuild);
     if (m == nullptr) {
       return nullptr;
     }
     m->entityA = entityA;
     m->entityB = entityB;
     m->contactCount = 0U;
+    if (needsRebuild) {
+      manifold_index_rebuild(*store);
+    } else {
+      manifold_index_insert(
+          *store,
+          static_cast<std::uint32_t>(m - store->contactManifolds.data()));
+    }
   } else if (!(m->entityA == entityA)) {
     // Dense reorder flipped the pair's perspective: stored points and
     // impulses are mirrored, so restart the manifold in the new order.
@@ -273,7 +343,10 @@ void manifold_evict_stale(PhysicsContext &context,
       ++writeIdx;
     }
   }
-  store->contactManifoldCount = writeIdx;
+  if (writeIdx != store->contactManifoldCount) {
+    store->contactManifoldCount = writeIdx;
+    manifold_index_rebuild(*store);
+  }
 }
 
 std::size_t manifold_count(const PhysicsContext &context) noexcept {
@@ -290,6 +363,8 @@ void manifold_reset(PhysicsContext &context) noexcept {
     store->contactManifolds[i] = ContactManifold{};
   }
   store->contactManifoldCount = 0U;
+  store->contactManifoldHash.fill(kManifoldSlotEmpty);
+  store->contactManifoldSaturatedFrame = 0U;
 }
 
 const ContactManifold *manifold_get(const PhysicsContext &context,

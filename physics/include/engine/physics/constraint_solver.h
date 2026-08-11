@@ -40,6 +40,13 @@ struct ContactManifold final {
 
 static constexpr std::size_t kMaxContactManifolds = 2048U;
 
+/// Bucket count for the pair->manifold hash index; at most half-loaded so
+/// linear probing always terminates on an empty bucket.
+static constexpr std::size_t kManifoldHashBuckets = 4096U;
+
+/// Empty sentinel for manifold hash buckets.
+static constexpr std::uint32_t kManifoldSlotEmpty = 0xFFFFFFFFU;
+
 // ------ Constraint Solver API -----------------------------------------------
 
 // Solve all joint constraints on the world.  Called after collision resolution.

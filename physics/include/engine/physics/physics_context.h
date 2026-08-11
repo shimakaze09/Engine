@@ -136,6 +136,17 @@ struct PhysicsShapeStore final {
   // full Entity so index reuse cannot inherit stale impulses.
   std::array<ContactManifold, kMaxContactManifolds> contactManifolds{};
   std::size_t contactManifoldCount = 0U;
+  // O(1) pair->slot index (open addressing over entity-index pair keys;
+  // hits verify full Entity identity). Maintained on insert, rebuilt after
+  // eviction compaction, so per-pair lookups never scan the whole cache.
+  std::array<std::uint32_t, kManifoldHashBuckets> contactManifoldHash = [] {
+    std::array<std::uint32_t, kManifoldHashBuckets> filled{};
+    filled.fill(kManifoldSlotEmpty);
+    return filled;
+  }();
+  // Resolve frame in which the cache was found full of live manifolds:
+  // further pairs that frame cold-start instead of thrashing evictions.
+  std::uint32_t contactManifoldSaturatedFrame = 0U;
 
   // Blocked-body warning diagnostic (physics.blocked_warn_steps): commanded
   // speeds captured at resolve entry keyed by dense rigid-body index
