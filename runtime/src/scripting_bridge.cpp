@@ -374,6 +374,13 @@ bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
   return true;
 }
 
+/// Folds the native kInvalidJointId onto the bridge's single 0 failure
+/// sentinel; valid ids always carry a non-zero generation (issue #100).
+std::uint32_t normalize_joint_id(physics::JointId id) noexcept {
+  return (id == physics::kInvalidJointId) ? 0U
+                                          : static_cast<std::uint32_t>(id);
+}
+
 std::uint32_t scripting_add_distance_joint(runtime::World *world,
                                            std::uint32_t entityIndexA,
                                            std::uint32_t entityIndexB,
@@ -384,7 +391,7 @@ std::uint32_t scripting_add_distance_joint(runtime::World *world,
 
   const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
-  return static_cast<std::uint32_t>(
+  return normalize_joint_id(
       runtime::add_distance_joint(*world, entityA, entityB, distance));
 }
 
@@ -409,7 +416,7 @@ std::uint32_t scripting_add_hinge_joint(runtime::World *world,
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   const math::Vec3 pivot(pivotX, pivotY, pivotZ);
   const math::Vec3 axis(axisX, axisY, axisZ);
-  return static_cast<std::uint32_t>(
+  return normalize_joint_id(
       runtime::add_hinge_joint(*world, entityA, entityB, pivot, axis));
 }
 
@@ -424,7 +431,7 @@ std::uint32_t scripting_add_ball_socket_joint(runtime::World *world,
   const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   const math::Vec3 pivot(pivotX, pivotY, pivotZ);
-  return static_cast<std::uint32_t>(
+  return normalize_joint_id(
       runtime::add_ball_socket_joint(*world, entityA, entityB, pivot));
 }
 
@@ -439,7 +446,7 @@ std::uint32_t scripting_add_slider_joint(runtime::World *world,
   const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   const math::Vec3 axis(axisX, axisY, axisZ);
-  return static_cast<std::uint32_t>(
+  return normalize_joint_id(
       runtime::add_slider_joint(*world, entityA, entityB, axis));
 }
 
@@ -453,7 +460,7 @@ std::uint32_t scripting_add_spring_joint(runtime::World *world,
   }
   const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
-  return static_cast<std::uint32_t>(runtime::add_spring_joint(
+  return normalize_joint_id(runtime::add_spring_joint(
       *world, entityA, entityB, restLength, stiffness, damping));
 }
 
@@ -465,7 +472,7 @@ std::uint32_t scripting_add_fixed_joint(runtime::World *world,
   }
   const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
   const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
-  return static_cast<std::uint32_t>(
+  return normalize_joint_id(
       runtime::add_fixed_joint(*world, entityA, entityB));
 }
 

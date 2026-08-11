@@ -609,12 +609,24 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   return 8;
 }
 
+/// Pushes a joint constructor result: nil for the unified 0 failure
+/// sentinel, the id otherwise (issue #100 contract).
+int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
+  if (id == 0U) {
+    lua_pushnil(state);
+  } else {
+    lua_pushinteger(state, static_cast<lua_Integer>(id));
+  }
+  return 1;
+}
+
+// engine.add_distance_joint(entityA, entityB [, distance]) → joint_id | nil
 int lua_engine_add_distance_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
       (runtime_binding().services == nullptr) || (runtime_binding().services->add_distance_joint == nullptr)) {
-    lua_pushinteger(state, 0);
+    lua_pushnil(state);
     return 1;
   }
   const float dist = lua_isnumber(state, 3)
@@ -622,8 +634,7 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
                          : 1.0F;
   const std::uint32_t id = runtime_binding().services->add_distance_joint(
       runtime_binding().world, entityA.index, entityB.index, dist);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
+  return push_joint_result(state, id);
 }
 
 int lua_engine_remove_joint(lua_State *state) noexcept {
@@ -638,13 +649,13 @@ int lua_engine_remove_joint(lua_State *state) noexcept {
 }
 
 // engine.add_hinge_joint(entityA, entityB, pivotX, pivotY, pivotZ, axisX,
-// axisY, axisZ)
+// axisY, axisZ) → joint_id | nil
 int lua_engine_add_hinge_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
       (runtime_binding().services == nullptr) || (runtime_binding().services->add_hinge_joint == nullptr)) {
-    lua_pushinteger(state, 0);
+    lua_pushnil(state);
     return 1;
   }
   const auto px = static_cast<float>(luaL_optnumber(state, 3, 0.0));
@@ -655,18 +666,18 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
   const auto az = static_cast<float>(luaL_optnumber(state, 8, 0.0));
   const std::uint32_t id = runtime_binding().services->add_hinge_joint(
       runtime_binding().world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
+  return push_joint_result(state, id);
 }
 
 // engine.add_ball_socket_joint(entityA, entityB, pivotX, pivotY, pivotZ)
+// → joint_id | nil
 int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
       (runtime_binding().services == nullptr) ||
       (runtime_binding().services->add_ball_socket_joint == nullptr)) {
-    lua_pushinteger(state, 0);
+    lua_pushnil(state);
     return 1;
   }
   const auto px = static_cast<float>(luaL_optnumber(state, 3, 0.0));
@@ -674,17 +685,17 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
   const auto pz = static_cast<float>(luaL_optnumber(state, 5, 0.0));
   const std::uint32_t id = runtime_binding().services->add_ball_socket_joint(
       runtime_binding().world, entityA.index, entityB.index, px, py, pz);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
+  return push_joint_result(state, id);
 }
 
 // engine.add_slider_joint(entityA, entityB, axisX, axisY, axisZ)
+// → joint_id | nil
 int lua_engine_add_slider_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
       (runtime_binding().services == nullptr) || (runtime_binding().services->add_slider_joint == nullptr)) {
-    lua_pushinteger(state, 0);
+    lua_pushnil(state);
     return 1;
   }
   const auto ax = static_cast<float>(luaL_optnumber(state, 3, 1.0));
@@ -692,17 +703,17 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
   const auto az = static_cast<float>(luaL_optnumber(state, 5, 0.0));
   const std::uint32_t id = runtime_binding().services->add_slider_joint(
       runtime_binding().world, entityA.index, entityB.index, ax, ay, az);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
+  return push_joint_result(state, id);
 }
 
 // engine.add_spring_joint(entityA, entityB, restLength, stiffness, damping)
+// → joint_id | nil
 int lua_engine_add_spring_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
       (runtime_binding().services == nullptr) || (runtime_binding().services->add_spring_joint == nullptr)) {
-    lua_pushinteger(state, 0);
+    lua_pushnil(state);
     return 1;
   }
   const auto rest = static_cast<float>(luaL_optnumber(state, 3, 1.0));
@@ -710,23 +721,21 @@ int lua_engine_add_spring_joint(lua_State *state) noexcept {
   const auto damp = static_cast<float>(luaL_optnumber(state, 5, 1.0));
   const std::uint32_t id = runtime_binding().services->add_spring_joint(
       runtime_binding().world, entityA.index, entityB.index, rest, stiff, damp);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
+  return push_joint_result(state, id);
 }
 
-// engine.add_fixed_joint(entityA, entityB)
+// engine.add_fixed_joint(entityA, entityB) → joint_id | nil
 int lua_engine_add_fixed_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
   runtime::Entity entityB{};
   if (!read_entity(state, 1, &entityA) || !read_entity(state, 2, &entityB) ||
       (runtime_binding().services == nullptr) || (runtime_binding().services->add_fixed_joint == nullptr)) {
-    lua_pushinteger(state, 0);
+    lua_pushnil(state);
     return 1;
   }
   const std::uint32_t id =
       runtime_binding().services->add_fixed_joint(runtime_binding().world, entityA.index, entityB.index);
-  lua_pushinteger(state, static_cast<lua_Integer>(id));
-  return 1;
+  return push_joint_result(state, id);
 }
 
 // engine.set_joint_limits(jointId, minLimit, maxLimit)

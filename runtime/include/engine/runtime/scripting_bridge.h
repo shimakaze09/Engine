@@ -163,6 +163,9 @@ struct RuntimeServices final {
                     float maxDistance, RuntimeRaycastHit *outHit,
                     std::uint32_t mask,
                     std::uint32_t skipEntityIndex) noexcept = nullptr;
+  /// Joint constructors return the joint id or 0 for every failure —
+  /// invalid entities, invalid parameters, self-joints, and a full joint
+  /// table all share the one sentinel (issue #100).
   std::uint32_t (*add_distance_joint)(runtime::World *world,
                                       std::uint32_t entityIndexA,
                                       std::uint32_t entityIndexB,
