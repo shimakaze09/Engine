@@ -15,6 +15,8 @@ class PhysicsWorldView;
 
 // ------ Contact Manifold ---------------------------------------------------
 
+struct PhysicsContext;
+
 struct ManifoldContact final {
   math::Vec3 pointOnA{};
   math::Vec3 pointOnB{};
@@ -24,17 +26,26 @@ struct ManifoldContact final {
   std::uint32_t featureId = 0U;
 };
 
-/// Persistent contact set for one body pair (4 warm-started points).
+/// Persistent contact set for one collider-entity pair (4 warm-started
+/// points). Keyed by full Entity (index AND generation) so a destroyed and
+/// reused entity index can never inherit a stale manifold.
 struct ContactManifold final {
   static constexpr std::size_t kMaxContacts = 4U;
-  std::uint32_t entityIndexA = 0U;
-  std::uint32_t entityIndexB = 0U;
+  Entity entityA = kInvalidEntity;
+  Entity entityB = kInvalidEntity;
   ManifoldContact contacts[kMaxContacts]{};
   std::size_t contactCount = 0U;
   std::uint32_t lastFrameUsed = 0U;
 };
 
 static constexpr std::size_t kMaxContactManifolds = 2048U;
+
+/// Bucket count for the pair->manifold hash index; at most half-loaded so
+/// linear probing always terminates on an empty bucket.
+static constexpr std::size_t kManifoldHashBuckets = 4096U;
+
+/// Empty sentinel for manifold hash buckets.
+static constexpr std::uint32_t kManifoldSlotEmpty = 0xFFFFFFFFU;
 
 // ------ Constraint Solver API -----------------------------------------------
 
@@ -73,26 +84,38 @@ void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept;
 
 // ------ Contact Manifold API ------------------------------------------------
+// The cache is world-scoped (stored in the context's shape store), never a
+// process-global: separate worlds must not share warm-start state.
 
-// Update the manifold store with a new contact.  Returns the manifold index.
-std::size_t manifold_add_contact(std::uint32_t entityIndexA,
-                                 std::uint32_t entityIndexB,
-                                 const math::Vec3 &pointOnA,
+// Finds or creates the pair's persistent manifold and stamps it used in
+// `frameNumber`. A stored pair matched in flipped order reinitializes empty
+// (dense reorder swapped the perspective). Returns nullptr when the store
+// is unavailable or full with no evictable slot.
+ContactManifold *manifold_acquire(PhysicsContext &context, Entity entityA,
+                                  Entity entityB,
+                                  std::uint32_t frameNumber) noexcept;
+
+// Update the manifold store with a new contact.  Returns the manifold index
+// (or kMaxContactManifolds when the store is unavailable).
+std::size_t manifold_add_contact(PhysicsContext &context, Entity entityA,
+                                 Entity entityB, const math::Vec3 &pointOnA,
                                  const math::Vec3 &pointOnB,
                                  const math::Vec3 &normal, float penetration,
                                  std::uint32_t featureId,
                                  std::uint32_t frameNumber) noexcept;
 
 // Evict stale manifolds (not used in `frameNumber`).
-void manifold_evict_stale(std::uint32_t frameNumber) noexcept;
+void manifold_evict_stale(PhysicsContext &context,
+                          std::uint32_t frameNumber) noexcept;
 
 // Get current manifold count (for testing).
-std::size_t manifold_count() noexcept;
+std::size_t manifold_count(const PhysicsContext &context) noexcept;
 
 // Reset all manifolds (for testing).
-void manifold_reset() noexcept;
+void manifold_reset(PhysicsContext &context) noexcept;
 
 // Get manifold by index (for testing).
-const ContactManifold *manifold_get(std::size_t index) noexcept;
+const ContactManifold *manifold_get(const PhysicsContext &context,
+                                    std::size_t index) noexcept;
 
 } // namespace engine::physics

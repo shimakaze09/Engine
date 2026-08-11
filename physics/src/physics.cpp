@@ -126,6 +126,57 @@ ResolveScratch *acquire_resolve_scratch() noexcept {
 
 } // namespace
 
+/// Publishes owners, live owner velocities, the identity slot map, and
+/// open AABBs (gating must never reject when no real bounds exist yet) for
+/// every collider, so the first step after world creation, scene load, or
+/// an Input-phase add sweeps against moving targets instead of a static
+/// world. Serial-only: races with the parallel chunk jobs otherwise.
+void prime_ccd_snapshot(PhysicsWorldView &world) noexcept {
+  PhysicsContext &physicsCtx = world.physics_context();
+  if (!physicsCtx.ccdSnapshotDirty) {
+    return;
+  }
+  PhysicsShapeStore *store = physicsCtx.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+
+  physicsCtx.ccdColliderCount = 0U;
+  physicsCtx.ccdHasCompoundColliders = false;
+  const std::size_t colliderCount = world.collider_count();
+  const Entity *entities = nullptr;
+  const Collider *colliders = nullptr;
+  if ((colliderCount > 0U) &&
+      !world.get_collider_range(0U, colliderCount, &entities, &colliders)) {
+    return;
+  }
+
+  constexpr float kOpenBound = 1.0e30F;
+  const math::AABB openBounds{math::Vec3(-kOpenBound, -kOpenBound, -kOpenBound),
+                              math::Vec3(kOpenBound, kOpenBound, kOpenBound)};
+  for (std::size_t i = 0U; i < colliderCount; ++i) {
+    const Entity owner = world.rigid_body_owner(entities[i]);
+    store->ccdColliderEntities[i] = entities[i];
+    store->ccdColliderOwners[i] = owner;
+    store->ccdColliderAabbs[i] = openBounds;
+    const RigidBody *ownerBody = (owner != kInvalidEntity)
+                                     ? world.get_rigid_body_ptr(owner)
+                                     : nullptr;
+    store->ccdColliderVelocities[i] =
+        (ownerBody != nullptr) ? ownerBody->velocity
+                               : math::Vec3(0.0F, 0.0F, 0.0F);
+    if (entities[i].index < store->ccdSlotByEntityIndex.size()) {
+      store->ccdSlotByEntityIndex[entities[i].index] =
+          static_cast<std::uint32_t>(i);
+    }
+    if ((owner != kInvalidEntity) && (owner != entities[i])) {
+      physicsCtx.ccdHasCompoundColliders = true;
+    }
+  }
+  physicsCtx.ccdColliderCount = colliderCount;
+  physicsCtx.ccdSnapshotDirty = false;
+}
+
 /// Broadphase + narrow phase + constraint solve + sleep for one step:
 /// collider world geometry is built serially in dense order (the only
 /// simulation stage allowed to compose child transforms from the write
@@ -150,6 +201,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
   physicsCtx.collisionPairCount = 0U;
   physicsCtx.collisionPairDropCount = 0U;
+  ++physicsCtx.solverFrameNumber;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
                    physicsCtx.pairHashStamps.size());
@@ -648,7 +700,12 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                                            ? ownerBody->velocity
                                            : math::Vec3(0.0F, 0.0F, 0.0F);
     }
+    physicsCtx.ccdSnapshotDirty = false;
   }
+
+  // Manifolds no pair touched this resolve hold contacts that no longer
+  // exist; drop them so warm starts never replay a vanished contact.
+  manifold_evict_stale(physicsCtx, physicsCtx.solverFrameNumber);
 
   report_blocked_bodies(world, deltaSeconds);
 

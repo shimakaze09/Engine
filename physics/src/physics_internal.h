@@ -11,6 +11,10 @@ namespace engine::physics {
 /// contacts wake a sleeper only when the other body exceeds it.
 constexpr float kSleepThreshold = 0.01F;
 
+/// Restitution acts only above this approach speed (m/s): slow pushing or
+/// resting contacts absorb fully, shared by discrete and CCD responses.
+constexpr float kRestitutionSpeedThreshold = 1.0F;
+
 /// Sign of value, treating zero as positive.
 inline float sign_or_positive(float value) noexcept {
   return (value < 0.0F) ? -1.0F : 1.0F;

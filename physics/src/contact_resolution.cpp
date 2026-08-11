@@ -10,7 +10,9 @@
 #include <cstddef>
 
 #include "engine/math/vec3.h"
+#include "engine/physics/constraint_solver.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
 #include "contact_clip.h"
 #include "physics_internal.h"
@@ -33,12 +35,11 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 // Applies the contact impulse with friction. Restitution only acts above a
 // 1 m/s approach speed: slow pushing/resting contacts absorb fully, or
 // driven bodies would pump bounce energy every step and ratchet airborne.
-// When angular transfer is active (both bodies dynamic with rotational
-// inertia) the normal row is the full J = [-n, -(rA x n), n, (rB x n)]:
-// relative velocity includes the contact-point angular terms and the
-// effective mass includes i |r x n|^2, so the impulse removes exactly the
-// point approach speed instead of overshooting. Static-environment
-// contacts keep the linear-only row, matching the applied response.
+// Every dynamic endpoint with rotational inertia carries its angular
+// Jacobian row — including against static geometry (issue #111) — so the
+// normal row is the full J = [-n, -(rA x n), n, (rB x n)] and friction
+// applies torque through the contact lever arm, letting off-center static
+// impacts rotate the body and floor friction roll a sliding sphere.
 void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                             const engine::math::Vec3 &normal, float invMassA,
                             float invMassB, float invMassSum,
@@ -142,8 +143,8 @@ void clamp_angular_speed(RigidBody *body) noexcept {
 void resolve_manifold_contact(
     PhysicsWorldView &world,
     const PhysicsWorldView::SimulationAccessToken &simToken,
-    Entity bodyEntityA, Entity bodyEntityB,
-    const engine::math::Vec3 &bodyCenterA,
+    Entity colliderEntityA, Entity colliderEntityB, Entity bodyEntityA,
+    Entity bodyEntityB, const engine::math::Vec3 &bodyCenterA,
     const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA, RigidBody *bodyB,
     float invMassA, float invMassB, float invMassSum,
     const engine::math::Vec3 &normal, const ClippedManifold &manifold,
@@ -211,13 +212,76 @@ void resolve_manifold_contact(
       engine::math::dot(engine::math::sub(pointVelB0, pointVelA0), normal);
   const float combinedRest =
       std::max(colliderA.restitution, colliderB.restitution);
-  constexpr float kRestitutionSpeedThreshold = 1.0F;
   const float restitutionTarget =
       (-approachSpeed0 > kRestitutionSpeedThreshold)
           ? (combinedRest * -approachSpeed0)
           : 0.0F;
 
+  static_assert(ClippedManifold::kMaxPoints <= ContactManifold::kMaxContacts,
+                "cache writeback assumes every clipped point fits");
+  PhysicsContext &physicsCtx = world.physics_context();
+  ContactManifold *cached = manifold_acquire(
+      physicsCtx, colliderEntityA, colliderEntityB,
+      physicsCtx.solverFrameNumber);
+
   float accumulated[ClippedManifold::kMaxPoints] = {};
+  if (cached != nullptr) {
+    // Warm start: replay last step's solved impulse on each matched point
+    // (same proximity threshold as the cache's own contact matching, plus
+    // normal agreement) so resting stacks begin near their converged state
+    // instead of cold-starting every step.
+    constexpr float kWarmStartMatchDistSq = 0.01F;
+    for (std::size_t p = 0U; p < manifold.count; ++p) {
+      float bestDistSq = kWarmStartMatchDistSq;
+      std::size_t match = ContactManifold::kMaxContacts;
+      for (std::size_t c = 0U; c < cached->contactCount; ++c) {
+        const engine::math::Vec3 diff =
+            engine::math::sub(cached->contacts[c].pointOnA,
+                              manifold.points[p]);
+        const float distSq = engine::math::dot(diff, diff);
+        if ((distSq < bestDistSq) &&
+            (engine::math::dot(cached->contacts[c].normal, normal) > 0.9F)) {
+          bestDistSq = distSq;
+          match = c;
+        }
+      }
+      if (match >= ContactManifold::kMaxContacts) {
+        continue;
+      }
+      const float warmImpulse =
+          cached->contacts[match].accumulatedNormalImpulse;
+      if (warmImpulse <= 0.0F) {
+        continue;
+      }
+      accumulated[p] = warmImpulse;
+      const engine::math::Vec3 impulseVec =
+          engine::math::mul(normal, warmImpulse);
+      const engine::math::Vec3 rA =
+          engine::math::sub(manifold.points[p], centerA);
+      const engine::math::Vec3 rB =
+          engine::math::sub(manifold.points[p], centerB);
+      if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+        bodyA->velocity = engine::math::sub(
+            bodyA->velocity, engine::math::mul(impulseVec, invMassA));
+        if (invInertiaA > 0.0F) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(rA, impulseVec),
+                                invInertiaA));
+        }
+      }
+      if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+        bodyB->velocity = engine::math::add(
+            bodyB->velocity, engine::math::mul(impulseVec, invMassB));
+        if (invInertiaB > 0.0F) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(rB, impulseVec),
+                                invInertiaB));
+        }
+      }
+    }
+  }
   for (std::size_t iteration = 0U; iteration < kManifoldSolverIterations;
        ++iteration) {
     for (std::size_t p = 0U; p < manifold.count; ++p) {
@@ -345,6 +409,20 @@ void resolve_manifold_contact(
       }
     }
   }
+  if (cached != nullptr) {
+    // Write the solved state back so the next step's solve seeds from it;
+    // stale points fall away because the whole set is replaced.
+    cached->contactCount = manifold.count;
+    for (std::size_t p = 0U; p < manifold.count; ++p) {
+      ManifoldContact &c = cached->contacts[p];
+      c.pointOnA = manifold.points[p];
+      c.pointOnB = manifold.points[p];
+      c.normal = normal;
+      c.penetration = manifold.penetrations[p];
+      c.accumulatedNormalImpulse = accumulated[p];
+      c.featureId = 0U;
+    }
+  }
   clamp_angular_speed((invMassA > 0.0F) ? bodyA : nullptr);
   clamp_angular_speed((invMassB > 0.0F) ? bodyB : nullptr);
 }
@@ -416,19 +494,15 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
   const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
   const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
-  const bool angularA =
-      (invMassA > 0.0F) && (invInertiaA > 0.0F) && (invMassB > 0.0F);
-  const bool angularB =
-      (invMassB > 0.0F) && (invInertiaB > 0.0F) && (invMassA > 0.0F);
+  const bool angularA = (invMassA > 0.0F) && (invInertiaA > 0.0F);
+  const bool angularB = (invMassB > 0.0F) && (invInertiaB > 0.0F);
   const engine::math::Vec3 pointVelA = engine::math::add(
       velA, angularA ? engine::math::cross(angVelA, contactOffsetA) : zeroVec);
   const engine::math::Vec3 pointVelB = engine::math::add(
       velB, angularB ? engine::math::cross(angVelB, contactOffsetB) : zeroVec);
-  const engine::math::Vec3 relVel = engine::math::sub(velB, velA);
   const float relVelAlongNormal =
       engine::math::dot(engine::math::sub(pointVelB, pointVelA), normal);
   if (relVelAlongNormal < 0.0F) {
-    constexpr float kRestitutionSpeedThreshold = 1.0F;
     const float effectiveRestitution =
         (-relVelAlongNormal > kRestitutionSpeedThreshold) ? restitution : 0.0F;
     const float effectiveMass =
@@ -449,69 +523,92 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       bodyA->velocity = engine::math::sub(
           bodyA->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassA));
-      // Keep static-environment contacts stable: only transfer angular
-      // impulse when both bodies are dynamic.
-      if ((bodyA->inverseInertia > 0.0F) && (invMassB > 0.0F)) {
-        const engine::math::Vec3 angImpulse =
+      if (angularA) {
+        bodyA->angularVelocity = engine::math::sub(
+            bodyA->angularVelocity,
             engine::math::mul(engine::math::cross(contactOffsetA, impulseVec),
-                              bodyA->inverseInertia);
-        bodyA->angularVelocity =
-            engine::math::sub(bodyA->angularVelocity, angImpulse);
-        const float angSpeedSq =
-            engine::math::length_sq(bodyA->angularVelocity);
-        if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
-          const float angSpeed = std::sqrt(angSpeedSq);
-          bodyA->angularVelocity = engine::math::mul(
-              bodyA->angularVelocity, kMaxAngularSpeed / angSpeed);
-        }
+                              invInertiaA));
       }
     }
     if ((bodyB != nullptr) && (invMassB > 0.0F)) {
       bodyB->velocity = engine::math::add(
           bodyB->velocity,
           engine::math::mul(normal, impulseMagnitude * invMassB));
-      if ((bodyB->inverseInertia > 0.0F) && (invMassA > 0.0F)) {
-        const engine::math::Vec3 angImpulse =
+      if (angularB) {
+        bodyB->angularVelocity = engine::math::add(
+            bodyB->angularVelocity,
             engine::math::mul(engine::math::cross(contactOffsetB, impulseVec),
-                              bodyB->inverseInertia);
-        bodyB->angularVelocity =
-            engine::math::add(bodyB->angularVelocity, angImpulse);
-        const float angSpeedSq =
-            engine::math::length_sq(bodyB->angularVelocity);
-        if (angSpeedSq > (kMaxAngularSpeed * kMaxAngularSpeed)) {
-          const float angSpeed = std::sqrt(angSpeedSq);
-          bodyB->angularVelocity = engine::math::mul(
-              bodyB->angularVelocity, kMaxAngularSpeed / angSpeed);
-        }
+                              invInertiaB));
       }
     }
 
+    // Friction consumes the post-normal-impulse contact-point velocities so
+    // it converges to rolling instead of braking a rolling body forever.
+    const engine::math::Vec3 postVelA =
+        (bodyA != nullptr) ? bodyA->velocity : zeroVec;
+    const engine::math::Vec3 postVelB =
+        (bodyB != nullptr) ? bodyB->velocity : zeroVec;
+    const engine::math::Vec3 postAngVelA =
+        (bodyA != nullptr) ? bodyA->angularVelocity : zeroVec;
+    const engine::math::Vec3 postAngVelB =
+        (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
+    const engine::math::Vec3 postPointVelA = engine::math::add(
+        postVelA,
+        angularA ? engine::math::cross(postAngVelA, contactOffsetA) : zeroVec);
+    const engine::math::Vec3 postPointVelB = engine::math::add(
+        postVelB,
+        angularB ? engine::math::cross(postAngVelB, contactOffsetB) : zeroVec);
+    const engine::math::Vec3 relPointVel =
+        engine::math::sub(postPointVelB, postPointVelA);
     const engine::math::Vec3 tangentVel = engine::math::sub(
-        relVel,
-        engine::math::mul(normal, engine::math::dot(relVel, normal)));
+        relPointVel,
+        engine::math::mul(normal, engine::math::dot(relPointVel, normal)));
     const float tangentSpeedSq = engine::math::length_sq(tangentVel);
     if (tangentSpeedSq > 1e-12F) {
       const float tangentSpeed = std::sqrt(tangentSpeedSq);
       const engine::math::Vec3 tangent =
           engine::math::div(tangentVel, tangentSpeed);
-      float frictionImpulse = -tangentSpeed / invMassSum;
-      if (std::fabs(frictionImpulse) < impulseMagnitude * staticFric) {
-        // Static friction: apply exact counter-impulse.
-      } else {
-        frictionImpulse =
-            sign_or_positive(frictionImpulse) * impulseMagnitude * dynamicFric;
+      const float frictionEffectiveMass =
+          invMassSum +
+          (angularA ? invInertiaA * engine::math::length_sq(
+                                        engine::math::cross(contactOffsetA,
+                                                            tangent))
+                    : 0.0F) +
+          (angularB ? invInertiaB * engine::math::length_sq(
+                                        engine::math::cross(contactOffsetB,
+                                                            tangent))
+                    : 0.0F);
+      float frictionImpulse = tangentSpeed / frictionEffectiveMass;
+      if (frictionImpulse >= impulseMagnitude * staticFric) {
+        frictionImpulse = impulseMagnitude * dynamicFric;
       }
+      const engine::math::Vec3 frictionVec =
+          engine::math::mul(tangent, -frictionImpulse);
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
-            bodyA->velocity,
-            engine::math::mul(tangent, frictionImpulse * invMassA));
+            bodyA->velocity, engine::math::mul(frictionVec, invMassA));
+        if (angularA) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(contactOffsetA,
+                                                    frictionVec),
+                                invInertiaA));
+        }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
         bodyB->velocity = engine::math::add(
-            bodyB->velocity,
-            engine::math::mul(tangent, frictionImpulse * invMassB));
+            bodyB->velocity, engine::math::mul(frictionVec, invMassB));
+        if (angularB) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(contactOffsetB,
+                                                    frictionVec),
+                                invInertiaB));
+        }
       }
     }
+    clamp_angular_speed((angularA && (bodyA != nullptr)) ? bodyA : nullptr);
+    clamp_angular_speed((angularB && (bodyB != nullptr)) ? bodyB : nullptr);
   }
 }
 

@@ -96,11 +96,16 @@ GjkResult geometry_intersection(const ColliderWorldGeometry &a,
 }
 
 /// Produces the response normal from target B toward moving collider A.
+/// Sphere pairs use the exact center line: EPA normals on barely-touching
+/// curved-curved contacts are polytope-faceting noise, tens of degrees off.
 math::Vec3 contact_normal(const ColliderWorldGeometry &a,
                           const ColliderWorldGeometry &b,
                           const GjkResult &intersection) noexcept {
-  if (math::length_sq(intersection.normal) > 1.0e-12F) {
-    return math::normalize(math::mul(intersection.normal, -1.0F));
+  if ((a.shape != ColliderShape::Sphere) ||
+      (b.shape != ColliderShape::Sphere)) {
+    if (math::length_sq(intersection.normal) > 1.0e-12F) {
+      return math::normalize(math::mul(intersection.normal, -1.0F));
+    }
   }
   const math::Vec3 delta = math::sub(a.center, b.center);
   const float len = math::length(delta);
@@ -136,16 +141,18 @@ float ccd_velocity_threshold() noexcept {
 /// ENTITY IDENTITY through the published entity-index -> slot map (slot in
 /// range and stored entity equal in index AND generation), so sparse-set
 /// reorders between the publish and this sweep cannot mismatch entries:
-/// snapshot AABBs (expanded by one step of positional correction drift)
-/// reject most pairs before the expensive geometry build, and candidate
+/// snapshot AABBs — tested against this body's bounds expanded by the
+/// pair's RELATIVE displacement plus positional-correction slop (issue
+/// #106: expanding by own motion only rejected head-on closers) — cull
+/// most pairs before the expensive geometry build, and candidate
 /// velocities come from the snapshot because reading live
-/// RigidBody::velocity races with the parallel integration chunks. When
-/// no snapshot entry vouches for a candidate (first step after play start
-/// or scene load, collider added since the last resolve) that body is
-/// treated as static — never read live — which is deterministic and
-/// conservative: the speculative-contact path still catches the encounter
-/// on the next resolved step. A pair missed because the OTHER body races
-/// toward a slow mover is covered by that body's own sweep.
+/// RigidBody::velocity races with the parallel integration chunks. Steps
+/// with no resolve-published snapshot (play start, scene load, Input-phase
+/// adds) run against the serial prime_ccd_snapshot publication of live
+/// owner velocities under open bounds; a candidate no snapshot vouches
+/// for is treated as static, which the next resolve repairs. A pair
+/// missed because the OTHER body races toward a slow mover is covered by
+/// that body's own sweep.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity, const RigidBody &body,
                                      const Collider &collider,
@@ -197,6 +204,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   math::Vec3 bestNormal(0.0F, 1.0F, 0.0F);
   math::Vec3 bestContactPt{};
   std::uint32_t bestHitEntity = 0U;
+  math::Vec3 bestOtherVel(0.0F, 0.0F, 0.0F);
+  Entity bestOtherOwner = kInvalidEntity;
+  float bestOtherRestitution = 0.0F;
   const Entity movingOwner = world.rigid_body_owner(entity);
 
   const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
@@ -204,14 +214,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   constexpr std::uint32_t kNoSnapshotSlot = 0xFFFFFFFFU;
 
   constexpr float kSnapshotDriftSlop = 0.1F;
-  const math::Vec3 gateDisplacement = math::mul(body.velocity, dt);
-  math::AABB gateBounds = movingGeometry.worldAabb;
-  gateBounds.min.x += std::min(gateDisplacement.x, 0.0F) - kSnapshotDriftSlop;
-  gateBounds.min.y += std::min(gateDisplacement.y, 0.0F) - kSnapshotDriftSlop;
-  gateBounds.min.z += std::min(gateDisplacement.z, 0.0F) - kSnapshotDriftSlop;
-  gateBounds.max.x += std::max(gateDisplacement.x, 0.0F) + kSnapshotDriftSlop;
-  gateBounds.max.y += std::max(gateDisplacement.y, 0.0F) + kSnapshotDriftSlop;
-  gateBounds.max.z += std::max(gateDisplacement.z, 0.0F) + kSnapshotDriftSlop;
 
   for (std::size_t i = 0U; i < count; ++i) {
     if (entities[i] == entity) {
@@ -226,19 +228,6 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       if ((slot < snapshotCount) &&
           (snapshotStore->ccdColliderEntities[slot] == entities[i])) {
         snapshotSlot = slot;
-      }
-    }
-
-    if (snapshotSlot != kNoSnapshotSlot) {
-      const math::AABB &otherBounds =
-          snapshotStore->ccdColliderAabbs[snapshotSlot];
-      if ((gateBounds.min.x > otherBounds.max.x) ||
-          (gateBounds.max.x < otherBounds.min.x) ||
-          (gateBounds.min.y > otherBounds.max.y) ||
-          (gateBounds.max.y < otherBounds.min.y) ||
-          (gateBounds.min.z > otherBounds.max.z) ||
-          (gateBounds.max.z < otherBounds.min.z)) {
-        continue;
       }
     }
 
@@ -264,6 +253,37 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     const float relSpeed = math::length(relVel);
     if (relSpeed < 1e-6F) {
       continue;
+    }
+
+    // Gate on RELATIVE motion (issue #106): expanding only by this body's
+    // displacement rejected head-on pairs whose individual paths fall
+    // short of each other's snapshot bounds while their relative paths
+    // cross completely within the step.
+    if (snapshotSlot != kNoSnapshotSlot) {
+      const math::Vec3 gateDisplacement = math::mul(relVel, dt);
+      math::AABB gateBounds = movingGeometry.worldAabb;
+      gateBounds.min.x +=
+          std::min(gateDisplacement.x, 0.0F) - kSnapshotDriftSlop;
+      gateBounds.min.y +=
+          std::min(gateDisplacement.y, 0.0F) - kSnapshotDriftSlop;
+      gateBounds.min.z +=
+          std::min(gateDisplacement.z, 0.0F) - kSnapshotDriftSlop;
+      gateBounds.max.x +=
+          std::max(gateDisplacement.x, 0.0F) + kSnapshotDriftSlop;
+      gateBounds.max.y +=
+          std::max(gateDisplacement.y, 0.0F) + kSnapshotDriftSlop;
+      gateBounds.max.z +=
+          std::max(gateDisplacement.z, 0.0F) + kSnapshotDriftSlop;
+      const math::AABB &otherBounds =
+          snapshotStore->ccdColliderAabbs[snapshotSlot];
+      if ((gateBounds.min.x > otherBounds.max.x) ||
+          (gateBounds.max.x < otherBounds.min.x) ||
+          (gateBounds.min.y > otherBounds.max.y) ||
+          (gateBounds.max.y < otherBounds.min.y) ||
+          (gateBounds.min.z > otherBounds.max.z) ||
+          (gateBounds.max.z < otherBounds.min.z)) {
+        continue;
+      }
     }
 
     ColliderWorldGeometry otherGeometry{};
@@ -339,6 +359,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
           contact_normal(contactGeometry, otherGeometry, contactIntersection);
       bestContactPt = contact_point(contactGeometry, otherGeometry, bestNormal);
       bestHitEntity = entities[i].index;
+      bestOtherVel = otherVel;
+      bestOtherOwner = otherOwner;
+      bestOtherRestitution = other.restitution;
     }
   }
 
@@ -348,6 +371,18 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     result.contactNormal = bestNormal;
     result.contactPoint = bestContactPt;
     result.hitEntityIndex = bestHitEntity;
+    result.targetVelocity = bestOtherVel;
+    result.combinedRestitution =
+        std::max(collider.restitution, bestOtherRestitution);
+    // inverseMass is Input-phase-only state, safe to read beside the
+    // parallel chunk jobs that only write velocities.
+    const RigidBody *otherBody = (bestOtherOwner != kInvalidEntity)
+                                     ? world.get_rigid_body_ptr(bestOtherOwner)
+                                     : nullptr;
+    result.targetInverseMass =
+        (otherBody != nullptr) ? otherBody->inverseMass : 0.0F;
+    result.targetRespondsInCcd = (result.targetInverseMass > 0.0F) &&
+                                 (math::length(bestOtherVel) >= threshold);
   }
 
   return result;

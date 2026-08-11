@@ -1,53 +1,121 @@
-// Implements contact manifold behavior for the Engine physics system.
+// Implements the world-scoped persistent contact-manifold cache: pair
+// lookup keyed by full Entity identity, contact matching/reduction, and
+// frame-stamped eviction (issue #110 moved it off a process-global store).
 
 #include "engine/physics/constraint_solver.h"
 
 #include "engine/math/vec3.h"
+#include "engine/physics/physics_context.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace engine::physics {
 
 namespace {
 
-ContactManifold g_manifolds[kMaxContactManifolds]{};
-std::size_t g_manifoldCount = 0U;
+// Returns the store's manifold array, or nullptr when heap-backed storage
+// is unavailable.
+PhysicsShapeStore *manifold_store(PhysicsContext &context) noexcept {
+  return context.shapeStore.get();
+}
 
-// Find an existing manifold for this entity pair, or return nullptr.
-ContactManifold *find_manifold(std::uint32_t entityIndexA,
-                               std::uint32_t entityIndexB) noexcept {
-  for (std::size_t i = 0U; i < g_manifoldCount; ++i) {
-    if (((g_manifolds[i].entityIndexA == entityIndexA) &&
-         (g_manifolds[i].entityIndexB == entityIndexB)) ||
-        ((g_manifolds[i].entityIndexA == entityIndexB) &&
-         (g_manifolds[i].entityIndexB == entityIndexA))) {
-      return &g_manifolds[i];
+// Order-independent hash key from the pair's entity indices; lookups verify
+// full Entity identity, so index reuse can never alias through the key.
+std::uint64_t manifold_pair_key(Entity entityA, Entity entityB) noexcept {
+  const std::uint32_t lo = std::min(entityA.index, entityB.index);
+  const std::uint32_t hi = std::max(entityA.index, entityB.index);
+  return (static_cast<std::uint64_t>(lo) << 32U) |
+         static_cast<std::uint64_t>(hi);
+}
+
+// Fibonacci-mixed starting bucket for a pair key.
+std::size_t manifold_bucket(std::uint64_t key) noexcept {
+  return static_cast<std::size_t>((key * 11400714819323198485ULL) %
+                                  kManifoldHashBuckets);
+}
+
+// Inserts a manifold slot into the first empty probe bucket.
+void manifold_index_insert(PhysicsShapeStore &store,
+                           std::uint32_t slot) noexcept {
+  const ContactManifold &m = store.contactManifolds[slot];
+  std::size_t bucket = manifold_bucket(manifold_pair_key(m.entityA, m.entityB));
+  for (std::size_t probe = 0U; probe < kManifoldHashBuckets; ++probe) {
+    if (store.contactManifoldHash[bucket] == kManifoldSlotEmpty) {
+      store.contactManifoldHash[bucket] = slot;
+      return;
     }
+    bucket = (bucket + 1U) % kManifoldHashBuckets;
+  }
+}
+
+// Rebuilds the whole pair index from the live manifold set.
+void manifold_index_rebuild(PhysicsShapeStore &store) noexcept {
+  store.contactManifoldHash.fill(kManifoldSlotEmpty);
+  for (std::size_t i = 0U; i < store.contactManifoldCount; ++i) {
+    manifold_index_insert(store, static_cast<std::uint32_t>(i));
+  }
+}
+
+// Find an existing manifold for this entity pair (either order, exact
+// index+generation match) through the O(1) index, or return nullptr.
+ContactManifold *find_manifold(PhysicsShapeStore &store, Entity entityA,
+                               Entity entityB) noexcept {
+  std::size_t bucket = manifold_bucket(manifold_pair_key(entityA, entityB));
+  for (std::size_t probe = 0U; probe < kManifoldHashBuckets; ++probe) {
+    const std::uint32_t slot = store.contactManifoldHash[bucket];
+    if (slot == kManifoldSlotEmpty) {
+      return nullptr;
+    }
+    if (slot < store.contactManifoldCount) {
+      ContactManifold &m = store.contactManifolds[slot];
+      if (((m.entityA == entityA) && (m.entityB == entityB)) ||
+          ((m.entityA == entityB) && (m.entityB == entityA))) {
+        return &m;
+      }
+    }
+    bucket = (bucket + 1U) % kManifoldHashBuckets;
   }
   return nullptr;
 }
 
 // Allocate a new manifold slot, or evict the oldest (lowest lastFrameUsed)
-// if full.
-ContactManifold *allocate_manifold() noexcept {
-  if (g_manifoldCount < kMaxContactManifolds) {
-    ContactManifold *m = &g_manifolds[g_manifoldCount];
-    ++g_manifoldCount;
+// if full; the caller assigns the pair and must then index the slot (the
+// full-replacement path rebuilds so dead keys never accumulate). Returns
+// nullptr when every slot is live this frame — those pairs cold-start
+// rather than thrashing same-frame evictions, and the saturation stamp
+// caps the oldest-scan at once per resolve.
+ContactManifold *allocate_manifold(PhysicsShapeStore &store,
+                                   std::uint32_t frameNumber,
+                                   bool *outNeedsRebuild) noexcept {
+  *outNeedsRebuild = false;
+  if (store.contactManifoldCount < kMaxContactManifolds) {
+    ContactManifold *m = &store.contactManifolds[store.contactManifoldCount];
+    ++store.contactManifoldCount;
     return m;
+  }
+  if (store.contactManifoldSaturatedFrame == frameNumber) {
+    return nullptr;
   }
 
   std::size_t oldestIdx = 0U;
-  std::uint32_t oldestFrame = g_manifolds[0U].lastFrameUsed;
-  for (std::size_t i = 1U; i < g_manifoldCount; ++i) {
-    if (g_manifolds[i].lastFrameUsed < oldestFrame) {
-      oldestFrame = g_manifolds[i].lastFrameUsed;
+  std::uint32_t oldestFrame = store.contactManifolds[0U].lastFrameUsed;
+  for (std::size_t i = 1U; i < store.contactManifoldCount; ++i) {
+    if (store.contactManifolds[i].lastFrameUsed < oldestFrame) {
+      oldestFrame = store.contactManifolds[i].lastFrameUsed;
       oldestIdx = i;
     }
   }
+  if (oldestFrame >= frameNumber) {
+    store.contactManifoldSaturatedFrame = frameNumber;
+    return nullptr;
+  }
 
-  g_manifolds[oldestIdx] = ContactManifold{};
-  return &g_manifolds[oldestIdx];
+  store.contactManifolds[oldestIdx] = ContactManifold{};
+  *outNeedsRebuild = true;
+  return &store.contactManifolds[oldestIdx];
 }
 
 // Feature-ID based contact matching threshold.
@@ -173,21 +241,55 @@ void reduce_manifold(ExtendedManifold &em, ContactManifold &m) noexcept {
 
 } // namespace
 
-std::size_t manifold_add_contact(std::uint32_t entityIndexA,
-                                 std::uint32_t entityIndexB,
-                                 const math::Vec3 &pointOnA,
+ContactManifold *manifold_acquire(PhysicsContext &context, Entity entityA,
+                                  Entity entityB,
+                                  std::uint32_t frameNumber) noexcept {
+  PhysicsShapeStore *store = manifold_store(context);
+  if (store == nullptr) {
+    return nullptr;
+  }
+  ContactManifold *m = find_manifold(*store, entityA, entityB);
+  if (m == nullptr) {
+    bool needsRebuild = false;
+    m = allocate_manifold(*store, frameNumber, &needsRebuild);
+    if (m == nullptr) {
+      return nullptr;
+    }
+    m->entityA = entityA;
+    m->entityB = entityB;
+    m->contactCount = 0U;
+    if (needsRebuild) {
+      manifold_index_rebuild(*store);
+    } else {
+      manifold_index_insert(
+          *store,
+          static_cast<std::uint32_t>(m - store->contactManifolds.data()));
+    }
+  } else if (!(m->entityA == entityA)) {
+    // Dense reorder flipped the pair's perspective: stored points and
+    // impulses are mirrored, so restart the manifold in the new order.
+    m->entityA = entityA;
+    m->entityB = entityB;
+    m->contactCount = 0U;
+  }
+  m->lastFrameUsed = frameNumber;
+  return m;
+}
+
+std::size_t manifold_add_contact(PhysicsContext &context, Entity entityA,
+                                 Entity entityB, const math::Vec3 &pointOnA,
                                  const math::Vec3 &pointOnB,
                                  const math::Vec3 &normal, float penetration,
                                  std::uint32_t featureId,
                                  std::uint32_t frameNumber) noexcept {
-  ContactManifold *m = find_manifold(entityIndexA, entityIndexB);
-  if (m == nullptr) {
-    m = allocate_manifold();
-    m->entityIndexA = entityIndexA;
-    m->entityIndexB = entityIndexB;
-    m->contactCount = 0U;
+  PhysicsShapeStore *store = manifold_store(context);
+  if (store == nullptr) {
+    return kMaxContactManifolds;
   }
-  m->lastFrameUsed = frameNumber;
+  ContactManifold *m = manifold_acquire(context, entityA, entityB, frameNumber);
+  if (m == nullptr) {
+    return kMaxContactManifolds;
+  }
 
   const std::size_t matchIdx = find_matching_contact(*m, pointOnA, featureId);
   if (matchIdx < m->contactCount) {
@@ -223,36 +325,55 @@ std::size_t manifold_add_contact(std::uint32_t entityIndexA,
     reduce_manifold(em, *m);
   }
 
-  return static_cast<std::size_t>(m - g_manifolds);
+  return static_cast<std::size_t>(m - store->contactManifolds.data());
 }
 
-void manifold_evict_stale(std::uint32_t frameNumber) noexcept {
+void manifold_evict_stale(PhysicsContext &context,
+                          std::uint32_t frameNumber) noexcept {
+  PhysicsShapeStore *store = manifold_store(context);
+  if (store == nullptr) {
+    return;
+  }
   std::size_t writeIdx = 0U;
-  for (std::size_t i = 0U; i < g_manifoldCount; ++i) {
-    if (g_manifolds[i].lastFrameUsed >= frameNumber) {
+  for (std::size_t i = 0U; i < store->contactManifoldCount; ++i) {
+    if (store->contactManifolds[i].lastFrameUsed >= frameNumber) {
       if (writeIdx != i) {
-        g_manifolds[writeIdx] = g_manifolds[i];
+        store->contactManifolds[writeIdx] = store->contactManifolds[i];
       }
       ++writeIdx;
     }
   }
-  g_manifoldCount = writeIdx;
-}
-
-std::size_t manifold_count() noexcept { return g_manifoldCount; }
-
-void manifold_reset() noexcept {
-  for (std::size_t i = 0U; i < g_manifoldCount; ++i) {
-    g_manifolds[i] = ContactManifold{};
+  if (writeIdx != store->contactManifoldCount) {
+    store->contactManifoldCount = writeIdx;
+    manifold_index_rebuild(*store);
   }
-  g_manifoldCount = 0U;
 }
 
-const ContactManifold *manifold_get(std::size_t index) noexcept {
-  if (index >= g_manifoldCount) {
+std::size_t manifold_count(const PhysicsContext &context) noexcept {
+  const PhysicsShapeStore *store = context.shapeStore.get();
+  return (store != nullptr) ? store->contactManifoldCount : 0U;
+}
+
+void manifold_reset(PhysicsContext &context) noexcept {
+  PhysicsShapeStore *store = manifold_store(context);
+  if (store == nullptr) {
+    return;
+  }
+  for (std::size_t i = 0U; i < store->contactManifoldCount; ++i) {
+    store->contactManifolds[i] = ContactManifold{};
+  }
+  store->contactManifoldCount = 0U;
+  store->contactManifoldHash.fill(kManifoldSlotEmpty);
+  store->contactManifoldSaturatedFrame = 0U;
+}
+
+const ContactManifold *manifold_get(const PhysicsContext &context,
+                                    std::size_t index) noexcept {
+  const PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || (index >= store->contactManifoldCount)) {
     return nullptr;
   }
-  return &g_manifolds[index];
+  return &store->contactManifolds[index];
 }
 
 } // namespace engine::physics

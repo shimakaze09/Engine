@@ -43,12 +43,14 @@ void resolve_contact(PhysicsWorldView &world,
 
 /// Resolves a clipped multi-point contact manifold with rotational response
 /// including against static geometry; per-point Coulomb friction also
-/// brakes twist about the contact normal.
+/// brakes twist about the contact normal. Impulses warm-start from and
+/// write back to the pair's persistent manifold, keyed by the collider
+/// entities (issue #110).
 void resolve_manifold_contact(
     PhysicsWorldView &world,
     const PhysicsWorldView::SimulationAccessToken &simToken,
-    Entity bodyEntityA, Entity bodyEntityB,
-    const engine::math::Vec3 &bodyCenterA,
+    Entity colliderEntityA, Entity colliderEntityB, Entity bodyEntityA,
+    Entity bodyEntityB, const engine::math::Vec3 &bodyCenterA,
     const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA, RigidBody *bodyB,
     float invMassA, float invMassB, float invMassSum,
     const engine::math::Vec3 &normal, const ClippedManifold &manifold,

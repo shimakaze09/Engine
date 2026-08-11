@@ -286,9 +286,10 @@ void resolve_pair_contact(const PairContext &pair,
 void resolve_pair_manifold(const PairContext &pair,
                            const engine::math::Vec3 &normal,
                            const ClippedManifold &manifold) noexcept {
-  resolve_manifold_contact(pair.world, pair.simToken, pair.bodyEntityA,
-                           pair.bodyEntityB, pair.bodyCenterA, pair.bodyCenterB,
-                           pair.bodyA, pair.bodyB, pair.invMassA, pair.invMassB,
+  resolve_manifold_contact(pair.world, pair.simToken, pair.entityA,
+                           pair.entityB, pair.bodyEntityA, pair.bodyEntityB,
+                           pair.bodyCenterA, pair.bodyCenterB, pair.bodyA,
+                           pair.bodyB, pair.invMassA, pair.invMassB,
                            pair.invMassSum, normal, manifold, pair.colliderA,
                            pair.colliderB);
 }
@@ -711,7 +712,22 @@ void narrow_phase_convex_gjk(const PairContext &pair) noexcept {
     resolve_pair_manifold(pair, gjk.normal, manifold);
     return;
   }
-  resolve_pair_contact(pair, gjk.normal, gjk.depth, gjk.contactPoint);
+  // EPA's contact point averages polytope vertices, which can land tens of
+  // metres away when a small shape rests on a large face; the single-point
+  // resolver now consumes it as an angular lever arm (issue #111), so
+  // project the smaller shape's deepest support point instead.
+  const float extentSqA = engine::math::length_sq(halfA);
+  const float extentSqB = engine::math::length_sq(halfB);
+  const engine::math::Vec3 contactPoint =
+      (extentSqA <= extentSqB)
+          ? engine::math::sub(
+                collider_support_point(pair.geometryA, gjk.normal),
+                engine::math::mul(gjk.normal, gjk.depth * 0.5F))
+          : engine::math::add(
+                collider_support_point(pair.geometryB,
+                                       engine::math::mul(gjk.normal, -1.0F)),
+                engine::math::mul(gjk.normal, gjk.depth * 0.5F));
+  resolve_pair_contact(pair, gjk.normal, gjk.depth, contactPoint);
 }
 
 /// Capsule vs Capsule: closest points between the two core segments.

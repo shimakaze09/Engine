@@ -12,6 +12,7 @@
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "physics_internal.h"
 
 namespace engine::physics {
 
@@ -137,12 +138,32 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
             engine::math::add(readTransforms[i].position,
                               engine::math::mul(displacement, safeToi));
 
-        const float normalVelocity =
-            engine::math::dot(body->velocity, earliestCcd.contactNormal);
-        if (normalVelocity < 0.0F) {
-          body->velocity = engine::math::sub(
-              body->velocity, engine::math::mul(earliestCcd.contactNormal,
-                                                2.0F * normalVelocity));
+        // Impulse in relative normal space with the pair's combined
+        // restitution and inverse-mass split (issue #98). Static targets
+        // take the full material response; fast dynamic targets apply the
+        // symmetric share through their own sweep; slow dynamic targets
+        // get a position clamp only, leaving the momentum exchange to the
+        // discrete solver so one-sided writes can never delete momentum.
+        if ((earliestCcd.targetInverseMass <= 0.0F) ||
+            earliestCcd.targetRespondsInCcd) {
+          const engine::math::Vec3 relVel =
+              engine::math::sub(body->velocity, earliestCcd.targetVelocity);
+          const float approachSpeed =
+              engine::math::dot(relVel, earliestCcd.contactNormal);
+          const float invMassSum =
+              body->inverseMass + earliestCcd.targetInverseMass;
+          if ((approachSpeed < 0.0F) && (invMassSum > 0.0F)) {
+            const float restitution =
+                (-approachSpeed > kRestitutionSpeedThreshold)
+                    ? earliestCcd.combinedRestitution
+                    : 0.0F;
+            const float impulse =
+                -(1.0F + restitution) * approachSpeed / invMassSum;
+            body->velocity = engine::math::add(
+                body->velocity,
+                engine::math::mul(earliestCcd.contactNormal,
+                                  impulse * body->inverseMass));
+          }
         }
         clamped = true;
       }

@@ -383,7 +383,12 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
                   entity.index);
     core::log_message(core::LogLevel::Warning, "world", message);
   }
-  return m_rigidBodies.add(entity, sanitized);
+  if (!m_rigidBodies.add(entity, sanitized)) {
+    return false;
+  }
+  // New owner velocities must reach the next step's CCD snapshot (issue #106).
+  m_physicsContext.ccdSnapshotDirty = true;
+  return true;
 }
 
 bool World::remove_rigid_body(Entity entity) noexcept {
@@ -487,6 +492,8 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
                                              sanitized.shape);
   install_provenance_hull(m_physicsContext, entity, sanitized);
+  // New colliders have no snapshot entry until the next resolve (issue #106).
+  m_physicsContext.ccdSnapshotDirty = true;
   return true;
 }
 

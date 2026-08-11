@@ -22,6 +22,12 @@ bool register_physics_cvars() noexcept;
 /// touches the global cvar mutex.
 void refresh_step_cvar_cache(PhysicsContext &context) noexcept;
 
+/// When the CCD snapshot is dirty (no resolve yet, or colliders/bodies
+/// added since), serially publishes a conservative snapshot from live
+/// state: real owners and velocities, open AABBs so gating never rejects.
+/// Must run on the serial begin-step path before any physics chunk job.
+void prime_ccd_snapshot(PhysicsWorldView &world) noexcept;
+
 // Blocked-body warning diagnostic ---------------------------------------------
 /// Counters published by the blocked-body warning (physics.blocked_warn_steps):
 /// total warnings emitted plus the blocked entity and blocking-partner
