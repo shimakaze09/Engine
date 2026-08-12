@@ -290,6 +290,126 @@ bool test_longest_prefix_match() noexcept {
   return true;
 }
 
+// Regression for issue #113: trailing-slash and backslash prefix forms must
+// identify the same mount for remount, unmount, and resolution.
+bool test_prefix_form_equivalence() noexcept {
+  if (!initialize_vfs()) {
+    return false;
+  }
+
+  // Remounting the trailing-slash form must replace the plain-form entry,
+  // not append a shadowed duplicate, so resolution follows the new target.
+  if (!mount("assets", "/first") || !mount("assets/", "/second")) {
+    shutdown_vfs();
+    return false;
+  }
+  char resolved[512] = {};
+  if (!vfs_resolve_os_path("assets/foo.txt", resolved, sizeof(resolved)) ||
+      (std::strcmp(resolved, "/second/foo.txt") != 0)) {
+    shutdown_vfs();
+    return false;
+  }
+  // Backslash form remounts the same entry too.
+  if (!mount("assets\\", "/third") ||
+      !vfs_resolve_os_path("assets/foo.txt", resolved, sizeof(resolved)) ||
+      (std::strcmp(resolved, "/third/foo.txt") != 0)) {
+    shutdown_vfs();
+    return false;
+  }
+
+  // Every equivalent form unmounts the single entry; the second unmount of
+  // any form must report no such mount.
+  if (!unmount("assets/")) {
+    shutdown_vfs();
+    return false;
+  }
+  if (unmount("assets") || unmount("assets\\")) {
+    shutdown_vfs();
+    return false;
+  }
+  if (vfs_resolve_os_path("assets/foo.txt", resolved, sizeof(resolved))) {
+    shutdown_vfs();
+    return false;
+  }
+
+  // A prefix that normalizes to empty ("/" loses its trailing slash) is
+  // rejected rather than stored as an unmountable empty entry.
+  if (mount("/", "/root") || mount("\\", "/root")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  shutdown_vfs();
+  return true;
+}
+
+// Regression for issue #113: repeated trailing-slash mount/unmount cycles
+// must not consume extra mount-table slots, and nested mounts keep their
+// longest-prefix behavior across slash forms.
+bool test_prefix_remount_cycles_and_nested() noexcept {
+  if (!initialize_vfs()) {
+    return false;
+  }
+
+  // 64 cycles far exceeds the fixed table capacity, so any leaked slot
+  // would surface as a failed mount or a stale resolution target.
+  for (int cycle = 0; cycle < 64; ++cycle) {
+    const bool slashForm = (cycle % 2) == 0;
+    if (!mount(slashForm ? "cycle/" : "cycle", "/cycle")) {
+      shutdown_vfs();
+      return false;
+    }
+    if (!unmount(slashForm ? "cycle" : "cycle/")) {
+      shutdown_vfs();
+      return false;
+    }
+  }
+
+  // Repeated remounts (no unmount) must reuse the one entry as well.
+  for (int cycle = 0; cycle < 64; ++cycle) {
+    if (!mount("stack/", "/stack")) {
+      shutdown_vfs();
+      return false;
+    }
+  }
+  char resolved[512] = {};
+  if (!vfs_resolve_os_path("stack/a", resolved, sizeof(resolved)) ||
+      (std::strcmp(resolved, "/stack/a") != 0)) {
+    shutdown_vfs();
+    return false;
+  }
+
+  // Nested mounts registered with mixed slash forms still resolve by the
+  // longest matching prefix and unmount independently.
+  if (!mount("game/", "/game") || !mount("game/audio/", "/audio")) {
+    shutdown_vfs();
+    return false;
+  }
+  if (!vfs_resolve_os_path("game/audio/hit.wav", resolved,
+                           sizeof(resolved)) ||
+      (std::strcmp(resolved, "/audio/hit.wav") != 0)) {
+    shutdown_vfs();
+    return false;
+  }
+  if (!unmount("game/audio")) {
+    shutdown_vfs();
+    return false;
+  }
+  if (!vfs_resolve_os_path("game/audio/hit.wav", resolved,
+                           sizeof(resolved)) ||
+      (std::strcmp(resolved, "/game/audio/hit.wav") != 0)) {
+    shutdown_vfs();
+    return false;
+  }
+  if (!unmount("game")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  shutdown_vfs();
+  return true;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -317,6 +437,12 @@ int main() {
   }
   if (!test_write_failure_preserves_existing()) {
     return 8;
+  }
+  if (!test_prefix_form_equivalence()) {
+    return 9;
+  }
+  if (!test_prefix_remount_cycles_and_nested()) {
+    return 10;
   }
   return 0;
 }

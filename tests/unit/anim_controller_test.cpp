@@ -30,9 +30,13 @@ constexpr const char *kSkelPath = "anim_controller_test.skel";
 constexpr const char *kIdlePath = "anim_controller_test.idle.anim";
 constexpr const char *kWalkPath = "anim_controller_test.walk.anim";
 constexpr const char *kControllerPath = "anim_controller_test.animctrl.json";
+constexpr const char *kReverseControllerPath =
+    "anim_controller_test.reverse.animctrl.json";
 constexpr const char *kMountPrefix = "animctrl";
 constexpr const char *kControllerVirtualPath =
     "animctrl/anim_controller_test.animctrl.json";
+constexpr const char *kReverseControllerVirtualPath =
+    "animctrl/anim_controller_test.reverse.animctrl.json";
 constexpr float kFixedDt = 1.0F / 60.0F;
 
 /// Removes a temporary test file when it exists.
@@ -48,6 +52,7 @@ void cleanup_files() noexcept {
   remove_file(kIdlePath);
   remove_file(kWalkPath);
   remove_file(kControllerPath);
+  remove_file(kReverseControllerPath);
 }
 
 /// Writes a text file for the controller JSON fixture.
@@ -145,6 +150,34 @@ bool cook_fixtures() {
       "]"
       "}";
   if (!write_text(kControllerPath, controller)) {
+    return false;
+  }
+
+  // Reverse-playback fixture (issue #112): the 0.4s walk clip with a
+  // looping and a non-looping state plus events near the head and tail.
+  const char *reverseController =
+      "{"
+      "\"skeleton\":\"animctrl/anim_controller_test.skel\","
+      "\"clips\":["
+      "{\"name\":\"walk\",\"path\":\"animctrl/anim_controller_test.walk.anim\"}"
+      "],"
+      "\"initial\":\"loop\","
+      "\"states\":["
+      "{\"name\":\"loop\",\"clip\":\"walk\",\"loop\":true},"
+      "{\"name\":\"once\",\"clip\":\"walk\",\"loop\":false}"
+      "],"
+      "\"transitions\":["
+      "{\"from\":\"loop\",\"to\":\"once\",\"param\":\"hold\",\"when\":\">\","
+      "\"value\":0.5,\"blend\":0.1},"
+      "{\"from\":\"once\",\"to\":\"loop\",\"param\":\"hold\",\"when\":\"<\","
+      "\"value\":0.5,\"blend\":0.1}"
+      "],"
+      "\"events\":["
+      "{\"clip\":\"walk\",\"time\":0.1,\"name\":\"mid\"},"
+      "{\"clip\":\"walk\",\"time\":0.39,\"name\":\"tail\"}"
+      "]"
+      "}";
+  if (!write_text(kReverseControllerPath, reverseController)) {
     return false;
   }
 
@@ -489,6 +522,200 @@ int check_exact_duration_wraps() {
   return 0;
 }
 
+/// Creates a world with one animated entity bound to the reverse-playback
+/// controller fixture and runs the binding update; returns the entity (or
+/// kInvalidEntity on setup failure).
+engine::runtime::Entity bind_reverse_fixture(
+    engine::runtime::World &world) noexcept {
+  world.end_frame_phase();
+  const auto entity = world.create_entity();
+  AnimationComponent component{};
+  std::snprintf(component.controllerPath, sizeof(component.controllerPath),
+                "%s", kReverseControllerVirtualPath);
+  if (!world.add_animation_component(entity, component)) {
+    return engine::runtime::kInvalidEntity;
+  }
+  engine::runtime::update_animations(world, kFixedDt);
+  return entity;
+}
+
+/// Counts this update's fired events by name.
+std::size_t fired_count(const char *name) noexcept {
+  const std::uint32_t hash = engine::core::fnv1a_32(name);
+  std::size_t count = 0U;
+  for (std::size_t i = 0U; i < engine::runtime::fired_anim_event_count();
+       ++i) {
+    const engine::runtime::FiredAnimEvent *fired =
+        engine::runtime::fired_anim_event_at(i);
+    if ((fired != nullptr) && (fired->nameHash == hash)) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+/// EXPECTATION (issue #112): reverse looping playback starting at time
+/// zero wraps to the clip tail firing only the events the step actually
+/// traversed ([0.383, 0.4] fires "tail" at 0.39, never "mid" at 0.1), a
+/// reverse landing exactly on zero neither wraps nor fires, and repeated
+/// reverse loops fire each crossing exactly once per pass.
+int check_reverse_loop_events() {
+  engine::runtime::reset_anim_controllers();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 1;
+  }
+  const auto entity = bind_reverse_fixture(*world);
+  AnimationComponent *component = world->get_animation_component_ptr(entity);
+  if ((component == nullptr) ||
+      (component->controllerSlot == kInvalidAnimSlot)) {
+    std::puts("reverse fixture did not bind");
+    return 1;
+  }
+
+  // The binding update advanced the looping state to exactly one step.
+  if (component->stateTime != kFixedDt) {
+    std::puts("unexpected state time after bind");
+    return 1;
+  }
+
+  // One reverse step lands exactly on zero: no wrap, no events.
+  component->playbackSpeed = -1.0F;
+  engine::runtime::update_animations(*world, kFixedDt);
+  component = world->get_animation_component_ptr(entity);
+  if ((component == nullptr) || (component->stateTime != 0.0F)) {
+    std::puts("reverse step did not land exactly on zero");
+    return 1;
+  }
+  if (engine::runtime::fired_anim_event_count() != 0U) {
+    std::puts("events fired on an exact-zero reverse landing");
+    return 1;
+  }
+
+  // The next reverse step wraps to the tail; only the traversed tail
+  // window may fire. The unfixed forward-only window fired "mid" here.
+  engine::runtime::update_animations(*world, kFixedDt);
+  component = world->get_animation_component_ptr(entity);
+  if ((component == nullptr) || !(component->stateTime > 0.38F) ||
+      !(component->stateTime < 0.39F)) {
+    std::puts("reverse wrap did not land near the clip tail");
+    return 1;
+  }
+  if ((fired_count("tail") != 1U) || (fired_count("mid") != 0U)) {
+    std::puts("reverse wrap fired the wrong event window");
+    return 1;
+  }
+
+  // Two more full reverse loops (48 steps of 1/60 over the 0.4s clip):
+  // each pass crosses "mid" once and wraps through "tail" once.
+  std::size_t midTotal = 0U;
+  std::size_t tailTotal = 0U;
+  for (int i = 0; i < 48; ++i) {
+    engine::runtime::update_animations(*world, kFixedDt);
+    midTotal += fired_count("mid");
+    tailTotal += fired_count("tail");
+  }
+  if ((midTotal != 2U) || (tailTotal != 2U)) {
+    std::printf("reverse loop event counts mismatch: mid=%zu tail=%zu\n",
+                midTotal, tailTotal);
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (issue #112): a crossfade progresses by the magnitude of
+/// the scaled step, so a negative playback speed still completes the
+/// blend (never growing blendRemaining or driving the weight negative), a
+/// zero speed freezes it, a mid-blend sign flip keeps it converging, and
+/// reverse playback on the non-looping state clamps at frame zero without
+/// firing events.
+int check_reverse_crossfade_and_nonloop_clamp() {
+  engine::runtime::reset_anim_controllers();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 1;
+  }
+  const auto entity = bind_reverse_fixture(*world);
+  AnimationComponent *component = world->get_animation_component_ptr(entity);
+  if ((component == nullptr) ||
+      (component->controllerSlot == kInvalidAnimSlot)) {
+    std::puts("reverse fixture did not bind");
+    return 1;
+  }
+
+  // Trigger the loop→once transition (0.1s blend) while playing in
+  // reverse: the same update starts and advances the blend.
+  component->playbackSpeed = -1.0F;
+  if (!engine::runtime::set_anim_param(*world, entity, "hold", 1.0F)) {
+    std::puts("set_anim_param failed");
+    return 1;
+  }
+  engine::runtime::update_animations(*world, kFixedDt);
+  component = world->get_animation_component_ptr(entity);
+  if ((component == nullptr) || (component->currentState != 1U)) {
+    std::puts("transition to the non-looping state did not happen");
+    return 1;
+  }
+  // The unfixed blendRemaining -= scaledDt grew past 0.1 here.
+  const float afterOneStep = component->blendRemaining;
+  if (!(afterOneStep > 0.0F) || !(afterOneStep < 0.1F)) {
+    std::puts("reverse blend did not progress");
+    return 1;
+  }
+  // Non-looping state entered at time zero clamps there in reverse and
+  // fires nothing.
+  if ((component->stateTime != 0.0F) ||
+      (engine::runtime::fired_anim_event_count() != 0U)) {
+    std::puts("reverse non-looping state did not clamp silently at zero");
+    return 1;
+  }
+
+  // Zero speed freezes both the clip time and the blend clock.
+  component->playbackSpeed = 0.0F;
+  engine::runtime::update_animations(*world, kFixedDt);
+  component = world->get_animation_component_ptr(entity);
+  if ((component == nullptr) || (component->blendRemaining != afterOneStep) ||
+      (component->stateTime != 0.0F) ||
+      (engine::runtime::fired_anim_event_count() != 0U)) {
+    std::puts("zero speed did not freeze the blend and clip time");
+    return 1;
+  }
+
+  // Flip the sign mid-blend: the blend must keep converging
+  // monotonically to exactly zero within the remaining ~5 steps.
+  component->playbackSpeed = -1.0F;
+  engine::runtime::update_animations(*world, kFixedDt);
+  component = world->get_animation_component_ptr(entity);
+  if (component == nullptr) {
+    return 1;
+  }
+  float previousRemaining = component->blendRemaining;
+  if (!(previousRemaining < afterOneStep)) {
+    std::puts("reverse blend stopped converging");
+    return 1;
+  }
+  component->playbackSpeed = 1.0F;
+  for (int i = 0; i < 6; ++i) {
+    engine::runtime::update_animations(*world, kFixedDt);
+    component = world->get_animation_component_ptr(entity);
+    if (component == nullptr) {
+      return 1;
+    }
+    if (component->blendRemaining > previousRemaining) {
+      std::puts("blend remaining increased after the sign flip");
+      return 1;
+    }
+    previousRemaining = component->blendRemaining;
+  }
+  if (component->blendRemaining != 0.0F) {
+    std::puts("crossfade did not complete after the sign flip");
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -517,6 +744,12 @@ int main() {
   }
   if (result == 0) {
     result = check_exact_duration_wraps();
+  }
+  if (result == 0) {
+    result = check_reverse_loop_events();
+  }
+  if (result == 0) {
+    result = check_reverse_crossfade_and_nonloop_clamp();
   }
   engine::runtime::reset_anim_controllers();
   cleanup_files();

@@ -75,10 +75,13 @@ bool resolve_gbuffer_program_state(BackendState &backend,
 
 // REQUIRED: the four G-Buffer samplers (samplers default to unit 0, so a
 // dropped binding silently reads the wrong texture), the tile/light-data
-// textures with their counts, the inverse view/projection
-// reconstruction matrices, the directional light, camera position, and
-// screen size. OPTIONAL: fog and height fog (uFogMode=0 / enable flag
-// off), IBL, SSAO, and every shadow family behind their enable flags.
+// textures with the X tile count and light counts, the inverse
+// view/projection reconstruction matrices, the directional light, and the
+// camera position. OPTIONAL: fog and height fog (uFogMode=0 / enable flag
+// off), IBL, SSAO, and every shadow family behind their enable flags, plus
+// uTileCountY/uScreenSize, which the shader does not read today — a
+// conforming compiler may strip them, so requiring them let real drivers
+// disable the whole deferred path (issue #95).
 bool resolve_deferred_light_program_state(BackendState &backend,
                                           const RenderDevice *dev) noexcept {
   backend.deferredLightProgram =
@@ -96,7 +99,7 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlTileLightTexLoc =
       required_location(&ok, dev, dlProg, "uTileLightTex");
   backend.dlTileCountXLoc = required_location(&ok, dev, dlProg, "uTileCountX");
-  backend.dlTileCountYLoc = required_location(&ok, dev, dlProg, "uTileCountY");
+  backend.dlTileCountYLoc = dev->uniform_location(dlProg, "uTileCountY");
   backend.dlInvProjectionLoc =
       required_location(&ok, dev, dlProg, "uInvProjection");
   backend.dlInvViewLoc = required_location(&ok, dev, dlProg, "uInvView");
@@ -105,7 +108,7 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlDirLightColorLoc =
       required_location(&ok, dev, dlProg, "uDirLightColor");
   backend.dlCameraPosLoc = required_location(&ok, dev, dlProg, "uCameraPos");
-  backend.dlScreenSizeLoc = required_location(&ok, dev, dlProg, "uScreenSize");
+  backend.dlScreenSizeLoc = dev->uniform_location(dlProg, "uScreenSize");
   backend.dlFogModeLoc = dev->uniform_location(dlProg, "uFogMode");
   backend.dlFogStartLoc = dev->uniform_location(dlProg, "uFogStart");
   backend.dlFogEndLoc = dev->uniform_location(dlProg, "uFogEnd");

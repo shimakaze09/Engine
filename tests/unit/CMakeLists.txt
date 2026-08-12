@@ -194,6 +194,14 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_spawn_shape_transaction
+    SOURCES
+    spawn_shape_transaction_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_script_sweep_skip
     SOURCES
     script_sweep_skip_test.cpp
@@ -379,6 +387,18 @@ engine_add_test_executable(engine_unit_pass_resources
 engine_add_test_executable(engine_unit_command_history
     SOURCES
     command_history_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_command_transaction
+    SOURCES
+    editor_command_transaction_test.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src

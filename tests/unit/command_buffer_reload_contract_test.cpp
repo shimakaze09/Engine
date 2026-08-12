@@ -8,7 +8,11 @@
 // corrected reload restores it (unavailable → available). Covers a sky
 // family (skybox), a shadow family (cascades), a post family (SSAO),
 // and the program-id-gated FXAA pass. This closes the reload-regression
-// gap acknowledged in PR #52's closure table.
+// gap acknowledged in PR #52's closure table. Also pins the deferred
+// resolver's optional-uniform contract (issue #95): uniforms the lighting
+// shader declares but never reads (uTileCountY, uScreenSize) may be
+// optimized out by a conforming compiler and must not disable the
+// deferred path, while a genuinely required uniform still does.
 
 #include "command_buffer_capture.h"
 #include "command_buffer_context.h"
@@ -367,6 +371,36 @@ int check_reload_transitions() {
   return 0;
 }
 
+/// EXPECTATION (issue #95): a driver that strips the declared-but-unread
+/// uTileCountY/uScreenSize uniforms (-1 from glGetUniformLocation) leaves
+/// the deferred path available, while a missing genuinely required
+/// deferred uniform (uTileCountX) still disables it.
+int check_deferred_survives_optimized_out_uniforms() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  add_missing_uniform("uTileCountY", 0U);
+  add_missing_uniform("uScreenSize", 0U);
+  if (!initialize_backend()) {
+    return 340;
+  }
+  if (!backend_state().deferredAvailable) {
+    return 341;
+  }
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  add_missing_uniform("uTileCountX", 0U);
+  if (!initialize_backend()) {
+    return 342;
+  }
+  if (backend_state().deferredAvailable) {
+    return 343;
+  }
+  return 0;
+}
+
 } // namespace
 
 namespace engine::renderer {
@@ -426,6 +460,9 @@ int main() {
   }
   if (result == 0) {
     result = check_reload_transitions();
+  }
+  if (result == 0) {
+    result = check_deferred_survives_optimized_out_uniforms();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);

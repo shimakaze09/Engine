@@ -160,39 +160,64 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     return 1;
   }
 
+  runtime::World &world = *runtime_binding().world;
   runtime::Transform transform{};
   transform.position = pos;
-  const runtime::Entity entity =
-      runtime_binding().world->create_scene_object(transform);
+  const runtime::Entity entity = world.create_scene_object(transform);
   if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
 
+  // Every insertion below is checked so a partially constructed entity is
+  // rolled back instead of leaking to Lua as a success (issue #108).
+  const char *failedStep = nullptr;
+
   runtime::RigidBody rigidBody{};
   rigidBody.inverseMass = 1.0F;
-  static_cast<void>(runtime_binding().world->add_rigid_body(entity, rigidBody));
+  if (!world.add_rigid_body(entity, rigidBody)) {
+    failedStep = "rigid body";
+  }
 
   runtime::Collider collider{};
   collider.halfExtents = halfExtents;
   collider.shape = colliderShape;
   collider.hullSource = hullSource;
-  static_cast<void>(runtime_binding().world->add_collider(entity, collider));
-  if (hasHull && !runtime::set_convex_hull_data(*runtime_binding().world,
-                                                entity, hull)) {
-    core::log_message(core::LogLevel::Warning, "scripting",
-                      "spawn_shape hull slots exhausted — using box collider");
-    collider.shape = runtime::ColliderShape::AABB;
-    collider.hullSource = runtime::HullSource::None;
-    static_cast<void>(runtime_binding().world->add_collider(entity, collider));
+  if (failedStep == nullptr) {
+    if (!world.add_collider(entity, collider)) {
+      failedStep = "collider";
+    } else if (hasHull && !runtime::set_convex_hull_data(world, entity, hull)) {
+      // Documented fallback: hull slots exhausted degrades to the bounding
+      // box, but only if the replacement collider actually installs.
+      core::log_message(
+          core::LogLevel::Warning, "scripting",
+          "spawn_shape hull slots exhausted — using box collider");
+      collider.shape = runtime::ColliderShape::AABB;
+      collider.hullSource = runtime::HullSource::None;
+      if (!world.add_collider(entity, collider)) {
+        failedStep = "fallback collider";
+      }
+    }
   }
 
-  if (meshId != 0ULL) {
+  if ((failedStep == nullptr) && (meshId != 0ULL)) {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
     meshComp.albedo = albedo;
-    static_cast<void>(
-        runtime_binding().world->add_mesh_component(entity, meshComp));
+    if (!world.add_mesh_component(entity, meshComp)) {
+      failedStep = "mesh component";
+    }
+  }
+
+  if (failedStep != nullptr) {
+    char message[128] = {};
+    std::snprintf(message, sizeof(message),
+                  "spawn_shape %s insertion failed — spawn rolled back",
+                  failedStep);
+    core::log_message(core::LogLevel::Warning, "scripting", message);
+    static_cast<void>(world.destroy_entity(entity));
+    lua_pushnil(state);
+    return 1;
   }
 
   push_entity_handle(state, entity);

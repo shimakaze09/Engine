@@ -380,14 +380,14 @@ static bool apply_parent_id(runtime::Entity child,
   return world->add_transform(resolved, transform);
 }
 
-void ReparentCommand::execute() noexcept {
-  static_cast<void>(apply_parent_id(
-      resolve_command_target(child, childPersistentId), afterParentId));
+bool ReparentCommand::execute() noexcept {
+  return apply_parent_id(
+      resolve_command_target(child, childPersistentId), afterParentId);
 }
 
-void ReparentCommand::undo() noexcept {
-  static_cast<void>(apply_parent_id(
-      resolve_command_target(child, childPersistentId), beforeParentId));
+bool ReparentCommand::undo() noexcept {
+  return apply_parent_id(
+      resolve_command_target(child, childPersistentId), beforeParentId);
 }
 
 bool execute_reparent(runtime::Entity child,
@@ -457,14 +457,13 @@ bool execute_reparent(runtime::Entity child,
   command->childPersistentId = world->persistent_id(child);
   command->beforeParentId = before.parentId;
   command->afterParentId = afterId;
-  editor_session().commandHistory.execute(command);
-  return true;
+  return editor_session().commandHistory.execute(command);
 }
 
-void EntityCreateCommand::execute() noexcept {
+bool EntityCreateCommand::execute() noexcept {
   runtime::World *const world = editor_session().world;
   if (world == nullptr) {
-    return;
+    return false;
   }
   const runtime::Entity entity =
       (persistentId == runtime::kInvalidPersistentId)
@@ -474,33 +473,42 @@ void EntityCreateCommand::execute() noexcept {
   if (entity == runtime::kInvalidEntity) {
     core::log_message(core::LogLevel::Error, "editor",
                       "entity create command could not create the entity");
-    return;
+    return false;
   }
   persistentId = world->persistent_id(entity);
   if (name.name[0] == '\0') {
     make_default_entity_name(entity.index, &name);
   }
-  static_cast<void>(world->add_name_component(entity, name));
-  if (hasMesh) {
-    static_cast<void>(world->add_mesh_component(entity, mesh));
+  // Any failed insertion rolls the whole creation back so the history
+  // never records a partially constructed entity (issue #117).
+  bool ok = world->add_name_component(entity, name);
+  if (ok && hasMesh) {
+    ok = world->add_mesh_component(entity, mesh);
   }
-  if (hasCollider) {
-    static_cast<void>(world->add_collider(entity, colliderComponent));
+  if (ok && hasCollider) {
+    ok = world->add_collider(entity, colliderComponent);
   }
+  if (!ok) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "entity create command rolled back a partial entity");
+    static_cast<void>(world->destroy_entity(entity));
+    return false;
+  }
+  return true;
 }
 
-void EntityCreateCommand::undo() noexcept {
+bool EntityCreateCommand::undo() noexcept {
   runtime::World *const world = editor_session().world;
   if ((world == nullptr) ||
       (persistentId == runtime::kInvalidPersistentId)) {
-    return;
+    return false;
   }
   const runtime::Entity entity =
       world->find_entity_by_persistent_id(persistentId);
   if (entity == runtime::kInvalidEntity) {
-    return;
+    return false;
   }
-  static_cast<void>(world->destroy_entity(entity));
+  return world->destroy_entity(entity);
 }
 
 /// Collects the entity's transform subtree into members (root first,
@@ -541,27 +549,33 @@ static std::size_t collect_subtree_members(runtime::World &world,
   return count;
 }
 
-void EntityDeleteCommand::execute() noexcept {
+bool EntityDeleteCommand::execute() noexcept {
   runtime::World *const world = editor_session().world;
   if ((world == nullptr) || (recordCount == 0U)) {
-    return;
+    return false;
   }
   const runtime::Entity root =
       world->find_entity_by_persistent_id(records[0].persistentId);
   if (root == runtime::kInvalidEntity) {
-    return;
+    return false;
   }
-  static_cast<void>(world->destroy_entity(root));
+  return world->destroy_entity(root);
 }
 
-void EntityDeleteCommand::undo() noexcept {
+bool EntityDeleteCommand::undo() noexcept {
   runtime::World *const world = editor_session().world;
   if (world == nullptr) {
-    return;
+    return false;
   }
   constexpr std::size_t transformSlot =
       static_cast<std::size_t>(ComponentEditType::Transform);
-  for (std::size_t i = 0U; i < recordCount; ++i) {
+  // All-or-nothing restore: `restored` tracks how many members exist so a
+  // mid-subtree failure (entity or component capacity, stale ids) can
+  // destroy exactly what this undo created and report failure with the
+  // world back in its pre-undo state (issue #117).
+  std::size_t restored = 0U;
+  bool ok = true;
+  for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
     const EntityDeleteRecord &record = records[i];
     const runtime::Entity entity =
         record.present[transformSlot]
@@ -569,21 +583,39 @@ void EntityDeleteCommand::undo() noexcept {
                   record.persistentId, record.components.transform)
             : world->create_entity_with_persistent_id(record.persistentId);
     if (entity == runtime::kInvalidEntity) {
-      core::log_message(
-          core::LogLevel::Error, "editor",
-          "entity delete undo could not re-create a subtree member");
-      continue;
+      ok = false;
+      break;
     }
+    ++restored;
     for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
          ++typeIndex) {
       if (!record.present[typeIndex] || (typeIndex == transformSlot)) {
         continue;
       }
-      static_cast<void>(apply_component_snapshot(
-          static_cast<ComponentEditType>(typeIndex), entity, true,
-          record.components));
+      if (!apply_component_snapshot(
+              static_cast<ComponentEditType>(typeIndex), entity, true,
+              record.components)) {
+        ok = false;
+        break;
+      }
     }
   }
+  if (!ok) {
+    // Children before parents: destroy_entity takes whole transform
+    // subtrees, so reverse order never double-frees a member.
+    for (std::size_t i = restored; i > 0U; --i) {
+      const runtime::Entity member =
+          world->find_entity_by_persistent_id(records[i - 1U].persistentId);
+      if (member != runtime::kInvalidEntity) {
+        static_cast<void>(world->destroy_entity(member));
+      }
+    }
+    core::log_message(
+        core::LogLevel::Error, "editor",
+        "entity delete undo could not restore the subtree — rolled back");
+    return false;
+  }
+  return true;
 }
 
 runtime::Entity execute_entity_create() noexcept {
@@ -601,7 +633,9 @@ runtime::Entity execute_entity_create() noexcept {
     }
     return entity;
   }
-  editor_session().commandHistory.execute(command);
+  if (!editor_session().commandHistory.execute(command)) {
+    return runtime::kInvalidEntity;
+  }
   return world->find_entity_by_persistent_id(command->persistentId);
 }
 
@@ -657,7 +691,9 @@ runtime::Entity execute_asset_spawn(
   make_asset_spawn_name(virtualPath, &command->name);
   command->hasMesh = true;
   command->mesh.meshAssetId = assetId;
-  editor_session().commandHistory.execute(command);
+  if (!editor_session().commandHistory.execute(command)) {
+    return runtime::kInvalidEntity;
+  }
   return world->find_entity_by_persistent_id(command->persistentId);
 }
 
@@ -757,7 +793,9 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
     command->colliderComponent.hullSource = desc.hullSource;
     command->colliderComponent.halfExtents = hull.localHalfExtents;
   }
-  editor_session().commandHistory.execute(command);
+  if (!editor_session().commandHistory.execute(command)) {
+    return runtime::kInvalidEntity;
+  }
   return world->find_entity_by_persistent_id(command->persistentId);
 }
 
@@ -810,8 +848,7 @@ bool execute_entity_delete(runtime::Entity entity) noexcept {
     return (editor_session().world != nullptr) &&
            editor_session().world->destroy_entity(entity);
   }
-  editor_session().commandHistory.execute(command);
-  return true;
+  return editor_session().commandHistory.execute(command);
 }
 
 ComponentEditSnapshot default_component_snapshot(

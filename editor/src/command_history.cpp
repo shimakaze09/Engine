@@ -8,13 +8,17 @@
 
 namespace engine::editor {
 
-void CommandHistory::execute(EditorCommand *cmd) noexcept {
+bool CommandHistory::execute(EditorCommand *cmd) noexcept {
   if (cmd == nullptr) {
-    return;
+    return false;
   }
 
+  // A failed execute must leave history untouched — dropping the redo
+  // stack for an edit that never happened would corrupt the cursor.
   std::unique_ptr<EditorCommand> ownedCommand(cmd);
-  ownedCommand->execute();
+  if (!ownedCommand->execute()) {
+    return false;
+  }
 
   for (int i = m_top + 1; i < m_count; ++i) {
     m_history[static_cast<std::size_t>(i)].reset();
@@ -32,26 +36,32 @@ void CommandHistory::execute(EditorCommand *cmd) noexcept {
     m_history[kMaxHistory - 1U] = std::move(ownedCommand);
     m_top = static_cast<int>(kMaxHistory) - 1;
   }
+  return true;
 }
 
-void CommandHistory::undo() noexcept {
+bool CommandHistory::undo() noexcept {
   if (m_top < 0) {
-    return;
+    return false;
   }
-  if (m_history[static_cast<std::size_t>(m_top)] != nullptr) {
-    m_history[static_cast<std::size_t>(m_top)]->undo();
+  EditorCommand *const cmd = m_history[static_cast<std::size_t>(m_top)].get();
+  if ((cmd == nullptr) || !cmd->undo()) {
+    return false;
   }
   --m_top;
+  return true;
 }
 
-void CommandHistory::redo() noexcept {
+bool CommandHistory::redo() noexcept {
   if (m_top + 1 >= m_count) {
-    return;
+    return false;
+  }
+  EditorCommand *const cmd =
+      m_history[static_cast<std::size_t>(m_top + 1)].get();
+  if ((cmd == nullptr) || !cmd->redo()) {
+    return false;
   }
   ++m_top;
-  if (m_history[static_cast<std::size_t>(m_top)] != nullptr) {
-    m_history[static_cast<std::size_t>(m_top)]->redo();
-  }
+  return true;
 }
 
 bool CommandHistory::can_undo() const noexcept {
