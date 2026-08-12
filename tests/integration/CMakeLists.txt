@@ -84,6 +84,15 @@ engine_add_test_executable(engine_integration_scene_flow
     integration
 )
 
+engine_add_test_executable(engine_integration_island_template
+    SOURCES
+    island_template_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_lua_lifecycle
     SOURCES
     lua_lifecycle_test.cpp

@@ -361,7 +361,43 @@ bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
   return engine::scripting::call_script_function("verify_entity_reload");
 }
 
-/// Loads every demo module and verifies its core behavior with Lua stubs.
+/// Loads every Lua module shipped with the demo and the Island Hopper
+/// template through the production module cache; a syntax error or a
+/// module that fails to return a table in any shipped file fails here.
+bool verify_shipped_module_manifest() noexcept {
+  engine::scripting::clear_entity_script_modules();
+  const char *script = R"lua(
+local SHIPPED_MODULES = {
+    'assets/lib/utils.lua',
+    'assets/main.lua',
+    'assets/scripts/player.lua',
+    'assets/scripts/island_hopper.lua',
+    'assets/scripts/island_player.lua',
+    'assets/scripts/moving_platform.lua',
+    'assets/scripts/falling_rock.lua',
+}
+
+function verify_shipped_manifest()
+    for i = 1, #SHIPPED_MODULES do
+        local path = SHIPPED_MODULES[i]
+        local mod = engine.require(path)
+        if type(mod) ~= 'table' then
+            error('shipped module failed to load: ' .. path)
+        end
+    end
+end
+)lua";
+
+  if (!write_script_file(script) ||
+      !engine::scripting::load_script(kTempScriptPath)) {
+    return false;
+  }
+  return engine::scripting::call_script_function("verify_shipped_manifest");
+}
+
+/// Loads the utils/player/main demo modules and verifies their behavior
+/// with Lua stubs; the island template scripts are covered by the island
+/// lifecycle tests and the shipped-module manifest sweep.
 bool verify_demo_script_modules() noexcept {
   engine::scripting::clear_entity_script_modules();
   const char *script = R"lua(
@@ -513,6 +549,642 @@ end
     return false;
   }
   return engine::scripting::call_script_function("verify_demo_scripts");
+}
+
+/// Advances an entity-script module's file timestamp so the next update
+/// dispatch hot-reloads it through the production module cache.
+bool touch_module_for_reload(const char *path) noexcept {
+  std::error_code error{};
+  const std::filesystem::file_time_type mtime =
+      std::filesystem::last_write_time(path, error);
+  if (error) {
+    return false;
+  }
+  std::filesystem::last_write_time(path, mtime + std::chrono::seconds(2),
+                                   error);
+  return !error;
+}
+
+/// Destroys every remaining entity through the production deferred-destroy
+/// flow and clears the entity module cache so island tests start isolated.
+bool reset_world_for_island_tests(engine::runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  // Leftover scripted entities would reload kTempScriptPath as a module at
+  // EndPlay; give them a valid trivial module to unload against.
+  if (!write_script_file("local M = {}\nreturn M\n")) {
+    return false;
+  }
+  world->begin_update_phase();
+  world->for_each_alive([world](engine::runtime::Entity entity) noexcept {
+    static_cast<void>(world->destroy_entity(entity));
+  });
+  world->begin_transform_phase();
+  world->begin_render_prep_phase();
+  world->begin_render_phase();
+  world->end_frame_phase();
+  world->begin_end_play_phase();
+  engine::scripting::dispatch_entity_scripts_end_play(world);
+  world->end_end_play_phase();
+  engine::scripting::clear_entity_script_modules();
+  return world->alive_entity_count() == 0U;
+}
+
+/// Fires begin-play dispatch for entities created by an island test driver.
+void dispatch_begin_play_phase(engine::runtime::World *world) noexcept {
+  world->begin_begin_play_phase();
+  engine::scripting::dispatch_entity_scripts_begin_play(world);
+  world->end_begin_play_phase();
+}
+
+/// Verifies two moving platforms driven by the shipped script through the
+/// production dispatch path keep independent authored bases, survive a hot
+/// reload with per-instance state, and release state on destroy (#101).
+bool verify_island_platform_isolation(engine::runtime::World *world) noexcept {
+  if (!reset_world_for_island_tests(world)) {
+    return false;
+  }
+
+  const char *driver = R"lua(
+island_positions = {}
+island_velocity = {}
+engine.get_position = function(e)
+    local p = island_positions[e]
+    if p == nil then return nil end
+    return p.x, p.y, p.z
+end
+engine.set_velocity = function(e, x, y, z)
+    island_velocity[e] = { x = x, y = y, z = z }
+    return true
+end
+engine.wake_body = function(_) return true end
+
+function island_setup_two_platforms()
+    island_plat1 = engine.spawn_entity()
+    island_plat2 = engine.spawn_entity()
+    if island_plat1 == nil or island_plat2 == nil then
+        error('spawn failed')
+    end
+    island_positions[island_plat1] = { x = 1.0, y = 2.0, z = 3.0 }
+    island_positions[island_plat2] = { x = 11.0, y = 5.0, z = -4.0 }
+    if not engine.add_script_component(island_plat1,
+            'assets/scripts/moving_platform.lua') then
+        error('plat1 script failed')
+    end
+    if not engine.add_script_component(island_plat2,
+            'assets/scripts/moving_platform.lua') then
+        error('plat2 script failed')
+    end
+end
+
+-- Each platform's y/z correctives are exactly zero when it tracks its own
+-- base (base minus unchanged position); shared-base aliasing clamps them
+-- to the 3.5 corrective limit. The x corrective from a stationary stub
+-- position grows with sweep phase but stays under 0.4 for the few ticks
+-- this test runs, far below the aliased 3.5 clamp.
+local function island_check_platform(e, label)
+    local v = island_velocity[e]
+    if v == nil then error(label .. ': no velocity write') end
+    if v.y ~= 0.0 then error(label .. ': y corrective ' .. v.y) end
+    if v.z ~= 0.0 then error(label .. ': z corrective ' .. v.z) end
+    if math.abs(v.x) > 0.5 then error(label .. ': x corrective ' .. v.x) end
+end
+
+function island_verify_platform_isolation()
+    island_check_platform(island_plat1, 'platform1')
+    island_check_platform(island_plat2, 'platform2')
+end
+
+function island_clear_platform_captures()
+    island_velocity = {}
+end
+
+function island_destroy_plat1()
+    if not engine.destroy_entity(island_plat1) then
+        error('destroy failed')
+    end
+end
+
+function island_verify_platform_state_cleanup()
+    local mod = engine.require('assets/scripts/moving_platform.lua')
+    if mod == nil then error('module load failed') end
+    if mod.on_save_state(island_plat1) ~= nil then
+        error('destroyed platform state not released')
+    end
+    if mod.on_save_state(island_plat2) == nil then
+        error('live platform state missing')
+    end
+end
+)lua";
+
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("island_setup_two_platforms")) {
+    return false;
+  }
+
+  dispatch_begin_play_phase(world);
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_platform_isolation")) {
+    return false;
+  }
+
+  // Hot reload through the production module cache must preserve each
+  // platform's own base and phase.
+  if (!engine::scripting::call_script_function(
+          "island_clear_platform_captures") ||
+      !touch_module_for_reload("assets/scripts/moving_platform.lua")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_platform_isolation")) {
+    return false;
+  }
+
+  return engine::scripting::call_script_function("island_destroy_plat1") &&
+         engine::scripting::call_script_function(
+             "island_verify_platform_state_cleanup");
+}
+
+/// Verifies two falling rocks driven by the shipped script through the
+/// production dispatch path trigger, re-arm, and hot-reload independently,
+/// and that the alarm sound survives a reload (#101).
+bool verify_island_rock_isolation(engine::runtime::World *world) noexcept {
+  if (!reset_world_for_island_tests(world)) {
+    return false;
+  }
+
+  const char *driver = R"lua(
+island_positions = {}
+island_accel = {}
+island_setpos = {}
+island_alarms = {}
+engine.get_position = function(e)
+    local p = island_positions[e]
+    if p == nil then return nil end
+    return p.x, p.y, p.z
+end
+engine.set_acceleration = function(e, x, y, z)
+    island_accel[#island_accel + 1] = { e = e, x = x, y = y, z = z }
+    return true
+end
+engine.set_velocity = function(...) return true end
+engine.set_position = function(e, x, y, z)
+    island_setpos[#island_setpos + 1] = { e = e, x = x, y = y, z = z }
+    island_positions[e] = { x = x, y = y, z = z }
+    return true
+end
+engine.load_sound = function(_path) return 7 end
+engine.play_sound_at = function(sound, ...)
+    island_alarms[#island_alarms + 1] = sound
+    return true
+end
+engine.find_entity_by_name = function(name)
+    if name == 'Player' then return island_rock_player end
+    return nil
+end
+
+function island_setup_two_rocks()
+    island_rock_player = engine.spawn_entity()
+    island_rock1 = engine.spawn_entity()
+    island_rock2 = engine.spawn_entity()
+    if island_rock_player == nil or island_rock1 == nil
+        or island_rock2 == nil then
+        error('spawn failed')
+    end
+    island_positions[island_rock_player] = { x = 0.0, y = 3.0, z = 0.0 }
+    island_positions[island_rock1] = { x = 0.0, y = 6.0, z = 0.0 }
+    island_positions[island_rock2] = { x = 20.0, y = 6.0, z = 0.0 }
+    if not engine.add_script_component(island_rock1,
+            'assets/scripts/falling_rock.lua') then
+        error('rock1 script failed')
+    end
+    if not engine.add_script_component(island_rock2,
+            'assets/scripts/falling_rock.lua') then
+        error('rock2 script failed')
+    end
+end
+
+function island_verify_rock1_dropped()
+    if #island_accel ~= 1 then
+        error('accel calls: ' .. #island_accel)
+    end
+    if island_accel[1].e ~= island_rock1 then
+        error('wrong rock dropped')
+    end
+    if island_accel[1].y ~= -9.8 then
+        error('drop acceleration: ' .. island_accel[1].y)
+    end
+    if #island_alarms ~= 1 or island_alarms[1] ~= 7 then
+        error('alarm did not play')
+    end
+end
+
+function island_sink_rock1_player_far()
+    island_positions[island_rock1] = { x = 0.0, y = -9.0, z = 0.0 }
+    island_positions[island_rock_player] = { x = 100.0, y = 3.0, z = 100.0 }
+end
+
+function island_verify_rock1_rearmed_on_own_perch()
+    if #island_setpos ~= 1 then
+        error('set_position calls: ' .. #island_setpos)
+    end
+    local call = island_setpos[1]
+    if call.e ~= island_rock1 then error('wrong rock re-armed') end
+    if call.x ~= 0.0 or call.y ~= 6.0 or call.z ~= 0.0 then
+        error(('re-armed on foreign perch (%g, %g, %g)')
+            :format(call.x, call.y, call.z))
+    end
+end
+
+function island_move_player_under_rock2()
+    island_positions[island_rock_player] = { x = 20.0, y = 3.0, z = 0.0 }
+end
+
+function island_verify_rock2_dropped_rock1_armed()
+    if #island_accel ~= 3 then
+        error('accel calls: ' .. #island_accel)
+    end
+    local last = island_accel[3]
+    if last.e ~= island_rock2 or last.y ~= -9.8 then
+        error('rock2 did not drop')
+    end
+end
+
+function island_move_player_under_rock1()
+    island_positions[island_rock_player] = { x = 0.0, y = 3.0, z = 0.0 }
+end
+
+function island_verify_alarm_survives_reload()
+    if #island_alarms ~= 3 then
+        error('alarm handle lost after reload: ' .. #island_alarms)
+    end
+    if island_alarms[3] ~= 7 then
+        error('alarm played with invalid handle')
+    end
+    local final = island_accel[#island_accel]
+    if final == nil or final.e ~= island_rock1 or final.y ~= -9.8 then
+        error('rock1 did not re-trigger after reload')
+    end
+end
+)lua";
+
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("island_setup_two_rocks")) {
+    return false;
+  }
+
+  dispatch_begin_play_phase(world);
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_verify_rock1_dropped")) {
+    return false;
+  }
+
+  if (!engine::scripting::call_script_function(
+          "island_sink_rock1_player_far")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_rock1_rearmed_on_own_perch")) {
+    return false;
+  }
+
+  if (!engine::scripting::call_script_function(
+          "island_move_player_under_rock2")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_rock2_dropped_rock1_armed")) {
+    return false;
+  }
+
+  // Hot reload, then re-trigger rock1: its state and the alarm handle must
+  // both survive the reload.
+  if (!touch_module_for_reload("assets/scripts/falling_rock.lua")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_move_player_under_rock1")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  return engine::scripting::call_script_function(
+      "island_verify_alarm_survives_reload");
+}
+
+/// Verifies the shipped island player carries moving ground at the ground's
+/// true speed when the fixed-step count changes between frames, and that two
+/// players keep independent carry samples (#107, #101).
+bool verify_island_player_carry(engine::runtime::World *world) noexcept {
+  if (!reset_world_for_island_tests(world)) {
+    return false;
+  }
+
+  const char *driver = R"lua(
+island_positions = {}
+island_velocity = {}
+island_ground1 = 3001
+island_ground2 = 3002
+engine.get_position = function(e)
+    local p = island_positions[e]
+    if p == nil then return nil end
+    return p.x, p.y, p.z
+end
+engine.set_velocity = function(e, x, y, z)
+    island_velocity[e] = { x = x, y = y, z = z }
+    return true
+end
+engine.get_velocity = function(_e) return 0.0, 0.0, 0.0 end
+engine.wake_body = function(_) return true end
+engine.is_key_down = function(_) return false end
+engine.is_key_pressed = function(_) return false end
+engine.set_anim_param = function(...) return true end
+engine.push_camera = function(...) return true end
+engine.set_restitution = function(...) return true end
+engine.set_friction = function(...) return true end
+engine.set_lock_rotation = function(...) return true end
+engine.load_sound = function(_) return 7 end
+engine.play_sound_at = function(...) return true end
+engine.on_anim_event_handler = function(_) return 1 end
+engine.remove_anim_event_handler = function(_) return true end
+-- Each player stands on its own ground entity, selected by query origin.
+engine.raycast_all = function(x, ...)
+    if x < 25.0 then
+        return { { entity = island_ground1, ny = 1.0 } }
+    end
+    return { { entity = island_ground2, ny = 1.0 } }
+end
+
+function island_setup_two_riders()
+    island_p1 = engine.spawn_entity()
+    island_p2 = engine.spawn_entity()
+    if island_p1 == nil or island_p2 == nil then error('spawn failed') end
+    island_positions[island_p1] = { x = 0.0, y = 0.5, z = 0.0 }
+    island_positions[island_p2] = { x = 50.0, y = 0.5, z = 0.0 }
+    island_positions[island_ground1] = { x = 10.0, y = 0.0, z = 0.0 }
+    island_positions[island_ground2] = { x = 60.0, y = 0.0, z = 0.0 }
+    if not engine.add_script_component(island_p1,
+            'assets/scripts/island_player.lua') then
+        error('p1 script failed')
+    end
+    if not engine.add_script_component(island_p2,
+            'assets/scripts/island_player.lua') then
+        error('p2 script failed')
+    end
+end
+
+-- Moves each ground by its own speed over the simulated time the previous
+-- dispatch reported, mirroring what the fixed steps would have produced.
+local function island_advance_grounds(sim_dt)
+    local g1 = island_positions[island_ground1]
+    local g2 = island_positions[island_ground2]
+    g1.x = g1.x + 1.5 * sim_dt
+    g2.x = g2.x + 0.5 * sim_dt
+end
+
+function island_advance_grounds_two_steps()
+    island_advance_grounds(2.0 / 60.0)
+end
+
+function island_advance_grounds_one_step()
+    island_advance_grounds(1.0 / 60.0)
+end
+
+-- 1e-4 separates the correct carry (1.5 / 0.5, reproduced to ~1e-7 across
+-- the float dt round-trip) from the wrong-frame results (3.0 / 0.75).
+local function check_carry(e, expected, label)
+    local v = island_velocity[e]
+    if v == nil then error(label .. ': no velocity write') end
+    if math.abs(v.x - expected) > 1e-4 then
+        error(label .. ': carried vx ' .. v.x .. ' expected ' .. expected)
+    end
+end
+
+function island_verify_first_tick_no_carry()
+    check_carry(island_p1, 0.0, 'rider1 first tick')
+    check_carry(island_p2, 0.0, 'rider2 first tick')
+end
+
+function island_verify_carry_speeds()
+    check_carry(island_p1, 1.5, 'rider1')
+    check_carry(island_p2, 0.5, 'rider2')
+end
+)lua";
+
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("island_setup_two_riders")) {
+    return false;
+  }
+
+  dispatch_begin_play_phase(world);
+
+  // Frame 1 simulates two fixed steps (dt 2/60), frame 2 one step (dt
+  // 1/60), frame 3 two steps again — the inherited speed must stay the
+  // ground's own speed through both catch-up transitions.
+  engine::scripting::dispatch_entity_scripts_update(2.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_first_tick_no_carry")) {
+    return false;
+  }
+
+  if (!engine::scripting::call_script_function(
+          "island_advance_grounds_two_steps")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_verify_carry_speeds")) {
+    return false;
+  }
+
+  if (!engine::scripting::call_script_function(
+          "island_advance_grounds_one_step")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(2.0F / 60.0F);
+  return engine::scripting::call_script_function("island_verify_carry_speeds");
+}
+
+/// Verifies the shipped Island Hopper controller keeps its effect sounds,
+/// progress, and single music stream across a production hot reload (#94).
+bool verify_island_hopper_reload_audio(engine::runtime::World *world) noexcept {
+  if (!reset_world_for_island_tests(world)) {
+    return false;
+  }
+
+  const char *driver = R"lua(
+island_positions = {}
+island_names = {}
+island_sfx = {}
+island_music_count = 0
+island_saved = nil
+local SOUND_IDS = {
+    ['assets/sounds/pickup.wav'] = 11,
+    ['assets/sounds/win.wav'] = 12,
+    ['assets/sounds/splash.wav'] = 13,
+}
+engine.load_sound = function(path) return SOUND_IDS[path] or 9 end
+engine.play_sound_at = function(sound, ...)
+    island_sfx[#island_sfx + 1] = sound
+    return true
+end
+engine.play_music = function(...)
+    island_music_count = island_music_count + 1
+    return true
+end
+engine.set_bus_volume = function(...) return true end
+engine.load_asset_async = function(...) return true end
+engine.log = function(_message) end
+engine.save_data = function(t)
+    island_saved = t
+    return true
+end
+engine.load_data = function() return nil end
+engine.set_rotation = function(...) return true end
+engine.get_position = function(e)
+    local p = island_positions[e]
+    if p == nil then return nil end
+    return p.x, p.y, p.z
+end
+engine.find_entity_by_name = function(name) return island_names[name] end
+engine.destroy_entity = function(e)
+    for name, handle in pairs(island_names) do
+        if handle == e then island_names[name] = nil end
+    end
+    return true
+end
+
+function island_setup_hopper()
+    island_ctrl = engine.spawn_entity()
+    if island_ctrl == nil then error('spawn failed') end
+    island_names['Player'] = 1001
+    island_positions[1001] = { x = 0.0, y = 0.5, z = 0.0 }
+    island_names['Coin1'] = 1002
+    island_positions[1002] = { x = 0.0, y = 0.5, z = 0.0 }
+    island_names['Coin2'] = 1003
+    island_positions[1003] = { x = 30.0, y = 0.5, z = 0.0 }
+    if not engine.add_script_component(island_ctrl,
+            'assets/scripts/island_hopper.lua') then
+        error('controller script failed')
+    end
+end
+
+function island_verify_first_pickup()
+    if island_music_count ~= 1 then error('music not started once') end
+    if #island_sfx ~= 1 or island_sfx[1] ~= 11 then
+        error('pre-reload pickup sound missing')
+    end
+end
+
+function island_move_coin2_to_player()
+    island_positions[1003] = { x = 0.0, y = 0.5, z = 0.0 }
+end
+
+function island_verify_pickup_after_reload()
+    if #island_sfx ~= 2 or island_sfx[2] ~= 11 then
+        error('pickup sound lost after reload: ' .. #island_sfx)
+    end
+    if island_music_count ~= 1 then error('music duplicated by reload') end
+    local mod = engine.require('assets/scripts/island_hopper.lua')
+    if mod == nil then error('module load failed') end
+    local state = mod.on_save_state(island_ctrl)
+    if type(state) ~= 'table' or state.coins ~= 2 then
+        error('progress lost across reload')
+    end
+    if not (state.time and state.time > 0.0) then
+        error('run timer lost across reload')
+    end
+end
+
+function island_sink_player()
+    island_positions[1001] = { x = 0.0, y = -2.0, z = 0.0 }
+end
+
+function island_raise_player()
+    island_positions[1001] = { x = 0.0, y = 1.0, z = 0.0 }
+end
+
+function island_verify_splash_after_reload()
+    if #island_sfx ~= 3 or island_sfx[3] ~= 13 then
+        error('splash sound lost after reload: ' .. #island_sfx)
+    end
+end
+
+function island_place_remaining_coins_and_goal()
+    island_positions[1001] = { x = 0.0, y = 0.5, z = 0.0 }
+    for i = 3, 8 do
+        local handle = 1000 + i + 10
+        island_names['Coin' .. i] = handle
+        island_positions[handle] = { x = 0.0, y = 0.5, z = 0.0 }
+    end
+    island_names['Goal'] = 1050
+    island_positions[1050] = { x = 0.0, y = 0.5, z = 0.0 }
+end
+
+function island_verify_win_after_reload()
+    if #island_sfx ~= 10 or island_sfx[10] ~= 12 then
+        error('win sound lost after reload: ' .. #island_sfx)
+    end
+    if type(island_saved) ~= 'table'
+        or not (island_saved.best_time and island_saved.best_time > 0.0) then
+        error('best time not saved')
+    end
+end
+)lua";
+
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("island_setup_hopper")) {
+    return false;
+  }
+
+  dispatch_begin_play_phase(world);
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_verify_first_pickup")) {
+    return false;
+  }
+
+  // Hot reload the shipped controller through the production module cache,
+  // then collect the second coin: the pickup handle must still be live.
+  if (!touch_module_for_reload("assets/scripts/island_hopper.lua")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_move_coin2_to_player")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_pickup_after_reload")) {
+    return false;
+  }
+
+  // Splash out, resurface, then finish the run: splash and win jingles
+  // must also survive the reload, and the best time must be saved.
+  if (!engine::scripting::call_script_function("island_sink_player")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_splash_after_reload") ||
+      !engine::scripting::call_script_function("island_raise_player")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_place_remaining_coins_and_goal")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  return engine::scripting::call_script_function(
+      "island_verify_win_after_reload");
 }
 
 /// Verifies Lua scene-object creation exposes an identity TRS immediately and
@@ -780,7 +1452,66 @@ int main() {
     }
   }
 
-  // --- Test 6: shipped demo Lua modules load and behave correctly ---
+  // --- Test 6: every shipped Lua module loads through the module cache ---
+  // (Runs while the engine table still holds the real bindings, before any
+  // test replaces them with Lua stubs.)
+  {
+    std::printf("  %-40s ", "shipped module manifest");
+    if (verify_shipped_module_manifest()) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 7: two moving platforms stay independent per entity ---
+  // (Runs before the demo-module test, which replaces real bindings such
+  // as add_script_component with Lua stubs for the rest of the VM.)
+  {
+    std::printf("  %-40s ", "island platforms independent");
+    if (verify_island_platform_isolation(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 8: two falling rocks trigger/re-arm/reload independently ---
+  {
+    std::printf("  %-40s ", "island rocks independent");
+    if (verify_island_rock_isolation(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 9: rider carry uses the sampled frame's simulated dt ---
+  {
+    std::printf("  %-40s ", "island player carry across catch-up");
+    if (verify_island_player_carry(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 10: hopper controller audio/progress survive hot reload ---
+  {
+    std::printf("  %-40s ", "island hopper reload keeps audio");
+    if (verify_island_hopper_reload_audio(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 11: shipped demo Lua modules load and behave correctly ---
   {
     std::printf("  %-40s ", "demo Lua modules");
     if (verify_demo_script_modules()) {
@@ -791,7 +1522,7 @@ int main() {
     }
   }
 
-  // --- Test 7: circular self-require during hot reload is rejected ---
+  // --- Test 12: circular self-require during hot reload is rejected ---
   {
     std::printf("  %-40s ", "circular reload guard");
     if (verify_circular_reload_guard()) {

@@ -3,7 +3,10 @@
 -- Island Hopper template controller. Preloads the bundled prop meshes the
 -- scene references, runs the collect-a-thon loop (spinning coin pickups,
 -- the bonus gem, the goal check), plays the pickup/win/splash sounds, and
--- saves the best completion time through engine.save_data.
+-- saves the best completion time through engine.save_data. This is a
+-- scene-singleton controller (one entity, addressed by name), so its state
+-- stays module-local; sound handles are re-acquired on hot reload because
+-- a reloaded chunk starts with nil handles.
 local M = {}
 
 local COIN_COUNT = 8
@@ -31,19 +34,32 @@ local g_pickup_sound = nil
 local g_win_sound = nil
 local g_splash_sound = nil
 
--- Preserves progress across a script hot reload.
-function M.on_save_state(_self)
-    return { time = g_time, coins = g_coins, gem = g_gem_taken, won = g_won }
+-- Loads the effect sounds; safe to call again after a hot reload (handles
+-- are never serialized, so the replacement chunk must re-acquire them).
+local function acquire_sounds()
+    g_pickup_sound = engine.load_sound("assets/sounds/pickup.wav")
+    g_win_sound = engine.load_sound("assets/sounds/win.wav")
+    g_splash_sound = engine.load_sound("assets/sounds/splash.wav")
 end
 
--- Restores progress after a script hot reload.
+-- Preserves progress and transient effect state across a script hot reload.
+function M.on_save_state(_self)
+    return { time = g_time, coins = g_coins, gem = g_gem_taken, won = g_won,
+             spin = g_spin, splashed = g_splashed }
+end
+
+-- Restores progress after a script hot reload and re-acquires the sound
+-- handles; the ambient music keeps playing, so it is not restarted here.
 function M.on_reload(_self, state)
     if type(state) == "table" then
         g_time = state.time or 0.0
         g_coins = state.coins or 0
         g_gem_taken = state.gem == true
         g_won = state.won == true
+        g_spin = state.spin or 0.0
+        g_splashed = state.splashed == true
     end
+    acquire_sounds()
 end
 
 -- Requests the bundled meshes, loads the effect sounds, and starts the
@@ -53,9 +69,7 @@ function M.on_begin_play(_self)
         engine.load_asset_async(PRELOAD_MESHES[i], 2)
     end
 
-    g_pickup_sound = engine.load_sound("assets/sounds/pickup.wav")
-    g_win_sound = engine.load_sound("assets/sounds/win.wav")
-    g_splash_sound = engine.load_sound("assets/sounds/splash.wav")
+    acquire_sounds()
 
     engine.set_bus_volume("music", 0.30)
     engine.play_music("assets/sounds/waves.wav", 1.0, true)
