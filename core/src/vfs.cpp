@@ -172,6 +172,22 @@ std::size_t resolve(const char *virtualPath, char *outBuffer,
   return totalLen;
 }
 
+// Canonicalizes a caller-supplied mount prefix into `out` so equality
+// comparisons see the same form the mount table stores.
+bool canonicalize_prefix(const char *virtualPrefix,
+                         char (&out)[kMaxPrefixLength]) noexcept {
+  if (virtualPrefix == nullptr) {
+    return false;
+  }
+  const std::size_t rawLen = std::strlen(virtualPrefix);
+  if ((rawLen == 0U) || (rawLen >= kMaxPrefixLength)) {
+    return false;
+  }
+  std::memcpy(out, virtualPrefix, rawLen + 1U);
+  normalize_path(out, rawLen);
+  return out[0] != '\0';
+}
+
 } // namespace
 
 /// Initializes the owning system for vfs.
@@ -199,21 +215,23 @@ void shutdown_vfs() noexcept {
 }
 
 bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
-  if ((virtualPrefix == nullptr) || (osDirectoryPath == nullptr)) {
+  if (osDirectoryPath == nullptr) {
     return false;
   }
-  const std::size_t prefixLen = std::strlen(virtualPrefix);
   const std::size_t osLen = std::strlen(osDirectoryPath);
-  if ((prefixLen == 0U) || (prefixLen >= kMaxPrefixLength) || (osLen == 0U) ||
-      (osLen >= kMaxOsPathLength)) {
+  if ((osLen == 0U) || (osLen >= kMaxOsPathLength)) {
     return false;
   }
+  char normalizedPrefix[kMaxPrefixLength] = {};
+  if (!canonicalize_prefix(virtualPrefix, normalizedPrefix)) {
+    return false;
+  }
+  const std::size_t prefixLen = std::strlen(normalizedPrefix);
 
   for (auto &entry : g_mounts) {
-    if (entry.active && (std::strcmp(entry.prefix, virtualPrefix) == 0)) {
+    if (entry.active && (std::strcmp(entry.prefix, normalizedPrefix) == 0)) {
       std::memcpy(entry.osPath, osDirectoryPath, osLen + 1U);
       normalize_path(entry.osPath, osLen);
-      normalize_path(entry.prefix, prefixLen);
       log_message(LogLevel::Info, "vfs", "remounted prefix");
       return true;
     }
@@ -221,9 +239,8 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
 
   for (auto &entry : g_mounts) {
     if (!entry.active) {
-      std::memcpy(entry.prefix, virtualPrefix, prefixLen + 1U);
-      normalize_path(entry.prefix, prefixLen);
-      entry.prefixLength = std::strlen(entry.prefix);
+      std::memcpy(entry.prefix, normalizedPrefix, prefixLen + 1U);
+      entry.prefixLength = prefixLen;
       std::memcpy(entry.osPath, osDirectoryPath, osLen + 1U);
       normalize_path(entry.osPath, osLen);
       entry.active = true;
@@ -237,11 +254,12 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept {
 }
 
 bool unmount(const char *virtualPrefix) noexcept {
-  if (virtualPrefix == nullptr) {
+  char normalizedPrefix[kMaxPrefixLength] = {};
+  if (!canonicalize_prefix(virtualPrefix, normalizedPrefix)) {
     return false;
   }
   for (auto &entry : g_mounts) {
-    if (entry.active && (std::strcmp(entry.prefix, virtualPrefix) == 0)) {
+    if (entry.active && (std::strcmp(entry.prefix, normalizedPrefix) == 0)) {
       entry = MountEntry{};
       return true;
     }
