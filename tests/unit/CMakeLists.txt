@@ -194,6 +194,14 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_spawn_shape_transaction
+    SOURCES
+    spawn_shape_transaction_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_script_sweep_skip
     SOURCES
     script_sweep_skip_test.cpp
