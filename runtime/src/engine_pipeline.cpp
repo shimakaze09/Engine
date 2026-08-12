@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -492,6 +493,8 @@ struct EnginePipeline::Impl final {
   bool stage_simulation_graph() noexcept;
   void stage_camera() noexcept;
   bool stage_render_prep_graph() noexcept;
+  // True once when dbg_fail_frame_stage names this stage (test seam, #120).
+  bool consume_injected_stage_failure(const char *stageName) noexcept;
   void stage_post_frame() noexcept;
   void stage_measure_frame() noexcept;
   void stage_render() noexcept;
@@ -905,12 +908,35 @@ void EnginePipeline::Impl::stage_animation() noexcept {
 }
 
 // ---------------------------------------------------------------------------
+// Fault-injection seam (issue #120): dbg_fail_frame_stage forces the named
+// graph stage to report a fatal failure through its production return path.
+// The cvar self-clears so the injected failure fires exactly once per set.
+// ---------------------------------------------------------------------------
+
+bool EnginePipeline::Impl::consume_injected_stage_failure(
+    const char *stageName) noexcept {
+  const char *requested = core::cvar_get_string("dbg_fail_frame_stage", "");
+  if ((requested == nullptr) || (requested[0] == '\0') ||
+      (std::strcmp(requested, stageName) != 0)) {
+    return false;
+  }
+  static_cast<void>(core::cvar_set_string("dbg_fail_frame_stage", ""));
+  core::log_message(core::LogLevel::Error, "engine",
+                    "injected frame-stage failure (dbg_fail_frame_stage)");
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Stage: simulation graph (fixed-step job submission + execution; ends the
 // graph after the last commit so the camera stage can run before render prep)
 // Returns false on fatal error; sets running = false internally.
 // ---------------------------------------------------------------------------
 
 bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
+  if (consume_injected_stage_failure("simulation_graph")) {
+    running = false;
+    return false;
+  }
   frameContext->frameGraphFailed.store(false, std::memory_order_release);
   if (updateStepCount == 0U) {
     return true;
@@ -1181,6 +1207,10 @@ void EnginePipeline::Impl::stage_camera() noexcept {
 // ---------------------------------------------------------------------------
 
 bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
+  if (consume_injected_stage_failure("render_prep_graph")) {
+    running = false;
+    return false;
+  }
   if (!core::begin_frame_graph()) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to begin frame graph");

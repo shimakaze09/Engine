@@ -464,3 +464,15 @@ engine_add_test_executable(engine_integration_scene_transition_reset
     LABELS
     integration
 )
+
+# ---- #120: injected frame-stage fatal must map to FatalFrame ----
+
+engine_add_test_executable(engine_integration_run_fatal_frame
+    SOURCES
+    run_fatal_frame_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
+    LABELS
+    gpu;integration
+)

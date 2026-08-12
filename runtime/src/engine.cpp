@@ -68,6 +68,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "debug_dap_port", 0,
       "DAP debugger port (0 = disabled). Set to e.g. 4711 to enable."));
 
+  static_cast<void>(core::cvar_register_string(
+      "dbg_fail_frame_stage", "",
+      "Test-only fault injection: fail the named frame stage once "
+      "(simulation_graph or render_prep_graph); self-clears when consumed"));
+
   static_cast<void>(physics::register_physics_cvars());
 
   if (!core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
