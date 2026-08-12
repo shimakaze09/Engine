@@ -17,17 +17,15 @@
 // main so the cook manifest can list the sidecar (issue #55).
 void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
                                    std::size_t size) noexcept {
-  std::strncpy(checksumPath, thumbPath, size - 1U);
-  checksumPath[size - 1U] = '\0';
-  char *dot = std::strrchr(checksumPath, '.');
-  if (dot != nullptr) {
-    std::strncpy(dot, ".checksum",
-                 size - static_cast<std::size_t>(dot - checksumPath) - 1U);
-    checksumPath[size - 1U] = '\0';
-  } else {
-    std::strncat(checksumPath, ".checksum",
-                 size - std::strlen(checksumPath) - 1U);
+  if ((thumbPath == nullptr) || (checksumPath == nullptr) || (size == 0U)) {
+    return;
   }
+  const char *dot = std::strrchr(thumbPath, '.');
+  const std::size_t stemLength = (dot != nullptr)
+                                     ? static_cast<std::size_t>(dot - thumbPath)
+                                     : std::strlen(thumbPath);
+  std::snprintf(checksumPath, size, "%.*s.checksum",
+                static_cast<int>(stemLength), thumbPath);
 }
 
 // Read stored checksum from sidecar file. Returns false if file not found.
