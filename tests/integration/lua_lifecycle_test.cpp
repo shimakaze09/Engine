@@ -361,7 +361,43 @@ bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
   return engine::scripting::call_script_function("verify_entity_reload");
 }
 
-/// Loads every demo module and verifies its core behavior with Lua stubs.
+/// Loads every Lua module shipped with the demo and the Island Hopper
+/// template through the production module cache; a syntax error or a
+/// module that fails to return a table in any shipped file fails here.
+bool verify_shipped_module_manifest() noexcept {
+  engine::scripting::clear_entity_script_modules();
+  const char *script = R"lua(
+local SHIPPED_MODULES = {
+    'assets/lib/utils.lua',
+    'assets/main.lua',
+    'assets/scripts/player.lua',
+    'assets/scripts/island_hopper.lua',
+    'assets/scripts/island_player.lua',
+    'assets/scripts/moving_platform.lua',
+    'assets/scripts/falling_rock.lua',
+}
+
+function verify_shipped_manifest()
+    for i = 1, #SHIPPED_MODULES do
+        local path = SHIPPED_MODULES[i]
+        local mod = engine.require(path)
+        if type(mod) ~= 'table' then
+            error('shipped module failed to load: ' .. path)
+        end
+    end
+end
+)lua";
+
+  if (!write_script_file(script) ||
+      !engine::scripting::load_script(kTempScriptPath)) {
+    return false;
+  }
+  return engine::scripting::call_script_function("verify_shipped_manifest");
+}
+
+/// Loads the utils/player/main demo modules and verifies their behavior
+/// with Lua stubs; the island template scripts are covered by the island
+/// lifecycle tests and the shipped-module manifest sweep.
 bool verify_demo_script_modules() noexcept {
   engine::scripting::clear_entity_script_modules();
   const char *script = R"lua(
@@ -1416,7 +1452,20 @@ int main() {
     }
   }
 
-  // --- Test 6: two moving platforms stay independent per entity ---
+  // --- Test 6: every shipped Lua module loads through the module cache ---
+  // (Runs while the engine table still holds the real bindings, before any
+  // test replaces them with Lua stubs.)
+  {
+    std::printf("  %-40s ", "shipped module manifest");
+    if (verify_shipped_module_manifest()) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 7: two moving platforms stay independent per entity ---
   // (Runs before the demo-module test, which replaces real bindings such
   // as add_script_component with Lua stubs for the rest of the VM.)
   {
@@ -1429,7 +1478,7 @@ int main() {
     }
   }
 
-  // --- Test 7: two falling rocks trigger/re-arm/reload independently ---
+  // --- Test 8: two falling rocks trigger/re-arm/reload independently ---
   {
     std::printf("  %-40s ", "island rocks independent");
     if (verify_island_rock_isolation(world.get())) {
@@ -1440,7 +1489,7 @@ int main() {
     }
   }
 
-  // --- Test 8: rider carry uses the sampled frame's simulated dt ---
+  // --- Test 9: rider carry uses the sampled frame's simulated dt ---
   {
     std::printf("  %-40s ", "island player carry across catch-up");
     if (verify_island_player_carry(world.get())) {
@@ -1451,7 +1500,7 @@ int main() {
     }
   }
 
-  // --- Test 9: hopper controller audio/progress survive hot reload ---
+  // --- Test 10: hopper controller audio/progress survive hot reload ---
   {
     std::printf("  %-40s ", "island hopper reload keeps audio");
     if (verify_island_hopper_reload_audio(world.get())) {
@@ -1462,7 +1511,7 @@ int main() {
     }
   }
 
-  // --- Test 10: shipped demo Lua modules load and behave correctly ---
+  // --- Test 11: shipped demo Lua modules load and behave correctly ---
   {
     std::printf("  %-40s ", "demo Lua modules");
     if (verify_demo_script_modules()) {
@@ -1473,7 +1522,7 @@ int main() {
     }
   }
 
-  // --- Test 11: circular self-require during hot reload is rejected ---
+  // --- Test 12: circular self-require during hot reload is rejected ---
   {
     std::printf("  %-40s ", "circular reload guard");
     if (verify_circular_reload_guard()) {
