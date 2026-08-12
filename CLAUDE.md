@@ -282,10 +282,11 @@ directory-global by design.
   `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, CI
   helpers. `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
-  `.github/workflows/ci.yml` — 10 jobs: build matrix (3 OS × 2 configs),
-  determinism hash compare, static analysis + comment audits, clang-tidy,
-  werror, ASAN/UBSAN, TSAN, coverage (≥50%), benchmarks (>10% regression
-  fails), quality gate.
+  `.github/workflows/ci.yml` — 11 jobs: canonical-toolchain build matrix
+  (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
+  #130), MSVC + GCC Release compatibility lanes, determinism hash compare,
+  static analysis + comment audits, clang-tidy, werror, ASAN/UBSAN, TSAN,
+  coverage (≥50%), benchmarks (>10% regression fails), quality gate.
 
 ## Architecture invariants
 
