@@ -50,8 +50,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/_deps
-          key: deps-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ matrix.os }}-
+          key: deps-v2-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-${{ matrix.os }}-
 
       # ---- Linux: install OpenGL + X11 dev headers (headless) ----
       - name: Install Linux dependencies
@@ -148,8 +148,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/_deps
-          key: deps-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ matrix.os }}-
+          key: deps-v2-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-${{ matrix.os }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
