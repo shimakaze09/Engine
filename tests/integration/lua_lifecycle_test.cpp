@@ -976,6 +976,181 @@ end
   return engine::scripting::call_script_function("island_verify_carry_speeds");
 }
 
+/// Verifies the shipped Island Hopper controller keeps its effect sounds,
+/// progress, and single music stream across a production hot reload (#94).
+bool verify_island_hopper_reload_audio(engine::runtime::World *world) noexcept {
+  if (!reset_world_for_island_tests(world)) {
+    return false;
+  }
+
+  const char *driver = R"lua(
+island_positions = {}
+island_names = {}
+island_sfx = {}
+island_music_count = 0
+island_saved = nil
+local SOUND_IDS = {
+    ['assets/sounds/pickup.wav'] = 11,
+    ['assets/sounds/win.wav'] = 12,
+    ['assets/sounds/splash.wav'] = 13,
+}
+engine.load_sound = function(path) return SOUND_IDS[path] or 9 end
+engine.play_sound_at = function(sound, ...)
+    island_sfx[#island_sfx + 1] = sound
+    return true
+end
+engine.play_music = function(...)
+    island_music_count = island_music_count + 1
+    return true
+end
+engine.set_bus_volume = function(...) return true end
+engine.load_asset_async = function(...) return true end
+engine.log = function(_message) end
+engine.save_data = function(t)
+    island_saved = t
+    return true
+end
+engine.load_data = function() return nil end
+engine.set_rotation = function(...) return true end
+engine.get_position = function(e)
+    local p = island_positions[e]
+    if p == nil then return nil end
+    return p.x, p.y, p.z
+end
+engine.find_entity_by_name = function(name) return island_names[name] end
+engine.destroy_entity = function(e)
+    for name, handle in pairs(island_names) do
+        if handle == e then island_names[name] = nil end
+    end
+    return true
+end
+
+function island_setup_hopper()
+    island_ctrl = engine.spawn_entity()
+    if island_ctrl == nil then error('spawn failed') end
+    island_names['Player'] = 1001
+    island_positions[1001] = { x = 0.0, y = 0.5, z = 0.0 }
+    island_names['Coin1'] = 1002
+    island_positions[1002] = { x = 0.0, y = 0.5, z = 0.0 }
+    island_names['Coin2'] = 1003
+    island_positions[1003] = { x = 30.0, y = 0.5, z = 0.0 }
+    if not engine.add_script_component(island_ctrl,
+            'assets/scripts/island_hopper.lua') then
+        error('controller script failed')
+    end
+end
+
+function island_verify_first_pickup()
+    if island_music_count ~= 1 then error('music not started once') end
+    if #island_sfx ~= 1 or island_sfx[1] ~= 11 then
+        error('pre-reload pickup sound missing')
+    end
+end
+
+function island_move_coin2_to_player()
+    island_positions[1003] = { x = 0.0, y = 0.5, z = 0.0 }
+end
+
+function island_verify_pickup_after_reload()
+    if #island_sfx ~= 2 or island_sfx[2] ~= 11 then
+        error('pickup sound lost after reload: ' .. #island_sfx)
+    end
+    if island_music_count ~= 1 then error('music duplicated by reload') end
+    local mod = engine.require('assets/scripts/island_hopper.lua')
+    if mod == nil then error('module load failed') end
+    local state = mod.on_save_state(island_ctrl)
+    if type(state) ~= 'table' or state.coins ~= 2 then
+        error('progress lost across reload')
+    end
+    if not (state.time and state.time > 0.0) then
+        error('run timer lost across reload')
+    end
+end
+
+function island_sink_player()
+    island_positions[1001] = { x = 0.0, y = -2.0, z = 0.0 }
+end
+
+function island_raise_player()
+    island_positions[1001] = { x = 0.0, y = 1.0, z = 0.0 }
+end
+
+function island_verify_splash_after_reload()
+    if #island_sfx ~= 3 or island_sfx[3] ~= 13 then
+        error('splash sound lost after reload: ' .. #island_sfx)
+    end
+end
+
+function island_place_remaining_coins_and_goal()
+    island_positions[1001] = { x = 0.0, y = 0.5, z = 0.0 }
+    for i = 3, 8 do
+        local handle = 1000 + i + 10
+        island_names['Coin' .. i] = handle
+        island_positions[handle] = { x = 0.0, y = 0.5, z = 0.0 }
+    end
+    island_names['Goal'] = 1050
+    island_positions[1050] = { x = 0.0, y = 0.5, z = 0.0 }
+end
+
+function island_verify_win_after_reload()
+    if #island_sfx ~= 10 or island_sfx[10] ~= 12 then
+        error('win sound lost after reload: ' .. #island_sfx)
+    end
+    if type(island_saved) ~= 'table'
+        or not (island_saved.best_time and island_saved.best_time > 0.0) then
+        error('best time not saved')
+    end
+end
+)lua";
+
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("island_setup_hopper")) {
+    return false;
+  }
+
+  dispatch_begin_play_phase(world);
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_verify_first_pickup")) {
+    return false;
+  }
+
+  // Hot reload the shipped controller through the production module cache,
+  // then collect the second coin: the pickup handle must still be live.
+  if (!touch_module_for_reload("assets/scripts/island_hopper.lua")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_move_coin2_to_player")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_pickup_after_reload")) {
+    return false;
+  }
+
+  // Splash out, resurface, then finish the run: splash and win jingles
+  // must also survive the reload, and the best time must be saved.
+  if (!engine::scripting::call_script_function("island_sink_player")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_splash_after_reload") ||
+      !engine::scripting::call_script_function("island_raise_player")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_place_remaining_coins_and_goal")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  return engine::scripting::call_script_function(
+      "island_verify_win_after_reload");
+}
+
 /// Verifies Lua scene-object creation exposes an identity TRS immediately and
 /// that entity counting includes transformless raw ECS entities.
 bool verify_lua_scene_object_defaults(engine::runtime::World *world) noexcept {
@@ -1276,7 +1451,18 @@ int main() {
     }
   }
 
-  // --- Test 9: shipped demo Lua modules load and behave correctly ---
+  // --- Test 9: hopper controller audio/progress survive hot reload ---
+  {
+    std::printf("  %-40s ", "island hopper reload keeps audio");
+    if (verify_island_hopper_reload_audio(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 10: shipped demo Lua modules load and behave correctly ---
   {
     std::printf("  %-40s ", "demo Lua modules");
     if (verify_demo_script_modules()) {
@@ -1287,7 +1473,7 @@ int main() {
     }
   }
 
-  // --- Test 10: circular self-require during hot reload is rejected ---
+  // --- Test 11: circular self-require during hot reload is rejected ---
   {
     std::printf("  %-40s ", "circular reload guard");
     if (verify_circular_reload_guard()) {
