@@ -197,16 +197,19 @@ function M.on_tick(self, dt)
     -- carried explicitly. The carry uses the ground's ACTUAL displacement
     -- (not its commanded velocity, which can overshoot when the ground's
     -- own corrective is clamped) so the rider tracks it without drifting
-    -- toward an edge.
+    -- toward an edge. Scripts run BEFORE the frame's physics steps, so the
+    -- displacement observed now was simulated during the PREVIOUS tick's
+    -- dt — each sample stores its dt and the next delta divides by it,
+    -- keeping the inherited speed correct across catch-up frames.
     if grounded then
         local gx, _, gz = engine.get_position(ground)
         if gx ~= nil then
             if s.last_ground ~= nil and s.last_ground.id == ground
-                and dt > 0.0 then
-                tx = tx + (gx - s.last_ground.x) / dt
-                tz = tz + (gz - s.last_ground.z) / dt
+                and s.last_ground.dt > 0.0 then
+                tx = tx + (gx - s.last_ground.x) / s.last_ground.dt
+                tz = tz + (gz - s.last_ground.z) / s.last_ground.dt
             end
-            s.last_ground = { id = ground, x = gx, z = gz }
+            s.last_ground = { id = ground, x = gx, z = gz, dt = dt }
         else
             s.last_ground = nil
         end

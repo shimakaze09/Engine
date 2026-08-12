@@ -843,6 +843,139 @@ end
       "island_verify_alarm_survives_reload");
 }
 
+/// Verifies the shipped island player carries moving ground at the ground's
+/// true speed when the fixed-step count changes between frames, and that two
+/// players keep independent carry samples (#107, #101).
+bool verify_island_player_carry(engine::runtime::World *world) noexcept {
+  if (!reset_world_for_island_tests(world)) {
+    return false;
+  }
+
+  const char *driver = R"lua(
+island_positions = {}
+island_velocity = {}
+island_ground1 = 3001
+island_ground2 = 3002
+engine.get_position = function(e)
+    local p = island_positions[e]
+    if p == nil then return nil end
+    return p.x, p.y, p.z
+end
+engine.set_velocity = function(e, x, y, z)
+    island_velocity[e] = { x = x, y = y, z = z }
+    return true
+end
+engine.get_velocity = function(_e) return 0.0, 0.0, 0.0 end
+engine.wake_body = function(_) return true end
+engine.is_key_down = function(_) return false end
+engine.is_key_pressed = function(_) return false end
+engine.set_anim_param = function(...) return true end
+engine.push_camera = function(...) return true end
+engine.set_restitution = function(...) return true end
+engine.set_friction = function(...) return true end
+engine.set_lock_rotation = function(...) return true end
+engine.load_sound = function(_) return 7 end
+engine.play_sound_at = function(...) return true end
+engine.on_anim_event_handler = function(_) return 1 end
+engine.remove_anim_event_handler = function(_) return true end
+-- Each player stands on its own ground entity, selected by query origin.
+engine.raycast_all = function(x, ...)
+    if x < 25.0 then
+        return { { entity = island_ground1, ny = 1.0 } }
+    end
+    return { { entity = island_ground2, ny = 1.0 } }
+end
+
+function island_setup_two_riders()
+    island_p1 = engine.spawn_entity()
+    island_p2 = engine.spawn_entity()
+    if island_p1 == nil or island_p2 == nil then error('spawn failed') end
+    island_positions[island_p1] = { x = 0.0, y = 0.5, z = 0.0 }
+    island_positions[island_p2] = { x = 50.0, y = 0.5, z = 0.0 }
+    island_positions[island_ground1] = { x = 10.0, y = 0.0, z = 0.0 }
+    island_positions[island_ground2] = { x = 60.0, y = 0.0, z = 0.0 }
+    if not engine.add_script_component(island_p1,
+            'assets/scripts/island_player.lua') then
+        error('p1 script failed')
+    end
+    if not engine.add_script_component(island_p2,
+            'assets/scripts/island_player.lua') then
+        error('p2 script failed')
+    end
+end
+
+-- Moves each ground by its own speed over the simulated time the previous
+-- dispatch reported, mirroring what the fixed steps would have produced.
+local function island_advance_grounds(sim_dt)
+    local g1 = island_positions[island_ground1]
+    local g2 = island_positions[island_ground2]
+    g1.x = g1.x + 1.5 * sim_dt
+    g2.x = g2.x + 0.5 * sim_dt
+end
+
+function island_advance_grounds_two_steps()
+    island_advance_grounds(2.0 / 60.0)
+end
+
+function island_advance_grounds_one_step()
+    island_advance_grounds(1.0 / 60.0)
+end
+
+-- 1e-4 separates the correct carry (1.5 / 0.5, reproduced to ~1e-7 across
+-- the float dt round-trip) from the wrong-frame results (3.0 / 0.75).
+local function check_carry(e, expected, label)
+    local v = island_velocity[e]
+    if v == nil then error(label .. ': no velocity write') end
+    if math.abs(v.x - expected) > 1e-4 then
+        error(label .. ': carried vx ' .. v.x .. ' expected ' .. expected)
+    end
+end
+
+function island_verify_first_tick_no_carry()
+    check_carry(island_p1, 0.0, 'rider1 first tick')
+    check_carry(island_p2, 0.0, 'rider2 first tick')
+end
+
+function island_verify_carry_speeds()
+    check_carry(island_p1, 1.5, 'rider1')
+    check_carry(island_p2, 0.5, 'rider2')
+end
+)lua";
+
+  if (!write_script_file(driver) ||
+      !engine::scripting::load_script(kTempScriptPath) ||
+      !engine::scripting::call_script_function("island_setup_two_riders")) {
+    return false;
+  }
+
+  dispatch_begin_play_phase(world);
+
+  // Frame 1 simulates two fixed steps (dt 2/60), frame 2 one step (dt
+  // 1/60), frame 3 two steps again — the inherited speed must stay the
+  // ground's own speed through both catch-up transitions.
+  engine::scripting::dispatch_entity_scripts_update(2.0F / 60.0F);
+  if (!engine::scripting::call_script_function(
+          "island_verify_first_tick_no_carry")) {
+    return false;
+  }
+
+  if (!engine::scripting::call_script_function(
+          "island_advance_grounds_two_steps")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  if (!engine::scripting::call_script_function("island_verify_carry_speeds")) {
+    return false;
+  }
+
+  if (!engine::scripting::call_script_function(
+          "island_advance_grounds_one_step")) {
+    return false;
+  }
+  engine::scripting::dispatch_entity_scripts_update(2.0F / 60.0F);
+  return engine::scripting::call_script_function("island_verify_carry_speeds");
+}
+
 /// Verifies Lua scene-object creation exposes an identity TRS immediately and
 /// that entity counting includes transformless raw ECS entities.
 bool verify_lua_scene_object_defaults(engine::runtime::World *world) noexcept {
@@ -1132,7 +1265,18 @@ int main() {
     }
   }
 
-  // --- Test 8: shipped demo Lua modules load and behave correctly ---
+  // --- Test 8: rider carry uses the sampled frame's simulated dt ---
+  {
+    std::printf("  %-40s ", "island player carry across catch-up");
+    if (verify_island_player_carry(world.get())) {
+      std::printf("PASS\n");
+    } else {
+      std::printf("FAIL\n");
+      ++failures;
+    }
+  }
+
+  // --- Test 9: shipped demo Lua modules load and behave correctly ---
   {
     std::printf("  %-40s ", "demo Lua modules");
     if (verify_demo_script_modules()) {
@@ -1143,7 +1287,7 @@ int main() {
     }
   }
 
-  // --- Test 9: circular self-require during hot reload is rejected ---
+  // --- Test 10: circular self-require during hot reload is rejected ---
   {
     std::printf("  %-40s ", "circular reload guard");
     if (verify_circular_reload_guard()) {
