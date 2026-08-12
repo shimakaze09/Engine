@@ -1,10 +1,11 @@
 # Runs the Engine build, test, analysis, coverage, and benchmark gates.
 # Toolchain policy (issue #130): the primary build matrix pins the canonical
 # LLVM compilers from CMakePresets.json (clang-cl on Windows via the VS
-# ClangCL toolset, clang on Linux, AppleClang on macOS) instead of the
+# clang-cl via Ninja, clang on Linux, AppleClang on macOS) instead of the
 # runner default; the presets themselves are not invoked because CI shares
-# one build/ tree across Debug/Release and the Windows runner uses the VS
-# generator. MSVC and GCC are Tier 2 portability compilers validated by the
+# one build/ tree across Debug/Release and the Windows lane configures
+# Ninja + clang-cl per the documented flow (the runner's VS generator has
+# no ClangCL toolset component). MSVC and GCC are Tier 2 portability compilers validated by the
 # compatibility lanes.
 
 name: CI
@@ -38,7 +39,7 @@ jobs:
           - os: macos-14
             toolchain_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - os: windows-2025-vs2026
-            toolchain_args: -T ClangCL
+            toolchain_args: -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
 
     steps:
       - name: Checkout
@@ -63,6 +64,11 @@ jobs:
             libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
+
+      # Ninja + clang-cl needs the MSVC environment (headers/libs/link).
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
         run: >
