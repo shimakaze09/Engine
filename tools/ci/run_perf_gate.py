@@ -131,13 +131,17 @@ def main() -> int:
     with baseline_path.open("r", encoding="utf-8") as f:
         baseline = json.load(f)
 
+    physics_bench = find_executable(build_dir, "engine_bench_physics_perf")
     measured = {
         "ecs_iterate_ms": measure_with_retries(
             find_executable(build_dir, "engine_bench_ecs_perf"),
             "ecs_iterate_ms", baseline, args.threshold, args.attempts),
         "physics_step_ms": measure_with_retries(
-            find_executable(build_dir, "engine_bench_physics_perf"),
-            "physics_step_ms", baseline, args.threshold, args.attempts),
+            physics_bench, "physics_step_ms", baseline, args.threshold,
+            args.attempts),
+        "physics_dense_step_ms": measure_with_retries(
+            physics_bench, "physics_dense_step_ms", baseline, args.threshold,
+            args.attempts),
     }
 
     if not evaluate(measured, baseline, args.threshold):

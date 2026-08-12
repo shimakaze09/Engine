@@ -93,12 +93,28 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 
 ## Build prerequisites
 
-- CMake 3.28+
+- CMake 3.28+ and Ninja
 - Python 3 (required for generated Lua bindings during configure/build)
-- A C++23-capable compiler
-	- MSVC (Windows) or
-	- Clang/GCC (Linux/macOS)
+- A C++23-capable compiler (see the toolchain policy below)
 - OpenGL development support
+
+### Compiler support policy
+
+The engine centers on one canonical LLVM toolchain per platform, with two
+secondary compilers validated for portability:
+
+- **Tier 1 — canonical (used for development and primary CI)**
+	- Windows x64: `clang-cl`
+	- Linux x64: `clang++`
+	- macOS: AppleClang
+- **Tier 2 — portability validation (dedicated CI compatibility lanes)**
+	- Windows x64: MSVC
+	- Linux x64: GCC
+
+Engine code stays standard C++23 with no compiler-specific language
+extensions; Tier 2 exists to prove that, not to relax it. The
+`CMakePresets.json` presets encode the canonical flows and are the
+recommended way to configure.
 
 Notes:
 
@@ -107,13 +123,27 @@ Notes:
 
 ## Quick start
 
-From repository root:
+From repository root, configure with the canonical preset for your platform
+(`windows-clang-cl-debug`, `linux-clang-debug`, or `macos-clang-debug`),
+then build and test:
 
 ```powershell
-cmake -S . -B build
-cmake --build build
+cmake --preset windows-clang-cl-debug
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
+
+```bash
+cmake --preset linux-clang-debug     # or: macos-clang-debug
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+`cmake --list-presets` shows every configure/build/test preset, including
+the GCC compatibility flows and the sanitizer lanes. A generic
+`cmake -S . -B build` with the environment-default compiler may work but is
+not a supported configuration; CI validates the canonical presets plus the
+MSVC/GCC compatibility lanes.
 
 Run the app after build:
 
@@ -164,9 +194,12 @@ Some tests are labeled `gpu`; CI excludes those where headless execution is requ
 ## Continuous integration
 
 GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently
-runs ten jobs:
+runs eleven jobs:
 
-- Windows, Linux, and macOS builds in Debug and Release, with headless-safe CTest filtering
+- Windows, Linux, and macOS builds in Debug and Release on the canonical
+  toolchains (`clang-cl` via the VS ClangCL toolset, `clang++`, AppleClang),
+  with headless-safe CTest filtering
+- MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
 - Cross-platform determinism hash comparison
 - `cppcheck` static analysis (plus the source comment audit)
 - `clang-tidy` with warnings-as-errors

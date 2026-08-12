@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -21,11 +22,17 @@
 namespace {
 
 std::size_t g_dispatchedPairCount = 0U;
+// Captured copy of the dispatched pair list (first kMaxCollisionPairs).
+std::uint32_t g_dispatchedPairData[engine::physics::kMaxCollisionPairs * 2U];
 
 void test_collision_dispatch(const std::uint32_t *pairs,
                              std::size_t pairCount) noexcept {
-  static_cast<void>(pairs);
   g_dispatchedPairCount = pairCount;
+  const std::size_t copyPairs = (pairCount < engine::physics::kMaxCollisionPairs)
+                                    ? pairCount
+                                    : engine::physics::kMaxCollisionPairs;
+  std::memcpy(g_dispatchedPairData, pairs,
+              copyPairs * 2U * sizeof(std::uint32_t));
 }
 
 int check_physics_cvars_register_after_core_cvars() {
@@ -1488,23 +1495,72 @@ int check_collision_bookkeeping_scale() {
   world->commit_update_phase();
   world->begin_render_prep_phase();
   world->end_frame_phase();
-  engine::runtime::dispatch_collision_callbacks(*world);
-  const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::steady_clock::now() - start)
-                             .count();
+  const double elapsedMs =
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - start)
+          .count();
 
   if (!stepped || !resolved) {
     return 203;
   }
 
-  const std::size_t maxUniquePairs = (kBodies * (kBodies - 1U)) / 2U;
-  if ((g_dispatchedPairCount == 0U) ||
-      (g_dispatchedPairCount > maxUniquePairs)) {
+  // Snapshot bookkeeping before dispatch drains the frame accumulators.
+  const engine::physics::PhysicsContext &ctx = world->physics_context();
+  const std::size_t keptPairs = ctx.collisionPairCount;
+  const std::size_t framePairs = ctx.frameCollisionPairCount;
+  const std::uint32_t stepDrops = ctx.collisionPairDropCount;
+  const std::uint32_t frameDrops = ctx.frameCollisionPairDropCount;
+  engine::runtime::dispatch_collision_callbacks(*world);
+
+  // Diagnostic only: wall-clock budgets live in engine_bench_physics_perf.
+  std::printf("[collision_bookkeeping] kept=%zu dropped=%u step_ms=%.3f\n",
+              keptPairs, stepDrops, elapsedMs);
+
+  if (keptPairs != engine::physics::kMaxCollisionPairs) {
     return 204;
   }
-
-  if (elapsedMs > 250) {
+  if ((framePairs != keptPairs) || (frameDrops != stepDrops)) {
     return 205;
+  }
+
+  // Bodies within nine 0.1-spaced rows must overlap (1.0 extent sum), so at
+  // least 3804 of the 4560 unique pairs collide and the cap must overflow.
+  constexpr std::size_t kGuaranteedOverlapPairs = 3804U;
+  const std::size_t maxUniquePairs = (kBodies * (kBodies - 1U)) / 2U;
+  const std::size_t detectedPairs =
+      keptPairs + static_cast<std::size_t>(stepDrops);
+  if ((detectedPairs < kGuaranteedOverlapPairs) ||
+      (detectedPairs > maxUniquePairs)) {
+    return 206;
+  }
+
+  if ((ctx.collisionPairOverflowEpisodes != 1U) ||
+      !ctx.collisionPairOverflowActive) {
+    return 207;
+  }
+  if (ctx.broadphaseOverflowEpisodes != 0U) {
+    return 208;
+  }
+
+  if (g_dispatchedPairCount != keptPairs) {
+    return 209;
+  }
+
+  // Dispatched pairs must reference valid, distinct bodies with no
+  // duplicate unordered pair surviving the dedupe hash.
+  bool seen[kBodies + 1U][kBodies + 1U] = {};
+  for (std::size_t i = 0U; i < g_dispatchedPairCount; ++i) {
+    const std::uint32_t a = g_dispatchedPairData[i * 2U];
+    const std::uint32_t b = g_dispatchedPairData[(i * 2U) + 1U];
+    if ((a < 1U) || (a > kBodies) || (b < 1U) || (b > kBodies) || (a == b)) {
+      return 210;
+    }
+    const std::uint32_t lo = (a < b) ? a : b;
+    const std::uint32_t hi = (a < b) ? b : a;
+    if (seen[lo][hi]) {
+      return 211;
+    }
+    seen[lo][hi] = true;
   }
 
   return 0;

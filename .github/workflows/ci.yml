@@ -1,4 +1,12 @@
 # Runs the Engine build, test, analysis, coverage, and benchmark gates.
+# Toolchain policy (issue #130): the primary build matrix pins the canonical
+# LLVM compilers from CMakePresets.json (clang-cl on Windows via the VS
+# clang-cl via Ninja, clang on Linux, AppleClang on macOS) instead of the
+# runner default; the presets themselves are not invoked because CI shares
+# one build/ tree across Debug/Release and the Windows lane configures
+# Ninja + clang-cl per the documented flow (the runner's VS generator has
+# no ClangCL toolset component). MSVC and GCC are Tier 2 portability compilers validated by the
+# compatibility lanes.
 
 name: CI
 
@@ -24,6 +32,14 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-14, windows-2025-vs2026]
         config: [Debug, Release]
+        # Canonical toolchain per OS (matches CMakePresets.json).
+        include:
+          - os: ubuntu-24.04
+            toolchain_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - os: macos-14
+            toolchain_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - os: windows-2025-vs2026
+            toolchain_args: -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
 
     steps:
       - name: Checkout
@@ -34,8 +50,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/_deps
-          key: deps-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-${{ matrix.os }}-
+          key: deps-v2-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-${{ matrix.os }}-
 
       # ---- Linux: install OpenGL + X11 dev headers (headless) ----
       - name: Install Linux dependencies
@@ -49,9 +65,15 @@ jobs:
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
 
+      # Ninja + clang-cl needs the MSVC environment (headers/libs/link).
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure
         run: >
           cmake -S . -B build
+          ${{ matrix.toolchain_args }}
           -DCMAKE_BUILD_TYPE=${{ matrix.config }}
           -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=ON
@@ -99,6 +121,60 @@ jobs:
         with:
           name: compile_commands
           path: build/compile_commands.json
+
+  # ---- Tier 2 portability compilers: MSVC and GCC Release build + test ----
+  # Release so -O3/-Werror warning classes the canonical lanes cannot see
+  # stay covered (issue #118's stringop-truncation was GCC-Release-only).
+  compat-build:
+    name: ${{ matrix.name }} compatibility
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-msvc
+            os: windows-2025-vs2026
+            toolchain_args: ""
+          - name: linux-gcc
+            os: ubuntu-24.04
+            toolchain_args: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache _deps
+        uses: actions/cache@v5
+        with:
+          path: build/_deps
+          key: deps-v2-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-${{ matrix.os }}-
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          bash .github/scripts/install-linux-deps.sh \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          ${{ matrix.toolchain_args }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DENGINE_BUILD_TESTS=ON
+          -DENGINE_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 120 --label-exclude gpu
 
   # ---- Cross-platform determinism comparison (P1-M1-C1a) ----
   determinism-check:
@@ -528,6 +604,7 @@ jobs:
     name: Required CI quality gate
     needs:
       - build
+      - compat-build
       - determinism-check
       - static-analysis
       - clang-tidy
