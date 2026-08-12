@@ -40,11 +40,20 @@ struct CountingCommand final : engine::editor::EditorCommand {
     ++g_destroyedCommands;
   }
 
-  void execute() noexcept override { ++g_executeCount; }
+  bool execute() noexcept override {
+    ++g_executeCount;
+    return true;
+  }
 
-  void undo() noexcept override { ++g_undoCount; }
+  bool undo() noexcept override {
+    ++g_undoCount;
+    return true;
+  }
 
-  void redo() noexcept override { ++g_redoCount; }
+  bool redo() noexcept override {
+    ++g_redoCount;
+    return true;
+  }
 };
 
 engine::editor::EditorCommand *make_command() noexcept {

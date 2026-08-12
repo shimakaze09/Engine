@@ -28,18 +28,16 @@ struct TransformEditCommand final : EditorCommand {
   runtime::Transform oldTransform{};
   runtime::Transform newTransform{};
 
-  void execute() noexcept override {
-    if (editor_session().world != nullptr) {
-      static_cast<void>(editor_session().world->add_transform(
-          resolve_command_target(entity, persistentId), newTransform));
-    }
+  bool execute() noexcept override {
+    return (editor_session().world != nullptr) &&
+           editor_session().world->add_transform(
+               resolve_command_target(entity, persistentId), newTransform);
   }
 
-  void undo() noexcept override {
-    if (editor_session().world != nullptr) {
-      static_cast<void>(editor_session().world->add_transform(
-          resolve_command_target(entity, persistentId), oldTransform));
-    }
+  bool undo() noexcept override {
+    return (editor_session().world != nullptr) &&
+           editor_session().world->add_transform(
+               resolve_command_target(entity, persistentId), oldTransform);
   }
 };
 
@@ -110,16 +108,28 @@ struct ComponentEditCommand final : EditorCommand {
   ComponentEditSnapshot before{};
   ComponentEditSnapshot after{};
 
-  void execute() noexcept override {
-    static_cast<void>(apply_component_snapshot(
-        type, resolve_command_target(entity, persistentId), afterExists,
-        after));
-  }
+  bool execute() noexcept override { return apply_state(afterExists, after); }
 
-  void undo() noexcept override {
-    static_cast<void>(apply_component_snapshot(
-        type, resolve_command_target(entity, persistentId), beforeExists,
-        before));
+  bool undo() noexcept override { return apply_state(beforeExists, before); }
+
+private:
+  /// Applies one endpoint of the edit. Removing a component that is
+  /// already absent on the live target counts as applied — the desired
+  /// end state holds (e.g. undoing an add after the entity was re-created
+  /// without the component).
+  bool apply_state(bool exists,
+                   const ComponentEditSnapshot &snapshot) noexcept {
+    const runtime::Entity target =
+        resolve_command_target(entity, persistentId);
+    if (apply_component_snapshot(type, target, exists, snapshot)) {
+      return true;
+    }
+    if (exists || (editor_session().world == nullptr) ||
+        !editor_session().world->is_alive(target)) {
+      return false;
+    }
+    ComponentEditSnapshot current{};
+    return !capture_component_snapshot(type, target, &current);
   }
 };
 
@@ -132,8 +142,8 @@ struct ReparentCommand final : EditorCommand {
   runtime::PersistentId beforeParentId = runtime::kInvalidPersistentId;
   runtime::PersistentId afterParentId = runtime::kInvalidPersistentId;
 
-  void execute() noexcept override;
-  void undo() noexcept override;
+  bool execute() noexcept override;
+  bool undo() noexcept override;
 };
 
 /// Reparents through the command history; false when the child has no
@@ -155,8 +165,8 @@ struct EntityCreateCommand final : EditorCommand {
   bool hasCollider = false;
   runtime::Collider colliderComponent{};
 
-  void execute() noexcept override;
-  void undo() noexcept override;
+  bool execute() noexcept override;
+  bool undo() noexcept override;
 };
 
 /// One captured subtree member of a deleted entity: its persistent id
@@ -169,13 +179,15 @@ struct EntityDeleteRecord final {
 
 /// Undoable entity deletion backed by parent-before-child subtree records;
 /// undo re-creates every member under its original persistent id so parent
-/// links and cross-references survive the round trip.
+/// links and cross-references survive the round trip. The restore is
+/// transactional: when any member or component cannot be re-created, every
+/// member restored so far is destroyed again and undo reports failure.
 struct EntityDeleteCommand final : EditorCommand {
   std::unique_ptr<EntityDeleteRecord[]> records{};
   std::size_t recordCount = 0U;
 
-  void execute() noexcept override;
-  void undo() noexcept override;
+  bool execute() noexcept override;
+  bool undo() noexcept override;
 };
 
 /// Creates a scene object with a default name through the command history;
