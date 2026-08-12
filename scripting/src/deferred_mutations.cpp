@@ -78,7 +78,150 @@ bool is_deferred_entity_current(runtime::World *world,
   return (world != nullptr) && world->is_alive(entity);
 }
 
+/// Pending-read outcome: nothing queued, a queued snapshot, or a queued
+/// removal/destruction that invalidates the component.
+enum class PendingRead : std::uint8_t { None, Value, Removed };
+
+/// Finds the newest queued mutation affecting entity's component of the
+/// given snapshot type; a queued destroy (or matching remove) wins over
+/// older snapshots so setters cannot resurrect the component (issue #105).
+PendingRead find_pending_snapshot(runtime::Entity entity,
+                                  DeferredMutationType snapshotType,
+                                  DeferredMutationType removeType,
+                                  bool hasRemoveType,
+                                  DeferredMutation *out) noexcept {
+  std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+  for (std::size_t i = g_deferredMutationCount; i > 0U; --i) {
+    const DeferredMutation &mutation = g_deferredMutations[i - 1U];
+    if (!(mutation.entity == entity)) {
+      continue;
+    }
+    if ((mutation.type == DeferredMutationType::DestroyEntity) ||
+        (hasRemoveType && (mutation.type == removeType))) {
+      return PendingRead::Removed;
+    }
+    if (mutation.type == snapshotType) {
+      *out = mutation;
+      return PendingRead::Value;
+    }
+  }
+  return PendingRead::None;
+}
+
 } // namespace
+
+/// Reads the entity's transform through any pending queued write.
+bool latest_transform(runtime::Entity entity,
+                      runtime::Transform *outTransform) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outTransform == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity, DeferredMutationType::SetTransform,
+                                DeferredMutationType::SetTransform, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outTransform = pending.transform;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_transform(entity, outTransform);
+}
+
+/// Reads the entity's rigid body through any pending queued write.
+bool latest_rigid_body(runtime::Entity entity,
+                       runtime::RigidBody *outRigidBody) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outRigidBody == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity, DeferredMutationType::AddRigidBody,
+                                DeferredMutationType::AddRigidBody, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outRigidBody = pending.rigidBody;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_rigid_body(entity, outRigidBody);
+}
+
+/// Reads the entity's collider through any pending queued write.
+bool latest_collider(runtime::Entity entity,
+                     runtime::Collider *outCollider) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outCollider == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity, DeferredMutationType::AddCollider,
+                                DeferredMutationType::AddCollider, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outCollider = pending.collider;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_collider(entity, outCollider);
+}
+
+/// Reads the entity's mesh component through any pending queued write.
+bool latest_mesh_component(runtime::Entity entity,
+                           runtime::MeshComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddMeshComponent,
+                                DeferredMutationType::AddMeshComponent, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.meshComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_mesh_component(entity, outComponent);
+}
+
+/// Reads the entity's light component through any pending queued write;
+/// a queued removal reports the component as absent.
+bool latest_light_component(runtime::Entity entity,
+                            runtime::LightComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddLightComponent,
+                                DeferredMutationType::RemoveLightComponent,
+                                true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.lightComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_light_component(entity, outComponent);
+}
 
 /// Returns whether script-driven world mutations may run immediately.
 bool can_apply_mutations_now() noexcept {

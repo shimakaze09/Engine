@@ -151,14 +151,21 @@ struct RuntimeServices final {
                              std::uint32_t *outEntityIndices,
                              std::size_t maxResults,
                              std::uint32_t mask) noexcept = nullptr;
+  /// skipEntityIndex 0 disables the exclusion; a valid index excludes that
+  /// entity's colliders and any compound-body colliders it owns.
   bool (*sweep_sphere)(runtime::World *world, float ox, float oy, float oz,
                        float radius, float dx, float dy, float dz,
                        float maxDistance, RuntimeRaycastHit *outHit,
-                       std::uint32_t mask) noexcept = nullptr;
+                       std::uint32_t mask,
+                       std::uint32_t skipEntityIndex) noexcept = nullptr;
   bool (*sweep_box)(runtime::World *world, float cx, float cy, float cz,
                     float hx, float hy, float hz, float dx, float dy, float dz,
                     float maxDistance, RuntimeRaycastHit *outHit,
-                    std::uint32_t mask) noexcept = nullptr;
+                    std::uint32_t mask,
+                    std::uint32_t skipEntityIndex) noexcept = nullptr;
+  /// Joint constructors return the joint id or 0 for every failure —
+  /// invalid entities, invalid parameters, self-joints, and a full joint
+  /// table all share the one sentinel (issue #100).
   std::uint32_t (*add_distance_joint)(runtime::World *world,
                                       std::uint32_t entityIndexA,
                                       std::uint32_t entityIndexB,

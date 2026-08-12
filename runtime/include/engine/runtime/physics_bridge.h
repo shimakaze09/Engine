@@ -127,10 +127,12 @@ bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,
                   Entity skipEntity = kInvalidEntity) noexcept;
 
 /// Sweeps an AABB along a normalized copy of direction; maxDistance must be
-/// finite and positive.
+/// finite and positive. skipEntity excludes that entity's colliders and any
+/// compound-body colliders it owns.
 bool sweep_box(const World &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
                float maxDistance, physics::SweepHit *outHit,
-               std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+               std::uint32_t mask = 0xFFFFFFFFU,
+               Entity skipEntity = kInvalidEntity) noexcept;
 
 } // namespace engine::runtime

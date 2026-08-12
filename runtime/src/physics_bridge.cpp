@@ -307,10 +307,10 @@ bool sweep_sphere(const World &world, const math::Vec3 &origin, float radius,
 
 bool sweep_box(const World &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
-               float maxDistance, physics::SweepHit *outHit,
-               std::uint32_t mask) noexcept {
+               float maxDistance, physics::SweepHit *outHit, std::uint32_t mask,
+               Entity skipEntity) noexcept {
   return physics::sweep_box(world, center, halfExtents, direction, maxDistance,
-                            outHit, mask);
+                            outHit, mask, skipEntity);
 }
 
 } // namespace engine::runtime
