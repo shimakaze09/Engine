@@ -362,12 +362,15 @@ void push_fired_event(core::Entity entity, const AnimEvent &event) noexcept {
   ++g_firedEventCount;
 }
 
-/// Fires every event of the state's clip whose time lies in
-/// (previousTime, newTime]; loop wraps fire the tail then the head.
+/// Fires every event of the state's clip the step traversed. Forward
+/// playback covers (previousTime, newTime] (loop wraps fire the tail then
+/// the head); reverse playback mirrors it as [newTime, previousTime)
+/// (wraps fire the head-side [0, previousTime) then the tail
+/// [newTime, clipDuration]).
 void fire_clip_events(core::Entity entity,
                       const AnimControllerData &controller,
                       std::uint32_t clipIndex, float previousTime,
-                      float newTime, bool wrapped,
+                      float newTime, bool wrapped, bool forward,
                       float clipDuration) noexcept {
   for (std::uint32_t i = 0U; i < controller.eventCount; ++i) {
     const AnimEvent &event = controller.events[i];
@@ -375,10 +378,16 @@ void fire_clip_events(core::Entity entity,
       continue;
     }
     const float t = event.timeSeconds;
-    const bool hit =
-        wrapped ? ((t > previousTime) && (t <= clipDuration)) ||
-                      ((t >= 0.0F) && (t <= newTime))
-                : ((t > previousTime) && (t <= newTime));
+    bool hit = false;
+    if (forward) {
+      hit = wrapped ? ((t > previousTime) && (t <= clipDuration)) ||
+                          ((t >= 0.0F) && (t <= newTime))
+                    : ((t > previousTime) && (t <= newTime));
+    } else {
+      hit = wrapped ? ((t >= 0.0F) && (t < previousTime)) ||
+                          ((t >= newTime) && (t <= clipDuration))
+                    : ((t >= newTime) && (t < previousTime));
+    }
     if (hit) {
       push_fired_event(entity, event);
     }
@@ -406,6 +415,9 @@ float advance_state_time(const AnimControllerData &controller,
     if (!state.loop) {
       return 0.0F;
     }
+    // Reverse wraps must be reported like forward ones so event firing
+    // sees the boundary crossing instead of a huge forward jump.
+    *outWrapped = true;
     newTime = std::fmod(newTime, duration);
     return (newTime < 0.0F) ? (newTime + duration) : newTime;
   }
@@ -547,8 +559,16 @@ void update_animations(World &world, float dt) noexcept {
           *controller, component->currentState, component->stateTime,
           scaledDt, &wrapped);
       const AnimState &state = controller->states[component->currentState];
+      // The traversal direction is the sign of the effective clip-time
+      // delta (component speed times per-state speed), so reverse
+      // playback fires the reverse event window instead of the forward
+      // one. A non-finite delta stays on the forward path: its window is
+      // empty against the zero time advance_state_time clamps to.
+      const float effectiveDt = scaledDt * state.speed;
+      const bool forward =
+          !std::isfinite(effectiveDt) || (effectiveDt >= 0.0F);
       fire_clip_events(entity, *controller, state.clipIndex, previousTime,
-                       component->stateTime, wrapped,
+                       component->stateTime, wrapped, forward,
                        controller->clips[state.clipIndex].durationSeconds);
 
       if (component->blendRemaining > 0.0F) {
@@ -556,7 +576,10 @@ void update_animations(World &world, float dt) noexcept {
         component->previousStateTime = advance_state_time(
             *controller, component->previousState,
             component->previousStateTime, scaledDt, &previousWrapped);
-        component->blendRemaining -= scaledDt;
+        // A crossfade progresses with elapsed playback magnitude; a
+        // negative rate must not grow blendRemaining or push the blend
+        // weight below zero.
+        component->blendRemaining -= std::fabs(scaledDt);
         if (component->blendRemaining < 0.0F) {
           component->blendRemaining = 0.0F;
         }
