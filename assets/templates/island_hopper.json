@@ -1618,7 +1618,7 @@
     "RigidBody": {
      "acceleration": [
       0.0,
-      0.0,
+      9.8,
       0.0
      ],
      "angularVelocity": [
@@ -1700,7 +1700,7 @@
     "RigidBody": {
      "acceleration": [
       0.0,
-      0.0,
+      9.8,
       0.0
      ],
      "angularVelocity": [
@@ -1916,7 +1916,7 @@
     "RigidBody": {
      "acceleration": [
       0.0,
-      -9.8,
+      0.0,
       0.0
      ],
      "angularVelocity": [
