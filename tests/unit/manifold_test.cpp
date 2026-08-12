@@ -3,6 +3,8 @@
 // #110 world-scoping and entity-generation safety contracts.
 
 #include <cstdio>
+#include <memory>
+#include <new>
 
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
@@ -12,6 +14,14 @@ namespace {
 
 namespace math = engine::math;
 namespace physics = engine::physics;
+
+// PhysicsContext is ~1 MB (8 KB under Windows' 1 MB default thread stack),
+// so every test constructs it on the heap; two on one frame is a certain
+// overflow.
+[[nodiscard]] std::unique_ptr<physics::PhysicsContext> make_ctx() noexcept {
+  return std::unique_ptr<physics::PhysicsContext>(
+      new (std::nothrow) physics::PhysicsContext{});
+}
 
 physics::Entity make_entity(std::uint32_t index,
                             std::uint32_t generation) noexcept {
@@ -23,7 +33,11 @@ physics::Entity make_entity(std::uint32_t index,
 
 // Test: adding contacts up to kMaxContacts fills correctly.
 int test_manifold_add_and_fill() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const math::Vec3 normal(0.0F, 1.0F, 0.0F);
@@ -57,7 +71,11 @@ int test_manifold_add_and_fill() noexcept {
 
 // Test: adding a 5th contact triggers reduction to kMaxContacts.
 int test_manifold_overflow_reduces() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const math::Vec3 normal(0.0F, 1.0F, 0.0F);
@@ -88,7 +106,11 @@ int test_manifold_overflow_reduces() noexcept {
 
 // Test: evict_stale removes manifolds not used in current frame.
 int test_manifold_evict_stale() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const math::Vec3 pt(0.0F, 0.0F, 0.0F);
@@ -118,7 +140,11 @@ int test_manifold_evict_stale() noexcept {
 
 // Test: feature-ID matching updates existing contact in-place.
 int test_manifold_feature_id_match() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const math::Vec3 pt(1.0F, 0.0F, 0.0F);
@@ -155,7 +181,11 @@ int test_manifold_feature_id_match() noexcept {
 
 // Test: reset clears all manifolds.
 int test_manifold_reset() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const math::Vec3 pt(0.0F, 0.0F, 0.0F);
@@ -179,7 +209,11 @@ int test_manifold_reset() noexcept {
 // Test: a reused entity index with a new generation must not inherit the
 // old pair's manifold or its accumulated impulse.
 int test_manifold_generation_reuse_isolated() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const physics::Entity oldEntity = make_entity(7U, 1U);
@@ -212,8 +246,13 @@ int test_manifold_generation_reuse_isolated() noexcept {
 
 // Test: two contexts never share manifolds (world-scoped storage).
 int test_manifold_world_scoped() noexcept {
-  physics::PhysicsContext ctxA{};
-  physics::PhysicsContext ctxB{};
+  auto ctxPtrA = make_ctx();
+  auto ctxPtrB = make_ctx();
+  if ((ctxPtrA == nullptr) || (ctxPtrB == nullptr)) {
+    return 90;
+  }
+  physics::PhysicsContext &ctxA = *ctxPtrA;
+  physics::PhysicsContext &ctxB = *ctxPtrB;
   physics::manifold_reset(ctxA);
   physics::manifold_reset(ctxB);
 
@@ -236,7 +275,11 @@ int test_manifold_world_scoped() noexcept {
 // Test: acquiring a stored pair in flipped order restarts the manifold
 // (mirrored points/impulses must not replay from the wrong perspective).
 int test_manifold_flipped_order_restarts() noexcept {
-  physics::PhysicsContext ctx{};
+  auto ctxPtr = make_ctx();
+  if (ctxPtr == nullptr) {
+    return 90;
+  }
+  physics::PhysicsContext &ctx = *ctxPtr;
   physics::manifold_reset(ctx);
 
   const physics::Entity a = make_entity(1U, 1U);
