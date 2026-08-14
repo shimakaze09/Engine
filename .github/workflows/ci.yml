@@ -34,8 +34,11 @@ jobs:
         config: [Debug, Release]
         # Canonical toolchain per OS (matches CMakePresets.json).
         include:
+          # clang-19: the default clang 18 still reports __cpp_concepts=201907,
+          # which guards out libstdc++'s <expected> (probe-verified in a
+          # noble container); 19 reports 202002 and compiles it.
           - os: ubuntu-24.04
-            toolchain_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            toolchain_args: -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
           - os: macos-14
             toolchain_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - os: windows-2025-vs2026
@@ -58,6 +61,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bash .github/scripts/install-linux-deps.sh \
+            clang-19 \
             libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev libxxf86vm-dev \
