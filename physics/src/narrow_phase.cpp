@@ -91,82 +91,8 @@ void capsule_segment(const engine::math::Vec3 &pos, const Collider &col,
   outB = engine::math::Vec3(pos.x, pos.y + hh, pos.z);
 }
 
-// Closest point on line segment AB to point P.  Returns parameter t in [0,1].
-float closest_point_on_segment(const engine::math::Vec3 &a,
-                               const engine::math::Vec3 &b,
-                               const engine::math::Vec3 &p,
-                               engine::math::Vec3 &outClosest) noexcept {
-  const engine::math::Vec3 ab = engine::math::sub(b, a);
-  const float ab2 = engine::math::dot(ab, ab);
-  if (ab2 < 1e-12F) {
-    outClosest = a;
-    return 0.0F;
-  }
-  float t = engine::math::dot(engine::math::sub(p, a), ab) / ab2;
-  t = std::max(0.0F, std::min(1.0F, t));
-  outClosest = engine::math::add(a, engine::math::mul(ab, t));
-  return t;
-}
-
-// Closest points between two line segments (P0-P1 and Q0-Q1).
-// Returns the two closest points and the squared distance between them.
-float closest_point_segment_segment(const engine::math::Vec3 &p0,
-                                    const engine::math::Vec3 &p1,
-                                    const engine::math::Vec3 &q0,
-                                    const engine::math::Vec3 &q1,
-                                    engine::math::Vec3 &outClosestP,
-                                    engine::math::Vec3 &outClosestQ) noexcept {
-  const engine::math::Vec3 d1 = engine::math::sub(p1, p0);
-  const engine::math::Vec3 d2 = engine::math::sub(q1, q0);
-  const engine::math::Vec3 r = engine::math::sub(p0, q0);
-  const float a = engine::math::dot(d1, d1);
-  const float e = engine::math::dot(d2, d2);
-  const float f = engine::math::dot(d2, r);
-
-  float s = 0.0F;
-  float t = 0.0F;
-
-  if (a <= 1e-12F && e <= 1e-12F) {
-    outClosestP = p0;
-    outClosestQ = q0;
-    const engine::math::Vec3 diff = engine::math::sub(outClosestP, outClosestQ);
-    return engine::math::dot(diff, diff);
-  }
-
-  if (a <= 1e-12F) {
-    s = 0.0F;
-    t = std::max(0.0F, std::min(f / e, 1.0F));
-  } else {
-    const float c = engine::math::dot(d1, r);
-    if (e <= 1e-12F) {
-      t = 0.0F;
-      s = std::max(0.0F, std::min(-c / a, 1.0F));
-    } else {
-      const float b = engine::math::dot(d1, d2);
-      const float denom = a * e - b * b;
-
-      if (denom > 1e-12F) {
-        s = std::max(0.0F, std::min((b * f - c * e) / denom, 1.0F));
-      } else {
-        s = 0.0F;
-      }
-
-      t = (b * s + f) / e;
-      if (t < 0.0F) {
-        t = 0.0F;
-        s = std::max(0.0F, std::min(-c / a, 1.0F));
-      } else if (t > 1.0F) {
-        t = 1.0F;
-        s = std::max(0.0F, std::min((b - c) / a, 1.0F));
-      }
-    }
-  }
-
-  outClosestP = engine::math::add(p0, engine::math::mul(d1, s));
-  outClosestQ = engine::math::add(q0, engine::math::mul(d2, t));
-  const engine::math::Vec3 diff = engine::math::sub(outClosestP, outClosestQ);
-  return engine::math::dot(diff, diff);
-}
+// closest_point_on_segment / closest_point_segment_segment moved to
+// physics_internal.h (shared with ccd.cpp's rotation-aware capsule normals).
 
 // Closest point on an AABB (defined by center + halfExtents) to a point.
 engine::math::Vec3
