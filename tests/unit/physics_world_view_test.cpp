@@ -124,9 +124,10 @@ private:
 
 // --- Tests ------------------------------------------------------------------
 
-// PhysicsContext is ~1 MB of fixed storage; the stub embeds it by value, so
-// fixtures heap-construct like production Worlds do — a stack instance
-// overflows Windows' 1 MB default thread stack.
+// The stub embeds PhysicsContext by value; fixtures heap-construct like
+// production Worlds do (issue #129 shrank the struct off the Windows
+// stack-overflow trap, but stack-heavy fixtures stay heap-backed on
+// principle).
 [[nodiscard]] std::unique_ptr<StubPhysicsWorld> make_stub() noexcept {
   return std::unique_ptr<StubPhysicsWorld>(new (std::nothrow)
                                                StubPhysicsWorld());

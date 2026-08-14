@@ -44,8 +44,13 @@ inline JointId claim_joint_slot(PhysicsContext &context,
   }
   *outSlot = nullptr;
 
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return kInvalidJointId;
+  }
+
   for (std::size_t index = 0U; index < kMaxPhysicsJoints; ++index) {
-    PhysicsJointSlot &slot = context.joints[index];
+    PhysicsJointSlot &slot = store->joints[index];
     if (slot.active) {
       continue;
     }
@@ -76,7 +81,12 @@ inline PhysicsJointSlot *find_joint_slot(PhysicsContext &context,
     return nullptr;
   }
 
-  PhysicsJointSlot &slot = context.joints[index];
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return nullptr;
+  }
+
+  PhysicsJointSlot &slot = store->joints[index];
   if (!slot.active || (slot.generation != generation)) {
     return nullptr;
   }

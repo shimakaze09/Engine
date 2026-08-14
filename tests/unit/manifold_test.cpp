@@ -15,9 +15,9 @@ namespace {
 namespace math = engine::math;
 namespace physics = engine::physics;
 
-// PhysicsContext is ~1 MB (8 KB under Windows' 1 MB default thread stack),
-// so every test constructs it on the heap; two on one frame is a certain
-// overflow.
+// Heap-construct like production Worlds do (issue #129 shrank
+// PhysicsContext off the Windows stack-overflow trap, but stack-heavy
+// fixtures stay heap-backed on principle).
 [[nodiscard]] std::unique_ptr<physics::PhysicsContext> make_ctx() noexcept {
   return std::unique_ptr<physics::PhysicsContext>(
       new (std::nothrow) physics::PhysicsContext{});

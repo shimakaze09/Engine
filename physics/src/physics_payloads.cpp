@@ -78,7 +78,6 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   }
 
   gravity = other.gravity;
-  joints = other.joints;
   jointCount = other.jointCount;
   collisionPairData = other.collisionPairData;
   collisionPairCount = other.collisionPairCount;
@@ -89,7 +88,6 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   pairHashKeys = other.pairHashKeys;
   pairHashStamps = other.pairHashStamps;
   pairHashGeneration = other.pairHashGeneration;
-  testedStamps = other.testedStamps;
   testedGeneration = other.testedGeneration;
   ccdColliderCount = other.ccdColliderCount;
   ccdHasCompoundColliders = other.ccdHasCompoundColliders;

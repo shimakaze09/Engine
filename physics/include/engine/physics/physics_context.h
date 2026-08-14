@@ -104,6 +104,12 @@ struct PhysicsJointSlot final {
 
 /// Stores large shape payloads owned by a physics context.
 struct PhysicsShapeStore final {
+  // Joint slot table and broadphase dedupe stamps (issue #129): moved off
+  // PhysicsContext itself, which a Windows main-red incident found sat ~8 KB
+  // under the platform's 1 MB default thread stack when stack-constructed.
+  std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
+  std::array<std::uint32_t, kMaxColliders> testedStamps{};
+
   std::array<ConvexHullData, kMaxConvexHulls> convexHullData{};
   std::array<Entity, kMaxConvexHulls> convexHullEntity{};
   std::size_t convexHullCount = 0U;
@@ -174,7 +180,8 @@ struct PhysicsContext final {
   ~PhysicsContext() = default;
 
   math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
-  std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
+  // Slot table lives in shapeStore; joint-adding code must never let
+  // jointCount go nonzero without a live store (see joint_handle.h).
   std::size_t jointCount = 0U;
 
   // Packed collision pairs: [entityIndexA0, entityIndexB0, ...]
@@ -197,8 +204,9 @@ struct PhysicsContext final {
   std::array<std::uint32_t, kCollisionPairHashBuckets> pairHashStamps{};
   std::uint32_t pairHashGeneration = 1U;
 
-  // O(1) broadphase neighbor dedupe using per-collider generation stamps.
-  std::array<std::uint32_t, kMaxColliders> testedStamps{};
+  // O(1) broadphase neighbor dedupe using per-collider generation stamps;
+  // the stamp array itself lives in shapeStore (see kMaxColliders comment
+  // above joints in PhysicsShapeStore).
   std::uint32_t testedGeneration = 1U;
 
   // Valid entry count and compound flag for the shape store's CCD snapshot
@@ -244,5 +252,17 @@ struct PhysicsContext final {
   // Heap-backed so large heightfield buffers do not inflate World stack size.
   std::unique_ptr<PhysicsShapeStore> shapeStore;
 };
+
+// Compile-time regrowth guard for issue #129: PhysicsContext used to sit at
+// ~1,016 KB (joints[4096] + testedStamps[65536] dominated), ~8 KB under
+// Windows' 1 MB default thread stack, and a stack-constructed instance (the
+// manifold suite's original fixture) segfaulted there across four CI runs.
+// Both arrays now live in the heap-backed PhysicsShapeStore; this budget
+// catches any future field that regrows the struct toward that trap before
+// it ships. Raise it only with a matching stack-safety review.
+static_assert(sizeof(PhysicsContext) <= 200U * 1024U,
+             "PhysicsContext regrew toward the Windows stack-overflow "
+             "incident in issue #129; move new large arrays into "
+             "PhysicsShapeStore instead of raising this budget");
 
 } // namespace engine::physics

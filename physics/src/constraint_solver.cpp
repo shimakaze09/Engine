@@ -311,9 +311,18 @@ static Transform *resolve_endpoint_pose(
 /// Retires constraints whose exact generation-bearing endpoint disappeared.
 static void retire_missing_joint_endpoints(PhysicsWorldView &world,
                                            PhysicsContext &context) noexcept {
+  if (context.jointCount == 0U) {
+    return;
+  }
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+  auto &joints = store->joints;
+
   Transform endpoint{};
   for (std::size_t index = 0U; index < context.jointCount; ++index) {
-    PhysicsJointSlot &joint = context.joints[index];
+    PhysicsJointSlot &joint = joints[index];
     if (!joint.active) {
       continue;
     }
@@ -323,8 +332,7 @@ static void retire_missing_joint_endpoints(PhysicsWorldView &world,
     }
   }
 
-  while ((context.jointCount > 0U) &&
-         !context.joints[context.jointCount - 1U].active) {
+  while ((context.jointCount > 0U) && !joints[context.jointCount - 1U].active) {
     --context.jointCount;
   }
 }
@@ -354,6 +362,11 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   if (ctx.jointCount == 0U) {
     return;
   }
+  PhysicsShapeStore *store = ctx.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+  auto &joints = store->joints;
 
   // Iterations come from the per-step cvar cache (the global cvar mutex is
   // off-limits during stepping) and clamp to a documented safe range:
@@ -367,10 +380,10 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
           : 8U;
 
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
-    if (!ctx.joints[i].active) {
+    if (!joints[i].active) {
       continue;
     }
-    auto &j = ctx.joints[i];
+    auto &j = joints[i];
     const auto warmType = static_cast<JointType>(j.type);
     if ((warmType != JointType::Distance) && (warmType != JointType::Spring)) {
       continue;
@@ -418,16 +431,16 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
   }
 
   for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
-    ctx.joints[i].accumulatedImpulse = 0.0F;
+    joints[i].accumulatedImpulse = 0.0F;
   }
 
   for (std::size_t iter = 0U; iter < iterCount; ++iter) {
     for (std::size_t i = 0U; i < ctx.jointCount; ++i) {
-      if (!ctx.joints[i].active) {
+      if (!joints[i].active) {
         continue;
       }
 
-      auto &j = ctx.joints[i];
+      auto &j = joints[i];
 
       Transform *tA = world.get_transform_write_ptr(j.entityA, simToken);
       Transform *tB = world.get_transform_write_ptr(j.entityB, simToken);

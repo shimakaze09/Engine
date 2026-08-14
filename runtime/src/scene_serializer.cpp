@@ -597,9 +597,12 @@ bool serialize_scene_to_writer(const World &world,
   // slots behind, so only active joints are worth warning about.
   const auto &physicsContext = world.physics_context();
   std::size_t activeJointCount = 0U;
-  for (std::size_t i = 0U; i < physicsContext.jointCount; ++i) {
-    if (physicsContext.joints[i].active) {
-      ++activeJointCount;
+  if (physicsContext.shapeStore != nullptr) {
+    const auto &joints = physicsContext.shapeStore->joints;
+    for (std::size_t i = 0U; i < physicsContext.jointCount; ++i) {
+      if (joints[i].active) {
+        ++activeJointCount;
+      }
     }
   }
   if (activeJointCount > 0U) {

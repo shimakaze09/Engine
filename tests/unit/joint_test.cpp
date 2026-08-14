@@ -713,7 +713,7 @@ int test_destroyed_endpoint_retires_joint() noexcept {
   if (context.jointCount != 0U) {
     return 5;
   }
-  for (const physics::PhysicsJointSlot &joint : context.joints) {
+  for (const physics::PhysicsJointSlot &joint : context.shapeStore->joints) {
     if (joint.active) {
       return 6;
     }
@@ -731,7 +731,7 @@ int test_destroyed_endpoint_retires_joint() noexcept {
     return 8;
   }
   std::size_t activeCount = 0U;
-  for (const physics::PhysicsJointSlot &joint : context.joints) {
+  for (const physics::PhysicsJointSlot &joint : context.shapeStore->joints) {
     if (joint.active) {
       ++activeCount;
     }
@@ -789,7 +789,7 @@ int test_joint_validation_and_stale_ids() noexcept {
   }
 
   physics::PhysicsJointSlot *active = nullptr;
-  for (physics::PhysicsJointSlot &joint : context.joints) {
+  for (physics::PhysicsJointSlot &joint : context.shapeStore->joints) {
     if (joint.active) {
       if (active != nullptr) {
         return 5;
@@ -825,7 +825,7 @@ int test_joint_validation_and_stale_ids() noexcept {
   }
 
   active = nullptr;
-  for (physics::PhysicsJointSlot &joint : context.joints) {
+  for (physics::PhysicsJointSlot &joint : context.shapeStore->joints) {
     if (joint.active) {
       active = &joint;
       break;
