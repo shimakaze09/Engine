@@ -94,10 +94,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Ninja is single-config on every OS now; keep the multi-config
+          # fallback in case a lane returns to the VS generator.
+          exe="build/tests/integration/engine_integration_determinism"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            exe="build/tests/integration/Release/engine_integration_determinism.exe"
-          else
-            exe="build/tests/integration/engine_integration_determinism"
+            exe="$exe.exe"
+            if [ ! -x "$exe" ]; then
+              exe="build/tests/integration/Release/engine_integration_determinism.exe"
+            fi
           fi
           if [ ! -x "$exe" ]; then
             echo "FAIL: determinism executable not found or not executable: $exe"
