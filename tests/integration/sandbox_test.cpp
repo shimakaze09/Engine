@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
@@ -212,6 +213,104 @@ bool test_coroutine_instruction_limit() noexcept {
   engine::scripting::set_instruction_limit(1000000);
   engine::scripting::shutdown_scripting();
   return result;
+}
+
+// -----------------------------------------------------------------------
+// 3b2. A raw coroutine.create thread created before an instruction limit
+//      is configured, then resumed after, still shares the per-frame
+//      budget (issue #115b). Lua's lua_newthread already copies hook
+//      state from the creating thread, so a coroutine created under an
+//      ACTIVE hook is not the gap; the gap is one created while
+//      instruction accounting is off (limit 0 => no LUA_MASKCOUNT), whose
+//      inherited no-hook state nothing ever refreshes on a later resume
+//      unless resume itself re-arms it. The loop is bounded (not
+//      infinite) so this test terminates deterministically either way.
+// -----------------------------------------------------------------------
+bool test_raw_coroutine_instruction_limit() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+  engine::scripting::set_instruction_limit(0); // unlimited: no count hook yet
+
+  const char *setup = "co = coroutine.create(function()\n"
+                      "  local x = 0\n"
+                      "  for i = 1, 5000000 do x = x + 1 end\n"
+                      "  return x\n"
+                      "end)\n";
+  if (!write_script(setup) || !engine::scripting::load_script(kTempScript)) {
+    remove_script();
+    engine::scripting::shutdown_scripting();
+    return false;
+  }
+  remove_script();
+
+  // Instruction accounting turns on only now, after the thread already
+  // exists.
+  engine::scripting::set_instruction_limit(10000);
+
+  const char *resume = "coroutine.resume(co)\n";
+  if (!write_script(resume)) {
+    engine::scripting::shutdown_scripting();
+    return false;
+  }
+  bool loadOk = engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  engine::scripting::set_instruction_limit(1000000);
+  engine::scripting::shutdown_scripting();
+  return !loadOk;
+}
+
+// -----------------------------------------------------------------------
+// 3b3. Same staleness gap for coroutine.wrap (issue #115b): wrap hides its
+//      underlying thread inside the closure it returns, so it is rebuilt
+//      on top of the hooked create/resume rather than hooked directly.
+// -----------------------------------------------------------------------
+bool test_coroutine_wrap_instruction_limit() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+  engine::scripting::set_instruction_limit(0); // unlimited: no count hook yet
+
+  const char *setup = "resumer = coroutine.wrap(function()\n"
+                      "  local x = 0\n"
+                      "  for i = 1, 5000000 do x = x + 1 end\n"
+                      "  return x\n"
+                      "end)\n";
+  if (!write_script(setup) || !engine::scripting::load_script(kTempScript)) {
+    remove_script();
+    engine::scripting::shutdown_scripting();
+    return false;
+  }
+  remove_script();
+
+  engine::scripting::set_instruction_limit(10000);
+
+  const char *resume = "pcall(resumer)\n";
+  if (!write_script(resume)) {
+    engine::scripting::shutdown_scripting();
+    return false;
+  }
+  bool loadOk = engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  engine::scripting::set_instruction_limit(1000000);
+  engine::scripting::shutdown_scripting();
+  return !loadOk;
 }
 
 // -----------------------------------------------------------------------
@@ -423,6 +522,7 @@ bool test_debug_blocked() noexcept {
 
 /// Runs this executable or test program.
 int main() {
+  static_cast<void>(engine::core::initialize_logging());
   int failures = 0;
 
   struct TestCase {
@@ -435,6 +535,8 @@ int main() {
       {"safe_globals_available", test_safe_globals_available},
       {"instruction_limit", test_instruction_limit},
       {"coroutine_instruction_limit", test_coroutine_instruction_limit},
+      {"raw_coroutine_instruction_limit", test_raw_coroutine_instruction_limit},
+      {"coroutine_wrap_instruction_limit", test_coroutine_wrap_instruction_limit},
       {"coroutine_budget_shared_per_frame",
        test_coroutine_budget_shared_per_frame},
       {"memory_limit", test_memory_limit},

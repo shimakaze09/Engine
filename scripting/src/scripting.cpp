@@ -315,6 +315,7 @@ int open_libraries_trampoline(lua_State *state) noexcept {
   luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
   lua_pop(state, 1);
   luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
+  install_hooked_coroutine_library(state);
   lua_pop(state, 1);
   luaL_requiref(state, LUA_TABLIBNAME, luaopen_table, 1);
   lua_pop(state, 1);

@@ -3,6 +3,7 @@
 #include "coroutine_bindings.h"
 
 #include "binding_util.h"
+#include "debug_bindings.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -130,6 +131,50 @@ public:
 };
 
 CoroutineScheduler g_coroutineScheduler;
+
+// #115b: Lua's lua_newthread (the C function behind coroutine.create)
+// already copies the creating thread's hookmask/hook/basehookcount into
+// the new thread, so a raw coroutine created while the shared debug/
+// sandbox hook is armed is not fully unhooked. The gap that survives that
+// inheritance is staleness: a coroutine created before sandboxing turns on
+// (or before an instruction limit is set) freezes that no-hook state
+// forever, since nothing re-applies the CURRENT hook configuration to it
+// on a later resume the way engine.start_coroutine's tracked coroutines
+// get via refreshLuaHook before every resume. Wrapping both create (belt)
+// and resume (suspenders, and the one that actually closes the staleness
+// gap) gives raw coroutines the identical before-every-resume guarantee.
+
+/// C replacement for coroutine.create: creates the thread via the real
+/// implementation captured as upvalue 1, then arms the shared hook on it
+/// so a coroutine that is resumed without ever going through the wrapped
+/// resume below (e.g. lua_resume called directly from other C code) still
+/// starts with a correct hook rather than whatever it inherited.
+int lua_coroutine_create_hooked(lua_State *state) noexcept {
+  lua_pushvalue(state, lua_upvalueindex(1));
+  lua_pushvalue(state, 1);
+  lua_call(state, 1, 1);
+  if (lua_isthread(state, -1) != 0) {
+    arm_debug_lua_hook(lua_tothread(state, -1));
+  }
+  return 1;
+}
+
+/// C replacement for coroutine.resume: re-arms the shared hook on the
+/// target thread with the CURRENT sandbox/debug configuration immediately
+/// before resuming, then forwards every argument and result. This is what
+/// actually closes the staleness gap above — engine.start_coroutine's
+/// tracked coroutines already get this before every resume
+/// (tick_lua_coroutines); raw ones did not.
+int lua_coroutine_resume_hooked(lua_State *state) noexcept {
+  const int nargs = lua_gettop(state);
+  if (lua_isthread(state, 1) != 0) {
+    arm_debug_lua_hook(lua_tothread(state, 1));
+  }
+  lua_pushvalue(state, lua_upvalueindex(1));
+  lua_insert(state, 1);
+  lua_call(state, nargs, LUA_MULTRET);
+  return lua_gettop(state);
+}
 
 } // namespace
 
@@ -276,6 +321,53 @@ void clear_lua_coroutines(lua_State *state) noexcept {
   for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
     g_coroutineScheduler.release_entry(state, g_coroutineScheduler.m_entries[i]);
   }
+}
+
+void install_hooked_coroutine_library(lua_State *state) noexcept {
+  lua_getfield(state, -1, "create");
+  if (lua_iscfunction(state, -1) == 0) {
+    lua_pop(state, 1);
+    return;
+  }
+  lua_pushcclosure(state, &lua_coroutine_create_hooked, 1);
+  lua_setfield(state, -2, "create");
+
+  lua_getfield(state, -1, "resume");
+  if (lua_iscfunction(state, -1) == 0) {
+    lua_pop(state, 1);
+    return;
+  }
+  lua_pushcclosure(state, &lua_coroutine_resume_hooked, 1);
+  lua_setfield(state, -2, "resume");
+
+  // coroutine.wrap hides its underlying thread inside the closure it
+  // returns, so there is no C-API way to hook it after the fact; rebuild
+  // it in Lua on top of the now-hooked create so a wrapped coroutine's
+  // thread is hooked too. error(results[2], 0) forwards the resume error
+  // object (string or not) unchanged, matching the stock implementation's
+  // no-extra-position-info behavior.
+  constexpr const char *kWrapShim =
+      "return function(create)\n"
+      "  return function(f)\n"
+      "    local co = create(f)\n"
+      "    return function(...)\n"
+      "      local results = { coroutine.resume(co, ...) }\n"
+      "      if not results[1] then error(results[2], 0) end\n"
+      "      return table.unpack(results, 2)\n"
+      "    end\n"
+      "  end\n"
+      "end\n";
+  if ((luaL_loadstring(state, kWrapShim) != LUA_OK) ||
+      (lua_pcall(state, 0, 1, 0) != LUA_OK)) {
+    lua_pop(state, 1);
+    return;
+  }
+  lua_getfield(state, -2, "create");
+  if (lua_pcall(state, 1, 1, 0) != LUA_OK) {
+    lua_pop(state, 1);
+    return;
+  }
+  lua_setfield(state, -2, "wrap");
 }
 
 } // namespace engine::scripting
