@@ -752,6 +752,8 @@ int lua_engine_set_joint_limits(lua_State *state) noexcept {
   return 0;
 }
 
+// #125: get_half_extents/get_restitution/get_friction read through any
+// same-frame queued collider write instead of only the committed snapshot.
 int lua_engine_get_half_extents(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -759,7 +761,7 @@ int lua_engine_get_half_extents(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -794,7 +796,7 @@ int lua_engine_get_restitution(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
@@ -809,7 +811,7 @@ int lua_engine_get_friction(lua_State *state) noexcept {
     return 1;
   }
   runtime::Collider collider{};
-  if (!runtime_binding().world->get_collider(entity, &collider)) {
+  if (!latest_collider(entity, &collider)) {
     lua_pushnil(state);
     return 1;
   }
