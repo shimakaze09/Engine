@@ -880,12 +880,37 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
 
 void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 
+// H-16 remainder (#93a): scene transitions reset the World's TimerManager
+// (reset_world/load_scene) but that layer cannot reach the scripting-side
+// Lua registry refs, so a transition mid-flight left them pinned, retaining
+// closures (and any old-world entity handles their upvalues captured) past
+// the outgoing scene's lifetime. Mirror clear_coroutines(): the engine
+// pipeline calls this at the same transition point so no stale timer ref
+// survives into the replacement world.
+void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
+
 void tick_coroutines() noexcept {
   tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
                       arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
+
+// H-16 remainder (#93b): entity pools created from Lua were never retired
+// at a scene transition, only at full VM shutdown, so every transition that
+// used the pool API leaked one of the fixed 16 slots and left any pool id a
+// script still held pointing at a slot whose world content had moved on.
+// The engine pipeline now calls this at the same transition point as
+// clear_coroutines(); the returned pool ids carry the creating world's
+// content epoch (entity_pool_bindings.cpp), so a stale id from before the
+// reset is rejected instead of aliasing a same-numbered replacement pool.
+void clear_entity_pools() noexcept { reset_entity_pool_bindings(); }
+
+std::size_t active_timer_ref_count() noexcept {
+  return active_lua_timer_ref_count();
+}
+
+std::size_t active_entity_pool_count() noexcept { return pool_slot_count(); }
 
 /// Adds a script to the hot-reload watch table (or refreshes its mtime when
 /// already watched). Watching a new file no longer drops earlier watches;

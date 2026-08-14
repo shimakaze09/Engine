@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 struct lua_State;
 
 namespace engine::scripting {
@@ -18,5 +20,9 @@ void clear_lua_timer_bindings(lua_State *fallbackState) noexcept;
 
 /// Rewires restored Lua timers and advances the current world timer manager.
 void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept;
+
+/// Count of live Lua registry refs held by timer callbacks (test/production
+/// introspection for #93a: a scene transition must drain this to zero).
+std::size_t active_lua_timer_ref_count() noexcept;
 
 } // namespace engine::scripting
