@@ -156,8 +156,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/_deps
-          key: deps-v2-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-${{ matrix.os }}-
+          key: deps-v2-compat-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v2-compat-${{ matrix.os }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
