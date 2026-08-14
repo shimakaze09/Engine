@@ -193,9 +193,12 @@ struct RuntimeServices final {
   std::uint32_t (*add_fixed_joint)(
       runtime::World *world, std::uint32_t entityIndexA,
       std::uint32_t entityIndexB) noexcept = nullptr;
-  void (*set_joint_limits)(runtime::World *world, std::uint32_t jointId,
+  // false (issue #126) on a stale/invalid joint id, wrong joint type,
+  // out-of-range limits, or outside the Input phase, so a script can tell a
+  // dropped write from an applied one.
+  bool (*set_joint_limits)(runtime::World *world, std::uint32_t jointId,
                            float minLimit, float maxLimit) noexcept = nullptr;
-  void (*remove_joint)(runtime::World *world,
+  bool (*remove_joint)(runtime::World *world,
                        std::uint32_t jointId) noexcept = nullptr;
   void (*wake_body)(runtime::World *world,
                     std::uint32_t entityIndex) noexcept = nullptr;

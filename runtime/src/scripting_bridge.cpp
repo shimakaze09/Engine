@@ -395,12 +395,12 @@ std::uint32_t scripting_add_distance_joint(runtime::World *world,
       runtime::add_distance_joint(*world, entityA, entityB, distance));
 }
 
-void scripting_remove_joint(runtime::World *world,
+bool scripting_remove_joint(runtime::World *world,
                             std::uint32_t jointId) noexcept {
   if (world == nullptr) {
-    return;
+    return false;
   }
-  runtime::remove_joint(*world, static_cast<physics::JointId>(jointId));
+  return runtime::remove_joint(*world, static_cast<physics::JointId>(jointId));
 }
 
 std::uint32_t scripting_add_hinge_joint(runtime::World *world,
@@ -476,13 +476,13 @@ std::uint32_t scripting_add_fixed_joint(runtime::World *world,
       runtime::add_fixed_joint(*world, entityA, entityB));
 }
 
-void scripting_set_joint_limits(runtime::World *world, std::uint32_t jointId,
+bool scripting_set_joint_limits(runtime::World *world, std::uint32_t jointId,
                                 float minLimit, float maxLimit) noexcept {
   if (world == nullptr) {
-    return;
+    return false;
   }
-  runtime::set_joint_limits(*world, static_cast<physics::JointId>(jointId),
-                            minLimit, maxLimit);
+  return runtime::set_joint_limits(
+      *world, static_cast<physics::JointId>(jointId), minLimit, maxLimit);
 }
 
 void scripting_wake_body(runtime::World *world,

@@ -2,6 +2,13 @@
 // every constructor returns nil for binding-level and native-level
 // rejections (invalid handles, bad parameters, self-joints, full table)
 // while successful ids stay round-trippable through limits and removal.
+//
+// Also verifies the matching mutator contract (#126): set_joint_limits and
+// remove_joint join the constructors' nil-on-failure convention (true on
+// success, nil — not false — on failure) so a script can tell a dropped
+// write from an applied one, covering a live id, a native-level rejection
+// (wrong joint type), a stale id after removal, an out-of-range id, and the
+// unbound-service path.
 
 #include <cstdio>
 #include <cstring>
@@ -124,6 +131,49 @@ constexpr const char *kScript =
     "    local reused = engine.add_distance_joint(g_a, g_b, 2.0)\n"
     "    expect_id(reused, 'post-removal claim')\n"
     "    engine.remove_joint(reused)\n"
+    "end\n"
+    "function verify_mutator_success_and_native_rejection()\n"
+    "    local hinge = expect_id(engine.add_hinge_joint(g_a, g_b, 1.0, 0.0,\n"
+    "        0.0, 0.0, 1.0, 0.0), 'hinge')\n"
+    "    if engine.set_joint_limits(hinge, -0.5, 0.5) ~= true then\n"
+    "        error('set_joint_limits on a live hinge must return true')\n"
+    "    end\n"
+    "    local distance = expect_id(engine.add_distance_joint(g_a, g_b, 2.0),\n"
+    "                               'distance')\n"
+    "    -- Distance joints have no limits: a native-level type rejection,\n"
+    "    -- distinct from a stale/invalid id, must still report nil.\n"
+    "    expect_nil(engine.set_joint_limits(distance, 0.0, 1.0),\n"
+    "               'set_joint_limits on a non-hinge/slider joint')\n"
+    "    if engine.remove_joint(hinge) ~= true then\n"
+    "        error('remove_joint on a live joint must return true')\n"
+    "    end\n"
+    "    if engine.remove_joint(distance) ~= true then\n"
+    "        error('remove_joint on a live joint must return true')\n"
+    "    end\n"
+    "end\n"
+    "function verify_mutator_stale_id_rejected()\n"
+    "    local id = expect_id(engine.add_hinge_joint(g_a, g_b, 1.0, 0.0, 0.0,\n"
+    "        0.0, 1.0, 0.0), 'hinge')\n"
+    "    if engine.remove_joint(id) ~= true then\n"
+    "        error('remove_joint on a live joint must return true')\n"
+    "    end\n"
+    "    -- id is now stale: both mutators must report nil, not silently\n"
+    "    -- no-op as they did before #126.\n"
+    "    expect_nil(engine.set_joint_limits(id, -0.5, 0.5),\n"
+    "               'set_joint_limits on a stale id')\n"
+    "    expect_nil(engine.remove_joint(id), 'remove_joint on a stale id')\n"
+    "end\n"
+    "function verify_mutator_invalid_id_rejected()\n"
+    "    expect_nil(engine.set_joint_limits(999999, 0.0, 1.0),\n"
+    "               'set_joint_limits on an out-of-range id')\n"
+    "    expect_nil(engine.remove_joint(999999),\n"
+    "               'remove_joint on an out-of-range id')\n"
+    "end\n"
+    "function verify_mutator_unbound_service_rejected()\n"
+    "    expect_nil(engine.set_joint_limits(1, 0.0, 1.0),\n"
+    "               'set_joint_limits with no bound runtime')\n"
+    "    expect_nil(engine.remove_joint(1),\n"
+    "               'remove_joint with no bound runtime')\n"
     "end\n";
 
 } // namespace
@@ -160,6 +210,20 @@ int main() {
             "native-level rejection returns nil");
   ctx.check(sc::call_script_function("verify_capacity_rejection"),
             "joint table exhaustion returns nil");
+  ctx.check(sc::call_script_function("verify_mutator_success_and_native_rejection"),
+            "set_joint_limits/remove_joint report true for a live joint, "
+            "nil for a native-level type rejection");
+  ctx.check(sc::call_script_function("verify_mutator_stale_id_rejected"),
+            "set_joint_limits/remove_joint report nil for a stale id after "
+            "removal");
+  ctx.check(sc::call_script_function("verify_mutator_invalid_id_rejected"),
+            "set_joint_limits/remove_joint report nil for an out-of-range id");
+
+  // #126 unbound-service path: the mutators must fail closed (nil), not
+  // crash, once the runtime binding is torn down.
+  rt::unbind_scripting_runtime(serviceLocator);
+  ctx.check(sc::call_script_function("verify_mutator_unbound_service_rejected"),
+            "set_joint_limits/remove_joint report nil with no bound runtime");
 
   sc::shutdown_scripting();
   static_cast<void>(std::remove(kScriptPath));

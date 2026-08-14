@@ -620,6 +620,19 @@ int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   return 1;
 }
 
+/// Pushes the nil-on-failure result the joint constructors settled on
+/// (issue #126): true on success, nil (not false) so a stale id, an
+/// unbound service, or a rejected write are all indistinguishable failures
+/// from the caller's perspective, same as a failed constructor.
+int push_joint_mutation_result(lua_State *state, bool ok) noexcept {
+  if (ok) {
+    lua_pushboolean(state, 1);
+  } else {
+    lua_pushnil(state);
+  }
+  return 1;
+}
+
 // engine.add_distance_joint(entityA, entityB [, distance]) → joint_id | nil
 int lua_engine_add_distance_joint(lua_State *state) noexcept {
   runtime::Entity entityA{};
@@ -637,15 +650,16 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
   return push_joint_result(state, id);
 }
 
+// engine.remove_joint(jointId) → true | nil
 int lua_engine_remove_joint(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    return 0;
+  if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->remove_joint == nullptr)) {
+    lua_pushnil(state);
+    return 1;
   }
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->remove_joint != nullptr)) {
-    runtime_binding().services->remove_joint(
-        runtime_binding().world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
-  }
-  return 0;
+  const bool ok = runtime_binding().services->remove_joint(
+      runtime_binding().world, static_cast<std::uint32_t>(lua_tointeger(state, 1)));
+  return push_joint_mutation_result(state, ok);
 }
 
 // engine.add_hinge_joint(entityA, entityB, pivotX, pivotY, pivotZ, axisX,
@@ -738,18 +752,19 @@ int lua_engine_add_fixed_joint(lua_State *state) noexcept {
   return push_joint_result(state, id);
 }
 
-// engine.set_joint_limits(jointId, minLimit, maxLimit)
+// engine.set_joint_limits(jointId, minLimit, maxLimit) → true | nil
 int lua_engine_set_joint_limits(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    return 0;
+  if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
+      (runtime_binding().services->set_joint_limits == nullptr)) {
+    lua_pushnil(state);
+    return 1;
   }
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_joint_limits != nullptr)) {
-    const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    const auto minL = static_cast<float>(luaL_optnumber(state, 2, 0.0));
-    const auto maxL = static_cast<float>(luaL_optnumber(state, 3, 0.0));
-    runtime_binding().services->set_joint_limits(runtime_binding().world, id, minL, maxL);
-  }
-  return 0;
+  const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
+  const auto minL = static_cast<float>(luaL_optnumber(state, 2, 0.0));
+  const auto maxL = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+  const bool ok = runtime_binding().services->set_joint_limits(
+      runtime_binding().world, id, minL, maxL);
+  return push_joint_mutation_result(state, ok);
 }
 
 // #125: get_half_extents/get_restitution/get_friction read through any
