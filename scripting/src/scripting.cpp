@@ -981,6 +981,15 @@ void watch_script_file(const char *path) noexcept {
   ++g_watchedScriptCount;
 }
 
+// #115c: portable rejection proof for watch_script_file's copy_path_strict
+// call (issue #80/77e6dfe) — unlike require/load_scene/add_script_component,
+// watching a path never reads the file at registration time, so proving
+// rejection needs no on-disk fixture at the truncated length and sidesteps
+// the Windows MAX_PATH staging problem that left this call site's rejection
+// unpinned by a red regression. A synthetic over-long string leaves this
+// count unchanged; a normal path grows it by exactly one.
+std::size_t watched_script_count() noexcept { return g_watchedScriptCount; }
+
 /// Polls every watched script and reloads the ones whose mtime changed.
 void check_script_reload() noexcept {
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {

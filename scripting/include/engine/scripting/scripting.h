@@ -121,6 +121,9 @@ void clear_pending_scene_op() noexcept;
 
 // Begin watching a Lua script file for changes (hot-reload).
 void watch_script_file(const char *path) noexcept;
+/// Count of scripts currently in the hot-reload watch table; unchanged by
+/// a rejected (over-long or jailed) watch_script_file call.
+std::size_t watched_script_count() noexcept;
 
 // Reload changed watched scripts atomically; failed execution restores all
 // previous top-level global bindings.
