@@ -636,16 +636,25 @@ struct GlobalsSnapshotArgs final {
   int ref = LUA_NOREF;
 };
 
-// Rollback covers tables reachable from _G through table fields down to
-// this depth; deeper tables (and closure upvalues, metatables, userdata,
-// registry-only state) stay shared and are not rolled back.
+// Rollback covers tables (and, since #115a, their metatables) reachable
+// from _G through table fields down to this depth; deeper tables, closure
+// upvalues, userdata, and registry-only state stay shared and are not
+// rolled back. Upvalues are deliberately out of scope: Lua joins upvalues
+// across every closure created by the same enclosing function into one
+// shared cell, so restoring one closure's upvalue by index without also
+// tracking which other closures share that exact cell would silently
+// split an aliasing relationship the script depends on — that needs its
+// own design pass, not a drive-by alongside the metatable fix.
 constexpr std::size_t kMaxReloadSnapshotDepth = 8U;
 
 /// Replaces the table on top of the stack with its snapshot copy,
 /// recording orig->copy in memo and copy->orig in rev; cycles reuse the
 /// memoized copy, and depth/stack limits fall back to a shared reference.
+/// Also records the table's metatable identity in metaIndex (#115a) and
+/// walks into it the same way, so a failed reload that swaps, clears, or
+/// mutates a metatable (a common OOP class-table pattern) rolls back too.
 void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
-                         std::size_t depth) noexcept {
+                         int metaIndex, std::size_t depth) noexcept {
   const int origIndex = lua_absindex(state, -1);
   lua_pushvalue(state, origIndex);
   lua_rawget(state, memoIndex);
@@ -664,12 +673,27 @@ void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
   lua_pushvalue(state, origIndex);
   lua_rawset(state, revIndex);
 
+  if (((depth + 1U) < kMaxReloadSnapshotDepth) &&
+      (lua_checkstack(state, 8) != 0) &&
+      (lua_getmetatable(state, origIndex) != 0)) {
+    // Record the ORIGINAL metatable's identity before recursing — the
+    // recursive call replaces this stack slot with the metatable's own
+    // snapshot copy, which restore never needs directly (its fields
+    // restore through its own memo entry; only the identity link back to
+    // origIndex needs to survive here).
+    lua_pushvalue(state, origIndex);
+    lua_pushvalue(state, -2);
+    lua_rawset(state, metaIndex);
+    deep_snapshot_table(state, memoIndex, revIndex, metaIndex, depth + 1U);
+    lua_pop(state, 1);
+  }
+
   lua_pushnil(state);
   while (lua_next(state, origIndex) != 0) {
     if ((lua_istable(state, -1) != 0) &&
         ((depth + 1U) < kMaxReloadSnapshotDepth) &&
         (lua_checkstack(state, 8) != 0)) {
-      deep_snapshot_table(state, memoIndex, revIndex, depth + 1U);
+      deep_snapshot_table(state, memoIndex, revIndex, metaIndex, depth + 1U);
     }
     lua_pushvalue(state, -2);
     lua_pushvalue(state, -2);
@@ -685,22 +709,26 @@ void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
 /// registry, so allocation failure while snapshotting stays catchable.
 int snapshot_globals_trampoline(lua_State *state) noexcept {
   auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
-  lua_createtable(state, 2, 0);
+  lua_createtable(state, 3, 0);
   const int containerIndex = lua_absindex(state, -1);
   lua_newtable(state);
   const int memoIndex = lua_absindex(state, -1);
   lua_newtable(state);
   const int revIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int metaIndex = lua_absindex(state, -1);
 
   lua_pushglobaltable(state);
-  deep_snapshot_table(state, memoIndex, revIndex, 0U);
+  deep_snapshot_table(state, memoIndex, revIndex, metaIndex, 0U);
   lua_pop(state, 1);
 
   lua_pushvalue(state, memoIndex);
   lua_rawseti(state, containerIndex, 1);
   lua_pushvalue(state, revIndex);
   lua_rawseti(state, containerIndex, 2);
-  lua_pop(state, 2);
+  lua_pushvalue(state, metaIndex);
+  lua_rawseti(state, containerIndex, 3);
+  lua_pop(state, 3);
   args->ref = luaL_ref(state, LUA_REGISTRYINDEX);
   return 0;
 }
@@ -772,8 +800,11 @@ int restore_globals_trampoline(lua_State *state) noexcept {
   const int memoIndex = lua_absindex(state, -1);
   lua_rawgeti(state, containerIndex, 2);
   const int revIndex = lua_absindex(state, -1);
+  lua_rawgeti(state, containerIndex, 3);
+  const int metaIndex = lua_absindex(state, -1);
   if ((lua_istable(state, memoIndex) == 0) ||
       (lua_istable(state, revIndex) == 0) ||
+      (lua_istable(state, metaIndex) == 0) ||
       (lua_checkstack(state, 16) == 0)) {
     lua_settop(state, originalTop);
     return 0;
@@ -781,8 +812,15 @@ int restore_globals_trampoline(lua_State *state) noexcept {
 
   lua_pushnil(state);
   while (lua_next(state, memoIndex) != 0) {
-    restore_table_in_place(state, revIndex, lua_absindex(state, -2),
-                           lua_absindex(state, -1));
+    const int origIndex = lua_absindex(state, -2);
+    const int copyIndex = lua_absindex(state, -1);
+    restore_table_in_place(state, revIndex, origIndex, copyIndex);
+    // #115a: reattach the table's original metatable identity (nil clears
+    // one the failed reload added); the metatable's own fields, if it is
+    // itself a snapshotted table, were just restored by this same loop.
+    lua_pushvalue(state, origIndex);
+    lua_rawget(state, metaIndex);
+    lua_setmetatable(state, origIndex);
     lua_pop(state, 1);
   }
 
