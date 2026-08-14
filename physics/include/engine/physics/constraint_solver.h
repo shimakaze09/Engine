@@ -77,10 +77,12 @@ JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept;
 
-/// Sets finite ordered limits on a live hinge or slider; invalid input is
-/// ignored. Hinge limits are twist radians and must lie within [-pi, pi]
-/// (the wrapped twist measurement cannot enforce multi-turn ranges).
-void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
+/// Sets finite ordered limits on a live hinge or slider; false (issue #126)
+/// on a stale/invalid id, wrong joint type, or out-of-range limits, with the
+/// joint left unchanged. Hinge limits are twist radians and must lie within
+/// [-pi, pi] (the wrapped twist measurement cannot enforce multi-turn
+/// ranges).
+bool set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept;
 
 // ------ Contact Manifold API ------------------------------------------------

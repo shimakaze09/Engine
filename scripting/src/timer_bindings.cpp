@@ -238,6 +238,17 @@ void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {
   g_timerLuaState = nullptr;
 }
 
+std::size_t active_lua_timer_ref_count() noexcept {
+  ensure_timer_refs_init();
+  std::size_t count = 0U;
+  for (const auto &timerRef : g_timerLuaRefs) {
+    if (timerRef.registryRef != LUA_NOREF) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept {
   if ((state == nullptr) || (runtime_binding().world == nullptr)) {
     return;

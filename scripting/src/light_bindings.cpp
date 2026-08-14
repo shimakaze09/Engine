@@ -91,6 +91,8 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
   return 1;
 }
 
+// #125: get_light_color/get_light_intensity read through any same-frame
+// queued light-component write instead of only the committed snapshot.
 int lua_engine_get_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -98,7 +100,7 @@ int lua_engine_get_light_color(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!runtime_binding().world->get_light_component(entity, &light)) {
+  if (!latest_light_component(entity, &light)) {
     lua_pushnil(state);
     return 1;
   }
@@ -132,7 +134,7 @@ int lua_engine_get_light_intensity(lua_State *state) noexcept {
     return 1;
   }
   runtime::LightComponent light{};
-  if (!runtime_binding().world->get_light_component(entity, &light)) {
+  if (!latest_light_component(entity, &light)) {
     lua_pushnil(state);
     return 1;
   }

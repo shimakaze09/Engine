@@ -35,4 +35,17 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
 /// Releases all active Lua coroutine registry refs.
 void clear_lua_coroutines(lua_State *state) noexcept;
 
+/// Replaces coroutine.create and coroutine.resume (and reimplements
+/// coroutine.wrap on top of the replacements) so every Lua thread is armed
+/// with the CURRENT shared debug/sandbox hook before every resume, not just
+/// ones started through engine.start_coroutine (issue #115b). Lua's
+/// lua_newthread already copies hook state from the creating thread, so the
+/// gap the resume wrapper closes is staleness: a thread created before
+/// sandboxing was configured (or before a later reconfiguration) otherwise
+/// keeps running with whatever hook state it was born with. Call once,
+/// immediately after the coroutine library loads, with that library's
+/// table on top of the stack; the table is left on top on return, matching
+/// luaL_requiref's convention of leaving the pop to the caller.
+void install_hooked_coroutine_library(lua_State *state) noexcept;
+
 } // namespace engine::scripting

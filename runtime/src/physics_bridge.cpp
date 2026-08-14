@@ -24,7 +24,7 @@ void set_collision_dispatch(PhysicsWorldView &world,
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept;
 JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
                            Entity entityB, float distance) noexcept;
-void remove_joint(PhysicsWorldView &world, JointId id) noexcept;
+bool remove_joint(PhysicsWorldView &world, JointId id) noexcept;
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept;
 /// Returns whether is sleeping.
 bool is_sleeping(const PhysicsWorldView &world, Entity entity) noexcept;
@@ -199,20 +199,23 @@ physics::JointId add_fixed_joint(World &world, Entity entityA,
   return physics::add_fixed_joint(world, entityA, entityB);
 }
 
-/// Sets the requested value for joint limits.
-void set_joint_limits(World &world, physics::JointId id, float minLimit,
+/// Sets the requested value for joint limits; false (issue #126) outside
+/// the Input phase or when the physics-level set rejects the id/limits.
+bool set_joint_limits(World &world, physics::JointId id, float minLimit,
                       float maxLimit) noexcept {
   if (!require_phase(world, WorldPhase::Input, "set_joint_limits")) {
-    return;
+    return false;
   }
-  physics::set_joint_limits(world, id, minLimit, maxLimit);
+  return physics::set_joint_limits(world, id, minLimit, maxLimit);
 }
 
-void remove_joint(World &world, physics::JointId id) noexcept {
+/// Removes the given joint; false (issue #126) outside the Input phase or
+/// when the id no longer names a live joint.
+bool remove_joint(World &world, physics::JointId id) noexcept {
   if (!require_phase(world, WorldPhase::Input, "remove_joint")) {
-    return;
+    return false;
   }
-  physics::remove_joint(world, id);
+  return physics::remove_joint(world, id);
 }
 
 void wake_body(World &world, Entity entity) noexcept {

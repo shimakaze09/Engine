@@ -1,7 +1,10 @@
 // Integration tests for deep hot-reload rollback: a failed reload rolls
 // back nested table state (identity-preserving, cycle-safe, depth-capped)
 // through the production watch/check_script_reload path, and a later good
-// reload still commits.
+// reload still commits. Also covers the #115a metatable extension: a
+// swapped metatable's identity, a shared metatable's own mutated field,
+// and a metatable a failed reload added to a previously plain table all
+// roll back; closure upvalues remain a documented, uncovered gap.
 
 #include <chrono>
 #include <cstdio>
@@ -59,6 +62,10 @@ constexpr const char *kV1 =
     "local t = deep\n"
     "for i = 1, 9 do t.n = {}; t = t.n end\n"
     "t.value = 1\n"
+    "ClassMeta = { __index = { greet = function() return 'hi' end },\n"
+    "              tag = 'meta-orig' }\n"
+    "Instance = setmetatable({}, ClassMeta)\n"
+    "Plain = {}\n"
     "function verify_rollback()\n"
     "  if Config.speed ~= 1 then error('nested table field not rolled back') end\n"
     "  if Config.nested.value ~= 1 then error('deep field not rolled back') end\n"
@@ -73,6 +80,19 @@ constexpr const char *kV1 =
     "  local t = deep\n"
     "  for i = 1, 9 do t = t.n end\n"
     "  if t.value ~= 777 then error('beyond-cap leaf should stay shared') end\n"
+    "  if getmetatable(Instance) ~= ClassMeta then\n"
+    "    error('swapped metatable identity not rolled back')\n"
+    "  end\n"
+    "  if ClassMeta.tag ~= 'meta-orig' then\n"
+    "    error('shared metatable field not rolled back')\n"
+    "  end\n"
+    "  if Instance.greet == nil or Instance.greet() ~= 'hi' then\n"
+    "    error('metatable __index dispatch not rolled back')\n"
+    "  end\n"
+    "  if getmetatable(Plain) ~= nil then\n"
+    "    error('reload-added metatable on a previously plain table not '\n"
+    "          .. 'cleared')\n"
+    "  end\n"
     "end\n";
 
 constexpr const char *kFailingV2 =
@@ -86,6 +106,9 @@ constexpr const char *kFailingV2 =
     "local t = deep\n"
     "for i = 1, 9 do t = t.n end\n"
     "t.value = 777\n"
+    "ClassMeta.tag = 'meta-mutated'\n"
+    "setmetatable(Instance, { __index = { greet = function() return 'bye' end } })\n"
+    "setmetatable(Plain, { evil = true })\n"
     "function verify_rollback() error('replacement function leaked') end\n"
     "error('intentional reload failure')\n";
 

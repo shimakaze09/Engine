@@ -254,7 +254,7 @@ JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
 /// twist radians restricted to [-pi, pi]: the twist is measured with atan2
 /// and therefore wraps, so multi-turn ranges cannot be enforced and are
 /// rejected rather than silently clamping at the wrong boundary.
-void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
+bool set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
                       float maxLimit) noexcept {
   constexpr float kPi = 3.14159274F;
   PhysicsJointSlot *joint = find_joint_slot(world.physics_context(), id);
@@ -265,13 +265,13 @@ void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
       (minLimit > maxLimit)) {
     core::log_message(core::LogLevel::Error, "physics",
                       "invalid joint ID, type, or limits");
-    return;
+    return false;
   }
   if ((joint->type == JointType::Hinge) &&
       ((minLimit < -kPi) || (maxLimit > kPi))) {
     core::log_message(core::LogLevel::Error, "physics",
                       "hinge limits must lie within [-pi, pi]");
-    return;
+    return false;
   }
 
   joint->hasLimits = true;
@@ -279,6 +279,7 @@ void set_joint_limits(PhysicsWorldView &world, JointId id, float minLimit,
   joint->maxLimit = maxLimit;
   joint->twistContinuous = 0.0F;
   joint->twistTracked = false;
+  return true;
 }
 
 // --- Main constraint solver -------------------------------------------------

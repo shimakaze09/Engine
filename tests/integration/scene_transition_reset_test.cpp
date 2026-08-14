@@ -1,8 +1,8 @@
 // Verifies the declared scene-transition reset protocol: transient
-// script execution state (coroutines) from the outgoing scene must not
-// keep acting after process_pending_scene_op commits the replacement
-// world, for both load_scene and new_scene ops and across repeated
-// transitions.
+// script execution state (coroutines, timer callback refs, entity pools)
+// from the outgoing scene must not keep acting after process_pending_scene_op
+// commits the replacement world, for both load_scene and new_scene ops and
+// across repeated transitions (#93a/#93b).
 
 #include <cstdio>
 #include <cstring>
@@ -265,6 +265,146 @@ int main() {
         result = 1;
       }
       engine::scripting::clear_pending_scene_op();
+    }
+  }
+
+  // #93a: a Lua timer callback registered in the outgoing scene must not
+  // keep its Lua registry ref (and the old-world upvalues it may close
+  // over) pinned after the transition commits.
+  if (result == 0) {
+    const char *timerScript =
+        "function start_timer_and_load()\n"
+        "    engine.set_interval(function()\n"
+        "        leak = (leak or 0) + 1\n"
+        "    end, 1000)\n"
+        "    engine.load_scene(\"scene_reset_b.scene.json\")\n"
+        "end\n";
+    if (!write_text_file(kSceneAScript, timerScript) ||
+        !engine::scripting::load_script(kSceneAScript) ||
+        !engine::scripting::call_script_function("start_timer_and_load")) {
+      std::puts("timer setup failed");
+      result = 1;
+    } else if (engine::scripting::active_timer_ref_count() != 1U) {
+      std::puts("set_interval did not register a Lua timer ref");
+      result = 1;
+    } else if (!engine::runtime::process_pending_scene_op(*world)) {
+      std::puts("timer scene transition failed");
+      result = 1;
+    } else if (engine::scripting::active_timer_ref_count() != 0U) {
+      std::puts("scene transition left a stale Lua timer ref");
+      result = 1;
+    }
+  }
+
+  // #93a repeated-transition boundary: every load_scene/new_scene commit
+  // must drain the timer ref table, not just the first one.
+  if (result == 0) {
+    const char *timerLoopScript =
+        "function timer_loop_iter()\n"
+        "    engine.set_interval(function() end, 1000)\n"
+        "    engine.new_scene()\n"
+        "end\n";
+    if (!write_text_file(kSceneAScript, timerLoopScript) ||
+        !engine::scripting::load_script(kSceneAScript)) {
+      std::puts("timer loop script failed");
+      result = 1;
+    }
+    for (int i = 0; (result == 0) && (i < 5); ++i) {
+      if (!engine::scripting::call_script_function("timer_loop_iter")) {
+        std::puts("timer_loop_iter failed");
+        result = 1;
+      } else if (!engine::runtime::process_pending_scene_op(*world)) {
+        std::puts("timer loop transition failed");
+        result = 1;
+      } else if (engine::scripting::active_timer_ref_count() != 0U) {
+        std::printf("timer ref leaked at repeated transition %d\n", i);
+        result = 1;
+      }
+    }
+  }
+
+  // #93b: an entity-pool id a script held across a transition must not
+  // alias a same-numbered pool the replacement scene creates, and the
+  // outgoing scene's pool slot must be reclaimed rather than leaked.
+  if (result == 0) {
+    const char *poolAliasScript =
+        "function pool_make_a()\n"
+        "    pool_a = engine.pool_create(4)\n"
+        "    if pool_a == nil then error('pool_create failed for A') end\n"
+        "end\n"
+        "function pool_a_transition()\n"
+        "    engine.new_scene()\n"
+        "end\n"
+        "function pool_make_b()\n"
+        "    pool_b = engine.pool_create(4)\n"
+        "    if pool_b == nil then error('pool_create failed for B') end\n"
+        "end\n"
+        "function pool_assert_stale_a_rejected()\n"
+        "    if engine.pool_spawn(pool_a) ~= nil then\n"
+        "        error('stale pool id from the outgoing scene aliased ' ..\n"
+        "              'the replacement pool')\n"
+        "    end\n"
+        "end\n"
+        "function pool_assert_b_alive()\n"
+        "    if engine.pool_spawn(pool_b) == nil then\n"
+        "        error('replacement-scene pool failed to spawn')\n"
+        "    end\n"
+        "end\n";
+    if (!write_text_file(kSceneAScript, poolAliasScript) ||
+        !engine::scripting::load_script(kSceneAScript) ||
+        !engine::scripting::call_script_function("pool_make_a")) {
+      std::puts("pool alias setup failed");
+      result = 1;
+    } else if (engine::scripting::active_entity_pool_count() != 1U) {
+      std::puts("pool_create did not allocate a pool slot");
+      result = 1;
+    } else if (!engine::scripting::call_script_function("pool_a_transition")) {
+      std::puts("pool alias transition trigger failed");
+      result = 1;
+    } else {
+      if (!engine::runtime::process_pending_scene_op(*world)) {
+        std::puts("pool alias transition failed");
+        result = 1;
+      } else if (engine::scripting::active_entity_pool_count() != 0U) {
+        std::puts("outgoing scene's pool slot was not reclaimed");
+        result = 1;
+      } else if (!engine::scripting::call_script_function("pool_make_b") ||
+                 !engine::scripting::call_script_function(
+                     "pool_assert_stale_a_rejected") ||
+                 !engine::scripting::call_script_function(
+                     "pool_assert_b_alive")) {
+        std::puts("pool alias assertions failed");
+        result = 1;
+      }
+    }
+  }
+
+  // #93b repeated-transition boundary: 20 transitions (> the 16-slot pool
+  // table) each creating one pool must never exhaust pool_create once
+  // outgoing-scene pools are reclaimed at the transition boundary.
+  if (result == 0) {
+    const char *poolLoopScript =
+        "function pool_loop_iter()\n"
+        "    local p = engine.pool_create(2)\n"
+        "    if p == nil then error('pool_create exhausted') end\n"
+        "    engine.new_scene()\n"
+        "end\n";
+    if (!write_text_file(kSceneAScript, poolLoopScript) ||
+        !engine::scripting::load_script(kSceneAScript)) {
+      std::puts("pool loop script failed");
+      result = 1;
+    }
+    for (int i = 0; (result == 0) && (i < 20); ++i) {
+      if (!engine::scripting::call_script_function("pool_loop_iter")) {
+        std::printf("pool_create exhausted at transition %d\n", i);
+        result = 1;
+      } else if (!engine::runtime::process_pending_scene_op(*world)) {
+        std::puts("pool loop transition failed");
+        result = 1;
+      } else if (engine::scripting::active_entity_pool_count() != 0U) {
+        std::printf("pool slot leaked at repeated transition %d\n", i);
+        result = 1;
+      }
     }
   }
 

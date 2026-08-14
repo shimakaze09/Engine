@@ -9,6 +9,13 @@
 // on every read and write surface (require, add_script_component,
 // load_scene/save_scene, save_prefab/instantiate, load_asset_async,
 // load_sound/play_music) and no file outside the jail is created or read.
+//
+// watch_script_file (issue #115c) is covered here too, portably: unlike the
+// sites above, watching a path never reads the file at registration time,
+// so proving rejection needs no on-disk fixture at the truncated length —
+// the >511-char-fixture staging problem that left this site's rejection
+// unpinned by a red regression (this file's original commit message) does
+// not apply to a call that only ever touches a path string.
 
 #include <cstdio>
 #include <cstring>
@@ -230,6 +237,21 @@ int main() {
             "no scene file is written outside the jail");
   ctx.check(sc::call_script_function("jail_misc_rejected"),
             "backslash/drive/parent paths are jailed on asset and audio");
+
+  // #115c: watch_script_file rejection, proven without any on-disk fixture
+  // (see file header) — the count getter is the observable, portable
+  // signal a rejected call left the watch table untouched.
+  const std::size_t watchedBefore = sc::watched_script_count();
+  const std::string longWatchPath = padded_name(600U, ".lua");
+  sc::watch_script_file(longWatchPath.c_str());
+  ctx.check(sc::watched_script_count() == watchedBefore,
+            "over-long watch_script_file path leaves the watch table "
+            "unchanged");
+
+  const std::string maxWatchPath = padded_name(511U, ".lua");
+  sc::watch_script_file(maxWatchPath.c_str());
+  ctx.check(sc::watched_script_count() == (watchedBefore + 1U),
+            "511-character watch_script_file path is registered exactly");
 
   sc::clear_entity_script_modules();
   sc::shutdown_scripting();

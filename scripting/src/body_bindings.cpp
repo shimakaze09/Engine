@@ -44,21 +44,18 @@ int lua_engine_get_position(lua_State *state) noexcept {
     return 1;
   }
 
-  if (runtime_binding().services == nullptr) {
+  // #125: read through any same-frame queued transform write so a script
+  // that sets then immediately gets sees its own write, not stale
+  // committed state.
+  runtime::Transform transform{};
+  if (!latest_transform(entity, &transform)) {
     lua_pushnil(state);
     return 1;
   }
 
-  const runtime::Transform *transform =
-      runtime_binding().services->get_transform_read_ptr(runtime_binding().world, entity.index);
-  if (transform == nullptr) {
-    lua_pushnil(state);
-    return 1;
-  }
-
-  lua_pushnumber(state, static_cast<lua_Number>(transform->position.x));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->position.y));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->position.z));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.position.x));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.position.y));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.position.z));
   return 3;
 }
 
@@ -88,7 +85,7 @@ int lua_engine_get_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -244,7 +241,7 @@ int lua_engine_get_angular_velocity(lua_State *state) noexcept {
   }
 
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -314,15 +311,15 @@ int lua_engine_get_rotation(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Transform *transform = runtime_binding().world->get_transform_read_ptr(entity);
-  if (transform == nullptr) {
+  runtime::Transform transform{};
+  if (!latest_transform(entity, &transform)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<lua_Number>(transform->rotation.x));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->rotation.y));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->rotation.z));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->rotation.w));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.rotation.x));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.rotation.y));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.rotation.z));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.rotation.w));
   return 4;
 }
 
@@ -358,14 +355,14 @@ int lua_engine_get_scale(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::Transform *transform = runtime_binding().world->get_transform_read_ptr(entity);
-  if (transform == nullptr) {
+  runtime::Transform transform{};
+  if (!latest_transform(entity, &transform)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<lua_Number>(transform->scale.x));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->scale.y));
-  lua_pushnumber(state, static_cast<lua_Number>(transform->scale.z));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.scale.x));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.scale.y));
+  lua_pushnumber(state, static_cast<lua_Number>(transform.scale.z));
   return 3;
 }
 
@@ -396,7 +393,7 @@ int lua_engine_get_inverse_mass(lua_State *state) noexcept {
     return 1;
   }
   runtime::RigidBody rigidBody{};
-  if (!runtime_binding().world->get_rigid_body(entity, &rigidBody)) {
+  if (!latest_rigid_body(entity, &rigidBody)) {
     lua_pushnil(state);
     return 1;
   }
@@ -470,16 +467,15 @@ int lua_engine_get_parent(lua_State *state) noexcept {
     return 1;
   }
 
-  const runtime::Transform *transform =
-      runtime_binding().world->get_transform_read_ptr(child);
-  if ((transform == nullptr) ||
-      (transform->parentId == runtime::kInvalidPersistentId)) {
+  runtime::Transform transform{};
+  if (!latest_transform(child, &transform) ||
+      (transform.parentId == runtime::kInvalidPersistentId)) {
     lua_pushnil(state);
     return 1;
   }
 
   push_entity_handle(state, runtime_binding().world->find_entity_by_persistent_id(
-                                transform->parentId));
+                                transform.parentId));
   return 1;
 }
 

@@ -771,12 +771,12 @@ JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
   return id;
 }
 
-void remove_joint(PhysicsWorldView &world, JointId id) noexcept {
+bool remove_joint(PhysicsWorldView &world, JointId id) noexcept {
   PhysicsContext &context = world.physics_context();
   std::size_t slotIndex = 0U;
   PhysicsJointSlot *joint = find_joint_slot(context, id, &slotIndex);
   if (joint == nullptr) {
-    return;
+    return false;
   }
 
   retire_joint_slot(*joint);
@@ -784,6 +784,7 @@ void remove_joint(PhysicsWorldView &world, JointId id) noexcept {
          !context.joints[context.jointCount - 1U].active) {
     --context.jointCount;
   }
+  return true;
 }
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept {
   RigidBody *body = world.get_rigid_body_ptr(entity);

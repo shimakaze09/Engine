@@ -92,6 +92,22 @@ void flush_deferred_mutations() noexcept;
 // Clear all active coroutines (called on stop/reload).
 void clear_coroutines() noexcept;
 
+// Release Lua timer callback registry refs and clear the bound world's
+// timers (called on stop/reload and on every scene transition so no timer
+// closure outlives the world it was scheduled against).
+void clear_timers() noexcept;
+
+// Retire every Lua-created entity pool (called on stop/reload and on every
+// scene transition so pool slots don't leak and stale pool ids can't alias
+// a replacement-world pool of the same slot number).
+void clear_entity_pools() noexcept;
+
+// Introspection: live Lua timer-callback registry refs / allocated entity
+// pool slots. Exercised by scene-transition regression tests; a correct
+// transition drains both to zero.
+std::size_t active_timer_ref_count() noexcept;
+std::size_t active_entity_pool_count() noexcept;
+
 // Scene operation query — engine.cpp polls these after each fixed-step batch.
 bool has_pending_scene_op() noexcept;
 /// True when the pending op is a scene load.
@@ -105,6 +121,9 @@ void clear_pending_scene_op() noexcept;
 
 // Begin watching a Lua script file for changes (hot-reload).
 void watch_script_file(const char *path) noexcept;
+/// Count of scripts currently in the hot-reload watch table; unchanged by
+/// a rejected (over-long or jailed) watch_script_file call.
+std::size_t watched_script_count() noexcept;
 
 // Reload changed watched scripts atomically; failed execution restores all
 // previous top-level global bindings.

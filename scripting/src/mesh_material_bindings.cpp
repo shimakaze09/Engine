@@ -241,21 +241,24 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
   return 1;
 }
 
+// #125: get_albedo/get_mesh/get_roughness/get_metallic/get_opacity read
+// through any same-frame queued mesh-component write instead of only the
+// committed snapshot (copied out, mirroring the latest_mesh_component
+// helper's value semantics rather than the old pointer-into-World read).
 int lua_engine_get_albedo(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<lua_Number>(mesh->albedo.x));
-  lua_pushnumber(state, static_cast<lua_Number>(mesh->albedo.y));
-  lua_pushnumber(state, static_cast<lua_Number>(mesh->albedo.z));
+  lua_pushnumber(state, static_cast<lua_Number>(mesh.albedo.x));
+  lua_pushnumber(state, static_cast<lua_Number>(mesh.albedo.y));
+  lua_pushnumber(state, static_cast<lua_Number>(mesh.albedo.z));
   return 3;
 }
 
@@ -265,13 +268,12 @@ int lua_engine_get_mesh(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushinteger(state, static_cast<lua_Integer>(mesh->meshAssetId));
+  lua_pushinteger(state, static_cast<lua_Integer>(mesh.meshAssetId));
   return 1;
 }
 
@@ -299,13 +301,12 @@ int lua_engine_get_roughness(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<lua_Number>(mesh->roughness));
+  lua_pushnumber(state, static_cast<lua_Number>(mesh.roughness));
   return 1;
 }
 
@@ -333,13 +334,12 @@ int lua_engine_get_metallic(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<lua_Number>(mesh->metallic));
+  lua_pushnumber(state, static_cast<lua_Number>(mesh.metallic));
   return 1;
 }
 
@@ -367,13 +367,12 @@ int lua_engine_get_opacity(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const runtime::MeshComponent *mesh =
-      runtime_binding().world->get_mesh_component_ptr(entity);
-  if (mesh == nullptr) {
+  runtime::MeshComponent mesh{};
+  if (!latest_mesh_component(entity, &mesh)) {
     lua_pushnil(state);
     return 1;
   }
-  lua_pushnumber(state, static_cast<lua_Number>(mesh->opacity));
+  lua_pushnumber(state, static_cast<lua_Number>(mesh.opacity));
   return 1;
 }
 

@@ -71,11 +71,14 @@ physics::JointId add_spring_joint(World &world, Entity entityA, Entity entityB,
 physics::JointId add_fixed_joint(World &world, Entity entityA,
                                  Entity entityB) noexcept;
 /// Sets ordered joint limits: twist radians within [-pi, pi] on hinges,
-/// travel distance on sliders.
-void set_joint_limits(World &world, physics::JointId id, float minLimit,
+/// travel distance on sliders; false (issue #126) on a stale/invalid id,
+/// wrong joint type, out-of-range limits, or outside the Input phase.
+bool set_joint_limits(World &world, physics::JointId id, float minLimit,
                       float maxLimit) noexcept;
-/// Releases the joint slot; safe with kInvalidJointId.
-void remove_joint(World &world, physics::JointId id) noexcept;
+/// Releases the joint slot; false (issue #126) when the id no longer names
+/// a live joint or the call is outside the Input phase. Safe with
+/// kInvalidJointId (reports false, does not crash).
+bool remove_joint(World &world, physics::JointId id) noexcept;
 
 /// Clears the entity's sleep state so simulation resumes.
 void wake_body(World &world, Entity entity) noexcept;
