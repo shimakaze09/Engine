@@ -111,6 +111,7 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   ccdThresholdCvar = other.ccdThresholdCvar;
   blockedWarnStepsCvar = other.blockedWarnStepsCvar;
   solverIterationsCvar = other.solverIterationsCvar;
+  contactRelaxationIterationsCvar = other.contactRelaxationIterationsCvar;
 
   if (other.shapeStore == nullptr) {
     shapeStore.reset();
