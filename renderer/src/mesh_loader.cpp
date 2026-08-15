@@ -14,7 +14,7 @@
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/render_device.h"
 
-#include "asset_stale_check.h"
+#include "engine/renderer/asset_staleness.h"
 
 namespace engine::renderer {
 
