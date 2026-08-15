@@ -681,7 +681,19 @@ static void make_asset_spawn_name(const char *virtualPath,
       stem = cursor + 1;
     }
   }
-  std::snprintf(outName->name, sizeof(outName->name), "%s", stem);
+  const int written =
+      std::snprintf(outName->name, sizeof(outName->name), "%s", stem);
+  // A long asset filename still spawns (naming is cosmetic, not fatal) but
+  // must not clip into NameComponent::kMaxNameLength silently (issue #86
+  // L-07): surface it once so the author can see why the entity name was
+  // shortened instead of it just quietly not matching the file.
+  if ((written < 0) || (static_cast<std::size_t>(written) >= sizeof(outName->name))) {
+    char message[256] = {};
+    std::snprintf(message, sizeof(message),
+                  "asset spawn name truncated to %zu chars (source: %s)",
+                  sizeof(outName->name) - 1U, virtualPath);
+    core::log_message(core::LogLevel::Warning, "editor", message);
+  }
   char *dot = std::strrchr(outName->name, '.');
   if ((dot != nullptr) && (dot != outName->name)) {
     *dot = '\0';

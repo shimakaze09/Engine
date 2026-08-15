@@ -428,6 +428,29 @@ if(ENGINE_BUILD_TOOLS)
     )
 endif()
 
+engine_add_executable_target(editor_asset_spawn_name_host
+    SOURCES
+    editor_asset_spawn_name_host.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+add_test(
+    NAME engine_integration_editor_asset_spawn_name_truncation
+    COMMAND ${CMAKE_COMMAND}
+        "-DSPAWN_HOST=$<TARGET_FILE:editor_asset_spawn_name_host>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/editor_asset_spawn_name_test.cmake
+)
+set_tests_properties(
+    engine_integration_editor_asset_spawn_name_truncation
+    PROPERTIES LABELS integration
+)
+
 engine_add_test_executable(engine_integration_hotreload
     SOURCES
     hotreload_test.cpp
