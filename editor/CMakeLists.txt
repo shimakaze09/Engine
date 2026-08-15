@@ -25,4 +25,11 @@ engine_add_module_library(engine_editor
     engine_math
     engine_runtime
     engine_renderer
+    PRIVATE_DEPS
+    # editor_session.cpp/.h and editor_panels_assets.cpp call GL directly
+    # for ImGui's OpenGL3 backend and thumbnail texture upload; this used to
+    # arrive only transitively through engine_renderer's (formerly PUBLIC)
+    # OpenGL::GL dependency, so tightening that to PRIVATE there means this
+    # module needs its own explicit link (audit #178).
+    OpenGL::GL
 )

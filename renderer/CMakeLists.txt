@@ -46,6 +46,14 @@ engine_add_module_library(engine_renderer
     PUBLIC_DEPS
     engine_core
     engine_math
+    PRIVATE_DEPS
+    # GL stays inside renderer impl (CLAUDE.md); no renderer public header
+    # includes a GL type, so OpenGL::GL only needs to reach this target's
+    # own .cpp files, not every consumer's link line (audit #178 — this was
+    # PUBLIC, so every engine_renderer consumer pulled in an OpenGL usage
+    # requirement it never directly needed; editor/CMakeLists.txt now links
+    # OpenGL::GL itself since it is the one other module with real, if
+    # pre-existing and separately tracked, direct GL calls).
     OpenGL::GL
     PCH
     src/pch.h
