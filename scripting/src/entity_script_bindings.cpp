@@ -5,6 +5,7 @@
 #include "binding_util.h"
 #include "debug_bindings.h"
 #include "physics_bindings.h"
+#include "scene_bindings.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -814,12 +815,13 @@ void dispatch_entity_scripts_update(float dt) noexcept {
   }
 }
 
-void dispatch_entity_scripts_end() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
-    return;
-  }
+namespace {
 
-  runtime::World *world = runtime_binding().world;
+/// Shared body of dispatch_entity_scripts_end() and
+/// dispatch_entity_scripts_end_for_transition(): calls module.on_end_play
+/// for every alive, currently-scripted entity in the bound world, in
+/// snapshotted ScriptComponent dispatch order.
+void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
   const std::size_t count = snapshot_script_dispatch_order();
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
@@ -836,6 +838,35 @@ void dispatch_entity_scripts_end() noexcept {
     static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
                                            entity, false, 0.0F));
   }
+}
+
+} // namespace
+
+void dispatch_entity_scripts_end() noexcept {
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
+    return;
+  }
+  dispatch_entity_scripts_end_impl(runtime_binding().world);
+}
+
+void dispatch_entity_scripts_end_for_transition() noexcept {
+  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
+    return;
+  }
+  // #198: close both reentrancy holes for the duration of this dispatch —
+  // g_endPlayDispatchDepth makes can_apply_mutations_now() defer (not
+  // apply) any world mutation a handler triggers (spawn/destroy/etc.), and
+  // the teardown-dispatch flag makes engine.load_scene/new_scene reject a
+  // handler's own transition request instead of overwriting the one this
+  // dispatch is servicing. Deferred mutations queued here go stale once the
+  // replacement world commits (generation-checked, same as any other
+  // cross-transition Lua reference) and are simply dropped on the next
+  // flush.
+  begin_scene_teardown_dispatch();
+  ++g_endPlayDispatchDepth;
+  dispatch_entity_scripts_end_impl(runtime_binding().world);
+  --g_endPlayDispatchDepth;
+  end_scene_teardown_dispatch();
 }
 
 void clear_entity_script_modules() noexcept {

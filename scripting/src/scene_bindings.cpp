@@ -5,6 +5,8 @@
 #include "binding_util.h"
 #include "runtime_binding.h"
 
+#include "engine/core/logging.h"
+
 #include <cstdint>
 #include <cstdio>
 
@@ -16,6 +18,9 @@ enum class SceneOp : std::uint8_t { None, Load, New };
 
 SceneOp g_pendingSceneOp = SceneOp::None;
 char g_pendingScenePath[512] = {};
+/// Re-entrancy guard for the #198 outgoing-scene on_end_play dispatch: set
+/// only while dispatch_entity_scripts_end_for_transition() is running.
+bool g_teardownDispatchActive = false;
 
 /// Saves the current world to a scene file from Lua.
 int lua_engine_save_scene(lua_State *state) noexcept {
@@ -40,6 +45,15 @@ int lua_engine_save_scene(lua_State *state) noexcept {
 
 /// Defers a scene load request until the runtime can safely process it.
 int lua_engine_load_scene(lua_State *state) noexcept {
+  // #198: a handler running inside the outgoing scene's own on_end_play
+  // dispatch cannot be allowed to overwrite the pending op the dispatch was
+  // launched to service — reject and warn rather than corrupt it.
+  if (g_teardownDispatchActive) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "engine.load_scene ignored: called from on_end_play "
+                      "during a scene transition");
+    return 0;
+  }
   if (!lua_isstring(state, 1)) {
     return 0;
   }
@@ -59,6 +73,13 @@ int lua_engine_load_scene(lua_State *state) noexcept {
 /// Defers a new-scene request until the runtime can safely process it.
 int lua_engine_new_scene(lua_State *state) noexcept {
   static_cast<void>(state);
+  // #198: see lua_engine_load_scene — same reentrancy rejection.
+  if (g_teardownDispatchActive) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "engine.new_scene ignored: called from on_end_play "
+                      "during a scene transition");
+    return 0;
+  }
   g_pendingSceneOp = SceneOp::New;
   return 0;
 }
@@ -77,6 +98,7 @@ void register_scene_bindings(lua_State *state) noexcept {
 void reset_scene_bindings() noexcept {
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
+  g_teardownDispatchActive = false;
 }
 
 bool has_pending_scene_op() noexcept {
@@ -94,5 +116,13 @@ bool pending_scene_op_is_new() noexcept {
 const char *get_pending_scene_path() noexcept { return g_pendingScenePath; }
 
 void clear_pending_scene_op() noexcept { reset_scene_bindings(); }
+
+void begin_scene_teardown_dispatch() noexcept {
+  g_teardownDispatchActive = true;
+}
+
+void end_scene_teardown_dispatch() noexcept {
+  g_teardownDispatchActive = false;
+}
 
 } // namespace engine::scripting

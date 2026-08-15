@@ -172,6 +172,17 @@ void dispatch_entity_scripts_update(float dt) noexcept;
 // Call once when Play transitions to Stopped.
 void dispatch_entity_scripts_end() noexcept;
 
+// Call module.on_end_play(self) for every entity with a ScriptComponent in
+// the outgoing world, immediately before a script-driven scene transition
+// (engine.load_scene/engine.new_scene) commits its replacement content
+// (#198); same dispatch as dispatch_entity_scripts_end() but additionally
+// rejects a handler's own load_scene/new_scene call and defers rather than
+// applies any world mutation the handler triggers, so a reentrant handler
+// cannot corrupt the transition already in flight. Call once from
+// process_pending_scene_op, before the outgoing world's content is
+// replaced or cleared.
+void dispatch_entity_scripts_end_for_transition() noexcept;
+
 // Drop all cached entity script modules and unclaimed reload state.
 void clear_entity_script_modules() noexcept;
 

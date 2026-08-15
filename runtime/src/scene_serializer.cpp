@@ -618,13 +618,18 @@ bool serialize_scene_to_writer(const World &world,
 } // namespace
 
 /// Resets this object back to its reusable empty state for world.
-/// Declared reset order (audit H-18): entities first — the phase-
-/// independent destructive teardown, so component removal releases its
-/// physics/camera bookkeeping while those managers still exist — then
-/// timers, cameras, game mode, the content epoch, and last the animation
-/// controller registry, which must only reset once no component can
-/// still hold a controllerSlot into it.
-void reset_world(World &world) noexcept {
+/// Declared reset order (audit H-18, extended by #198): beforeTeardown
+/// first — while the outgoing entities and their script modules are still
+/// alive, this is where process_pending_scene_op dispatches on_end_play —
+/// then entities, the phase-independent destructive teardown, so component
+/// removal releases its physics/camera bookkeeping while those managers
+/// still exist, then timers, cameras, game mode, the content epoch, and
+/// last the animation controller registry, which must only reset once no
+/// component can still hold a controllerSlot into it.
+void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
+  if (beforeTeardown != nullptr) {
+    beforeTeardown();
+  }
   world.reset_all_entities();
   if (world.alive_entity_count() != 0U) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
@@ -688,7 +693,8 @@ bool save_scene(const World &world, char *buffer, std::size_t capacity,
 }
 
 /// Loads the requested resource for scene.
-bool load_scene(World &world, const char *path) noexcept {
+bool load_scene(World &world, const char *path,
+                SceneTeardownHook beforeTeardown) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with null path");
@@ -703,11 +709,18 @@ bool load_scene(World &world, const char *path) noexcept {
     return false;
   }
 
-  return load_scene(world, fileBuffer.get(), fileSize);
+  return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown);
 }
 
-/// Loads the requested resource for scene.
-bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
+/// Loads the requested resource for scene. Declared reset order (#198):
+/// every validation and staging step below runs on a scratch World and
+/// never touches the caller's world, so a failure returns false with the
+/// outgoing scene completely untouched and beforeTeardown never called;
+/// only once the replacement content is fully staged and invariant-checked
+/// does beforeTeardown fire (outgoing entities and modules still alive)
+/// immediately before the destructive `world = *committedWorld` commit.
+bool load_scene(World &world, const char *buffer, std::size_t size,
+                SceneTeardownHook beforeTeardown) noexcept {
   if ((buffer == nullptr) || (size == 0U)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with invalid input buffer");
@@ -856,6 +869,14 @@ bool load_scene(World &world, const char *buffer, std::size_t size) noexcept {
   }
 
   const std::uint32_t previousEpoch = world.content_epoch();
+
+  // Staging fully succeeded and passed its invariant checks, so the
+  // transition is now guaranteed to commit: dispatch on_end_play to the
+  // still-alive outgoing world before it is overwritten (#198).
+  if (beforeTeardown != nullptr) {
+    beforeTeardown();
+  }
+
   world = *committedWorld;
   world.mark_content_replaced(previousEpoch);
   // The replaced world's components are gone, so their cached animation

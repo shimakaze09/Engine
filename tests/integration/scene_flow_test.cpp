@@ -1,8 +1,21 @@
 // Verifies the scene transition flow end to end: a scripted entity in
 // scene A requests engine.load_scene, the pipeline-side pending-op
-// processor commits scene B into the live world, scene B's scripts fire
-// on_begin_play, and Lua globals survive the transition (the cross-scene
-// state channel the templates use). Also pins engine.new_scene teardown.
+// processor dispatches on_end_play to scene A's outgoing entities, commits
+// scene B into the live world, scene B's scripts fire on_begin_play, and
+// Lua globals survive the transition (the cross-scene state channel the
+// templates use) while the entity handle does not. Also pins
+// engine.new_scene teardown, including its own on_end_play dispatch.
+//
+// Contract migration (#198, 2026-08-16): before this change, neither
+// load_scene nor new_scene dispatched on_end_play to the outgoing scene's
+// scripted entities (only editor Stop did), so a script that released
+// resources or saved state in on_end_play silently skipped that path on
+// every script-driven transition. This file did not previously assert
+// on_end_play behavior either way; it now pins the corrected contract —
+// on_end_play fires for both ops, before the outgoing entities are torn
+// down. See tests/integration/scene_transition_end_play_test.cpp for the
+// full boundary matrix (many entities, same-frame destroy, repeated
+// transitions, failed load, reentrancy).
 
 #include <cstdio>
 #include <cstring>
@@ -123,12 +136,19 @@ int main() {
   // Scene A's script hands a value to scene B through a Lua global and
   // requests the transition; scene B's script consumes the global on
   // begin play and surfaces it as its entity name so the test can read
-  // it back through the world.
+  // it back through the world. Each script also marks a Lua global from
+  // on_end_play (#198): the VM persists across the transition (globals are
+  // the cross-scene handoff channel) but the entity handle `self` does
+  // not, so the marker itself must be a global, set before this world's
+  // content is replaced.
   const char *sceneAScript =
       "local M = {}\n"
       "function M.on_begin_play(self)\n"
       "    handoff = 7\n"
       "    engine.load_scene(\"scene_flow_b.scene.json\")\n"
+      "end\n"
+      "function M.on_end_play(self)\n"
+      "    scene_a_end_play = true\n"
       "end\n"
       "return M\n";
   const char *sceneBScript =
@@ -137,14 +157,30 @@ int main() {
       "    local started = (handoff or 0) + 1\n"
       "    engine.set_name(self, \"goal_\" .. tostring(started))\n"
       "end\n"
+      "function M.on_end_play(self)\n"
+      "    scene_b_end_play = true\n"
+      "end\n"
       "return M\n";
   const char *helperScript =
       "function request_new_scene()\n"
       "    engine.new_scene()\n"
+      "end\n"
+      "function assert_scene_a_end_play()\n"
+      "    if scene_a_end_play ~= true then\n"
+      "        error('scene A on_end_play did not fire before load_scene ' ..\n"
+      "              'committed (#198)')\n"
+      "    end\n"
+      "end\n"
+      "function assert_scene_b_end_play()\n"
+      "    if scene_b_end_play ~= true then\n"
+      "        error('scene B on_end_play did not fire before new_scene ' ..\n"
+      "              'committed (#198)')\n"
+      "    end\n"
       "end\n";
   if (!write_text_file(kSceneAScript, sceneAScript) ||
       !write_text_file(kSceneBScript, sceneBScript) ||
-      !write_text_file(kHelperScript, helperScript)) {
+      !write_text_file(kHelperScript, helperScript) ||
+      !engine::scripting::load_script(kHelperScript)) {
     std::puts("fixture write failed");
     result = 1;
   }
@@ -190,6 +226,11 @@ int main() {
       std::puts("scene A entity survived the transition");
       result = 1;
     }
+    // #198: scene A's on_end_play must have fired before scene B committed.
+    if (!engine::scripting::call_script_function("assert_scene_a_end_play")) {
+      std::puts("scene A did not receive on_end_play before load_scene");
+      result = 1;
+    }
   }
 
   // Scene B's scripts fire begin play and read the cross-scene global:
@@ -205,8 +246,7 @@ int main() {
 
   // engine.new_scene tears the world down to empty via the same path.
   if (result == 0) {
-    if (!engine::scripting::load_script(kHelperScript) ||
-        !engine::scripting::call_script_function("request_new_scene")) {
+    if (!engine::scripting::call_script_function("request_new_scene")) {
       std::puts("new-scene helper failed");
       result = 1;
     } else if (!engine::runtime::process_pending_scene_op(*world)) {
@@ -214,6 +254,12 @@ int main() {
       result = 1;
     } else if (world->alive_entity_count() != 0U) {
       std::puts("new scene left entities alive");
+      result = 1;
+    } else if (!engine::scripting::call_script_function(
+                   "assert_scene_b_end_play")) {
+      // #198: scene B's on_end_play must have fired before new_scene
+      // cleared the world.
+      std::puts("scene B did not receive on_end_play before new_scene");
       result = 1;
     }
   }
