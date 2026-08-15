@@ -471,7 +471,16 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
     }
   }
 
-  backend.instanceAttributes.resize(batch.count);
+  if (backend.instanceAttributes.size() < batch.count) {
+    // A failed grow reports failure instead of terminating (audit #204:
+    // nothrow instead of a terminating std::vector throw); the caller
+    // already falls back to per-command (non-instanced) draws whenever this
+    // function returns false, so a transient allocation failure degrades
+    // this batch to individual draw calls rather than crashing the process.
+    if (!backend.instanceAttributes.allocate(batch.count)) {
+      return false;
+    }
+  }
   for (std::uint32_t i = 0U; i < batch.count; ++i) {
     const std::size_t commandIndex =
         static_cast<std::size_t>(batch.first) + static_cast<std::size_t>(i);

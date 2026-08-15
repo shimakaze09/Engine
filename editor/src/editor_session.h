@@ -12,8 +12,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <SDL3/SDL_opengl.h>
-
 #include "imgui.h"
 #include "ImGuizmo.h"
 
@@ -34,10 +32,12 @@ namespace engine::editor {
 /// Enumerates play state values used by the engine.
 enum class PlayState : std::uint8_t { Stopped, Playing, Paused };
 
-// Thumbnail cache: maps a file path to a GL texture.
+// Thumbnail cache: maps a file path to a renderer texture handle (a
+// RenderDevice-owned GL texture id; the editor never touches GL types
+// directly, per audit #206).
 struct ThumbnailEntry final {
   char path[512] = {};
-  GLuint textureId = 0U;
+  std::uint32_t textureId = 0U;
   int width = 0;
   int height = 0;
 };
@@ -147,9 +147,11 @@ const char *editor_scene_path() noexcept;
 /// Returns the configured editor asset browser root ("" when unset).
 const char *editor_asset_root() noexcept;
 
-/// Loads (and caches) the thumbnail texture for an asset path; 0 on miss.
-GLuint load_thumbnail_texture(const char *assetPath) noexcept;
-/// Releases cached thumbnail GL textures owned by the editor.
+/// Loads (and caches) the thumbnail texture for an asset path through the
+/// renderer's RenderDevice; 0 on miss.
+std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept;
+/// Releases cached thumbnail textures owned by the editor through the
+/// renderer's RenderDevice.
 void clear_thumbnail_cache() noexcept;
 
 /// True when the attached world exists, is stopped, and accepts edits.

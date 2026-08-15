@@ -18,6 +18,16 @@ engine_add_test_executable(engine_integration_pipeline_camera_prep
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_tick_cadence
+    SOURCES
+    pipeline_tick_cadence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    gpu;integration
+)
+
 engine_add_test_executable(engine_integration_vertical_slice
     SOURCES
     vertical_slice_integration.cpp

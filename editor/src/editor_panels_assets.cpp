@@ -13,9 +13,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <SDL3/SDL_opengl.h>
-
-#include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -346,7 +343,7 @@ void draw_asset_browser_panel() noexcept {
     ImGui::Separator();
     ImGui::TextWrapped("Selected: %s", editor_session().selectedAssetPath);
 
-      const GLuint thumbTex = load_thumbnail_texture(editor_session().selectedAssetPath);
+      const std::uint32_t thumbTex = load_thumbnail_texture(editor_session().selectedAssetPath);
     if (thumbTex != 0U) {
       ImGui::Image(
           static_cast<ImTextureID>(static_cast<std::uintptr_t>(thumbTex)),

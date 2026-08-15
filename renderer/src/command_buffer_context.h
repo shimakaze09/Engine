@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "engine/core/nothrow_buffer.h"
 #include "engine/math/mat4.h"
 #include "engine/math/vec4.h"
 #include "engine/renderer/camera.h"
@@ -293,15 +294,23 @@ struct BackendState final {
   // allocated height so viewport growth recreates it.
   std::uint32_t tileLightTex = 0U;
   int tileLightTexRows = 0;
-  std::vector<float> tileBuffer;
+  // Grow-only nothrow-allocating scratch buffer (audit #204): a failed grow
+  // leaves this at zero capacity instead of terminating, and the downstream
+  // dataSize < requiredSize check in cull_lights_tiled already degrades
+  // gracefully (deferred lighting renders without local lights that frame).
+  core::NothrowBuffer<float> tileBuffer;
 
   // Per-light data texture consumed by the deferred lighting shader
   // (uploaded each frame; fixed layout, see light_culling.h).
   std::uint32_t lightDataTex = 0U;
   std::array<float, kLightDataBufferSize> lightDataBuffer{};
   std::uint32_t instanceMatrixBuffer = 0U;
-  std::vector<InstanceAttributes> instanceAttributes;
-  std::vector<StaticMeshBatch> staticMeshBatches;
+  // Grow-only nothrow-allocating scratch buffers (audit #204): a failed grow
+  // leaves the buffer empty instead of terminating; callers already treat a
+  // too-small capacity as a safe degrade (fewer/no batches, non-instanced
+  // draw fallback) rather than a correctness requirement on exact sizing.
+  core::NothrowBuffer<InstanceAttributes> instanceAttributes;
+  core::NothrowBuffer<StaticMeshBatch> staticMeshBatches;
 
   // Bloom state.
   ShaderProgramHandle bloomThresholdShaderHandle{};

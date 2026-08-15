@@ -335,7 +335,11 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     const std::size_t tileBufferSize =
         compute_tile_buffer_size(drawableWidth, drawableHeight);
     if (backend.tileBuffer.size() < tileBufferSize) {
-      backend.tileBuffer.resize(tileBufferSize, 0.0F);
+      // A failed grow leaves the buffer at zero capacity (audit #204:
+      // nothrow instead of a terminating std::vector throw); the
+      // dataSize < requiredSize check inside cull_lights_tiled below
+      // already treats an undersized buffer as a graceful cull failure.
+      static_cast<void>(backend.tileBuffer.allocate(tileBufferSize));
     }
 
     TileLightData tileData{};
