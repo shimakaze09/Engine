@@ -664,6 +664,13 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.collisionPairOverflowActive = false;
   }
 
+  // Extra outer passes over this frame's cached contacts (issue #123):
+  // propagates corrections through contact chains (stacks) within this step
+  // instead of leaving convergence to accumulate one frame at a time via
+  // warm start alone. Runs before joints solve, mirroring the primary
+  // resolve's contacts-then-joints order.
+  relax_cached_contacts(world, simToken, physicsCtx);
+
   solve_constraints(world, deltaSeconds);
 
   const std::size_t rigidBodyCount = world.rigid_body_count();

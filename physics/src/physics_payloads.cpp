@@ -53,6 +53,14 @@ bool register_physics_cvars() noexcept {
              "velocity-driven body is not moving (0 disables)") &&
          ok;
   }
+  if (!cvar_exists("physics.contact_relaxation_iterations")) {
+    ok = core::cvar_register_int(
+             "physics.contact_relaxation_iterations", 4,
+             "Extra outer passes over the contact-manifold cache per step, "
+             "propagating corrections through contact chains so resting "
+             "stacks converge and sleep (0 disables)") &&
+         ok;
+  }
   return ok;
 }
 
@@ -61,6 +69,8 @@ void refresh_step_cvar_cache(PhysicsContext &context) noexcept {
   context.solverIterationsCvar = core::cvar_get_int("physics.solver_iterations");
   context.blockedWarnStepsCvar =
       core::cvar_get_float("physics.blocked_warn_steps", 30.0F);
+  context.contactRelaxationIterationsCvar =
+      core::cvar_get_int("physics.contact_relaxation_iterations", 4);
 }
 
 PhysicsContext::PhysicsContext() noexcept

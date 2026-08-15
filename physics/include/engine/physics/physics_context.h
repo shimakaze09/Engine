@@ -248,6 +248,12 @@ struct PhysicsContext final {
   float ccdThresholdCvar = 2.0F;
   float blockedWarnStepsCvar = 30.0F;
   int solverIterationsCvar = 8;
+  // Extra outer passes over the persistent contact-manifold cache after the
+  // primary narrow-phase resolve (issue #123): propagates corrections
+  // through contact chains (stacks) within one step instead of leaving them
+  // for next step's warm start. 0 disables and reproduces the pre-#123
+  // single-pass behavior.
+  int contactRelaxationIterationsCvar = 4;
 
   // Heap-backed so large heightfield buffers do not inflate World stack size.
   std::unique_ptr<PhysicsShapeStore> shapeStore;

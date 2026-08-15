@@ -2,6 +2,9 @@
 // must feed the world-scoped persistent contact-manifold cache — seeding
 // solver impulses from it, writing solved impulses back, evicting stale
 // pairs, and never letting a reused entity index inherit old contacts.
+// test_stack_settles_without_jitter also covers issue #123's approved
+// contract migration: resting-stack residual velocity must converge to
+// (near) zero and actually sleep, not merely stay bounded.
 
 #include <cmath>
 #include <cstdio>
@@ -127,12 +130,23 @@ static void test_production_populates_manifold_cache() noexcept {
   check(survivingImpulse, "Cached impulse survives into the following step");
 }
 
-/// A three-box stack under gravity must settle without positional jitter
-/// with the configured iteration count: after 2.5 s every box holds its
-/// height to sub-millimetre for the final half second, and the residual
-/// velocity stays inside the single-pass pair-ordering bound (each solved
-/// pair can re-inject at most one step of gravity into its lower body, so
-/// |v| <= pairCount * g * dt ~= 0.49 m/s; energy <= 0.25 with margin).
+/// A three-box stack under gravity must settle without positional jitter,
+/// and its residual velocity must actually CONVERGE instead of merely
+/// staying bounded.
+///
+/// OLD contract (pre-#123, defective, pinned by this test until now): the
+/// solver made a single pass over the pair set per step, so each solved
+/// pair could re-inject up to one step's worth of gravity into its lower
+/// body every step; residual velocity stayed bounded (|v| <=
+/// pairCount * g * dt ~= 0.49 m/s, asserted as energy <= 0.25) but never
+/// reached zero, so a stacked box could never cross the sleep threshold.
+///
+/// NEW contract (issue #123's approved defective-contract migration):
+/// physics.contact_relaxation_iterations' extra outer passes over the
+/// manifold cache (default 4) propagate corrections through the stack
+/// within one step instead of leaving convergence to accumulate one frame
+/// at a time, so residual energy converges to (near) zero and every box in
+/// the stack actually sleeps.
 static void test_stack_settles_without_jitter() noexcept {
   auto world = std::unique_ptr<engine::runtime::World>(
       new (std::nothrow) engine::runtime::World());
@@ -171,15 +185,25 @@ static void test_stack_settles_without_jitter() noexcept {
     }
   }
 
+  // kSleepFramesRequired (physics.cpp) is 60 consecutive low-energy steps;
+  // run enough further steps that every box's sleep counter can fully
+  // elapse even if it converged only near the end of the steady window
+  // above.
+  for (int i = 0; i < 60; ++i) {
+    run_step(*world);
+  }
+
   bool heightsHeld = true;
-  bool residualBounded = true;
+  bool residualConverged = true;
+  bool stackSleeps = true;
   for (int b = 0; b < 3; ++b) {
     engine::runtime::Transform t{};
     const engine::runtime::RigidBody *body =
         world->get_rigid_body_ptr(boxes[b]);
     if (!world->get_transform(boxes[b], &t) || (body == nullptr)) {
       heightsHeld = false;
-      residualBounded = false;
+      residualConverged = false;
+      stackSleeps = false;
       break;
     }
     const float expectedY = 1.0F + static_cast<float>(b);
@@ -188,13 +212,21 @@ static void test_stack_settles_without_jitter() noexcept {
     }
     const float energy = engine::math::length_sq(body->velocity) +
                          engine::math::length_sq(body->angularVelocity);
-    if (energy > 0.25F) {
-      residualBounded = false;
+    if (energy > 1.0e-6F) {
+      residualConverged = false;
+    }
+    if (!body->sleeping) {
+      stackSleeps = false;
     }
   }
   check(heightsHeld, "Stacked boxes hold their heights after 3 seconds");
   check(positionsSteady, "Stack positions stay jitter-free (sub-mm) for 0.5 s");
-  check(residualBounded, "Residual velocity stays inside the solver bound");
+  check(residualConverged,
+        "Residual velocity converges to rest instead of a bounded nonzero "
+        "value (issue #123)");
+  check(stackSleeps,
+        "Resting stack actually sleeps instead of holding forever above "
+        "the threshold (issue #123)");
 }
 
 /// Removing the resting box's collider must evict its manifold on the next
