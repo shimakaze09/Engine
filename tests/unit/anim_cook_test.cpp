@@ -15,6 +15,7 @@
 
 #include "engine/core/animation_asset.h"
 #include "engine/core/hash.h"
+#include "engine/core/nothrow_buffer.h"
 #include "engine/core/vfs.h"
 #include "engine/runtime/animation.h"
 
@@ -388,6 +389,79 @@ int check_non_finite_duration_rejected() {
   return 0;
 }
 
+/// EXPECTATION (audit #174): a cooked clip whose header claims a
+/// payloadFloatCount above the loader's independent sanity ceiling is
+/// rejected before any allocation is attempted, even though the file on
+/// disk is only a few hundred bytes (nowhere near enough to honestly back
+/// that many floats). The rejected clip is left untouched rather than
+/// partially populated.
+int check_hostile_payload_float_count_rejected() {
+  std::vector<std::uint32_t> remap{};
+  if (!cook_and_mount(&remap)) {
+    std::puts("cook_and_mount failed");
+    return 1;
+  }
+
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kAnimPath, "rb+") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kAnimPath, "rb+");
+#endif
+  if (file == nullptr) {
+    std::puts("could not reopen cooked clip");
+    return 1;
+  }
+  const std::uint32_t hostileCount = 0xFFFFFFF0U;
+  bool wrote =
+      std::fseek(file, static_cast<long>(offsetof(
+                           engine::core::AnimClipAssetHeader,
+                           payloadFloatCount)),
+                 SEEK_SET) == 0;
+  wrote = wrote &&
+          (std::fwrite(&hostileCount, sizeof(hostileCount), 1U, file) == 1U);
+  static_cast<void>(std::fclose(file));
+  if (!wrote) {
+    std::puts("could not corrupt cooked clip payload count");
+    return 1;
+  }
+
+  AnimationClip clip{};
+  if (engine::runtime::load_animation_clip_asset(kAnimVirtualPath, &clip)) {
+    std::puts("loader accepted a hostile payload float count");
+    return 1;
+  }
+  if ((clip.trackCount != 0U) || !clip.payload.empty()) {
+    std::puts("rejected clip left a partial payload");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit #174, allocator-controlled): a payload size no real
+/// machine can satisfy returns false from allocate() instead of
+/// terminating the process (std::vector::resize's std::bad_alloc would
+/// abort under the no-exception build), and leaves the buffer empty. This
+/// exercises the exact allocation primitive load_animation_clip_asset now
+/// uses for AnimationClip::payload, standing in for true OOM fault
+/// injection.
+int check_payload_allocate_survives_unallocatable_size() {
+  engine::core::NothrowBuffer<float> buffer{};
+  constexpr std::size_t kUnallocatable =
+      std::numeric_limits<std::size_t>::max() / (sizeof(float) * 2U);
+  if (buffer.allocate(kUnallocatable)) {
+    std::puts("unallocatable payload size unexpectedly succeeded");
+    return 1;
+  }
+  if (!buffer.empty() || (buffer.size() != 0U) || (buffer.data() != nullptr)) {
+    std::puts("failed allocate() left the buffer in a non-empty state");
+    return 1;
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-20): clip names that sanitize to the same cooked
 /// file name are rejected instead of silently overwriting the earlier
 /// clip's output; distinct names and the empty-name fallback pass.
@@ -460,6 +534,18 @@ int main() {
     return result;
   }
   result = check_non_finite_duration_rejected();
+  if (result != 0) {
+    remove_file(kSkelPath);
+    remove_file(kAnimPath);
+    return result;
+  }
+  result = check_hostile_payload_float_count_rejected();
+  if (result != 0) {
+    remove_file(kSkelPath);
+    remove_file(kAnimPath);
+    return result;
+  }
+  result = check_payload_allocate_survives_unallocatable_size();
   if (result != 0) {
     remove_file(kSkelPath);
     remove_file(kAnimPath);

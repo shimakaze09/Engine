@@ -9,8 +9,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
+#include "engine/core/nothrow_buffer.h"
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
@@ -72,12 +72,17 @@ struct AnimTrackDesc final {
 };
 
 /// A sampled animation clip: a fixed track table over one shared payload
-/// buffer (allocated at load time; evaluation only reads it).
+/// buffer (allocated at load time; evaluation only reads it). payload is a
+/// move-only nothrow buffer (not std::vector) so a load whose file-derived
+/// float count cannot be allocated fails cleanly instead of terminating
+/// under the no-exception build (audit #174); AnimationClip is therefore
+/// move-only too — every producer (loader, controller registry slots)
+/// already writes through an out-param or moves rather than copies.
 struct AnimationClip final {
   float durationSeconds = 0.0F;
   std::uint32_t trackCount = 0U;
   std::array<AnimTrackDesc, kMaxAnimTracks> tracks{};
-  std::vector<float> payload{};
+  core::NothrowBuffer<float> payload{};
 };
 
 /// True when every non-root joint's parent index precedes it (the storage
