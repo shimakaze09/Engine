@@ -449,8 +449,10 @@ int check_hostile_payload_float_count_rejected() {
 /// injection.
 int check_payload_allocate_survives_unallocatable_size() {
   engine::core::NothrowBuffer<float> buffer{};
+  // A byte size that overflows size_t trips the allocate() guard on every
+  // platform; merely-huge counts can succeed under macOS/Linux overcommit.
   constexpr std::size_t kUnallocatable =
-      std::numeric_limits<std::size_t>::max() / (sizeof(float) * 2U);
+      (std::numeric_limits<std::size_t>::max() / sizeof(float)) + 1U;
   if (buffer.allocate(kUnallocatable)) {
     std::puts("unallocatable payload size unexpectedly succeeded");
     return 1;

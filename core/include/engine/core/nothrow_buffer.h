@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -34,6 +35,9 @@ class NothrowBuffer final {
     m_count = 0U;
     if (count == 0U) {
       return true;
+    }
+    if (count > (std::numeric_limits<std::size_t>::max() / sizeof(T))) {
+      return false;
     }
     m_data.reset(new (std::nothrow) T[count]{});
     if (m_data == nullptr) {
