@@ -17,6 +17,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +26,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "engine/core/cvar.h"
@@ -516,7 +518,12 @@ bool EntityCreateCommand::undo() noexcept {
 /// frontier and per-index visited marks, so corrupted parent links
 /// (cycles, self-parenting) are captured once and 1000+-deep chains
 /// cannot grow the call stack; returns the member count (bounded by
-/// capacity).
+/// capacity). Builds a single parentId -> children index up front (one
+/// world.for_each_alive pass) instead of rescanning every alive entity
+/// per BFS member, so a subtree of S members in a world of N entities
+/// costs O(N log N + S log N) rather than the former O(S * N) (issue
+/// #86 L-01); the per-parent child order is unchanged (ascending entity
+/// index), so member order is identical to the prior full-scan walk.
 static std::size_t collect_subtree_members(runtime::World &world,
                                            runtime::Entity root,
                                            runtime::Entity *members,
@@ -526,6 +533,25 @@ static std::size_t collect_subtree_members(runtime::World &world,
       !world.is_alive(root)) {
     return 0U;
   }
+
+  // Cold editor path (not per-frame): a heap-allocated index is fine here,
+  // unlike the hot-path ECS/physics/render-prep code CLAUDE.md restricts.
+  std::vector<std::pair<runtime::PersistentId, runtime::Entity>> byParent;
+  world.for_each_alive([&](runtime::Entity candidate) {
+    runtime::Transform transform{};
+    if (world.get_transform(candidate, &transform) &&
+        (transform.parentId != runtime::kInvalidPersistentId)) {
+      byParent.emplace_back(transform.parentId, candidate);
+    }
+  });
+  std::sort(byParent.begin(), byParent.end(),
+           [](const auto &lhs, const auto &rhs) noexcept {
+             if (lhs.first != rhs.first) {
+               return lhs.first < rhs.first;
+             }
+             return lhs.second.index < rhs.second.index;
+           });
+
   std::size_t count = 0U;
   members[count++] = root;
   visited[root.index] = true;
@@ -534,17 +560,20 @@ static std::size_t collect_subtree_members(runtime::World &world,
     if (ownId == runtime::kInvalidPersistentId) {
       continue;
     }
-    world.for_each_alive([&](runtime::Entity candidate) {
-      if ((count >= capacity) || visited[candidate.index]) {
-        return;
-      }
-      runtime::Transform transform{};
-      if (world.get_transform(candidate, &transform) &&
-          (transform.parentId == ownId)) {
+    const auto range = std::equal_range(
+        byParent.begin(), byParent.end(),
+        std::pair<runtime::PersistentId, runtime::Entity>{ownId, {}},
+        [](const auto &lhs, const auto &rhs) noexcept {
+          return lhs.first < rhs.first;
+        });
+    for (auto it = range.first; (it != range.second) && (count < capacity);
+        ++it) {
+      const runtime::Entity candidate = it->second;
+      if (!visited[candidate.index]) {
         visited[candidate.index] = true;
         members[count++] = candidate;
       }
-    });
+    }
   }
   return count;
 }
