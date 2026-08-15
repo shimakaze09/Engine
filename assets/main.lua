@@ -2,7 +2,9 @@
 --
 -- Attached to the "Scene Controller" entity by the engine at startup.
 -- The engine calls M.on_begin_play(self) once when Play is pressed and
--- M.on_tick(self, dt) every simulation step.
+-- M.on_tick(self, dt) once per rendered frame that advanced simulation
+-- (not once per fixed step); dt is that frame's total simulated time,
+-- summing every catch-up fixed step folded into it.
 -- 'self' is an opaque, generation-checked entity handle.
 --
 -- This script sets up the scene: it spawns gameplay entities and attaches
