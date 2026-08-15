@@ -4,9 +4,11 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <thread>
 
 #include "engine/core/debug_draw.h"
+#include "engine/core/engine_version.h"
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -138,7 +140,10 @@ bool initialize_core(const CoreConfig &config) noexcept {
 
   if (initializedSuccessfully) {
     g_coreInitialized = true;
-    log_message(LogLevel::Info, "core", "core initialized");
+    char versionMessage[64] = {};
+    std::snprintf(versionMessage, sizeof(versionMessage),
+                  "core initialized (engine %s)", engine_version_string());
+    log_message(LogLevel::Info, "core", versionMessage);
     return true;
   }
 

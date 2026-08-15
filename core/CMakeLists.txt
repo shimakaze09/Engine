@@ -1,5 +1,15 @@
 # Configures core build settings for the Engine repository.
 
+# Generates the engine package/version header from the root project()
+# VERSION (issue #86 L-06); the module's public include dir carries the
+# generated tree so `#include "engine/core/engine_version.h"` resolves the
+# same way whether the header is hand-written or generated.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/engine/core/engine_version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/engine/core/engine_version.h
+    @ONLY
+)
+
 engine_add_module_library(engine_core
     SOURCES
     src/bootstrap.cpp
@@ -26,6 +36,7 @@ engine_add_module_library(engine_core
     src/vfs.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
     PUBLIC_DEPS
     Threads::Threads
     ${ENGINE_SDL_TARGET}

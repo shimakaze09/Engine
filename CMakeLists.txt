@@ -6,7 +6,7 @@ if(POLICY CMP0174)
     cmake_policy(SET CMP0174 NEW)
 endif()
 
-project(Engine LANGUAGES C CXX)
+project(Engine VERSION 0.1.0 LANGUAGES C CXX)
 
 include(${CMAKE_SOURCE_DIR}/cmake/EngineHelpers.cmake)
 

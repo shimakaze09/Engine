@@ -404,7 +404,52 @@ if(ENGINE_BUILD_TOOLS)
         engine_integration_asset_runtime_stale_warning
         PROPERTIES LABELS integration
     )
+
+    engine_add_executable_target(asset_stale_skeletal_load_host
+        SOURCES
+        asset_stale_skeletal_load_test.cpp
+        PRIVATE_DEPS
+        engine_runtime
+    )
+
+    add_test(
+        NAME engine_integration_asset_runtime_stale_warning_skeletal
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSTALE_HOST=$<TARGET_FILE:asset_stale_skeletal_load_host>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/runtime_stale_skeletal_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_runtime_stale_skeletal_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_runtime_stale_warning_skeletal
+        PROPERTIES LABELS integration
+    )
 endif()
+
+engine_add_executable_target(editor_asset_spawn_name_host
+    SOURCES
+    editor_asset_spawn_name_host.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+add_test(
+    NAME engine_integration_editor_asset_spawn_name_truncation
+    COMMAND ${CMAKE_COMMAND}
+        "-DSPAWN_HOST=$<TARGET_FILE:editor_asset_spawn_name_host>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/editor_asset_spawn_name_test.cmake
+)
+set_tests_properties(
+    engine_integration_editor_asset_spawn_name_truncation
+    PROPERTIES LABELS integration
+)
 
 engine_add_test_executable(engine_integration_hotreload
     SOURCES

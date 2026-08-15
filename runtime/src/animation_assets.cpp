@@ -1,6 +1,8 @@
 // Implements the runtime loaders for cooked skeletal animation assets:
 // .skel skeletons and .anim clips read through the VFS and validated
-// against the shared binary formats before evaluation ever touches them.
+// against the shared binary formats before evaluation ever touches them;
+// each load also routes through the shared cooked-asset staleness check
+// (issue #91) via its owning mesh's .meta.json sidecar.
 
 #include "engine/runtime/animation.h"
 
@@ -13,6 +15,7 @@
 #include "engine/core/animation_asset.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
+#include "engine/renderer/asset_staleness.h"
 
 namespace engine::runtime {
 
@@ -25,6 +28,79 @@ bool fail(const char *virtualPath, const char *reason) noexcept {
                 (virtualPath != nullptr) ? virtualPath : "(null)", reason);
   core::log_message(core::LogLevel::Error, "animation", message);
   return false;
+}
+
+/// True when the last `suffixLen` bytes of `text` equal `suffix`.
+bool ends_with(const char *text, std::size_t textLen, const char *suffix,
+              std::size_t suffixLen) noexcept {
+  return (textLen >= suffixLen) &&
+         (std::memcmp(text + (textLen - suffixLen), suffix, suffixLen) == 0);
+}
+
+/// Derives the cooked mesh path that owns a .skel/.anim sidecar so the
+/// staleness check below can reuse the mesh's .meta.json (skeletons and
+/// clips are cooked from the same source glTF in the same packer run and
+/// carry no sidecar of their own). Mirrors the packer's orphan-sweep
+/// convention in cook_stamp.cpp: a skeleton keeps the mesh's stem, a
+/// clip's stem carries an extra ".<clipName>" segment. Returns false for
+/// paths that don't end in .skel/.anim (builtin/procedural callers stay
+/// silent).
+bool owning_mesh_virtual_path(const char *virtualPath, char *outPath,
+                              std::size_t outSize) noexcept {
+  if ((virtualPath == nullptr) || (outPath == nullptr) || (outSize == 0U)) {
+    return false;
+  }
+
+  constexpr char kSkelSuffix[] = ".skel";
+  constexpr char kAnimSuffix[] = ".anim";
+  constexpr std::size_t kSkelSuffixLen = sizeof(kSkelSuffix) - 1U;
+  constexpr std::size_t kAnimSuffixLen = sizeof(kAnimSuffix) - 1U;
+  const std::size_t pathLen = std::strlen(virtualPath);
+
+  std::size_t stemLen = 0U;
+  if (ends_with(virtualPath, pathLen, kSkelSuffix, kSkelSuffixLen)) {
+    stemLen = pathLen - kSkelSuffixLen;
+  } else if (ends_with(virtualPath, pathLen, kAnimSuffix, kAnimSuffixLen)) {
+    const std::size_t clipStemLen = pathLen - kAnimSuffixLen;
+    std::size_t clipDot = clipStemLen;
+    while ((clipDot > 0U) && (virtualPath[clipDot - 1U] != '.')) {
+      --clipDot;
+    }
+    if (clipDot == 0U) {
+      return false;
+    }
+    stemLen = clipDot - 1U;
+  } else {
+    return false;
+  }
+
+  if (stemLen == 0U) {
+    return false;
+  }
+
+  const int written = std::snprintf(outPath, outSize, "%.*s.mesh",
+                                    static_cast<int>(stemLen), virtualPath);
+  return (written > 0) && (static_cast<std::size_t>(written) < outSize);
+}
+
+/// Routes a cooked .skel/.anim load through the shared once-per-asset
+/// staleness check (issue #91) by resolving and reusing the owning mesh's
+/// .meta.json sidecar; stays silent when the virtual prefix isn't mounted
+/// or no owning mesh path can be derived, matching the mesh-only check's
+/// existing silent boundary for sidecar-less assets.
+void warn_if_owning_mesh_stale(const char *virtualPath) noexcept {
+  char meshVirtualPath[192] = {};
+  if (!owning_mesh_virtual_path(virtualPath, meshVirtualPath,
+                                sizeof(meshVirtualPath))) {
+    return;
+  }
+
+  char osPath[512] = {};
+  if (!core::vfs_resolve_os_path(meshVirtualPath, osPath, sizeof(osPath))) {
+    return;
+  }
+
+  renderer::warn_if_cooked_asset_stale(osPath);
 }
 
 /// True when a track's key span [offset, offset + count*stride) fits the
@@ -44,6 +120,8 @@ bool load_skeleton_asset(const char *virtualPath,
   if ((virtualPath == nullptr) || (outSkeleton == nullptr)) {
     return false;
   }
+
+  warn_if_owning_mesh_stale(virtualPath);
 
   void *data = nullptr;
   std::size_t size = 0U;
@@ -103,6 +181,8 @@ bool load_animation_clip_asset(const char *virtualPath,
   if ((virtualPath == nullptr) || (outClip == nullptr)) {
     return false;
   }
+
+  warn_if_owning_mesh_stale(virtualPath);
 
   void *data = nullptr;
   std::size_t size = 0U;

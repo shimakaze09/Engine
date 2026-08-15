@@ -1122,6 +1122,134 @@ int check_deep_chain_delete_round_trip() noexcept {
   return finish(0);
 }
 
+/// Deleting a modest subtree in a world crowded with many unrelated
+/// parented entities must capture exactly the subtree and leave every
+/// unrelated entity untouched, then restore exactly that subtree on undo
+/// (issue #86 L-01: collect_subtree_members switched from an O(subtree *
+/// aliveCount) full-scan-per-member walk to a single sorted parentId
+/// index, so this is the "many items" boundary that dimension needs).
+int check_subtree_delete_scales_with_many_unrelated_entities() noexcept {
+  using engine::editor::EntityDeleteCommand;
+  using engine::runtime::Entity;
+  using engine::runtime::PersistentId;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  constexpr std::size_t kUnrelatedPairCount = 4000U;
+  constexpr std::size_t kSubtreeChildCount = 10U;
+  constexpr std::size_t kSubtreeGrandchildrenPerChild = 3U;
+  constexpr std::size_t kSubtreeMemberCount =
+      1U + kSubtreeChildCount +
+      (kSubtreeChildCount * kSubtreeGrandchildrenPerChild);
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 200;
+  }
+
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.world = previousWorld;
+    return result;
+  };
+
+  // Interleave unrelated parent/child pairs with the target subtree's
+  // creation so subtree members do not land at contiguous entity indices;
+  // each pair gives the parentId index real width beyond the subtree.
+  const auto spawn_unrelated_pair = [&world]() noexcept -> bool {
+    const Entity parent = world->create_scene_object(Transform{});
+    if (parent == engine::runtime::kInvalidEntity) {
+      return false;
+    }
+    Transform childTransform{};
+    childTransform.parentId = world->persistent_id(parent);
+    return world->create_scene_object(childTransform) !=
+          engine::runtime::kInvalidEntity;
+  };
+
+  for (std::size_t i = 0U; i < (kUnrelatedPairCount / 2U); ++i) {
+    if (!spawn_unrelated_pair()) {
+      return finish(201);
+    }
+  }
+
+  const Entity root = world->create_scene_object(Transform{});
+  if (root == engine::runtime::kInvalidEntity) {
+    return finish(202);
+  }
+  const PersistentId rootId = world->persistent_id(root);
+  PersistentId firstChildId = engine::runtime::kInvalidPersistentId;
+  for (std::size_t c = 0U; c < kSubtreeChildCount; ++c) {
+    Transform childTransform{};
+    childTransform.parentId = rootId;
+    const Entity child = world->create_scene_object(childTransform);
+    if (child == engine::runtime::kInvalidEntity) {
+      return finish(203);
+    }
+    const PersistentId childId = world->persistent_id(child);
+    if (c == 0U) {
+      firstChildId = childId;
+    }
+    for (std::size_t g = 0U; g < kSubtreeGrandchildrenPerChild; ++g) {
+      Transform grandchildTransform{};
+      grandchildTransform.parentId = childId;
+      if (world->create_scene_object(grandchildTransform) ==
+          engine::runtime::kInvalidEntity) {
+        return finish(204);
+      }
+    }
+    // Scatter more unrelated pairs between subtree siblings.
+    if (!spawn_unrelated_pair()) {
+      return finish(205);
+    }
+  }
+
+  for (std::size_t i = 0U; i < (kUnrelatedPairCount / 2U); ++i) {
+    if (!spawn_unrelated_pair()) {
+      return finish(206);
+    }
+  }
+
+  const std::size_t aliveBeforeDelete = world->alive_entity_count();
+  const std::size_t expectedUnrelated =
+      aliveBeforeDelete - kSubtreeMemberCount;
+
+  EntityDeleteCommand *const command =
+      engine::editor::build_entity_delete_command(root);
+  if ((command == nullptr) ||
+      (command->recordCount != kSubtreeMemberCount)) {
+    delete command;
+    return finish(207);
+  }
+
+  engine::editor::CommandHistory history{};
+  history.execute(command);
+  if (world->alive_entity_count() != expectedUnrelated) {
+    return finish(208);
+  }
+  if (world->find_entity_by_persistent_id(rootId) !=
+      engine::runtime::kInvalidEntity) {
+    return finish(209);
+  }
+
+  history.undo();
+  if (world->alive_entity_count() != aliveBeforeDelete) {
+    return finish(210);
+  }
+  const Entity restoredFirstChild =
+      world->find_entity_by_persistent_id(firstChildId);
+  Transform restoredLink{};
+  if ((restoredFirstChild == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(restoredFirstChild, &restoredLink) ||
+      (restoredLink.parentId != rootId)) {
+    return finish(211);
+  }
+
+  return finish(0);
+}
+
 /// Reparenting an entity under its own descendant must be refused at any
 /// depth (the historical guard walked at most 256 ancestors and then
 /// allowed the cycle).
@@ -1347,6 +1475,12 @@ int main() {
   }
 
   result = check_reparent_refuses_deep_descendant();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_subtree_delete_scales_with_many_unrelated_entities();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

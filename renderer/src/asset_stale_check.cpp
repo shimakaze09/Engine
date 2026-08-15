@@ -4,7 +4,7 @@
 // CPU load path only (sync loads and the streaming worker), never per
 // frame; the once-per-asset memory is a fixed lock-free table.
 
-#include "asset_stale_check.h"
+#include "engine/renderer/asset_staleness.h"
 
 #include <atomic>
 #include <cerrno>
