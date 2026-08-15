@@ -88,7 +88,14 @@ bool set_working_directory_with_assets() noexcept {
 }
 
 bool write_script_file(const char *contents) noexcept {
-  std::FILE *file = std::fopen(kScriptPath, "wb");
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kScriptPath, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kScriptPath, "wb");
+#endif
   if (file == nullptr) {
     return false;
   }
