@@ -193,7 +193,19 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
   }
   if (backend.staticMeshBatches.size() < opaqueCount) {
-    backend.staticMeshBatches.resize(opaqueCount);
+    // A failed grow leaves the buffer empty (audit #204: nothrow instead of
+    // a terminating std::vector throw); build_static_mesh_batches already
+    // treats zero capacity as "produce zero batches" so opaque instancing
+    // degrades to no batching this frame instead of crashing the process.
+    if (!backend.staticMeshBatches.allocate(opaqueCount)) {
+      static bool warnedBatchAllocFailure = false;
+      if (!warnedBatchAllocFailure) {
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "static mesh batch buffer allocation failed; "
+                          "opaque batching skipped this frame");
+        warnedBatchAllocFailure = true;
+      }
+    }
   }
   const std::size_t opaqueBatchCount = build_static_mesh_batches(
       commandBufferView, 0U, opaqueCount, backend.staticMeshBatches.data(),
