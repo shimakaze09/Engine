@@ -11,9 +11,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <SDL3/SDL_opengl.h>
-
-#include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -42,6 +39,7 @@
 #include "engine/math/vec4.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/render_device.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -78,7 +76,7 @@ const char *editor_asset_root() noexcept {
 }
 
 /// Loads the requested resource for thumbnail texture.
-GLuint load_thumbnail_texture(const char *assetPath) noexcept {
+std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
     return 0U;
   }
@@ -142,13 +140,15 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
     return 0U;
   }
 
-  GLuint tex = 0U;
-  glGenTextures(1, &tex);
-  glBindTexture(GL_TEXTURE_2D, tex);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-               pixels);
+  // Routed through the renderer's RenderDevice (audit #206) instead of
+  // calling glGenTextures/glTexImage2D directly: GL stays inside the
+  // renderer implementation, and the editor only ever sees the opaque
+  // texture id RenderDevice::create_texture_2d returns.
+  std::uint32_t tex = 0U;
+  const renderer::RenderDevice *device = renderer::render_device();
+  if ((device != nullptr) && (device->create_texture_2d != nullptr)) {
+    tex = device->create_texture_2d(w, h, 4, pixels);
+  }
   stbi_image_free(pixels);
 
   if (tex != 0U) {
@@ -163,12 +163,15 @@ GLuint load_thumbnail_texture(const char *assetPath) noexcept {
   return tex;
 }
 
-/// Releases cached thumbnail GL textures owned by the editor.
+/// Releases cached thumbnail textures owned by the editor through the
+/// renderer's RenderDevice (audit #206).
 void clear_thumbnail_cache() noexcept {
+  const renderer::RenderDevice *device = renderer::render_device();
   for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
-    if (editor_session().thumbnailCache[i].textureId != 0U) {
-      const GLuint tex = editor_session().thumbnailCache[i].textureId;
-      glDeleteTextures(1, &tex);
+    const std::uint32_t tex = editor_session().thumbnailCache[i].textureId;
+    if ((tex != 0U) && (device != nullptr) &&
+        (device->destroy_texture != nullptr)) {
+      device->destroy_texture(tex);
     }
     editor_session().thumbnailCache[i] = ThumbnailEntry{};
   }

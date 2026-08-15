@@ -9,8 +9,12 @@
 
 #include <SDL3/SDL.h>
 
-#include <SDL3/SDL_opengl.h>
-
+// ImGui's OpenGL3 backend is an accepted exception to "GL stays inside the
+// renderer implementation" (audit #206): it is a third-party UI integration
+// point, not engine rendering logic, its public API (Init/Shutdown/NewFrame/
+// RenderDrawData) never exposes a raw GL type, and it links its own GL
+// symbols through engine_imgui rather than through engine_editor. No other
+// GL header or symbol is used in this module.
 #include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
