@@ -829,7 +829,7 @@ int test_hinge_limits_reject_outside_pi() noexcept {
 
   physics::PhysicsJointSlot *slot = nullptr;
   for (physics::PhysicsJointSlot &candidate :
-       world->physics_context().joints) {
+       world->physics_context().shapeStore->joints) {
     if (candidate.active) {
       slot = &candidate;
       break;

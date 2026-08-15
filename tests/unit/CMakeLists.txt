@@ -607,6 +607,14 @@ engine_add_test_executable(engine_unit_manifold_warmstart
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_contact_relaxation
+    SOURCES
+    contact_relaxation_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_query
     SOURCES
     physics_query_test.cpp
@@ -634,6 +642,14 @@ engine_add_test_executable(engine_unit_ccd_relative_motion
 engine_add_test_executable(engine_unit_ccd_response
     SOURCES
     ccd_response_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_ccd_wave2_residuals
+    SOURCES
+    ccd_wave2_residuals_test.cpp
     PRIVATE_DEPS
     engine_physics
     engine_runtime

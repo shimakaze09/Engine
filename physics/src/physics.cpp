@@ -215,6 +215,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return false;
   }
 
+  // Broadphase dedupe stamps live in the heap-backed shape store (issue
+  // #129); fetched once so the per-collider loop below never re-derefs the
+  // unique_ptr.
+  PhysicsShapeStore *const shapeStorePtr = physicsCtx.shapeStore.get();
+
   ResolveScratch *const resolveScratch = acquire_resolve_scratch();
   if (resolveScratch == nullptr) {
     core::log_message(core::LogLevel::Error, "physics",
@@ -274,8 +279,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
   physicsCtx.ccdColliderCount = 0U;
   physicsCtx.ccdHasCompoundColliders = false;
-  if (physicsCtx.shapeStore != nullptr) {
-    PhysicsShapeStore &store = *physicsCtx.shapeStore;
+  if (shapeStorePtr != nullptr) {
+    PhysicsShapeStore &store = *shapeStorePtr;
     physicsCtx.ccdColliderCount = colliderCount;
     for (std::size_t i = 0U; i < colliderCount; ++i) {
       store.ccdColliderEntities[i] = entities[i];
@@ -297,7 +302,12 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   }
 
   bool stepHadOverflow = false;
-  if (colliderCount >= 2U) {
+  // The dedupe stamp array is shapeStore-backed; without a store, pair
+  // discovery cannot dedupe neighbors so broadphase is skipped this step
+  // (mirrors the CCD-snapshot degrade above under the same OOM condition).
+  if ((colliderCount >= 2U) && (shapeStorePtr != nullptr)) {
+    std::uint32_t *const testedStamps = shapeStorePtr->testedStamps.data();
+    const std::size_t testedStampsSize = shapeStorePtr->testedStamps.size();
 
     float cellSize = kDefaultCellSize;
     for (std::size_t i = 0U; i < colliderCount; ++i) {
@@ -429,17 +439,16 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
       const float ay = posY[i];
       const float az = posZ[i];
 
-      begin_generation(&physicsCtx.testedGeneration,
-                       physicsCtx.testedStamps.data(),
-                       physicsCtx.testedStamps.size());
-      physicsCtx.testedStamps[i] = physicsCtx.testedGeneration;
+      begin_generation(&physicsCtx.testedGeneration, testedStamps,
+                       testedStampsSize);
+      testedStamps[i] = physicsCtx.testedGeneration;
 
       auto test_pair = [&](std::uint32_t jIndex) noexcept {
         const std::size_t j = jIndex;
-        if (physicsCtx.testedStamps[j] == physicsCtx.testedGeneration) {
+        if (testedStamps[j] == physicsCtx.testedGeneration) {
           return;
         }
-        physicsCtx.testedStamps[j] = physicsCtx.testedGeneration;
+        testedStamps[j] = physicsCtx.testedGeneration;
 
         if (j <= i) {
           return;
@@ -655,6 +664,13 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.collisionPairOverflowActive = false;
   }
 
+  // Extra outer passes over this frame's cached contacts (issue #123):
+  // propagates corrections through contact chains (stacks) within this step
+  // instead of leaving convergence to accumulate one frame at a time via
+  // warm start alone. Runs before joints solve, mirroring the primary
+  // resolve's contacts-then-joints order.
+  relax_cached_contacts(world, simToken, physicsCtx);
+
   solve_constraints(world, deltaSeconds);
 
   const std::size_t rigidBodyCount = world.rigid_body_count();
@@ -780,8 +796,11 @@ bool remove_joint(PhysicsWorldView &world, JointId id) noexcept {
   }
 
   retire_joint_slot(*joint);
-  while ((context.jointCount > 0U) &&
-         !context.joints[context.jointCount - 1U].active) {
+  // find_joint_slot only returns non-null when shapeStore is live, so the
+  // store lookup here cannot fail.
+  PhysicsShapeStore *store = context.shapeStore.get();
+  auto &joints = store->joints;
+  while ((context.jointCount > 0U) && !joints[context.jointCount - 1U].active) {
     --context.jointCount;
   }
   return true;

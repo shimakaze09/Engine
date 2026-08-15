@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
@@ -40,18 +41,21 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 // normal row is the full J = [-n, -(rA x n), n, (rB x n)] and friction
 // applies torque through the contact lever arm, letting off-center static
 // impacts rotate the body and floor friction roll a sliding sphere.
-void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
-                            const engine::math::Vec3 &normal, float invMassA,
-                            float invMassB, float invMassSum,
-                            const engine::math::Vec3 &contactOffsetA,
-                            const engine::math::Vec3 &contactOffsetB,
-                            float restitution, float staticFric,
-                            float dynamicFric) noexcept;
+float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
+                             const engine::math::Vec3 &normal, float invMassA,
+                             float invMassB, float invMassSum,
+                             const engine::math::Vec3 &contactOffsetA,
+                             const engine::math::Vec3 &contactOffsetB,
+                             float restitution, float staticFric,
+                             float dynamicFric) noexcept;
 
 // Resolve a collision between two shapes given contact normal, overlap, and
-// the contact point.  Applies positional correction and velocity impulse.
+// the contact point.  Applies positional correction and velocity impulse,
+// then registers a 1-point manifold cache entry (issue #123) so this pair
+// warm-starts and joins relax_cached_contacts' outer iteration.
 void resolve_contact(PhysicsWorldView &world,
                      const PhysicsWorldView::SimulationAccessToken &simToken,
+                     Entity colliderEntityA, Entity colliderEntityB,
                      Entity bodyEntityA, Entity bodyEntityB,
                      const engine::math::Vec3 &bodyCenterA,
                      const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA,
@@ -93,10 +97,46 @@ void resolve_contact(PhysicsWorldView &world,
       engine::math::sub(bodyCenterA, engine::math::mul(normal, moveA));
   const engine::math::Vec3 correctedCenterB =
       engine::math::add(bodyCenterB, engine::math::mul(normal, moveB));
-  apply_velocity_impulse(bodyA, bodyB, normal, invMassA, invMassB, invMassSum,
-                         engine::math::sub(contactPt, correctedCenterA),
-                         engine::math::sub(contactPt, correctedCenterB),
-                         combinedRest, combinedStaticFric, combinedDynFric);
+  const float appliedImpulse = apply_velocity_impulse(
+      bodyA, bodyB, normal, invMassA, invMassB, invMassSum,
+      engine::math::sub(contactPt, correctedCenterA),
+      engine::math::sub(contactPt, correctedCenterB), combinedRest,
+      combinedStaticFric, combinedDynFric);
+
+  PhysicsContext &physicsCtx = world.physics_context();
+  // Matches apply_velocity_impulse's own convention: RigidBody::
+  // inverseInertia directly, zero for a static or non-rotating endpoint.
+  const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
+  const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
+  record_single_point_contact_cache(physicsCtx, colliderEntityA,
+                                    colliderEntityB, contactPt, normal,
+                                    overlap, appliedImpulse, invInertiaA,
+                                    invInertiaB, physicsCtx.solverFrameNumber);
+}
+
+// Writes a fresh 1-point manifold: single-point paths do not clip/match
+// features, so each resolve simply replaces the prior contact (mirroring
+// resolve_manifold_contact's own whole-set-replace write-back).
+void record_single_point_contact_cache(
+    PhysicsContext &context, Entity colliderEntityA, Entity colliderEntityB,
+    const engine::math::Vec3 &contactPt, const engine::math::Vec3 &normal,
+    float penetration, float accumulatedImpulse, float invInertiaA,
+    float invInertiaB, std::uint32_t frameNumber) noexcept {
+  ContactManifold *cached =
+      manifold_acquire(context, colliderEntityA, colliderEntityB, frameNumber);
+  if (cached == nullptr) {
+    return;
+  }
+  cached->contactCount = 1U;
+  cached->invInertiaA = invInertiaA;
+  cached->invInertiaB = invInertiaB;
+  ManifoldContact &c = cached->contacts[0];
+  c.pointOnA = contactPt;
+  c.pointOnB = contactPt;
+  c.normal = normal;
+  c.penetration = penetration;
+  c.accumulatedNormalImpulse = accumulatedImpulse;
+  c.featureId = 0U;
 }
 
 // Sequential-impulse iterations over one clipped contact manifold.
@@ -411,7 +451,10 @@ void resolve_manifold_contact(
   }
   if (cached != nullptr) {
     // Write the solved state back so the next step's solve seeds from it;
-    // stale points fall away because the whole set is replaced.
+    // stale points fall away because the whole set is replaced. Also record
+    // the box-tensor invInertia this resolve actually used (issue #123) so
+    // the outer relaxation pass re-solves the same point-relative quantity
+    // instead of re-deriving a possibly different value.
     cached->contactCount = manifold.count;
     for (std::size_t p = 0U; p < manifold.count; ++p) {
       ManifoldContact &c = cached->contacts[p];
@@ -422,6 +465,8 @@ void resolve_manifold_contact(
       c.accumulatedNormalImpulse = accumulated[p];
       c.featureId = 0U;
     }
+    cached->invInertiaA = invInertiaA;
+    cached->invInertiaB = invInertiaB;
   }
   clamp_angular_speed((invMassA > 0.0F) ? bodyA : nullptr);
   clamp_angular_speed((invMassB > 0.0F) ? bodyB : nullptr);
@@ -478,13 +523,13 @@ void resolve_speculative_contact(RigidBody *bodyA, RigidBody *bodyB,
   }
 }
 
-void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
-                            const engine::math::Vec3 &normal, float invMassA,
-                            float invMassB, float invMassSum,
-                            const engine::math::Vec3 &contactOffsetA,
-                            const engine::math::Vec3 &contactOffsetB,
-                            float restitution, float staticFric,
-                            float dynamicFric) noexcept {
+float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
+                             const engine::math::Vec3 &normal, float invMassA,
+                             float invMassB, float invMassSum,
+                             const engine::math::Vec3 &contactOffsetA,
+                             const engine::math::Vec3 &contactOffsetB,
+                             float restitution, float staticFric,
+                             float dynamicFric) noexcept {
   const engine::math::Vec3 zeroVec(0.0F, 0.0F, 0.0F);
   const engine::math::Vec3 velA = (bodyA != nullptr) ? bodyA->velocity : zeroVec;
   const engine::math::Vec3 velB = (bodyB != nullptr) ? bodyB->velocity : zeroVec;
@@ -609,6 +654,194 @@ void apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
     }
     clamp_angular_speed((angularA && (bodyA != nullptr)) ? bodyA : nullptr);
     clamp_angular_speed((angularB && (bodyB != nullptr)) ? bodyB : nullptr);
+    return impulseMagnitude;
+  }
+  return 0.0F;
+}
+
+// Extra outer pass over one cached manifold's points (issue #123): re-solves
+// each point's normal impulse against the pair's CURRENT point-relative
+// velocities (which earlier pairs in this same pass may have already
+// changed), continuing to accumulate from where the primary resolve (or an
+// earlier relaxation pass) left off, converging fully (kManifoldSolverIterations
+// sub-passes) before moving on so this pair reaches its own local
+// equilibrium given whatever the rest of this outer iteration already
+// changed. Angular response (point velocity via cross(angularVelocity, r),
+// using ContactManifold::invInertiaA/B -- the SAME per-endpoint value the
+// originating resolve used, box-tensor for a clip vs RigidBody::
+// inverseInertia directly for a single-point path, never re-derived here)
+// applies only to single-point manifolds; see the invInertiaA/B comment
+// below for why multi-point manifolds stay linear-only.
+void relax_one_manifold(
+    PhysicsWorldView &world,
+    const PhysicsWorldView::SimulationAccessToken &simToken,
+    ContactManifold &manifold) noexcept {
+  if (manifold.contactCount == 0U) {
+    return;
+  }
+
+  const Entity ownerA = world.rigid_body_owner(manifold.entityA, simToken);
+  const Entity ownerB = world.rigid_body_owner(manifold.entityB, simToken);
+  RigidBody *bodyA =
+      (ownerA != kInvalidEntity) ? world.get_rigid_body_ptr(ownerA) : nullptr;
+  RigidBody *bodyB =
+      (ownerB != kInvalidEntity) ? world.get_rigid_body_ptr(ownerB) : nullptr;
+  // A sleeping endpoint holds zero velocity by construction and must not be
+  // woken by a relaxation pass (the primary resolve already wakes a sleeper
+  // touched by a fast partner via maybe_wake_pair) -- but it is still a
+  // legitimate, effectively-immovable anchor for its AWAKE neighbor, exactly
+  // like a true static body. Zeroing its inverse mass here (rather than
+  // skipping the whole pair) is what lets a box resting on an
+  // already-asleep lower box keep converging instead of losing its extra
+  // passes the moment the lower box crosses the sleep threshold.
+  const float invMassA =
+      ((bodyA != nullptr) && !bodyA->sleeping) ? bodyA->inverseMass : 0.0F;
+  const float invMassB =
+      ((bodyB != nullptr) && !bodyB->sleeping) ? bodyB->inverseMass : 0.0F;
+  const float invMassSum = invMassA + invMassB;
+  if (invMassSum <= 0.0F) {
+    return;
+  }
+
+  PhysicsTransform transformA{};
+  PhysicsTransform transformB{};
+  const bool haveA =
+      (bodyA != nullptr) &&
+      world.get_simulation_physics_transform(ownerA, simToken, &transformA);
+  const bool haveB =
+      (bodyB != nullptr) &&
+      world.get_simulation_physics_transform(ownerB, simToken, &transformB);
+  const engine::math::Vec3 zero(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 centerA = haveA ? transformA.position : zero;
+  const engine::math::Vec3 centerB = haveB ? transformB.position : zero;
+
+  // Zeroing alongside invMassA/B above (rather than reading unconditionally)
+  // keeps a sleeping endpoint immovable in both linear and angular terms.
+  // A MULTI-point manifold's points additionally share both bodies'
+  // rotational DOF: correcting several points' normal impulses one at a
+  // time (Gauss-Seidel) without also re-solving friction after each,
+  // exactly what resolve_manifold_contact's own inner loop does but this
+  // pass does not, feeds a persistent one-directional spin into the shared
+  // body -- reproduced as steady stack creep/drift while building this fix,
+  // not mere oscillation. A lone point has no such inter-point coupling, so
+  // only single-point manifolds (contactCount == 1, whether from a
+  // single-point path or a clip that degenerated to one point) get the
+  // angular term; multi-point manifolds stay linear-only here, matching the
+  // MOST helpful and safe subset for issue #123's dominant case (flat
+  // resting stacks).
+  const bool singlePoint = manifold.contactCount == 1U;
+  const float invInertiaA =
+      ((invMassA > 0.0F) && singlePoint) ? manifold.invInertiaA : 0.0F;
+  const float invInertiaB =
+      ((invMassB > 0.0F) && singlePoint) ? manifold.invInertiaB : 0.0F;
+  // correcting them one pass each (rather than to convergence) lets later
+  // points in the SAME manifold re-perturb earlier ones every outer
+  // iteration -- reproduced as visible stack creep/rotation jitter while
+  // building this fix. Converging fully here, matching
+  // resolve_manifold_contact's own inner-iteration depth, is what makes
+  // each outer pass leave the manifold at its OWN local equilibrium before
+  // the next cached pair (and, on the next outer iteration, this one again)
+  // sees the update.
+  for (std::size_t iteration = 0U; iteration < kManifoldSolverIterations;
+       ++iteration) {
+    for (std::size_t p = 0U; p < manifold.contactCount; ++p) {
+      ManifoldContact &c = manifold.contacts[p];
+      const engine::math::Vec3 rA = engine::math::sub(c.pointOnA, centerA);
+      const engine::math::Vec3 rB = engine::math::sub(c.pointOnB, centerB);
+      const engine::math::Vec3 pointVelA = engine::math::add(
+          (bodyA != nullptr) ? bodyA->velocity : zero,
+          (bodyA != nullptr) ? engine::math::cross(bodyA->angularVelocity, rA)
+                             : zero);
+      const engine::math::Vec3 pointVelB = engine::math::add(
+          (bodyB != nullptr) ? bodyB->velocity : zero,
+          (bodyB != nullptr) ? engine::math::cross(bodyB->angularVelocity, rB)
+                             : zero);
+      const float vn = engine::math::dot(
+          engine::math::sub(pointVelB, pointVelA), c.normal);
+      // A separating point (vn >= 0) already left contact this step -- most
+      // often a legitimate restitution bounce the primary resolve just
+      // applied. Relaxing it toward the target=0 rest state here would
+      // erode that bounce every extra pass. Only points still approaching
+      // (vn < 0, the residual-stack case this pass exists for) get
+      // corrected.
+      if (vn >= 0.0F) {
+        continue;
+      }
+      const float effectiveMass =
+          invMassSum +
+          invInertiaA *
+              engine::math::length_sq(engine::math::cross(rA, c.normal)) +
+          invInertiaB *
+              engine::math::length_sq(engine::math::cross(rB, c.normal));
+      if (effectiveMass <= 0.0F) {
+        continue;
+      }
+      const float rawImpulse = -vn / effectiveMass;
+      const float newAccumulated =
+          std::fmax(0.0F, c.accumulatedNormalImpulse + rawImpulse);
+      const float impulse = newAccumulated - c.accumulatedNormalImpulse;
+      c.accumulatedNormalImpulse = newAccumulated;
+      if (impulse == 0.0F) {
+        continue;
+      }
+      const engine::math::Vec3 impulseVec = engine::math::mul(c.normal, impulse);
+      if ((bodyA != nullptr) && (invMassA > 0.0F)) {
+        bodyA->velocity = engine::math::sub(
+            bodyA->velocity, engine::math::mul(impulseVec, invMassA));
+        if (invInertiaA > 0.0F) {
+          bodyA->angularVelocity = engine::math::sub(
+              bodyA->angularVelocity,
+              engine::math::mul(engine::math::cross(rA, impulseVec),
+                                invInertiaA));
+        }
+      }
+      if ((bodyB != nullptr) && (invMassB > 0.0F)) {
+        bodyB->velocity = engine::math::add(
+            bodyB->velocity, engine::math::mul(impulseVec, invMassB));
+        if (invInertiaB > 0.0F) {
+          bodyB->angularVelocity = engine::math::add(
+              bodyB->angularVelocity,
+              engine::math::mul(engine::math::cross(rB, impulseVec),
+                                invInertiaB));
+        }
+      }
+    }
+  }
+  clamp_angular_speed((invMassA > 0.0F) ? bodyA : nullptr);
+  clamp_angular_speed((invMassB > 0.0F) ? bodyB : nullptr);
+}
+
+// Safety clamp mirroring solve_constraints' kMaxSolverIterations pattern: a
+// misconfigured cvar cannot hang the frame.
+constexpr int kMaxContactRelaxationIterations = 16;
+
+void relax_cached_contacts(
+    PhysicsWorldView &world,
+    const PhysicsWorldView::SimulationAccessToken &simToken,
+    PhysicsContext &physicsCtx) noexcept {
+  PhysicsShapeStore *store = physicsCtx.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+  const int configured = physicsCtx.contactRelaxationIterationsCvar;
+  const int extraIterations =
+      (configured > 0) ? std::min(configured, kMaxContactRelaxationIterations)
+                       : 0;
+  if (extraIterations <= 0) {
+    return;
+  }
+
+  const std::uint32_t frameNumber = physicsCtx.solverFrameNumber;
+  for (int iteration = 0; iteration < extraIterations; ++iteration) {
+    for (std::size_t i = 0U; i < store->contactManifoldCount; ++i) {
+      ContactManifold &manifold = store->contactManifolds[i];
+      if (manifold.lastFrameUsed != frameNumber) {
+        // Not touched by this frame's primary resolve: a leftover pair
+        // pending eviction, not a live contact to relax.
+        continue;
+      }
+      relax_one_manifold(world, simToken, manifold);
+    }
   }
 }
 

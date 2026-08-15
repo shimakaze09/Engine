@@ -8,11 +8,13 @@
 #include "engine/math/sphere.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec3.h"
+#include "engine/math/vec4.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "physics_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -95,14 +97,70 @@ GjkResult geometry_intersection(const ColliderWorldGeometry &a,
                  &support_geometry);
 }
 
+/// Returns a capsule's world-space core-segment endpoints: local (0,
+/// +/-halfExtents.y, 0) carried through the full affine localToWorld, so a
+/// rotated capsule's axis is exact (unlike narrow_phase's analytic fast path,
+/// which only handles the unrotated case).
+void capsule_world_segment(const ColliderWorldGeometry &geometry,
+                           math::Vec3 &outA, math::Vec3 &outB) noexcept {
+  const float halfHeight = geometry.halfExtents.y;
+  const math::Vec4 localA(0.0F, -halfHeight, 0.0F, 1.0F);
+  const math::Vec4 localB(0.0F, halfHeight, 0.0F, 1.0F);
+  const math::Vec4 worldA = math::mul(geometry.localToWorld, localA);
+  const math::Vec4 worldB = math::mul(geometry.localToWorld, localB);
+  outA = math::Vec3(worldA.x, worldA.y, worldA.z);
+  outB = math::Vec3(worldB.x, worldB.y, worldB.z);
+}
+
 /// Produces the response normal from target B toward moving collider A.
-/// Sphere pairs use the exact center line: EPA normals on barely-touching
-/// curved-curved contacts are polytope-faceting noise, tens of degrees off.
+/// Sphere pairs use the exact center line and capsule pairs (capsule-capsule,
+/// capsule-sphere) use the exact closest-point-on-axis line: EPA normals on
+/// barely-touching curved-curved contacts are polytope-faceting noise, tens
+/// of degrees off on any pair with a curved axis, not just spheres.
 math::Vec3 contact_normal(const ColliderWorldGeometry &a,
                           const ColliderWorldGeometry &b,
                           const GjkResult &intersection) noexcept {
-  if ((a.shape != ColliderShape::Sphere) ||
-      (b.shape != ColliderShape::Sphere)) {
+  const bool aCapsule = a.shape == ColliderShape::Capsule;
+  const bool bCapsule = b.shape == ColliderShape::Capsule;
+  const bool bothSpheres =
+      (a.shape == ColliderShape::Sphere) && (b.shape == ColliderShape::Sphere);
+  const bool capsuleCapsule = aCapsule && bCapsule;
+  const bool capsuleSphere =
+      (aCapsule && (b.shape == ColliderShape::Sphere)) ||
+      (bCapsule && (a.shape == ColliderShape::Sphere));
+
+  if (capsuleCapsule) {
+    math::Vec3 segAa{};
+    math::Vec3 segAb{};
+    math::Vec3 segBa{};
+    math::Vec3 segBb{};
+    capsule_world_segment(a, segAa, segAb);
+    capsule_world_segment(b, segBa, segBb);
+    math::Vec3 closestA{};
+    math::Vec3 closestB{};
+    closest_point_segment_segment(segAa, segAb, segBa, segBb, closestA,
+                                  closestB);
+    const math::Vec3 diff = math::sub(closestA, closestB);
+    if (math::length_sq(diff) > 1.0e-12F) {
+      return math::normalize(diff);
+    }
+  } else if (capsuleSphere) {
+    const ColliderWorldGeometry &capsuleGeometry = aCapsule ? a : b;
+    const math::Vec3 &sphereCenter = aCapsule ? b.center : a.center;
+    math::Vec3 segA{};
+    math::Vec3 segB{};
+    capsule_world_segment(capsuleGeometry, segA, segB);
+    math::Vec3 closestOnCapsule{};
+    closest_point_on_segment(segA, segB, sphereCenter, closestOnCapsule);
+    // Points from B toward A: when A is the capsule, its representative
+    // point is the segment's closest approach; when B is the capsule, A's
+    // own center (a sphere) is already a point.
+    const math::Vec3 diff = aCapsule ? math::sub(closestOnCapsule, b.center)
+                                     : math::sub(a.center, closestOnCapsule);
+    if (math::length_sq(diff) > 1.0e-12F) {
+      return math::normalize(diff);
+    }
+  } else if (!bothSpheres) {
     if (math::length_sq(intersection.normal) > 1.0e-12F) {
       return math::normalize(math::mul(intersection.normal, -1.0F));
     }
@@ -207,6 +265,10 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
   math::Vec3 bestOtherVel(0.0F, 0.0F, 0.0F);
   Entity bestOtherOwner = kInvalidEntity;
   float bestOtherRestitution = 0.0F;
+  // Target's own smallest half-extent at the hit, mirroring movingHe/minHalf
+  // above: lets the post-loop response check reproduce the TARGET's own
+  // travel/extent entry gate instead of assuming its sweep always fires.
+  float bestOtherMinHalf = 0.0F;
   const Entity movingOwner = world.rigid_body_owner(entity);
 
   const PhysicsShapeStore *snapshotStore = physicsCtx.shapeStore.get();
@@ -362,6 +424,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       bestOtherVel = otherVel;
       bestOtherOwner = otherOwner;
       bestOtherRestitution = other.restitution;
+      const math::Vec3 otherHe =
+          math::aabb_half_extents(otherGeometry.worldAabb);
+      bestOtherMinHalf = std::min({otherHe.x, otherHe.y, otherHe.z});
     }
   }
 
@@ -381,8 +446,22 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      : nullptr;
     result.targetInverseMass =
         (otherBody != nullptr) ? otherBody->inverseMass : 0.0F;
-    result.targetRespondsInCcd = (result.targetInverseMass > 0.0F) &&
-                                 (math::length(bestOtherVel) >= threshold);
+    // Reproduces the TARGET's own two-part entry gate (speed threshold AND
+    // travel-vs-extent) instead of only the speed half: a target fast enough
+    // to pass the speed gate can still be gated out of its own sweep by a
+    // large collider whose travel this step never exceeds half its extent
+    // (issue #122a). Undercounting that left the target's own sweep never
+    // applying its symmetric share while this sweep assumed it would --
+    // a one-sided, momentum-violating impulse. Matching both gates here
+    // means a target that truly won't sweep falls through to the slow-target
+    // position-clamp path below, the same momentum-safe fallback already
+    // used for genuinely slow targets.
+    const float otherSpeed = math::length(bestOtherVel);
+    const bool otherOwnSweepWouldRun =
+        (otherSpeed >= threshold) &&
+        ((otherSpeed * dt) > (bestOtherMinHalf * 0.5F));
+    result.targetRespondsInCcd =
+        (result.targetInverseMass > 0.0F) && otherOwnSweepWouldRun;
   }
 
   return result;
