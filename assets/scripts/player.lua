@@ -6,7 +6,8 @@
 --
 -- This script is a MODULE — it must return a table (M).
 -- The engine calls M.on_begin_play(self) once on Play and
--- M.on_tick(self, dt) every simulation step.
+-- M.on_tick(self, dt) once per rendered frame that advanced simulation
+-- (not once per fixed step); dt is that frame's total simulated time.
 -- 'self' is an opaque, generation-checked entity handle.
 local M = {}
 
@@ -39,7 +40,7 @@ function M.on_begin_play(self)
     engine.set_metallic(self, 0.0)
 end
 
--- Applies input-driven velocity once per simulation step.
+-- Applies input-driven velocity once per rendered frame.
 function M.on_tick(self, _dt)
     if not engine.is_alive(self) then
         return

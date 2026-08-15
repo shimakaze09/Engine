@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
@@ -40,6 +41,26 @@ AnimSkeleton make_two_joint_skeleton() {
   return skeleton;
 }
 
+/// Appends floats to clip.payload. AnimationClip::payload is a fixed-count
+/// NothrowBuffer (audit #174), not a std::vector, so it has no incremental
+/// push_back; production loaders always know their total float count
+/// upfront and never need to grow one. Tests build a track at a time, so
+/// this rebuilds a merged buffer via one allocate + copy per call — a
+/// pattern that is fine off the noexcept hot path this buffer type exists
+/// to protect.
+bool append_payload(AnimationClip &clip, const float *values,
+                    std::size_t count) {
+  const std::size_t oldSize = clip.payload.size();
+  std::vector<float> merged(oldSize + count);
+  for (std::size_t i = 0U; i < oldSize; ++i) {
+    merged[i] = clip.payload[i];
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    merged[oldSize + i] = values[i];
+  }
+  return clip.payload.assign(merged.data(), merged.size());
+}
+
 /// Appends a vec3 track with the given keys; returns the track index.
 std::uint32_t add_vec3_track(AnimationClip &clip, std::uint32_t joint,
                              AnimTarget target, AnimInterp interp,
@@ -51,15 +72,16 @@ std::uint32_t add_vec3_track(AnimationClip &clip, std::uint32_t joint,
   track.interpolation = interp;
   track.keyCount = keyCount;
   track.timesOffset = static_cast<std::uint32_t>(clip.payload.size());
-  for (std::uint32_t k = 0U; k < keyCount; ++k) {
-    clip.payload.push_back(times[k]);
-  }
+  static_cast<void>(append_payload(clip, times, keyCount));
   track.valuesOffset = static_cast<std::uint32_t>(clip.payload.size());
+  std::vector<float> flatValues;
+  flatValues.reserve(static_cast<std::size_t>(keyCount) * 3U);
   for (std::uint32_t k = 0U; k < keyCount; ++k) {
-    clip.payload.push_back(values[k].x);
-    clip.payload.push_back(values[k].y);
-    clip.payload.push_back(values[k].z);
+    flatValues.push_back(values[k].x);
+    flatValues.push_back(values[k].y);
+    flatValues.push_back(values[k].z);
   }
+  static_cast<void>(append_payload(clip, flatValues.data(), flatValues.size()));
   return clip.trackCount++;
 }
 
@@ -74,16 +96,17 @@ std::uint32_t add_quat_track(AnimationClip &clip, std::uint32_t joint,
   track.interpolation = interp;
   track.keyCount = keyCount;
   track.timesOffset = static_cast<std::uint32_t>(clip.payload.size());
-  for (std::uint32_t k = 0U; k < keyCount; ++k) {
-    clip.payload.push_back(times[k]);
-  }
+  static_cast<void>(append_payload(clip, times, keyCount));
   track.valuesOffset = static_cast<std::uint32_t>(clip.payload.size());
+  std::vector<float> flatValues;
+  flatValues.reserve(static_cast<std::size_t>(keyCount) * 4U);
   for (std::uint32_t k = 0U; k < keyCount; ++k) {
-    clip.payload.push_back(values[k].x);
-    clip.payload.push_back(values[k].y);
-    clip.payload.push_back(values[k].z);
-    clip.payload.push_back(values[k].w);
+    flatValues.push_back(values[k].x);
+    flatValues.push_back(values[k].y);
+    flatValues.push_back(values[k].z);
+    flatValues.push_back(values[k].w);
   }
+  static_cast<void>(append_payload(clip, flatValues.data(), flatValues.size()));
   return clip.trackCount++;
 }
 

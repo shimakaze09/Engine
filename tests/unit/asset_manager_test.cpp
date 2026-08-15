@@ -100,9 +100,12 @@ int verify_unload_clears_registry_slot() {
   engine::renderer::clear_asset_database(database.get());
 
   constexpr engine::renderer::AssetId kAssetId = 103ULL;
-  constexpr engine::renderer::MeshHandle kMeshHandle{3U};
-  registry->occupied[kMeshHandle.id] = true;
-  registry->meshes[kMeshHandle.id] = engine::renderer::GpuMesh{};
+  const engine::renderer::MeshHandle kMeshHandle =
+      engine::renderer::register_gpu_mesh(registry.get(),
+                                          engine::renderer::GpuMesh{});
+  if (kMeshHandle == engine::renderer::kInvalidMeshHandle) {
+    return 40;
+  }
 
   if (!engine::renderer::register_mesh_asset(database.get(), kAssetId,
                                              "assets/test.mesh", kMeshHandle)) {
@@ -124,7 +127,10 @@ int verify_unload_clears_registry_slot() {
     return 44;
   }
 
-  if (registry->occupied[kMeshHandle.id]) {
+  // The stale handle must fail lookup once its slot is released, not just
+  // read back the raw occupied flag (audit #173).
+  if (engine::renderer::lookup_gpu_mesh(registry.get(), kMeshHandle) !=
+      nullptr) {
     return 45;
   }
 
@@ -151,9 +157,12 @@ int verify_auto_unload_from_release_intent() {
   engine::renderer::clear_asset_database(database.get());
 
   constexpr engine::renderer::AssetId kAssetId = 104ULL;
-  constexpr engine::renderer::MeshHandle kMeshHandle{4U};
-  registry->occupied[kMeshHandle.id] = true;
-  registry->meshes[kMeshHandle.id] = engine::renderer::GpuMesh{};
+  const engine::renderer::MeshHandle kMeshHandle =
+      engine::renderer::register_gpu_mesh(registry.get(),
+                                          engine::renderer::GpuMesh{});
+  if (kMeshHandle == engine::renderer::kInvalidMeshHandle) {
+    return 60;
+  }
 
   if (!engine::renderer::register_mesh_asset(database.get(), kAssetId,
                                              "assets/test.mesh", kMeshHandle)) {
@@ -174,7 +183,8 @@ int verify_auto_unload_from_release_intent() {
     return 64;
   }
 
-  if (registry->occupied[kMeshHandle.id]) {
+  if (engine::renderer::lookup_gpu_mesh(registry.get(), kMeshHandle) !=
+      nullptr) {
     return 65;
   }
 

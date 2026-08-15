@@ -16,14 +16,43 @@ find_package(Threads REQUIRED)
 # ---- Platform target ----
 # Valid values: Win64 Linux macOS Android iOS Web
 # Default auto-detected from CMake's current host/target when not specified.
+#
+# Support matrix (target platform x toolchain x renderer backend), per
+# CLAUDE.md's documented platform policy (audit #178 — configure used to
+# accept every value in _ENGINE_VALID_PLATFORMS regardless of whether this
+# repo can actually build for it, so a mismatched or unimplemented target
+# passed initial parsing and then failed deep in dependency discovery,
+# compilation, or linking instead of here):
+#   Win64  - native only (no cross-compile toolchain is wired up in this
+#            repo). Desktop OpenGL 4.5 renderer, full editor + runtime.
+#            Primary lane alongside Linux.
+#   Linux  - native only. Desktop OpenGL 4.5 renderer, full editor + runtime.
+#   macOS  - native only. Build + headless-test lane ONLY (owner decision
+#            2026-08-09, issue #82): Apple caps OpenGL at 4.1 while
+#            default.frag requires GLSL 450, so the interactive GL renderer
+#            does not run there until the v0.5 bgfx replatform. Configure
+#            succeeds (the AppleClang conformance lane needs it) but warns.
+#   Android, iOS, Web - no toolchain, renderer backend, or dependency graph
+#            exists for these yet; gated on the v0.5 bgfx replatform (RHI
+#            migration) per the roadmap. Configure fails fast below.
+#
+# This repo has no cross-compilation toolchain files (no Android NDK, iOS,
+# or Emscripten toolchain wiring): nothing past this point derives
+# platform-specific settings from CMAKE_TOOLCHAIN_FILE/CMAKE_SYSTEM_NAME, so
+# a target that does not match the host CMake is actually running on is
+# rejected rather than silently applying the wrong platform compile
+# definitions (this also covers CI/host-vs-target mistakes, not just a
+# typo'd cache value).
+if(WIN32)
+    set(_ENGINE_HOST_PLATFORM "Win64")
+elseif(APPLE)
+    set(_ENGINE_HOST_PLATFORM "macOS")
+else()
+    set(_ENGINE_HOST_PLATFORM "Linux")
+endif()
+
 if(NOT DEFINED ENGINE_TARGET_PLATFORM)
-    if(WIN32)
-        set(ENGINE_TARGET_PLATFORM "Win64" CACHE STRING "Target platform for the engine build")
-    elseif(APPLE)
-        set(ENGINE_TARGET_PLATFORM "macOS" CACHE STRING "Target platform for the engine build")
-    else()
-        set(ENGINE_TARGET_PLATFORM "Linux" CACHE STRING "Target platform for the engine build")
-    endif()
+    set(ENGINE_TARGET_PLATFORM "${_ENGINE_HOST_PLATFORM}" CACHE STRING "Target platform for the engine build")
 else()
     set(ENGINE_TARGET_PLATFORM "${ENGINE_TARGET_PLATFORM}" CACHE STRING "Target platform for the engine build")
 endif()
@@ -34,6 +63,39 @@ set(_ENGINE_VALID_PLATFORMS Win64 Linux macOS Android iOS Web)
 if(NOT ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_VALID_PLATFORMS)
     message(FATAL_ERROR "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' is not valid. "
         "Choose one of: Win64 Linux macOS Android iOS Web")
+endif()
+
+set(_ENGINE_UNIMPLEMENTED_PLATFORMS Android iOS Web)
+if(ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_UNIMPLEMENTED_PLATFORMS)
+    message(FATAL_ERROR
+        "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' has no toolchain, "
+        "renderer backend, or dependency graph in this repo yet — it is "
+        "gated on the v0.5 bgfx replatform (RHI migration) per CLAUDE.md's "
+        "roadmap. Configuring for it would pass this check and then fail "
+        "later during dependency discovery, compilation, or linking instead "
+        "of here with a clear reason. Supported targets today: Win64, "
+        "Linux, macOS (macOS is a build + headless-test lane only).")
+endif()
+
+if(NOT CMAKE_CROSSCOMPILING AND NOT ENGINE_TARGET_PLATFORM STREQUAL _ENGINE_HOST_PLATFORM)
+    message(FATAL_ERROR
+        "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' does not match "
+        "the platform CMake is actually configuring for ('${_ENGINE_HOST_PLATFORM}'), "
+        "and no cross-compilation toolchain (CMAKE_TOOLCHAIN_FILE / "
+        "CMAKE_SYSTEM_NAME) was supplied. This repo builds natively only "
+        "today, so an unmatched target platform is always a host/target "
+        "mistake, not a supported cross-compile — it would otherwise apply "
+        "the wrong ENGINE_PLATFORM_* compile definitions to a native build "
+        "instead of failing here.")
+endif()
+
+if(ENGINE_TARGET_PLATFORM STREQUAL "macOS")
+    message(WARNING
+        "ENGINE_TARGET_PLATFORM=macOS is a build + headless-test lane only "
+        "(owner decision 2026-08-09, issue #82): OpenGL is capped at 4.1 on "
+        "this platform while default.frag requires GLSL 450, so the "
+        "interactive GL renderer does not run here until the v0.5 bgfx "
+        "replatform. Use Win64 or Linux to run the live renderer.")
 endif()
 
 message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")

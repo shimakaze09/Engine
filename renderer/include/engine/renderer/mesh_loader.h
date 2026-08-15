@@ -5,10 +5,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
-#include <memory>
-#include <new>
 
+#include "engine/core/nothrow_buffer.h"
 #include "engine/renderer/command_buffer.h"
 
 namespace engine::renderer {
@@ -24,76 +22,22 @@ struct GpuMesh final {
   bool hasSkin = false;
 };
 
-/// Fixed table mapping MeshHandle to uploaded GpuMesh slots.
+/// Fixed table mapping MeshHandle to uploaded GpuMesh slots. Each slot
+/// carries a generation counter (bumped on release) so a MeshHandle that
+/// outlives its slot's reuse fails lookup instead of aliasing whatever mesh
+/// was loaded into the recycled slot afterward (audit #173).
 struct GpuMeshRegistry final {
   static constexpr std::size_t kMaxSlots = 4096U;
   std::array<GpuMesh, kMaxSlots> meshes{};
   std::array<bool, kMaxSlots> occupied{};
+  std::array<std::uint32_t, kMaxSlots> generations{};
 };
 
-/// Move-only owned buffer whose element count is bound to its allocation:
-/// allocate/assign are the only growth paths and report failure instead of
-/// terminating, so recoverable out-of-memory keeps normal load-failure
-/// semantics under the no-exception build while the buffer stays the single
-/// source of allocation truth (audit H-11 follow-up).
+/// Mesh-domain alias for the shared nothrow buffer (audit H-11 follow-up;
+/// generalized to core::NothrowBuffer under audit #174 so runtime's
+/// animation payload loader can reuse the same allocate/assign contract).
 template <typename T>
-class MeshBuffer final {
- public:
-  MeshBuffer() = default;
-  MeshBuffer(MeshBuffer &&) noexcept = default;
-  MeshBuffer &operator=(MeshBuffer &&) noexcept = default;
-  MeshBuffer(const MeshBuffer &) = delete;
-  MeshBuffer &operator=(const MeshBuffer &) = delete;
-  ~MeshBuffer() = default;
-
-  /// Replaces the contents with count zero-initialized elements; false and
-  /// empty on allocation failure.
-  [[nodiscard]] bool allocate(std::size_t count) noexcept {
-    m_data.reset();
-    m_count = 0U;
-    if (count == 0U) {
-      return true;
-    }
-    m_data.reset(new (std::nothrow) T[count]{});
-    if (m_data == nullptr) {
-      return false;
-    }
-    m_count = count;
-    return true;
-  }
-
-  /// Replaces the contents with a copy of values; false and empty on
-  /// allocation failure.
-  [[nodiscard]] bool assign(std::initializer_list<T> values) noexcept {
-    if (!allocate(values.size())) {
-      return false;
-    }
-    std::size_t index = 0U;
-    for (const T &value : values) {
-      m_data[index] = value;
-      ++index;
-    }
-    return true;
-  }
-
-  void clear() noexcept {
-    m_data.reset();
-    m_count = 0U;
-  }
-
-  std::size_t size() const noexcept { return m_count; }
-  bool empty() const noexcept { return m_count == 0U; }
-  T *data() noexcept { return m_data.get(); }
-  const T *data() const noexcept { return m_data.get(); }
-  T &operator[](std::size_t index) noexcept { return m_data[index]; }
-  const T &operator[](std::size_t index) const noexcept {
-    return m_data[index];
-  }
-
- private:
-  std::unique_ptr<T[]> m_data{};
-  std::size_t m_count = 0U;
-};
+using MeshBuffer = core::NothrowBuffer<T>;
 
 /// CPU-side mesh payload decoded from a cooked mesh asset file. The
 /// buffers are the single source of allocation truth: float and index
@@ -111,12 +55,17 @@ struct CpuMeshData final {
   bool hasSkin = false;
 };
 
-// Returns slot index (same as MeshHandle::id) or 0 on failure.
-std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
-                                const GpuMesh &mesh) noexcept;
-/// Registry entry for a handle; nullptr when stale or absent.
+/// Claims a free slot and returns a generation-encoded handle, or
+/// kInvalidMeshHandle when the registry is full.
+MeshHandle register_gpu_mesh(GpuMeshRegistry *registry,
+                             const GpuMesh &mesh) noexcept;
+/// Registry entry for a handle; nullptr when stale (slot reused under a
+/// newer generation) or absent.
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
                                renderer::MeshHandle handle) noexcept;
+/// Releases the slot backing handle (no-op on a stale or absent handle) and
+/// bumps its generation so any surviving copy of handle fails lookup.
+void unload_gpu_mesh(GpuMeshRegistry *registry, MeshHandle handle) noexcept;
 
 /// Loads the requested resource for mesh from file.
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept;

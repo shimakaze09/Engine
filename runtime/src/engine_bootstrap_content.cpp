@@ -37,11 +37,10 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                         renderer::AssetDatabase *database,
                                         const renderer::GpuMesh &mesh,
                                         const char *builtinPath) noexcept {
-  const std::uint32_t slot = renderer::register_gpu_mesh(registry, mesh);
-  if (slot == 0U) {
+  const renderer::MeshHandle handle = renderer::register_gpu_mesh(registry, mesh);
+  if (handle == renderer::kInvalidMeshHandle) {
     return renderer::kInvalidAssetId;
   }
-  const renderer::MeshHandle handle{slot};
   const renderer::AssetId id = renderer::make_asset_id_from_path(builtinPath);
   if (id == renderer::kInvalidAssetId) {
     return renderer::kInvalidAssetId;

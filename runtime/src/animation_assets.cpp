@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 #include "engine/core/animation_asset.h"
 #include "engine/core/logging.h"
@@ -20,6 +21,15 @@
 namespace engine::runtime {
 
 namespace {
+
+// Independent sanity ceiling on top of the file-size-derived bound below:
+// a payloadFloatCount within an actual file's size still cannot be trusted
+// to be reasonable (a large-but-real file could legitimately claim a size
+// that is expensive but unallocatable on a constrained device). 8M floats
+// (32 MiB) comfortably covers any authored clip while giving hostile or
+// corrupt headers a small-file rejection path that never reaches
+// allocation (audit #174).
+constexpr std::uint32_t kMaxAnimPayloadFloats = 8U * 1024U * 1024U;
 
 /// Logs one load failure with its virtual path.
 bool fail(const char *virtualPath, const char *reason) noexcept {
@@ -204,6 +214,7 @@ bool load_animation_clip_asset(const char *virtualPath,
     if ((header.magic == core::kAnimClipAssetMagic) &&
         (header.version == core::kAnimClipAssetVersion) &&
         (header.trackCount <= kMaxAnimTracks) &&
+        (header.payloadFloatCount <= kMaxAnimPayloadFloats) &&
         (static_cast<std::uint64_t>(size) >= expected) &&
         std::isfinite(header.durationSeconds) &&
         (header.durationSeconds >= 0.0F)) {
@@ -213,50 +224,59 @@ bool load_animation_clip_asset(const char *virtualPath,
       const auto *base = static_cast<const std::uint8_t *>(data);
       const auto *records = reinterpret_cast<const core::AnimClipAssetTrack *>(
           base + sizeof(header));
-      clip.payload.resize(header.payloadFloatCount);
-      if (header.payloadFloatCount > 0U) {
-        std::memcpy(clip.payload.data(),
-                    base + sizeof(header) +
-                        (static_cast<std::size_t>(header.trackCount) *
-                         sizeof(core::AnimClipAssetTrack)),
-                    static_cast<std::size_t>(header.payloadFloatCount) *
-                        sizeof(float));
-      }
-
-      bool tracksValid = true;
-      for (std::uint32_t t = 0U; tracksValid && (t < header.trackCount);
-           ++t) {
-        const core::AnimClipAssetTrack &record = records[t];
-        AnimTrackDesc &track = clip.tracks[t];
-        track.joint = record.joint;
-        track.target = static_cast<AnimTarget>(record.target);
-        track.interpolation = static_cast<AnimInterp>(record.interpolation);
-        track.keyCount = record.keyCount;
-        track.timesOffset = record.timesOffset;
-        track.valuesOffset = record.valuesOffset;
-        track.inTangentsOffset = record.inTangentsOffset;
-        track.outTangentsOffset = record.outTangentsOffset;
-
-        const std::uint32_t stride = (record.target == 1U) ? 4U : 3U;
-        tracksValid =
-            (record.target <= 2U) && (record.interpolation <= 2U) &&
-            span_fits(record.timesOffset, record.keyCount, 1U,
-                      header.payloadFloatCount) &&
-            span_fits(record.valuesOffset, record.keyCount, stride,
-                      header.payloadFloatCount);
-        if (tracksValid && (record.interpolation == 2U)) {
-          tracksValid = span_fits(record.inTangentsOffset, record.keyCount,
-                                  stride, header.payloadFloatCount) &&
-                        span_fits(record.outTangentsOffset, record.keyCount,
-                                  stride, header.payloadFloatCount);
-        }
-      }
-
-      if (tracksValid) {
-        *outClip = clip;
-        ok = true;
+      // Nothrow allocation: an unallocatable (but header/size-validated)
+      // payload is a recoverable load failure, never process termination
+      // under the no-exception build (audit #174).
+      if (!clip.payload.allocate(header.payloadFloatCount)) {
+        static_cast<void>(fail(virtualPath, "clip payload allocation failed"));
       } else {
-        static_cast<void>(fail(virtualPath, "clip track out of bounds"));
+        if (header.payloadFloatCount > 0U) {
+          std::memcpy(clip.payload.data(),
+                      base + sizeof(header) +
+                          (static_cast<std::size_t>(header.trackCount) *
+                           sizeof(core::AnimClipAssetTrack)),
+                      static_cast<std::size_t>(header.payloadFloatCount) *
+                          sizeof(float));
+        }
+
+        bool tracksValid = true;
+        for (std::uint32_t t = 0U; tracksValid && (t < header.trackCount);
+             ++t) {
+          const core::AnimClipAssetTrack &record = records[t];
+          AnimTrackDesc &track = clip.tracks[t];
+          track.joint = record.joint;
+          track.target = static_cast<AnimTarget>(record.target);
+          track.interpolation = static_cast<AnimInterp>(record.interpolation);
+          track.keyCount = record.keyCount;
+          track.timesOffset = record.timesOffset;
+          track.valuesOffset = record.valuesOffset;
+          track.inTangentsOffset = record.inTangentsOffset;
+          track.outTangentsOffset = record.outTangentsOffset;
+
+          const std::uint32_t stride = (record.target == 1U) ? 4U : 3U;
+          tracksValid =
+              (record.target <= 2U) && (record.interpolation <= 2U) &&
+              span_fits(record.timesOffset, record.keyCount, 1U,
+                        header.payloadFloatCount) &&
+              span_fits(record.valuesOffset, record.keyCount, stride,
+                        header.payloadFloatCount);
+          if (tracksValid && (record.interpolation == 2U)) {
+            tracksValid = span_fits(record.inTangentsOffset, record.keyCount,
+                                    stride, header.payloadFloatCount) &&
+                          span_fits(record.outTangentsOffset, record.keyCount,
+                                    stride, header.payloadFloatCount);
+          }
+        }
+
+        if (tracksValid) {
+          // Move, not copy: payload is a move-only nothrow buffer, so
+          // publishing the decoded clip never allocates a second time
+          // (audit #174).
+          *outClip = std::move(clip);
+          ok = true;
+        } else {
+          static_cast<void>(fail(virtualPath, "clip track out of bounds"));
+        }
       }
     } else {
       static_cast<void>(fail(virtualPath, "invalid clip header"));

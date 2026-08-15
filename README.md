@@ -220,7 +220,9 @@ Current script conventions in `assets/`:
 
 - Scene-level module (`assets/main.lua`)
 	- `M.on_begin_play(self)` is called once when play starts
-	- `M.on_tick(self, dt)` is called every simulation step
+	- `M.on_tick(self, dt)` is called once per rendered frame that
+	  advanced simulation (not once per fixed step); `dt` is that
+	  frame's total simulated time, summing every catch-up fixed step
 	- `M.on_end_play(self)`, `M.on_save_state(self)`, and
 	  `M.on_reload(self, state)` cover teardown and hot reload
 	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks

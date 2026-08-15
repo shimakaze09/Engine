@@ -135,6 +135,20 @@ void check_script_reload() noexcept;
 // dt), on_end_play(self), on_save_state(self), and on_reload(self, state);
 // legacy on_start/on_update/on_end names remain fallbacks. `self` is an opaque,
 // generation-checked handle. Multiple entities may share the same script file.
+//
+// on_tick cadence (audit #176, corrects the prior "once per simulation step"
+// claim to match the always-intentional EnginePipeline::stage_scripting
+// behavior, audit M-01): on_tick is a per-rendered-frame callback, not a
+// per-fixed-step one. It fires exactly once per frame that advanced
+// simulation, with dt equal to the total time simulated that frame — the sum
+// of every catch-up fixed step folded into it, not one call per step. A
+// frame that runs three fixed steps calls on_tick once with dt = 3 *
+// kFixedDeltaSeconds, the same way physics and animation each ran three
+// times that frame but transform propagation only publishes once. Re-entrant
+// per-step dispatch would multiply gameplay callbacks and their deferred
+// mutations; passing the bare fixed delta instead of the summed time made
+// timers and script-driven motion run slow under catch-up. There is
+// currently no separate per-fixed-step Lua callback — only on_tick.
 
 // Load all unique script files referenced by ScriptComponents in the world and
 // call module.on_begin_play(self) for each entity. Call once on Play start.
@@ -149,7 +163,9 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;
 void dispatch_entity_scripts_end_play(runtime::World *world) noexcept;
 
 // Restore pending reload state, then call module.on_tick(self, dt) for every
-// entity with a ScriptComponent. Call once per simulation step.
+// entity with a ScriptComponent. Call once per rendered frame that advanced
+// simulation (not once per fixed step); dt is the frame's total simulated
+// time — see the on_tick cadence note above.
 void dispatch_entity_scripts_update(float dt) noexcept;
 
 // Call module.on_end_play(self) for every entity with a ScriptComponent.

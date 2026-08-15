@@ -1241,6 +1241,7 @@ int main() {
       "local M = {}\n"
       "local begin_play_count = 0\n"
       "local tick_count = 0\n"
+      "local last_dt = 0.0\n"
       "local end_play_count = 0\n"
       "\n"
       "function M.on_begin_play(self)\n"
@@ -1249,10 +1250,30 @@ int main() {
       "\n"
       "function M.on_tick(self, dt)\n"
       "    tick_count = tick_count + 1\n"
+      "    last_dt = dt\n"
       "end\n"
       "\n"
       "function M.on_end_play(self)\n"
       "    end_play_count = end_play_count + 1\n"
+      "end\n"
+      "\n"
+      "function verify_tick_count(expected)\n"
+      "    if tick_count ~= expected then\n"
+      "        error('tick_count ' .. tostring(tick_count) .. ' expected ' ..\n"
+      "              tostring(expected))\n"
+      "    end\n"
+      "end\n"
+      "\n"
+      "function verify_last_dt(expected)\n"
+      "    if last_dt ~= expected then\n"
+      "        error('last_dt ' .. tostring(last_dt) .. ' expected ' ..\n"
+      "              tostring(expected))\n"
+      "    end\n"
+      "end\n"
+      "\n"
+      "function reset_tick_tracking()\n"
+      "    tick_count = 0\n"
+      "    last_dt = 0.0\n"
       "end\n"
       "\n"
       "function spawn_scripted_pair()\n"
@@ -1363,16 +1384,63 @@ int main() {
   {
     std::printf("  %-40s ", "on_tick fires 3 times");
 
-    constexpr float kDt = 1.0F / 60.0F;
-    for (int i = 0; i < 3; ++i) {
-      engine::scripting::set_frame_time(kDt, kDt * static_cast<float>(i + 1));
-      engine::scripting::dispatch_entity_scripts_update(kDt);
-    }
+    if (!engine::scripting::call_script_function("reset_tick_tracking")) {
+      std::printf("FAIL (reset)\n");
+      ++failures;
+    } else {
+      constexpr float kDt = 1.0F / 60.0F;
+      for (int i = 0; i < 3; ++i) {
+        engine::scripting::set_frame_time(kDt,
+                                          kDt * static_cast<float>(i + 1));
+        engine::scripting::dispatch_entity_scripts_update(kDt);
+      }
 
-    // We can't easily read the Lua counter directly, but the dispatch didn't
-    // crash and the entity isn't faulted. That's the basic check.
-    // A more thorough test would need the scripting system to expose a query.
-    std::printf("PASS\n");
+      if (engine::scripting::call_script_function_float("verify_tick_count",
+                                                         3.0F)) {
+        std::printf("PASS\n");
+      } else {
+        std::printf("FAIL (tick_count != 3)\n");
+        ++failures;
+      }
+    }
+  }
+
+  // --- Test 2b: audit #176 — one dispatch call per rendered frame carries
+  // the frame's total simulated time, not one call per fixed step folded
+  // into it. EnginePipeline::stage_scripting (runtime/src/engine_pipeline.cpp)
+  // calls dispatch_entity_scripts_update exactly once per frame with
+  // step_seconds() (every catch-up fixed step's dt summed); this pins that
+  // contract at the dispatch function itself: one call carrying a
+  // multi-step dt must produce exactly one on_tick with that same dt, not
+  // three calls of dt/3 each. ---
+  {
+    std::printf("  %-40s ",
+               "catch-up: one dispatch, summed dt (audit #176)");
+
+    if (!engine::scripting::call_script_function("reset_tick_tracking")) {
+      std::printf("FAIL (reset)\n");
+      ++failures;
+    } else {
+      // Stands in for a rendered frame whose accumulator produced three
+      // catch-up fixed steps (fixed_step_decision's multi-step case,
+      // covered directly in frame_pacing_test.cpp); stage_scripting would
+      // pass step_seconds() == 3 * kFixedDeltaSeconds for that frame.
+      constexpr float kThreeStepDt = 3.0F * (1.0F / 60.0F);
+      engine::scripting::set_frame_time(kThreeStepDt, kThreeStepDt);
+      engine::scripting::dispatch_entity_scripts_update(kThreeStepDt);
+
+      const bool countOk = engine::scripting::call_script_function_float(
+          "verify_tick_count", 1.0F);
+      const bool dtOk = engine::scripting::call_script_function_float(
+          "verify_last_dt", kThreeStepDt);
+      if (countOk && dtOk) {
+        std::printf("PASS\n");
+      } else {
+        std::printf("FAIL (count_ok=%d dt_ok=%d)\n", countOk ? 1 : 0,
+                   dtOk ? 1 : 0);
+        ++failures;
+      }
+    }
   }
 
   // --- Test 3: on_end_play fires for deferred destroys at EndPlay ---
