@@ -122,33 +122,13 @@ bool ensure_record(AssetDatabase *database,
   return true;
 }
 
-void unload_registry_mesh(GpuMeshRegistry *registry,
-                          MeshHandle handle) noexcept {
-  if ((registry == nullptr) || (handle == kInvalidMeshHandle)) {
-    return;
-  }
-
-  const std::uint32_t meshId = handle.id;
-  if ((meshId == 0U) || (meshId >= registry->meshes.size())) {
-    return;
-  }
-
-  if (!registry->occupied[meshId]) {
-    return;
-  }
-
-  unload_mesh(&registry->meshes[meshId]);
-  registry->occupied[meshId] = false;
-  registry->meshes[meshId] = GpuMesh{};
-}
-
 void unload_record_mesh(MeshAssetRecord *record,
                         GpuMeshRegistry *registry) noexcept {
   if (record == nullptr) {
     return;
   }
 
-  unload_registry_mesh(registry, record->runtimeMesh);
+  unload_gpu_mesh(registry, record->runtimeMesh);
   record->runtimeMesh = kInvalidMeshHandle;
 }
 
@@ -243,8 +223,8 @@ bool process_load_like_request(AssetDatabase *database,
     return false;
   }
 
-  const std::uint32_t meshSlot = register_gpu_mesh(registry, mesh);
-  if (meshSlot == 0U) {
+  const MeshHandle meshHandle = register_gpu_mesh(registry, mesh);
+  if (meshHandle == kInvalidMeshHandle) {
     unload_mesh(&mesh);
     record.state =
         record.requestedResident ? AssetState::Failed : AssetState::Unloaded;
@@ -255,7 +235,7 @@ bool process_load_like_request(AssetDatabase *database,
     return false;
   }
 
-  record.runtimeMesh = MeshHandle{meshSlot};
+  record.runtimeMesh = meshHandle;
   if (!record.requestedResident || (record.refCount == 0U)) {
     unload_record_mesh(&record, registry);
     record.state = AssetState::Unloaded;

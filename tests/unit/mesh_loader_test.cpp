@@ -5,11 +5,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <new>
 
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
+
+#include "mesh_handle_codec.h"
 
 namespace {
 
@@ -664,6 +667,162 @@ int check_v3_decode_rejects_out_of_palette_joint() {
   return loaded ? 182 : 0;
 }
 
+// --- audit #173: MeshHandle generation validation ---
+
+/// EXPECTATION (audit #173, red on main): releasing mesh A and reusing its
+/// slot for mesh B must not let the stale handle to A resolve to B. Before
+/// the fix, MeshHandle carried no generation and register_gpu_mesh returned
+/// the raw slot index, so a saved handle silently aliased whatever mesh the
+/// registry later placed in the same slot.
+int check_stale_handle_rejected_after_slot_reuse() {
+  engine::renderer::GpuMeshRegistry registry{};
+
+  engine::renderer::GpuMesh meshA{};
+  meshA.vertexCount = 111U;
+  const engine::renderer::MeshHandle handleA =
+      engine::renderer::register_gpu_mesh(&registry, meshA);
+  if (handleA == engine::renderer::kInvalidMeshHandle) {
+    return 190;
+  }
+
+  const engine::renderer::GpuMesh *lookedUpA =
+      engine::renderer::lookup_gpu_mesh(&registry, handleA);
+  if ((lookedUpA == nullptr) || (lookedUpA->vertexCount != 111U)) {
+    return 191;
+  }
+
+  engine::renderer::unload_gpu_mesh(&registry, handleA);
+  if (engine::renderer::lookup_gpu_mesh(&registry, handleA) != nullptr) {
+    return 192;
+  }
+
+  engine::renderer::GpuMesh meshB{};
+  meshB.vertexCount = 222U;
+  const engine::renderer::MeshHandle handleB =
+      engine::renderer::register_gpu_mesh(&registry, meshB);
+  if (handleB == engine::renderer::kInvalidMeshHandle) {
+    return 193;
+  }
+
+  // The registry always claims the first free slot, so B lands in A's old
+  // slot with a bumped generation: same slot bits, different handle value.
+  if (engine::renderer::mesh_handle_detail::slot_index(handleA) !=
+      engine::renderer::mesh_handle_detail::slot_index(handleB)) {
+    return 194;
+  }
+  if (handleA.id == handleB.id) {
+    return 195;
+  }
+
+  // The stale handle to A must still fail even though its slot is occupied.
+  if (engine::renderer::lookup_gpu_mesh(&registry, handleA) != nullptr) {
+    return 196;
+  }
+
+  const engine::renderer::GpuMesh *lookedUpB =
+      engine::renderer::lookup_gpu_mesh(&registry, handleB);
+  if ((lookedUpB == nullptr) || (lookedUpB->vertexCount != 222U)) {
+    return 197;
+  }
+
+  return 0;
+}
+
+/// EXPECTATION (audit #173): the generation counter wraps past its bounded
+/// field without ever landing on the reserved zero (invalid) value.
+int check_generation_wrap_policy() {
+  engine::renderer::GpuMeshRegistry registry{};
+
+  engine::renderer::GpuMesh mesh{};
+  const engine::renderer::MeshHandle handle =
+      engine::renderer::register_gpu_mesh(&registry, mesh);
+  if (handle == engine::renderer::kInvalidMeshHandle) {
+    return 200;
+  }
+  const std::uint32_t slot =
+      engine::renderer::mesh_handle_detail::slot_index(handle);
+
+  // Force the slot's stored generation to the last value before the codec
+  // wraps, then unload once more to cross the boundary.
+  registry.generations[slot] = engine::renderer::mesh_handle_detail::kGenerationMask;
+  registry.occupied[slot] = true;
+  engine::renderer::unload_gpu_mesh(
+      &registry, engine::renderer::mesh_handle_detail::make_handle(
+                     slot, engine::renderer::mesh_handle_detail::kGenerationMask));
+
+  if (registry.generations[slot] != 1U) {
+    return 201;
+  }
+
+  const engine::renderer::MeshHandle wrapped =
+      engine::renderer::register_gpu_mesh(&registry, mesh);
+  if (wrapped == engine::renderer::kInvalidMeshHandle) {
+    return 202;
+  }
+  if (engine::renderer::mesh_handle_detail::generation(wrapped) != 1U) {
+    return 203;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit #173): a full registry rejects further registration,
+/// and releasing one slot makes exactly one more registration succeed.
+int check_registry_full_then_reuse() {
+  std::unique_ptr<engine::renderer::GpuMeshRegistry> registry(
+      new (std::nothrow) engine::renderer::GpuMeshRegistry());
+  if (registry == nullptr) {
+    return 210;
+  }
+
+  engine::renderer::GpuMesh mesh{};
+  engine::renderer::MeshHandle firstHandle = engine::renderer::kInvalidMeshHandle;
+  std::size_t registered = 0U;
+  for (std::size_t i = 1U; i < engine::renderer::GpuMeshRegistry::kMaxSlots;
+       ++i) {
+    const engine::renderer::MeshHandle handle =
+        engine::renderer::register_gpu_mesh(registry.get(), mesh);
+    if (handle == engine::renderer::kInvalidMeshHandle) {
+      return 211;
+    }
+    if (registered == 0U) {
+      firstHandle = handle;
+    }
+    ++registered;
+  }
+  if (registered != engine::renderer::GpuMeshRegistry::kMaxSlots - 1U) {
+    return 212;
+  }
+
+  // Registry is now full (slot 0 stays reserved as invalid): one more
+  // registration must fail cleanly rather than overwrite a live slot.
+  if (engine::renderer::register_gpu_mesh(registry.get(), mesh) !=
+      engine::renderer::kInvalidMeshHandle) {
+    return 213;
+  }
+
+  engine::renderer::unload_gpu_mesh(registry.get(), firstHandle);
+  const engine::renderer::MeshHandle reused =
+      engine::renderer::register_gpu_mesh(registry.get(), mesh);
+  if (reused == engine::renderer::kInvalidMeshHandle) {
+    return 214;
+  }
+  if (engine::renderer::mesh_handle_detail::slot_index(reused) !=
+      engine::renderer::mesh_handle_detail::slot_index(firstHandle)) {
+    return 215;
+  }
+  if (reused.id == firstHandle.id) {
+    return 216;
+  }
+
+  // The registry is full again: registration must fail once more.
+  if (engine::renderer::register_gpu_mesh(registry.get(), mesh) !=
+      engine::renderer::kInvalidMeshHandle) {
+    return 217;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 namespace engine::renderer {
@@ -773,5 +932,20 @@ int main() {
     return result;
   }
 
-  return check_v3_decode_rejects_out_of_palette_joint();
+  result = check_v3_decode_rejects_out_of_palette_joint();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_stale_handle_rejected_after_slot_reuse();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_generation_wrap_policy();
+  if (result != 0) {
+    return result;
+  }
+
+  return check_registry_full_then_reuse();
 }

@@ -143,9 +143,9 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
     return false;
   }
 
-  const std::uint32_t meshSlot =
+  const renderer::MeshHandle meshHandle =
       renderer::register_gpu_mesh(state->meshRegistry, mesh);
-  if (meshSlot == 0U) {
+  if (meshHandle == renderer::kInvalidMeshHandle) {
     renderer::unload_mesh(&mesh);
     static_cast<void>(renderer::set_mesh_asset_state(
         state->database, assetId, renderer::AssetState::Failed,
@@ -157,9 +157,10 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
 
   if (!renderer::set_mesh_asset_state(state->database, assetId,
                                       renderer::AssetState::Ready,
-                                      renderer::MeshHandle{meshSlot})) {
-    renderer::unload_mesh(&state->meshRegistry->meshes[meshSlot]);
-    state->meshRegistry->occupied[meshSlot] = false;
+                                      meshHandle)) {
+    // Roll back through the public unload path (not raw slot indexing) so
+    // the registry's generation bump still fires (audit #173).
+    renderer::unload_gpu_mesh(state->meshRegistry, meshHandle);
     return false;
   }
 

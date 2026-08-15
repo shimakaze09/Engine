@@ -262,9 +262,9 @@ int main() {
 
   engine::renderer::GpuMesh dummyMesh{};
   dummyMesh.vertexCount = 3U;
-  const std::uint32_t meshSlot =
+  const engine::renderer::MeshHandle meshHandle =
       engine::renderer::register_gpu_mesh(meshRegistry.get(), dummyMesh);
-  if (meshSlot == 0U) {
+  if (meshHandle == engine::renderer::kInvalidMeshHandle) {
     engine::scripting::shutdown_scripting();
     return fail(4);
   }
@@ -274,8 +274,7 @@ int main() {
       engine::renderer::make_asset_id_from_path(meshPath);
   if ((meshAssetId == engine::renderer::kInvalidAssetId) ||
       !engine::renderer::register_mesh_asset(
-          assetDatabase.get(), meshAssetId, meshPath,
-          engine::renderer::MeshHandle{meshSlot})) {
+          assetDatabase.get(), meshAssetId, meshPath, meshHandle)) {
     engine::scripting::shutdown_scripting();
     return fail(5);
   }
@@ -459,7 +458,7 @@ int main() {
       }
 
       foundMoverCommand = true;
-      if ((view.data[i].mesh.id != meshSlot) ||
+      if ((view.data[i].mesh != meshHandle) ||
           !mat4_nearly_equal(view.data[i].modelMatrix, propagated->matrix)) {
         engine::core::shutdown_job_system();
         remove_script_file();

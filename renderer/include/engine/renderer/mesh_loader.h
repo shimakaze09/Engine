@@ -24,11 +24,15 @@ struct GpuMesh final {
   bool hasSkin = false;
 };
 
-/// Fixed table mapping MeshHandle to uploaded GpuMesh slots.
+/// Fixed table mapping MeshHandle to uploaded GpuMesh slots. Each slot
+/// carries a generation counter (bumped on release) so a MeshHandle that
+/// outlives its slot's reuse fails lookup instead of aliasing whatever mesh
+/// was loaded into the recycled slot afterward (audit #173).
 struct GpuMeshRegistry final {
   static constexpr std::size_t kMaxSlots = 4096U;
   std::array<GpuMesh, kMaxSlots> meshes{};
   std::array<bool, kMaxSlots> occupied{};
+  std::array<std::uint32_t, kMaxSlots> generations{};
 };
 
 /// Move-only owned buffer whose element count is bound to its allocation:
@@ -111,12 +115,17 @@ struct CpuMeshData final {
   bool hasSkin = false;
 };
 
-// Returns slot index (same as MeshHandle::id) or 0 on failure.
-std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
-                                const GpuMesh &mesh) noexcept;
-/// Registry entry for a handle; nullptr when stale or absent.
+/// Claims a free slot and returns a generation-encoded handle, or
+/// kInvalidMeshHandle when the registry is full.
+MeshHandle register_gpu_mesh(GpuMeshRegistry *registry,
+                             const GpuMesh &mesh) noexcept;
+/// Registry entry for a handle; nullptr when stale (slot reused under a
+/// newer generation) or absent.
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
                                renderer::MeshHandle handle) noexcept;
+/// Releases the slot backing handle (no-op on a stale or absent handle) and
+/// bumps its generation so any surviving copy of handle fails lookup.
+void unload_gpu_mesh(GpuMeshRegistry *registry, MeshHandle handle) noexcept;
 
 /// Loads the requested resource for mesh from file.
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept;

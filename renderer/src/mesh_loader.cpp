@@ -15,6 +15,7 @@
 #include "engine/renderer/render_device.h"
 
 #include "engine/renderer/asset_staleness.h"
+#include "mesh_handle_codec.h"
 
 namespace engine::renderer {
 
@@ -587,39 +588,72 @@ void unload_mesh(GpuMesh *mesh) noexcept {
   }
 }
 
-std::uint32_t register_gpu_mesh(GpuMeshRegistry *registry,
-                                const GpuMesh &mesh) noexcept {
+MeshHandle register_gpu_mesh(GpuMeshRegistry *registry,
+                             const GpuMesh &mesh) noexcept {
   if (registry == nullptr) {
-    return 0U;
+    return kInvalidMeshHandle;
   }
 
   for (std::size_t i = 1U; i < registry->meshes.size(); ++i) {
     if (!registry->occupied[i]) {
       registry->meshes[i] = mesh;
       registry->occupied[i] = true;
-      return static_cast<std::uint32_t>(i);
+      // Slot generations start at 1 (0 is the "never used" storage default
+      // and also the codec's invalid sentinel), matching TextureSlot.
+      if (registry->generations[i] == 0U) {
+        registry->generations[i] = 1U;
+      }
+      return mesh_handle_detail::make_handle(i, registry->generations[i]);
     }
   }
 
-  return 0U;
+  return kInvalidMeshHandle;
 }
 
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *registry,
                                renderer::MeshHandle handle) noexcept {
-  if (registry == nullptr) {
+  if ((registry == nullptr) || (handle == kInvalidMeshHandle)) {
     return nullptr;
   }
 
-  const std::uint32_t id = handle.id;
-  if ((id == 0U) || (id >= registry->meshes.size())) {
+  const std::uint32_t slot = mesh_handle_detail::slot_index(handle);
+  const std::uint32_t generation = mesh_handle_detail::generation(handle);
+  if ((slot == 0U) || (slot >= registry->meshes.size()) ||
+      (generation == 0U)) {
     return nullptr;
   }
 
-  if (!registry->occupied[id]) {
+  if (!registry->occupied[slot] || (registry->generations[slot] != generation)) {
     return nullptr;
   }
 
-  return &registry->meshes[id];
+  return &registry->meshes[slot];
+}
+
+void unload_gpu_mesh(GpuMeshRegistry *registry, MeshHandle handle) noexcept {
+  if ((registry == nullptr) || (handle == kInvalidMeshHandle)) {
+    return;
+  }
+
+  const std::uint32_t slot = mesh_handle_detail::slot_index(handle);
+  const std::uint32_t generation = mesh_handle_detail::generation(handle);
+  if ((slot == 0U) || (slot >= registry->meshes.size()) ||
+      (generation == 0U)) {
+    return;
+  }
+
+  if (!registry->occupied[slot] || (registry->generations[slot] != generation)) {
+    return;
+  }
+
+  unload_mesh(&registry->meshes[slot]);
+  registry->occupied[slot] = false;
+  registry->meshes[slot] = GpuMesh{};
+  // Bump the generation on release so any handle still pointing at this
+  // slot fails lookup instead of aliasing the next mesh loaded here
+  // (audit #173).
+  registry->generations[slot] =
+      mesh_handle_detail::next_generation(registry->generations[slot]);
 }
 
 } // namespace engine::renderer
