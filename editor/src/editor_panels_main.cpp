@@ -4,6 +4,7 @@
 #include "editor_panels_main.h"
 
 #include "editor_commands.h"
+#include "editor_scene_document.h"
 #include "editor_session.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -25,6 +26,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "engine/core/platform.h"
@@ -55,58 +57,100 @@
 
 namespace engine::editor {
 
+/// Draws the Save/Discard/Cancel confirm modal (issue #158) that gates
+/// New/Open/quit while the document is dirty; the decision itself is
+/// production logic in editor_scene_document.cpp/scene_document_prompt_*,
+/// this function only presents it.
+static void draw_unsaved_changes_prompt() noexcept {
+  if (!scene_document_prompt_open()) {
+    return;
+  }
+
+  constexpr const char *kPopupId = "Unsaved Changes###scene_unsaved_prompt";
+  if (!ImGui::IsPopupOpen(kPopupId)) {
+    ImGui::OpenPopup(kPopupId);
+  }
+
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  if (viewport != nullptr) {
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5F, 0.5F));
+  }
+
+  if (ImGui::BeginPopupModal(kPopupId, nullptr,
+                            ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("Save changes to \"%s\" before continuing?",
+               scene_document_display_name());
+    const char *error = scene_document_last_error();
+    if (error[0] != '\0') {
+      ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", error);
+    }
+
+    if (ImGui::Button("Save")) {
+      scene_document_prompt_choose_save();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Discard")) {
+      ImGui::CloseCurrentPopup();
+      scene_document_prompt_choose_discard();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      ImGui::CloseCurrentPopup();
+      scene_document_prompt_choose_cancel();
+    }
+
+    if (!scene_document_prompt_open()) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
 void draw_main_menu_bar() noexcept {
   if (!ImGui::BeginMainMenuBar()) {
     return;
   }
 
   if (ImGui::BeginMenu("File")) {
-    const bool canSaveScene = world_is_editable();
-    const bool sceneFileExists = default_scene_file_exists();
-    const bool canLoadScene = world_can_load_scene() && sceneFileExists;
-
-    if (!canSaveScene) {
+    const bool editable = world_is_editable();
+    if (!editable) {
       ImGui::BeginDisabled();
     }
 
-    if (ImGui::MenuItem("Save Scene") && canSaveScene) {
-      const char *scenePath = editor_scene_path();
-      if (!runtime::save_scene(*editor_session().world, scenePath)) {
-        core::log_message(core::LogLevel::Error, "editor",
-                          "failed to save configured editor scene");
+    if (ImGui::MenuItem("New Scene")) {
+      request_scene_new();
+    }
+    if (ImGui::MenuItem("Open Scene...")) {
+      request_open_scene_dialog();
+    }
+
+    const std::size_t recentCount = recent_scene_count();
+    if (ImGui::BeginMenu("Recent Scenes", recentCount > 0U)) {
+      for (std::size_t i = 0U; i < recentCount; ++i) {
+        const char *path = recent_scene_at(i);
+        const std::string label =
+            std::filesystem::path(path).filename().string();
+        if (ImGui::MenuItem(label.empty() ? path : label.c_str())) {
+          request_scene_open(path);
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip("%s", path);
+        }
       }
+      ImGui::EndMenu();
     }
 
-    if (!canSaveScene) {
-      ImGui::EndDisabled();
+    ImGui::Separator();
+
+    if (ImGui::MenuItem("Save", "Ctrl+S")) {
+      request_save_scene();
+    }
+    if (ImGui::MenuItem("Save As...")) {
+      request_save_scene_as();
     }
 
-    if (!canLoadScene) {
-      ImGui::BeginDisabled();
-    }
-
-    const bool loadScenePressed = ImGui::MenuItem("Load Scene");
-    if (!sceneFileExists &&
-        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-      ImGui::BeginTooltip();
-      ImGui::Text("No saved scene at %s", editor_scene_path());
-      ImGui::EndTooltip();
-    }
-
-    if (loadScenePressed && canLoadScene) {
-      const char *scenePath = editor_scene_path();
-      if (!runtime::load_scene(*editor_session().world, scenePath)) {
-        core::log_message(core::LogLevel::Error, "editor",
-                          "failed to load configured editor scene");
-      } else {
-        inspector_abandon_pending_edit();
-        clear_entity_selection();
-        editor_session().worldRestoreFailed = false;
-        editor_session().commandHistory.clear();
-      }
-    }
-
-    if (!canLoadScene) {
+    if (!editable) {
       ImGui::EndDisabled();
     }
 
@@ -141,7 +185,19 @@ void draw_main_menu_bar() noexcept {
     ImGui::EndMenu();
   }
 
+  // Document status (issue #158): name plus a dirty marker, right-aligned
+  // in the menu bar; scene_document_update_window_title mirrors the same
+  // state into the OS title bar once per frame.
+  char status[160] = {};
+  std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
+               scene_document_is_dirty() ? " *" : "");
+  const float statusWidth = ImGui::CalcTextSize(status).x;
+  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - 16.0F);
+  ImGui::TextUnformatted(status);
+
   ImGui::EndMainMenuBar();
+
+  draw_unsaved_changes_prompt();
 }
 
 void draw_toolbar() noexcept {

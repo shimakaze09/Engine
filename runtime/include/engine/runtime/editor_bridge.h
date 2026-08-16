@@ -26,6 +26,11 @@ struct EditorBridge final {
   // True at most once per Step click while paused: the pipeline consumes
   // the request and simulates exactly one fixed step that frame.
   bool (*consume_step_request)() noexcept = nullptr;
+  // Called instead of an immediate quit on SDL_EVENT_QUIT; true lets the
+  // runtime quit right away (the editor has nothing to protect), false
+  // means the editor armed its own unsaved-change confirm flow and will
+  // request the quit itself once that resolves. Null behaves as true.
+  bool (*handle_quit_request)() noexcept = nullptr;
 };
 
 /// Sets the requested value for editor bridge.
