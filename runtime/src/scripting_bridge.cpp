@@ -799,7 +799,7 @@ std::uint32_t scripting_clone_entity_op(runtime::World *world,
   const auto copy = [&](auto getComponent, auto addComponent) noexcept {
     return clone_component(*world, source, clone, getComponent, addComponent);
   };
-#define ENGINE_PCR_CLONE_COMPONENT(Type, Key, GetFn, AddFn)                    \
+#define ENGINE_PCR_CLONE_COMPONENT(Type, Key, GetFn, AddFn, RemoveFn)          \
   success = success && copy(&runtime::World::GetFn, &runtime::World::AddFn);
   ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PCR_CLONE_COMPONENT)
 #undef ENGINE_PCR_CLONE_COMPONENT

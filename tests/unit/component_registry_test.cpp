@@ -481,7 +481,7 @@ static_assert(engine::runtime::kPersistentComponentTypeCount == 14U,
 int main() {
   int rowBase = 100;
   int stage = 0;
-#define ENGINE_PCR_RUN_ROW(Type, Key, GetFn, AddFn)                            \
+#define ENGINE_PCR_RUN_ROW(Type, Key, GetFn, AddFn, RemoveFn)                  \
   stage = verify_registry_round_trip<Type>(&World::GetFn, &World::AddFn);      \
   if (stage != 0) {                                                            \
     std::printf("component_registry: %s round trip failed at stage %d\n",      \

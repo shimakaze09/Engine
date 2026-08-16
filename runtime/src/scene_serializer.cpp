@@ -305,7 +305,7 @@ bool world_component_counts_match(const World &sourceWorld,
            count_components(targetWorld, getComponent);
   };
   bool countsMatch = true;
-#define ENGINE_PCR_COUNT_MATCH(Type, Key, GetFn, AddFn)                        \
+#define ENGINE_PCR_COUNT_MATCH(Type, Key, GetFn, AddFn, RemoveFn)              \
   countsMatch = countsMatch && matches(&World::GetFn);
   ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PCR_COUNT_MATCH)
 #undef ENGINE_PCR_COUNT_MATCH
@@ -354,7 +354,7 @@ bool copy_world_contents(const World &sourceWorld,
                             targetEntity, getComponent, addComponent);
     };
     success = true;
-#define ENGINE_PCR_COPY_COMPONENT(Type, Key, GetFn, AddFn)                     \
+#define ENGINE_PCR_COPY_COMPONENT(Type, Key, GetFn, AddFn, RemoveFn)           \
   success = success && copy(&World::GetFn, &World::AddFn);
     ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PCR_COPY_COMPONENT)
 #undef ENGINE_PCR_COPY_COMPONENT
