@@ -109,3 +109,19 @@ REFLECT_TYPE(engine::runtime::FoliagePatchComponent)
 static_cast<void>(desc);
 // Fixed instance and LOD arrays are edited/serialized manually.
 REFLECT_END()
+
+REFLECT_TYPE(engine::runtime::MeshComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor (issue #156): the asset-id
+// fields are 64-bit and TypeField::Kind has no Uint64 case, and albedo/
+// roughness/metallic/opacity/sceneCaptureSourceId are edited through the
+// editor's typed asset/entity pickers rather than the generic field loop.
+REFLECT_END()
+
+REFLECT_TYPE(engine::runtime::LightComponent)
+REFLECT_FIELD(color, Vec3)
+REFLECT_FIELD(direction, Vec3)
+REFLECT_FIELD(intensity, Float)
+// `type` (LightType) is not reflected: Kind has no enum case, so the editor
+// draws it with a small dedicated combo box ahead of the generic fields.
+REFLECT_END()

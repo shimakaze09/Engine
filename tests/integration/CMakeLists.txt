@@ -444,6 +444,7 @@ engine_add_executable_target(editor_asset_spawn_name_host
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
     PRIVATE_DEPS
     engine_editor
     COMPILE_DEFINITIONS

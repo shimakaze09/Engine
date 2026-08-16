@@ -7,10 +7,15 @@ engine_add_module_library(engine_editor
     src/editor.cpp
     src/editor_commands.cpp
     src/editor_console_capture.cpp
+    src/editor_component_registry.cpp
+    src/editor_inspector_metadata.cpp
+    src/editor_reference_pickers.cpp
     src/editor_panels_assets.cpp
     src/editor_panels_console.cpp
     src/editor_panels_diagnostics.cpp
     src/editor_panels_inspector.cpp
+    src/editor_panels_inspector_generic.cpp
+    src/editor_panels_inspector_custom.cpp
     src/editor_panels_main.cpp
     src/editor_panels_viewport.cpp
     src/editor_scene_document.cpp
@@ -22,6 +27,7 @@ engine_add_module_library(engine_editor
     ${CMAKE_SOURCE_DIR}/renderer/include
     PRIVATE_INCLUDE_DIRS
     ${ENGINE_STB_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/runtime/src
     PUBLIC_DEPS
     engine_imgui
     engine_core
