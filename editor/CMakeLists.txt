@@ -6,6 +6,7 @@ engine_add_module_library(engine_editor
     src/debug_camera.cpp
     src/editor.cpp
     src/editor_commands.cpp
+    src/editor_console_capture.cpp
     src/editor_panels_assets.cpp
     src/editor_panels_diagnostics.cpp
     src/editor_panels_inspector.cpp
