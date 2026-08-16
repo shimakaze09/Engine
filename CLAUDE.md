@@ -253,11 +253,11 @@ directory-global by design.
   `EnginePipeline` (17 named frame stages, fixed 1/60 step, job-graph frame
   split into a simulation graph and a render-prep graph; animation evaluates
   per fixed step BEFORE the simulation graph so render prep bakes
-  current-frame palette slots; the camera stage runs spring arms and camera
-  evaluation between the last fixed step and render prep so culling and
-  interpolation see the frame's camera; frame pacing waits out r_max_fps as
-  the final stage),
-  `World` ECS (14 component types on SparseSets, WorldPhase gating,
+  current-frame palette slots; the camera stage runs spring arms, authored
+  CameraComponent publishing, and camera evaluation between the last fixed
+  step and render prep so culling and interpolation see the frame's camera;
+  frame pacing waits out r_max_fps as the final stage),
+  `World` ECS (15 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids), scene/prefab serializers
   (one authoritative persistent-component registry —
   `src/component_registry.h` X-macro table, compile-time cross-checked
@@ -272,7 +272,20 @@ directory-global by design.
   vsync/cap helpers and the fixed-step count decision incl. the paused
   editor's single step), the single-slot game save (`save_data.{h,cpp}` over
   `platform_get_save_dir`), service registry, timers, cameras, spring
-  arms, game mode/state, player controllers, entity pool.
+  arms, game mode/state, player controllers, entity pool. Authored
+  `CameraComponent` (issue #161: projection/fov-or-orthographic-size/
+  near/far/priority/blendSpeed/active) derives pose from the owning
+  entity's transform (never stores its own) and `update_persistent_
+  cameras` republishes it into the World's `CameraManager` priority stack
+  every frame, so it is the CameraManager's normal scene-facing input
+  alongside Lua-pushed and spring-arm cameras rather than a second camera
+  stack; a same-entity `SpringArmComponent` supplies the pose (its
+  collision-aware boom) while the CameraComponent supplies the lens/
+  priority/blend, the standard authored third-person rig. Orthographic
+  projection is authored/serialized/editable but the render path
+  (`command_buffer_flush.cpp`) still projects every camera as perspective
+  -- true orthographic rendering across shadow/post/culling consumers is
+  open follow-up scope, not silently faked.
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle,
   multi-selection, single-step request), hierarchy tree panel (drag-drop
   reparent through the undoable ReparentCommand), `editor_commands`

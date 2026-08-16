@@ -351,6 +351,62 @@ int check_transform_rotation_renormalized() noexcept {
   return 0;
 }
 
+/// A CameraComponent priority edit round-trips through the full
+/// stage/commit/undo/redo pipeline exactly like RigidBody above -- proves
+/// the registry-generated ComponentEditType::Camera dispatch (issue #161)
+/// reaches actual undo/redo history, not just capture/apply in isolation.
+int check_camera_component_undo_redo() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 70;
+  }
+  SessionWorldScope scope(world.get());
+
+  const Entity entity = world->create_scene_object();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 71;
+  }
+  engine::runtime::CameraComponent camera{};
+  camera.priority = 1.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return 72;
+  }
+
+  ComponentEditSnapshot before{};
+  before.camera = camera;
+  ComponentEditSnapshot after = before;
+  after.camera.priority = 5.0F;
+  if (!engine::editor::inspector_stage_component_edit(
+          entity, ComponentEditType::Camera, before, after)) {
+    return 73;
+  }
+  engine::editor::inspector_commit_pending_edit();
+  if (!engine::editor::editor_session().commandHistory.can_undo()) {
+    return 74;
+  }
+
+  engine::runtime::CameraComponent live{};
+  if (!world->get_camera_component(entity, &live) || (live.priority != 5.0F)) {
+    return 75;
+  }
+
+  engine::editor::editor_session().commandHistory.undo();
+  engine::runtime::CameraComponent reverted{};
+  if (!world->get_camera_component(entity, &reverted) ||
+      (reverted.priority != 1.0F)) {
+    return 76;
+  }
+
+  engine::editor::editor_session().commandHistory.redo();
+  engine::runtime::CameraComponent redone{};
+  if (!world->get_camera_component(entity, &redone) ||
+      (redone.priority != 5.0F)) {
+    return 77;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -386,6 +442,12 @@ int main() {
   }
 
   result = check_transform_rotation_renormalized();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_inspector_edit_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_camera_component_undo_redo();
   if (result != 0) {
     std::fprintf(stderr, "editor_inspector_edit_test failed: %d\n", result);
     return result;
