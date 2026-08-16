@@ -187,7 +187,7 @@ void walk_directory(const std::filesystem::path &dir,
     const std::string osPathStr = entry.path().string();
     std::snprintf(indexed.osPath, sizeof(indexed.osPath), "%s",
                  osPathStr.c_str());
-    const std::string folderStr = entry.path().parent_path().string();
+    const std::string folderStr = entry.path().parent_path().generic_string();
     std::snprintf(indexed.folder, sizeof(indexed.folder), "%s",
                  folderStr.c_str());
     const std::string nameStr = entry.path().filename().string();
@@ -290,7 +290,7 @@ bool rebuild_asset_index() noexcept {
   ++g_generation;
 
   const std::filesystem::path root(active_config().editorAssetRoot);
-  g_rootOsPath = root.string();
+  g_rootOsPath = root.generic_string();
   std::error_code ec{};
   if (!std::filesystem::is_directory(root, ec) || ec) {
     core::log_message(core::LogLevel::Warning, kLogChannel,
