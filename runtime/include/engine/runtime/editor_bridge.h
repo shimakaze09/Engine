@@ -2,7 +2,10 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+
+#include "engine/renderer/asset_metadata.h"
 
 namespace engine::runtime {
 
@@ -45,5 +48,28 @@ void set_editor_asset_service(EngineAssetDatabaseService *service) noexcept;
 /// path and returns the path-derived asset id; 0 when no runtime asset
 /// service is published, the path cannot resolve, or the request fails.
 std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept;
+
+/// One asset-picker search hit: a stable id plus its registered display
+/// path, so the Inspector's asset reference pickers (issue #156) can search
+/// and select by name/path instead of a raw numeric id.
+struct EditorAssetSearchResult final {
+  renderer::AssetId assetId = renderer::kInvalidAssetId;
+  char path[260] = {};
+};
+
+/// Searches assets of `typeTag` already known to the asset database whose
+/// registered file path contains `query` as a case-insensitive substring
+/// ("" matches every known asset of that type); writes up to maxResults hits
+/// and returns the count actually written. Returns 0 (no results, not an
+/// error) when no runtime asset service is published yet.
+std::size_t editor_query_assets(renderer::AssetTypeTag typeTag,
+                                const char *query,
+                                EditorAssetSearchResult *outResults,
+                                std::size_t maxResults) noexcept;
+/// Display path for a known asset id; false (outPath left untouched) when
+/// the id is not registered in the asset database -- the signal an asset
+/// reference picker uses to render its broken-reference state.
+bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
+                               std::size_t outPathSize) noexcept;
 
 } // namespace engine::runtime

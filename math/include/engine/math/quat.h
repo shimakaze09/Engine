@@ -231,27 +231,51 @@ inline Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
               cy * cp * sr - sy * sp * cr, cy * cp * cr + sy * sp * sr);
 }
 
-/// Extracts Euler angles using the same axis convention as from_euler.
+/// Extracts Euler angles that reconstruct q under from_euler's exact
+/// composition order (q = qy(yaw) * qx(pitch) * qz(roll); derived from the
+/// Ry*Rx*Rz rotation matrix product, not the independent roll/pitch/yaw
+/// formula an aircraft-attitude (ZYX) convention would use, which is a
+/// different composition and does not round-trip with this from_euler).
+/// pitch is the "middle" axis of the composition and is the one that loses
+/// a degree of freedom at the poles, so it is clamped to +-90 deg (asin
+/// domain) while yaw and roll keep the full +-180 deg range (atan2). At
+/// pitch = +-90 deg exactly (gimbal lock), yaw and roll are no longer
+/// independent -- only their sum (at the -90 pole) or difference (at the
+/// +90 pole) is observable -- so the extraction folds that combined value
+/// entirely into yaw and reports roll = 0 (the common engine convention).
+/// This still reconstructs the identical rotation on round trip (verified
+/// in tests/unit/math_test.cpp), just not necessarily the same (yaw, roll)
+/// split that produced q.
 inline bool to_euler(const Quat &q, float *outPitch, float *outYaw,
                      float *outRoll) noexcept {
   if ((outPitch == nullptr) || (outYaw == nullptr) || (outRoll == nullptr)) {
     return false;
   }
 
-  const float sinPitchCosp = 2.0F * (q.w * q.x + q.y * q.z);
-  const float cosPitchCosp = 1.0F - 2.0F * (q.x * q.x + q.y * q.y);
-  *outPitch = std::atan2(sinPitchCosp, cosPitchCosp);
-
-  const float sinYaw = 2.0F * (q.w * q.y - q.z * q.x);
-  if (std::fabs(sinYaw) >= 1.0F) {
-    *outYaw = std::copysign(1.5707963268F, sinYaw);
-  } else {
-    *outYaw = std::asin(sinYaw);
+  float sinPitch = 2.0F * ((q.w * q.x) - (q.y * q.z));
+  if (sinPitch > 1.0F) {
+    sinPitch = 1.0F;
+  } else if (sinPitch < -1.0F) {
+    sinPitch = -1.0F;
   }
+  *outPitch = std::asin(sinPitch);
 
-  const float sinRollCosp = 2.0F * (q.w * q.z + q.x * q.y);
-  const float cosRollCosp = 1.0F - 2.0F * (q.y * q.y + q.z * q.z);
-  *outRoll = std::atan2(sinRollCosp, cosRollCosp);
+  if (std::fabs(sinPitch) > 0.999999F) {
+    // Gimbal lock: R[0][0]/R[0][1] (unlike the general-case pair below)
+    // stay well-conditioned at the pole and encode yaw -+ roll depending
+    // on pole sign; folding the whole combined angle into yaw and zeroing
+    // roll reconstructs q exactly (the (yaw, roll) split itself is not
+    // recoverable, matching the documented ambiguity above).
+    const float sign = (sinPitch >= 0.0F) ? 1.0F : -1.0F;
+    *outYaw = sign * std::atan2(2.0F * ((q.x * q.y) - (q.w * q.z)),
+                               1.0F - (2.0F * ((q.y * q.y) + (q.z * q.z))));
+    *outRoll = 0.0F;
+  } else {
+    *outYaw = std::atan2(2.0F * ((q.x * q.z) + (q.w * q.y)),
+                         1.0F - (2.0F * ((q.x * q.x) + (q.y * q.y))));
+    *outRoll = std::atan2(2.0F * ((q.x * q.y) + (q.w * q.z)),
+                          1.0F - (2.0F * ((q.x * q.x) + (q.z * q.z))));
+  }
 
   return true;
 }

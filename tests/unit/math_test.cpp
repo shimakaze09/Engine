@@ -242,6 +242,44 @@ int main() {
     return 25;
   }
 
+  // Combined pitch+yaw+roll round trip (issue #156 regression): the prior
+  // to_euler formula was only ever exercised with one nonzero axis at a
+  // time (the three checks above), which happened to leave a wrong-
+  // composition-order bug undetected -- it inverted an aircraft-attitude
+  // (ZYX) formula against from_euler's actual Ry*Rx*Rz (YXZ) composition,
+  // so any two-or-more-axis rotation reconstructed a materially different
+  // orientation on round trip (dot product as low as ~0.65 for the case
+  // below, red on the pre-fix formula). Each case here recovers both the
+  // exact input angles and an equivalent quaternion (away from the
+  // pitch = +-90 deg pole, where the yaw/roll split is documented as
+  // ambiguous but the reconstructed rotation must still match).
+  {
+    const float kCases[][3] = {
+        {0.5235988F, 0.7853982F, 1.0471976F},    // 30, 45, 60 deg
+        {-0.3490659F, 1.2217305F, -2.3561945F},  // -20, 70, -135 deg
+        {0.1745329F, -0.1745329F, 0.1745329F},   // 10, -10, 10 deg
+    };
+    for (const auto &c : kCases) {
+      const engine::math::Quat original =
+          engine::math::from_euler(c[0], c[1], c[2]);
+      float p = 0.0F;
+      float y = 0.0F;
+      float r = 0.0F;
+      if (!engine::math::to_euler(original, &p, &y, &r)) {
+        return 37;
+      }
+      if (!nearly_equal_angle(p, c[0], 1.0e-3F) ||
+          !nearly_equal_angle(y, c[1], 1.0e-3F) ||
+          !nearly_equal_angle(r, c[2], 1.0e-3F)) {
+        return 38;
+      }
+      const engine::math::Quat roundTrip = engine::math::from_euler(p, y, r);
+      if (!nearly_equal_quat(original, roundTrip, 1.0e-4F)) {
+        return 39;
+      }
+    }
+  }
+
   const engine::math::Quat invalidAxis = engine::math::from_axis_angle(
       engine::math::Vec3(0.0F, 0.0F, 0.0F), 0.75F);
   const engine::math::Quat identityQ{};

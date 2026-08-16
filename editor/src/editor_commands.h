@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "editor_component_registry.h"
 #include "editor_session.h"
 
 namespace engine::editor {
@@ -41,54 +42,12 @@ struct TransformEditCommand final : EditorCommand {
   }
 };
 
-/// Enumerates component edit type values used by the engine.
-enum class ComponentEditType : std::uint8_t {
-  Name,
-  Transform,
-  RigidBody,
-  Collider,
-  Light,
-  Mesh,
-  FoliagePatch,
-  Script,
-  ReflectionProbe,
-  PointLight,
-  SpotLight,
-  SpringArm,
-  SceneCapture,
-  Animation,
-};
+// ComponentEditType, ComponentEditSnapshot, capture_component_snapshot, and
+// apply_component_snapshot are generated from the persistent-component
+// registry in editor_component_registry.h (issue #156) so a new registry row
+// automatically gains an inspector edit slot instead of requiring a matching
+// hand-written branch in every one of these switches.
 
-/// Number of ComponentEditType values (used to size per-type flag arrays).
-inline constexpr std::size_t kComponentEditTypeCount = 14U;
-
-/// Union-of-components value captured before/after an inspector edit.
-struct ComponentEditSnapshot final {
-  runtime::NameComponent name{};
-  runtime::Transform transform{};
-  runtime::RigidBody rigidBody{};
-  runtime::Collider collider{};
-  runtime::LightComponent light{};
-  runtime::MeshComponent mesh{};
-  runtime::FoliagePatchComponent foliagePatch{};
-  runtime::ScriptComponent script{};
-  runtime::ReflectionProbeComponent reflectionProbe{};
-  runtime::PointLightComponent pointLight{};
-  runtime::SpotLightComponent spotLight{};
-  runtime::SpringArmComponent springArm{};
-  runtime::SceneCaptureComponent sceneCapture{};
-  runtime::AnimationComponent animation{};
-};
-
-/// Fills a snapshot from the entity's current component of `type`; false
-/// when the world is unbound or the component is absent.
-bool capture_component_snapshot(ComponentEditType type, runtime::Entity entity,
-                                ComponentEditSnapshot *out) noexcept;
-/// Applies (or removes, when !exists) the snapshotted component of `type`;
-/// false when the exact entity generation is no longer alive.
-bool apply_component_snapshot(ComponentEditType type, runtime::Entity entity,
-                              bool exists,
-                              const ComponentEditSnapshot &snapshot) noexcept;
 /// Adds the component of `type` with `after`'s values through the command
 /// history so the edit is undoable.
 void execute_component_add(runtime::Entity entity, ComponentEditType type,
