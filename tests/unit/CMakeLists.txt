@@ -551,6 +551,7 @@ engine_add_test_executable(engine_unit_editor_asset_index
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
     PRIVATE_DEPS
     engine_editor
     COMPILE_DEFINITIONS
