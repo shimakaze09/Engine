@@ -14,9 +14,25 @@ constexpr float kPi = 3.14159265358979323846F;
 constexpr float kRadToDeg = 180.0F / kPi;
 constexpr float kDegToRad = kPi / 180.0F;
 
+// Enum label tables for the two current Enum-widget fields; only the
+// analytically authorable Collider shapes are offered (a convex hull needs
+// primitive-spawn provenance and heightfields are not editor-authorable at
+// all, so switching a live collider into either would create a payload-
+// less shape) -- matches the pre-existing custom combo's authorable count.
+constexpr const char *kColliderShapeLabels[] = {"Box", "Sphere", "Capsule"};
+constexpr const char *kLightTypeLabels[] = {"Directional", "Point"};
+
 // One row per annotated field. Fields with no row here still draw through
 // the generic Auto path -- omission never hides a field.
 constexpr FieldMetadata kFieldMetadataTable[] = {
+    {"engine::runtime::Collider", "shape", "Shape", "Shape",
+     "Analytic collider shapes only; convex hull and heightfield shapes "
+     "are set by primitive spawn/import, not this combo.", nullptr, 0.0F,
+     0.0F, 0.0F, InspectorWidget::Enum, false, false, kColliderShapeLabels,
+     3U},
+    {"engine::runtime::LightComponent", "type", "Type", "Light", nullptr,
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Enum, false, false,
+     kLightTypeLabels, 2U},
     {"engine::runtime::Transform", "position", "Position", "Transform",
      "World-relative position of the object's local origin.", "m", 0.05F,
      0.0F, 0.0F, InspectorWidget::Drag, false, false},

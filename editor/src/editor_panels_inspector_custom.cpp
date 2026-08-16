@@ -113,9 +113,21 @@ bool draw_mesh_component_fields(runtime::Entity entity,
 }
 
 bool draw_light_type_combo(runtime::LightComponent &light) noexcept {
-  constexpr const char *kLightTypeNames[] = {"Directional", "Point"};
+  // Metadata-driven enum labels (editor_inspector_metadata's Enum widget
+  // kind); a fallback pair keeps this combo working even if the metadata
+  // row were ever removed, since Kind has no Enum case to enforce it at
+  // compile time the way reflected fields are.
+  constexpr const char *kFallbackNames[] = {"Directional", "Point"};
+  const FieldMetadata *meta = find_field_metadata(
+      "engine::runtime::LightComponent", "type");
+  const char *const *names =
+      (meta != nullptr) ? meta->enumLabels : kFallbackNames;
+  const int count = (meta != nullptr)
+                        ? static_cast<int>(meta->enumLabelCount)
+                        : 2;
+
   int currentType = static_cast<int>(light.type);
-  if (ImGui::Combo("Type", &currentType, kLightTypeNames, 2)) {
+  if (ImGui::Combo("Type", &currentType, names, count)) {
     light.type = static_cast<runtime::LightType>(currentType);
     return true;
   }

@@ -89,9 +89,14 @@ is prohibited.
   eight remained (json, render_device_gl, engine_pipeline, world.h,
   narrow_phase, editor_panels_inspector, dap_server, asset_database). The
   2026-08-15 L-04 re-verification (issue #86) found five more had grown past
-  the trigger since — thirteen remain (the eight above plus physics_query,
-  scripting_bridge, convex_hull, world_components, scripting), queued for the
-  next split pass, owner directs each split. Split growing tests into focused suite
+  the trigger since — thirteen remained (the eight above plus physics_query,
+  scripting_bridge, convex_hull, world_components, scripting); the issue #156
+  Inspector-metadata split moved editor_panels_inspector's per-component
+  branching into editor_component_registry, editor_inspector_metadata,
+  editor_reference_pickers, editor_panels_inspector_generic, and
+  editor_panels_inspector_custom (1263 -> 349 lines), dropping it back under
+  the trigger — twelve remain, queued for the next split pass, owner directs
+  each split. Split growing tests into focused suite
   files while preserving test names/history unless an approved contract
   migration requires a move.
 - **[OWNER]** No new third-party dependencies without confirmation; never ones
@@ -275,7 +280,28 @@ directory-global by design.
   subtree restore and asset drag-spawn; commands resolve targets by
   persistent id), panel TUs (main/inspector/diagnostics/assets/viewport;
   asset browser drags .mesh entries onto the viewport), editor + debug
-  cameras, command history.
+  cameras, command history. Inspector metadata (issue #156):
+  `editor_component_registry` generates `ComponentEditType`/
+  `ComponentEditSnapshot`/capture-apply-remove dispatch from the runtime's
+  `ENGINE_PERSISTENT_COMPONENT_TABLE` (X-macro over
+  `runtime/src/component_registry.h`, reached via a `runtime/src` private
+  include on the editor target) so a new persistent component cannot skip
+  the Inspector; `editor_inspector_metadata` holds per-field/per-component
+  display metadata (name/category/tooltip/range/units/widget kind incl.
+  Color/AngleDegrees/EulerDegrees/LayerMask/Enum) plus the pure Euler-
+  degrees<->quaternion helpers (storage stays quaternion; presentation
+  recomputed every call, exact round trip incl. through the pitch = +-90
+  gimbal pole); `editor_reference_pickers` holds searchable entity
+  (World name/liveness) and asset (via two `runtime::editor_query_assets`/
+  `editor_asset_display_path` bridge functions) reference pickers plus a
+  VFS-path picker for script/controller fields, each with a broken-
+  reference Clear action; `editor_panels_inspector_generic` is the
+  metadata-driven reflected-field drawer and `editor_panels_inspector_custom`
+  holds the typed drawers for fields core::TypeField cannot represent
+  (64-bit asset ids, VFS paths: Mesh/Script/Animation/Foliage/Light-type/
+  SceneCapture-preview) plus the registry-generated, categorized Add
+  Component menu; `editor_panels_inspector` is a thin per-section
+  orchestrator.
 - `assets/` — GLSL shaders, sample Lua scripts, sample meshes, the bundled
   prop pack (`props/`, cooked from generated glTFs), sounds, and the Island
   Hopper template (`templates/island_hopper.json`, installed as

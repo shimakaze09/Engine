@@ -111,21 +111,37 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
       entity, ComponentEditType::Collider, "Collider",
       &ComponentEditSnapshot::collider, editable, true,
       [](runtime::Collider &c) {
-        // Only the analytically authorable shapes are selectable: a convex
-        // hull needs a provenance payload only primitive spawns carry, and
-        // heightfield payloads are not editor-authorable at all, so
-        // switching into either would create a payload-less collider.
-        constexpr const char *kColliderShapeNames[] = {
-            "Box", "Sphere", "Capsule", "Convex Hull", "Heightfield"};
-        constexpr int kAuthorableShapeCount = 3;
+        // The combo's selectable options come from metadata (the Enum
+        // widget kind); the display-only names cover the two shapes a
+        // primitive spawn or import can produce but this combo cannot
+        // select into (a convex hull needs provenance only primitive
+        // spawns carry, and heightfields are not editor-authorable at all
+        // -- see the field's tooltip in editor_inspector_metadata), so an
+        // inspected cylinder/pyramid/imported collider still shows its
+        // real shape name instead of clamping to the first entry.
+        constexpr const char *kDisplayOnlyNames[] = {"Convex Hull",
+                                                      "Heightfield"};
+        constexpr const char *kFallbackSelectable[] = {"Box", "Sphere",
+                                                        "Capsule"};
+        const FieldMetadata *meta =
+            find_field_metadata("engine::runtime::Collider", "shape");
+        const char *const *selectable =
+            (meta != nullptr) ? meta->enumLabels : kFallbackSelectable;
+        const int selectableCount =
+            (meta != nullptr) ? static_cast<int>(meta->enumLabelCount) : 3;
+
         int shapeIndex = static_cast<int>(c.shape);
-        bool modified = false;
         if ((shapeIndex < 0) || (shapeIndex >= 5)) {
           shapeIndex = 0;
         }
-        if (ImGui::BeginCombo("Shape", kColliderShapeNames[shapeIndex])) {
-          for (int i = 0; i < kAuthorableShapeCount; ++i) {
-            if (ImGui::Selectable(kColliderShapeNames[i], shapeIndex == i) &&
+        const char *currentLabel =
+            (shapeIndex < selectableCount)
+                ? selectable[shapeIndex]
+                : kDisplayOnlyNames[shapeIndex - selectableCount];
+        bool modified = false;
+        if (ImGui::BeginCombo("Shape", currentLabel)) {
+          for (int i = 0; i < selectableCount; ++i) {
+            if (ImGui::Selectable(selectable[i], shapeIndex == i) &&
                 (shapeIndex != i)) {
               c.shape = static_cast<runtime::ColliderShape>(i);
               modified = true;

@@ -24,6 +24,7 @@ enum class InspectorWidget : std::uint8_t {
   AngleDegrees, // a single radian float, edited/displayed in degrees
   EulerDegrees, // a Quat field, edited/displayed as pitch/yaw/roll degrees
   LayerMask,    // a Uint32 field, edited as named bit checkboxes
+  Enum,         // an integer-backed field edited via a named combo box
 };
 
 /// Semantic metadata for one reflected field of one component type. Looked
@@ -44,6 +45,14 @@ struct FieldMetadata final {
   InspectorWidget widget = InspectorWidget::Auto;
   bool advanced = false; // hidden unless the Inspector's Advanced view is on
   bool readOnly = false;
+  // widget == Enum: display strings indexed by the field's integer value.
+  // Field is not required to be a reflected core::TypeField -- the two
+  // current consumers (Collider.shape, LightComponent.type) are drawn by a
+  // custom combo ahead of the generic loop and look this table up directly
+  // by the same (typeName, fieldName) key, since TypeField::Kind has no
+  // Enum case.
+  const char *const *enumLabels = nullptr;
+  std::size_t enumLabelCount = 0U;
 };
 
 /// Looks up field metadata for (typeName, fieldName); nullptr on a miss (the

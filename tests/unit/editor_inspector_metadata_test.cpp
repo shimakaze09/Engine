@@ -47,6 +47,23 @@ int check_field_metadata_lookup() noexcept {
     return 4;
   }
 
+  const FieldMetadata *shape = engine::editor::find_field_metadata(
+      "engine::runtime::Collider", "shape");
+  if ((shape == nullptr) || (shape->widget != InspectorWidget::Enum) ||
+      (shape->enumLabels == nullptr) || (shape->enumLabelCount != 3U) ||
+      (std::strcmp(shape->enumLabels[0], "Box") != 0) ||
+      (std::strcmp(shape->enumLabels[1], "Sphere") != 0) ||
+      (std::strcmp(shape->enumLabels[2], "Capsule") != 0)) {
+    return 8;
+  }
+
+  const FieldMetadata *lightType = engine::editor::find_field_metadata(
+      "engine::runtime::LightComponent", "type");
+  if ((lightType == nullptr) || (lightType->widget != InspectorWidget::Enum) ||
+      (lightType->enumLabelCount != 2U)) {
+    return 9;
+  }
+
   if (engine::editor::find_field_metadata(nullptr, "rotation") != nullptr) {
     return 5;
   }
