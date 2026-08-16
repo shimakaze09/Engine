@@ -325,8 +325,25 @@ void console_capture_sink(core::LogLevel level, const char *channel,
 /// Resets every piece of capture state to empty; shared by initialize,
 /// shutdown, and Clear so the three can never drift out of sync with each
 /// other about which counters "empty" resets. Called with the lock held.
+///
+/// g_ring.fill(...) rather than `g_ring = {}`: ConsoleEntry is 784 bytes,
+/// so the whole 2048-entry ring is ~1.5MB. `g_ring = {}` binds a const
+/// std::array& (the implicit copy-assignment parameter) to a brace-init
+/// prvalue, which forces temporary materialization of the full ~1.5MB
+/// array; a compiler is free to elide that temp's storage but is not
+/// required to, and the windows-2025-vs2026-Release CI lane (clang-cl
+/// against the Microsoft STL, ~1MB default thread stack) segfaulted in
+/// engine_unit_editor_console_capture at the point this runs first
+/// (console_capture_initialize) while every Linux/macOS lane — including
+/// ASAN/UBSAN/TSAN — passed (libstdc++/libc++ elide the temp there, and
+/// their ~8MB default stack has slack either way). fill() only ever
+/// materializes one 784-byte element and assigns it member-wise, so no
+/// oversized temporary can exist regardless of what the STL/compiler
+/// elides. Not reproduced locally (only Linux toolchains are available
+/// here, which already elide the temp); fixed from static analysis of
+/// the object sizes plus the failure signature reported by CI.
 void reset_state_locked() noexcept {
-  g_ring = {};
+  g_ring.fill(ConsoleEntry{});
   g_head = 0U;
   g_count = 0U;
   g_nextSequence = 1U;
