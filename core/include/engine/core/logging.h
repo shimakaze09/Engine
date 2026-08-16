@@ -16,6 +16,9 @@ enum class LogLevel : std::uint8_t {
     Fatal
 };
 
+/// Returns a short human-readable name for a log level ("Trace".."Fatal").
+const char *log_level_to_string(LogLevel level) noexcept;
+
 /// Initializes the owning system for logging.
 bool initialize_logging() noexcept;
 /// Shuts down the owning system for logging.
@@ -28,5 +31,37 @@ void log_frame_metrics(
     double frameMs,
     std::size_t frameBytes,
     std::size_t frameAllocations) noexcept;
+
+/// Publishes the simulation frame index active while log_message runs, so
+/// sinks can attach best-effort frame context; callers update it once per
+/// frame (e.g. EnginePipeline). Never gates or blocks log_message itself.
+void log_set_frame_index(std::uint32_t frameIndex) noexcept;
+/// Returns the frame index last published by log_set_frame_index (0 before
+/// the first frame or when no caller publishes one, e.g. headless tools).
+std::uint32_t log_current_frame_index() noexcept;
+
+// ---------------------------------------------------------------------------
+// Generic sink registration (issue #155): lets an editor-safe consumer
+// observe every log_message call without a second logging backend. Sinks
+// are invoked synchronously and in registration order from whatever thread
+// called log_message, including for LogLevel::Fatal (dispatched before the
+// process aborts), so implementations must be reentrant-safe, must not call
+// log_message themselves, and must do only fixed-size, non-blocking work
+// (no heap allocation, no filesystem I/O) — mirrors the no-allocation
+// contract already required of the log-ingest hot path.
+// NOLINTNEXTLINE(modernize-use-using)
+typedef void (*LogSinkFn)(LogLevel level, const char *channel,
+                          const char *message, void *userData) noexcept;
+
+/// Registers a sink invoked on every subsequent log_message call. Returns
+/// false when the (fn, userData) pair is already registered or the fixed
+/// sink table (kMaxLogSinks) is full; never allocates.
+bool log_register_sink(LogSinkFn fn, void *userData) noexcept;
+/// Unregisters a sink previously accepted by log_register_sink; a no-op if
+/// the (fn, userData) pair is not currently registered.
+void log_unregister_sink(LogSinkFn fn, void *userData) noexcept;
+
+/// Hard cap on simultaneously registered sinks (fixed table, no growth).
+constexpr std::size_t kMaxLogSinks = 4U;
 
 } // namespace engine::core

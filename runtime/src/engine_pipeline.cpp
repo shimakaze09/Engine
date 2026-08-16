@@ -653,6 +653,10 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
 bool EnginePipeline::Impl::execute_frame() noexcept {
   core::profiler_begin_frame();
+  // Published before any stage runs so every log_message call this frame
+  // (including early stages ahead of stage_scripting) tags itself with the
+  // right index for the editor Console's frame-context column (issue #155).
+  core::log_set_frame_index(frameIndex);
   PROFILE_SCOPE("engine_frame");
   frameStart = Clock::now();
   wallFrameMs =

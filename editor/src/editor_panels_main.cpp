@@ -4,6 +4,7 @@
 #include "editor_panels_main.h"
 
 #include "editor_commands.h"
+#include "editor_panels_console.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 
@@ -184,6 +185,18 @@ void draw_main_menu_bar() noexcept {
 
     ImGui::EndMenu();
   }
+
+  if (ImGui::BeginMenu("Window")) {
+    bool showConsole = core::cvar_get_bool("editor.show_console", true);
+    if (ImGui::MenuItem("Console", nullptr, showConsole)) {
+      core::cvar_set_bool("editor.show_console", !showConsole);
+    }
+    ImGui::EndMenu();
+  }
+
+  // Non-spamming status indicator (issue #155): Fatal/high-severity errors
+  // stay visible in the menu bar even while the Console panel is closed.
+  draw_console_status_indicator();
 
   // Document status (issue #158): name plus a dirty marker, right-aligned
   // in the menu bar; scene_document_update_window_title mirrors the same

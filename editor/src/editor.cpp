@@ -56,7 +56,9 @@
 #include <stb_image.h>
 
 #include "editor_commands.h"
+#include "editor_console_capture.h"
 #include "editor_panels_assets.h"
+#include "editor_panels_console.h"
 #include "editor_panels_diagnostics.h"
 #include "editor_panels_inspector.h"
 #include "editor_panels_main.h"
@@ -85,6 +87,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderDockWindow("Inspector", right);
   ImGui::DockBuilderDockWindow("Stats", bottom);
   ImGui::DockBuilderDockWindow("Assets", bottom);
+  ImGui::DockBuilderDockWindow("Console", bottom);
   ImGui::DockBuilderDockWindow("Scene", center);
 
   ImGui::DockBuilderFinish(dockspaceId);
@@ -143,6 +146,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
     draw_in_game_stats_overlay(stats);
   }
   draw_asset_browser_panel();
+  draw_console_panel();
 }
 
 /// Applies the editor's visual theme: neutral dark palette, one restrained
@@ -260,6 +264,11 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
       "Toggle in-game stats and profiling overlays in the editor"));
 
   static_cast<void>(core::cvar_register_bool(
+      "editor.show_console", true,
+      "Toggle the editor Console panel (Window menu)"));
+  console_capture_initialize();
+
+  static_cast<void>(core::cvar_register_bool(
       "debug.camera_detach", false,
       "Detach debug free-fly camera from game camera"));
 
@@ -290,6 +299,7 @@ void shutdown_editor() noexcept {
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
 
+  console_capture_shutdown();
   clear_thumbnail_cache();
   editor_session().commandHistory.clear();
 

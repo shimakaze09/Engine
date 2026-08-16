@@ -46,6 +46,7 @@
 
 #include "ImGuizmo.h"
 
+#include "editor_console_capture.h"
 #include "engine/editor/command_history.h"
 #include "engine/editor/debug_camera.h"
 
@@ -376,6 +377,8 @@ void start_play_mode() noexcept {
 
   editor_session().playState = PlayState::Playing;
   editor_session().stepRequested = false;
+  // "Current session" in the Console's filter reads as "since I hit Play."
+  console_capture_begin_session();
   core::log_message(core::LogLevel::Info, "editor", "play");
 }
 
