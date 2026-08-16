@@ -510,6 +510,20 @@ engine_add_test_executable(engine_integration_scene_transition_reset
     integration
 )
 
+# ---- #198: on_end_play dispatch on script-driven scene transitions ----
+
+engine_add_test_executable(engine_integration_scene_transition_end_play
+    SOURCES
+    scene_transition_end_play_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
 # ---- #120: injected frame-stage fatal must map to FatalFrame ----
 
 engine_add_test_executable(engine_integration_run_fatal_frame
