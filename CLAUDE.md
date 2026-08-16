@@ -507,8 +507,15 @@ stutter) at 60 Hz sim.
   (`engine.load_scene` from a playing script → pending-op commit →
   scene B `on_begin_play` refires → `engine.new_scene` teardown);
   cross-scene state rides Lua globals, which survive transitions because
-  the VM persists across scene loads (the templates' handoff channel);
-  and the single save slot lands as `engine.save_data(table)` /
+  the VM persists across scene loads (the templates' handoff channel).
+  `process_pending_scene_op` (`runtime/src/engine_pipeline.cpp`) dispatches
+  `on_end_play` to every outgoing-scene scripted entity before either op
+  commits, matching editor Stop (audit #198, closed 2026-08-16); a failed
+  load skips the dispatch along with the rest of the reset, and a handler
+  that reenters with its own `load_scene`/`new_scene` call is rejected
+  with a logged warning rather than corrupting the transition already in
+  flight (`tests/integration/scene_transition_end_play_test.cpp`). And the
+  single save slot lands as `engine.save_data(table)` /
   `engine.load_data()` — a flat string-keyed table (number/string/bool)
   as JSON in the per-user platform save directory
   (`runtime/save_data.{h,cpp}`, `platform_get_save_dir`). CUT: additive

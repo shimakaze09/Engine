@@ -102,17 +102,26 @@ InputEventRoute process_editor_input_event(const EditorBridge *bridge,
   return InputEventRoute::Gameplay;
 }
 
+/// Declared scene-transition reset order (audit H-16, extended by #198):
+/// (0) on_end_play — load_scene/reset_world call this back once the
+/// transition is guaranteed to commit but before it destructively touches
+/// the outgoing world, so every outgoing scripted entity still alive and
+/// callable receives on_end_play, matching editor Stop and pre-existing
+/// destroy-driven EndPlay; (1) commit the replacement world — staged
+/// load_scene or reset_world, which already resets the world-owned
+/// managers in the H-18 order; (2) clear the outgoing scene's coroutines,
+/// timer callback refs, entity pools, and per-entity script modules so no
+/// stale entity identity or Lua reference can act on the new world
+/// (globals persist by contract as the cross-scene handoff channel;
+/// #93a/#93b: the World-owned TimerManager was already reset in step 1,
+/// but only these scripting-side calls drop the Lua registry refs and pool
+/// slots that point at it); (3) clear the pending op. A failed load skips
+/// every reset, including step 0, and leaves all state unchanged.
+static void dispatch_outgoing_scene_end_play() noexcept {
+  scripting::dispatch_entity_scripts_end_for_transition();
+}
+
 /// Processes a queued script scene operation, if one exists.
-/// Declared scene-transition reset order (audit H-16): (1) commit the
-/// replacement world — staged load_scene or reset_world, which already
-/// resets the world-owned managers in the H-18 order; (2) clear the
-/// outgoing scene's coroutines, timer callback refs, entity pools, and
-/// per-entity script modules so no stale entity identity or Lua reference
-/// can act on the new world (globals persist by contract as the cross-scene
-/// handoff channel; #93a/#93b: the World-owned TimerManager was already
-/// reset in step 1, but only these scripting-side calls drop the Lua
-/// registry refs and pool slots that point at it); (3) clear the pending
-/// op. A failed load skips every reset and leaves all state unchanged.
 bool process_pending_scene_op(World &world) noexcept {
   if (!scripting::has_pending_scene_op()) {
     return true;
@@ -121,14 +130,16 @@ bool process_pending_scene_op(World &world) noexcept {
   bool processed = false;
   if (scripting::pending_scene_op_is_load()) {
     const char *scenePath = scripting::get_pending_scene_path();
-    if ((scenePath != nullptr) && runtime::load_scene(world, scenePath)) {
+    if ((scenePath != nullptr) &&
+        runtime::load_scene(world, scenePath,
+                            &dispatch_outgoing_scene_end_play)) {
       processed = true;
     } else {
       core::log_message(core::LogLevel::Error, "engine",
                         "failed to process pending scene load");
     }
   } else if (scripting::pending_scene_op_is_new()) {
-    runtime::reset_world(world);
+    runtime::reset_world(world, &dispatch_outgoing_scene_end_play);
     processed = true;
   }
 
