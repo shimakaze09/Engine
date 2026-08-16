@@ -300,7 +300,7 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
 
   draw_component_section(
       entity, ComponentEditType::Camera, "Camera",
-      &ComponentEditSnapshot::camera, editable, true,
+      &ComponentEditSnapshot::camera, authoredEditable, liveEditable, true,
       [entity](runtime::CameraComponent &c) {
         // Projection is a plain uint32 (not a reflected C++ enum, matching
         // Collider.shape/LightComponent.type) so it stays in the generic
