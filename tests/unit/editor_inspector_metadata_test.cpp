@@ -20,7 +20,6 @@ using engine::editor::ComponentMetadata;
 using engine::editor::FieldMetadata;
 using engine::editor::InspectorWidget;
 
-constexpr float kPi = 3.14159265358979323846F;
 
 bool nearly_equal(float a, float b, float tolerance) noexcept {
   return std::fabs(a - b) <= tolerance;
