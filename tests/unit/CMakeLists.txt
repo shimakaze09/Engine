@@ -432,6 +432,18 @@ engine_add_test_executable(engine_unit_editor_session
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_scene_document
+    SOURCES
+    editor_scene_document_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_inspector_edit
     SOURCES
     editor_inspector_edit_test.cpp

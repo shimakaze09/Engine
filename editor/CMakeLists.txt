@@ -11,6 +11,7 @@ engine_add_module_library(engine_editor
     src/editor_panels_inspector.cpp
     src/editor_panels_main.cpp
     src/editor_panels_viewport.cpp
+    src/editor_scene_document.cpp
     src/editor_session.cpp
     src/editor_camera.cpp
     PUBLIC_INCLUDE_DIRS

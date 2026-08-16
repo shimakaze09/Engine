@@ -61,6 +61,7 @@
 #include "editor_panels_inspector.h"
 #include "editor_panels_main.h"
 #include "editor_panels_viewport.h"
+#include "editor_scene_document.h"
 #include "editor_session.h"
 
 namespace engine::editor {
@@ -365,6 +366,7 @@ void editor_set_world(runtime::World *world) noexcept {
     editor_session().hasPlaySnapshot = false;
     editor_session().playSnapshotWorld = nullptr;
     editor_session().worldRestoreFailed = false;
+    scene_document_reset_for_world_switch();
   }
   editor_session().world = world;
 }

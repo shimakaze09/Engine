@@ -27,6 +27,8 @@
 #include "engine/renderer/camera.h"
 #include "engine/runtime/world.h"
 
+#include "editor_scene_document.h"
+
 namespace engine::editor {
 
 /// Enumerates play state values used by the engine.
@@ -86,6 +88,11 @@ struct EditorSession final {
   // viewport panel so overlays can anchor inside the rendered scene.
   ImVec2 sceneViewportScreenPos{};
   ImVec2 sceneViewportScreenSize{};
+  // Native window handle, retained for title-bar updates and as the
+  // parent window for native file dialogs; never touched by Play/Stop.
+  SDL_Window *sdlWindow = nullptr;
+  char lastAppliedWindowTitle[640] = {};
+  SceneDocumentState document{};
 };
 
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
