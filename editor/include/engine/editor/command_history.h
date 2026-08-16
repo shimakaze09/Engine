@@ -3,6 +3,7 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 namespace engine::editor {
 
@@ -51,10 +52,21 @@ public:
   /// Drops all undo/redo history.
   void clear() noexcept;
 
+  /// Opaque id of the command instance now at the undo cursor; 0 denotes
+  /// the empty-history state (a fresh history, or one just cleared/undone
+  /// all the way back). Tokens are assigned once per execute() call and
+  /// never reused, including across the drop-oldest shift once history
+  /// is full, so scene-document dirty tracking can compare against a
+  /// saved token and never falsely read "clean" for a state execute()
+  /// already discarded from the ring.
+  std::uint64_t current_token() const noexcept;
+
 private:
   std::array<std::unique_ptr<EditorCommand>, kMaxHistory> m_history{};
+  std::array<std::uint64_t, kMaxHistory> m_tokens{};
   int m_top = -1;       // index of last executed command
   int m_count = 0;      // total valid entries in history
+  std::uint64_t m_nextToken = 1U;  // 0 is reserved for "empty history"
 };
 
 } // namespace engine::editor

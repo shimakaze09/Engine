@@ -378,7 +378,15 @@ void process_input_events_with_editor() noexcept {
     const runtime::InputEventRoute route =
         runtime::process_editor_input_event(bridge, &event);
     if (route == runtime::InputEventRoute::QuitRequested) {
-      core::request_platform_quit();
+      // Issue #158: the editor gets a chance to defer the quit behind its
+      // own unsaved-change confirm flow; a null hook or a bound-but-clean
+      // document both proceed immediately, matching the pre-#158 behavior.
+      const bool proceedNow = (bridge == nullptr) ||
+                              (bridge->handle_quit_request == nullptr) ||
+                              bridge->handle_quit_request();
+      if (proceedNow) {
+        core::request_platform_quit();
+      }
       continue;
     }
     if (route == runtime::InputEventRoute::EditorCaptured) {

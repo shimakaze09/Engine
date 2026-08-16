@@ -61,6 +61,7 @@
 #include "editor_panels_inspector.h"
 #include "editor_panels_main.h"
 #include "editor_panels_viewport.h"
+#include "editor_scene_document.h"
 #include "editor_session.h"
 
 namespace engine::editor {
@@ -227,6 +228,8 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
     return false;
   }
 
+  editor_session().sdlWindow = static_cast<SDL_Window *>(sdlWindow);
+
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
@@ -292,6 +295,7 @@ void shutdown_editor() noexcept {
 
   editor_session().initialized = false;
   editor_session().world = nullptr;
+  editor_session().sdlWindow = nullptr;
   clear_entity_selection();
   editor_session().playState = PlayState::Stopped;
   editor_session().playSnapshotBuffer.reset();
@@ -306,6 +310,12 @@ void editor_new_frame() noexcept {
     return;
   }
 
+  // Applies any native file-dialog result queued since the last frame and
+  // refreshes the title bar before drawing, so both reflect this frame's
+  // document state rather than lagging one frame behind.
+  scene_document_poll_dialog_result();
+  scene_document_update_window_title();
+
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
@@ -318,6 +328,9 @@ void editor_new_frame() noexcept {
     }
     if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
       editor_history_redo();
+    }
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
+      request_save_scene();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_W)) {
       editor_session().gizmoOp = ImGuizmo::TRANSLATE;
@@ -365,6 +378,7 @@ void editor_set_world(runtime::World *world) noexcept {
     editor_session().hasPlaySnapshot = false;
     editor_session().playSnapshotWorld = nullptr;
     editor_session().worldRestoreFailed = false;
+    scene_document_reset_for_world_switch();
   }
   editor_session().world = world;
 }
@@ -381,6 +395,17 @@ bool editor_consume_step_request() noexcept {
   }
   session.stepRequested = false;
   return true;
+}
+
+/// Runtime quit-request bridge hook (issue #158): true lets the runtime
+/// quit immediately (document was clean); false means the unsaved-change
+/// prompt was armed instead, and the runtime must not quit until it
+/// resolves PendingSceneAction::Quit (Discard, or a successful Save).
+bool editor_handle_quit_request() noexcept {
+  if (!editor_session().initialized) {
+    return true; // no editor session bound: nothing to protect
+  }
+  return request_scene_quit();
 }
 
 namespace {
@@ -413,6 +438,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_wants_capture_keyboard,
     &editor_wants_capture_mouse,
     &editor_consume_step_request,
+    &editor_handle_quit_request,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {
