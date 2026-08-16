@@ -143,7 +143,8 @@ void check_sink_dispatch_is_thread_safe() noexcept {
   std::vector<std::thread> threads;
   threads.reserve(static_cast<std::size_t>(kThreadCount));
   for (int t = 0; t < kThreadCount; ++t) {
-    threads.emplace_back([t]() noexcept {
+    static_cast<void>(t);
+    threads.emplace_back([]() noexcept {
       for (int i = 0; i < kMessagesPerThread; ++i) {
         engine::core::log_message(engine::core::LogLevel::Trace, "jobs",
                                   "concurrent log line");
