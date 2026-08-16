@@ -105,6 +105,17 @@ REFLECT_FIELD(farPlane, Float)
 REFLECT_FIELD(enabled, Bool)
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::CameraComponent)
+REFLECT_FIELD(projection, Uint32)
+REFLECT_FIELD(fovRadians, Float)
+REFLECT_FIELD(orthographicSize, Float)
+REFLECT_FIELD(nearPlane, Float)
+REFLECT_FIELD(farPlane, Float)
+REFLECT_FIELD(priority, Float)
+REFLECT_FIELD(blendSpeed, Float)
+REFLECT_FIELD(active, Bool)
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::FoliagePatchComponent)
 static_cast<void>(desc);
 // Fixed instance and LOD arrays are edited/serialized manually.

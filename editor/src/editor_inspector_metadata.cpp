@@ -21,6 +21,8 @@ constexpr float kDegToRad = kPi / 180.0F;
 // less shape) -- matches the pre-existing custom combo's authorable count.
 constexpr const char *kColliderShapeLabels[] = {"Box", "Sphere", "Capsule"};
 constexpr const char *kLightTypeLabels[] = {"Directional", "Point"};
+constexpr const char *kCameraProjectionLabels[] = {"Perspective",
+                                                    "Orthographic"};
 
 // One row per annotated field. Fields with no row here still draw through
 // the generic Auto path -- omission never hides a field.
@@ -143,6 +145,31 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::SceneCaptureComponent", "farPlane", "Far Plane",
      "Capture", nullptr, "m", 0.5F, 0.001F, 0.0F, InspectorWidget::Drag,
      false, false},
+
+    {"engine::runtime::CameraComponent", "projection", "Projection",
+     "Camera", "Perspective renders with field-of-view depth; Orthographic "
+     "is authored and saved but the renderer still projects it as "
+     "Perspective (issue #161 follow-up).", nullptr, 0.0F, 0.0F, 0.0F,
+     InspectorWidget::Enum, false, false, kCameraProjectionLabels, 2U},
+    {"engine::runtime::CameraComponent", "fovRadians", "Field of View",
+     "Camera", nullptr, "deg", 1.0F, 1.0F, 179.0F,
+     InspectorWidget::AngleDegrees, false, false},
+    {"engine::runtime::CameraComponent", "orthographicSize",
+     "Orthographic Size", "Camera",
+     "Half-height of the orthographic view volume, in world units.", "m",
+     0.1F, 0.01F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::CameraComponent", "nearPlane", "Near Plane", "Camera",
+     nullptr, "m", 0.01F, 0.001F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::CameraComponent", "farPlane", "Far Plane", "Camera",
+     nullptr, "m", 0.5F, 0.001F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::CameraComponent", "priority", "Priority", "Camera",
+     "Highest active priority wins CameraManager's selection; ties resolve "
+     "by authoring order.", nullptr, 0.1F, 0.0F, 0.0F, InspectorWidget::Drag,
+     false, false},
+    {"engine::runtime::CameraComponent", "blendSpeed", "Blend Speed",
+     "Camera", "How fast CameraManager blends toward this camera once it "
+     "becomes active.", nullptr, 0.1F, 0.0F, 0.0F, InspectorWidget::Drag,
+     false, false},
 };
 
 constexpr ComponentMetadata kComponentMetadataTable[] = {
@@ -176,6 +203,9 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Attaches a Lua behaviour script to this object."},
     {"engine::runtime::AnimationComponent", "Animation", "Gameplay",
      "Drives a skeletal animation controller state machine."},
+    {"engine::runtime::CameraComponent", "Camera", "Gameplay",
+     "Authored camera: pose follows this object's transform and publishes "
+     "into the CameraManager priority/blend stack when active."},
 };
 
 } // namespace

@@ -214,6 +214,18 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       }
     }
 
+    core::JsonValue cameraValue{};
+    if (parser.get_object_field(components, kJsonKeyCameraComponent,
+                                &cameraValue)) {
+      CameraComponent camera{};
+      if (!read_reflected_component(parser, cameraValue, *descs.camera,
+                                    &camera) ||
+          !targetWorld.add_camera_component(entity, camera)) {
+        targetWorld.destroy_entity(entity);
+        return log_scene_error("failed to load CameraComponent component");
+      }
+    }
+
     core::JsonValue nameValue{};
     if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
       NameComponent nameComponent{};
@@ -508,6 +520,14 @@ bool serialize_scene_to_writer(const World &world,
     if (world.get_scene_capture_component(entity, &sceneCapture) &&
         !write_reflected_component(writer, kJsonKeySceneCaptureComponent,
                                    *descs.sceneCapture, &sceneCapture)) {
+      writeFailed = true;
+      return;
+    }
+
+    CameraComponent camera{};
+    if (world.get_camera_component(entity, &camera) &&
+        !write_reflected_component(writer, kJsonKeyCameraComponent,
+                                   *descs.camera, &camera)) {
       writeFailed = true;
       return;
     }

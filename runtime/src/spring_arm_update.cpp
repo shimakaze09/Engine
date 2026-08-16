@@ -21,12 +21,22 @@ namespace engine::runtime {
 /// When collision is enabled, a sphere sweep from the pivot (skipping the
 /// owning entity and its compound body) clamps the arm to the first hit so
 /// the camera never lags through geometry; lag smoothing still governs how
-/// the arm extends back toward the authored length.
+/// the arm extends back toward the authored length. A CameraComponent on
+/// the same entity supplies the lens (fov/near/far) and priority/blendSpeed
+/// -- the standard authored third-person rig (issue #161) -- and an
+/// explicitly disabled one (active == false) suppresses the push entirely;
+/// with no CameraComponent authored the previous hardcoded lens/priority
+/// stay exactly as before, so existing spring-arm-only scenes are unchanged.
 void update_spring_arm_cameras(World &world, float dt) noexcept {
   CameraManager &camMgr = world.camera_manager();
 
   world.for_each<SpringArmComponent>([&](core::Entity entity,
                                          const SpringArmComponent &arm) {
+    const CameraComponent *camComp = world.get_camera_component_ptr(entity);
+    if ((camComp != nullptr) && !camComp->active) {
+      static_cast<void>(camMgr.pop_camera(entity));
+      return;
+    }
     math::Vec3 worldPos{};
     math::Quat worldRot{};
     math::Vec3 worldScale(1.0F, 1.0F, 1.0F);
@@ -93,9 +103,17 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
     entry.position = camPos;
     entry.target = pivot;
     entry.up = math::Vec3(0.0F, 1.0F, 0.0F);
-    entry.blendSpeed = 5.0F;
+    if (camComp != nullptr) {
+      entry.fovRadians = camComp->fovRadians;
+      entry.nearPlane = camComp->nearPlane;
+      entry.farPlane = camComp->farPlane;
+      entry.blendSpeed = camComp->blendSpeed;
+    } else {
+      entry.blendSpeed = 5.0F;
+    }
+    const float priority = (camComp != nullptr) ? camComp->priority : 10.0F;
 
-    camMgr.push_camera(entity, entry, 10.0F);
+    camMgr.push_camera(entity, entry, priority);
   });
 }
 

@@ -33,6 +33,7 @@ namespace engine::editor {
 #define ENGINE_ICR_ALIAS_SceneCaptureComponent SceneCapture
 #define ENGINE_ICR_ALIAS_FoliagePatchComponent FoliagePatch
 #define ENGINE_ICR_ALIAS_AnimationComponent Animation
+#define ENGINE_ICR_ALIAS_CameraComponent Camera
 
 #define ENGINE_ICR_MEMBER(Type) ENGINE_ICR_MEMBER_##Type
 #define ENGINE_ICR_MEMBER_Transform transform
@@ -49,6 +50,7 @@ namespace engine::editor {
 #define ENGINE_ICR_MEMBER_SceneCaptureComponent sceneCapture
 #define ENGINE_ICR_MEMBER_FoliagePatchComponent foliagePatch
 #define ENGINE_ICR_MEMBER_AnimationComponent animation
+#define ENGINE_ICR_MEMBER_CameraComponent camera
 
 /// Enumerates component edit type values, one per persistent-component
 /// registry row (order follows the registry, not historical declaration

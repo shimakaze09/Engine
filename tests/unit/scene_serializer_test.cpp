@@ -923,6 +923,43 @@ int verify_foliage_parse_failures_reject_scene() {
   return 0;
 }
 
+/// A malformed CameraComponent field fails the load and leaves the
+/// destination World completely unchanged (staged World + commit-on-success
+/// only, per the serialization contract), matching the FoliagePatch/Light
+/// precedents above.
+int verify_camera_parse_failure_rejects_scene() {
+  constexpr const char *kBadCameraFovScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"CameraComponent\":{\"fovRadians\":\"wide\"}}}]}";
+  std::unique_ptr<engine::runtime::World> world(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return 122;
+  }
+  if (engine::runtime::load_scene(*world, kBadCameraFovScene,
+                                  std::strlen(kBadCameraFovScene))) {
+    return 123;
+  }
+  if (world->alive_entity_count() != 0U) {
+    return 124;
+  }
+
+  // A failed load must not disturb a World that already had content.
+  const engine::runtime::Entity survivor = world->create_scene_object();
+  if (survivor == engine::runtime::kInvalidEntity) {
+    return 125;
+  }
+  if (engine::runtime::load_scene(*world, kBadCameraFovScene,
+                                  std::strlen(kBadCameraFovScene))) {
+    return 126;
+  }
+  if (!world->is_alive(survivor) || (world->alive_entity_count() != 1U)) {
+    return 127;
+  }
+
+  return 0;
+}
+
 /// MeshComponent.materialAssetId round-trips exactly and stays zero for
 /// scenes authored before material assets existed (key absent).
 int verify_mesh_material_reference_round_trip() {
@@ -1144,6 +1181,9 @@ int check_every_component_type_survives_load() {
   AnimationComponent animation{};
   std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
                 "%s", "assets/character.animctrl.json");
+  CameraComponent camera{};
+  camera.priority = 6.5F;
+  camera.fovRadians = 0.8F;
 
   if (!source->add_name_component(entity, name) ||
       !source->add_rigid_body(entity, body) ||
@@ -1157,7 +1197,8 @@ int check_every_component_type_survives_load() {
       !source->add_scene_capture_component(entity, capture) ||
       !source->add_script_component(entity, script) ||
       !source->add_spring_arm(entity, springArm) ||
-      !source->add_animation_component(entity, animation)) {
+      !source->add_animation_component(entity, animation) ||
+      !source->add_camera_component(entity, camera)) {
     return 302;
   }
 
@@ -1196,6 +1237,7 @@ int check_every_component_type_survives_load() {
   ScriptComponent loadedScript{};
   SpringArmComponent loadedSpringArm{};
   AnimationComponent loadedAnimation{};
+  CameraComponent loadedCamera{};
 
   if (!loaded->get_transform(found, &loadedTransform) ||
       (loadedTransform.position.x != 1.0F) ||
@@ -1230,6 +1272,12 @@ int check_every_component_type_survives_load() {
       (std::strcmp(loadedAnimation.controllerPath,
                    "assets/character.animctrl.json") != 0)) {
     return 308;
+  }
+
+  if (!loaded->get_camera_component(found, &loadedCamera) ||
+      (loadedCamera.priority != 6.5F) ||
+      (loadedCamera.fovRadians != 0.8F)) {
+    return 309;
   }
 
   return 0;
@@ -1368,6 +1416,13 @@ int main() {
   }
 
   result = verify_foliage_parse_failures_reject_scene();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_camera_parse_failure_rejects_scene();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

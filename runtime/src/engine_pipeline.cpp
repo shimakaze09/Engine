@@ -50,6 +50,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/animation_system.h"
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/spring_arm_update.h"
 #include "frame_pacing.h"
 #include "engine_bootstrap_content.h"
@@ -1203,6 +1204,8 @@ void EnginePipeline::Impl::stage_camera() noexcept {
   }
 
   runtime::update_spring_arm_cameras(*world,
+                                     static_cast<float>(step_seconds()));
+  runtime::update_persistent_cameras(*world,
                                      static_cast<float>(step_seconds()));
   math::Vec3 camPos, camTarget, camUp;
   float camFov = 0.0F;

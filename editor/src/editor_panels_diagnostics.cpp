@@ -41,6 +41,7 @@
 #include "engine/math/vec4.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -127,6 +128,35 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
   ImGui::Text("GPU Tonemap: %.3f ms", static_cast<double>(stats.gpuTonemapMs));
   ImGui::Text("Job Utilization: %.2f%%",
               static_cast<double>(stats.jobUtilizationPct));
+
+  ImGui::Separator();
+  // Scene-wide authored-camera status (issue #161 acceptance: "reports
+  // conflicts/no-camera states clearly"), independent of any selection --
+  // computed from CameraComponents directly so it reads correctly in Edit
+  // mode too, not only while CameraManager is populated during Play.
+  if (editor_session().world != nullptr) {
+    std::uint32_t tieCount = 0U;
+    const runtime::Entity activeCamera = runtime::find_authored_active_camera(
+        *editor_session().world, &tieCount);
+    if (activeCamera == runtime::kInvalidEntity) {
+      ImGui::TextColored(
+          ImVec4(1.0F, 0.5F, 0.2F, 1.0F),
+          "Game Camera: none (add and enable a Camera component)");
+    } else {
+      runtime::NameComponent name{};
+      const bool hasName =
+          editor_session().world->get_name_component(activeCamera, &name);
+      const char *label = (hasName && (name.name[0] != '\0')) ? name.name
+                                                               : "<unnamed>";
+      if (tieCount > 0U) {
+        ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F),
+                           "Game Camera: %s (priority tied with %u other%s)",
+                           label, tieCount, (tieCount == 1U) ? "" : "s");
+      } else {
+        ImGui::Text("Game Camera: %s", label);
+      }
+    }
+  }
 
   ImGui::Separator();
   ImGui::TextUnformatted("CPU Flame Graph");

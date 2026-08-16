@@ -45,6 +45,7 @@
 #include "engine/physics/collider.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
@@ -161,6 +162,29 @@ void emit_collider_hull(const math::Mat4 &localToWorld,
       }
     }
   }
+}
+
+// Shows the selected entity's authored CameraComponent as a frustum
+// wireframe (issue #161): derives the same pose/lens update_persistent_
+// cameras would publish (runtime::camera_component_pose keeps the -Z-
+// forward/+Y-up convention in one place) and reuses the existing frozen-
+// game-camera frustum drawer, so the gizmo always matches what the entity
+// would actually render if it became the active game camera. Uses the
+// viewport's own aspect ratio, which may differ slightly from the game's
+// presented aspect -- the frustum shape stays representative either way.
+void draw_selected_camera_frustum_overlay(const runtime::Entity selectedEntity,
+                                          float aspectRatio) noexcept {
+  if ((editor_session().world == nullptr) ||
+      (selectedEntity == runtime::kInvalidEntity) || (aspectRatio <= 0.0F)) {
+    return;
+  }
+
+  renderer::CameraState pose{};
+  if (!runtime::camera_component_pose(*editor_session().world, selectedEntity,
+                                      &pose)) {
+    return;
+  }
+  draw_camera_frustum_wireframe(pose, aspectRatio);
 }
 
 // Emits the selected entity's collider as a shape-matched wireframe into the
@@ -365,6 +389,10 @@ void draw_scene_viewport_panel() noexcept {
 
   if (selectedEntity != runtime::kInvalidEntity) {
     draw_selected_collider_overlay(selectedEntity);
+    if (regionSize.y > 0.0F) {
+      draw_selected_camera_frustum_overlay(selectedEntity,
+                                           regionSize.x / regionSize.y);
+    }
   }
 
   if (editable && hasTransform && (regionSize.x > 0.0F) &&

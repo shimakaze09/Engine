@@ -5,7 +5,9 @@
 #include <memory>
 #include <new>
 
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/camera_manager.h"
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/spring_arm_update.h"
 #include "engine/runtime/world.h"
 
@@ -506,6 +508,355 @@ bool test_spring_arm_collision_clamps_length() noexcept {
   return (uncapped != nullptr) && nearly(uncapped->position.z, 8.0F);
 }
 
+bool test_camera_component_crud() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  camera.fovRadians = 1.2F;
+  camera.priority = 4.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+  if (!world->has_camera_component(entity)) {
+    return false;
+  }
+
+  CameraComponent out{};
+  if (!world->get_camera_component(entity, &out)) {
+    return false;
+  }
+  if ((out.fovRadians != 1.2F) || (out.priority != 4.0F)) {
+    return false;
+  }
+
+  if (!world->remove_camera_component(entity)) {
+    return false;
+  }
+  if (world->has_camera_component(entity)) {
+    return false;
+  }
+  return true;
+}
+
+/// A CameraComponent with no SpringArm derives its pose from the entity's
+/// world transform (-Z forward, +Y up) and publishes into CameraManager.
+bool test_camera_component_pose_from_transform() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  Transform transform{};
+  transform.position = math::Vec3(1.0F, 2.0F, 3.0F);
+  transform.rotation = math::Quat(0.0F, 1.0F, 0.0F, 0.0F); // 180 deg yaw
+  const Entity entity = world->create_scene_object(transform);
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  camera.priority = 2.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  world->begin_transform_phase();
+  world->end_frame_phase();
+  update_persistent_cameras(*world, 1.0F);
+
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) || (active->ownerEntity != entity)) {
+    return false;
+  }
+  // 180-degree yaw rotates local -Z (forward) to world +Z.
+  return nearly(active->position.x, 1.0F) && nearly(active->position.y, 2.0F) &&
+        nearly(active->position.z, 3.0F) && nearly(active->target.x, 1.0F) &&
+        nearly(active->target.y, 2.0F) && nearly(active->target.z, 4.0F);
+}
+
+/// An inactive CameraComponent never reaches CameraManager, and flipping it
+/// back to active resumes publishing.
+bool test_camera_component_disabled_not_pushed() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  camera.active = false;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  update_persistent_cameras(*world, 1.0F);
+  if (world->camera_manager().camera_count() != 0U) {
+    return false;
+  }
+
+  CameraComponent *ptr = world->get_camera_component_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  ptr->active = true;
+  update_persistent_cameras(*world, 1.0F);
+  return world->camera_manager().camera_count() == 1U;
+}
+
+/// Destroying the owning entity removes its published camera, matching the
+/// existing World-level camera_manager().on_entity_destroyed cleanup.
+bool test_camera_component_destroyed_owner_removes_camera() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+  update_persistent_cameras(*world, 1.0F);
+  if (world->camera_manager().camera_count() != 1U) {
+    return false;
+  }
+
+  if (!world->destroy_entity(entity)) {
+    return false;
+  }
+  return world->camera_manager().camera_count() == 0U;
+}
+
+/// Two active cameras at equal priority resolve deterministically: the one
+/// authored (added) first keeps winning across repeated evaluations, and
+/// find_authored_active_camera reports the tie so editor UI can surface it.
+bool test_camera_component_priority_ties_deterministic() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity first = world->create_scene_object();
+  const Entity second = world->create_scene_object();
+  if ((first == kInvalidEntity) || (second == kInvalidEntity)) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  camera.priority = 1.0F;
+  if (!world->add_camera_component(first, camera) ||
+      !world->add_camera_component(second, camera)) {
+    return false;
+  }
+
+  std::uint32_t tieCount = 0U;
+  const Entity winnerA = find_authored_active_camera(*world, &tieCount);
+  if ((winnerA != first) || (tieCount != 1U)) {
+    return false;
+  }
+
+  update_persistent_cameras(*world, 1.0F);
+  update_persistent_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) || (active->ownerEntity != first)) {
+    return false;
+  }
+
+  const Entity winnerB = find_authored_active_camera(*world, &tieCount);
+  return (winnerB == first) && (tieCount == 1U);
+}
+
+/// No active CameraComponent reports kInvalidEntity, not a stale winner.
+bool test_camera_component_none_active_reports_invalid() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+  CameraComponent camera{};
+  camera.active = false;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+  std::uint32_t tieCount = 5U;
+  const Entity winner = find_authored_active_camera(*world, &tieCount);
+  return (winner == kInvalidEntity) && (tieCount == 0U);
+}
+
+/// SpringArm + CameraComponent on the same entity is the standard authored
+/// third-person rig: the spring arm's collision-aware boom supplies
+/// position/target while the CameraComponent's fov/priority/blendSpeed
+/// (not the spring arm's hardcoded defaults) reach CameraManager, and
+/// update_persistent_cameras must not also push a second, conflicting entry
+/// for the same owner.
+bool test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  Transform transform{};
+  transform.position = math::Vec3(1.0F, 2.0F, 3.0F);
+  const Entity entity = world->create_scene_object(transform);
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.armLength = 8.0F;
+  arm.currentLength = 8.0F;
+  arm.offset = math::Vec3(0.0F, 2.0F, 0.0F);
+  arm.lagSpeed = 100.0F;
+  arm.collisionEnabled = false;
+  if (!world->add_spring_arm(entity, arm)) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  camera.fovRadians = 0.7F;
+  camera.priority = 42.0F;
+  camera.blendSpeed = 9.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  update_spring_arm_cameras(*world, 1.0F);
+  update_persistent_cameras(*world, 1.0F);
+
+  if (world->camera_manager().camera_count() != 1U) {
+    return false; // update_persistent_cameras must have skipped this owner.
+  }
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) || (active->ownerEntity != entity)) {
+    return false;
+  }
+  // Spring-arm-derived pose (matches test_spring_arm_updates_camera_position).
+  if (!nearly(active->target.x, 1.0F) || !nearly(active->target.y, 4.0F) ||
+      !nearly(active->target.z, 3.0F) || !nearly(active->position.x, 1.0F) ||
+      !nearly(active->position.y, 4.0F) || !nearly(active->position.z, 11.0F)) {
+    return false;
+  }
+  // CameraComponent-derived lens/priority/blend.
+  return nearly(active->fovRadians, 0.7F) && (active->priority == 42.0F) &&
+        (active->blendSpeed == 9.0F);
+}
+
+/// A disabled CameraComponent co-located with a SpringArmComponent suppresses
+/// the push entirely (the author turned this rig's camera off).
+bool test_camera_component_disabled_suppresses_spring_arm_push() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.collisionEnabled = false;
+  if (!world->add_spring_arm(entity, arm)) {
+    return false;
+  }
+  CameraComponent camera{};
+  camera.active = false;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  update_spring_arm_cameras(*world, 1.0F);
+  return world->camera_manager().camera_count() == 0U;
+}
+
+/// camera_component_pose (the editor viewport frustum gizmo's pose query)
+/// derives the identical pose update_persistent_cameras would publish,
+/// without touching CameraManager, and fails cleanly for an entity with no
+/// CameraComponent.
+bool test_camera_component_pose_query_matches_manager_push() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  Transform transform{};
+  transform.position = math::Vec3(2.0F, 0.0F, -4.0F);
+  const Entity entity = world->create_scene_object(transform);
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+  CameraComponent camera{};
+  camera.fovRadians = 0.5F;
+  camera.nearPlane = 0.2F;
+  camera.farPlane = 50.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  world->begin_transform_phase();
+  world->end_frame_phase();
+
+  renderer::CameraState pose{};
+  if (!camera_component_pose(*world, entity, &pose)) {
+    return false;
+  }
+
+  update_persistent_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if (active == nullptr) {
+    return false;
+  }
+  if (!nearly(pose.position.x, active->position.x) ||
+      !nearly(pose.position.y, active->position.y) ||
+      !nearly(pose.position.z, active->position.z) ||
+      !nearly(pose.target.x, active->target.x) ||
+      !nearly(pose.target.y, active->target.y) ||
+      !nearly(pose.target.z, active->target.z) ||
+      (pose.fovRadians != active->fovRadians) ||
+      (pose.nearPlane != active->nearPlane) ||
+      (pose.farPlane != active->farPlane)) {
+    return false;
+  }
+
+  const Entity bare = world->create_entity();
+  renderer::CameraState unused{};
+  return !camera_component_pose(*world, bare, &unused);
+}
+
+/// Scene save/load round-trips a CameraComponent through the production
+/// serializer, and the reloaded component drives the pipeline's camera
+/// update exactly like a freshly-authored one.
+bool test_camera_component_survives_scene_reload() noexcept {
+  constexpr PersistentId kCameraPersistentId = 9101U;
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  Transform transform{};
+  transform.position = math::Vec3(5.0F, 0.0F, 0.0F);
+  const Entity entity = source->create_scene_object_with_persistent_id(
+      kCameraPersistentId, transform);
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+  CameraComponent camera{};
+  camera.priority = 7.0F;
+  camera.fovRadians = 1.1F;
+  if (!source->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  static char buffer[64U * 1024U];
+  std::size_t written = 0U;
+  if (!save_scene(*source, buffer, sizeof(buffer), &written)) {
+    return false;
+  }
+
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if (!load_scene(*loaded, buffer, written)) {
+    return false;
+  }
+
+  const Entity reloadedEntity =
+      loaded->find_entity_by_persistent_id(kCameraPersistentId);
+  CameraComponent reloadedCamera{};
+  if (!loaded->get_camera_component(reloadedEntity, &reloadedCamera)) {
+    return false;
+  }
+  if ((reloadedCamera.priority != 7.0F) ||
+      (reloadedCamera.fovRadians != 1.1F)) {
+    return false;
+  }
+
+  loaded->begin_transform_phase();
+  loaded->end_frame_phase();
+  update_persistent_cameras(*loaded, 1.0F);
+  const CameraEntry *active = loaded->camera_manager().active_camera();
+  return (active != nullptr) && (active->ownerEntity == reloadedEntity) &&
+        nearly(active->position.x, 5.0F);
+}
+
 bool test_clear() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   auto &cm = world->camera_manager();
@@ -558,6 +909,25 @@ int main() {
       test_spring_arm_collision_clamps_length);
   run("test_destroyed_owner_removes_camera",
       test_destroyed_owner_removes_camera);
+  run("test_camera_component_crud", test_camera_component_crud);
+  run("test_camera_component_pose_from_transform",
+      test_camera_component_pose_from_transform);
+  run("test_camera_component_disabled_not_pushed",
+      test_camera_component_disabled_not_pushed);
+  run("test_camera_component_destroyed_owner_removes_camera",
+      test_camera_component_destroyed_owner_removes_camera);
+  run("test_camera_component_priority_ties_deterministic",
+      test_camera_component_priority_ties_deterministic);
+  run("test_camera_component_none_active_reports_invalid",
+      test_camera_component_none_active_reports_invalid);
+  run("test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens",
+      test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens);
+  run("test_camera_component_disabled_suppresses_spring_arm_push",
+      test_camera_component_disabled_suppresses_spring_arm_push);
+  run("test_camera_component_survives_scene_reload",
+      test_camera_component_survives_scene_reload);
+  run("test_camera_component_pose_query_matches_manager_push",
+      test_camera_component_pose_query_matches_manager_push);
   run("test_clear", test_clear);
 
   if (failures > 0) {

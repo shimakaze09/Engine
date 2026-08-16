@@ -1064,6 +1064,39 @@ World::get_spring_arm_ptr(Entity entity) const noexcept {
   return get_component_ptr_checked(m_springArms, entity);
 }
 
+bool World::add_camera_component(Entity entity,
+                                 const CameraComponent &component) noexcept {
+  return add_component_checked(m_cameraComponents, entity, component,
+                               "add_camera_component");
+}
+
+bool World::remove_camera_component(Entity entity) noexcept {
+  return remove_component_checked(m_cameraComponents, entity,
+                                  "remove_camera_component");
+}
+
+bool World::get_camera_component(Entity entity,
+                                 CameraComponent *outComponent) const noexcept {
+  return get_component_checked(m_cameraComponents, entity, outComponent,
+                               "get_camera_component");
+}
+
+bool World::has_camera_component(Entity entity) const noexcept {
+  if (!is_valid_entity(entity)) {
+    return false;
+  }
+  return m_cameraComponents.contains(entity);
+}
+
+CameraComponent *World::get_camera_component_ptr(Entity entity) noexcept {
+  return get_component_ptr_checked(m_cameraComponents, entity);
+}
+
+const CameraComponent *
+World::get_camera_component_ptr(Entity entity) const noexcept {
+  return get_component_ptr_checked(m_cameraComponents, entity);
+}
+
 bool World::get_collider_range(std::size_t startIndex, std::size_t count,
                                const Entity **outEntities,
                                const Collider **outColliders) const noexcept {

@@ -1886,6 +1886,68 @@ int main() {
     }
   }
 
+  // =========================================================================
+  // Step: authored CameraComponent Lua bindings (issue #161) exercise the
+  // real production binding path end to end -- add/get round-trips exact
+  // values, and the three single-field setters (active/priority/blendSpeed)
+  // let a behaviour script enable/disable/select/blend a camera by stable
+  // entity reference without ever supplying position/target.
+  // =========================================================================
+  {
+    const char *cameraScript =
+        "function on_start()\n"
+        "    local e = engine.spawn_entity()\n"
+        "    engine.set_name(e, 'camera_target')\n"
+        "    local ok = engine.add_camera_component(e, 1.0, 0.5, 200.0, 3.0, "
+        "4.0, true)\n"
+        "    if not ok then return end\n"
+        "    local fov, near, far, pri, blend, active = "
+        "engine.get_camera_component(e)\n"
+        "    if fov == nil or fov ~= 1.0 or near ~= 0.5 or far ~= 200.0 or "
+        "pri ~= 3.0 or blend ~= 4.0 or active ~= true then return end\n"
+        "    if not engine.set_camera_component_active(e, false) then "
+        "return end\n"
+        "    if not engine.set_camera_component_priority(e, 9.0) then "
+        "return end\n"
+        "    if not engine.set_camera_component_blend_speed(e, 2.5) then "
+        "return end\n"
+        "    local newFov, newNear, newFar, newPri, newBlend, newActive = "
+        "engine.get_camera_component(e)\n"
+        "    if newPri ~= 9.0 or newBlend ~= 2.5 or newActive ~= false then "
+        "return end\n"
+        "    if newFov ~= fov or newNear ~= near or newFar ~= far then "
+        "return end\n"
+        "    if not engine.remove_camera_component(e) then return end\n"
+        "    if engine.get_camera_component(e) ~= nil then return end\n"
+        "    local r = engine.spawn_entity()\n"
+        "    engine.set_name(r, 'camera_bindings_ok')\n"
+        "end\n";
+    if (!write_script_file(cameraScript)) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 260;
+    }
+    if (!engine::scripting::load_script(kTempScriptPath) ||
+        !engine::scripting::call_script_function("on_start")) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 261;
+    }
+    bool cameraBindingsOk = false;
+    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
+      engine::runtime::NameComponent nc{};
+      if (world->get_name_component(ent, &nc) &&
+          std::strcmp(nc.name, "camera_bindings_ok") == 0) {
+        cameraBindingsOk = true;
+      }
+    });
+    if (!cameraBindingsOk) {
+      engine::scripting::shutdown_scripting();
+      remove_script_file();
+      return 262;
+    }
+  }
+
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::shutdown_scripting();
   if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {

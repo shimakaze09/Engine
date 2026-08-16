@@ -228,6 +228,151 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
   return 6;
 }
 
+// -- Authored CameraComponent Lua bindings (issue #161) --------------------
+// Pose always comes from the entity's Transform (never supplied here); these
+// bindings only touch fov/near/far/priority/blendSpeed/active so behaviour
+// scripts can enable/disable/select/blend authored cameras by stable entity
+// reference. fovRadians matches engine.set_camera_fov's existing convention.
+
+// Engine.add_camera_component(entityIndex, fovRadians, nearPlane, farPlane,
+// priority [, blendSpeed] [, active]) -> bool
+int lua_engine_add_camera_component(lua_State *state) noexcept {
+  if (runtime_binding().world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::CameraComponent camera{};
+  camera.fovRadians = static_cast<float>(luaL_checknumber(state, 2));
+  camera.nearPlane = static_cast<float>(luaL_checknumber(state, 3));
+  camera.farPlane = static_cast<float>(luaL_checknumber(state, 4));
+  camera.priority = static_cast<float>(luaL_checknumber(state, 5));
+  if (lua_isnumber(state, 6)) {
+    camera.blendSpeed = static_cast<float>(lua_tonumber(state, 6));
+  }
+  if (lua_isboolean(state, 7)) {
+    camera.active = (lua_toboolean(state, 7) != 0);
+  }
+  const bool ok = runtime_binding().world->add_camera_component(entity, camera);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Engine.get_camera_component(entityIndex) -> fovRadians, nearPlane,
+// farPlane, priority, blendSpeed, active | nil
+int lua_engine_get_camera_component(lua_State *state) noexcept {
+  if (runtime_binding().world == nullptr) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::CameraComponent camera{};
+  if (!runtime_binding().world->get_camera_component(entity, &camera)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushnumber(state, static_cast<double>(camera.fovRadians));
+  lua_pushnumber(state, static_cast<double>(camera.nearPlane));
+  lua_pushnumber(state, static_cast<double>(camera.farPlane));
+  lua_pushnumber(state, static_cast<double>(camera.priority));
+  lua_pushnumber(state, static_cast<double>(camera.blendSpeed));
+  lua_pushboolean(state, camera.active ? 1 : 0);
+  return 6;
+}
+
+// Engine.remove_camera_component(entityIndex) -> bool
+int lua_engine_remove_camera_component(lua_State *state) noexcept {
+  if (runtime_binding().world == nullptr) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const bool ok = runtime_binding().world->remove_camera_component(entity);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+/// Shared get-modify-add body for the single-field CameraComponent setters
+/// below: reads the entity's current component, applies `apply`, and writes
+/// it back through add_camera_component (so the World's own Input-phase
+/// gating and storage-full checks stay the single source of truth -- no
+/// second, unchecked mutation path).
+template <typename ApplyFn>
+bool set_camera_component_field(runtime::Entity entity,
+                                ApplyFn &&apply) noexcept {
+  if (runtime_binding().world == nullptr) {
+    return false;
+  }
+  runtime::CameraComponent camera{};
+  if (!runtime_binding().world->get_camera_component(entity, &camera)) {
+    return false;
+  }
+  apply(camera);
+  return runtime_binding().world->add_camera_component(entity, camera);
+}
+
+// Engine.set_camera_component_active(entityIndex, active) -> bool
+int lua_engine_set_camera_component_active(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const bool active = (lua_toboolean(state, 2) != 0);
+  const bool ok = set_camera_component_field(
+      entity, [active](runtime::CameraComponent &c) noexcept {
+        c.active = active;
+      });
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Engine.set_camera_component_priority(entityIndex, priority) -> bool
+// The mechanism for selecting which authored camera is active: the highest
+// active priority wins CameraManager's stack (matches engine.push_camera).
+int lua_engine_set_camera_component_priority(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const float priority = static_cast<float>(luaL_checknumber(state, 2));
+  const bool ok = set_camera_component_field(
+      entity, [priority](runtime::CameraComponent &c) noexcept {
+        c.priority = priority;
+      });
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// Engine.set_camera_component_blend_speed(entityIndex, blendSpeed) -> bool
+int lua_engine_set_camera_component_blend_speed(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const float blendSpeed = static_cast<float>(luaL_checknumber(state, 2));
+  const bool ok = set_camera_component_field(
+      entity, [blendSpeed](runtime::CameraComponent &c) noexcept {
+        c.blendSpeed = blendSpeed;
+      });
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
 } // namespace
 
 /// Registers this module's engine-table bindings; expects the table at the
@@ -253,6 +398,18 @@ void register_camera_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "add_spring_arm");
   lua_pushcfunction(state, &lua_engine_get_spring_arm);
   lua_setfield(state, -2, "get_spring_arm");
+  lua_pushcfunction(state, &lua_engine_add_camera_component);
+  lua_setfield(state, -2, "add_camera_component");
+  lua_pushcfunction(state, &lua_engine_get_camera_component);
+  lua_setfield(state, -2, "get_camera_component");
+  lua_pushcfunction(state, &lua_engine_remove_camera_component);
+  lua_setfield(state, -2, "remove_camera_component");
+  lua_pushcfunction(state, &lua_engine_set_camera_component_active);
+  lua_setfield(state, -2, "set_camera_component_active");
+  lua_pushcfunction(state, &lua_engine_set_camera_component_priority);
+  lua_setfield(state, -2, "set_camera_component_priority");
+  lua_pushcfunction(state, &lua_engine_set_camera_component_blend_speed);
+  lua_setfield(state, -2, "set_camera_component_blend_speed");
 }
 
 } // namespace engine::scripting

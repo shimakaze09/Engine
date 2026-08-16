@@ -224,6 +224,7 @@ constexpr const char *kSpotLightTypeName =
     "engine::runtime::SpotLightComponent";
 constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
+constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 
 bool find_reflected_component_descriptors(
     ReflectedComponentDescriptors *outDescs, const char *logChannel) noexcept {
@@ -239,11 +240,12 @@ bool find_reflected_component_descriptors(
   outDescs->pointLight = registry.find_type(kPointLightTypeName);
   outDescs->spotLight = registry.find_type(kSpotLightTypeName);
   outDescs->sceneCapture = registry.find_type(kSceneCaptureTypeName);
+  outDescs->camera = registry.find_type(kCameraTypeName);
   if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
       (outDescs->springArm == nullptr) ||
       (outDescs->reflectionProbe == nullptr) ||
       (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr) ||
-      (outDescs->sceneCapture == nullptr)) {
+      (outDescs->sceneCapture == nullptr) || (outDescs->camera == nullptr)) {
     if (logChannel != nullptr) {
       core::log_message(core::LogLevel::Error, logChannel,
                         "missing runtime reflection descriptors");

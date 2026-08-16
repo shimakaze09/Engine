@@ -191,6 +191,40 @@ struct AnimationComponent final {
   AnimParam params[kMaxParams] = {};
 };
 
+/// Perspective vs orthographic projection selection for CameraComponent.
+/// Stored as a plain uint32 (not a scoped enum) so the field stays in the
+/// component's fully-generic reflected codec/editor path alongside its
+/// other numeric fields; this alias exists only for readable C++ compares.
+enum class CameraProjection : std::uint32_t { Perspective = 0U,
+                                              Orthographic = 1U };
+
+/// First-class authored camera (issue #161). Pose is never stored here: it
+/// comes from the entity's world transform (looks along the rotated -Z
+/// axis, up is the rotated +Y axis, matching SceneCaptureComponent's
+/// convention) so authoring a camera never duplicates Transform state.
+/// update_persistent_cameras publishes the derived pose into the owning
+/// World's CameraManager priority stack every frame, so an authored camera
+/// participates in the same priority/blend/shake model Lua-pushed and
+/// spring-arm cameras already use -- it is not a second camera stack.
+/// `projection`/`orthographicSize` round-trip through the editor and
+/// scene/prefab files, but the production render path still projects every
+/// camera as perspective (using fovRadians regardless of `projection`);
+/// true orthographic rendering is open follow-up scope, not silently faked.
+/// When the owning entity also carries a SpringArmComponent, the spring arm
+/// supplies position/target (its collision-aware boom) and this component
+/// only contributes fovRadians/near/far/priority/blendSpeed/active -- the
+/// standard authored third-person rig.
+struct CameraComponent final {
+  std::uint32_t projection = 0U; // CameraProjection::Perspective
+  float fovRadians = 1.0471975512F; // 60 degrees; used when Perspective
+  float orthographicSize = 5.0F;    // half-height, world units; Orthographic
+  float nearPlane = 0.1F;
+  float farPlane = 100.0F;
+  float priority = 0.0F;
+  float blendSpeed = 5.0F; ///< How fast CameraManager blends toward this.
+  bool active = true;
+};
+
 /// Spring arm component: drives a third-person camera boom that shortens on
 /// collision and smoothly interpolates length.
 struct SpringArmComponent final {
@@ -250,6 +284,7 @@ public:
   static constexpr std::size_t kMaxSceneCaptureComponents = 8U;
   static constexpr std::size_t kMaxFoliagePatchComponents = 128U;
   static constexpr std::size_t kMaxAnimationComponents = 64U;
+  static constexpr std::size_t kMaxCameraComponents = 32U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -265,7 +300,7 @@ public:
                  LightComponent, ScriptComponent, SpringArmComponent,
                  PointLightComponent, SpotLightComponent,
                  ReflectionProbeComponent, SceneCaptureComponent,
-                 FoliagePatchComponent, AnimationComponent>;
+                 FoliagePatchComponent, AnimationComponent, CameraComponent>;
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
@@ -677,6 +712,26 @@ public:
   /// stale or the component is absent (no logging).
   const SpringArmComponent *get_spring_arm_ptr(Entity entity) const noexcept;
 
+  /// Adds or replaces the entity's camera. Requires the Input phase and a
+  /// live entity; logs and returns false otherwise or when storage is full.
+  bool add_camera_component(Entity entity,
+                            const CameraComponent &component) noexcept;
+  /// Removes the entity's camera. Requires the Input phase and a live
+  /// entity; logs and returns false otherwise or when the component is absent.
+  bool remove_camera_component(Entity entity) noexcept;
+  /// Copies the entity's camera into the out parameter; logs and returns
+  /// false for stale or dead entities or when the component is absent.
+  bool get_camera_component(Entity entity,
+                            CameraComponent *outComponent) const noexcept;
+  /// Returns whether has camera component.
+  bool has_camera_component(Entity entity) const noexcept;
+  /// Pointer to the entity's camera, or nullptr when the handle is stale or
+  /// the component is absent (no logging).
+  CameraComponent *get_camera_component_ptr(Entity entity) noexcept;
+  /// Pointer to the entity's camera, or nullptr when the handle is stale or
+  /// the component is absent (no logging).
+  const CameraComponent *get_camera_component_ptr(Entity entity) const noexcept;
+
   /// Enters Simulation for the frame's first fixed step: refreshes the
   /// physics per-step cvar cache, snapshots TRS history, opens the write
   /// buffer.
@@ -910,6 +965,9 @@ private:
   using AnimationComponentSet =
       core::SparseSet<Entity, AnimationComponent, kMaxEntities,
                       kMaxAnimationComponents>;
+  using CameraComponentSet =
+      core::SparseSet<Entity, CameraComponent, kMaxEntities,
+                      kMaxCameraComponents>;
 
   /// True for every persistent component type plus the derived
   /// WorldTransform; membership comes from PersistentComponentTypes so the
@@ -1060,6 +1118,8 @@ private:
       return m_foliagePatches.count();
     } else if constexpr (std::is_same_v<C, AnimationComponent>) {
       return m_animationComponents.count();
+    } else if constexpr (std::is_same_v<C, CameraComponent>) {
+      return m_cameraComponents.count();
     } else {
       return 0U;
     }
@@ -1104,6 +1164,8 @@ private:
       return m_foliagePatches.get_ptr(entity);
     } else if constexpr (std::is_same_v<C, AnimationComponent>) {
       return m_animationComponents.get_ptr(entity);
+    } else if constexpr (std::is_same_v<C, CameraComponent>) {
+      return m_cameraComponents.get_ptr(entity);
     } else {
       return nullptr;
     }
@@ -1259,6 +1321,10 @@ private:
         fn(m_animationComponents.entity_at(i),
            m_animationComponents.component_at(i));
       }
+    } else if constexpr (std::is_same_v<C, CameraComponent>) {
+      for (std::size_t i = 0U; i < m_cameraComponents.count(); ++i) {
+        fn(m_cameraComponents.entity_at(i), m_cameraComponents.component_at(i));
+      }
     }
   }
 
@@ -1352,6 +1418,7 @@ private:
   SceneCaptureSet m_sceneCaptures{};
   FoliagePatchSet m_foliagePatches{};
   AnimationComponentSet m_animationComponents{};
+  CameraComponentSet m_cameraComponents{};
   std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>
       m_worldTransformHistory{};
   std::uint64_t m_worldTransformHistoryEpoch = 0U;
