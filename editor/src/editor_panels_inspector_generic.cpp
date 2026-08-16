@@ -53,6 +53,18 @@ const char *label_with_units(const char *label, const FieldMetadata *meta,
   return scratch;
 }
 
+/// Appends an arbitrary caller-supplied suffix (the multi Inspector's
+/// " (mixed)") to a label into a caller-owned scratch buffer; returns the
+/// label unchanged when there is no suffix.
+const char *label_with_suffix(const char *label, const char *suffix,
+                              char *scratch, std::size_t scratchSize) noexcept {
+  if (suffix == nullptr) {
+    return label;
+  }
+  std::snprintf(scratch, scratchSize, "%s%s", label, suffix);
+  return scratch;
+}
+
 void draw_tooltip(const FieldMetadata *meta) noexcept {
   if ((meta != nullptr) && (meta->tooltip != nullptr) &&
       ImGui::IsItemHovered()) {
@@ -214,7 +226,7 @@ void draw_layer_mask_field(const char *label, std::uint32_t &mask,
 
 void draw_field(const core::TypeDescriptor &desc, void *instance,
                 const core::TypeField &field, bool showAdvanced,
-                bool *modified) noexcept {
+                bool *modified, const char *labelSuffix = nullptr) noexcept {
   if ((instance == nullptr) || (field.name == nullptr)) {
     return;
   }
@@ -229,9 +241,12 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
   }
 
   char labelScratch[96] = {};
-  const char *label =
+  const char *labelWithUnits =
       label_with_units(display_label(field, meta), meta, labelScratch,
                        sizeof(labelScratch));
+  char labelScratch2[112] = {};
+  const char *label = label_with_suffix(labelWithUnits, labelSuffix,
+                                        labelScratch2, sizeof(labelScratch2));
 
   switch (field.kind) {
   case core::TypeField::Kind::Float: {
@@ -365,6 +380,29 @@ bool draw_reflected_component_fields(const char *typeName, void *instance,
     draw_field(*desc, instance, field, showAdvanced, &modified);
   }
 
+  return modified;
+}
+
+bool draw_reflected_field(const char *typeName, const char *fieldName,
+                         void *instance, const char *labelSuffix,
+                         bool showAdvanced) noexcept {
+  if ((typeName == nullptr) || (fieldName == nullptr) ||
+      (instance == nullptr)) {
+    return false;
+  }
+
+  const core::TypeDescriptor *desc =
+      core::global_type_registry().find_type(typeName);
+  if (desc == nullptr) {
+    return false;
+  }
+  const core::TypeField *field = desc->find_field(fieldName);
+  if (field == nullptr) {
+    return false;
+  }
+
+  bool modified = false;
+  draw_field(*desc, instance, *field, showAdvanced, &modified, labelSuffix);
   return modified;
 }
 

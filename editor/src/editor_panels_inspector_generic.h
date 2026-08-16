@@ -18,4 +18,18 @@ namespace engine::editor {
 bool draw_reflected_component_fields(const char *typeName, void *instance,
                                      bool showAdvanced) noexcept;
 
+/// Draws exactly one reflected field of `typeName` at `instance` by field
+/// name, using the same per-Kind widgets and metadata hints as
+/// draw_reflected_component_fields; the multi-select Inspector (issue #159)
+/// calls this once per field on a scratch representative instance instead
+/// of the whole-component loop, so it can tell which single field changed
+/// and never clobbers a sibling field that is still mixed across the
+/// selection. `labelSuffix` (nullptr for none) is appended verbatim to the
+/// field's label -- the multi Inspector passes " (mixed)". Returns true if
+/// the field's value changed this frame; false (no-op) on an unknown type/
+/// field name or an advanced field hidden by `showAdvanced`.
+bool draw_reflected_field(const char *typeName, const char *fieldName,
+                         void *instance, const char *labelSuffix,
+                         bool showAdvanced) noexcept;
+
 } // namespace engine::editor

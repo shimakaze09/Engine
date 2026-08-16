@@ -10,6 +10,8 @@
 
 #include "editor_commands.h"
 #include "editor_inspector_metadata.h"
+#include "editor_live_edit.h"
+#include "editor_multi_edit.h"
 #include "editor_panels_inspector_custom.h"
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
@@ -50,50 +52,94 @@ bool draw_remove_component_button(const char *id, bool editable) noexcept {
   return removePressed;
 }
 
+/// Draws the play-mode live-edit affordance row for one component section:
+/// a badge once the field has an uncommitted transient tweak this session,
+/// plus "Apply to authored value" (queues the current runtime value for
+/// Stop to replay as an ordinary undoable edit) and "Revert runtime edit"
+/// (writes the play-session baseline straight back). No-op when the
+/// component was never live-edited this session.
+void draw_live_edit_row(runtime::Entity entity, ComponentEditType type) noexcept {
+  if (!has_live_component_edit(entity, type)) {
+    return;
+  }
+  ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F), "Live edit (transient)");
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Apply to authored value")) {
+    static_cast<void>(queue_apply_to_authored(entity, type));
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Revert runtime edit")) {
+    static_cast<void>(revert_live_component_edit(entity, type));
+  }
+  if (has_pending_apply_to_authored(entity, type)) {
+    ImGui::TextDisabled("Queued: will apply to the authored scene on Stop.");
+  }
+}
+
 /// Shared capture -> draw -> stage/remove boilerplate for one component
-/// section; `drawFn` is `bool(Component&)`, called with the field editor
-/// disabled while the world is not editable so the section still renders
-/// (greyed out) instead of disappearing.
+/// section; `drawFn` is `bool(Component&)`. Fields render disabled unless
+/// `authoredEditable` (Stopped, routes edits through command history) or
+/// `liveEditable` (Playing/Paused with the opt-in live-edit toggle on,
+/// routes edits straight to the running world and never touches undo --
+/// issue #159); the remove-component action stays authored-only since
+/// removing a component is a structural edit, not a value tweak.
 template <typename Component, typename DrawFn>
 void draw_component_section(runtime::Entity entity, ComponentEditType type,
                             const char *sectionLabel,
                             Component ComponentEditSnapshot::*member,
-                            bool editable, bool removable,
-                            DrawFn &&drawFn) noexcept {
+                            bool authoredEditable, bool liveEditable,
+                            bool removable, DrawFn &&drawFn) noexcept {
   ComponentEditSnapshot snapshot{};
   if (!capture_component_snapshot(type, entity, &snapshot)) {
     ImGui::Text("%s: <none>", sectionLabel);
     return;
   }
   const Component before = snapshot.*member;
+  const bool fieldsEditable = authoredEditable || liveEditable;
 
   ImGui::PushID(sectionLabel);
   const bool open = ImGui::CollapsingHeader(sectionLabel,
                                             ImGuiTreeNodeFlags_DefaultOpen);
   const bool removePressed =
-      removable && draw_remove_component_button("remove", editable);
+      removable && draw_remove_component_button("remove", authoredEditable);
 
   bool modified = false;
   if (open) {
-    if (!editable) {
+    if (!fieldsEditable) {
       ImGui::BeginDisabled();
     }
     modified = drawFn(snapshot.*member);
-    if (!editable) {
+    if (!fieldsEditable) {
       ImGui::EndDisabled();
+    }
+    if (liveEditable) {
+      draw_live_edit_row(entity, type);
+    } else if (!authoredEditable && live_edit_available()) {
+      // The author opted in to live edit, but this specific component's
+      // caller passed liveEditable=false (a custom-drawer type out of
+      // per-field batch/live scope) -- say so instead of leaving the
+      // disabled fields unexplained (issue #159 acceptance: unsupported
+      // fields stay read-only with a reason).
+      ImGui::TextDisabled(
+          "Read-only: live edit not yet supported for this component "
+          "(Stop to edit).");
     }
   }
   ImGui::PopID();
 
-  if (editable && removePressed) {
+  if (authoredEditable && removePressed) {
     execute_component_remove(entity, type);
-  } else if (editable && modified) {
+  } else if (authoredEditable && modified) {
     ComponentEditSnapshot beforeSnapshot{};
     beforeSnapshot.*member = before;
     ComponentEditSnapshot afterSnapshot{};
     afterSnapshot.*member = snapshot.*member;
     static_cast<void>(inspector_stage_component_edit(
         entity, type, beforeSnapshot, afterSnapshot));
+  } else if (liveEditable && modified) {
+    ComponentEditSnapshot afterSnapshot{};
+    afterSnapshot.*member = snapshot.*member;
+    static_cast<void>(apply_live_component_edit(entity, type, afterSnapshot));
   }
 }
 
@@ -101,11 +147,19 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
 /// registry entry except Name and Transform (drawn separately above as
 /// entity identity); the count assert below fails the build if a new
 /// registry row is not also added here, matching the ledger the ADD
-/// COMPONENT menu already keeps generically.
-void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
+/// COMPONENT menu already keeps generically. `liveEditable` (Playing/Paused
+/// with the live-edit toggle on) only reaches the reflected-field sections
+/// (RigidBody, Collider, Light, PointLight, SpotLight, ReflectionProbe,
+/// SpringArm) -- the custom-drawer sections below (Mesh, FoliagePatch,
+/// Script, Animation, SceneCapture) manage their own sub-widget structural
+/// edits (asset picks, foliage instance add/remove) that are out of scope
+/// for issue #159's live-edit path and stay Stop-only, always read-only
+/// during Play regardless of the toggle.
+void draw_component_sections(runtime::Entity entity, bool authoredEditable,
+                             bool liveEditable) noexcept {
   draw_component_section(
       entity, ComponentEditType::RigidBody, "Rigid Body",
-      &ComponentEditSnapshot::rigidBody, editable, true,
+      &ComponentEditSnapshot::rigidBody, authoredEditable, liveEditable, true,
       [](runtime::RigidBody &c) {
         return draw_reflected_component_fields("engine::runtime::RigidBody",
                                                &c, g_showAdvanced);
@@ -113,7 +167,7 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
 
   draw_component_section(
       entity, ComponentEditType::Collider, "Collider",
-      &ComponentEditSnapshot::collider, editable, true,
+      &ComponentEditSnapshot::collider, authoredEditable, liveEditable, true,
       [](runtime::Collider &c) {
         // The combo's selectable options come from metadata (the Enum
         // widget kind); the display-only names cover the two shapes a
@@ -160,7 +214,7 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
 
   draw_component_section(
       entity, ComponentEditType::Light, "Directional/Point Light",
-      &ComponentEditSnapshot::light, editable, true,
+      &ComponentEditSnapshot::light, authoredEditable, liveEditable, true,
       [](runtime::LightComponent &c) {
         bool modified = draw_light_type_combo(c);
         return draw_reflected_component_fields("engine::runtime::LightComponent",
@@ -169,23 +223,25 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
       });
 
   draw_component_section(entity, ComponentEditType::Mesh, "Mesh",
-                         &ComponentEditSnapshot::mesh, editable, true,
-                         [entity, editable](runtime::MeshComponent &c) {
+                         &ComponentEditSnapshot::mesh, authoredEditable, false,
+                         true,
+                         [entity, authoredEditable](runtime::MeshComponent &c) {
                            return draw_mesh_component_fields(entity, c,
-                                                             editable);
+                                                             authoredEditable);
                          });
 
   draw_component_section(
       entity, ComponentEditType::FoliagePatch, "Foliage Patch",
-      &ComponentEditSnapshot::foliagePatch, editable, true,
-      [entity, editable](runtime::FoliagePatchComponent &c) {
+      &ComponentEditSnapshot::foliagePatch, authoredEditable, false, true,
+      [entity, authoredEditable](runtime::FoliagePatchComponent &c) {
         bool modified = false;
-        draw_foliage_patch_fields(entity, c, editable, &modified);
+        draw_foliage_patch_fields(entity, c, authoredEditable, &modified);
         return modified;
       });
 
   draw_component_section(entity, ComponentEditType::PointLight, "Point Light",
-                         &ComponentEditSnapshot::pointLight, editable, true,
+                         &ComponentEditSnapshot::pointLight, authoredEditable,
+                         liveEditable, true,
                          [](runtime::PointLightComponent &c) {
                            return draw_reflected_component_fields(
                                "engine::runtime::PointLightComponent", &c,
@@ -193,7 +249,8 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
                          });
 
   draw_component_section(entity, ComponentEditType::SpotLight, "Spot Light",
-                         &ComponentEditSnapshot::spotLight, editable, true,
+                         &ComponentEditSnapshot::spotLight, authoredEditable,
+                         liveEditable, true,
                          [](runtime::SpotLightComponent &c) {
                            return draw_reflected_component_fields(
                                "engine::runtime::SpotLightComponent", &c,
@@ -202,7 +259,8 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
 
   draw_component_section(
       entity, ComponentEditType::ReflectionProbe, "Reflection Probe",
-      &ComponentEditSnapshot::reflectionProbe, editable, true,
+      &ComponentEditSnapshot::reflectionProbe, authoredEditable, liveEditable,
+      true,
       [](runtime::ReflectionProbeComponent &c) {
         return draw_reflected_component_fields(
             "engine::runtime::ReflectionProbeComponent", &c, g_showAdvanced);
@@ -210,7 +268,7 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
 
   draw_component_section(
       entity, ComponentEditType::SceneCapture, "Scene Capture",
-      &ComponentEditSnapshot::sceneCapture, editable, true,
+      &ComponentEditSnapshot::sceneCapture, authoredEditable, false, true,
       [entity](runtime::SceneCaptureComponent &c) {
         const bool modified = draw_reflected_component_fields(
             "engine::runtime::SceneCaptureComponent", &c, g_showAdvanced);
@@ -219,20 +277,22 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
       });
 
   draw_component_section(entity, ComponentEditType::Script,
-                         "Script", &ComponentEditSnapshot::script, editable,
+                         "Script", &ComponentEditSnapshot::script,
+                         authoredEditable, false,
                          true, [](runtime::ScriptComponent &c) {
                            return draw_script_component_fields(c);
                          });
 
   draw_component_section(entity, ComponentEditType::Animation,
                          "Animation", &ComponentEditSnapshot::animation,
-                         editable, true, [](runtime::AnimationComponent &c) {
+                         authoredEditable, false, true,
+                         [](runtime::AnimationComponent &c) {
                            return draw_animation_component_fields(c);
                          });
 
   draw_component_section(
       entity, ComponentEditType::SpringArm, "Spring Arm",
-      &ComponentEditSnapshot::springArm, editable, true,
+      &ComponentEditSnapshot::springArm, authoredEditable, liveEditable, true,
       [](runtime::SpringArmComponent &c) {
         return draw_reflected_component_fields(
             "engine::runtime::SpringArmComponent", &c, g_showAdvanced);
@@ -341,6 +401,17 @@ void draw_inspector_panel() noexcept {
     ImGui::Separator();
   }
 
+  // Multi-selection (issue #159): common components across every selected
+  // entity, mixed-value fields flagged, batch edits as one undoable
+  // command. A pending single-entity gesture from before the selection
+  // grew must still commit instead of being silently dropped.
+  if (editor_session().selectedEntityCount > 1U) {
+    inspector_commit_pending_edit();
+    draw_multi_select_inspector_panel();
+    ImGui::End();
+    return;
+  }
+
   const runtime::Entity entity = selected_entity();
   if ((editor_session().world == nullptr) ||
       (entity == runtime::kInvalidEntity)) {
@@ -350,7 +421,33 @@ void draw_inspector_panel() noexcept {
     return;
   }
 
-  const bool editable = world_is_editable();
+  // authoredEditable: Stopped, edits route through command history as
+  // usual. liveEditable: Playing/Paused with the opt-in live-edit toggle
+  // on (issue #159) -- edits write straight to the running world and
+  // never touch undo/dirty state. The two are mutually exclusive (Stopped
+  // implies liveEditable is false) so callers never need to pick between
+  // them for a single field.
+  const bool authoredEditable = world_is_editable();
+  const bool liveEditable = !authoredEditable && live_edit_available();
+  if (editor_session().playState != PlayState::Stopped) {
+    const bool paused = editor_session().playState == PlayState::Paused;
+    ImGui::TextColored(ImVec4(0.4F, 0.8F, 1.0F, 1.0F), "%s -- runtime values",
+                       paused ? "PAUSED" : "PLAYING");
+    ImGui::SameLine();
+    ImGui::Checkbox("Live Edit", &editor_session().liveEditEnabled);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip(
+          "Opt in to edit the running world directly. Live edits are "
+          "transient, never enter Undo, and are discarded on Stop unless "
+          "explicitly applied to the authored value.");
+    }
+    if (!editor_session().liveEditEnabled) {
+      ImGui::TextDisabled("Read-only: values shown are the live simulation "
+                          "state, not the authored scene.");
+    }
+    ImGui::Separator();
+  }
+
   ImGui::Checkbox("Advanced", &g_showAdvanced);
   ImGui::SameLine();
   ImGui::TextDisabled("(raw ids/paths and simulation state)");
@@ -360,21 +457,22 @@ void draw_inspector_panel() noexcept {
       editor_session().world->get_name_component(entity, &nameComponent);
   if (hasNameComponent) {
     // The name is entity identity, not a removable behavior -- it can be
-    // edited but never deleted from the inspector.
+    // edited but never deleted from the inspector. Renaming stays
+    // authored-only: it is not part of issue #159's live-edit scope.
     const runtime::NameComponent nameBefore = nameComponent;
     bool nameChanged = false;
-    if (!editable) {
+    if (!authoredEditable) {
       ImGui::BeginDisabled();
     }
 
     nameChanged = ImGui::InputText("Name", nameComponent.name,
                                    sizeof(nameComponent.name));
 
-    if (!editable) {
+    if (!authoredEditable) {
       ImGui::EndDisabled();
     }
 
-    if (editable && nameChanged) {
+    if (authoredEditable && nameChanged) {
       ComponentEditSnapshot before{};
       before.name = nameBefore;
       ComponentEditSnapshot after{};
@@ -383,34 +481,34 @@ void draw_inspector_panel() noexcept {
           entity, ComponentEditType::Name, before, after));
     }
   } else {
-    if (!editable) {
+    if (!authoredEditable) {
       ImGui::BeginDisabled();
     }
 
-    if (ImGui::SmallButton("+ Name") && editable) {
+    if (ImGui::SmallButton("+ Name") && authoredEditable) {
       execute_component_add(entity, ComponentEditType::Name,
                             default_component_snapshot(
                                 entity, ComponentEditType::Name));
     }
 
-    if (!editable) {
+    if (!authoredEditable) {
       ImGui::EndDisabled();
     }
   }
 
   ImGui::Separator();
 
-  if (!editable) {
+  if (!authoredEditable) {
     ImGui::BeginDisabled();
   }
 
   const bool deletePressed = ImGui::Button("Delete Entity");
 
-  if (!editable) {
+  if (!authoredEditable) {
     ImGui::EndDisabled();
   }
 
-  if (editable && deletePressed) {
+  if (authoredEditable && deletePressed) {
     static_cast<void>(execute_entity_delete(entity));
     clear_entity_selection();
     ImGui::End();
@@ -428,18 +526,21 @@ void draw_inspector_panel() noexcept {
   // Transform is entity identity (position/axis): editable in place but
   // never removable from the inspector, matching the empty-object mental
   // model -- routed through the generic drawer so Rotation gets the
-  // EulerDegrees widget like every other reflected Quat field.
+  // EulerDegrees widget like every other reflected Quat field. Transform
+  // is in live-edit scope (tuning a playing actor's pose is the canonical
+  // use case).
   draw_component_section(
       entity, ComponentEditType::Transform, "Transform",
-      &ComponentEditSnapshot::transform, editable, false,
+      &ComponentEditSnapshot::transform, authoredEditable, liveEditable,
+      false,
       [](runtime::Transform &c) {
         return draw_reflected_component_fields("engine::runtime::Transform",
                                                &c, g_showAdvanced);
       });
 
-  draw_component_sections(entity, editable);
+  draw_component_sections(entity, authoredEditable, liveEditable);
 
-  draw_add_component_menu(entity, editable);
+  draw_add_component_menu(entity, authoredEditable);
 
   if (inspector_has_pending_edit() && !ImGui::IsAnyItemActive()) {
     inspector_commit_pending_edit();

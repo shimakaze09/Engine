@@ -326,7 +326,34 @@ directory-global by design.
   (64-bit asset ids, VFS paths: Mesh/Script/Animation/Foliage/Light-type/
   SceneCapture-preview) plus the registry-generated, categorized Add
   Component menu; `editor_panels_inspector` is a thin per-section
-  orchestrator.
+  orchestrator. Play-mode inspection (issue #159, LANDED 2026-08-17):
+  `editor_live_edit` gives Play/Pause an explicit opt-in
+  (`EditorSession::liveEditEnabled`, off by default) — with it off the
+  Inspector shows the running World's live component values read-only
+  (WorldPhase::Input holds between fixed steps and while paused, so the
+  same capture path used at rest already reads live state); with it on,
+  edits write straight to the running World through the same
+  apply_component_snapshot dispatch but never enter CommandHistory or scene
+  dirty state, and Stop's snapshot restore always discards them unless the
+  author explicitly queues "Apply to authored value" (frozen at click
+  time), which Stop replays as one ordinary undoable ComponentEditCommand
+  against the just-restored authored World once the restore succeeds;
+  "Revert runtime edit" restores the play-session baseline captured at the
+  first live touch. `editor_multi_edit` extends the #156 registry-generated
+  editing to N-entity selections: common-component detection is per
+  ComponentEditType across the selection, per-field mixed-value detection
+  reads core::TypeField offset/size so a "(mixed)" field never gets
+  silently overwritten to one entity's value by an edit to a sibling field,
+  and one field edit applies to every selected entity as a single
+  atomic `MultiComponentEditCommand` (one gesture, one undo step; a
+  mid-batch failure rolls every already-touched entity back and pushes no
+  history entry). Both live-edit and multi-edit currently cover the
+  reflected-field component set (Transform, RigidBody, Collider, Light,
+  PointLight, SpotLight, ReflectionProbe, SpringArm); the custom-drawer
+  components (Mesh, FoliagePatch, Script, Animation, SceneCapture, Name)
+  stay Stop-only/single-entity-only pending a follow-up that threads their
+  drawers' own structural sub-edits (asset picks, foliage instance add/
+  remove) through the same per-field batch/live path.
 - `assets/` — GLSL shaders, sample Lua scripts, sample meshes, the bundled
   prop pack (`props/`, cooked from generated glTFs), sounds, and the Island
   Hopper template (`templates/island_hopper.json`, installed as

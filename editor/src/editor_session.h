@@ -84,6 +84,11 @@ struct EditorSession final {
   // Set by the toolbar Step button while paused; the runtime consumes it
   // through the editor bridge to simulate exactly one fixed step.
   bool stepRequested = false;
+  // Explicit opt-in (issue #159): while Playing/Paused, on lets the
+  // Inspector write straight to the running world through editor_live_edit
+  // instead of showing runtime values read-only. Never implies undo --
+  // live edits stay outside command history regardless of this flag.
+  bool liveEditEnabled = false;
   std::unique_ptr<char[]> playSnapshotBuffer{};
   std::size_t playSnapshotCapacity = 0U;
   std::size_t playSnapshotSize = 0U;
@@ -122,6 +127,7 @@ constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";
 constexpr const char *kColliderTypeName = "engine::runtime::Collider";
 constexpr const char *kNameTypeName = "engine::runtime::NameComponent";
+constexpr const char *kLightTypeName = "engine::runtime::LightComponent";
 constexpr const char *kReflectionProbeTypeName =
     "engine::runtime::ReflectionProbeComponent";
 constexpr const char *kFoliagePatchTypeName =
