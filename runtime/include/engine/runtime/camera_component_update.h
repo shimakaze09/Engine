@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "engine/core/entity.h"
+#include "engine/renderer/camera.h"
 
 namespace engine::runtime {
 
@@ -34,5 +35,15 @@ void update_persistent_cameras(World &world, float dt) noexcept;
 /// winner's priority to *outTieCount when non-null (0 when unique or none).
 core::Entity find_authored_active_camera(const World &world,
                                          std::uint32_t *outTieCount) noexcept;
+
+/// Derives the renderer-facing pose (position/target/up/fov/near/far) the
+/// entity's CameraComponent would publish -- the same -Z-forward/+Y-up
+/// convention update_persistent_cameras uses -- without touching
+/// CameraManager. Editor authoring helpers (the selected-camera frustum
+/// gizmo) use this so the convention lives in exactly one place. False when
+/// the entity has no CameraComponent or is not alive; *outState is
+/// untouched on failure.
+bool camera_component_pose(const World &world, core::Entity entity,
+                           renderer::CameraState *outState) noexcept;
 
 } // namespace engine::runtime

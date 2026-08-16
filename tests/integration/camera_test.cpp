@@ -757,6 +757,56 @@ bool test_camera_component_disabled_suppresses_spring_arm_push() noexcept {
   return world->camera_manager().camera_count() == 0U;
 }
 
+/// camera_component_pose (the editor viewport frustum gizmo's pose query)
+/// derives the identical pose update_persistent_cameras would publish,
+/// without touching CameraManager, and fails cleanly for an entity with no
+/// CameraComponent.
+bool test_camera_component_pose_query_matches_manager_push() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  Transform transform{};
+  transform.position = math::Vec3(2.0F, 0.0F, -4.0F);
+  const Entity entity = world->create_scene_object(transform);
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+  CameraComponent camera{};
+  camera.fovRadians = 0.5F;
+  camera.nearPlane = 0.2F;
+  camera.farPlane = 50.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  world->begin_transform_phase();
+  world->end_frame_phase();
+
+  renderer::CameraState pose{};
+  if (!camera_component_pose(*world, entity, &pose)) {
+    return false;
+  }
+
+  update_persistent_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if (active == nullptr) {
+    return false;
+  }
+  if (!nearly(pose.position.x, active->position.x) ||
+      !nearly(pose.position.y, active->position.y) ||
+      !nearly(pose.position.z, active->position.z) ||
+      !nearly(pose.target.x, active->target.x) ||
+      !nearly(pose.target.y, active->target.y) ||
+      !nearly(pose.target.z, active->target.z) ||
+      (pose.fovRadians != active->fovRadians) ||
+      (pose.nearPlane != active->nearPlane) ||
+      (pose.farPlane != active->farPlane)) {
+    return false;
+  }
+
+  const Entity bare = world->create_entity();
+  renderer::CameraState unused{};
+  return !camera_component_pose(*world, bare, &unused);
+}
+
 /// Scene save/load round-trips a CameraComponent through the production
 /// serializer, and the reloaded component drives the pipeline's camera
 /// update exactly like a freshly-authored one.
@@ -876,6 +926,8 @@ int main() {
       test_camera_component_disabled_suppresses_spring_arm_push);
   run("test_camera_component_survives_scene_reload",
       test_camera_component_survives_scene_reload);
+  run("test_camera_component_pose_query_matches_manager_push",
+      test_camera_component_pose_query_matches_manager_push);
   run("test_clear", test_clear);
 
   if (failures > 0) {

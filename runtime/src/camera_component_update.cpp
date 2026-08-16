@@ -10,6 +10,35 @@
 
 namespace engine::runtime {
 
+namespace {
+
+/// Shared -Z-forward/+Y-up pose derivation (matches SceneCaptureComponent's
+/// convention -- see engine_frame_collect.cpp's collect_scene_captures) used
+/// by both update_persistent_cameras and the editor's camera_component_pose
+/// query, so the convention lives in exactly one place. False when the
+/// entity carries neither a WorldTransform nor a local Transform.
+bool derive_pose_from_transform(const World &world, core::Entity entity,
+                                math::Vec3 *outPosition,
+                                math::Quat *outRotation) noexcept {
+  const WorldTransform *worldTransform =
+      world.get_world_transform_read_ptr(entity);
+  if (worldTransform != nullptr) {
+    *outPosition = worldTransform->position;
+    *outRotation = worldTransform->rotation;
+    return true;
+  }
+
+  Transform local{};
+  if (!world.get_transform(entity, &local)) {
+    return false;
+  }
+  *outPosition = local.position;
+  *outRotation = local.rotation;
+  return true;
+}
+
+} // namespace
+
 /// Derives each authored camera's pose from its world transform (looking
 /// along the rotated -Z axis, up is the rotated +Y axis, matching
 /// SceneCaptureComponent's convention -- see engine_frame_collect.cpp's
@@ -39,18 +68,8 @@ void update_persistent_cameras(World &world, float dt) noexcept {
 
     math::Vec3 position(0.0F, 0.0F, 0.0F);
     math::Quat rotation{};
-    const WorldTransform *worldTransform =
-        world.get_world_transform_read_ptr(entity);
-    if (worldTransform != nullptr) {
-      position = worldTransform->position;
-      rotation = worldTransform->rotation;
-    } else {
-      Transform local{};
-      if (!world.get_transform(entity, &local)) {
-        return;
-      }
-      position = local.position;
-      rotation = local.rotation;
+    if (!derive_pose_from_transform(world, entity, &position, &rotation)) {
+      return;
     }
 
     CameraEntry entry{};
@@ -95,6 +114,34 @@ core::Entity find_authored_active_camera(const World &world,
     *outTieCount = tieCount;
   }
   return best;
+}
+
+bool camera_component_pose(const World &world, core::Entity entity,
+                           renderer::CameraState *outState) noexcept {
+  if (outState == nullptr) {
+    return false;
+  }
+  const CameraComponent *camera = world.get_camera_component_ptr(entity);
+  if (camera == nullptr) {
+    return false;
+  }
+
+  math::Vec3 position(0.0F, 0.0F, 0.0F);
+  math::Quat rotation{};
+  if (!derive_pose_from_transform(world, entity, &position, &rotation)) {
+    return false;
+  }
+
+  renderer::CameraState state{};
+  state.position = position;
+  state.target = math::add(
+      position, math::rotate_vector(math::Vec3(0.0F, 0.0F, -1.0F), rotation));
+  state.up = math::rotate_vector(math::Vec3(0.0F, 1.0F, 0.0F), rotation);
+  state.fovRadians = camera->fovRadians;
+  state.nearPlane = camera->nearPlane;
+  state.farPlane = camera->farPlane;
+  *outState = state;
+  return true;
 }
 
 } // namespace engine::runtime
