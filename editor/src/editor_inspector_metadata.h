@@ -70,14 +70,13 @@ const ComponentMetadata *find_component_metadata(const char *typeName) noexcept;
 /// about +Z; q = qy(yaw) * qx(pitch) * qz(roll)). Round-trip policy (issue
 /// #156): storage stays the normalized quaternion; this is a presentation
 /// projection recomputed fresh from the quaternion every call, not a staged
-/// value, so it is exact for every orientation except the pitch = +-90 deg
-/// gimbal case, where yaw and roll become linearly dependent and the
-/// extraction picks yaw = 0 with roll absorbing the swing (math::to_euler's
-/// documented behavior) -- a quat->degrees->quat round trip through that
-/// pole reproduces the same rotation but not necessarily the same
-/// (yaw, roll) split the user last typed. Editing away from the pole is
-/// always a stable, exact round trip (verified in
-/// editor_inspector_metadata_test.cpp).
+/// value, so a quat->degrees->quat round trip always reconstructs the
+/// identical rotation (verified in editor_inspector_metadata_test.cpp),
+/// including through the pitch = +-90 deg gimbal pole (math::to_euler
+/// folds the pole's combined yaw+-roll value into yaw and reports
+/// roll = 0). The one thing not preserved at that pole is the specific
+/// (yaw, roll) split the user last typed; editing away from the pole is a
+/// stable, exact round trip of the full triple.
 math::Vec3 euler_degrees_from_quat(const math::Quat &rotation) noexcept;
 /// Inverse of euler_degrees_from_quat; always returns a normalized
 /// quaternion (from_euler composes three unit rotations).
