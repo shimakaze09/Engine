@@ -8,6 +8,13 @@ engine_add_test_executable(engine_unit_foundation
     engine_math
 )
 
+engine_add_test_executable(engine_unit_logging_sink
+    SOURCES
+    logging_sink_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_job_handle_generation
     SOURCES
     job_handle_generation_test.cpp
