@@ -43,6 +43,10 @@ function M.on_reload(self, state)
 end
 
 -- Releases this platform's state so a reused entity slot starts fresh.
+-- Fires on editor Stop, engine.new_scene, and engine.load_scene alike
+-- (#198): the VM persists across a scene transition (Lua globals are the
+-- cross-scene handoff channel) but `self` does not, so per-entity cleanup
+-- belongs here rather than after the transition commits.
 function M.on_end_play(self)
     g_instances[self] = nil
 end

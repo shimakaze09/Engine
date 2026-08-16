@@ -115,7 +115,12 @@ function M.on_reload(self, state)
     ensure_anim_handler()
 end
 
--- Releases this player's state so a reused entity slot starts fresh.
+-- Releases this player's state so a reused entity slot starts fresh. Fires
+-- on editor Stop, engine.new_scene, and engine.load_scene alike (#198), so
+-- this is also the right place to persist anything that must survive a
+-- level transition (e.g. via engine.save_data) — a top-level Lua global
+-- would work too, since the VM persists across scene loads, but `self` and
+-- every other entity handle die with this world and must not be kept.
 function M.on_end_play(self)
     g_instances[self] = nil
 end
