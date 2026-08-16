@@ -158,6 +158,17 @@ runtime::Entity execute_entity_create() noexcept;
 runtime::Entity execute_asset_spawn(const char *virtualPath,
                                     const runtime::Transform &transform) noexcept;
 
+/// Dispatches the content browser's typed double-click/Open action for
+/// `entry` through its production entry point: a mesh spawns at the
+/// editor camera's focus point (mirroring execute_primitive_spawn's
+/// placement) and becomes the selection; a scene routes through the #158
+/// gated open flow (request_scene_open), which may defer behind the
+/// unsaved-change prompt instead of switching immediately; every other
+/// kind only updates the browser selection since no dedicated editor
+/// exists yet for it. Always updates selectedAssetPath. Returns false
+/// only when a SpawnMesh dispatch's actual spawn failed.
+bool execute_asset_open(const AssetIndexEntry &entry) noexcept;
+
 /// Enumerates the built-in blockout primitives the editor can spawn.
 enum class EditorPrimitive : std::uint8_t {
   Cube,

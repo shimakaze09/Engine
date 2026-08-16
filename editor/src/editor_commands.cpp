@@ -614,6 +614,35 @@ runtime::Entity execute_asset_spawn(
   return world->find_entity_by_persistent_id(command->persistentId);
 }
 
+bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
+  std::snprintf(editor_session().selectedAssetPath,
+               sizeof(editor_session().selectedAssetPath), "%s",
+               entry.osPath);
+
+  switch (resolve_asset_open_action(entry.kind)) {
+  case AssetOpenAction::SpawnMesh: {
+    const renderer::CameraState cam =
+        editor_camera_state(editor_session().editorCamera);
+    runtime::Transform transform{};
+    transform.position = math::Vec3(cam.target.x, 0.5F, cam.target.z);
+    const runtime::Entity spawned =
+        execute_asset_spawn(entry.virtualPath, transform);
+    if (spawned != runtime::kInvalidEntity) {
+      select_entity(spawned, false);
+    }
+    return spawned != runtime::kInvalidEntity;
+  }
+  case AssetOpenAction::OpenScene:
+    // Gated: proceeds immediately when the current document is clean, or
+    // arms the unsaved-change prompt and defers (#158's contract).
+    request_scene_open(entry.osPath);
+    return true;
+  case AssetOpenAction::SelectOnly:
+  default:
+    return true;
+  }
+}
+
 /// Per-primitive spawn description: display name, builtin mesh path,
 /// resting height, fallback collider, and hull provenance.
 struct PrimitiveSpawnDesc final {

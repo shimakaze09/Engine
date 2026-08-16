@@ -5,6 +5,7 @@ engine_add_module_library(engine_editor
     src/command_history.cpp
     src/debug_camera.cpp
     src/editor.cpp
+    src/editor_asset_index.cpp
     src/editor_commands.cpp
     src/editor_console_capture.cpp
     src/editor_component_registry.cpp

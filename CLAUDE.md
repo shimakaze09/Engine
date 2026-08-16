@@ -274,13 +274,25 @@ directory-global by design.
   `platform_get_save_dir`), service registry, timers, cameras, spring
   arms, game mode/state, player controllers, entity pool.
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle,
-  multi-selection, single-step request), hierarchy tree panel (drag-drop
-  reparent through the undoable ReparentCommand), `editor_commands`
-  (undoable edits incl. entity create/delete with persistent-id-preserving
-  subtree restore and asset drag-spawn; commands resolve targets by
-  persistent id), panel TUs (main/inspector/diagnostics/assets/viewport;
-  asset browser drags .mesh entries onto the viewport), editor + debug
-  cameras, command history. Inspector metadata (issue #156):
+  multi-selection, single-step request, embedded `ContentBrowserState`),
+  hierarchy tree panel (drag-drop reparent through the undoable
+  ReparentCommand), `editor_commands` (undoable edits incl. entity
+  create/delete with persistent-id-preserving subtree restore and asset
+  drag-spawn; commands resolve targets by persistent id; `execute_asset_open`
+  dispatches the content browser's typed Open action through production
+  entry points), `editor_asset_index` (issue #157: a cold, process-wide
+  content-browser index — one filesystem walk classifies every file into
+  AssetKind by extension/content-sniff and hides sidecar/internal files;
+  rebuilt only on explicit Rescan or startup, never per frame; change-driven
+  `AssetFilterCache`/`AssetChildFolderCache` recompute only when the
+  request or the index generation changed), panel TUs (main/inspector/
+  diagnostics/assets/viewport; the assets panel is the content browser:
+  search/type-filter/folder-nav with persisted last-folder+filter state,
+  thumbnails, and typed double-click/context-menu actions — mesh drag-spawn
+  is unchanged and still pinned by `editor_asset_spawn_name_test`; Rename/
+  Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled pending
+  #150's asset identity and dependency graph), editor + debug cameras,
+  command history. Inspector metadata (issue #156):
   `editor_component_registry` generates `ComponentEditType`/
   `ComponentEditSnapshot`/capture-apply-remove dispatch from the runtime's
   `ENGINE_PERSISTENT_COMPONENT_TABLE` (X-macro over
