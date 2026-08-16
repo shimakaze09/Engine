@@ -617,12 +617,13 @@ void recent_scenes_add(const char *path) noexcept {
     if (std::strcmp(doc.recentScenes[i], path) == 0) {
       continue;
     }
-    std::snprintf(reordered[writeIndex++], kMaxDocumentPathLength, "%s",
+    std::snprintf(reordered[writeIndex++], kMaxDocumentPathLength, "%.*s",
+                  static_cast<int>(kMaxDocumentPathLength - 1U),
                   doc.recentScenes[i]);
   }
   for (std::size_t i = 0U; i < writeIndex; ++i) {
-    std::snprintf(doc.recentScenes[i], kMaxDocumentPathLength, "%s",
-                  reordered[i]);
+    std::snprintf(doc.recentScenes[i], kMaxDocumentPathLength, "%.*s",
+                  static_cast<int>(kMaxDocumentPathLength - 1U), reordered[i]);
   }
   doc.recentSceneCount = writeIndex;
   recent_scenes_persist();

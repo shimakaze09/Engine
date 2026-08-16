@@ -445,7 +445,14 @@ int check_recent_scenes_persist_and_prune() {
   std::snprintf(pathB, sizeof(pathB), "%s/b.json", recentDir);
   std::snprintf(pathC, sizeof(pathC), "%s/c.json", recentDir);
   for (const char *path : {pathA, pathB, pathC}) {
-    std::FILE *file = std::fopen(path, "wb");
+    std::FILE *file = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&file, path, "wb") != 0) {
+      file = nullptr;
+    }
+#else
+    file = std::fopen(path, "wb");
+#endif
     if (file == nullptr) {
       recent_scenes_set_directory_override_for_tests("");
       return 4;
