@@ -545,6 +545,18 @@ engine_add_test_executable(engine_unit_editor_component_registry
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_asset_index
+    SOURCES
+    editor_asset_index_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_shader_system
     SOURCES
     shader_system_test.cpp

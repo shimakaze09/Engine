@@ -27,6 +27,7 @@
 #include "engine/renderer/camera.h"
 #include "engine/runtime/world.h"
 
+#include "editor_asset_index.h"
 #include "editor_scene_document.h"
 
 namespace engine::editor {
@@ -44,6 +45,27 @@ struct ThumbnailEntry final {
   int height = 0;
 };
 constexpr std::size_t kMaxThumbnails = 128U;
+
+/// Bounded folder-navigation history for the content browser's back/forward
+/// controls; in-session only (browser folder/filter identity itself is
+/// what survives restart, through content_browser_state_load_once).
+struct ContentBrowserNavHistory final {
+  static constexpr std::size_t kMaxEntries = 32U;
+  char entries[kMaxEntries][kMaxAssetIndexPath] = {};
+  std::size_t count = 0U;
+  std::size_t position = 0U;
+};
+
+/// Content-browser panel state: the active search/filter/folder request,
+/// its change-driven match cache, and navigation history. Embedded in
+/// EditorSession so panel draw code never owns per-frame filter state.
+struct ContentBrowserState final {
+  AssetFilterState filter{};
+  AssetFilterCache filterCache{};
+  AssetChildFolderCache childFolderCache{};
+  ContentBrowserNavHistory navHistory{};
+  bool persistedStateLoaded = false;
+};
 
 /// Owns editor UI/session state for the currently attached runtime world.
 /// Selection stores full generation-checked entity handles plus the world
@@ -93,6 +115,7 @@ struct EditorSession final {
   SDL_Window *sdlWindow = nullptr;
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
+  ContentBrowserState contentBrowser{};
 };
 
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
@@ -160,6 +183,32 @@ std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept;
 /// Releases cached thumbnail textures owned by the editor through the
 /// renderer's RenderDevice.
 void clear_thumbnail_cache() noexcept;
+
+/// Loads the persisted content-browser folder/filter (last-used folder and
+/// type mask) once per process; no-op after the first call or when no
+/// state was ever saved (defaults stand: index root, every type shown).
+void content_browser_state_load_once() noexcept;
+/// Persists the current folder + type mask to the platform save directory
+/// (or the test override directory, when set).
+void content_browser_state_persist() noexcept;
+/// Test-only override for the content-browser state persistence directory;
+/// an empty string restores the default per-user platform save directory.
+void content_browser_state_set_directory_override_for_tests(
+    const char *directory) noexcept;
+
+/// Navigates the content browser to `folder` ("" = index root), recording
+/// history so back/forward can retrace it, and persists the new folder. A
+/// no-op when `folder` is already the current folder.
+void content_browser_navigate(const char *folder) noexcept;
+/// True when a back-navigation step is available.
+bool content_browser_can_go_back() noexcept;
+/// True when a forward-navigation step is available.
+bool content_browser_can_go_forward() noexcept;
+/// Steps the navigation history back one folder; no-op when unavailable.
+void content_browser_go_back() noexcept;
+/// Steps the navigation history forward one folder; no-op when
+/// unavailable.
+void content_browser_go_forward() noexcept;
 
 /// True when the attached world exists, is stopped, and accepts edits.
 bool world_is_editable() noexcept;

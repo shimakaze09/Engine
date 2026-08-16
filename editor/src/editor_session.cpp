@@ -25,11 +25,13 @@
 #include <memory>
 #include <vector>
 
+#include "engine/core/atomic_file.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/mem_tracker.h"
+#include "engine/core/platform.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
 #include "engine/engine.h"
@@ -177,6 +179,215 @@ void clear_thumbnail_cache() noexcept {
     editor_session().thumbnailCache[i] = ThumbnailEntry{};
   }
   editor_session().thumbnailCount = 0U;
+}
+
+namespace {
+
+constexpr const char *kContentBrowserLogChannel = "editor.content_browser";
+constexpr const char *kContentBrowserStateFileName =
+    "editor_content_browser_state.json";
+char g_contentBrowserDirectoryOverride[512] = {};
+
+/// Resolves the content-browser state persistence directory: the test
+/// override when set, otherwise the real per-user platform save directory.
+bool resolve_content_browser_directory(char *out,
+                                       std::size_t capacity) noexcept {
+  if (g_contentBrowserDirectoryOverride[0] != '\0') {
+    const int written =
+        std::snprintf(out, capacity, "%s", g_contentBrowserDirectoryOverride);
+    return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+  }
+  return core::platform_get_save_dir(out, capacity);
+}
+
+bool build_content_browser_state_path(char *out,
+                                      std::size_t capacity) noexcept {
+  char directory[900] = {};
+  if (!resolve_content_browser_directory(directory, sizeof(directory))) {
+    return false;
+  }
+  const int written = std::snprintf(out, capacity, "%s/%s", directory,
+                                    kContentBrowserStateFileName);
+  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+}
+
+/// Reads a whole small file into a fixed buffer; false on overflow or I/O
+/// failure (mirrors editor_scene_document.cpp's recent-scenes reader).
+bool read_whole_small_file(const char *path, char *out, std::size_t capacity,
+                           std::size_t *outSize) noexcept {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
+  const bool overflow = std::fgetc(file) != EOF;
+  const bool hitError = std::ferror(file) != 0;
+  std::fclose(file);
+  if (overflow || hitError) {
+    return false;
+  }
+  out[readCount] = '\0';
+  if (outSize != nullptr) {
+    *outSize = readCount;
+  }
+  return true;
+}
+
+} // namespace
+
+void content_browser_state_set_directory_override_for_tests(
+    const char *directory) noexcept {
+  std::snprintf(g_contentBrowserDirectoryOverride,
+               sizeof(g_contentBrowserDirectoryOverride), "%s",
+               (directory != nullptr) ? directory : "");
+}
+
+void content_browser_state_persist() noexcept {
+  const ContentBrowserState &cb = editor_session().contentBrowser;
+
+  char directory[900] = {};
+  if (resolve_content_browser_directory(directory, sizeof(directory))) {
+    std::error_code ec{};
+    std::filesystem::create_directories(std::filesystem::path(directory), ec);
+  }
+
+  char path[1024] = {};
+  if (!build_content_browser_state_path(path, sizeof(path))) {
+    return;
+  }
+
+  core::JsonWriter writer{};
+  writer.begin_object();
+  writer.write_string("folder", cb.filter.folder);
+  writer.write_uint("typeMask", cb.filter.typeMask);
+  writer.end_object();
+  if (writer.failed()) {
+    core::log_message(core::LogLevel::Error, kContentBrowserLogChannel,
+                      "failed to serialize content browser state");
+    return;
+  }
+
+  if (!core::atomic_write_file(path, writer.result(), writer.result_size())) {
+    core::log_message(core::LogLevel::Error, kContentBrowserLogChannel,
+                      "failed to write content browser state");
+  }
+}
+
+void content_browser_state_load_once() noexcept {
+  ContentBrowserState &cb = editor_session().contentBrowser;
+  if (cb.persistedStateLoaded) {
+    return;
+  }
+  cb.persistedStateLoaded = true;
+
+  char path[1024] = {};
+  if (!build_content_browser_state_path(path, sizeof(path))) {
+    return;
+  }
+
+  char buffer[2048] = {};
+  std::size_t size = 0U;
+  if (!read_whole_small_file(path, buffer, sizeof(buffer), &size)) {
+    return;
+  }
+
+  core::JsonParser parser{};
+  if (!parser.parse(buffer, size)) {
+    return;
+  }
+  const core::JsonValue *root = parser.root();
+  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
+    return;
+  }
+
+  char folder[kMaxAssetIndexPath] = {};
+  const core::JsonValue *folderValue = parser.get_object_field(*root, "folder");
+  if ((folderValue != nullptr) &&
+      parser.copy_string(*folderValue, folder, sizeof(folder))) {
+    std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s", folder);
+  }
+
+  const core::JsonValue *maskValue =
+      parser.get_object_field(*root, "typeMask");
+  if (maskValue != nullptr) {
+    std::uint32_t mask = kAssetKindMaskAll;
+    if (parser.as_uint(*maskValue, &mask) && (mask != 0U)) {
+      cb.filter.typeMask = mask & kAssetKindMaskAll;
+    }
+  }
+}
+
+void content_browser_navigate(const char *folder) noexcept {
+  EditorSession &session = editor_session();
+  ContentBrowserState &cb = session.contentBrowser;
+  ContentBrowserNavHistory &hist = cb.navHistory;
+  if (hist.count == 0U) {
+    hist.entries[0][0] = '\0';
+    hist.count = 1U;
+    hist.position = 0U;
+  }
+
+  const char *target = (folder != nullptr) ? folder : "";
+  if (std::strcmp(hist.entries[hist.position], target) == 0) {
+    return;
+  }
+
+  std::size_t newPosition = hist.position + 1U;
+  if (newPosition >= ContentBrowserNavHistory::kMaxEntries) {
+    // History is full: drop the oldest entry to make room for the new one.
+    std::memmove(hist.entries[0], hist.entries[1],
+                (ContentBrowserNavHistory::kMaxEntries - 1U) *
+                    kMaxAssetIndexPath);
+    newPosition = ContentBrowserNavHistory::kMaxEntries - 1U;
+  }
+  std::snprintf(hist.entries[newPosition], kMaxAssetIndexPath, "%s", target);
+  hist.count = newPosition + 1U;
+  hist.position = newPosition;
+
+  std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s", target);
+  cb.filter.flatSearch = false;
+  content_browser_state_persist();
+}
+
+bool content_browser_can_go_back() noexcept {
+  return editor_session().contentBrowser.navHistory.position > 0U;
+}
+
+bool content_browser_can_go_forward() noexcept {
+  const ContentBrowserNavHistory &hist =
+      editor_session().contentBrowser.navHistory;
+  return (hist.position + 1U) < hist.count;
+}
+
+void content_browser_go_back() noexcept {
+  if (!content_browser_can_go_back()) {
+    return;
+  }
+  ContentBrowserState &cb = editor_session().contentBrowser;
+  --cb.navHistory.position;
+  std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s",
+               cb.navHistory.entries[cb.navHistory.position]);
+  cb.filter.flatSearch = false;
+  content_browser_state_persist();
+}
+
+void content_browser_go_forward() noexcept {
+  if (!content_browser_can_go_forward()) {
+    return;
+  }
+  ContentBrowserState &cb = editor_session().contentBrowser;
+  ++cb.navHistory.position;
+  std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s",
+               cb.navHistory.entries[cb.navHistory.position]);
+  cb.filter.flatSearch = false;
+  content_browser_state_persist();
 }
 
 bool world_is_editable() noexcept {
