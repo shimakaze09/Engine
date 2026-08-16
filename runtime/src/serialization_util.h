@@ -78,6 +78,7 @@ struct ReflectedComponentDescriptors final {
   const core::TypeDescriptor *pointLight = nullptr;
   const core::TypeDescriptor *spotLight = nullptr;
   const core::TypeDescriptor *sceneCapture = nullptr;
+  const core::TypeDescriptor *camera = nullptr;
 };
 
 /// Looks up every reflected component descriptor; logs under `logChannel`

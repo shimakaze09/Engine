@@ -12,6 +12,7 @@
 #include "engine/math/vec3.h"
 #include "engine/runtime/world.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <new>
@@ -43,9 +44,9 @@ struct SessionWorldScope final {
 };
 
 /// The registry row count generated from the runtime table matches the
-/// production World's persistent-component count (14 as of issue #156).
+/// production World's persistent-component count (15 as of issue #161).
 int check_component_edit_type_count() noexcept {
-  if (engine::editor::kComponentEditTypeCount != 14U) {
+  if (engine::editor::kComponentEditTypeCount != 15U) {
     return 1;
   }
   return 0;
@@ -138,6 +139,63 @@ int check_light_component_capture_apply_round_trip() noexcept {
   return 0;
 }
 
+/// capture_component_snapshot/apply_component_snapshot round-trip
+/// CameraComponent's fields through the generated dispatch (issue #161),
+/// including the plain-uint32 projection field the generic reflected
+/// serializer/editor path uses in place of a reflected C++ enum.
+int check_camera_component_capture_apply_round_trip() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  SessionWorldScope scope(world.get());
+  const Entity entity = world->create_scene_object();
+
+  engine::runtime::CameraComponent camera{};
+  camera.projection =
+      static_cast<std::uint32_t>(engine::runtime::CameraProjection::Orthographic);
+  camera.fovRadians = 0.9F;
+  camera.orthographicSize = 3.5F;
+  camera.nearPlane = 0.2F;
+  camera.farPlane = 250.0F;
+  camera.priority = 5.0F;
+  camera.blendSpeed = 2.5F;
+  camera.active = false;
+
+  ComponentEditSnapshot after{};
+  after.camera = camera;
+  if (!engine::editor::apply_component_snapshot(ComponentEditType::Camera,
+                                                entity, true, after)) {
+    return 2;
+  }
+
+  ComponentEditSnapshot captured{};
+  if (!engine::editor::capture_component_snapshot(ComponentEditType::Camera,
+                                                  entity, &captured)) {
+    return 3;
+  }
+  if ((captured.camera.projection != camera.projection) ||
+      (captured.camera.fovRadians != camera.fovRadians) ||
+      (captured.camera.orthographicSize != camera.orthographicSize) ||
+      (captured.camera.nearPlane != camera.nearPlane) ||
+      (captured.camera.farPlane != camera.farPlane) ||
+      (captured.camera.priority != camera.priority) ||
+      (captured.camera.blendSpeed != camera.blendSpeed) ||
+      (captured.camera.active != camera.active)) {
+    return 4;
+  }
+
+  if (!engine::editor::apply_component_snapshot(
+          ComponentEditType::Camera, entity, false, ComponentEditSnapshot{})) {
+    return 5;
+  }
+  if (engine::editor::has_component_of_type(ComponentEditType::Camera,
+                                            entity)) {
+    return 6;
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -151,6 +209,8 @@ int main() {
        check_has_component_of_type_round_trip},
       {"light_component_capture_apply_round_trip",
        check_light_component_capture_apply_round_trip},
+      {"camera_component_capture_apply_round_trip",
+       check_camera_component_capture_apply_round_trip},
   };
   for (const Case &c : cases) {
     const int result = c.fn();

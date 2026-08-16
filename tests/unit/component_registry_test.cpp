@@ -8,6 +8,7 @@
 // fails to compile. Serialized floats round-trip exactly (%.9g), so every
 // comparison is exact.
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -323,6 +324,26 @@ bool components_equal(const AnimationComponent &a,
   return std::strcmp(a.controllerPath, b.controllerPath) == 0;
 }
 
+void make_test_value(CameraComponent *out) noexcept {
+  out->projection = static_cast<std::uint32_t>(CameraProjection::Orthographic);
+  out->fovRadians = 0.95F;
+  out->orthographicSize = 4.25F;
+  out->nearPlane = 0.15F;
+  out->farPlane = 175.0F;
+  out->priority = 3.5F;
+  out->blendSpeed = 7.5F;
+  out->active = false;
+}
+
+bool components_equal(const CameraComponent &a,
+                      const CameraComponent &b) noexcept {
+  return (a.projection == b.projection) && (a.fovRadians == b.fovRadians) &&
+         (a.orthographicSize == b.orthographicSize) &&
+         (a.nearPlane == b.nearPlane) && (a.farPlane == b.farPlane) &&
+         (a.priority == b.priority) && (a.blendSpeed == b.blendSpeed) &&
+         (a.active == b.active);
+}
+
 /// Round-trips one registry row's component through both production
 /// serializers and compares the reloaded value field-by-field. Returns 0 on
 /// success or a stage code identifying the first failing step.
@@ -473,7 +494,7 @@ int verify_prefab_legacy_mesh_id() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 14U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 15U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

@@ -205,6 +205,7 @@ void World::remove_all_components(Entity entity) noexcept {
   static_cast<void>(m_springArms.remove(entity));
   static_cast<void>(m_scriptComponents.remove(entity));
   static_cast<void>(m_animationComponents.remove(entity));
+  static_cast<void>(m_cameraComponents.remove(entity));
 
   m_movementAuthorities[entity.index] = MovementAuthority::None;
   reset_transform_cache(entity.index);

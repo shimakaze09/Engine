@@ -14,6 +14,10 @@
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
 
+#include "engine/runtime/camera_component_update.h"
+
+#include <cstdint>
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -233,9 +237,91 @@ void draw_component_sections(runtime::Entity entity, bool editable) noexcept {
         return draw_reflected_component_fields(
             "engine::runtime::SpringArmComponent", &c, g_showAdvanced);
       });
+
+  draw_component_section(
+      entity, ComponentEditType::Camera, "Camera",
+      &ComponentEditSnapshot::camera, editable, true,
+      [entity](runtime::CameraComponent &c) {
+        // Projection is a plain uint32 (not a reflected C++ enum, matching
+        // Collider.shape/LightComponent.type) so it stays in the generic
+        // codec; the combo below is the same "hand-drawn selector ahead of
+        // the generic loop" pattern those two use.
+        constexpr const char *kProjectionFallback[] = {"Perspective",
+                                                        "Orthographic"};
+        const FieldMetadata *meta = find_field_metadata(
+            "engine::runtime::CameraComponent", "projection");
+        const char *const *labels =
+            (meta != nullptr) ? meta->enumLabels : kProjectionFallback;
+        const int labelCount =
+            (meta != nullptr) ? static_cast<int>(meta->enumLabelCount) : 2;
+        int projIndex = static_cast<int>(c.projection);
+        if ((projIndex < 0) || (projIndex >= labelCount)) {
+          projIndex = 0;
+        }
+        bool modified = false;
+        if (ImGui::BeginCombo("Projection", labels[projIndex])) {
+          for (int i = 0; i < labelCount; ++i) {
+            if (ImGui::Selectable(labels[i], projIndex == i) &&
+                (projIndex != i)) {
+              c.projection = static_cast<std::uint32_t>(i);
+              modified = true;
+            }
+          }
+          ImGui::EndCombo();
+        }
+        modified = draw_reflected_component_fields(
+                       "engine::runtime::CameraComponent", &c,
+                       g_showAdvanced) ||
+                   modified;
+
+        // Selection/conflict status (acceptance: "reports conflicts/
+        // no-camera states clearly"). Computed from authored components
+        // directly so it reads correctly in Edit mode too, not only while
+        // CameraManager is populated during Play.
+        if (editor_session().world != nullptr) {
+          std::uint32_t tieCount = 0U;
+          const runtime::Entity activeCam = runtime::find_authored_active_camera(
+              *editor_session().world, &tieCount);
+          if (!c.active) {
+            ImGui::TextDisabled("Disabled");
+          } else if (activeCam == entity) {
+            if (tieCount > 0U) {
+              ImGui::TextColored(
+                  ImVec4(1.0F, 0.8F, 0.2F, 1.0F),
+                  "Active game camera (priority tied with %u other%s)",
+                  tieCount, (tieCount == 1U) ? "" : "s");
+            } else {
+              ImGui::TextColored(ImVec4(0.3F, 0.9F, 0.3F, 1.0F),
+                                 "Active game camera");
+            }
+          } else {
+            ImGui::TextDisabled(
+                "Not selected -- another camera has higher priority");
+          }
+        }
+
+        // Optional live preview (acceptance: "optional live camera
+        // preview"): reuses the existing SceneCapture render-to-texture
+        // pipeline when the author also attaches a Scene Capture component
+        // to this entity, rather than duplicating a second capture path.
+        runtime::SceneCaptureComponent preview{};
+        if ((editor_session().world != nullptr) &&
+            editor_session().world->get_scene_capture_component(entity,
+                                                                 &preview)) {
+          ImGui::Separator();
+          ImGui::TextUnformatted("Live Preview (via Scene Capture)");
+          draw_scene_capture_preview(entity, preview);
+        } else {
+          ImGui::TextDisabled(
+              "Live preview: add a Scene Capture component for a rendered "
+              "preview");
+        }
+
+        return modified;
+      });
 }
-// 12 sections above cover every registry row except Name and Transform.
-static_assert(kComponentEditTypeCount == 14U,
+// 13 sections above cover every registry row except Name and Transform.
+static_assert(kComponentEditTypeCount == 15U,
              "a new persistent-component registry row needs both a section "
              "in draw_component_sections and an entry in "
              "editor_inspector_metadata's ComponentMetadata table");

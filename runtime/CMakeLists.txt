@@ -4,6 +4,7 @@ engine_add_module_library(engine_runtime
     SOURCES
     src/camera_manager.cpp
     src/spring_arm_update.cpp
+    src/camera_component_update.cpp
     src/editor_bridge.cpp
     src/engine.cpp
     src/animation.cpp

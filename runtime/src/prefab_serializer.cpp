@@ -140,6 +140,15 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     return false;
   }
 
+  CameraComponent camera{};
+  if (world.get_camera_component(entity, &camera) &&
+      !write_reflected_component(w, kJsonKeyCameraComponent, *descs.camera,
+                                 &camera)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab: failed to write CameraComponent");
+    return false;
+  }
+
   ScriptComponent scriptComp{};
   if (world.get_script_component(entity, &scriptComp) &&
       (scriptComp.scriptPath[0] != '\0')) {
@@ -405,6 +414,19 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
         !world.add_scene_capture_component(entity, sceneCapture)) {
       return failComponent(
           "instantiate_prefab: failed to add SceneCaptureComponent");
+    }
+  }
+
+  if (!readComponentObject(kJsonKeyCameraComponent, &componentValue,
+                           &hasComponent)) {
+    return failComponent("instantiate_prefab: invalid CameraComponent");
+  }
+  if (hasComponent) {
+    CameraComponent camera{};
+    if (!read_reflected_component(parser, componentValue, *descs.camera,
+                                  &camera) ||
+        !world.add_camera_component(entity, camera)) {
+      return failComponent("instantiate_prefab: failed to add CameraComponent");
     }
   }
 

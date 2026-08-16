@@ -817,6 +817,7 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::SpringArm:
   case ComponentEditType::SceneCapture:
   case ComponentEditType::Animation:
+  case ComponentEditType::Camera:
     break;
   }
   return snapshot;

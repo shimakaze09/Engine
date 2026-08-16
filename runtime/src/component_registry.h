@@ -55,7 +55,9 @@
     get_foliage_patch_component, add_foliage_patch_component,                  \
     remove_foliage_patch_component)                                           \
   X(AnimationComponent, kJsonKeyAnimationComponent, get_animation_component,   \
-    add_animation_component, remove_animation_component)
+    add_animation_component, remove_animation_component)                     \
+  X(CameraComponent, kJsonKeyCameraComponent, get_camera_component,           \
+    add_camera_component, remove_camera_component)
 
 namespace engine::runtime {
 
