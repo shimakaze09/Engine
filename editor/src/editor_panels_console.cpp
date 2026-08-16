@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace engine::editor {
 
@@ -77,6 +78,23 @@ void navigate_to_entry(const ConsoleEntry &entry) noexcept {
 }
 
 /// Draws one entry's row plus its inline navigation controls.
+/// Copies `message` up to its first newline into `out` (a Lua traceback
+/// carries "\n\t..." frames; the row stays one line and the full text,
+/// newlines included, is available in the hover tooltip instead).
+void first_line(const char *message, char *out, std::size_t outCapacity) noexcept {
+  std::size_t i = 0U;
+  for (; (i + 1U < outCapacity) && (message[i] != '\0') &&
+        (message[i] != '\n');
+      ++i) {
+    out[i] = message[i];
+  }
+  out[i] = '\0';
+  const bool hasMore = (message[i] != '\0');
+  if (hasMore && (i + 4U < outCapacity)) {
+    std::snprintf(out + i, outCapacity - i, " [...]");
+  }
+}
+
 void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
   ImGui::PushID(static_cast<int>(rowIndex));
   ImGui::PushStyleColor(ImGuiCol_Text, level_color(entry.level));
@@ -86,12 +104,15 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
                static_cast<double>(entry.captureTimeMs) / 1000.0,
                core::log_level_to_string(entry.level), entry.channel);
 
+  char messageLine[kConsoleMessageCapacity] = {};
+  first_line(entry.message, messageLine, sizeof(messageLine));
+
   char label[kConsoleMessageCapacity + 96] = {};
   if (entry.repeatCount > 1U) {
-    std::snprintf(label, sizeof(label), "%s  %s  (x%u)", header,
-                 entry.message, entry.repeatCount);
+    std::snprintf(label, sizeof(label), "%s  %s  (x%u)", header, messageLine,
+                 entry.repeatCount);
   } else {
-    std::snprintf(label, sizeof(label), "%s  %s", header, entry.message);
+    std::snprintf(label, sizeof(label), "%s  %s", header, messageLine);
   }
 
   const bool hasNavigation =
@@ -105,8 +126,12 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
   }
   ImGui::PopStyleColor();
 
-  if (ImGui::IsItemHovered() && (entry.category == ConsoleSourceCategory::Script)) {
-    ImGui::SetTooltip("Script diagnostic — double-click to locate");
+  if (ImGui::IsItemHovered()) {
+    // The full untruncated (modulo the ring's own capacity bound) message,
+    // newlines included, so a Lua stack traceback reads normally on hover
+    // even though the row itself stays a single compact line.
+    ImGui::SetTooltip("%s%s", entry.message,
+                      entry.truncated ? "\n[...diagnostic truncated...]" : "");
   }
 
   if (hasNavigation && ImGui::BeginPopupContextItem("entry_context")) {
@@ -179,6 +204,28 @@ void draw_console_panel() noexcept {
 
   if (ImGui::Button("Clear")) {
     console_capture_clear();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Copy All")) {
+    // Built only on click (not every frame): every currently filtered
+    // entry, one line per entry, oldest first — a plain-text export of
+    // exactly what the filters are currently showing.
+    std::string copyText;
+    const std::size_t count = console_capture_entry_count();
+    for (std::size_t i = 0U; i < count; ++i) {
+      ConsoleEntry entry{};
+      if (!console_capture_get_entry(i, &entry) ||
+         !console_filter_matches(filter, entry)) {
+        continue;
+      }
+      char line[kConsoleMessageCapacity + 96] = {};
+      std::snprintf(line, sizeof(line), "[%s][%s] %s%s\n",
+                   core::log_level_to_string(entry.level), entry.channel,
+                   entry.message,
+                   (entry.repeatCount > 1U) ? " (repeated)" : "");
+      copyText += line;
+    }
+    ImGui::SetClipboardText(copyText.c_str());
   }
   ImGui::SameLine();
   ImGui::Checkbox("Pause", &paused);
