@@ -49,6 +49,7 @@
 #include "ImGuizmo.h"
 
 #include "editor_console_capture.h"
+#include "editor_live_edit.h"
 #include "engine/editor/command_history.h"
 #include "engine/editor/debug_camera.h"
 
@@ -584,6 +585,9 @@ void start_play_mode() noexcept {
                         "failed to capture pre-play scene snapshot");
       return;
     }
+    // Fresh play session: a prior session's live-edit baselines/queued
+    // apply-to-authored entries must never leak into this one.
+    reset_live_edit_state();
   }
 
   editor_session().playState = PlayState::Playing;
@@ -637,6 +641,22 @@ void stop_play_mode() noexcept {
   editor_session().playState = PlayState::Stopped;
   editor_session().stepRequested = false;
   editor_session().worldRestoreFailed = !restored;
+
+  if (restored) {
+    // Authored state is back; any "Apply to authored value" queued during
+    // Play now replays as ordinary undoable edits against it (issue #159)
+    // instead of the transient live-edit values that just got discarded
+    // by the restore above. Also drops every live-edit baseline -- a new
+    // Play session starts tracking fresh regardless.
+    const std::size_t appliedCount = replay_pending_authored_applies();
+    if (appliedCount > 0U) {
+      char message[96] = {};
+      std::snprintf(message, sizeof(message),
+                    "applied %zu live edit(s) to the authored scene",
+                    appliedCount);
+      core::log_message(core::LogLevel::Info, "editor", message);
+    }
+  }
 
   core::log_message(core::LogLevel::Info, "editor", "stop");
 }
