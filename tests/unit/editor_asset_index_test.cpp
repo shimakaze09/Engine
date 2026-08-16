@@ -132,7 +132,12 @@ const AssetIndexEntry *find_entry_by_leaf(const char *leaf) noexcept {
     if (entry == nullptr) {
       continue;
     }
-    const std::string osPath(entry->osPath);
+    std::string osPath(entry->osPath);
+    for (char &c : osPath) {
+      if (c == '\\') {
+        c = '/';
+      }
+    }
     const std::string suffix(leaf);
     if ((osPath.size() >= suffix.size()) &&
         (osPath.compare(osPath.size() - suffix.size(), suffix.size(),
