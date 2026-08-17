@@ -372,15 +372,8 @@ bool copy_world_contents(const World &sourceWorld,
 #undef ENGINE_PCR_COPY_COMPONENT
   });
 
-  // Copy timer timing metadata (callbacks must be re-wired by caller).
-  if (success) {
-    TimerManager::TimerSnapshot snaps[TimerManager::kMaxTimers]{};
-    const std::size_t count =
-        sourceWorld.timer_manager().snapshot(snaps, TimerManager::kMaxTimers);
-    if (count > 0U) {
-      targetWorld.timer_manager().restore(snaps, count);
-    }
-  }
+  // Timers deliberately do not ride the commit copy: they are runtime-only
+  // state a freshly staged world never carries (issue #209).
 
   // World gravity rides the commit copy like the components do.
   if (success) {
@@ -565,28 +558,10 @@ bool serialize_scene_to_writer(const World &world,
 
   writer.end_array();
 
-  // Serialize active timers (timing metadata only; callbacks must be re-wired).
-  {
-    TimerManager::TimerSnapshot snaps[TimerManager::kMaxTimers]{};
-    const std::size_t timerCount =
-        world.timer_manager().snapshot(snaps, TimerManager::kMaxTimers);
-    if (timerCount > 0U) {
-      writer.begin_array("timers");
-      for (std::size_t i = 0U; i < timerCount; ++i) {
-        if (!snaps[i].active) {
-          continue;
-        }
-        writer.begin_object();
-        writer.write_uint("id", snaps[i].timerId);
-        writer.write_float("remaining", snaps[i].remainingSeconds);
-        writer.write_float("interval", snaps[i].intervalSeconds);
-        writer.write_bool("repeat", snaps[i].repeat);
-        writer.end_object();
-      }
-      writer.end_array();
-    }
-  }
-
+  // Timers are runtime-only, per-scene state and are deliberately not
+  // serialized (issue #209): a callback has no stable identity the format
+  // could restore, and the canonical load path clears the scripting timer
+  // registry anyway. Scripts re-arm their timers in on_begin_play.
   writer.end_object();
 
   if (writeFailed || !writer.ok()) {
@@ -817,54 +792,18 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     set_gravity(*stagedWorld, gravity.x, gravity.y, gravity.z);
   }
 
-  // Restore timers from scene JSON (timing metadata only).
+  // Legacy "timers" blocks (scenes saved before issue #209) are ignored:
+  // the serialized timing carried no callback identity, so a restored
+  // timer could never fire on the production load path — it was cleared or
+  // dropped inert. Timers are runtime-only state; scripts re-arm them in
+  // on_begin_play.
   core::JsonValue timersArray{};
   if (parser.get_object_field(*root, "timers", &timersArray) &&
-      (timersArray.type == core::JsonValue::Type::Array)) {
-    const std::size_t timerCount = parser.array_size(timersArray);
-    for (std::size_t i = 0U; i < timerCount; ++i) {
-      core::JsonValue timerVal{};
-      if (!parser.get_array_element(timersArray, i, &timerVal) ||
-          (timerVal.type != core::JsonValue::Type::Object)) {
-        continue;
-      }
-
-      TimerManager::TimerSnapshot snap{};
-      snap.active = true;
-
-      core::JsonValue idVal{};
-      if (parser.get_object_field(timerVal, "id", &idVal)) {
-        std::uint32_t timerId = 0U;
-        if (parser.as_uint(idVal, &timerId)) {
-          snap.timerId = static_cast<TimerId>(timerId);
-        }
-      }
-      // A rejected numeric token must not fall back to the zero default:
-      // remaining 0 fires immediately and interval 0 with repeat spins, so
-      // an unparsable field drops the timer instead.
-      bool timerFieldsValid = true;
-      core::JsonValue remainVal{};
-      if (parser.get_object_field(timerVal, "remaining", &remainVal)) {
-        timerFieldsValid = parser.as_float(remainVal, &snap.remainingSeconds);
-      }
-      core::JsonValue intervalVal{};
-      if (timerFieldsValid &&
-          parser.get_object_field(timerVal, "interval", &intervalVal)) {
-        timerFieldsValid = parser.as_float(intervalVal, &snap.intervalSeconds);
-      }
-      core::JsonValue repeatVal{};
-      if (timerFieldsValid &&
-          parser.get_object_field(timerVal, "repeat", &repeatVal)) {
-        timerFieldsValid = parser.as_bool(repeatVal, &snap.repeat);
-      }
-      if (!timerFieldsValid) {
-        core::log_message(core::LogLevel::Warning, kSceneLogChannel,
-                          "scene load dropped a timer with unparsable timing");
-        continue;
-      }
-
-      static_cast<void>(stagedWorld->timer_manager().restore(&snap, 1U));
-    }
+      (timersArray.type == core::JsonValue::Type::Array) &&
+      (parser.array_size(timersArray) > 0U)) {
+    core::log_message(core::LogLevel::Info, kSceneLogChannel,
+                      "scene carries a legacy timers block; timers are "
+                      "runtime-only state and are not restored (issue #209)");
   }
 
   std::unique_ptr<World> committedWorld(new (std::nothrow) World());

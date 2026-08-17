@@ -111,26 +111,6 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   }
 }
 
-/// Restores Lua callbacks on timers loaded from serialized snapshots.
-void rewire_lua_timer_callbacks() noexcept {
-  if (runtime_binding().world == nullptr) {
-    return;
-  }
-
-  ensure_timer_refs_init();
-  auto &timerManager = runtime_binding().world->timer_manager();
-  for (std::size_t i = 0U; i < kMaxTimerRefs; ++i) {
-    auto &entry = timerManager.entry_at_mut(i);
-    const LuaTimerRef &timerRef = g_timerLuaRefs[i];
-    if (entry.active && (entry.callback == nullptr) &&
-        (timerRef.registryRef != LUA_NOREF) &&
-        (timerManager.slot_for_id(timerRef.ownerId) == i)) {
-      entry.callback = lua_timer_callback;
-      entry.userData = nullptr;
-    }
-  }
-}
-
 /// Registers a Lua timer callback in the current world's timer manager.
 runtime::TimerId register_lua_timer(lua_State *state, float seconds,
                                     bool repeat) noexcept {
@@ -256,7 +236,6 @@ void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept {
 
   g_timerLuaState = state;
   ensure_timer_refs_init();
-  rewire_lua_timer_callbacks();
   runtime_binding().world->timer_manager().tick(deltaSeconds);
 }
 
