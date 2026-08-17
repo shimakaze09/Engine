@@ -28,6 +28,16 @@ engine_add_test_executable(engine_integration_pipeline_tick_cadence
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_texture_system_bootstrap
+    SOURCES
+    texture_system_bootstrap_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    LABELS
+    gpu;integration
+)
+
 engine_add_test_executable(engine_integration_vertical_slice
     SOURCES
     vertical_slice_integration.cpp
