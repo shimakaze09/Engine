@@ -616,6 +616,28 @@ AssetState material_asset_state(const AssetDatabase *database,
   return database->materialAssets[slot].state;
 }
 
+bool set_material_texture_slots(AssetDatabase *database, AssetId id,
+                                const MaterialTextureSlots &slots) noexcept {
+  const std::size_t slot = find_material_slot(database, id);
+  if ((database == nullptr) || (slot == database->materialAssets.size())) {
+    return false;
+  }
+
+  database->materialAssets[slot].textureSlots = slots;
+  return true;
+}
+
+const MaterialTextureSlots *
+find_material_texture_slots(const AssetDatabase *database,
+                            AssetId id) noexcept {
+  const std::size_t slot = find_material_slot(database, id);
+  if ((database == nullptr) || (slot == database->materialAssets.size())) {
+    return nullptr;
+  }
+
+  return &database->materialAssets[slot].textureSlots;
+}
+
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept {
@@ -636,6 +658,27 @@ bool register_texture_asset(AssetDatabase *database, AssetId id,
   record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
   record.state = AssetState::Ready;
   record.requestedResident = true;
+  write_source_path(&record.sourcePath, sourcePath);
+  return true;
+}
+
+bool register_texture_asset_failed(AssetDatabase *database, AssetId id,
+                                   const char *sourcePath) noexcept {
+  if ((database == nullptr) || (id == kInvalidAssetId)) {
+    return false;
+  }
+
+  const std::size_t slot = find_texture_insert_slot(database, id);
+  if (slot == database->textureAssets.size()) {
+    return false;
+  }
+
+  database->textureOccupied[slot] = true;
+  TextureAssetRecord &record = database->textureAssets[slot];
+  record.id = id;
+  record.runtimeTexture = kInvalidTextureHandle;
+  record.state = AssetState::Failed;
+  record.requestedResident = false;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
 }

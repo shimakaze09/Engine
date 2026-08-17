@@ -1241,6 +1241,29 @@ engine_add_test_executable(engine_unit_material_asset
     engine_renderer
 )
 
+# ---- Issue #160: texture-backed PBR materials ----
+
+engine_add_test_executable(engine_unit_material_asset_v2
+    SOURCES
+    material_asset_v2_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_material_reload
+    SOURCES
+    material_reload_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_material_texture_resolve
+    SOURCES
+    material_texture_resolve_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
 # ---- H-16 (#85): async-load handle reclamation ----
 
 engine_add_test_executable(engine_unit_asset_load_recovery
