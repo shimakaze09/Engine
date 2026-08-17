@@ -186,6 +186,12 @@ void dispatch_entity_scripts_end_for_transition() noexcept;
 // Drop all cached entity script modules and unclaimed reload state.
 void clear_entity_script_modules() noexcept;
 
+// Reset every run-scoped scripting state (entity scripts, pools, timers,
+// coroutines, deferred mutations, game state, watched scripts) while the VM
+// stays alive; EnginePipeline::teardown calls it so no run residue survives
+// into a later pipeline run (#168).
+void reset_run_state() noexcept;
+
 // --- Sandbox configuration ---
 // Enable or disable the Lua sandbox (restricted globals, CPU/memory limits).
 void set_sandbox_enabled(bool enabled) noexcept;

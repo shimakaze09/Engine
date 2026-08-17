@@ -721,6 +721,12 @@ void EnginePipeline::Impl::teardown() noexcept {
     bridge->set_world(nullptr);
   }
 
+  // Run-scoped residue must not leak into a later pipeline run (#168): the
+  // scripting run state and the animation controller registry are reset
+  // while the VM and bindings are still alive, before anything unbinds.
+  scripting::reset_run_state();
+  runtime::reset_anim_controllers();
+
   runtime::set_editor_asset_service(nullptr);
   runtime::unbind_scripting_runtime(serviceLocator);
   serviceRegistry.unregister_services();
