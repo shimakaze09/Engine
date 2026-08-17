@@ -33,7 +33,6 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/renderer/camera.h"
-#include "engine/renderer/render_device.h"
 #include "engine/runtime/world.h"
 
 #include <stb_image.h>
@@ -390,11 +389,11 @@ void draw_asset_row(const AssetIndexEntry &entry) noexcept {
   ImGui::PushID(entry.osPath);
 
   if (entry.hasThumbnail) {
-    const std::uint32_t tex = load_thumbnail_texture(entry.osPath);
-    if (tex != 0U) {
-      ImGui::Image(
-          static_cast<ImTextureID>(static_cast<std::uintptr_t>(tex)),
-          ImVec2(20.0F, 20.0F));
+    const renderer::DeviceTextureHandle tex =
+        load_thumbnail_texture(entry.osPath);
+    const std::uint64_t imguiTex = imgui_texture_id(tex);
+    if (imguiTex != 0U) {
+      ImGui::Image(static_cast<ImTextureID>(imguiTex), ImVec2(20.0F, 20.0F));
       ImGui::SameLine();
     }
   }
@@ -539,12 +538,10 @@ void draw_asset_browser_panel() noexcept {
     ImGui::Separator();
     ImGui::TextWrapped("Selected: %s", editor_session().selectedAssetPath);
 
-    const std::uint32_t thumbTex =
-        load_thumbnail_texture(editor_session().selectedAssetPath);
+    const std::uint64_t thumbTex = imgui_texture_id(
+        load_thumbnail_texture(editor_session().selectedAssetPath));
     if (thumbTex != 0U) {
-      ImGui::Image(
-          static_cast<ImTextureID>(static_cast<std::uintptr_t>(thumbTex)),
-          ImVec2(64.0F, 64.0F));
+      ImGui::Image(static_cast<ImTextureID>(thumbTex), ImVec2(64.0F, 64.0F));
     }
 
     draw_import_settings_inspector(editor_session().selectedAssetPath);
