@@ -65,13 +65,29 @@ struct TextureAssetRecord final {
   bool requestedResident = false;
 };
 
+/// Authored texture-slot references for one material (path-derived asset
+/// ids; kInvalidAssetId = slot not set). Kept separate from Material so the
+/// per-draw-command struct stays a flat parameter/handle block: these ids
+/// are only touched by the loader and resolve_material_textures, never
+/// per-frame render prep.
+struct MaterialTextureSlots final {
+  AssetId albedo = kInvalidAssetId;
+  AssetId metallicRoughness = kInvalidAssetId;
+  AssetId emissive = kInvalidAssetId;
+  AssetId occlusion = kInvalidAssetId;
+  AssetId opacity = kInvalidAssetId;
+};
+
 /// One material slot: id, source path, and the fully resolved parameters
 /// (parent-chain overrides are baked at load time so render prep reads a
-/// flat record).
+/// flat record). textureSlots holds the same chain's resolved texture
+/// references; Material's TextureHandle fields are populated from them by
+/// resolve_material_textures once GPU upload succeeds.
 struct MaterialAssetRecord final {
   AssetId id = kInvalidAssetId;
   std::array<char, 260U> sourcePath{};
   Material params{};
+  MaterialTextureSlots textureSlots{};
   AssetState state = AssetState::Unloaded;
 };
 
@@ -180,11 +196,26 @@ const Material *find_material_params(const AssetDatabase *database,
 /// Lifecycle state for the material id (Unloaded when unknown).
 AssetState material_asset_state(const AssetDatabase *database,
                                 AssetId id) noexcept;
+/// Overwrites an already-registered material's texture-slot references;
+/// false when the id is unknown. Called by the loader after
+/// register_material_asset so a reload can update both parts atomically
+/// from the caller's perspective (register first, then slots — either both
+/// land or the reload was already rejected before either call).
+bool set_material_texture_slots(AssetDatabase *database, AssetId id,
+                                const MaterialTextureSlots &slots) noexcept;
+/// Authored texture-slot references for the id, or nullptr when absent.
+const MaterialTextureSlots *
+find_material_texture_slots(const AssetDatabase *database, AssetId id) noexcept;
 
 // Texture asset management.
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept;
+/// Registers (or updates) a texture id as permanently Failed with no GPU
+/// handle, so resolve_material_textures does not retry it every frame; the
+/// source path is kept for diagnostics.
+bool register_texture_asset_failed(AssetDatabase *database, AssetId id,
+                                   const char *sourcePath) noexcept;
 /// Lifecycle state for the texture id (Unloaded when unknown).
 AssetState texture_asset_state(const AssetDatabase *database,
                                AssetId id) noexcept;

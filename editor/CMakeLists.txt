@@ -11,6 +11,7 @@ engine_add_module_library(engine_editor
     src/editor_component_registry.cpp
     src/editor_inspector_metadata.cpp
     src/editor_live_edit.cpp
+    src/editor_material_edit.cpp
     src/editor_multi_edit.cpp
     src/editor_reference_pickers.cpp
     src/editor_panels_assets.cpp
@@ -20,6 +21,7 @@ engine_add_module_library(engine_editor
     src/editor_panels_inspector_generic.cpp
     src/editor_panels_inspector_custom.cpp
     src/editor_panels_main.cpp
+    src/editor_panels_material.cpp
     src/editor_panels_viewport.cpp
     src/editor_scene_document.cpp
     src/editor_session.cpp

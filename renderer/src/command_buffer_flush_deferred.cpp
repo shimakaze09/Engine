@@ -111,9 +111,23 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     auto drawGBufferBatches = [&]() {
       std::uint32_t boundVertexArray = 0U;
       std::uint32_t boundAlbedoTex = 0U;
+      std::uint32_t boundMaterialTexIds[4] = {};
       if (backend.gbufAlbedoTextureLoc >= 0) {
         dev->set_uniform_int(backend.gbufAlbedoTextureLoc, 0);
       }
+      const MaterialTextureUniformLocs materialTexLocs{
+          backend.gbufHasMetallicRoughnessTextureLoc,
+          backend.gbufMetallicRoughnessTextureLoc,
+          backend.gbufHasEmissiveTextureLoc,
+          backend.gbufEmissiveTextureLoc,
+          backend.gbufHasOcclusionTextureLoc,
+          backend.gbufOcclusionTextureLoc,
+          backend.gbufHasOpacityTextureLoc,
+          backend.gbufOpacityTextureLoc,
+          backend.gbufAlphaModeLoc,
+          backend.gbufAlphaCutoffLoc,
+          backend.gbufUvTilingLoc,
+          backend.gbufUvOffsetLoc};
       for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
            ++batchIndex) {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
@@ -164,6 +178,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           dev->bind_texture(0, 0U);
           boundAlbedoTex = 0U;
         }
+        upload_material_texture_slots(materialTexLocs, dev, command.material,
+                                      boundMaterialTexIds);
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
         if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
@@ -202,7 +218,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->bind_program(backend.gbufferSkinnedProgram);
             upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,
                                             timeSeconds, singleCommand, model,
-                                            normalMatrix, &boundAlbedoTex);
+                                            normalMatrix, &boundAlbedoTex,
+                                            boundMaterialTexIds);
             if (mesh->indexCount > 0U) {
               ++frameStats.drawCalls;
               frameStats.triangleCount += (mesh->indexCount / 3U);
@@ -762,10 +779,24 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
 
       const math::Mat4 &vp = viewProjection;
+      const MaterialTextureUniformLocs transparentMaterialTexLocs{
+          backend.pbrHasMetallicRoughnessTextureLocation,
+          backend.pbrMetallicRoughnessMapLocation,
+          backend.pbrHasEmissiveTextureLocation,
+          backend.pbrEmissiveMapLocation,
+          backend.pbrHasOcclusionTextureLocation,
+          backend.pbrOcclusionMapLocation,
+          backend.pbrHasOpacityTextureLocation,
+          backend.pbrOpacityMapLocation,
+          backend.pbrAlphaModeLocation,
+          backend.pbrAlphaCutoffLocation,
+          backend.pbrUvTilingLocation,
+          backend.pbrUvOffsetLocation};
 
       auto drawForwardTransparent = [&](std::size_t start, std::size_t end) {
         std::uint32_t boundVA = 0U;
         std::uint32_t boundAlbedoTex = 0U;
+        std::uint32_t boundMaterialTexIds[4] = {};
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
@@ -788,6 +819,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           if (backend.pbrOpacityLocation >= 0)
             dev->set_uniform_float(backend.pbrOpacityLocation,
                                    cmd.material.opacity);
+          if (backend.pbrEmissiveLocation >= 0)
+            dev->set_uniform_vec3(backend.pbrEmissiveLocation,
+                                  &cmd.material.emissive.x);
           upload_pbr_foliage_uniforms(backend, dev, cmd);
           const std::uint32_t albedoGpu =
               texture_gpu_id(cmd.material.albedoTexture);
@@ -804,6 +838,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->bind_texture(0, 0U);
             boundAlbedoTex = 0U;
           }
+          upload_material_texture_slots(transparentMaterialTexLocs, dev,
+                                        cmd.material, boundMaterialTexIds);
           const math::Mat4 model = compute_model_matrix(cmd);
           const math::Mat4 mvp = compute_mvp(model, vp);
           float nm[9] = {};

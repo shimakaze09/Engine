@@ -12,6 +12,8 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_streaming.h"
+#include "engine/renderer/material_loader.h"
+#include "engine/renderer/material_writer.h"
 #include "engine/runtime/service_registry.h"
 
 namespace engine::runtime {
@@ -173,6 +175,116 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
   }
   std::snprintf(outPath, outPathSize, "%s", metadata->filePath.data());
   return true;
+}
+
+namespace {
+
+/// Builds the state struct from an already-registered material id; false
+/// (state left default) when the id is not (or no longer) Ready.
+bool fill_material_state(renderer::AssetId materialId,
+                         EditorMaterialState *outState) noexcept {
+  const renderer::Material *params = renderer::find_material_params(
+      g_editorAssetService->database, materialId);
+  if (params == nullptr) {
+    return false;
+  }
+
+  outState->found = true;
+  outState->materialId = materialId;
+  outState->params = *params;
+  const renderer::MaterialTextureSlots *slots =
+      renderer::find_material_texture_slots(g_editorAssetService->database,
+                                            materialId);
+  if (slots != nullptr) {
+    outState->textureSlots = *slots;
+  }
+  outState->hasParent = renderer::find_material_parent_virtual_path(
+      g_editorAssetService->database, materialId,
+      outState->parentVirtualPath, sizeof(outState->parentVirtualPath));
+  return true;
+}
+
+} // namespace
+
+EditorMaterialState editor_load_material(const char *virtualPath) noexcept {
+  EditorMaterialState state{};
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return state;
+  }
+
+  const auto loadResult =
+      renderer::load_material_asset(g_editorAssetService->database, virtualPath);
+  if (!loadResult.has_value()) {
+    return state;
+  }
+
+  static_cast<void>(fill_material_state(*loadResult, &state));
+  return state;
+}
+
+bool editor_set_material_params(
+    renderer::AssetId materialId, const renderer::Material &params,
+    const renderer::MaterialTextureSlots &textureSlots) noexcept {
+  if ((materialId == renderer::kInvalidAssetId) ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return false;
+  }
+
+  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
+      g_editorAssetService->database, materialId);
+  const char *sourcePath =
+      (metadata != nullptr) ? metadata->filePath.data() : nullptr;
+  if (!renderer::register_material_asset(g_editorAssetService->database,
+                                         materialId, sourcePath, params)) {
+    return false;
+  }
+  return renderer::set_material_texture_slots(g_editorAssetService->database,
+                                              materialId, textureSlots);
+}
+
+bool editor_save_material(const char *virtualPath,
+                          const char *parentVirtualPath) noexcept {
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return false;
+  }
+
+  const renderer::AssetId materialId =
+      renderer::make_asset_id_from_path(virtualPath);
+  const renderer::Material *params =
+      renderer::find_material_params(g_editorAssetService->database, materialId);
+  if (params == nullptr) {
+    return false;
+  }
+  const renderer::MaterialTextureSlots *slots =
+      renderer::find_material_texture_slots(g_editorAssetService->database,
+                                            materialId);
+  const renderer::MaterialTextureSlots emptySlots{};
+  return renderer::save_material_asset(
+      g_editorAssetService->database, virtualPath, *params,
+      (slots != nullptr) ? *slots : emptySlots, parentVirtualPath);
+}
+
+EditorMaterialState editor_reload_material(const char *virtualPath) noexcept {
+  EditorMaterialState state{};
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return state;
+  }
+
+  const auto reloadResult = renderer::reload_material_asset(
+      g_editorAssetService->database, virtualPath);
+  if (!reloadResult.has_value()) {
+    return state;
+  }
+
+  static_cast<void>(fill_material_state(*reloadResult, &state));
+  return state;
 }
 
 } // namespace engine::runtime

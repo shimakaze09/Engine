@@ -257,8 +257,11 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
     return 47;
   }
 
+  // Version 2 (texture-backed schema) is a supported version now — see
+  // material_asset_v2_test.cpp for its contract. Only versions outside
+  // [1, 2] still reject the load.
   constexpr const char *kBadVersionPath = "material_test_bad_version.json";
-  if (!write_material_file(kBadVersionPath, "{\"version\":2}")) {
+  if (!write_material_file(kBadVersionPath, "{\"version\":3}")) {
     return 48;
   }
   const auto badVersionResult = engine::renderer::load_material_asset(

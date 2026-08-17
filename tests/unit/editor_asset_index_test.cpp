@@ -305,8 +305,14 @@ int check_resolve_asset_open_action_mapping() {
       AssetOpenAction::OpenScene) {
     return 2;
   }
+  // Issue #160: Material's typed Open now routes to the material editor
+  // panel instead of merely selecting the asset.
+  if (resolve_asset_open_action(AssetKind::Material) !=
+      AssetOpenAction::EditMaterial) {
+    return 4;
+  }
   const AssetKind selectOnlyKinds[] = {
-      AssetKind::Texture,  AssetKind::Material, AssetKind::Script,
+      AssetKind::Texture,   AssetKind::Script,
       AssetKind::Animation, AssetKind::AnimationController,
       AssetKind::Sound,     AssetKind::Other,
   };

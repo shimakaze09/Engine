@@ -284,6 +284,58 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
   }
 }
 
+void upload_material_texture_slots(const MaterialTextureUniformLocs &locs,
+                                   const RenderDevice *dev,
+                                   const Material &material,
+                                   std::uint32_t boundGpuIds[4]) noexcept {
+  constexpr std::int32_t kMetallicRoughnessUnit = 1;
+  constexpr std::int32_t kEmissiveUnit = 2;
+  constexpr std::int32_t kOcclusionUnit = 3;
+  constexpr std::int32_t kOpacityUnit = 4;
+
+  auto bindSlot = [&](std::int32_t hasLoc, std::int32_t mapLoc,
+                      std::int32_t unit, TextureHandle handle,
+                      std::uint32_t *boundGpuId) {
+    const std::uint32_t gpuId = texture_gpu_id(handle);
+    const bool has = (handle != kInvalidTextureHandle) && (gpuId != 0U);
+    if (hasLoc >= 0) {
+      dev->set_uniform_int(hasLoc, has ? 1 : 0);
+    }
+    if (mapLoc >= 0) {
+      dev->set_uniform_int(mapLoc, unit);
+    }
+    const std::uint32_t desired = has ? gpuId : 0U;
+    if (desired != *boundGpuId) {
+      dev->bind_texture(unit, desired);
+      *boundGpuId = desired;
+    }
+  };
+
+  bindSlot(locs.hasMetallicRoughness, locs.metallicRoughnessMap,
+          kMetallicRoughnessUnit, material.metallicRoughnessTexture,
+          &boundGpuIds[0]);
+  bindSlot(locs.hasEmissive, locs.emissiveMap, kEmissiveUnit,
+          material.emissiveTexture, &boundGpuIds[1]);
+  bindSlot(locs.hasOcclusion, locs.occlusionMap, kOcclusionUnit,
+          material.occlusionTexture, &boundGpuIds[2]);
+  bindSlot(locs.hasOpacity, locs.opacityMap, kOpacityUnit,
+          material.opacityTexture, &boundGpuIds[3]);
+
+  if (locs.alphaMode >= 0) {
+    dev->set_uniform_int(locs.alphaMode,
+                         static_cast<std::int32_t>(material.alphaMode));
+  }
+  if (locs.alphaCutoff >= 0) {
+    dev->set_uniform_float(locs.alphaCutoff, material.alphaCutoff);
+  }
+  if (locs.uvTiling >= 0) {
+    dev->set_uniform_vec2(locs.uvTiling, &material.uvTiling.x);
+  }
+  if (locs.uvOffset >= 0) {
+    dev->set_uniform_vec2(locs.uvOffset, &material.uvOffset.x);
+  }
+}
+
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {

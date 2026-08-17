@@ -107,6 +107,20 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
     }
 
+    const MaterialTextureUniformLocs forwardMaterialTexLocs{
+        backend.pbrHasMetallicRoughnessTextureLocation,
+        backend.pbrMetallicRoughnessMapLocation,
+        backend.pbrHasEmissiveTextureLocation,
+        backend.pbrEmissiveMapLocation,
+        backend.pbrHasOcclusionTextureLocation,
+        backend.pbrOcclusionMapLocation,
+        backend.pbrHasOpacityTextureLocation,
+        backend.pbrOpacityMapLocation,
+        backend.pbrAlphaModeLocation,
+        backend.pbrAlphaCutoffLocation,
+        backend.pbrUvTilingLocation,
+        backend.pbrUvOffsetLocation};
+
     auto drawForwardCommand = [&](const DrawCommand &command,
                                   const GpuMesh &mesh) {
       const math::Mat4 model = compute_model_matrix(command);
@@ -138,7 +152,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     };
 
     auto uploadForwardMaterial = [&](const Material &material,
-                                     std::uint32_t *boundAlbedoTexture) {
+                                     std::uint32_t *boundAlbedoTexture,
+                                     std::uint32_t *boundMaterialTexIds) {
       if (backend.pbrAlbedoLocation >= 0) {
         dev->set_uniform_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
       }
@@ -151,6 +166,10 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       }
       if (backend.pbrOpacityLocation >= 0) {
         dev->set_uniform_float(backend.pbrOpacityLocation, material.opacity);
+      }
+      if (backend.pbrEmissiveLocation >= 0) {
+        dev->set_uniform_vec3(backend.pbrEmissiveLocation,
+                              &material.emissive.x);
       }
 
       const std::uint32_t albedoGpuId = texture_gpu_id(material.albedoTexture);
@@ -168,11 +187,14 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
         dev->bind_texture(0, 0U);
         *boundAlbedoTexture = 0U;
       }
+      upload_material_texture_slots(forwardMaterialTexLocs, dev, material,
+                                    boundMaterialTexIds);
     };
 
     auto drawRange = [&](std::size_t start, std::size_t end) {
       std::uint32_t boundVertexArray = 0U;
       std::uint32_t boundAlbedoTexture = 0U;
+      std::uint32_t boundMaterialTexIds[4] = {};
 
       if ((start == 0U) && (end == opaqueCount)) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
@@ -190,7 +212,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
             boundVertexArray = mesh->vertexArray;
           }
 
-          uploadForwardMaterial(command.material, &boundAlbedoTexture);
+          uploadForwardMaterial(command.material, &boundAlbedoTexture,
+                                boundMaterialTexIds);
           upload_pbr_foliage_uniforms(backend, dev, command);
 
           if ((batch.count > 1U) && !mesh->hasSkin &&
@@ -233,7 +256,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           boundVertexArray = mesh->vertexArray;
         }
 
-        uploadForwardMaterial(command.material, &boundAlbedoTexture);
+        uploadForwardMaterial(command.material, &boundAlbedoTexture,
+                                boundMaterialTexIds);
         drawForwardCommand(command, *mesh);
       }
     };

@@ -78,6 +78,20 @@ struct BackendState final {
   std::int32_t pbrHasAlbedoTextureLocation = -1;
   std::int32_t pbrAlbedoMapLocation = -1;
   std::int32_t pbrOpacityLocation = -1;
+  // issue #160: texture-backed PBR material slots (forward program).
+  std::int32_t pbrEmissiveLocation = -1;
+  std::int32_t pbrHasMetallicRoughnessTextureLocation = -1;
+  std::int32_t pbrMetallicRoughnessMapLocation = -1;
+  std::int32_t pbrHasEmissiveTextureLocation = -1;
+  std::int32_t pbrEmissiveMapLocation = -1;
+  std::int32_t pbrHasOcclusionTextureLocation = -1;
+  std::int32_t pbrOcclusionMapLocation = -1;
+  std::int32_t pbrHasOpacityTextureLocation = -1;
+  std::int32_t pbrOpacityMapLocation = -1;
+  std::int32_t pbrAlphaModeLocation = -1;
+  std::int32_t pbrAlphaCutoffLocation = -1;
+  std::int32_t pbrUvTilingLocation = -1;
+  std::int32_t pbrUvOffsetLocation = -1;
   std::int32_t pbrViewLocation = -1;
   std::int32_t pbrViewProjectionLocation = -1;
   std::int32_t pbrUseInstancingLocation = -1;
@@ -233,6 +247,19 @@ struct BackendState final {
   std::int32_t gbufRoughnessLoc = -1;
   std::int32_t gbufAOLoc = -1;
   std::int32_t gbufEmissiveLoc = -1;
+  // issue #160: texture-backed PBR material slots (static G-buffer program).
+  std::int32_t gbufHasMetallicRoughnessTextureLoc = -1;
+  std::int32_t gbufMetallicRoughnessTextureLoc = -1;
+  std::int32_t gbufHasEmissiveTextureLoc = -1;
+  std::int32_t gbufEmissiveTextureLoc = -1;
+  std::int32_t gbufHasOcclusionTextureLoc = -1;
+  std::int32_t gbufOcclusionTextureLoc = -1;
+  std::int32_t gbufHasOpacityTextureLoc = -1;
+  std::int32_t gbufOpacityTextureLoc = -1;
+  std::int32_t gbufAlphaModeLoc = -1;
+  std::int32_t gbufAlphaCutoffLoc = -1;
+  std::int32_t gbufUvTilingLoc = -1;
+  std::int32_t gbufUvOffsetLoc = -1;
 
   // Deferred lighting shader.
   ShaderProgramHandle deferredLightShaderHandle{};
@@ -458,6 +485,21 @@ struct BackendState final {
   std::int32_t gbufSkinnedRoughnessLoc = -1;
   std::int32_t gbufSkinnedAOLoc = -1;
   std::int32_t gbufSkinnedEmissiveLoc = -1;
+  // issue #160: texture-backed PBR material slots (skinned G-buffer
+  // program). Shares gbuffer.frag with the static program, so the uniform
+  // names match; only the cached locations differ per linked program.
+  std::int32_t gbufSkinnedHasMetallicRoughnessTextureLoc = -1;
+  std::int32_t gbufSkinnedMetallicRoughnessTextureLoc = -1;
+  std::int32_t gbufSkinnedHasEmissiveTextureLoc = -1;
+  std::int32_t gbufSkinnedEmissiveTextureLoc = -1;
+  std::int32_t gbufSkinnedHasOcclusionTextureLoc = -1;
+  std::int32_t gbufSkinnedOcclusionTextureLoc = -1;
+  std::int32_t gbufSkinnedHasOpacityTextureLoc = -1;
+  std::int32_t gbufSkinnedOpacityTextureLoc = -1;
+  std::int32_t gbufSkinnedAlphaModeLoc = -1;
+  std::int32_t gbufSkinnedAlphaCutoffLoc = -1;
+  std::int32_t gbufSkinnedUvTilingLoc = -1;
+  std::int32_t gbufSkinnedUvOffsetLoc = -1;
 
   ShaderProgramHandle shadowDepthSkinnedShaderHandle{};
   std::uint32_t shadowDepthSkinnedProgram = 0U;

@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_metadata.h"
+#include "engine/renderer/material.h"
 
 namespace engine::runtime {
 
@@ -71,5 +73,59 @@ std::size_t editor_query_assets(renderer::AssetTypeTag typeTag,
 /// reference picker uses to render its broken-reference state.
 bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
                                std::size_t outPathSize) noexcept;
+
+// --- Material editor bridge (issue #160) ---
+//
+// The material editor panel (editor/) never touches renderer::AssetDatabase
+// directly -- it goes through these functions, matching the asset-picker
+// bridge above, so the editor stays behind the published-service seam even
+// though editor->runtime->renderer is otherwise a legal dependency
+// direction.
+
+/// Full editable state of one material asset: resolved scalar/vector
+/// params, alpha mode/cutoff, UV transform, texture-slot references, and
+/// the parent path (hasParent=false when it has none). found=false when no
+/// runtime asset service is published or the file fails to load/parse (the
+/// caller's existing buffer, if any, should keep displaying rather than be
+/// cleared -- the same "malformed reload preserves previous state" contract
+/// reload_material_asset already gives the loader layer).
+struct EditorMaterialState final {
+  bool found = false;
+  renderer::AssetId materialId = renderer::kInvalidAssetId;
+  renderer::Material params{};
+  renderer::MaterialTextureSlots textureSlots{};
+  char parentVirtualPath[260] = {};
+  bool hasParent = false;
+};
+
+/// Loads (if not already loaded) `virtualPath` and returns its current
+/// editable state.
+EditorMaterialState editor_load_material(const char *virtualPath) noexcept;
+
+/// Writes `params`/`textureSlots` directly into the live asset database
+/// record -- the same mutation register_material_asset and
+/// set_material_texture_slots perform -- so the very next frame's render
+/// prep and resolve_material_textures reflect the edit: the material
+/// editor's live viewport feedback. Never touches disk; call
+/// editor_save_material to persist. False when the id is unknown or no
+/// runtime asset service is published.
+bool editor_set_material_params(
+    renderer::AssetId materialId, const renderer::Material &params,
+    const renderer::MaterialTextureSlots &textureSlots) noexcept;
+
+/// Persists the live in-memory state for `virtualPath` to disk via
+/// save_material_asset (staged atomic write): a failure (including an
+/// unresolvable texture-slot path) leaves the previous file on disk
+/// completely untouched. `parentVirtualPath` may be null/empty for no
+/// parent.
+bool editor_save_material(const char *virtualPath,
+                          const char *parentVirtualPath) noexcept;
+
+/// Re-reads `virtualPath` from disk (reload_material_asset) and, on
+/// success, returns the freshly loaded state with found=true. On failure
+/// the live in-memory record is left exactly as it was (reload_material_
+/// asset's contract) and this returns found=false -- the caller should keep
+/// displaying its existing buffer rather than clearing it.
+EditorMaterialState editor_reload_material(const char *virtualPath) noexcept;
 
 } // namespace engine::runtime
