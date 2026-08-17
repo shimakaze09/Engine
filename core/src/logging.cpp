@@ -72,6 +72,10 @@ bool initialize_logging() noexcept {
 /// Shuts down the owning system for logging.
 void shutdown_logging() noexcept {
   g_loggingInitialized.store(false, std::memory_order_release);
+  // Drop any sink its owner failed to unregister (#236) so a dead sink is
+  // never dispatched to after a later re-initialization.
+  std::lock_guard<std::mutex> lock(g_sinkMutex);
+  g_sinks = {};
 }
 
 void log_message(LogLevel level,
