@@ -15,6 +15,7 @@
 #include "editor_panels_inspector_custom.h"
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
+#include "engine/core/logging.h"
 
 #include "engine/runtime/camera_component_update.h"
 
@@ -64,15 +65,33 @@ void draw_live_edit_row(runtime::Entity entity, ComponentEditType type) noexcept
   }
   ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F), "Live edit (transient)");
   ImGui::SameLine();
-  if (ImGui::SmallButton("Apply to authored value")) {
-    static_cast<void>(queue_apply_to_authored(entity, type));
+  // Re-queueing an already-queued pair replaces in place and never
+  // allocates, so only a first-time queue request is blocked by a full
+  // queue; the disabled button plus the reason line below make the failed
+  // state actionable instead of a silently ignored click (audit #224).
+  const bool alreadyQueued = has_pending_apply_to_authored(entity, type);
+  const bool queueFull = pending_apply_to_authored_count() >=
+                         pending_apply_to_authored_capacity();
+  const bool canQueue = alreadyQueued || !queueFull;
+  ImGui::BeginDisabled(!canQueue);
+  if (ImGui::SmallButton("Apply to authored value") &&
+      !queue_apply_to_authored(entity, type)) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "apply-to-authored request failed; edit not queued");
   }
+  ImGui::EndDisabled();
   ImGui::SameLine();
   if (ImGui::SmallButton("Revert runtime edit")) {
     static_cast<void>(revert_live_component_edit(entity, type));
   }
   if (has_pending_apply_to_authored(entity, type)) {
     ImGui::TextDisabled("Queued: will apply to the authored scene on Stop.");
+  }
+  if (!canQueue) {
+    ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.3F, 1.0F),
+                       "Apply queue full (%zu): Stop to apply queued edits, "
+                       "or cancel one first.",
+                       pending_apply_to_authored_capacity());
   }
 }
 
@@ -95,7 +114,16 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
     return;
   }
   const Component before = snapshot.*member;
-  const bool fieldsEditable = authoredEditable || liveEditable;
+  // A first-touch live edit needs a free baseline slot before it may
+  // mutate the world (audit #224); when the budget is exhausted the
+  // fields lock with a reason instead of accepting edits that would
+  // silently lose their advertised Revert.
+  const bool liveBudgetBlocked =
+      liveEditable && !authoredEditable &&
+      !has_live_component_edit(entity, type) &&
+      (live_edit_baseline_count() >= live_edit_baseline_capacity());
+  const bool fieldsEditable =
+      authoredEditable || (liveEditable && !liveBudgetBlocked);
 
   ImGui::PushID(sectionLabel);
   const bool open = ImGui::CollapsingHeader(sectionLabel,
@@ -111,6 +139,12 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
     modified = drawFn(snapshot.*member);
     if (!fieldsEditable) {
       ImGui::EndDisabled();
+    }
+    if (liveBudgetBlocked) {
+      ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.3F, 1.0F),
+                         "Live-edit budget full (%zu components): revert an "
+                         "edit or Stop before editing more.",
+                         live_edit_baseline_capacity());
     }
     if (liveEditable) {
       draw_live_edit_row(entity, type);
@@ -136,7 +170,7 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
     afterSnapshot.*member = snapshot.*member;
     static_cast<void>(inspector_stage_component_edit(
         entity, type, beforeSnapshot, afterSnapshot));
-  } else if (liveEditable && modified) {
+  } else if (liveEditable && !liveBudgetBlocked && modified) {
     ComponentEditSnapshot afterSnapshot{};
     afterSnapshot.*member = snapshot.*member;
     static_cast<void>(apply_live_component_edit(entity, type, afterSnapshot));

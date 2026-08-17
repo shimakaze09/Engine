@@ -305,6 +305,184 @@ int check_cancel_apply_to_authored() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// EXPECTATION (audit #224): the live-edit baseline budget is keyed by
+/// (entity, component type) pairs — one entity consumes a slot per touched
+/// type — and a first-touch edit past capacity is refused BEFORE mutating
+/// the world, keeping the advertised Revert contract intact; reverting an
+/// edit frees its slot for a new pair.
+int check_baseline_budget_blocks_edit_before_mutation() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 90;
+  }
+  SessionWorldScope scope(world.get());
+
+  // One entity, two component types: two budget slots, proving the key is
+  // the (entity, type) pair rather than the entity.
+  const Entity dual = make_rigid_body_entity(*world, 1.0F);
+  if (dual == engine::runtime::kInvalidEntity) {
+    return 91;
+  }
+  const std::size_t capacity = live_edit_baseline_capacity();
+  if (capacity < 3U) {
+    return 92; // the fill loop below assumes a real budget
+  }
+
+  start_play_mode();
+  editor_session().liveEditEnabled = true;
+  if (!live_edit_available()) {
+    return 93;
+  }
+
+  ComponentEditSnapshot bodyEdit{};
+  bodyEdit.rigidBody.inverseMass = 9.0F;
+  if (!apply_live_component_edit(dual, ComponentEditType::RigidBody,
+                                 bodyEdit)) {
+    return 94;
+  }
+  ComponentEditSnapshot transformEdit{};
+  transformEdit.transform.position.x = 5.0F;
+  if (!apply_live_component_edit(dual, ComponentEditType::Transform,
+                                 transformEdit)) {
+    return 95;
+  }
+  if (live_edit_baseline_count() != 2U) {
+    return 96; // one entity, two types -> two slots
+  }
+
+  // Fill the remaining budget with sequentially edited entities (never
+  // more than one selected at a time in a real session).
+  for (std::size_t i = live_edit_baseline_count(); i < capacity; ++i) {
+    const Entity extra = make_rigid_body_entity(
+        *world, static_cast<float>(i) + 1.0F);
+    if (extra == engine::runtime::kInvalidEntity) {
+      return 97;
+    }
+    if (!apply_live_component_edit(extra, ComponentEditType::RigidBody,
+                                   bodyEdit)) {
+      return 98;
+    }
+  }
+  if (live_edit_baseline_count() != capacity) {
+    return 99;
+  }
+
+  // Capacity + 1: refused before mutation, no badge, value untouched.
+  const Entity overflow = make_rigid_body_entity(*world, 77.0F);
+  if (overflow == engine::runtime::kInvalidEntity) {
+    return 100;
+  }
+  if (apply_live_component_edit(overflow, ComponentEditType::RigidBody,
+                                bodyEdit)) {
+    return 101;
+  }
+  RigidBody untouched{};
+  if (!world->get_rigid_body(overflow, &untouched) ||
+      (untouched.inverseMass != 77.0F)) {
+    return 102; // the refused edit must not have mutated the world
+  }
+  if (has_live_component_edit(overflow, ComponentEditType::RigidBody)) {
+    return 103;
+  }
+  // An already-tracked pair keeps editing at full capacity (no new slot).
+  bodyEdit.rigidBody.inverseMass = 12.0F;
+  if (!apply_live_component_edit(dual, ComponentEditType::RigidBody,
+                                 bodyEdit)) {
+    return 104;
+  }
+
+  // Revert frees a slot; the blocked pair then succeeds.
+  if (!revert_live_component_edit(dual, ComponentEditType::RigidBody)) {
+    return 105;
+  }
+  if (live_edit_baseline_count() != capacity - 1U) {
+    return 106;
+  }
+  if (!apply_live_component_edit(overflow, ComponentEditType::RigidBody,
+                                 bodyEdit)) {
+    return 107;
+  }
+
+  stop_play_mode();
+  return 0;
+}
+
+/// EXPECTATION (audit #224): the apply-to-authored queue reports failure at
+/// capacity + 1 and keeps its count, while re-queueing an already-queued
+/// pair replaces in place and still succeeds at full capacity.
+int check_pending_apply_budget() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 120;
+  }
+  SessionWorldScope scope(world.get());
+
+  const std::size_t capacity = pending_apply_to_authored_capacity();
+  if (capacity < 2U) {
+    return 121;
+  }
+  std::unique_ptr<Entity[]> entities(new (std::nothrow) Entity[capacity + 1U]);
+  if (entities == nullptr) {
+    return 122;
+  }
+  for (std::size_t i = 0U; i < capacity + 1U; ++i) {
+    entities[i] = make_rigid_body_entity(*world, static_cast<float>(i) + 1.0F);
+    if (entities[i] == engine::runtime::kInvalidEntity) {
+      return 123;
+    }
+  }
+
+  start_play_mode();
+  editor_session().liveEditEnabled = true;
+  if (!live_edit_available()) {
+    return 124;
+  }
+
+  for (std::size_t i = 0U; i < capacity; ++i) {
+    if (!queue_apply_to_authored(entities[i], ComponentEditType::RigidBody)) {
+      return 125;
+    }
+  }
+  if (pending_apply_to_authored_count() != capacity) {
+    return 126;
+  }
+
+  // Capacity + 1: fails and the count is unchanged.
+  if (queue_apply_to_authored(entities[capacity],
+                              ComponentEditType::RigidBody)) {
+    return 127;
+  }
+  if (pending_apply_to_authored_count() != capacity) {
+    return 128;
+  }
+  if (has_pending_apply_to_authored(entities[capacity],
+                                    ComponentEditType::RigidBody)) {
+    return 129;
+  }
+
+  // Replacement of an existing pair never allocates, so it succeeds at
+  // full capacity and the count stays flat.
+  if (!queue_apply_to_authored(entities[0], ComponentEditType::RigidBody)) {
+    return 130;
+  }
+  if (pending_apply_to_authored_count() != capacity) {
+    return 131;
+  }
+
+  // Cancel frees a slot; the previously blocked pair then queues.
+  cancel_apply_to_authored(entities[0], ComponentEditType::RigidBody);
+  if (!queue_apply_to_authored(entities[capacity],
+                               ComponentEditType::RigidBody)) {
+    return 132;
+  }
+  if (pending_apply_to_authored_count() != capacity) {
+    return 133;
+  }
+
+  stop_play_mode();
+  return 0;
+}
+
 int main() {
   struct NamedCheck {
     const char *name;
@@ -318,6 +496,9 @@ int main() {
       {"check_apply_to_authored_replays_as_undoable_command",
        &check_apply_to_authored_replays_as_undoable_command},
       {"check_cancel_apply_to_authored", &check_cancel_apply_to_authored},
+      {"check_baseline_budget_blocks_edit_before_mutation",
+       &check_baseline_budget_blocks_edit_before_mutation},
+      {"check_pending_apply_budget", &check_pending_apply_budget},
   };
 
   for (const auto &check : checks) {
