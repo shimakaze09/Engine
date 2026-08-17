@@ -70,7 +70,7 @@ public:
     entry.live = false;
     entry.payload = Payload{};
     entry.generation = next_generation(entry.generation);
-    m_freeList[m_freeCount] = slot;
+    m_freeList[m_freeCount] = static_cast<std::uint32_t>(slot);
     ++m_freeCount;
     return true;
   }

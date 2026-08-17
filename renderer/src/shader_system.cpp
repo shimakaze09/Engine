@@ -331,7 +331,11 @@ DeviceProgramHandle compile_program_from_source(
     compiledFragSource = variantFragSource.get();
   }
 
-  return dev->create_program(compiledVertSource, compiledFragSource);
+  // The variant sources only need to outlive this call; naming the result
+  // also keeps cppcheck from tying the returned handle to their lifetime.
+  const DeviceProgramHandle program =
+      dev->create_program(compiledVertSource, compiledFragSource);
+  return program;
 }
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
