@@ -15,6 +15,7 @@ in vec3 vNormal;
 in vec2 vTexCoord;
 
 uniform vec3 u_albedo;
+uniform vec3 u_emissive;
 uniform float u_roughness;
 uniform float u_metallic;
 uniform float u_opacity;
@@ -22,6 +23,25 @@ uniform float u_time;
 uniform vec3 u_cameraPos;
 uniform int u_hasAlbedoTexture;
 uniform sampler2D u_albedoMap;
+
+// issue #160: texture-backed PBR material slots (forward path — also used
+// for the deferred pipeline's forward-transparent tail, so unlike
+// gbuffer.frag this shader needs the full alpha-mode contract). Packing
+// mirrors gbuffer.frag: metallicRoughness follows glTF (G = roughness,
+// B = metallic).
+uniform sampler2D u_metallicRoughnessMap;
+uniform int u_hasMetallicRoughnessTexture;
+uniform sampler2D u_emissiveMap;
+uniform int u_hasEmissiveTexture;
+uniform sampler2D u_occlusionMap;
+uniform int u_hasOcclusionTexture;
+uniform sampler2D u_opacityMap;
+uniform int u_hasOpacityTexture;
+uniform int u_alphaMode; // 0 = opaque, 1 = mask, 2 = blend
+uniform float u_alphaCutoff;
+uniform vec2 u_uvTiling;
+uniform vec2 u_uvOffset;
+
 uniform mat4 u_viewMatrix;
 uniform int uFogMode;
 uniform float uFogStart;
@@ -375,16 +395,45 @@ float combine_fog_factors(float distanceFog, float heightFog) {
 
 /// Runs the shader entry point for this stage.
 void main() {
+  vec2 uv = vTexCoord * u_uvTiling + u_uvOffset;
   vec3 N = normalize(vNormal);
   vec3 V = normalize(u_cameraPos - vWorldPos);
 
   vec3 albedo = u_albedo;
   if (u_hasAlbedoTexture != 0) {
-    albedo *= texture(u_albedoMap, vTexCoord).rgb;
+    albedo *= texture(u_albedoMap, uv).rgb;
   }
 
-  float roughness = clamp(u_roughness, 0.04, 1.0);
-  float metallic = clamp(u_metallic, 0.0, 1.0);
+  float roughnessFactor = u_roughness;
+  float metallicFactor = u_metallic;
+  if (u_hasMetallicRoughnessTexture != 0) {
+    vec3 mr = texture(u_metallicRoughnessMap, uv).rgb;
+    roughnessFactor *= mr.g;
+    metallicFactor *= mr.b;
+  }
+  float roughness = clamp(roughnessFactor, 0.04, 1.0);
+  float metallic = clamp(metallicFactor, 0.0, 1.0);
+
+  float ao = 1.0;
+  if (u_hasOcclusionTexture != 0) {
+    ao = texture(u_occlusionMap, uv).r;
+  }
+
+  vec3 emissive = u_emissive;
+  if (u_hasEmissiveTexture != 0) {
+    emissive *= texture(u_emissiveMap, uv).rgb;
+  }
+
+  float maskAlpha = 1.0;
+  if (u_hasOpacityTexture != 0) {
+    maskAlpha = texture(u_opacityMap, uv).r;
+  }
+  if (u_alphaMode == 1 && maskAlpha < u_alphaCutoff) {
+    discard;
+  }
+  // Mask draws are alpha-tested, not blended (matches gbuffer.frag / the
+  // opaque routing in command_buffer_flush.cpp), so a mask material's
+  // output alpha stays the author's opacity rather than the mask sample.
   float opacity = clamp(u_opacity, 0.0, 1.0);
   vec3 F0 = mix(vec3(0.04), albedo, metallic);
   vec3 Lo = vec3(0.0);
@@ -436,10 +485,10 @@ void main() {
           compute_spot_shadow(vWorldPos, i);
   }
 
-  vec3 ambient = (uIblEnabled != 0)
+  vec3 ambient = ((uIblEnabled != 0)
       ? ibl_ambient(N, V, albedo, metallic, roughness)
-      : vec3(0.03) * albedo;
-  vec3 color = ambient + Lo;
+      : vec3(0.03) * albedo) * ao;
+  vec3 color = ambient + Lo + emissive;
   float distanceFog = compute_distance_fog_factor(length(u_cameraPos - vWorldPos));
   float heightFog = compute_height_fog_factor(u_cameraPos, vWorldPos);
   float fogFactor = combine_fog_factors(distanceFog, heightFog);

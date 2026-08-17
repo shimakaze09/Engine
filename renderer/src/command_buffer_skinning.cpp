@@ -80,8 +80,8 @@ void upload_skinned_gbuffer_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const math::Mat4 &view, const math::Mat4 &projection, float timeSeconds,
     const DrawCommand &command, const math::Mat4 &model,
-    const float *normalMatrix,
-    std::uint32_t *inOutBoundAlbedoTex) noexcept {
+    const float *normalMatrix, std::uint32_t *inOutBoundAlbedoTex,
+    std::uint32_t inOutBoundMaterialTexIds[4]) noexcept {
   if (backend.gbufSkinnedViewLoc >= 0) {
     dev->set_uniform_mat4(backend.gbufSkinnedViewLoc, &view.columns[0].x);
   }
@@ -138,6 +138,24 @@ void upload_skinned_gbuffer_uniforms(
       dev->bind_texture(0, wanted);
       *inOutBoundAlbedoTex = wanted;
     }
+  }
+
+  if (inOutBoundMaterialTexIds != nullptr) {
+    const MaterialTextureUniformLocs locs{
+        backend.gbufSkinnedHasMetallicRoughnessTextureLoc,
+        backend.gbufSkinnedMetallicRoughnessTextureLoc,
+        backend.gbufSkinnedHasEmissiveTextureLoc,
+        backend.gbufSkinnedEmissiveTextureLoc,
+        backend.gbufSkinnedHasOcclusionTextureLoc,
+        backend.gbufSkinnedOcclusionTextureLoc,
+        backend.gbufSkinnedHasOpacityTextureLoc,
+        backend.gbufSkinnedOpacityTextureLoc,
+        backend.gbufSkinnedAlphaModeLoc,
+        backend.gbufSkinnedAlphaCutoffLoc,
+        backend.gbufSkinnedUvTilingLoc,
+        backend.gbufSkinnedUvOffsetLoc};
+    upload_material_texture_slots(locs, dev, command.material,
+                                  inOutBoundMaterialTexIds);
   }
 }
 
