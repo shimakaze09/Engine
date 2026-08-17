@@ -24,8 +24,10 @@ bool live_edit_available() noexcept;
 /// state); the first live touch of an (entity, type) pair this play
 /// session captures the pre-edit value as its baseline so
 /// revert_live_component_edit has something to restore. False when live
-/// editing is unavailable or the world rejected the value (the world is
-/// left unchanged either way).
+/// editing is unavailable, the world rejected the value, or the baseline
+/// budget is exhausted — an edit whose advertised Revert cannot be
+/// provided is refused before mutation (audit #224); the world is left
+/// unchanged in every failure case.
 bool apply_live_component_edit(runtime::Entity entity, ComponentEditType type,
                                const ComponentEditSnapshot &after) noexcept;
 
@@ -68,6 +70,20 @@ void reset_live_edit_state() noexcept;
 /// Number of entries currently queued for apply-to-authored (test hook and
 /// the Inspector's "N pending" affordance).
 std::size_t pending_apply_to_authored_count() noexcept;
+
+/// Number of (entity, component type) pairs currently holding a live-edit
+/// baseline this play session.
+std::size_t live_edit_baseline_count() noexcept;
+
+/// Fixed baseline budget: at capacity, further first-touch live edits are
+/// refused (Revert could not be provided) until Revert or Stop frees
+/// entries; the Inspector surfaces this state.
+std::size_t live_edit_baseline_capacity() noexcept;
+
+/// Fixed apply-to-authored queue budget: at capacity, new queue requests
+/// fail (replacing an already-queued pair still succeeds); the Inspector
+/// disables the Apply button with a reason instead of discarding failure.
+std::size_t pending_apply_to_authored_capacity() noexcept;
 
 /// Replays every queued apply-to-authored entry as an ordinary undoable
 /// ComponentEditCommand against the just-restored authored world, then

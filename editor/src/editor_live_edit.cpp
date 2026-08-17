@@ -36,10 +36,15 @@ struct PendingAuthoredApply final {
   ComponentEditSnapshot snapshot{};
 };
 
-constexpr std::size_t kMaxLiveEditBaselines =
-    EditorSession::kMaxSelectedEntities;
-constexpr std::size_t kMaxPendingAuthoredApplies =
-    EditorSession::kMaxSelectedEntities;
+// Both tables are keyed by (PersistentId, ComponentEditType) and persist
+// across selection changes until Revert/cancel/Stop, so their budget is
+// independent of the simultaneous-selection capacity (audit #224): one
+// entity consumes one slot per live-editable component type it touches,
+// and sequentially edited entities accumulate. 128 pairs covers e.g. 16
+// entities times 8 component types in one session at ~313 KB of static
+// storage per table (sizeof(ComponentEditSnapshot) is ~2.4 KB).
+constexpr std::size_t kMaxLiveEditBaselines = 128U;
+constexpr std::size_t kMaxPendingAuthoredApplies = 128U;
 
 std::array<LiveEditBaseline, kMaxLiveEditBaselines> g_baselines{};
 std::array<PendingAuthoredApply, kMaxPendingAuthoredApplies> g_pending{};
@@ -106,24 +111,38 @@ bool apply_live_component_edit(runtime::Entity entity, ComponentEditType type,
     return false;
   }
 
+  LiveEditBaseline *created = nullptr;
   if (find_baseline(id, type) == nullptr) {
+    // The baseline is acquired BEFORE the mutation: a live edit whose
+    // advertised Revert cannot be provided must be refused up front, not
+    // applied with the affordance silently missing (audit #224).
     ComponentEditSnapshot current{};
-    if (capture_component_snapshot(type, entity, &current)) {
-      LiveEditBaseline *slot = allocate_baseline();
-      if (slot != nullptr) {
-        slot->active = true;
-        slot->persistentId = id;
-        slot->type = type;
-        slot->baseline = current;
-      } else {
-        core::log_message(core::LogLevel::Warning, "editor",
-                          "live-edit baseline table full; Revert unavailable "
-                          "for this field this session");
-      }
+    if (!capture_component_snapshot(type, entity, &current)) {
+      return false;
     }
+    created = allocate_baseline();
+    if (created == nullptr) {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "live-edit budget exhausted; edit blocked so Revert "
+                        "stays available — revert an edit or Stop to free "
+                        "entries");
+      return false;
+    }
+    created->active = true;
+    created->persistentId = id;
+    created->type = type;
+    created->baseline = current;
   }
 
-  return apply_component_snapshot(type, entity, true, after);
+  if (!apply_component_snapshot(type, entity, true, after)) {
+    // Drop a baseline created for a rejected write so an untouched pair
+    // does not wear the "edited live" badge or hold a budget slot.
+    if (created != nullptr) {
+      *created = LiveEditBaseline{};
+    }
+    return false;
+  }
+  return true;
 }
 
 bool has_live_component_edit(runtime::Entity entity,
@@ -212,6 +231,24 @@ void cancel_apply_to_authored(runtime::Entity entity,
 void reset_live_edit_state() noexcept {
   g_baselines.fill(LiveEditBaseline{});
   g_pending.fill(PendingAuthoredApply{});
+}
+
+std::size_t live_edit_baseline_count() noexcept {
+  std::size_t count = 0U;
+  for (const auto &entry : g_baselines) {
+    if (entry.active) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+std::size_t live_edit_baseline_capacity() noexcept {
+  return kMaxLiveEditBaselines;
+}
+
+std::size_t pending_apply_to_authored_capacity() noexcept {
+  return kMaxPendingAuthoredApplies;
 }
 
 std::size_t pending_apply_to_authored_count() noexcept {
