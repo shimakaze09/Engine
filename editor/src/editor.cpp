@@ -62,6 +62,7 @@
 #include "editor_panels_diagnostics.h"
 #include "editor_panels_inspector.h"
 #include "editor_panels_main.h"
+#include "editor_panels_material.h"
 #include "editor_panels_viewport.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
@@ -147,6 +148,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   }
   draw_asset_browser_panel();
   draw_console_panel();
+  draw_material_editor_panel();
 }
 
 /// Applies the editor's visual theme: neutral dark palette, one restrained

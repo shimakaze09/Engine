@@ -3,6 +3,8 @@
 
 #include "editor_commands.h"
 
+#include "editor_material_edit.h"
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -636,6 +638,9 @@ bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
     // Gated: proceeds immediately when the current document is clean, or
     // arms the unsaved-change prompt and defers (#158's contract).
     request_scene_open(entry.osPath);
+    return true;
+  case AssetOpenAction::EditMaterial:
+    open_material_editor(entry.virtualPath);
     return true;
   case AssetOpenAction::SelectOnly:
   default:

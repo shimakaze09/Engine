@@ -17,9 +17,11 @@
 
 #include "editor_commands.h"
 #include "editor_inspector_metadata.h"
+#include "editor_material_edit.h"
 #include "editor_reference_pickers.h"
 #include "editor_session.h"
 #include "engine/renderer/asset_database.h"
+#include "engine/runtime/editor_bridge.h"
 
 namespace engine::editor {
 
@@ -56,6 +58,15 @@ bool draw_mesh_component_fields(runtime::Entity entity,
   mark_modified(modified, draw_asset_reference_picker(
                               "Material", renderer::AssetTypeTag::Material,
                               &mesh.materialAssetId));
+  if (mesh.materialAssetId != 0ULL) {
+    ImGui::SameLine();
+    char materialPath[260] = {};
+    if (ImGui::SmallButton("Edit##material") &&
+        runtime::editor_asset_display_path(mesh.materialAssetId, materialPath,
+                                           sizeof(materialPath))) {
+      open_material_editor(materialPath);
+    }
+  }
   mark_modified(modified, ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
   mark_modified(modified, ImGui::SliderFloat("Roughness", &mesh.roughness,
                                              0.0F, 1.0F, "%.2f"));
