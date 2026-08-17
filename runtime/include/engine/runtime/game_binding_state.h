@@ -39,7 +39,7 @@ private:
   /// Bounded label copy usable in constant evaluation.
   static constexpr void copy_label(char (&dst)[64], const char *src) noexcept {
     std::size_t i = 0U;
-    for (; (src[i] != '\0') && (i < 63U); ++i) {
+    for (; (i < 63U) && (src[i] != '\0'); ++i) {
       dst[i] = src[i];
     }
     dst[i] = '\0';
