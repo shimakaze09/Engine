@@ -183,6 +183,31 @@ bool resolve_pbr_program_state(BackendState &backend,
       dev->shader_param(pbrProgram, "u_albedoMap");
   backend.pbrOpacityLocation =
       required_param(&ok, dev, pbrProgram, "u_opacity");
+  // issue #160: texture-backed PBR material slots — all optional, same
+  // fallback contract as u_hasAlbedoTexture above.
+  backend.pbrEmissiveLocation = dev->shader_param(pbrProgram, "u_emissive");
+  backend.pbrHasMetallicRoughnessTextureLocation =
+      dev->shader_param(pbrProgram, "u_hasMetallicRoughnessTexture");
+  backend.pbrMetallicRoughnessMapLocation =
+      dev->shader_param(pbrProgram, "u_metallicRoughnessMap");
+  backend.pbrHasEmissiveTextureLocation =
+      dev->shader_param(pbrProgram, "u_hasEmissiveTexture");
+  backend.pbrEmissiveMapLocation =
+      dev->shader_param(pbrProgram, "u_emissiveMap");
+  backend.pbrHasOcclusionTextureLocation =
+      dev->shader_param(pbrProgram, "u_hasOcclusionTexture");
+  backend.pbrOcclusionMapLocation =
+      dev->shader_param(pbrProgram, "u_occlusionMap");
+  backend.pbrHasOpacityTextureLocation =
+      dev->shader_param(pbrProgram, "u_hasOpacityTexture");
+  backend.pbrOpacityMapLocation =
+      dev->shader_param(pbrProgram, "u_opacityMap");
+  backend.pbrAlphaModeLocation =
+      dev->shader_param(pbrProgram, "u_alphaMode");
+  backend.pbrAlphaCutoffLocation =
+      dev->shader_param(pbrProgram, "u_alphaCutoff");
+  backend.pbrUvTilingLocation = dev->shader_param(pbrProgram, "u_uvTiling");
+  backend.pbrUvOffsetLocation = dev->shader_param(pbrProgram, "u_uvOffset");
   backend.pbrViewLocation =
       required_param(&ok, dev, pbrProgram, "u_viewMatrix");
   backend.pbrViewProjectionLocation =

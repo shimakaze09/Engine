@@ -136,9 +136,23 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
     auto drawGBufferBatches = [&]() {
       DeviceTextureHandle boundAlbedoTex{};
+      DeviceTextureHandle boundMaterialTex[4] = {};
       if (backend.gbufAlbedoTextureLoc.valid()) {
         dev->set_param_i32(backend.gbufAlbedoTextureLoc, 0);
       }
+      const MaterialTextureUniformLocs materialTexLocs{
+          backend.gbufHasMetallicRoughnessTextureLoc,
+          backend.gbufMetallicRoughnessTextureLoc,
+          backend.gbufHasEmissiveTextureLoc,
+          backend.gbufEmissiveTextureLoc,
+          backend.gbufHasOcclusionTextureLoc,
+          backend.gbufOcclusionTextureLoc,
+          backend.gbufHasOpacityTextureLoc,
+          backend.gbufOpacityTextureLoc,
+          backend.gbufAlphaModeLoc,
+          backend.gbufAlphaCutoffLoc,
+          backend.gbufUvTilingLoc,
+          backend.gbufUvOffsetLoc};
       for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
            ++batchIndex) {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
@@ -184,6 +198,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           dev->bind_texture_slot(0U, kInvalidDeviceTexture);
           boundAlbedoTex = kInvalidDeviceTexture;
         }
+        upload_material_texture_slots(materialTexLocs, dev, command.material,
+                                      boundMaterialTex);
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
         if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
@@ -221,7 +237,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->bind_program(backend.gbufferSkinnedProgram);
             upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,
                                             timeSeconds, singleCommand, model,
-                                            normalMatrix, &boundAlbedoTex);
+                                            normalMatrix, &boundAlbedoTex,
+                                            boundMaterialTex);
             if (mesh->indexCount > 0U) {
               ++frameStats.drawCalls;
               frameStats.triangleCount += (mesh->indexCount / 3U);
@@ -761,9 +778,23 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
 
       const math::Mat4 &vp = viewProjection;
+      const MaterialTextureUniformLocs transparentMaterialTexLocs{
+          backend.pbrHasMetallicRoughnessTextureLocation,
+          backend.pbrMetallicRoughnessMapLocation,
+          backend.pbrHasEmissiveTextureLocation,
+          backend.pbrEmissiveMapLocation,
+          backend.pbrHasOcclusionTextureLocation,
+          backend.pbrOcclusionMapLocation,
+          backend.pbrHasOpacityTextureLocation,
+          backend.pbrOpacityMapLocation,
+          backend.pbrAlphaModeLocation,
+          backend.pbrAlphaCutoffLocation,
+          backend.pbrUvTilingLocation,
+          backend.pbrUvOffsetLocation};
 
       auto drawForwardTransparent = [&](std::size_t start, std::size_t end) {
         DeviceTextureHandle boundAlbedoTex{};
+        DeviceTextureHandle boundMaterialTex[4] = {};
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
@@ -783,6 +814,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           if (backend.pbrOpacityLocation.valid())
             dev->set_param_f32(backend.pbrOpacityLocation,
                                    cmd.material.opacity);
+          if (backend.pbrEmissiveLocation.valid())
+            dev->set_param_vec3(backend.pbrEmissiveLocation,
+                                  &cmd.material.emissive.x);
           upload_pbr_foliage_uniforms(backend, dev, cmd);
           const DeviceTextureHandle albedoTex =
               texture_device_handle(cmd.material.albedoTexture);
@@ -799,6 +833,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->bind_texture_slot(0U, kInvalidDeviceTexture);
             boundAlbedoTex = kInvalidDeviceTexture;
           }
+          upload_material_texture_slots(transparentMaterialTexLocs, dev,
+                                        cmd.material, boundMaterialTex);
           const math::Mat4 model = compute_model_matrix(cmd);
           const math::Mat4 mvp = compute_mvp(model, vp);
           float nm[9] = {};

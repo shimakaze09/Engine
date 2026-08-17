@@ -70,6 +70,30 @@ bool resolve_gbuffer_program_state(BackendState &backend,
   backend.gbufRoughnessLoc = dev->shader_param(gbufProg, "uRoughness");
   backend.gbufAOLoc = dev->shader_param(gbufProg, "uAO");
   backend.gbufEmissiveLoc = dev->shader_param(gbufProg, "uEmissive");
+  // issue #160: texture-backed PBR material slots — all optional, like the
+  // albedo texture above (a dropped uniform just means uHasXTexture stays
+  // unset and the fragment shader falls back to scalar-only).
+  backend.gbufHasMetallicRoughnessTextureLoc =
+      dev->shader_param(gbufProg, "uHasMetallicRoughnessTexture");
+  backend.gbufMetallicRoughnessTextureLoc =
+      dev->shader_param(gbufProg, "uMetallicRoughnessTexture");
+  backend.gbufHasEmissiveTextureLoc =
+      dev->shader_param(gbufProg, "uHasEmissiveTexture");
+  backend.gbufEmissiveTextureLoc =
+      dev->shader_param(gbufProg, "uEmissiveTexture");
+  backend.gbufHasOcclusionTextureLoc =
+      dev->shader_param(gbufProg, "uHasOcclusionTexture");
+  backend.gbufOcclusionTextureLoc =
+      dev->shader_param(gbufProg, "uOcclusionTexture");
+  backend.gbufHasOpacityTextureLoc =
+      dev->shader_param(gbufProg, "uHasOpacityTexture");
+  backend.gbufOpacityTextureLoc =
+      dev->shader_param(gbufProg, "uOpacityTexture");
+  backend.gbufAlphaModeLoc = dev->shader_param(gbufProg, "uAlphaMode");
+  backend.gbufAlphaCutoffLoc =
+      dev->shader_param(gbufProg, "uAlphaCutoff");
+  backend.gbufUvTilingLoc = dev->shader_param(gbufProg, "uUvTiling");
+  backend.gbufUvOffsetLoc = dev->shader_param(gbufProg, "uUvOffset");
   return ok;
 }
 
@@ -285,6 +309,32 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
   backend.gbufSkinnedAOLoc = dev->shader_param(skinnedProg, "uAO");
   backend.gbufSkinnedEmissiveLoc =
       dev->shader_param(skinnedProg, "uEmissive");
+  // issue #160: texture-backed PBR material slots, same optional-uniform
+  // contract as the static G-buffer program above.
+  backend.gbufSkinnedHasMetallicRoughnessTextureLoc =
+      dev->shader_param(skinnedProg, "uHasMetallicRoughnessTexture");
+  backend.gbufSkinnedMetallicRoughnessTextureLoc =
+      dev->shader_param(skinnedProg, "uMetallicRoughnessTexture");
+  backend.gbufSkinnedHasEmissiveTextureLoc =
+      dev->shader_param(skinnedProg, "uHasEmissiveTexture");
+  backend.gbufSkinnedEmissiveTextureLoc =
+      dev->shader_param(skinnedProg, "uEmissiveTexture");
+  backend.gbufSkinnedHasOcclusionTextureLoc =
+      dev->shader_param(skinnedProg, "uHasOcclusionTexture");
+  backend.gbufSkinnedOcclusionTextureLoc =
+      dev->shader_param(skinnedProg, "uOcclusionTexture");
+  backend.gbufSkinnedHasOpacityTextureLoc =
+      dev->shader_param(skinnedProg, "uHasOpacityTexture");
+  backend.gbufSkinnedOpacityTextureLoc =
+      dev->shader_param(skinnedProg, "uOpacityTexture");
+  backend.gbufSkinnedAlphaModeLoc =
+      dev->shader_param(skinnedProg, "uAlphaMode");
+  backend.gbufSkinnedAlphaCutoffLoc =
+      dev->shader_param(skinnedProg, "uAlphaCutoff");
+  backend.gbufSkinnedUvTilingLoc =
+      dev->shader_param(skinnedProg, "uUvTiling");
+  backend.gbufSkinnedUvOffsetLoc =
+      dev->shader_param(skinnedProg, "uUvOffset");
   if ((dev->bind_program_uniform_block == nullptr) ||
       !dev->bind_program_uniform_block(skinnedProg, "BonePalette",
                                        kBonePaletteUboBinding)) {

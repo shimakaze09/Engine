@@ -19,6 +19,15 @@
 #include <cstdio>
 #include <limits>
 
+namespace engine::renderer {
+// Link stub: upload_material_texture_slots (linked in from
+// command_buffer_flush_uniforms.cpp) reports every slot unresolved to the
+// caller; this test never exercises texture-slot binding.
+DeviceTextureHandle texture_device_handle(TextureHandle) noexcept {
+  return kInvalidDeviceTexture;
+}
+} // namespace engine::renderer
+
 namespace {
 
 using namespace engine::renderer;

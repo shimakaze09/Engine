@@ -108,6 +108,20 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
+    const MaterialTextureUniformLocs forwardMaterialTexLocs{
+        backend.pbrHasMetallicRoughnessTextureLocation,
+        backend.pbrMetallicRoughnessMapLocation,
+        backend.pbrHasEmissiveTextureLocation,
+        backend.pbrEmissiveMapLocation,
+        backend.pbrHasOcclusionTextureLocation,
+        backend.pbrOcclusionMapLocation,
+        backend.pbrHasOpacityTextureLocation,
+        backend.pbrOpacityMapLocation,
+        backend.pbrAlphaModeLocation,
+        backend.pbrAlphaCutoffLocation,
+        backend.pbrUvTilingLocation,
+        backend.pbrUvOffsetLocation};
+
     auto drawForwardCommand = [&](const DrawCommand &command,
                                   const GpuMesh &mesh) {
       const math::Mat4 model = compute_model_matrix(command);
@@ -139,7 +153,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     };
 
     auto uploadForwardMaterial = [&](const Material &material,
-                                     DeviceTextureHandle *boundAlbedoTexture) {
+                                     DeviceTextureHandle *boundAlbedoTexture,
+                                     DeviceTextureHandle *boundMaterialTex) {
       if (backend.pbrAlbedoLocation.valid()) {
         dev->set_param_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
       }
@@ -152,6 +167,10 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       }
       if (backend.pbrOpacityLocation.valid()) {
         dev->set_param_f32(backend.pbrOpacityLocation, material.opacity);
+      }
+      if (backend.pbrEmissiveLocation.valid()) {
+        dev->set_param_vec3(backend.pbrEmissiveLocation,
+                              &material.emissive.x);
       }
 
       const DeviceTextureHandle albedoTex =
@@ -171,10 +190,13 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
         dev->bind_texture_slot(0U, kInvalidDeviceTexture);
         *boundAlbedoTexture = kInvalidDeviceTexture;
       }
+      upload_material_texture_slots(forwardMaterialTexLocs, dev, material,
+                                    boundMaterialTex);
     };
 
     auto drawRange = [&](std::size_t start, std::size_t end) {
       DeviceTextureHandle boundAlbedoTexture{};
+      DeviceTextureHandle boundMaterialTex[4] = {};
 
       if ((start == 0U) && (end == opaqueCount)) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
@@ -188,7 +210,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
             continue;
           }
 
-          uploadForwardMaterial(command.material, &boundAlbedoTexture);
+          uploadForwardMaterial(command.material, &boundAlbedoTexture,
+                                boundMaterialTex);
           upload_pbr_foliage_uniforms(backend, dev, command);
 
           if ((batch.count > 1U) && !mesh->hasSkin &&
@@ -225,7 +248,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           continue;
         }
 
-        uploadForwardMaterial(command.material, &boundAlbedoTexture);
+        uploadForwardMaterial(command.material, &boundAlbedoTexture,
+                                boundMaterialTex);
         drawForwardCommand(command, *mesh);
       }
     };

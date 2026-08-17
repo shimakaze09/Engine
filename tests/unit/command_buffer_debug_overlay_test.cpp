@@ -75,6 +75,9 @@ bool upload_instance_matrices(BackendState &, const RenderDevice *,
                               const StaticMeshBatch &) noexcept {
   return false;
 }
+void upload_material_texture_slots(const MaterialTextureUniformLocs &,
+                                   const RenderDevice *, const Material &,
+                                   DeviceTextureHandle *) noexcept {}
 
 } // namespace engine::renderer
 

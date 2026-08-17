@@ -137,6 +137,38 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
                                      const RenderDevice *dev,
                                      const DrawCommand &command) noexcept;
 
+/// Cached uniform locations for one program variant's texture-backed PBR
+/// material slots (issue #160): metallicRoughness/emissive/occlusion/
+/// opacity samplers plus alpha-mode/cutoff and the UV transform. Albedo
+/// keeps its own pre-existing per-program loc pair (every program already
+/// had it before this issue).
+struct MaterialTextureUniformLocs final {
+  ShaderParam hasMetallicRoughness{};
+  ShaderParam metallicRoughnessMap{};
+  ShaderParam hasEmissive{};
+  ShaderParam emissiveMap{};
+  ShaderParam hasOcclusion{};
+  ShaderParam occlusionMap{};
+  ShaderParam hasOpacity{};
+  ShaderParam opacityMap{};
+  ShaderParam alphaMode{};
+  ShaderParam alphaCutoff{};
+  ShaderParam uvTiling{};
+  ShaderParam uvOffset{};
+};
+
+/// Uploads the four texture-backed material slots issue #160 adds (bound
+/// to texture slots 1-4; slot 0 stays each program's pre-existing albedo
+/// slot) plus the UV transform and alpha-mode/cutoff uniforms.
+/// boundMaterialTex[0..3] tracks the last-bound device texture per slot
+/// (metallicRoughness/emissive/occlusion/opacity) so a batch reusing the
+/// same material does not redundantly rebind — mirrors the existing
+/// per-batch albedo dedupe each flush loop already does.
+void upload_material_texture_slots(
+    const MaterialTextureUniformLocs &locs, const RenderDevice *dev,
+    const Material &material,
+    DeviceTextureHandle boundMaterialTex[4]) noexcept;
+
 /// Uploads distance fog settings to the deferred lighting program.
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
@@ -176,13 +208,14 @@ bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
                          std::uint32_t paletteIndex) noexcept;
 
 /// Uploads every uniform the bound skinned G-buffer program needs for one
-/// draw (camera, material, model) and rebinds unit 0 to the command's
-/// albedo texture, keeping the caller's binding cache in sync.
+/// draw (camera, material, model) and rebinds unit 0 plus units 1-4 (issue
+/// #160's texture-backed material slots) to the command's textures,
+/// keeping the caller's binding caches in sync.
 void upload_skinned_gbuffer_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const math::Mat4 &view, const math::Mat4 &projection, float timeSeconds,
     const DrawCommand &command, const math::Mat4 &model,
-    const float *normalMatrix,
-    DeviceTextureHandle *inOutBoundAlbedoTex) noexcept;
+    const float *normalMatrix, DeviceTextureHandle *inOutBoundAlbedoTex,
+    DeviceTextureHandle inOutBoundMaterialTex[4]) noexcept;
 
 } // namespace engine::renderer

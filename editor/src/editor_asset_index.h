@@ -136,6 +136,7 @@ bool refresh_child_folder_cache(const char *folder,
 enum class AssetOpenAction : std::uint8_t {
   SpawnMesh,
   OpenScene,
+  EditMaterial,
   SelectOnly,
 };
 

@@ -317,6 +317,13 @@ engine_add_test_executable(engine_unit_editor_asset_request
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_editor_material_bridge
+    SOURCES
+    editor_material_bridge_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_world_name_lookup
     SOURCES
     world_name_lookup_test.cpp
@@ -506,6 +513,19 @@ engine_add_test_executable(engine_unit_editor_console_capture
 engine_add_test_executable(engine_unit_editor_inspector_edit
     SOURCES
     editor_inspector_edit_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_material_edit
+    SOURCES
+    editor_material_edit_test.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src
@@ -1247,6 +1267,36 @@ engine_add_test_executable(engine_unit_run_result
 engine_add_test_executable(engine_unit_material_asset
     SOURCES
     material_asset_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+# ---- Issue #160: texture-backed PBR materials ----
+
+engine_add_test_executable(engine_unit_material_asset_v2
+    SOURCES
+    material_asset_v2_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_material_reload
+    SOURCES
+    material_reload_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_material_texture_resolve
+    SOURCES
+    material_texture_resolve_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_material_writer
+    SOURCES
+    material_writer_test.cpp
     PRIVATE_DEPS
     engine_renderer
 )

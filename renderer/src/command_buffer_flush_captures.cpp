@@ -116,8 +116,28 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
+    // issue #160: scene captures share pbrProgram (and its GL uniform
+    // state) with the main forward pass, so every draw here must set these
+    // uniforms itself even when a capture's own materials never use them —
+    // otherwise a capture would silently keep whatever texture the last
+    // forward draw left bound.
+    const MaterialTextureUniformLocs captureMaterialTexLocs{
+        backend.pbrHasMetallicRoughnessTextureLocation,
+        backend.pbrMetallicRoughnessMapLocation,
+        backend.pbrHasEmissiveTextureLocation,
+        backend.pbrEmissiveMapLocation,
+        backend.pbrHasOcclusionTextureLocation,
+        backend.pbrOcclusionMapLocation,
+        backend.pbrHasOpacityTextureLocation,
+        backend.pbrOpacityMapLocation,
+        backend.pbrAlphaModeLocation,
+        backend.pbrAlphaCutoffLocation,
+        backend.pbrUvTilingLocation,
+        backend.pbrUvOffsetLocation};
+
     auto drawCaptureRange = [&](std::size_t start, std::size_t end) {
       DeviceTextureHandle boundAlbedoTexture{};
+      DeviceTextureHandle boundMaterialTex[4] = {};
       for (std::size_t i = start; i < end; ++i) {
         const DrawCommand &command = commandBufferView.data[i];
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
@@ -142,6 +162,10 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
           dev->set_param_f32(backend.pbrOpacityLocation,
                                  command.material.opacity);
         }
+        if (backend.pbrEmissiveLocation.valid()) {
+          dev->set_param_vec3(backend.pbrEmissiveLocation,
+                                &command.material.emissive.x);
+        }
         upload_pbr_foliage_uniforms(backend, dev, command);
 
         const DeviceTextureHandle albedoTex =
@@ -161,6 +185,8 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
           dev->bind_texture_slot(0U, kInvalidDeviceTexture);
           boundAlbedoTexture = kInvalidDeviceTexture;
         }
+        upload_material_texture_slots(captureMaterialTexLocs, dev,
+                                      command.material, boundMaterialTex);
 
         const math::Mat4 model = compute_model_matrix(command);
         const math::Mat4 mvp = compute_mvp(model, captureViewProjection);

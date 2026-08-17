@@ -282,6 +282,60 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
   }
 }
 
+void upload_material_texture_slots(
+    const MaterialTextureUniformLocs &locs, const RenderDevice *dev,
+    const Material &material,
+    DeviceTextureHandle boundMaterialTex[4]) noexcept {
+  constexpr std::uint32_t kMetallicRoughnessSlot = 1U;
+  constexpr std::uint32_t kEmissiveSlot = 2U;
+  constexpr std::uint32_t kOcclusionSlot = 3U;
+  constexpr std::uint32_t kOpacitySlot = 4U;
+
+  auto bindSlot = [&](ShaderParam hasParam, ShaderParam mapParam,
+                      std::uint32_t slot, TextureHandle handle,
+                      DeviceTextureHandle *boundTex) {
+    const DeviceTextureHandle deviceTex = texture_device_handle(handle);
+    const bool has = (handle != kInvalidTextureHandle) &&
+                     (deviceTex != kInvalidDeviceTexture);
+    if (hasParam.valid()) {
+      dev->set_param_i32(hasParam, has ? 1 : 0);
+    }
+    if (mapParam.valid()) {
+      dev->set_param_i32(mapParam, static_cast<std::int32_t>(slot));
+    }
+    const DeviceTextureHandle desired =
+        has ? deviceTex : kInvalidDeviceTexture;
+    if (desired != *boundTex) {
+      dev->bind_texture_slot(slot, desired);
+      *boundTex = desired;
+    }
+  };
+
+  bindSlot(locs.hasMetallicRoughness, locs.metallicRoughnessMap,
+          kMetallicRoughnessSlot, material.metallicRoughnessTexture,
+          &boundMaterialTex[0]);
+  bindSlot(locs.hasEmissive, locs.emissiveMap, kEmissiveSlot,
+          material.emissiveTexture, &boundMaterialTex[1]);
+  bindSlot(locs.hasOcclusion, locs.occlusionMap, kOcclusionSlot,
+          material.occlusionTexture, &boundMaterialTex[2]);
+  bindSlot(locs.hasOpacity, locs.opacityMap, kOpacitySlot,
+          material.opacityTexture, &boundMaterialTex[3]);
+
+  if (locs.alphaMode.valid()) {
+    dev->set_param_i32(locs.alphaMode,
+                       static_cast<std::int32_t>(material.alphaMode));
+  }
+  if (locs.alphaCutoff.valid()) {
+    dev->set_param_f32(locs.alphaCutoff, material.alphaCutoff);
+  }
+  if (locs.uvTiling.valid()) {
+    dev->set_param_vec2(locs.uvTiling, &material.uvTiling.x);
+  }
+  if (locs.uvOffset.valid()) {
+    dev->set_param_vec2(locs.uvOffset, &material.uvOffset.x);
+  }
+}
+
 void upload_deferred_distance_fog_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const DistanceFogSettings &settings) noexcept {

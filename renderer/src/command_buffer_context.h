@@ -78,6 +78,20 @@ struct BackendState final {
   ShaderParam pbrHasAlbedoTextureLocation{};
   ShaderParam pbrAlbedoMapLocation{};
   ShaderParam pbrOpacityLocation{};
+  // issue #160: texture-backed PBR material slots (forward program).
+  ShaderParam pbrEmissiveLocation{};
+  ShaderParam pbrHasMetallicRoughnessTextureLocation{};
+  ShaderParam pbrMetallicRoughnessMapLocation{};
+  ShaderParam pbrHasEmissiveTextureLocation{};
+  ShaderParam pbrEmissiveMapLocation{};
+  ShaderParam pbrHasOcclusionTextureLocation{};
+  ShaderParam pbrOcclusionMapLocation{};
+  ShaderParam pbrHasOpacityTextureLocation{};
+  ShaderParam pbrOpacityMapLocation{};
+  ShaderParam pbrAlphaModeLocation{};
+  ShaderParam pbrAlphaCutoffLocation{};
+  ShaderParam pbrUvTilingLocation{};
+  ShaderParam pbrUvOffsetLocation{};
   ShaderParam pbrViewLocation{};
   ShaderParam pbrViewProjectionLocation{};
   ShaderParam pbrUseInstancingLocation{};
@@ -94,7 +108,6 @@ struct BackendState final {
   ShaderParam pbrHeightFogDensityLocation{};
   ShaderParam pbrHeightFogFalloffLocation{};
   ShaderParam pbrHeightFogStepCountLocation{};
-
   // Directional lights.
   ShaderParam pbrDirLightCountLocation{};
   std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightDir{};
@@ -230,7 +243,19 @@ struct BackendState final {
   ShaderParam gbufRoughnessLoc{};
   ShaderParam gbufAOLoc{};
   ShaderParam gbufEmissiveLoc{};
-
+  // issue #160: texture-backed PBR material slots (static G-buffer program).
+  ShaderParam gbufHasMetallicRoughnessTextureLoc{};
+  ShaderParam gbufMetallicRoughnessTextureLoc{};
+  ShaderParam gbufHasEmissiveTextureLoc{};
+  ShaderParam gbufEmissiveTextureLoc{};
+  ShaderParam gbufHasOcclusionTextureLoc{};
+  ShaderParam gbufOcclusionTextureLoc{};
+  ShaderParam gbufHasOpacityTextureLoc{};
+  ShaderParam gbufOpacityTextureLoc{};
+  ShaderParam gbufAlphaModeLoc{};
+  ShaderParam gbufAlphaCutoffLoc{};
+  ShaderParam gbufUvTilingLoc{};
+  ShaderParam gbufUvOffsetLoc{};
   // Deferred lighting shader.
   ShaderProgramHandle deferredLightShaderHandle{};
   DeviceProgramHandle deferredLightProgram{};
@@ -455,7 +480,21 @@ struct BackendState final {
   ShaderParam gbufSkinnedRoughnessLoc{};
   ShaderParam gbufSkinnedAOLoc{};
   ShaderParam gbufSkinnedEmissiveLoc{};
-
+  // issue #160: texture-backed PBR material slots (skinned G-buffer
+  // program). Shares gbuffer.frag with the static program, so the uniform
+  // names match; only the cached locations differ per linked program.
+  ShaderParam gbufSkinnedHasMetallicRoughnessTextureLoc{};
+  ShaderParam gbufSkinnedMetallicRoughnessTextureLoc{};
+  ShaderParam gbufSkinnedHasEmissiveTextureLoc{};
+  ShaderParam gbufSkinnedEmissiveTextureLoc{};
+  ShaderParam gbufSkinnedHasOcclusionTextureLoc{};
+  ShaderParam gbufSkinnedOcclusionTextureLoc{};
+  ShaderParam gbufSkinnedHasOpacityTextureLoc{};
+  ShaderParam gbufSkinnedOpacityTextureLoc{};
+  ShaderParam gbufSkinnedAlphaModeLoc{};
+  ShaderParam gbufSkinnedAlphaCutoffLoc{};
+  ShaderParam gbufSkinnedUvTilingLoc{};
+  ShaderParam gbufSkinnedUvOffsetLoc{};
   ShaderProgramHandle shadowDepthSkinnedShaderHandle{};
   DeviceProgramHandle shadowDepthSkinnedProgram{};
   ShaderParam shadowSkinnedLightMvpLoc{};

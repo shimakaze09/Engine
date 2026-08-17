@@ -402,8 +402,9 @@ AssetOpenAction resolve_asset_open_action(AssetKind kind) noexcept {
     return AssetOpenAction::SpawnMesh;
   case AssetKind::Scene:
     return AssetOpenAction::OpenScene;
-  case AssetKind::Texture:
   case AssetKind::Material:
+    return AssetOpenAction::EditMaterial;
+  case AssetKind::Texture:
   case AssetKind::Script:
   case AssetKind::Animation:
   case AssetKind::AnimationController:

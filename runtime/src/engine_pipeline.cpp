@@ -43,6 +43,7 @@
 #include "engine/renderer/mesh_primitives.h"
 #include "engine/physics/physics_context.h"
 #include "engine/renderer/shader_system.h"
+#include "engine/renderer/texture_loader.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
@@ -171,6 +172,15 @@ static_assert(kMaxUpdateStepsPerFrame <= physics::kMaxCollisionFrameSteps,
 constexpr std::size_t kMaxChunkJobs = 1024U;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
+
+/// Production MaterialTextureLoadFn: the same synchronous GL texture loader
+/// every other texture consumer (skybox, character textures) already calls.
+/// Only ever invoked from stage_assets, which has just confirmed a GL
+/// context is current.
+renderer::TextureHandle load_material_texture_production(
+    const char *virtualPath, void * /*userData*/) noexcept {
+  return renderer::load_texture(virtualPath);
+}
 
 // ---------------------------------------------------------------------------
 // Job data structures
@@ -886,6 +896,12 @@ void EnginePipeline::Impl::stage_assets() noexcept {
 
     updatedAssets = renderer::update_asset_manager(
         assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
+    // Not a hot path: cost is O(materials with an unresolved texture slot),
+    // which drains to zero once content is resident (see resolve_material_
+    // textures's header comment). Requires the GL context just confirmed
+    // current above.
+    static_cast<void>(renderer::resolve_material_textures(
+        assetDatabase.get(), &load_material_texture_production, nullptr));
     core::release_render_context();
   }
 
