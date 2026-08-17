@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <thread>
 
+#include "engine/core/console.h"
+#include "engine/core/cvar.h"
 #include "engine/core/debug_draw.h"
 #include "engine/core/engine_version.h"
 #include "engine/core/event_bus.h"
@@ -57,6 +59,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
   }
 
   bool loggingInitialized = false;
+  bool cvarsInitialized = false;
+  bool consoleInitialized = false;
+  bool debugDrawInitialized = false;
   bool vfsInitialized = false;
   bool eventBusInitialized = false;
   bool platformInitialized = false;
@@ -76,6 +81,21 @@ bool initialize_core(const CoreConfig &config) noexcept {
       break;
     }
     loggingInitialized = true;
+
+    // Core owns the cvar/console tables (#168): production registration no
+    // longer relies on the zero-initialized fallback, and shutdown_core
+    // clears both so a later bootstrap starts from defaults.
+    if (!initialize_cvars()) {
+      failureMessage = "failed to initialize cvars";
+      break;
+    }
+    cvarsInitialized = true;
+
+    if (!initialize_console()) {
+      failureMessage = "failed to initialize console";
+      break;
+    }
+    consoleInitialized = true;
 
     if (!initialize_vfs()) {
       failureMessage = "failed to initialize virtual file system";
@@ -109,8 +129,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
     }
     profilerInitialized = true;
 
-    // Fixed-storage queue with no failure modes or teardown ordering needs.
-    static_cast<void>(initialize_debug_draw());
+    // Fixed-storage queue whose init cannot fail today; tracked anyway so
+    // the failure rollback below stays symmetric with shutdown_core (#235).
+    debugDrawInitialized = initialize_debug_draw();
 
     const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
     const std::uint32_t workerThreads =
@@ -155,6 +176,10 @@ bool initialize_core(const CoreConfig &config) noexcept {
     shutdown_job_system();
   }
 
+  if (debugDrawInitialized) {
+    shutdown_debug_draw();
+  }
+
   if (profilerInitialized) {
     shutdown_profiler();
   }
@@ -173,6 +198,14 @@ bool initialize_core(const CoreConfig &config) noexcept {
 
   if (vfsInitialized) {
     shutdown_vfs();
+  }
+
+  if (consoleInitialized) {
+    shutdown_console();
+  }
+
+  if (cvarsInitialized) {
+    shutdown_cvars();
   }
 
   if (loggingInitialized) {
@@ -209,6 +242,8 @@ void shutdown_core() noexcept {
   shutdown_platform();
   shutdown_event_bus();
   shutdown_vfs();
+  shutdown_console();
+  shutdown_cvars();
   shutdown_logging();
 
   g_mainFrameAllocator.reset();
