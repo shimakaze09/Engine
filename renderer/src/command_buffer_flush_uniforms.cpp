@@ -41,9 +41,7 @@
 namespace engine::renderer {
 
 namespace {
-constexpr std::uint32_t kInstanceModelAttrib0 = 3U;
-constexpr std::uint32_t kInstanceModelAttribCount = 4U;
-constexpr std::uint32_t kInstanceFoliageAttrib = 7U;
+constexpr std::size_t kInstanceModelColumns = 4U;
 } // namespace
 
 /// Uploads the environment IBL uniforms for the forward PBR program and
@@ -55,32 +53,32 @@ constexpr std::uint32_t kInstanceFoliageAttrib = 7U;
 void apply_pbr_ibl_uniforms(const BackendState &backend,
                             const RenderDevice *dev,
                             bool iblAvailable) noexcept {
-  if (backend.pbrIrradianceMapLoc >= 0) {
-    dev->set_uniform_int(backend.pbrIrradianceMapLoc, kIblIrradianceUnit);
+  if (backend.pbrIrradianceMapLoc.valid()) {
+    dev->set_param_i32(backend.pbrIrradianceMapLoc, kIblIrradianceUnit);
   }
-  if (backend.pbrPrefilteredMapLoc >= 0) {
-    dev->set_uniform_int(backend.pbrPrefilteredMapLoc, kIblPrefilteredUnit);
+  if (backend.pbrPrefilteredMapLoc.valid()) {
+    dev->set_param_i32(backend.pbrPrefilteredMapLoc, kIblPrefilteredUnit);
   }
-  if (backend.pbrBrdfLutLoc >= 0) {
-    dev->set_uniform_int(backend.pbrBrdfLutLoc, kIblBrdfLutUnit);
+  if (backend.pbrBrdfLutLoc.valid()) {
+    dev->set_param_i32(backend.pbrBrdfLutLoc, kIblBrdfLutUnit);
   }
 
-  const bool enabled = iblAvailable && (backend.pbrIblEnabledLoc >= 0) &&
-                       (dev->bind_texture_cubemap != nullptr);
-  if (backend.pbrIblEnabledLoc >= 0) {
-    dev->set_uniform_int(backend.pbrIblEnabledLoc, enabled ? 1 : 0);
+  const bool enabled = iblAvailable && (backend.pbrIblEnabledLoc.valid()) &&
+                       (dev->bind_texture_slot != nullptr);
+  if (backend.pbrIblEnabledLoc.valid()) {
+    dev->set_param_i32(backend.pbrIblEnabledLoc, enabled ? 1 : 0);
   }
   if (!enabled) {
     return;
   }
 
-  dev->bind_texture_cubemap(kIblIrradianceUnit,
+  dev->bind_texture_slot(kIblIrradianceUnit,
                             backend.irradianceEnvironmentTexture);
-  dev->bind_texture_cubemap(kIblPrefilteredUnit,
+  dev->bind_texture_slot(kIblPrefilteredUnit,
                             backend.prefilteredEnvironmentTexture);
-  dev->bind_texture(kIblBrdfLutUnit, backend.brdfLutTexture);
-  if (backend.pbrPrefilteredMipsLoc >= 0) {
-    dev->set_uniform_float(
+  dev->bind_texture_slot(kIblBrdfLutUnit, backend.brdfLutTexture);
+  if (backend.pbrPrefilteredMipsLoc.valid()) {
+    dev->set_param_f32(
         backend.pbrPrefilteredMipsLoc,
         static_cast<float>(backend.prefilteredEnvironmentMipLevels));
   }
@@ -91,115 +89,115 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const SceneLightData &lights) noexcept {
   const std::size_t dirCount =
       std::min(lights.directionalLightCount, kMaxDirectionalLights);
-  if (backend.pbrDirLightCountLocation >= 0) {
-    dev->set_uniform_int(backend.pbrDirLightCountLocation,
+  if (backend.pbrDirLightCountLocation.valid()) {
+    dev->set_param_i32(backend.pbrDirLightCountLocation,
                          static_cast<std::int32_t>(dirCount));
   }
   for (std::size_t i = 0U; i < dirCount; ++i) {
     const auto &dl = lights.directionalLights[i];
-    if (backend.pbrDirLightDir[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
+    if (backend.pbrDirLightDir[i].valid()) {
+      dev->set_param_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
     }
-    if (backend.pbrDirLightColor[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrDirLightColor[i], &dl.color.x);
+    if (backend.pbrDirLightColor[i].valid()) {
+      dev->set_param_vec3(backend.pbrDirLightColor[i], &dl.color.x);
     }
-    if (backend.pbrDirLightIntensity[i] >= 0) {
-      dev->set_uniform_float(backend.pbrDirLightIntensity[i], dl.intensity);
+    if (backend.pbrDirLightIntensity[i].valid()) {
+      dev->set_param_f32(backend.pbrDirLightIntensity[i], dl.intensity);
     }
   }
 
   const std::size_t pointCount =
       std::min(lights.pointLightCount, kForwardMaxPointLights);
-  if (backend.pbrPointLightCountLocation >= 0) {
-    dev->set_uniform_int(backend.pbrPointLightCountLocation,
+  if (backend.pbrPointLightCountLocation.valid()) {
+    dev->set_param_i32(backend.pbrPointLightCountLocation,
                          static_cast<std::int32_t>(pointCount));
   }
   for (std::size_t i = 0U; i < pointCount; ++i) {
     const auto &pl = lights.pointLights[i];
-    if (backend.pbrPointLightPos[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrPointLightPos[i], &pl.position.x);
+    if (backend.pbrPointLightPos[i].valid()) {
+      dev->set_param_vec3(backend.pbrPointLightPos[i], &pl.position.x);
     }
-    if (backend.pbrPointLightColor[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrPointLightColor[i], &pl.color.x);
+    if (backend.pbrPointLightColor[i].valid()) {
+      dev->set_param_vec3(backend.pbrPointLightColor[i], &pl.color.x);
     }
-    if (backend.pbrPointLightIntensity[i] >= 0) {
-      dev->set_uniform_float(backend.pbrPointLightIntensity[i], pl.intensity);
+    if (backend.pbrPointLightIntensity[i].valid()) {
+      dev->set_param_f32(backend.pbrPointLightIntensity[i], pl.intensity);
     }
-    if (backend.pbrPointLightRadius[i] >= 0) {
-      dev->set_uniform_float(backend.pbrPointLightRadius[i], pl.radius);
+    if (backend.pbrPointLightRadius[i].valid()) {
+      dev->set_param_f32(backend.pbrPointLightRadius[i], pl.radius);
     }
   }
 
   const std::size_t spotCount =
       std::min(lights.spotLightCount, kForwardMaxSpotLights);
-  if (backend.pbrSpotLightCountLocation >= 0) {
-    dev->set_uniform_int(backend.pbrSpotLightCountLocation,
+  if (backend.pbrSpotLightCountLocation.valid()) {
+    dev->set_param_i32(backend.pbrSpotLightCountLocation,
                          static_cast<std::int32_t>(spotCount));
   }
   for (std::size_t i = 0U; i < spotCount; ++i) {
     const auto &sl = lights.spotLights[i];
-    if (backend.pbrSpotLightPos[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrSpotLightPos[i], &sl.position.x);
+    if (backend.pbrSpotLightPos[i].valid()) {
+      dev->set_param_vec3(backend.pbrSpotLightPos[i], &sl.position.x);
     }
-    if (backend.pbrSpotLightDir[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrSpotLightDir[i], &sl.direction.x);
+    if (backend.pbrSpotLightDir[i].valid()) {
+      dev->set_param_vec3(backend.pbrSpotLightDir[i], &sl.direction.x);
     }
-    if (backend.pbrSpotLightColor[i] >= 0) {
-      dev->set_uniform_vec3(backend.pbrSpotLightColor[i], &sl.color.x);
+    if (backend.pbrSpotLightColor[i].valid()) {
+      dev->set_param_vec3(backend.pbrSpotLightColor[i], &sl.color.x);
     }
-    if (backend.pbrSpotLightIntensity[i] >= 0) {
-      dev->set_uniform_float(backend.pbrSpotLightIntensity[i], sl.intensity);
+    if (backend.pbrSpotLightIntensity[i].valid()) {
+      dev->set_param_f32(backend.pbrSpotLightIntensity[i], sl.intensity);
     }
-    if (backend.pbrSpotLightRadius[i] >= 0) {
-      dev->set_uniform_float(backend.pbrSpotLightRadius[i], sl.radius);
+    if (backend.pbrSpotLightRadius[i].valid()) {
+      dev->set_param_f32(backend.pbrSpotLightRadius[i], sl.radius);
     }
     // Shaders compare these against dot(L, -spotDir), a cosine — upload
     // cosines, not the stored radian angles.
-    if (backend.pbrSpotLightInnerCone[i] >= 0) {
-      dev->set_uniform_float(backend.pbrSpotLightInnerCone[i],
+    if (backend.pbrSpotLightInnerCone[i].valid()) {
+      dev->set_param_f32(backend.pbrSpotLightInnerCone[i],
                              std::cos(sl.innerConeAngle));
     }
-    if (backend.pbrSpotLightOuterCone[i] >= 0) {
-      dev->set_uniform_float(backend.pbrSpotLightOuterCone[i],
+    if (backend.pbrSpotLightOuterCone[i].valid()) {
+      dev->set_param_f32(backend.pbrSpotLightOuterCone[i],
                              std::cos(sl.outerConeAngle));
     }
   }
 }
 
 struct DistanceFogUniformLocations final {
-  int mode = -1;
-  int start = -1;
-  int end = -1;
-  int density = -1;
-  int color = -1;
+  ShaderParam mode{};
+  ShaderParam start{};
+  ShaderParam end{};
+  ShaderParam density{};
+  ShaderParam color{};
 };
 
 struct HeightFogUniformLocations final {
-  int enabled = -1;
-  int baseHeight = -1;
-  int density = -1;
-  int falloff = -1;
-  int stepCount = -1;
+  ShaderParam enabled{};
+  ShaderParam baseHeight{};
+  ShaderParam density{};
+  ShaderParam falloff{};
+  ShaderParam stepCount{};
 };
 
 void upload_distance_fog_uniforms(
     const RenderDevice *dev, const DistanceFogUniformLocations &locations,
     const DistanceFogSettings &settings) noexcept {
   const DistanceFogSettings fog = normalize_distance_fog_settings(settings);
-  if (locations.mode >= 0) {
-    dev->set_uniform_int(locations.mode, static_cast<std::int32_t>(fog.mode));
+  if (locations.mode.valid()) {
+    dev->set_param_i32(locations.mode, static_cast<std::int32_t>(fog.mode));
   }
-  if (locations.start >= 0) {
-    dev->set_uniform_float(locations.start, fog.start);
+  if (locations.start.valid()) {
+    dev->set_param_f32(locations.start, fog.start);
   }
-  if (locations.end >= 0) {
-    dev->set_uniform_float(locations.end, fog.end);
+  if (locations.end.valid()) {
+    dev->set_param_f32(locations.end, fog.end);
   }
-  if (locations.density >= 0) {
-    dev->set_uniform_float(locations.density, fog.density);
+  if (locations.density.valid()) {
+    dev->set_param_f32(locations.density, fog.density);
   }
-  if (locations.color >= 0) {
-    dev->set_uniform_vec3(locations.color, &fog.color.x);
+  if (locations.color.valid()) {
+    dev->set_param_vec3(locations.color, &fog.color.x);
   }
 }
 
@@ -207,20 +205,20 @@ void upload_height_fog_uniforms(
     const RenderDevice *dev, const HeightFogUniformLocations &locations,
     const HeightFogSettings &settings) noexcept {
   const HeightFogSettings fog = normalize_height_fog_settings(settings);
-  if (locations.enabled >= 0) {
-    dev->set_uniform_int(locations.enabled, fog.enabled ? 1 : 0);
+  if (locations.enabled.valid()) {
+    dev->set_param_i32(locations.enabled, fog.enabled ? 1 : 0);
   }
-  if (locations.baseHeight >= 0) {
-    dev->set_uniform_float(locations.baseHeight, fog.baseHeight);
+  if (locations.baseHeight.valid()) {
+    dev->set_param_f32(locations.baseHeight, fog.baseHeight);
   }
-  if (locations.density >= 0) {
-    dev->set_uniform_float(locations.density, fog.density);
+  if (locations.density.valid()) {
+    dev->set_param_f32(locations.density, fog.density);
   }
-  if (locations.falloff >= 0) {
-    dev->set_uniform_float(locations.falloff, fog.falloff);
+  if (locations.falloff.valid()) {
+    dev->set_param_f32(locations.falloff, fog.falloff);
   }
-  if (locations.stepCount >= 0) {
-    dev->set_uniform_int(locations.stepCount, fog.stepCount);
+  if (locations.stepCount.valid()) {
+    dev->set_param_i32(locations.stepCount, fog.stepCount);
   }
 }
 
@@ -253,16 +251,16 @@ void upload_pbr_height_fog_uniforms(
 void upload_pbr_foliage_uniforms(const BackendState &backend,
                                  const RenderDevice *dev,
                                  const DrawCommand &command) noexcept {
-  if (backend.pbrFoliageWindStrengthLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFoliageWindStrengthLocation,
+  if (backend.pbrFoliageWindStrengthLocation.valid()) {
+    dev->set_param_f32(backend.pbrFoliageWindStrengthLocation,
                            command.foliageWindStrength);
   }
-  if (backend.pbrFoliageWindFrequencyLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFoliageWindFrequencyLocation,
+  if (backend.pbrFoliageWindFrequencyLocation.valid()) {
+    dev->set_param_f32(backend.pbrFoliageWindFrequencyLocation,
                            command.foliageWindFrequency);
   }
-  if (backend.pbrFoliagePhaseLocation >= 0) {
-    dev->set_uniform_float(backend.pbrFoliagePhaseLocation,
+  if (backend.pbrFoliagePhaseLocation.valid()) {
+    dev->set_param_f32(backend.pbrFoliagePhaseLocation,
                            command.foliageWindPhase);
   }
 }
@@ -270,16 +268,16 @@ void upload_pbr_foliage_uniforms(const BackendState &backend,
 void upload_gbuffer_foliage_uniforms(const BackendState &backend,
                                      const RenderDevice *dev,
                                      const DrawCommand &command) noexcept {
-  if (backend.gbufFoliageWindStrengthLoc >= 0) {
-    dev->set_uniform_float(backend.gbufFoliageWindStrengthLoc,
+  if (backend.gbufFoliageWindStrengthLoc.valid()) {
+    dev->set_param_f32(backend.gbufFoliageWindStrengthLoc,
                            command.foliageWindStrength);
   }
-  if (backend.gbufFoliageWindFrequencyLoc >= 0) {
-    dev->set_uniform_float(backend.gbufFoliageWindFrequencyLoc,
+  if (backend.gbufFoliageWindFrequencyLoc.valid()) {
+    dev->set_param_f32(backend.gbufFoliageWindFrequencyLoc,
                            command.foliageWindFrequency);
   }
-  if (backend.gbufFoliagePhaseLoc >= 0) {
-    dev->set_uniform_float(backend.gbufFoliagePhaseLoc,
+  if (backend.gbufFoliagePhaseLoc.valid()) {
+    dev->set_param_f32(backend.gbufFoliagePhaseLoc,
                            command.foliageWindPhase);
   }
 }
@@ -313,109 +311,113 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
                               const SceneLightData &lights, bool shadowEnabled,
                               bool spotShadowEnabled,
                               bool pointShadowEnabled) noexcept {
-  if ((dev == nullptr) || (dev->set_uniform_int == nullptr)) {
+  if ((dev == nullptr) || (dev->set_param_i32 == nullptr)) {
     return;
   }
 
   for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-    const int texUnit = 6 + static_cast<int>(c);
+    const auto texUnit = static_cast<std::uint32_t>(6U + c);
     if (shadowEnabled) {
-      dev->bind_texture(texUnit, backend.shadowState.depthTextures[c]);
+      dev->bind_texture_slot(texUnit, backend.shadowState.depthTextures[c]);
     }
-    if (backend.pbrShadowMapLocs[c] >= 0) {
-      dev->set_uniform_int(backend.pbrShadowMapLocs[c], texUnit);
+    if (backend.pbrShadowMapLocs[c].valid()) {
+      dev->set_param_i32(backend.pbrShadowMapLocs[c],
+                         static_cast<std::int32_t>(texUnit));
     }
-    if (backend.pbrShadowMatrixLocs[c] >= 0) {
-      dev->set_uniform_mat4(
+    if (backend.pbrShadowMatrixLocs[c].valid()) {
+      dev->set_param_mat4(
           backend.pbrShadowMatrixLocs[c],
           &backend.shadowState.cascades[c].lightViewProjection.columns[0].x);
     }
-    if (backend.pbrCascadeSplitLocs[c] >= 0) {
-      dev->set_uniform_float(backend.pbrCascadeSplitLocs[c],
+    if (backend.pbrCascadeSplitLocs[c].valid()) {
+      dev->set_param_f32(backend.pbrCascadeSplitLocs[c],
                              backend.shadowState.cascades[c].splitDistance);
     }
   }
-  if (backend.pbrShadowEnabledLoc >= 0) {
-    dev->set_uniform_int(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
+  if (backend.pbrShadowEnabledLoc.valid()) {
+    dev->set_param_i32(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
   }
 
   for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
     const auto &slot = backend.spotShadowState.slots[s];
-    const int texUnit = 10 + static_cast<int>(s);
+    const auto texUnit = static_cast<std::uint32_t>(10U + s);
     if (spotShadowEnabled) {
-      dev->bind_texture(texUnit, slot.depthTexture);
+      dev->bind_texture_slot(texUnit, slot.depthTexture);
     }
-    if (backend.pbrSpotShadowMapLocs[s] >= 0) {
-      dev->set_uniform_int(backend.pbrSpotShadowMapLocs[s], texUnit);
+    if (backend.pbrSpotShadowMapLocs[s].valid()) {
+      dev->set_param_i32(backend.pbrSpotShadowMapLocs[s],
+                         static_cast<std::int32_t>(texUnit));
     }
-    if (backend.pbrSpotShadowMatrixLocs[s] >= 0) {
-      dev->set_uniform_mat4(backend.pbrSpotShadowMatrixLocs[s],
+    if (backend.pbrSpotShadowMatrixLocs[s].valid()) {
+      dev->set_param_mat4(backend.pbrSpotShadowMatrixLocs[s],
                             &slot.lightViewProjection.columns[0].x);
     }
-    if (backend.pbrSpotShadowLightIdxLocs[s] >= 0) {
-      dev->set_uniform_int(backend.pbrSpotShadowLightIdxLocs[s],
+    if (backend.pbrSpotShadowLightIdxLocs[s].valid()) {
+      dev->set_param_i32(backend.pbrSpotShadowLightIdxLocs[s],
                            slot.lightIndex);
     }
   }
-  if (backend.pbrSpotShadowEnabledLoc >= 0) {
-    dev->set_uniform_int(backend.pbrSpotShadowEnabledLoc,
+  if (backend.pbrSpotShadowEnabledLoc.valid()) {
+    dev->set_param_i32(backend.pbrSpotShadowEnabledLoc,
                          spotShadowEnabled ? 1 : 0);
   }
 
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
     const auto &slot = backend.pointShadowState.slots[s];
-    const int texUnit = 14 + static_cast<int>(s);
-    if (pointShadowEnabled && (dev->bind_texture_cubemap != nullptr)) {
-      dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
+    const auto texUnit = static_cast<std::uint32_t>(14U + s);
+    if (pointShadowEnabled && (dev->bind_texture_slot != nullptr)) {
+      dev->bind_texture_slot(texUnit, slot.depthCubemap);
     }
-    if (backend.pbrPointShadowMapLocs[s] >= 0) {
-      dev->set_uniform_int(backend.pbrPointShadowMapLocs[s], texUnit);
+    if (backend.pbrPointShadowMapLocs[s].valid()) {
+      dev->set_param_i32(backend.pbrPointShadowMapLocs[s],
+                         static_cast<std::int32_t>(texUnit));
     }
-    if (backend.pbrPointShadowLightPosLocs[s] >= 0) {
+    if (backend.pbrPointShadowLightPosLocs[s].valid()) {
       const math::Vec3 lightPos =
           point_shadow_slot_light_position(slot.lightIndex, lights);
-      dev->set_uniform_vec3(backend.pbrPointShadowLightPosLocs[s], &lightPos.x);
+      dev->set_param_vec3(backend.pbrPointShadowLightPosLocs[s], &lightPos.x);
     }
-    if (backend.pbrPointShadowFarPlaneLocs[s] >= 0) {
-      dev->set_uniform_float(backend.pbrPointShadowFarPlaneLocs[s],
+    if (backend.pbrPointShadowFarPlaneLocs[s].valid()) {
+      dev->set_param_f32(backend.pbrPointShadowFarPlaneLocs[s],
                              slot.farPlane);
     }
-    if (backend.pbrPointShadowLightIdxLocs[s] >= 0) {
-      dev->set_uniform_int(backend.pbrPointShadowLightIdxLocs[s],
+    if (backend.pbrPointShadowLightIdxLocs[s].valid()) {
+      dev->set_param_i32(backend.pbrPointShadowLightIdxLocs[s],
                            slot.lightIndex);
     }
   }
-  if (backend.pbrPointShadowEnabledLoc >= 0) {
-    dev->set_uniform_int(backend.pbrPointShadowEnabledLoc,
+  if (backend.pbrPointShadowEnabledLoc.valid()) {
+    dev->set_param_i32(backend.pbrPointShadowEnabledLoc,
                          pointShadowEnabled ? 1 : 0);
   }
 }
 
 void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
-  if (dev == nullptr) {
+  if ((dev == nullptr) || (dev->bind_texture_slot == nullptr)) {
     return;
   }
   for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-    dev->bind_texture(6 + static_cast<int>(c), 0U);
+    dev->bind_texture_slot(static_cast<std::uint32_t>(6U + c),
+                           kInvalidDeviceTexture);
   }
   for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
-    dev->bind_texture(10 + static_cast<int>(s), 0U);
+    dev->bind_texture_slot(static_cast<std::uint32_t>(10U + s),
+                           kInvalidDeviceTexture);
   }
-  if (dev->bind_texture_cubemap != nullptr) {
-    for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
-      dev->bind_texture_cubemap(14 + static_cast<int>(s), 0U);
-    }
+  for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+    dev->bind_texture_slot(static_cast<std::uint32_t>(14U + s),
+                           kInvalidDeviceTexture);
   }
 }
 
 /// Unbinds the environment IBL texture units after a forward PBR pass.
 void unbind_pbr_ibl_textures(const RenderDevice *dev) noexcept {
-  if ((dev == nullptr) || (dev->bind_texture_cubemap == nullptr)) {
+  if ((dev == nullptr) || (dev->bind_texture_slot == nullptr)) {
     return;
   }
-  dev->bind_texture_cubemap(kIblIrradianceUnit, 0U);
-  dev->bind_texture_cubemap(kIblPrefilteredUnit, 0U);
-  dev->bind_texture(kIblBrdfLutUnit, 0U);
+  dev->bind_texture_slot(kIblIrradianceUnit, kInvalidDeviceTexture);
+  dev->bind_texture_slot(kIblPrefilteredUnit, kInvalidDeviceTexture);
+  dev->bind_texture_slot(kIblBrdfLutUnit, kInvalidDeviceTexture);
 }
 
 DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
@@ -451,22 +453,28 @@ HeightFogSettings height_fog_settings_from_cvars() noexcept {
 
 /// Returns whether can upload instance matrices.
 bool can_upload_instance_matrices(const RenderDevice *dev) noexcept {
-  return (dev != nullptr) && (dev->vertex_attrib_divisor != nullptr) &&
-         (dev->draw_elements_triangles_u32_instanced != nullptr);
+  return (dev != nullptr) && dev->caps.instancing &&
+         (dev->set_geometry_instance_stream != nullptr) &&
+         (dev->update_buffer != nullptr) &&
+         (dev->draw_indexed_instanced != nullptr);
 }
 
 bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                               const GpuMesh &mesh,
                               CommandBufferView commandBufferView,
                               const StaticMeshBatch &batch) noexcept {
-  if (!can_upload_instance_matrices(dev) || (mesh.vertexArray == 0U) ||
-      (batch.count == 0U) || (commandBufferView.data == nullptr)) {
+  if (!can_upload_instance_matrices(dev) ||
+      (mesh.geometry == kInvalidDeviceGeometry) || (batch.count == 0U) ||
+      (commandBufferView.data == nullptr)) {
     return false;
   }
 
-  if (backend.instanceMatrixBuffer == 0U) {
-    backend.instanceMatrixBuffer = dev->create_buffer();
-    if (backend.instanceMatrixBuffer == 0U) {
+  if (backend.instanceMatrixBuffer == kInvalidDeviceBuffer) {
+    BufferDesc desc{};
+    desc.usage = BufferUsage::Vertex;
+    desc.access = BufferAccess::Stream;
+    backend.instanceMatrixBuffer = dev->create_buffer(desc);
+    if (backend.instanceMatrixBuffer == kInvalidDeviceBuffer) {
       return false;
     }
   }
@@ -491,33 +499,30 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                    static_cast<float>(command.foliageLodIndex), 0.0F, 0.0F);
   }
 
-  dev->bind_vertex_array(mesh.vertexArray);
-  dev->bind_array_buffer(backend.instanceMatrixBuffer);
-  dev->buffer_data_array(
-      backend.instanceAttributes.data(),
+  dev->update_buffer(
+      backend.instanceMatrixBuffer, backend.instanceAttributes.data(),
       static_cast<std::ptrdiff_t>(backend.instanceAttributes.size() *
                                   sizeof(InstanceAttributes)));
 
-  constexpr std::int32_t stride =
+  VertexLayout instanceLayout{};
+  instanceLayout.strideBytes =
       static_cast<std::int32_t>(sizeof(InstanceAttributes));
-  for (std::uint32_t column = 0U; column < kInstanceModelAttribCount;
-       ++column) {
-    const std::uint32_t attrib = kInstanceModelAttrib0 + column;
-    const auto offset = reinterpret_cast<const void *>(
-        static_cast<std::uintptr_t>(offsetof(InstanceAttributes, model) +
-                                    (sizeof(float) * 4U * column)));
-    dev->enable_vertex_attrib(attrib);
-    dev->vertex_attrib_float(attrib, 4, stride, offset);
-    dev->vertex_attrib_divisor(attrib, 1U);
+  for (std::size_t column = 0U; column < kInstanceModelColumns; ++column) {
+    instanceLayout.attributes[column] = {
+        static_cast<VertexSemantic>(
+            static_cast<std::uint8_t>(VertexSemantic::InstanceModel0) +
+            static_cast<std::uint8_t>(column)),
+        4,
+        static_cast<std::int32_t>(offsetof(InstanceAttributes, model) +
+                                  (sizeof(float) * 4U * column))};
   }
+  instanceLayout.attributes[kInstanceModelColumns] = {
+      VertexSemantic::InstanceParams, 4,
+      static_cast<std::int32_t>(offsetof(InstanceAttributes, foliage))};
+  instanceLayout.attributeCount = kInstanceModelColumns + 1U;
 
-  const auto foliageOffset = reinterpret_cast<const void *>(
-      static_cast<std::uintptr_t>(offsetof(InstanceAttributes, foliage)));
-  dev->enable_vertex_attrib(kInstanceFoliageAttrib);
-  dev->vertex_attrib_float(kInstanceFoliageAttrib, 4, stride, foliageOffset);
-  dev->vertex_attrib_divisor(kInstanceFoliageAttrib, 1U);
-
-  return true;
+  return dev->set_geometry_instance_stream(
+      mesh.geometry, backend.instanceMatrixBuffer, instanceLayout);
 }
 
 

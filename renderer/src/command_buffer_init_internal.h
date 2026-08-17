@@ -21,8 +21,9 @@ ShaderProgramHandle load_configured_shader_variant(
     const ShaderDefine *defines, std::size_t defineCount) noexcept;
 
 /// Hard-fail core: render device, shader system, default/PBR/tonemap
-/// programs with required uniforms, and the fullscreen empty VAO. On any
-/// failure the partial state is unwound and the backend is marked failed.
+/// programs with required shader params, and the fullscreen attribute-
+/// less geometry. On any failure the partial state is unwound and the
+/// backend is marked failed.
 bool init_backend_core(BackendState &backend) noexcept;
 
 /// Soft-fail sky and IBL programs: cubemap skybox, Preetham, procedural
@@ -41,26 +42,26 @@ void init_backend_post(BackendState &backend,
                        const RenderDevice *dev) noexcept;
 
 // Per-program resolvers shared by initialization and hot-reload refresh
-// (audit H-09): each re-reads the GPU program id from its stored handle
-// and re-queries every cached uniform location (and uniform-block binding
+// (audit H-09): each re-reads the device program from its stored handle
+// and re-queries every cached shader param (and uniform-block binding
 // where the program uses one). Every queried name is classified REQUIRED
-// (looked up through required_location; the pass cannot render
-// meaningfully without it) or OPTIONAL (safe shader default or
-// conditionally used; plain uniform_location). A resolver returns false
-// when any REQUIRED location is -1 or a required block is absent, so
-// init leaves the family unavailable and refresh downgrades it.
+// (looked up through required_param; the pass cannot render meaningfully
+// without it) or OPTIONAL (safe shader default or conditionally used;
+// plain shader_param). A resolver returns false when any REQUIRED param
+// is invalid or a required block is absent, so init leaves the family
+// unavailable and refresh downgrades it.
 
-/// Looks up a REQUIRED uniform: returns the location and clears *ok when
-/// the current link no longer exposes it, so resolvers accumulate one
-/// verdict instead of silently caching -1.
-inline std::int32_t required_location(bool *ok, const RenderDevice *dev,
-                                      std::uint32_t program,
-                                      const char *name) noexcept {
-  const std::int32_t location = dev->uniform_location(program, name);
-  if (location < 0) {
+/// Looks up a REQUIRED shader parameter: returns the param and clears *ok
+/// when the current link no longer exposes it, so resolvers accumulate one
+/// verdict instead of silently caching an invalid param.
+inline ShaderParam required_param(bool *ok, const RenderDevice *dev,
+                                  DeviceProgramHandle program,
+                                  const char *name) noexcept {
+  const ShaderParam param = dev->shader_param(program, name);
+  if (!param.valid()) {
     *ok = false;
   }
-  return location;
+  return param;
 }
 
 /// Default fallback program: id only, no cached uniforms.
@@ -148,9 +149,9 @@ bool resolve_debug_line_program_state(BackendState &backend,
 bool resolve_luminance_program_state(BackendState &backend,
                                      const RenderDevice *dev) noexcept;
 
-/// Re-resolves every cached program id, uniform location, and uniform-
+/// Re-resolves every cached device program, shader param, and uniform-
 /// block binding from the shader-system handles after a hot reload, and
-/// downgrades availability flags whose program lost a required uniform.
+/// downgrades availability flags whose program lost a required param.
 /// Called by flush_renderer when shader_reload_epoch() moves past
 /// BackendState::programCacheEpoch.
 void refresh_backend_program_state(BackendState &backend,

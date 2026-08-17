@@ -40,18 +40,18 @@ namespace engine::renderer {
 // because the FXAA pass gates on it rather than on an availability flag.
 bool resolve_fxaa_program_state(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
-  backend.fxaaProgram = shader_gpu_program(backend.fxaaShaderHandle);
-  const std::uint32_t fxaaProg = backend.fxaaProgram;
-  if (fxaaProg == 0U) {
+  backend.fxaaProgram = shader_device_program(backend.fxaaShaderHandle);
+  const DeviceProgramHandle fxaaProg = backend.fxaaProgram;
+  if (fxaaProg == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.fxaaInputTextureLocation =
-      required_location(&ok, dev, fxaaProg, "u_inputTexture");
+      required_param(&ok, dev, fxaaProg, "u_inputTexture");
   backend.fxaaTexelSizeLocation =
-      required_location(&ok, dev, fxaaProg, "u_texelSize");
+      required_param(&ok, dev, fxaaProg, "u_texelSize");
   if (!ok) {
-    backend.fxaaProgram = 0U;
+    backend.fxaaProgram = kInvalidDeviceProgram;
   }
   return ok;
 }
@@ -65,49 +65,49 @@ bool resolve_bloom_program_state(BackendState &backend,
   bool ok = true;
   if (backend.bloomThresholdShaderHandle != kInvalidShaderProgram) {
     backend.bloomThresholdProgram =
-        shader_gpu_program(backend.bloomThresholdShaderHandle);
-    const std::uint32_t prog = backend.bloomThresholdProgram;
-    bool programOk = prog != 0U;
+        shader_device_program(backend.bloomThresholdShaderHandle);
+    const DeviceProgramHandle prog = backend.bloomThresholdProgram;
+    bool programOk = prog != kInvalidDeviceProgram;
     if (programOk) {
       backend.bloomThreshSceneColorLoc =
-          required_location(&programOk, dev, prog, "u_sceneColor");
+          required_param(&programOk, dev, prog, "u_sceneColor");
       backend.bloomThreshThresholdLoc =
-          required_location(&programOk, dev, prog, "u_threshold");
+          required_param(&programOk, dev, prog, "u_threshold");
     }
     if (!programOk) {
-      backend.bloomThresholdProgram = 0U;
+      backend.bloomThresholdProgram = kInvalidDeviceProgram;
       ok = false;
     }
   }
   if (backend.bloomDownsampleShaderHandle != kInvalidShaderProgram) {
     backend.bloomDownsampleProgram =
-        shader_gpu_program(backend.bloomDownsampleShaderHandle);
-    const std::uint32_t prog = backend.bloomDownsampleProgram;
-    bool programOk = prog != 0U;
+        shader_device_program(backend.bloomDownsampleShaderHandle);
+    const DeviceProgramHandle prog = backend.bloomDownsampleProgram;
+    bool programOk = prog != kInvalidDeviceProgram;
     if (programOk) {
       backend.bloomDownInputLoc =
-          required_location(&programOk, dev, prog, "u_input");
+          required_param(&programOk, dev, prog, "u_input");
       backend.bloomDownTexelSizeLoc =
-          required_location(&programOk, dev, prog, "u_texelSize");
+          required_param(&programOk, dev, prog, "u_texelSize");
     }
     if (!programOk) {
-      backend.bloomDownsampleProgram = 0U;
+      backend.bloomDownsampleProgram = kInvalidDeviceProgram;
       ok = false;
     }
   }
   if (backend.bloomUpsampleShaderHandle != kInvalidShaderProgram) {
     backend.bloomUpsampleProgram =
-        shader_gpu_program(backend.bloomUpsampleShaderHandle);
-    const std::uint32_t prog = backend.bloomUpsampleProgram;
-    bool programOk = prog != 0U;
+        shader_device_program(backend.bloomUpsampleShaderHandle);
+    const DeviceProgramHandle prog = backend.bloomUpsampleProgram;
+    bool programOk = prog != kInvalidDeviceProgram;
     if (programOk) {
       backend.bloomUpInputLoc =
-          required_location(&programOk, dev, prog, "u_input");
+          required_param(&programOk, dev, prog, "u_input");
       backend.bloomUpTexelSizeLoc =
-          required_location(&programOk, dev, prog, "u_texelSize");
+          required_param(&programOk, dev, prog, "u_texelSize");
     }
     if (!programOk) {
-      backend.bloomUpsampleProgram = 0U;
+      backend.bloomUpsampleProgram = kInvalidDeviceProgram;
       ok = false;
     }
   }
@@ -123,27 +123,27 @@ bool resolve_ssao_program_state(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   bool ok = true;
   if (backend.ssaoShaderHandle != kInvalidShaderProgram) {
-    backend.ssaoProgram = shader_gpu_program(backend.ssaoShaderHandle);
-    const std::uint32_t prog = backend.ssaoProgram;
-    if (prog != 0U) {
-      backend.ssaoDepthLoc = required_location(&ok, dev, prog, "u_gBufferDepth");
+    backend.ssaoProgram = shader_device_program(backend.ssaoShaderHandle);
+    const DeviceProgramHandle prog = backend.ssaoProgram;
+    if (prog != kInvalidDeviceProgram) {
+      backend.ssaoDepthLoc = required_param(&ok, dev, prog, "u_gBufferDepth");
       backend.ssaoNormalLoc =
-          required_location(&ok, dev, prog, "u_gBufferNormal");
-      backend.ssaoNoiseLoc = required_location(&ok, dev, prog, "u_noiseTexture");
+          required_param(&ok, dev, prog, "u_gBufferNormal");
+      backend.ssaoNoiseLoc = required_param(&ok, dev, prog, "u_noiseTexture");
       backend.ssaoProjectionLoc =
-          required_location(&ok, dev, prog, "u_projection");
-      backend.ssaoViewLoc = required_location(&ok, dev, prog, "u_view");
+          required_param(&ok, dev, prog, "u_projection");
+      backend.ssaoViewLoc = required_param(&ok, dev, prog, "u_view");
       backend.ssaoNoiseScaleLoc =
-          required_location(&ok, dev, prog, "u_noiseScale");
-      backend.ssaoRadiusLoc = required_location(&ok, dev, prog, "u_radius");
-      backend.ssaoBiasLoc = required_location(&ok, dev, prog, "u_bias");
+          required_param(&ok, dev, prog, "u_noiseScale");
+      backend.ssaoRadiusLoc = required_param(&ok, dev, prog, "u_radius");
+      backend.ssaoBiasLoc = required_param(&ok, dev, prog, "u_bias");
       for (int i = 0; i < 32; ++i) {
         char nm[64] = {};
         std::snprintf(nm, sizeof(nm), "u_samples[%d]", i);
         backend.ssaoSampleLocs[static_cast<std::size_t>(i)] =
-            dev->uniform_location(prog, nm);
+            dev->shader_param(prog, nm);
       }
-      if (backend.ssaoSampleLocs[0] < 0) {
+      if (!backend.ssaoSampleLocs[0].valid()) {
         ok = false;
       }
     } else {
@@ -151,13 +151,13 @@ bool resolve_ssao_program_state(BackendState &backend,
     }
   }
   if (backend.ssaoBlurShaderHandle != kInvalidShaderProgram) {
-    backend.ssaoBlurProgram = shader_gpu_program(backend.ssaoBlurShaderHandle);
-    const std::uint32_t prog = backend.ssaoBlurProgram;
-    if (prog != 0U) {
+    backend.ssaoBlurProgram = shader_device_program(backend.ssaoBlurShaderHandle);
+    const DeviceProgramHandle prog = backend.ssaoBlurProgram;
+    if (prog != kInvalidDeviceProgram) {
       backend.ssaoBlurInputLoc =
-          required_location(&ok, dev, prog, "u_ssaoInput");
+          required_param(&ok, dev, prog, "u_ssaoInput");
       backend.ssaoBlurTexelSizeLoc =
-          required_location(&ok, dev, prog, "u_texelSize");
+          required_param(&ok, dev, prog, "u_texelSize");
     } else {
       ok = false;
     }
@@ -169,14 +169,14 @@ bool resolve_ssao_program_state(BackendState &backend,
 // without it.
 bool resolve_debug_line_program_state(BackendState &backend,
                                       const RenderDevice *dev) noexcept {
-  backend.debugLineProgram = shader_gpu_program(backend.debugLineShaderHandle);
-  const std::uint32_t prog = backend.debugLineProgram;
-  if (prog == 0U) {
+  backend.debugLineProgram = shader_device_program(backend.debugLineShaderHandle);
+  const DeviceProgramHandle prog = backend.debugLineProgram;
+  if (prog == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.debugLineViewProjectionLoc =
-      required_location(&ok, dev, prog, "uViewProjection");
+      required_param(&ok, dev, prog, "uViewProjection");
   return ok;
 }
 
@@ -184,14 +184,14 @@ bool resolve_debug_line_program_state(BackendState &backend,
 // reduction has no other input.
 bool resolve_luminance_program_state(BackendState &backend,
                                      const RenderDevice *dev) noexcept {
-  backend.luminanceProgram = shader_gpu_program(backend.luminanceShaderHandle);
-  const std::uint32_t prog = backend.luminanceProgram;
-  if (prog == 0U) {
+  backend.luminanceProgram = shader_device_program(backend.luminanceShaderHandle);
+  const DeviceProgramHandle prog = backend.luminanceProgram;
+  if (prog == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.lumSceneColorLoc =
-      required_location(&ok, dev, prog, "u_sceneColor");
+      required_param(&ok, dev, prog, "u_sceneColor");
   return ok;
 }
 
@@ -240,9 +240,9 @@ void init_backend_post(BackendState &backend,
 
     static_cast<void>(resolve_bloom_program_state(backend, dev));
 
-    if (backend.bloomThresholdProgram == 0U ||
-        backend.bloomDownsampleProgram == 0U ||
-        backend.bloomUpsampleProgram == 0U) {
+    if (backend.bloomThresholdProgram == kInvalidDeviceProgram ||
+        backend.bloomDownsampleProgram == kInvalidDeviceProgram ||
+        backend.bloomUpsampleProgram == kInvalidDeviceProgram) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "bloom shaders not fully available — bloom disabled");
     }
@@ -267,12 +267,12 @@ void init_backend_post(BackendState &backend,
 
     const bool ssaoUniformsOk = resolve_ssao_program_state(backend, dev);
 
-    if (ssaoUniformsOk && backend.ssaoProgram != 0U &&
-        backend.ssaoBlurProgram != 0U) {
+    if (ssaoUniformsOk && backend.ssaoProgram != kInvalidDeviceProgram &&
+        backend.ssaoBlurProgram != kInvalidDeviceProgram) {
       backend.ssaoAvailable = true;
       generate_ssao_kernel(backend.ssaoKernel, 32);
       backend.ssaoNoiseTexture = create_ssao_noise_texture();
-      if (backend.ssaoNoiseTexture == 0U) {
+      if (backend.ssaoNoiseTexture == kInvalidDeviceTexture) {
         core::log_message(core::LogLevel::Warning, "renderer",
                           "SSAO noise texture creation failed — SSAO disabled");
         backend.ssaoAvailable = false;
@@ -290,31 +290,29 @@ void init_backend_post(BackendState &backend,
     if (lineShader != kInvalidShaderProgram) {
       backend.debugLineShaderHandle = lineShader;
       if (resolve_debug_line_program_state(backend, dev)) {
-        backend.debugLineVao = dev->create_vertex_array();
-        backend.debugLineVbo = dev->create_buffer();
-        if ((backend.debugLineVao != 0U) && (backend.debugLineVbo != 0U)) {
-          dev->bind_vertex_array(backend.debugLineVao);
-          dev->bind_array_buffer(backend.debugLineVbo);
-          constexpr std::int32_t kLineStride =
+        // Streamed position+color line vertices (7 floats per vertex).
+        BufferDesc lineBufferDesc{};
+        lineBufferDesc.usage = BufferUsage::Vertex;
+        lineBufferDesc.access = BufferAccess::Stream;
+        backend.debugLineVbo = dev->create_buffer(lineBufferDesc);
+        if (backend.debugLineVbo != kInvalidDeviceBuffer) {
+          GeometryDesc lineGeometryDesc{};
+          lineGeometryDesc.vertexBuffer = backend.debugLineVbo;
+          lineGeometryDesc.layout.strideBytes =
               static_cast<std::int32_t>(sizeof(float) * 7U);
-          dev->enable_vertex_attrib(0U);
-          dev->vertex_attrib_float(0U, 3, kLineStride, nullptr);
-          dev->enable_vertex_attrib(1U);
-          dev->vertex_attrib_float(
-              1U, 4, kLineStride,
-              reinterpret_cast<const void *>(sizeof(float) * 3U));
-          dev->bind_vertex_array(0U);
-          dev->bind_array_buffer(0U);
+          lineGeometryDesc.layout.attributeCount = 2U;
+          lineGeometryDesc.layout.attributes[0] = {VertexSemantic::Position,
+                                                   3, 0};
+          lineGeometryDesc.layout.attributes[1] = {
+              VertexSemantic::Color, 4,
+              static_cast<std::int32_t>(sizeof(float) * 3U)};
+          backend.debugLineGeometry = dev->create_geometry(lineGeometryDesc);
+        }
+        if (backend.debugLineGeometry != kInvalidDeviceGeometry) {
           backend.debugLineAvailable = true;
-        } else {
-          if (backend.debugLineVao != 0U) {
-            dev->destroy_vertex_array(backend.debugLineVao);
-            backend.debugLineVao = 0U;
-          }
-          if (backend.debugLineVbo != 0U) {
-            dev->destroy_buffer(backend.debugLineVbo);
-            backend.debugLineVbo = 0U;
-          }
+        } else if (backend.debugLineVbo != kInvalidDeviceBuffer) {
+          dev->destroy_buffer(backend.debugLineVbo);
+          backend.debugLineVbo = kInvalidDeviceBuffer;
         }
       } else {
         backend.debugLineShaderHandle = ShaderProgramHandle{};

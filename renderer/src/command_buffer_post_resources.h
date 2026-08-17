@@ -26,6 +26,6 @@ void destroy_luminance_resources(BackendState &b) noexcept;
 /// Fills kernel with `count` SSAO hemisphere sample vectors.
 void generate_ssao_kernel(float *kernel, int count) noexcept;
 /// Creates the SSAO rotation noise texture and returns its GPU id.
-std::uint32_t create_ssao_noise_texture() noexcept;
+DeviceTextureHandle create_ssao_noise_texture() noexcept;
 
 } // namespace engine::renderer

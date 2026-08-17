@@ -15,28 +15,29 @@ namespace engine::renderer {
 /// Reads the r_env_* cvars into normalized ReflectionProbeBakeSettings.
 ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept;
 /// Prefilters sourceCubemap into the cached specular environment map and
-/// returns its GPU id (0 when unavailable). Re-bakes when the source
-/// cubemap or bake settings change.
-std::uint32_t
+/// returns it (invalid when unavailable). Re-bakes when the source cubemap
+/// or bake settings change.
+DeviceTextureHandle
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
-                               std::uint32_t sourceCubemap,
+                               DeviceTextureHandle sourceCubemap,
                                ReflectionProbeBakeSettings settings) noexcept;
 /// Convolves sourceCubemap into the cached diffuse irradiance map and
-/// returns its GPU id (0 when unavailable). Re-bakes when the source
-/// cubemap or bake settings change.
-std::uint32_t
+/// returns it (invalid when unavailable). Re-bakes when the source cubemap
+/// or bake settings change.
+DeviceTextureHandle
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
-                              std::uint32_t sourceCubemap,
+                              DeviceTextureHandle sourceCubemap,
                               ReflectionProbeBakeSettings settings) noexcept;
-/// Renders the split-sum BRDF LUT if needed and returns its GPU id
-/// (0 when unavailable).
-std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
-                              ReflectionProbeBakeSettings settings) noexcept;
+/// Renders the split-sum BRDF LUT if needed and returns it (invalid when
+/// unavailable).
+DeviceTextureHandle ensure_brdf_lut(BackendState &backend,
+                                    const RenderDevice *dev,
+                                    ReflectionProbeBakeSettings settings) noexcept;
 /// Releases prefiltered-environment GPU resources and bake bookkeeping.
 void destroy_environment_prefilter_resources(BackendState &backend) noexcept;
 /// Releases irradiance-environment GPU resources and bake bookkeeping.
 void destroy_environment_irradiance_resources(BackendState &backend) noexcept;
-/// Releases the BRDF LUT texture and framebuffer.
+/// Releases the BRDF LUT texture.
 void destroy_brdf_lut_resources(BackendState &backend) noexcept;
 
 } // namespace engine::renderer

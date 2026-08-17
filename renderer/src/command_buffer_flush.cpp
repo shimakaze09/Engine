@@ -85,8 +85,8 @@ void flush_renderer(CommandBufferView commandBufferView,
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();
 
-  // A hot reload replaced GL program objects, so every cached program id
-  // and uniform location must be re-resolved before any pass binds one
+  // A hot reload replaced device program objects, so every cached program
+  // handle and shader param must be re-resolved before any pass binds one
   // (audit H-09).
   const std::uint64_t reloadEpoch = shader_reload_epoch();
   if (backend.programCacheEpoch != reloadEpoch) {
@@ -135,21 +135,22 @@ void flush_renderer(CommandBufferView commandBufferView,
   const HeightFogSettings heightFogSettings = height_fog_settings_from_cvars();
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
-  const std::uint32_t envSkyboxTexture =
+  const DeviceTextureHandle envSkyboxTexture =
       (selected_sky_model() == SkyModel::Cubemap)
-          ? active_skybox_gpu_texture(backend)
-          : 0U;
-  std::uint32_t iblPrefilteredTex = 0U;
-  std::uint32_t iblIrradianceTex = 0U;
-  if (envSkyboxTexture != 0U) {
+          ? active_skybox_device_texture(backend)
+          : kInvalidDeviceTexture;
+  DeviceTextureHandle iblPrefilteredTex{};
+  DeviceTextureHandle iblIrradianceTex{};
+  if (envSkyboxTexture != kInvalidDeviceTexture) {
     iblPrefilteredTex = ensure_prefiltered_environment(
         backend, dev, envSkyboxTexture, environmentBakeSettings);
     iblIrradianceTex = ensure_irradiance_environment(
         backend, dev, envSkyboxTexture, environmentBakeSettings);
   }
-  const bool iblAvailable = (iblPrefilteredTex != 0U) &&
-                            (iblIrradianceTex != 0U) &&
-                            (backend.brdfLutTexture != 0U);
+  const bool iblAvailable =
+      (iblPrefilteredTex != kInvalidDeviceTexture) &&
+      (iblIrradianceTex != kInvalidDeviceTexture) &&
+      (backend.brdfLutTexture != kInvalidDeviceTexture);
 
   const bool useDeferred =
       backend.deferredAvailable && core::cvar_get_bool("r_deferred", true);
@@ -170,7 +171,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 
   if (registry == nullptr) {
-    dev->bind_framebuffer(0U);
+    dev->bind_render_target(kBackBufferTarget);
     return;
   }
 

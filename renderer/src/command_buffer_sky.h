@@ -28,21 +28,22 @@ inline constexpr std::int32_t kSkyboxVertexCount = 36;
 
 /// Maps the r_sky_model cvar string to a SkyModel (default Hosek).
 SkyModel selected_sky_model() noexcept;
-/// Lazily creates the shared skybox cube VAO/VBO (also used by IBL bakes).
+/// Lazily creates the shared skybox cube geometry (also used by IBL bakes).
 bool create_skybox_geometry(BackendState &backend,
                             const RenderDevice *dev) noexcept;
 /// Releases every sky shader and the shared cube geometry.
 void destroy_skybox_resources(BackendState &backend) noexcept;
-/// Releases the Preetham sky shader and resets its cached uniform locations.
+/// Releases the Preetham sky shader and resets its cached shader params.
 void destroy_preetham_sky_resources(BackendState &backend) noexcept;
-/// Releases the Hosek sky shader and resets its cached uniform locations.
+/// Releases the Hosek sky shader and resets its cached shader params.
 void destroy_hosek_sky_resources(BackendState &backend) noexcept;
-/// Returns the GPU id of the active cubemap skybox, or 0 when unavailable.
-std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept;
+/// Device texture of the active cubemap skybox; invalid when unavailable.
+DeviceTextureHandle
+active_skybox_device_texture(const BackendState &backend) noexcept;
 /// Draws the cubemap skybox and counts the draw in frameStats.
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
                  const math::Mat4 &viewMat, const math::Mat4 &projMat,
-                 std::uint32_t cubemapGpuId,
+                 DeviceTextureHandle cubemap,
                  RendererFrameStats &frameStats) noexcept;
 /// Draws the Preetham analytic sky; the sun direction comes from the first
 /// directional light (with a fixed fallback).

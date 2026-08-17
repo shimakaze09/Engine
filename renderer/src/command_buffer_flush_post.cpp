@@ -47,9 +47,10 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   const PassResources &passRes = ctx.passRes;
   const int drawableWidth = ctx.drawableWidth;
   const int drawableHeight = ctx.drawableHeight;
-  const bool bloomAvailable = backend.bloomThresholdProgram != 0U &&
-                              backend.bloomDownsampleProgram != 0U &&
-                              backend.bloomUpsampleProgram != 0U;
+  const bool bloomAvailable =
+      (backend.bloomThresholdProgram != kInvalidDeviceProgram) &&
+      (backend.bloomDownsampleProgram != kInvalidDeviceProgram) &&
+      (backend.bloomUpsampleProgram != kInvalidDeviceProgram);
   const bool bloomEnabled =
       bloomAvailable && core::cvar_get_bool("r_bloom") &&
       ensure_bloom_resources(backend, drawableWidth, drawableHeight);
@@ -57,64 +58,63 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   if (bloomEnabled) {
     gpu_profiler_begin_pass(GpuPassId::Bloom);
 
-    const std::uint32_t sceneColorTexBloom =
-        pass_resource_gpu_texture(passRes.sceneColor);
+    const DeviceTextureHandle sceneColorTexBloom =
+        pass_resource_texture(passRes.sceneColor);
 
-    dev->bind_framebuffer(backend.bloomMipFbos[0]);
+    dev->bind_render_target(backend.bloomMipTargets[0]);
     dev->set_viewport(0, 0, backend.bloomMipWidths[0],
                       backend.bloomMipHeights[0]);
-    dev->disable_depth_test();
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
     dev->bind_program(backend.bloomThresholdProgram);
-    dev->bind_texture(0, sceneColorTexBloom);
-    if (backend.bloomThreshSceneColorLoc >= 0) {
-      dev->set_uniform_int(backend.bloomThreshSceneColorLoc, 0);
+    dev->bind_texture_slot(0U, sceneColorTexBloom);
+    if (backend.bloomThreshSceneColorLoc.valid()) {
+      dev->set_param_i32(backend.bloomThreshSceneColorLoc, 0);
     }
-    if (backend.bloomThreshThresholdLoc >= 0) {
-      dev->set_uniform_float(backend.bloomThreshThresholdLoc,
+    if (backend.bloomThreshThresholdLoc.valid()) {
+      dev->set_param_f32(backend.bloomThreshThresholdLoc,
                              core::cvar_get_float("r_bloom_threshold"));
     }
-    dev->bind_vertex_array(backend.emptyVao);
-    dev->draw_arrays_triangles(0, 3);
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
     dev->bind_program(backend.bloomDownsampleProgram);
     for (int i = 1; i < BackendState::kBloomMipLevels; ++i) {
-      dev->bind_framebuffer(backend.bloomMipFbos[i]);
+      dev->bind_render_target(backend.bloomMipTargets[i]);
       dev->set_viewport(0, 0, backend.bloomMipWidths[i],
                         backend.bloomMipHeights[i]);
-      dev->bind_texture(0, backend.bloomMipTextures[i - 1]);
-      if (backend.bloomDownInputLoc >= 0) {
-        dev->set_uniform_int(backend.bloomDownInputLoc, 0);
+      dev->bind_texture_slot(0U, backend.bloomMipTextures[i - 1]);
+      if (backend.bloomDownInputLoc.valid()) {
+        dev->set_param_i32(backend.bloomDownInputLoc, 0);
       }
-      if (backend.bloomDownTexelSizeLoc >= 0) {
+      if (backend.bloomDownTexelSizeLoc.valid()) {
         const float ts[2] = {
             1.0F / static_cast<float>(backend.bloomMipWidths[i - 1]),
             1.0F / static_cast<float>(backend.bloomMipHeights[i - 1])};
-        dev->set_uniform_vec2(backend.bloomDownTexelSizeLoc, ts);
+        dev->set_param_vec2(backend.bloomDownTexelSizeLoc, ts);
       }
-      dev->draw_arrays_triangles(0, 3);
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
     }
 
     dev->bind_program(backend.bloomUpsampleProgram);
     for (int i = BackendState::kBloomMipLevels - 2; i >= 0; --i) {
-      dev->bind_framebuffer(backend.bloomMipFbos[i]);
+      dev->bind_render_target(backend.bloomMipTargets[i]);
       dev->set_viewport(0, 0, backend.bloomMipWidths[i],
                         backend.bloomMipHeights[i]);
-      dev->bind_texture(0, backend.bloomMipTextures[i + 1]);
-      if (backend.bloomUpInputLoc >= 0) {
-        dev->set_uniform_int(backend.bloomUpInputLoc, 0);
+      dev->bind_texture_slot(0U, backend.bloomMipTextures[i + 1]);
+      if (backend.bloomUpInputLoc.valid()) {
+        dev->set_param_i32(backend.bloomUpInputLoc, 0);
       }
-      if (backend.bloomUpTexelSizeLoc >= 0) {
+      if (backend.bloomUpTexelSizeLoc.valid()) {
         const float ts[2] = {
             1.0F / static_cast<float>(backend.bloomMipWidths[i + 1]),
             1.0F / static_cast<float>(backend.bloomMipHeights[i + 1])};
-        dev->set_uniform_vec2(backend.bloomUpTexelSizeLoc, ts);
+        dev->set_param_vec2(backend.bloomUpTexelSizeLoc, ts);
       }
-      dev->draw_arrays_triangles(0, 3);
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
     }
 
-    dev->bind_texture(0, 0U);
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::Bloom);
   }
 
@@ -125,36 +125,36 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
 
-    dev->bind_framebuffer(backend.lumMipFbos[0]);
+    dev->bind_render_target(backend.lumMipTargets[0]);
     dev->set_viewport(0, 0, backend.lumMipWidths[0], backend.lumMipHeights[0]);
-    dev->disable_depth_test();
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
     dev->bind_program(backend.luminanceProgram);
-    dev->bind_texture(0, pass_resource_gpu_texture(passRes.sceneColor));
-    if (backend.lumSceneColorLoc >= 0) {
-      dev->set_uniform_int(backend.lumSceneColorLoc, 0);
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.sceneColor));
+    if (backend.lumSceneColorLoc.valid()) {
+      dev->set_param_i32(backend.lumSceneColorLoc, 0);
     }
-    dev->bind_vertex_array(backend.emptyVao);
-    dev->draw_arrays_triangles(0, 3);
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
     // Step 2: Progressive downsample to 1×1 using bloom downsample shader
     // (re-use as a generic bilinear downsample).
-    if (backend.bloomDownsampleProgram != 0U) {
+    if (backend.bloomDownsampleProgram != kInvalidDeviceProgram) {
       dev->bind_program(backend.bloomDownsampleProgram);
       for (int i = 1; i < BackendState::kLuminanceMipLevels; ++i) {
-        dev->bind_framebuffer(backend.lumMipFbos[i]);
+        dev->bind_render_target(backend.lumMipTargets[i]);
         dev->set_viewport(0, 0, backend.lumMipWidths[i],
                           backend.lumMipHeights[i]);
-        dev->bind_texture(0, backend.lumMipTextures[i - 1]);
-        if (backend.bloomDownInputLoc >= 0) {
-          dev->set_uniform_int(backend.bloomDownInputLoc, 0);
+        dev->bind_texture_slot(0U, backend.lumMipTextures[i - 1]);
+        if (backend.bloomDownInputLoc.valid()) {
+          dev->set_param_i32(backend.bloomDownInputLoc, 0);
         }
-        if (backend.bloomDownTexelSizeLoc >= 0) {
+        if (backend.bloomDownTexelSizeLoc.valid()) {
           const float ts[2] = {
               1.0F / static_cast<float>(backend.lumMipWidths[i - 1]),
               1.0F / static_cast<float>(backend.lumMipHeights[i - 1])};
-          dev->set_uniform_vec2(backend.bloomDownTexelSizeLoc, ts);
+          dev->set_param_vec2(backend.bloomDownTexelSizeLoc, ts);
         }
-        dev->draw_arrays_triangles(0, 3);
+        dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
       }
     }
 
@@ -182,9 +182,8 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     backend.currentExposure =
         std::clamp(backend.currentExposure, minExposure, maxExposure);
 
-    dev->bind_texture(0, 0U);
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::AutoExposure);
   }
 
@@ -193,93 +192,85 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
                                   : core::cvar_get_float("r_exposure", 1.0F);
 
   gpu_profiler_begin_pass(GpuPassId::Tonemap);
-  const std::uint32_t finalFbo = pass_resource_framebuffer(passRes.finalColor);
-  dev->bind_framebuffer(finalFbo);
+  dev->bind_render_target(pass_resource_target(passRes.finalColor));
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-  dev->disable_depth_test();
+  dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                      BlendMode::Disabled, CullMode::Back});
 
   dev->bind_program(backend.tonemapProgram);
 
-  const std::uint32_t sceneColorTex =
-      pass_resource_gpu_texture(passRes.sceneColor);
-  dev->bind_texture(0, sceneColorTex);
-  if (backend.tonemapSceneColorLocation >= 0) {
-    dev->set_uniform_int(backend.tonemapSceneColorLocation, 0);
+  dev->bind_texture_slot(0U, pass_resource_texture(passRes.sceneColor));
+  if (backend.tonemapSceneColorLocation.valid()) {
+    dev->set_param_i32(backend.tonemapSceneColorLocation, 0);
   }
-  if (backend.tonemapExposureLocation >= 0) {
-    dev->set_uniform_float(backend.tonemapExposureLocation, finalExposure);
+  if (backend.tonemapExposureLocation.valid()) {
+    dev->set_param_f32(backend.tonemapExposureLocation, finalExposure);
   }
-  if (backend.tonemapOperatorLocation >= 0) {
-    dev->set_uniform_int(backend.tonemapOperatorLocation,
+  if (backend.tonemapOperatorLocation.valid()) {
+    dev->set_param_i32(backend.tonemapOperatorLocation,
                          core::cvar_get_int("r_tonemap_operator"));
   }
 
   if (bloomEnabled) {
-    dev->bind_texture(1, backend.bloomMipTextures[0]);
-    if (backend.tonemapBloomTextureLoc >= 0) {
-      dev->set_uniform_int(backend.tonemapBloomTextureLoc, 1);
+    dev->bind_texture_slot(1U, backend.bloomMipTextures[0]);
+    if (backend.tonemapBloomTextureLoc.valid()) {
+      dev->set_param_i32(backend.tonemapBloomTextureLoc, 1);
     }
-    if (backend.tonemapBloomIntensityLoc >= 0) {
-      dev->set_uniform_float(backend.tonemapBloomIntensityLoc,
+    if (backend.tonemapBloomIntensityLoc.valid()) {
+      dev->set_param_f32(backend.tonemapBloomIntensityLoc,
                              core::cvar_get_float("r_bloom_intensity"));
     }
-    if (backend.tonemapBloomEnabledLoc >= 0) {
-      dev->set_uniform_int(backend.tonemapBloomEnabledLoc, 1);
+    if (backend.tonemapBloomEnabledLoc.valid()) {
+      dev->set_param_i32(backend.tonemapBloomEnabledLoc, 1);
     }
   } else {
-    if (backend.tonemapBloomEnabledLoc >= 0) {
-      dev->set_uniform_int(backend.tonemapBloomEnabledLoc, 0);
+    if (backend.tonemapBloomEnabledLoc.valid()) {
+      dev->set_param_i32(backend.tonemapBloomEnabledLoc, 0);
     }
   }
 
-  dev->bind_vertex_array(backend.emptyVao);
-  dev->draw_arrays_triangles(0, 3);
+  dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-  dev->bind_texture(0, 0U);
+  dev->bind_texture_slot(0U, kInvalidDeviceTexture);
   if (bloomEnabled) {
-    dev->bind_texture(1, 0U);
+    dev->bind_texture_slot(1U, kInvalidDeviceTexture);
   }
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
+  dev->bind_program(kInvalidDeviceProgram);
   gpu_profiler_end_pass(GpuPassId::Tonemap);
 
   renderer_context().fxaaAppliedThisFrame = false;
-  if (backend.fxaaProgram != 0U && core::cvar_get_bool("r_fxaa")) {
-    const std::uint32_t sceneFbo =
-        pass_resource_framebuffer(passRes.sceneColor);
-    dev->bind_framebuffer(sceneFbo);
+  if ((backend.fxaaProgram != kInvalidDeviceProgram) &&
+      core::cvar_get_bool("r_fxaa")) {
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
     dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-    dev->disable_depth_test();
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
 
     dev->bind_program(backend.fxaaProgram);
 
-    const std::uint32_t finalColorTex =
-        pass_resource_gpu_texture(passRes.finalColor);
-    dev->bind_texture(0, finalColorTex);
-    if (backend.fxaaInputTextureLocation >= 0) {
-      dev->set_uniform_int(backend.fxaaInputTextureLocation, 0);
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.finalColor));
+    if (backend.fxaaInputTextureLocation.valid()) {
+      dev->set_param_i32(backend.fxaaInputTextureLocation, 0);
     }
-    if (backend.fxaaTexelSizeLocation >= 0) {
+    if (backend.fxaaTexelSizeLocation.valid()) {
       const float texelSize[2] = {1.0F / static_cast<float>(drawableWidth),
                                   1.0F / static_cast<float>(drawableHeight)};
-      dev->set_uniform_vec2(backend.fxaaTexelSizeLocation, texelSize);
+      dev->set_param_vec2(backend.fxaaTexelSizeLocation, texelSize);
     }
 
-    dev->bind_vertex_array(backend.emptyVao);
-    dev->draw_arrays_triangles(0, 3);
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-    dev->bind_texture(0, 0U);
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
 
     renderer_context().fxaaAppliedThisFrame = true;
   }
 
-  dev->bind_framebuffer(0U);
+  dev->bind_render_target(kBackBufferTarget);
   dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-  dev->set_clear_color(0.0F, 0.0F, 0.0F, 1.0F);
-  dev->clear_color_depth();
-  dev->enable_depth_test();
+  dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
+  dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                      BlendMode::Disabled, CullMode::Back});
 }
 
 } // namespace engine::renderer

@@ -51,41 +51,50 @@ std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
   return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
 }
 
-/// Saved fixed-function state around an offscreen bake. restore() returns
-/// the device to the engine's ambient scene state — default framebuffer,
-/// depth test and face culling enabled — and re-applies the entry viewport
-/// when the device can report it (audit M-05).
-struct BakeStateScope final {
-  std::int32_t viewport[4] = {0, 0, 0, 0};
-  bool hasViewport = false;
+/// Returns the device to the engine's ambient scene state after an
+/// offscreen bake: back buffer bound, opaque-scene render state. The
+/// frame passes re-apply their own viewport before drawing (audit M-05).
+void restore_scene_state(const RenderDevice *dev) noexcept {
+  dev->bind_render_target(kBackBufferTarget);
+  dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                      BlendMode::Disabled, CullMode::Back});
+}
 
-  /// Captures the entry viewport when the device exposes a getter.
-  void save(const RenderDevice *dev) noexcept {
-    if (dev->get_viewport != nullptr) {
-      dev->get_viewport(&viewport[0], &viewport[1], &viewport[2],
-                        &viewport[3]);
-      hasViewport = true;
-    }
-  }
+/// Cube-face color render target over one mip of a bake cubemap; invalid
+/// when the attachment combination is unsupported.
+RenderTargetHandle create_face_target(const RenderDevice *dev,
+                                      DeviceTextureHandle cubemap, int face,
+                                      int mip) noexcept {
+  RenderTargetDesc desc{};
+  desc.colorCount = 1U;
+  desc.colors[0].texture = cubemap;
+  desc.colors[0].face = static_cast<CubeFace>(face);
+  desc.colors[0].mipLevel = mip;
+  return dev->create_render_target(desc);
+}
 
-  /// Restores framebuffer, depth/cull enables, and the saved viewport.
-  void restore(const RenderDevice *dev) const noexcept {
-    dev->bind_framebuffer(0U);
-    dev->enable_depth_test();
-    dev->enable_face_culling();
-    if (hasViewport) {
-      dev->set_viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-    }
-  }
-};
+/// Empty RGB16F bake cubemap with an explicit mip count.
+DeviceTextureHandle create_bake_cubemap(const RenderDevice *dev, int faceSize,
+                                        int mipLevels) noexcept {
+  TextureDesc desc{};
+  desc.kind = TextureKind::Cube;
+  desc.format = TextureFormat::RGB16F;
+  desc.width = faceSize;
+  desc.mipLevels = mipLevels;
+  desc.filter =
+      (mipLevels > 1) ? TextureFilter::LinearMipmap : TextureFilter::Linear;
+  desc.wrap = TextureWrap::ClampEdge;
+  return dev->create_texture(desc);
+}
 
-/// Attaches face 0 of the target cubemap and reports FBO completeness;
-/// devices without a completeness query pass by default.
-bool bake_target_complete(const RenderDevice *dev, std::uint32_t fbo,
-                          std::uint32_t cubeTex) noexcept {
-  dev->framebuffer_cubemap_color_face_mip(fbo, cubeTex, 0, 0);
-  return (dev->check_framebuffer_complete == nullptr) ||
-         dev->check_framebuffer_complete();
+/// True when the device exposes every operation the bake path drives.
+bool bake_device_ready(const RenderDevice *dev) noexcept {
+  return (dev != nullptr) && (dev->create_texture != nullptr) &&
+         (dev->create_render_target != nullptr) &&
+         (dev->destroy_render_target != nullptr) &&
+         (dev->bind_render_target != nullptr) &&
+         (dev->apply_render_state != nullptr) && (dev->draw != nullptr) &&
+         (dev->bind_texture_slot != nullptr);
 }
 
 void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
@@ -121,77 +130,52 @@ ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
 /// Destroys or releases the requested object, handle, or resource for environment prefilter resources.
 void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
-  if ((backend.prefilteredEnvironmentTexture != 0U) && (dev != nullptr)) {
+  if ((backend.prefilteredEnvironmentTexture != kInvalidDeviceTexture) &&
+      (dev != nullptr) && (dev->destroy_texture != nullptr)) {
     dev->destroy_texture(backend.prefilteredEnvironmentTexture);
-    backend.prefilteredEnvironmentTexture = 0U;
   }
-  if ((backend.environmentPrefilterFbo != 0U) && (dev != nullptr)) {
-    dev->destroy_framebuffer(backend.environmentPrefilterFbo);
-    backend.environmentPrefilterFbo = 0U;
-  }
+  backend.prefilteredEnvironmentTexture = kInvalidDeviceTexture;
   if (backend.environmentPrefilterShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.environmentPrefilterShaderHandle);
     backend.environmentPrefilterShaderHandle = ShaderProgramHandle{};
   }
-  backend.environmentPrefilterProgram = 0U;
+  backend.environmentPrefilterProgram = kInvalidDeviceProgram;
   backend.environmentPrefilterAvailable = false;
-  backend.prefilteredEnvironmentSource = 0U;
+  backend.prefilteredEnvironmentSource = kInvalidDeviceTexture;
   backend.prefilteredEnvironmentFaceSize = 0;
   backend.prefilteredEnvironmentMipLevels = 0;
 }
 
-std::uint32_t
+DeviceTextureHandle
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
-                               std::uint32_t sourceCubemap,
+                               DeviceTextureHandle sourceCubemap,
                                ReflectionProbeBakeSettings settings) noexcept {
-  if ((dev == nullptr) || !backend.environmentPrefilterAvailable ||
-      !core::cvar_get_bool("r_env_prefilter", true) || (sourceCubemap == 0U) ||
-      (dev->create_cubemap_hdr_empty == nullptr) ||
-      (dev->create_framebuffer == nullptr) ||
-      (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
-      (dev->bind_texture_cubemap == nullptr)) {
-    return 0U;
+  if (!backend.environmentPrefilterAvailable ||
+      !core::cvar_get_bool("r_env_prefilter", true) ||
+      (sourceCubemap == kInvalidDeviceTexture) || !bake_device_ready(dev)) {
+    return kInvalidDeviceTexture;
   }
 
   settings = normalize_reflection_probe_bake_settings(settings);
   const int faceSize = static_cast<int>(settings.prefilteredFaceSize);
   const int mipLevels = static_cast<int>(settings.prefilteredMipLevels);
 
-  if ((backend.prefilteredEnvironmentTexture != 0U) &&
+  if ((backend.prefilteredEnvironmentTexture != kInvalidDeviceTexture) &&
       (backend.prefilteredEnvironmentSource == sourceCubemap) &&
       (backend.prefilteredEnvironmentFaceSize == faceSize) &&
       (backend.prefilteredEnvironmentMipLevels == mipLevels)) {
     return backend.prefilteredEnvironmentTexture;
   }
 
-  if (backend.prefilteredEnvironmentTexture != 0U) {
+  if (backend.prefilteredEnvironmentTexture != kInvalidDeviceTexture) {
     dev->destroy_texture(backend.prefilteredEnvironmentTexture);
-    backend.prefilteredEnvironmentTexture = 0U;
+    backend.prefilteredEnvironmentTexture = kInvalidDeviceTexture;
   }
 
-  if (backend.environmentPrefilterFbo == 0U) {
-    backend.environmentPrefilterFbo = dev->create_framebuffer(0U, 0U);
-    if (backend.environmentPrefilterFbo == 0U) {
-      return 0U;
-    }
-  }
-
-  const std::uint32_t prefiltered =
-      dev->create_cubemap_hdr_empty(faceSize, mipLevels);
-  if (prefiltered == 0U) {
-    return 0U;
-  }
-
-  BakeStateScope scope{};
-  scope.save(dev);
-  if (!bake_target_complete(dev, backend.environmentPrefilterFbo,
-                            prefiltered)) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "environment prefilter framebuffer incomplete; bake "
-                      "aborted");
-    dev->destroy_texture(prefiltered);
-    scope.restore(dev);
-    return 0U;
+  const DeviceTextureHandle prefiltered =
+      create_bake_cubemap(dev, faceSize, mipLevels);
+  if (prefiltered == kInvalidDeviceTexture) {
+    return kInvalidDeviceTexture;
   }
 
   std::array<math::Mat4, 6> views{};
@@ -199,47 +183,61 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   const math::Mat4 projection =
       math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
 
-  dev->disable_depth_test();
-  dev->disable_face_culling();
+  dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                      BlendMode::Disabled, CullMode::None});
   dev->bind_program(backend.environmentPrefilterProgram);
-  dev->bind_texture_cubemap(0, sourceCubemap);
-  if (backend.environmentPrefilterTextureLoc >= 0) {
-    dev->set_uniform_int(backend.environmentPrefilterTextureLoc, 0);
+  dev->bind_texture_slot(0U, sourceCubemap);
+  if (backend.environmentPrefilterTextureLoc.valid()) {
+    dev->set_param_i32(backend.environmentPrefilterTextureLoc, 0);
   }
-  if (backend.environmentPrefilterProjectionLoc >= 0) {
-    dev->set_uniform_mat4(backend.environmentPrefilterProjectionLoc,
-                          &projection.columns[0].x);
+  if (backend.environmentPrefilterProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.environmentPrefilterProjectionLoc,
+                        &projection.columns[0].x);
   }
 
-  dev->bind_vertex_array(backend.skyboxVertexArray);
-  for (int mip = 0; mip < mipLevels; ++mip) {
+  bool baked = true;
+  for (int mip = 0; baked && (mip < mipLevels); ++mip) {
     const int mipSize = cubemap_mip_size(faceSize, mip);
     const float roughness =
         (mipLevels > 1)
             ? static_cast<float>(mip) / static_cast<float>(mipLevels - 1)
             : 0.0F;
     dev->set_viewport(0, 0, mipSize, mipSize);
-    if (backend.environmentPrefilterRoughnessLoc >= 0) {
-      dev->set_uniform_float(backend.environmentPrefilterRoughnessLoc,
-                             roughness);
+    if (backend.environmentPrefilterRoughnessLoc.valid()) {
+      dev->set_param_f32(backend.environmentPrefilterRoughnessLoc, roughness);
     }
 
     for (int face = 0; face < 6; ++face) {
-      dev->framebuffer_cubemap_color_face_mip(backend.environmentPrefilterFbo,
-                                              prefiltered, face, mip);
-      if (backend.environmentPrefilterViewLoc >= 0) {
-        dev->set_uniform_mat4(
+      const RenderTargetHandle faceTarget =
+          create_face_target(dev, prefiltered, face, mip);
+      if (faceTarget.value == 0U) {
+        baked = false;
+        break;
+      }
+      dev->bind_render_target(faceTarget);
+      if (backend.environmentPrefilterViewLoc.valid()) {
+        dev->set_param_mat4(
             backend.environmentPrefilterViewLoc,
             &views[static_cast<std::size_t>(face)].columns[0].x);
       }
-      dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+      dev->draw(backend.skyboxGeometry, PrimitiveTopology::Triangles, 0,
+                kSkyboxVertexCount);
+      dev->bind_render_target(kBackBufferTarget);
+      dev->destroy_render_target(faceTarget);
     }
   }
 
-  dev->bind_texture_cubemap(0, 0U);
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
-  scope.restore(dev);
+  dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+  dev->bind_program(kInvalidDeviceProgram);
+  restore_scene_state(dev);
+
+  if (!baked) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment prefilter render target unavailable; bake "
+                      "aborted");
+    dev->destroy_texture(prefiltered);
+    return kInvalidDeviceTexture;
+  }
 
   backend.prefilteredEnvironmentTexture = prefiltered;
   backend.prefilteredEnvironmentSource = sourceCubemap;
@@ -251,73 +249,48 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
 /// Destroys or releases the requested object, handle, or resource for environment irradiance resources.
 void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
-  if ((backend.irradianceEnvironmentTexture != 0U) && (dev != nullptr)) {
+  if ((backend.irradianceEnvironmentTexture != kInvalidDeviceTexture) &&
+      (dev != nullptr) && (dev->destroy_texture != nullptr)) {
     dev->destroy_texture(backend.irradianceEnvironmentTexture);
-    backend.irradianceEnvironmentTexture = 0U;
   }
-  if ((backend.environmentIrradianceFbo != 0U) && (dev != nullptr)) {
-    dev->destroy_framebuffer(backend.environmentIrradianceFbo);
-    backend.environmentIrradianceFbo = 0U;
-  }
+  backend.irradianceEnvironmentTexture = kInvalidDeviceTexture;
   if (backend.environmentIrradianceShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.environmentIrradianceShaderHandle);
     backend.environmentIrradianceShaderHandle = ShaderProgramHandle{};
   }
-  backend.environmentIrradianceProgram = 0U;
+  backend.environmentIrradianceProgram = kInvalidDeviceProgram;
   backend.environmentIrradianceAvailable = false;
-  backend.irradianceEnvironmentSource = 0U;
+  backend.irradianceEnvironmentSource = kInvalidDeviceTexture;
   backend.irradianceEnvironmentFaceSize = 0;
 }
 
-std::uint32_t
+DeviceTextureHandle
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
-                              std::uint32_t sourceCubemap,
+                              DeviceTextureHandle sourceCubemap,
                               ReflectionProbeBakeSettings settings) noexcept {
-  if ((dev == nullptr) || !backend.environmentIrradianceAvailable ||
-      !core::cvar_get_bool("r_env_irradiance", true) || (sourceCubemap == 0U) ||
-      (dev->create_cubemap_hdr_empty == nullptr) ||
-      (dev->create_framebuffer == nullptr) ||
-      (dev->framebuffer_cubemap_color_face_mip == nullptr) ||
-      (dev->bind_texture_cubemap == nullptr)) {
-    return 0U;
+  if (!backend.environmentIrradianceAvailable ||
+      !core::cvar_get_bool("r_env_irradiance", true) ||
+      (sourceCubemap == kInvalidDeviceTexture) || !bake_device_ready(dev)) {
+    return kInvalidDeviceTexture;
   }
 
   settings = normalize_reflection_probe_bake_settings(settings);
   const int faceSize = static_cast<int>(settings.irradianceFaceSize);
 
-  if ((backend.irradianceEnvironmentTexture != 0U) &&
+  if ((backend.irradianceEnvironmentTexture != kInvalidDeviceTexture) &&
       (backend.irradianceEnvironmentSource == sourceCubemap) &&
       (backend.irradianceEnvironmentFaceSize == faceSize)) {
     return backend.irradianceEnvironmentTexture;
   }
 
-  if (backend.irradianceEnvironmentTexture != 0U) {
+  if (backend.irradianceEnvironmentTexture != kInvalidDeviceTexture) {
     dev->destroy_texture(backend.irradianceEnvironmentTexture);
-    backend.irradianceEnvironmentTexture = 0U;
+    backend.irradianceEnvironmentTexture = kInvalidDeviceTexture;
   }
 
-  if (backend.environmentIrradianceFbo == 0U) {
-    backend.environmentIrradianceFbo = dev->create_framebuffer(0U, 0U);
-    if (backend.environmentIrradianceFbo == 0U) {
-      return 0U;
-    }
-  }
-
-  const std::uint32_t irradiance = dev->create_cubemap_hdr_empty(faceSize, 1);
-  if (irradiance == 0U) {
-    return 0U;
-  }
-
-  BakeStateScope scope{};
-  scope.save(dev);
-  if (!bake_target_complete(dev, backend.environmentIrradianceFbo,
-                            irradiance)) {
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "environment irradiance framebuffer incomplete; bake "
-                      "aborted");
-    dev->destroy_texture(irradiance);
-    scope.restore(dev);
-    return 0U;
+  const DeviceTextureHandle irradiance = create_bake_cubemap(dev, faceSize, 1);
+  if (irradiance == kInvalidDeviceTexture) {
+    return kInvalidDeviceTexture;
   }
 
   std::array<math::Mat4, 6> views{};
@@ -325,35 +298,49 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   const math::Mat4 projection =
       math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
 
-  dev->disable_depth_test();
-  dev->disable_face_culling();
+  dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                      BlendMode::Disabled, CullMode::None});
   dev->bind_program(backend.environmentIrradianceProgram);
-  dev->bind_texture_cubemap(0, sourceCubemap);
-  if (backend.environmentIrradianceTextureLoc >= 0) {
-    dev->set_uniform_int(backend.environmentIrradianceTextureLoc, 0);
+  dev->bind_texture_slot(0U, sourceCubemap);
+  if (backend.environmentIrradianceTextureLoc.valid()) {
+    dev->set_param_i32(backend.environmentIrradianceTextureLoc, 0);
   }
-  if (backend.environmentIrradianceProjectionLoc >= 0) {
-    dev->set_uniform_mat4(backend.environmentIrradianceProjectionLoc,
-                          &projection.columns[0].x);
+  if (backend.environmentIrradianceProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.environmentIrradianceProjectionLoc,
+                        &projection.columns[0].x);
   }
 
-  dev->bind_vertex_array(backend.skyboxVertexArray);
   dev->set_viewport(0, 0, faceSize, faceSize);
+  bool baked = true;
   for (int face = 0; face < 6; ++face) {
-    dev->framebuffer_cubemap_color_face_mip(backend.environmentIrradianceFbo,
-                                            irradiance, face, 0);
-    if (backend.environmentIrradianceViewLoc >= 0) {
-      dev->set_uniform_mat4(
-          backend.environmentIrradianceViewLoc,
-          &views[static_cast<std::size_t>(face)].columns[0].x);
+    const RenderTargetHandle faceTarget =
+        create_face_target(dev, irradiance, face, 0);
+    if (faceTarget.value == 0U) {
+      baked = false;
+      break;
     }
-    dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+    dev->bind_render_target(faceTarget);
+    if (backend.environmentIrradianceViewLoc.valid()) {
+      dev->set_param_mat4(backend.environmentIrradianceViewLoc,
+                          &views[static_cast<std::size_t>(face)].columns[0].x);
+    }
+    dev->draw(backend.skyboxGeometry, PrimitiveTopology::Triangles, 0,
+              kSkyboxVertexCount);
+    dev->bind_render_target(kBackBufferTarget);
+    dev->destroy_render_target(faceTarget);
   }
 
-  dev->bind_texture_cubemap(0, 0U);
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
-  scope.restore(dev);
+  dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+  dev->bind_program(kInvalidDeviceProgram);
+  restore_scene_state(dev);
+
+  if (!baked) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "environment irradiance render target unavailable; "
+                      "bake aborted");
+    dev->destroy_texture(irradiance);
+    return kInvalidDeviceTexture;
+  }
 
   backend.irradianceEnvironmentTexture = irradiance;
   backend.irradianceEnvironmentSource = sourceCubemap;
@@ -364,97 +351,97 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
 /// Destroys or releases the requested object, handle, or resource for brdf lut resources.
 void destroy_brdf_lut_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
-  if ((backend.brdfLutFbo != 0U) && (dev != nullptr)) {
-    dev->destroy_framebuffer(backend.brdfLutFbo);
-    backend.brdfLutFbo = 0U;
-  }
-  if ((backend.brdfLutTexture != 0U) && (dev != nullptr)) {
+  if ((backend.brdfLutTexture != kInvalidDeviceTexture) && (dev != nullptr) &&
+      (dev->destroy_texture != nullptr)) {
     dev->destroy_texture(backend.brdfLutTexture);
-    backend.brdfLutTexture = 0U;
   }
+  backend.brdfLutTexture = kInvalidDeviceTexture;
   if (backend.environmentBrdfLutShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.environmentBrdfLutShaderHandle);
     backend.environmentBrdfLutShaderHandle = ShaderProgramHandle{};
   }
-  backend.environmentBrdfLutProgram = 0U;
+  backend.environmentBrdfLutProgram = kInvalidDeviceProgram;
   backend.environmentBrdfLutAvailable = false;
   backend.brdfLutSize = 0;
 }
 
-std::uint32_t ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
-                              ReflectionProbeBakeSettings settings) noexcept {
-  if ((dev == nullptr) || !backend.environmentBrdfLutAvailable ||
-      !core::cvar_get_bool("r_env_brdf_lut", true) ||
-      (dev->create_texture_2d_hdr == nullptr) ||
-      (dev->create_framebuffer == nullptr)) {
-    return 0U;
+DeviceTextureHandle
+ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
+                ReflectionProbeBakeSettings settings) noexcept {
+  if (!backend.environmentBrdfLutAvailable ||
+      !core::cvar_get_bool("r_env_brdf_lut", true) || !bake_device_ready(dev)) {
+    return kInvalidDeviceTexture;
   }
 
   settings = normalize_reflection_probe_bake_settings(settings);
   const int lutSize = static_cast<int>(settings.brdfLutSize);
-  if ((backend.brdfLutTexture != 0U) && (backend.brdfLutSize == lutSize)) {
+  if ((backend.brdfLutTexture != kInvalidDeviceTexture) &&
+      (backend.brdfLutSize == lutSize)) {
     return backend.brdfLutTexture;
   }
 
-  if (backend.brdfLutFbo != 0U) {
-    dev->destroy_framebuffer(backend.brdfLutFbo);
-    backend.brdfLutFbo = 0U;
-  }
-  if (backend.brdfLutTexture != 0U) {
+  if (backend.brdfLutTexture != kInvalidDeviceTexture) {
     dev->destroy_texture(backend.brdfLutTexture);
-    backend.brdfLutTexture = 0U;
+    backend.brdfLutTexture = kInvalidDeviceTexture;
   }
 
-  const std::uint32_t lutTexture =
-      dev->create_texture_2d_hdr(lutSize, lutSize, 2, nullptr);
-  if (lutTexture == 0U) {
-    return 0U;
+  TextureDesc lutDesc{};
+  lutDesc.kind = TextureKind::Tex2D;
+  lutDesc.format = TextureFormat::RG16F;
+  lutDesc.width = lutSize;
+  lutDesc.height = lutSize;
+  lutDesc.filter = TextureFilter::Linear;
+  lutDesc.wrap = TextureWrap::Repeat;
+  const DeviceTextureHandle lutTexture = dev->create_texture(lutDesc);
+  if (lutTexture == kInvalidDeviceTexture) {
+    return kInvalidDeviceTexture;
   }
 
-  const std::uint32_t lutFbo = dev->create_framebuffer(lutTexture, 0U);
-  if (lutFbo == 0U) {
+  RenderTargetDesc targetDesc{};
+  targetDesc.colorCount = 1U;
+  targetDesc.colors[0].texture = lutTexture;
+  const RenderTargetHandle lutTarget = dev->create_render_target(targetDesc);
+  if (lutTarget.value == 0U) {
     dev->destroy_texture(lutTexture);
-    return 0U;
+    return kInvalidDeviceTexture;
   }
 
-  BakeStateScope scope{};
-  scope.save(dev);
-  dev->bind_framebuffer(lutFbo);
+  dev->bind_render_target(lutTarget);
   dev->set_viewport(0, 0, lutSize, lutSize);
-  dev->disable_depth_test();
-  dev->disable_face_culling();
+  dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                      BlendMode::Disabled, CullMode::None});
   dev->bind_program(backend.environmentBrdfLutProgram);
-  dev->bind_vertex_array(backend.emptyVao);
-  dev->draw_arrays_triangles(0, 3);
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
-  scope.restore(dev);
+  dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+  dev->bind_program(kInvalidDeviceProgram);
+  restore_scene_state(dev);
+  // The LUT render target only exists for this one draw; the texture keeps
+  // the baked contents.
+  dev->destroy_render_target(lutTarget);
 
   backend.brdfLutTexture = lutTexture;
-  backend.brdfLutFbo = lutFbo;
   backend.brdfLutSize = lutSize;
   return lutTexture;
 }
 
-std::uint32_t get_prefiltered_environment_texture() noexcept {
+DeviceTextureHandle get_prefiltered_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_prefilter", true)) {
-    return 0U;
+    return kInvalidDeviceTexture;
   }
   return backend_state().prefilteredEnvironmentTexture;
 }
 
-std::uint32_t get_irradiance_environment_texture() noexcept {
+DeviceTextureHandle get_irradiance_environment_texture() noexcept {
   if ((selected_sky_model() != SkyModel::Cubemap) ||
       !core::cvar_get_bool("r_env_irradiance", true)) {
-    return 0U;
+    return kInvalidDeviceTexture;
   }
   return backend_state().irradianceEnvironmentTexture;
 }
 
-std::uint32_t get_brdf_lut_texture() noexcept {
+DeviceTextureHandle get_brdf_lut_texture() noexcept {
   if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
-    return 0U;
+    return kInvalidDeviceTexture;
   }
   return backend_state().brdfLutTexture;
 }
@@ -479,12 +466,12 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
     return result;
   }
 
-  const std::uint32_t sourceCubemap =
+  const DeviceTextureHandle sourceCubemap =
       (request.sourceCubemap == kInvalidTextureHandle)
-          ? active_skybox_gpu_texture(backend)
-          : texture_gpu_id(request.sourceCubemap);
+          ? active_skybox_device_texture(backend)
+          : texture_device_handle(request.sourceCubemap);
   result.sourceCubemapTexture = sourceCubemap;
-  if (sourceCubemap == 0U) {
+  if (sourceCubemap == kInvalidDeviceTexture) {
     return result;
   }
 
@@ -493,9 +480,10 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
   result.irradianceEnvironmentTexture = ensure_irradiance_environment(
       backend, dev, sourceCubemap, result.settings);
   result.brdfLutTexture = ensure_brdf_lut(backend, dev, result.settings);
-  result.baked = (result.prefilteredEnvironmentTexture != 0U) &&
-                 (result.irradianceEnvironmentTexture != 0U) &&
-                 (result.brdfLutTexture != 0U);
+  result.baked =
+      (result.prefilteredEnvironmentTexture != kInvalidDeviceTexture) &&
+      (result.irradianceEnvironmentTexture != kInvalidDeviceTexture) &&
+      (result.brdfLutTexture != kInvalidDeviceTexture);
   return result;
 }
 

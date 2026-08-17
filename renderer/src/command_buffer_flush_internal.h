@@ -43,9 +43,9 @@ struct FrameFlushContext final {
   int drawableHeight;
   DistanceFogSettings fogSettings;
   HeightFogSettings heightFogSettings;
-  std::uint32_t envSkyboxTexture;
-  std::uint32_t iblPrefilteredTex;
-  std::uint32_t iblIrradianceTex;
+  DeviceTextureHandle envSkyboxTexture;
+  DeviceTextureHandle iblPrefilteredTex;
+  DeviceTextureHandle iblIrradianceTex;
   bool iblAvailable;
   math::Mat4 viewMat;
   math::Mat4 projMat;
@@ -183,6 +183,6 @@ void upload_skinned_gbuffer_uniforms(
     const math::Mat4 &view, const math::Mat4 &projection, float timeSeconds,
     const DrawCommand &command, const math::Mat4 &model,
     const float *normalMatrix,
-    std::uint32_t *inOutBoundAlbedoTex) noexcept;
+    DeviceTextureHandle *inOutBoundAlbedoTex) noexcept;
 
 } // namespace engine::renderer

@@ -66,11 +66,12 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
 
     const SceneCaptureTarget &target =
         backend.sceneCaptureTargets[captureIndex];
-    dev->bind_framebuffer(target.framebuffer);
+    dev->bind_render_target(target.target);
     dev->set_viewport(0, 0, captureWidth, captureHeight);
-    dev->enable_depth_test();
-    dev->set_clear_color(kClearRed, kClearGreen, kClearBlue, 1.0F);
-    dev->clear_color_depth();
+    dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                        BlendMode::Disabled, CullMode::Back});
+    dev->clear(ClearFlags::ColorDepth, kClearRed, kClearGreen, kClearBlue,
+               1.0F);
 
     if ((commandBufferView.data == nullptr) || (totalCount == 0U)) {
       continue;
@@ -87,23 +88,23 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
         math::mul(captureProj, captureView);
 
     dev->bind_program(backend.pbrProgram);
-    if (backend.pbrTimeLocation >= 0) {
-      dev->set_uniform_float(backend.pbrTimeLocation, timeSeconds);
+    if (backend.pbrTimeLocation.valid()) {
+      dev->set_param_f32(backend.pbrTimeLocation, timeSeconds);
     }
-    if (backend.pbrCameraPosLocation >= 0) {
-      dev->set_uniform_vec3(backend.pbrCameraPosLocation,
+    if (backend.pbrCameraPosLocation.valid()) {
+      dev->set_param_vec3(backend.pbrCameraPosLocation,
                             &request.camera.position.x);
     }
-    if (backend.pbrViewLocation >= 0) {
-      dev->set_uniform_mat4(backend.pbrViewLocation,
+    if (backend.pbrViewLocation.valid()) {
+      dev->set_param_mat4(backend.pbrViewLocation,
                             &captureView.columns[0].x);
     }
-    if (backend.pbrViewProjectionLocation >= 0) {
-      dev->set_uniform_mat4(backend.pbrViewProjectionLocation,
+    if (backend.pbrViewProjectionLocation.valid()) {
+      dev->set_param_mat4(backend.pbrViewProjectionLocation,
                             &captureViewProjection.columns[0].x);
     }
-    if (backend.pbrUseInstancingLocation >= 0) {
-      dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+    if (backend.pbrUseInstancingLocation.valid()) {
+      dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
     }
     upload_pbr_lighting_uniforms(backend, dev, lights);
     upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
@@ -111,108 +112,97 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     bind_pbr_shadow_uniforms(backend, dev, lights, false, false, false);
     // Captures skip sky and IBL by design.
     apply_pbr_ibl_uniforms(backend, dev, false);
-    if (backend.pbrAlbedoMapLocation >= 0) {
-      dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
+    if (backend.pbrAlbedoMapLocation.valid()) {
+      dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
     auto drawCaptureRange = [&](std::size_t start, std::size_t end) {
-      std::uint32_t boundVertexArray = 0U;
-      std::uint32_t boundAlbedoTexture = 0U;
+      DeviceTextureHandle boundAlbedoTexture{};
       for (std::size_t i = start; i < end; ++i) {
         const DrawCommand &command = commandBufferView.data[i];
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
             (mesh->vertexCount == 0U)) {
           continue;
         }
 
-        if (mesh->vertexArray != boundVertexArray) {
-          dev->bind_vertex_array(mesh->vertexArray);
-          boundVertexArray = mesh->vertexArray;
-        }
-
-        if (backend.pbrAlbedoLocation >= 0) {
-          dev->set_uniform_vec3(backend.pbrAlbedoLocation,
+        if (backend.pbrAlbedoLocation.valid()) {
+          dev->set_param_vec3(backend.pbrAlbedoLocation,
                                 &command.material.albedo.x);
         }
-        if (backend.pbrRoughnessLocation >= 0) {
-          dev->set_uniform_float(backend.pbrRoughnessLocation,
+        if (backend.pbrRoughnessLocation.valid()) {
+          dev->set_param_f32(backend.pbrRoughnessLocation,
                                  command.material.roughness);
         }
-        if (backend.pbrMetallicLocation >= 0) {
-          dev->set_uniform_float(backend.pbrMetallicLocation,
+        if (backend.pbrMetallicLocation.valid()) {
+          dev->set_param_f32(backend.pbrMetallicLocation,
                                  command.material.metallic);
         }
-        if (backend.pbrOpacityLocation >= 0) {
-          dev->set_uniform_float(backend.pbrOpacityLocation,
+        if (backend.pbrOpacityLocation.valid()) {
+          dev->set_param_f32(backend.pbrOpacityLocation,
                                  command.material.opacity);
         }
         upload_pbr_foliage_uniforms(backend, dev, command);
 
-        const std::uint32_t albedoGpuId =
-            texture_gpu_id(command.material.albedoTexture);
+        const DeviceTextureHandle albedoTex =
+            texture_device_handle(command.material.albedoTexture);
         const bool hasAlbedoTex =
             (command.material.albedoTexture != kInvalidTextureHandle) &&
-            (albedoGpuId != 0U);
-        if (backend.pbrHasAlbedoTextureLocation >= 0) {
-          dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
+            (albedoTex != kInvalidDeviceTexture);
+        if (backend.pbrHasAlbedoTextureLocation.valid()) {
+          dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
                                hasAlbedoTex ? 1 : 0);
         }
-        if (hasAlbedoTex && (albedoGpuId != boundAlbedoTexture)) {
-          dev->bind_texture(0, albedoGpuId);
-          boundAlbedoTexture = albedoGpuId;
-        } else if (!hasAlbedoTex && (boundAlbedoTexture != 0U)) {
-          dev->bind_texture(0, 0U);
-          boundAlbedoTexture = 0U;
+        if (hasAlbedoTex && (albedoTex != boundAlbedoTexture)) {
+          dev->bind_texture_slot(0U, albedoTex);
+          boundAlbedoTexture = albedoTex;
+        } else if (!hasAlbedoTex &&
+                   (boundAlbedoTexture != kInvalidDeviceTexture)) {
+          dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+          boundAlbedoTexture = kInvalidDeviceTexture;
         }
 
         const math::Mat4 model = compute_model_matrix(command);
         const math::Mat4 mvp = compute_mvp(model, captureViewProjection);
         float normalMatrix[9] = {};
         extract_normal_matrix(model, normalMatrix);
-        if (backend.pbrModelLocation >= 0) {
-          dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
+        if (backend.pbrModelLocation.valid()) {
+          dev->set_param_mat4(backend.pbrModelLocation, &model.columns[0].x);
         }
-        dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-        dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
+        dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
+        dev->set_param_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
 
         if (mesh->indexCount > 0U) {
           ++frameStats.drawCalls;
           frameStats.triangleCount += (mesh->indexCount / 3U);
-          dev->draw_elements_triangles_u32(
-              static_cast<std::int32_t>(mesh->indexCount));
+          dev->draw_indexed(mesh->geometry,
+                            static_cast<std::int32_t>(mesh->indexCount));
         } else {
           ++frameStats.drawCalls;
           frameStats.triangleCount += (mesh->vertexCount / 3U);
-          dev->draw_arrays_triangles(
-              0, static_cast<std::int32_t>(mesh->vertexCount));
+          dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                    static_cast<std::int32_t>(mesh->vertexCount));
         }
       }
     };
 
-    dev->set_depth_mask(true);
-    dev->disable_blending();
-    dev->enable_face_culling();
     drawCaptureRange(0U, opaqueCount);
 
     if (opaqueCount < totalCount) {
-      dev->set_depth_mask(false);
-      dev->enable_blending();
-      dev->set_blend_func_alpha();
-      dev->disable_face_culling();
+      dev->apply_render_state(RenderState{DepthTest::Less, false,
+                                          BlendMode::Alpha, CullMode::None});
       drawCaptureRange(opaqueCount, totalCount);
-      dev->set_depth_mask(true);
-      dev->disable_blending();
-      dev->enable_face_culling();
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
     }
 
-    dev->bind_texture(0, 0U);
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
   }
   if ((captureCount > 0U) && (dev != nullptr) &&
-      (dev->bind_framebuffer != nullptr)) {
-    dev->bind_framebuffer(0U);
+      (dev->bind_render_target != nullptr)) {
+    dev->bind_render_target(kBackBufferTarget);
   }
 }
 

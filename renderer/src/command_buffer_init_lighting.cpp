@@ -40,36 +40,36 @@ namespace engine::renderer {
 // scalar material tuning channels.
 bool resolve_gbuffer_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
-  backend.gbufferProgram = shader_gpu_program(backend.gbufferShaderHandle);
-  const std::uint32_t gbufProg = backend.gbufferProgram;
-  if (gbufProg == 0U) {
+  backend.gbufferProgram = shader_device_program(backend.gbufferShaderHandle);
+  const DeviceProgramHandle gbufProg = backend.gbufferProgram;
+  if (gbufProg == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
-  backend.gbufModelLoc = required_location(&ok, dev, gbufProg, "uModel");
-  backend.gbufViewLoc = required_location(&ok, dev, gbufProg, "uView");
+  backend.gbufModelLoc = required_param(&ok, dev, gbufProg, "uModel");
+  backend.gbufViewLoc = required_param(&ok, dev, gbufProg, "uView");
   backend.gbufProjectionLoc =
-      required_location(&ok, dev, gbufProg, "uProjection");
+      required_param(&ok, dev, gbufProg, "uProjection");
   backend.gbufNormalMatrixLoc =
-      required_location(&ok, dev, gbufProg, "uNormalMatrix");
+      required_param(&ok, dev, gbufProg, "uNormalMatrix");
   backend.gbufUseInstancingLoc =
-      required_location(&ok, dev, gbufProg, "uUseInstancing");
-  backend.gbufTimeLoc = dev->uniform_location(gbufProg, "uTime");
+      required_param(&ok, dev, gbufProg, "uUseInstancing");
+  backend.gbufTimeLoc = dev->shader_param(gbufProg, "uTime");
   backend.gbufFoliageWindStrengthLoc =
-      dev->uniform_location(gbufProg, "uFoliageWindStrength");
+      dev->shader_param(gbufProg, "uFoliageWindStrength");
   backend.gbufFoliageWindFrequencyLoc =
-      dev->uniform_location(gbufProg, "uFoliageWindFrequency");
+      dev->shader_param(gbufProg, "uFoliageWindFrequency");
   backend.gbufFoliagePhaseLoc =
-      dev->uniform_location(gbufProg, "uFoliagePhase");
-  backend.gbufAlbedoLoc = required_location(&ok, dev, gbufProg, "uAlbedo");
+      dev->shader_param(gbufProg, "uFoliagePhase");
+  backend.gbufAlbedoLoc = required_param(&ok, dev, gbufProg, "uAlbedo");
   backend.gbufHasAlbedoTextureLoc =
-      dev->uniform_location(gbufProg, "uHasAlbedoTexture");
+      dev->shader_param(gbufProg, "uHasAlbedoTexture");
   backend.gbufAlbedoTextureLoc =
-      dev->uniform_location(gbufProg, "uAlbedoTexture");
-  backend.gbufMetallicLoc = dev->uniform_location(gbufProg, "uMetallic");
-  backend.gbufRoughnessLoc = dev->uniform_location(gbufProg, "uRoughness");
-  backend.gbufAOLoc = dev->uniform_location(gbufProg, "uAO");
-  backend.gbufEmissiveLoc = dev->uniform_location(gbufProg, "uEmissive");
+      dev->shader_param(gbufProg, "uAlbedoTexture");
+  backend.gbufMetallicLoc = dev->shader_param(gbufProg, "uMetallic");
+  backend.gbufRoughnessLoc = dev->shader_param(gbufProg, "uRoughness");
+  backend.gbufAOLoc = dev->shader_param(gbufProg, "uAO");
+  backend.gbufEmissiveLoc = dev->shader_param(gbufProg, "uEmissive");
   return ok;
 }
 
@@ -85,98 +85,98 @@ bool resolve_gbuffer_program_state(BackendState &backend,
 bool resolve_deferred_light_program_state(BackendState &backend,
                                           const RenderDevice *dev) noexcept {
   backend.deferredLightProgram =
-      shader_gpu_program(backend.deferredLightShaderHandle);
-  const std::uint32_t dlProg = backend.deferredLightProgram;
-  if (dlProg == 0U) {
+      shader_device_program(backend.deferredLightShaderHandle);
+  const DeviceProgramHandle dlProg = backend.deferredLightProgram;
+  if (dlProg == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
-  backend.dlGBufAlbedoLoc = required_location(&ok, dev, dlProg, "uGBufferAlbedo");
-  backend.dlGBufNormalLoc = required_location(&ok, dev, dlProg, "uGBufferNormal");
+  backend.dlGBufAlbedoLoc = required_param(&ok, dev, dlProg, "uGBufferAlbedo");
+  backend.dlGBufNormalLoc = required_param(&ok, dev, dlProg, "uGBufferNormal");
   backend.dlGBufEmissiveLoc =
-      required_location(&ok, dev, dlProg, "uGBufferEmissive");
-  backend.dlGBufDepthLoc = required_location(&ok, dev, dlProg, "uGBufferDepth");
+      required_param(&ok, dev, dlProg, "uGBufferEmissive");
+  backend.dlGBufDepthLoc = required_param(&ok, dev, dlProg, "uGBufferDepth");
   backend.dlTileLightTexLoc =
-      required_location(&ok, dev, dlProg, "uTileLightTex");
-  backend.dlTileCountXLoc = required_location(&ok, dev, dlProg, "uTileCountX");
-  backend.dlTileCountYLoc = dev->uniform_location(dlProg, "uTileCountY");
+      required_param(&ok, dev, dlProg, "uTileLightTex");
+  backend.dlTileCountXLoc = required_param(&ok, dev, dlProg, "uTileCountX");
+  backend.dlTileCountYLoc = dev->shader_param(dlProg, "uTileCountY");
   backend.dlInvProjectionLoc =
-      required_location(&ok, dev, dlProg, "uInvProjection");
-  backend.dlInvViewLoc = required_location(&ok, dev, dlProg, "uInvView");
+      required_param(&ok, dev, dlProg, "uInvProjection");
+  backend.dlInvViewLoc = required_param(&ok, dev, dlProg, "uInvView");
   backend.dlDirLightDirLoc =
-      required_location(&ok, dev, dlProg, "uDirLightDirection");
+      required_param(&ok, dev, dlProg, "uDirLightDirection");
   backend.dlDirLightColorLoc =
-      required_location(&ok, dev, dlProg, "uDirLightColor");
-  backend.dlCameraPosLoc = required_location(&ok, dev, dlProg, "uCameraPos");
-  backend.dlScreenSizeLoc = dev->uniform_location(dlProg, "uScreenSize");
-  backend.dlFogModeLoc = dev->uniform_location(dlProg, "uFogMode");
-  backend.dlFogStartLoc = dev->uniform_location(dlProg, "uFogStart");
-  backend.dlFogEndLoc = dev->uniform_location(dlProg, "uFogEnd");
-  backend.dlFogDensityLoc = dev->uniform_location(dlProg, "uFogDensity");
-  backend.dlFogColorLoc = dev->uniform_location(dlProg, "uFogColor");
+      required_param(&ok, dev, dlProg, "uDirLightColor");
+  backend.dlCameraPosLoc = required_param(&ok, dev, dlProg, "uCameraPos");
+  backend.dlScreenSizeLoc = dev->shader_param(dlProg, "uScreenSize");
+  backend.dlFogModeLoc = dev->shader_param(dlProg, "uFogMode");
+  backend.dlFogStartLoc = dev->shader_param(dlProg, "uFogStart");
+  backend.dlFogEndLoc = dev->shader_param(dlProg, "uFogEnd");
+  backend.dlFogDensityLoc = dev->shader_param(dlProg, "uFogDensity");
+  backend.dlFogColorLoc = dev->shader_param(dlProg, "uFogColor");
   backend.dlHeightFogEnabledLoc =
-      dev->uniform_location(dlProg, "uHeightFogEnabled");
+      dev->shader_param(dlProg, "uHeightFogEnabled");
   backend.dlHeightFogBaseHeightLoc =
-      dev->uniform_location(dlProg, "uHeightFogBaseHeight");
+      dev->shader_param(dlProg, "uHeightFogBaseHeight");
   backend.dlHeightFogDensityLoc =
-      dev->uniform_location(dlProg, "uHeightFogDensity");
+      dev->shader_param(dlProg, "uHeightFogDensity");
   backend.dlHeightFogFalloffLoc =
-      dev->uniform_location(dlProg, "uHeightFogFalloff");
+      dev->shader_param(dlProg, "uHeightFogFalloff");
   backend.dlHeightFogStepCountLoc =
-      dev->uniform_location(dlProg, "uHeightFogStepCount");
+      dev->shader_param(dlProg, "uHeightFogStepCount");
   backend.dlPointLightCountLoc =
-      required_location(&ok, dev, dlProg, "uPointLightCount");
+      required_param(&ok, dev, dlProg, "uPointLightCount");
   backend.dlSpotLightCountLoc =
-      required_location(&ok, dev, dlProg, "uSpotLightCount");
+      required_param(&ok, dev, dlProg, "uSpotLightCount");
   backend.dlLightDataTexLoc =
-      required_location(&ok, dev, dlProg, "uLightDataTex");
-  backend.dlIblEnabledLoc = dev->uniform_location(dlProg, "uIblEnabled");
+      required_param(&ok, dev, dlProg, "uLightDataTex");
+  backend.dlIblEnabledLoc = dev->shader_param(dlProg, "uIblEnabled");
   backend.dlIrradianceMapLoc =
-      dev->uniform_location(dlProg, "uIrradianceMap");
+      dev->shader_param(dlProg, "uIrradianceMap");
   backend.dlPrefilteredMapLoc =
-      dev->uniform_location(dlProg, "uPrefilteredMap");
-  backend.dlBrdfLutLoc = dev->uniform_location(dlProg, "uBrdfLut");
+      dev->shader_param(dlProg, "uPrefilteredMap");
+  backend.dlBrdfLutLoc = dev->shader_param(dlProg, "uBrdfLut");
   backend.dlPrefilteredMipsLoc =
-      dev->uniform_location(dlProg, "uPrefilteredMips");
-  backend.dlSsaoTextureLoc = dev->uniform_location(dlProg, "uSsaoTexture");
-  backend.dlSsaoEnabledLoc = dev->uniform_location(dlProg, "uSsaoEnabled");
+      dev->shader_param(dlProg, "uPrefilteredMips");
+  backend.dlSsaoTextureLoc = dev->shader_param(dlProg, "uSsaoTexture");
+  backend.dlSsaoEnabledLoc = dev->shader_param(dlProg, "uSsaoEnabled");
 
   backend.dlShadowEnabledLoc =
-      dev->uniform_location(dlProg, "uShadowEnabled");
+      dev->shader_param(dlProg, "uShadowEnabled");
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
     char nm[80] = {};
     std::snprintf(nm, sizeof(nm), "uShadowMap[%zu]", i);
-    backend.dlShadowMapLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlShadowMapLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uShadowMatrix[%zu]", i);
-    backend.dlShadowMatrixLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlShadowMatrixLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uCascadeSplit[%zu]", i);
-    backend.dlCascadeSplitLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlCascadeSplitLocs[i] = dev->shader_param(dlProg, nm);
   }
 
   backend.dlSpotShadowEnabledLoc =
-      dev->uniform_location(dlProg, "uSpotShadowEnabled");
+      dev->shader_param(dlProg, "uSpotShadowEnabled");
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
     char nm[80] = {};
     std::snprintf(nm, sizeof(nm), "uSpotShadowMap[%zu]", i);
-    backend.dlSpotShadowMapLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlSpotShadowMapLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uSpotShadowMatrix[%zu]", i);
-    backend.dlSpotShadowMatrixLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlSpotShadowMatrixLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uSpotShadowLightIdx[%zu]", i);
-    backend.dlSpotShadowLightIdxLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlSpotShadowLightIdxLocs[i] = dev->shader_param(dlProg, nm);
   }
 
   backend.dlPointShadowEnabledLoc =
-      dev->uniform_location(dlProg, "uPointShadowEnabled");
+      dev->shader_param(dlProg, "uPointShadowEnabled");
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
     char nm[80] = {};
     std::snprintf(nm, sizeof(nm), "uPointShadowMap[%zu]", i);
-    backend.dlPointShadowMapLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlPointShadowMapLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uPointShadowLightPos[%zu]", i);
-    backend.dlPointShadowLightPosLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlPointShadowLightPosLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uPointShadowFarPlane[%zu]", i);
-    backend.dlPointShadowFarPlaneLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlPointShadowFarPlaneLocs[i] = dev->shader_param(dlProg, nm);
     std::snprintf(nm, sizeof(nm), "uPointShadowLightIdx[%zu]", i);
-    backend.dlPointShadowLightIdxLocs[i] = dev->uniform_location(dlProg, nm);
+    backend.dlPointShadowLightIdxLocs[i] = dev->shader_param(dlProg, nm);
   }
   return ok;
 }
@@ -188,23 +188,23 @@ bool resolve_deferred_light_program_state(BackendState &backend,
 bool resolve_gbuffer_debug_program_state(BackendState &backend,
                                          const RenderDevice *dev) noexcept {
   backend.gbufferDebugProgram =
-      shader_gpu_program(backend.gbufferDebugShaderHandle);
-  const std::uint32_t dbgProg = backend.gbufferDebugProgram;
-  if (dbgProg == 0U) {
+      shader_device_program(backend.gbufferDebugShaderHandle);
+  const DeviceProgramHandle dbgProg = backend.gbufferDebugProgram;
+  if (dbgProg == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.dbgGBufAlbedoLoc =
-      required_location(&ok, dev, dbgProg, "uGBufferAlbedo");
+      required_param(&ok, dev, dbgProg, "uGBufferAlbedo");
   backend.dbgGBufNormalLoc =
-      required_location(&ok, dev, dbgProg, "uGBufferNormal");
+      required_param(&ok, dev, dbgProg, "uGBufferNormal");
   backend.dbgGBufEmissiveLoc =
-      required_location(&ok, dev, dbgProg, "uGBufferEmissive");
+      required_param(&ok, dev, dbgProg, "uGBufferEmissive");
   backend.dbgGBufDepthLoc =
-      required_location(&ok, dev, dbgProg, "uGBufferDepth");
-  backend.dbgModeLoc = required_location(&ok, dev, dbgProg, "uDebugMode");
+      required_param(&ok, dev, dbgProg, "uGBufferDepth");
+  backend.dbgModeLoc = required_param(&ok, dev, dbgProg, "uDebugMode");
   if (!ok) {
-    backend.gbufferDebugProgram = 0U;
+    backend.gbufferDebugProgram = kInvalidDeviceProgram;
   }
   return ok;
 }
@@ -215,14 +215,14 @@ bool resolve_gbuffer_debug_program_state(BackendState &backend,
 bool resolve_shadow_depth_program_state(BackendState &backend,
                                         const RenderDevice *dev) noexcept {
   backend.shadowDepthProgram =
-      shader_gpu_program(backend.shadowDepthShaderHandle);
-  const std::uint32_t prog = backend.shadowDepthProgram;
-  if (prog == 0U) {
+      shader_device_program(backend.shadowDepthShaderHandle);
+  const DeviceProgramHandle prog = backend.shadowDepthProgram;
+  if (prog == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
-  backend.shadowLightMvpLoc = required_location(&ok, dev, prog, "u_lightMVP");
-  backend.shadowModelLoc = dev->uniform_location(prog, "u_model");
+  backend.shadowLightMvpLoc = required_param(&ok, dev, prog, "u_lightMVP");
+  backend.shadowModelLoc = dev->shader_param(prog, "u_model");
   return ok;
 }
 
@@ -232,19 +232,19 @@ bool resolve_shadow_depth_program_state(BackendState &backend,
 bool resolve_shadow_depth_point_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.shadowDepthPointProgram =
-      shader_gpu_program(backend.shadowDepthPointShaderHandle);
-  const std::uint32_t prog = backend.shadowDepthPointProgram;
-  if (prog == 0U) {
+      shader_device_program(backend.shadowDepthPointShaderHandle);
+  const DeviceProgramHandle prog = backend.shadowDepthPointProgram;
+  if (prog == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.shadowPointLightMvpLoc =
-      required_location(&ok, dev, prog, "u_lightMVP");
-  backend.shadowPointModelLoc = required_location(&ok, dev, prog, "u_model");
+      required_param(&ok, dev, prog, "u_lightMVP");
+  backend.shadowPointModelLoc = required_param(&ok, dev, prog, "u_model");
   backend.shadowPointLightPosLoc =
-      required_location(&ok, dev, prog, "u_lightPos");
+      required_param(&ok, dev, prog, "u_lightPos");
   backend.shadowPointFarPlaneLoc =
-      required_location(&ok, dev, prog, "u_farPlane");
+      required_param(&ok, dev, prog, "u_farPlane");
   return ok;
 }
 
@@ -255,39 +255,39 @@ bool resolve_shadow_depth_point_program_state(
 bool resolve_gbuffer_skinned_program_state(BackendState &backend,
                                            const RenderDevice *dev) noexcept {
   backend.gbufferSkinnedProgram =
-      shader_gpu_program(backend.gbufferSkinnedShaderHandle);
-  const std::uint32_t skinnedProg = backend.gbufferSkinnedProgram;
-  if (skinnedProg == 0U) {
+      shader_device_program(backend.gbufferSkinnedShaderHandle);
+  const DeviceProgramHandle skinnedProg = backend.gbufferSkinnedProgram;
+  if (skinnedProg == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.gbufSkinnedModelLoc =
-      required_location(&ok, dev, skinnedProg, "uModel");
+      required_param(&ok, dev, skinnedProg, "uModel");
   backend.gbufSkinnedViewLoc =
-      required_location(&ok, dev, skinnedProg, "uView");
+      required_param(&ok, dev, skinnedProg, "uView");
   backend.gbufSkinnedProjectionLoc =
-      required_location(&ok, dev, skinnedProg, "uProjection");
+      required_param(&ok, dev, skinnedProg, "uProjection");
   backend.gbufSkinnedNormalMatrixLoc =
-      required_location(&ok, dev, skinnedProg, "uNormalMatrix");
+      required_param(&ok, dev, skinnedProg, "uNormalMatrix");
   backend.gbufSkinnedUseInstancingLoc =
-      required_location(&ok, dev, skinnedProg, "uUseInstancing");
-  backend.gbufSkinnedTimeLoc = dev->uniform_location(skinnedProg, "uTime");
+      required_param(&ok, dev, skinnedProg, "uUseInstancing");
+  backend.gbufSkinnedTimeLoc = dev->shader_param(skinnedProg, "uTime");
   backend.gbufSkinnedAlbedoLoc =
-      required_location(&ok, dev, skinnedProg, "uAlbedo");
+      required_param(&ok, dev, skinnedProg, "uAlbedo");
   backend.gbufSkinnedHasAlbedoTextureLoc =
-      dev->uniform_location(skinnedProg, "uHasAlbedoTexture");
+      dev->shader_param(skinnedProg, "uHasAlbedoTexture");
   backend.gbufSkinnedAlbedoTextureLoc =
-      dev->uniform_location(skinnedProg, "uAlbedoTexture");
+      dev->shader_param(skinnedProg, "uAlbedoTexture");
   backend.gbufSkinnedMetallicLoc =
-      dev->uniform_location(skinnedProg, "uMetallic");
+      dev->shader_param(skinnedProg, "uMetallic");
   backend.gbufSkinnedRoughnessLoc =
-      dev->uniform_location(skinnedProg, "uRoughness");
-  backend.gbufSkinnedAOLoc = dev->uniform_location(skinnedProg, "uAO");
+      dev->shader_param(skinnedProg, "uRoughness");
+  backend.gbufSkinnedAOLoc = dev->shader_param(skinnedProg, "uAO");
   backend.gbufSkinnedEmissiveLoc =
-      dev->uniform_location(skinnedProg, "uEmissive");
-  if ((dev->bind_uniform_block == nullptr) ||
-      !dev->bind_uniform_block(skinnedProg, "BonePalette",
-                               kBonePaletteUboBinding)) {
+      dev->shader_param(skinnedProg, "uEmissive");
+  if ((dev->bind_program_uniform_block == nullptr) ||
+      !dev->bind_program_uniform_block(skinnedProg, "BonePalette",
+                                       kBonePaletteUboBinding)) {
     ok = false;
   }
   return ok;
@@ -300,21 +300,21 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
 bool resolve_shadow_depth_skinned_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.shadowDepthSkinnedProgram =
-      shader_gpu_program(backend.shadowDepthSkinnedShaderHandle);
-  const std::uint32_t skinnedShadowProg = backend.shadowDepthSkinnedProgram;
-  if (skinnedShadowProg == 0U) {
+      shader_device_program(backend.shadowDepthSkinnedShaderHandle);
+  const DeviceProgramHandle skinnedShadowProg = backend.shadowDepthSkinnedProgram;
+  if (skinnedShadowProg == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.shadowSkinnedLightMvpLoc =
-      required_location(&ok, dev, skinnedShadowProg, "u_lightMVP");
-  if ((dev->bind_uniform_block == nullptr) ||
-      !dev->bind_uniform_block(skinnedShadowProg, "BonePalette",
-                               kBonePaletteUboBinding)) {
+      required_param(&ok, dev, skinnedShadowProg, "u_lightMVP");
+  if ((dev->bind_program_uniform_block == nullptr) ||
+      !dev->bind_program_uniform_block(skinnedShadowProg, "BonePalette",
+                                       kBonePaletteUboBinding)) {
     ok = false;
   }
   if (!ok) {
-    backend.shadowDepthSkinnedProgram = 0U;
+    backend.shadowDepthSkinnedProgram = kInvalidDeviceProgram;
   }
   return ok;
 }
@@ -408,8 +408,8 @@ void init_backend_lighting(BackendState &backend,
       destroy_shader_program(gbufferShader);
       backend.gbufferShaderHandle = ShaderProgramHandle{};
       backend.deferredLightShaderHandle = ShaderProgramHandle{};
-      backend.gbufferProgram = 0U;
-      backend.deferredLightProgram = 0U;
+      backend.gbufferProgram = kInvalidDeviceProgram;
+      backend.deferredLightProgram = kInvalidDeviceProgram;
       deferredOk = false;
     }
   }
@@ -489,11 +489,11 @@ void init_backend_lighting(BackendState &backend,
   // skinned G-buffer and shadow-depth variants share one bone-palette
   // uniform buffer rebound per skinned draw.
   {
-    const bool uboSupported = (dev->bind_uniform_buffer != nullptr) &&
-                              (dev->buffer_data_uniform != nullptr) &&
-                              (dev->buffer_sub_data_uniform != nullptr) &&
-                              (dev->bind_uniform_buffer_base != nullptr) &&
-                              (dev->bind_uniform_block != nullptr);
+    const bool uboSupported = dev->caps.uniformBlocks &&
+                              (dev->create_buffer != nullptr) &&
+                              (dev->update_buffer_range != nullptr) &&
+                              (dev->bind_uniform_buffer_slot != nullptr) &&
+                              (dev->bind_program_uniform_block != nullptr);
     if (backend.deferredAvailable && uboSupported) {
       const ShaderDefine skinnedDefine{"SKINNED", "1"};
       const ShaderProgramHandle skinnedGbufferShader =
@@ -501,14 +501,14 @@ void init_backend_lighting(BackendState &backend,
                                          &skinnedDefine, 1U);
       backend.gbufferSkinnedShaderHandle = skinnedGbufferShader;
       if (resolve_gbuffer_skinned_program_state(backend, dev)) {
-        backend.bonePaletteUbo = dev->create_buffer();
-        if (backend.bonePaletteUbo != 0U) {
-          dev->bind_uniform_buffer(backend.bonePaletteUbo);
-          dev->buffer_data_uniform(
-              nullptr, static_cast<std::ptrdiff_t>(kMaxSkinPaletteJoints *
-                                                   sizeof(math::Mat4)));
-          dev->bind_uniform_buffer(0U);
-          dev->bind_uniform_buffer_base(kBonePaletteUboBinding,
+        BufferDesc paletteDesc{};
+        paletteDesc.usage = BufferUsage::Uniform;
+        paletteDesc.access = BufferAccess::Stream;
+        paletteDesc.sizeBytes = static_cast<std::ptrdiff_t>(
+            kMaxSkinPaletteJoints * sizeof(math::Mat4));
+        backend.bonePaletteUbo = dev->create_buffer(paletteDesc);
+        if (backend.bonePaletteUbo != kInvalidDeviceBuffer) {
+          dev->bind_uniform_buffer_slot(kBonePaletteUboBinding,
                                         backend.bonePaletteUbo);
           backend.skinningAvailable = true;
         } else {
@@ -528,7 +528,7 @@ void init_backend_lighting(BackendState &backend,
               destroy_shader_program(skinnedShadowShader);
             }
             backend.shadowDepthSkinnedShaderHandle = ShaderProgramHandle{};
-            backend.shadowDepthSkinnedProgram = 0U;
+            backend.shadowDepthSkinnedProgram = kInvalidDeviceProgram;
             core::log_message(core::LogLevel::Warning, "renderer",
                               "skinned shadow shader not available — skinned "
                               "meshes cast bind-pose shadows");
@@ -539,7 +539,7 @@ void init_backend_lighting(BackendState &backend,
           destroy_shader_program(skinnedGbufferShader);
         }
         backend.gbufferSkinnedShaderHandle = ShaderProgramHandle{};
-        backend.gbufferSkinnedProgram = 0U;
+        backend.gbufferSkinnedProgram = kInvalidDeviceProgram;
         core::log_message(core::LogLevel::Warning, "renderer",
                           "skinned G-buffer shader not available — GPU "
                           "skinning disabled");

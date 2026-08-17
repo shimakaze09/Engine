@@ -1,6 +1,6 @@
 // Implements the hard-fail backend core initialization: render device,
 // shader system, the default/PBR/tonemap programs with their required
-// uniforms, and the fullscreen empty VAO.
+// shader parameters, and the fullscreen attribute-less geometry.
 #include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
 #include "command_buffer_post_resources.h"
@@ -38,20 +38,20 @@ namespace {
 
 void resolve_pbr_light_uniforms(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
-  const std::uint32_t prog = backend.pbrProgram;
+  const DeviceProgramHandle prog = backend.pbrProgram;
 
   backend.pbrDirLightCountLocation =
-      dev->uniform_location(prog, "u_dirLightCount");
+      dev->shader_param(prog, "u_dirLightCount");
   for (std::size_t i = 0U; i < kMaxDirectionalLights; ++i) {
     char name[64] = {};
     std::snprintf(name, sizeof(name), "u_dirLights[%zu].direction", i);
-    backend.pbrDirLightDir[i] = dev->uniform_location(prog, name);
+    backend.pbrDirLightDir[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_dirLights[%zu].color", i);
-    backend.pbrDirLightColor[i] = dev->uniform_location(prog, name);
+    backend.pbrDirLightColor[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_dirLights[%zu].intensity", i);
-    backend.pbrDirLightIntensity[i] = dev->uniform_location(prog, name);
-    if ((backend.pbrDirLightDir[i] < 0) || (backend.pbrDirLightColor[i] < 0) ||
-        (backend.pbrDirLightIntensity[i] < 0)) {
+    backend.pbrDirLightIntensity[i] = dev->shader_param(prog, name);
+    if ((!backend.pbrDirLightDir[i].valid()) || (!backend.pbrDirLightColor[i].valid()) ||
+        (!backend.pbrDirLightIntensity[i].valid())) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "PBR shader missing directional light uniforms at "
                         "index — lights will be invisible");
@@ -59,21 +59,21 @@ void resolve_pbr_light_uniforms(BackendState &backend,
   }
 
   backend.pbrPointLightCountLocation =
-      dev->uniform_location(prog, "u_pointLightCount");
+      dev->shader_param(prog, "u_pointLightCount");
   for (std::size_t i = 0U; i < kForwardMaxPointLights; ++i) {
     char name[64] = {};
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].position", i);
-    backend.pbrPointLightPos[i] = dev->uniform_location(prog, name);
+    backend.pbrPointLightPos[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].color", i);
-    backend.pbrPointLightColor[i] = dev->uniform_location(prog, name);
+    backend.pbrPointLightColor[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].intensity", i);
-    backend.pbrPointLightIntensity[i] = dev->uniform_location(prog, name);
+    backend.pbrPointLightIntensity[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_pointLights[%zu].radius", i);
-    backend.pbrPointLightRadius[i] = dev->uniform_location(prog, name);
-    if ((backend.pbrPointLightPos[i] < 0) ||
-        (backend.pbrPointLightColor[i] < 0) ||
-        (backend.pbrPointLightIntensity[i] < 0) ||
-        (backend.pbrPointLightRadius[i] < 0)) {
+    backend.pbrPointLightRadius[i] = dev->shader_param(prog, name);
+    if ((!backend.pbrPointLightPos[i].valid()) ||
+        (!backend.pbrPointLightColor[i].valid()) ||
+        (!backend.pbrPointLightIntensity[i].valid()) ||
+        (!backend.pbrPointLightRadius[i].valid())) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "PBR shader missing point light uniforms at "
                         "index — lights will be invisible");
@@ -81,63 +81,63 @@ void resolve_pbr_light_uniforms(BackendState &backend,
   }
 
   backend.pbrSpotLightCountLocation =
-      dev->uniform_location(prog, "u_spotLightCount");
+      dev->shader_param(prog, "u_spotLightCount");
   for (std::size_t i = 0U; i < kForwardMaxSpotLights; ++i) {
     char name[64] = {};
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].position", i);
-    backend.pbrSpotLightPos[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightPos[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].direction", i);
-    backend.pbrSpotLightDir[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightDir[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].color", i);
-    backend.pbrSpotLightColor[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightColor[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].intensity", i);
-    backend.pbrSpotLightIntensity[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightIntensity[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].radius", i);
-    backend.pbrSpotLightRadius[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightRadius[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].innerCone", i);
-    backend.pbrSpotLightInnerCone[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightInnerCone[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "u_spotLights[%zu].outerCone", i);
-    backend.pbrSpotLightOuterCone[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotLightOuterCone[i] = dev->shader_param(prog, name);
   }
 }
 
 void resolve_pbr_shadow_uniforms(BackendState &backend,
                                  const RenderDevice *dev) noexcept {
-  const std::uint32_t prog = backend.pbrProgram;
+  const DeviceProgramHandle prog = backend.pbrProgram;
   char name[64] = {};
 
-  backend.pbrShadowEnabledLoc = dev->uniform_location(prog, "uShadowEnabled");
+  backend.pbrShadowEnabledLoc = dev->shader_param(prog, "uShadowEnabled");
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
     std::snprintf(name, sizeof(name), "uShadowMap[%zu]", i);
-    backend.pbrShadowMapLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrShadowMapLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uShadowMatrix[%zu]", i);
-    backend.pbrShadowMatrixLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrShadowMatrixLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uCascadeSplit[%zu]", i);
-    backend.pbrCascadeSplitLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrCascadeSplitLocs[i] = dev->shader_param(prog, name);
   }
 
   backend.pbrSpotShadowEnabledLoc =
-      dev->uniform_location(prog, "uSpotShadowEnabled");
+      dev->shader_param(prog, "uSpotShadowEnabled");
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
     std::snprintf(name, sizeof(name), "uSpotShadowMap[%zu]", i);
-    backend.pbrSpotShadowMapLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotShadowMapLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uSpotShadowMatrix[%zu]", i);
-    backend.pbrSpotShadowMatrixLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotShadowMatrixLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uSpotShadowLightIdx[%zu]", i);
-    backend.pbrSpotShadowLightIdxLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrSpotShadowLightIdxLocs[i] = dev->shader_param(prog, name);
   }
 
   backend.pbrPointShadowEnabledLoc =
-      dev->uniform_location(prog, "uPointShadowEnabled");
+      dev->shader_param(prog, "uPointShadowEnabled");
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
     std::snprintf(name, sizeof(name), "uPointShadowMap[%zu]", i);
-    backend.pbrPointShadowMapLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrPointShadowMapLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uPointShadowLightPos[%zu]", i);
-    backend.pbrPointShadowLightPosLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrPointShadowLightPosLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uPointShadowFarPlane[%zu]", i);
-    backend.pbrPointShadowFarPlaneLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrPointShadowFarPlaneLocs[i] = dev->shader_param(prog, name);
     std::snprintf(name, sizeof(name), "uPointShadowLightIdx[%zu]", i);
-    backend.pbrPointShadowLightIdxLocs[i] = dev->uniform_location(prog, name);
+    backend.pbrPointShadowLightIdxLocs[i] = dev->shader_param(prog, name);
   }
 }
 
@@ -146,8 +146,8 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
 bool resolve_default_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
   static_cast<void>(dev);
-  backend.defaultProgram = shader_gpu_program(backend.defaultShaderHandle);
-  return backend.defaultProgram != 0U;
+  backend.defaultProgram = shader_device_program(backend.defaultShaderHandle);
+  return backend.defaultProgram != kInvalidDeviceProgram;
 }
 
 // REQUIRED: transforms, instancing switch, core material color/opacity,
@@ -157,68 +157,68 @@ bool resolve_default_program_state(BackendState &backend,
 // IBL and every shadow family (their enable flags default to off).
 bool resolve_pbr_program_state(BackendState &backend,
                                const RenderDevice *dev) noexcept {
-  backend.pbrProgram = shader_gpu_program(backend.pbrShaderHandle);
-  const std::uint32_t pbrProgram = backend.pbrProgram;
-  if (pbrProgram == 0U) {
+  backend.pbrProgram = shader_device_program(backend.pbrShaderHandle);
+  const DeviceProgramHandle pbrProgram = backend.pbrProgram;
+  if (pbrProgram == kInvalidDeviceProgram) {
     return false;
   }
 
   bool ok = true;
   backend.pbrModelLocation =
-      required_location(&ok, dev, pbrProgram, "u_model");
-  backend.pbrMvpLocation = required_location(&ok, dev, pbrProgram, "u_mvp");
+      required_param(&ok, dev, pbrProgram, "u_model");
+  backend.pbrMvpLocation = required_param(&ok, dev, pbrProgram, "u_mvp");
   backend.pbrNormalMatrixLocation =
-      required_location(&ok, dev, pbrProgram, "u_normalMatrix");
+      required_param(&ok, dev, pbrProgram, "u_normalMatrix");
   backend.pbrAlbedoLocation =
-      required_location(&ok, dev, pbrProgram, "u_albedo");
+      required_param(&ok, dev, pbrProgram, "u_albedo");
   backend.pbrRoughnessLocation =
-      dev->uniform_location(pbrProgram, "u_roughness");
-  backend.pbrMetallicLocation = dev->uniform_location(pbrProgram, "u_metallic");
-  backend.pbrTimeLocation = dev->uniform_location(pbrProgram, "u_time");
+      dev->shader_param(pbrProgram, "u_roughness");
+  backend.pbrMetallicLocation = dev->shader_param(pbrProgram, "u_metallic");
+  backend.pbrTimeLocation = dev->shader_param(pbrProgram, "u_time");
   backend.pbrCameraPosLocation =
-      required_location(&ok, dev, pbrProgram, "u_cameraPos");
+      required_param(&ok, dev, pbrProgram, "u_cameraPos");
   backend.pbrHasAlbedoTextureLocation =
-      dev->uniform_location(pbrProgram, "u_hasAlbedoTexture");
+      dev->shader_param(pbrProgram, "u_hasAlbedoTexture");
   backend.pbrAlbedoMapLocation =
-      dev->uniform_location(pbrProgram, "u_albedoMap");
+      dev->shader_param(pbrProgram, "u_albedoMap");
   backend.pbrOpacityLocation =
-      required_location(&ok, dev, pbrProgram, "u_opacity");
+      required_param(&ok, dev, pbrProgram, "u_opacity");
   backend.pbrViewLocation =
-      required_location(&ok, dev, pbrProgram, "u_viewMatrix");
+      required_param(&ok, dev, pbrProgram, "u_viewMatrix");
   backend.pbrViewProjectionLocation =
-      required_location(&ok, dev, pbrProgram, "u_viewProjection");
+      required_param(&ok, dev, pbrProgram, "u_viewProjection");
   backend.pbrUseInstancingLocation =
-      required_location(&ok, dev, pbrProgram, "uUseInstancing");
-  backend.pbrIblEnabledLoc = dev->uniform_location(pbrProgram, "uIblEnabled");
+      required_param(&ok, dev, pbrProgram, "uUseInstancing");
+  backend.pbrIblEnabledLoc = dev->shader_param(pbrProgram, "uIblEnabled");
   backend.pbrIrradianceMapLoc =
-      dev->uniform_location(pbrProgram, "uIrradianceMap");
+      dev->shader_param(pbrProgram, "uIrradianceMap");
   backend.pbrPrefilteredMapLoc =
-      dev->uniform_location(pbrProgram, "uPrefilteredMap");
-  backend.pbrBrdfLutLoc = dev->uniform_location(pbrProgram, "uBrdfLut");
+      dev->shader_param(pbrProgram, "uPrefilteredMap");
+  backend.pbrBrdfLutLoc = dev->shader_param(pbrProgram, "uBrdfLut");
   backend.pbrPrefilteredMipsLoc =
-      dev->uniform_location(pbrProgram, "uPrefilteredMips");
+      dev->shader_param(pbrProgram, "uPrefilteredMips");
   backend.pbrFoliageWindStrengthLocation =
-      dev->uniform_location(pbrProgram, "uFoliageWindStrength");
+      dev->shader_param(pbrProgram, "uFoliageWindStrength");
   backend.pbrFoliageWindFrequencyLocation =
-      dev->uniform_location(pbrProgram, "uFoliageWindFrequency");
+      dev->shader_param(pbrProgram, "uFoliageWindFrequency");
   backend.pbrFoliagePhaseLocation =
-      dev->uniform_location(pbrProgram, "uFoliagePhase");
-  backend.pbrFogModeLocation = dev->uniform_location(pbrProgram, "uFogMode");
-  backend.pbrFogStartLocation = dev->uniform_location(pbrProgram, "uFogStart");
-  backend.pbrFogEndLocation = dev->uniform_location(pbrProgram, "uFogEnd");
+      dev->shader_param(pbrProgram, "uFoliagePhase");
+  backend.pbrFogModeLocation = dev->shader_param(pbrProgram, "uFogMode");
+  backend.pbrFogStartLocation = dev->shader_param(pbrProgram, "uFogStart");
+  backend.pbrFogEndLocation = dev->shader_param(pbrProgram, "uFogEnd");
   backend.pbrFogDensityLocation =
-      dev->uniform_location(pbrProgram, "uFogDensity");
-  backend.pbrFogColorLocation = dev->uniform_location(pbrProgram, "uFogColor");
+      dev->shader_param(pbrProgram, "uFogDensity");
+  backend.pbrFogColorLocation = dev->shader_param(pbrProgram, "uFogColor");
   backend.pbrHeightFogEnabledLocation =
-      dev->uniform_location(pbrProgram, "uHeightFogEnabled");
+      dev->shader_param(pbrProgram, "uHeightFogEnabled");
   backend.pbrHeightFogBaseHeightLocation =
-      dev->uniform_location(pbrProgram, "uHeightFogBaseHeight");
+      dev->shader_param(pbrProgram, "uHeightFogBaseHeight");
   backend.pbrHeightFogDensityLocation =
-      dev->uniform_location(pbrProgram, "uHeightFogDensity");
+      dev->shader_param(pbrProgram, "uHeightFogDensity");
   backend.pbrHeightFogFalloffLocation =
-      dev->uniform_location(pbrProgram, "uHeightFogFalloff");
+      dev->shader_param(pbrProgram, "uHeightFogFalloff");
   backend.pbrHeightFogStepCountLocation =
-      dev->uniform_location(pbrProgram, "uHeightFogStepCount");
+      dev->shader_param(pbrProgram, "uHeightFogStepCount");
 
   resolve_pbr_light_uniforms(backend, dev);
   resolve_pbr_shadow_uniforms(backend, dev);
@@ -232,24 +232,24 @@ bool resolve_pbr_program_state(BackendState &backend,
 // u_bloomEnabled=0 keeps inert.
 bool resolve_tonemap_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
-  backend.tonemapProgram = shader_gpu_program(backend.tonemapShaderHandle);
-  const std::uint32_t tonemapProgram = backend.tonemapProgram;
-  if (tonemapProgram == 0U) {
+  backend.tonemapProgram = shader_device_program(backend.tonemapShaderHandle);
+  const DeviceProgramHandle tonemapProgram = backend.tonemapProgram;
+  if (tonemapProgram == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.tonemapSceneColorLocation =
-      required_location(&ok, dev, tonemapProgram, "u_sceneColor");
+      required_param(&ok, dev, tonemapProgram, "u_sceneColor");
   backend.tonemapExposureLocation =
-      required_location(&ok, dev, tonemapProgram, "u_exposure");
+      required_param(&ok, dev, tonemapProgram, "u_exposure");
   backend.tonemapOperatorLocation =
-      dev->uniform_location(tonemapProgram, "u_tonemapOperator");
+      dev->shader_param(tonemapProgram, "u_tonemapOperator");
   backend.tonemapBloomTextureLoc =
-      dev->uniform_location(tonemapProgram, "u_bloomTexture");
+      dev->shader_param(tonemapProgram, "u_bloomTexture");
   backend.tonemapBloomIntensityLoc =
-      dev->uniform_location(tonemapProgram, "u_bloomIntensity");
+      dev->shader_param(tonemapProgram, "u_bloomIntensity");
   backend.tonemapBloomEnabledLoc =
-      dev->uniform_location(tonemapProgram, "u_bloomEnabled");
+      dev->shader_param(tonemapProgram, "u_bloomEnabled");
   return ok;
 }
 
@@ -348,11 +348,14 @@ bool init_backend_core(BackendState &backend) noexcept {
       "r_tonemap_operator", 1,
       "Tonemap operator (0=Reinhard, 1=ACES, 2=Uncharted2)");
 
-  // Empty VAO for fullscreen triangle (required by core profile).
-  backend.emptyVao = dev->create_vertex_array();
-  if (backend.emptyVao == 0U) {
+  // Attribute-less geometry for fullscreen triangles (the vertex shader
+  // synthesizes positions from gl_VertexID-style indices).
+  backend.emptyGeometry = (dev->create_geometry != nullptr)
+                              ? dev->create_geometry(GeometryDesc{})
+                              : kInvalidDeviceGeometry;
+  if (backend.emptyGeometry == kInvalidDeviceGeometry) {
     core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to create empty VAO for fullscreen pass");
+                      "failed to create fullscreen-pass geometry");
     destroy_shader_program(tonemapShaderHandle);
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);

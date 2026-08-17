@@ -34,6 +34,39 @@
 
 namespace engine::renderer {
 
+namespace {
+
+/// RGBA16F post-chain texture with the loader-default linear sampling.
+DeviceTextureHandle create_post_chain_texture(const RenderDevice *dev, int w,
+                                              int h) noexcept {
+  if ((dev == nullptr) || (dev->create_texture == nullptr)) {
+    return kInvalidDeviceTexture;
+  }
+  TextureDesc desc{};
+  desc.kind = TextureKind::Tex2D;
+  desc.format = TextureFormat::RGBA16F;
+  desc.width = w;
+  desc.height = h;
+  desc.filter = TextureFilter::Linear;
+  desc.wrap = TextureWrap::Repeat;
+  return dev->create_texture(desc);
+}
+
+/// Color-only render target over one post-chain texture.
+RenderTargetHandle create_post_chain_target(const RenderDevice *dev,
+                                            DeviceTextureHandle color) noexcept {
+  if ((dev == nullptr) || (dev->create_render_target == nullptr) ||
+      (color == kInvalidDeviceTexture)) {
+    return RenderTargetHandle{};
+  }
+  RenderTargetDesc desc{};
+  desc.colorCount = 1U;
+  desc.colors[0].texture = color;
+  return dev->create_render_target(desc);
+}
+
+} // namespace
+
 /// Destroys or releases the requested object, handle, or resource for bloom resources.
 void destroy_bloom_resources(BackendState &b) noexcept {
   const auto *dev = render_device();
@@ -41,13 +74,13 @@ void destroy_bloom_resources(BackendState &b) noexcept {
     return;
   }
   for (int i = 0; i < BackendState::kBloomMipLevels; ++i) {
-    if (b.bloomMipFbos[i] != 0U) {
-      dev->destroy_framebuffer(b.bloomMipFbos[i]);
-      b.bloomMipFbos[i] = 0U;
+    if (b.bloomMipTargets[i].value != 0U) {
+      dev->destroy_render_target(b.bloomMipTargets[i]);
+      b.bloomMipTargets[i] = RenderTargetHandle{};
     }
-    if (b.bloomMipTextures[i] != 0U) {
+    if (b.bloomMipTextures[i] != kInvalidDeviceTexture) {
       dev->destroy_texture(b.bloomMipTextures[i]);
-      b.bloomMipTextures[i] = 0U;
+      b.bloomMipTextures[i] = kInvalidDeviceTexture;
     }
   }
   b.bloomAllocatedWidth = 0;
@@ -56,7 +89,7 @@ void destroy_bloom_resources(BackendState &b) noexcept {
 
 bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
   if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
-    return b.bloomMipFbos[0] != 0U;
+    return b.bloomMipTargets[0].value != 0U;
   }
   destroy_bloom_resources(b);
   const auto *dev = render_device();
@@ -75,11 +108,9 @@ bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
     }
     b.bloomMipWidths[i] = w;
     b.bloomMipHeights[i] = h;
-    b.bloomMipTextures[i] = dev->create_texture_2d_hdr(w, h, 4, nullptr);
-    b.bloomMipFbos[i] = (b.bloomMipTextures[i] != 0U)
-                            ? dev->create_framebuffer(b.bloomMipTextures[i], 0U)
-                            : 0U;
-    if (b.bloomMipFbos[i] == 0U) {
+    b.bloomMipTextures[i] = create_post_chain_texture(dev, w, h);
+    b.bloomMipTargets[i] = create_post_chain_target(dev, b.bloomMipTextures[i]);
+    if (b.bloomMipTargets[i].value == 0U) {
       complete = false;
       break;
     }
@@ -104,13 +135,13 @@ void destroy_luminance_resources(BackendState &b) noexcept {
     return;
   }
   for (int i = 0; i < BackendState::kLuminanceMipLevels; ++i) {
-    if (b.lumMipFbos[i] != 0U) {
-      dev->destroy_framebuffer(b.lumMipFbos[i]);
-      b.lumMipFbos[i] = 0U;
+    if (b.lumMipTargets[i].value != 0U) {
+      dev->destroy_render_target(b.lumMipTargets[i]);
+      b.lumMipTargets[i] = RenderTargetHandle{};
     }
-    if (b.lumMipTextures[i] != 0U) {
+    if (b.lumMipTextures[i] != kInvalidDeviceTexture) {
       dev->destroy_texture(b.lumMipTextures[i]);
-      b.lumMipTextures[i] = 0U;
+      b.lumMipTextures[i] = kInvalidDeviceTexture;
     }
   }
   b.lumAllocatedWidth = 0;
@@ -120,7 +151,7 @@ void destroy_luminance_resources(BackendState &b) noexcept {
 bool ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept {
   if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
-    return b.lumMipFbos[0] != 0U;
+    return b.lumMipTargets[0].value != 0U;
   }
   destroy_luminance_resources(b);
   const auto *dev = render_device();
@@ -139,11 +170,9 @@ bool ensure_luminance_resources(BackendState &b, int width,
     }
     b.lumMipWidths[i] = w;
     b.lumMipHeights[i] = h;
-    b.lumMipTextures[i] = dev->create_texture_2d_hdr(w, h, 4, nullptr);
-    b.lumMipFbos[i] = (b.lumMipTextures[i] != 0U)
-                          ? dev->create_framebuffer(b.lumMipTextures[i], 0U)
-                          : 0U;
-    if (b.lumMipFbos[i] == 0U) {
+    b.lumMipTextures[i] = create_post_chain_texture(dev, w, h);
+    b.lumMipTargets[i] = create_post_chain_target(dev, b.lumMipTextures[i]);
+    if (b.lumMipTargets[i].value == 0U) {
       complete = false;
       break;
     }
@@ -190,7 +219,7 @@ void generate_ssao_kernel(float *kernel, int count) noexcept {
 }
 
 /// Creates a new object, handle, or resource for ssao noise texture.
-std::uint32_t create_ssao_noise_texture() noexcept {
+DeviceTextureHandle create_ssao_noise_texture() noexcept {
   float noise[16 * 4] = {};
   unsigned int seed = 54321U;
   auto nextFloat = [&seed]() -> float {
@@ -203,7 +232,20 @@ std::uint32_t create_ssao_noise_texture() noexcept {
     noise[i * 4 + 2] = 0.0F;
     noise[i * 4 + 3] = 0.0F;
   }
-  return render_device()->create_texture_2d_hdr(4, 4, 4, noise);
+  const RenderDevice *dev = render_device();
+  if ((dev == nullptr) || (dev->create_texture == nullptr)) {
+    return kInvalidDeviceTexture;
+  }
+  TextureDesc desc{};
+  desc.kind = TextureKind::Tex2D;
+  desc.format = TextureFormat::RGBA16F;
+  desc.width = 4;
+  desc.height = 4;
+  desc.filter = TextureFilter::Linear;
+  desc.wrap = TextureWrap::Repeat;
+  desc.pixelData = TexelData::F32;
+  desc.pixels = noise;
+  return dev->create_texture(desc);
 }
 
 } // namespace engine::renderer

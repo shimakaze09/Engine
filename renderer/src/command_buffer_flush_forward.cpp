@@ -62,39 +62,40 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
   const math::Mat4 &projMat = ctx.projMat;
   const math::Mat4 &viewProjection = ctx.viewProjection;
   const bool iblAvailable = ctx.iblAvailable;
-  const std::uint32_t envSkyboxTexture = ctx.envSkyboxTexture;
+  const DeviceTextureHandle envSkyboxTexture = ctx.envSkyboxTexture;
   const bool shadowEnabled = ctx.shadowEnabled;
   const bool doSpotShadows = ctx.doSpotShadows;
   const bool doPointShadows = ctx.doPointShadows;
   RendererFrameStats &frameStats = ctx.frameStats;
-    const std::uint32_t sceneFbo =
-        pass_resource_framebuffer(passRes.sceneColor);
+    const RenderTargetHandle sceneTarget =
+        pass_resource_target(passRes.sceneColor);
 
     gpu_profiler_begin_pass(GpuPassId::Scene);
-    dev->bind_framebuffer(sceneFbo);
+    dev->bind_render_target(sceneTarget);
     dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-    dev->enable_depth_test();
-    dev->set_clear_color(kClearRed, kClearGreen, kClearBlue, 1.0F);
-    dev->clear_color_depth();
+    dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                        BlendMode::Disabled, CullMode::Back});
+    dev->clear(ClearFlags::ColorDepth, kClearRed, kClearGreen, kClearBlue,
+               1.0F);
 
     dev->bind_program(backend.pbrProgram);
 
-    if (backend.pbrTimeLocation >= 0) {
-      dev->set_uniform_float(backend.pbrTimeLocation, timeSeconds);
+    if (backend.pbrTimeLocation.valid()) {
+      dev->set_param_f32(backend.pbrTimeLocation, timeSeconds);
     }
-    if (backend.pbrCameraPosLocation >= 0) {
-      dev->set_uniform_vec3(backend.pbrCameraPosLocation,
+    if (backend.pbrCameraPosLocation.valid()) {
+      dev->set_param_vec3(backend.pbrCameraPosLocation,
                             &renderer_context().activeCamera.position.x);
     }
-    if (backend.pbrViewLocation >= 0) {
-      dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
+    if (backend.pbrViewLocation.valid()) {
+      dev->set_param_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
     }
-    if (backend.pbrViewProjectionLocation >= 0) {
-      dev->set_uniform_mat4(backend.pbrViewProjectionLocation,
+    if (backend.pbrViewProjectionLocation.valid()) {
+      dev->set_param_mat4(backend.pbrViewProjectionLocation,
                             &viewProjection.columns[0].x);
     }
-    if (backend.pbrUseInstancingLocation >= 0) {
-      dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+    if (backend.pbrUseInstancingLocation.valid()) {
+      dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
     }
     upload_pbr_lighting_uniforms(backend, dev, lights);
     apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
@@ -103,8 +104,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
                              doPointShadows);
 
-    if (backend.pbrAlbedoMapLocation >= 0) {
-      dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
+    if (backend.pbrAlbedoMapLocation.valid()) {
+      dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
     auto drawForwardCommand = [&](const DrawCommand &command,
@@ -114,65 +115,66 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       float normalMatrix[9] = {};
       extract_normal_matrix(model, normalMatrix);
 
-      if (backend.pbrUseInstancingLocation >= 0) {
-        dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+      if (backend.pbrUseInstancingLocation.valid()) {
+        dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
       }
       upload_pbr_foliage_uniforms(backend, dev, command);
-      if (backend.pbrModelLocation >= 0) {
-        dev->set_uniform_mat4(backend.pbrModelLocation, &model.columns[0].x);
+      if (backend.pbrModelLocation.valid()) {
+        dev->set_param_mat4(backend.pbrModelLocation, &model.columns[0].x);
       }
-      dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-      dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
+      dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
+      dev->set_param_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
 
       if (mesh.indexCount > 0U) {
         ++frameStats.drawCalls;
         frameStats.triangleCount += (mesh.indexCount / 3U);
-        dev->draw_elements_triangles_u32(
-            static_cast<std::int32_t>(mesh.indexCount));
+        dev->draw_indexed(mesh.geometry,
+                          static_cast<std::int32_t>(mesh.indexCount));
       } else {
         ++frameStats.drawCalls;
         frameStats.triangleCount += (mesh.vertexCount / 3U);
-        dev->draw_arrays_triangles(0,
-                                   static_cast<std::int32_t>(mesh.vertexCount));
+        dev->draw(mesh.geometry, PrimitiveTopology::Triangles, 0,
+                  static_cast<std::int32_t>(mesh.vertexCount));
       }
     };
 
     auto uploadForwardMaterial = [&](const Material &material,
-                                     std::uint32_t *boundAlbedoTexture) {
-      if (backend.pbrAlbedoLocation >= 0) {
-        dev->set_uniform_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
+                                     DeviceTextureHandle *boundAlbedoTexture) {
+      if (backend.pbrAlbedoLocation.valid()) {
+        dev->set_param_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
       }
-      if (backend.pbrRoughnessLocation >= 0) {
-        dev->set_uniform_float(backend.pbrRoughnessLocation,
+      if (backend.pbrRoughnessLocation.valid()) {
+        dev->set_param_f32(backend.pbrRoughnessLocation,
                                material.roughness);
       }
-      if (backend.pbrMetallicLocation >= 0) {
-        dev->set_uniform_float(backend.pbrMetallicLocation, material.metallic);
+      if (backend.pbrMetallicLocation.valid()) {
+        dev->set_param_f32(backend.pbrMetallicLocation, material.metallic);
       }
-      if (backend.pbrOpacityLocation >= 0) {
-        dev->set_uniform_float(backend.pbrOpacityLocation, material.opacity);
+      if (backend.pbrOpacityLocation.valid()) {
+        dev->set_param_f32(backend.pbrOpacityLocation, material.opacity);
       }
 
-      const std::uint32_t albedoGpuId = texture_gpu_id(material.albedoTexture);
+      const DeviceTextureHandle albedoTex =
+          texture_device_handle(material.albedoTexture);
       const bool hasAlbedoTex =
           (material.albedoTexture != kInvalidTextureHandle) &&
-          (albedoGpuId != 0U);
-      if (backend.pbrHasAlbedoTextureLocation >= 0) {
-        dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
+          (albedoTex != kInvalidDeviceTexture);
+      if (backend.pbrHasAlbedoTextureLocation.valid()) {
+        dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
                              hasAlbedoTex ? 1 : 0);
       }
-      if (hasAlbedoTex && (albedoGpuId != *boundAlbedoTexture)) {
-        dev->bind_texture(0, albedoGpuId);
-        *boundAlbedoTexture = albedoGpuId;
-      } else if (!hasAlbedoTex && (*boundAlbedoTexture != 0U)) {
-        dev->bind_texture(0, 0U);
-        *boundAlbedoTexture = 0U;
+      if (hasAlbedoTex && (albedoTex != *boundAlbedoTexture)) {
+        dev->bind_texture_slot(0U, albedoTex);
+        *boundAlbedoTexture = albedoTex;
+      } else if (!hasAlbedoTex &&
+                 (*boundAlbedoTexture != kInvalidDeviceTexture)) {
+        dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+        *boundAlbedoTexture = kInvalidDeviceTexture;
       }
     };
 
     auto drawRange = [&](std::size_t start, std::size_t end) {
-      std::uint32_t boundVertexArray = 0U;
-      std::uint32_t boundAlbedoTexture = 0U;
+      DeviceTextureHandle boundAlbedoTexture{};
 
       if ((start == 0U) && (end == opaqueCount)) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
@@ -180,14 +182,10 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
           const DrawCommand &command = commandBufferView.data[batch.first];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-          if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+          if ((mesh == nullptr) ||
+              (mesh->geometry == kInvalidDeviceGeometry) ||
               (mesh->vertexCount == 0U)) {
             continue;
-          }
-
-          if (mesh->vertexArray != boundVertexArray) {
-            dev->bind_vertex_array(mesh->vertexArray);
-            boundVertexArray = mesh->vertexArray;
           }
 
           uploadForwardMaterial(command.material, &boundAlbedoTexture);
@@ -197,15 +195,14 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
               (mesh->indexCount > 0U) &&
               upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                        batch)) {
-            boundVertexArray = mesh->vertexArray;
-            if (backend.pbrUseInstancingLocation >= 0) {
-              dev->set_uniform_int(backend.pbrUseInstancingLocation, 1);
+            if (backend.pbrUseInstancingLocation.valid()) {
+              dev->set_param_i32(backend.pbrUseInstancingLocation, 1);
             }
             ++frameStats.drawCalls;
             frameStats.triangleCount += (mesh->indexCount / 3U) *
                                         static_cast<std::uint64_t>(batch.count);
-            dev->draw_elements_triangles_u32_instanced(
-                static_cast<std::int32_t>(mesh->indexCount),
+            dev->draw_indexed_instanced(
+                mesh->geometry, static_cast<std::int32_t>(mesh->indexCount),
                 static_cast<std::int32_t>(batch.count));
             continue;
           }
@@ -223,14 +220,9 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       for (std::size_t i = start; i < end; ++i) {
         const DrawCommand &command = commandBufferView.data[i];
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
             (mesh->vertexCount == 0U)) {
           continue;
-        }
-
-        if (mesh->vertexArray != boundVertexArray) {
-          dev->bind_vertex_array(mesh->vertexArray);
-          boundVertexArray = mesh->vertexArray;
         }
 
         uploadForwardMaterial(command.material, &boundAlbedoTexture);
@@ -238,15 +230,12 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       }
     };
 
-    dev->set_depth_mask(true);
-    dev->disable_blending();
-    dev->enable_face_culling();
     drawRange(0U, opaqueCount);
 
     const SkyModel skyModel = selected_sky_model();
-    const std::uint32_t skyboxTexture = envSkyboxTexture;
-    if (skyboxTexture != 0U) {
-      dev->bind_framebuffer(sceneFbo);
+    const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
+    if (skyboxTexture != kInvalidDeviceTexture) {
+      dev->bind_render_target(sceneTarget);
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       dev->bind_program(backend.pbrProgram);
@@ -261,22 +250,19 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     }
 
     if (opaqueCount < totalCount) {
-      dev->set_depth_mask(false);
-      dev->enable_blending();
-      dev->set_blend_func_alpha();
-      dev->disable_face_culling();
+      dev->apply_render_state(RenderState{DepthTest::Less, false,
+                                          BlendMode::Alpha, CullMode::None});
       drawRange(opaqueCount, totalCount);
 
-      dev->set_depth_mask(true);
-      dev->disable_blending();
-      dev->enable_face_culling();
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
     }
 
-    dev->bind_texture(0, 0U);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
     unbind_pbr_shadow_textures(dev);
     unbind_pbr_ibl_textures(dev);
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::Scene);
 }
 
@@ -289,13 +275,16 @@ constexpr std::size_t kDebugSegmentChunk = 1024U;
 constexpr std::size_t kDebugFloatsPerSegment = 14U;
 
 /// Uploads and draws one accumulated chunk of debug line segments.
-void draw_debug_segment_chunk(const RenderDevice *dev, const float *vertices,
+void draw_debug_segment_chunk(const RenderDevice *dev,
+                              const BackendState &backend,
+                              const float *vertices,
                               std::size_t segmentCount) noexcept {
-  dev->buffer_data_array(vertices,
-                         static_cast<std::ptrdiff_t>(
-                             segmentCount * kDebugFloatsPerSegment *
-                             sizeof(float)));
-  dev->draw_arrays_lines(0, static_cast<std::int32_t>(segmentCount * 2U));
+  dev->update_buffer(backend.debugLineVbo, vertices,
+                     static_cast<std::ptrdiff_t>(
+                         segmentCount * kDebugFloatsPerSegment *
+                         sizeof(float)));
+  dev->draw(backend.debugLineGeometry, PrimitiveTopology::Lines, 0,
+            static_cast<std::int32_t>(segmentCount * 2U));
 }
 
 /// Returns a point on one of a sphere's three axis-aligned great circles.
@@ -352,25 +341,25 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
         }
         ++chunkCount;
         if (chunkCount == kDebugSegmentChunk) {
-          draw_debug_segment_chunk(dev, chunkVertices.data(), chunkCount);
+          draw_debug_segment_chunk(dev, backend, chunkVertices.data(),
+                                   chunkCount);
           chunkCount = 0U;
         }
       };
 
       const math::Mat4 debugLineViewProjection = math::mul(projMat, viewMat);
-      dev->bind_framebuffer(pass_resource_framebuffer(passRes.sceneColor));
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->enable_depth_test();
-      dev->enable_blending();
-      dev->set_blend_func_alpha();
+      // Depth-tested alpha-blended lines over the scene; depth writes stay
+      // on as before (line-over-line occlusion in one frame is acceptable).
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Alpha, CullMode::Back});
 
       dev->bind_program(backend.debugLineProgram);
-      if (backend.debugLineViewProjectionLoc >= 0) {
-        dev->set_uniform_mat4(backend.debugLineViewProjectionLoc,
+      if (backend.debugLineViewProjectionLoc.valid()) {
+        dev->set_param_mat4(backend.debugLineViewProjectionLoc,
                               &debugLineViewProjection.columns[0].x);
       }
-      dev->bind_vertex_array(backend.debugLineVao);
-      dev->bind_array_buffer(backend.debugLineVbo);
 
       for (std::size_t i = 0U; i < debugLineCount; ++i) {
         appendSegment(debugLines[i].from, debugLines[i].to,
@@ -390,13 +379,14 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
         }
       }
       if (chunkCount > 0U) {
-        draw_debug_segment_chunk(dev, chunkVertices.data(), chunkCount);
+        draw_debug_segment_chunk(dev, backend, chunkVertices.data(),
+                                 chunkCount);
       }
 
-      dev->bind_array_buffer(0U);
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
-      dev->disable_blending();
+      dev->bind_program(kInvalidDeviceProgram);
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
     }
   }
   static bool warnedTextUnsupported = false;

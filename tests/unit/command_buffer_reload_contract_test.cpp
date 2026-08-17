@@ -1,8 +1,8 @@
-// Verifies the required-uniform reflection contract (issue #56) at the
-// renderer/device seam with a fake RenderDevice whose uniform_location
-// can report chosen names as missing (-1): a program that links but
-// lacks a required uniform leaves its feature family unavailable at
-// init, a hot reload that drops a required uniform downgrades the
+// Verifies the required-parameter reflection contract (issue #56) at the
+// renderer/device seam with a fake RenderDevice whose shader_param can
+// report chosen names as missing (invalid): a program that links but
+// lacks a required parameter leaves its feature family unavailable at
+// init, a hot reload that drops a required parameter downgrades the
 // family (available → unavailable) through the production
 // check_shader_reload + refresh_backend_program_state path, and a
 // corrected reload restores it (unavailable → available). Covers a sky
@@ -56,7 +56,6 @@ constexpr const char *kShaderFiles[] = {
 };
 
 engine::renderer::RenderDevice g_fakeDevice{};
-std::uint32_t g_nextShader = 0U;
 std::uint32_t g_nextProgram = 100U;
 std::uint32_t g_nextResource = 1U;
 
@@ -81,85 +80,79 @@ void add_missing_uniform(const char *name,
   }
 }
 
-std::uint32_t fake_create_shader(std::uint32_t, const char *) noexcept {
-  return ++g_nextShader;
-}
-
-void fake_destroy_shader(std::uint32_t) noexcept {}
-
-std::uint32_t fake_link_program(std::uint32_t vs, std::uint32_t fs) noexcept {
-  if ((vs == 0U) || (fs == 0U)) {
-    return 0U;
+engine::renderer::DeviceProgramHandle
+fake_create_program(const char *vs, const char *fs) noexcept {
+  if ((vs == nullptr) || (fs == nullptr)) {
+    return engine::renderer::kInvalidDeviceProgram;
   }
-  return ++g_nextProgram;
+  return engine::renderer::DeviceProgramHandle{++g_nextProgram};
 }
 
-void fake_destroy_program(std::uint32_t) noexcept {}
+void fake_destroy_program(engine::renderer::DeviceProgramHandle) noexcept {}
 
-std::int32_t fake_uniform_location(std::uint32_t program,
-                                   const char *name) noexcept {
+engine::renderer::ShaderParam
+fake_shader_param(engine::renderer::DeviceProgramHandle program,
+                  const char *name) noexcept {
   for (std::size_t i = 0U; i < g_missingCount; ++i) {
     if ((std::strcmp(name, g_missing[i].name) == 0) &&
-        (program > g_missing[i].afterProgram)) {
-      return -1;
+        (program.value > g_missing[i].afterProgram)) {
+      return engine::renderer::kInvalidShaderParam;
     }
   }
-  return 3;
+  return engine::renderer::ShaderParam{3};
 }
 
-std::uint32_t fake_create_resource() noexcept { return g_nextResource++; }
-
-std::uint32_t fake_create_texture_2d_hdr(std::int32_t, std::int32_t,
-                                         std::int32_t,
-                                         const float *) noexcept {
-  return g_nextResource++;
+engine::renderer::DeviceBufferHandle
+fake_create_buffer(const engine::renderer::BufferDesc &) noexcept {
+  return engine::renderer::DeviceBufferHandle{g_nextResource++};
 }
 
-std::uint32_t fake_create_depth_texture(std::int32_t, std::int32_t) noexcept {
-  return g_nextResource++;
+void fake_destroy_buffer(engine::renderer::DeviceBufferHandle) noexcept {}
+
+engine::renderer::DeviceGeometryHandle
+fake_create_geometry(const engine::renderer::GeometryDesc &) noexcept {
+  return engine::renderer::DeviceGeometryHandle{g_nextResource++};
 }
 
-std::uint32_t fake_create_depth_cubemap(std::int32_t) noexcept {
-  return g_nextResource++;
+void fake_destroy_geometry(engine::renderer::DeviceGeometryHandle) noexcept {}
+
+engine::renderer::DeviceTextureHandle
+fake_create_texture(const engine::renderer::TextureDesc &) noexcept {
+  return engine::renderer::DeviceTextureHandle{g_nextResource++};
 }
 
-std::uint32_t fake_create_framebuffer(std::uint32_t, std::uint32_t) noexcept {
-  return g_nextResource++;
+void fake_destroy_texture(engine::renderer::DeviceTextureHandle) noexcept {}
+
+engine::renderer::RenderTargetHandle
+fake_create_render_target(const engine::renderer::RenderTargetDesc &) noexcept {
+  return engine::renderer::RenderTargetHandle{g_nextResource++};
 }
 
-void fake_destroy_id(std::uint32_t) noexcept {}
-void fake_bind_id(std::uint32_t) noexcept {}
-void fake_buffer_data(const void *, std::ptrdiff_t) noexcept {}
-void fake_enable_vertex_attrib(std::uint32_t) noexcept {}
-void fake_vertex_attrib_float(std::uint32_t, std::int32_t, std::int32_t,
-                              const void *) noexcept {}
+void fake_destroy_render_target(engine::renderer::RenderTargetHandle) noexcept {
+}
 
-/// Installs the fake function table: the shader/link/uniform seam plus
-/// the resource creators the init paths need (skybox geometry, debug
-/// line buffers, SSAO noise, shadow FBOs). UBO entries stay null so the
-/// skinning family is skipped, keeping the harness scoped to issue #56.
+void fake_update_buffer(engine::renderer::DeviceBufferHandle, const void *,
+                        std::ptrdiff_t) noexcept {}
+
+/// Installs the fake function table: the program/parameter seam plus the
+/// resource creators the init paths need (skybox geometry, debug line
+/// buffers, SSAO noise, shadow targets). Uniform-block entries stay null
+/// (and caps.uniformBlocks false) so the skinning family is skipped,
+/// keeping the harness scoped to issue #56.
 void configure_fake_device() noexcept {
   g_fakeDevice = engine::renderer::RenderDevice{};
-  g_fakeDevice.create_shader = &fake_create_shader;
-  g_fakeDevice.destroy_shader = &fake_destroy_shader;
-  g_fakeDevice.link_program = &fake_link_program;
+  g_fakeDevice.create_program = &fake_create_program;
   g_fakeDevice.destroy_program = &fake_destroy_program;
-  g_fakeDevice.uniform_location = &fake_uniform_location;
-  g_fakeDevice.create_vertex_array = &fake_create_resource;
-  g_fakeDevice.destroy_vertex_array = &fake_destroy_id;
-  g_fakeDevice.bind_vertex_array = &fake_bind_id;
-  g_fakeDevice.create_buffer = &fake_create_resource;
-  g_fakeDevice.destroy_buffer = &fake_destroy_id;
-  g_fakeDevice.bind_array_buffer = &fake_bind_id;
-  g_fakeDevice.buffer_data_array = &fake_buffer_data;
-  g_fakeDevice.enable_vertex_attrib = &fake_enable_vertex_attrib;
-  g_fakeDevice.vertex_attrib_float = &fake_vertex_attrib_float;
-  g_fakeDevice.create_texture_2d_hdr = &fake_create_texture_2d_hdr;
-  g_fakeDevice.create_depth_texture = &fake_create_depth_texture;
-  g_fakeDevice.create_depth_cubemap = &fake_create_depth_cubemap;
-  g_fakeDevice.create_framebuffer = &fake_create_framebuffer;
-  g_fakeDevice.destroy_framebuffer = &fake_destroy_id;
-  g_fakeDevice.destroy_texture = &fake_destroy_id;
+  g_fakeDevice.shader_param = &fake_shader_param;
+  g_fakeDevice.create_buffer = &fake_create_buffer;
+  g_fakeDevice.destroy_buffer = &fake_destroy_buffer;
+  g_fakeDevice.update_buffer = &fake_update_buffer;
+  g_fakeDevice.create_geometry = &fake_create_geometry;
+  g_fakeDevice.destroy_geometry = &fake_destroy_geometry;
+  g_fakeDevice.create_texture = &fake_create_texture;
+  g_fakeDevice.destroy_texture = &fake_destroy_texture;
+  g_fakeDevice.create_render_target = &fake_create_render_target;
+  g_fakeDevice.destroy_render_target = &fake_destroy_render_target;
 }
 
 bool write_shader_file(const char *fileName, const char *text) noexcept {
@@ -247,7 +240,7 @@ int check_init_with_missing_required_uniform() {
   if (backend.ssaoAvailable) {
     return 306;
   }
-  if (backend.ssaoNoiseTexture != 0U) {
+  if (backend.ssaoNoiseTexture != kInvalidDeviceTexture) {
     return 307;
   }
 
@@ -265,9 +258,10 @@ int check_init_with_missing_required_uniform() {
   if (!backend.debugLineAvailable || !backend.autoExposureAvailable) {
     return 311;
   }
-  if ((backend.fxaaProgram == 0U) || (backend.bloomThresholdProgram == 0U) ||
-      (backend.bloomDownsampleProgram == 0U) ||
-      (backend.bloomUpsampleProgram == 0U)) {
+  if ((backend.fxaaProgram == kInvalidDeviceProgram) ||
+      (backend.bloomThresholdProgram == kInvalidDeviceProgram) ||
+      (backend.bloomDownsampleProgram == kInvalidDeviceProgram) ||
+      (backend.bloomUpsampleProgram == kInvalidDeviceProgram)) {
     return 312;
   }
   return 0;
@@ -291,7 +285,8 @@ int check_reload_transitions() {
   const RenderDevice *dev = render_device();
   if (!backend.skyboxAvailable || !backend.shadowAvailable ||
       !backend.spotShadowAvailable || !backend.pointShadowAvailable ||
-      !backend.ssaoAvailable || (backend.fxaaProgram == 0U)) {
+      !backend.ssaoAvailable ||
+      (backend.fxaaProgram == kInvalidDeviceProgram)) {
     return 321;
   }
 
@@ -322,7 +317,7 @@ int check_reload_transitions() {
   if (backend.ssaoAvailable) {
     return 326;
   }
-  if (backend.fxaaProgram != 0U) {
+  if (backend.fxaaProgram != kInvalidDeviceProgram) {
     return 327;
   }
   if (!backend.pointShadowAvailable) {
@@ -362,7 +357,7 @@ int check_reload_transitions() {
   if (!backend.ssaoAvailable) {
     return 335;
   }
-  if (backend.fxaaProgram == 0U) {
+  if (backend.fxaaProgram == kInvalidDeviceProgram) {
     return 336;
   }
   if (!backend.pointShadowAvailable || !backend.deferredAvailable) {
