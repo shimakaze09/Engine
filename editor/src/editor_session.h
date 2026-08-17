@@ -140,6 +140,7 @@ constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
 constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
+constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 constexpr const char *kTransformSectionLabel = "Transform";
 constexpr const char *kRigidBodySectionLabel = "RigidBody";
 constexpr const char *kColliderSectionLabel = "Collider";

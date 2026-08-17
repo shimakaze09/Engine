@@ -302,37 +302,11 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
       entity, ComponentEditType::Camera, "Camera",
       &ComponentEditSnapshot::camera, authoredEditable, liveEditable, true,
       [entity](runtime::CameraComponent &c) {
-        // Projection is a plain uint32 (not a reflected C++ enum, matching
-        // Collider.shape/LightComponent.type) so it stays in the generic
-        // codec; the combo below is the same "hand-drawn selector ahead of
-        // the generic loop" pattern those two use.
-        constexpr const char *kProjectionFallback[] = {"Perspective",
-                                                        "Orthographic"};
-        const FieldMetadata *meta = find_field_metadata(
-            "engine::runtime::CameraComponent", "projection");
-        const char *const *labels =
-            (meta != nullptr) ? meta->enumLabels : kProjectionFallback;
-        const int labelCount =
-            (meta != nullptr) ? static_cast<int>(meta->enumLabelCount) : 2;
-        int projIndex = static_cast<int>(c.projection);
-        if ((projIndex < 0) || (projIndex >= labelCount)) {
-          projIndex = 0;
-        }
-        bool modified = false;
-        if (ImGui::BeginCombo("Projection", labels[projIndex])) {
-          for (int i = 0; i < labelCount; ++i) {
-            if (ImGui::Selectable(labels[i], projIndex == i) &&
-                (projIndex != i)) {
-              c.projection = static_cast<std::uint32_t>(i);
-              modified = true;
-            }
-          }
-          ImGui::EndCombo();
-        }
-        modified = draw_reflected_component_fields(
-                       "engine::runtime::CameraComponent", &c,
-                       g_showAdvanced) ||
-                   modified;
+        // Projection is a reflected uint32 whose Enum metadata drives a
+        // named combo inside the generic loop (shared with multi-edit,
+        // issue #225), so no hand-drawn selector precedes it.
+        bool modified = draw_reflected_component_fields(
+            "engine::runtime::CameraComponent", &c, g_showAdvanced);
 
         // Selection/conflict status (acceptance: "reports conflicts/
         // no-camera states clearly"). Computed from authored components

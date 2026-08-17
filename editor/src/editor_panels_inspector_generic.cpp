@@ -199,6 +199,32 @@ void draw_euler_degrees_field(const char *label, math::Quat &value,
   ImGui::PopID();
 }
 
+/// Draws a Uint32 enum-backed field as a named combo from metadata
+/// labels; a stored value past the label range keeps a numeric preview so
+/// real data is shown rather than silently clamped to the first entry.
+void draw_enum_combo_field(const char *label, std::uint32_t &value,
+                           const FieldMetadata &meta,
+                           bool *modified) noexcept {
+  char numericScratch[16] = {};
+  const char *preview = nullptr;
+  if (value < meta.enumLabelCount) {
+    preview = meta.enumLabels[value];
+  } else {
+    std::snprintf(numericScratch, sizeof(numericScratch), "%u", value);
+    preview = numericScratch;
+  }
+  if (ImGui::BeginCombo(label, preview)) {
+    for (std::size_t i = 0U; i < meta.enumLabelCount; ++i) {
+      const bool selected = (value == i);
+      if (ImGui::Selectable(meta.enumLabels[i], selected) && !selected) {
+        value = static_cast<std::uint32_t>(i);
+        mark_modified(modified, true);
+      }
+    }
+    ImGui::EndCombo();
+  }
+}
+
 /// Draws a Uint32 bitmask field as per-bit named checkboxes.
 void draw_layer_mask_field(const char *label, std::uint32_t &mask,
                            bool *modified) noexcept {
@@ -288,6 +314,9 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
     }
     if ((meta != nullptr) && (meta->widget == InspectorWidget::LayerMask)) {
       draw_layer_mask_field(label, *value, modified);
+    } else if ((meta != nullptr) && (meta->widget == InspectorWidget::Enum) &&
+               (meta->enumLabels != nullptr) && (meta->enumLabelCount > 0U)) {
+      draw_enum_combo_field(label, *value, *meta, modified);
     } else {
       mark_modified(modified,
                     ImGui::InputScalar(label, ImGuiDataType_U32, value));
