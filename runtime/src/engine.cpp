@@ -13,6 +13,7 @@
 #include "engine/core/vfs.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/texture_loader.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -135,6 +136,19 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
 
+  // Bootstrap owns the texture registry's lifetime (#234); every production
+  // texture consumer is gated on it and engine::shutdown tears it down.
+  if (!renderer::initialize_texture_system()) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "failed to initialize texture system");
+    audio::shutdown_audio();
+    scripting::dap_stop();
+    scripting::shutdown_scripting();
+    shutdown_editor_bridge(bridge);
+    core::shutdown_core();
+    return false;
+  }
+
   core::log_message(core::LogLevel::Info, "engine", "bootstrap complete");
   return true;
 }
@@ -175,6 +189,9 @@ void shutdown() noexcept {
   shutdown_editor_bridge(bridge);
   runtime::reset_anim_controllers();
   renderer::shutdown_renderer();
+  // Close the bootstrap-owned texture registry after the renderer unloads
+  // its capture handles; remaining GL objects die with the context below.
+  renderer::shutdown_texture_system();
   audio::shutdown_audio();
   scripting::dap_stop();
   scripting::shutdown_scripting();
