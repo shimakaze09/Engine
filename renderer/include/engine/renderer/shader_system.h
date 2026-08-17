@@ -5,9 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/renderer/render_device.h"
+
 namespace engine::renderer {
 
-struct RenderDevice;
 struct Material;
 
 /// Opaque id of a linked shader program (0 = invalid).
@@ -76,18 +77,18 @@ MaterialShaderVariantSelection select_material_shader_defines(
 /// Destroys or releases the requested object, handle, or resource for shader program.
 void destroy_shader_program(ShaderProgramHandle handle) noexcept;
 
-// Return the underlying GPU program id for a loaded shader program.
-// Returns 0 on invalid handle.
-std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept;
+// Return the device program behind a loaded shader program. Returns
+// kInvalidDeviceProgram on invalid handle.
+DeviceProgramHandle shader_device_program(ShaderProgramHandle handle) noexcept;
 
 // Check all loaded programs for source-file changes and recompile as needed.
 // Call once per frame.
 void check_shader_reload() noexcept;
 
-/// Monotonic count of successful program (re)links. Caches that store raw
-/// GPU program ids or uniform locations snapshot this and re-resolve when
-/// it changes — a relink replaces the GL program object, so every derived
-/// id and location is stale afterwards (audit H-09).
+/// Monotonic count of successful program (re)links. Caches that store
+/// device program handles or resolved ShaderParams snapshot this and
+/// re-resolve when it changes — a relink replaces the device program, so
+/// every derived handle and parameter is stale afterwards (audit H-09).
 std::uint64_t shader_reload_epoch() noexcept;
 
 } // namespace engine::renderer

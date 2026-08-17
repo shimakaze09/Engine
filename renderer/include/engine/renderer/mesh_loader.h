@@ -8,14 +8,15 @@
 
 #include "engine/core/nothrow_buffer.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
 
-/// Uploaded mesh: VAO/VBO/EBO ids and index count.
+/// Uploaded mesh: device geometry plus its owned vertex/index buffers.
 struct GpuMesh final {
-  std::uint32_t vertexArray = 0U;
-  std::uint32_t vertexBuffer = 0U;
-  std::uint32_t indexBuffer = 0U;
+  DeviceGeometryHandle geometry{};
+  DeviceBufferHandle vertexBuffer{};
+  DeviceBufferHandle indexBuffer{};
   std::uint32_t vertexCount = 0U;
   std::uint32_t indexCount = 0U;
   bool hasUVs = false;
@@ -82,11 +83,12 @@ bool mesh_data_valid(const CpuMeshData &meshData) noexcept;
 /// Uploads decoded CPU mesh data to the current render context.
 bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                              GpuMesh *outMesh) noexcept;
-/// Deletes the mesh's GL buffers and clears the struct.
+/// Destroys the mesh's device geometry/buffers and clears the struct.
 void unload_mesh(GpuMesh *mesh) noexcept;
 
 // Direct GPU upload from in-memory vertex/index data (no file I/O).
-// Precondition: caller must own the GL context before calling this function.
+// Precondition: caller must own the render context before calling this
+// function.
 // vertices: array of floats, 6 per vertex (pos xyz, norm xyz) when !hasUVs,
 //           8 per vertex (pos xyz, norm xyz, uv xy) when hasUVs.
 // indices: may be nullptr when indexCount == 0 (drawArrays path).

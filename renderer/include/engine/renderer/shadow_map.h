@@ -8,6 +8,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
+#include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
 
@@ -38,8 +39,8 @@ struct CascadeData final {
 /// Full CSM state for one directional light.
 struct ShadowMapState final {
   CascadeData cascades[kShadowCascadeCount]{};
-  std::uint32_t depthTextures[kShadowCascadeCount]{};
-  std::uint32_t depthFbos[kShadowCascadeCount]{};
+  DeviceTextureHandle depthTextures[kShadowCascadeCount]{};
+  RenderTargetHandle depthTargets[kShadowCascadeCount]{};
   int resolutions[kShadowCascadeCount]{};
   bool initialized = false;
 };
@@ -72,7 +73,7 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
 math::Mat4 snap_to_texel(const math::Mat4 &lightViewProj,
                          int shadowMapSize) noexcept;
 
-/// Initialize shadow map GPU resources (depth textures + FBOs).
+/// Initialize shadow map GPU resources (depth textures + render targets).
 bool initialize_shadow_maps(ShadowMapState &state) noexcept;
 
 /// Destroy shadow map GPU resources.
@@ -83,11 +84,11 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept;
 inline constexpr std::size_t kMaxSpotShadowLights = 4U;
 inline constexpr int kSpotShadowMapResolution = 1024;
 
-/// One spot light's shadow map: texture, FBO, and light matrix.
+/// One spot light's shadow map: texture, render target, light matrix.
 struct SpotShadowData final {
   math::Mat4 lightViewProjection{};
-  std::uint32_t depthTexture = 0U;
-  std::uint32_t depthFbo = 0U;
+  DeviceTextureHandle depthTexture{};
+  RenderTargetHandle depthTarget{};
   int lightIndex = -1; // index into SceneLightData::spotLights, -1 = unused
   float farPlane = 0.0F;
 };
@@ -104,7 +105,7 @@ math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
                                       float outerConeAngle,
                                       float radius) noexcept;
 
-/// Initialize spot light shadow map GPU resources (depth textures + FBOs).
+/// Initialize spot light shadow map GPU resources.
 bool initialize_spot_shadow_maps(SpotShadowState &state) noexcept;
 
 /// Destroy spot light shadow map GPU resources.
@@ -115,11 +116,12 @@ void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept;
 inline constexpr std::size_t kMaxPointShadowLights = 4U;
 inline constexpr int kPointShadowMapResolution = 1024;
 
-/// One point light's cube shadow map and far plane.
+/// One point light's cube shadow map: per-face depth render targets over
+/// one cubemap texture, plus the far plane.
 struct PointShadowData final {
   math::Mat4 faceViewProjections[6]{};
-  std::uint32_t depthCubemap = 0U;
-  std::uint32_t depthFbo = 0U;
+  DeviceTextureHandle depthCubemap{};
+  RenderTargetHandle faceTargets[6]{};
   int lightIndex = -1; // index into SceneLightData::pointLights, -1 = unused
   float farPlane = 0.0F;
 };

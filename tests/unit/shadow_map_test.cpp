@@ -230,10 +230,10 @@ int verify_shadow_state_defaults() {
     return 600;
   }
   for (std::size_t i = 0U; i < engine::renderer::kShadowCascadeCount; ++i) {
-    if (state.depthTextures[i] != 0U) {
+    if (state.depthTextures[i] != engine::renderer::kInvalidDeviceTexture) {
       return 601;
     }
-    if (state.depthFbos[i] != 0U) {
+    if (state.depthTargets[i].value != 0U) {
       return 602;
     }
     if (state.resolutions[i] != 0) {

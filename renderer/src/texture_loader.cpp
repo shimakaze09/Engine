@@ -61,14 +61,42 @@ constexpr std::int32_t kHdrCubemapChannels = 3;
 constexpr std::int32_t kMaxCubemapFaceSize = 4096;
 constexpr double kPi = 3.14159265358979323846264338327950288;
 
+/// Maps an stb channel count onto the engine 8-bit texel format.
+TextureFormat ldr_format_for_channels(int channels) noexcept {
+  switch (channels) {
+  case 1:
+    return TextureFormat::R8;
+  case 2:
+    return TextureFormat::RG8;
+  case 3:
+    return TextureFormat::RGB8;
+  default:
+    return TextureFormat::RGBA8;
+  }
+}
+
+/// Maps an stb channel count onto the engine half-float texel format.
+TextureFormat hdr_format_for_channels(int channels) noexcept {
+  switch (channels) {
+  case 1:
+    return TextureFormat::R16F;
+  case 2:
+    return TextureFormat::RG16F;
+  case 3:
+    return TextureFormat::RGB16F;
+  default:
+    return TextureFormat::RGBA16F;
+  }
+}
+
 struct TextureSlot final {
-  std::uint32_t gpuId = 0U;
+  DeviceTextureHandle device{};
   std::uint32_t generation = 1U;
   bool occupied = false;
   bool hdr = false;
   bool cubemap = false;
-  // External slots alias a GL texture owned elsewhere (e.g. a scene capture
-  // target); the texture system never destroys their GL object.
+  // External slots alias a device texture owned elsewhere (e.g. a scene
+  // capture target); the texture system never destroys their object.
   bool external = false;
   std::array<char, kMaxPathLen> path{};
 };
@@ -93,8 +121,9 @@ TextureHandle make_texture_handle(std::size_t slotIndex) noexcept {
 
 /// Resets a texture slot while preserving stale-handle invalidation.
 void reset_texture_slot(TextureSlot &slot) noexcept {
-  slot = TextureSlot{0U, texture_handle_detail::next_generation(slot.generation), false,
-                     false, false, false, {}};
+  slot = TextureSlot{kInvalidDeviceTexture,
+                     texture_handle_detail::next_generation(slot.generation),
+                     false, false, false, false, {}};
 }
 
 /// Copies a texture VFS path into a fixed-size slot field.
@@ -318,10 +347,11 @@ void shutdown_texture_system() noexcept {
 
   const RenderDevice *dev = render_device();
   for (std::size_t i = 0U; i < kMaxTextureSlots; ++i) {
-    if (g_texState.slots[i].occupied && (g_texState.slots[i].gpuId != 0U) &&
+    if (g_texState.slots[i].occupied &&
+        (g_texState.slots[i].device != kInvalidDeviceTexture) &&
         !g_texState.slots[i].external) {
-      if (dev != nullptr) {
-        dev->destroy_texture(g_texState.slots[i].gpuId);
+      if ((dev != nullptr) && (dev->destroy_texture != nullptr)) {
+        dev->destroy_texture(g_texState.slots[i].device);
       }
     }
     reset_texture_slot(g_texState.slots[i]);
@@ -365,7 +395,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   int height = 0;
   int channels = 0;
   bool isHdr = false;
-  std::uint32_t gpuId = 0U;
+  DeviceTextureHandle deviceTexture{};
   int stbFileSize = 0;
   if (!texture_input_size_fits_stb(fileSize, &stbFileSize)) {
     core::vfs_free(fileData);
@@ -386,8 +416,18 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     }
 
     const RenderDevice *dev = render_device();
-    if (dev != nullptr && dev->create_texture_2d_hdr != nullptr) {
-      gpuId = dev->create_texture_2d_hdr(width, height, channels, pixels);
+    if (dev != nullptr && dev->create_texture != nullptr) {
+      TextureDesc desc{};
+      desc.kind = TextureKind::Tex2D;
+      desc.format = hdr_format_for_channels(channels);
+      desc.width = width;
+      desc.height = height;
+      desc.mipLevels = 1;
+      desc.filter = TextureFilter::Linear;
+      desc.wrap = TextureWrap::Repeat;
+      desc.pixelData = TexelData::F32;
+      desc.pixels = pixels;
+      deviceTexture = dev->create_texture(desc);
     }
     stbi_image_free(pixels);
     isHdr = true;
@@ -403,20 +443,30 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     }
 
     const RenderDevice *dev = render_device();
-    if (dev != nullptr && dev->create_texture_2d != nullptr) {
-      gpuId = dev->create_texture_2d(width, height, channels, pixels);
+    if (dev != nullptr && dev->create_texture != nullptr) {
+      TextureDesc desc{};
+      desc.kind = TextureKind::Tex2D;
+      desc.format = ldr_format_for_channels(channels);
+      desc.width = width;
+      desc.height = height;
+      desc.mipLevels = 0; // full generated chain, as image assets always had
+      desc.filter = TextureFilter::LinearMipmap;
+      desc.wrap = TextureWrap::Repeat;
+      desc.pixelData = TexelData::U8;
+      desc.pixels = pixels;
+      deviceTexture = dev->create_texture(desc);
     }
     stbi_image_free(pixels);
   }
 
-  if (gpuId == 0U) {
+  if (deviceTexture == kInvalidDeviceTexture) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to create GPU texture");
     return kInvalidTextureHandle;
   }
 
   TextureSlot &slot = g_texState.slots[freeSlot];
-  slot.gpuId = gpuId;
+  slot.device = deviceTexture;
   slot.occupied = true;
   slot.hdr = isHdr;
   slot.cubemap = false;
@@ -491,7 +541,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   }
 
   const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || (dev->create_cubemap_hdr == nullptr)) {
+  if ((dev == nullptr) || (dev->create_texture == nullptr)) {
     stbi_image_free(pixels);
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to create HDR cubemap texture");
@@ -508,21 +558,29 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   }
   stbi_image_free(pixels);
 
-  std::array<const float *, 6> facePixels{};
+  std::array<const void *, 6> facePixels{};
   for (std::size_t i = 0U; i < facePixels.size(); ++i) {
     facePixels[i] = faces[i].get();
   }
 
-  const std::uint32_t gpuId =
-      dev->create_cubemap_hdr(faceSize, kHdrCubemapChannels, facePixels.data());
-  if (gpuId == 0U) {
+  TextureDesc cubeDesc{};
+  cubeDesc.kind = TextureKind::Cube;
+  cubeDesc.format = TextureFormat::RGB16F;
+  cubeDesc.width = faceSize;
+  cubeDesc.mipLevels = 0; // generated chain (prefilter source sampling)
+  cubeDesc.filter = TextureFilter::LinearMipmap;
+  cubeDesc.wrap = TextureWrap::ClampEdge;
+  cubeDesc.pixelData = TexelData::F32;
+  cubeDesc.facePixels = facePixels.data();
+  const DeviceTextureHandle deviceTexture = dev->create_texture(cubeDesc);
+  if (deviceTexture == kInvalidDeviceTexture) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to upload HDR cubemap texture");
     return kInvalidTextureHandle;
   }
 
   TextureSlot &slot = g_texState.slots[freeSlot];
-  slot.gpuId = gpuId;
+  slot.device = deviceTexture;
   slot.occupied = true;
   slot.hdr = true;
   slot.cubemap = true;
@@ -543,14 +601,16 @@ void unload_texture(TextureHandle handle) noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  if (dev != nullptr && slot->gpuId != 0U && !slot->external) {
-    dev->destroy_texture(slot->gpuId);
+  if ((dev != nullptr) && (dev->destroy_texture != nullptr) &&
+      (slot->device != kInvalidDeviceTexture) && !slot->external) {
+    dev->destroy_texture(slot->device);
   }
 
   reset_texture_slot(g_texState.slots[slotIndex]);
 }
 
-TextureHandle register_external_texture(std::uint32_t gpuId) noexcept {
+TextureHandle register_external_texture(
+    DeviceTextureHandle texture) noexcept {
   if (!g_texState.initialized) {
     return kInvalidTextureHandle;
   }
@@ -565,7 +625,7 @@ TextureHandle register_external_texture(std::uint32_t gpuId) noexcept {
   TextureSlot &slot = g_texState.slots[freeSlot];
   slot.occupied = true;
   slot.external = true;
-  slot.gpuId = gpuId;
+  slot.device = texture;
   slot.hdr = false;
   slot.cubemap = false;
   safe_copy_path(slot.path.data(), slot.path.size(), "<external>");
@@ -573,23 +633,23 @@ TextureHandle register_external_texture(std::uint32_t gpuId) noexcept {
 }
 
 bool update_external_texture(TextureHandle handle,
-                             std::uint32_t gpuId) noexcept {
+                             DeviceTextureHandle texture) noexcept {
   TextureSlot *slot = lookup_texture_slot(handle);
   if ((slot == nullptr) || !slot->external) {
     return false;
   }
 
-  slot->gpuId = gpuId;
+  slot->device = texture;
   return true;
 }
 
-std::uint32_t texture_gpu_id(TextureHandle handle) noexcept {
+DeviceTextureHandle texture_device_handle(TextureHandle handle) noexcept {
   const TextureSlot *slot = lookup_texture_slot(handle);
   if (slot == nullptr) {
-    return 0U;
+    return kInvalidDeviceTexture;
   }
 
-  return slot->gpuId;
+  return slot->device;
 }
 
 /// Returns whether is texture hdr.

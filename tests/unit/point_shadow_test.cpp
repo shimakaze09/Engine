@@ -128,11 +128,14 @@ int verify_point_state_defaults() {
     if (state.slots[i].lightIndex != -1) {
       return 401;
     }
-    if (state.slots[i].depthCubemap != 0U) {
+    if (state.slots[i].depthCubemap !=
+        engine::renderer::kInvalidDeviceTexture) {
       return 402;
     }
-    if (state.slots[i].depthFbo != 0U) {
-      return 403;
+    for (const auto &faceTarget : state.slots[i].faceTargets) {
+      if (faceTarget.value != 0U) {
+        return 403;
+      }
     }
   }
   return 0;
@@ -163,11 +166,13 @@ int verify_point_data_defaults() {
   if (data.farPlane != 0.0F) {
     return 601;
   }
-  if (data.depthCubemap != 0U) {
+  if (data.depthCubemap != engine::renderer::kInvalidDeviceTexture) {
     return 602;
   }
-  if (data.depthFbo != 0U) {
-    return 603;
+  for (const auto &faceTarget : data.faceTargets) {
+    if (faceTarget.value != 0U) {
+      return 603;
+    }
   }
   return 0;
 }

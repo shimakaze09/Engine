@@ -29,25 +29,25 @@ struct PassResourceState final {
   int width = 0;
   int height = 0;
 
-  std::uint32_t sceneColorTexture = 0U;
-  std::uint32_t sceneDepthTexture = 0U;
-  std::uint32_t sceneFbo = 0U;
+  DeviceTextureHandle sceneColorTexture{};
+  DeviceTextureHandle sceneDepthTexture{};
+  RenderTargetHandle sceneTarget{};
 
-  std::uint32_t finalColorTexture = 0U;
-  std::uint32_t finalFbo = 0U;
+  DeviceTextureHandle finalColorTexture{};
+  RenderTargetHandle finalTarget{};
 
   // G-Buffer textures (deferred path).
-  std::uint32_t gbufferAlbedoTex = 0U;   // RGBA8 — albedo.rgb + metallic.a
-  std::uint32_t gbufferNormalTex = 0U;   // RGBA16F — normal.xyz + roughness.a
-  std::uint32_t gbufferEmissiveTex = 0U; // RGBA8 — emissive.rgb + AO.a
-  std::uint32_t gbufferDepthTex = 0U;    // DEPTH24
-  std::uint32_t gbufferFbo = 0U;
+  DeviceTextureHandle gbufferAlbedoTex{};   // RGBA8 — albedo.rgb + metallic.a
+  DeviceTextureHandle gbufferNormalTex{};   // RGBA16F — normal.xyz+roughness.a
+  DeviceTextureHandle gbufferEmissiveTex{}; // RGBA8 — emissive.rgb + AO.a
+  DeviceTextureHandle gbufferDepthTex{};    // DEPTH24
+  RenderTargetHandle gbufferTarget{};
 
   // SSAO textures.
-  std::uint32_t ssaoTex = 0U;           // R32F — raw AO
-  std::uint32_t ssaoFbo = 0U;
-  std::uint32_t ssaoBlurTex = 0U;       // R32F — blurred AO
-  std::uint32_t ssaoBlurFbo = 0U;
+  DeviceTextureHandle ssaoTex{};     // R32F — raw AO
+  RenderTargetHandle ssaoTarget{};
+  DeviceTextureHandle ssaoBlurTex{}; // R32F — blurred AO
+  RenderTargetHandle ssaoBlurTarget{};
 
   PassResources resources{};
 };
@@ -57,68 +57,40 @@ PassResourceState g_state{};
 /// Destroys or releases the requested object, handle, or resource for gpu resources.
 void destroy_gpu_resources(PassResourceState &state) noexcept {
   const RenderDevice *dev = render_device();
-  if (dev == nullptr) {
+  if ((dev == nullptr) || (dev->destroy_texture == nullptr) ||
+      (dev->destroy_render_target == nullptr)) {
     return;
   }
 
-  if (state.ssaoBlurFbo != 0U) {
-    dev->destroy_framebuffer(state.ssaoBlurFbo);
-    state.ssaoBlurFbo = 0U;
-  }
-  if (state.ssaoBlurTex != 0U) {
-    dev->destroy_texture(state.ssaoBlurTex);
-    state.ssaoBlurTex = 0U;
-  }
-  if (state.ssaoFbo != 0U) {
-    dev->destroy_framebuffer(state.ssaoFbo);
-    state.ssaoFbo = 0U;
-  }
-  if (state.ssaoTex != 0U) {
-    dev->destroy_texture(state.ssaoTex);
-    state.ssaoTex = 0U;
-  }
+  const auto destroyTarget = [dev](RenderTargetHandle &target) noexcept {
+    if (target.value != 0U) {
+      dev->destroy_render_target(target);
+      target = RenderTargetHandle{};
+    }
+  };
+  const auto destroyTexture = [dev](DeviceTextureHandle &texture) noexcept {
+    if (texture != kInvalidDeviceTexture) {
+      dev->destroy_texture(texture);
+      texture = kInvalidDeviceTexture;
+    }
+  };
 
-  if (state.gbufferFbo != 0U) {
-    dev->destroy_framebuffer(state.gbufferFbo);
-    state.gbufferFbo = 0U;
-  }
-  if (state.gbufferDepthTex != 0U) {
-    dev->destroy_texture(state.gbufferDepthTex);
-    state.gbufferDepthTex = 0U;
-  }
-  if (state.gbufferEmissiveTex != 0U) {
-    dev->destroy_texture(state.gbufferEmissiveTex);
-    state.gbufferEmissiveTex = 0U;
-  }
-  if (state.gbufferNormalTex != 0U) {
-    dev->destroy_texture(state.gbufferNormalTex);
-    state.gbufferNormalTex = 0U;
-  }
-  if (state.gbufferAlbedoTex != 0U) {
-    dev->destroy_texture(state.gbufferAlbedoTex);
-    state.gbufferAlbedoTex = 0U;
-  }
+  destroyTarget(state.ssaoBlurTarget);
+  destroyTexture(state.ssaoBlurTex);
+  destroyTarget(state.ssaoTarget);
+  destroyTexture(state.ssaoTex);
 
-  if (state.finalFbo != 0U) {
-    dev->destroy_framebuffer(state.finalFbo);
-    state.finalFbo = 0U;
-  }
-  if (state.finalColorTexture != 0U) {
-    dev->destroy_texture(state.finalColorTexture);
-    state.finalColorTexture = 0U;
-  }
-  if (state.sceneFbo != 0U) {
-    dev->destroy_framebuffer(state.sceneFbo);
-    state.sceneFbo = 0U;
-  }
-  if (state.sceneColorTexture != 0U) {
-    dev->destroy_texture(state.sceneColorTexture);
-    state.sceneColorTexture = 0U;
-  }
-  if (state.sceneDepthTexture != 0U) {
-    dev->destroy_texture(state.sceneDepthTexture);
-    state.sceneDepthTexture = 0U;
-  }
+  destroyTarget(state.gbufferTarget);
+  destroyTexture(state.gbufferDepthTex);
+  destroyTexture(state.gbufferEmissiveTex);
+  destroyTexture(state.gbufferNormalTex);
+  destroyTexture(state.gbufferAlbedoTex);
+
+  destroyTarget(state.finalTarget);
+  destroyTexture(state.finalColorTexture);
+  destroyTarget(state.sceneTarget);
+  destroyTexture(state.sceneColorTexture);
+  destroyTexture(state.sceneDepthTexture);
 }
 
 bool fail_create(PassResourceState &state, const char *message) noexcept {
@@ -139,7 +111,8 @@ bool create_gpu_resources(PassResourceState *outState, int width,
   }
 
   const RenderDevice *dev = render_device();
-  if (dev == nullptr) {
+  if ((dev == nullptr) || (dev->create_texture == nullptr) ||
+      (dev->create_render_target == nullptr)) {
     return false;
   }
 
@@ -147,103 +120,123 @@ bool create_gpu_resources(PassResourceState *outState, int width,
   next.width = width;
   next.height = height;
 
-  next.sceneColorTexture =
-      dev->create_texture_2d_hdr(static_cast<std::int32_t>(width),
-                                 static_cast<std::int32_t>(height), 4, nullptr);
-  if (next.sceneColorTexture == 0U) {
+  const auto w32 = static_cast<std::int32_t>(width);
+  const auto h32 = static_cast<std::int32_t>(height);
+
+  // Render-target textures are single-level: only mip 0 is ever rendered,
+  // so a generated chain would hold stale data forever (issue #229). Every
+  // consumer samples them 1:1 with linear filtering.
+  const auto makeTexture = [&](TextureFormat format) noexcept {
+    TextureDesc desc{};
+    desc.kind = TextureKind::Tex2D;
+    desc.format = format;
+    desc.width = w32;
+    desc.height = h32;
+    desc.filter = TextureFilter::Linear;
+    desc.wrap = TextureWrap::Repeat;
+    if (format == TextureFormat::R32F) {
+      desc.filter = TextureFilter::Nearest;
+      desc.wrap = TextureWrap::ClampEdge;
+    }
+    return dev->create_texture(desc);
+  };
+  const auto makeColorTarget = [&](DeviceTextureHandle color,
+                                   DeviceTextureHandle depth) noexcept {
+    RenderTargetDesc desc{};
+    desc.colorCount = 1U;
+    desc.colors[0].texture = color;
+    desc.depth.texture = depth;
+    return dev->create_render_target(desc);
+  };
+
+  next.sceneColorTexture = makeTexture(TextureFormat::RGBA16F);
+  if (next.sceneColorTexture == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create scene color texture");
   }
 
-  next.sceneDepthTexture = dev->create_depth_texture(
-      static_cast<std::int32_t>(width), static_cast<std::int32_t>(height));
-  if (next.sceneDepthTexture == 0U) {
+  next.sceneDepthTexture = makeTexture(TextureFormat::Depth24);
+  if (next.sceneDepthTexture == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create scene depth texture");
   }
 
-  next.sceneFbo =
-      dev->create_framebuffer(next.sceneColorTexture, next.sceneDepthTexture);
-  if (next.sceneFbo == 0U) {
-    return fail_create(next, "failed to create scene framebuffer");
+  next.sceneTarget =
+      makeColorTarget(next.sceneColorTexture, next.sceneDepthTexture);
+  if (next.sceneTarget.value == 0U) {
+    return fail_create(next, "failed to create scene render target");
   }
 
-  next.finalColorTexture =
-      dev->create_texture_2d(static_cast<std::int32_t>(width),
-                             static_cast<std::int32_t>(height), 4, nullptr);
-  if (next.finalColorTexture == 0U) {
+  next.finalColorTexture = makeTexture(TextureFormat::RGBA8);
+  if (next.finalColorTexture == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create final color texture");
   }
 
-  next.finalFbo = dev->create_framebuffer(next.finalColorTexture, 0U);
-  if (next.finalFbo == 0U) {
-    return fail_create(next, "failed to create final framebuffer");
+  next.finalTarget =
+      makeColorTarget(next.finalColorTexture, kInvalidDeviceTexture);
+  if (next.finalTarget.value == 0U) {
+    return fail_create(next, "failed to create final render target");
   }
 
   next.resources.sceneColor = PassResourceId{kSceneColorSlot};
   next.resources.sceneDepth = PassResourceId{kSceneDepthSlot};
   next.resources.finalColor = PassResourceId{kFinalColorSlot};
 
-  const auto w32 = static_cast<std::int32_t>(width);
-  const auto h32 = static_cast<std::int32_t>(height);
-
-  next.gbufferAlbedoTex = dev->create_texture_2d(w32, h32, 4, nullptr);
-  if (next.gbufferAlbedoTex == 0U) {
+  next.gbufferAlbedoTex = makeTexture(TextureFormat::RGBA8);
+  if (next.gbufferAlbedoTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create G-Buffer albedo texture");
   }
 
-  next.gbufferNormalTex = dev->create_texture_2d_hdr(w32, h32, 4, nullptr);
-  if (next.gbufferNormalTex == 0U) {
+  next.gbufferNormalTex = makeTexture(TextureFormat::RGBA16F);
+  if (next.gbufferNormalTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create G-Buffer normal texture");
   }
 
-  next.gbufferEmissiveTex = dev->create_texture_2d(w32, h32, 4, nullptr);
-  if (next.gbufferEmissiveTex == 0U) {
+  next.gbufferEmissiveTex = makeTexture(TextureFormat::RGBA8);
+  if (next.gbufferEmissiveTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create G-Buffer emissive texture");
   }
 
-  next.gbufferDepthTex = dev->create_depth_texture(w32, h32);
-  if (next.gbufferDepthTex == 0U) {
+  next.gbufferDepthTex = makeTexture(TextureFormat::Depth24);
+  if (next.gbufferDepthTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create G-Buffer depth texture");
   }
 
-  const std::uint32_t gbufferColors[] = {next.gbufferAlbedoTex,
-                                         next.gbufferNormalTex,
-                                         next.gbufferEmissiveTex};
-  next.gbufferFbo =
-      dev->create_framebuffer_mrt(gbufferColors, 3, next.gbufferDepthTex);
-  if (next.gbufferFbo == 0U) {
-    return fail_create(next, "failed to create G-Buffer framebuffer");
+  {
+    RenderTargetDesc gbufferDesc{};
+    gbufferDesc.colorCount = 3U;
+    gbufferDesc.colors[0].texture = next.gbufferAlbedoTex;
+    gbufferDesc.colors[1].texture = next.gbufferNormalTex;
+    gbufferDesc.colors[2].texture = next.gbufferEmissiveTex;
+    gbufferDesc.depth.texture = next.gbufferDepthTex;
+    next.gbufferTarget = dev->create_render_target(gbufferDesc);
   }
-
-  dev->bind_framebuffer(next.gbufferFbo);
-  if (!dev->check_framebuffer_complete()) {
-    dev->bind_framebuffer(0U);
-    return fail_create(next, "G-Buffer FBO is not complete");
+  if (next.gbufferTarget.value == 0U) {
+    return fail_create(next, "failed to create G-Buffer render target");
   }
-  dev->bind_framebuffer(0U);
 
   next.resources.gbufferAlbedo = PassResourceId{kGBufferAlbedoSlot};
   next.resources.gbufferNormal = PassResourceId{kGBufferNormalSlot};
   next.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
   next.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
 
-  next.ssaoTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
-  if (next.ssaoTex == 0U) {
+  next.ssaoTex = makeTexture(TextureFormat::R32F);
+  if (next.ssaoTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create SSAO texture");
   }
 
-  next.ssaoFbo = dev->create_framebuffer(next.ssaoTex, 0U);
-  if (next.ssaoFbo == 0U) {
-    return fail_create(next, "failed to create SSAO framebuffer");
+  next.ssaoTarget = makeColorTarget(next.ssaoTex, kInvalidDeviceTexture);
+  if (next.ssaoTarget.value == 0U) {
+    return fail_create(next, "failed to create SSAO render target");
   }
 
-  next.ssaoBlurTex = dev->create_texture_2d_r32f(w32, h32, nullptr);
-  if (next.ssaoBlurTex == 0U) {
+  next.ssaoBlurTex = makeTexture(TextureFormat::R32F);
+  if (next.ssaoBlurTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create SSAO blur texture");
   }
 
-  next.ssaoBlurFbo = dev->create_framebuffer(next.ssaoBlurTex, 0U);
-  if (next.ssaoBlurFbo == 0U) {
-    return fail_create(next, "failed to create SSAO blur framebuffer");
+  next.ssaoBlurTarget =
+      makeColorTarget(next.ssaoBlurTex, kInvalidDeviceTexture);
+  if (next.ssaoBlurTarget.value == 0U) {
+    return fail_create(next, "failed to create SSAO blur render target");
   }
 
   next.resources.ssaoTexture = PassResourceId{kSsaoTextureSlot};
@@ -317,7 +310,7 @@ bool resize_pass_resources(int width, int height) noexcept {
 
 const PassResources &get_pass_resources() noexcept { return g_state.resources; }
 
-std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
+DeviceTextureHandle pass_resource_texture(PassResourceId resource) noexcept {
   if (resource.id == kSceneColorSlot) {
     return g_state.sceneColorTexture;
   }
@@ -345,27 +338,27 @@ std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept {
   if (resource.id == kSsaoBlurTextureSlot) {
     return g_state.ssaoBlurTex;
   }
-  return 0U;
+  return kInvalidDeviceTexture;
 }
 
-std::uint32_t
-pass_resource_framebuffer(PassResourceId colorAttachment) noexcept {
+RenderTargetHandle
+pass_resource_target(PassResourceId colorAttachment) noexcept {
   if (colorAttachment.id == kSceneColorSlot) {
-    return g_state.sceneFbo;
+    return g_state.sceneTarget;
   }
   if (colorAttachment.id == kFinalColorSlot) {
-    return g_state.finalFbo;
+    return g_state.finalTarget;
   }
   if (colorAttachment.id == kGBufferAlbedoSlot) {
-    return g_state.gbufferFbo;
+    return g_state.gbufferTarget;
   }
   if (colorAttachment.id == kSsaoTextureSlot) {
-    return g_state.ssaoFbo;
+    return g_state.ssaoTarget;
   }
   if (colorAttachment.id == kSsaoBlurTextureSlot) {
-    return g_state.ssaoBlurFbo;
+    return g_state.ssaoBlurTarget;
   }
-  return 0U;
+  return RenderTargetHandle{};
 }
 
 } // namespace engine::renderer

@@ -19,26 +19,17 @@ namespace engine::renderer {
 namespace {
 
 RenderDevice g_fakeDevice{};
-std::uint32_t g_nextShader = 1U;
 std::uint32_t g_nextProgram = 100U;
 
-std::uint32_t fake_create_shader(std::uint32_t, const char *) noexcept {
-  return g_nextShader++;
+DeviceProgramHandle fake_create_program(const char *, const char *) noexcept {
+  return DeviceProgramHandle{g_nextProgram++};
 }
 
-void fake_destroy_shader(std::uint32_t) noexcept {}
-
-std::uint32_t fake_link_program(std::uint32_t, std::uint32_t) noexcept {
-  return g_nextProgram++;
-}
-
-void fake_destroy_program(std::uint32_t) noexcept {}
+void fake_destroy_program(DeviceProgramHandle) noexcept {}
 
 void configure_fake_render_device() noexcept {
   g_fakeDevice = RenderDevice{};
-  g_fakeDevice.create_shader = &fake_create_shader;
-  g_fakeDevice.destroy_shader = &fake_destroy_shader;
-  g_fakeDevice.link_program = &fake_link_program;
+  g_fakeDevice.create_program = &fake_create_program;
   g_fakeDevice.destroy_program = &fake_destroy_program;
 }
 
@@ -264,8 +255,8 @@ static void test_load_null_paths() {
 static void test_gpu_program_invalid_handle() {
   using namespace engine::renderer;
   TEST_ASSERT(initialize_shader_system());
-  TEST_ASSERT(shader_gpu_program(kInvalidShaderProgram) == 0U);
-  TEST_ASSERT(shader_gpu_program(ShaderProgramHandle{999U}) == 0U);
+  TEST_ASSERT(shader_device_program(kInvalidShaderProgram) == kInvalidDeviceProgram);
+  TEST_ASSERT(shader_device_program(ShaderProgramHandle{999U}) == kInvalidDeviceProgram);
   shutdown_shader_system();
   ++g_passed;
 }
@@ -289,21 +280,21 @@ static void test_stale_handle_rejected_after_slot_reuse() {
   const ShaderProgramHandle first = load_shader_program(
       "shader_test/_shader_a.vert", "shader_test/_shader_a.frag");
   TEST_ASSERT(first != kInvalidShaderProgram);
-  const std::uint32_t firstProgram = shader_gpu_program(first);
-  TEST_ASSERT(firstProgram != 0U);
+  const DeviceProgramHandle firstProgram = shader_device_program(first);
+  TEST_ASSERT(firstProgram != kInvalidDeviceProgram);
 
   destroy_shader_program(first);
-  TEST_ASSERT(shader_gpu_program(first) == 0U);
+  TEST_ASSERT(shader_device_program(first) == kInvalidDeviceProgram);
 
   const ShaderProgramHandle second = load_shader_program(
       "shader_test/_shader_b.vert", "shader_test/_shader_b.frag");
   TEST_ASSERT(second != kInvalidShaderProgram);
   TEST_ASSERT(second.id == first.id);
   TEST_ASSERT(second.generation != first.generation);
-  TEST_ASSERT(shader_gpu_program(second) != 0U);
+  TEST_ASSERT(shader_device_program(second) != kInvalidDeviceProgram);
 
   destroy_shader_program(first);
-  TEST_ASSERT(shader_gpu_program(second) != 0U);
+  TEST_ASSERT(shader_device_program(second) != kInvalidDeviceProgram);
 
   destroy_shader_program(second);
   shutdown_shader_system();

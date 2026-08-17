@@ -79,7 +79,7 @@ struct ShaderEntry final {
   char fragPath[kMaxPathLength] = {};
   ShaderDefineCopy defines[kMaxShaderDefines] = {};
   std::size_t defineCount = 0U;
-  std::uint32_t gpuProgram = 0U;
+  DeviceProgramHandle deviceProgram{};
   std::int64_t vertMtime = 0;
   std::int64_t fragMtime = 0;
 };
@@ -307,13 +307,12 @@ void remove_variants_for_handle(ShaderProgramHandle handle) noexcept {
   }
 }
 
-std::uint32_t compile_program_from_source(const char *vertSource,
-                                          const char *fragSource,
-                                          const ShaderDefineCopy *defines,
-                                          std::size_t defineCount) noexcept {
+DeviceProgramHandle compile_program_from_source(
+    const char *vertSource, const char *fragSource,
+    const ShaderDefineCopy *defines, std::size_t defineCount) noexcept {
   const RenderDevice *dev = render_device();
-  if (dev == nullptr) {
-    return 0U;
+  if ((dev == nullptr) || (dev->create_program == nullptr)) {
+    return kInvalidDeviceProgram;
   }
 
   std::unique_ptr<char[]> variantVertSource;
@@ -326,31 +325,13 @@ std::uint32_t compile_program_from_source(const char *vertSource,
     variantFragSource =
         build_source_with_defines(fragSource, defines, defineCount);
     if (!variantVertSource || !variantFragSource) {
-      return 0U;
+      return kInvalidDeviceProgram;
     }
     compiledVertSource = variantVertSource.get();
     compiledFragSource = variantFragSource.get();
   }
 
-  const std::uint32_t vs =
-      dev->create_shader(kShaderStageVertex, compiledVertSource);
-  const std::uint32_t fs =
-      dev->create_shader(kShaderStageFragment, compiledFragSource);
-
-  if ((vs == 0U) || (fs == 0U)) {
-    if (vs != 0U) {
-      dev->destroy_shader(vs);
-    }
-    if (fs != 0U) {
-      dev->destroy_shader(fs);
-    }
-    return 0U;
-  }
-
-  const std::uint32_t program = dev->link_program(vs, fs);
-  dev->destroy_shader(vs);
-  dev->destroy_shader(fs);
-  return program;
+  return dev->create_program(compiledVertSource, compiledFragSource);
 }
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
@@ -371,13 +352,13 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
     return false;
   }
 
-  const std::uint32_t newProgram =
+  const DeviceProgramHandle newProgram =
       compile_program_from_source(vertSource, fragSource, entry.defines,
                                   entry.defineCount);
   core::vfs_free(vertSource);
   core::vfs_free(fragSource);
 
-  if (newProgram == 0U) {
+  if (newProgram == kInvalidDeviceProgram) {
     core::log_message(core::LogLevel::Error,
                       "shader",
                       "shader compilation failed — keeping old program");
@@ -385,11 +366,12 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  if ((dev != nullptr) && (entry.gpuProgram != 0U)) {
-    dev->destroy_program(entry.gpuProgram);
+  if ((dev != nullptr) && (dev->destroy_program != nullptr) &&
+      (entry.deviceProgram != kInvalidDeviceProgram)) {
+    dev->destroy_program(entry.deviceProgram);
   }
 
-  entry.gpuProgram = newProgram;
+  entry.deviceProgram = newProgram;
   entry.vertMtime = core::vfs_file_mtime(entry.vertPath);
   entry.fragMtime = core::vfs_file_mtime(entry.fragPath);
   ++g_reloadEpoch;
@@ -462,8 +444,9 @@ void shutdown_shader_system() noexcept {
   const RenderDevice *dev = render_device();
   for (std::size_t i = 0U; i < kMaxShaderPrograms; ++i) {
     ShaderEntry &e = g_entries[i];
-    if (e.active && (e.gpuProgram != 0U) && (dev != nullptr)) {
-      dev->destroy_program(e.gpuProgram);
+    if (e.active && (e.deviceProgram != kInvalidDeviceProgram) &&
+        (dev != nullptr) && (dev->destroy_program != nullptr)) {
+      dev->destroy_program(e.deviceProgram);
     }
     reset_shader_entry(i);
   }
@@ -587,21 +570,22 @@ void destroy_shader_program(ShaderProgramHandle handle) noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  if ((dev != nullptr) && (entry.gpuProgram != 0U)) {
-    dev->destroy_program(entry.gpuProgram);
+  if ((dev != nullptr) && (dev->destroy_program != nullptr) &&
+      (entry.deviceProgram != kInvalidDeviceProgram)) {
+    dev->destroy_program(entry.deviceProgram);
   }
 
   remove_variants_for_handle(handle);
   reset_shader_entry(handle.id - 1U);
 }
 
-std::uint32_t shader_gpu_program(ShaderProgramHandle handle) noexcept {
+DeviceProgramHandle shader_device_program(ShaderProgramHandle handle) noexcept {
   if (!is_current_handle(handle)) {
-    return 0U;
+    return kInvalidDeviceProgram;
   }
 
   const ShaderEntry &entry = g_entries[handle.id - 1U];
-  return entry.gpuProgram;
+  return entry.deviceProgram;
 }
 
 std::uint64_t shader_reload_epoch() noexcept { return g_reloadEpoch; }
