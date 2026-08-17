@@ -20,6 +20,7 @@
 namespace {
 
 using namespace engine::editor;
+using engine::runtime::CameraComponent;
 using engine::runtime::Entity;
 using engine::runtime::RigidBody;
 using engine::runtime::World;
@@ -320,6 +321,192 @@ int check_batch_remove_single_command_undo_redo() noexcept {
   return 0;
 }
 
+/// EXPECTATION (issue #225): the multi Inspector's section inventory and
+/// the explicit deferred list cover every registry-generated edit type
+/// exactly once, and Camera specifically has a section — the registry can
+/// grow without a component silently vanishing from multi-edit.
+int check_inventory_covers_registry_and_lists_camera() noexcept {
+  for (std::size_t t = 0U; t < kComponentEditTypeCount; ++t) {
+    const auto type = static_cast<ComponentEditType>(t);
+    if (multi_edit_section_listed(type) == multi_edit_type_deferred(type)) {
+      return 70; // exactly one of the two lists must own each type
+    }
+  }
+  if (!multi_edit_section_listed(ComponentEditType::Camera)) {
+    return 71;
+  }
+  return 0;
+}
+
+Entity make_camera_entity(World &world, float fovRadians,
+                          float priority) noexcept {
+  const Entity entity = world.create_scene_object();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return engine::runtime::kInvalidEntity;
+  }
+  CameraComponent camera{};
+  camera.fovRadians = fovRadians;
+  camera.priority = priority;
+  if (!world.add_camera_component(entity, camera)) {
+    return engine::runtime::kInvalidEntity;
+  }
+  return entity;
+}
+
+const engine::core::TypeField *camera_field(const char *name) noexcept {
+  const engine::core::TypeDescriptor *desc =
+      engine::core::global_type_registry().find_type(
+          "engine::runtime::CameraComponent");
+  return (desc != nullptr) ? desc->find_field(name) : nullptr;
+}
+
+/// EXPECTATION (issue #225): Camera participates in multi-edit like every
+/// other reflected component — common detection, mixed-field detection,
+/// one-field batch edit that preserves each entity's own sibling values,
+/// undo restoring per-entity values, and batch removal with undo/redo.
+int check_camera_batch_edit_and_remove() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 80;
+  }
+  SessionWorldScope scope(world.get());
+
+  const Entity first = make_camera_entity(*world, 1.0F, 10.0F);
+  const Entity second = make_camera_entity(*world, 2.0F, 20.0F);
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity)) {
+    return 81;
+  }
+  select_entity(first, false);
+  select_entity(second, true);
+
+  std::array<bool, kComponentEditTypeCount> common{};
+  compute_selection_common_components(&common);
+  if (!common[static_cast<std::size_t>(ComponentEditType::Camera)]) {
+    return 82;
+  }
+
+  const engine::core::TypeField *fov = camera_field("fovRadians");
+  const engine::core::TypeField *priority = camera_field("priority");
+  if ((fov == nullptr) || (priority == nullptr)) {
+    return 83;
+  }
+  if (!selection_field_is_mixed(ComponentEditType::Camera, fov->offset,
+                                fov->size) ||
+      !selection_field_is_mixed(ComponentEditType::Camera, priority->offset,
+                                priority->size)) {
+    return 84;
+  }
+
+  ComponentEditSnapshot source{};
+  if (!selection_representative_component(ComponentEditType::Camera,
+                                          &source)) {
+    return 85;
+  }
+  source.camera.fovRadians = 1.5F;
+  if (!apply_multi_field_edit(ComponentEditType::Camera, fov->offset,
+                              fov->size, source)) {
+    return 86;
+  }
+
+  CameraComponent firstCam{};
+  CameraComponent secondCam{};
+  if (!world->get_camera_component(first, &firstCam) ||
+      !world->get_camera_component(second, &secondCam)) {
+    return 87;
+  }
+  if ((firstCam.fovRadians != 1.5F) || (secondCam.fovRadians != 1.5F)) {
+    return 88; // the edited field lands on every selected entity
+  }
+  if ((firstCam.priority != 10.0F) || (secondCam.priority != 20.0F)) {
+    return 89; // the still-mixed sibling field keeps per-entity values
+  }
+  if (selection_field_is_mixed(ComponentEditType::Camera, fov->offset,
+                               fov->size)) {
+    return 90;
+  }
+
+  editor_session().commandHistory.undo();
+  if (!world->get_camera_component(first, &firstCam) ||
+      !world->get_camera_component(second, &secondCam)) {
+    return 91;
+  }
+  if ((firstCam.fovRadians != 1.0F) || (secondCam.fovRadians != 2.0F)) {
+    return 92; // undo restores each entity's own original value
+  }
+
+  if (!apply_multi_component_remove(ComponentEditType::Camera)) {
+    return 93;
+  }
+  CameraComponent probe{};
+  if (world->get_camera_component(first, &probe) ||
+      world->get_camera_component(second, &probe)) {
+    return 94;
+  }
+  editor_session().commandHistory.undo();
+  if (!world->get_camera_component(first, &firstCam) ||
+      !world->get_camera_component(second, &secondCam)) {
+    return 95;
+  }
+  if ((firstCam.priority != 10.0F) || (secondCam.priority != 20.0F)) {
+    return 96;
+  }
+  editor_session().commandHistory.redo();
+  if (world->get_camera_component(first, &probe) ||
+      world->get_camera_component(second, &probe)) {
+    return 97;
+  }
+
+  return 0;
+}
+
+/// EXPECTATION (issue #225): a Camera batch edit over a selection holding
+/// a dead entity fails atomically — no history entry, and the surviving
+/// entity keeps its prior value.
+int check_camera_batch_edit_rolls_back_on_dead_entity() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 100;
+  }
+  SessionWorldScope scope(world.get());
+
+  const Entity first = make_camera_entity(*world, 1.0F, 10.0F);
+  const Entity second = make_camera_entity(*world, 2.0F, 20.0F);
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity)) {
+    return 101;
+  }
+  select_entity(first, false);
+  select_entity(second, true);
+
+  // Destroy the last selected entity without pruning the selection, so
+  // the batch edit encounters a dead entity (same shape as the RigidBody
+  // rollback case above).
+  if (!world->destroy_entity(second)) {
+    return 106;
+  }
+
+  const engine::core::TypeField *fov = camera_field("fovRadians");
+  if (fov == nullptr) {
+    return 102;
+  }
+  ComponentEditSnapshot source{};
+  source.camera.fovRadians = 1.5F;
+  if (apply_multi_field_edit(ComponentEditType::Camera, fov->offset,
+                             fov->size, source)) {
+    return 103; // a selection holding a dead entity must be rejected
+  }
+  if (editor_session().commandHistory.can_undo()) {
+    return 104; // no history entry for a rejected batch
+  }
+  CameraComponent survivor{};
+  if (!world->get_camera_component(first, &survivor) ||
+      (survivor.fovRadians != 1.0F)) {
+    return 105; // the surviving entity keeps its prior value
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -337,6 +524,12 @@ int main() {
        &check_batch_edit_rolls_back_on_partial_failure},
       {"check_batch_remove_single_command_undo_redo",
        &check_batch_remove_single_command_undo_redo},
+      {"check_inventory_covers_registry_and_lists_camera",
+       &check_inventory_covers_registry_and_lists_camera},
+      {"check_camera_batch_edit_and_remove",
+       &check_camera_batch_edit_and_remove},
+      {"check_camera_batch_edit_rolls_back_on_dead_entity",
+       &check_camera_batch_edit_rolls_back_on_dead_entity},
   };
 
   for (const auto &check : checks) {

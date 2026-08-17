@@ -273,10 +273,9 @@ namespace {
 /// Reflected type names the multi Inspector's per-field editor covers (the
 /// same set editor_panels_inspector.cpp routes through
 /// draw_reflected_component_fields for a single entity); components with a
-/// custom drawer (Name, Mesh, FoliagePatch, Script, Animation, SceneCapture)
-/// are out of scope for per-field multi-edit and are skipped here --
-/// deferred scope, tracked in the PR description rather than silently
-/// mis-edited.
+/// custom drawer are out of scope for per-field multi-edit and are declared
+/// in kMultiEditDeferredTypes below (issue #223), with a compile-time guard
+/// proving the two lists cover the registry exactly.
 struct MultiSectionDesc final {
   ComponentEditType type;
   const char *typeName;
@@ -295,7 +294,52 @@ constexpr MultiSectionDesc kMultiSections[] = {
     {ComponentEditType::ReflectionProbe, kReflectionProbeTypeName,
      "Reflection Probe", true},
     {ComponentEditType::SpringArm, kSpringArmTypeName, "Spring Arm", true},
+    {ComponentEditType::Camera, kCameraTypeName, "Camera", true},
 };
+
+// Custom-drawer components explicitly deferred from per-field multi-edit
+// (issue #223's scope); declared once so the guard below can prove every
+// registry-generated ComponentEditType is either sectioned or deferred.
+constexpr ComponentEditType kMultiEditDeferredTypes[] = {
+    ComponentEditType::Name,         ComponentEditType::Mesh,
+    ComponentEditType::FoliagePatch, ComponentEditType::Script,
+    ComponentEditType::Animation,    ComponentEditType::SceneCapture,
+};
+
+constexpr bool multi_section_row_exists(ComponentEditType type) noexcept {
+  for (const MultiSectionDesc &desc : kMultiSections) {
+    if (desc.type == type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+constexpr bool multi_deferred_row_exists(ComponentEditType type) noexcept {
+  for (const ComponentEditType deferred : kMultiEditDeferredTypes) {
+    if (deferred == type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Every registry-generated edit type must appear in exactly one of the
+/// two lists, so a new persistent component cannot silently be omitted
+/// from the multi Inspector the way Camera was (issue #225).
+constexpr bool multi_edit_inventory_complete() noexcept {
+  for (std::size_t t = 0U; t < kComponentEditTypeCount; ++t) {
+    const auto type = static_cast<ComponentEditType>(t);
+    if (multi_section_row_exists(type) == multi_deferred_row_exists(type)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static_assert(multi_edit_inventory_complete(),
+              "every ComponentEditType needs a kMultiSections row or an "
+              "explicit kMultiEditDeferredTypes entry (issue #225)");
 
 /// Draws every reflected field of one common component across the
 /// selection: mixed fields get a "(mixed)" label suffix and a shared edit
@@ -347,6 +391,14 @@ void draw_multi_component_section(const MultiSectionDesc &desc) noexcept {
 }
 
 } // namespace
+
+bool multi_edit_section_listed(ComponentEditType type) noexcept {
+  return multi_section_row_exists(type);
+}
+
+bool multi_edit_type_deferred(ComponentEditType type) noexcept {
+  return multi_deferred_row_exists(type);
+}
 
 void draw_multi_select_inspector_panel() noexcept {
   const EditorSession &session = editor_session();

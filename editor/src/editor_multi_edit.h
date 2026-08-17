@@ -70,6 +70,15 @@ bool apply_multi_field_edit(ComponentEditType type, std::size_t fieldOffset,
 /// present on everyone).
 bool apply_multi_component_remove(ComponentEditType type) noexcept;
 
+/// True when `type` has a reflected per-field section in the multi-object
+/// Inspector inventory.
+bool multi_edit_section_listed(ComponentEditType type) noexcept;
+
+/// True when `type` is explicitly deferred from per-field multi-edit (the
+/// custom-drawer components tracked by issue #223). Every registry edit
+/// type is exactly one of listed or deferred, enforced at compile time.
+bool multi_edit_type_deferred(ComponentEditType type) noexcept;
+
 /// Draws the Inspector's multi-selection body (issue #159): one section per
 /// component common to every selected entity, each reflected field shown
 /// with a "(mixed)" suffix when the selection disagrees on its value, plus
