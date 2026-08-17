@@ -57,6 +57,7 @@
 
 #include "editor_commands.h"
 #include "editor_console_capture.h"
+#include "editor_material_edit.h"
 #include "editor_panels_assets.h"
 #include "editor_panels_console.h"
 #include "editor_panels_diagnostics.h"
@@ -303,6 +304,7 @@ void shutdown_editor() noexcept {
 
   console_capture_shutdown();
   clear_thumbnail_cache();
+  reset_material_editor();
   editor_session().commandHistory.clear();
 
   editor_session().initialized = false;
@@ -381,6 +383,7 @@ void editor_set_world(runtime::World *world) noexcept {
   // restore world A's contents into world B).
   if (editor_session().world != world) {
     inspector_abandon_pending_edit();
+    reset_material_editor();
     editor_session().commandHistory.clear();
     editor_session().gizmoWasUsing = false;
     clear_entity_selection();

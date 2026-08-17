@@ -119,6 +119,9 @@ void close_material_editor() noexcept {
   g_state.open = false;
 }
 
+/// Session-transition reset: drops all state without finalizing a gesture.
+void reset_material_editor() noexcept { g_state = MaterialEditorState{}; }
+
 void material_editor_apply_frame(
     const renderer::Material &beforeFrameParams,
     const renderer::MaterialTextureSlots &beforeFrameSlots,

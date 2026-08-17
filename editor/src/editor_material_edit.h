@@ -51,6 +51,12 @@ struct MaterialEditCommand final : EditorCommand {
 /// Returns the process-wide material editor panel state.
 MaterialEditorState &material_editor_state() noexcept;
 
+// Discards the whole material editor state — open panel, buffer, asset id,
+// and any in-progress gesture — without pushing history. Called on world
+// rebind and editor shutdown, where the referenced asset service is going
+// away (#168); user-driven close goes through close_material_editor.
+void reset_material_editor() noexcept;
+
 /// Opens the panel for `virtualPath` (loading it if not already loaded). A
 /// no-op re-open of the already-open material keeps the current buffer
 /// (does not discard unsaved edits); switching to a different material
