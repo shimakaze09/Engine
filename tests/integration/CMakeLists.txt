@@ -28,6 +28,16 @@ engine_add_test_executable(engine_integration_pipeline_tick_cadence
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_teardown_run_state
+    SOURCES
+    pipeline_teardown_run_state_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    gpu;integration
+)
+
 engine_add_test_executable(engine_integration_vertical_slice
     SOURCES
     vertical_slice_integration.cpp

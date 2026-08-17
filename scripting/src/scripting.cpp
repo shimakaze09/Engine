@@ -525,6 +525,31 @@ void shutdown_scripting() noexcept {
   g_watchedScriptCount = 0U;
 }
 
+/// Resets run-scoped scripting state without touching the VM, the debug/DAP
+/// hooks, or the runtime binding (their owners tear those down separately).
+void reset_run_state() noexcept {
+  lua_State *state = lua_state();
+  clear_touch_gesture_callbacks(state);
+  if (state != nullptr) {
+    clear_persist_bindings(state);
+    reset_entity_script_bindings();
+    clear_lua_timer_bindings(state);
+    clear_collision_handlers(state);
+    clear_anim_event_handlers(state);
+    clear_lua_coroutines(state);
+  }
+  reset_mesh_material_bindings();
+  clear_deferred_mutations();
+  reset_scene_bindings();
+  reset_cheat_bindings();
+  reset_entity_pool_bindings();
+  reset_game_bindings();
+  for (WatchedScript &watchedScript : g_watchedScripts) {
+    watchedScript = {};
+  }
+  g_watchedScriptCount = 0U;
+}
+
 /// Sets the requested value for frame time.
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
   g_deltaSeconds = deltaSeconds;
