@@ -9,6 +9,8 @@
 #include "editor_material_edit.h"
 #include "editor_session.h"
 #include "engine/core/vfs.h"
+#include "engine/editor/editor.h"
+#include "engine/runtime/world.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/service_registry.h"
@@ -257,6 +259,64 @@ int check_close_keeps_live_edit() noexcept {
 
 } // namespace
 
+/// EXPECTATION (#168 M5): a world rebind is a full session transition — an
+/// open material editor with an in-progress gesture is discarded wholesale
+/// (panel closed, asset id dropped, gesture abandoned without finalizing),
+/// unlike user-driven close, which finalizes and is covered above.
+int check_world_clear_resets_editor() noexcept {
+  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3}")) {
+    return 40;
+  }
+  MaterialEditScope scope;
+  const auto finish = [&](int result) noexcept {
+    editor_set_world(nullptr);
+    remove_file(kOsPath);
+    return result;
+  };
+  if (!scope.valid()) {
+    return finish(41);
+  }
+
+  std::unique_ptr<engine::runtime::World> world(
+      new (std::nothrow) engine::runtime::World());
+  if (world == nullptr) {
+    return finish(42);
+  }
+  editor_set_world(world.get());
+
+  open_material_editor(kVirtualPath);
+  MaterialEditorState &state = material_editor_state();
+  if (!state.open || !state.found) {
+    return finish(43);
+  }
+
+  // Leave a gesture in flight so the reset path (not close's finalize) is
+  // what must handle it.
+  const engine::renderer::Material beforeParams = state.buffer;
+  const engine::renderer::MaterialTextureSlots beforeSlots =
+      state.textureSlots;
+  state.buffer.roughness = 0.7F;
+  material_editor_apply_frame(beforeParams, beforeSlots, true, true);
+  if (!state.gestureActive) {
+    return finish(44);
+  }
+
+  // The pipeline-teardown path: the bridge rebinds the world to null.
+  editor_set_world(nullptr);
+
+  if (state.open || state.gestureActive || state.dirty) {
+    return finish(45);
+  }
+  if (state.materialId != engine::renderer::kInvalidAssetId) {
+    return finish(46);
+  }
+  if (editor_session().commandHistory.can_undo()) {
+    return finish(47);
+  }
+
+  return finish(0);
+}
+
 int main() {
   if (!engine::core::initialize_vfs()) {
     return 1;
@@ -275,6 +335,9 @@ int main() {
   }
   if (result == 0) {
     result = check_close_keeps_live_edit();
+  }
+  if (result == 0) {
+    result = check_world_clear_resets_editor();
   }
 
   engine::core::shutdown_vfs();
