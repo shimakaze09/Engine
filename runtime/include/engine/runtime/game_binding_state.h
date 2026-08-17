@@ -36,11 +36,15 @@ struct GameBindingState final {
   }
 
 private:
-  /// Bounded label copy usable in constant evaluation.
+  /// Bounded label copy usable in constant evaluation. Walks src by
+  /// pointer so static analysis never reasons about indexing a shorter
+  /// literal with dst's bound.
   static constexpr void copy_label(char (&dst)[64], const char *src) noexcept {
     std::size_t i = 0U;
-    for (; (i < 63U) && (src[i] != '\0'); ++i) {
-      dst[i] = src[i];
+    while ((i < 63U) && (*src != '\0')) {
+      dst[i] = *src;
+      ++src;
+      ++i;
     }
     dst[i] = '\0';
   }
