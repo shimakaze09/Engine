@@ -217,117 +217,6 @@ bool test_clear_removes_all() noexcept {
   return true;
 }
 
-bool test_snapshot_restore() noexcept {
-  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
-                                                    engine::runtime::World());
-  if (world == nullptr) {
-    return false;
-  }
-  auto &tm = world->timer_manager();
-
-  g_timeoutFired = 0;
-  g_intervalFired = 0;
-
-  tm.set_timeout(1.0F, on_timeout, nullptr);
-  tm.set_interval(0.5F, on_interval, nullptr);
-
-  // Advance 0.3s.
-  tm.tick(0.3F);
-
-  // Snapshot.
-  engine::runtime::TimerManager::TimerSnapshot snaps[8]{};
-  const std::size_t count = tm.snapshot(snaps, 8U);
-  if (count != 2U) {
-    return false;
-  }
-
-  // Verify remaining times.
-  // Timeout: remaining ~0.7s, interval: remaining ~0.2s.
-  bool foundTimeout = false;
-  bool foundInterval = false;
-  for (std::size_t i = 0U; i < count; ++i) {
-    if (!snaps[i].repeat && snaps[i].active) {
-      foundTimeout = true;
-      if ((snaps[i].remainingSeconds < 0.69F) ||
-          (snaps[i].remainingSeconds > 0.71F)) {
-        return false;
-      }
-    }
-    if (snaps[i].repeat && snaps[i].active) {
-      foundInterval = true;
-      if ((snaps[i].remainingSeconds < 0.19F) ||
-          (snaps[i].remainingSeconds > 0.21F)) {
-        return false;
-      }
-    }
-  }
-  if (!foundTimeout || !foundInterval) {
-    return false;
-  }
-
-  std::unique_ptr<engine::runtime::World> world2(new (std::nothrow)
-                                                     engine::runtime::World());
-  if (world2 == nullptr) {
-    return false;
-  }
-  auto &tm2 = world2->timer_manager();
-  const std::size_t restored = tm2.restore(snaps, count);
-  if (restored != 2U) {
-    return false;
-  }
-  if (tm2.active_count() != 2U) {
-    return false;
-  }
-
-  if ((snaps[0].timerId == engine::runtime::kInvalidTimerId) ||
-      (snaps[1].timerId == engine::runtime::kInvalidTimerId)) {
-    return false;
-  }
-
-  return true;
-}
-
-bool test_restore_preserves_slots_and_rewires_callbacks() noexcept {
-  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
-                                                    engine::runtime::World());
-  if (world == nullptr) {
-    return false;
-  }
-  auto &tm = world->timer_manager();
-
-  g_timeoutFired = 0;
-  const auto id = tm.set_timeout(0.2F, on_timeout, nullptr);
-  if (id == engine::runtime::kInvalidTimerId) {
-    return false;
-  }
-
-  engine::runtime::TimerManager::TimerSnapshot snaps[4]{};
-  const std::size_t count = tm.snapshot(snaps, 4U);
-  if ((count != 1U) || (snaps[0].timerId != id)) {
-    return false;
-  }
-
-  engine::runtime::TimerManager restored{};
-  if (restored.restore(snaps, count) != 1U) {
-    return false;
-  }
-
-  const std::size_t slot = restored.slot_for_id(id);
-  if (slot == engine::runtime::TimerManager::kInvalidTimerSlot) {
-    return false;
-  }
-  if (!restored.entry_at(slot).active ||
-      (restored.entry_at(slot).callback != nullptr)) {
-    return false;
-  }
-
-  if (restored.rewire_callbacks(on_timeout, nullptr) != 1U) {
-    return false;
-  }
-  restored.tick(0.25F);
-  return g_timeoutFired == 1;
-}
-
 bool test_null_callback_rejected() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -344,9 +233,9 @@ bool test_null_callback_rejected() noexcept {
   return true;
 }
 
-/// Non-finite timings are rejected at every ingress: NaN passes the old
-/// `<= 0` interval guard and would fire on every tick forever, Inf would
-/// never fire and leak its slot.
+/// Non-finite timings are rejected by the live setters: NaN passes the
+/// old `<= 0` interval guard and would fire on every tick forever, Inf
+/// would never fire and leak its slot.
 bool test_non_finite_timings_rejected() noexcept {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -373,53 +262,7 @@ bool test_non_finite_timings_rejected() noexcept {
       engine::runtime::kInvalidTimerId) {
     return false;
   }
-  if (tm.active_count() != 0U) {
-    return false;
-  }
-
-  engine::runtime::TimerManager::TimerSnapshot bad[3]{};
-  bad[0].active = true;
-  bad[0].remainingSeconds = nan;
-  bad[1].active = true;
-  bad[1].intervalSeconds = inf;
-  bad[1].repeat = true;
-  bad[2].active = true;
-  bad[2].remainingSeconds = 1.0F;
-  bad[2].intervalSeconds = 0.0F;
-  bad[2].repeat = true;
-  return tm.restore(bad, 3U) == 0U;
-}
-
-/// A restored timer whose callback was never re-wired is dropped when it
-/// comes due, instead of counting as fired and (when repeating) re-arming
-/// an empty callback on every interval forever.
-bool test_unresolved_restored_timer_is_dropped() noexcept {
-  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
-                                                    engine::runtime::World());
-  if (world == nullptr) {
-    return false;
-  }
-  auto &tm = world->timer_manager();
-
-  engine::runtime::TimerManager::TimerSnapshot snap{};
-  snap.active = true;
-  snap.remainingSeconds = 0.1F;
-  snap.intervalSeconds = 0.1F;
-  snap.repeat = true;
-  if (tm.restore(&snap, 1U) != 1U) {
-    return false;
-  }
-  if (tm.active_count() != 1U) {
-    return false;
-  }
-
-  if (tm.tick(0.2F) != 0U) {
-    return false;
-  }
-  if (tm.active_count() != 0U) {
-    return false;
-  }
-  return tm.tick(1.0F) == 0U;
+  return tm.active_count() == 0U;
 }
 
 bool test_timer_per_world() noexcept {
@@ -472,13 +315,8 @@ int main() {
   run("test_stale_timer_ids_do_not_cancel_reused_slots",
       test_stale_timer_ids_do_not_cancel_reused_slots);
   run("test_clear_removes_all", test_clear_removes_all);
-  run("test_snapshot_restore", test_snapshot_restore);
-  run("test_restore_preserves_slots_and_rewires_callbacks",
-      test_restore_preserves_slots_and_rewires_callbacks);
   run("test_null_callback_rejected", test_null_callback_rejected);
   run("test_non_finite_timings_rejected", test_non_finite_timings_rejected);
-  run("test_unresolved_restored_timer_is_dropped",
-      test_unresolved_restored_timer_is_dropped);
   run("test_timer_per_world", test_timer_per_world);
 
   if (failures > 0) {

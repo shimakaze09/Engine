@@ -49,34 +49,10 @@ public:
   /// Number of currently active timers.
   std::size_t active_count() const noexcept;
 
-  // --- Serialization helpers -----------------------------------------------
-  // These operate on a flat snapshot understood by scene_serializer.
-
-  struct TimerSnapshot final {
-    TimerId timerId = kInvalidTimerId;
-    float remainingSeconds = 0.0F;
-    float intervalSeconds = 0.0F;
-    bool repeat = false;
-    bool active = false;
-  };
-
-  /// Write up to @p maxOut snapshots into @p out. Returns count written.
-  std::size_t snapshot(TimerSnapshot *out, std::size_t maxOut) const noexcept;
-
-  /// Restore timers from snapshots. Snapshots carry timing only — callback
-  /// identity is never serialized — so every restored timer starts with a
-  /// null callback and the owning layer must re-wire it (the scripting layer
-  /// does so each tick from its live registry refs, which only resolves
-  /// within the same VM). A restored timer that comes due still unresolved
-  /// is dropped with a warning rather than counted as fired or, when
-  /// repeating, re-armed forever. Timing is validated like the live setters:
-  /// non-finite values, and repeating snapshots with a non-positive
-  /// interval, are rejected. Returns the count of timers restored.
-  std::size_t restore(const TimerSnapshot *in, std::size_t count) noexcept;
-
-  /// Reconnect active timers that have no callback after restore.
-  /// Returns number of entries updated.
-  std::size_t rewire_callbacks(Callback callback, void *userData) noexcept;
+  // Timers are runtime-only, per-scene state (issue #209): they are never
+  // serialized — a callback has no stable cross-process identity — and
+  // scripts re-arm their timers in on_begin_play after a scene loads. The
+  // scene transition path clears this manager explicitly.
 
   // Low-level access for scripting-layer Lua ref management.
   struct Entry final {
@@ -90,8 +66,6 @@ public:
 
   /// Direct read access (for scripting bridge inspection).
   const Entry &entry_at(std::size_t index) const noexcept;
-  /// Mutable timer slot at dense index (internal restore path).
-  Entry &entry_at_mut(std::size_t index) noexcept;
 
 private:
   TimerId make_timer_id(std::size_t slot) const noexcept;

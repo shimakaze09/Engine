@@ -1338,6 +1338,59 @@ int check_gravity_round_trip() {
   return 0;
 }
 
+/// No-op callback for arming a timer ahead of a save.
+void transient_timer_noop(engine::runtime::TimerId, void *) noexcept {}
+
+/// EXPECTATION (issue #209): timers are runtime-only state. A save of a
+/// world with an armed timer emits no "timers" block, and loading a legacy
+/// scene that carries one leaves the loaded world's timer manager empty
+/// instead of restoring inert timers the canonical load path could never
+/// fire (they carried no callback identity and were cleared right after).
+int check_timers_are_runtime_only() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  if (source == nullptr) {
+    return 340;
+  }
+  if (source->timer_manager().set_timeout(1.0F, transient_timer_noop,
+                                          nullptr) == kInvalidTimerId) {
+    return 341;
+  }
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      buffer(new (std::nothrow)
+                 std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  if (buffer == nullptr) {
+    return 342;
+  }
+  std::size_t size = 0U;
+  if (!save_scene(*source, buffer->data(), buffer->size(), &size)) {
+    return 343;
+  }
+  buffer->at(size < buffer->size() ? size : buffer->size() - 1U) = '\0';
+  if (std::strstr(buffer->data(), "\"timers\"") != nullptr) {
+    return 344; // the format no longer carries runtime-only timer state
+  }
+
+  // A legacy scene with a timers block still loads, but restores nothing.
+  const char *legacyScene =
+      "{\"version\":1,\"entities\":[],"
+      "\"timers\":[{\"id\":1,\"remaining\":0.5,\"interval\":0.5,"
+      "\"repeat\":true}]}";
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if (loaded == nullptr) {
+    return 345;
+  }
+  if (!load_scene(*loaded, legacyScene, std::strlen(legacyScene))) {
+    return 346; // legacy blocks must stay loadable, just ignored
+  }
+  if (loaded->timer_manager().active_count() != 0U) {
+    return 347; // nothing restored: no inert, never-firing timers
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -1458,6 +1511,10 @@ int main() {
   }
 
   result = check_gravity_round_trip();
+  if (result != 0) {
+    return result;
+  }
+  result = check_timers_are_runtime_only();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

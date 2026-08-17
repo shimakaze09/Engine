@@ -281,7 +281,10 @@ directory-global by design.
   World, blended in render prep; `frame_pacing.{h,cpp}` holds the
   vsync/cap helpers and the fixed-step count decision incl. the paused
   editor's single step), the single-slot game save (`save_data.{h,cpp}` over
-  `platform_get_save_dir`), service registry, timers, cameras, spring
+  `platform_get_save_dir`), service registry, timers (runtime-only,
+  per-scene state, never serialized — scripts re-arm them in
+  `on_begin_play`; legacy scene `timers` blocks load but restore nothing,
+  #209), cameras, spring
   arms, game mode/state, player controllers, entity pool. Authored
   `CameraComponent` (issue #161: projection/fov-or-orthographic-size/
   near/far/priority/blendSpeed/active) derives pose from the owning

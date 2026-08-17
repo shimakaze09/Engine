@@ -25,20 +25,6 @@ constexpr std::size_t decode_slot(TimerId id) noexcept {
   }
   return static_cast<std::size_t>(slotValue - 1U);
 }
-
-constexpr std::size_t preferred_restore_slot(TimerId id) noexcept {
-  if (id == kInvalidTimerId) {
-    return TimerManager::kInvalidTimerSlot;
-  }
-  const std::size_t encodedSlot = decode_slot(id);
-  if (encodedSlot != TimerManager::kInvalidTimerSlot) {
-    return encodedSlot;
-  }
-  if (id <= TimerManager::kMaxTimers) {
-    return static_cast<std::size_t>(id - 1U);
-  }
-  return TimerManager::kInvalidTimerSlot;
-}
 } // namespace
 
 TimerId TimerManager::make_timer_id(std::size_t slot) const noexcept {
@@ -222,91 +208,6 @@ std::size_t TimerManager::active_count() const noexcept {
   return count;
 }
 
-std::size_t TimerManager::snapshot(TimerSnapshot *out,
-                                   std::size_t maxOut) const noexcept {
-  if (out == nullptr) {
-    return 0U;
-  }
-  std::size_t written = 0U;
-  for (std::size_t i = 0U; (i < kMaxTimers) && (written < maxOut); ++i) {
-    if (!m_timers[i].active) {
-      continue;
-    }
-    out[written].timerId = make_timer_id(i);
-    out[written].remainingSeconds = m_timers[i].fireAt - m_elapsed;
-    out[written].intervalSeconds = m_timers[i].interval;
-    out[written].repeat = m_timers[i].repeat;
-    out[written].active = true;
-    ++written;
-  }
-  return written;
-}
-
-std::size_t TimerManager::restore(const TimerSnapshot *in,
-                                  std::size_t count) noexcept {
-  if (in == nullptr) {
-    return 0U;
-  }
-  std::size_t restored = 0U;
-  for (std::size_t i = 0U; i < count; ++i) {
-    if (!in[i].active) {
-      continue;
-    }
-    // Snapshots arrive from serialized scenes, so they get the same finite
-    // and positive-interval contract as the live setters; a repeating timer
-    // with a non-positive interval would re-arm on every tick forever.
-    if (!std::isfinite(in[i].remainingSeconds) ||
-        !std::isfinite(in[i].intervalSeconds) ||
-        (in[i].repeat && (in[i].intervalSeconds <= 0.0F))) {
-      core::log_message(core::LogLevel::Warning, kLogChannel,
-                        "restore: rejected timer with invalid timing");
-      continue;
-    }
-    const std::size_t preferredSlot = preferred_restore_slot(in[i].timerId);
-    const std::uint16_t restoredGeneration = decode_generation(in[i].timerId);
-
-    for (std::size_t attempt = 0U; attempt <= kMaxTimers; ++attempt) {
-      const std::size_t s = (attempt == 0U) ? preferredSlot : (attempt - 1U);
-      if (s >= kMaxTimers) {
-        continue;
-      }
-      if (!m_timers[s].active) {
-        if ((s == preferredSlot) && (restoredGeneration != 0U)) {
-          m_generations[s] = restoredGeneration;
-        } else {
-          ensure_generation(s);
-        }
-        m_timers[s].fireAt = m_elapsed + in[i].remainingSeconds;
-        m_timers[s].interval = in[i].intervalSeconds;
-        m_timers[s].repeat = in[i].repeat;
-        m_timers[s].active = true;
-        m_timers[s].callback = nullptr;
-        m_timers[s].userData = nullptr;
-        ++restored;
-        break;
-      }
-    }
-  }
-  return restored;
-}
-
-std::size_t TimerManager::rewire_callbacks(Callback callback,
-                                           void *userData) noexcept {
-  if (callback == nullptr) {
-    return 0U;
-  }
-
-  std::size_t rewired = 0U;
-  for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-    if (m_timers[i].active && (m_timers[i].callback == nullptr)) {
-      m_timers[i].callback = callback;
-      m_timers[i].userData = userData;
-      ++rewired;
-    }
-  }
-  return rewired;
-}
-
 const TimerManager::Entry &
 TimerManager::entry_at(std::size_t index) const noexcept {
   static const Entry kEmpty{};
@@ -316,12 +217,5 @@ TimerManager::entry_at(std::size_t index) const noexcept {
   return m_timers[index];
 }
 
-TimerManager::Entry &TimerManager::entry_at_mut(std::size_t index) noexcept {
-  static Entry kDummy{};
-  if (index >= kMaxTimers) {
-    return kDummy;
-  }
-  return m_timers[index];
-}
 
 } // namespace engine::runtime
