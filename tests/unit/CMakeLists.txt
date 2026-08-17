@@ -1264,6 +1264,13 @@ engine_add_test_executable(engine_unit_material_texture_resolve
     engine_renderer
 )
 
+engine_add_test_executable(engine_unit_material_writer
+    SOURCES
+    material_writer_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
 # ---- H-16 (#85): async-load handle reclamation ----
 
 engine_add_test_executable(engine_unit_asset_load_recovery
