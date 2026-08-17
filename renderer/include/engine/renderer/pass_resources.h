@@ -4,6 +4,8 @@
 
 #include <cstdint>
 
+#include "engine/renderer/render_device.h"
+
 namespace engine::renderer {
 
 /// Identifies one render-target resource owned by PassResources.
@@ -47,10 +49,11 @@ bool resize_pass_resources(int width, int height) noexcept;
 
 /// Current pass-resource set.
 const PassResources &get_pass_resources() noexcept;
-/// GL texture id backing the resource (0 when absent).
-std::uint32_t pass_resource_gpu_texture(PassResourceId resource) noexcept;
-/// GL framebuffer id whose color attachment is the resource.
-std::uint32_t
-pass_resource_framebuffer(PassResourceId colorAttachment) noexcept;
+/// Device texture backing the resource (invalid when absent).
+DeviceTextureHandle pass_resource_texture(PassResourceId resource) noexcept;
+/// Render target whose color attachment is the resource (the scene target
+/// also carries the scene depth attachment).
+RenderTargetHandle
+pass_resource_target(PassResourceId colorAttachment) noexcept;
 
 } // namespace engine::renderer

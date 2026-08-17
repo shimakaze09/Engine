@@ -27,60 +27,50 @@ constexpr const char *kOutOfRangeIndexPath =
     "mesh_loader_out_of_range_index.mesh";
 
 engine::renderer::RenderDevice g_fakeDevice{};
-std::uint32_t g_fakeVertexArray = 1U;
+std::uint32_t g_fakeGeometry = 1U;
 std::uint32_t g_fakeVertexBuffer = 2U;
 std::uint32_t g_fakeIndexBuffer = 3U;
 std::uint32_t g_createBufferCalls = 0U;
 std::uint32_t g_destroyBufferCalls = 0U;
-std::uint32_t g_destroyVertexArrayCalls = 0U;
+std::uint32_t g_destroyGeometryCalls = 0U;
 
-std::uint32_t fake_create_vertex_array() noexcept {
-  return g_fakeVertexArray;
-}
-
-std::uint32_t fake_create_buffer() noexcept {
+engine::renderer::DeviceBufferHandle
+fake_create_buffer(const engine::renderer::BufferDesc &desc) noexcept {
   ++g_createBufferCalls;
-  return g_createBufferCalls == 1U ? g_fakeVertexBuffer : g_fakeIndexBuffer;
+  const std::uint32_t value =
+      (desc.usage == engine::renderer::BufferUsage::Index)
+          ? g_fakeIndexBuffer
+          : g_fakeVertexBuffer;
+  return engine::renderer::DeviceBufferHandle{value};
 }
 
-void fake_destroy_vertex_array(std::uint32_t) noexcept {
-  ++g_destroyVertexArrayCalls;
+void fake_destroy_buffer(engine::renderer::DeviceBufferHandle) noexcept {
+  ++g_destroyBufferCalls;
 }
 
-void fake_destroy_buffer(std::uint32_t) noexcept { ++g_destroyBufferCalls; }
+engine::renderer::DeviceGeometryHandle
+fake_create_geometry(const engine::renderer::GeometryDesc &) noexcept {
+  return engine::renderer::DeviceGeometryHandle{g_fakeGeometry};
+}
 
-void fake_bind_vertex_array(std::uint32_t) noexcept {}
+void fake_destroy_geometry(engine::renderer::DeviceGeometryHandle) noexcept {
+  ++g_destroyGeometryCalls;
+}
 
-void fake_bind_buffer(std::uint32_t) noexcept {}
-
-void fake_buffer_data(const void *, std::ptrdiff_t) noexcept {}
-
-void fake_enable_vertex_attrib(std::uint32_t) noexcept {}
-
-void fake_vertex_attrib_float(std::uint32_t, std::int32_t, std::int32_t,
-                              const void *) noexcept {}
-
-void configure_fake_render_device(std::uint32_t vertexArray,
+void configure_fake_render_device(std::uint32_t geometry,
                                   std::uint32_t vertexBuffer,
                                   std::uint32_t indexBuffer) noexcept {
   g_fakeDevice = engine::renderer::RenderDevice{};
-  g_fakeDevice.create_vertex_array = &fake_create_vertex_array;
-  g_fakeDevice.destroy_vertex_array = &fake_destroy_vertex_array;
-  g_fakeDevice.bind_vertex_array = &fake_bind_vertex_array;
   g_fakeDevice.create_buffer = &fake_create_buffer;
   g_fakeDevice.destroy_buffer = &fake_destroy_buffer;
-  g_fakeDevice.bind_array_buffer = &fake_bind_buffer;
-  g_fakeDevice.bind_element_buffer = &fake_bind_buffer;
-  g_fakeDevice.buffer_data_array = &fake_buffer_data;
-  g_fakeDevice.buffer_data_element = &fake_buffer_data;
-  g_fakeDevice.enable_vertex_attrib = &fake_enable_vertex_attrib;
-  g_fakeDevice.vertex_attrib_float = &fake_vertex_attrib_float;
-  g_fakeVertexArray = vertexArray;
+  g_fakeDevice.create_geometry = &fake_create_geometry;
+  g_fakeDevice.destroy_geometry = &fake_destroy_geometry;
+  g_fakeGeometry = geometry;
   g_fakeVertexBuffer = vertexBuffer;
   g_fakeIndexBuffer = indexBuffer;
   g_createBufferCalls = 0U;
   g_destroyBufferCalls = 0U;
-  g_destroyVertexArrayCalls = 0U;
+  g_destroyGeometryCalls = 0U;
 }
 
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
@@ -373,28 +363,32 @@ int check_v2_file_size_validation() {
   return loaded ? 82 : 0;
 }
 
-int check_gpu_upload_rejects_zero_vertex_array() {
+// EXPECTATION: geometry-creation failure destroys both already-created
+// buffers and zeroes the mesh; a stale-prefilled out param is cleared.
+int check_gpu_upload_cleans_geometry_failure() {
   configure_fake_render_device(0U, 2U, 3U);
 
   const float vertices[6] = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  const std::uint32_t indices[3] = {0U, 0U, 0U};
   engine::renderer::GpuMesh mesh{};
-  mesh.vertexArray = 99U;
-  mesh.vertexBuffer = 99U;
-  mesh.indexBuffer = 99U;
+  mesh.geometry = engine::renderer::DeviceGeometryHandle{99U};
+  mesh.vertexBuffer = engine::renderer::DeviceBufferHandle{99U};
+  mesh.indexBuffer = engine::renderer::DeviceBufferHandle{99U};
   mesh.vertexCount = 99U;
   mesh.indexCount = 99U;
   mesh.hasUVs = true;
-  if (engine::renderer::build_gpu_mesh_from_data(vertices, 1U, nullptr, 0U,
+  if (engine::renderer::build_gpu_mesh_from_data(vertices, 1U, indices, 3U,
                                                  false, &mesh)) {
     return 101;
   }
-  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
-      (mesh.indexBuffer != 0U) || (mesh.vertexCount != 0U) ||
-      (mesh.indexCount != 0U)) {
+  if ((mesh.geometry != engine::renderer::kInvalidDeviceGeometry) ||
+      (mesh.vertexBuffer != engine::renderer::kInvalidDeviceBuffer) ||
+      (mesh.indexBuffer != engine::renderer::kInvalidDeviceBuffer) ||
+      (mesh.vertexCount != 0U) || (mesh.indexCount != 0U)) {
     return 102;
   }
-  return (g_destroyVertexArrayCalls == 0U && g_destroyBufferCalls == 0U) ? 0
-                                                                         : 103;
+  return (g_destroyGeometryCalls == 0U && g_destroyBufferCalls == 2U) ? 0
+                                                                      : 103;
 }
 
 int check_gpu_upload_cleans_vertex_buffer_failure() {
@@ -406,12 +400,13 @@ int check_gpu_upload_cleans_vertex_buffer_failure() {
                                                  false, &mesh)) {
     return 111;
   }
-  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
-      (mesh.indexBuffer != 0U)) {
+  if ((mesh.geometry != engine::renderer::kInvalidDeviceGeometry) ||
+      (mesh.vertexBuffer != engine::renderer::kInvalidDeviceBuffer) ||
+      (mesh.indexBuffer != engine::renderer::kInvalidDeviceBuffer)) {
     return 112;
   }
-  return (g_destroyVertexArrayCalls == 1U && g_destroyBufferCalls == 0U) ? 0
-                                                                         : 113;
+  return (g_destroyGeometryCalls == 0U && g_destroyBufferCalls == 0U) ? 0
+                                                                      : 113;
 }
 
 int check_gpu_upload_cleans_index_buffer_failure() {
@@ -424,12 +419,13 @@ int check_gpu_upload_cleans_index_buffer_failure() {
                                                  false, &mesh)) {
     return 121;
   }
-  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
-      (mesh.indexBuffer != 0U)) {
+  if ((mesh.geometry != engine::renderer::kInvalidDeviceGeometry) ||
+      (mesh.vertexBuffer != engine::renderer::kInvalidDeviceBuffer) ||
+      (mesh.indexBuffer != engine::renderer::kInvalidDeviceBuffer)) {
     return 122;
   }
-  return (g_destroyVertexArrayCalls == 1U && g_destroyBufferCalls == 1U) ? 0
-                                                                         : 123;
+  return (g_destroyGeometryCalls == 0U && g_destroyBufferCalls == 1U) ? 0
+                                                                      : 123;
 }
 
 constexpr const char *kV3ValidPath = "mesh_loader_v3_valid.mesh";
@@ -511,11 +507,12 @@ int check_gpu_upload_rejects_missing_indices() {
                                                  false, &mesh)) {
     return 131;
   }
-  if ((mesh.vertexArray != 0U) || (mesh.vertexBuffer != 0U) ||
-      (mesh.indexBuffer != 0U)) {
+  if ((mesh.geometry != engine::renderer::kInvalidDeviceGeometry) ||
+      (mesh.vertexBuffer != engine::renderer::kInvalidDeviceBuffer) ||
+      (mesh.indexBuffer != engine::renderer::kInvalidDeviceBuffer)) {
     return 132;
   }
-  return (g_createBufferCalls == 0U && g_destroyVertexArrayCalls == 0U &&
+  return (g_createBufferCalls == 0U && g_destroyGeometryCalls == 0U &&
           g_destroyBufferCalls == 0U)
              ? 0
              : 133;
@@ -633,7 +630,7 @@ int check_upload_validates_skin_payload() {
   if (!engine::renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
     return 179;
   }
-  if ((mesh.vertexArray != 1U) || (mesh.vertexBuffer != 2U) ||
+  if ((mesh.geometry.value != 1U) || (mesh.vertexBuffer.value != 2U) ||
       (mesh.vertexCount != 1U) || !mesh.hasSkin || !mesh.hasUVs) {
     return 180;
   }
@@ -887,7 +884,7 @@ int main() {
     return result;
   }
 
-  result = check_gpu_upload_rejects_zero_vertex_array();
+  result = check_gpu_upload_cleans_geometry_failure();
   if (result != 0) {
     return result;
   }

@@ -80,18 +80,19 @@ const char *editor_asset_root() noexcept {
 }
 
 /// Loads the requested resource for thumbnail texture.
-std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept {
+renderer::DeviceTextureHandle
+load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
-    return 0U;
+    return renderer::kInvalidDeviceTexture;
   }
 
   for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
     if (std::strcmp(editor_session().thumbnailCache[i].path, assetPath) == 0) {
-      return editor_session().thumbnailCache[i].textureId;
+      return editor_session().thumbnailCache[i].texture;
     }
   }
   if (editor_session().thumbnailCount >= kMaxThumbnails) {
-    return 0U;
+    return renderer::kInvalidDeviceTexture;
   }
 
   std::string assetStr(assetPath);
@@ -115,7 +116,7 @@ std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept {
   fp = std::fopen(thumbPath.c_str(), "rb");
 #endif
   if (fp == nullptr) {
-    return 0U;
+    return renderer::kInvalidDeviceTexture;
   }
   std::fseek(fp, 0, SEEK_END);
   const long fileLen = std::ftell(fp);
@@ -124,14 +125,14 @@ std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept {
       (static_cast<unsigned long>(fileLen) >
        static_cast<unsigned long>(std::numeric_limits<int>::max()))) {
     std::fclose(fp);
-    return 0U;
+    return renderer::kInvalidDeviceTexture;
   }
   std::vector<unsigned char> fileData(static_cast<std::size_t>(fileLen));
   const std::size_t bytesRead =
       std::fread(fileData.data(), 1U, fileData.size(), fp);
   std::fclose(fp);
   if (bytesRead != fileData.size()) {
-    return 0U;
+    return renderer::kInvalidDeviceTexture;
   }
 
   int w = 0;
@@ -141,24 +142,33 @@ std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept {
   unsigned char *pixels = stbi_load_from_memory(
       fileData.data(), stbSize, &w, &h, &channels, 4);
   if (pixels == nullptr) {
-    return 0U;
+    return renderer::kInvalidDeviceTexture;
   }
 
   // Routed through the renderer's RenderDevice (audit #206) instead of
-  // calling glGenTextures/glTexImage2D directly: GL stays inside the
-  // renderer implementation, and the editor only ever sees the opaque
-  // texture id RenderDevice::create_texture_2d returns.
-  std::uint32_t tex = 0U;
+  // calling glGenTextures/glTexImage2D directly: the graphics API stays
+  // inside the renderer backend, and the editor only ever sees the opaque
+  // device texture handle create_texture returns.
+  renderer::DeviceTextureHandle tex{};
   const renderer::RenderDevice *device = renderer::render_device();
-  if ((device != nullptr) && (device->create_texture_2d != nullptr)) {
-    tex = device->create_texture_2d(w, h, 4, pixels);
+  if ((device != nullptr) && (device->create_texture != nullptr)) {
+    renderer::TextureDesc desc{};
+    desc.kind = renderer::TextureKind::Tex2D;
+    desc.format = renderer::TextureFormat::RGBA8;
+    desc.width = w;
+    desc.height = h;
+    desc.mipLevels = 0;
+    desc.filter = renderer::TextureFilter::LinearMipmap;
+    desc.wrap = renderer::TextureWrap::Repeat;
+    desc.pixels = pixels;
+    tex = device->create_texture(desc);
   }
   stbi_image_free(pixels);
 
-  if (tex != 0U) {
+  if (tex != renderer::kInvalidDeviceTexture) {
     auto &entry = editor_session().thumbnailCache[editor_session().thumbnailCount];
     std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
-    entry.textureId = tex;
+    entry.texture = tex;
     entry.width = w;
     entry.height = h;
     ++editor_session().thumbnailCount;
@@ -172,14 +182,25 @@ std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept {
 void clear_thumbnail_cache() noexcept {
   const renderer::RenderDevice *device = renderer::render_device();
   for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
-    const std::uint32_t tex = editor_session().thumbnailCache[i].textureId;
-    if ((tex != 0U) && (device != nullptr) &&
+    const renderer::DeviceTextureHandle tex =
+        editor_session().thumbnailCache[i].texture;
+    if ((tex != renderer::kInvalidDeviceTexture) && (device != nullptr) &&
         (device->destroy_texture != nullptr)) {
       device->destroy_texture(tex);
     }
     editor_session().thumbnailCache[i] = ThumbnailEntry{};
   }
   editor_session().thumbnailCount = 0U;
+}
+
+/// ImGui image id for a device texture (see editor_session.h contract).
+std::uint64_t
+imgui_texture_id(renderer::DeviceTextureHandle texture) noexcept {
+  const renderer::RenderDevice *device = renderer::render_device();
+  if ((device == nullptr) || (device->native_texture_id == nullptr)) {
+    return 0U;
+  }
+  return device->native_texture_id(texture);
 }
 
 namespace {

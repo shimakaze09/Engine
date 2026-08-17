@@ -23,7 +23,9 @@ namespace engine::renderer {
 // Link stub: upload_material_texture_slots (linked in from
 // command_buffer_flush_uniforms.cpp) reports every slot unresolved to the
 // caller; this test never exercises texture-slot binding.
-std::uint32_t texture_gpu_id(TextureHandle) noexcept { return 0U; }
+DeviceTextureHandle texture_device_handle(TextureHandle) noexcept {
+  return kInvalidDeviceTexture;
+}
 } // namespace engine::renderer
 
 namespace {
@@ -41,39 +43,34 @@ int g_failures = 0;
   } while (false)
 
 std::uint32_t g_createdBuffer = 0U;
-std::uint32_t g_lastBoundArrayBuffer = 0U;
 const void *g_lastUploadData = nullptr;
 std::ptrdiff_t g_lastUploadBytes = 0;
 
-std::uint32_t fake_create_buffer() noexcept { return ++g_createdBuffer; }
-void fake_bind_vertex_array(std::uint32_t) noexcept {}
-void fake_bind_array_buffer(std::uint32_t buffer) noexcept {
-  g_lastBoundArrayBuffer = buffer;
+DeviceBufferHandle fake_create_buffer(const BufferDesc &) noexcept {
+  return DeviceBufferHandle{++g_createdBuffer};
 }
-void fake_buffer_data_array(const void *data, std::ptrdiff_t bytes) noexcept {
+void fake_update_buffer(DeviceBufferHandle, const void *data,
+                        std::ptrdiff_t bytes) noexcept {
   g_lastUploadData = data;
   g_lastUploadBytes = bytes;
 }
-void fake_enable_vertex_attrib(std::uint32_t) noexcept {}
-void fake_vertex_attrib_float(std::uint32_t, std::int32_t, std::int32_t,
-                              const void *) noexcept {}
-void fake_vertex_attrib_divisor(std::uint32_t, std::uint32_t) noexcept {}
-void fake_draw_elements_triangles_u32_instanced(std::int32_t,
-                                                std::int32_t) noexcept {}
+bool fake_set_geometry_instance_stream(DeviceGeometryHandle,
+                                       DeviceBufferHandle,
+                                       const VertexLayout &) noexcept {
+  return true;
+}
+void fake_draw_indexed_instanced(DeviceGeometryHandle, std::int32_t,
+                                 std::int32_t) noexcept {}
 
 /// Builds a device table stubbing exactly the entry points instanced
 /// attribute upload uses.
 RenderDevice make_fake_device() noexcept {
   RenderDevice device{};
+  device.caps.instancing = true;
   device.create_buffer = &fake_create_buffer;
-  device.bind_vertex_array = &fake_bind_vertex_array;
-  device.bind_array_buffer = &fake_bind_array_buffer;
-  device.buffer_data_array = &fake_buffer_data_array;
-  device.enable_vertex_attrib = &fake_enable_vertex_attrib;
-  device.vertex_attrib_float = &fake_vertex_attrib_float;
-  device.vertex_attrib_divisor = &fake_vertex_attrib_divisor;
-  device.draw_elements_triangles_u32_instanced =
-      &fake_draw_elements_triangles_u32_instanced;
+  device.update_buffer = &fake_update_buffer;
+  device.set_geometry_instance_stream = &fake_set_geometry_instance_stream;
+  device.draw_indexed_instanced = &fake_draw_indexed_instanced;
   return device;
 }
 
@@ -94,7 +91,7 @@ void test_happy_path_uploads_batch() noexcept {
                              make_command(3.0F)};
   CommandBufferView view{commands, 3U};
   GpuMesh mesh{};
-  mesh.vertexArray = 7U;
+  mesh.geometry = DeviceGeometryHandle{7U};
   mesh.indexCount = 36U;
   StaticMeshBatch batch{.first = 0U, .count = 3U};
 
@@ -126,7 +123,7 @@ void test_shrinking_batch_reuses_capacity_safely() noexcept {
                             make_command(14.0F)};
   CommandBufferView bigView{bigBatch, 5U};
   GpuMesh mesh{};
-  mesh.vertexArray = 7U;
+  mesh.geometry = DeviceGeometryHandle{7U};
   mesh.indexCount = 36U;
   StaticMeshBatch bigStaticBatch{.first = 0U, .count = 5U};
   CHECK(upload_instance_matrices(backend, &device, mesh, bigView,

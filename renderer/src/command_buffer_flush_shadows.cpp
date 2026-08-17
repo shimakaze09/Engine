@@ -114,57 +114,53 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                          ? backend.shadowState.resolutions[c]
                                          : shadow_cascade_resolution(c);
 
-        dev->bind_framebuffer(backend.shadowState.depthFbos[c]);
+        dev->bind_render_target(backend.shadowState.depthTargets[c]);
         dev->set_viewport(0, 0, shadowResolution, shadowResolution);
-        dev->enable_depth_test();
-        dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
-        dev->clear_color_depth();
+        dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                            BlendMode::Disabled,
+                                            CullMode::Back});
+        dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
         dev->bind_program(backend.shadowDepthProgram);
 
-        std::uint32_t boundVertexArray = 0U;
         for (std::size_t i = 0U; i < opaqueCount; ++i) {
           const DrawCommand &command = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-          if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+          if ((mesh == nullptr) ||
+              (mesh->geometry == kInvalidDeviceGeometry) ||
               (mesh->vertexCount == 0U)) {
             continue;
-          }
-
-          if (mesh->vertexArray != boundVertexArray) {
-            dev->bind_vertex_array(mesh->vertexArray);
-            boundVertexArray = mesh->vertexArray;
           }
 
           const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
           const bool skinnedDraw =
               mesh->hasSkin && (command.skinPalette != kInvalidSkinPalette) &&
-              (backend.shadowDepthSkinnedProgram != 0U) &&
+              (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram) &&
               upload_bone_palette(backend, dev, command.skinPalette);
           if (skinnedDraw) {
             dev->bind_program(backend.shadowDepthSkinnedProgram);
-            if (backend.shadowSkinnedLightMvpLoc >= 0) {
-              dev->set_uniform_mat4(backend.shadowSkinnedLightMvpLoc,
+            if (backend.shadowSkinnedLightMvpLoc.valid()) {
+              dev->set_param_mat4(backend.shadowSkinnedLightMvpLoc,
                                     &lightMvp.columns[0].x);
             }
           } else {
-            if (backend.shadowLightMvpLoc >= 0) {
-              dev->set_uniform_mat4(backend.shadowLightMvpLoc,
+            if (backend.shadowLightMvpLoc.valid()) {
+              dev->set_param_mat4(backend.shadowLightMvpLoc,
                                     &lightMvp.columns[0].x);
             }
-            if (backend.shadowModelLoc >= 0) {
-              dev->set_uniform_mat4(backend.shadowModelLoc,
+            if (backend.shadowModelLoc.valid()) {
+              dev->set_param_mat4(backend.shadowModelLoc,
                                     &command.modelMatrix.columns[0].x);
             }
           }
 
           if (mesh->indexCount > 0U) {
-            dev->draw_elements_triangles_u32(
-                static_cast<std::int32_t>(mesh->indexCount));
+            dev->draw_indexed(mesh->geometry,
+                              static_cast<std::int32_t>(mesh->indexCount));
             frameStats.triangleCount += mesh->indexCount / 3U;
           } else {
-            dev->draw_arrays_triangles(
-                0, static_cast<std::int32_t>(mesh->vertexCount));
+            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                      static_cast<std::int32_t>(mesh->vertexCount));
             frameStats.triangleCount += mesh->vertexCount / 3U;
           }
           ++frameStats.drawCalls;
@@ -173,8 +169,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           }
         }
 
-        dev->bind_vertex_array(0U);
-        dev->bind_program(0U);
+        dev->bind_program(kInvalidDeviceProgram);
       }
 
       gpu_profiler_end_pass(GpuPassId::ShadowMap);
@@ -232,18 +227,18 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     dev->bind_program(backend.shadowDepthProgram);
     for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
       const auto &slot = backend.spotShadowState.slots[s];
-      dev->bind_framebuffer(slot.depthFbo);
+      dev->bind_render_target(slot.depthTarget);
       dev->set_viewport(0, 0, kSpotShadowMapResolution,
                         kSpotShadowMapResolution);
-      dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
-      dev->clear_color_depth();
-      dev->enable_depth_test();
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
+      dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
-      std::uint32_t boundVao = 0U;
       for (std::size_t ci = 0U; ci < opaqueCount; ++ci) {
         const DrawCommand &cmd = commandBufferView.data[ci];
         const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
-        if ((mesh == nullptr) || (mesh->vertexArray == 0U)) {
+        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry)) {
           continue;
         }
 
@@ -251,34 +246,30 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
             math::mul(slot.lightViewProjection, cmd.modelMatrix);
         const bool skinnedDraw =
             mesh->hasSkin && (cmd.skinPalette != kInvalidSkinPalette) &&
-            (backend.shadowDepthSkinnedProgram != 0U) &&
+            (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram) &&
             upload_bone_palette(backend, dev, cmd.skinPalette);
         if (skinnedDraw) {
           dev->bind_program(backend.shadowDepthSkinnedProgram);
-          if (backend.shadowSkinnedLightMvpLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowSkinnedLightMvpLoc,
+          if (backend.shadowSkinnedLightMvpLoc.valid()) {
+            dev->set_param_mat4(backend.shadowSkinnedLightMvpLoc,
                                   &mvp.columns[0].x);
           }
         } else {
-          if (backend.shadowLightMvpLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowLightMvpLoc, &mvp.columns[0].x);
+          if (backend.shadowLightMvpLoc.valid()) {
+            dev->set_param_mat4(backend.shadowLightMvpLoc, &mvp.columns[0].x);
           }
-          if (backend.shadowModelLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowModelLoc,
+          if (backend.shadowModelLoc.valid()) {
+            dev->set_param_mat4(backend.shadowModelLoc,
                                   &cmd.modelMatrix.columns[0].x);
           }
         }
 
-        if (mesh->vertexArray != boundVao) {
-          dev->bind_vertex_array(mesh->vertexArray);
-          boundVao = mesh->vertexArray;
-        }
         if (mesh->indexCount > 0U) {
-          dev->draw_elements_triangles_u32(
-              static_cast<std::int32_t>(mesh->indexCount));
+          dev->draw_indexed(mesh->geometry,
+                            static_cast<std::int32_t>(mesh->indexCount));
         } else {
-          dev->draw_arrays_triangles(
-              0, static_cast<std::int32_t>(mesh->vertexCount));
+          dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                    static_cast<std::int32_t>(mesh->vertexCount));
         }
         if (skinnedDraw) {
           dev->bind_program(backend.shadowDepthProgram);
@@ -286,8 +277,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
       }
     }
 
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::SpotShadowMap);
   }
 
@@ -342,59 +332,54 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           lights.pointLights[static_cast<std::size_t>(slot.lightIndex)]
               .position;
 
-      if (backend.shadowPointLightPosLoc >= 0) {
-        dev->set_uniform_vec3(backend.shadowPointLightPosLoc, &lightPos.x);
+      if (backend.shadowPointLightPosLoc.valid()) {
+        dev->set_param_vec3(backend.shadowPointLightPosLoc, &lightPos.x);
       }
-      if (backend.shadowPointFarPlaneLoc >= 0) {
-        dev->set_uniform_float(backend.shadowPointFarPlaneLoc, slot.farPlane);
+      if (backend.shadowPointFarPlaneLoc.valid()) {
+        dev->set_param_f32(backend.shadowPointFarPlaneLoc, slot.farPlane);
       }
 
       for (int face = 0; face < 6; ++face) {
-        dev->framebuffer_cubemap_face(slot.depthFbo, slot.depthCubemap, face);
-        dev->bind_framebuffer(slot.depthFbo);
+        dev->bind_render_target(slot.faceTargets[face]);
         dev->set_viewport(0, 0, kPointShadowMapResolution,
                           kPointShadowMapResolution);
-        dev->set_clear_color(1.0F, 1.0F, 1.0F, 1.0F);
-        dev->clear_color_depth();
-        dev->enable_depth_test();
+        dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                            BlendMode::Disabled,
+                                            CullMode::Back});
+        dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
-        std::uint32_t boundVao = 0U;
         for (std::size_t ci = 0U; ci < opaqueCount; ++ci) {
           const DrawCommand &cmd = commandBufferView.data[ci];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
-          if ((mesh == nullptr) || (mesh->vertexArray == 0U)) {
+          if ((mesh == nullptr) ||
+              (mesh->geometry == kInvalidDeviceGeometry)) {
             continue;
           }
 
           // The point shader multiplies u_lightMVP by the world-space
           // position (u_model * aPosition), so upload the face VP alone —
           // including the model here would apply it twice.
-          if (backend.shadowPointLightMvpLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowPointLightMvpLoc,
+          if (backend.shadowPointLightMvpLoc.valid()) {
+            dev->set_param_mat4(backend.shadowPointLightMvpLoc,
                                   &slot.faceViewProjections[face].columns[0].x);
           }
-          if (backend.shadowPointModelLoc >= 0) {
-            dev->set_uniform_mat4(backend.shadowPointModelLoc,
+          if (backend.shadowPointModelLoc.valid()) {
+            dev->set_param_mat4(backend.shadowPointModelLoc,
                                   &cmd.modelMatrix.columns[0].x);
           }
 
-          if (mesh->vertexArray != boundVao) {
-            dev->bind_vertex_array(mesh->vertexArray);
-            boundVao = mesh->vertexArray;
-          }
           if (mesh->indexCount > 0U) {
-            dev->draw_elements_triangles_u32(
-                static_cast<std::int32_t>(mesh->indexCount));
+            dev->draw_indexed(mesh->geometry,
+                              static_cast<std::int32_t>(mesh->indexCount));
           } else {
-            dev->draw_arrays_triangles(
-                0, static_cast<std::int32_t>(mesh->vertexCount));
+            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                      static_cast<std::int32_t>(mesh->vertexCount));
           }
         }
       }
     }
 
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::PointShadowMap);
   }
   ctx.shadowEnabled = shadowEnabled;

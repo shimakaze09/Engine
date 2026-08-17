@@ -24,39 +24,31 @@ constexpr const char *kVertVfsPath = "shdr/_shader_reload_test.vert";
 constexpr const char *kFragVfsPath = "shdr/_shader_reload_test.frag";
 
 engine::renderer::RenderDevice g_fakeDevice{};
-std::uint32_t g_nextShader = 0U;
 std::uint32_t g_nextProgram = 100U;
 std::uint32_t g_lastDestroyedProgram = 0U;
 std::uint32_t g_destroyedProgramCount = 0U;
 bool g_failNextCompiles = false;
 
-std::uint32_t fake_create_shader(std::uint32_t, const char *source) noexcept {
-  if (g_failNextCompiles ||
-      ((source != nullptr) && (std::strstr(source, "FAILME") != nullptr))) {
-    return 0U;
+engine::renderer::DeviceProgramHandle
+fake_create_program(const char *vertSource, const char *fragSource) noexcept {
+  const auto broken = [](const char *source) noexcept {
+    return (source != nullptr) && (std::strstr(source, "FAILME") != nullptr);
+  };
+  if (g_failNextCompiles || broken(vertSource) || broken(fragSource)) {
+    return engine::renderer::kInvalidDeviceProgram;
   }
-  return ++g_nextShader;
+  return engine::renderer::DeviceProgramHandle{++g_nextProgram};
 }
 
-void fake_destroy_shader(std::uint32_t) noexcept {}
-
-std::uint32_t fake_link_program(std::uint32_t vs, std::uint32_t fs) noexcept {
-  if ((vs == 0U) || (fs == 0U)) {
-    return 0U;
-  }
-  return ++g_nextProgram;
-}
-
-void fake_destroy_program(std::uint32_t program) noexcept {
-  g_lastDestroyedProgram = program;
+void fake_destroy_program(
+    engine::renderer::DeviceProgramHandle program) noexcept {
+  g_lastDestroyedProgram = program.value;
   ++g_destroyedProgramCount;
 }
 
 void configure_fake_device() noexcept {
   g_fakeDevice = engine::renderer::RenderDevice{};
-  g_fakeDevice.create_shader = &fake_create_shader;
-  g_fakeDevice.destroy_shader = &fake_destroy_shader;
-  g_fakeDevice.link_program = &fake_link_program;
+  g_fakeDevice.create_program = &fake_create_program;
   g_fakeDevice.destroy_program = &fake_destroy_program;
 }
 
@@ -119,9 +111,9 @@ int check_reload_swaps_program_and_signals_epoch() {
   if (handle == engine::renderer::kInvalidShaderProgram) {
     return 203;
   }
-  const std::uint32_t firstProgram =
-      engine::renderer::shader_gpu_program(handle);
-  if (firstProgram == 0U) {
+  const engine::renderer::DeviceProgramHandle firstProgram =
+      engine::renderer::shader_device_program(handle);
+  if (firstProgram == engine::renderer::kInvalidDeviceProgram) {
     return 204;
   }
   if (engine::renderer::shader_reload_epoch() != epochBeforeLoad + 1U) {
@@ -136,16 +128,16 @@ int check_reload_swaps_program_and_signals_epoch() {
   g_destroyedProgramCount = 0U;
   engine::renderer::check_shader_reload();
 
-  const std::uint32_t secondProgram =
-      engine::renderer::shader_gpu_program(handle);
+  const engine::renderer::DeviceProgramHandle secondProgram =
+      engine::renderer::shader_device_program(handle);
   if (secondProgram == firstProgram) {
     return 207;
   }
-  if (secondProgram == 0U) {
+  if (secondProgram == engine::renderer::kInvalidDeviceProgram) {
     return 208;
   }
   if ((g_destroyedProgramCount != 1U) ||
-      (g_lastDestroyedProgram != firstProgram)) {
+      (g_lastDestroyedProgram != firstProgram.value)) {
     return 209;
   }
   if (engine::renderer::shader_reload_epoch() != epochBeforeLoad + 2U) {
@@ -159,7 +151,7 @@ int check_reload_swaps_program_and_signals_epoch() {
   g_destroyedProgramCount = 0U;
   engine::renderer::check_shader_reload();
 
-  if (engine::renderer::shader_gpu_program(handle) != secondProgram) {
+  if (engine::renderer::shader_device_program(handle) != secondProgram) {
     return 212;
   }
   if (g_destroyedProgramCount != 0U) {
@@ -172,10 +164,11 @@ int check_reload_swaps_program_and_signals_epoch() {
   g_destroyedProgramCount = 0U;
   engine::renderer::destroy_shader_program(handle);
   if ((g_destroyedProgramCount != 1U) ||
-      (g_lastDestroyedProgram != secondProgram)) {
+      (g_lastDestroyedProgram != secondProgram.value)) {
     return 215;
   }
-  if (engine::renderer::shader_gpu_program(handle) != 0U) {
+  if (engine::renderer::shader_device_program(handle) !=
+      engine::renderer::kInvalidDeviceProgram) {
     return 216;
   }
 

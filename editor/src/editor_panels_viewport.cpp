@@ -345,7 +345,8 @@ void draw_scene_viewport_panel() noexcept {
   renderer::set_scene_viewport_size(static_cast<int>(regionSize.x),
                                     static_cast<int>(regionSize.y));
 
-  const std::uint32_t texId = renderer::get_scene_viewport_texture();
+  const std::uint64_t texId =
+      imgui_texture_id(renderer::get_scene_viewport_texture());
   if ((texId != 0U) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
     ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
                  ImVec2(0.0F, 1.0F), ImVec2(1.0F, 0.0F));

@@ -43,9 +43,9 @@ struct FrameFlushContext final {
   int drawableHeight;
   DistanceFogSettings fogSettings;
   HeightFogSettings heightFogSettings;
-  std::uint32_t envSkyboxTexture;
-  std::uint32_t iblPrefilteredTex;
-  std::uint32_t iblIrradianceTex;
+  DeviceTextureHandle envSkyboxTexture;
+  DeviceTextureHandle iblPrefilteredTex;
+  DeviceTextureHandle iblIrradianceTex;
   bool iblAvailable;
   math::Mat4 viewMat;
   math::Mat4 projMat;
@@ -143,31 +143,31 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
 /// keeps its own pre-existing per-program loc pair (every program already
 /// had it before this issue).
 struct MaterialTextureUniformLocs final {
-  std::int32_t hasMetallicRoughness = -1;
-  std::int32_t metallicRoughnessMap = -1;
-  std::int32_t hasEmissive = -1;
-  std::int32_t emissiveMap = -1;
-  std::int32_t hasOcclusion = -1;
-  std::int32_t occlusionMap = -1;
-  std::int32_t hasOpacity = -1;
-  std::int32_t opacityMap = -1;
-  std::int32_t alphaMode = -1;
-  std::int32_t alphaCutoff = -1;
-  std::int32_t uvTiling = -1;
-  std::int32_t uvOffset = -1;
+  ShaderParam hasMetallicRoughness{};
+  ShaderParam metallicRoughnessMap{};
+  ShaderParam hasEmissive{};
+  ShaderParam emissiveMap{};
+  ShaderParam hasOcclusion{};
+  ShaderParam occlusionMap{};
+  ShaderParam hasOpacity{};
+  ShaderParam opacityMap{};
+  ShaderParam alphaMode{};
+  ShaderParam alphaCutoff{};
+  ShaderParam uvTiling{};
+  ShaderParam uvOffset{};
 };
 
-/// Uploads the four texture-backed material slots issue #160 adds (bound to
-/// sampler units 1-4; unit 0 stays each program's pre-existing albedo slot)
-/// plus the UV transform and alpha-mode/cutoff uniforms. boundGpuIds[0..3]
-/// tracks the last-bound GL id per unit (metallicRoughness/emissive/
-/// occlusion/opacity) so a batch reusing the same material does not
-/// redundantly rebind — mirrors the existing per-batch albedo dedupe each
-/// flush loop already does.
-void upload_material_texture_slots(const MaterialTextureUniformLocs &locs,
-                                   const RenderDevice *dev,
-                                   const Material &material,
-                                   std::uint32_t boundGpuIds[4]) noexcept;
+/// Uploads the four texture-backed material slots issue #160 adds (bound
+/// to texture slots 1-4; slot 0 stays each program's pre-existing albedo
+/// slot) plus the UV transform and alpha-mode/cutoff uniforms.
+/// boundMaterialTex[0..3] tracks the last-bound device texture per slot
+/// (metallicRoughness/emissive/occlusion/opacity) so a batch reusing the
+/// same material does not redundantly rebind — mirrors the existing
+/// per-batch albedo dedupe each flush loop already does.
+void upload_material_texture_slots(
+    const MaterialTextureUniformLocs &locs, const RenderDevice *dev,
+    const Material &material,
+    DeviceTextureHandle boundMaterialTex[4]) noexcept;
 
 /// Uploads distance fog settings to the deferred lighting program.
 void upload_deferred_distance_fog_uniforms(
@@ -215,7 +215,7 @@ void upload_skinned_gbuffer_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const math::Mat4 &view, const math::Mat4 &projection, float timeSeconds,
     const DrawCommand &command, const math::Mat4 &model,
-    const float *normalMatrix, std::uint32_t *inOutBoundAlbedoTex,
-    std::uint32_t inOutBoundMaterialTexIds[4]) noexcept;
+    const float *normalMatrix, DeviceTextureHandle *inOutBoundAlbedoTex,
+    DeviceTextureHandle inOutBoundMaterialTex[4]) noexcept;
 
 } // namespace engine::renderer

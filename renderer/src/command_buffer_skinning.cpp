@@ -51,9 +51,9 @@ std::size_t skin_palette_count() noexcept {
 bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
                          std::uint32_t paletteIndex) noexcept {
   const RendererContext &context = renderer_context();
-  if (!backend.skinningAvailable || (backend.bonePaletteUbo == 0U) ||
-      (dev == nullptr) || (dev->bind_uniform_buffer == nullptr) ||
-      (dev->buffer_sub_data_uniform == nullptr) ||
+  if (!backend.skinningAvailable ||
+      (backend.bonePaletteUbo == kInvalidDeviceBuffer) || (dev == nullptr) ||
+      (dev->update_buffer_range == nullptr) ||
       (paletteIndex >= context.skinPaletteCount)) {
     return false;
   }
@@ -67,12 +67,10 @@ bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
   }
   backend.lastUploadedBonePalette = paletteIndex;
 
-  dev->bind_uniform_buffer(backend.bonePaletteUbo);
-  dev->buffer_sub_data_uniform(
-      palette.joints.data(),
+  dev->update_buffer_range(
+      backend.bonePaletteUbo, palette.joints.data(),
       static_cast<std::ptrdiff_t>(
           static_cast<std::size_t>(palette.jointCount) * sizeof(math::Mat4)));
-  dev->bind_uniform_buffer(0U);
   return true;
 }
 
@@ -80,67 +78,69 @@ void upload_skinned_gbuffer_uniforms(
     const BackendState &backend, const RenderDevice *dev,
     const math::Mat4 &view, const math::Mat4 &projection, float timeSeconds,
     const DrawCommand &command, const math::Mat4 &model,
-    const float *normalMatrix, std::uint32_t *inOutBoundAlbedoTex,
-    std::uint32_t inOutBoundMaterialTexIds[4]) noexcept {
-  if (backend.gbufSkinnedViewLoc >= 0) {
-    dev->set_uniform_mat4(backend.gbufSkinnedViewLoc, &view.columns[0].x);
+    const float *normalMatrix, DeviceTextureHandle *inOutBoundAlbedoTex,
+    DeviceTextureHandle inOutBoundMaterialTex[4]) noexcept {
+  if (backend.gbufSkinnedViewLoc.valid()) {
+    dev->set_param_mat4(backend.gbufSkinnedViewLoc, &view.columns[0].x);
   }
-  if (backend.gbufSkinnedProjectionLoc >= 0) {
-    dev->set_uniform_mat4(backend.gbufSkinnedProjectionLoc,
+  if (backend.gbufSkinnedProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.gbufSkinnedProjectionLoc,
                           &projection.columns[0].x);
   }
-  if (backend.gbufSkinnedTimeLoc >= 0) {
-    dev->set_uniform_float(backend.gbufSkinnedTimeLoc, timeSeconds);
+  if (backend.gbufSkinnedTimeLoc.valid()) {
+    dev->set_param_f32(backend.gbufSkinnedTimeLoc, timeSeconds);
   }
-  if (backend.gbufSkinnedUseInstancingLoc >= 0) {
-    dev->set_uniform_int(backend.gbufSkinnedUseInstancingLoc, 0);
+  if (backend.gbufSkinnedUseInstancingLoc.valid()) {
+    dev->set_param_i32(backend.gbufSkinnedUseInstancingLoc, 0);
   }
-  if (backend.gbufSkinnedModelLoc >= 0) {
-    dev->set_uniform_mat4(backend.gbufSkinnedModelLoc, &model.columns[0].x);
+  if (backend.gbufSkinnedModelLoc.valid()) {
+    dev->set_param_mat4(backend.gbufSkinnedModelLoc, &model.columns[0].x);
   }
-  if ((backend.gbufSkinnedNormalMatrixLoc >= 0) && (normalMatrix != nullptr)) {
-    dev->set_uniform_mat3(backend.gbufSkinnedNormalMatrixLoc, normalMatrix);
+  if ((backend.gbufSkinnedNormalMatrixLoc.valid()) && (normalMatrix != nullptr)) {
+    dev->set_param_mat3(backend.gbufSkinnedNormalMatrixLoc, normalMatrix);
   }
-  if (backend.gbufSkinnedAlbedoLoc >= 0) {
-    dev->set_uniform_vec3(backend.gbufSkinnedAlbedoLoc,
+  if (backend.gbufSkinnedAlbedoLoc.valid()) {
+    dev->set_param_vec3(backend.gbufSkinnedAlbedoLoc,
                           &command.material.albedo.x);
   }
-  if (backend.gbufSkinnedMetallicLoc >= 0) {
-    dev->set_uniform_float(backend.gbufSkinnedMetallicLoc,
+  if (backend.gbufSkinnedMetallicLoc.valid()) {
+    dev->set_param_f32(backend.gbufSkinnedMetallicLoc,
                            command.material.metallic);
   }
-  if (backend.gbufSkinnedRoughnessLoc >= 0) {
-    dev->set_uniform_float(backend.gbufSkinnedRoughnessLoc,
+  if (backend.gbufSkinnedRoughnessLoc.valid()) {
+    dev->set_param_f32(backend.gbufSkinnedRoughnessLoc,
                            command.material.roughness);
   }
-  if (backend.gbufSkinnedAOLoc >= 0) {
-    dev->set_uniform_float(backend.gbufSkinnedAOLoc, 1.0F);
+  if (backend.gbufSkinnedAOLoc.valid()) {
+    dev->set_param_f32(backend.gbufSkinnedAOLoc, 1.0F);
   }
-  if (backend.gbufSkinnedEmissiveLoc >= 0) {
-    dev->set_uniform_vec3(backend.gbufSkinnedEmissiveLoc,
+  if (backend.gbufSkinnedEmissiveLoc.valid()) {
+    dev->set_param_vec3(backend.gbufSkinnedEmissiveLoc,
                           &command.material.emissive.x);
   }
 
-  const std::uint32_t albedoGpu = texture_gpu_id(command.material.albedoTexture);
+  const DeviceTextureHandle albedoTex =
+      texture_device_handle(command.material.albedoTexture);
   const bool hasAlbedoTex =
       (command.material.albedoTexture != kInvalidTextureHandle) &&
-      (albedoGpu != 0U);
-  if (backend.gbufSkinnedAlbedoTextureLoc >= 0) {
-    dev->set_uniform_int(backend.gbufSkinnedAlbedoTextureLoc, 0);
+      (albedoTex != kInvalidDeviceTexture);
+  if (backend.gbufSkinnedAlbedoTextureLoc.valid()) {
+    dev->set_param_i32(backend.gbufSkinnedAlbedoTextureLoc, 0);
   }
-  if (backend.gbufSkinnedHasAlbedoTextureLoc >= 0) {
-    dev->set_uniform_int(backend.gbufSkinnedHasAlbedoTextureLoc,
+  if (backend.gbufSkinnedHasAlbedoTextureLoc.valid()) {
+    dev->set_param_i32(backend.gbufSkinnedHasAlbedoTextureLoc,
                          hasAlbedoTex ? 1 : 0);
   }
   if (inOutBoundAlbedoTex != nullptr) {
-    const std::uint32_t wanted = hasAlbedoTex ? albedoGpu : 0U;
+    const DeviceTextureHandle wanted =
+        hasAlbedoTex ? albedoTex : kInvalidDeviceTexture;
     if (*inOutBoundAlbedoTex != wanted) {
-      dev->bind_texture(0, wanted);
+      dev->bind_texture_slot(0U, wanted);
       *inOutBoundAlbedoTex = wanted;
     }
   }
 
-  if (inOutBoundMaterialTexIds != nullptr) {
+  if (inOutBoundMaterialTex != nullptr) {
     const MaterialTextureUniformLocs locs{
         backend.gbufSkinnedHasMetallicRoughnessTextureLoc,
         backend.gbufSkinnedMetallicRoughnessTextureLoc,
@@ -155,7 +155,7 @@ void upload_skinned_gbuffer_uniforms(
         backend.gbufSkinnedUvTilingLoc,
         backend.gbufSkinnedUvOffsetLoc};
     upload_material_texture_slots(locs, dev, command.material,
-                                  inOutBoundMaterialTexIds);
+                                  inOutBoundMaterialTex);
   }
 }
 

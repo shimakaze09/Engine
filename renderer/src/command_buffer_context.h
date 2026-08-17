@@ -31,11 +31,11 @@ struct InstanceAttributes final {
   math::Vec4 foliage = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
 };
 
-/// GL objects backing one scene-capture render target slot.
+/// Device resources backing one scene-capture render target slot.
 struct SceneCaptureTarget final {
-  std::uint32_t colorTexture = 0U;
-  std::uint32_t depthTexture = 0U;
-  std::uint32_t framebuffer = 0U;
+  DeviceTextureHandle colorTexture{};
+  DeviceTextureHandle depthTexture{};
+  RenderTargetHandle target{};
   // Stable external texture-system handle materials can reference; keeps
   // pointing at colorTexture across lazy target (re)creation.
   TextureHandle textureHandle = kInvalidTextureHandle;
@@ -55,170 +55,166 @@ struct BackendState final {
 
   // Fallback shader (kept for compatibility).
   ShaderProgramHandle defaultShaderHandle{};
-  std::uint32_t defaultProgram = 0U;
+  DeviceProgramHandle defaultProgram{};
 
   // PBR shader.
   ShaderProgramHandle pbrShaderHandle{};
-  std::uint32_t pbrProgram = 0U;
+  DeviceProgramHandle pbrProgram{};
 
   // PBR uniform locations.
-  std::int32_t pbrModelLocation = -1;
-  std::int32_t pbrMvpLocation = -1;
-  std::int32_t pbrNormalMatrixLocation = -1;
-  std::int32_t pbrAlbedoLocation = -1;
-  std::int32_t pbrRoughnessLocation = -1;
-  std::int32_t pbrMetallicLocation = -1;
-  std::int32_t pbrTimeLocation = -1;
-  std::int32_t pbrCameraPosLocation = -1;
-  std::int32_t pbrIblEnabledLoc = -1;
-  std::int32_t pbrIrradianceMapLoc = -1;
-  std::int32_t pbrPrefilteredMapLoc = -1;
-  std::int32_t pbrBrdfLutLoc = -1;
-  std::int32_t pbrPrefilteredMipsLoc = -1;
-  std::int32_t pbrHasAlbedoTextureLocation = -1;
-  std::int32_t pbrAlbedoMapLocation = -1;
-  std::int32_t pbrOpacityLocation = -1;
+  ShaderParam pbrModelLocation{};
+  ShaderParam pbrMvpLocation{};
+  ShaderParam pbrNormalMatrixLocation{};
+  ShaderParam pbrAlbedoLocation{};
+  ShaderParam pbrRoughnessLocation{};
+  ShaderParam pbrMetallicLocation{};
+  ShaderParam pbrTimeLocation{};
+  ShaderParam pbrCameraPosLocation{};
+  ShaderParam pbrIblEnabledLoc{};
+  ShaderParam pbrIrradianceMapLoc{};
+  ShaderParam pbrPrefilteredMapLoc{};
+  ShaderParam pbrBrdfLutLoc{};
+  ShaderParam pbrPrefilteredMipsLoc{};
+  ShaderParam pbrHasAlbedoTextureLocation{};
+  ShaderParam pbrAlbedoMapLocation{};
+  ShaderParam pbrOpacityLocation{};
   // issue #160: texture-backed PBR material slots (forward program).
-  std::int32_t pbrEmissiveLocation = -1;
-  std::int32_t pbrHasMetallicRoughnessTextureLocation = -1;
-  std::int32_t pbrMetallicRoughnessMapLocation = -1;
-  std::int32_t pbrHasEmissiveTextureLocation = -1;
-  std::int32_t pbrEmissiveMapLocation = -1;
-  std::int32_t pbrHasOcclusionTextureLocation = -1;
-  std::int32_t pbrOcclusionMapLocation = -1;
-  std::int32_t pbrHasOpacityTextureLocation = -1;
-  std::int32_t pbrOpacityMapLocation = -1;
-  std::int32_t pbrAlphaModeLocation = -1;
-  std::int32_t pbrAlphaCutoffLocation = -1;
-  std::int32_t pbrUvTilingLocation = -1;
-  std::int32_t pbrUvOffsetLocation = -1;
-  std::int32_t pbrViewLocation = -1;
-  std::int32_t pbrViewProjectionLocation = -1;
-  std::int32_t pbrUseInstancingLocation = -1;
-  std::int32_t pbrFoliageWindStrengthLocation = -1;
-  std::int32_t pbrFoliageWindFrequencyLocation = -1;
-  std::int32_t pbrFoliagePhaseLocation = -1;
-  std::int32_t pbrFogModeLocation = -1;
-  std::int32_t pbrFogStartLocation = -1;
-  std::int32_t pbrFogEndLocation = -1;
-  std::int32_t pbrFogDensityLocation = -1;
-  std::int32_t pbrFogColorLocation = -1;
-  std::int32_t pbrHeightFogEnabledLocation = -1;
-  std::int32_t pbrHeightFogBaseHeightLocation = -1;
-  std::int32_t pbrHeightFogDensityLocation = -1;
-  std::int32_t pbrHeightFogFalloffLocation = -1;
-  std::int32_t pbrHeightFogStepCountLocation = -1;
-
+  ShaderParam pbrEmissiveLocation{};
+  ShaderParam pbrHasMetallicRoughnessTextureLocation{};
+  ShaderParam pbrMetallicRoughnessMapLocation{};
+  ShaderParam pbrHasEmissiveTextureLocation{};
+  ShaderParam pbrEmissiveMapLocation{};
+  ShaderParam pbrHasOcclusionTextureLocation{};
+  ShaderParam pbrOcclusionMapLocation{};
+  ShaderParam pbrHasOpacityTextureLocation{};
+  ShaderParam pbrOpacityMapLocation{};
+  ShaderParam pbrAlphaModeLocation{};
+  ShaderParam pbrAlphaCutoffLocation{};
+  ShaderParam pbrUvTilingLocation{};
+  ShaderParam pbrUvOffsetLocation{};
+  ShaderParam pbrViewLocation{};
+  ShaderParam pbrViewProjectionLocation{};
+  ShaderParam pbrUseInstancingLocation{};
+  ShaderParam pbrFoliageWindStrengthLocation{};
+  ShaderParam pbrFoliageWindFrequencyLocation{};
+  ShaderParam pbrFoliagePhaseLocation{};
+  ShaderParam pbrFogModeLocation{};
+  ShaderParam pbrFogStartLocation{};
+  ShaderParam pbrFogEndLocation{};
+  ShaderParam pbrFogDensityLocation{};
+  ShaderParam pbrFogColorLocation{};
+  ShaderParam pbrHeightFogEnabledLocation{};
+  ShaderParam pbrHeightFogBaseHeightLocation{};
+  ShaderParam pbrHeightFogDensityLocation{};
+  ShaderParam pbrHeightFogFalloffLocation{};
+  ShaderParam pbrHeightFogStepCountLocation{};
   // Directional lights.
-  std::int32_t pbrDirLightCountLocation = -1;
-  std::array<std::int32_t, kMaxDirectionalLights> pbrDirLightDir{};
-  std::array<std::int32_t, kMaxDirectionalLights> pbrDirLightColor{};
-  std::array<std::int32_t, kMaxDirectionalLights> pbrDirLightIntensity{};
+  ShaderParam pbrDirLightCountLocation{};
+  std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightDir{};
+  std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightColor{};
+  std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightIntensity{};
 
   // Point lights.
-  std::int32_t pbrPointLightCountLocation = -1;
-  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightPos{};
-  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightColor{};
-  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightIntensity{};
-  std::array<std::int32_t, kForwardMaxPointLights> pbrPointLightRadius{};
+  ShaderParam pbrPointLightCountLocation{};
+  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightPos{};
+  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightColor{};
+  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightIntensity{};
+  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightRadius{};
 
   // Spot lights.
-  std::int32_t pbrSpotLightCountLocation = -1;
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightPos{};
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightDir{};
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightColor{};
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightIntensity{};
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightRadius{};
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightInnerCone{};
-  std::array<std::int32_t, kForwardMaxSpotLights> pbrSpotLightOuterCone{};
+  ShaderParam pbrSpotLightCountLocation{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightPos{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightDir{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightColor{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightIntensity{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightRadius{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightInnerCone{};
+  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightOuterCone{};
 
   // PBR forward shadow uniforms.
-  std::int32_t pbrShadowEnabledLoc = -1;
-  std::array<std::int32_t, kShadowCascadeCount> pbrShadowMapLocs{};
-  std::array<std::int32_t, kShadowCascadeCount> pbrShadowMatrixLocs{};
-  std::array<std::int32_t, kShadowCascadeCount> pbrCascadeSplitLocs{};
-  std::int32_t pbrSpotShadowEnabledLoc = -1;
-  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowMapLocs{};
-  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowMatrixLocs{};
-  std::array<std::int32_t, kMaxSpotShadowLights> pbrSpotShadowLightIdxLocs{};
-  std::int32_t pbrPointShadowEnabledLoc = -1;
-  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowMapLocs{};
-  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowLightPosLocs{};
-  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowFarPlaneLocs{};
-  std::array<std::int32_t, kMaxPointShadowLights> pbrPointShadowLightIdxLocs{};
+  ShaderParam pbrShadowEnabledLoc{};
+  std::array<ShaderParam, kShadowCascadeCount> pbrShadowMapLocs{};
+  std::array<ShaderParam, kShadowCascadeCount> pbrShadowMatrixLocs{};
+  std::array<ShaderParam, kShadowCascadeCount> pbrCascadeSplitLocs{};
+  ShaderParam pbrSpotShadowEnabledLoc{};
+  std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowMapLocs{};
+  std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowMatrixLocs{};
+  std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowLightIdxLocs{};
+  ShaderParam pbrPointShadowEnabledLoc{};
+  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowMapLocs{};
+  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowLightPosLocs{};
+  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowFarPlaneLocs{};
+  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowLightIdxLocs{};
 
   // Tonemap shader.
   ShaderProgramHandle tonemapShaderHandle{};
-  std::uint32_t tonemapProgram = 0U;
-  std::int32_t tonemapSceneColorLocation = -1;
-  std::int32_t tonemapExposureLocation = -1;
-  std::int32_t tonemapOperatorLocation = -1;
+  DeviceProgramHandle tonemapProgram{};
+  ShaderParam tonemapSceneColorLocation{};
+  ShaderParam tonemapExposureLocation{};
+  ShaderParam tonemapOperatorLocation{};
 
   // FXAA shader.
   ShaderProgramHandle fxaaShaderHandle{};
-  std::uint32_t fxaaProgram = 0U;
-  std::int32_t fxaaInputTextureLocation = -1;
-  std::int32_t fxaaTexelSizeLocation = -1;
+  DeviceProgramHandle fxaaProgram{};
+  ShaderParam fxaaInputTextureLocation{};
+  ShaderParam fxaaTexelSizeLocation{};
 
-  // Empty VAO for fullscreen triangle.
-  std::uint32_t emptyVao = 0U;
+  // Attribute-less geometry for fullscreen triangles.
+  DeviceGeometryHandle emptyGeometry{};
 
   // Skybox shader and cube geometry.
   bool skyboxAvailable = false;
   ShaderProgramHandle skyboxShaderHandle{};
-  std::uint32_t skyboxProgram = 0U;
-  std::int32_t skyboxViewLoc = -1;
-  std::int32_t skyboxProjectionLoc = -1;
-  std::int32_t skyboxTextureLoc = -1;
-  std::uint32_t skyboxVertexArray = 0U;
-  std::uint32_t skyboxVertexBuffer = 0U;
+  DeviceProgramHandle skyboxProgram{};
+  ShaderParam skyboxViewLoc{};
+  ShaderParam skyboxProjectionLoc{};
+  ShaderParam skyboxTextureLoc{};
+  DeviceGeometryHandle skyboxGeometry{};
+  DeviceBufferHandle skyboxVertexBuffer{};
 
   bool preethamSkyAvailable = false;
   ShaderProgramHandle preethamSkyShaderHandle{};
-  std::uint32_t preethamSkyProgram = 0U;
-  std::int32_t preethamSkyViewLoc = -1;
-  std::int32_t preethamSkyProjectionLoc = -1;
-  std::int32_t preethamSkySunDirectionLoc = -1;
-  std::int32_t preethamSkyTurbidityLoc = -1;
+  DeviceProgramHandle preethamSkyProgram{};
+  ShaderParam preethamSkyViewLoc{};
+  ShaderParam preethamSkyProjectionLoc{};
+  ShaderParam preethamSkySunDirectionLoc{};
+  ShaderParam preethamSkyTurbidityLoc{};
 
   bool hosekSkyAvailable = false;
   ShaderProgramHandle hosekSkyShaderHandle{};
-  std::uint32_t hosekSkyProgram = 0U;
-  std::int32_t hosekSkyViewLoc = -1;
-  std::int32_t hosekSkyProjectionLoc = -1;
-  std::int32_t hosekSkySunDirectionLoc = -1;
-  std::int32_t hosekSkyTurbidityLoc = -1;
-  std::int32_t hosekSkyGroundAlbedoLoc = -1;
+  DeviceProgramHandle hosekSkyProgram{};
+  ShaderParam hosekSkyViewLoc{};
+  ShaderParam hosekSkyProjectionLoc{};
+  ShaderParam hosekSkySunDirectionLoc{};
+  ShaderParam hosekSkyTurbidityLoc{};
+  ShaderParam hosekSkyGroundAlbedoLoc{};
 
   bool environmentPrefilterAvailable = false;
   ShaderProgramHandle environmentPrefilterShaderHandle{};
-  std::uint32_t environmentPrefilterProgram = 0U;
-  std::int32_t environmentPrefilterViewLoc = -1;
-  std::int32_t environmentPrefilterProjectionLoc = -1;
-  std::int32_t environmentPrefilterTextureLoc = -1;
-  std::int32_t environmentPrefilterRoughnessLoc = -1;
-  std::uint32_t prefilteredEnvironmentTexture = 0U;
-  std::uint32_t environmentPrefilterFbo = 0U;
-  std::uint32_t prefilteredEnvironmentSource = 0U;
+  DeviceProgramHandle environmentPrefilterProgram{};
+  ShaderParam environmentPrefilterViewLoc{};
+  ShaderParam environmentPrefilterProjectionLoc{};
+  ShaderParam environmentPrefilterTextureLoc{};
+  ShaderParam environmentPrefilterRoughnessLoc{};
+  DeviceTextureHandle prefilteredEnvironmentTexture{};
+  DeviceTextureHandle prefilteredEnvironmentSource{};
   int prefilteredEnvironmentFaceSize = 0;
   int prefilteredEnvironmentMipLevels = 0;
 
   bool environmentIrradianceAvailable = false;
   ShaderProgramHandle environmentIrradianceShaderHandle{};
-  std::uint32_t environmentIrradianceProgram = 0U;
-  std::int32_t environmentIrradianceViewLoc = -1;
-  std::int32_t environmentIrradianceProjectionLoc = -1;
-  std::int32_t environmentIrradianceTextureLoc = -1;
-  std::uint32_t irradianceEnvironmentTexture = 0U;
-  std::uint32_t environmentIrradianceFbo = 0U;
-  std::uint32_t irradianceEnvironmentSource = 0U;
+  DeviceProgramHandle environmentIrradianceProgram{};
+  ShaderParam environmentIrradianceViewLoc{};
+  ShaderParam environmentIrradianceProjectionLoc{};
+  ShaderParam environmentIrradianceTextureLoc{};
+  DeviceTextureHandle irradianceEnvironmentTexture{};
+  DeviceTextureHandle irradianceEnvironmentSource{};
   int irradianceEnvironmentFaceSize = 0;
 
   bool environmentBrdfLutAvailable = false;
   ShaderProgramHandle environmentBrdfLutShaderHandle{};
-  std::uint32_t environmentBrdfLutProgram = 0U;
-  std::uint32_t brdfLutTexture = 0U;
-  std::uint32_t brdfLutFbo = 0U;
+  DeviceProgramHandle environmentBrdfLutProgram{};
+  DeviceTextureHandle brdfLutTexture{};
   int brdfLutSize = 0;
 
   // Tracked drawable dimensions for pass resource resize.
@@ -230,96 +226,95 @@ struct BackendState final {
 
   // G-Buffer shader.
   ShaderProgramHandle gbufferShaderHandle{};
-  std::uint32_t gbufferProgram = 0U;
-  std::int32_t gbufModelLoc = -1;
-  std::int32_t gbufViewLoc = -1;
-  std::int32_t gbufProjectionLoc = -1;
-  std::int32_t gbufNormalMatrixLoc = -1;
-  std::int32_t gbufUseInstancingLoc = -1;
-  std::int32_t gbufTimeLoc = -1;
-  std::int32_t gbufFoliageWindStrengthLoc = -1;
-  std::int32_t gbufFoliageWindFrequencyLoc = -1;
-  std::int32_t gbufFoliagePhaseLoc = -1;
-  std::int32_t gbufAlbedoLoc = -1;
-  std::int32_t gbufHasAlbedoTextureLoc = -1;
-  std::int32_t gbufAlbedoTextureLoc = -1;
-  std::int32_t gbufMetallicLoc = -1;
-  std::int32_t gbufRoughnessLoc = -1;
-  std::int32_t gbufAOLoc = -1;
-  std::int32_t gbufEmissiveLoc = -1;
+  DeviceProgramHandle gbufferProgram{};
+  ShaderParam gbufModelLoc{};
+  ShaderParam gbufViewLoc{};
+  ShaderParam gbufProjectionLoc{};
+  ShaderParam gbufNormalMatrixLoc{};
+  ShaderParam gbufUseInstancingLoc{};
+  ShaderParam gbufTimeLoc{};
+  ShaderParam gbufFoliageWindStrengthLoc{};
+  ShaderParam gbufFoliageWindFrequencyLoc{};
+  ShaderParam gbufFoliagePhaseLoc{};
+  ShaderParam gbufAlbedoLoc{};
+  ShaderParam gbufHasAlbedoTextureLoc{};
+  ShaderParam gbufAlbedoTextureLoc{};
+  ShaderParam gbufMetallicLoc{};
+  ShaderParam gbufRoughnessLoc{};
+  ShaderParam gbufAOLoc{};
+  ShaderParam gbufEmissiveLoc{};
   // issue #160: texture-backed PBR material slots (static G-buffer program).
-  std::int32_t gbufHasMetallicRoughnessTextureLoc = -1;
-  std::int32_t gbufMetallicRoughnessTextureLoc = -1;
-  std::int32_t gbufHasEmissiveTextureLoc = -1;
-  std::int32_t gbufEmissiveTextureLoc = -1;
-  std::int32_t gbufHasOcclusionTextureLoc = -1;
-  std::int32_t gbufOcclusionTextureLoc = -1;
-  std::int32_t gbufHasOpacityTextureLoc = -1;
-  std::int32_t gbufOpacityTextureLoc = -1;
-  std::int32_t gbufAlphaModeLoc = -1;
-  std::int32_t gbufAlphaCutoffLoc = -1;
-  std::int32_t gbufUvTilingLoc = -1;
-  std::int32_t gbufUvOffsetLoc = -1;
-
+  ShaderParam gbufHasMetallicRoughnessTextureLoc{};
+  ShaderParam gbufMetallicRoughnessTextureLoc{};
+  ShaderParam gbufHasEmissiveTextureLoc{};
+  ShaderParam gbufEmissiveTextureLoc{};
+  ShaderParam gbufHasOcclusionTextureLoc{};
+  ShaderParam gbufOcclusionTextureLoc{};
+  ShaderParam gbufHasOpacityTextureLoc{};
+  ShaderParam gbufOpacityTextureLoc{};
+  ShaderParam gbufAlphaModeLoc{};
+  ShaderParam gbufAlphaCutoffLoc{};
+  ShaderParam gbufUvTilingLoc{};
+  ShaderParam gbufUvOffsetLoc{};
   // Deferred lighting shader.
   ShaderProgramHandle deferredLightShaderHandle{};
-  std::uint32_t deferredLightProgram = 0U;
-  std::int32_t dlGBufAlbedoLoc = -1;
-  std::int32_t dlGBufNormalLoc = -1;
-  std::int32_t dlGBufEmissiveLoc = -1;
-  std::int32_t dlGBufDepthLoc = -1;
-  std::int32_t dlIblEnabledLoc = -1;
-  std::int32_t dlIrradianceMapLoc = -1;
-  std::int32_t dlPrefilteredMapLoc = -1;
-  std::int32_t dlBrdfLutLoc = -1;
-  std::int32_t dlPrefilteredMipsLoc = -1;
-  std::int32_t dlTileLightTexLoc = -1;
-  std::int32_t dlTileCountXLoc = -1;
-  std::int32_t dlTileCountYLoc = -1;
-  std::int32_t dlInvProjectionLoc = -1;
-  std::int32_t dlInvViewLoc = -1;
-  std::int32_t dlDirLightDirLoc = -1;
-  std::int32_t dlDirLightColorLoc = -1;
-  std::int32_t dlCameraPosLoc = -1;
-  std::int32_t dlScreenSizeLoc = -1;
-  std::int32_t dlFogModeLoc = -1;
-  std::int32_t dlFogStartLoc = -1;
-  std::int32_t dlFogEndLoc = -1;
-  std::int32_t dlFogDensityLoc = -1;
-  std::int32_t dlFogColorLoc = -1;
-  std::int32_t dlHeightFogEnabledLoc = -1;
-  std::int32_t dlHeightFogBaseHeightLoc = -1;
-  std::int32_t dlHeightFogDensityLoc = -1;
-  std::int32_t dlHeightFogFalloffLoc = -1;
-  std::int32_t dlHeightFogStepCountLoc = -1;
-  std::int32_t dlPointLightCountLoc = -1;
-  std::int32_t dlSpotLightCountLoc = -1;
+  DeviceProgramHandle deferredLightProgram{};
+  ShaderParam dlGBufAlbedoLoc{};
+  ShaderParam dlGBufNormalLoc{};
+  ShaderParam dlGBufEmissiveLoc{};
+  ShaderParam dlGBufDepthLoc{};
+  ShaderParam dlIblEnabledLoc{};
+  ShaderParam dlIrradianceMapLoc{};
+  ShaderParam dlPrefilteredMapLoc{};
+  ShaderParam dlBrdfLutLoc{};
+  ShaderParam dlPrefilteredMipsLoc{};
+  ShaderParam dlTileLightTexLoc{};
+  ShaderParam dlTileCountXLoc{};
+  ShaderParam dlTileCountYLoc{};
+  ShaderParam dlInvProjectionLoc{};
+  ShaderParam dlInvViewLoc{};
+  ShaderParam dlDirLightDirLoc{};
+  ShaderParam dlDirLightColorLoc{};
+  ShaderParam dlCameraPosLoc{};
+  ShaderParam dlScreenSizeLoc{};
+  ShaderParam dlFogModeLoc{};
+  ShaderParam dlFogStartLoc{};
+  ShaderParam dlFogEndLoc{};
+  ShaderParam dlFogDensityLoc{};
+  ShaderParam dlFogColorLoc{};
+  ShaderParam dlHeightFogEnabledLoc{};
+  ShaderParam dlHeightFogBaseHeightLoc{};
+  ShaderParam dlHeightFogDensityLoc{};
+  ShaderParam dlHeightFogFalloffLoc{};
+  ShaderParam dlHeightFogStepCountLoc{};
+  ShaderParam dlPointLightCountLoc{};
+  ShaderParam dlSpotLightCountLoc{};
 
   // Deferred per-light data texture sampler (replaces per-light uniform
   // arrays, which exceeded the NVIDIA fragment uniform register limit).
-  std::int32_t dlLightDataTexLoc = -1;
+  ShaderParam dlLightDataTexLoc{};
 
   // G-Buffer debug shader.
   ShaderProgramHandle gbufferDebugShaderHandle{};
-  std::uint32_t gbufferDebugProgram = 0U;
-  std::int32_t dbgGBufAlbedoLoc = -1;
-  std::int32_t dbgGBufNormalLoc = -1;
-  std::int32_t dbgGBufEmissiveLoc = -1;
-  std::int32_t dbgGBufDepthLoc = -1;
-  std::int32_t dbgModeLoc = -1;
+  DeviceProgramHandle gbufferDebugProgram{};
+  ShaderParam dbgGBufAlbedoLoc{};
+  ShaderParam dbgGBufNormalLoc{};
+  ShaderParam dbgGBufEmissiveLoc{};
+  ShaderParam dbgGBufDepthLoc{};
+  ShaderParam dbgModeLoc{};
 
   // Depth-tested debug line pass (positions+colors streamed each frame from
   // the core debug-draw queue).
   bool debugLineAvailable = false;
   ShaderProgramHandle debugLineShaderHandle{};
-  std::uint32_t debugLineProgram = 0U;
-  std::int32_t debugLineViewProjectionLoc = -1;
-  std::uint32_t debugLineVao = 0U;
-  std::uint32_t debugLineVbo = 0U;
+  DeviceProgramHandle debugLineProgram{};
+  ShaderParam debugLineViewProjectionLoc{};
+  DeviceGeometryHandle debugLineGeometry{};
+  DeviceBufferHandle debugLineVbo{};
 
   // Tile light texture (uploaded each frame by CPU culling); rows tracks the
   // allocated height so viewport growth recreates it.
-  std::uint32_t tileLightTex = 0U;
+  DeviceTextureHandle tileLightTex{};
   int tileLightTexRows = 0;
   // Grow-only nothrow-allocating scratch buffer (audit #204): a failed grow
   // leaves this at zero capacity instead of terminating, and the downstream
@@ -329,9 +324,9 @@ struct BackendState final {
 
   // Per-light data texture consumed by the deferred lighting shader
   // (uploaded each frame; fixed layout, see light_culling.h).
-  std::uint32_t lightDataTex = 0U;
+  DeviceTextureHandle lightDataTex{};
   std::array<float, kLightDataBufferSize> lightDataBuffer{};
-  std::uint32_t instanceMatrixBuffer = 0U;
+  DeviceBufferHandle instanceMatrixBuffer{};
   // Grow-only nothrow-allocating scratch buffers (audit #204): a failed grow
   // leaves the buffer empty instead of terminating; callers already treat a
   // too-small capacity as a safe degrade (fewer/no batches, non-instanced
@@ -341,29 +336,29 @@ struct BackendState final {
 
   // Bloom state.
   ShaderProgramHandle bloomThresholdShaderHandle{};
-  std::uint32_t bloomThresholdProgram = 0U;
-  std::int32_t bloomThreshSceneColorLoc = -1;
-  std::int32_t bloomThreshThresholdLoc = -1;
+  DeviceProgramHandle bloomThresholdProgram{};
+  ShaderParam bloomThreshSceneColorLoc{};
+  ShaderParam bloomThreshThresholdLoc{};
 
   ShaderProgramHandle bloomDownsampleShaderHandle{};
-  std::uint32_t bloomDownsampleProgram = 0U;
-  std::int32_t bloomDownInputLoc = -1;
-  std::int32_t bloomDownTexelSizeLoc = -1;
+  DeviceProgramHandle bloomDownsampleProgram{};
+  ShaderParam bloomDownInputLoc{};
+  ShaderParam bloomDownTexelSizeLoc{};
 
   ShaderProgramHandle bloomUpsampleShaderHandle{};
-  std::uint32_t bloomUpsampleProgram = 0U;
-  std::int32_t bloomUpInputLoc = -1;
-  std::int32_t bloomUpTexelSizeLoc = -1;
+  DeviceProgramHandle bloomUpsampleProgram{};
+  ShaderParam bloomUpInputLoc{};
+  ShaderParam bloomUpTexelSizeLoc{};
 
   // Tonemap bloom integration uniforms.
-  std::int32_t tonemapBloomTextureLoc = -1;
-  std::int32_t tonemapBloomIntensityLoc = -1;
-  std::int32_t tonemapBloomEnabledLoc = -1;
+  ShaderParam tonemapBloomTextureLoc{};
+  ShaderParam tonemapBloomIntensityLoc{};
+  ShaderParam tonemapBloomEnabledLoc{};
 
   // Bloom mip chain resources (managed internally).
   static constexpr int kBloomMipLevels = 6;
-  std::uint32_t bloomMipTextures[kBloomMipLevels] = {};
-  std::uint32_t bloomMipFbos[kBloomMipLevels] = {};
+  DeviceTextureHandle bloomMipTextures[kBloomMipLevels] = {};
+  RenderTargetHandle bloomMipTargets[kBloomMipLevels] = {};
   int bloomMipWidths[kBloomMipLevels] = {};
   int bloomMipHeights[kBloomMipLevels] = {};
   int bloomAllocatedWidth = 0;
@@ -373,28 +368,28 @@ struct BackendState final {
   bool ssaoAvailable = false;
 
   ShaderProgramHandle ssaoShaderHandle{};
-  std::uint32_t ssaoProgram = 0U;
-  std::int32_t ssaoDepthLoc = -1;
-  std::int32_t ssaoNormalLoc = -1;
-  std::int32_t ssaoNoiseLoc = -1;
-  std::int32_t ssaoProjectionLoc = -1;
-  std::int32_t ssaoViewLoc = -1;
-  std::int32_t ssaoNoiseScaleLoc = -1;
-  std::int32_t ssaoRadiusLoc = -1;
-  std::int32_t ssaoBiasLoc = -1;
-  std::array<std::int32_t, 32> ssaoSampleLocs{};
+  DeviceProgramHandle ssaoProgram{};
+  ShaderParam ssaoDepthLoc{};
+  ShaderParam ssaoNormalLoc{};
+  ShaderParam ssaoNoiseLoc{};
+  ShaderParam ssaoProjectionLoc{};
+  ShaderParam ssaoViewLoc{};
+  ShaderParam ssaoNoiseScaleLoc{};
+  ShaderParam ssaoRadiusLoc{};
+  ShaderParam ssaoBiasLoc{};
+  std::array<ShaderParam, 32> ssaoSampleLocs{};
 
   ShaderProgramHandle ssaoBlurShaderHandle{};
-  std::uint32_t ssaoBlurProgram = 0U;
-  std::int32_t ssaoBlurInputLoc = -1;
-  std::int32_t ssaoBlurTexelSizeLoc = -1;
+  DeviceProgramHandle ssaoBlurProgram{};
+  ShaderParam ssaoBlurInputLoc{};
+  ShaderParam ssaoBlurTexelSizeLoc{};
 
   // Deferred lighting SSAO uniforms.
-  std::int32_t dlSsaoTextureLoc = -1;
-  std::int32_t dlSsaoEnabledLoc = -1;
+  ShaderParam dlSsaoTextureLoc{};
+  ShaderParam dlSsaoEnabledLoc{};
 
   // SSAO sampling resources.
-  std::uint32_t ssaoNoiseTexture = 0U;
+  DeviceTextureHandle ssaoNoiseTexture{};
   float ssaoKernel[32 * 3] = {};
 
   // Shadow map state.
@@ -402,15 +397,15 @@ struct BackendState final {
   bool shadowAvailable = false;
 
   ShaderProgramHandle shadowDepthShaderHandle{};
-  std::uint32_t shadowDepthProgram = 0U;
-  std::int32_t shadowLightMvpLoc = -1;
-  std::int32_t shadowModelLoc = -1;
+  DeviceProgramHandle shadowDepthProgram{};
+  ShaderParam shadowLightMvpLoc{};
+  ShaderParam shadowModelLoc{};
 
   // Deferred lighting shadow uniforms.
-  std::int32_t dlShadowEnabledLoc = -1;
-  std::array<std::int32_t, kShadowCascadeCount> dlShadowMapLocs{};
-  std::array<std::int32_t, kShadowCascadeCount> dlShadowMatrixLocs{};
-  std::array<std::int32_t, kShadowCascadeCount> dlCascadeSplitLocs{};
+  ShaderParam dlShadowEnabledLoc{};
+  std::array<ShaderParam, kShadowCascadeCount> dlShadowMapLocs{};
+  std::array<ShaderParam, kShadowCascadeCount> dlShadowMatrixLocs{};
+  std::array<ShaderParam, kShadowCascadeCount> dlCascadeSplitLocs{};
   std::uint64_t directionalShadowCacheKey = 0U;
   bool directionalShadowCacheValid = false;
 
@@ -418,39 +413,39 @@ struct BackendState final {
   SpotShadowState spotShadowState{};
   bool spotShadowAvailable = false;
 
-  std::int32_t dlSpotShadowEnabledLoc = -1;
-  std::array<std::int32_t, kMaxSpotShadowLights> dlSpotShadowMapLocs{};
-  std::array<std::int32_t, kMaxSpotShadowLights> dlSpotShadowMatrixLocs{};
-  std::array<std::int32_t, kMaxSpotShadowLights> dlSpotShadowLightIdxLocs{};
+  ShaderParam dlSpotShadowEnabledLoc{};
+  std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowMapLocs{};
+  std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowMatrixLocs{};
+  std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowLightIdxLocs{};
 
   // Point shadow state.
   PointShadowState pointShadowState{};
   bool pointShadowAvailable = false;
 
   ShaderProgramHandle shadowDepthPointShaderHandle{};
-  std::uint32_t shadowDepthPointProgram = 0U;
-  std::int32_t shadowPointLightMvpLoc = -1;
-  std::int32_t shadowPointModelLoc = -1;
-  std::int32_t shadowPointLightPosLoc = -1;
-  std::int32_t shadowPointFarPlaneLoc = -1;
+  DeviceProgramHandle shadowDepthPointProgram{};
+  ShaderParam shadowPointLightMvpLoc{};
+  ShaderParam shadowPointModelLoc{};
+  ShaderParam shadowPointLightPosLoc{};
+  ShaderParam shadowPointFarPlaneLoc{};
 
-  std::int32_t dlPointShadowEnabledLoc = -1;
-  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowMapLocs{};
-  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowLightPosLocs{};
-  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowFarPlaneLocs{};
-  std::array<std::int32_t, kMaxPointShadowLights> dlPointShadowLightIdxLocs{};
+  ShaderParam dlPointShadowEnabledLoc{};
+  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowMapLocs{};
+  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowLightPosLocs{};
+  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowFarPlaneLocs{};
+  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowLightIdxLocs{};
 
   // Auto-exposure state.
   bool autoExposureAvailable = false;
 
   ShaderProgramHandle luminanceShaderHandle{};
-  std::uint32_t luminanceProgram = 0U;
-  std::int32_t lumSceneColorLoc = -1;
+  DeviceProgramHandle luminanceProgram{};
+  ShaderParam lumSceneColorLoc{};
 
   // Luminance mip chain for averaging.
   static constexpr int kLuminanceMipLevels = 7;
-  std::uint32_t lumMipTextures[kLuminanceMipLevels] = {};
-  std::uint32_t lumMipFbos[kLuminanceMipLevels] = {};
+  DeviceTextureHandle lumMipTextures[kLuminanceMipLevels] = {};
+  RenderTargetHandle lumMipTargets[kLuminanceMipLevels] = {};
   int lumMipWidths[kLuminanceMipLevels] = {};
   int lumMipHeights[kLuminanceMipLevels] = {};
   int lumAllocatedWidth = 0;
@@ -467,43 +462,42 @@ struct BackendState final {
   // lastUploadedBonePalette dedupes uploads within one flush (palette
   // contents are per-frame, so flush start resets it to invalid).
   bool skinningAvailable = false;
-  std::uint32_t bonePaletteUbo = 0U;
+  DeviceBufferHandle bonePaletteUbo{};
   std::uint32_t lastUploadedBonePalette = 0xFFFFFFFFU;
 
   ShaderProgramHandle gbufferSkinnedShaderHandle{};
-  std::uint32_t gbufferSkinnedProgram = 0U;
-  std::int32_t gbufSkinnedModelLoc = -1;
-  std::int32_t gbufSkinnedViewLoc = -1;
-  std::int32_t gbufSkinnedProjectionLoc = -1;
-  std::int32_t gbufSkinnedNormalMatrixLoc = -1;
-  std::int32_t gbufSkinnedUseInstancingLoc = -1;
-  std::int32_t gbufSkinnedTimeLoc = -1;
-  std::int32_t gbufSkinnedAlbedoLoc = -1;
-  std::int32_t gbufSkinnedHasAlbedoTextureLoc = -1;
-  std::int32_t gbufSkinnedAlbedoTextureLoc = -1;
-  std::int32_t gbufSkinnedMetallicLoc = -1;
-  std::int32_t gbufSkinnedRoughnessLoc = -1;
-  std::int32_t gbufSkinnedAOLoc = -1;
-  std::int32_t gbufSkinnedEmissiveLoc = -1;
+  DeviceProgramHandle gbufferSkinnedProgram{};
+  ShaderParam gbufSkinnedModelLoc{};
+  ShaderParam gbufSkinnedViewLoc{};
+  ShaderParam gbufSkinnedProjectionLoc{};
+  ShaderParam gbufSkinnedNormalMatrixLoc{};
+  ShaderParam gbufSkinnedUseInstancingLoc{};
+  ShaderParam gbufSkinnedTimeLoc{};
+  ShaderParam gbufSkinnedAlbedoLoc{};
+  ShaderParam gbufSkinnedHasAlbedoTextureLoc{};
+  ShaderParam gbufSkinnedAlbedoTextureLoc{};
+  ShaderParam gbufSkinnedMetallicLoc{};
+  ShaderParam gbufSkinnedRoughnessLoc{};
+  ShaderParam gbufSkinnedAOLoc{};
+  ShaderParam gbufSkinnedEmissiveLoc{};
   // issue #160: texture-backed PBR material slots (skinned G-buffer
   // program). Shares gbuffer.frag with the static program, so the uniform
   // names match; only the cached locations differ per linked program.
-  std::int32_t gbufSkinnedHasMetallicRoughnessTextureLoc = -1;
-  std::int32_t gbufSkinnedMetallicRoughnessTextureLoc = -1;
-  std::int32_t gbufSkinnedHasEmissiveTextureLoc = -1;
-  std::int32_t gbufSkinnedEmissiveTextureLoc = -1;
-  std::int32_t gbufSkinnedHasOcclusionTextureLoc = -1;
-  std::int32_t gbufSkinnedOcclusionTextureLoc = -1;
-  std::int32_t gbufSkinnedHasOpacityTextureLoc = -1;
-  std::int32_t gbufSkinnedOpacityTextureLoc = -1;
-  std::int32_t gbufSkinnedAlphaModeLoc = -1;
-  std::int32_t gbufSkinnedAlphaCutoffLoc = -1;
-  std::int32_t gbufSkinnedUvTilingLoc = -1;
-  std::int32_t gbufSkinnedUvOffsetLoc = -1;
-
+  ShaderParam gbufSkinnedHasMetallicRoughnessTextureLoc{};
+  ShaderParam gbufSkinnedMetallicRoughnessTextureLoc{};
+  ShaderParam gbufSkinnedHasEmissiveTextureLoc{};
+  ShaderParam gbufSkinnedEmissiveTextureLoc{};
+  ShaderParam gbufSkinnedHasOcclusionTextureLoc{};
+  ShaderParam gbufSkinnedOcclusionTextureLoc{};
+  ShaderParam gbufSkinnedHasOpacityTextureLoc{};
+  ShaderParam gbufSkinnedOpacityTextureLoc{};
+  ShaderParam gbufSkinnedAlphaModeLoc{};
+  ShaderParam gbufSkinnedAlphaCutoffLoc{};
+  ShaderParam gbufSkinnedUvTilingLoc{};
+  ShaderParam gbufSkinnedUvOffsetLoc{};
   ShaderProgramHandle shadowDepthSkinnedShaderHandle{};
-  std::uint32_t shadowDepthSkinnedProgram = 0U;
-  std::int32_t shadowSkinnedLightMvpLoc = -1;
+  DeviceProgramHandle shadowDepthSkinnedProgram{};
+  ShaderParam shadowSkinnedLightMvpLoc{};
 };
 
 /// Owns renderer state for the default renderer context.

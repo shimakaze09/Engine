@@ -74,6 +74,16 @@ engine_add_test_executable(engine_unit_math
     engine_math
 )
 
+engine_add_test_executable(engine_unit_device_slot_table
+    SOURCES
+    device_slot_table_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp

@@ -52,9 +52,10 @@ int check_invalid_handle() {
     return 31;
   }
 
-  const std::uint32_t gpuId =
-      engine::renderer::texture_gpu_id(engine::renderer::kInvalidTextureHandle);
-  if (gpuId != 0U) {
+  const engine::renderer::DeviceTextureHandle deviceTexture =
+      engine::renderer::texture_device_handle(
+          engine::renderer::kInvalidTextureHandle);
+  if (deviceTexture != engine::renderer::kInvalidDeviceTexture) {
     engine::renderer::shutdown_texture_system();
     return 32;
   }

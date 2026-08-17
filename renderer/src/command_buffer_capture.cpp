@@ -1,5 +1,5 @@
-// Implements scene-capture (render-to-texture) request storage and the GL
-// render-target slots behind them. The capture pass itself runs inside
+// Implements scene-capture (render-to-texture) request storage and the
+// device render-target slots behind them. The capture pass itself runs inside
 // flush_renderer (command_buffer_flush.cpp) so it can share the forward-path
 // state; this TU owns everything that is not per-frame pass code.
 
@@ -16,26 +16,30 @@ namespace {
 
 constexpr const char *kCaptureLogChannel = "renderer";
 
-/// Releases one capture target's GL objects (safe on empty slots). The
+/// Releases one capture target's device objects (safe on empty slots). The
 /// external texture handle survives so material references stay stable
 /// across target resizes; it resolves to "no texture" until re-created.
 void destroy_capture_target(SceneCaptureTarget &target,
                             const RenderDevice *dev) noexcept {
   if (dev != nullptr) {
-    if (target.framebuffer != 0U) {
-      dev->destroy_framebuffer(target.framebuffer);
+    if ((target.target.value != 0U) &&
+        (dev->destroy_render_target != nullptr)) {
+      dev->destroy_render_target(target.target);
     }
-    if (target.depthTexture != 0U) {
-      dev->destroy_texture(target.depthTexture);
-    }
-    if (target.colorTexture != 0U) {
-      dev->destroy_texture(target.colorTexture);
+    if (dev->destroy_texture != nullptr) {
+      if (target.depthTexture != kInvalidDeviceTexture) {
+        dev->destroy_texture(target.depthTexture);
+      }
+      if (target.colorTexture != kInvalidDeviceTexture) {
+        dev->destroy_texture(target.colorTexture);
+      }
     }
   }
   const TextureHandle preservedHandle = target.textureHandle;
   target = SceneCaptureTarget{};
   target.textureHandle = preservedHandle;
-  static_cast<void>(update_external_texture(preservedHandle, 0U));
+  static_cast<void>(
+      update_external_texture(preservedHandle, kInvalidDeviceTexture));
 }
 
 } // namespace
@@ -95,9 +99,9 @@ std::size_t scene_capture_request_count() noexcept {
   return renderer_context().sceneCaptureRequestCount;
 }
 
-std::uint32_t get_scene_capture_texture(std::size_t index) noexcept {
+DeviceTextureHandle get_scene_capture_texture(std::size_t index) noexcept {
   if (index >= kMaxSceneCaptures) {
-    return 0U;
+    return kInvalidDeviceTexture;
   }
   return backend_state().sceneCaptureTargets[index].colorTexture;
 }
@@ -118,34 +122,58 @@ bool ensure_scene_capture_target(BackendState &backend,
   }
 
   SceneCaptureTarget &target = backend.sceneCaptureTargets[slot];
-  if ((target.framebuffer != 0U) && (target.width == width) &&
+  if ((target.target.value != 0U) && (target.width == width) &&
       (target.height == height)) {
     return true;
   }
 
   destroy_capture_target(target, dev);
+  if ((dev->create_texture == nullptr) ||
+      (dev->create_render_target == nullptr)) {
+    return false;
+  }
 
-  target.colorTexture = dev->create_texture_2d(width, height, 4, nullptr);
-  if (target.colorTexture == 0U) {
+  // Single-level LDR color: the capture pass renders mip 0 only, so a
+  // generated chain would freeze stale data (issue #229); material
+  // sampling clamps to the rendered level instead.
+  TextureDesc colorDesc{};
+  colorDesc.kind = TextureKind::Tex2D;
+  colorDesc.format = TextureFormat::RGBA8;
+  colorDesc.width = width;
+  colorDesc.height = height;
+  colorDesc.filter = TextureFilter::Linear;
+  colorDesc.wrap = TextureWrap::Repeat;
+  target.colorTexture = dev->create_texture(colorDesc);
+  if (target.colorTexture == kInvalidDeviceTexture) {
     core::log_message(core::LogLevel::Error, kCaptureLogChannel,
                       "failed to create scene capture color texture");
     destroy_capture_target(target, dev);
     return false;
   }
 
-  target.depthTexture = dev->create_depth_texture(width, height);
-  if (target.depthTexture == 0U) {
+  TextureDesc depthDesc{};
+  depthDesc.kind = TextureKind::Tex2D;
+  depthDesc.format = TextureFormat::Depth24;
+  depthDesc.width = width;
+  depthDesc.height = height;
+  depthDesc.filter = TextureFilter::Linear;
+  depthDesc.wrap = TextureWrap::Repeat;
+  target.depthTexture = dev->create_texture(depthDesc);
+  if (target.depthTexture == kInvalidDeviceTexture) {
     core::log_message(core::LogLevel::Error, kCaptureLogChannel,
                       "failed to create scene capture depth texture");
     destroy_capture_target(target, dev);
     return false;
   }
 
-  target.framebuffer =
-      dev->create_framebuffer(target.colorTexture, target.depthTexture);
-  if (target.framebuffer == 0U) {
+  RenderTargetDesc targetDesc{};
+  targetDesc.colorCount = 1U;
+  targetDesc.colors[0].texture = target.colorTexture;
+  targetDesc.depth.texture = target.depthTexture;
+  target.target = dev->create_render_target(targetDesc);
+  if (target.target.value == 0U) {
     core::log_message(core::LogLevel::Error, kCaptureLogChannel,
-                      "failed to create scene capture framebuffer");
+                      "failed to create scene capture render target");
     destroy_capture_target(target, dev);
     return false;
   }

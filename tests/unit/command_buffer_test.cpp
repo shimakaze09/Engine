@@ -310,15 +310,18 @@ int check_environment_texture_getters() {
     return 45;
   }
 
-  if (engine::renderer::get_prefiltered_environment_texture() != 0U) {
+  if (engine::renderer::get_prefiltered_environment_texture() !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::core::shutdown_cvars();
     return 46;
   }
-  if (engine::renderer::get_irradiance_environment_texture() != 0U) {
+  if (engine::renderer::get_irradiance_environment_texture() !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::core::shutdown_cvars();
     return 47;
   }
-  if (engine::renderer::get_brdf_lut_texture() != 0U) {
+  if (engine::renderer::get_brdf_lut_texture() !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::core::shutdown_cvars();
     return 48;
   }
@@ -327,11 +330,13 @@ int check_environment_texture_getters() {
     engine::core::shutdown_cvars();
     return 49;
   }
-  if (engine::renderer::get_prefiltered_environment_texture() != 0U) {
+  if (engine::renderer::get_prefiltered_environment_texture() !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::core::shutdown_cvars();
     return 50;
   }
-  if (engine::renderer::get_irradiance_environment_texture() != 0U) {
+  if (engine::renderer::get_irradiance_environment_texture() !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::core::shutdown_cvars();
     return 51;
   }
@@ -340,7 +345,8 @@ int check_environment_texture_getters() {
     engine::core::shutdown_cvars();
     return 52;
   }
-  if (engine::renderer::get_brdf_lut_texture() != 0U) {
+  if (engine::renderer::get_brdf_lut_texture() !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::core::shutdown_cvars();
     return 53;
   }
@@ -374,10 +380,11 @@ int check_reflection_probe_bake_settings() {
   const engine::renderer::ReflectionProbeBakeResult inactive =
       engine::renderer::bake_reflection_probe(
           engine::renderer::ReflectionProbeBakeRequest{});
-  if (inactive.baked || (inactive.sourceCubemapTexture != 0U) ||
-      (inactive.prefilteredEnvironmentTexture != 0U) ||
-      (inactive.irradianceEnvironmentTexture != 0U) ||
-      (inactive.brdfLutTexture != 0U)) {
+  constexpr engine::renderer::DeviceTextureHandle kNoTexture{};
+  if (inactive.baked || (inactive.sourceCubemapTexture != kNoTexture) ||
+      (inactive.prefilteredEnvironmentTexture != kNoTexture) ||
+      (inactive.irradianceEnvironmentTexture != kNoTexture) ||
+      (inactive.brdfLutTexture != kNoTexture)) {
     return 65;
   }
 
@@ -542,11 +549,13 @@ int check_scene_capture_requests() {
 
   // Without a rendered flush, capture textures stay unavailable; slot
   // indices past the fixed capacity always return 0.
-  if (engine::renderer::get_scene_capture_texture(0U) != 0U) {
+  if (engine::renderer::get_scene_capture_texture(0U) !=
+      engine::renderer::kInvalidDeviceTexture) {
     return 99;
   }
   if (engine::renderer::get_scene_capture_texture(
-          engine::renderer::kMaxSceneCaptures) != 0U) {
+          engine::renderer::kMaxSceneCaptures) !=
+      engine::renderer::kInvalidDeviceTexture) {
     return 100;
   }
 
@@ -570,7 +579,8 @@ int check_scene_capture_requests() {
     engine::renderer::shutdown_texture_system();
     return 103;
   }
-  if (engine::renderer::texture_gpu_id(slotHandle) != 0U) {
+  if (engine::renderer::texture_device_handle(slotHandle) !=
+      engine::renderer::kInvalidDeviceTexture) {
     engine::renderer::shutdown_texture_system();
     return 104;
   }
@@ -589,7 +599,8 @@ int check_scene_capture_requests() {
     engine::renderer::shutdown_texture_system();
     return 106;
   }
-  if (engine::renderer::update_external_texture(slotHandle, 7U)) {
+  if (engine::renderer::update_external_texture(
+          slotHandle, engine::renderer::DeviceTextureHandle{7U})) {
     engine::renderer::shutdown_texture_system();
     return 107;
   }

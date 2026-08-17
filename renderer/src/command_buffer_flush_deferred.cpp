@@ -41,6 +41,31 @@
 
 namespace engine::renderer {
 
+namespace {
+
+/// R32F data texture (tile/per-light lookup tables): exact texel fetches,
+/// so nearest filtering and edge clamping.
+DeviceTextureHandle create_r32f_data_texture(const RenderDevice *dev,
+                                             std::int32_t width,
+                                             std::int32_t height,
+                                             const float *data) noexcept {
+  if ((dev == nullptr) || (dev->create_texture == nullptr)) {
+    return kInvalidDeviceTexture;
+  }
+  TextureDesc desc{};
+  desc.kind = TextureKind::Tex2D;
+  desc.format = TextureFormat::R32F;
+  desc.width = width;
+  desc.height = height;
+  desc.filter = TextureFilter::Nearest;
+  desc.wrap = TextureWrap::ClampEdge;
+  desc.pixelData = TexelData::F32;
+  desc.pixels = data;
+  return dev->create_texture(desc);
+}
+
+} // namespace
+
 void flush_deferred_path(FrameFlushContext &ctx) noexcept {
   BackendState &backend = ctx.backend;
   const RenderDevice *dev = ctx.dev;
@@ -60,9 +85,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
   const math::Mat4 &projMat = ctx.projMat;
   const math::Mat4 &viewProjection = ctx.viewProjection;
   const bool iblAvailable = ctx.iblAvailable;
-  const std::uint32_t iblPrefilteredTex = ctx.iblPrefilteredTex;
-  const std::uint32_t iblIrradianceTex = ctx.iblIrradianceTex;
-  const std::uint32_t envSkyboxTexture = ctx.envSkyboxTexture;
+  const DeviceTextureHandle iblPrefilteredTex = ctx.iblPrefilteredTex;
+  const DeviceTextureHandle iblIrradianceTex = ctx.iblIrradianceTex;
+  const DeviceTextureHandle envSkyboxTexture = ctx.envSkyboxTexture;
   const int gbufferDebugMode = ctx.gbufferDebugMode;
   const bool shadowEnabled = ctx.shadowEnabled;
   const bool doSpotShadows = ctx.doSpotShadows;
@@ -73,47 +98,47 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (sceneDepthHasOpaque) {
         return true;
       }
-      if (dev->blit_depth == nullptr) {
+      if (dev->copy_depth == nullptr) {
         return false;
       }
 
-      const std::uint32_t gbufferFbo =
-          pass_resource_framebuffer(passRes.gbufferAlbedo);
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->blit_depth(gbufferFbo, sceneFbo, drawableWidth, drawableHeight);
-      dev->bind_framebuffer(sceneFbo);
+      const RenderTargetHandle gbufferTarget =
+          pass_resource_target(passRes.gbufferAlbedo);
+      const RenderTargetHandle sceneTarget =
+          pass_resource_target(passRes.sceneColor);
+      dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
+                      drawableHeight);
+      dev->bind_render_target(sceneTarget);
       sceneDepthHasOpaque = true;
       return true;
     };
 
     gpu_profiler_begin_pass(GpuPassId::GBuffer);
-    const std::uint32_t gbufferFbo =
-        pass_resource_framebuffer(passRes.gbufferAlbedo);
-    dev->bind_framebuffer(gbufferFbo);
+    const RenderTargetHandle gbufferTarget =
+        pass_resource_target(passRes.gbufferAlbedo);
+    dev->bind_render_target(gbufferTarget);
     dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-    dev->enable_depth_test();
-    dev->set_clear_color(0.0F, 0.0F, 0.0F, 0.0F);
-    dev->clear_color_depth();
+    dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                        BlendMode::Disabled, CullMode::Back});
+    dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 0.0F);
 
     dev->bind_program(backend.gbufferProgram);
 
-    if (backend.gbufViewLoc >= 0) {
-      dev->set_uniform_mat4(backend.gbufViewLoc, &viewMat.columns[0].x);
+    if (backend.gbufViewLoc.valid()) {
+      dev->set_param_mat4(backend.gbufViewLoc, &viewMat.columns[0].x);
     }
-    if (backend.gbufProjectionLoc >= 0) {
-      dev->set_uniform_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
+    if (backend.gbufProjectionLoc.valid()) {
+      dev->set_param_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
     }
-    if (backend.gbufTimeLoc >= 0) {
-      dev->set_uniform_float(backend.gbufTimeLoc, timeSeconds);
+    if (backend.gbufTimeLoc.valid()) {
+      dev->set_param_f32(backend.gbufTimeLoc, timeSeconds);
     }
 
     auto drawGBufferBatches = [&]() {
-      std::uint32_t boundVertexArray = 0U;
-      std::uint32_t boundAlbedoTex = 0U;
-      std::uint32_t boundMaterialTexIds[4] = {};
-      if (backend.gbufAlbedoTextureLoc >= 0) {
-        dev->set_uniform_int(backend.gbufAlbedoTextureLoc, 0);
+      DeviceTextureHandle boundAlbedoTex{};
+      DeviceTextureHandle boundMaterialTex[4] = {};
+      if (backend.gbufAlbedoTextureLoc.valid()) {
+        dev->set_param_i32(backend.gbufAlbedoTextureLoc, 0);
       }
       const MaterialTextureUniformLocs materialTexLocs{
           backend.gbufHasMetallicRoughnessTextureLoc,
@@ -133,73 +158,67 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
         const DrawCommand &command = commandBufferView.data[batch.first];
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
             (mesh->vertexCount == 0U)) {
           continue;
         }
 
-        if (mesh->vertexArray != boundVertexArray) {
-          dev->bind_vertex_array(mesh->vertexArray);
-          boundVertexArray = mesh->vertexArray;
-        }
-
-        if (backend.gbufAlbedoLoc >= 0) {
-          dev->set_uniform_vec3(backend.gbufAlbedoLoc,
+        if (backend.gbufAlbedoLoc.valid()) {
+          dev->set_param_vec3(backend.gbufAlbedoLoc,
                                 &command.material.albedo.x);
         }
-        if (backend.gbufMetallicLoc >= 0) {
-          dev->set_uniform_float(backend.gbufMetallicLoc,
+        if (backend.gbufMetallicLoc.valid()) {
+          dev->set_param_f32(backend.gbufMetallicLoc,
                                  command.material.metallic);
         }
-        if (backend.gbufRoughnessLoc >= 0) {
-          dev->set_uniform_float(backend.gbufRoughnessLoc,
+        if (backend.gbufRoughnessLoc.valid()) {
+          dev->set_param_f32(backend.gbufRoughnessLoc,
                                  command.material.roughness);
         }
-        if (backend.gbufAOLoc >= 0) {
-          dev->set_uniform_float(backend.gbufAOLoc, 1.0F);
+        if (backend.gbufAOLoc.valid()) {
+          dev->set_param_f32(backend.gbufAOLoc, 1.0F);
         }
-        if (backend.gbufEmissiveLoc >= 0) {
-          dev->set_uniform_vec3(backend.gbufEmissiveLoc,
+        if (backend.gbufEmissiveLoc.valid()) {
+          dev->set_param_vec3(backend.gbufEmissiveLoc,
                                 &command.material.emissive.x);
         }
-        const std::uint32_t albedoGpu =
-            texture_gpu_id(command.material.albedoTexture);
+        const DeviceTextureHandle albedoTex =
+            texture_device_handle(command.material.albedoTexture);
         const bool hasAlbedoTex =
             (command.material.albedoTexture != kInvalidTextureHandle) &&
-            (albedoGpu != 0U);
-        if (backend.gbufHasAlbedoTextureLoc >= 0) {
-          dev->set_uniform_int(backend.gbufHasAlbedoTextureLoc,
+            (albedoTex != kInvalidDeviceTexture);
+        if (backend.gbufHasAlbedoTextureLoc.valid()) {
+          dev->set_param_i32(backend.gbufHasAlbedoTextureLoc,
                                hasAlbedoTex ? 1 : 0);
         }
-        if (hasAlbedoTex && (albedoGpu != boundAlbedoTex)) {
-          dev->bind_texture(0, albedoGpu);
-          boundAlbedoTex = albedoGpu;
-        } else if (!hasAlbedoTex && (boundAlbedoTex != 0U)) {
-          dev->bind_texture(0, 0U);
-          boundAlbedoTex = 0U;
+        if (hasAlbedoTex && (albedoTex != boundAlbedoTex)) {
+          dev->bind_texture_slot(0U, albedoTex);
+          boundAlbedoTex = albedoTex;
+        } else if (!hasAlbedoTex && (boundAlbedoTex != kInvalidDeviceTexture)) {
+          dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+          boundAlbedoTex = kInvalidDeviceTexture;
         }
         upload_material_texture_slots(materialTexLocs, dev, command.material,
-                                      boundMaterialTexIds);
+                                      boundMaterialTex);
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
         if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
             upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                      batch)) {
-          boundVertexArray = mesh->vertexArray;
-          if (backend.gbufUseInstancingLoc >= 0) {
-            dev->set_uniform_int(backend.gbufUseInstancingLoc, 1);
+          if (backend.gbufUseInstancingLoc.valid()) {
+            dev->set_param_i32(backend.gbufUseInstancingLoc, 1);
           }
           ++frameStats.drawCalls;
           frameStats.triangleCount +=
               (mesh->indexCount / 3U) * static_cast<std::uint64_t>(batch.count);
-          dev->draw_elements_triangles_u32_instanced(
-              static_cast<std::int32_t>(mesh->indexCount),
+          dev->draw_indexed_instanced(
+              mesh->geometry, static_cast<std::int32_t>(mesh->indexCount),
               static_cast<std::int32_t>(batch.count));
           continue;
         }
 
-        if (backend.gbufUseInstancingLoc >= 0) {
-          dev->set_uniform_int(backend.gbufUseInstancingLoc, 0);
+        if (backend.gbufUseInstancingLoc.valid()) {
+          dev->set_param_i32(backend.gbufUseInstancingLoc, 0);
         }
         for (std::uint32_t local = 0U; local < batch.count; ++local) {
           const std::size_t commandIndex =
@@ -219,133 +238,123 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,
                                             timeSeconds, singleCommand, model,
                                             normalMatrix, &boundAlbedoTex,
-                                            boundMaterialTexIds);
+                                            boundMaterialTex);
             if (mesh->indexCount > 0U) {
               ++frameStats.drawCalls;
               frameStats.triangleCount += (mesh->indexCount / 3U);
-              dev->draw_elements_triangles_u32(
-                  static_cast<std::int32_t>(mesh->indexCount));
+              dev->draw_indexed(mesh->geometry,
+                                static_cast<std::int32_t>(mesh->indexCount));
             } else {
               ++frameStats.drawCalls;
               frameStats.triangleCount += (mesh->vertexCount / 3U);
-              dev->draw_arrays_triangles(
-                  0, static_cast<std::int32_t>(mesh->vertexCount));
+              dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                        static_cast<std::int32_t>(mesh->vertexCount));
             }
             dev->bind_program(backend.gbufferProgram);
             continue;
           }
 
           upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
-          if (backend.gbufModelLoc >= 0) {
-            dev->set_uniform_mat4(backend.gbufModelLoc, &model.columns[0].x);
+          if (backend.gbufModelLoc.valid()) {
+            dev->set_param_mat4(backend.gbufModelLoc, &model.columns[0].x);
           }
-          if (backend.gbufNormalMatrixLoc >= 0) {
-            dev->set_uniform_mat3(backend.gbufNormalMatrixLoc, normalMatrix);
+          if (backend.gbufNormalMatrixLoc.valid()) {
+            dev->set_param_mat3(backend.gbufNormalMatrixLoc, normalMatrix);
           }
 
           if (mesh->indexCount > 0U) {
             ++frameStats.drawCalls;
             frameStats.triangleCount += (mesh->indexCount / 3U);
-            dev->draw_elements_triangles_u32(
-                static_cast<std::int32_t>(mesh->indexCount));
+            dev->draw_indexed(mesh->geometry,
+                              static_cast<std::int32_t>(mesh->indexCount));
           } else {
             ++frameStats.drawCalls;
             frameStats.triangleCount += (mesh->vertexCount / 3U);
-            dev->draw_arrays_triangles(
-                0, static_cast<std::int32_t>(mesh->vertexCount));
+            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                      static_cast<std::int32_t>(mesh->vertexCount));
           }
         }
       }
     };
 
-    dev->set_depth_mask(true);
-    dev->disable_blending();
-    dev->enable_face_culling();
     drawGBufferBatches();
 
-    dev->bind_vertex_array(0U);
-    dev->bind_program(0U);
+    dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::GBuffer);
 
     const bool ssaoEnabled =
         backend.ssaoAvailable && core::cvar_get_bool("r_ssao", true);
     if (ssaoEnabled) {
       gpu_profiler_begin_pass(GpuPassId::SSAO);
-      const std::uint32_t ssaoFbo =
-          pass_resource_framebuffer(passRes.ssaoTexture);
-      dev->bind_framebuffer(ssaoFbo);
+      dev->bind_render_target(pass_resource_target(passRes.ssaoTexture));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->disable_depth_test();
+      dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
 
       dev->bind_program(backend.ssaoProgram);
 
-      dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferDepth));
-      dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
-      dev->bind_texture(2, backend.ssaoNoiseTexture);
+      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferDepth));
+      dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
+      dev->bind_texture_slot(2U, backend.ssaoNoiseTexture);
 
-      if (backend.ssaoDepthLoc >= 0)
-        dev->set_uniform_int(backend.ssaoDepthLoc, 0);
-      if (backend.ssaoNormalLoc >= 0)
-        dev->set_uniform_int(backend.ssaoNormalLoc, 1);
-      if (backend.ssaoNoiseLoc >= 0)
-        dev->set_uniform_int(backend.ssaoNoiseLoc, 2);
+      if (backend.ssaoDepthLoc.valid())
+        dev->set_param_i32(backend.ssaoDepthLoc, 0);
+      if (backend.ssaoNormalLoc.valid())
+        dev->set_param_i32(backend.ssaoNormalLoc, 1);
+      if (backend.ssaoNoiseLoc.valid())
+        dev->set_param_i32(backend.ssaoNoiseLoc, 2);
 
-      if (backend.ssaoProjectionLoc >= 0)
-        dev->set_uniform_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
-      if (backend.ssaoViewLoc >= 0)
-        dev->set_uniform_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
+      if (backend.ssaoProjectionLoc.valid())
+        dev->set_param_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
+      if (backend.ssaoViewLoc.valid())
+        dev->set_param_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
 
-      if (backend.ssaoNoiseScaleLoc >= 0) {
+      if (backend.ssaoNoiseScaleLoc.valid()) {
         const float noiseScale[2] = {static_cast<float>(drawableWidth) / 4.0F,
                                      static_cast<float>(drawableHeight) / 4.0F};
-        dev->set_uniform_vec2(backend.ssaoNoiseScaleLoc, noiseScale);
+        dev->set_param_vec2(backend.ssaoNoiseScaleLoc, noiseScale);
       }
-      if (backend.ssaoRadiusLoc >= 0)
-        dev->set_uniform_float(backend.ssaoRadiusLoc,
+      if (backend.ssaoRadiusLoc.valid())
+        dev->set_param_f32(backend.ssaoRadiusLoc,
                                core::cvar_get_float("r_ssao_radius"));
-      if (backend.ssaoBiasLoc >= 0)
-        dev->set_uniform_float(backend.ssaoBiasLoc,
+      if (backend.ssaoBiasLoc.valid())
+        dev->set_param_f32(backend.ssaoBiasLoc,
                                core::cvar_get_float("r_ssao_bias"));
 
       for (int i = 0; i < 32; ++i) {
         const auto idx = static_cast<std::size_t>(i);
-        if (backend.ssaoSampleLocs[idx] >= 0) {
-          dev->set_uniform_vec3(backend.ssaoSampleLocs[idx],
+        if (backend.ssaoSampleLocs[idx].valid()) {
+          dev->set_param_vec3(backend.ssaoSampleLocs[idx],
                                 &backend.ssaoKernel[i * 3]);
         }
       }
 
-      dev->bind_vertex_array(backend.emptyVao);
-      dev->draw_arrays_triangles(0, 3);
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-      dev->bind_texture(0, 0U);
-      dev->bind_texture(1, 0U);
-      dev->bind_texture(2, 0U);
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+      dev->bind_texture_slot(1U, kInvalidDeviceTexture);
+      dev->bind_texture_slot(2U, kInvalidDeviceTexture);
+      dev->bind_program(kInvalidDeviceProgram);
 
-      const std::uint32_t ssaoBlurFbo =
-          pass_resource_framebuffer(passRes.ssaoBlurTexture);
-      dev->bind_framebuffer(ssaoBlurFbo);
+      dev->bind_render_target(pass_resource_target(passRes.ssaoBlurTexture));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
 
       dev->bind_program(backend.ssaoBlurProgram);
 
-      dev->bind_texture(0, pass_resource_gpu_texture(passRes.ssaoTexture));
-      if (backend.ssaoBlurInputLoc >= 0)
-        dev->set_uniform_int(backend.ssaoBlurInputLoc, 0);
-      if (backend.ssaoBlurTexelSizeLoc >= 0) {
+      dev->bind_texture_slot(0U, pass_resource_texture(passRes.ssaoTexture));
+      if (backend.ssaoBlurInputLoc.valid())
+        dev->set_param_i32(backend.ssaoBlurInputLoc, 0);
+      if (backend.ssaoBlurTexelSizeLoc.valid()) {
         const float texelSize[2] = {1.0F / static_cast<float>(drawableWidth),
                                     1.0F / static_cast<float>(drawableHeight)};
-        dev->set_uniform_vec2(backend.ssaoBlurTexelSizeLoc, texelSize);
+        dev->set_param_vec2(backend.ssaoBlurTexelSizeLoc, texelSize);
       }
 
-      dev->bind_vertex_array(backend.emptyVao);
-      dev->draw_arrays_triangles(0, 3);
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-      dev->bind_texture(0, 0U);
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+      dev->bind_program(kInvalidDeviceProgram);
       gpu_profiler_end_pass(GpuPassId::SSAO);
     }
 
@@ -374,22 +383,23 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                           "renders without local lights");
         warnedCullFailure = true;
       }
-      if (backend.tileLightTex != 0U) {
+      if (backend.tileLightTex != kInvalidDeviceTexture) {
         dev->destroy_texture(backend.tileLightTex);
-        backend.tileLightTex = 0U;
+        backend.tileLightTex = kInvalidDeviceTexture;
         backend.tileLightTexRows = 0;
       }
     } else {
-      if ((backend.tileLightTex != 0U) &&
+      if ((backend.tileLightTex != kInvalidDeviceTexture) &&
           (tileData.totalTiles > backend.tileLightTexRows)) {
         dev->destroy_texture(backend.tileLightTex);
-        backend.tileLightTex = 0U;
+        backend.tileLightTex = kInvalidDeviceTexture;
         backend.tileLightTexRows = 0;
       }
-      if (backend.tileLightTex == 0U) {
-        backend.tileLightTex = dev->create_texture_2d_r32f(
-            kTileDataWidth, tileData.totalTiles, backend.tileBuffer.data());
-        if (backend.tileLightTex != 0U) {
+      if (backend.tileLightTex == kInvalidDeviceTexture) {
+        backend.tileLightTex = create_r32f_data_texture(
+            dev, kTileDataWidth, tileData.totalTiles,
+            backend.tileBuffer.data());
+        if (backend.tileLightTex != kInvalidDeviceTexture) {
           backend.tileLightTexRows = tileData.totalTiles;
         } else {
           static bool warnedTileTexFailure = false;
@@ -401,9 +411,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           }
         }
       } else {
-        dev->update_texture_2d_r32f(backend.tileLightTex, kTileDataWidth,
-                                    tileData.totalTiles,
-                                    backend.tileBuffer.data());
+        dev->update_texture(backend.tileLightTex, backend.tileBuffer.data(),
+                            kTileDataWidth, tileData.totalTiles);
       }
     }
 
@@ -416,172 +425,175 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                           "keeps its previous contents");
         warnedPackFailure = true;
       }
-    } else if (backend.lightDataTex == 0U) {
-      backend.lightDataTex = dev->create_texture_2d_r32f(
-          kLightDataTexWidth, kLightDataTexHeight,
+    } else if (backend.lightDataTex == kInvalidDeviceTexture) {
+      backend.lightDataTex = create_r32f_data_texture(
+          dev, kLightDataTexWidth, kLightDataTexHeight,
           backend.lightDataBuffer.data());
     } else {
-      dev->update_texture_2d_r32f(backend.lightDataTex, kLightDataTexWidth,
-                                  kLightDataTexHeight,
-                                  backend.lightDataBuffer.data());
+      dev->update_texture(backend.lightDataTex,
+                          backend.lightDataBuffer.data(), kLightDataTexWidth,
+                          kLightDataTexHeight);
     }
 
-    if (gbufferDebugMode > 0 && backend.gbufferDebugProgram != 0U) {
+    if (gbufferDebugMode > 0 &&
+        backend.gbufferDebugProgram != kInvalidDeviceProgram) {
       gpu_profiler_begin_pass(GpuPassId::GBufferDebug);
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->bind_framebuffer(sceneFbo);
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->disable_depth_test();
+      dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
 
       dev->bind_program(backend.gbufferDebugProgram);
 
-      dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferAlbedo));
-      dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
-      dev->bind_texture(2, pass_resource_gpu_texture(passRes.gbufferEmissive));
-      dev->bind_texture(3, pass_resource_gpu_texture(passRes.gbufferDepth));
+      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
+      dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
+      dev->bind_texture_slot(2U,
+                             pass_resource_texture(passRes.gbufferEmissive));
+      dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
 
-      if (backend.dbgGBufAlbedoLoc >= 0)
-        dev->set_uniform_int(backend.dbgGBufAlbedoLoc, 0);
-      if (backend.dbgGBufNormalLoc >= 0)
-        dev->set_uniform_int(backend.dbgGBufNormalLoc, 1);
-      if (backend.dbgGBufEmissiveLoc >= 0)
-        dev->set_uniform_int(backend.dbgGBufEmissiveLoc, 2);
-      if (backend.dbgGBufDepthLoc >= 0)
-        dev->set_uniform_int(backend.dbgGBufDepthLoc, 3);
+      if (backend.dbgGBufAlbedoLoc.valid())
+        dev->set_param_i32(backend.dbgGBufAlbedoLoc, 0);
+      if (backend.dbgGBufNormalLoc.valid())
+        dev->set_param_i32(backend.dbgGBufNormalLoc, 1);
+      if (backend.dbgGBufEmissiveLoc.valid())
+        dev->set_param_i32(backend.dbgGBufEmissiveLoc, 2);
+      if (backend.dbgGBufDepthLoc.valid())
+        dev->set_param_i32(backend.dbgGBufDepthLoc, 3);
       // Debug mode:
       // 0=albedo,1=normals,2=metallic,3=roughness,4=emissive,5=AO,6=depth CVar
       // value 1..7 maps to shader 0..6.
-      if (backend.dbgModeLoc >= 0)
-        dev->set_uniform_int(backend.dbgModeLoc, gbufferDebugMode - 1);
+      if (backend.dbgModeLoc.valid())
+        dev->set_param_i32(backend.dbgModeLoc, gbufferDebugMode - 1);
 
-      dev->bind_vertex_array(backend.emptyVao);
-      dev->draw_arrays_triangles(0, 3);
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-      dev->bind_texture(0, 0U);
-      dev->bind_texture(1, 0U);
-      dev->bind_texture(2, 0U);
-      dev->bind_texture(3, 0U);
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+      dev->bind_texture_slot(1U, kInvalidDeviceTexture);
+      dev->bind_texture_slot(2U, kInvalidDeviceTexture);
+      dev->bind_texture_slot(3U, kInvalidDeviceTexture);
+      dev->bind_program(kInvalidDeviceProgram);
       gpu_profiler_end_pass(GpuPassId::GBufferDebug);
     } else {
       gpu_profiler_begin_pass(GpuPassId::DeferredLighting);
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->bind_framebuffer(sceneFbo);
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->disable_depth_test();
+      dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
 
       dev->bind_program(backend.deferredLightProgram);
 
-      // Bind G-Buffer textures on units 0-3, tile on unit 4, SSAO on unit 5,
-      // per-light data on unit 18 (units 6-17 hold shadow maps).
-      dev->bind_texture(0, pass_resource_gpu_texture(passRes.gbufferAlbedo));
-      dev->bind_texture(1, pass_resource_gpu_texture(passRes.gbufferNormal));
-      dev->bind_texture(2, pass_resource_gpu_texture(passRes.gbufferEmissive));
-      dev->bind_texture(3, pass_resource_gpu_texture(passRes.gbufferDepth));
-      dev->bind_texture(4, backend.tileLightTex);
-      dev->bind_texture(18, backend.lightDataTex);
+      // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on slot
+      // 5, per-light data on slot 18 (slots 6-17 hold shadow maps).
+      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
+      dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
+      dev->bind_texture_slot(2U,
+                             pass_resource_texture(passRes.gbufferEmissive));
+      dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
+      dev->bind_texture_slot(4U, backend.tileLightTex);
+      dev->bind_texture_slot(18U, backend.lightDataTex);
 
       if (ssaoEnabled) {
-        dev->bind_texture(5,
-                          pass_resource_gpu_texture(passRes.ssaoBlurTexture));
+        dev->bind_texture_slot(5U,
+                               pass_resource_texture(passRes.ssaoBlurTexture));
       }
 
-      if (backend.dlGBufAlbedoLoc >= 0)
-        dev->set_uniform_int(backend.dlGBufAlbedoLoc, 0);
-      if (backend.dlGBufNormalLoc >= 0)
-        dev->set_uniform_int(backend.dlGBufNormalLoc, 1);
-      if (backend.dlGBufEmissiveLoc >= 0)
-        dev->set_uniform_int(backend.dlGBufEmissiveLoc, 2);
-      if (backend.dlGBufDepthLoc >= 0)
-        dev->set_uniform_int(backend.dlGBufDepthLoc, 3);
-      if (backend.dlTileLightTexLoc >= 0)
-        dev->set_uniform_int(backend.dlTileLightTexLoc, 4);
-      if (backend.dlLightDataTexLoc >= 0)
-        dev->set_uniform_int(backend.dlLightDataTexLoc, 18);
+      if (backend.dlGBufAlbedoLoc.valid())
+        dev->set_param_i32(backend.dlGBufAlbedoLoc, 0);
+      if (backend.dlGBufNormalLoc.valid())
+        dev->set_param_i32(backend.dlGBufNormalLoc, 1);
+      if (backend.dlGBufEmissiveLoc.valid())
+        dev->set_param_i32(backend.dlGBufEmissiveLoc, 2);
+      if (backend.dlGBufDepthLoc.valid())
+        dev->set_param_i32(backend.dlGBufDepthLoc, 3);
+      if (backend.dlTileLightTexLoc.valid())
+        dev->set_param_i32(backend.dlTileLightTexLoc, 4);
+      if (backend.dlLightDataTexLoc.valid())
+        dev->set_param_i32(backend.dlLightDataTexLoc, 18);
 
       // Sampler units are assigned even when IBL is off: a samplerCube
       // uniform left at its default unit 0 aliases the sampler2D G-buffer
       // there, which is a draw-time GL_INVALID_OPERATION that corrupts
       // every deferred draw.
-      if (backend.dlIrradianceMapLoc >= 0) {
-        dev->set_uniform_int(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
+      if (backend.dlIrradianceMapLoc.valid()) {
+        dev->set_param_i32(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
       }
-      if (backend.dlPrefilteredMapLoc >= 0) {
-        dev->set_uniform_int(backend.dlPrefilteredMapLoc, kIblPrefilteredUnit);
+      if (backend.dlPrefilteredMapLoc.valid()) {
+        dev->set_param_i32(backend.dlPrefilteredMapLoc, kIblPrefilteredUnit);
       }
-      if (backend.dlBrdfLutLoc >= 0) {
-        dev->set_uniform_int(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
+      if (backend.dlBrdfLutLoc.valid()) {
+        dev->set_param_i32(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
       }
       const bool dlIblEnabled = iblAvailable &&
-                                (backend.dlIblEnabledLoc >= 0) &&
-                                (dev->bind_texture_cubemap != nullptr);
-      if (backend.dlIblEnabledLoc >= 0) {
-        dev->set_uniform_int(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
+                                (backend.dlIblEnabledLoc.valid()) &&
+                                (dev->bind_texture_slot != nullptr);
+      if (backend.dlIblEnabledLoc.valid()) {
+        dev->set_param_i32(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
       }
       if (dlIblEnabled) {
-        dev->bind_texture_cubemap(kIblIrradianceUnit, iblIrradianceTex);
-        dev->bind_texture_cubemap(kIblPrefilteredUnit, iblPrefilteredTex);
-        dev->bind_texture(kIblBrdfLutUnit, backend.brdfLutTexture);
-        if (backend.dlPrefilteredMipsLoc >= 0) {
-          dev->set_uniform_float(
+        dev->bind_texture_slot(kIblIrradianceUnit, iblIrradianceTex);
+        dev->bind_texture_slot(kIblPrefilteredUnit, iblPrefilteredTex);
+        dev->bind_texture_slot(kIblBrdfLutUnit, backend.brdfLutTexture);
+        if (backend.dlPrefilteredMipsLoc.valid()) {
+          dev->set_param_f32(
               backend.dlPrefilteredMipsLoc,
               static_cast<float>(backend.prefilteredEnvironmentMipLevels));
         }
       }
 
-      if (backend.dlSsaoTextureLoc >= 0)
-        dev->set_uniform_int(backend.dlSsaoTextureLoc, 5);
-      if (backend.dlSsaoEnabledLoc >= 0)
-        dev->set_uniform_int(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
+      if (backend.dlSsaoTextureLoc.valid())
+        dev->set_param_i32(backend.dlSsaoTextureLoc, 5);
+      if (backend.dlSsaoEnabledLoc.valid())
+        dev->set_param_i32(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
 
       if (shadowEnabled) {
         for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-          const int texUnit = 6 + static_cast<int>(c);
-          dev->bind_texture(texUnit, backend.shadowState.depthTextures[c]);
-          if (backend.dlShadowMapLocs[c] >= 0) {
-            dev->set_uniform_int(backend.dlShadowMapLocs[c], texUnit);
+          const auto texUnit = static_cast<std::uint32_t>(6U + c);
+          dev->bind_texture_slot(texUnit, backend.shadowState.depthTextures[c]);
+          if (backend.dlShadowMapLocs[c].valid()) {
+            dev->set_param_i32(backend.dlShadowMapLocs[c],
+                               static_cast<std::int32_t>(texUnit));
           }
-          if (backend.dlShadowMatrixLocs[c] >= 0) {
-            dev->set_uniform_mat4(backend.dlShadowMatrixLocs[c],
+          if (backend.dlShadowMatrixLocs[c].valid()) {
+            dev->set_param_mat4(backend.dlShadowMatrixLocs[c],
                                   &backend.shadowState.cascades[c]
                                        .lightViewProjection.columns[0]
                                        .x);
           }
-          if (backend.dlCascadeSplitLocs[c] >= 0) {
-            dev->set_uniform_float(
+          if (backend.dlCascadeSplitLocs[c].valid()) {
+            dev->set_param_f32(
                 backend.dlCascadeSplitLocs[c],
                 backend.shadowState.cascades[c].splitDistance);
           }
         }
       }
-      if (backend.dlShadowEnabledLoc >= 0) {
-        dev->set_uniform_int(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
+      if (backend.dlShadowEnabledLoc.valid()) {
+        dev->set_param_i32(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
       }
 
       const bool spotShadowEnabled = doSpotShadows;
       if (spotShadowEnabled) {
         for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
           const auto &slot = backend.spotShadowState.slots[s];
-          const int texUnit = 10 + static_cast<int>(s);
-          dev->bind_texture(texUnit, slot.depthTexture);
-          if (backend.dlSpotShadowMapLocs[s] >= 0) {
-            dev->set_uniform_int(backend.dlSpotShadowMapLocs[s], texUnit);
+          const auto texUnit = static_cast<std::uint32_t>(10U + s);
+          dev->bind_texture_slot(texUnit, slot.depthTexture);
+          if (backend.dlSpotShadowMapLocs[s].valid()) {
+            dev->set_param_i32(backend.dlSpotShadowMapLocs[s],
+                               static_cast<std::int32_t>(texUnit));
           }
-          if (backend.dlSpotShadowMatrixLocs[s] >= 0) {
-            dev->set_uniform_mat4(backend.dlSpotShadowMatrixLocs[s],
+          if (backend.dlSpotShadowMatrixLocs[s].valid()) {
+            dev->set_param_mat4(backend.dlSpotShadowMatrixLocs[s],
                                   &slot.lightViewProjection.columns[0].x);
           }
-          if (backend.dlSpotShadowLightIdxLocs[s] >= 0) {
-            dev->set_uniform_int(backend.dlSpotShadowLightIdxLocs[s],
+          if (backend.dlSpotShadowLightIdxLocs[s].valid()) {
+            dev->set_param_i32(backend.dlSpotShadowLightIdxLocs[s],
                                  slot.lightIndex);
           }
         }
       }
-      if (backend.dlSpotShadowEnabledLoc >= 0) {
-        dev->set_uniform_int(backend.dlSpotShadowEnabledLoc,
+      if (backend.dlSpotShadowEnabledLoc.valid()) {
+        dev->set_param_i32(backend.dlSpotShadowEnabledLoc,
                              spotShadowEnabled ? 1 : 0);
       }
 
@@ -592,53 +604,53 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       // drivers.
       const bool pointShadowEnabled = doPointShadows;
       for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
-        const int texUnit = 14 + static_cast<int>(s);
-        if (backend.dlPointShadowMapLocs[s] >= 0) {
-          dev->set_uniform_int(backend.dlPointShadowMapLocs[s], texUnit);
+        if (backend.dlPointShadowMapLocs[s].valid()) {
+          dev->set_param_i32(backend.dlPointShadowMapLocs[s],
+                             static_cast<std::int32_t>(14U + s));
         }
       }
       if (pointShadowEnabled) {
         for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
           const auto &slot = backend.pointShadowState.slots[s];
-          const int texUnit = 14 + static_cast<int>(s);
-          if (dev->bind_texture_cubemap != nullptr) {
-            dev->bind_texture_cubemap(texUnit, slot.depthCubemap);
+          const auto texUnit = static_cast<std::uint32_t>(14U + s);
+          if (dev->bind_texture_slot != nullptr) {
+            dev->bind_texture_slot(texUnit, slot.depthCubemap);
           }
-          if (backend.dlPointShadowLightPosLocs[s] >= 0) {
+          if (backend.dlPointShadowLightPosLocs[s].valid()) {
             const math::Vec3 lp =
                 point_shadow_slot_light_position(slot.lightIndex, lights);
-            dev->set_uniform_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
+            dev->set_param_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
           }
-          if (backend.dlPointShadowFarPlaneLocs[s] >= 0) {
-            dev->set_uniform_float(backend.dlPointShadowFarPlaneLocs[s],
+          if (backend.dlPointShadowFarPlaneLocs[s].valid()) {
+            dev->set_param_f32(backend.dlPointShadowFarPlaneLocs[s],
                                    slot.farPlane);
           }
-          if (backend.dlPointShadowLightIdxLocs[s] >= 0) {
-            dev->set_uniform_int(backend.dlPointShadowLightIdxLocs[s],
+          if (backend.dlPointShadowLightIdxLocs[s].valid()) {
+            dev->set_param_i32(backend.dlPointShadowLightIdxLocs[s],
                                  slot.lightIndex);
           }
         }
       }
-      if (backend.dlPointShadowEnabledLoc >= 0) {
-        dev->set_uniform_int(backend.dlPointShadowEnabledLoc,
+      if (backend.dlPointShadowEnabledLoc.valid()) {
+        dev->set_param_i32(backend.dlPointShadowEnabledLoc,
                              pointShadowEnabled ? 1 : 0);
       }
 
-      if (backend.dlTileCountXLoc >= 0)
-        dev->set_uniform_int(backend.dlTileCountXLoc, tileData.tileCountX);
-      if (backend.dlTileCountYLoc >= 0)
-        dev->set_uniform_int(backend.dlTileCountYLoc, tileData.tileCountY);
+      if (backend.dlTileCountXLoc.valid())
+        dev->set_param_i32(backend.dlTileCountXLoc, tileData.tileCountX);
+      if (backend.dlTileCountYLoc.valid())
+        dev->set_param_i32(backend.dlTileCountYLoc, tileData.tileCountY);
 
       math::Mat4 invProj{};
       if (math::inverse(projMat, &invProj)) {
-        if (backend.dlInvProjectionLoc >= 0)
-          dev->set_uniform_mat4(backend.dlInvProjectionLoc,
+        if (backend.dlInvProjectionLoc.valid())
+          dev->set_param_mat4(backend.dlInvProjectionLoc,
                                 &invProj.columns[0].x);
       }
       math::Mat4 invView{};
       if (math::inverse(viewMat, &invView)) {
-        if (backend.dlInvViewLoc >= 0)
-          dev->set_uniform_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
+        if (backend.dlInvViewLoc.valid())
+          dev->set_param_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
       }
 
       // Directional light (use first if available). Always upload: the
@@ -649,82 +661,74 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         const bool hasDirLight = lights.directionalLightCount > 0U;
         const math::Vec3 kNoLightDir(0.0F, -1.0F, 0.0F);
         const math::Vec3 kNoLightColor(0.0F, 0.0F, 0.0F);
-        if (backend.dlDirLightDirLoc >= 0) {
+        if (backend.dlDirLightDirLoc.valid()) {
           const math::Vec3 &dir = hasDirLight
                                       ? lights.directionalLights[0].direction
                                       : kNoLightDir;
-          dev->set_uniform_vec3(backend.dlDirLightDirLoc, &dir.x);
+          dev->set_param_vec3(backend.dlDirLightDirLoc, &dir.x);
         }
-        if (backend.dlDirLightColorLoc >= 0) {
+        if (backend.dlDirLightColorLoc.valid()) {
           const math::Vec3 &color = hasDirLight
                                         ? lights.directionalLights[0].color
                                         : kNoLightColor;
-          dev->set_uniform_vec3(backend.dlDirLightColorLoc, &color.x);
+          dev->set_param_vec3(backend.dlDirLightColorLoc, &color.x);
         }
       }
 
-      if (backend.dlCameraPosLoc >= 0) {
-        dev->set_uniform_vec3(backend.dlCameraPosLoc,
+      if (backend.dlCameraPosLoc.valid()) {
+        dev->set_param_vec3(backend.dlCameraPosLoc,
                               &renderer_context().activeCamera.position.x);
       }
-      if (backend.dlScreenSizeLoc >= 0) {
+      if (backend.dlScreenSizeLoc.valid()) {
         const float screenSize[2] = {static_cast<float>(drawableWidth),
                                      static_cast<float>(drawableHeight)};
-        dev->set_uniform_vec2(backend.dlScreenSizeLoc, screenSize);
+        dev->set_param_vec2(backend.dlScreenSizeLoc, screenSize);
       }
       upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
       upload_deferred_height_fog_uniforms(backend, dev, heightFogSettings);
 
       const auto plCount = static_cast<int>(std::min(
           lights.pointLightCount, static_cast<std::size_t>(kMaxPointLights)));
-      if (backend.dlPointLightCountLoc >= 0)
-        dev->set_uniform_int(backend.dlPointLightCountLoc, plCount);
+      if (backend.dlPointLightCountLoc.valid())
+        dev->set_param_i32(backend.dlPointLightCountLoc, plCount);
       const auto slCount = static_cast<int>(std::min(
           lights.spotLightCount, static_cast<std::size_t>(kMaxSpotLights)));
-      if (backend.dlSpotLightCountLoc >= 0)
-        dev->set_uniform_int(backend.dlSpotLightCountLoc, slCount);
+      if (backend.dlSpotLightCountLoc.valid())
+        dev->set_param_i32(backend.dlSpotLightCountLoc, slCount);
 
-      dev->bind_vertex_array(backend.emptyVao);
-      dev->draw_arrays_triangles(0, 3);
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-      dev->bind_texture(0, 0U);
-      dev->bind_texture(1, 0U);
-      dev->bind_texture(2, 0U);
-      dev->bind_texture(3, 0U);
-      dev->bind_texture(4, 0U);
-      dev->bind_texture(18, 0U);
+      for (std::uint32_t slot = 0U; slot <= 4U; ++slot) {
+        dev->bind_texture_slot(slot, kInvalidDeviceTexture);
+      }
+      dev->bind_texture_slot(18U, kInvalidDeviceTexture);
       if (dlIblEnabled) {
-        dev->bind_texture_cubemap(kIblIrradianceUnit, 0U);
-        dev->bind_texture_cubemap(kIblPrefilteredUnit, 0U);
-        dev->bind_texture(kIblBrdfLutUnit, 0U);
+        dev->bind_texture_slot(kIblIrradianceUnit, kInvalidDeviceTexture);
+        dev->bind_texture_slot(kIblPrefilteredUnit, kInvalidDeviceTexture);
+        dev->bind_texture_slot(kIblBrdfLutUnit, kInvalidDeviceTexture);
       }
       if (ssaoEnabled) {
-        dev->bind_texture(5, 0U);
+        dev->bind_texture_slot(5U, kInvalidDeviceTexture);
       }
       if (shadowEnabled) {
-        for (int c = 0; c < static_cast<int>(kShadowCascadeCount); ++c) {
-          dev->bind_texture(6 + c, 0U);
+        for (std::uint32_t c = 0U; c < kShadowCascadeCount; ++c) {
+          dev->bind_texture_slot(6U + c, kInvalidDeviceTexture);
         }
       }
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      dev->bind_program(kInvalidDeviceProgram);
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
     }
 
     const SkyModel skyModel = selected_sky_model();
-    const std::uint32_t skyboxTexture = envSkyboxTexture;
-    if (skyboxTexture != 0U) {
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->bind_framebuffer(sceneFbo);
+    const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
+    if (skyboxTexture != kInvalidDeviceTexture) {
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       if (ensureSceneDepthHasOpaque()) {
         draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
       }
     } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->bind_framebuffer(sceneFbo);
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       if (ensureSceneDepthHasOpaque()) {
         draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
@@ -732,9 +736,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     } else if (((skyModel == SkyModel::Preetham) ||
                 (skyModel == SkyModel::Hosek)) &&
                backend.preethamSkyAvailable) {
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->bind_framebuffer(sceneFbo);
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       if (ensureSceneDepthHasOpaque()) {
         draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
@@ -742,32 +744,29 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     }
 
     if (opaqueCount < totalCount) {
-      const std::uint32_t sceneFbo =
-          pass_resource_framebuffer(passRes.sceneColor);
-      dev->bind_framebuffer(sceneFbo);
-      dev->enable_depth_test();
+      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
 
-      // Carry opaque deferred depth into the scene FBO so forward transparent
-      // draws depth-test against G-Buffer geometry.
+      // Carry opaque deferred depth into the scene target so forward
+      // transparent draws depth-test against G-Buffer geometry.
       static_cast<void>(ensureSceneDepthHasOpaque());
       dev->bind_program(backend.pbrProgram);
 
-      if (backend.pbrTimeLocation >= 0) {
-        dev->set_uniform_float(backend.pbrTimeLocation, timeSeconds);
+      if (backend.pbrTimeLocation.valid()) {
+        dev->set_param_f32(backend.pbrTimeLocation, timeSeconds);
       }
-      if (backend.pbrCameraPosLocation >= 0) {
-        dev->set_uniform_vec3(backend.pbrCameraPosLocation,
+      if (backend.pbrCameraPosLocation.valid()) {
+        dev->set_param_vec3(backend.pbrCameraPosLocation,
                               &renderer_context().activeCamera.position.x);
       }
-      if (backend.pbrViewLocation >= 0) {
-        dev->set_uniform_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
+      if (backend.pbrViewLocation.valid()) {
+        dev->set_param_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
       }
-      if (backend.pbrViewProjectionLocation >= 0) {
-        dev->set_uniform_mat4(backend.pbrViewProjectionLocation,
+      if (backend.pbrViewProjectionLocation.valid()) {
+        dev->set_param_mat4(backend.pbrViewProjectionLocation,
                               &viewProjection.columns[0].x);
       }
-      if (backend.pbrUseInstancingLocation >= 0) {
-        dev->set_uniform_int(backend.pbrUseInstancingLocation, 0);
+      if (backend.pbrUseInstancingLocation.valid()) {
+        dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
       }
       upload_pbr_lighting_uniforms(backend, dev, lights);
       apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
@@ -775,8 +774,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
       bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
                                doSpotShadows, doPointShadows);
-      if (backend.pbrAlbedoMapLocation >= 0)
-        dev->set_uniform_int(backend.pbrAlbedoMapLocation, 0);
+      if (backend.pbrAlbedoMapLocation.valid())
+        dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
 
       const math::Mat4 &vp = viewProjection;
       const MaterialTextureUniformLocs transparentMaterialTexLocs{
@@ -794,88 +793,81 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           backend.pbrUvOffsetLocation};
 
       auto drawForwardTransparent = [&](std::size_t start, std::size_t end) {
-        std::uint32_t boundVA = 0U;
-        std::uint32_t boundAlbedoTex = 0U;
-        std::uint32_t boundMaterialTexIds[4] = {};
+        DeviceTextureHandle boundAlbedoTex{};
+        DeviceTextureHandle boundMaterialTex[4] = {};
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
-          if ((mesh == nullptr) || (mesh->vertexArray == 0U) ||
+          if ((mesh == nullptr) ||
+              (mesh->geometry == kInvalidDeviceGeometry) ||
               (mesh->vertexCount == 0U))
             continue;
-          if (mesh->vertexArray != boundVA) {
-            dev->bind_vertex_array(mesh->vertexArray);
-            boundVA = mesh->vertexArray;
-          }
-          if (backend.pbrAlbedoLocation >= 0)
-            dev->set_uniform_vec3(backend.pbrAlbedoLocation,
+          if (backend.pbrAlbedoLocation.valid())
+            dev->set_param_vec3(backend.pbrAlbedoLocation,
                                   &cmd.material.albedo.x);
-          if (backend.pbrRoughnessLocation >= 0)
-            dev->set_uniform_float(backend.pbrRoughnessLocation,
+          if (backend.pbrRoughnessLocation.valid())
+            dev->set_param_f32(backend.pbrRoughnessLocation,
                                    cmd.material.roughness);
-          if (backend.pbrMetallicLocation >= 0)
-            dev->set_uniform_float(backend.pbrMetallicLocation,
+          if (backend.pbrMetallicLocation.valid())
+            dev->set_param_f32(backend.pbrMetallicLocation,
                                    cmd.material.metallic);
-          if (backend.pbrOpacityLocation >= 0)
-            dev->set_uniform_float(backend.pbrOpacityLocation,
+          if (backend.pbrOpacityLocation.valid())
+            dev->set_param_f32(backend.pbrOpacityLocation,
                                    cmd.material.opacity);
-          if (backend.pbrEmissiveLocation >= 0)
-            dev->set_uniform_vec3(backend.pbrEmissiveLocation,
+          if (backend.pbrEmissiveLocation.valid())
+            dev->set_param_vec3(backend.pbrEmissiveLocation,
                                   &cmd.material.emissive.x);
           upload_pbr_foliage_uniforms(backend, dev, cmd);
-          const std::uint32_t albedoGpu =
-              texture_gpu_id(cmd.material.albedoTexture);
+          const DeviceTextureHandle albedoTex =
+              texture_device_handle(cmd.material.albedoTexture);
           const bool hasTex =
               (cmd.material.albedoTexture != kInvalidTextureHandle) &&
-              (albedoGpu != 0U);
-          if (backend.pbrHasAlbedoTextureLocation >= 0)
-            dev->set_uniform_int(backend.pbrHasAlbedoTextureLocation,
+              (albedoTex != kInvalidDeviceTexture);
+          if (backend.pbrHasAlbedoTextureLocation.valid())
+            dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
                                  hasTex ? 1 : 0);
-          if (hasTex && albedoGpu != boundAlbedoTex) {
-            dev->bind_texture(0, albedoGpu);
-            boundAlbedoTex = albedoGpu;
-          } else if (!hasTex && boundAlbedoTex != 0U) {
-            dev->bind_texture(0, 0U);
-            boundAlbedoTex = 0U;
+          if (hasTex && albedoTex != boundAlbedoTex) {
+            dev->bind_texture_slot(0U, albedoTex);
+            boundAlbedoTex = albedoTex;
+          } else if (!hasTex && (boundAlbedoTex != kInvalidDeviceTexture)) {
+            dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+            boundAlbedoTex = kInvalidDeviceTexture;
           }
           upload_material_texture_slots(transparentMaterialTexLocs, dev,
-                                        cmd.material, boundMaterialTexIds);
+                                        cmd.material, boundMaterialTex);
           const math::Mat4 model = compute_model_matrix(cmd);
           const math::Mat4 mvp = compute_mvp(model, vp);
           float nm[9] = {};
           extract_normal_matrix(model, nm);
-          if (backend.pbrModelLocation >= 0)
-            dev->set_uniform_mat4(backend.pbrModelLocation,
+          if (backend.pbrModelLocation.valid())
+            dev->set_param_mat4(backend.pbrModelLocation,
                                   &model.columns[0].x);
-          dev->set_uniform_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-          dev->set_uniform_mat3(backend.pbrNormalMatrixLocation, nm);
+          dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
+          dev->set_param_mat3(backend.pbrNormalMatrixLocation, nm);
           if (mesh->indexCount > 0U) {
             ++frameStats.drawCalls;
             frameStats.triangleCount += (mesh->indexCount / 3U);
-            dev->draw_elements_triangles_u32(
-                static_cast<std::int32_t>(mesh->indexCount));
+            dev->draw_indexed(mesh->geometry,
+                              static_cast<std::int32_t>(mesh->indexCount));
           } else {
             ++frameStats.drawCalls;
             frameStats.triangleCount += (mesh->vertexCount / 3U);
-            dev->draw_arrays_triangles(
-                0, static_cast<std::int32_t>(mesh->vertexCount));
+            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                      static_cast<std::int32_t>(mesh->vertexCount));
           }
         }
       };
 
-      dev->set_depth_mask(false);
-      dev->enable_blending();
-      dev->set_blend_func_alpha();
-      dev->disable_face_culling();
+      dev->apply_render_state(RenderState{DepthTest::Less, false,
+                                          BlendMode::Alpha, CullMode::None});
       drawForwardTransparent(opaqueCount, totalCount);
-      dev->set_depth_mask(true);
-      dev->disable_blending();
-      dev->enable_face_culling();
-      dev->bind_texture(0, 0U);
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Disabled,
+                                          CullMode::Back});
+      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
       unbind_pbr_shadow_textures(dev);
       unbind_pbr_ibl_textures(dev);
-      dev->bind_vertex_array(0U);
-      dev->bind_program(0U);
+      dev->bind_program(kInvalidDeviceProgram);
     }
 
     frameStats.gpuGBufferMs = gpu_profiler_pass_ms(GpuPassId::GBuffer);

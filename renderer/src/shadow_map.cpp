@@ -15,6 +15,37 @@
 
 namespace engine::renderer {
 
+namespace {
+
+/// Square Depth24 shadow texture (linear filtering, as the samplers expect).
+DeviceTextureHandle create_shadow_depth_texture(const RenderDevice *dev,
+                                                int resolution) noexcept {
+  if ((dev == nullptr) || (dev->create_texture == nullptr)) {
+    return kInvalidDeviceTexture;
+  }
+  TextureDesc desc{};
+  desc.kind = TextureKind::Tex2D;
+  desc.format = TextureFormat::Depth24;
+  desc.width = resolution;
+  desc.height = resolution;
+  desc.filter = TextureFilter::Linear;
+  desc.wrap = TextureWrap::Repeat;
+  return dev->create_texture(desc);
+}
+
+/// Depth-only render target over one shadow depth texture.
+RenderTargetHandle create_depth_only_target(const RenderDevice *dev,
+                                            DeviceTextureHandle depth) noexcept {
+  if ((dev == nullptr) || (dev->create_render_target == nullptr)) {
+    return RenderTargetHandle{};
+  }
+  RenderTargetDesc desc{};
+  desc.depth.texture = depth;
+  return dev->create_render_target(desc);
+}
+
+} // namespace
+
 int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
   if (cascadeIndex >= kShadowCascadeCount) {
     return kShadowCascadeResolutions[kShadowCascadeCount - 1U];
@@ -228,19 +259,19 @@ bool initialize_shadow_maps(ShadowMapState &state) noexcept {
     const int cascadeResolution = shadow_cascade_resolution(i);
     state.resolutions[i] = cascadeResolution;
     state.depthTextures[i] =
-        dev->create_depth_texture(cascadeResolution, cascadeResolution);
-    if (state.depthTextures[i] == 0U) {
+        create_shadow_depth_texture(dev, cascadeResolution);
+    if (state.depthTextures[i] == kInvalidDeviceTexture) {
       core::log_message(core::LogLevel::Error, "shadow_map",
                         "failed to create shadow cascade depth texture");
       shutdown_shadow_maps(state);
       return false;
     }
 
-    // Depth-only FBO (no color attachment → pass 0 for color).
-    state.depthFbos[i] = dev->create_framebuffer(0U, state.depthTextures[i]);
-    if (state.depthFbos[i] == 0U) {
+    state.depthTargets[i] =
+        create_depth_only_target(dev, state.depthTextures[i]);
+    if (state.depthTargets[i].value == 0U) {
       core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create shadow cascade FBO");
+                        "failed to create shadow cascade render target");
       shutdown_shadow_maps(state);
       return false;
     }
@@ -258,13 +289,13 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept {
   }
 
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
-    if (state.depthFbos[i] != 0U) {
-      dev->destroy_framebuffer(state.depthFbos[i]);
-      state.depthFbos[i] = 0U;
+    if (state.depthTargets[i].value != 0U) {
+      dev->destroy_render_target(state.depthTargets[i]);
+      state.depthTargets[i] = RenderTargetHandle{};
     }
-    if (state.depthTextures[i] != 0U) {
+    if (state.depthTextures[i] != kInvalidDeviceTexture) {
       dev->destroy_texture(state.depthTextures[i]);
-      state.depthTextures[i] = 0U;
+      state.depthTextures[i] = kInvalidDeviceTexture;
     }
     state.resolutions[i] = 0;
   }
@@ -306,20 +337,20 @@ bool initialize_spot_shadow_maps(SpotShadowState &state) noexcept {
   }
 
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    state.slots[i].depthTexture = dev->create_depth_texture(
-        kSpotShadowMapResolution, kSpotShadowMapResolution);
-    if (state.slots[i].depthTexture == 0U) {
+    state.slots[i].depthTexture =
+        create_shadow_depth_texture(dev, kSpotShadowMapResolution);
+    if (state.slots[i].depthTexture == kInvalidDeviceTexture) {
       core::log_message(core::LogLevel::Error, "shadow_map",
                         "failed to create spot shadow depth texture");
       shutdown_spot_shadow_maps(state);
       return false;
     }
 
-    state.slots[i].depthFbo =
-        dev->create_framebuffer(0U, state.slots[i].depthTexture);
-    if (state.slots[i].depthFbo == 0U) {
+    state.slots[i].depthTarget =
+        create_depth_only_target(dev, state.slots[i].depthTexture);
+    if (state.slots[i].depthTarget.value == 0U) {
       core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create spot shadow FBO");
+                        "failed to create spot shadow render target");
       shutdown_spot_shadow_maps(state);
       return false;
     }
@@ -337,13 +368,13 @@ void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept {
   }
 
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    if (state.slots[i].depthFbo != 0U) {
-      dev->destroy_framebuffer(state.slots[i].depthFbo);
-      state.slots[i].depthFbo = 0U;
+    if (state.slots[i].depthTarget.value != 0U) {
+      dev->destroy_render_target(state.slots[i].depthTarget);
+      state.slots[i].depthTarget = RenderTargetHandle{};
     }
-    if (state.slots[i].depthTexture != 0U) {
+    if (state.slots[i].depthTexture != kInvalidDeviceTexture) {
       dev->destroy_texture(state.slots[i].depthTexture);
-      state.slots[i].depthTexture = 0U;
+      state.slots[i].depthTexture = kInvalidDeviceTexture;
     }
     state.slots[i].lightIndex = -1;
   }
@@ -386,27 +417,39 @@ void compute_point_shadow_matrices(const math::Vec3 &position, float radius,
 /// Initializes the owning system for point shadow maps.
 bool initialize_point_shadow_maps(PointShadowState &state) noexcept {
   const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || (dev->create_depth_cubemap == nullptr)) {
+  if ((dev == nullptr) || (dev->create_texture == nullptr) ||
+      (dev->create_render_target == nullptr)) {
     return false;
   }
 
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
-    state.slots[i].depthCubemap =
-        dev->create_depth_cubemap(kPointShadowMapResolution);
-    if (state.slots[i].depthCubemap == 0U) {
+    TextureDesc cubeDesc{};
+    cubeDesc.kind = TextureKind::Cube;
+    cubeDesc.format = TextureFormat::Depth24;
+    cubeDesc.width = kPointShadowMapResolution;
+    cubeDesc.filter = TextureFilter::Linear;
+    cubeDesc.wrap = TextureWrap::ClampEdge;
+    state.slots[i].depthCubemap = dev->create_texture(cubeDesc);
+    if (state.slots[i].depthCubemap == kInvalidDeviceTexture) {
       core::log_message(core::LogLevel::Error, "shadow_map",
                         "failed to create point shadow cubemap");
       shutdown_point_shadow_maps(state);
       return false;
     }
 
-    // Single FBO per slot — face is re-attached each frame.
-    state.slots[i].depthFbo = dev->create_framebuffer(0U, 0U);
-    if (state.slots[i].depthFbo == 0U) {
-      core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create point shadow FBO");
-      shutdown_point_shadow_maps(state);
-      return false;
+    // Render targets are immutable, so each cube face gets its own
+    // depth-only target over the shared cubemap.
+    for (int face = 0; face < 6; ++face) {
+      RenderTargetDesc faceDesc{};
+      faceDesc.depth.texture = state.slots[i].depthCubemap;
+      faceDesc.depth.face = static_cast<CubeFace>(face);
+      state.slots[i].faceTargets[face] = dev->create_render_target(faceDesc);
+      if (state.slots[i].faceTargets[face].value == 0U) {
+        core::log_message(core::LogLevel::Error, "shadow_map",
+                          "failed to create point shadow face target");
+        shutdown_point_shadow_maps(state);
+        return false;
+      }
     }
   }
 
@@ -422,13 +465,15 @@ void shutdown_point_shadow_maps(PointShadowState &state) noexcept {
   }
 
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
-    if (state.slots[i].depthFbo != 0U) {
-      dev->destroy_framebuffer(state.slots[i].depthFbo);
-      state.slots[i].depthFbo = 0U;
+    for (int face = 0; face < 6; ++face) {
+      if (state.slots[i].faceTargets[face].value != 0U) {
+        dev->destroy_render_target(state.slots[i].faceTargets[face]);
+        state.slots[i].faceTargets[face] = RenderTargetHandle{};
+      }
     }
-    if (state.slots[i].depthCubemap != 0U) {
+    if (state.slots[i].depthCubemap != kInvalidDeviceTexture) {
       dev->destroy_texture(state.slots[i].depthCubemap);
-      state.slots[i].depthCubemap = 0U;
+      state.slots[i].depthCubemap = kInvalidDeviceTexture;
     }
     state.slots[i].lightIndex = -1;
   }

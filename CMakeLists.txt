@@ -281,6 +281,10 @@ if(CPPCHECK_EXE)
         --suppress=arithOperationsOnVoidPointer:*/core/src/json.cpp
         --suppress=duplInheritedMember:*/runtime/include/engine/runtime/world.h
         --suppress=duplInheritedMember:*/runtime/src/world.cpp
+        # False positive: create_program is an opaque function pointer, so
+        # cppcheck assumes the returned DeviceProgramHandle (a plain
+        # uint32) captures the variant source buffers passed to it (#165).
+        --suppress=returnDanglingLifetime:*/renderer/src/shader_system.cpp
         -i "${CMAKE_BINARY_DIR}/_deps"
         -i "${CMAKE_SOURCE_DIR}/tests"
         -i "${CMAKE_SOURCE_DIR}/tools"

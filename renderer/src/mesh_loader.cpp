@@ -25,11 +25,6 @@ constexpr std::size_t kVertexStrideV1Floats = 6U;
 constexpr std::size_t kVertexStrideV2Floats = 8U;
 constexpr std::size_t kVertexStrideV3Floats = 16U;
 
-/// Vertex attribute locations for skinned joint indices and weights;
-/// 3-7 are reserved for the per-instance model matrix and foliage data.
-constexpr std::uint32_t kSkinJointsAttrib = 8U;
-constexpr std::uint32_t kSkinWeightsAttrib = 9U;
-
 /// Float offsets of the joint-index and weight attributes inside a
 /// stride-16 skinned vertex (position 0-2, normal 3-5, uv 6-7).
 constexpr std::size_t kSkinJointOffsetFloats = 8U;
@@ -98,62 +93,59 @@ void delete_mesh_resources(const RenderDevice *dev, GpuMesh *mesh) noexcept {
     return;
   }
 
-  if (mesh->indexBuffer != 0U) {
-    if (dev->destroy_buffer != nullptr) {
-      dev->destroy_buffer(mesh->indexBuffer);
-    }
-    mesh->indexBuffer = 0U;
+  if ((mesh->geometry != kInvalidDeviceGeometry) &&
+      (dev->destroy_geometry != nullptr)) {
+    dev->destroy_geometry(mesh->geometry);
   }
-
-  if (mesh->vertexBuffer != 0U) {
-    if (dev->destroy_buffer != nullptr) {
-      dev->destroy_buffer(mesh->vertexBuffer);
-    }
-    mesh->vertexBuffer = 0U;
+  if ((mesh->indexBuffer != kInvalidDeviceBuffer) &&
+      (dev->destroy_buffer != nullptr)) {
+    dev->destroy_buffer(mesh->indexBuffer);
   }
-
-  if (mesh->vertexArray != 0U) {
-    if (dev->destroy_vertex_array != nullptr) {
-      dev->destroy_vertex_array(mesh->vertexArray);
-    }
-    mesh->vertexArray = 0U;
+  if ((mesh->vertexBuffer != kInvalidDeviceBuffer) &&
+      (dev->destroy_buffer != nullptr)) {
+    dev->destroy_buffer(mesh->vertexBuffer);
   }
-
-  mesh->vertexCount = 0U;
-  mesh->indexCount = 0U;
+  *mesh = GpuMesh{};
 }
 
 bool mesh_upload_device_ready(const RenderDevice *dev) noexcept {
-  return (dev != nullptr) && (dev->create_vertex_array != nullptr) &&
-         (dev->destroy_vertex_array != nullptr) &&
-         (dev->bind_vertex_array != nullptr) &&
-         (dev->create_buffer != nullptr) && (dev->destroy_buffer != nullptr) &&
-         (dev->bind_array_buffer != nullptr) &&
-         (dev->bind_element_buffer != nullptr) &&
-         (dev->buffer_data_array != nullptr) &&
-         (dev->buffer_data_element != nullptr) &&
-         (dev->enable_vertex_attrib != nullptr) &&
-         (dev->vertex_attrib_float != nullptr);
+  return (dev != nullptr) && (dev->create_buffer != nullptr) &&
+         (dev->destroy_buffer != nullptr) &&
+         (dev->create_geometry != nullptr) &&
+         (dev->destroy_geometry != nullptr);
 }
 
-void unbind_mesh_upload_state(const RenderDevice *dev) noexcept {
-  if (dev == nullptr) {
-    return;
+/// Builds the interleaved-float layout matching the mesh's UV/skin shape.
+VertexLayout mesh_vertex_layout(bool hasUVs, bool hasSkin,
+                                std::size_t strideFloats) noexcept {
+  VertexLayout layout{};
+  layout.strideBytes =
+      static_cast<std::int32_t>(strideFloats * sizeof(float));
+  layout.attributes[0] = {VertexSemantic::Position, 3, 0};
+  layout.attributes[1] = {VertexSemantic::Normal, 3,
+                          static_cast<std::int32_t>(sizeof(float) * 3U)};
+  layout.attributeCount = 2U;
+  if (hasUVs) {
+    layout.attributes[layout.attributeCount] = {
+        VertexSemantic::TexCoord0, 2,
+        static_cast<std::int32_t>(sizeof(float) * 6U)};
+    ++layout.attributeCount;
   }
-  if (dev->bind_vertex_array != nullptr) {
-    dev->bind_vertex_array(0U);
+  if (hasSkin) {
+    layout.attributes[layout.attributeCount] = {
+        VertexSemantic::Joints, 4,
+        static_cast<std::int32_t>(sizeof(float) * kSkinJointOffsetFloats)};
+    ++layout.attributeCount;
+    layout.attributes[layout.attributeCount] = {
+        VertexSemantic::Weights, 4,
+        static_cast<std::int32_t>(sizeof(float) * kSkinWeightOffsetFloats)};
+    ++layout.attributeCount;
   }
-  if (dev->bind_array_buffer != nullptr) {
-    dev->bind_array_buffer(0U);
-  }
-  if (dev->bind_element_buffer != nullptr) {
-    dev->bind_element_buffer(0U);
-  }
+  return layout;
 }
 
 bool fail_mesh_upload(const RenderDevice *dev, GpuMesh *mesh,
                       GpuMesh *outMesh) noexcept {
-  unbind_mesh_upload_state(dev);
   delete_mesh_resources(dev, mesh);
   if (outMesh != nullptr) {
     *outMesh = GpuMesh{};
@@ -161,6 +153,49 @@ bool fail_mesh_upload(const RenderDevice *dev, GpuMesh *mesh,
   core::log_message(core::LogLevel::Error, "renderer",
                     "failed to create mesh GPU resources");
   return false;
+}
+
+/// Uploads interleaved vertices (plus optional indices) as device buffers
+/// and geometry; shared by the cooked-asset and in-memory entry points.
+bool upload_mesh_streams(const RenderDevice *dev, const float *vertices,
+                         std::size_t vertexFloatCount,
+                         const std::uint32_t *indices,
+                         std::size_t indexCount, bool hasUVs, bool hasSkin,
+                         std::size_t strideFloats, GpuMesh *mesh,
+                         GpuMesh *outMesh) noexcept {
+  BufferDesc vertexDesc{};
+  vertexDesc.usage = BufferUsage::Vertex;
+  vertexDesc.access = BufferAccess::Static;
+  vertexDesc.sizeBytes =
+      static_cast<std::ptrdiff_t>(vertexFloatCount * sizeof(float));
+  vertexDesc.data = vertices;
+  mesh->vertexBuffer = dev->create_buffer(vertexDesc);
+  if (mesh->vertexBuffer == kInvalidDeviceBuffer) {
+    return fail_mesh_upload(dev, mesh, outMesh);
+  }
+
+  if (indexCount > 0U) {
+    BufferDesc indexDesc{};
+    indexDesc.usage = BufferUsage::Index;
+    indexDesc.access = BufferAccess::Static;
+    indexDesc.sizeBytes =
+        static_cast<std::ptrdiff_t>(indexCount * sizeof(std::uint32_t));
+    indexDesc.data = indices;
+    mesh->indexBuffer = dev->create_buffer(indexDesc);
+    if (mesh->indexBuffer == kInvalidDeviceBuffer) {
+      return fail_mesh_upload(dev, mesh, outMesh);
+    }
+  }
+
+  GeometryDesc geometryDesc{};
+  geometryDesc.vertexBuffer = mesh->vertexBuffer;
+  geometryDesc.layout = mesh_vertex_layout(hasUVs, hasSkin, strideFloats);
+  geometryDesc.indexBuffer = mesh->indexBuffer;
+  mesh->geometry = dev->create_geometry(geometryDesc);
+  if (mesh->geometry == kInvalidDeviceGeometry) {
+    return fail_mesh_upload(dev, mesh, outMesh);
+  }
+  return true;
 }
 
 } // namespace
@@ -319,8 +354,8 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
   return true;
 }
 
-// Precondition: caller must own the GL context before calling this function.
-// Context acquisition and release are the engine loop's responsibility;
+// Precondition: caller must own the render context before calling this
+// function. Context acquisition and release are the engine loop's responsibility;
 // the renderer must not acquire or release the context internally.
 bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
   if ((path == nullptr) || (outMesh == nullptr)) {
@@ -401,7 +436,7 @@ bool mesh_data_valid(const CpuMeshData &meshData) noexcept {
   return true;
 }
 
-// Precondition: caller must own the GL context before calling this function.
+// Precondition: caller must own the render context before this call.
 bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                              GpuMesh *outMesh) noexcept {
   if (outMesh == nullptr) {
@@ -424,64 +459,17 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
   if (!mesh_upload_device_ready(dev)) {
     return false;
   }
-  const std::int32_t stride =
-      static_cast<std::int32_t>(meshData.strideFloats * sizeof(float));
 
   GpuMesh mesh{};
   mesh.hasUVs = meshData.hasUVs;
   mesh.hasSkin = meshData.hasSkin;
-  mesh.vertexArray = dev->create_vertex_array();
-  if (mesh.vertexArray == 0U) {
-    return fail_mesh_upload(dev, &mesh, outMesh);
+  if (!upload_mesh_streams(dev, meshData.vertices.data(),
+                           meshData.vertices.size(), meshData.indices.data(),
+                           meshData.indices.size(), meshData.hasUVs,
+                           meshData.hasSkin, meshData.strideFloats, &mesh,
+                           outMesh)) {
+    return false;
   }
-  dev->bind_vertex_array(mesh.vertexArray);
-
-  mesh.vertexBuffer = dev->create_buffer();
-  if (mesh.vertexBuffer == 0U) {
-    return fail_mesh_upload(dev, &mesh, outMesh);
-  }
-  dev->bind_array_buffer(mesh.vertexBuffer);
-  dev->buffer_data_array(
-      meshData.vertices.data(),
-      static_cast<std::ptrdiff_t>(meshData.vertices.size() * sizeof(float)));
-
-  dev->enable_vertex_attrib(0U);
-  dev->vertex_attrib_float(0U, 3, stride, nullptr);
-
-  dev->enable_vertex_attrib(1U);
-  dev->vertex_attrib_float(1U, 3, stride,
-                           reinterpret_cast<const void *>(sizeof(float) * 3U));
-
-  if (meshData.hasUVs) {
-    dev->enable_vertex_attrib(2U);
-    dev->vertex_attrib_float(
-        2U, 2, stride, reinterpret_cast<const void *>(sizeof(float) * 6U));
-  }
-
-  if (meshData.hasSkin) {
-    dev->enable_vertex_attrib(kSkinJointsAttrib);
-    dev->vertex_attrib_float(
-        kSkinJointsAttrib, 4, stride,
-        reinterpret_cast<const void *>(sizeof(float) * 8U));
-    dev->enable_vertex_attrib(kSkinWeightsAttrib);
-    dev->vertex_attrib_float(
-        kSkinWeightsAttrib, 4, stride,
-        reinterpret_cast<const void *>(sizeof(float) * 12U));
-  }
-
-  if (!meshData.indices.empty()) {
-    mesh.indexBuffer = dev->create_buffer();
-    if (mesh.indexBuffer == 0U) {
-      return fail_mesh_upload(dev, &mesh, outMesh);
-    }
-    dev->bind_element_buffer(mesh.indexBuffer);
-    dev->buffer_data_element(
-        meshData.indices.data(),
-        static_cast<std::ptrdiff_t>(meshData.indices.size() *
-                                    sizeof(std::uint32_t)));
-  }
-
-  unbind_mesh_upload_state(dev);
 
   mesh.vertexCount = meshData.vertexCount;
   mesh.indexCount = static_cast<std::uint32_t>(meshData.indices.size());
@@ -489,7 +477,7 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
   return true;
 }
 
-// Precondition: caller must own the GL context before calling this function.
+// Precondition: caller must own the render context before this call.
 bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
                               const std::uint32_t *indices,
                               std::uint32_t indexCount, bool hasUVs,
@@ -517,50 +505,15 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
   }
   const std::size_t strideFloats =
       hasUVs ? kVertexStrideV2Floats : kVertexStrideV1Floats;
-  const std::int32_t stride =
-      static_cast<std::int32_t>(strideFloats * sizeof(float));
 
   GpuMesh mesh{};
   mesh.hasUVs = hasUVs;
-  mesh.vertexArray = dev->create_vertex_array();
-  if (mesh.vertexArray == 0U) {
-    return fail_mesh_upload(dev, &mesh, outMesh);
+  if (!upload_mesh_streams(dev, vertices,
+                           static_cast<std::size_t>(vertexCount) * strideFloats,
+                           indices, indexCount, hasUVs, false, strideFloats,
+                           &mesh, outMesh)) {
+    return false;
   }
-  dev->bind_vertex_array(mesh.vertexArray);
-
-  mesh.vertexBuffer = dev->create_buffer();
-  if (mesh.vertexBuffer == 0U) {
-    return fail_mesh_upload(dev, &mesh, outMesh);
-  }
-  dev->bind_array_buffer(mesh.vertexBuffer);
-  dev->buffer_data_array(
-      vertices,
-      static_cast<std::ptrdiff_t>(vertexCount * strideFloats * sizeof(float)));
-
-  dev->enable_vertex_attrib(0U);
-  dev->vertex_attrib_float(0U, 3, stride, nullptr);
-
-  dev->enable_vertex_attrib(1U);
-  dev->vertex_attrib_float(1U, 3, stride,
-                           reinterpret_cast<const void *>(sizeof(float) * 3U));
-
-  if (hasUVs) {
-    dev->enable_vertex_attrib(2U);
-    dev->vertex_attrib_float(
-        2U, 2, stride, reinterpret_cast<const void *>(sizeof(float) * 6U));
-  }
-
-  if ((indexCount > 0U) && (indices != nullptr)) {
-    mesh.indexBuffer = dev->create_buffer();
-    if (mesh.indexBuffer == 0U) {
-      return fail_mesh_upload(dev, &mesh, outMesh);
-    }
-    dev->bind_element_buffer(mesh.indexBuffer);
-    dev->buffer_data_element(indices, static_cast<std::ptrdiff_t>(
-                                          indexCount * sizeof(std::uint32_t)));
-  }
-
-  unbind_mesh_upload_state(dev);
 
   mesh.vertexCount = vertexCount;
   mesh.indexCount = indexCount;
@@ -568,14 +521,15 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
   return true;
 }
 
-// Precondition: caller must own the GL context before calling this function.
+// Precondition: caller must own the render context before this call.
 void unload_mesh(GpuMesh *mesh) noexcept {
   if (mesh == nullptr) {
     return;
   }
 
-  if ((mesh->vertexArray == 0U) && (mesh->vertexBuffer == 0U) &&
-      (mesh->indexBuffer == 0U)) {
+  if ((mesh->geometry == kInvalidDeviceGeometry) &&
+      (mesh->vertexBuffer == kInvalidDeviceBuffer) &&
+      (mesh->indexBuffer == kInvalidDeviceBuffer)) {
     *mesh = GpuMesh{};
     return;
   }

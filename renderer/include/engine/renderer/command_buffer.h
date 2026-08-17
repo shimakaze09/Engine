@@ -25,7 +25,8 @@ inline constexpr MeshHandle kInvalidMeshHandle{};
 
 // GPU skinning: per-entity bone palettes uploaded once per frame and
 // referenced by DrawCommand::skinPalette. One palette fits the 128-joint
-// skeleton budget inside the GL-guaranteed 16 KiB uniform block size.
+// skeleton budget inside the 16 KiB uniform-block size every supported
+// backend guarantees.
 inline constexpr std::size_t kMaxSkinPalettes = 16U;
 inline constexpr std::size_t kMaxSkinPaletteJoints = 128U;
 inline constexpr std::uint32_t kInvalidSkinPalette = 0xFFFFFFFFU;
@@ -169,12 +170,13 @@ struct ReflectionProbeBakeRequest final {
   ReflectionProbeBakeSettings settings{};
 };
 
-/// GPU ids produced by a probe bake (0 where a stage was unavailable).
+/// Device textures produced by a probe bake (invalid where a stage was
+/// unavailable).
 struct ReflectionProbeBakeResult final {
-  std::uint32_t sourceCubemapTexture = 0U;
-  std::uint32_t prefilteredEnvironmentTexture = 0U;
-  std::uint32_t irradianceEnvironmentTexture = 0U;
-  std::uint32_t brdfLutTexture = 0U;
+  DeviceTextureHandle sourceCubemapTexture{};
+  DeviceTextureHandle prefilteredEnvironmentTexture{};
+  DeviceTextureHandle irradianceEnvironmentTexture{};
+  DeviceTextureHandle brdfLutTexture{};
   ReflectionProbeBakeSettings settings{};
   bool baked = false;
 };
@@ -201,8 +203,8 @@ void set_scene_capture_requests(const SceneCaptureRequest *requests,
 /// Number of capture requests currently stored.
 std::size_t scene_capture_request_count() noexcept;
 /// LDR color texture rendered for capture slot `index` (request order);
-/// 0 until that slot has been rendered by a flush.
-std::uint32_t get_scene_capture_texture(std::size_t index) noexcept;
+/// invalid until that slot has been rendered by a flush.
+DeviceTextureHandle get_scene_capture_texture(std::size_t index) noexcept;
 /// Stable texture-system handle for capture slot `index`, usable as a
 /// material albedo texture. Invalid until the slot is first requested via
 /// set_scene_capture_requests; resolves to "no texture" until the slot's
@@ -271,15 +273,15 @@ void set_skybox_texture(TextureHandle cubemap) noexcept;
 /// Currently bound skybox cubemap handle (may be invalid).
 TextureHandle get_skybox_texture() noexcept;
 
-/// Returns the GPU texture ID of the tonemapped scene (final color).
-/// Valid after the first flush_renderer call. Returns 0 if not yet available.
-std::uint32_t get_scene_viewport_texture() noexcept;
-/// Prefiltered specular environment GPU id; 0 until baked/enabled.
-std::uint32_t get_prefiltered_environment_texture() noexcept;
-/// Diffuse irradiance environment GPU id; 0 until baked/enabled.
-std::uint32_t get_irradiance_environment_texture() noexcept;
-/// Split-sum BRDF LUT GPU id; 0 until rendered/enabled.
-std::uint32_t get_brdf_lut_texture() noexcept;
+/// Device texture holding the tonemapped scene (final color). Valid after
+/// the first flush_renderer call; invalid if not yet available.
+DeviceTextureHandle get_scene_viewport_texture() noexcept;
+/// Prefiltered specular environment; invalid until baked/enabled.
+DeviceTextureHandle get_prefiltered_environment_texture() noexcept;
+/// Diffuse irradiance environment; invalid until baked/enabled.
+DeviceTextureHandle get_irradiance_environment_texture() noexcept;
+/// Split-sum BRDF LUT; invalid until rendered/enabled.
+DeviceTextureHandle get_brdf_lut_texture() noexcept;
 /// Clamps and fills settings into a safe runtime range for reflection probe bake settings.
 ReflectionProbeBakeSettings normalize_reflection_probe_bake_settings(
     const ReflectionProbeBakeSettings &settings) noexcept;

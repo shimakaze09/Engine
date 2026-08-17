@@ -157,7 +157,8 @@ void refresh_backend_program_state(BackendState &backend,
   // re-evaluated on each reload while resource readiness (geometry,
   // FBOs, UBOs) is reload-invariant, so a corrected shader re-enables
   // its feature instead of latching it off.
-  const bool skyGeometryReady = backend.skyboxVertexArray != 0U;
+  const bool skyGeometryReady =
+      backend.skyboxGeometry != kInvalidDeviceGeometry;
   recompute_availability(
       &backend.skyboxAvailable,
       (backend.skyboxShaderHandle != kInvalidShaderProgram) &&
@@ -226,7 +227,7 @@ void refresh_backend_program_state(BackendState &backend,
       &backend.skinningAvailable,
       (backend.gbufferSkinnedShaderHandle != kInvalidShaderProgram) &&
           resolve_gbuffer_skinned_program_state(backend, dev),
-      backend.bonePaletteUbo != 0U, "GPU skinning");
+      backend.bonePaletteUbo != kInvalidDeviceBuffer, "GPU skinning");
   if ((backend.shadowDepthSkinnedShaderHandle != kInvalidShaderProgram) &&
       !resolve_shadow_depth_skinned_program_state(backend, dev)) {
     core::log_message(core::LogLevel::Warning, "renderer",
@@ -247,12 +248,14 @@ void refresh_backend_program_state(BackendState &backend,
   }
   recompute_availability(&backend.ssaoAvailable,
                          resolve_ssao_program_state(backend, dev),
-                         backend.ssaoNoiseTexture != 0U, "SSAO");
+                         backend.ssaoNoiseTexture != kInvalidDeviceTexture,
+                         "SSAO");
   recompute_availability(
       &backend.debugLineAvailable,
       (backend.debugLineShaderHandle != kInvalidShaderProgram) &&
           resolve_debug_line_program_state(backend, dev),
-      (backend.debugLineVao != 0U) && (backend.debugLineVbo != 0U),
+      (backend.debugLineGeometry != kInvalidDeviceGeometry) &&
+          (backend.debugLineVbo != kInvalidDeviceBuffer),
       "debug lines");
   recompute_availability(
       &backend.autoExposureAvailable,
@@ -274,33 +277,34 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   const RenderDevice *dev = render_device();
 
   // Destroy tile light texture.
-  if (backend->tileLightTex != 0U && dev != nullptr) {
+  if ((backend->tileLightTex != kInvalidDeviceTexture) && (dev != nullptr)) {
     dev->destroy_texture(backend->tileLightTex);
-    backend->tileLightTex = 0U;
+    backend->tileLightTex = kInvalidDeviceTexture;
   }
   backend->tileLightTexRows = 0;
   backend->tileBuffer.clear();
 
   // Destroy per-light data texture.
-  if (backend->lightDataTex != 0U && dev != nullptr) {
+  if ((backend->lightDataTex != kInvalidDeviceTexture) && (dev != nullptr)) {
     dev->destroy_texture(backend->lightDataTex);
-    backend->lightDataTex = 0U;
+    backend->lightDataTex = kInvalidDeviceTexture;
   }
 
   // Destroy debug line resources.
-  if (backend->debugLineVao != 0U && dev != nullptr) {
-    dev->destroy_vertex_array(backend->debugLineVao);
-    backend->debugLineVao = 0U;
+  if ((backend->debugLineGeometry != kInvalidDeviceGeometry) &&
+      (dev != nullptr)) {
+    dev->destroy_geometry(backend->debugLineGeometry);
+    backend->debugLineGeometry = kInvalidDeviceGeometry;
   }
-  if (backend->debugLineVbo != 0U && dev != nullptr) {
+  if ((backend->debugLineVbo != kInvalidDeviceBuffer) && (dev != nullptr)) {
     dev->destroy_buffer(backend->debugLineVbo);
-    backend->debugLineVbo = 0U;
+    backend->debugLineVbo = kInvalidDeviceBuffer;
   }
   if (backend->debugLineShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->debugLineShaderHandle);
     backend->debugLineShaderHandle = ShaderProgramHandle{};
   }
-  backend->debugLineProgram = 0U;
+  backend->debugLineProgram = kInvalidDeviceProgram;
   backend->debugLineAvailable = false;
 
   // Destroy scene capture render targets.
@@ -312,33 +316,34 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->bloomUpsampleShaderHandle);
     backend->bloomUpsampleShaderHandle = ShaderProgramHandle{};
   }
-  backend->bloomUpsampleProgram = 0U;
+  backend->bloomUpsampleProgram = kInvalidDeviceProgram;
   if (backend->bloomDownsampleShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->bloomDownsampleShaderHandle);
     backend->bloomDownsampleShaderHandle = ShaderProgramHandle{};
   }
-  backend->bloomDownsampleProgram = 0U;
+  backend->bloomDownsampleProgram = kInvalidDeviceProgram;
   if (backend->bloomThresholdShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->bloomThresholdShaderHandle);
     backend->bloomThresholdShaderHandle = ShaderProgramHandle{};
   }
-  backend->bloomThresholdProgram = 0U;
+  backend->bloomThresholdProgram = kInvalidDeviceProgram;
 
   // Destroy SSAO resources.
-  if (backend->ssaoNoiseTexture != 0U && dev != nullptr) {
+  if ((backend->ssaoNoiseTexture != kInvalidDeviceTexture) &&
+      (dev != nullptr)) {
     dev->destroy_texture(backend->ssaoNoiseTexture);
-    backend->ssaoNoiseTexture = 0U;
+    backend->ssaoNoiseTexture = kInvalidDeviceTexture;
   }
   if (backend->ssaoBlurShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->ssaoBlurShaderHandle);
     backend->ssaoBlurShaderHandle = ShaderProgramHandle{};
   }
-  backend->ssaoBlurProgram = 0U;
+  backend->ssaoBlurProgram = kInvalidDeviceProgram;
   if (backend->ssaoShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->ssaoShaderHandle);
     backend->ssaoShaderHandle = ShaderProgramHandle{};
   }
-  backend->ssaoProgram = 0U;
+  backend->ssaoProgram = kInvalidDeviceProgram;
   backend->ssaoAvailable = false;
 
   // Destroy shadow map resources.
@@ -350,7 +355,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->shadowDepthShaderHandle);
     backend->shadowDepthShaderHandle = ShaderProgramHandle{};
   }
-  backend->shadowDepthProgram = 0U;
+  backend->shadowDepthProgram = kInvalidDeviceProgram;
 
   // Destroy spot shadow resources.
   shutdown_spot_shadow_maps(backend->spotShadowState);
@@ -363,7 +368,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->shadowDepthPointShaderHandle);
     backend->shadowDepthPointShaderHandle = ShaderProgramHandle{};
   }
-  backend->shadowDepthPointProgram = 0U;
+  backend->shadowDepthPointProgram = kInvalidDeviceProgram;
 
   // Destroy auto-exposure resources.
   destroy_luminance_resources(*backend);
@@ -371,7 +376,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->luminanceShaderHandle);
     backend->luminanceShaderHandle = ShaderProgramHandle{};
   }
-  backend->luminanceProgram = 0U;
+  backend->luminanceProgram = kInvalidDeviceProgram;
   backend->autoExposureAvailable = false;
 
   destroy_brdf_lut_resources(*backend);
@@ -379,21 +384,23 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   destroy_environment_prefilter_resources(*backend);
   destroy_skybox_resources(*backend);
 
-  if (backend->emptyVao != 0U && dev != nullptr) {
-    dev->destroy_vertex_array(backend->emptyVao);
-    backend->emptyVao = 0U;
+  if ((backend->emptyGeometry != kInvalidDeviceGeometry) &&
+      (dev != nullptr)) {
+    dev->destroy_geometry(backend->emptyGeometry);
+    backend->emptyGeometry = kInvalidDeviceGeometry;
   }
-  if (backend->instanceMatrixBuffer != 0U && dev != nullptr) {
+  if ((backend->instanceMatrixBuffer != kInvalidDeviceBuffer) &&
+      (dev != nullptr)) {
     dev->destroy_buffer(backend->instanceMatrixBuffer);
-    backend->instanceMatrixBuffer = 0U;
+    backend->instanceMatrixBuffer = kInvalidDeviceBuffer;
   }
   backend->instanceAttributes.clear();
   backend->staticMeshBatches.clear();
 
   // Destroy GPU skinning state.
-  if (backend->bonePaletteUbo != 0U && dev != nullptr) {
+  if ((backend->bonePaletteUbo != kInvalidDeviceBuffer) && (dev != nullptr)) {
     dev->destroy_buffer(backend->bonePaletteUbo);
-    backend->bonePaletteUbo = 0U;
+    backend->bonePaletteUbo = kInvalidDeviceBuffer;
   }
   if (backend->gbufferSkinnedShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->gbufferSkinnedShaderHandle);
@@ -424,13 +431,13 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->fxaaShaderHandle);
     backend->fxaaShaderHandle = ShaderProgramHandle{};
   }
-  backend->fxaaProgram = 0U;
+  backend->fxaaProgram = kInvalidDeviceProgram;
 
   if (backend->tonemapShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->tonemapShaderHandle);
     backend->tonemapShaderHandle = ShaderProgramHandle{};
   }
-  backend->tonemapProgram = 0U;
+  backend->tonemapProgram = kInvalidDeviceProgram;
 
   if (backend->pbrShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->pbrShaderHandle);
@@ -440,8 +447,8 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->defaultShaderHandle);
     backend->defaultShaderHandle = ShaderProgramHandle{};
   }
-  backend->pbrProgram = 0U;
-  backend->defaultProgram = 0U;
+  backend->pbrProgram = kInvalidDeviceProgram;
+  backend->defaultProgram = kInvalidDeviceProgram;
   backend->initialized = false;
   shutdown_gpu_profiler();
 }
@@ -452,8 +459,8 @@ void destroy_backend_resources(BackendState *backend) noexcept {
 void shutdown_renderer() noexcept {
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
-    // No GL resources exist yet, but capture slots may hold texture-system
-    // handles that would go stale across a texture-system restart.
+    // No device resources exist yet, but capture slots may hold texture-
+    // system handles that would go stale across a texture-system restart.
     destroy_scene_capture_targets(backend, nullptr);
     backend.sceneCaptureTargets = {};
     reset_renderer_public_state();
@@ -511,12 +518,12 @@ CameraState get_active_camera() noexcept {
   return renderer_context().activeCamera;
 }
 
-std::uint32_t get_scene_viewport_texture() noexcept {
+DeviceTextureHandle get_scene_viewport_texture() noexcept {
   const PassResources &passRes = get_pass_resources();
   if (renderer_context().fxaaAppliedThisFrame) {
-    return pass_resource_gpu_texture(passRes.sceneColor);
+    return pass_resource_texture(passRes.sceneColor);
   }
-  return pass_resource_gpu_texture(passRes.finalColor);
+  return pass_resource_texture(passRes.finalColor);
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {

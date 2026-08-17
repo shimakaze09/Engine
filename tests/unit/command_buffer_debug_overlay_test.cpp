@@ -29,16 +29,22 @@ namespace engine::renderer {
 // pipeline unavailable, no draw commands submitted).
 void gpu_profiler_begin_pass(GpuPassId) noexcept {}
 void gpu_profiler_end_pass(GpuPassId) noexcept {}
-std::uint32_t pass_resource_gpu_texture(PassResourceId) noexcept { return 1U; }
-std::uint32_t pass_resource_framebuffer(PassResourceId) noexcept { return 1U; }
+DeviceTextureHandle pass_resource_texture(PassResourceId) noexcept {
+  return DeviceTextureHandle{1U};
+}
+RenderTargetHandle pass_resource_target(PassResourceId) noexcept {
+  return RenderTargetHandle{1U};
+}
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *,
                                MeshHandle) noexcept {
   return nullptr;
 }
-std::uint32_t texture_gpu_id(TextureHandle) noexcept { return 0U; }
+DeviceTextureHandle texture_device_handle(TextureHandle) noexcept {
+  return kInvalidDeviceTexture;
+}
 SkyModel selected_sky_model() noexcept { return SkyModel::None; }
 void draw_skybox(const BackendState &, const RenderDevice *,
-                 const math::Mat4 &, const math::Mat4 &, std::uint32_t,
+                 const math::Mat4 &, const math::Mat4 &, DeviceTextureHandle,
                  RendererFrameStats &) noexcept {}
 void draw_preetham_sky(const BackendState &, const RenderDevice *,
                        const math::Mat4 &, const math::Mat4 &,
@@ -71,7 +77,7 @@ bool upload_instance_matrices(BackendState &, const RenderDevice *,
 }
 void upload_material_texture_slots(const MaterialTextureUniformLocs &,
                                    const RenderDevice *, const Material &,
-                                   std::uint32_t *) noexcept {}
+                                   DeviceTextureHandle *) noexcept {}
 
 } // namespace engine::renderer
 
@@ -104,9 +110,9 @@ FrameFlushContext make_context(const SceneLightData &lights,
                            .drawableHeight = 480,
                            .fogSettings = {},
                            .heightFogSettings = {},
-                           .envSkyboxTexture = 0U,
-                           .iblPrefilteredTex = 0U,
-                           .iblIrradianceTex = 0U,
+                           .envSkyboxTexture = {},
+                           .iblPrefilteredTex = {},
+                           .iblIrradianceTex = {},
                            .iblAvailable = false,
                            .viewMat = {},
                            .projMat = {},
@@ -127,13 +133,18 @@ struct FakeOverlayStats final {
 
 FakeOverlayStats g_stats{};
 
-void fake_bind_framebuffer(std::uint32_t) noexcept {}
+void fake_bind_render_target(RenderTargetHandle) noexcept {}
 void fake_set_viewport(std::int32_t, std::int32_t, std::int32_t,
                        std::int32_t) noexcept {}
-void fake_state_toggle() noexcept {}
-void fake_bind_id(std::uint32_t) noexcept {}
-void fake_buffer_data_array(const void *, std::ptrdiff_t) noexcept {}
-void fake_draw_arrays_lines(std::int32_t, std::int32_t count) noexcept {
+void fake_apply_render_state(const RenderState &) noexcept {}
+void fake_bind_program(DeviceProgramHandle) noexcept {}
+void fake_update_buffer(DeviceBufferHandle, const void *,
+                        std::ptrdiff_t) noexcept {}
+void fake_draw(DeviceGeometryHandle, PrimitiveTopology topology, std::int32_t,
+               std::int32_t count) noexcept {
+  if (topology != PrimitiveTopology::Lines) {
+    return;
+  }
   ++g_stats.drawCalls;
   g_stats.vertexTotal += count;
 }
@@ -141,17 +152,12 @@ void fake_draw_arrays_lines(std::int32_t, std::int32_t count) noexcept {
 /// Builds a device table stubbing exactly the entry points the overlay uses.
 RenderDevice make_fake_device() noexcept {
   RenderDevice device{};
-  device.bind_framebuffer = &fake_bind_framebuffer;
+  device.bind_render_target = &fake_bind_render_target;
   device.set_viewport = &fake_set_viewport;
-  device.enable_depth_test = &fake_state_toggle;
-  device.enable_blending = &fake_state_toggle;
-  device.set_blend_func_alpha = &fake_state_toggle;
-  device.disable_blending = &fake_state_toggle;
-  device.bind_program = &fake_bind_id;
-  device.bind_vertex_array = &fake_bind_id;
-  device.bind_array_buffer = &fake_bind_id;
-  device.buffer_data_array = &fake_buffer_data_array;
-  device.draw_arrays_lines = &fake_draw_arrays_lines;
+  device.apply_render_state = &fake_apply_render_state;
+  device.bind_program = &fake_bind_program;
+  device.update_buffer = &fake_update_buffer;
+  device.draw = &fake_draw;
   return device;
 }
 
@@ -195,10 +201,10 @@ void test_sphere_renders_through_line_pipeline() noexcept {
   CHECK(engine::core::initialize_debug_draw(), "debug draw initializes");
   backend_state() = BackendState{};
   backend_state().debugLineAvailable = true;
-  backend_state().debugLineProgram = 1U;
-  backend_state().debugLineVao = 1U;
-  backend_state().debugLineVbo = 1U;
-  backend_state().debugLineViewProjectionLoc = -1;
+  backend_state().debugLineProgram = DeviceProgramHandle{1U};
+  backend_state().debugLineGeometry = DeviceGeometryHandle{1U};
+  backend_state().debugLineVbo = DeviceBufferHandle{1U};
+  backend_state().debugLineViewProjectionLoc = kInvalidShaderParam;
   static const SceneLightData lights{};
   static const PassResources passRes{};
   const RenderDevice device = make_fake_device();
@@ -220,10 +226,10 @@ void test_lines_and_spheres_share_stream() noexcept {
   CHECK(engine::core::initialize_debug_draw(), "debug draw initializes");
   backend_state() = BackendState{};
   backend_state().debugLineAvailable = true;
-  backend_state().debugLineProgram = 1U;
-  backend_state().debugLineVao = 1U;
-  backend_state().debugLineVbo = 1U;
-  backend_state().debugLineViewProjectionLoc = -1;
+  backend_state().debugLineProgram = DeviceProgramHandle{1U};
+  backend_state().debugLineGeometry = DeviceGeometryHandle{1U};
+  backend_state().debugLineVbo = DeviceBufferHandle{1U};
+  backend_state().debugLineViewProjectionLoc = kInvalidShaderParam;
   static const SceneLightData lights{};
   static const PassResources passRes{};
   const RenderDevice device = make_fake_device();
@@ -248,10 +254,10 @@ void test_segment_chunking_draws_everything() noexcept {
   CHECK(engine::core::initialize_debug_draw(), "debug draw initializes");
   backend_state() = BackendState{};
   backend_state().debugLineAvailable = true;
-  backend_state().debugLineProgram = 1U;
-  backend_state().debugLineVao = 1U;
-  backend_state().debugLineVbo = 1U;
-  backend_state().debugLineViewProjectionLoc = -1;
+  backend_state().debugLineProgram = DeviceProgramHandle{1U};
+  backend_state().debugLineGeometry = DeviceGeometryHandle{1U};
+  backend_state().debugLineVbo = DeviceBufferHandle{1U};
+  backend_state().debugLineViewProjectionLoc = kInvalidShaderParam;
   static const SceneLightData lights{};
   static const PassResources passRes{};
   const RenderDevice device = make_fake_device();

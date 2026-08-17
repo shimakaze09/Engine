@@ -25,6 +25,7 @@
 #include "engine/editor/editor_camera.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
+#include "engine/renderer/render_device.h"
 #include "engine/runtime/world.h"
 
 #include "editor_asset_index.h"
@@ -35,12 +36,12 @@ namespace engine::editor {
 /// Enumerates play state values used by the engine.
 enum class PlayState : std::uint8_t { Stopped, Playing, Paused };
 
-// Thumbnail cache: maps a file path to a renderer texture handle (a
-// RenderDevice-owned GL texture id; the editor never touches GL types
-// directly, per audit #206).
+// Thumbnail cache: maps a file path to a device texture handle owned by
+// the editor (created/destroyed through the engine-facing RenderDevice
+// contract; the editor never touches GL types directly, per audit #206).
 struct ThumbnailEntry final {
   char path[512] = {};
-  std::uint32_t textureId = 0U;
+  renderer::DeviceTextureHandle texture{};
   int width = 0;
   int height = 0;
 };
@@ -185,11 +186,16 @@ const char *editor_scene_path() noexcept;
 const char *editor_asset_root() noexcept;
 
 /// Loads (and caches) the thumbnail texture for an asset path through the
-/// renderer's RenderDevice; 0 on miss.
-std::uint32_t load_thumbnail_texture(const char *assetPath) noexcept;
+/// renderer's RenderDevice; invalid handle on miss.
+renderer::DeviceTextureHandle
+load_thumbnail_texture(const char *assetPath) noexcept;
 /// Releases cached thumbnail textures owned by the editor through the
 /// renderer's RenderDevice.
 void clear_thumbnail_cache() noexcept;
+/// ImGui image id for a device texture. The editor's ImGui backend renders
+/// with the same graphics device, so this is the one sanctioned use of the
+/// device's native texture id; 0 when the handle is stale or no device.
+std::uint64_t imgui_texture_id(renderer::DeviceTextureHandle texture) noexcept;
 
 /// Loads the persisted content-browser folder/filter (last-used folder and
 /// type mask) once per process; no-op after the first call or when no

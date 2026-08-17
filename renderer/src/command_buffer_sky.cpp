@@ -75,19 +75,18 @@ math::Vec3 preetham_sun_direction(const SceneLightData &lights) noexcept {
   return math::normalize(math::Vec3(0.25F, 0.85F, 0.45F));
 }
 
+// Sky renders at maximum depth, so it needs the less-equal test, must not
+// write depth, and draws the cube's inside faces (no culling). Blending
+// stays off: both call sites run inside the opaque section of the frame.
 void prepare_procedural_sky_draw(const RenderDevice *dev) noexcept {
-  dev->enable_depth_test();
-  dev->set_depth_func_less_equal();
-  dev->set_depth_mask(false);
-  dev->disable_face_culling();
+  dev->apply_render_state(RenderState{DepthTest::LessEqual, false,
+                                      BlendMode::Disabled, CullMode::None});
 }
 
 void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
-  dev->bind_vertex_array(0U);
-  dev->bind_program(0U);
-  dev->set_depth_mask(true);
-  dev->set_depth_func_less();
-  dev->enable_face_culling();
+  dev->bind_program(kInvalidDeviceProgram);
+  dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                      BlendMode::Disabled, CullMode::Back});
 }
 
 } // namespace
@@ -95,14 +94,16 @@ void finish_procedural_sky_draw(const RenderDevice *dev) noexcept {
 /// Destroys or releases the requested object, handle, or resource for skybox resources.
 void destroy_skybox_resources(BackendState &backend) noexcept {
   const RenderDevice *dev = render_device();
-  if ((backend.skyboxVertexBuffer != 0U) && (dev != nullptr)) {
+  if ((backend.skyboxGeometry != kInvalidDeviceGeometry) && (dev != nullptr) &&
+      (dev->destroy_geometry != nullptr)) {
+    dev->destroy_geometry(backend.skyboxGeometry);
+  }
+  backend.skyboxGeometry = kInvalidDeviceGeometry;
+  if ((backend.skyboxVertexBuffer != kInvalidDeviceBuffer) &&
+      (dev != nullptr) && (dev->destroy_buffer != nullptr)) {
     dev->destroy_buffer(backend.skyboxVertexBuffer);
-    backend.skyboxVertexBuffer = 0U;
   }
-  if ((backend.skyboxVertexArray != 0U) && (dev != nullptr)) {
-    dev->destroy_vertex_array(backend.skyboxVertexArray);
-    backend.skyboxVertexArray = 0U;
-  }
+  backend.skyboxVertexBuffer = kInvalidDeviceBuffer;
   if (backend.skyboxShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.skyboxShaderHandle);
     backend.skyboxShaderHandle = ShaderProgramHandle{};
@@ -115,11 +116,11 @@ void destroy_skybox_resources(BackendState &backend) noexcept {
     destroy_shader_program(backend.hosekSkyShaderHandle);
     backend.hosekSkyShaderHandle = ShaderProgramHandle{};
   }
-  backend.skyboxProgram = 0U;
+  backend.skyboxProgram = kInvalidDeviceProgram;
   backend.skyboxAvailable = false;
-  backend.preethamSkyProgram = 0U;
+  backend.preethamSkyProgram = kInvalidDeviceProgram;
   backend.preethamSkyAvailable = false;
-  backend.hosekSkyProgram = 0U;
+  backend.hosekSkyProgram = kInvalidDeviceProgram;
   backend.hosekSkyAvailable = false;
 }
 
@@ -129,12 +130,12 @@ void destroy_preetham_sky_resources(BackendState &backend) noexcept {
     destroy_shader_program(backend.preethamSkyShaderHandle);
     backend.preethamSkyShaderHandle = ShaderProgramHandle{};
   }
-  backend.preethamSkyProgram = 0U;
+  backend.preethamSkyProgram = kInvalidDeviceProgram;
   backend.preethamSkyAvailable = false;
-  backend.preethamSkyViewLoc = -1;
-  backend.preethamSkyProjectionLoc = -1;
-  backend.preethamSkySunDirectionLoc = -1;
-  backend.preethamSkyTurbidityLoc = -1;
+  backend.preethamSkyViewLoc = kInvalidShaderParam;
+  backend.preethamSkyProjectionLoc = kInvalidShaderParam;
+  backend.preethamSkySunDirectionLoc = kInvalidShaderParam;
+  backend.preethamSkyTurbidityLoc = kInvalidShaderParam;
 }
 
 /// Destroys or releases the requested object, handle, or resource for hosek sky resources.
@@ -143,46 +144,50 @@ void destroy_hosek_sky_resources(BackendState &backend) noexcept {
     destroy_shader_program(backend.hosekSkyShaderHandle);
     backend.hosekSkyShaderHandle = ShaderProgramHandle{};
   }
-  backend.hosekSkyProgram = 0U;
+  backend.hosekSkyProgram = kInvalidDeviceProgram;
   backend.hosekSkyAvailable = false;
-  backend.hosekSkyViewLoc = -1;
-  backend.hosekSkyProjectionLoc = -1;
-  backend.hosekSkySunDirectionLoc = -1;
-  backend.hosekSkyTurbidityLoc = -1;
-  backend.hosekSkyGroundAlbedoLoc = -1;
+  backend.hosekSkyViewLoc = kInvalidShaderParam;
+  backend.hosekSkyProjectionLoc = kInvalidShaderParam;
+  backend.hosekSkySunDirectionLoc = kInvalidShaderParam;
+  backend.hosekSkyTurbidityLoc = kInvalidShaderParam;
+  backend.hosekSkyGroundAlbedoLoc = kInvalidShaderParam;
 }
 
 /// Creates a new object, handle, or resource for skybox geometry.
 bool create_skybox_geometry(BackendState &backend,
                             const RenderDevice *dev) noexcept {
-  if ((backend.skyboxVertexArray != 0U) && (backend.skyboxVertexBuffer != 0U)) {
+  if ((backend.skyboxGeometry != kInvalidDeviceGeometry) &&
+      (backend.skyboxVertexBuffer != kInvalidDeviceBuffer)) {
     return true;
   }
 
-  if ((dev == nullptr) || (dev->create_vertex_array == nullptr) ||
-      (dev->create_buffer == nullptr) || (dev->bind_vertex_array == nullptr) ||
-      (dev->bind_array_buffer == nullptr) ||
-      (dev->buffer_data_array == nullptr) ||
-      (dev->enable_vertex_attrib == nullptr) ||
-      (dev->vertex_attrib_float == nullptr)) {
+  if ((dev == nullptr) || (dev->create_buffer == nullptr) ||
+      (dev->create_geometry == nullptr)) {
     return false;
   }
 
-  backend.skyboxVertexArray = dev->create_vertex_array();
-  backend.skyboxVertexBuffer = dev->create_buffer();
-  if ((backend.skyboxVertexArray == 0U) || (backend.skyboxVertexBuffer == 0U)) {
+  BufferDesc bufferDesc{};
+  bufferDesc.usage = BufferUsage::Vertex;
+  bufferDesc.access = BufferAccess::Static;
+  bufferDesc.sizeBytes = sizeof(kSkyboxCubeVertices);
+  bufferDesc.data = kSkyboxCubeVertices;
+  backend.skyboxVertexBuffer = dev->create_buffer(bufferDesc);
+  if (backend.skyboxVertexBuffer == kInvalidDeviceBuffer) {
     destroy_skybox_resources(backend);
     return false;
   }
 
-  dev->bind_vertex_array(backend.skyboxVertexArray);
-  dev->bind_array_buffer(backend.skyboxVertexBuffer);
-  dev->buffer_data_array(kSkyboxCubeVertices, sizeof(kSkyboxCubeVertices));
-  dev->enable_vertex_attrib(0U);
-  dev->vertex_attrib_float(0U, 3, static_cast<std::int32_t>(3 * sizeof(float)),
-                           nullptr);
-  dev->bind_array_buffer(0U);
-  dev->bind_vertex_array(0U);
+  GeometryDesc geometryDesc{};
+  geometryDesc.vertexBuffer = backend.skyboxVertexBuffer;
+  geometryDesc.layout.strideBytes =
+      static_cast<std::int32_t>(3 * sizeof(float));
+  geometryDesc.layout.attributeCount = 1U;
+  geometryDesc.layout.attributes[0] = {VertexSemantic::Position, 3, 0};
+  backend.skyboxGeometry = dev->create_geometry(geometryDesc);
+  if (backend.skyboxGeometry == kInvalidDeviceGeometry) {
+    destroy_skybox_resources(backend);
+    return false;
+  }
   return true;
 }
 
@@ -200,45 +205,45 @@ SkyModel selected_sky_model() noexcept {
   return SkyModel::Hosek;
 }
 
-std::uint32_t active_skybox_gpu_texture(const BackendState &backend) noexcept {
+DeviceTextureHandle
+active_skybox_device_texture(const BackendState &backend) noexcept {
   if (!backend.skyboxAvailable ||
       (renderer_context().activeSkyboxTexture == kInvalidTextureHandle) ||
       !is_texture_cubemap(renderer_context().activeSkyboxTexture)) {
-    return 0U;
+    return kInvalidDeviceTexture;
   }
 
-  return texture_gpu_id(renderer_context().activeSkyboxTexture);
+  return texture_device_handle(renderer_context().activeSkyboxTexture);
 }
 
 void draw_skybox(const BackendState &backend, const RenderDevice *dev,
                  const math::Mat4 &viewMat, const math::Mat4 &projMat,
-                 std::uint32_t cubemapGpuId,
+                 DeviceTextureHandle cubemap,
                  RendererFrameStats &frameStats) noexcept {
-  if ((dev == nullptr) || (cubemapGpuId == 0U) ||
-      (dev->bind_texture_cubemap == nullptr) ||
-      (dev->set_depth_func_less_equal == nullptr) ||
-      (dev->set_depth_func_less == nullptr)) {
+  if ((dev == nullptr) || (cubemap == kInvalidDeviceTexture) ||
+      (dev->bind_texture_slot == nullptr) ||
+      (dev->apply_render_state == nullptr) || (dev->draw == nullptr)) {
     return;
   }
 
   prepare_procedural_sky_draw(dev);
 
   dev->bind_program(backend.skyboxProgram);
-  if (backend.skyboxViewLoc >= 0) {
-    dev->set_uniform_mat4(backend.skyboxViewLoc, &viewMat.columns[0].x);
+  if (backend.skyboxViewLoc.valid()) {
+    dev->set_param_mat4(backend.skyboxViewLoc, &viewMat.columns[0].x);
   }
-  if (backend.skyboxProjectionLoc >= 0) {
-    dev->set_uniform_mat4(backend.skyboxProjectionLoc, &projMat.columns[0].x);
+  if (backend.skyboxProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.skyboxProjectionLoc, &projMat.columns[0].x);
   }
-  if (backend.skyboxTextureLoc >= 0) {
-    dev->set_uniform_int(backend.skyboxTextureLoc, 0);
+  if (backend.skyboxTextureLoc.valid()) {
+    dev->set_param_i32(backend.skyboxTextureLoc, 0);
   }
 
-  dev->bind_texture_cubemap(0, cubemapGpuId);
-  dev->bind_vertex_array(backend.skyboxVertexArray);
-  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+  dev->bind_texture_slot(0U, cubemap);
+  dev->draw(backend.skyboxGeometry, PrimitiveTopology::Triangles, 0,
+            kSkyboxVertexCount);
 
-  dev->bind_texture_cubemap(0, 0U);
+  dev->bind_texture_slot(0U, kInvalidDeviceTexture);
   finish_procedural_sky_draw(dev);
 
   ++frameStats.drawCalls;
@@ -251,8 +256,7 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
                        const SceneLightData &lights,
                        RendererFrameStats &frameStats) noexcept {
   if ((dev == nullptr) || !backend.preethamSkyAvailable ||
-      (dev->set_depth_func_less_equal == nullptr) ||
-      (dev->set_depth_func_less == nullptr)) {
+      (dev->apply_render_state == nullptr) || (dev->draw == nullptr)) {
     return;
   }
 
@@ -262,22 +266,22 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
   prepare_procedural_sky_draw(dev);
 
   dev->bind_program(backend.preethamSkyProgram);
-  if (backend.preethamSkyViewLoc >= 0) {
-    dev->set_uniform_mat4(backend.preethamSkyViewLoc, &viewMat.columns[0].x);
+  if (backend.preethamSkyViewLoc.valid()) {
+    dev->set_param_mat4(backend.preethamSkyViewLoc, &viewMat.columns[0].x);
   }
-  if (backend.preethamSkyProjectionLoc >= 0) {
-    dev->set_uniform_mat4(backend.preethamSkyProjectionLoc,
+  if (backend.preethamSkyProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.preethamSkyProjectionLoc,
                           &projMat.columns[0].x);
   }
-  if (backend.preethamSkySunDirectionLoc >= 0) {
-    dev->set_uniform_vec3(backend.preethamSkySunDirectionLoc, &sunDir.x);
+  if (backend.preethamSkySunDirectionLoc.valid()) {
+    dev->set_param_vec3(backend.preethamSkySunDirectionLoc, &sunDir.x);
   }
-  if (backend.preethamSkyTurbidityLoc >= 0) {
-    dev->set_uniform_float(backend.preethamSkyTurbidityLoc, turbidity);
+  if (backend.preethamSkyTurbidityLoc.valid()) {
+    dev->set_param_f32(backend.preethamSkyTurbidityLoc, turbidity);
   }
 
-  dev->bind_vertex_array(backend.skyboxVertexArray);
-  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+  dev->draw(backend.skyboxGeometry, PrimitiveTopology::Triangles, 0,
+            kSkyboxVertexCount);
 
   finish_procedural_sky_draw(dev);
 
@@ -291,8 +295,7 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
                     const SceneLightData &lights,
                     RendererFrameStats &frameStats) noexcept {
   if ((dev == nullptr) || !backend.hosekSkyAvailable ||
-      (dev->set_depth_func_less_equal == nullptr) ||
-      (dev->set_depth_func_less == nullptr)) {
+      (dev->apply_render_state == nullptr) || (dev->draw == nullptr)) {
     return;
   }
 
@@ -303,24 +306,24 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
   prepare_procedural_sky_draw(dev);
 
   dev->bind_program(backend.hosekSkyProgram);
-  if (backend.hosekSkyViewLoc >= 0) {
-    dev->set_uniform_mat4(backend.hosekSkyViewLoc, &viewMat.columns[0].x);
+  if (backend.hosekSkyViewLoc.valid()) {
+    dev->set_param_mat4(backend.hosekSkyViewLoc, &viewMat.columns[0].x);
   }
-  if (backend.hosekSkyProjectionLoc >= 0) {
-    dev->set_uniform_mat4(backend.hosekSkyProjectionLoc, &projMat.columns[0].x);
+  if (backend.hosekSkyProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.hosekSkyProjectionLoc, &projMat.columns[0].x);
   }
-  if (backend.hosekSkySunDirectionLoc >= 0) {
-    dev->set_uniform_vec3(backend.hosekSkySunDirectionLoc, &sunDir.x);
+  if (backend.hosekSkySunDirectionLoc.valid()) {
+    dev->set_param_vec3(backend.hosekSkySunDirectionLoc, &sunDir.x);
   }
-  if (backend.hosekSkyTurbidityLoc >= 0) {
-    dev->set_uniform_float(backend.hosekSkyTurbidityLoc, turbidity);
+  if (backend.hosekSkyTurbidityLoc.valid()) {
+    dev->set_param_f32(backend.hosekSkyTurbidityLoc, turbidity);
   }
-  if (backend.hosekSkyGroundAlbedoLoc >= 0) {
-    dev->set_uniform_float(backend.hosekSkyGroundAlbedoLoc, groundAlbedo);
+  if (backend.hosekSkyGroundAlbedoLoc.valid()) {
+    dev->set_param_f32(backend.hosekSkyGroundAlbedoLoc, groundAlbedo);
   }
 
-  dev->bind_vertex_array(backend.skyboxVertexArray);
-  dev->draw_arrays_triangles(0, kSkyboxVertexCount);
+  dev->draw(backend.skyboxGeometry, PrimitiveTopology::Triangles, 0,
+            kSkyboxVertexCount);
 
   finish_procedural_sky_draw(dev);
 

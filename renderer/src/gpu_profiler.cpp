@@ -17,8 +17,8 @@ constexpr std::size_t kPassCount = static_cast<std::size_t>(GpuPassId::Count);
 constexpr std::size_t kFrameLag = 2U;
 
 struct QueryRange final {
-  std::uint32_t beginQuery = 0U;
-  std::uint32_t endQuery = 0U;
+  DeviceQueryHandle beginQuery{};
+  DeviceQueryHandle endQuery{};
   bool submitted = false;
   bool beginIssued = false;
 };
@@ -46,16 +46,16 @@ std::size_t pass_index(GpuPassId pass) noexcept {
 bool query_range_ready(const RenderDevice *dev,
                        const QueryRange &range) noexcept {
   if ((dev == nullptr) || !range.submitted ||
-      (dev->query_result_available == nullptr)) {
+      (dev->timestamp_ready == nullptr)) {
     return false;
   }
 
-  return dev->query_result_available(range.beginQuery) &&
-         dev->query_result_available(range.endQuery);
+  return dev->timestamp_ready(range.beginQuery) &&
+         dev->timestamp_ready(range.endQuery);
 }
 
 void resolve_read_frame(const RenderDevice *dev) noexcept {
-  if ((dev == nullptr) || (dev->query_result_u64 == nullptr)) {
+  if ((dev == nullptr) || (dev->timestamp_value == nullptr)) {
     return;
   }
 
@@ -66,8 +66,8 @@ void resolve_read_frame(const RenderDevice *dev) noexcept {
       continue;
     }
 
-    const std::uint64_t beginNs = dev->query_result_u64(range.beginQuery);
-    const std::uint64_t endNs = dev->query_result_u64(range.endQuery);
+    const std::uint64_t beginNs = dev->timestamp_value(range.beginQuery);
+    const std::uint64_t endNs = dev->timestamp_value(range.endQuery);
     g_gpuProfiler.passDurationsMs[i] =
         (endNs > beginNs)
             ? static_cast<float>(static_cast<double>(endNs - beginNs) /
@@ -88,11 +88,12 @@ bool initialize_gpu_profiler() noexcept {
   g_gpuProfiler = GpuProfilerState{};
 
   const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || (dev->create_query == nullptr) ||
-      (dev->destroy_query == nullptr) ||
-      (dev->query_counter_timestamp == nullptr) ||
-      (dev->query_result_available == nullptr) ||
-      (dev->query_result_u64 == nullptr)) {
+  if ((dev == nullptr) || !dev->caps.timestampQueries ||
+      (dev->create_timestamp_query == nullptr) ||
+      (dev->destroy_timestamp_query == nullptr) ||
+      (dev->write_timestamp == nullptr) ||
+      (dev->timestamp_ready == nullptr) ||
+      (dev->timestamp_value == nullptr)) {
     core::log_message(
         core::LogLevel::Warning, "renderer",
         "GPU profiler unavailable: timestamp query support missing");
@@ -104,9 +105,10 @@ bool initialize_gpu_profiler() noexcept {
   for (std::size_t frame = 0U; frame < kFrameLag; ++frame) {
     for (std::size_t pass = 0U; pass < kPassCount; ++pass) {
       QueryRange &range = g_gpuProfiler.queryFrames[frame][pass];
-      range.beginQuery = dev->create_query();
-      range.endQuery = dev->create_query();
-      if ((range.beginQuery == 0U) || (range.endQuery == 0U)) {
+      range.beginQuery = dev->create_timestamp_query();
+      range.endQuery = dev->create_timestamp_query();
+      if ((range.beginQuery == kInvalidDeviceQuery) ||
+          (range.endQuery == kInvalidDeviceQuery)) {
         core::log_message(
             core::LogLevel::Warning, "renderer",
             "GPU profiler disabled: failed to allocate query objects");
@@ -126,14 +128,14 @@ bool initialize_gpu_profiler() noexcept {
 /// Shuts down the owning system for gpu profiler.
 void shutdown_gpu_profiler() noexcept {
   const RenderDevice *dev = render_device();
-  if ((dev != nullptr) && (dev->destroy_query != nullptr)) {
+  if ((dev != nullptr) && (dev->destroy_timestamp_query != nullptr)) {
     for (auto &frameRanges : g_gpuProfiler.queryFrames) {
       for (QueryRange &range : frameRanges) {
-        if (range.beginQuery != 0U) {
-          dev->destroy_query(range.beginQuery);
+        if (range.beginQuery != kInvalidDeviceQuery) {
+          dev->destroy_timestamp_query(range.beginQuery);
         }
-        if (range.endQuery != 0U) {
-          dev->destroy_query(range.endQuery);
+        if (range.endQuery != kInvalidDeviceQuery) {
+          dev->destroy_timestamp_query(range.endQuery);
         }
         range = QueryRange{};
       }
@@ -188,7 +190,7 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || (dev->query_counter_timestamp == nullptr)) {
+  if ((dev == nullptr) || (dev->write_timestamp == nullptr)) {
     return;
   }
 
@@ -197,7 +199,7 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
     return;
   }
   QueryRange &range = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][idx];
-  dev->query_counter_timestamp(range.beginQuery);
+  dev->write_timestamp(range.beginQuery);
   range.beginIssued = true;
 }
 
@@ -215,7 +217,7 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
   }
 
   const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || (dev->query_counter_timestamp == nullptr)) {
+  if ((dev == nullptr) || (dev->write_timestamp == nullptr)) {
     return;
   }
 
@@ -227,7 +229,7 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
   if (!range.beginIssued) {
     return;
   }
-  dev->query_counter_timestamp(range.endQuery);
+  dev->write_timestamp(range.endQuery);
   range.submitted = true;
 }
 

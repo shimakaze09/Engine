@@ -224,8 +224,18 @@ directory-global by design.
   `collider.cpp` centralizes affine world geometry for every shape.
 - `renderer/` — asset database/manager/streaming (fixed slots + tombstones,
   worker-thread queue, LRU), mesh/texture loading, procedural
-  `mesh_primitives`, shader system (variants, hot reload), `RenderDevice`
-  function table (GL impl in `render_device_gl.cpp`), command buffer frontend
+  `mesh_primitives`, shader system (variants, hot reload), `RenderDevice` —
+  the engine-owned backend-neutral device contract (#165): generational
+  handles for buffers/textures/programs/geometry/render targets/queries,
+  descriptor-based creation, named `ShaderParam` binding, whole
+  `RenderState` application, and a `DeviceCaps` capability struct; the sole
+  backend implementation lives in `render_device_gl.cpp` (all GL enums,
+  VAOs, FBOs, uniform locations, and texture units stay inside it, mapped
+  through the generational slot tables in `device_slot_table.h` so stale
+  device handles are detected instead of aliasing recycled backend
+  objects; the one sanctioned native-id escape is
+  `RenderDevice::native_texture_id`, consumed only by the editor's ImGui
+  image binding), command buffer frontend
   (`CommandBufferBuilder`, 64-bit DrawKey sort) with backend split across
   `command_buffer{,_init_*,_flush,_flush_*,_sky,_ibl,_post_resources,_context,_builder,_math}`
   (init stages behind `command_buffer_init_internal.h`; flush passes share
@@ -412,7 +422,13 @@ directory-global by design.
   explicit behavior version, migration policy, and before/after tests.
 - Authored files use staged atomic replacement; related multi-file outputs
   use a manifest or transaction so interruption cannot create a mixed state.
-- Renderer: command construction stays separate from GL execution; preserve
+- Renderer: command construction stays separate from backend execution, and
+  code above `render_device_gl.cpp` speaks only the engine-facing
+  `RenderDevice` vocabulary (handles, descriptors, shader params, render
+  state) — GL concepts must not reappear above the backend; device
+  resources are owned by whichever system created them, destruction is
+  immediate and idempotent, and `shutdown_render_device` invalidates every
+  outstanding handle; preserve
   forward fallback and transparency behavior when touching deferred paths;
   prefer CPU-verifiable renderer tests (GPU tests carry the `gpu` label).
 - Scripting: don't break the Lua API without tests + doc updates; validate

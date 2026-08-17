@@ -292,10 +292,10 @@ void draw_scene_capture_preview(
   // V to match the GL framebuffer origin, like the viewport).
   const std::int32_t captureSlot =
       editor_session().world->scene_capture_slot_for_entity(entity);
-  const std::uint32_t captureTexture =
+  const std::uint64_t captureTexture =
       (captureSlot >= 0)
-          ? renderer::get_scene_capture_texture(
-                static_cast<std::size_t>(captureSlot))
+          ? imgui_texture_id(renderer::get_scene_capture_texture(
+                static_cast<std::size_t>(captureSlot)))
           : 0U;
   if ((captureTexture != 0U) && (capture.width > 0U)) {
     const float availWidth = ImGui::GetContentRegionAvail().x;

@@ -19,14 +19,13 @@ struct FakeTextureDevice final {
 FakeTextureDevice g_fake{};
 RenderDevice g_device{};
 
-std::uint32_t fake_create_texture_2d(std::int32_t, std::int32_t, std::int32_t,
-                                     const void *) noexcept {
+DeviceTextureHandle fake_create_texture(const TextureDesc &) noexcept {
   ++g_fake.aliveTextures;
-  return g_fake.nextId++;
+  return DeviceTextureHandle{g_fake.nextId++};
 }
 
-void fake_destroy_texture(std::uint32_t id) noexcept {
-  if (id != 0U) {
+void fake_destroy_texture(DeviceTextureHandle texture) noexcept {
+  if (texture.value != 0U) {
     --g_fake.aliveTextures;
   }
 }
@@ -34,7 +33,7 @@ void fake_destroy_texture(std::uint32_t id) noexcept {
 void reset_fake_device() noexcept {
   g_fake = FakeTextureDevice{};
   g_device = RenderDevice{};
-  g_device.create_texture_2d = &fake_create_texture_2d;
+  g_device.create_texture = &fake_create_texture;
   g_device.destroy_texture = &fake_destroy_texture;
 }
 
@@ -86,14 +85,16 @@ int check_texture_handle_generation() {
     engine::core::shutdown_vfs();
     return 14;
   }
-  if (engine::renderer::texture_gpu_id(first) != 1U) {
+  if (engine::renderer::texture_device_handle(first) !=
+      engine::renderer::DeviceTextureHandle{1U}) {
     engine::renderer::shutdown_texture_system();
     engine::core::shutdown_vfs();
     return 15;
   }
 
   engine::renderer::unload_texture(first);
-  if (engine::renderer::texture_gpu_id(first) != 0U) {
+  if (engine::renderer::texture_device_handle(first) !=
+      engine::renderer::DeviceTextureHandle{0U}) {
     engine::renderer::shutdown_texture_system();
     engine::core::shutdown_vfs();
     return 16;
@@ -107,12 +108,14 @@ int check_texture_handle_generation() {
     engine::core::shutdown_vfs();
     return 17;
   }
-  if (engine::renderer::texture_gpu_id(second) != 2U) {
+  if (engine::renderer::texture_device_handle(second) !=
+      engine::renderer::DeviceTextureHandle{2U}) {
     engine::renderer::shutdown_texture_system();
     engine::core::shutdown_vfs();
     return 18;
   }
-  if (engine::renderer::texture_gpu_id(first) != 0U) {
+  if (engine::renderer::texture_device_handle(first) !=
+      engine::renderer::DeviceTextureHandle{0U}) {
     engine::renderer::shutdown_texture_system();
     engine::core::shutdown_vfs();
     return 19;
@@ -144,7 +147,8 @@ int check_external_texture_registration() {
   engine::renderer::reset_fake_device();
 
   // Registration requires an initialized texture system.
-  if (engine::renderer::register_external_texture(7U) !=
+  if (engine::renderer::register_external_texture(
+      engine::renderer::DeviceTextureHandle{7U}) !=
       engine::renderer::kInvalidTextureHandle) {
     return 30;
   }
@@ -154,23 +158,27 @@ int check_external_texture_registration() {
   }
 
   const engine::renderer::TextureHandle handle =
-      engine::renderer::register_external_texture(77U);
+      engine::renderer::register_external_texture(
+      engine::renderer::DeviceTextureHandle{77U});
   if (handle == engine::renderer::kInvalidTextureHandle) {
     engine::renderer::shutdown_texture_system();
     return 32;
   }
-  if (engine::renderer::texture_gpu_id(handle) != 77U) {
+  if (engine::renderer::texture_device_handle(handle) !=
+      engine::renderer::DeviceTextureHandle{77U}) {
     engine::renderer::shutdown_texture_system();
     return 33;
   }
-  // No GL texture was created on the device for an external registration.
+  // No device texture was created for an external registration.
   if (engine::renderer::fake_alive_textures() != 0) {
     engine::renderer::shutdown_texture_system();
     return 34;
   }
 
-  if (!engine::renderer::update_external_texture(handle, 88U) ||
-      (engine::renderer::texture_gpu_id(handle) != 88U)) {
+  if (!engine::renderer::update_external_texture(
+      handle, engine::renderer::DeviceTextureHandle{88U}) ||
+      (engine::renderer::texture_device_handle(handle) !=
+      engine::renderer::DeviceTextureHandle{88U})) {
     engine::renderer::shutdown_texture_system();
     return 35;
   }
@@ -178,7 +186,8 @@ int check_external_texture_registration() {
   // Unload releases the slot without touching the GL object (the fake
   // device would go negative if destroy were called).
   engine::renderer::unload_texture(handle);
-  if (engine::renderer::texture_gpu_id(handle) != 0U) {
+  if (engine::renderer::texture_device_handle(handle) !=
+      engine::renderer::DeviceTextureHandle{0U}) {
     engine::renderer::shutdown_texture_system();
     return 36;
   }
@@ -188,13 +197,15 @@ int check_external_texture_registration() {
   }
 
   // A stale handle can no longer be updated.
-  if (engine::renderer::update_external_texture(handle, 99U)) {
+  if (engine::renderer::update_external_texture(
+      handle, engine::renderer::DeviceTextureHandle{99U})) {
     engine::renderer::shutdown_texture_system();
     return 38;
   }
 
   const engine::renderer::TextureHandle survivor =
-      engine::renderer::register_external_texture(55U);
+      engine::renderer::register_external_texture(
+      engine::renderer::DeviceTextureHandle{55U});
   if (survivor == engine::renderer::kInvalidTextureHandle) {
     engine::renderer::shutdown_texture_system();
     return 39;

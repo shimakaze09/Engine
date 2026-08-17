@@ -38,17 +38,17 @@ namespace engine::renderer {
 // uniform. No OPTIONAL uniforms.
 bool resolve_skybox_program_state(BackendState &backend,
                                   const RenderDevice *dev) noexcept {
-  backend.skyboxProgram = shader_gpu_program(backend.skyboxShaderHandle);
-  const std::uint32_t skyboxProgram = backend.skyboxProgram;
-  if (skyboxProgram == 0U) {
+  backend.skyboxProgram = shader_device_program(backend.skyboxShaderHandle);
+  const DeviceProgramHandle skyboxProgram = backend.skyboxProgram;
+  if (skyboxProgram == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
-  backend.skyboxViewLoc = required_location(&ok, dev, skyboxProgram, "u_view");
+  backend.skyboxViewLoc = required_param(&ok, dev, skyboxProgram, "u_view");
   backend.skyboxProjectionLoc =
-      required_location(&ok, dev, skyboxProgram, "u_projection");
+      required_param(&ok, dev, skyboxProgram, "u_projection");
   backend.skyboxTextureLoc =
-      required_location(&ok, dev, skyboxProgram, "u_skybox");
+      required_param(&ok, dev, skyboxProgram, "u_skybox");
   return ok;
 }
 
@@ -57,20 +57,20 @@ bool resolve_skybox_program_state(BackendState &backend,
 bool resolve_preetham_sky_program_state(BackendState &backend,
                                         const RenderDevice *dev) noexcept {
   backend.preethamSkyProgram =
-      shader_gpu_program(backend.preethamSkyShaderHandle);
-  const std::uint32_t preethamProgram = backend.preethamSkyProgram;
-  if (preethamProgram == 0U) {
+      shader_device_program(backend.preethamSkyShaderHandle);
+  const DeviceProgramHandle preethamProgram = backend.preethamSkyProgram;
+  if (preethamProgram == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.preethamSkyViewLoc =
-      required_location(&ok, dev, preethamProgram, "u_view");
+      required_param(&ok, dev, preethamProgram, "u_view");
   backend.preethamSkyProjectionLoc =
-      required_location(&ok, dev, preethamProgram, "u_projection");
+      required_param(&ok, dev, preethamProgram, "u_projection");
   backend.preethamSkySunDirectionLoc =
-      required_location(&ok, dev, preethamProgram, "u_sunDirection");
+      required_param(&ok, dev, preethamProgram, "u_sunDirection");
   backend.preethamSkyTurbidityLoc =
-      required_location(&ok, dev, preethamProgram, "u_turbidity");
+      required_param(&ok, dev, preethamProgram, "u_turbidity");
   return ok;
 }
 
@@ -78,21 +78,21 @@ bool resolve_preetham_sky_program_state(BackendState &backend,
 // — every procedural-scatter uniform. No OPTIONAL uniforms.
 bool resolve_hosek_sky_program_state(BackendState &backend,
                                      const RenderDevice *dev) noexcept {
-  backend.hosekSkyProgram = shader_gpu_program(backend.hosekSkyShaderHandle);
-  const std::uint32_t hosekProgram = backend.hosekSkyProgram;
-  if (hosekProgram == 0U) {
+  backend.hosekSkyProgram = shader_device_program(backend.hosekSkyShaderHandle);
+  const DeviceProgramHandle hosekProgram = backend.hosekSkyProgram;
+  if (hosekProgram == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
-  backend.hosekSkyViewLoc = required_location(&ok, dev, hosekProgram, "u_view");
+  backend.hosekSkyViewLoc = required_param(&ok, dev, hosekProgram, "u_view");
   backend.hosekSkyProjectionLoc =
-      required_location(&ok, dev, hosekProgram, "u_projection");
+      required_param(&ok, dev, hosekProgram, "u_projection");
   backend.hosekSkySunDirectionLoc =
-      required_location(&ok, dev, hosekProgram, "u_sunDirection");
+      required_param(&ok, dev, hosekProgram, "u_sunDirection");
   backend.hosekSkyTurbidityLoc =
-      required_location(&ok, dev, hosekProgram, "u_turbidity");
+      required_param(&ok, dev, hosekProgram, "u_turbidity");
   backend.hosekSkyGroundAlbedoLoc =
-      required_location(&ok, dev, hosekProgram, "u_groundAlbedo");
+      required_param(&ok, dev, hosekProgram, "u_groundAlbedo");
   return ok;
 }
 
@@ -101,20 +101,20 @@ bool resolve_hosek_sky_program_state(BackendState &backend,
 bool resolve_environment_prefilter_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.environmentPrefilterProgram =
-      shader_gpu_program(backend.environmentPrefilterShaderHandle);
-  const std::uint32_t prefilterProgram = backend.environmentPrefilterProgram;
-  if (prefilterProgram == 0U) {
+      shader_device_program(backend.environmentPrefilterShaderHandle);
+  const DeviceProgramHandle prefilterProgram = backend.environmentPrefilterProgram;
+  if (prefilterProgram == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.environmentPrefilterViewLoc =
-      required_location(&ok, dev, prefilterProgram, "u_view");
+      required_param(&ok, dev, prefilterProgram, "u_view");
   backend.environmentPrefilterProjectionLoc =
-      required_location(&ok, dev, prefilterProgram, "u_projection");
+      required_param(&ok, dev, prefilterProgram, "u_projection");
   backend.environmentPrefilterTextureLoc =
-      required_location(&ok, dev, prefilterProgram, "u_environmentMap");
+      required_param(&ok, dev, prefilterProgram, "u_environmentMap");
   backend.environmentPrefilterRoughnessLoc =
-      required_location(&ok, dev, prefilterProgram, "u_roughness");
+      required_param(&ok, dev, prefilterProgram, "u_roughness");
   return ok;
 }
 
@@ -123,18 +123,18 @@ bool resolve_environment_prefilter_program_state(
 bool resolve_environment_irradiance_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   backend.environmentIrradianceProgram =
-      shader_gpu_program(backend.environmentIrradianceShaderHandle);
-  const std::uint32_t irradianceProgram = backend.environmentIrradianceProgram;
-  if (irradianceProgram == 0U) {
+      shader_device_program(backend.environmentIrradianceShaderHandle);
+  const DeviceProgramHandle irradianceProgram = backend.environmentIrradianceProgram;
+  if (irradianceProgram == kInvalidDeviceProgram) {
     return false;
   }
   bool ok = true;
   backend.environmentIrradianceViewLoc =
-      required_location(&ok, dev, irradianceProgram, "u_view");
+      required_param(&ok, dev, irradianceProgram, "u_view");
   backend.environmentIrradianceProjectionLoc =
-      required_location(&ok, dev, irradianceProgram, "u_projection");
+      required_param(&ok, dev, irradianceProgram, "u_projection");
   backend.environmentIrradianceTextureLoc =
-      required_location(&ok, dev, irradianceProgram, "u_environmentMap");
+      required_param(&ok, dev, irradianceProgram, "u_environmentMap");
   return ok;
 }
 
@@ -144,8 +144,8 @@ bool resolve_environment_brdf_lut_program_state(
     BackendState &backend, const RenderDevice *dev) noexcept {
   static_cast<void>(dev);
   backend.environmentBrdfLutProgram =
-      shader_gpu_program(backend.environmentBrdfLutShaderHandle);
-  return backend.environmentBrdfLutProgram != 0U;
+      shader_device_program(backend.environmentBrdfLutShaderHandle);
+  return backend.environmentBrdfLutProgram != kInvalidDeviceProgram;
 }
 
 void init_backend_environment(BackendState &backend,
@@ -164,7 +164,7 @@ void init_backend_environment(BackendState &backend,
       core::log_message(core::LogLevel::Warning, "renderer",
                         "skybox setup failed — skybox disabled");
       destroy_skybox_resources(backend);
-      backend.skyboxProgram = 0U;
+      backend.skyboxProgram = kInvalidDeviceProgram;
     }
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",
@@ -186,7 +186,7 @@ void init_backend_environment(BackendState &backend,
           core::LogLevel::Warning, "renderer",
           "Preetham sky setup failed — procedural sky disabled");
       destroy_preetham_sky_resources(backend);
-      backend.preethamSkyProgram = 0U;
+      backend.preethamSkyProgram = kInvalidDeviceProgram;
     }
   } else {
     core::log_message(
@@ -210,7 +210,7 @@ void init_backend_environment(BackendState &backend,
           core::LogLevel::Warning, "renderer",
           "Hosek-Wilkie sky setup failed — falling back to Preetham");
       destroy_hosek_sky_resources(backend);
-      backend.hosekSkyProgram = 0U;
+      backend.hosekSkyProgram = kInvalidDeviceProgram;
     }
   } else {
     core::log_message(
@@ -238,7 +238,7 @@ void init_backend_environment(BackendState &backend,
           core::LogLevel::Warning, "renderer",
           "environment prefilter setup failed — IBL prefilter disabled");
       destroy_environment_prefilter_resources(backend);
-      backend.environmentPrefilterProgram = 0U;
+      backend.environmentPrefilterProgram = kInvalidDeviceProgram;
     }
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",
@@ -263,7 +263,7 @@ void init_backend_environment(BackendState &backend,
           core::LogLevel::Warning, "renderer",
           "environment irradiance setup failed — IBL irradiance disabled");
       destroy_environment_irradiance_resources(backend);
-      backend.environmentIrradianceProgram = 0U;
+      backend.environmentIrradianceProgram = kInvalidDeviceProgram;
     }
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",

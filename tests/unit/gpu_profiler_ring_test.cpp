@@ -21,19 +21,21 @@ std::uint64_t g_nextTimestampNs = 0U;
 std::uint64_t g_queryResults[512]{};
 bool g_resultsAvailable = true;
 
-std::uint32_t fake_create_query() noexcept { return g_nextQueryId++; }
-void fake_destroy_query(std::uint32_t) noexcept {}
-void fake_query_counter_timestamp(std::uint32_t query) noexcept {
+DeviceQueryHandle fake_create_query() noexcept {
+  return DeviceQueryHandle{g_nextQueryId++};
+}
+void fake_destroy_query(DeviceQueryHandle) noexcept {}
+void fake_write_timestamp(DeviceQueryHandle query) noexcept {
   ++g_timestampCalls;
-  if (query < 512U) {
-    g_queryResults[query] = g_nextTimestampNs;
+  if (query.value < 512U) {
+    g_queryResults[query.value] = g_nextTimestampNs;
   }
 }
-bool fake_query_result_available(std::uint32_t) noexcept {
+bool fake_timestamp_ready(DeviceQueryHandle) noexcept {
   return g_resultsAvailable;
 }
-std::uint64_t fake_query_result_u64(std::uint32_t query) noexcept {
-  return (query < 512U) ? g_queryResults[query] : 0U;
+std::uint64_t fake_timestamp_value(DeviceQueryHandle query) noexcept {
+  return (query.value < 512U) ? g_queryResults[query.value] : 0U;
 }
 
 RenderDevice g_device{};
@@ -42,11 +44,12 @@ RenderDevice g_device{};
 
 /// Link seam: the profiler TU resolves its device through this override.
 const RenderDevice *render_device() noexcept {
-  g_device.create_query = &fake_create_query;
-  g_device.destroy_query = &fake_destroy_query;
-  g_device.query_counter_timestamp = &fake_query_counter_timestamp;
-  g_device.query_result_available = &fake_query_result_available;
-  g_device.query_result_u64 = &fake_query_result_u64;
+  g_device.caps.timestampQueries = true;
+  g_device.create_timestamp_query = &fake_create_query;
+  g_device.destroy_timestamp_query = &fake_destroy_query;
+  g_device.write_timestamp = &fake_write_timestamp;
+  g_device.timestamp_ready = &fake_timestamp_ready;
+  g_device.timestamp_value = &fake_timestamp_value;
   return &g_device;
 }
 

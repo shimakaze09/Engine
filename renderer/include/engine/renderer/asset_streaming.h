@@ -163,7 +163,8 @@ LoadingState wait_for_load(const AssetStreamingQueue *queue, LoadHandle handle,
 ///                       on success.  May run concurrently on streaming worker
 ///                       threads.  May be nullptr for budget-only tests.
 /// @param uploadCallback Called for each request that needs GPU upload.  Should
-///                       upload to GL and return true on success.  May be
+///                       upload to the device and return true on success.
+///                       May be
 ///                       nullptr for budget-only tests.
 /// @param userData       Forwarded to both callbacks. Must be safe for
 ///                       concurrent load callbacks when loadCallback is used.
