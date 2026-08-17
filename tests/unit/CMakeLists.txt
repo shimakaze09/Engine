@@ -307,6 +307,13 @@ engine_add_test_executable(engine_unit_editor_asset_request
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_editor_material_bridge
+    SOURCES
+    editor_material_bridge_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_world_name_lookup
     SOURCES
     world_name_lookup_test.cpp
