@@ -10,8 +10,13 @@ namespace engine {
 namespace runtime {
 class World;
 }
+namespace content {
+struct AssetRequestQueue;
+}
 namespace renderer {
-struct AssetManager;
+// The queue container is content-owned (#171 C3); this keeps the
+// established renderer service vocabulary in the signatures below.
+using AssetManager = content::AssetRequestQueue;
 struct GpuMeshRegistry;
 }
 

@@ -35,70 +35,6 @@ bool has_source_path(const MeshAssetRecord &record) noexcept {
   return record.sourcePath[0] != '\0';
 }
 
-/// Returns whether has pending request.
-bool has_pending_request(const AssetManager *manager,
-                         AssetRequestType type,
-                         AssetId id) noexcept {
-  if ((manager == nullptr) || (id == kInvalidAssetId)) {
-    return false;
-  }
-
-  for (std::size_t i = 0U; i < manager->requestCount; ++i) {
-    const std::size_t slot =
-        (manager->requestHead + i) % manager->requests.size();
-    const AssetRequest &request = manager->requests[slot];
-    if ((request.id == id) && (request.type == type)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/// Pushes an item onto the owning stack or queue for request.
-bool push_request(AssetManager *manager,
-                  AssetRequestType type,
-                  AssetId id,
-                  const char *sourcePath) noexcept {
-  if ((manager == nullptr) || (id == kInvalidAssetId)) {
-    return false;
-  }
-
-  if (manager->requestCount >= manager->requests.size()) {
-    ++manager->droppedRequests;
-    if (manager->droppedRequests == 1U) {
-      core::log_message(core::LogLevel::Warning, "assets",
-                        "asset request ring full; requests are being "
-                        "dropped (droppedRequests counts the total)");
-    }
-    return false;
-  }
-
-  const std::size_t slot =
-      (manager->requestHead + manager->requestCount) % manager->requests.size();
-  AssetRequest &request = manager->requests[slot];
-  request = AssetRequest{};
-  request.type = type;
-  request.id = id;
-  copy_source_path(&request.sourcePath, sourcePath);
-  ++manager->requestCount;
-  return true;
-}
-
-/// Pops an item from the owning stack or queue for request.
-bool pop_request(AssetManager *manager, AssetRequest *outRequest) noexcept {
-  if ((manager == nullptr) || (outRequest == nullptr)
-      || (manager->requestCount == 0U)) {
-    return false;
-  }
-
-  *outRequest = manager->requests[manager->requestHead];
-  manager->requests[manager->requestHead] = AssetRequest{};
-  manager->requestHead = (manager->requestHead + 1U) % manager->requests.size();
-  --manager->requestCount;
-  return true;
-}
-
 bool ensure_record(AssetDatabase *database,
                    AssetId id,
                    const char *sourcePath,
@@ -152,9 +88,9 @@ void sync_requested_residency(AssetManager *manager,
       if ((record.state == AssetState::Ready)
           || (record.state == AssetState::Loading)
           || (record.state == AssetState::Failed)) {
-        if (!has_pending_request(
+        if (!content::has_pending_asset_request(
                 manager, AssetRequestType::Unload, record.id)) {
-          static_cast<void>(push_request(
+          static_cast<void>(content::push_asset_request(
               manager, AssetRequestType::Unload, record.id, nullptr));
         }
       }
@@ -162,13 +98,13 @@ void sync_requested_residency(AssetManager *manager,
     }
 
     if (record.state == AssetState::Unloaded) {
-      if (!has_pending_request(manager, AssetRequestType::Load, record.id)
-          && !has_pending_request(
+      if (!content::has_pending_asset_request(manager, AssetRequestType::Load, record.id)
+          && !content::has_pending_asset_request(
               manager, AssetRequestType::Reload, record.id)) {
         const char *path =
             has_source_path(record) ? record.sourcePath.data() : nullptr;
         static_cast<void>(
-            push_request(manager, AssetRequestType::Load, record.id, path));
+            content::push_asset_request(manager, AssetRequestType::Load, record.id, path));
       }
     }
   }
@@ -258,22 +194,7 @@ bool process_load_like_request(AssetDatabase *database,
 } // namespace
 
 void clear_asset_manager(AssetManager *manager) noexcept {
-  if (manager == nullptr) {
-    return;
-  }
-
-  manager->requests.fill(AssetRequest{});
-  manager->requestHead = 0U;
-  manager->requestCount = 0U;
-  manager->droppedRequests = 0U;
-}
-
-std::size_t pending_asset_request_count(const AssetManager *manager) noexcept {
-  if (manager == nullptr) {
-    return 0U;
-  }
-
-  return manager->requestCount;
+  content::clear_asset_request_queue(manager);
 }
 
 bool queue_mesh_load(AssetManager *manager,
@@ -300,12 +221,12 @@ bool queue_mesh_load(AssetManager *manager,
     return true;
   }
 
-  if (has_pending_request(manager, AssetRequestType::Load, id)
-      || has_pending_request(manager, AssetRequestType::Reload, id)) {
+  if (content::has_pending_asset_request(manager, AssetRequestType::Load, id)
+      || content::has_pending_asset_request(manager, AssetRequestType::Reload, id)) {
     return true;
   }
 
-  return push_request(manager, AssetRequestType::Load, id, sourcePath);
+  return content::push_asset_request(manager, AssetRequestType::Load, id, sourcePath);
 }
 
 bool queue_mesh_unload(AssetManager *manager,
@@ -329,11 +250,11 @@ bool queue_mesh_unload(AssetManager *manager,
     return true;
   }
 
-  if (has_pending_request(manager, AssetRequestType::Unload, id)) {
+  if (content::has_pending_asset_request(manager, AssetRequestType::Unload, id)) {
     return true;
   }
 
-  return push_request(manager, AssetRequestType::Unload, id, nullptr);
+  return content::push_asset_request(manager, AssetRequestType::Unload, id, nullptr);
 }
 
 bool queue_mesh_reload(AssetManager *manager,
@@ -356,11 +277,11 @@ bool queue_mesh_reload(AssetManager *manager,
     record.refCount = 1U;
   }
 
-  if (has_pending_request(manager, AssetRequestType::Reload, id)) {
+  if (content::has_pending_asset_request(manager, AssetRequestType::Reload, id)) {
     return true;
   }
 
-  return push_request(manager, AssetRequestType::Reload, id, sourcePath);
+  return content::push_asset_request(manager, AssetRequestType::Reload, id, sourcePath);
 }
 
 /// Advances this system for the current frame or tick for asset manager.
@@ -381,7 +302,7 @@ bool update_asset_manager(AssetManager *manager,
   bool allSucceeded = true;
   AssetRequest request{};
   std::size_t processed = 0U;
-  while ((processed < maxTransitions) && pop_request(manager, &request)) {
+  while ((processed < maxTransitions) && content::pop_asset_request(manager, &request)) {
     const std::size_t slot = find_record_slot(database, request.id);
     if (slot == database->meshAssets.size()) {
       ++processed;
