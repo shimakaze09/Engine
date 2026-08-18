@@ -141,9 +141,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Ninja instead of the default Visual Studio generator: same
+          # cl.exe conformance coverage, but MSBuild built this project with
+          # poor parallelism (30-43 min vs the tier-1 Ninja lane's ~7 on the
+          # same runner class).
           - name: windows-msvc
             os: windows-2025-vs2026
-            toolchain_args: ""
+            toolchain_args: -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           - name: linux-gcc
             os: ubuntu-24.04
             toolchain_args: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
@@ -169,6 +173,12 @@ jobs:
             libxtst-dev libxfixes-dev \
             libxss-dev libwayland-dev libxkbcommon-dev \
             libasound2-dev libpulse-dev
+
+      # Ninja + cl needs the MSVC environment (headers/libs/link), same as
+      # the tier-1 Windows lane.
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
         run: >
