@@ -78,7 +78,7 @@ private:
   std::size_t m_count = 0U;
 };
 
-// Global engine-wide service locator instance.
-ServiceLocator &global_service_locator() noexcept;
+// Deliberately no process-global locator instance: the only live locator is
+// EnginePipeline's, owned and torn down with the run (#168).
 
 } // namespace engine::core

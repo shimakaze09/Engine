@@ -11,6 +11,7 @@ extern "C" {
 #include <cstddef>
 #include <cstdio>
 
+#include "engine/runtime/game_binding_state.h"
 #include "engine/runtime/game_mode.h"
 #include "engine/runtime/game_state.h"
 #include "engine/runtime/player_controller.h"
@@ -20,19 +21,25 @@ extern "C" {
 namespace engine::scripting {
 namespace {
 
-char g_gameMode[64] = "default";
-char g_gameState[64] = "startup";
-constexpr std::size_t kMaxPlayerControllers = 4U;
-core::Entity g_playerControllerEntities[kMaxPlayerControllers]{};
-runtime::GameState g_persistentGameState{};
-runtime::PlayerControllerArray g_playerControllers{};
+constexpr std::size_t kMaxPlayerControllers =
+    runtime::GameBindingState::kMaxPlayerControllers;
+
+// Pipeline-owned when bound (#168 M3); the fallback keeps standalone/test
+// use (no pipeline) working with identical semantics.
+runtime::GameBindingState g_fallbackState{};
+runtime::GameBindingState *g_boundState = nullptr;
+
+/// Returns the state instance the game bindings currently act on.
+runtime::GameBindingState &binding_state() noexcept {
+  return (g_boundState != nullptr) ? *g_boundState : g_fallbackState;
+}
 
 /// Stores the current game mode name in scripting and the bound world.
 bool set_game_mode_name(const char *name) noexcept {
   if (name == nullptr) {
     return false;
   }
-  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", name);
+  std::snprintf(binding_state().gameMode, sizeof(binding_state().gameMode), "%s", name);
   if (runtime_binding().world != nullptr) {
     std::snprintf(runtime_binding().world->game_mode().name,
                   runtime::GameMode::kMaxNameLength, "%s", name);
@@ -45,7 +52,7 @@ bool set_game_state_name(const char *name) noexcept {
   if (name == nullptr) {
     return false;
   }
-  std::snprintf(g_gameState, sizeof(g_gameState), "%s", name);
+  std::snprintf(binding_state().gameState, sizeof(binding_state().gameState), "%s", name);
   return true;
 }
 
@@ -61,7 +68,7 @@ int lua_engine_get_game_mode(lua_State *state) noexcept {
   if (runtime_binding().world != nullptr) {
     lua_pushstring(state, runtime_binding().world->game_mode().name);
   } else {
-    lua_pushstring(state, g_gameMode);
+    lua_pushstring(state, binding_state().gameMode);
   }
   return 1;
 }
@@ -73,7 +80,7 @@ int lua_engine_set_game_state(lua_State *state) noexcept {
 }
 
 int lua_engine_get_game_state(lua_State *state) noexcept {
-  lua_pushstring(state, g_gameState);
+  lua_pushstring(state, binding_state().gameState);
   return 1;
 }
 
@@ -179,7 +186,7 @@ int lua_engine_game_state_set_number(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_persistentGameState.set_number(
+  lua_pushboolean(state, binding_state().persistentState.set_number(
                              key, static_cast<float>(lua_tonumber(state, 2)))
                              ? 1
                              : 0);
@@ -189,7 +196,7 @@ int lua_engine_game_state_set_number(lua_State *state) noexcept {
 int lua_engine_game_state_get_number(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   lua_pushnumber(
-      state, static_cast<lua_Number>(g_persistentGameState.get_number(key)));
+      state, static_cast<lua_Number>(binding_state().persistentState.get_number(key)));
   return 1;
 }
 
@@ -200,13 +207,13 @@ int lua_engine_game_state_set_string(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, g_persistentGameState.set_string(key, value) ? 1 : 0);
+  lua_pushboolean(state, binding_state().persistentState.set_string(key, value) ? 1 : 0);
   return 1;
 }
 
 int lua_engine_game_state_get_string(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
-  const char *value = g_persistentGameState.get_string(key);
+  const char *value = binding_state().persistentState.get_string(key);
   if (value != nullptr) {
     lua_pushstring(state, value);
   } else {
@@ -217,13 +224,13 @@ int lua_engine_game_state_get_string(lua_State *state) noexcept {
 
 int lua_engine_game_state_has(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
-  lua_pushboolean(state, g_persistentGameState.has(key) ? 1 : 0);
+  lua_pushboolean(state, binding_state().persistentState.has(key) ? 1 : 0);
   return 1;
 }
 
 int lua_engine_game_state_clear(lua_State *state) noexcept {
   static_cast<void>(state);
-  g_persistentGameState.clear();
+  binding_state().persistentState.clear();
   return 0;
 }
 
@@ -232,8 +239,8 @@ bool set_player_controller_entity(std::uint8_t player,
   if (player >= kMaxPlayerControllers) {
     return false;
   }
-  g_playerControllerEntities[player] = entity;
-  g_playerControllers.set_controlled_entity(player, entity);
+  binding_state().playerControllerEntities[player] = entity;
+  binding_state().playerControllers.set_controlled_entity(player, entity);
   return true;
 }
 
@@ -241,7 +248,7 @@ core::Entity get_player_controller_entity(std::uint8_t player) noexcept {
   if (player >= kMaxPlayerControllers) {
     return core::kInvalidEntity;
   }
-  return g_playerControllers.get_controlled_entity(player);
+  return binding_state().playerControllers.get_controlled_entity(player);
 }
 
 bool is_player_controller_entity(core::Entity entity) noexcept {
@@ -250,8 +257,8 @@ bool is_player_controller_entity(core::Entity entity) noexcept {
   }
   for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
     const auto player = static_cast<std::uint8_t>(i);
-    if ((g_playerControllerEntities[i] == entity) ||
-        (g_playerControllers.get_controlled_entity(player) == entity)) {
+    if ((binding_state().playerControllerEntities[i] == entity) ||
+        (binding_state().playerControllers.get_controlled_entity(player) == entity)) {
       return true;
     }
   }
@@ -263,34 +270,39 @@ void clear_player_controller_entity(core::Entity entity) noexcept {
     return;
   }
 
-  g_playerControllers.on_entity_destroyed(entity);
+  binding_state().playerControllers.on_entity_destroyed(entity);
   for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-    if (g_playerControllerEntities[i] == entity) {
-      g_playerControllerEntities[i] = core::kInvalidEntity;
+    if (binding_state().playerControllerEntities[i] == entity) {
+      binding_state().playerControllerEntities[i] = core::kInvalidEntity;
     }
   }
 }
 
 void reset_game_bindings() noexcept {
-  std::snprintf(g_gameMode, sizeof(g_gameMode), "%s", "default");
-  std::snprintf(g_gameState, sizeof(g_gameState), "%s", "startup");
+  std::snprintf(binding_state().gameMode, sizeof(binding_state().gameMode), "%s", "default");
+  std::snprintf(binding_state().gameState, sizeof(binding_state().gameState), "%s", "startup");
   for (std::size_t i = 0U; i < kMaxPlayerControllers; ++i) {
-    g_playerControllerEntities[i] = core::kInvalidEntity;
+    binding_state().playerControllerEntities[i] = core::kInvalidEntity;
   }
-  g_playerControllers.reset();
+  binding_state().playerControllers.reset();
+}
+
+/// Binds the pipeline-owned state (#168 M3); nullptr restores the fallback.
+void bind_game_state(runtime::GameBindingState *state) noexcept {
+  g_boundState = state;
 }
 
 bool bindable_set_game_mode(const char *name) noexcept {
   return set_game_mode_name(name);
 }
 
-const char *bindable_get_game_state() noexcept { return g_gameState; }
+const char *bindable_get_game_state() noexcept { return binding_state().gameState; }
 
 const char *bindable_get_game_mode() noexcept {
   if (runtime_binding().world != nullptr) {
     return runtime_binding().world->game_mode().name;
   }
-  return g_gameMode;
+  return binding_state().gameMode;
 }
 
 bool bindable_set_game_state(const char *name) noexcept {

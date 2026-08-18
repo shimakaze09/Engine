@@ -65,9 +65,4 @@ void ServiceLocator::clear() noexcept {
   m_count = 0U;
 }
 
-ServiceLocator &global_service_locator() noexcept {
-  static ServiceLocator instance;
-  return instance;
-}
-
 } // namespace engine::core
