@@ -10,7 +10,10 @@ namespace engine::renderer {
 
 using content::AssetId;
 using content::kInvalidAssetId;
+using content::AssetState;
 using content::AssetTypeTag;
+using content::make_asset_id_from_path;
+using content::make_asset_id_from_file;
 using content::MeshImportSettings;
 using content::TextureImportSettings;
 using content::AssetMetadata;

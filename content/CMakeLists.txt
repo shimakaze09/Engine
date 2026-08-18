@@ -6,6 +6,7 @@ engine_add_module_library(engine_content
     src/asset_stale_check.cpp
     src/asset_streaming.cpp
     src/lru_cache.cpp
+    src/metadata_store.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS

@@ -104,6 +104,13 @@ engine_add_test_executable(engine_unit_mesh_loader
     engine_math
 )
 
+engine_add_test_executable(engine_unit_content_metadata
+    SOURCES
+    content_metadata_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_asset_database
     SOURCES
     asset_database_test.cpp
@@ -1205,6 +1212,7 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
         ${ENGINE_CGLTF_INCLUDE_DIR}
         PRIVATE_DEPS
+        engine_content
         engine_core
         COMPILE_DEFINITIONS
         _CRT_SECURE_NO_WARNINGS
@@ -1231,6 +1239,7 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
         PRIVATE_DEPS
+        engine_content
         engine_core
         engine_math
         engine_physics

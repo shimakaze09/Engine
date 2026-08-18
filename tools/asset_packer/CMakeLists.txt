@@ -25,6 +25,7 @@ engine_add_executable_target(asset_packer
     ${ENGINE_CGLTF_INCLUDE_DIR}
     ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
+    engine_content
     engine_core
     engine_physics
     engine_math

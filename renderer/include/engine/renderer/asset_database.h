@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/content/metadata_store.h"
 #include "engine/renderer/asset_metadata.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
@@ -14,9 +15,8 @@
 
 namespace engine::renderer {
 
-// AssetId and kInvalidAssetId are defined in asset_metadata.h (included above).
-
-enum class AssetState : std::uint8_t { Unloaded, Loading, Ready, Failed };
+// AssetId, kInvalidAssetId, and AssetState are re-exported from
+// engine::content by asset_metadata.h (included above).
 
 /// One mesh slot: id, GPU handle, source path, refcount, residency. The
 /// last-access stamp is atomic because parallel render-prep chunk jobs
@@ -109,9 +109,11 @@ struct AssetDatabase final {
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets{};
   std::array<bool, kMaxMaterialAssets> materialOccupied{};
 
-  static constexpr std::size_t kMaxMetadata = 4096U;
-  std::array<AssetMetadata, kMaxMetadata> metadata{};
-  std::array<bool, kMaxMetadata> metadataOccupied{};
+  // The generic identity/tag/dependency table is content-owned (#171 C2);
+  // this database embeds one store and delegates the metadata API to it.
+  static constexpr std::size_t kMaxMetadata =
+      content::MetadataStore::kMaxMetadata;
+  content::MetadataStore metadataStore{};
 
   std::uint64_t currentFrame = 0ULL;
 };
@@ -134,13 +136,10 @@ bool set_mesh_asset_size(AssetDatabase *database, AssetId id,
 std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
                                           std::uint64_t budgetBytes) noexcept;
 
-/// 64-bit FNV-1a id from the canonicalized path.
-AssetId make_asset_id_from_path(const char *path) noexcept;
-/// 64-bit content-hash id from the file bytes. When the file cannot be
-/// opened or a read error would leave a partial hash, falls back to the
-/// canonicalized path hash with a logged warning (contract pinned by
-/// asset_database_test; the old "0 on read failure" doc was stale).
-AssetId make_asset_id_from_file(const char *path) noexcept;
+// make_asset_id_from_path / make_asset_id_from_file live in
+// engine::content (re-exported by asset_metadata.h); the file-hash
+// fallback contract stays pinned by asset_database_test.
+
 /// Inserts or updates a mesh record; false when the table is full. Records
 /// registered here are already Ready with no streaming reload path
 /// (builtin/synchronous meshes), so they are pinned: counted against the

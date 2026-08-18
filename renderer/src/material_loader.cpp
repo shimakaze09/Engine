@@ -129,9 +129,9 @@ bool material_slot_available(const AssetDatabase &database,
 /// True when metadata registration can insert or update this ID.
 bool metadata_slot_available(const AssetDatabase &database,
                              AssetId id) noexcept {
-  for (std::size_t index = 0U; index < database.metadata.size(); ++index) {
-    if (!database.metadataOccupied[index] ||
-        (database.metadata[index].assetId == id)) {
+  const content::MetadataStore &store = database.metadataStore;
+  for (std::size_t index = 0U; index < store.entries.size(); ++index) {
+    if (!store.occupied[index] || (store.entries[index].assetId == id)) {
       return true;
     }
   }
