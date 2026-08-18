@@ -449,6 +449,7 @@ endif()
 
 add_subdirectory(core)
 add_subdirectory(math)
+add_subdirectory(content)
 add_subdirectory(physics)
 add_subdirectory(scripting)
 add_subdirectory(renderer)

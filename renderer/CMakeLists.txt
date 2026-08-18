@@ -4,8 +4,6 @@ engine_add_module_library(engine_renderer
     SOURCES
     src/asset_database.cpp
     src/asset_manager.cpp
-    src/asset_stale_check.cpp
-    src/asset_streaming.cpp
     src/command_buffer_builder.cpp
     src/command_buffer_capture.cpp
     src/command_buffer_context.cpp
@@ -28,7 +26,6 @@ engine_add_module_library(engine_renderer
     src/command_buffer_init_post.cpp
     src/gpu_profiler.cpp
     src/light_culling.cpp
-    src/lru_cache.cpp
     src/mesh_loader.cpp
     src/material_loader.cpp
     src/material_writer.cpp
@@ -45,6 +42,7 @@ engine_add_module_library(engine_renderer
     PRIVATE_INCLUDE_DIRS
     ${ENGINE_STB_INCLUDE_DIR}
     PUBLIC_DEPS
+    engine_content
     engine_core
     engine_math
     PRIVATE_DEPS

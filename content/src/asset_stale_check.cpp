@@ -4,7 +4,7 @@
 // CPU load path only (sync loads and the streaming worker), never per
 // frame; the once-per-asset memory is a fixed lock-free table.
 
-#include "engine/renderer/asset_staleness.h"
+#include "engine/content/asset_staleness.h"
 
 #include <atomic>
 #include <cerrno>
@@ -19,7 +19,7 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 
-namespace engine::renderer {
+namespace engine::content {
 
 namespace {
 
@@ -220,4 +220,4 @@ void reset_cooked_asset_stale_warnings() noexcept {
   }
 }
 
-} // namespace engine::renderer
+} // namespace engine::content
