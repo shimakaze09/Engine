@@ -12,7 +12,7 @@
 
 #include "engine/core/logging.h"
 #include "engine/renderer/asset_database.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -148,8 +148,8 @@ int check_prefab_path_rejection() {
 /// An over-long streaming source path must be rejected by the queue and
 /// the asset database instead of being truncated into a different path.
 int check_streaming_path_rejection() {
-  std::unique_ptr<engine::renderer::AssetStreamingQueue> queue(
-      new (std::nothrow) engine::renderer::AssetStreamingQueue());
+  std::unique_ptr<engine::content::AssetStreamingQueue> queue(
+      new (std::nothrow) engine::content::AssetStreamingQueue());
   std::unique_ptr<engine::renderer::AssetDatabase> database(
       new (std::nothrow) engine::renderer::AssetDatabase());
   if ((queue == nullptr) || (database == nullptr)) {
@@ -158,19 +158,19 @@ int check_streaming_path_rejection() {
   engine::renderer::clear_asset_database(database.get());
 
   const std::size_t capacity =
-      sizeof(engine::renderer::LoadRequest::sourcePath);
+      sizeof(engine::content::LoadRequest::sourcePath);
   const std::string overlong(capacity + 40U, 'e');
   const std::string maxFit(capacity - 1U, 'f');
 
-  const engine::renderer::LoadHandle rejected =
-      engine::renderer::load_asset_async(queue.get(), 7ULL, overlong.c_str(),
-                                         engine::renderer::LoadPriority::Low);
+  const engine::content::LoadHandle rejected =
+      engine::content::load_asset_async(queue.get(), 7ULL, overlong.c_str(),
+                                         engine::content::LoadPriority::Low);
   if (rejected.valid()) {
     return 41;
   }
-  const engine::renderer::LoadHandle accepted =
-      engine::renderer::load_asset_async(queue.get(), 7ULL, maxFit.c_str(),
-                                         engine::renderer::LoadPriority::Low);
+  const engine::content::LoadHandle accepted =
+      engine::content::load_asset_async(queue.get(), 7ULL, maxFit.c_str(),
+                                         engine::content::LoadPriority::Low);
   if (!accepted.valid()) {
     return 42;
   }

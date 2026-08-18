@@ -8,15 +8,29 @@
 #include <cstdint>
 
 #include "engine/content/metadata_store.h"
-#include "engine/renderer/asset_metadata.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/texture_loader.h"
 
 namespace engine::renderer {
 
-// AssetId, kInvalidAssetId, and AssetState are re-exported from
-// engine::content by asset_metadata.h (included above).
+// The asset identity/metadata vocabulary is content-owned (#171); these
+// re-exports keep the renderer's established names for its own headers
+// and remaining mixed consumers (the C4 renderer shims are deleted).
+using content::AssetId;
+using content::kInvalidAssetId;
+using content::AssetState;
+using content::AssetTypeTag;
+using content::MeshImportSettings;
+using content::TextureImportSettings;
+using content::AssetMetadata;
+using content::asset_metadata_has_tag;
+using content::asset_metadata_add_tag;
+using content::write_metadata_path;
+using content::asset_metadata_add_dependency;
+using content::asset_metadata_has_dependency;
+using content::make_asset_id_from_path;
+using content::make_asset_id_from_file;
 
 /// One mesh slot: id, GPU handle, source path, refcount, residency. The
 /// last-access stamp is atomic because parallel render-prep chunk jobs
