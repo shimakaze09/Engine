@@ -13,6 +13,18 @@ namespace engine::content {
 using AssetId = std::uint64_t;
 inline constexpr AssetId kInvalidAssetId = 0ULL;
 
+/// Generic per-asset load lifecycle shared by every asset class.
+enum class AssetState : std::uint8_t { Unloaded, Loading, Ready, Failed };
+
+/// 64-bit FNV-1a id from the canonicalized path (separators normalized to
+/// '/'); the one identity constructor shared by runtime and tools (#172).
+AssetId make_asset_id_from_path(const char *path) noexcept;
+
+/// 64-bit content-hash id from the file bytes. When the file cannot be
+/// opened or a read error would leave a partial hash, falls back to the
+/// canonicalized path hash with a logged warning.
+AssetId make_asset_id_from_file(const char *path) noexcept;
+
 /// Enumerates asset type tag values used by the engine.
 enum class AssetTypeTag : std::uint8_t {
   Unknown = 0,

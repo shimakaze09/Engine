@@ -4,6 +4,8 @@
 
 #include "packer_shared.h"
 
+#include "engine/content/asset_metadata.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -701,25 +703,9 @@ bool sweep_orphan_outputs(const char *outputPath) {
   return true;
 }
 
+// Cooked ids must agree byte-for-byte with the runtime's — one shared
+// implementation instead of a drifting duplicate (#171 C2, #172).
 std::uint64_t hash_path_to_asset_id(const char *path) {
-  if (path == nullptr) {
-    return 0ULL;
-  }
-
-  std::uint64_t hash = kFnv64Offset;
-  for (const unsigned char *cursor =
-           reinterpret_cast<const unsigned char *>(path);
-       *cursor != 0U; ++cursor) {
-    const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
-                                 ? static_cast<unsigned char>('/')
-                                 : *cursor;
-    hash ^= static_cast<std::uint64_t>(ch);
-    hash *= kFnv64Prime;
-  }
-
-  if (hash == 0ULL) {
-    hash = 1ULL;
-  }
-  return hash;
+  return engine::content::make_asset_id_from_path(path);
 }
 

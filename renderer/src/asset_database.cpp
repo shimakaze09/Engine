@@ -57,78 +57,6 @@ void write_source_path(std::array<char, 260U> *outPath,
 
 } // namespace
 
-/// FNV-1a over the path with separators canonicalized to '/' so the same
-/// asset hashes identically on every platform.
-AssetId make_asset_id_from_path(const char *path) noexcept {
-  if (path == nullptr) {
-    return kInvalidAssetId;
-  }
-
-  std::uint64_t hash = core::kFnv1a64Offset;
-  for (const unsigned char *cursor =
-           reinterpret_cast<const unsigned char *>(path);
-       *cursor != 0U; ++cursor) {
-    const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
-                                 ? static_cast<unsigned char>('/')
-                                 : *cursor;
-    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(ch));
-  }
-
-  if (hash == kInvalidAssetId) {
-    hash = 1ULL;
-  }
-
-  return hash;
-}
-
-AssetId make_asset_id_from_file(const char *path) noexcept {
-  if (path == nullptr) {
-    return kInvalidAssetId;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    core::log_message(core::LogLevel::Warning, "assets",
-                      "asset id falls back to path hash: file unreadable");
-    return make_asset_id_from_path(path);
-  }
-
-  std::uint64_t hash = core::kFnv1a64Offset;
-  unsigned char buffer[4096] = {};
-  while (true) {
-    const std::size_t bytesRead = std::fread(buffer, 1U, sizeof(buffer), file);
-    if (bytesRead == 0U) {
-      break;
-    }
-    for (std::size_t i = 0U; i < bytesRead; ++i) {
-      hash = core::fnv1a_64_append(hash, buffer[i]);
-    }
-  }
-
-  const bool readFailed = std::ferror(file) != 0;
-  if (std::fclose(file) != 0) {
-    core::log_message(core::LogLevel::Warning, "assets",
-                      "asset id hashing: close failed after read");
-  }
-  if (readFailed) {
-    core::log_message(core::LogLevel::Warning, "assets",
-                      "asset id falls back to path hash: read error left a "
-                      "partial content hash");
-    return make_asset_id_from_path(path);
-  }
-  if (hash == kInvalidAssetId) {
-    hash = 1ULL;
-  }
-  return hash;
-}
-
 /// Linear-probe lookup; a never-used slot terminates the probe chain while
 /// tombstones keep it alive. Returns capacity when the id is absent.
 std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
@@ -478,10 +406,7 @@ void clear_asset_database(AssetDatabase *database) noexcept {
     database->materialAssets[i] = MaterialAssetRecord{};
   }
 
-  for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
-    database->metadataOccupied[i] = false;
-    database->metadata[i] = AssetMetadata{};
-  }
+  content::clear_metadata_store(&database->metadataStore);
 }
 
 // --- Texture asset functions ---
@@ -784,264 +709,88 @@ bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-// --- Metadata management ---
-
-namespace {
-
-/// Finds the matching object or resource for metadata slot.
-std::size_t find_metadata_slot(const AssetDatabase *database,
-                               AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return database != nullptr ? database->metadata.size() : 0U;
-  }
-
-  const std::size_t capacity = database->metadata.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->metadataOccupied[slot]) {
-      return capacity;
-    }
-    if (database->metadata[slot].assetId == id) {
-      return slot;
-    }
-  }
-
-  return capacity;
-}
-
-/// Finds the matching object or resource for metadata insert slot.
-std::size_t find_metadata_insert_slot(const AssetDatabase *database,
-                                      AssetId id) noexcept {
-  if (database == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t capacity = database->metadata.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->metadataOccupied[slot] ||
-        (database->metadata[slot].assetId == id)) {
-      return slot;
-    }
-  }
-
-  return capacity;
-}
-
-} // namespace
+// --- Metadata management (#171 C2): thin delegators into the
+// content-owned MetadataStore embedded in this database. ---
 
 bool register_asset_metadata(AssetDatabase *database,
                              const AssetMetadata &metadata) noexcept {
-  if ((database == nullptr) || (metadata.assetId == kInvalidAssetId) ||
-      (metadata.tagCount > AssetMetadata::kMaxTags) ||
-      (metadata.dependencyCount > AssetMetadata::kMaxDependencies)) {
-    return false;
-  }
-
-  const std::size_t slot =
-      find_metadata_insert_slot(database, metadata.assetId);
-  if (slot == database->metadata.size()) {
-    return false;
-  }
-
-  database->metadataOccupied[slot] = true;
-  database->metadata[slot] = metadata;
-  return true;
+  return (database != nullptr) &&
+         content::register_asset_metadata(&database->metadataStore, metadata);
 }
 
 /// Finds the matching object or resource for asset metadata.
 const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
                                          AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return nullptr;
-  }
-
-  const std::size_t slot = find_metadata_slot(database, id);
-  if (slot == database->metadata.size()) {
-    return nullptr;
-  }
-
-  return &database->metadata[slot];
+  return (database != nullptr)
+             ? content::find_asset_metadata(&database->metadataStore, id)
+             : nullptr;
 }
 
+/// Adds a tag to the id's metadata; false when unknown or tags full.
 bool add_asset_tag(AssetDatabase *database, AssetId id,
                    const char *tag) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
-    return false;
-  }
-
-  const std::size_t slot = find_metadata_slot(database, id);
-  if (slot == database->metadata.size()) {
-    return false;
-  }
-
-  return asset_metadata_add_tag(&database->metadata[slot], tag);
+  return (database != nullptr) &&
+         content::add_asset_tag(&database->metadataStore, id, tag);
 }
 
+/// True when the id's metadata carries the tag.
 bool asset_has_tag(const AssetDatabase *database, AssetId id,
                    const char *tag) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
-    return false;
-  }
-
-  const std::size_t slot = find_metadata_slot(database, id);
-  if (slot == database->metadata.size()) {
-    return false;
-  }
-
-  return asset_metadata_has_tag(&database->metadata[slot], tag);
+  return (database != nullptr) &&
+         content::asset_has_tag(&database->metadataStore, id, tag);
 }
 
+/// Collects up to maxIds ids carrying the tag; returns the count.
 std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
                                 AssetId *outIds, std::size_t maxIds) noexcept {
-  if ((database == nullptr) || (tag == nullptr) || (outIds == nullptr) ||
-      (maxIds == 0U)) {
-    return 0U;
-  }
-
-  std::size_t count = 0U;
-  for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
-    if (!database->metadataOccupied[i]) {
-      continue;
-    }
-    if (asset_metadata_has_tag(&database->metadata[i], tag)) {
-      outIds[count] = database->metadata[i].assetId;
-      ++count;
-      if (count >= maxIds) {
-        break;
-      }
-    }
-  }
-  return count;
+  return (database != nullptr)
+             ? content::query_assets_by_tag(&database->metadataStore, tag,
+                                            outIds, maxIds)
+             : 0U;
 }
 
+/// Collects up to maxIds ids of the given type; returns the count.
 std::size_t query_assets_by_type(const AssetDatabase *database,
                                  AssetTypeTag typeTag, AssetId *outIds,
                                  std::size_t maxIds) noexcept {
-  if ((database == nullptr) || (outIds == nullptr) || (maxIds == 0U)) {
-    return 0U;
-  }
-
-  std::size_t count = 0U;
-  for (std::size_t i = 0U; i < database->metadata.size(); ++i) {
-    if (!database->metadataOccupied[i]) {
-      continue;
-    }
-    if (database->metadata[i].typeTag == typeTag) {
-      outIds[count] = database->metadata[i].assetId;
-      ++count;
-      if (count >= maxIds) {
-        break;
-      }
-    }
-  }
-  return count;
+  return (database != nullptr)
+             ? content::query_assets_by_type(&database->metadataStore, typeTag,
+                                             outIds, maxIds)
+             : 0U;
 }
 
-// --- Dependency management ---
-
+/// Copies up to maxIds direct dependencies of the id; returns the count.
 std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
                              AssetId *outIds, std::size_t maxIds) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId) || (outIds == nullptr) ||
-      (maxIds == 0U)) {
-    return 0U;
-  }
-
-  const AssetMetadata *meta = find_asset_metadata(database, id);
-  if (meta == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t count =
-      (meta->dependencyCount < maxIds) ? meta->dependencyCount : maxIds;
-  for (std::size_t i = 0U; i < count; ++i) {
-    outIds[i] = meta->dependencies[i];
-  }
-  return count;
+  return (database != nullptr)
+             ? content::get_dependencies(&database->metadataStore, id, outIds,
+                                         maxIds)
+             : 0U;
 }
 
+/// Records a directed dependency edge id -> depId; false when full.
 bool add_asset_dependency(AssetDatabase *database, AssetId id,
                           AssetId depId) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId) ||
-      (depId == kInvalidAssetId)) {
-    return false;
-  }
-
-  const std::size_t slot = find_metadata_slot(database, id);
-  if (slot == database->metadata.size()) {
-    return false;
-  }
-
-  return asset_metadata_add_dependency(&database->metadata[slot], depId);
+  return (database != nullptr) &&
+         content::add_asset_dependency(&database->metadataStore, id, depId);
 }
 
 namespace {
 
-/// Depth-first dependency load: rejects cycles via the visit stack,
-/// skips assets already loaded this session, and loads every dependency
-/// before the asset itself.
-bool load_with_deps_recursive(AssetDatabase *database, AssetId id,
-                              bool (*loadCallback)(AssetDatabase *db,
-                                                   AssetId id, void *userData),
-                              void *userData, AssetId *visitStack,
-                              std::size_t visitDepth, std::size_t maxVisitDepth,
-                              AssetId *loadedSet, std::size_t *loadedCount,
-                              std::size_t maxLoaded) noexcept {
-  for (std::size_t i = 0U; i < visitDepth; ++i) {
-    if (visitStack[i] == id) {
-      std::fprintf(stderr,
-                   "error: circular dependency detected for asset %016llx\n",
-                   static_cast<unsigned long long>(id));
-      return false;
-    }
+/// Bridges the renderer callback shape (which receives the database) onto
+/// the content-generic dependency walk.
+struct DepLoadTrampoline final {
+  AssetDatabase *database = nullptr;
+  bool (*callback)(AssetDatabase *db, AssetId id, void *userData) = nullptr;
+  void *userData = nullptr;
+};
+
+bool dep_load_trampoline(AssetId id, void *userData) noexcept {
+  auto *bridge = static_cast<DepLoadTrampoline *>(userData);
+  if (bridge->callback == nullptr) {
+    return true;
   }
-
-  if (visitDepth >= maxVisitDepth) {
-    std::fprintf(stderr,
-                 "error: dependency chain exceeds maximum depth for asset "
-                 "%016llx\n",
-                 static_cast<unsigned long long>(id));
-    return false;
-  }
-
-  for (std::size_t i = 0U; i < *loadedCount; ++i) {
-    if (loadedSet[i] == id) {
-      return true;
-    }
-  }
-
-  visitStack[visitDepth] = id;
-
-  const AssetMetadata *meta = find_asset_metadata(database, id);
-  if (meta != nullptr) {
-    for (std::size_t i = 0U; i < meta->dependencyCount; ++i) {
-      const AssetId depId = meta->dependencies[i];
-      if (depId == kInvalidAssetId) {
-        continue;
-      }
-
-      if (!load_with_deps_recursive(database, depId, loadCallback, userData,
-                                    visitStack, visitDepth + 1U, maxVisitDepth,
-                                    loadedSet, loadedCount, maxLoaded)) {
-        return false;
-      }
-    }
-  }
-
-  if (loadCallback != nullptr) {
-    if (!loadCallback(database, id, userData)) {
-      return false;
-    }
-  }
-
-  if (*loadedCount < maxLoaded) {
-    loadedSet[*loadedCount] = id;
-    ++(*loadedCount);
-  }
-
-  return true;
+  return bridge->callback(bridge->database, id, bridge->userData);
 }
 
 } // namespace
@@ -1051,19 +800,13 @@ bool load_with_dependencies(AssetDatabase *database, AssetId rootId,
                             bool (*loadCallback)(AssetDatabase *db, AssetId id,
                                                  void *userData),
                             void *userData) noexcept {
-  if ((database == nullptr) || (rootId == kInvalidAssetId)) {
+  if (database == nullptr) {
     return false;
   }
 
-  constexpr std::size_t kMaxDepth = 64U;
-  constexpr std::size_t kMaxLoaded = 256U;
-  AssetId visitStack[kMaxDepth] = {};
-  AssetId loadedSet[kMaxLoaded] = {};
-  std::size_t loadedCount = 0U;
-
-  return load_with_deps_recursive(database, rootId, loadCallback, userData,
-                                  visitStack, 0U, kMaxDepth, loadedSet,
-                                  &loadedCount, kMaxLoaded);
+  DepLoadTrampoline bridge{database, loadCallback, userData};
+  return content::load_with_dependencies(&database->metadataStore, rootId,
+                                         &dep_load_trampoline, &bridge);
 }
 
 } // namespace engine::renderer
