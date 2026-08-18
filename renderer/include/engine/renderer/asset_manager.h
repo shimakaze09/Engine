@@ -1,40 +1,26 @@
-// Declares asset manager types and APIs for the Engine renderer system.
+// Declares the renderer's mesh residency service: queues mesh transition
+// requests into the content-owned AssetRequestQueue (#171 C3) and applies
+// them against the asset database's mesh records and the GPU mesh registry.
 
 #pragma once
 
-#include <array>
 #include <cstddef>
-#include <cstdint>
 
+#include "engine/content/asset_request_queue.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/mesh_loader.h"
 
 namespace engine::renderer {
 
-/// Enumerates asset request type values used by the engine.
-enum class AssetRequestType : std::uint8_t { Load, Unload, Reload };
-
-/// One queued load/unload/reload transition for an asset id.
-struct AssetRequest final {
-  AssetRequestType type = AssetRequestType::Load;
-  AssetId id = kInvalidAssetId;
-  std::array<char, 260U> sourcePath{};
-};
-
-/// Fixed queue of asset transitions applied by update_asset_manager.
-struct AssetManager final {
-  static constexpr std::size_t kMaxQueuedRequests = 1024U;
-
-  std::array<AssetRequest, kMaxQueuedRequests> requests{};
-  std::size_t requestHead = 0U;
-  std::size_t requestCount = 0U;
-  std::uint32_t droppedRequests = 0U;
-};
+// The queue container and request vocabulary are content-owned (#171 C3);
+// these names keep the renderer's established service vocabulary working.
+using content::AssetRequest;
+using content::AssetRequestType;
+using AssetManager = content::AssetRequestQueue;
+using content::pending_asset_request_count;
 
 /// Drops all pending requests.
 void clear_asset_manager(AssetManager *manager) noexcept;
-/// Number of queued transitions.
-std::size_t pending_asset_request_count(const AssetManager *manager) noexcept;
 
 /// Queues a mesh load; false when the queue is full.
 bool queue_mesh_load(AssetManager *manager,

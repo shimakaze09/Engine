@@ -3,6 +3,7 @@
 
 engine_add_module_library(engine_content
     SOURCES
+    src/asset_request_queue.cpp
     src/asset_stale_check.cpp
     src/asset_streaming.cpp
     src/lru_cache.cpp
