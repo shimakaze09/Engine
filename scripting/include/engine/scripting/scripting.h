@@ -9,6 +9,7 @@
 
 namespace engine::runtime {
 class World;
+struct GameBindingState;
 } // namespace engine::runtime
 
 namespace engine::scripting {
@@ -191,6 +192,12 @@ void clear_entity_script_modules() noexcept;
 // stays alive; EnginePipeline::teardown calls it so no run residue survives
 // into a later pipeline run (#168).
 void reset_run_state() noexcept;
+
+// Bind (or with nullptr unbind) the pipeline-owned game-binding state the
+// Lua game bindings act on (#168 M3). While unbound they fall back to a
+// scripting-local instance so standalone/test use keeps working; the bound
+// pointer must outlive every dispatch, including editor Stop's VM recycle.
+void bind_game_state(runtime::GameBindingState *state) noexcept;
 
 // --- Sandbox configuration ---
 // Enable or disable the Lua sandbox (restricted globals, CPU/memory limits).

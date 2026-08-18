@@ -285,6 +285,14 @@ engine_add_test_executable(engine_unit_runtime_binding
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_game_binding_state
+    SOURCES
+    game_binding_state_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_scene_serializer
     SOURCES
     scene_serializer_test.cpp

@@ -45,6 +45,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/game_binding_state.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
@@ -451,6 +452,7 @@ struct EnginePipeline::Impl final {
   // --- Owned resources ---
   core::ServiceLocator serviceLocator{};
   runtime::EngineServiceRegistry serviceRegistry;
+  runtime::GameBindingState gameBindingState{};
   std::unique_ptr<runtime::World> world;
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
@@ -601,6 +603,9 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   runtime::set_editor_asset_service(&assetDatabaseService);
 
   runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  // The run's game-binding state is pipeline-owned (#168 M3); the binding
+  // survives editor Stop's VM recycle because this Impl outlives it.
+  scripting::bind_game_state(&gameBindingState);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
     bridge->set_world(world.get());
   }
@@ -728,6 +733,7 @@ void EnginePipeline::Impl::teardown() noexcept {
   runtime::reset_anim_controllers();
 
   runtime::set_editor_asset_service(nullptr);
+  scripting::bind_game_state(nullptr);
   runtime::unbind_scripting_runtime(serviceLocator);
   serviceRegistry.unregister_services();
 
