@@ -11,7 +11,7 @@
 
 #include "editor_material_edit.h"
 #include "editor_reference_pickers.h"
-#include "engine/renderer/asset_metadata.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/renderer/material.h"
 
 namespace engine::editor {
@@ -54,16 +54,16 @@ bool draw_scalar_fields(renderer::Material &params) noexcept {
 bool draw_texture_slot_fields(renderer::MaterialTextureSlots &slots) noexcept {
   bool changed = false;
   changed |= draw_asset_reference_picker(
-      "Albedo Texture", renderer::AssetTypeTag::Texture, &slots.albedo);
+      "Albedo Texture", content::AssetTypeTag::Texture, &slots.albedo);
   changed |= draw_asset_reference_picker("Metallic/Roughness Texture",
-                                         renderer::AssetTypeTag::Texture,
+                                         content::AssetTypeTag::Texture,
                                          &slots.metallicRoughness);
   changed |= draw_asset_reference_picker(
-      "Emissive Texture", renderer::AssetTypeTag::Texture, &slots.emissive);
+      "Emissive Texture", content::AssetTypeTag::Texture, &slots.emissive);
   changed |= draw_asset_reference_picker(
-      "Occlusion Texture", renderer::AssetTypeTag::Texture, &slots.occlusion);
+      "Occlusion Texture", content::AssetTypeTag::Texture, &slots.occlusion);
   changed |= draw_asset_reference_picker(
-      "Opacity Texture", renderer::AssetTypeTag::Texture, &slots.opacity);
+      "Opacity Texture", content::AssetTypeTag::Texture, &slots.opacity);
   return changed;
 }
 

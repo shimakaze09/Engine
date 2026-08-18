@@ -41,7 +41,7 @@
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
 #include "engine/physics/primitive_hulls.h"
-#include "engine/renderer/asset_database.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
@@ -727,7 +727,7 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
                 desc.name);
   command->hasMesh = true;
   command->mesh.meshAssetId =
-      renderer::make_asset_id_from_path(desc.builtinPath);
+      content::make_asset_id_from_path(desc.builtinPath);
   command->hasCollider = true;
   command->colliderComponent.shape = desc.fallbackShape;
   command->colliderComponent.halfExtents = desc.halfExtents;

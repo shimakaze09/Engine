@@ -16,7 +16,7 @@
 #include "engine/core/animation_asset.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
-#include "engine/renderer/asset_staleness.h"
+#include "engine/content/asset_staleness.h"
 
 namespace engine::runtime {
 
@@ -110,7 +110,7 @@ void warn_if_owning_mesh_stale(const char *virtualPath) noexcept {
     return;
   }
 
-  renderer::warn_if_cooked_asset_stale(osPath);
+  content::warn_if_cooked_asset_stale(osPath);
 }
 
 /// True when a track's key span [offset, offset + count*stride) fits the

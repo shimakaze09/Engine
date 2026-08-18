@@ -898,7 +898,7 @@ engine_add_test_executable(engine_unit_asset_hash
     SOURCES
     asset_hash_test.cpp
     PRIVATE_DEPS
-    engine_renderer
+    engine_content
 )
 
 # ---- P1-M4-B: Dependency Graph ----
@@ -932,7 +932,7 @@ engine_add_test_executable(engine_unit_async_streaming
     SOURCES
     async_streaming_test.cpp
     PRIVATE_DEPS
-    engine_renderer
+    engine_content
 )
 
 # ---- P1-M4-D: LRU Eviction ----
@@ -941,7 +941,7 @@ engine_add_test_executable(engine_unit_lru_cache
     SOURCES
     lru_cache_test.cpp
     PRIVATE_DEPS
-    engine_renderer
+    engine_content
 )
 
 # ---- P1-M4-E: Deterministic Cooking ----

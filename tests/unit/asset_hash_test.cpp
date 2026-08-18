@@ -1,6 +1,6 @@
 // Verifies asset hash test behavior for the Engine test suite.
 
-#include "engine/renderer/asset_database.h"
+#include "engine/content/asset_metadata.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -9,7 +9,7 @@
 
 static int test_100k_hash_no_collisions() {
   constexpr std::size_t kPathCount = 100000U;
-  std::set<engine::renderer::AssetId> ids{};
+  std::set<engine::content::AssetId> ids{};
   std::size_t collisions = 0U;
 
   for (std::size_t i = 0U; i < kPathCount; ++i) {
@@ -26,9 +26,9 @@ static int test_100k_hash_no_collisions() {
                     i - (kPathCount * 2U) / 3U);
     }
 
-    const engine::renderer::AssetId id =
-        engine::renderer::make_asset_id_from_path(path);
-    if (id == engine::renderer::kInvalidAssetId) {
+    const engine::content::AssetId id =
+        engine::content::make_asset_id_from_path(path);
+    if (id == engine::content::kInvalidAssetId) {
       std::fprintf(stderr, "FAIL: null path produced invalid id at i=%zu\n", i);
       return 1;
     }
@@ -53,10 +53,10 @@ static int test_100k_hash_no_collisions() {
 
 static int test_deterministic_hash() {
   const char *path = "assets/meshes/test_model.mesh";
-  const engine::renderer::AssetId id1 =
-      engine::renderer::make_asset_id_from_path(path);
-  const engine::renderer::AssetId id2 =
-      engine::renderer::make_asset_id_from_path(path);
+  const engine::content::AssetId id1 =
+      engine::content::make_asset_id_from_path(path);
+  const engine::content::AssetId id2 =
+      engine::content::make_asset_id_from_path(path);
   if (id1 != id2) {
     std::fprintf(stderr, "FAIL: same path produced different ids\n");
     return 1;
@@ -67,16 +67,16 @@ static int test_deterministic_hash() {
 }
 
 static int test_invalid_path_returns_invalid_id() {
-  const engine::renderer::AssetId id =
-      engine::renderer::make_asset_id_from_path(nullptr);
-  if (id != engine::renderer::kInvalidAssetId) {
+  const engine::content::AssetId id =
+      engine::content::make_asset_id_from_path(nullptr);
+  if (id != engine::content::kInvalidAssetId) {
     std::fprintf(stderr, "FAIL: nullptr path should return kInvalidAssetId\n");
     return 1;
   }
 
-  const engine::renderer::AssetId idEmpty =
-      engine::renderer::make_asset_id_from_path("");
-  if (idEmpty == engine::renderer::kInvalidAssetId) {
+  const engine::content::AssetId idEmpty =
+      engine::content::make_asset_id_from_path("");
+  if (idEmpty == engine::content::kInvalidAssetId) {
     std::fprintf(stderr,
                  "FAIL: empty string should still produce a valid hash\n");
     return 1;

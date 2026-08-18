@@ -246,7 +246,7 @@ engine_add_test_executable(engine_integration_async_load
     SOURCES
     async_load_test.cpp
     PRIVATE_DEPS
-    engine_renderer
+    engine_content
     LABELS
     integration
 )
@@ -255,7 +255,7 @@ engine_add_test_executable(engine_integration_streaming_budget
     SOURCES
     streaming_budget_test.cpp
     PRIVATE_DEPS
-    engine_renderer
+    engine_content
     LABELS
     integration
 )
