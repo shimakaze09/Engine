@@ -1,19 +1,14 @@
-// Public cross-module entry point for the runtime cooked-asset staleness
-// diagnostic (issue #81, extended to skeleton/animation callers by #91): the
-// CAS table and .meta.json sidecar reader stay implemented in the module-
-// private asset_stale_check.cpp; this header is the one public declaration
-// so callers outside renderer (e.g. runtime's .skel/.anim loaders) can
-// route through the same once-per-asset check instead of duplicating it.
+// Compatibility shim: the cooked-asset staleness diagnostic moved to
+// engine::content (#171 C1). Deletion condition: the C4 consumer migration
+// removes the last include of this renderer-path header.
 
 #pragma once
 
+#include "engine/content/asset_staleness.h"
+
 namespace engine::renderer {
 
-/// Logs a once-per-asset warning when the cooked file's recorded source
-/// changed after the last cook; silent when no sidecar/source is present.
-void warn_if_cooked_asset_stale(const char *cookedPath) noexcept;
-
-/// Clears the once-per-asset warning memory (tests only).
-void reset_cooked_asset_stale_warnings() noexcept;
+using content::warn_if_cooked_asset_stale;
+using content::reset_cooked_asset_stale_warnings;
 
 } // namespace engine::renderer

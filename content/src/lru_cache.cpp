@@ -1,11 +1,11 @@
-// Implements lru cache behavior for the Engine renderer system.
+// Implements lru cache behavior for the Engine content system.
 
-#include "engine/renderer/lru_cache.h"
+#include "engine/content/lru_cache.h"
 
 #include <cstddef>
 #include <cstdint>
 
-namespace engine::renderer {
+namespace engine::content {
 
 namespace {
 
@@ -211,4 +211,4 @@ bool lru_set_ref_count(LruCache *cache, AssetId id,
   return true;
 }
 
-} // namespace engine::renderer
+} // namespace engine::content

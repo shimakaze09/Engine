@@ -54,7 +54,9 @@ is prohibited.
   locks, or virtual dispatch on hot paths without justification backed by a
   profile and budget.
 - **[REVIEW]** Dependency flow strictly downward, no cycles or sideways deps:
-  `app → editor → runtime → renderer/physics/scripting/audio → core/math`.
+  `app → editor → runtime → renderer/physics/scripting/audio → content →
+  core/math` (`content` is the generic asset layer, #171; it depends only
+  on `core` and must never link a subsystem module).
 - **[REVIEW]** Public headers are self-contained and never leak SDL/OpenGL/
   Lua/ImGui/ImGuizmo types. GL stays inside renderer impl; Lua inside scripting
   impl; editor-only behavior stays in `editor/` behind explicit bridges.
@@ -201,6 +203,13 @@ directory-global by design.
   `fixed_hash_table.h`, `hash.h` FNV-1a, `string_util.h`).
 - `math/` — header-only INTERFACE lib (no `math/src/`): Vec2/3/4, Mat4, Quat,
   Transform, AABB/ray/sphere, component PODs; SSE2 paths in `math_detail.h`.
+- `content/` — generic asset/content layer (#171, depends only on core):
+  `AssetId`/`AssetTypeTag`/`AssetMetadata` identity + tag + dependency-edge
+  helpers, the async streaming queue (engine-neutral load/upload callbacks,
+  worker threads, budget cvars), the cooked-asset staleness diagnostic, and
+  the LRU cache. The renderer re-exports these under its old header paths
+  via compatibility shims until the #171 C4 consumer migration deletes
+  them; the asset database/manager split (C2/C3) is pending.
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
   speculative contacts, clipped contact manifolds (`contact_clip`,
   `contact_resolution`, `narrow_phase`, `physics_step`,
@@ -222,8 +231,8 @@ directory-global by design.
   world ONLY through
   `PhysicsWorldView`; shape payloads live in World-owned `PhysicsContext`;
   `collider.cpp` centralizes affine world geometry for every shape.
-- `renderer/` — asset database/manager/streaming (fixed slots + tombstones,
-  worker-thread queue, LRU), mesh/texture loading, procedural
+- `renderer/` — asset database/manager (fixed slots + tombstones, LRU
+  eviction over `content`'s queue/cache), mesh/texture loading, procedural
   `mesh_primitives`, shader system (variants, hot reload), `RenderDevice` —
   the engine-owned backend-neutral device contract (#165): generational
   handles for buffers/textures/programs/geometry/render targets/queries,

@@ -1,6 +1,6 @@
-// Implements asset streaming behavior for the Engine renderer system.
+// Implements asset streaming behavior for the Engine content system.
 
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 
 #include <chrono>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 
-namespace engine::renderer {
+namespace engine::content {
 
 namespace {
 
@@ -641,4 +641,4 @@ std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept {
   return pending;
 }
 
-} // namespace engine::renderer
+} // namespace engine::content
