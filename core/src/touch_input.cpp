@@ -297,6 +297,12 @@ void shutdown_touch_input() noexcept {
   g_mouseEmulation = false;
 }
 
+/// Drops every touch/gesture callback registration (run-scoped, #168).
+void clear_touch_callbacks() noexcept {
+  g_touchCallbacks = {};
+  g_gestureCallbacks = {};
+}
+
 // ---------------------------------------------------------------------------
 // Event processing
 // ---------------------------------------------------------------------------

@@ -70,6 +70,18 @@ bool register_axis(const char *name, KeyScancode negativeKey,
 /// Axis value in [-1, 1] from the bound key pair.
 float axis_value(const char *name) noexcept;
 
+// Clears run-scoped gameplay registrations — script-registered actions and
+// axes plus the action/touch callback tables that carry script-owned
+// userData — while keeping device state and the persisted input map.
+// EnginePipeline::teardown calls it so no binding outlives its run (#168).
+void clear_gameplay_bindings() noexcept;
+
+// Introspection: live action/axis registrations. Exercised by the
+// pipeline-teardown regression; a correct teardown drains both to zero.
+std::size_t gameplay_action_count() noexcept;
+/// Live axis registrations (see gameplay_action_count).
+std::size_t gameplay_axis_count() noexcept;
+
 // ----- Gamepad ------------------------------------------------------------
 
 bool is_gamepad_connected() noexcept;

@@ -728,9 +728,14 @@ void EnginePipeline::Impl::teardown() noexcept {
 
   // Run-scoped residue must not leak into a later pipeline run (#168): the
   // scripting run state and the animation controller registry are reset
-  // while the VM and bindings are still alive, before anything unbinds.
+  // while the VM and bindings are still alive, before anything unbinds,
+  // then the engine-tier subsystems drop their run-scoped content (script
+  // input bindings, scene audio, per-run renderer state).
   scripting::reset_run_state();
   runtime::reset_anim_controllers();
+  core::clear_gameplay_bindings();
+  audio::unload_all_sounds();
+  renderer::reset_renderer_public_state();
 
   runtime::set_editor_asset_service(nullptr);
   scripting::bind_game_state(nullptr);

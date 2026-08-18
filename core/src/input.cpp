@@ -142,6 +142,37 @@ bool initialize_input() noexcept {
 
 /// Shuts down the owning system for input, including the touch subsystem
 /// whose events and frames route through the general input entry points.
+/// Clears run-scoped gameplay registrations; device state and the
+/// persisted input map stay untouched (#168).
+void clear_gameplay_bindings() noexcept {
+  g_actions = {};
+  g_axes = {};
+  clear_action_callbacks();
+  clear_touch_callbacks();
+}
+
+/// Live action registrations (teardown-regression introspection).
+std::size_t gameplay_action_count() noexcept {
+  std::size_t count = 0U;
+  for (const auto &a : g_actions) {
+    if (a.occupied) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+/// Live axis registrations (teardown-regression introspection).
+std::size_t gameplay_axis_count() noexcept {
+  std::size_t count = 0U;
+  for (const auto &a : g_axes) {
+    if (a.occupied) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 void shutdown_input() noexcept {
   shutdown_touch_input();
   shutdown_input_mapper();

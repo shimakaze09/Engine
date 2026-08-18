@@ -9,7 +9,10 @@
 // character's animation controller, teardown must clear both, and run B
 // must start from defaults.
 
+#include "engine/audio/audio.h"
+#include "engine/core/input.h"
 #include "engine/engine.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -165,10 +168,26 @@ int main() {
     CHECK(ticking_frame(pipeline), "run A script frame 1");
     CHECK(ticking_frame(pipeline), "run A script frame 2");
 
-    // Guard asserts: the run really dirtied both probes before teardown.
+    // Engine-tier run content (#168 M2b): a gameplay input binding, a
+    // loaded scene sound, and rendered-frame renderer state.
+    CHECK(engine::core::register_action("m2b_probe_action", 44),
+          "register probe action");
+    CHECK(engine::core::register_axis("m2b_probe_axis", 4, 7),
+          "register probe axis");
+    const engine::audio::SoundHandle probeSound =
+        engine::audio::load_sound("assets/sounds/pickup.wav");
+    CHECK(probeSound != engine::audio::kInvalidSound, "load probe sound");
+    CHECK(engine::audio::play_sound(probeSound, {}), "probe sound plays");
+    CHECK(ticking_frame(pipeline), "run A rendered frame");
+
+    // Guard asserts: the run really dirtied every probe before teardown.
     CHECK(game_state_is("in_progress"), "run A moved the game state");
     CHECK(engine::runtime::get_anim_controller(0U) != nullptr,
           "run A acquired an animation controller slot");
+    CHECK(engine::core::gameplay_action_count() > 0U, "actions registered");
+    CHECK(engine::core::gameplay_axis_count() > 0U, "axes registered");
+    CHECK(engine::renderer::renderer_get_last_frame_stats().drawCalls > 0U,
+          "run A rendered draw calls");
 
     pipeline.teardown();
 
@@ -177,6 +196,14 @@ int main() {
           "teardown resets the game-state label to its default");
     CHECK(engine::runtime::get_anim_controller(0U) == nullptr,
           "teardown releases the animation controller registry");
+    CHECK(engine::core::gameplay_action_count() == 0U,
+          "teardown clears gameplay actions");
+    CHECK(engine::core::gameplay_axis_count() == 0U,
+          "teardown clears gameplay axes");
+    CHECK(!engine::audio::play_sound(probeSound, {}),
+          "teardown unloaded the scene sound");
+    CHECK(engine::renderer::renderer_get_last_frame_stats().drawCalls == 0U,
+          "teardown resets the public renderer state");
   }
 
   // --- Run B: a second run in the same process starts and stays clean. ---

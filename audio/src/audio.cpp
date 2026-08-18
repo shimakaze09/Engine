@@ -300,6 +300,31 @@ bool initialize_audio() noexcept {
 }
 
 /// Shuts down the owning system for audio.
+/// Releases run-scoped sound content while the engine/buses stay live.
+void unload_all_sounds() noexcept {
+  if (!g_audio.initialized) {
+    return;
+  }
+
+  for (auto &instance : g_audio.oneShots) {
+    reset_one_shot(instance);
+  }
+  stop_music();
+
+  for (auto &entry : g_audio.sounds) {
+    if (!entry.active) {
+      continue;
+    }
+    ma_sound_uninit(&entry.sound);
+    ma_decoder_uninit(&entry.decoder);
+    if (entry.fileData != nullptr) {
+      core::vfs_free(entry.fileData);
+      entry.fileData = nullptr;
+    }
+    reset_sound_entry(entry);
+  }
+}
+
 void shutdown_audio() noexcept {
   if (!g_audio.initialized) {
     return;

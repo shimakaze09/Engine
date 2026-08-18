@@ -95,6 +95,10 @@ struct InputAxisMapping final {
 bool initialize_input_mapper() noexcept;
 /// Shuts down the owning system for input mapper.
 void shutdown_input_mapper() noexcept;
+// Drops every action/axis callback registration (script-owned userData)
+// while keeping the persisted key mappings; part of the run-scoped input
+// reset (#168, see core::clear_gameplay_bindings).
+void clear_action_callbacks() noexcept;
 
 // ---------------------------------------------------------------------------
 // Registration
