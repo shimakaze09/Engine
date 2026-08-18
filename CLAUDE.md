@@ -393,6 +393,29 @@ directory-global by design.
 
 ## Architecture invariants
 
+- Subsystem ownership (#168, landed 2026-08-18 across PRs #237-#240,
+  #242-#244, #246): every mutable subsystem has one owner in a four-tier
+  model. **Engine tier** — `engine::bootstrap`/`engine::shutdown` own core
+  services (via `core::initialize_core`/`shutdown_core`, LIFO with
+  partial-init rollback), the cvar/console tables, scripting VM, audio
+  device, DAP, texture registry, renderer teardown, and the active
+  `EngineConfig`. **Run tier** — `EnginePipeline::Impl` owns the World,
+  asset database/manager/streaming, command buffer, mesh registry, service
+  locator + registry, game-binding state, and published bridge services;
+  its `teardown` is the single audit point for run residue and resets
+  scripting run state, animation controllers, gameplay input bindings,
+  scene audio content, and per-run public renderer state — a second
+  pipeline run in one process starts clean (pinned by
+  `engine_integration_pipeline_teardown_run_state`). **World tier** —
+  `World` owns ECS/hierarchy/persistent ids, physics context, timers,
+  cameras. **Editor tier** — `EditorSession` behind the bridge; a world
+  rebind is a full session transition. Compatibility globals must be
+  non-owning aliases set and cleared by their owner (the
+  `runtime_binding`/`g_editorAssetService` pattern); no global may lazily
+  resurrect a subsystem, and there is deliberately no process-global
+  service locator. The single-engine-process assumption stands; pure
+  caches and immutable config tables are exempt from mechanical
+  de-globalization.
 - Internal Entity = `{index, generation}`; index 0 invalid. Any entity handle
   that can outlive, cross, or be rebound between Worlds also carries and
   validates World identity. Generation reuse must not silently alias a stale
