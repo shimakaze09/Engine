@@ -25,6 +25,33 @@
 
 namespace engine::runtime {
 
+// One row per uniformly-stored component set: the storage member the
+// generated dispatch below (component_count / try_get_component /
+// for_each_primary) and World::remove_all_components bind to. Transform is
+// deliberately absent: its set is double-buffered and every access must
+// pick the phase-correct state index, so each generated site keeps one
+// hand-written Transform branch. A supported type missing from this table
+// is a compile error at the dispatch sites, never a silent empty result
+// (#166 W2 — this replaces three hand-maintained 16-way if-constexpr
+// chains and the hand-written removal list).
+#define ENGINE_WORLD_UNIFORM_STORAGE_TABLE(X)                                  \
+  X(WorldTransform, m_worldTransforms)                                         \
+  X(RigidBody, m_rigidBodies)                                                  \
+  X(Collider, m_colliders)                                                     \
+  X(MeshComponent, m_meshComponents)                                           \
+  X(NameComponent, m_nameComponents)                                           \
+  X(LightComponent, m_lightComponents)                                         \
+  X(ScriptComponent, m_scriptComponents)                                       \
+  X(SpringArmComponent, m_springArms)                                          \
+  X(PointLightComponent, m_pointLights)                                        \
+  X(SpotLightComponent, m_spotLights)                                          \
+  X(ReflectionProbeComponent, m_reflectionProbes)                              \
+  X(SceneCaptureComponent, m_sceneCaptures)                                    \
+  X(FoliagePatchComponent, m_foliagePatches)                                   \
+  X(AnimationComponent, m_animationComponents)                                 \
+  X(CameraComponent, m_cameraComponents)
+
+
 #ifndef ENGINE_MAX_ENTITIES
 #define ENGINE_MAX_ENTITIES 65536U
 #endif
@@ -102,6 +129,25 @@ public:
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
+
+  /// True when the type has a row in the uniform-storage table.
+  template <typename C>
+  static constexpr bool kHasUniformStorageRow =
+      false
+#define ENGINE_WUS_ROW_CHECK(Type, member) || std::is_same_v<C, Type>
+      ENGINE_WORLD_UNIFORM_STORAGE_TABLE(ENGINE_WUS_ROW_CHECK)
+#undef ENGINE_WUS_ROW_CHECK
+      ;
+
+  /// Compile-time proof every persistent type reaches generated storage
+  /// dispatch — Transform's special-cased branch or a table row (#166 W2);
+  /// asserted at namespace scope below the class (a consteval member
+  /// cannot run inside its own class body).
+  template <typename... Cs>
+  static consteval bool storage_covers(std::tuple<Cs...> *) noexcept {
+    return ((std::is_same_v<Cs, Transform> || kHasUniformStorageRow<Cs>) &&
+            ...);
+  }
 
   World() noexcept;
 
@@ -888,38 +934,18 @@ private:
     using C = std::remove_cv_t<Component>;
     if constexpr (std::is_same_v<C, Transform>) {
       return m_transforms.count();
-    } else if constexpr (std::is_same_v<C, WorldTransform>) {
-      return m_worldTransforms.count();
-    } else if constexpr (std::is_same_v<C, RigidBody>) {
-      return m_rigidBodies.count();
-    } else if constexpr (std::is_same_v<C, Collider>) {
-      return m_colliders.count();
-    } else if constexpr (std::is_same_v<C, MeshComponent>) {
-      return m_meshComponents.count();
-    } else if constexpr (std::is_same_v<C, NameComponent>) {
-      return m_nameComponents.count();
-    } else if constexpr (std::is_same_v<C, LightComponent>) {
-      return m_lightComponents.count();
-    } else if constexpr (std::is_same_v<C, ScriptComponent>) {
-      return m_scriptComponents.count();
-    } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
-      return m_springArms.count();
-    } else if constexpr (std::is_same_v<C, PointLightComponent>) {
-      return m_pointLights.count();
-    } else if constexpr (std::is_same_v<C, SpotLightComponent>) {
-      return m_spotLights.count();
-    } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
-      return m_reflectionProbes.count();
-    } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
-      return m_sceneCaptures.count();
-    } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
-      return m_foliagePatches.count();
-    } else if constexpr (std::is_same_v<C, AnimationComponent>) {
-      return m_animationComponents.count();
-    } else if constexpr (std::is_same_v<C, CameraComponent>) {
-      return m_cameraComponents.count();
-    } else {
-      return 0U;
+    }
+#define ENGINE_WUS_COUNT(Type, member)                                         \
+  else if constexpr (std::is_same_v<C, Type>) {                                \
+    return (member).count();                                                   \
+  }
+    ENGINE_WORLD_UNIFORM_STORAGE_TABLE(ENGINE_WUS_COUNT)
+#undef ENGINE_WUS_COUNT
+    else {
+      // A supported type without a storage row must fail here, not return 0
+      // (a silent 0 made every query treat the set as empty, drift rank 3).
+      static_assert(std::is_same_v<C, Transform>,
+                    "component type has no storage-table row");
     }
   }
 
@@ -934,38 +960,16 @@ private:
 
     if constexpr (std::is_same_v<C, Transform>) {
       return m_transforms.get_ptr(entity, query_state_index());
-    } else if constexpr (std::is_same_v<C, WorldTransform>) {
-      return m_worldTransforms.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, RigidBody>) {
-      return m_rigidBodies.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, Collider>) {
-      return m_colliders.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, MeshComponent>) {
-      return m_meshComponents.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, NameComponent>) {
-      return m_nameComponents.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, LightComponent>) {
-      return m_lightComponents.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, ScriptComponent>) {
-      return m_scriptComponents.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
-      return m_springArms.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, PointLightComponent>) {
-      return m_pointLights.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, SpotLightComponent>) {
-      return m_spotLights.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
-      return m_reflectionProbes.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
-      return m_sceneCaptures.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
-      return m_foliagePatches.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, AnimationComponent>) {
-      return m_animationComponents.get_ptr(entity);
-    } else if constexpr (std::is_same_v<C, CameraComponent>) {
-      return m_cameraComponents.get_ptr(entity);
-    } else {
-      return nullptr;
+    }
+#define ENGINE_WUS_GET(Type, member)                                           \
+  else if constexpr (std::is_same_v<C, Type>) {                                \
+    return (member).get_ptr(entity);                                           \
+  }
+    ENGINE_WORLD_UNIFORM_STORAGE_TABLE(ENGINE_WUS_GET)
+#undef ENGINE_WUS_GET
+    else {
+      static_assert(std::is_same_v<C, Transform>,
+                    "component type has no storage-table row");
     }
   }
 
@@ -1062,67 +1066,18 @@ private:
       for (std::size_t i = 0U; i < m_transforms.count(); ++i) {
         fn(m_transforms.entity_at(i), m_transforms.component_at(i, stateIndex));
       }
-    } else if constexpr (std::is_same_v<C, WorldTransform>) {
-      for (std::size_t i = 0U; i < m_worldTransforms.count(); ++i) {
-        fn(m_worldTransforms.entity_at(i), m_worldTransforms.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, RigidBody>) {
-      for (std::size_t i = 0U; i < m_rigidBodies.count(); ++i) {
-        fn(m_rigidBodies.entity_at(i), m_rigidBodies.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, Collider>) {
-      for (std::size_t i = 0U; i < m_colliders.count(); ++i) {
-        fn(m_colliders.entity_at(i), m_colliders.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, MeshComponent>) {
-      for (std::size_t i = 0U; i < m_meshComponents.count(); ++i) {
-        fn(m_meshComponents.entity_at(i), m_meshComponents.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, NameComponent>) {
-      for (std::size_t i = 0U; i < m_nameComponents.count(); ++i) {
-        fn(m_nameComponents.entity_at(i), m_nameComponents.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, LightComponent>) {
-      for (std::size_t i = 0U; i < m_lightComponents.count(); ++i) {
-        fn(m_lightComponents.entity_at(i), m_lightComponents.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, ScriptComponent>) {
-      for (std::size_t i = 0U; i < m_scriptComponents.count(); ++i) {
-        fn(m_scriptComponents.entity_at(i), m_scriptComponents.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, SpringArmComponent>) {
-      for (std::size_t i = 0U; i < m_springArms.count(); ++i) {
-        fn(m_springArms.entity_at(i), m_springArms.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, PointLightComponent>) {
-      for (std::size_t i = 0U; i < m_pointLights.count(); ++i) {
-        fn(m_pointLights.entity_at(i), m_pointLights.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, SpotLightComponent>) {
-      for (std::size_t i = 0U; i < m_spotLights.count(); ++i) {
-        fn(m_spotLights.entity_at(i), m_spotLights.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, ReflectionProbeComponent>) {
-      for (std::size_t i = 0U; i < m_reflectionProbes.count(); ++i) {
-        fn(m_reflectionProbes.entity_at(i), m_reflectionProbes.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, SceneCaptureComponent>) {
-      for (std::size_t i = 0U; i < m_sceneCaptures.count(); ++i) {
-        fn(m_sceneCaptures.entity_at(i), m_sceneCaptures.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, FoliagePatchComponent>) {
-      for (std::size_t i = 0U; i < m_foliagePatches.count(); ++i) {
-        fn(m_foliagePatches.entity_at(i), m_foliagePatches.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, AnimationComponent>) {
-      for (std::size_t i = 0U; i < m_animationComponents.count(); ++i) {
-        fn(m_animationComponents.entity_at(i),
-           m_animationComponents.component_at(i));
-      }
-    } else if constexpr (std::is_same_v<C, CameraComponent>) {
-      for (std::size_t i = 0U; i < m_cameraComponents.count(); ++i) {
-        fn(m_cameraComponents.entity_at(i), m_cameraComponents.component_at(i));
-      }
+    }
+#define ENGINE_WUS_FOR_EACH(Type, member)                                      \
+  else if constexpr (std::is_same_v<C, Type>) {                                \
+    for (std::size_t i = 0U; i < (member).count(); ++i) {                      \
+      fn((member).entity_at(i), (member).component_at(i));                     \
+    }                                                                          \
+  }
+    ENGINE_WORLD_UNIFORM_STORAGE_TABLE(ENGINE_WUS_FOR_EACH)
+#undef ENGINE_WUS_FOR_EACH
+    else {
+      static_assert(std::is_same_v<C, Transform>,
+                    "component type has no storage-table row");
     }
   }
 
@@ -1229,5 +1184,14 @@ private:
   std::size_t m_writeStateIndex = 1U;
   bool m_updateSwapPending = false;
 };
+
+// The #166 W2 coverage gate: a persistent registry row (or the runtime-only
+// WorldTransform set) without a storage-table row fails here, never as a
+// silently empty query result.
+static_assert(World::storage_covers(
+                  static_cast<World::PersistentComponentTypes *>(nullptr)),
+              "every persistent component type needs a storage-table row");
+static_assert(World::kHasUniformStorageRow<WorldTransform>,
+              "the runtime-only WorldTransform set needs its table row");
 
 } // namespace engine::runtime
