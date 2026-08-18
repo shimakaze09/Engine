@@ -5,7 +5,7 @@
 #include "engine/editor/command_history.h"
 #include "engine/math/transform.h"
 #include "engine/physics/primitive_hulls.h"
-#include "engine/renderer/asset_database.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -1350,7 +1350,7 @@ int check_execute_primitive_spawn_names_and_meshes() noexcept {
       (std::strcmp(cubeName.name, "Cube") != 0) ||
       !world->get_mesh_component(cube, &cubeMesh) ||
       (cubeMesh.meshAssetId !=
-       engine::renderer::make_asset_id_from_path("builtin://cube")) ||
+       engine::content::make_asset_id_from_path("builtin://cube")) ||
       !world->get_transform(cube, &cubeTransform) ||
       (cubeTransform.position.y != 0.5F)) {
     return finish(162);

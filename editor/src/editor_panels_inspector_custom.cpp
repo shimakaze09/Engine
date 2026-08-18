@@ -53,10 +53,10 @@ bool draw_mesh_component_fields(runtime::Entity entity,
   }
 
   mark_modified(modified,
-               draw_asset_reference_picker("Mesh", renderer::AssetTypeTag::Mesh,
+               draw_asset_reference_picker("Mesh", content::AssetTypeTag::Mesh,
                                           &mesh.meshAssetId));
   mark_modified(modified, draw_asset_reference_picker(
-                              "Material", renderer::AssetTypeTag::Material,
+                              "Material", content::AssetTypeTag::Material,
                               &mesh.materialAssetId));
   if (mesh.materialAssetId != 0ULL) {
     ImGui::SameLine();
@@ -175,7 +175,7 @@ void draw_foliage_patch_fields(runtime::Entity entity,
     std::snprintf(label, sizeof(label), "LOD %zu Mesh", lod);
     mark_modified(modified,
                   draw_asset_reference_picker(label,
-                                             renderer::AssetTypeTag::Mesh,
+                                             content::AssetTypeTag::Mesh,
                                              &foliage.meshAssetIds[lod]));
   }
 

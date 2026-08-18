@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "engine/renderer/asset_metadata.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/runtime/world.h"
 
 namespace engine::editor {
@@ -59,7 +59,7 @@ bool draw_entity_reference_picker(
 /// reference warning with a Clear button when the id is unregistered.
 /// Returns true when the caller should treat *value as changed.
 bool draw_asset_reference_picker(const char *label,
-                                 renderer::AssetTypeTag typeTag,
+                                 content::AssetTypeTag typeTag,
                                  std::uint64_t *value) noexcept;
 
 /// Draws a searchable combo box for a VFS path reference (script and

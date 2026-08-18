@@ -1,14 +1,14 @@
 // P1-M4-D2d: LRU cache test — load 100 assets into a 50-asset-sized cache,
 // access subset repeatedly, verify LRU evicts the stale ones.
 
-#include "engine/renderer/lru_cache.h"
+#include "engine/content/lru_cache.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 
-using namespace engine::renderer;
+using namespace engine::content;
 
 static int g_failures = 0;
 

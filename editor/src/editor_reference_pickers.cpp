@@ -176,7 +176,7 @@ bool draw_entity_reference_picker(
 }
 
 bool draw_asset_reference_picker(const char *label,
-                                 renderer::AssetTypeTag typeTag,
+                                 content::AssetTypeTag typeTag,
                                  std::uint64_t *value) noexcept {
   if ((label == nullptr) || (value == nullptr)) {
     return false;

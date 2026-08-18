@@ -2,7 +2,7 @@
 // without real IO or GL.
 
 #include "engine/core/cvar.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 
 
 #include <atomic>
@@ -13,7 +13,7 @@
 
 #include "../test_harness.h"
 
-using namespace engine::renderer;
+using namespace engine::content;
 
 static engine::tests::TestContext g_tests;
 

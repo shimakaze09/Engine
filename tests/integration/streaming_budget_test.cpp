@@ -2,7 +2,7 @@
 // frames.
 
 #include "engine/core/cvar.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 
 
 #include <cstdio>
@@ -11,7 +11,7 @@
 #include <memory>
 #include <thread>
 
-using namespace engine::renderer;
+using namespace engine::content;
 
 static int g_failures = 0;
 
