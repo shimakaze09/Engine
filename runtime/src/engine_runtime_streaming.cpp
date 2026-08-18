@@ -183,22 +183,22 @@ void retire_terminal_script_loads(
       continue;
     }
 
-    const renderer::LoadingState state = renderer::get_load_state(
+    const content::LoadingState state = content::get_load_state(
         service->streamingQueue, handle.streamingHandle);
-    if (state == renderer::LoadingState::Failed) {
+    if (state == content::LoadingState::Failed) {
       static_cast<void>(renderer::set_mesh_asset_state(
           service->database, handle.assetId, renderer::AssetState::Failed,
           renderer::kInvalidMeshHandle));
-      static_cast<void>(renderer::release_load(service->streamingQueue,
+      static_cast<void>(content::release_load(service->streamingQueue,
                                                handle.streamingHandle));
-      handle.streamingHandle = renderer::kInvalidLoadHandle;
-    } else if ((state == renderer::LoadingState::Ready) &&
+      handle.streamingHandle = content::kInvalidLoadHandle;
+    } else if ((state == content::LoadingState::Ready) &&
                (renderer::mesh_asset_state(service->database,
                                            handle.assetId) ==
                 renderer::AssetState::Ready)) {
-      static_cast<void>(renderer::release_load(service->streamingQueue,
+      static_cast<void>(content::release_load(service->streamingQueue,
                                                handle.streamingHandle));
-      handle.streamingHandle = renderer::kInvalidLoadHandle;
+      handle.streamingHandle = content::kInvalidLoadHandle;
     }
   }
 }
@@ -214,28 +214,28 @@ void sync_streaming_failures(
 
   retire_terminal_script_loads(service);
 
-  renderer::AssetStreamingQueue *queue = service->streamingQueue;
+  content::AssetStreamingQueue *queue = service->streamingQueue;
   struct TerminalRequest final {
-    renderer::LoadHandle handle{};
+    content::LoadHandle handle{};
     renderer::AssetId assetId = renderer::kInvalidAssetId;
-    renderer::LoadingState state = renderer::LoadingState::Queued;
+    content::LoadingState state = content::LoadingState::Queued;
   };
-  std::array<TerminalRequest, renderer::AssetStreamingQueue::kMaxRequests>
+  std::array<TerminalRequest, content::AssetStreamingQueue::kMaxRequests>
       terminals{};
   std::size_t terminalCount = 0U;
 
   {
     std::lock_guard<std::mutex> lock(queue->mutex);
     for (std::uint32_t i = 0U;
-         i < renderer::AssetStreamingQueue::kMaxRequests; ++i) {
-      const renderer::LoadRequest &request = queue->requests[i];
+         i < content::AssetStreamingQueue::kMaxRequests; ++i) {
+      const content::LoadRequest &request = queue->requests[i];
       if (!request.occupied ||
-          ((request.state != renderer::LoadingState::Ready) &&
-           (request.state != renderer::LoadingState::Failed))) {
+          ((request.state != content::LoadingState::Ready) &&
+           (request.state != content::LoadingState::Failed))) {
         continue;
       }
       terminals[terminalCount].handle =
-          renderer::LoadHandle{i, request.generation};
+          content::LoadHandle{i, request.generation};
       terminals[terminalCount].assetId = request.assetId;
       terminals[terminalCount].state = request.state;
       ++terminalCount;
@@ -243,7 +243,7 @@ void sync_streaming_failures(
   }
 
   for (std::size_t i = 0U; i < terminalCount; ++i) {
-    if ((terminals[i].state == renderer::LoadingState::Failed) &&
+    if ((terminals[i].state == content::LoadingState::Failed) &&
         (renderer::mesh_asset_state(service->database, terminals[i].assetId) ==
          renderer::AssetState::Loading)) {
       static_cast<void>(renderer::set_mesh_asset_state(
@@ -251,7 +251,7 @@ void sync_streaming_failures(
           renderer::kInvalidMeshHandle));
     }
     static_cast<void>(
-        renderer::release_load(queue, terminals[i].handle));
+        content::release_load(queue, terminals[i].handle));
   }
 }
 

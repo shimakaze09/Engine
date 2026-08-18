@@ -10,7 +10,7 @@
 #include "engine/physics/physics_world_view.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
@@ -43,7 +43,7 @@ struct EngineAssetDatabaseService final {
   /// Stores Lua-visible async/preload handles for runtime asset requests.
   struct ScriptAssetLoadHandle final {
     renderer::AssetId assetId = renderer::kInvalidAssetId;
-    renderer::LoadHandle streamingHandle = renderer::kInvalidLoadHandle;
+    content::LoadHandle streamingHandle = content::kInvalidLoadHandle;
     std::uint16_t generation = 0U;
     bool occupied = false;
   };
@@ -52,7 +52,7 @@ struct EngineAssetDatabaseService final {
 
   renderer::AssetDatabase *database = nullptr;
   renderer::AssetManager *manager = nullptr;
-  renderer::AssetStreamingQueue *streamingQueue = nullptr;
+  content::AssetStreamingQueue *streamingQueue = nullptr;
   std::array<ScriptAssetLoadHandle, kMaxScriptAssetLoadHandles>
       scriptLoadHandles{};
 };

@@ -205,11 +205,16 @@ directory-global by design.
   Transform, AABB/ray/sphere, component PODs; SSE2 paths in `math_detail.h`.
 - `content/` — generic asset/content layer (#171, depends only on core):
   `AssetId`/`AssetTypeTag`/`AssetMetadata` identity + tag + dependency-edge
-  helpers, the async streaming queue (engine-neutral load/upload callbacks,
-  worker threads, budget cvars), the cooked-asset staleness diagnostic, and
-  the LRU cache. The renderer re-exports these under its old header paths
-  via compatibility shims until the #171 C4 consumer migration deletes
-  them; the asset database/manager split (C2/C3) is pending.
+  helpers, the `MetadataStore` (registration/lookup, tags, type queries,
+  dependency edges, dependency-ordered load with cycle rejection), the
+  asset transition-request queue, the async streaming queue (engine-neutral
+  load/upload callbacks, worker threads, budget cvars), the cooked-asset
+  staleness diagnostic, and the LRU cache. Non-render consumers and tools
+  include `engine/content/...` directly (the tools packer shares
+  `make_asset_id_from_path`, so cooked and runtime ids cannot drift); the
+  renderer keeps the vocabulary re-exported in `asset_database.h` for its
+  own mesh/texture/material services — the old per-header shims are
+  deleted.
 - `physics/` — bodies, colliders, convex hull (GJK/EPA), heightfields, CCD +
   speculative contacts, clipped contact manifolds (`contact_clip`,
   `contact_resolution`, `narrow_phase`, `physics_step`,

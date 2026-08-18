@@ -18,7 +18,7 @@
 #include "engine/core/service_locator.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
@@ -362,15 +362,15 @@ int main() {
   }
 
   engine::core::initialize_cvars();
-  std::unique_ptr<engine::renderer::AssetStreamingQueue> scriptStreamingQueue(
-      new (std::nothrow) engine::renderer::AssetStreamingQueue());
+  std::unique_ptr<engine::content::AssetStreamingQueue> scriptStreamingQueue(
+      new (std::nothrow) engine::content::AssetStreamingQueue());
   if (scriptStreamingQueue == nullptr) {
     engine::core::shutdown_cvars();
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 119;
   }
-  if (!engine::renderer::initialize_asset_streaming(
+  if (!engine::content::initialize_asset_streaming(
           scriptStreamingQueue.get())) {
     engine::core::shutdown_cvars();
     remove_script_file();
@@ -394,7 +394,7 @@ int main() {
       !engine::scripting::load_script(kTempScriptPath) ||
       !engine::scripting::call_script_function("request_streaming_asset")) {
     scriptAssetService.streamingQueue = nullptr;
-    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();
     remove_script_file();
     engine::scripting::shutdown_scripting();
@@ -406,7 +406,7 @@ int main() {
   if (!engine::renderer::mesh_asset_requested_resident(
           scriptAssetDatabase.get(), streamingAssetId)) {
     scriptAssetService.streamingQueue = nullptr;
-    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();
     remove_script_file();
     engine::scripting::shutdown_scripting();
@@ -416,7 +416,7 @@ int main() {
                                          streamingAssetId) !=
       engine::renderer::AssetState::Loading) {
     scriptAssetService.streamingQueue = nullptr;
-    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();
     remove_script_file();
     engine::scripting::shutdown_scripting();
@@ -425,22 +425,22 @@ int main() {
   if (engine::renderer::pending_asset_request_count(
           scriptAssetManager.get()) != 0U) {
     scriptAssetService.streamingQueue = nullptr;
-    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 124;
   }
-  if (engine::renderer::pending_load_count(scriptStreamingQueue.get()) != 1U) {
+  if (engine::content::pending_load_count(scriptStreamingQueue.get()) != 1U) {
     scriptAssetService.streamingQueue = nullptr;
-    engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+    engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 125;
   }
   scriptAssetService.streamingQueue = nullptr;
-  engine::renderer::shutdown_asset_streaming(scriptStreamingQueue.get());
+  engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
   engine::core::shutdown_cvars();
 
   // Assumes a fresh World so the first spawned entity is index 1.

@@ -6,7 +6,7 @@
 #include <cstdint>
 
 #include "engine/renderer/asset_database.h"
-#include "engine/renderer/asset_metadata.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/renderer/material.h"
 
 namespace engine::runtime {
@@ -55,7 +55,7 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept;
 /// path, so the Inspector's asset reference pickers (issue #156) can search
 /// and select by name/path instead of a raw numeric id.
 struct EditorAssetSearchResult final {
-  renderer::AssetId assetId = renderer::kInvalidAssetId;
+  content::AssetId assetId = content::kInvalidAssetId;
   char path[260] = {};
 };
 
@@ -64,7 +64,7 @@ struct EditorAssetSearchResult final {
 /// ("" matches every known asset of that type); writes up to maxResults hits
 /// and returns the count actually written. Returns 0 (no results, not an
 /// error) when no runtime asset service is published yet.
-std::size_t editor_query_assets(renderer::AssetTypeTag typeTag,
+std::size_t editor_query_assets(content::AssetTypeTag typeTag,
                                 const char *query,
                                 EditorAssetSearchResult *outResults,
                                 std::size_t maxResults) noexcept;
@@ -91,7 +91,7 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
 /// reload_material_asset already gives the loader layer).
 struct EditorMaterialState final {
   bool found = false;
-  renderer::AssetId materialId = renderer::kInvalidAssetId;
+  content::AssetId materialId = content::kInvalidAssetId;
   renderer::Material params{};
   renderer::MaterialTextureSlots textureSlots{};
   char parentVirtualPath[260] = {};
@@ -110,7 +110,7 @@ EditorMaterialState editor_load_material(const char *virtualPath) noexcept;
 /// editor_save_material to persist. False when the id is unknown or no
 /// runtime asset service is published.
 bool editor_set_material_params(
-    renderer::AssetId materialId, const renderer::Material &params,
+    content::AssetId materialId, const renderer::Material &params,
     const renderer::MaterialTextureSlots &textureSlots) noexcept;
 
 /// Persists the live in-memory state for `virtualPath` to disk via

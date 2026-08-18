@@ -16,7 +16,7 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
@@ -47,7 +47,7 @@ bool ok_upload(engine::renderer::AssetId, void *) noexcept { return true; }
 
 /// Counts occupied streaming-queue slots under the queue lock.
 std::size_t occupied_request_count(
-    engine::renderer::AssetStreamingQueue *queue) noexcept {
+    engine::content::AssetStreamingQueue *queue) noexcept {
   std::lock_guard<std::mutex> lock(queue->mutex);
   std::size_t count = 0U;
   for (const auto &request : queue->requests) {
@@ -59,27 +59,27 @@ std::size_t occupied_request_count(
 }
 
 /// Finds the live queue handle for an asset id under the queue lock.
-engine::renderer::LoadHandle find_request_handle(
-    engine::renderer::AssetStreamingQueue *queue,
+engine::content::LoadHandle find_request_handle(
+    engine::content::AssetStreamingQueue *queue,
     engine::renderer::AssetId assetId) noexcept {
   std::lock_guard<std::mutex> lock(queue->mutex);
   for (std::uint32_t i = 0U;
-       i < engine::renderer::AssetStreamingQueue::kMaxRequests; ++i) {
+       i < engine::content::AssetStreamingQueue::kMaxRequests; ++i) {
     if (queue->requests[i].occupied &&
         (queue->requests[i].assetId == assetId)) {
-      return engine::renderer::LoadHandle{i, queue->requests[i].generation};
+      return engine::content::LoadHandle{i, queue->requests[i].generation};
     }
   }
-  return engine::renderer::kInvalidLoadHandle;
+  return engine::content::kInvalidLoadHandle;
 }
 
 /// True when an occupied, non-Failed queue request exists for the asset.
-bool has_live_request(engine::renderer::AssetStreamingQueue *queue,
+bool has_live_request(engine::content::AssetStreamingQueue *queue,
                       engine::renderer::AssetId assetId) noexcept {
   std::lock_guard<std::mutex> lock(queue->mutex);
   for (const auto &request : queue->requests) {
     if (request.occupied && (request.assetId == assetId) &&
-        (request.state != engine::renderer::LoadingState::Failed)) {
+        (request.state != engine::content::LoadingState::Failed)) {
       return true;
     }
   }
@@ -87,29 +87,29 @@ bool has_live_request(engine::renderer::AssetStreamingQueue *queue,
 }
 
 /// Drives one scheduling pass and blocks until the request is terminal.
-engine::renderer::LoadingState pump_to_terminal(
-    engine::renderer::AssetStreamingQueue *queue,
+engine::content::LoadingState pump_to_terminal(
+    engine::content::AssetStreamingQueue *queue,
     engine::renderer::AssetId assetId,
-    engine::renderer::AssetLoadCallback loadCallback,
-    engine::renderer::AssetUploadCallback uploadCallback) noexcept {
-  const engine::renderer::LoadHandle handle =
+    engine::content::AssetLoadCallback loadCallback,
+    engine::content::AssetUploadCallback uploadCallback) noexcept {
+  const engine::content::LoadHandle handle =
       find_request_handle(queue, assetId);
   if (!handle.valid()) {
-    return engine::renderer::LoadingState::Failed;
+    return engine::content::LoadingState::Failed;
   }
   for (std::size_t i = 0U; i < 64U; ++i) {
-    engine::renderer::begin_streaming_frame(queue);
-    static_cast<void>(engine::renderer::update_asset_streaming(
+    engine::content::begin_streaming_frame(queue);
+    static_cast<void>(engine::content::update_asset_streaming(
         queue, loadCallback, uploadCallback, nullptr));
-    const engine::renderer::LoadingState state =
-        engine::renderer::get_load_state(queue, handle);
-    if ((state == engine::renderer::LoadingState::Ready) ||
-        (state == engine::renderer::LoadingState::Failed)) {
+    const engine::content::LoadingState state =
+        engine::content::get_load_state(queue, handle);
+    if ((state == engine::content::LoadingState::Ready) ||
+        (state == engine::content::LoadingState::Failed)) {
       return state;
     }
-    static_cast<void>(engine::renderer::wait_for_load(queue, handle, 100U));
+    static_cast<void>(engine::content::wait_for_load(queue, handle, 100U));
   }
-  return engine::renderer::get_load_state(queue, handle);
+  return engine::content::get_load_state(queue, handle);
 }
 
 /// Writes the temporary Lua fixture used by the script-path checks.
@@ -136,7 +136,7 @@ bool write_script_file(const char *contents) noexcept {
 /// behind a dead Failed slot.
 int check_editor_failed_load_recovers(
     engine::renderer::AssetDatabase *database,
-    engine::renderer::AssetStreamingQueue *queue) noexcept {
+    engine::content::AssetStreamingQueue *queue) noexcept {
   engine::renderer::clear_asset_database(database);
   engine::runtime::EngineAssetDatabaseService service{};
   service.database = database;
@@ -157,7 +157,7 @@ int check_editor_failed_load_recovers(
   }
 
   if (pump_to_terminal(queue, assetId, &fail_load, nullptr) !=
-      engine::renderer::LoadingState::Failed) {
+      engine::content::LoadingState::Failed) {
     engine::runtime::set_editor_asset_service(nullptr);
     return 22;
   }
@@ -183,7 +183,7 @@ int check_editor_failed_load_recovers(
   }
 
   if (pump_to_terminal(queue, assetId, &fail_load, nullptr) !=
-      engine::renderer::LoadingState::Failed) {
+      engine::content::LoadingState::Failed) {
     engine::runtime::set_editor_asset_service(nullptr);
     return 27;
   }
@@ -197,7 +197,7 @@ int check_editor_failed_load_recovers(
 int check_script_failed_load_retries(
     engine::renderer::AssetDatabase *database,
     engine::renderer::AssetManager *manager,
-    engine::renderer::AssetStreamingQueue *queue) noexcept {
+    engine::content::AssetStreamingQueue *queue) noexcept {
   engine::renderer::clear_asset_database(database);
   std::unique_ptr<engine::runtime::World> world(
       new (std::nothrow) engine::runtime::World());
@@ -261,7 +261,7 @@ int check_script_failed_load_retries(
       return finish(45);
     }
     if (pump_to_terminal(queue, scriptAssetId, &fail_load, nullptr) !=
-        engine::renderer::LoadingState::Failed) {
+        engine::content::LoadingState::Failed) {
       return finish(46);
     }
   }
@@ -272,7 +272,7 @@ int check_script_failed_load_retries(
   const engine::renderer::AssetId readyAssetId =
       engine::renderer::make_asset_id_from_path("rtest_ready.mesh");
   if (pump_to_terminal(queue, readyAssetId, &ok_load, &ok_upload) !=
-      engine::renderer::LoadingState::Ready) {
+      engine::content::LoadingState::Ready) {
     return finish(48);
   }
   if (!engine::renderer::set_mesh_asset_state(
@@ -318,10 +318,10 @@ int main() {
   engine::renderer::clear_asset_manager(manager.get());
 
   for (int phase = 0; (phase < 2) && (result == 0); ++phase) {
-    std::unique_ptr<engine::renderer::AssetStreamingQueue> queue(
-        new (std::nothrow) engine::renderer::AssetStreamingQueue());
+    std::unique_ptr<engine::content::AssetStreamingQueue> queue(
+        new (std::nothrow) engine::content::AssetStreamingQueue());
     if ((queue == nullptr) ||
-        !engine::renderer::initialize_asset_streaming(queue.get())) {
+        !engine::content::initialize_asset_streaming(queue.get())) {
       result = 1;
       break;
     }
@@ -331,7 +331,7 @@ int main() {
                  : check_script_failed_load_retries(database.get(),
                                                     manager.get(),
                                                     queue.get());
-    engine::renderer::shutdown_asset_streaming(queue.get());
+    engine::content::shutdown_asset_streaming(queue.get());
   }
 
   engine::core::shutdown_vfs();
