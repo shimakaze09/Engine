@@ -325,6 +325,18 @@ bool remove_input_axis(const char *name) noexcept {
 // Callback registration
 // ---------------------------------------------------------------------------
 
+/// Drops every callback registration while keeping the key mappings.
+void clear_action_callbacks() noexcept {
+  for (auto &action : g_mappedActions) {
+    action.callback = nullptr;
+    action.userData = nullptr;
+  }
+  for (auto &axis : g_mappedAxes) {
+    axis.callback = nullptr;
+    axis.userData = nullptr;
+  }
+}
+
 bool set_action_callback(const char *name, ActionCallback cb,
                          void *userData) noexcept {
   InputAction *a = find_mapped_action(name);

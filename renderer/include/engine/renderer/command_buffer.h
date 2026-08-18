@@ -302,4 +302,10 @@ normalize_height_fog_settings(const HeightFogSettings &settings) noexcept;
 /// Stats recorded by the most recent flush_renderer call.
 RendererFrameStats renderer_get_last_frame_stats() noexcept;
 
+// Resets the per-run public renderer state (active camera, scene viewport,
+// last frame stats, capture requests, skybox binding) without touching the
+// backend; EnginePipeline::teardown calls it so no run residue survives
+// into a later run (#168), and shutdown_renderer already calls it.
+void reset_renderer_public_state() noexcept;
+
 } // namespace engine::renderer
