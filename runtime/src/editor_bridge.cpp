@@ -11,7 +11,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/material_writer.h"
 #include "engine/runtime/service_registry.h"
@@ -73,9 +73,9 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   }
 
   if (g_editorAssetService->streamingQueue != nullptr) {
-    const renderer::LoadHandle handle = renderer::load_asset_async(
+    const content::LoadHandle handle = content::load_asset_async(
         g_editorAssetService->streamingQueue, assetId, osPath,
-        renderer::LoadPriority::High);
+        content::LoadPriority::High);
     if (!handle.valid()) {
       static_cast<void>(renderer::set_mesh_asset_state(
           g_editorAssetService->database, assetId,
@@ -124,7 +124,7 @@ bool contains_ci(const char *haystack, const char *needle) noexcept {
 
 } // namespace
 
-std::size_t editor_query_assets(renderer::AssetTypeTag typeTag,
+std::size_t editor_query_assets(content::AssetTypeTag typeTag,
                                 const char *query,
                                 EditorAssetSearchResult *outResults,
                                 std::size_t maxResults) noexcept {

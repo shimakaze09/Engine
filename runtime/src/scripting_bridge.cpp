@@ -9,7 +9,7 @@
 #include "engine/physics/physics_query.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/physics_bridge.h"
@@ -107,7 +107,7 @@ allocate_script_asset_handle_slot(runtime::EngineAssetDatabaseService *service,
     if (!handle.occupied) {
       handle.occupied = true;
       handle.assetId = assetId;
-      handle.streamingHandle = renderer::kInvalidLoadHandle;
+      handle.streamingHandle = content::kInvalidLoadHandle;
       ++handle.generation;
       if (handle.generation == 0U) {
         handle.generation = 1U;
@@ -120,17 +120,17 @@ allocate_script_asset_handle_slot(runtime::EngineAssetDatabaseService *service,
 }
 
 /// Maps Lua asset priority values to renderer streaming priorities.
-renderer::LoadPriority script_asset_priority(std::uint8_t priority) noexcept {
+content::LoadPriority script_asset_priority(std::uint8_t priority) noexcept {
   switch (priority) {
   case 0:
-    return renderer::LoadPriority::Low;
+    return content::LoadPriority::Low;
   case 2:
-    return renderer::LoadPriority::High;
+    return content::LoadPriority::High;
   case 3:
-    return renderer::LoadPriority::Immediate;
+    return content::LoadPriority::Immediate;
   case 1:
   default:
-    return renderer::LoadPriority::Normal;
+    return content::LoadPriority::Normal;
   }
 }
 
@@ -618,7 +618,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
   }
 
   auto &scriptHandle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
-  scriptHandle.streamingHandle = renderer::kInvalidLoadHandle;
+  scriptHandle.streamingHandle = content::kInvalidLoadHandle;
 
   if (g_scriptingAssetDatabaseService->streamingQueue != nullptr) {
     if (!renderer::request_mesh_asset_streaming_load(
@@ -629,7 +629,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
     }
 
     if (!alreadyReady) {
-      const renderer::LoadHandle streamingHandle = renderer::load_asset_async(
+      const content::LoadHandle streamingHandle = content::load_asset_async(
           g_scriptingAssetDatabaseService->streamingQueue, assetId, path,
           script_asset_priority(priority));
       if (!streamingHandle.valid()) {
@@ -683,7 +683,7 @@ bool scripting_is_asset_ready(std::uint32_t handleIndex) noexcept {
                                  handle.assetId) == renderer::AssetState::Ready;
   if ((g_scriptingAssetDatabaseService->streamingQueue != nullptr) &&
       handle.streamingHandle.valid()) {
-    return databaseReady && renderer::is_load_ready(
+    return databaseReady && content::is_load_ready(
                                 g_scriptingAssetDatabaseService->streamingQueue,
                                 handle.streamingHandle);
   }

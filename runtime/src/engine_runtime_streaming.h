@@ -9,7 +9,7 @@
 #include <mutex>
 
 #include "engine/renderer/asset_database.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/runtime/service_registry.h"
 
@@ -33,7 +33,7 @@ struct RuntimeAssetStreamingState final {
   renderer::AssetDatabase *database = nullptr;
   renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::array<StreamingMeshTransferSlot,
-             renderer::AssetStreamingQueue::kMaxRequests>
+             content::AssetStreamingQueue::kMaxRequests>
       meshTransfers{};
   std::mutex mutex{};
 };

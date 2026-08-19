@@ -36,7 +36,7 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/renderer/asset_streaming.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
@@ -458,7 +458,7 @@ struct EnginePipeline::Impl final {
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
   std::unique_ptr<renderer::AssetDatabase> assetDatabase;
   std::unique_ptr<renderer::AssetManager> assetManager;
-  std::unique_ptr<renderer::AssetStreamingQueue> assetStreamingQueue;
+  std::unique_ptr<content::AssetStreamingQueue> assetStreamingQueue;
   std::unique_ptr<RuntimeAssetStreamingState> assetStreamingState;
   std::unique_ptr<FrameContext> frameContext;
   BootstrapMeshIds meshIds{};
@@ -553,7 +553,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   meshRegistry.reset(new (std::nothrow) renderer::GpuMeshRegistry());
   assetDatabase.reset(new (std::nothrow) renderer::AssetDatabase());
   assetManager.reset(new (std::nothrow) renderer::AssetManager());
-  assetStreamingQueue.reset(new (std::nothrow) renderer::AssetStreamingQueue());
+  assetStreamingQueue.reset(new (std::nothrow) content::AssetStreamingQueue());
   assetStreamingState.reset(new (std::nothrow) RuntimeAssetStreamingState());
 
   if (!world || !commandBuffer || !meshRegistry || !assetDatabase ||
@@ -564,7 +564,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   }
   renderer::clear_asset_database(assetDatabase.get());
   renderer::clear_asset_manager(assetManager.get());
-  if (!renderer::initialize_asset_streaming(assetStreamingQueue.get())) {
+  if (!content::initialize_asset_streaming(assetStreamingQueue.get())) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to initialize runtime asset streaming queue");
     return false;
@@ -742,7 +742,7 @@ void EnginePipeline::Impl::teardown() noexcept {
   runtime::unbind_scripting_runtime(serviceLocator);
   serviceRegistry.unregister_services();
 
-  renderer::shutdown_asset_streaming(assetStreamingQueue.get());
+  content::shutdown_asset_streaming(assetStreamingQueue.get());
   clear_streamed_mesh_data(assetStreamingState.get());
   renderer::shutdown_asset_manager(assetManager.get(), assetDatabase.get(),
                                    meshRegistry.get());
@@ -897,7 +897,7 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   bool updatedAssets = true;
   renderer::advance_asset_database_frame(assetDatabase.get());
   if (assetStreamingQueue != nullptr) {
-    renderer::begin_streaming_frame(assetStreamingQueue.get());
+    content::begin_streaming_frame(assetStreamingQueue.get());
   }
 
   if (!core::make_render_context_current()) {
@@ -905,7 +905,7 @@ void EnginePipeline::Impl::stage_assets() noexcept {
                       "skipping asset transitions: OpenGL context unavailable");
   } else {
     if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
-      static_cast<void>(renderer::update_asset_streaming(
+      static_cast<void>(content::update_asset_streaming(
           assetStreamingQueue.get(), &runtime_streaming_load_mesh,
           &runtime_streaming_upload_mesh, assetStreamingState.get()));
     }
@@ -1528,7 +1528,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
         count_ready_mesh_components(*world, assetDatabase.get());
     const std::size_t pendingAssetRequests =
         renderer::pending_asset_request_count(assetManager.get()) +
-        renderer::pending_load_count(assetStreamingQueue.get());
+        content::pending_load_count(assetStreamingQueue.get());
 
     char diagnostics[640] = {};
     std::snprintf(
