@@ -107,6 +107,8 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
       entry.fovRadians = camComp->fovRadians;
       entry.nearPlane = camComp->nearPlane;
       entry.farPlane = camComp->farPlane;
+      entry.projection = camComp->projection;
+      entry.orthographicSize = camComp->orthographicSize;
       entry.blendSpeed = camComp->blendSpeed;
     } else {
       entry.blendSpeed = 5.0F;

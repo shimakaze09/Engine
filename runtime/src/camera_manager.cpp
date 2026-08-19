@@ -156,14 +156,36 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     return;
   }
 
+  CameraEntry evaluated{};
+  evaluate(dt, &evaluated);
+  *outPosition = evaluated.position;
+  *outTarget = evaluated.target;
+  *outUp = evaluated.up;
+  *outFov = evaluated.fovRadians;
+  *outNear = evaluated.nearPlane;
+  *outFar = evaluated.farPlane;
+}
+
+/// Struct-filling primary (#221): also carries the projection kind and
+/// orthographic size. The kind never interpolates — the winning camera's
+/// projection applies instantly (there is no meaningful matrix blend
+/// between perspective and orthographic) while orthographicSize lerps
+/// exactly like fovRadians, its perspective analogue.
+void CameraManager::evaluate(float dt, CameraEntry *outCamera) noexcept {
+  if (outCamera == nullptr) {
+    return;
+  }
+
   const CameraEntry *best = active_camera();
   if (best == nullptr) {
-    *outPosition = m_currentPosition;
-    *outTarget = m_currentTarget;
-    *outUp = m_currentUp;
-    *outFov = m_currentFov;
-    *outNear = m_currentNear;
-    *outFar = m_currentFar;
+    outCamera->position = m_currentPosition;
+    outCamera->target = m_currentTarget;
+    outCamera->up = m_currentUp;
+    outCamera->fovRadians = m_currentFov;
+    outCamera->nearPlane = m_currentNear;
+    outCamera->farPlane = m_currentFar;
+    outCamera->projection = m_currentProjection;
+    outCamera->orthographicSize = m_currentOrthoSize;
     return;
   }
 
@@ -187,6 +209,7 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     m_currentFov = best->fovRadians;
     m_currentNear = best->nearPlane;
     m_currentFar = best->farPlane;
+    m_currentOrthoSize = best->orthographicSize;
     m_hasEvaluated = true;
   } else {
     m_currentPosition = lerp_vec3(m_currentPosition, best->position, t);
@@ -195,7 +218,9 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     m_currentFov = lerp(m_currentFov, best->fovRadians, t);
     m_currentNear = lerp(m_currentNear, best->nearPlane, t);
     m_currentFar = lerp(m_currentFar, best->farPlane, t);
+    m_currentOrthoSize = lerp(m_currentOrthoSize, best->orthographicSize, t);
   }
+  m_currentProjection = best->projection;
 
   math::Vec3 shakeOffset(0.0F, 0.0F, 0.0F);
   for (auto &shake : m_shakes) {
@@ -215,16 +240,18 @@ void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
     shakeOffset.z += envelope * noise1d(phase + 200.0F);
   }
 
-  *outPosition = math::Vec3(m_currentPosition.x + shakeOffset.x,
-                            m_currentPosition.y + shakeOffset.y,
-                            m_currentPosition.z + shakeOffset.z);
-  *outTarget = math::Vec3(m_currentTarget.x + shakeOffset.x,
-                          m_currentTarget.y + shakeOffset.y,
-                          m_currentTarget.z + shakeOffset.z);
-  *outUp = m_currentUp;
-  *outFov = m_currentFov;
-  *outNear = m_currentNear;
-  *outFar = m_currentFar;
+  outCamera->position = math::Vec3(m_currentPosition.x + shakeOffset.x,
+                                   m_currentPosition.y + shakeOffset.y,
+                                   m_currentPosition.z + shakeOffset.z);
+  outCamera->target = math::Vec3(m_currentTarget.x + shakeOffset.x,
+                                 m_currentTarget.y + shakeOffset.y,
+                                 m_currentTarget.z + shakeOffset.z);
+  outCamera->up = m_currentUp;
+  outCamera->fovRadians = m_currentFov;
+  outCamera->nearPlane = m_currentNear;
+  outCamera->farPlane = m_currentFar;
+  outCamera->projection = m_currentProjection;
+  outCamera->orthographicSize = m_currentOrthoSize;
 }
 
 void CameraManager::clear() noexcept {
@@ -235,6 +262,8 @@ void CameraManager::clear() noexcept {
     shake = CameraShakeEntry{};
   }
   m_hasEvaluated = false;
+  m_currentProjection = 0U;
+  m_currentOrthoSize = 5.0F;
 }
 
 std::size_t CameraManager::camera_count() const noexcept {

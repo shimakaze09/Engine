@@ -80,6 +80,8 @@ void update_persistent_cameras(World &world, float dt) noexcept {
     entry.fovRadians = camera.fovRadians;
     entry.nearPlane = camera.nearPlane;
     entry.farPlane = camera.farPlane;
+    entry.projection = camera.projection;
+    entry.orthographicSize = camera.orthographicSize;
     entry.blendSpeed = camera.blendSpeed;
 
     static_cast<void>(camMgr.push_camera(entity, entry, camera.priority));
@@ -140,6 +142,8 @@ bool camera_component_pose(const World &world, core::Entity entity,
   state.fovRadians = camera->fovRadians;
   state.nearPlane = camera->nearPlane;
   state.farPlane = camera->farPlane;
+  state.projection = camera->projection;
+  state.orthographicSize = camera->orthographicSize;
   *outState = state;
   return true;
 }

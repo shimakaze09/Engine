@@ -46,7 +46,6 @@ namespace engine::renderer {
 
 namespace {
 
-constexpr float kDefaultFovRadians = 1.0471975512F;
 constexpr float kNearClip = 0.1F;
 constexpr float kFarClip = 100.0F;
 constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
@@ -160,14 +159,12 @@ void flush_renderer(CommandBufferView commandBufferView,
       static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
   const math::Mat4 viewMat = math::look_at(
       renderer_context().activeCamera.position, renderer_context().activeCamera.target, renderer_context().activeCamera.up);
-  const float fov = (renderer_context().activeCamera.fovRadians > 0.0F)
-                        ? renderer_context().activeCamera.fovRadians
-                        : kDefaultFovRadians;
   const float nearP =
       (renderer_context().activeCamera.nearPlane > 0.0F) ? renderer_context().activeCamera.nearPlane : kNearClip;
   const float farP =
       (renderer_context().activeCamera.farPlane > nearP) ? renderer_context().activeCamera.farPlane : kFarClip;
-  const math::Mat4 projMat = math::perspective(fov, aspect, nearP, farP);
+  const math::Mat4 projMat =
+      camera_projection_matrix(renderer_context().activeCamera, aspect);
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 
   if (registry == nullptr) {

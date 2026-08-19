@@ -175,6 +175,26 @@ int main() {
     return 14;
   }
 
+  // ortho(): a point on each boundary plane maps to the matching NDC face
+  // and w stays exactly 1 (#221 pins the previously untested helper).
+  const engine::math::Mat4 orthoProj =
+      engine::math::ortho(-2.0F, 2.0F, -1.0F, 1.0F, nearZ, farZ);
+  const engine::math::Vec4 orthoCorner(2.0F, -1.0F, -nearZ, 1.0F);
+  const engine::math::Vec4 orthoFar(0.0F, 0.0F, -farZ, 1.0F);
+  const engine::math::Vec4 cornerClip =
+      engine::math::mul(orthoProj, orthoCorner);
+  const engine::math::Vec4 orthoFarClip =
+      engine::math::mul(orthoProj, orthoFar);
+  if ((cornerClip.w != 1.0F) || (orthoFarClip.w != 1.0F)) {
+    return 15;
+  }
+  if (!nearly_equal(cornerClip.x, 1.0F, 1.0e-3F) ||
+      !nearly_equal(cornerClip.y, -1.0F, 1.0e-3F) ||
+      !nearly_equal(cornerClip.z, -1.0F, 1.0e-3F) ||
+      !nearly_equal(orthoFarClip.z, 1.0F, 1.0e-3F)) {
+    return 16;
+  }
+
   engine::math::Vec3 outTranslation{};
   engine::math::Quat outRotation{};
   engine::math::Vec3 outScale{};

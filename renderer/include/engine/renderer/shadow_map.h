@@ -58,12 +58,18 @@ CascadeSplits compute_cascade_splits(float nearClip, float farClip,
 /// Compute cascade light view-projection matrix for a single cascade.
 /// @param viewMatrix     Camera view matrix.
 /// @param projMatrix     Camera projection matrix.
+/// @param projNear       Camera near plane the projection was built with.
+/// @param projFar        Camera far plane the projection was built with.
 /// @param lightDir       Normalized light direction (pointing toward scene).
 /// @param cascadeNear    Near split distance for this cascade.
 /// @param cascadeFar     Far split distance for this cascade.
 /// @param shadowMapSize  Cascade shadow texture size for stable snapping.
+/// projNear/projFar are passed explicitly (#221): recovering them from the
+/// matrix used perspective-only algebra that produced silently wrong
+/// cascade slabs for an orthographic camera.
 math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
+                                  float projNear, float projFar,
                                   const math::Vec3 &lightDir, float cascadeNear,
                                   float cascadeFar,
                                   int shadowMapSize) noexcept;

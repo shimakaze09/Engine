@@ -250,6 +250,15 @@ renderer::CameraState interpolate_camera_state(
       previous.up, math::mul(math::sub(current.up, previous.up), alpha)));
   out.fovRadians =
       previous.fovRadians + ((current.fovRadians - previous.fovRadians) * alpha);
+  // The ortho half-height lerps like fov, its perspective analogue, only
+  // when the kind is stable across the pair; the projection kind itself
+  // snaps with `out = current` (near/far precedent above) — there is no
+  // meaningful blend between perspective and orthographic matrices (#221).
+  if (previous.projection == current.projection) {
+    out.orthographicSize =
+        previous.orthographicSize +
+        ((current.orthographicSize - previous.orthographicSize) * alpha);
+  }
   return out;
 }
 
@@ -1250,21 +1259,19 @@ void EnginePipeline::Impl::stage_camera() noexcept {
                                      static_cast<float>(step_seconds()));
   runtime::update_persistent_cameras(*world,
                                      static_cast<float>(step_seconds()));
-  math::Vec3 camPos, camTarget, camUp;
-  float camFov = 0.0F;
-  float camNear = 0.0F;
-  float camFar = 0.0F;
+  runtime::CameraEntry evaluated{};
   world->camera_manager().evaluate(static_cast<float>(step_seconds()),
-                                   &camPos, &camTarget, &camUp, &camFov,
-                                   &camNear, &camFar);
+                                   &evaluated);
   if (world->camera_manager().camera_count() > 0U) {
     renderer::CameraState cam{};
-    cam.position = camPos;
-    cam.target = camTarget;
-    cam.up = camUp;
-    cam.fovRadians = camFov;
-    cam.nearPlane = camNear;
-    cam.farPlane = camFar;
+    cam.position = evaluated.position;
+    cam.target = evaluated.target;
+    cam.up = evaluated.up;
+    cam.fovRadians = evaluated.fovRadians;
+    cam.nearPlane = evaluated.nearPlane;
+    cam.farPlane = evaluated.farPlane;
+    cam.projection = evaluated.projection;
+    cam.orthographicSize = evaluated.orthographicSize;
     renderer::set_active_camera(cam);
   }
 
@@ -1322,9 +1329,10 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     const float vpAspect =
         (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH)) : 1.0F;
     const renderer::CameraState cam = renderer::get_active_camera();
+    // Shares the flush path's projection builder so CPU culling can never
+    // disagree with the GPU frustum (#221).
     const math::Mat4 vpMatrix =
-        math::mul(math::perspective(cam.fovRadians, vpAspect, cam.nearPlane,
-                                    cam.farPlane),
+        math::mul(renderer::camera_projection_matrix(cam, vpAspect),
                   math::look_at(cam.position, cam.target, cam.up));
 
     if (!runtime::enqueue_render_prep_pipeline(

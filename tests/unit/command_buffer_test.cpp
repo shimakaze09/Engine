@@ -3,6 +3,7 @@
 #include "command_buffer_flush_internal.h"
 #include "command_buffer_math.h"
 #include "engine/core/cvar.h"
+#include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 
@@ -229,6 +230,8 @@ int check_camera_state() {
   camera.fovRadians = 0.75F;
   camera.nearPlane = 0.25F;
   camera.farPlane = 250.0F;
+  camera.projection = engine::renderer::CameraState::kProjectionOrthographic;
+  camera.orthographicSize = 7.5F;
   engine::renderer::set_active_camera(camera);
 
   const engine::renderer::CameraState readback =
@@ -244,6 +247,41 @@ int check_camera_state() {
   if ((readback.fovRadians != 0.75F) || (readback.nearPlane != 0.25F) ||
       (readback.farPlane != 250.0F)) {
     return 33;
+  }
+  if ((readback.projection !=
+       engine::renderer::CameraState::kProjectionOrthographic) ||
+      (readback.orthographicSize != 7.5F)) {
+    return 34;
+  }
+
+  // The shared projection builder must produce the exact math::ortho
+  // matrix for an orthographic camera (half-height scaled by aspect) and
+  // the exact math::perspective matrix otherwise (#221).
+  const float aspect = 2.0F;
+  const engine::math::Mat4 built =
+      engine::renderer::camera_projection_matrix(camera, aspect);
+  const engine::math::Mat4 expected = engine::math::ortho(
+      -7.5F * aspect, 7.5F * aspect, -7.5F, 7.5F, 0.25F, 250.0F);
+  for (int c = 0; c < 4; ++c) {
+    if ((built.columns[c].x != expected.columns[c].x) ||
+        (built.columns[c].y != expected.columns[c].y) ||
+        (built.columns[c].z != expected.columns[c].z) ||
+        (built.columns[c].w != expected.columns[c].w)) {
+      return 35;
+    }
+  }
+  camera.projection = engine::renderer::CameraState::kProjectionPerspective;
+  const engine::math::Mat4 builtPersp =
+      engine::renderer::camera_projection_matrix(camera, aspect);
+  const engine::math::Mat4 expectedPersp =
+      engine::math::perspective(0.75F, aspect, 0.25F, 250.0F);
+  for (int c = 0; c < 4; ++c) {
+    if ((builtPersp.columns[c].x != expectedPersp.columns[c].x) ||
+        (builtPersp.columns[c].y != expectedPersp.columns[c].y) ||
+        (builtPersp.columns[c].z != expectedPersp.columns[c].z) ||
+        (builtPersp.columns[c].w != expectedPersp.columns[c].w)) {
+      return 36;
+    }
   }
   return 0;
 }

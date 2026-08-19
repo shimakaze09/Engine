@@ -132,6 +132,8 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlDirLightColorLoc =
       required_param(&ok, dev, dlProg, "uDirLightColor");
   backend.dlCameraPosLoc = required_param(&ok, dev, dlProg, "uCameraPos");
+  backend.dlCameraForwardOrthoLoc =
+      dev->shader_param(dlProg, "uCameraForwardOrtho");
   backend.dlScreenSizeLoc = dev->shader_param(dlProg, "uScreenSize");
   backend.dlFogModeLoc = dev->shader_param(dlProg, "uFogMode");
   backend.dlFogStartLoc = dev->shader_param(dlProg, "uFogStart");

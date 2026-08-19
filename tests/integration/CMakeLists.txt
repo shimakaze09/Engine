@@ -58,6 +58,17 @@ engine_add_test_executable(engine_integration_quit_end_play
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_ortho_camera_render
+    SOURCES
+    ortho_camera_render_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    LABELS
+    gpu;integration
+)
+
 engine_add_test_executable(engine_integration_vertical_slice
     SOURCES
     vertical_slice_integration.cpp

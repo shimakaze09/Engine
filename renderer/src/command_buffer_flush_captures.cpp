@@ -82,8 +82,7 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     const math::Mat4 captureView = math::look_at(
         request.camera.position, request.camera.target, request.camera.up);
     const math::Mat4 captureProj =
-        math::perspective(request.camera.fovRadians, captureAspect,
-                          request.camera.nearPlane, request.camera.farPlane);
+        camera_projection_matrix(request.camera, captureAspect);
     const math::Mat4 captureViewProjection =
         math::mul(captureProj, captureView);
 

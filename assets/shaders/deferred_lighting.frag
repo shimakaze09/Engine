@@ -62,6 +62,9 @@ uniform vec3 uDirLightColor;
 
 // Camera.
 uniform vec3 uCameraPos;
+// xyz = normalized camera forward, w = 1 when orthographic (#221): ortho
+// rays are parallel, so the per-pixel eye vector degenerates to -forward.
+uniform vec4 uCameraForwardOrtho;
 
 // Screen dimensions for tile computation.
 uniform vec2 uScreenSize;
@@ -411,7 +414,8 @@ void main() {
     float ao = emissiveAO.a;
 
     vec3 worldPos = reconstruct_world_pos(vTexCoord, depth);
-    vec3 V = normalize(uCameraPos - worldPos);
+    vec3 V = mix(normalize(uCameraPos - worldPos), -uCameraForwardOrtho.xyz,
+                 uCameraForwardOrtho.w);
 
     // Accumulate lighting.
     vec3 Lo = vec3(0.0);

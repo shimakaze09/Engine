@@ -118,6 +118,7 @@ void extract_frustum_corners(const math::Mat4 &invViewProj,
 /// shadow projection.
 math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
                                   const math::Mat4 &projMatrix,
+                                  float projNear, float projFar,
                                   const math::Vec3 &lightDir, float cascadeNear,
                                   float cascadeFar,
                                   int shadowMapSize) noexcept {
@@ -129,11 +130,6 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
 
   math::Vec3 fullCorners[8]{};
   extract_frustum_corners(invViewProj, fullCorners);
-
-  const float projNear =
-      projMatrix.columns[3].z / (projMatrix.columns[2].z - 1.0F);
-  const float projFar =
-      projMatrix.columns[3].z / (projMatrix.columns[2].z + 1.0F);
 
   const float nearRatio = (std::abs(projFar - projNear) > 1e-7F)
                               ? (cascadeNear - projNear) / (projFar - projNear)

@@ -708,6 +708,9 @@ bool test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens() noexc
   camera.fovRadians = 0.7F;
   camera.priority = 42.0F;
   camera.blendSpeed = 9.0F;
+  camera.projection =
+      static_cast<std::uint32_t>(CameraProjection::Orthographic);
+  camera.orthographicSize = 12.5F;
   if (!world->add_camera_component(entity, camera)) {
     return false;
   }
@@ -728,9 +731,13 @@ bool test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens() noexc
       !nearly(active->position.y, 4.0F) || !nearly(active->position.z, 11.0F)) {
     return false;
   }
-  // CameraComponent-derived lens/priority/blend.
+  // CameraComponent-derived lens/priority/blend, including the projection
+  // kind and orthographic half-height (#221).
   return nearly(active->fovRadians, 0.7F) && (active->priority == 42.0F) &&
-        (active->blendSpeed == 9.0F);
+        (active->blendSpeed == 9.0F) &&
+        (active->projection ==
+         static_cast<std::uint32_t>(CameraProjection::Orthographic)) &&
+        nearly(active->orthographicSize, 12.5F);
 }
 
 /// A disabled CameraComponent co-located with a SpringArmComponent suppresses
@@ -878,6 +885,56 @@ bool test_clear() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// #221: the struct evaluate carries the projection kind and half-height;
+/// the kind snaps to the winning camera instantly while the size lerps.
+bool test_evaluate_carries_projection_kind_and_size() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return false;
+  }
+  CameraManager &mgr = world->camera_manager();
+
+  const Entity ortho = world->create_scene_object();
+  CameraEntry orthoEntry{};
+  orthoEntry.projection =
+      static_cast<std::uint32_t>(CameraProjection::Orthographic);
+  orthoEntry.orthographicSize = 20.0F;
+  orthoEntry.blendSpeed = 0.5F;
+  if (!mgr.push_camera(ortho, orthoEntry, 5.0F)) {
+    return false;
+  }
+
+  CameraEntry evaluated{};
+  mgr.evaluate(0.1F, &evaluated);
+  if (evaluated.projection !=
+      static_cast<std::uint32_t>(CameraProjection::Orthographic)) {
+    return false; // the kind must apply on the first evaluate, not blend in
+  }
+  if (!nearly(evaluated.orthographicSize, 20.0F)) {
+    return false; // first evaluate seeds the blend state from the winner
+  }
+
+  // A higher-priority perspective camera takes over: the kind snaps on the
+  // next evaluate even though the continuous lens values are still blending.
+  const Entity persp = world->create_scene_object();
+  CameraEntry perspEntry{};
+  perspEntry.projection =
+      static_cast<std::uint32_t>(CameraProjection::Perspective);
+  perspEntry.orthographicSize = 4.0F;
+  perspEntry.blendSpeed = 0.5F;
+  if (!mgr.push_camera(persp, perspEntry, 9.0F)) {
+    return false;
+  }
+  mgr.evaluate(0.1F, &evaluated);
+  if (evaluated.projection !=
+      static_cast<std::uint32_t>(CameraProjection::Perspective)) {
+    return false;
+  }
+  // The half-height is mid-blend: strictly between the two authored values.
+  return (evaluated.orthographicSize < 20.0F) &&
+         (evaluated.orthographicSize > 4.0F);
+}
+
 int main() {
   int failures = 0;
 
@@ -922,6 +979,8 @@ int main() {
       test_camera_component_none_active_reports_invalid);
   run("test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens",
       test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens);
+  run("test_evaluate_carries_projection_kind_and_size",
+      test_evaluate_carries_projection_kind_and_size);
   run("test_camera_component_disabled_suppresses_spring_arm_push",
       test_camera_component_disabled_suppresses_spring_arm_push);
   run("test_camera_component_survives_scene_reload",
