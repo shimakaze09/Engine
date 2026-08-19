@@ -4,6 +4,8 @@
 // registered sink, not a copied capture model.
 
 #include "editor_console_capture.h"
+#include "engine/renderer/shader_system.h"
+#include "engine/renderer/texture_loader.h"
 #include "engine/core/logging.h"
 #include "engine/runtime/world.h"
 #include "../test_harness.h"
@@ -188,6 +190,41 @@ void check_asset_path_navigation() noexcept {
        "asset path parsed correctly, trailing colon trimmed");
 }
 
+/// EXPECTATION (#217): the production texture and shader load failures
+/// emit `<path>: <reason>` diagnostics the console parses into AssetPath
+/// navigation — exercised through the real loaders, not synthetic text.
+void check_production_diagnostics_navigate() noexcept {
+  console_capture_clear();
+  check(engine::renderer::initialize_texture_system(),
+       "texture system init for diagnostics");
+  static_cast<void>(
+      engine::renderer::load_texture("assets/textures/does_not_exist.png"));
+  engine::renderer::shutdown_texture_system();
+
+  ConsoleEntry entry{};
+  check(console_capture_get_entry(0U, &entry), "get texture diagnostic");
+  check(entry.referenceKind == ConsoleReferenceKind::AssetPath,
+       "texture load failure carries a navigable asset path (#217)");
+  check(std::strcmp(entry.referencePath,
+                    "assets/textures/does_not_exist.png") == 0,
+       "texture diagnostic names the failed path");
+
+  console_capture_clear();
+  check(engine::renderer::initialize_shader_system(),
+       "shader system init for diagnostics");
+  static_cast<void>(engine::renderer::load_shader_program(
+      "assets/shaders/does_not_exist.vert",
+      "assets/shaders/does_not_exist.frag"));
+  engine::renderer::shutdown_shader_system();
+
+  check(console_capture_get_entry(0U, &entry), "get shader diagnostic");
+  check(entry.referenceKind == ConsoleReferenceKind::AssetPath,
+       "shader load failure carries a navigable asset path (#217)");
+  check(std::strcmp(entry.referencePath,
+                    "assets/shaders/does_not_exist.vert") == 0,
+       "shader diagnostic names the failed path");
+}
+
 /// EXPECTATION: an "entity <n>" diagnostic yields an entity-index hint that
 /// resolves to the real, currently alive entity through the production
 /// World API — and refuses to resolve once that entity is destroyed.
@@ -314,6 +351,7 @@ int main() {
   check_filtering();
   check_script_location_navigation();
   check_asset_path_navigation();
+  check_production_diagnostics_navigate();
   check_entity_hint_navigation();
   check_unseen_badge_counters();
   check_frame_index_context();
