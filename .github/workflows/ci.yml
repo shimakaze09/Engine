@@ -160,8 +160,11 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/_deps
-          key: deps-v2-compat-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-v2-compat-${{ matrix.os }}-
+          # v3: the v2 Windows caches carry SDL3 FetchContent sub-builds
+          # configured with the Visual Studio generator, which CMake
+          # refuses to reuse under this lane's Ninja configure.
+          key: deps-v3-compat-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v3-compat-${{ matrix.os }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
