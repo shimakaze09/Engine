@@ -298,7 +298,14 @@ int verify_prefab_save_refuses_unserializable_payloads() {
   }
   {
     // The refused save must not have created the destination file.
-    std::FILE *file = std::fopen(kPrefabPath, "rb");
+    std::FILE *file = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&file, kPrefabPath, "rb") != 0) {
+      file = nullptr;
+    }
+#else
+    file = std::fopen(kPrefabPath, "rb");
+#endif
     if (file != nullptr) {
       static_cast<void>(std::fclose(file));
       return 305;
