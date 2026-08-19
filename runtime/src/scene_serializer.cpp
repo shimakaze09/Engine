@@ -49,16 +49,165 @@ bool log_scene_error(const char *message) noexcept {
   return false;
 }
 
+
+// ---- Registry-driven component codec (#166 W5) ----------------------------
+// Membership and row order for both serializer directions expand from
+// ENGINE_PERSISTENT_COMPONENT_TABLE; only each type's wire shape lives
+// below. A new registry row without a descriptor/decode/encode path fails
+// to compile, so a persistent component cannot be silently absent from the
+// scene format.
+
+/// Scene key for a row: the registry key, except NameComponent's
+/// pre-registry bare "name" field (kept byte-stable; migration is #252).
+template <typename T>
+const char *scene_component_key(const char *registryKey) noexcept {
+  if constexpr (std::is_same_v<T, NameComponent>) {
+    return kNameFieldKey;
+  } else {
+    return registryKey;
+  }
+}
+
+/// Reflection descriptor for a reflected component type (one overload per
+/// type; a new reflected row without one fails to compile).
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const Transform *) noexcept {
+  return *descs.transform;
+}
+/// RigidBody descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const RigidBody *) noexcept {
+  return *descs.rigidBody;
+}
+/// SpringArm descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const SpringArmComponent *) noexcept {
+  return *descs.springArm;
+}
+/// ReflectionProbe descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const ReflectionProbeComponent *) noexcept {
+  return *descs.reflectionProbe;
+}
+/// PointLight descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const PointLightComponent *) noexcept {
+  return *descs.pointLight;
+}
+/// SpotLight descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const SpotLightComponent *) noexcept {
+  return *descs.spotLight;
+}
+/// SceneCapture descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const SceneCaptureComponent *) noexcept {
+  return *descs.sceneCapture;
+}
+/// Camera descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const CameraComponent *) noexcept {
+  return *descs.camera;
+}
+
+/// Decodes one component value into `out`; the default path is the
+/// reflected codec, with the custom wire shapes (collider payloads, mesh
+/// LODs, light enums, foliage arrays, the bare Name/Script/Animation
+/// strings) enumerated explicitly.
+template <typename T>
+bool decode_scene_component(const core::JsonParser &parser,
+                            const core::JsonValue &value,
+                            const ReflectedComponentDescriptors &descs,
+                            T *out) noexcept {
+  if constexpr (std::is_same_v<T, Collider>) {
+    return read_collider_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, MeshComponent>) {
+    return read_mesh_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, LightComponent>) {
+    return read_light_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
+    return read_foliage_patch_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, NameComponent>) {
+    return parser.copy_string(value, out->name, sizeof(out->name));
+  } else if constexpr (std::is_same_v<T, ScriptComponent>) {
+    return parser.copy_string_strict(value, out->scriptPath,
+                                     sizeof(out->scriptPath));
+  } else if constexpr (std::is_same_v<T, AnimationComponent>) {
+    return parser.copy_string_strict(value, out->controllerPath,
+                                     sizeof(out->controllerPath));
+  } else {
+    return read_reflected_component(parser, value,
+                                    component_descriptor(descs, out), out);
+  }
+}
+
+/// Per-save side stats the collider row feeds (unserialized payload
+/// warnings surface after the write loop).
+struct SceneWriteStats final {
+  std::size_t unserializedHulls = 0U;
+  std::size_t unserializedHeightfields = 0U;
+};
+
+/// Encodes one component under its key; mirrors decode_scene_component's
+/// shape split. Empty Script/Animation paths write nothing, matching the
+/// pre-registry writer.
+template <typename T>
+bool encode_scene_component(core::JsonWriter &writer, const char *key,
+                            const ReflectedComponentDescriptors &descs,
+                            const T &component,
+                            SceneWriteStats *stats) noexcept {
+  if constexpr (std::is_same_v<T, Collider>) {
+    if (!write_collider_component(writer, component)) {
+      return false;
+    }
+    if ((component.shape == ColliderShape::ConvexHull) &&
+        (component.hullSource == math::HullSource::None)) {
+      ++stats->unserializedHulls;
+    }
+    if (component.shape == ColliderShape::Heightfield) {
+      ++stats->unserializedHeightfields;
+    }
+    return true;
+  } else if constexpr (std::is_same_v<T, MeshComponent>) {
+    write_mesh_component(writer, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, LightComponent>) {
+    write_light_component(writer, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
+    write_foliage_patch_component(writer, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, NameComponent>) {
+    writer.write_string(key, component.name);
+    return true;
+  } else if constexpr (std::is_same_v<T, ScriptComponent>) {
+    if (component.scriptPath[0] != '\0') {
+      writer.write_string(key, component.scriptPath);
+    }
+    return true;
+  } else if constexpr (std::is_same_v<T, AnimationComponent>) {
+    if (component.controllerPath[0] != '\0') {
+      writer.write_string(key, component.controllerPath);
+    }
+    return true;
+  } else {
+    return write_reflected_component(
+        writer, key, component_descriptor(descs, &component), &component);
+  }
+}
+
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
                                 const ReflectedComponentDescriptors &descs,
                                 World &targetWorld) noexcept {
-  const core::TypeDescriptor &transformDesc = *descs.transform;
-  const core::TypeDescriptor &rigidBodyDesc = *descs.rigidBody;
-  const core::TypeDescriptor &springArmDesc = *descs.springArm;
-  const core::TypeDescriptor &reflectionProbeDesc = *descs.reflectionProbe;
-  const core::TypeDescriptor &pointLightDesc = *descs.pointLight;
-  const core::TypeDescriptor &spotLightDesc = *descs.spotLight;
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
     core::JsonValue entityValue{};
@@ -100,190 +249,24 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
       return log_scene_error("components field must be an object");
     }
 
-    core::JsonValue transformValue{};
-    if (parser.get_object_field(components, kJsonKeyTransform,
-                                &transformValue)) {
-      Transform transform{};
-      if (!read_reflected_component(parser, transformValue, transformDesc,
-                                    &transform) ||
-          !targetWorld.add_transform(entity, transform)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load Transform component");
-      }
-    }
-
-    core::JsonValue rigidBodyValue{};
-    if (parser.get_object_field(components, kJsonKeyRigidBody,
-                                &rigidBodyValue)) {
-      RigidBody rigidBody{};
-      if (!read_reflected_component(parser, rigidBodyValue, rigidBodyDesc,
-                                    &rigidBody) ||
-          !targetWorld.add_rigid_body(entity, rigidBody)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load RigidBody component");
-      }
-    }
-
-    core::JsonValue colliderValue{};
-    if (parser.get_object_field(components, kJsonKeyCollider, &colliderValue)) {
-      Collider collider{};
-      if (!read_collider_component(parser, colliderValue, &collider) ||
-          !targetWorld.add_collider(entity, collider)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load Collider component");
-      }
-    }
-
-    core::JsonValue meshValue{};
-    if (parser.get_object_field(components, kJsonKeyMeshComponent, &meshValue)) {
-      MeshComponent mesh{};
-      if (!read_mesh_component(parser, meshValue, &mesh) ||
-          !targetWorld.add_mesh_component(entity, mesh)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load MeshComponent component");
-      }
-    }
-
-    core::JsonValue foliageValue{};
-    if (parser.get_object_field(components, kJsonKeyFoliagePatchComponent,
-                                &foliageValue)) {
-      FoliagePatchComponent foliage{};
-      if (!read_foliage_patch_component(parser, foliageValue, &foliage) ||
-          !targetWorld.add_foliage_patch_component(entity, foliage)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error(
-            "failed to load FoliagePatchComponent component");
-      }
-    }
-
-    core::JsonValue lightValue{};
-    if (parser.get_object_field(components, kJsonKeyLightComponent,
-                                &lightValue)) {
-      LightComponent light{};
-      if (!read_light_component(parser, lightValue, &light) ||
-          !targetWorld.add_light_component(entity, light)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load LightComponent component");
-      }
-    }
-
-    core::JsonValue plVal{};
-    if (parser.get_object_field(components, kJsonKeyPointLightComponent, &plVal)) {
-      PointLightComponent pc{};
-      if (!read_reflected_component(parser, plVal, pointLightDesc, &pc) ||
-          !targetWorld.add_point_light_component(entity, pc)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load PointLightComponent component");
-      }
-    }
-
-    core::JsonValue slVal{};
-    if (parser.get_object_field(components, kJsonKeySpotLightComponent, &slVal)) {
-      SpotLightComponent sc{};
-      if (!read_reflected_component(parser, slVal, spotLightDesc, &sc) ||
-          !targetWorld.add_spot_light_component(entity, sc)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load SpotLightComponent component");
-      }
-    }
-
-    core::JsonValue reflectionProbeValue{};
-    if (parser.get_object_field(components, kJsonKeyReflectionProbeComponent,
-                                &reflectionProbeValue)) {
-      ReflectionProbeComponent reflectionProbe{};
-      if (!read_reflected_component(parser, reflectionProbeValue,
-                                    reflectionProbeDesc, &reflectionProbe) ||
-          !targetWorld.add_reflection_probe_component(entity,
-                                                      reflectionProbe)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error(
-            "failed to load ReflectionProbeComponent component");
-      }
-    }
-
-    core::JsonValue sceneCaptureValue{};
-    if (parser.get_object_field(components, kJsonKeySceneCaptureComponent,
-                                &sceneCaptureValue)) {
-      SceneCaptureComponent sceneCapture{};
-      if (!read_reflected_component(parser, sceneCaptureValue,
-                                    *descs.sceneCapture, &sceneCapture) ||
-          !targetWorld.add_scene_capture_component(entity, sceneCapture)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error(
-            "failed to load SceneCaptureComponent component");
-      }
-    }
-
-    core::JsonValue cameraValue{};
-    if (parser.get_object_field(components, kJsonKeyCameraComponent,
-                                &cameraValue)) {
-      CameraComponent camera{};
-      if (!read_reflected_component(parser, cameraValue, *descs.camera,
-                                    &camera) ||
-          !targetWorld.add_camera_component(entity, camera)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load CameraComponent component");
-      }
-    }
-
-    core::JsonValue nameValue{};
-    if (parser.get_object_field(components, kNameFieldKey, &nameValue)) {
-      NameComponent nameComponent{};
-      if (!parser.copy_string(nameValue, nameComponent.name,
-                              sizeof(nameComponent.name))) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to parse name component string");
-      }
-
-      if (!targetWorld.add_name_component(entity, nameComponent)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load NameComponent");
-      }
-    }
-
-    core::JsonValue scriptValue{};
-    if (parser.get_object_field(components, kJsonKeyScriptComponent,
-                                &scriptValue)) {
-      ScriptComponent scriptComp{};
-      if (!parser.copy_string_strict(scriptValue, scriptComp.scriptPath,
-                                     sizeof(scriptComp.scriptPath))) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to parse ScriptComponent path");
-      }
-
-      if (!targetWorld.add_script_component(entity, scriptComp)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load ScriptComponent");
-      }
-    }
-
-    core::JsonValue animationValue{};
-    if (parser.get_object_field(components, kJsonKeyAnimationComponent,
-                                &animationValue)) {
-      AnimationComponent animationComp{};
-      if (!parser.copy_string_strict(animationValue,
-                                     animationComp.controllerPath,
-                                     sizeof(animationComp.controllerPath))) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to parse AnimationComponent path");
-      }
-
-      if (!targetWorld.add_animation_component(entity, animationComp)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load AnimationComponent");
-      }
-    }
-
-    core::JsonValue springArmValue{};
-    if (parser.get_object_field(components, kJsonKeySpringArmComponent,
-                                &springArmValue)) {
-      SpringArmComponent springArm{};
-      if (!read_reflected_component(parser, springArmValue, springArmDesc,
-                                    &springArm) ||
-          !targetWorld.add_spring_arm(entity, springArm)) {
-        targetWorld.destroy_entity(entity);
-        return log_scene_error("failed to load SpringArmComponent");
-      }
+    const char *rowError = nullptr;
+#define ENGINE_SCENE_READ_ROW(Type, Key, GetFn, AddFn, RemoveFn)               \
+  if (rowError == nullptr) {                                                   \
+    core::JsonValue value{};                                                   \
+    if (parser.get_object_field(components, scene_component_key<Type>(Key),    \
+                                &value)) {                                     \
+      Type component{};                                                        \
+      if (!decode_scene_component(parser, value, descs, &component) ||         \
+          !targetWorld.AddFn(entity, component)) {                             \
+        rowError = "failed to load " #Type;                                    \
+      }                                                                        \
+    }                                                                          \
+  }
+    ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_SCENE_READ_ROW)
+#undef ENGINE_SCENE_READ_ROW
+    if (rowError != nullptr) {
+      targetWorld.destroy_entity(entity);
+      return log_scene_error(rowError);
     }
   }
 
@@ -402,10 +385,6 @@ bool serialize_scene_to_writer(const World &world,
   if (!find_reflected_component_descriptors(&descs, kSceneLogChannel)) {
     return false;
   }
-  const core::TypeDescriptor *transformDesc = descs.transform;
-  const core::TypeDescriptor *rigidBodyDesc = descs.rigidBody;
-  const core::TypeDescriptor *springArmDesc = descs.springArm;
-  const core::TypeDescriptor *reflectionProbeDesc = descs.reflectionProbe;
 
   core::JsonWriter &writer = *outWriter;
   writer.reset();
@@ -422,8 +401,7 @@ bool serialize_scene_to_writer(const World &world,
 
   writer.begin_array(kEntitiesKey);
 
-  std::size_t unserializedHullCount = 0U;
-  std::size_t unserializedHeightfieldCount = 0U;
+  SceneWriteStats writeStats{};
   bool writeFailed = false;
   world.for_each_alive([&](Entity entity) {
     if (writeFailed) {
@@ -438,118 +416,18 @@ bool serialize_scene_to_writer(const World &world,
     writer.write_key(kComponentsKey);
     writer.begin_object();
 
-    Transform transform{};
-    if (world.get_transform(entity, &transform)) {
-      if (!write_reflected_component(writer, kJsonKeyTransform, *transformDesc,
-                                     &transform)) {
-        writeFailed = true;
-        return;
-      }
+#define ENGINE_SCENE_WRITE_ROW(Type, Key, GetFn, AddFn, RemoveFn)              \
+    {                                                                          \
+      Type component{};                                                        \
+      if (world.GetFn(entity, &component) &&                                   \
+          !encode_scene_component(writer, scene_component_key<Type>(Key),      \
+                                  descs, component, &writeStats)) {            \
+        writeFailed = true;                                                    \
+        return;                                                                \
+      }                                                                        \
     }
-
-    RigidBody rigidBody{};
-    if (world.get_rigid_body(entity, &rigidBody) &&
-        !write_reflected_component(writer, kJsonKeyRigidBody, *rigidBodyDesc,
-                                   &rigidBody)) {
-      writeFailed = true;
-      return;
-    }
-
-    Collider collider{};
-    if (world.get_collider(entity, &collider)) {
-      if (!write_collider_component(writer, collider)) {
-        writeFailed = true;
-        return;
-      }
-      if ((collider.shape == ColliderShape::ConvexHull) &&
-          (collider.hullSource == math::HullSource::None)) {
-        ++unserializedHullCount;
-      }
-      if (collider.shape == ColliderShape::Heightfield) {
-        ++unserializedHeightfieldCount;
-      }
-    }
-
-    MeshComponent mesh{};
-    if (world.get_mesh_component(entity, &mesh)) {
-      write_mesh_component(writer, mesh);
-    }
-
-    FoliagePatchComponent foliage{};
-    if (world.get_foliage_patch_component(entity, &foliage)) {
-      write_foliage_patch_component(writer, foliage);
-    }
-
-    LightComponent light{};
-    if (world.get_light_component(entity, &light)) {
-      write_light_component(writer, light);
-    }
-
-    PointLightComponent pointLight{};
-    if (world.get_point_light_component(entity, &pointLight) &&
-        !write_reflected_component(writer, kJsonKeyPointLightComponent,
-                                   *descs.pointLight, &pointLight)) {
-      writeFailed = true;
-      return;
-    }
-
-    SpotLightComponent spotLight{};
-    if (world.get_spot_light_component(entity, &spotLight) &&
-        !write_reflected_component(writer, kJsonKeySpotLightComponent,
-                                   *descs.spotLight, &spotLight)) {
-      writeFailed = true;
-      return;
-    }
-
-    ReflectionProbeComponent reflectionProbe{};
-    if (world.get_reflection_probe_component(entity, &reflectionProbe) &&
-        !write_reflected_component(writer, kJsonKeyReflectionProbeComponent,
-                                   *reflectionProbeDesc, &reflectionProbe)) {
-      writeFailed = true;
-      return;
-    }
-
-    SceneCaptureComponent sceneCapture{};
-    if (world.get_scene_capture_component(entity, &sceneCapture) &&
-        !write_reflected_component(writer, kJsonKeySceneCaptureComponent,
-                                   *descs.sceneCapture, &sceneCapture)) {
-      writeFailed = true;
-      return;
-    }
-
-    CameraComponent camera{};
-    if (world.get_camera_component(entity, &camera) &&
-        !write_reflected_component(writer, kJsonKeyCameraComponent,
-                                   *descs.camera, &camera)) {
-      writeFailed = true;
-      return;
-    }
-
-    NameComponent name{};
-    if (world.get_name_component(entity, &name)) {
-      writer.write_string(kNameFieldKey, name.name);
-    }
-
-    ScriptComponent script{};
-    if (world.get_script_component(entity, &script) &&
-        (script.scriptPath[0] != '\0')) {
-      writer.write_string(kJsonKeyScriptComponent, script.scriptPath);
-    }
-
-    AnimationComponent animation{};
-    if (world.get_animation_component(entity, &animation) &&
-        (animation.controllerPath[0] != '\0')) {
-      writer.write_string(kJsonKeyAnimationComponent,
-                          animation.controllerPath);
-    }
-
-    SpringArmComponent springArm{};
-    if (world.get_spring_arm(entity, &springArm) &&
-        !write_reflected_component(writer, kJsonKeySpringArmComponent, *springArmDesc,
-                                   &springArm)) {
-      writeFailed = true;
-      return;
-    }
+    ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_SCENE_WRITE_ROW)
+#undef ENGINE_SCENE_WRITE_ROW
 
     writer.end_object();
     writer.end_object();
@@ -573,19 +451,19 @@ bool serialize_scene_to_writer(const World &world,
   // Unsupported-state visibility (audit H-01): these carry runtime-only
   // payloads the format cannot reproduce, so their loss is announced with
   // precise counts instead of happening silently.
-  if (unserializedHullCount > 0U) {
+  if (writeStats.unserializedHulls > 0U) {
     char message[128];
     std::snprintf(message, sizeof(message),
                   "%zu convex-hull payload(s) without builder provenance "
                   "are not serialized",
-                  unserializedHullCount);
+                  writeStats.unserializedHulls);
     core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
   }
-  if (unserializedHeightfieldCount > 0U) {
+  if (writeStats.unserializedHeightfields > 0U) {
     char message[128];
     std::snprintf(message, sizeof(message),
                   "%zu heightfield payload(s) are not serialized",
-                  unserializedHeightfieldCount);
+                  writeStats.unserializedHeightfields);
     core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
   }
   // jointCount is a slot high-water mark; removed joints leave inactive
