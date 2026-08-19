@@ -548,23 +548,28 @@ int main(int argc, char **argv) {
     cookedOutputs.push_back(hullPath);
   }
 
+  // #212: the builders are fallible — an overlong destination refuses
+  // instead of redirecting into the working directory. With no buildable
+  // path there is nothing to retire or certify.
   char thumbPath[512] = {};
-  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
   char thumbChecksumPath[512] = {};
-  build_thumbnail_checksum_path(thumbPath, thumbChecksumPath,
-                                sizeof(thumbChecksumPath));
-  if (!generate_mesh_thumbnail(inputPath, outputPath, primitiveData,
-                               importSettingsHash)) {
+  const bool thumbPathsOk =
+      build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath)) &&
+      build_thumbnail_checksum_path(thumbPath, thumbChecksumPath,
+                                    sizeof(thumbChecksumPath));
+  if (!thumbPathsOk || !generate_mesh_thumbnail(inputPath, outputPath,
+                                                primitiveData,
+                                                importSettingsHash)) {
     std::fprintf(stderr, "warning: mesh thumbnail generation failed: %s\n",
                  outputPath);
     // #211: a failed regeneration must not leave the previous generation's
     // thumbnail behind for the fresh stamp below to certify as current; a
     // stale file that cannot be retired blocks the stamp entirely.
-    if (!retire_stale_thumbnail(thumbPath, thumbChecksumPath)) {
+    if (thumbPathsOk && !retire_stale_thumbnail(thumbPath, thumbChecksumPath)) {
       return 20;
     }
   }
-  if (file_exists(thumbPath)) {
+  if (thumbPathsOk && file_exists(thumbPath)) {
     cookedOutputs.emplace_back(thumbPath);
     if (file_exists(thumbChecksumPath)) {
       cookedOutputs.emplace_back(thumbChecksumPath);
