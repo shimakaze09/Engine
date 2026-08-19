@@ -99,33 +99,15 @@ bool decode_scene_component(const core::JsonParser &parser,
   }
 }
 
-/// Per-save side stats the collider row feeds (unserialized payload
-/// warnings surface after the write loop).
-struct SceneWriteStats final {
-  std::size_t unserializedHulls = 0U;
-  std::size_t unserializedHeightfields = 0U;
-};
-
 /// Encodes one component under its key; mirrors decode_scene_component's
 /// shape split. Empty Script/Animation paths write nothing, matching the
 /// pre-registry writer.
 template <typename T>
 bool encode_scene_component(core::JsonWriter &writer, const char *key,
                             const ReflectedComponentDescriptors &descs,
-                            const T &component,
-                            SceneWriteStats *stats) noexcept {
+                            const T &component) noexcept {
   if constexpr (std::is_same_v<T, Collider>) {
-    if (!write_collider_component(writer, component)) {
-      return false;
-    }
-    if ((component.shape == ColliderShape::ConvexHull) &&
-        (component.hullSource == math::HullSource::None)) {
-      ++stats->unserializedHulls;
-    }
-    if (component.shape == ColliderShape::Heightfield) {
-      ++stats->unserializedHeightfields;
-    }
-    return true;
+    return write_collider_component(writer, component);
   } else if constexpr (std::is_same_v<T, MeshComponent>) {
     write_mesh_component(writer, component);
     return true;
@@ -331,6 +313,25 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
+  // A save must not claim success while dropping live authored state
+  // (audit #208, supersedes H-01's warn-then-succeed): refuse before the
+  // destination file or buffer is touched.
+  const SceneSaveBlockers blockers = collect_scene_save_blockers(world);
+  if ((blockers.customHullPayloads > 0U) ||
+      (blockers.heightfieldPayloads > 0U) || (blockers.activeJoints > 0U)) {
+    char message[256];
+    std::snprintf(message, sizeof(message),
+                  "save_scene refused: %zu custom convex-hull payload(s), "
+                  "%zu heightfield payload(s), and %zu active physics "
+                  "joint(s) cannot be represented by the scene format; "
+                  "remove them (or stop the running simulation) and save "
+                  "again",
+                  blockers.customHullPayloads, blockers.heightfieldPayloads,
+                  blockers.activeJoints);
+    core::log_message(core::LogLevel::Error, kSceneLogChannel, message);
+    return false;
+  }
+
   ReflectedComponentDescriptors descs{};
   if (!find_reflected_component_descriptors(&descs, kSceneLogChannel)) {
     return false;
@@ -351,7 +352,6 @@ bool serialize_scene_to_writer(const World &world,
 
   writer.begin_array(kEntitiesKey);
 
-  SceneWriteStats writeStats{};
   bool writeFailed = false;
   world.for_each_alive([&](Entity entity) {
     if (writeFailed) {
@@ -371,7 +371,7 @@ bool serialize_scene_to_writer(const World &world,
       Type component{};                                                        \
       if (world.GetFn(entity, &component) &&                                   \
           !encode_scene_component(writer, scene_component_key<Type>(Key),      \
-                                  descs, component, &writeStats)) {            \
+                                  descs, component)) {                         \
         writeFailed = true;                                                    \
         return;                                                                \
       }                                                                        \
@@ -398,47 +398,50 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
-  // Unsupported-state visibility (audit H-01): these carry runtime-only
-  // payloads the format cannot reproduce, so their loss is announced with
-  // precise counts instead of happening silently.
-  if (writeStats.unserializedHulls > 0U) {
-    char message[128];
-    std::snprintf(message, sizeof(message),
-                  "%zu convex-hull payload(s) without builder provenance "
-                  "are not serialized",
-                  writeStats.unserializedHulls);
-    core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
-  }
-  if (writeStats.unserializedHeightfields > 0U) {
-    char message[128];
-    std::snprintf(message, sizeof(message),
-                  "%zu heightfield payload(s) are not serialized",
-                  writeStats.unserializedHeightfields);
-    core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
-  }
-  // jointCount is a slot high-water mark; removed joints leave inactive
-  // slots behind, so only active joints are worth warning about.
-  const auto &physicsContext = world.physics_context();
-  std::size_t activeJointCount = 0U;
-  if (physicsContext.shapeStore != nullptr) {
-    const auto &joints = physicsContext.shapeStore->joints;
-    for (std::size_t i = 0U; i < physicsContext.jointCount; ++i) {
-      if (joints[i].active) {
-        ++activeJointCount;
-      }
-    }
-  }
-  if (activeJointCount > 0U) {
-    char message[128];
-    std::snprintf(message, sizeof(message),
-                  "%zu physics joint(s) are not serialized", activeJointCount);
-    core::log_message(core::LogLevel::Warning, kSceneLogChannel, message);
-  }
-
   return true;
 }
 
 } // namespace
+
+/// Collects the live state save_scene would refuse to drop (#208). Hull
+/// payloads with builder provenance rebuild from the serialized descriptor
+/// on every install path, so only provenance-free payloads count.
+SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept {
+  SceneSaveBlockers blockers{};
+  const physics::PhysicsContext &context = world.physics_context();
+  const physics::PhysicsShapeStore *store = context.shapeStore.get();
+  if (store == nullptr) {
+    return blockers;
+  }
+
+  // Payload tables are compacted on removal, but a payload only blocks
+  // while a live collider of the matching shape still consumes it.
+  for (std::size_t i = 0U; i < store->convexHullCount; ++i) {
+    const Entity entity = store->convexHullEntity[i];
+    Collider collider{};
+    if (world.is_alive(entity) && world.get_collider(entity, &collider) &&
+        (collider.shape == ColliderShape::ConvexHull) &&
+        (collider.hullSource == math::HullSource::None)) {
+      ++blockers.customHullPayloads;
+    }
+  }
+  for (std::size_t i = 0U; i < store->heightfieldCount; ++i) {
+    const Entity entity = store->heightfieldEntity[i];
+    Collider collider{};
+    if (world.is_alive(entity) && world.get_collider(entity, &collider) &&
+        (collider.shape == ColliderShape::Heightfield)) {
+      ++blockers.heightfieldPayloads;
+    }
+  }
+  // jointCount is a slot high-water mark; removed joints leave inactive
+  // slots behind, so only active slots hold droppable state.
+  for (std::size_t i = 0U; i < context.jointCount; ++i) {
+    if (store->joints[i].active) {
+      ++blockers.activeJoints;
+    }
+  }
+  return blockers;
+}
 
 /// Resets this object back to its reusable empty state for world.
 /// Declared reset order (audit H-18, extended by #198): beforeTeardown

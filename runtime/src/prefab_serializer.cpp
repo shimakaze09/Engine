@@ -10,6 +10,7 @@
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/physics/physics.h"
 #include "component_registry.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
@@ -128,6 +129,32 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   if (!world.is_alive(entity) || (path == nullptr)) {
     core::log_message(core::LogLevel::Error, kPrefabLogChannel,
                       "save_prefab: invalid entity or null path");
+    return false;
+  }
+
+  // A save must not claim success while dropping live authored state
+  // (audit #208): heightfield samples and provenance-free custom hull
+  // payloads have no prefab representation, so their save is refused
+  // before the destination is touched. Builder-provenance hulls rebuild
+  // from the serialized descriptor on instantiate and stay savable.
+  // Joints are world-level runtime state between two bodies, never part
+  // of a single-entity component template, so they do not block here.
+  Collider collider{};
+  const bool hasCollider = world.get_collider(entity, &collider);
+  const physics::PhysicsContext &physicsContext = world.physics_context();
+  if (hasCollider && (collider.shape == ColliderShape::ConvexHull) &&
+      (collider.hullSource == math::HullSource::None) &&
+      (physics::get_convex_hull_data(physicsContext, entity) != nullptr)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab refused: the entity's custom convex-hull "
+                      "payload cannot be represented by the prefab format");
+    return false;
+  }
+  if (hasCollider && (collider.shape == ColliderShape::Heightfield) &&
+      (physics::get_heightfield_data(physicsContext, entity) != nullptr)) {
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
+                      "save_prefab refused: the entity's heightfield payload "
+                      "cannot be represented by the prefab format");
     return false;
   }
 
