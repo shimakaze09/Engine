@@ -9,6 +9,8 @@
 #include <new>
 
 #include "engine/core/json.h"
+#include "engine/physics/physics.h"
+#include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -1394,6 +1396,193 @@ int check_timers_are_runtime_only() {
 } // namespace
 
 /// Runs this executable or test program.
+/// #208: a save with live state the scene format cannot represent must be
+/// refused (not warn-and-succeed), the refusal must be visible through
+/// collect_scene_save_blockers, and a refused file save must leave the
+/// previous file byte-identical. Covers every joint type, the custom-hull
+/// and heightfield payload blockers, the provenance-hull and removed-joint
+/// recoveries, and the inactive high-water joint slots left by removal.
+int verify_save_refuses_unserializable_state(const char *path) {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 400;
+  }
+
+  const engine::runtime::Entity first = world->create_scene_object();
+  const engine::runtime::Entity second = world->create_scene_object();
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity)) {
+    return 401;
+  }
+
+  std::array<char, engine::core::JsonWriter::kBufferBytes> buffer{};
+  std::size_t size = 0U;
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 402; // blocker-free world must stay savable
+  }
+  if (!engine::runtime::save_scene(*world, path)) {
+    return 403;
+  }
+  std::unique_ptr<char[]> baseline{};
+  std::size_t baselineSize = 0U;
+  {
+    std::FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) {
+      return 404;
+    }
+    static_cast<void>(std::fseek(file, 0, SEEK_END));
+    const long fileEnd = std::ftell(file);
+    static_cast<void>(std::fseek(file, 0, SEEK_SET));
+    if (fileEnd <= 0) {
+      static_cast<void>(std::fclose(file));
+      return 405;
+    }
+    baselineSize = static_cast<std::size_t>(fileEnd);
+    baseline.reset(new (std::nothrow) char[baselineSize]);
+    if ((baseline == nullptr) ||
+        (std::fread(baseline.get(), 1U, baselineSize, file) != baselineSize)) {
+      static_cast<void>(std::fclose(file));
+      return 406;
+    }
+    static_cast<void>(std::fclose(file));
+  }
+
+  // Every joint type blocks the save while active and frees it on removal;
+  // removal leaves an inactive high-water slot that must not block.
+  const engine::math::Vec3 pivot(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 axis(0.0F, 1.0F, 0.0F);
+  const std::array<engine::physics::JointId, 6U> jointIds = {
+      engine::runtime::add_distance_joint(*world, first, second, 1.0F),
+      engine::runtime::add_hinge_joint(*world, first, second, pivot, axis),
+      engine::runtime::add_ball_socket_joint(*world, first, second, pivot),
+      engine::runtime::add_slider_joint(*world, first, second, axis),
+      engine::runtime::add_spring_joint(*world, first, second, 1.0F, 50.0F,
+                                        1.0F),
+      engine::runtime::add_fixed_joint(*world, first, second)};
+  for (std::size_t i = 0U; i < jointIds.size(); ++i) {
+    if (jointIds[i] == engine::physics::kInvalidJointId) {
+      return 407;
+    }
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints !=
+      jointIds.size()) {
+    return 408;
+  }
+  for (std::size_t i = 0U; i < jointIds.size(); ++i) {
+    if (engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                    &size)) {
+      return 409; // an active joint of any type must refuse the save
+    }
+    if (!engine::runtime::remove_joint(*world, jointIds[i])) {
+      return 410;
+    }
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 0U) {
+    return 411;
+  }
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 412; // inactive high-water slots must not block
+  }
+
+  // A provenance-free custom hull payload blocks; reinstalling the same
+  // collider with builder provenance rebuilds the payload and unblocks.
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_cylinder_hull(&hull)) {
+    return 413;
+  }
+  engine::runtime::Collider hullCollider{};
+  hullCollider.shape = engine::runtime::ColliderShape::ConvexHull;
+  hullCollider.hullSource = engine::math::HullSource::None;
+  if (!world->add_collider(first, hullCollider) ||
+      !engine::physics::set_convex_hull_data(world->physics_context(), first,
+                                             hull)) {
+    return 414;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).customHullPayloads !=
+      1U) {
+    return 415;
+  }
+  if (engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                  &size)) {
+    return 416; // custom hull payload must refuse the save
+  }
+  if (engine::runtime::save_scene(*world, path)) {
+    return 417; // file-path overload must refuse identically
+  }
+  {
+    // The refused save must leave the previous file byte-identical.
+    std::FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) {
+      return 418;
+    }
+    static_cast<void>(std::fseek(file, 0, SEEK_END));
+    const long fileEnd = std::ftell(file);
+    static_cast<void>(std::fseek(file, 0, SEEK_SET));
+    if ((fileEnd < 0) ||
+        (static_cast<std::size_t>(fileEnd) != baselineSize)) {
+      static_cast<void>(std::fclose(file));
+      return 419;
+    }
+    std::unique_ptr<char[]> current(new (std::nothrow) char[baselineSize]);
+    if ((current == nullptr) ||
+        (std::fread(current.get(), 1U, baselineSize, file) != baselineSize)) {
+      static_cast<void>(std::fclose(file));
+      return 420;
+    }
+    static_cast<void>(std::fclose(file));
+    if (std::memcmp(current.get(), baseline.get(), baselineSize) != 0) {
+      return 421;
+    }
+  }
+  if (!world->remove_collider(first)) {
+    return 422;
+  }
+  hullCollider.hullSource = engine::math::HullSource::Cylinder;
+  if (!world->add_collider(first, hullCollider)) {
+    return 423;
+  }
+  if (engine::physics::get_convex_hull_data(world->physics_context(), first) ==
+      nullptr) {
+    return 424; // provenance install must have rebuilt the payload
+  }
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 425; // provenance-backed hull payload must stay savable
+  }
+
+  // A heightfield payload consumed by a live collider blocks the save.
+  engine::runtime::Collider heightfieldCollider{};
+  heightfieldCollider.shape = engine::runtime::ColliderShape::Heightfield;
+  engine::physics::HeightfieldData heightfield{};
+  heightfield.rows = 2U;
+  heightfield.columns = 2U;
+  if (!world->add_collider(second, heightfieldCollider) ||
+      !engine::physics::set_heightfield_data(world->physics_context(), second,
+                                             heightfield)) {
+    return 426;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world)
+          .heightfieldPayloads != 1U) {
+    return 427;
+  }
+  if (engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                  &size)) {
+    return 428; // heightfield payload must refuse the save
+  }
+  if (!world->remove_collider(second)) {
+    return 429;
+  }
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 430; // dropping the consuming collider must unblock the save
+  }
+
+  return 0;
+}
+
 int main() {
   constexpr const char *kScenePath = "scene_serializer_test_tmp.json";
   constexpr const char *kLargeScenePath = "scene_serializer_large_tmp.json";
@@ -1515,6 +1704,15 @@ int main() {
     return result;
   }
   result = check_timers_are_runtime_only();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  constexpr const char *kBlockerScenePath = "scene_serializer_blocker_tmp.json";
+  result = verify_save_refuses_unserializable_state(kBlockerScenePath);
+  static_cast<void>(std::remove(kBlockerScenePath));
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
