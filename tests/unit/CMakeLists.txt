@@ -104,6 +104,19 @@ engine_add_test_executable(engine_unit_mesh_loader
     engine_math
 )
 
+engine_add_test_executable(engine_unit_asset_generation_check
+    SOURCES
+    asset_generation_check_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_content
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_content_metadata
     SOURCES
     content_metadata_test.cpp

@@ -5,7 +5,9 @@
 // a missing output manifest, a platform-tag mismatch (issue #81), or a
 // missing/altered manifest-listed output all force a recook;
 // stale-manifest entries are retired at commit and a failed retirement
-// blocks.
+// blocks; a failed thumbnail regeneration retires the previous
+// generation's thumbnail and checksum instead of re-certifying them
+// (audit #211).
 
 #include "packer_shared.h"
 
@@ -313,7 +315,37 @@ int check_output_manifest_owns_output_set() {
 } // namespace
 
 /// Runs this executable or test program.
+/// EXPECTATION (audit #211): retiring a stale thumbnail removes both the
+/// image and its checksum sidecar so a failed regeneration can never be
+/// certified into a fresh stamp; absent files count as already retired.
+int check_retire_stale_thumbnail() {
+  constexpr const char *kThumbPath = "cook_stamp_test_thumb.png";
+  constexpr const char *kChecksumPath = "cook_stamp_test_thumb.checksum";
+  static_cast<void>(std::remove(kThumbPath));
+  static_cast<void>(std::remove(kChecksumPath));
+
+  if (!write_file(kThumbPath, "old-thumbnail-bytes") ||
+      !write_file(kChecksumPath, "old-checksum")) {
+    return 601;
+  }
+  if (!retire_stale_thumbnail(kThumbPath, kChecksumPath)) {
+    return 602;
+  }
+  if (file_exists(kThumbPath) || file_exists(kChecksumPath)) {
+    return 603; // both stale files must be gone
+  }
+  // Absent files are already retired, not an error.
+  if (!retire_stale_thumbnail(kThumbPath, kChecksumPath)) {
+    return 604;
+  }
+  return 0;
+}
+
 int main() {
+  const int retireResult = check_retire_stale_thumbnail();
+  if (retireResult != 0) {
+    return retireResult;
+  }
   const int toolVersionResult = check_tool_version_gates_recook();
   if (toolVersionResult != 0) {
     return toolVersionResult;
