@@ -663,14 +663,15 @@ struct GlobalsSnapshotArgs final {
 };
 
 // Rollback covers tables (and, since #115a, their metatables) reachable
-// from _G through table fields down to this depth; deeper tables, closure
-// upvalues, userdata, and registry-only state stay shared and are not
-// rolled back. Upvalues are deliberately out of scope: Lua joins upvalues
-// across every closure created by the same enclosing function into one
-// shared cell, so restoring one closure's upvalue by index without also
-// tracking which other closures share that exact cell would silently
-// split an aliasing relationship the script depends on — that needs its
-// own design pass, not a drive-by alongside the metatable fix.
+// from _G through table fields down to this depth, plus (#199) the
+// upvalue cells of every Lua closure met during that walk; deeper tables,
+// C-closure upvalues, userdata, and registry-only state stay shared and
+// are not rolled back. Upvalue restore is cell-identity based: Lua joins
+// upvalues across closures created by the same enclosing function into
+// one shared cell (lua_upvalueid names it), so each cell is snapshotted
+// and restored exactly once through any one holder — lua_setupvalue
+// writes through the shared cell, never rebinding it, which preserves the
+// aliasing relationships the script depends on.
 constexpr std::size_t kMaxReloadSnapshotDepth = 8U;
 
 /// Replaces the table on top of the stack with its snapshot copy,
@@ -679,8 +680,11 @@ constexpr std::size_t kMaxReloadSnapshotDepth = 8U;
 /// Also records the table's metatable identity in metaIndex (#115a) and
 /// walks into it the same way, so a failed reload that swaps, clears, or
 /// mutates a metatable (a common OOP class-table pattern) rolls back too.
+/// Lua closures met along the walk are collected into closuresIndex
+/// (fn -> true) for the upvalue snapshot pass (#199).
 void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
-                         int metaIndex, std::size_t depth) noexcept {
+                         int metaIndex, int closuresIndex,
+                         std::size_t depth) noexcept {
   const int origIndex = lua_absindex(state, -1);
   lua_pushvalue(state, origIndex);
   lua_rawget(state, memoIndex);
@@ -710,7 +714,8 @@ void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
     lua_pushvalue(state, origIndex);
     lua_pushvalue(state, -2);
     lua_rawset(state, metaIndex);
-    deep_snapshot_table(state, memoIndex, revIndex, metaIndex, depth + 1U);
+    deep_snapshot_table(state, memoIndex, revIndex, metaIndex, closuresIndex,
+                        depth + 1U);
     lua_pop(state, 1);
   }
 
@@ -719,7 +724,27 @@ void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
     if ((lua_istable(state, -1) != 0) &&
         ((depth + 1U) < kMaxReloadSnapshotDepth) &&
         (lua_checkstack(state, 8) != 0)) {
-      deep_snapshot_table(state, memoIndex, revIndex, metaIndex, depth + 1U);
+      deep_snapshot_table(state, memoIndex, revIndex, metaIndex, closuresIndex,
+                          depth + 1U);
+    } else if ((lua_isfunction(state, -1) != 0) &&
+               (lua_iscfunction(state, -1) == 0)) {
+      // #199: remember every reachable Lua closure (dedup in the hash
+      // part, ordered in the array part — the upvalue pass appends while
+      // iterating, so no lua_next runs over a growing table); C closures
+      // stay owned by their bindings.
+      lua_pushvalue(state, -1);
+      lua_rawget(state, closuresIndex);
+      const bool closureKnown = !lua_isnil(state, -1);
+      lua_pop(state, 1);
+      if (!closureKnown) {
+        lua_pushvalue(state, -1);
+        lua_pushboolean(state, 1);
+        lua_rawset(state, closuresIndex);
+        lua_pushvalue(state, -1);
+        lua_rawseti(state, closuresIndex,
+                    static_cast<lua_Integer>(lua_rawlen(state, closuresIndex)) +
+                        1);
+      }
     }
     lua_pushvalue(state, -2);
     lua_pushvalue(state, -2);
@@ -735,7 +760,7 @@ void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
 /// registry, so allocation failure while snapshotting stays catchable.
 int snapshot_globals_trampoline(lua_State *state) noexcept {
   auto *args = static_cast<GlobalsSnapshotArgs *>(lua_touserdata(state, 1));
-  lua_createtable(state, 3, 0);
+  lua_createtable(state, 5, 0);
   const int containerIndex = lua_absindex(state, -1);
   lua_newtable(state);
   const int memoIndex = lua_absindex(state, -1);
@@ -743,10 +768,69 @@ int snapshot_globals_trampoline(lua_State *state) noexcept {
   const int revIndex = lua_absindex(state, -1);
   lua_newtable(state);
   const int metaIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int closuresIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int cellsIndex = lua_absindex(state, -1);
+  lua_newtable(state);
+  const int holdersIndex = lua_absindex(state, -1);
 
   lua_pushglobaltable(state);
-  deep_snapshot_table(state, memoIndex, revIndex, metaIndex, 0U);
+  deep_snapshot_table(state, memoIndex, revIndex, metaIndex, closuresIndex,
+                      0U);
   lua_pop(state, 1);
+
+  // #199: snapshot every collected closure's upvalue cells. Cells are
+  // keyed by lua_upvalueid identity so a cell shared across closures is
+  // recorded (and later restored) exactly once; a table-valued cell is
+  // additionally deep-snapshotted so its contents roll back in place.
+  lua_Integer holderCount = 0;
+  for (lua_Integer closure = 1;
+       closure <= static_cast<lua_Integer>(lua_rawlen(state, closuresIndex));
+       ++closure) {
+    lua_rawgeti(state, closuresIndex, closure);
+    const int fnIndex = lua_absindex(state, -1);
+    for (int upvalue = 1;; ++upvalue) {
+      if (lua_checkstack(state, 10) == 0) {
+        break;
+      }
+      const char *name = lua_getupvalue(state, fnIndex, upvalue);
+      if (name == nullptr) {
+        break;
+      }
+      void *cellId = lua_upvalueid(state, fnIndex, upvalue);
+
+      lua_pushlightuserdata(state, cellId);
+      lua_rawget(state, cellsIndex);
+      const bool cellKnown = !lua_isnil(state, -1);
+      lua_pop(state, 1);
+      if (!cellKnown) {
+        if (lua_istable(state, -1) != 0) {
+          lua_pushvalue(state, -1);
+          deep_snapshot_table(state, memoIndex, revIndex, metaIndex,
+                              closuresIndex, 0U);
+          lua_pop(state, 1);
+        }
+        lua_pushlightuserdata(state, cellId);
+        lua_pushvalue(state, -2);
+        lua_rawset(state, cellsIndex);
+      }
+
+      // holders[n] = {fn, upvalueIndex, cellId}: restore needs one live
+      // closure per cell to write through.
+      lua_createtable(state, 3, 0);
+      lua_pushvalue(state, fnIndex);
+      lua_rawseti(state, -2, 1);
+      lua_pushinteger(state, upvalue);
+      lua_rawseti(state, -2, 2);
+      lua_pushlightuserdata(state, cellId);
+      lua_rawseti(state, -2, 3);
+      lua_rawseti(state, holdersIndex, ++holderCount);
+
+      lua_pop(state, 1);
+    }
+    lua_pop(state, 1);
+  }
 
   lua_pushvalue(state, memoIndex);
   lua_rawseti(state, containerIndex, 1);
@@ -754,7 +838,11 @@ int snapshot_globals_trampoline(lua_State *state) noexcept {
   lua_rawseti(state, containerIndex, 2);
   lua_pushvalue(state, metaIndex);
   lua_rawseti(state, containerIndex, 3);
-  lua_pop(state, 3);
+  lua_pushvalue(state, cellsIndex);
+  lua_rawseti(state, containerIndex, 4);
+  lua_pushvalue(state, holdersIndex);
+  lua_rawseti(state, containerIndex, 5);
+  lua_pop(state, 6);
   args->ref = luaL_ref(state, LUA_REGISTRYINDEX);
   return 0;
 }
@@ -847,6 +935,52 @@ int restore_globals_trampoline(lua_State *state) noexcept {
     lua_pushvalue(state, origIndex);
     lua_rawget(state, metaIndex);
     lua_setmetatable(state, origIndex);
+    lua_pop(state, 1);
+  }
+
+  // #199: restore each snapshotted upvalue cell exactly once through any
+  // one recorded holder — lua_setupvalue writes through the shared cell,
+  // so every closure aliasing it sees the restored value and the sharing
+  // relationship itself is untouched. Pre-#199 snapshots carry no
+  // holders/cells slots and skip this pass.
+  lua_rawgeti(state, containerIndex, 4);
+  const int cellsIndex = lua_absindex(state, -1);
+  lua_rawgeti(state, containerIndex, 5);
+  const int holdersIndex = lua_absindex(state, -1);
+  if ((lua_istable(state, cellsIndex) != 0) &&
+      (lua_istable(state, holdersIndex) != 0)) {
+    lua_newtable(state);
+    const int doneIndex = lua_absindex(state, -1);
+    const auto holderCount =
+        static_cast<lua_Integer>(lua_rawlen(state, holdersIndex));
+    for (lua_Integer holder = 1; holder <= holderCount; ++holder) {
+      lua_rawgeti(state, holdersIndex, holder);
+      const int tripleIndex = lua_absindex(state, -1);
+      lua_rawgeti(state, tripleIndex, 3);
+      lua_pushvalue(state, -1);
+      lua_rawget(state, doneIndex);
+      const bool cellDone = !lua_isnil(state, -1);
+      lua_pop(state, 1);
+      if (cellDone) {
+        lua_pop(state, 2);
+        continue;
+      }
+      lua_pushvalue(state, -1);
+      lua_pushboolean(state, 1);
+      lua_rawset(state, doneIndex);
+
+      lua_rawgeti(state, tripleIndex, 1);
+      const int fnIndex = lua_absindex(state, -1);
+      lua_rawgeti(state, tripleIndex, 2);
+      const auto upvalue = static_cast<int>(lua_tointeger(state, -1));
+      lua_pop(state, 1);
+      lua_pushvalue(state, -2);
+      lua_rawget(state, cellsIndex);
+      if (lua_setupvalue(state, fnIndex, upvalue) == nullptr) {
+        lua_pop(state, 1); // unreachable index: setupvalue pops nothing
+      }
+      lua_pop(state, 3);
+    }
     lua_pop(state, 1);
   }
 
