@@ -11,21 +11,28 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
+#include "engine/core/atomic_file.h"
 #include "thumbnail_resample.h"
 
 // E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.checksum"; shared with
 // main so the cook manifest can list the sidecar (issue #55).
-void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
+bool build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
                                    std::size_t size) noexcept {
   if ((thumbPath == nullptr) || (checksumPath == nullptr) || (size == 0U)) {
-    return;
+    return false;
   }
+  checksumPath[0] = '\0';
   const char *dot = std::strrchr(thumbPath, '.');
   const std::size_t stemLength = (dot != nullptr)
                                      ? static_cast<std::size_t>(dot - thumbPath)
                                      : std::strlen(thumbPath);
-  std::snprintf(checksumPath, size, "%.*s.checksum",
-                static_cast<int>(stemLength), thumbPath);
+  const int written = std::snprintf(checksumPath, size, "%.*s.checksum",
+                                    static_cast<int>(stemLength), thumbPath);
+  if ((written <= 0) || (static_cast<std::size_t>(written) >= size)) {
+    checksumPath[0] = '\0';
+    return false;
+  }
+  return true;
 }
 
 // Read stored checksum from sidecar file. Returns false if file not found.
@@ -51,20 +58,45 @@ static bool read_thumbnail_checksum(const char *checksumPath,
   return true;
 }
 
-// Write checksum to sidecar file.
+// Write checksum to sidecar file via staged atomic replacement so an
+// interrupted write can never leave a truncated sidecar (audit #212).
 static bool write_thumbnail_checksum(const char *checksumPath,
                                      std::uint64_t hash) noexcept {
-  FILE *f = std::fopen(checksumPath, "w");
-  if (f == nullptr) {
+  char text[32] = {};
+  const int written = std::snprintf(text, sizeof(text), "%llu",
+                                    static_cast<unsigned long long>(hash));
+  if (written <= 0) {
     return false;
   }
-  std::fprintf(f, "%llu", static_cast<unsigned long long>(hash)); // NOLINT
-  std::fclose(f);
-  return true;
+  return engine::core::atomic_write_file(checksumPath, text,
+                                         static_cast<std::size_t>(written));
+}
+
+// stbi_write_png_to_func sink: appends the encoded bytes to a vector.
+static void append_png_bytes(void *context, void *data, int size) {
+  auto *bytes = static_cast<std::vector<std::uint8_t> *>(context);
+  const auto *src = static_cast<const std::uint8_t *>(data);
+  bytes->insert(bytes->end(), src, src + size);
+}
+
+// Encodes the pixels in memory and lands the PNG with staged atomic
+// replacement so an interrupted write can never publish a torn image
+// (audit #212).
+static bool write_thumbnail_png(const char *thumbPath,
+                                const std::uint8_t *pixels, int size,
+                                int channels) noexcept {
+  std::vector<std::uint8_t> png{};
+  if ((stbi_write_png_to_func(&append_png_bytes, &png, size, size, channels,
+                              pixels, size * channels) == 0) ||
+      png.empty()) {
+    return false;
+  }
+  return engine::core::atomic_write_file(
+      thumbPath, reinterpret_cast<const char *>(png.data()), png.size());
 }
 
 // Forward declaration (defined below alongside mesh thumbnail).
-void build_thumbnail_path(const char *outputPath, char *thumbPath,
+bool build_thumbnail_path(const char *outputPath, char *thumbPath,
                           std::size_t thumbPathSize) noexcept;
 
 // ---------------------------------------------------------------------------
@@ -78,13 +110,16 @@ bool generate_texture_thumbnail(const char *inputPath,
   }
 
   char thumbPath[512] = {};
-  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
+  char checksumPath[512] = {};
+  if (!build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath)) ||
+      !build_thumbnail_checksum_path(thumbPath, checksumPath,
+                                     sizeof(checksumPath))) {
+    return false;
+  }
 
   bool hashOk = false;
   const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
   if (hashOk) {
-    char checksumPath[512] = {};
-    build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
     std::uint64_t storedHash = 0U;
     if (read_thumbnail_checksum(checksumPath, &storedHash) &&
         storedHash == srcHash) {
@@ -165,16 +200,17 @@ bool generate_texture_thumbnail(const char *inputPath,
     return false;
   }
 
-  if (!stbi_write_png(thumbPath, kThumbSize, kThumbSize, kChannels,
-                      thumb.data(), kThumbSize * kChannels)) {
+  if (!write_thumbnail_png(thumbPath, thumb.data(), kThumbSize, kChannels)) {
     std::fprintf(stderr, "thumbnail: failed to write %s\n", thumbPath);
     return false;
   }
 
-  if (hashOk) {
-    char checksumPath[512] = {};
-    build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
-    write_thumbnail_checksum(checksumPath, srcHash);
+  // The PNG/checksum pair publishes as a unit: a failed checksum write
+  // fails the publication so a caller can never certify a mixed pair.
+  if (hashOk && !write_thumbnail_checksum(checksumPath, srcHash)) {
+    std::fprintf(stderr, "thumbnail: failed to write checksum for %s\n",
+                 thumbPath);
+    return false;
   }
 
   std::printf("texture thumbnail: %s\n", thumbPath);
@@ -182,8 +218,14 @@ bool generate_texture_thumbnail(const char *inputPath,
 }
 
 // Build thumbnail path: <dir>/.thumbnails/<basename>.png
-void build_thumbnail_path(const char *outputPath, char *thumbPath,
+bool build_thumbnail_path(const char *outputPath, char *thumbPath,
                           std::size_t thumbPathSize) noexcept {
+  if ((outputPath == nullptr) || (thumbPath == nullptr) ||
+      (thumbPathSize == 0U)) {
+    return false;
+  }
+  thumbPath[0] = '\0';
+
   const char *lastSlash = std::strrchr(outputPath, '/');
   const char *lastBackSlash = std::strrchr(outputPath, '\\');
   if ((lastBackSlash != nullptr) &&
@@ -191,23 +233,36 @@ void build_thumbnail_path(const char *outputPath, char *thumbPath,
     lastSlash = lastBackSlash;
   }
 
+  // An overlong destination is an error, never a silent redirect into the
+  // working directory where unrelated assets could collide (audit #212).
   char thumbDir[512] = {};
   if (lastSlash != nullptr) {
     const std::size_t dirLen = static_cast<std::size_t>(lastSlash - outputPath);
-    if (dirLen < sizeof(thumbDir) - 13U) {
-      std::memcpy(thumbDir, outputPath, dirLen);
-      std::snprintf(thumbDir + dirLen, sizeof(thumbDir) - dirLen,
-                    "/.thumbnails");
-    } else {
-      std::snprintf(thumbDir, sizeof(thumbDir), ".thumbnails");
+    if (dirLen >= sizeof(thumbDir) - 13U) {
+      std::fprintf(stderr, "thumbnail: destination path too long: %s\n",
+                   outputPath);
+      return false;
     }
+    std::memcpy(thumbDir, outputPath, dirLen);
+    std::snprintf(thumbDir + dirLen, sizeof(thumbDir) - dirLen,
+                  "/.thumbnails");
   } else {
+    // A bare filename cooks into the working directory, so its thumbnail
+    // dir legitimately sits beside it there.
     std::snprintf(thumbDir, sizeof(thumbDir), ".thumbnails");
   }
-  ensure_directory_exists(thumbDir);
 
   const char *basename = (lastSlash != nullptr) ? (lastSlash + 1) : outputPath;
-  std::snprintf(thumbPath, thumbPathSize, "%s/%s.png", thumbDir, basename);
+  const int written =
+      std::snprintf(thumbPath, thumbPathSize, "%s/%s.png", thumbDir, basename);
+  if ((written <= 0) || (static_cast<std::size_t>(written) >= thumbPathSize)) {
+    std::fprintf(stderr, "thumbnail: destination path too long: %s\n",
+                 outputPath);
+    thumbPath[0] = '\0';
+    return false;
+  }
+  ensure_directory_exists(thumbDir);
+  return true;
 }
 
 // Folds the import-settings hash into the source-content hash so the
@@ -234,14 +289,17 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   }
 
   char thumbPath[512] = {};
-  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
+  char checksumPath[512] = {};
+  if (!build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath)) ||
+      !build_thumbnail_checksum_path(thumbPath, checksumPath,
+                                     sizeof(checksumPath))) {
+    return false;
+  }
 
   if (inputPath != nullptr) {
     bool hashOk = false;
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
     if (hashOk) {
-      char checksumPath[512] = {};
-      build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
       std::uint64_t storedHash = 0U;
       if (read_thumbnail_checksum(checksumPath, &storedHash) &&
           storedHash == combine_thumbnail_hash(srcHash, importSettingsHash)) {
@@ -463,21 +521,24 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
     }
   }
 
-  if (!stbi_write_png(thumbPath, kThumbSize, kThumbSize, kChannels,
-                      pixels.data(), kThumbSize * kChannels)) {
+  if (!write_thumbnail_png(thumbPath, pixels.data(), kThumbSize, kChannels)) {
     std::fprintf(stderr, "warning: failed to write thumbnail: %s\n", thumbPath);
     return false;
   }
 
+  // The PNG/checksum pair publishes as a unit: a failed checksum write
+  // fails the publication so the cook driver retires the pair instead of
+  // certifying it (audit #212).
   if (inputPath != nullptr) {
     bool hashOk = false;
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);
-    if (hashOk) {
-      char checksumPath[512] = {};
-      build_thumbnail_checksum_path(thumbPath, checksumPath, sizeof(checksumPath));
-      write_thumbnail_checksum(checksumPath,
-                               combine_thumbnail_hash(srcHash,
-                                                      importSettingsHash));
+    if (hashOk &&
+        !write_thumbnail_checksum(
+            checksumPath,
+            combine_thumbnail_hash(srcHash, importSettingsHash))) {
+      std::fprintf(stderr, "thumbnail: failed to write checksum for %s\n",
+                   thumbPath);
+      return false;
     }
   }
 

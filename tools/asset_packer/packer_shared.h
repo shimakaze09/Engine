@@ -157,11 +157,15 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
                                std::vector<DependencyDigest> *autoDepDigests);
 
 /// Thumbnail output path beside the cooked asset (.thumbnails/<name>.png).
-void build_thumbnail_path(const char *outputPath, char *thumbPath,
+/// False (audit #212) when the destination would not fit the buffer — the
+/// path is never silently redirected to the working directory; outThumb
+/// is cleared on failure.
+bool build_thumbnail_path(const char *outputPath, char *thumbPath,
                           std::size_t thumbPathSize) noexcept;
 /// Checksum sidecar path for a thumbnail (".../foo.png" ->
+/// false on truncation with the buffer cleared (audit #212).
 /// ".../foo.checksum"), shared so the cook manifest can list it.
-void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
+bool build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
                                    std::size_t size) noexcept;
 /// Deletes a cooked asset's thumbnail and checksum sidecar (paths built by
 /// the helpers below) so a failed regeneration cannot leave a previous
