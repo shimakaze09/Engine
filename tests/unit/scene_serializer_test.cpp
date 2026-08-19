@@ -1396,6 +1396,19 @@ int check_timers_are_runtime_only() {
 } // namespace
 
 /// Runs this executable or test program.
+/// Portably opens a file for reading across CRTs.
+std::FILE *open_read_file(const char *path) noexcept {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  return file;
+}
+
 /// #208: a save with live state the scene format cannot represent must be
 /// refused (not warn-and-succeed), the refusal must be visible through
 /// collect_scene_save_blockers, and a refused file save must leave the
@@ -1428,7 +1441,7 @@ int verify_save_refuses_unserializable_state(const char *path) {
   std::unique_ptr<char[]> baseline{};
   std::size_t baselineSize = 0U;
   {
-    std::FILE *file = std::fopen(path, "rb");
+    std::FILE *file = open_read_file(path);
     if (file == nullptr) {
       return 404;
     }
@@ -1514,7 +1527,7 @@ int verify_save_refuses_unserializable_state(const char *path) {
   }
   {
     // The refused save must leave the previous file byte-identical.
-    std::FILE *file = std::fopen(path, "rb");
+    std::FILE *file = open_read_file(path);
     if (file == nullptr) {
       return 418;
     }
