@@ -5,6 +5,8 @@
 #include <memory>
 #include <new>
 
+#include "engine/physics/physics.h"
+#include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -259,6 +261,89 @@ int verify_spring_arm_prefab_round_trip() {
 } // namespace
 
 /// Runs this executable or test program.
+/// #208: save_prefab must refuse (not silently drop) payloads the prefab
+/// format cannot represent — provenance-free custom hulls and heightfield
+/// samples — leaving the destination untouched, while builder-provenance
+/// hulls rebuild on instantiate and stay savable.
+int verify_prefab_save_refuses_unserializable_payloads() {
+  remove_prefab_file();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 300;
+  }
+
+  const engine::runtime::Entity hullEntity = world->create_scene_object();
+  const engine::runtime::Entity heightfieldEntity =
+      world->create_scene_object();
+  if ((hullEntity == engine::runtime::kInvalidEntity) ||
+      (heightfieldEntity == engine::runtime::kInvalidEntity)) {
+    return 301;
+  }
+
+  engine::physics::ConvexHullData hull{};
+  if (!engine::physics::build_cylinder_hull(&hull)) {
+    return 302;
+  }
+  engine::runtime::Collider hullCollider{};
+  hullCollider.shape = engine::runtime::ColliderShape::ConvexHull;
+  hullCollider.hullSource = engine::math::HullSource::None;
+  if (!world->add_collider(hullEntity, hullCollider) ||
+      !engine::physics::set_convex_hull_data(world->physics_context(),
+                                             hullEntity, hull)) {
+    return 303;
+  }
+  if (engine::runtime::save_prefab(*world, hullEntity, kPrefabPath)) {
+    return 304; // custom hull payload must refuse the save
+  }
+  {
+    // The refused save must not have created the destination file.
+    std::FILE *file = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&file, kPrefabPath, "rb") != 0) {
+      file = nullptr;
+    }
+#else
+    file = std::fopen(kPrefabPath, "rb");
+#endif
+    if (file != nullptr) {
+      static_cast<void>(std::fclose(file));
+      return 305;
+    }
+  }
+  if (!world->remove_collider(hullEntity)) {
+    return 306;
+  }
+  hullCollider.hullSource = engine::math::HullSource::Cylinder;
+  if (!world->add_collider(hullEntity, hullCollider) ||
+      !engine::runtime::save_prefab(*world, hullEntity, kPrefabPath)) {
+    return 307; // provenance-backed hull payload must stay savable
+  }
+  remove_prefab_file();
+
+  engine::runtime::Collider heightfieldCollider{};
+  heightfieldCollider.shape = engine::runtime::ColliderShape::Heightfield;
+  if (!world->add_collider(heightfieldEntity, heightfieldCollider)) {
+    return 308;
+  }
+  if (!engine::runtime::save_prefab(*world, heightfieldEntity, kPrefabPath)) {
+    return 309; // descriptor-only heightfield keeps its round trip
+  }
+  remove_prefab_file();
+  engine::physics::HeightfieldData heightfield{};
+  heightfield.rows = 2U;
+  heightfield.columns = 2U;
+  if (!engine::physics::set_heightfield_data(world->physics_context(),
+                                             heightfieldEntity, heightfield)) {
+    return 310;
+  }
+  if (engine::runtime::save_prefab(*world, heightfieldEntity, kPrefabPath)) {
+    return 311; // heightfield payload must refuse the save
+  }
+
+  return 0;
+}
+
 int main() {
   remove_prefab_file();
 
@@ -546,6 +631,12 @@ int main() {
   }
 
   result = verify_spring_arm_prefab_round_trip();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_prefab_save_refuses_unserializable_payloads();
   if (result != 0) {
     remove_prefab_file();
     return result;

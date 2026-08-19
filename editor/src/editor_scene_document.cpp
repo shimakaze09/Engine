@@ -332,15 +332,36 @@ bool perform_scene_open(const char *path) noexcept {
   return true;
 }
 
+/// Composes the failed-save status message: state the scene format cannot
+/// represent gets its precise counts (#208); anything else was a write
+/// failure on the destination path.
+void set_save_failure_message(EditorSession &session,
+                              const char *path) noexcept {
+  const runtime::SceneSaveBlockers blockers =
+      runtime::collect_scene_save_blockers(*session.world);
+  if ((blockers.customHullPayloads > 0U) ||
+      (blockers.heightfieldPayloads > 0U) || (blockers.activeJoints > 0U)) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "cannot save: %zu custom hull payload(s), %zu heightfield "
+                  "payload(s), %zu active joint(s) are runtime-only state "
+                  "the scene format cannot keep",
+                  blockers.customHullPayloads, blockers.heightfieldPayloads,
+                  blockers.activeJoints);
+    return;
+  }
+  std::snprintf(session.document.lastSaveError,
+                sizeof(session.document.lastSaveError), "failed to write %s",
+                path);
+}
+
 bool perform_scene_save() noexcept {
   EditorSession &session = editor_session();
   if (!session.document.hasPath || !world_is_editable()) {
     return false;
   }
   if (!runtime::save_scene(*session.world, session.document.path)) {
-    std::snprintf(session.document.lastSaveError,
-                  sizeof(session.document.lastSaveError),
-                  "failed to write %s", session.document.path);
+    set_save_failure_message(session, session.document.path);
     return false;
   }
   session.document.savedHistoryToken = session.commandHistory.current_token();
@@ -396,9 +417,7 @@ bool perform_scene_save_as(const char *path) noexcept {
     return false;
   }
   if (!runtime::save_scene(*session.world, path)) {
-    std::snprintf(session.document.lastSaveError,
-                  sizeof(session.document.lastSaveError),
-                  "failed to write %s", path);
+    set_save_failure_message(session, path);
     return false;
   }
 

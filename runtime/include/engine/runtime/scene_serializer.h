@@ -16,6 +16,20 @@ class World;
 /// load — a failure leaves the outgoing world untouched and unreported.
 using SceneTeardownHook = void (*)() noexcept;
 
+/// Live world state the scene format cannot represent (#208): counts of
+/// provenance-free convex-hull payloads, heightfield payloads, and active
+/// physics joints. A save with any nonzero count is refused before the
+/// destination file or buffer is touched, so a success result is never
+/// lossy; callers use the counts to compose actionable diagnostics.
+struct SceneSaveBlockers final {
+  std::size_t customHullPayloads = 0U;
+  std::size_t heightfieldPayloads = 0U;
+  std::size_t activeJoints = 0U;
+};
+
+/// Collects the live state save_scene would refuse to drop.
+SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept;
+
 /// Saves the requested resource for scene.
 bool save_scene(const World &world, const char *path) noexcept;
 /// Saves the requested resource for scene.
