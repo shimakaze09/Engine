@@ -46,7 +46,6 @@ namespace engine::renderer {
 
 namespace {
 
-constexpr float kDefaultFovRadians = 1.0471975512F;
 constexpr float kNearClip = 0.1F;
 constexpr float kFarClip = 100.0F;
 constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
