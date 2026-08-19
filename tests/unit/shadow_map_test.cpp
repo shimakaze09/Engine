@@ -148,6 +148,57 @@ int verify_snap_to_texel_stable() {
 // ---------------------------------------------------------------------------
 // Test 6: Cascade matrix remains stable for sub-texel camera movement.
 // ---------------------------------------------------------------------------
+/// #221: an orthographic camera's full-range cascade must contain every
+/// ortho frustum corner in the light's clip volume — the old perspective-
+/// only near/far recovery silently sliced the wrong depth slab.
+int verify_cascade_matrix_contains_ortho_frustum() {
+  const engine::math::Mat4 viewMat = engine::math::look_at(
+      engine::math::Vec3(0, 5, 10), engine::math::Vec3(0, 0, 0),
+      engine::math::Vec3(0, 1, 0));
+  const float nearZ = 0.1F;
+  const float farZ = 60.0F;
+  const float halfW = 8.0F;
+  const float halfH = 4.5F;
+  const engine::math::Mat4 projMat =
+      engine::math::ortho(-halfW, halfW, -halfH, halfH, nearZ, farZ);
+  const engine::math::Vec3 lightDir(0.0F, -1.0F, -0.5F);
+
+  const auto lightVP = engine::renderer::compute_cascade_matrix(
+      viewMat, projMat, nearZ, farZ, lightDir, nearZ, farZ,
+      engine::renderer::kShadowMapResolution);
+
+  // Reconstruct the camera's world-space ortho corners and require each to
+  // land inside the light's clip cube (small epsilon for the padding the
+  // cascade fit applies).
+  engine::math::Mat4 viewProj = engine::math::mul(projMat, viewMat);
+  engine::math::Mat4 invViewProj{};
+  if (!engine::math::inverse(viewProj, &invViewProj)) {
+    return 90;
+  }
+  const float ndc[8][3] = {{-1, -1, -1}, {1, -1, -1}, {-1, 1, -1}, {1, 1, -1},
+                           {-1, -1, 1},  {1, -1, 1},  {-1, 1, 1},  {1, 1, 1}};
+  for (const auto &corner : ndc) {
+    const engine::math::Vec4 clip(corner[0], corner[1], corner[2], 1.0F);
+    engine::math::Vec4 world = engine::math::mul(invViewProj, clip);
+    if (world.w == 0.0F) {
+      return 91;
+    }
+    world.x /= world.w;
+    world.y /= world.w;
+    world.z /= world.w;
+    const engine::math::Vec4 lightClip =
+        engine::math::mul(lightVP, engine::math::Vec4(world.x, world.y,
+                                                      world.z, 1.0F));
+    const float kEps = 1.0e-3F;
+    if ((lightClip.x < -1.0F - kEps) || (lightClip.x > 1.0F + kEps) ||
+        (lightClip.y < -1.0F - kEps) || (lightClip.y > 1.0F + kEps) ||
+        (lightClip.z < -1.0F - kEps) || (lightClip.z > 1.0F + kEps)) {
+      return 92;
+    }
+  }
+  return 0;
+}
+
 int verify_cascade_matrix_stable_for_sub_texel_motion() {
   const engine::math::Vec3 lightDir(0.0F, -1.0F, -0.5F);
   const engine::math::Mat4 projMat =
@@ -261,6 +312,10 @@ int main() {
     return result;
 
   result = verify_cascade_matrix_valid();
+  if (result != 0)
+    return result;
+
+  result = verify_cascade_matrix_contains_ortho_frustum();
   if (result != 0)
     return result;
 

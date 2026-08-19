@@ -314,10 +314,12 @@ directory-global by design.
   stack; a same-entity `SpringArmComponent` supplies the pose (its
   collision-aware boom) while the CameraComponent supplies the lens/
   priority/blend, the standard authored third-person rig. Orthographic
-  projection is authored/serialized/editable but the render path
-  (`command_buffer_flush.cpp`) still projects every camera as perspective
-  -- true orthographic rendering across shadow/post/culling consumers is
-  open follow-up scope, not silently faked.
+  projection renders end to end (#221): one shared
+  `camera_projection_matrix` serves the flush, render-prep culling, scene
+  captures, and the editor frustum gizmo; cascaded shadows take the camera
+  near/far explicitly; the lighting view vector switches to the camera
+  forward under ortho; the sky pass keeps perspective directional sampling
+  (parallel rays would sample one sky direction).
 - `editor/` — ImGui editor: `editor_session` (state + play lifecycle,
   multi-selection, single-step request, embedded `ContentBrowserState`),
   hierarchy tree panel (drag-drop reparent through the undoable

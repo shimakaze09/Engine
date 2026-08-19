@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "engine/renderer/command_buffer.h"
+#include "engine/math/transform.h"
 #include "engine/renderer/light_culling.h"
 
 namespace {
@@ -120,6 +121,79 @@ int verify_single_point_light_center() {
     return 202;
   }
 
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Orthographic projection (#221): tiled culling is matrix-derived, so an
+// ortho VP must include an in-volume light and exclude one beyond the
+// ortho half-width that a perspective frustum of the same pose would keep.
+// ---------------------------------------------------------------------------
+
+int verify_ortho_projection_culling() {
+  engine::renderer::SceneLightData lights{};
+  lights.pointLightCount = 2U;
+  lights.pointLights[0].position = engine::math::Vec3(0.0F, 0.0F, -5.0F);
+  lights.pointLights[0].intensity = 1.0F;
+  lights.pointLights[0].radius = 1.0F;
+  lights.pointLights[1].position = engine::math::Vec3(50.0F, 0.0F, -5.0F);
+  lights.pointLights[1].intensity = 1.0F;
+  lights.pointLights[1].radius = 1.0F;
+
+  constexpr int kWidth = 64;
+  constexpr int kHeight = 64;
+
+  const float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  // math::ortho(-2, 2, -2, 2, 0.1, 100) in column-major float form.
+  const engine::math::Mat4 orthoProj =
+      engine::math::ortho(-2.0F, 2.0F, -2.0F, 2.0F, 0.1F, 100.0F);
+  float proj[16] = {};
+  for (int c = 0; c < 4; ++c) {
+    proj[c * 4 + 0] = orthoProj.columns[c].x;
+    proj[c * 4 + 1] = orthoProj.columns[c].y;
+    proj[c * 4 + 2] = orthoProj.columns[c].z;
+    proj[c * 4 + 3] = orthoProj.columns[c].w;
+  }
+
+  const std::size_t bufSize =
+      engine::renderer::compute_tile_buffer_size(kWidth, kHeight);
+  if (bufSize == 0U) {
+    return 700;
+  }
+  std::vector<float> buffer(bufSize, 0.0F);
+  engine::renderer::TileLightData tiles{};
+  tiles.data = buffer.data();
+  tiles.dataSize = bufSize;
+
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, kWidth, kHeight,
+                                           tiles)) {
+    return 701;
+  }
+
+  bool foundInVolume = false;
+  bool foundOutOfVolume = false;
+  for (int t = 0; t < tiles.totalTiles; ++t) {
+    const std::size_t base =
+        static_cast<std::size_t>(t) *
+        static_cast<std::size_t>(engine::renderer::kTileDataWidth);
+    const int count = static_cast<int>(buffer[base]);
+    for (int i = 0; i < count; ++i) {
+      const int lightIndex = static_cast<int>(buffer[base + 1U +
+                                                     static_cast<std::size_t>(i)]);
+      if (lightIndex == 0) {
+        foundInVolume = true;
+      }
+      if (lightIndex == 1) {
+        foundOutOfVolume = true;
+      }
+    }
+  }
+  if (!foundInVolume) {
+    return 702; // the centered light must survive ortho culling
+  }
+  if (foundOutOfVolume) {
+    return 703; // x=50 lies far outside the 2-unit ortho half-width
+  }
   return 0;
 }
 
@@ -475,6 +549,11 @@ int main() {
   }
 
   result = verify_single_point_light_center();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_ortho_projection_culling();
   if (result != 0) {
     return result;
   }
