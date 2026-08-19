@@ -338,12 +338,20 @@ DeviceProgramHandle compile_program_from_source(
   return program;
 }
 
+/// Logs one shader diagnostic in the `<path>: <reason>` shape the editor
+/// console parses for its Open/Select navigation actions (#217).
+void log_shader_path_error(const char *path, const char *reason) noexcept {
+  char message[640] = {};
+  std::snprintf(message, sizeof(message), "%s: %s",
+                (path != nullptr) ? path : "(null)", reason);
+  core::log_message(core::LogLevel::Error, "shader", message);
+}
+
 bool try_reload_entry(ShaderEntry &entry) noexcept {
   char *vertSource = nullptr;
   std::size_t vertSize = 0U;
   if (!core::vfs_read_text(entry.vertPath, &vertSource, &vertSize)) {
-    core::log_message(
-        core::LogLevel::Error, "shader", "failed to read vertex shader");
+    log_shader_path_error(entry.vertPath, "failed to read vertex shader");
     return false;
   }
 
@@ -351,8 +359,7 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
   std::size_t fragSize = 0U;
   if (!core::vfs_read_text(entry.fragPath, &fragSource, &fragSize)) {
     core::vfs_free(vertSource);
-    core::log_message(
-        core::LogLevel::Error, "shader", "failed to read fragment shader");
+    log_shader_path_error(entry.fragPath, "failed to read fragment shader");
     return false;
   }
 
@@ -363,9 +370,11 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
   core::vfs_free(fragSource);
 
   if (newProgram == kInvalidDeviceProgram) {
-    core::log_message(core::LogLevel::Error,
-                      "shader",
-                      "shader compilation failed — keeping old program");
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s %s: shader compilation failed — keeping old program",
+                  entry.vertPath, entry.fragPath);
+    core::log_message(core::LogLevel::Error, "shader", message);
     return false;
   }
 
@@ -395,8 +404,7 @@ ShaderProgramHandle load_shader_program_internal(
   }
 
   if (slot == kMaxShaderPrograms) {
-    core::log_message(
-        core::LogLevel::Error, "shader", "shader program registry full");
+    log_shader_path_error(vertPath, "shader program registry full");
     return kInvalidShaderProgram;
   }
 
@@ -521,8 +529,7 @@ ShaderProgramHandle load_shader_variant(const ShaderVariantDesc &desc) noexcept 
     }
   }
   if (variantSlot == kMaxShaderVariants) {
-    core::log_message(
-        core::LogLevel::Error, "shader", "shader variant cache full");
+    log_shader_path_error(desc.vertPath, "shader variant cache full");
     return kInvalidShaderProgram;
   }
 
@@ -608,8 +615,10 @@ void check_shader_reload() noexcept {
     const std::int64_t fragMtime = core::vfs_file_mtime(entry.fragPath);
 
     if ((vertMtime != entry.vertMtime) || (fragMtime != entry.fragMtime)) {
-      core::log_message(
-          core::LogLevel::Info, "shader", "reloading modified shader");
+      char message[640] = {};
+      std::snprintf(message, sizeof(message), "%s %s: reloading modified shader",
+                    entry.vertPath, entry.fragPath);
+      core::log_message(core::LogLevel::Info, "shader", message);
       try_reload_entry(entry);
     }
   }

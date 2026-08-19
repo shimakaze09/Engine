@@ -347,8 +347,10 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
   decoded.hasUVs = isV2 || isV3;
   decoded.hasSkin = isV3;
   if (!mesh_data_valid(decoded)) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "mesh asset payload failed validation");
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s: mesh asset payload failed validation", path);
+    core::log_message(core::LogLevel::Error, "renderer", message);
     return false;
   }
 
@@ -371,8 +373,10 @@ bool load_mesh_from_file(const char *path, GpuMesh *outMesh) noexcept {
 
   CpuMeshData meshData{};
   if (!load_mesh_data_from_file(path, &meshData)) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to read mesh asset");
+    char message[640] = {};
+    std::snprintf(message, sizeof(message), "%s: failed to read mesh asset",
+                  path);
+    core::log_message(core::LogLevel::Error, "renderer", message);
     return false;
   }
 
