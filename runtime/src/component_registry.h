@@ -10,6 +10,18 @@
 // generate the editor Inspector's component-edit type/snapshot/dispatch code
 // (editor_component_registry.h), so RemoveFn keeps the row a complete
 // get/add/remove triple instead of requiring a second lookup elsewhere.
+//
+// Adding a persistent component (#166): add the type to
+// World::PersistentComponentTypes, one row here, one row in world.h's
+// ENGINE_WORLD_UNIFORM_STORAGE_TABLE (plus the SparseSet member/alias/
+// capacity it names), reflection registration, and — only when the type
+// is not plain-reflected — a decode/encode branch in the scene and prefab
+// serializers plus a descriptor overload in serialization_util.h. Every
+// one of those is compile-enforced from this table: a missing tuple entry
+// or row fails the static_asserts below, a missing storage row fails
+// world.h's coverage gate, and a missing codec/descriptor path fails the
+// registry-expanded serializer loops. Row order is also the serialized
+// key order of both file formats.
 
 #pragma once
 

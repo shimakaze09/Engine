@@ -190,22 +190,14 @@ void World::remove_all_components(Entity entity) noexcept {
   m_cameraManager.on_entity_destroyed(entity);
 
   physics::remove_shape_payloads(m_physicsContext, entity);
+  // Every set is removed via the storage table so a new component cannot be
+  // stranded on a dead slot and inherited by the index's next entity
+  // (#166 W2 drift rank 1); removal order across sets is immaterial.
   static_cast<void>(m_transforms.remove(entity));
-  static_cast<void>(m_worldTransforms.remove(entity));
-  static_cast<void>(m_rigidBodies.remove(entity));
-  static_cast<void>(m_colliders.remove(entity));
-  static_cast<void>(m_meshComponents.remove(entity));
-  static_cast<void>(m_nameComponents.remove(entity));
-  static_cast<void>(m_lightComponents.remove(entity));
-  static_cast<void>(m_pointLights.remove(entity));
-  static_cast<void>(m_spotLights.remove(entity));
-  static_cast<void>(m_reflectionProbes.remove(entity));
-  static_cast<void>(m_sceneCaptures.remove(entity));
-  static_cast<void>(m_foliagePatches.remove(entity));
-  static_cast<void>(m_springArms.remove(entity));
-  static_cast<void>(m_scriptComponents.remove(entity));
-  static_cast<void>(m_animationComponents.remove(entity));
-  static_cast<void>(m_cameraComponents.remove(entity));
+#define ENGINE_WUS_REMOVE(Type, member)                                        \
+  static_cast<void>((member).remove(entity));
+  ENGINE_WORLD_UNIFORM_STORAGE_TABLE(ENGINE_WUS_REMOVE)
+#undef ENGINE_WUS_REMOVE
 
   m_movementAuthorities[entity.index] = MovementAuthority::None;
   reset_transform_cache(entity.index);

@@ -282,12 +282,17 @@ directory-global by design.
   step and render prep so culling and interpolation see the frame's camera;
   frame pacing waits out r_max_fps as the final stage),
   `World` ECS (15 component types on SparseSets, WorldPhase gating,
-  double-buffered transforms, persistent ids), scene/prefab serializers
+  double-buffered transforms, persistent ids; #166: the storage dispatch,
+  removal list, and both serializer directions expand from the registry —
+  world.h's storage table + `world_query.h` hold the generated dispatch
+  and query machinery, and a missing row/codec/descriptor fails to
+  compile instead of silently skipping the type), scene/prefab serializers
   (one authoritative persistent-component registry —
   `src/component_registry.h` X-macro table, compile-time cross-checked
   against `World::PersistentComponentTypes` and cross-validated per row by
   `engine_unit_component_registry`; shared `serialization_util` codecs;
-  reflection-backed components), physics/
+  reflection-backed components; registry row order is the serialized key
+  order of both formats), physics/
   scripting/editor bridges, render-prep pipeline, skeletal animation (CPU
   pose evaluation in `animation.cpp`, cooked .skel/.anim loaders, the
   controller state machine + palette handoff in `animation_system.cpp`),
