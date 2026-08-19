@@ -1259,6 +1259,28 @@ if(ENGINE_BUILD_TOOLS)
         _CRT_SECURE_NO_WARNINGS
     )
 
+    engine_add_test_executable(engine_unit_thumbnail_paths
+        SOURCES
+        thumbnail_paths_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_generate.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_resample.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        ${ENGINE_CGLTF_INCLUDE_DIR}
+        ${ENGINE_STB_INCLUDE_DIR}
+        PRIVATE_DEPS
+        engine_content
+        engine_core
+        engine_math
+        engine_physics
+        COMPILE_DEFINITIONS
+        _CRT_SECURE_NO_WARNINGS
+    )
+
     engine_add_test_executable(engine_unit_anim_controller
         SOURCES
         anim_controller_test.cpp
