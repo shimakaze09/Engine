@@ -81,7 +81,57 @@ struct ReflectedComponentDescriptors final {
   const core::TypeDescriptor *camera = nullptr;
 };
 
-/// Looks up every reflected component descriptor; logs under `logChannel`
+/// Reflection descriptor for a reflected component type (one overload per
+/// type; a new reflected row without one fails to compile).
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const Transform *) noexcept {
+  return *descs.transform;
+}
+/// RigidBody descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const RigidBody *) noexcept {
+  return *descs.rigidBody;
+}
+/// SpringArm descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const SpringArmComponent *) noexcept {
+  return *descs.springArm;
+}
+/// ReflectionProbe descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const ReflectionProbeComponent *) noexcept {
+  return *descs.reflectionProbe;
+}
+/// PointLight descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const PointLightComponent *) noexcept {
+  return *descs.pointLight;
+}
+/// SpotLight descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const SpotLightComponent *) noexcept {
+  return *descs.spotLight;
+}
+/// SceneCapture descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const SceneCaptureComponent *) noexcept {
+  return *descs.sceneCapture;
+}
+/// Camera descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const CameraComponent *) noexcept {
+  return *descs.camera;
+}
+
+/// Looks up every reflected component descriptor/// Looks up every reflected component descriptor/// Looks up every reflected component descriptor; logs under `logChannel`
 /// and fails when any registration is missing.
 bool find_reflected_component_descriptors(
     ReflectedComponentDescriptors *outDescs, const char *logChannel) noexcept;

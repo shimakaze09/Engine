@@ -10,11 +10,108 @@
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "component_registry.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
 #include "serialization_util.h"
 
 namespace engine::runtime {
+
+// ---- Registry-driven component codec (#166 W5) ----------------------------
+// Row membership and order for both prefab directions expand from
+// ENGINE_PERSISTENT_COMPONENT_TABLE; each type's prefab wire shape lives
+// in the decode/encode pair below (default: object-shaped reflected codec;
+// specials: Name's nested object, Script's legacy string-or-object with a
+// required path, Animation's required bare path, and the custom
+// collider/mesh/light/foliage shapes).
+
+/// Decodes one prefab component value into `out`; non-string shapes
+/// require a JSON object, matching the pre-registry per-row validation.
+template <typename T>
+bool decode_prefab_component(const core::JsonParser &parser,
+                             const core::JsonValue &value,
+                             const ReflectedComponentDescriptors &descs,
+                             T *out) noexcept {
+  if constexpr (std::is_same_v<T, ScriptComponent>) {
+    bool gotPath = false;
+    if (value.type == core::JsonValue::Type::String) {
+      gotPath = parser.copy_string_strict(value, out->scriptPath,
+                                          sizeof(out->scriptPath));
+    } else if (value.type == core::JsonValue::Type::Object) {
+      core::JsonValue pathValue{};
+      if (parser.get_object_field(value, "scriptPath", &pathValue)) {
+        gotPath = parser.copy_string_strict(pathValue, out->scriptPath,
+                                            sizeof(out->scriptPath));
+      }
+    } else {
+      return false;
+    }
+    return gotPath && (out->scriptPath[0] != '\0');
+  } else if constexpr (std::is_same_v<T, AnimationComponent>) {
+    return parser.copy_string_strict(value, out->controllerPath,
+                                     sizeof(out->controllerPath)) &&
+           (out->controllerPath[0] != '\0');
+  } else if (value.type != core::JsonValue::Type::Object) {
+    return false;
+  } else if constexpr (std::is_same_v<T, NameComponent>) {
+    core::JsonValue nameValue{};
+    if (parser.get_object_field(value, "name", &nameValue)) {
+      return parser.copy_string(nameValue, out->name, sizeof(out->name));
+    }
+    return true;
+  } else if constexpr (std::is_same_v<T, Collider>) {
+    return read_collider_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, MeshComponent>) {
+    return read_mesh_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, LightComponent>) {
+    return read_light_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
+    return read_foliage_patch_component(parser, value, out);
+  } else {
+    return read_reflected_component(parser, value,
+                                    component_descriptor(descs, out), out);
+  }
+}
+
+/// Encodes one prefab component under its registry key; empty
+/// Script/Animation paths write nothing, matching the pre-registry writer.
+template <typename T>
+bool encode_prefab_component(core::JsonWriter &w, const char *key,
+                             const ReflectedComponentDescriptors &descs,
+                             const T &component) noexcept {
+  if constexpr (std::is_same_v<T, NameComponent>) {
+    w.write_key(key);
+    w.begin_object();
+    w.write_string("name", component.name);
+    w.end_object();
+    return true;
+  } else if constexpr (std::is_same_v<T, ScriptComponent>) {
+    if (component.scriptPath[0] != '\0') {
+      w.write_string(key, component.scriptPath);
+    }
+    return true;
+  } else if constexpr (std::is_same_v<T, AnimationComponent>) {
+    if (component.controllerPath[0] != '\0') {
+      w.write_string(key, component.controllerPath);
+    }
+    return true;
+  } else if constexpr (std::is_same_v<T, Collider>) {
+    return write_collider_component(w, component);
+  } else if constexpr (std::is_same_v<T, MeshComponent>) {
+    write_mesh_component(w, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, LightComponent>) {
+    write_light_component(w, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
+    write_foliage_patch_component(w, component);
+    return true;
+  } else {
+    return write_reflected_component(
+        w, key, component_descriptor(descs, &component), &component);
+  }
+}
+
 
 namespace {
 
@@ -45,121 +142,18 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
   w.write_key("components");
   w.begin_object();
 
-  Transform transform{};
-  if (world.get_transform(entity, &transform) &&
-      !write_reflected_component(w, kJsonKeyTransform, *descs.transform,
-                                 &transform)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write Transform");
-    return false;
+#define ENGINE_PREFAB_WRITE_ROW(Type, Key, GetFn, AddFn, RemoveFn)             \
+  {                                                                            \
+    Type component{};                                                          \
+    if (world.GetFn(entity, &component) &&                                     \
+        !encode_prefab_component(w, Key, descs, component)) {                  \
+      core::log_message(core::LogLevel::Error, kPrefabLogChannel,              \
+                        "save_prefab: failed to write " #Type);                \
+      return false;                                                            \
+    }                                                                          \
   }
-
-  RigidBody rigidBody{};
-  if (world.get_rigid_body(entity, &rigidBody) &&
-      !write_reflected_component(w, kJsonKeyRigidBody, *descs.rigidBody,
-                                 &rigidBody)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write RigidBody");
-    return false;
-  }
-
-  Collider collider{};
-  if (world.get_collider(entity, &collider)) {
-    if (!write_collider_component(w, collider)) {
-      core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                        "save_prefab: invalid Collider component");
-      return false;
-    }
-  }
-
-  NameComponent nameComp{};
-  if (world.get_name_component(entity, &nameComp)) {
-    w.write_key(kJsonKeyNameComponent);
-    w.begin_object();
-    w.write_string("name", nameComp.name);
-    w.end_object();
-  }
-
-  MeshComponent mesh{};
-  if (world.get_mesh_component(entity, &mesh)) {
-    write_mesh_component(w, mesh);
-  }
-
-  FoliagePatchComponent foliage{};
-  if (world.get_foliage_patch_component(entity, &foliage)) {
-    write_foliage_patch_component(w, foliage);
-  }
-
-  LightComponent light{};
-  if (world.get_light_component(entity, &light)) {
-    write_light_component(w, light);
-  }
-
-  PointLightComponent pointLight{};
-  if (world.get_point_light_component(entity, &pointLight) &&
-      !write_reflected_component(w, kJsonKeyPointLightComponent,
-                                 *descs.pointLight, &pointLight)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write PointLightComponent");
-    return false;
-  }
-
-  SpotLightComponent spotLight{};
-  if (world.get_spot_light_component(entity, &spotLight) &&
-      !write_reflected_component(w, kJsonKeySpotLightComponent,
-                                 *descs.spotLight, &spotLight)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write SpotLightComponent");
-    return false;
-  }
-
-  SpringArmComponent springArm{};
-  if (world.get_spring_arm(entity, &springArm) &&
-      !write_reflected_component(w, kJsonKeySpringArmComponent,
-                                 *descs.springArm, &springArm)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write SpringArmComponent");
-    return false;
-  }
-
-  ReflectionProbeComponent reflectionProbe{};
-  if (world.get_reflection_probe_component(entity, &reflectionProbe) &&
-      !write_reflected_component(w, kJsonKeyReflectionProbeComponent,
-                                 *descs.reflectionProbe, &reflectionProbe)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write ReflectionProbeComponent");
-    return false;
-  }
-
-  SceneCaptureComponent sceneCapture{};
-  if (world.get_scene_capture_component(entity, &sceneCapture) &&
-      !write_reflected_component(w, kJsonKeySceneCaptureComponent,
-                                 *descs.sceneCapture, &sceneCapture)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write SceneCaptureComponent");
-    return false;
-  }
-
-  CameraComponent camera{};
-  if (world.get_camera_component(entity, &camera) &&
-      !write_reflected_component(w, kJsonKeyCameraComponent, *descs.camera,
-                                 &camera)) {
-    core::log_message(core::LogLevel::Error, kPrefabLogChannel,
-                      "save_prefab: failed to write CameraComponent");
-    return false;
-  }
-
-  ScriptComponent scriptComp{};
-  if (world.get_script_component(entity, &scriptComp) &&
-      (scriptComp.scriptPath[0] != '\0')) {
-    w.write_string(kJsonKeyScriptComponent, scriptComp.scriptPath);
-  }
-
-  AnimationComponent animationComp{};
-  if (world.get_animation_component(entity, &animationComp) &&
-      (animationComp.controllerPath[0] != '\0')) {
-    w.write_string(kJsonKeyAnimationComponent, animationComp.controllerPath);
-  }
+  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PREFAB_WRITE_ROW)
+#undef ENGINE_PREFAB_WRITE_ROW
 
   w.end_object();
   w.end_object();
@@ -235,245 +229,20 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     return kInvalidEntity;
   };
 
-  auto readComponentObject = [&](const char *key, core::JsonValue *outValue,
-                                 bool *outPresent) noexcept -> bool {
-    if ((key == nullptr) || (outValue == nullptr) || (outPresent == nullptr)) {
-      return false;
-    }
-    *outPresent = false;
-    core::JsonValue value{};
-    if (!parser.get_object_field(componentsVal, key, &value)) {
-      return true;
-    }
-    if (value.type != core::JsonValue::Type::Object) {
-      return false;
-    }
-    *outPresent = true;
-    *outValue = value;
-    return true;
-  };
 
-  bool hasComponent = false;
-  core::JsonValue componentValue{};
-
-  if (!readComponentObject(kJsonKeyTransform, &componentValue, &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid Transform component");
+#define ENGINE_PREFAB_READ_ROW(Type, Key, GetFn, AddFn, RemoveFn)              \
+  {                                                                            \
+    core::JsonValue value{};                                                   \
+    if (parser.get_object_field(componentsVal, Key, &value)) {                 \
+      Type component{};                                                        \
+      if (!decode_prefab_component(parser, value, descs, &component) ||        \
+          !world.AddFn(entity, component)) {                                   \
+        return failComponent("instantiate_prefab: failed to load " #Type);     \
+      }                                                                        \
+    }                                                                          \
   }
-  if (hasComponent) {
-    Transform transform{};
-    if (!read_reflected_component(parser, componentValue, *descs.transform,
-                                  &transform) ||
-        !world.add_transform(entity, transform)) {
-      return failComponent("instantiate_prefab: failed to add Transform");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyRigidBody, &componentValue, &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid RigidBody component");
-  }
-  if (hasComponent) {
-    RigidBody rigidBody{};
-    if (!read_reflected_component(parser, componentValue, *descs.rigidBody,
-                                  &rigidBody) ||
-        !world.add_rigid_body(entity, rigidBody)) {
-      return failComponent("instantiate_prefab: failed to add RigidBody");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyCollider, &componentValue, &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid Collider component");
-  }
-  if (hasComponent) {
-    Collider collider{};
-    if (!read_collider_component(parser, componentValue, &collider) ||
-        !world.add_collider(entity, collider)) {
-      return failComponent("instantiate_prefab: failed to add Collider");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyNameComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid NameComponent");
-  }
-  if (hasComponent) {
-    NameComponent nameComponent{};
-    core::JsonValue nameValue{};
-    if (parser.get_object_field(componentValue, "name", &nameValue)) {
-      if (!parser.copy_string(nameValue, nameComponent.name,
-                              sizeof(nameComponent.name))) {
-        return failComponent("instantiate_prefab: invalid NameComponent name");
-      }
-    }
-    if (!world.add_name_component(entity, nameComponent)) {
-      return failComponent("instantiate_prefab: failed to add NameComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyMeshComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid MeshComponent");
-  }
-  if (hasComponent) {
-    MeshComponent mesh{};
-    if (!read_mesh_component(parser, componentValue, &mesh) ||
-        !world.add_mesh_component(entity, mesh)) {
-      return failComponent("instantiate_prefab: failed to add MeshComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyFoliagePatchComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid FoliagePatchComponent");
-  }
-  if (hasComponent) {
-    FoliagePatchComponent foliage{};
-    if (!read_foliage_patch_component(parser, componentValue, &foliage) ||
-        !world.add_foliage_patch_component(entity, foliage)) {
-      return failComponent(
-          "instantiate_prefab: failed to add FoliagePatchComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyLightComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid LightComponent");
-  }
-  if (hasComponent) {
-    LightComponent light{};
-    if (!read_light_component(parser, componentValue, &light) ||
-        !world.add_light_component(entity, light)) {
-      return failComponent("instantiate_prefab: failed to add LightComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyPointLightComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid PointLightComponent");
-  }
-  if (hasComponent) {
-    PointLightComponent pointLight{};
-    if (!read_reflected_component(parser, componentValue, *descs.pointLight,
-                                  &pointLight) ||
-        !world.add_point_light_component(entity, pointLight)) {
-      return failComponent(
-          "instantiate_prefab: failed to add PointLightComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeySpotLightComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid SpotLightComponent");
-  }
-  if (hasComponent) {
-    SpotLightComponent spotLight{};
-    if (!read_reflected_component(parser, componentValue, *descs.spotLight,
-                                  &spotLight) ||
-        !world.add_spot_light_component(entity, spotLight)) {
-      return failComponent(
-          "instantiate_prefab: failed to add SpotLightComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeySpringArmComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid SpringArmComponent");
-  }
-  if (hasComponent) {
-    SpringArmComponent springArm{};
-    if (!read_reflected_component(parser, componentValue, *descs.springArm,
-                                  &springArm) ||
-        !world.add_spring_arm(entity, springArm)) {
-      return failComponent(
-          "instantiate_prefab: failed to add SpringArmComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyReflectionProbeComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent(
-        "instantiate_prefab: invalid ReflectionProbeComponent");
-  }
-  if (hasComponent) {
-    ReflectionProbeComponent reflectionProbe{};
-    if (!read_reflected_component(parser, componentValue,
-                                  *descs.reflectionProbe, &reflectionProbe) ||
-        !world.add_reflection_probe_component(entity, reflectionProbe)) {
-      return failComponent(
-          "instantiate_prefab: failed to add ReflectionProbeComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeySceneCaptureComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid SceneCaptureComponent");
-  }
-  if (hasComponent) {
-    SceneCaptureComponent sceneCapture{};
-    if (!read_reflected_component(parser, componentValue, *descs.sceneCapture,
-                                  &sceneCapture) ||
-        !world.add_scene_capture_component(entity, sceneCapture)) {
-      return failComponent(
-          "instantiate_prefab: failed to add SceneCaptureComponent");
-    }
-  }
-
-  if (!readComponentObject(kJsonKeyCameraComponent, &componentValue,
-                           &hasComponent)) {
-    return failComponent("instantiate_prefab: invalid CameraComponent");
-  }
-  if (hasComponent) {
-    CameraComponent camera{};
-    if (!read_reflected_component(parser, componentValue, *descs.camera,
-                                  &camera) ||
-        !world.add_camera_component(entity, camera)) {
-      return failComponent("instantiate_prefab: failed to add CameraComponent");
-    }
-  }
-
-  core::JsonValue scriptValue{};
-  if (parser.get_object_field(componentsVal, kJsonKeyScriptComponent,
-                              &scriptValue)) {
-    ScriptComponent script{};
-    bool gotPath = false;
-
-    if (scriptValue.type == core::JsonValue::Type::String) {
-      gotPath = parser.copy_string_strict(scriptValue, script.scriptPath,
-                                          sizeof(script.scriptPath));
-    } else if (scriptValue.type == core::JsonValue::Type::Object) {
-      core::JsonValue pathValue{};
-      if (parser.get_object_field(scriptValue, "scriptPath", &pathValue)) {
-        gotPath = parser.copy_string_strict(pathValue, script.scriptPath,
-                                            sizeof(script.scriptPath));
-      }
-    } else {
-      return failComponent("instantiate_prefab: invalid ScriptComponent");
-    }
-
-    if (!gotPath || (script.scriptPath[0] == '\0')) {
-      return failComponent("instantiate_prefab: invalid ScriptComponent path");
-    }
-
-    if (!world.add_script_component(entity, script)) {
-      return failComponent("instantiate_prefab: failed to add ScriptComponent");
-    }
-  }
-
-  core::JsonValue animationValue{};
-  if (parser.get_object_field(componentsVal, kJsonKeyAnimationComponent,
-                              &animationValue)) {
-    AnimationComponent animation{};
-    if ((animationValue.type != core::JsonValue::Type::String) ||
-        !parser.copy_string_strict(animationValue, animation.controllerPath,
-                                   sizeof(animation.controllerPath)) ||
-        (animation.controllerPath[0] == '\0')) {
-      return failComponent("instantiate_prefab: invalid AnimationComponent");
-    }
-
-    if (!world.add_animation_component(entity, animation)) {
-      return failComponent(
-          "instantiate_prefab: failed to add AnimationComponent");
-    }
-  }
+  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PREFAB_READ_ROW)
+#undef ENGINE_PREFAB_READ_ROW
 
   return entity;
 }

@@ -68,56 +68,6 @@ const char *scene_component_key(const char *registryKey) noexcept {
   }
 }
 
-/// Reflection descriptor for a reflected component type (one overload per
-/// type; a new reflected row without one fails to compile).
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const Transform *) noexcept {
-  return *descs.transform;
-}
-/// RigidBody descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const RigidBody *) noexcept {
-  return *descs.rigidBody;
-}
-/// SpringArm descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const SpringArmComponent *) noexcept {
-  return *descs.springArm;
-}
-/// ReflectionProbe descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const ReflectionProbeComponent *) noexcept {
-  return *descs.reflectionProbe;
-}
-/// PointLight descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const PointLightComponent *) noexcept {
-  return *descs.pointLight;
-}
-/// SpotLight descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const SpotLightComponent *) noexcept {
-  return *descs.spotLight;
-}
-/// SceneCapture descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const SceneCaptureComponent *) noexcept {
-  return *descs.sceneCapture;
-}
-/// Camera descriptor selector.
-inline const core::TypeDescriptor &
-component_descriptor(const ReflectedComponentDescriptors &descs,
-                     const CameraComponent *) noexcept {
-  return *descs.camera;
-}
-
 /// Decodes one component value into `out`; the default path is the
 /// reflected codec, with the custom wire shapes (collider payloads, mesh
 /// LODs, light enums, foliage arrays, the bare Name/Script/Animation
