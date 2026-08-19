@@ -32,6 +32,17 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
 /// Validates texture input size before calling stb's int-length APIs.
 bool texture_input_size_fits_stb(std::size_t fileSize,
                                  int *outStbSize) noexcept;
+/// Preflights an encoded image header against the decoded-size budget
+/// (audit #210) without decoding: false for an unreadable header,
+/// dimensions over the 16384 cap, or a decoded byte total over 512 MiB
+/// (HDR decodes to 32-bit floats; forcedChannels overrides the header's
+/// channel count when the decode will force one, 0 keeps the header's).
+/// Logs the rejection with the label and offending numbers.
+/// outDecodedBytes (nullable) receives the projected decoded size.
+bool texture_decode_within_budget(const unsigned char *encodedBytes,
+                                  int encodedByteCount, bool decodeAsHdr,
+                                  int forcedChannels, const char *label,
+                                  std::uint64_t *outDecodedBytes) noexcept;
 /// Releases the texture's device object; the handle becomes stale.
 /// External registrations only release the slot — their device texture is
 /// owned elsewhere.
