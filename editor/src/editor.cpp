@@ -420,6 +420,12 @@ bool editor_handle_quit_request() noexcept {
   if (!editor_session().initialized) {
     return true; // no editor session bound: nothing to protect
   }
+  // #241: window-close during play routes through the Stop flow first, so
+  // on_end_play dispatch and the authored-world restore behave exactly
+  // like the Stop button before the unsaved-change check below runs.
+  if (editor_session().playState != PlayState::Stopped) {
+    stop_play_mode();
+  }
   return request_scene_quit();
 }
 
