@@ -4,7 +4,9 @@
 // reload still commits. Also covers the #115a metatable extension: a
 // swapped metatable's identity, a shared metatable's own mutated field,
 // and a metatable a failed reload added to a previously plain table all
-// roll back; closure upvalues remain a documented, uncovered gap.
+// roll back. #199 extends coverage to closure upvalues: cells restore by
+// lua_upvalueid identity (shared cells once, aliasing preserved), and an
+// upvalue-only table's mutated fields roll back too.
 
 #include <chrono>
 #include <cstdio>
@@ -66,6 +68,30 @@ constexpr const char *kV1 =
     "              tag = 'meta-orig' }\n"
     "Instance = setmetatable({}, ClassMeta)\n"
     "Plain = {}\n"
+    "local sharedCounter = 0\n"
+    "function bump_shared() sharedCounter = sharedCounter + 1 "
+    "return sharedCounter end\n"
+    "function read_shared() return sharedCounter end\n"
+    "local solo = 'orig-solo'\n"
+    "function read_solo() return solo end\n"
+    "function set_solo(v) solo = v end\n"
+    "local hidden = { hp = 100 }\n"
+    "function poke_hidden(v) hidden.hp = v end\n"
+    "function read_hidden() return hidden.hp end\n"
+    "function verify_upvalue_rollback()\n"
+    "  if read_shared() ~= 0 then error('shared counter upvalue not rolled "
+    "back') end\n"
+    "  if read_solo() ~= 'orig-solo' then error('solo upvalue not rolled "
+    "back') end\n"
+    "  if read_hidden() ~= 100 then error('upvalue-only table field not "
+    "rolled back') end\n"
+    "  set_solo('after')\n"
+    "  if read_solo() ~= 'after' then error('upvalue sharing split by "
+    "rollback') end\n"
+    "  bump_shared()\n"
+    "  if read_shared() ~= 1 then error('counter sharing split by "
+    "rollback') end\n"
+    "end\n"
     "function verify_rollback()\n"
     "  if Config.speed ~= 1 then error('nested table field not rolled back') end\n"
     "  if Config.nested.value ~= 1 then error('deep field not rolled back') end\n"
@@ -96,6 +122,9 @@ constexpr const char *kV1 =
     "end\n";
 
 constexpr const char *kFailingV2 =
+    "bump_shared() bump_shared() bump_shared()\n"
+    "set_solo('mutated')\n"
+    "poke_hidden(1)\n"
     "Config.speed = 99\n"
     "Config.nested.value = 999\n"
     "Config.nested.tag = nil\n"
@@ -143,6 +172,8 @@ int main() {
   sc::check_script_reload();
   ctx.check(sc::call_script_function("verify_rollback"),
             "failed reload rolls back nested tables in place");
+  ctx.check(sc::call_script_function("verify_upvalue_rollback"),
+            "failed reload rolls back closure upvalue cells (#199)");
 
   ctx.check(rewrite_script(kGoodV3), "write good v3");
   sc::check_script_reload();
