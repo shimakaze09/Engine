@@ -2,7 +2,8 @@
 // .skel skeletons and .anim clips read through the VFS and validated
 // against the shared binary formats before evaluation ever touches them;
 // each load also routes through the shared cooked-asset staleness check
-// (issue #91) via its owning mesh's .meta.json sidecar.
+// (issue #91) and the cook-generation gate (audit #211) via its owning
+// mesh's sidecars.
 
 #include "engine/runtime/animation.h"
 
@@ -94,23 +95,30 @@ bool owning_mesh_virtual_path(const char *virtualPath, char *outPath,
 }
 
 /// Routes a cooked .skel/.anim load through the shared once-per-asset
-/// staleness check (issue #91) by resolving and reusing the owning mesh's
-/// .meta.json sidecar; stays silent when the virtual prefix isn't mounted
-/// or no owning mesh path can be derived, matching the mesh-only check's
-/// existing silent boundary for sidecar-less assets.
-void warn_if_owning_mesh_stale(const char *virtualPath) noexcept {
+/// staleness check (issue #91) and the cook-generation gate (#211) by
+/// resolving and reusing the owning mesh's sidecars — skeletons and clips
+/// are outputs of the mesh's cook, so its stamp certifies them. Returns
+/// false when that generation is torn or mixed; stays silent and accepts
+/// when the virtual prefix isn't mounted or no owning mesh path can be
+/// derived, matching the mesh-only check's existing silent boundary for
+/// sidecar-less assets.
+bool owning_mesh_generation_ok(const char *virtualPath) noexcept {
   char meshVirtualPath[192] = {};
   if (!owning_mesh_virtual_path(virtualPath, meshVirtualPath,
                                 sizeof(meshVirtualPath))) {
-    return;
+    return true;
   }
 
   char osPath[512] = {};
   if (!core::vfs_resolve_os_path(meshVirtualPath, osPath, sizeof(osPath))) {
-    return;
+    return true;
   }
 
+  if (!content::cooked_asset_generation_ok(osPath)) {
+    return false;
+  }
   content::warn_if_cooked_asset_stale(osPath);
+  return true;
 }
 
 /// True when a track's key span [offset, offset + count*stride) fits the
@@ -131,7 +139,9 @@ bool load_skeleton_asset(const char *virtualPath,
     return false;
   }
 
-  warn_if_owning_mesh_stale(virtualPath);
+  if (!owning_mesh_generation_ok(virtualPath)) {
+    return false;
+  }
 
   void *data = nullptr;
   std::size_t size = 0U;
@@ -192,7 +202,9 @@ bool load_animation_clip_asset(const char *virtualPath,
     return false;
   }
 
-  warn_if_owning_mesh_stale(virtualPath);
+  if (!owning_mesh_generation_ok(virtualPath)) {
+    return false;
+  }
 
   void *data = nullptr;
   std::size_t size = 0U;

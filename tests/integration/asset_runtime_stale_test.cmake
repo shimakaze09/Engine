@@ -1,7 +1,8 @@
 # Verifies the runtime mesh loader surfaces cooked-asset staleness
-# (issue #81): a cooked mesh whose source changed after the last cook must
-# log a once-per-asset warning through the production load path, while a
-# fresh cook and a sidecar-less mesh stay silent.
+# (issue #81) and rejects torn generations (audit #211): a cooked mesh
+# whose source changed after the last cook logs a once-per-asset warning
+# through the production load path, a stamped-but-missing sidecar rejects
+# the load, and a fresh cook or never-certified mesh stays silent.
 
 if(NOT DEFINED ASSET_PACKER OR NOT DEFINED STALE_HOST OR NOT DEFINED SRC_GLTF
    OR NOT DEFINED SRC_BIN OR NOT DEFINED WORKDIR)
@@ -63,8 +64,23 @@ if(NOT stale_count EQUAL 1)
         "expected exactly one staleness warning, got ${stale_count}")
 endif()
 
-# Boundary: a mesh without a metadata sidecar loads silently.
+# Boundary (#211): removing a stamped sidecar while the cook stamp still
+# certifies it is a torn generation, and the load must now be rejected.
 file(REMOVE "${output}.meta.json")
+execute_process(
+    COMMAND "${STALE_HOST}" "${output}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE torn_output
+    ERROR_VARIABLE torn_error
+)
+if(result EQUAL 0)
+    message(FATAL_ERROR
+        "runtime accepted a torn cook generation (stamped sidecar missing)")
+endif()
+
+# Boundary: a mesh without any sidecars or cook stamp (never-certified
+# content) loads silently.
+file(REMOVE "${output}.cookstamp")
 execute_process(
     COMMAND "${STALE_HOST}" "${output}"
     RESULT_VARIABLE result

@@ -163,6 +163,12 @@ void build_thumbnail_path(const char *outputPath, char *thumbPath,
 /// ".../foo.checksum"), shared so the cook manifest can list it.
 void build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
                                    std::size_t size) noexcept;
+/// Deletes a cooked asset's thumbnail and checksum sidecar (paths built by
+/// the helpers below) so a failed regeneration cannot leave a previous
+/// generation's thumbnail to be certified into the fresh cook stamp
+/// (audit #211). Absent files count as retired; false only when a present
+/// file cannot be removed.
+bool retire_stale_thumbnail(const char *thumbPath, const char *checksumPath);
 /// Renders/copies a texture asset thumbnail; skipped when up to date.
 bool generate_texture_thumbnail(const char *inputPath,
                                 const char *outputPath) noexcept;

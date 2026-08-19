@@ -212,6 +212,11 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
     *outSizeBytes = 0ULL;
   }
 
+  // #211: a torn or mixed cook generation is rejected, not loaded; the
+  // staleness warning only applies to an accepted generation.
+  if (!content::cooked_asset_generation_ok(path)) {
+    return false;
+  }
   content::warn_if_cooked_asset_stale(path);
 
   FILE *file = nullptr;

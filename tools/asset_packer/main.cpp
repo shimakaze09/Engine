@@ -548,18 +548,24 @@ int main(int argc, char **argv) {
     cookedOutputs.push_back(hullPath);
   }
 
+  char thumbPath[512] = {};
+  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
+  char thumbChecksumPath[512] = {};
+  build_thumbnail_checksum_path(thumbPath, thumbChecksumPath,
+                                sizeof(thumbChecksumPath));
   if (!generate_mesh_thumbnail(inputPath, outputPath, primitiveData,
                                importSettingsHash)) {
     std::fprintf(stderr, "warning: mesh thumbnail generation failed: %s\n",
                  outputPath);
+    // #211: a failed regeneration must not leave the previous generation's
+    // thumbnail behind for the fresh stamp below to certify as current; a
+    // stale file that cannot be retired blocks the stamp entirely.
+    if (!retire_stale_thumbnail(thumbPath, thumbChecksumPath)) {
+      return 20;
+    }
   }
-  char thumbPath[512] = {};
-  build_thumbnail_path(outputPath, thumbPath, sizeof(thumbPath));
   if (file_exists(thumbPath)) {
     cookedOutputs.emplace_back(thumbPath);
-    char thumbChecksumPath[512] = {};
-    build_thumbnail_checksum_path(thumbPath, thumbChecksumPath,
-                                  sizeof(thumbChecksumPath));
     if (file_exists(thumbChecksumPath)) {
       cookedOutputs.emplace_back(thumbChecksumPath);
     }

@@ -77,9 +77,24 @@ if(NOT stale_count EQUAL 1)
         "expected exactly one staleness warning, got ${stale_count}")
 endif()
 
-# Boundary: no owning mesh sidecar (builtin/procedural skeletal assets)
-# loads silently.
+# Boundary (#211): removing the stamped mesh sidecar while the cook stamp
+# still certifies it is a torn generation, and the skeletal loads that
+# route through the owning mesh must now be rejected.
 file(REMOVE "${output}.meta.json")
+execute_process(
+    COMMAND "${STALE_HOST}" "${WORKDIR}" "character.skel" "character.walk.anim"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE torn_output
+    ERROR_VARIABLE torn_error
+)
+if(result EQUAL 0)
+    message(FATAL_ERROR
+        "skeletal load accepted a torn cook generation (stamped sidecar missing)")
+endif()
+
+# Boundary: no owning mesh sidecars or cook stamp (builtin/procedural
+# skeletal assets, never-certified content) loads silently.
+file(REMOVE "${output}.cookstamp")
 execute_process(
     COMMAND "${STALE_HOST}" "${WORKDIR}" "character.skel" "character.walk.anim"
     RESULT_VARIABLE result
