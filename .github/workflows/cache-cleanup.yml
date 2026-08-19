@@ -1,0 +1,32 @@
+# Weekly Actions-cache pruning: the _deps caches accumulate one ~600 MB
+# entry per CMakeLists.txt hash generation and per branch scope, which
+# breached the repository's 10 GB cache quota (2026-08-19: 17 entries,
+# 10.4 GB) and caused LRU thrash of the live caches. Anything not
+# accessed within the window is a dead generation; active keys are
+# re-saved by the next CI run at worst.
+name: Cache cleanup
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete caches not accessed in 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api "repos/${{ github.repository }}/actions/caches?per_page=100" \
+            --jq ".actions_caches[] | select(.last_accessed_at < \"$cutoff\") | .id" |
+          while read -r id; do
+            echo "deleting stale cache $id"
+            gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id"
+          done
