@@ -79,8 +79,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                        ? backend.shadowState.resolutions[c]
                                        : shadow_cascade_resolution(c);
       math::Mat4 lightVP = compute_cascade_matrix(
-          viewMat, projMat, lightDir, cascadeSplits.distances[c],
-          cascadeSplits.distances[c + 1], shadowResolution);
+          viewMat, projMat, nearP, farP, lightDir,
+          cascadeSplits.distances[c], cascadeSplits.distances[c + 1],
+          shadowResolution);
       lightVP = snap_to_texel(lightVP, shadowResolution);
 
       backend.shadowState.cascades[c].lightViewProjection = lightVP;

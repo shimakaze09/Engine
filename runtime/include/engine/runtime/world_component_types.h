@@ -194,10 +194,11 @@ enum class CameraProjection : std::uint32_t { Perspective = 0U,
 /// World's CameraManager priority stack every frame, so an authored camera
 /// participates in the same priority/blend/shake model Lua-pushed and
 /// spring-arm cameras already use -- it is not a second camera stack.
-/// `projection`/`orthographicSize` round-trip through the editor and
-/// scene/prefab files, but the production render path still projects every
-/// camera as perspective (using fovRadians regardless of `projection`);
-/// true orthographic rendering is open follow-up scope, not silently faked.
+/// `projection` selects the render path's real projection (#221): the
+/// flush, render-prep culling, cascaded shadows, and lighting all honor
+/// Orthographic (half-height `orthographicSize`), while the sky pass keeps
+/// perspective directional sampling — parallel rays would all sample one
+/// sky direction.
 /// When the owning entity also carries a SpringArmComponent, the spring arm
 /// supplies position/target (its collision-aware boom) and this component
 /// only contributes fovRadians/near/far/priority/blendSpeed/active -- the

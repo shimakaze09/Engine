@@ -70,6 +70,7 @@ struct BackendState final {
   ShaderParam pbrMetallicLocation{};
   ShaderParam pbrTimeLocation{};
   ShaderParam pbrCameraPosLocation{};
+  ShaderParam pbrCameraForwardOrthoLocation{};
   ShaderParam pbrIblEnabledLoc{};
   ShaderParam pbrIrradianceMapLoc{};
   ShaderParam pbrPrefilteredMapLoc{};
@@ -276,6 +277,7 @@ struct BackendState final {
   ShaderParam dlDirLightDirLoc{};
   ShaderParam dlDirLightColorLoc{};
   ShaderParam dlCameraPosLoc{};
+  ShaderParam dlCameraForwardOrthoLoc{};
   ShaderParam dlScreenSizeLoc{};
   ShaderParam dlFogModeLoc{};
   ShaderParam dlFogStartLoc{};

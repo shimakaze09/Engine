@@ -21,6 +21,9 @@ uniform float u_metallic;
 uniform float u_opacity;
 uniform float u_time;
 uniform vec3 u_cameraPos;
+// xyz = normalized camera forward, w = 1 when orthographic (#221): ortho
+// rays are parallel, so the per-pixel eye vector degenerates to -forward.
+uniform vec4 u_cameraForwardOrtho;
 uniform int u_hasAlbedoTexture;
 uniform sampler2D u_albedoMap;
 
@@ -397,7 +400,8 @@ float combine_fog_factors(float distanceFog, float heightFog) {
 void main() {
   vec2 uv = vTexCoord * u_uvTiling + u_uvOffset;
   vec3 N = normalize(vNormal);
-  vec3 V = normalize(u_cameraPos - vWorldPos);
+  vec3 V = mix(normalize(u_cameraPos - vWorldPos), -u_cameraForwardOrtho.xyz,
+               u_cameraForwardOrtho.w);
 
   vec3 albedo = u_albedo;
   if (u_hasAlbedoTexture != 0) {

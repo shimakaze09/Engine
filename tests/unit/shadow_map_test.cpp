@@ -85,7 +85,7 @@ int verify_cascade_matrix_valid() {
   const engine::math::Vec3 lightDir(0.0F, -1.0F, -0.5F);
 
   const auto matrix = engine::renderer::compute_cascade_matrix(
-      viewMat, projMat, lightDir, 0.1F, 25.0F,
+      viewMat, projMat, 0.1F, 100.0F, lightDir, 0.1F, 25.0F,
       engine::renderer::kShadowMapResolution);
 
   // The matrix should not be identity (that would mean computation failed).
@@ -123,7 +123,7 @@ int verify_snap_to_texel_stable() {
   const engine::math::Vec3 lightDir(0.0F, -1.0F, -0.5F);
 
   const auto matrix = engine::renderer::compute_cascade_matrix(
-      viewMat, projMat, lightDir, 0.1F, 25.0F,
+      viewMat, projMat, 0.1F, 100.0F, lightDir, 0.1F, 25.0F,
       engine::renderer::kShadowMapResolution);
 
   const auto snapped = engine::renderer::snap_to_texel(matrix, 1024);
@@ -163,10 +163,10 @@ int verify_cascade_matrix_stable_for_sub_texel_motion() {
       engine::math::Vec3(0.0F, 1.0F, 0.0F));
 
   const auto matrixA = engine::renderer::compute_cascade_matrix(
-      viewA, projMat, lightDir, 0.1F, 25.0F,
+      viewA, projMat, 0.1F, 100.0F, lightDir, 0.1F, 25.0F,
       engine::renderer::kShadowMapResolution);
   const auto matrixB = engine::renderer::compute_cascade_matrix(
-      viewB, projMat, lightDir, 0.1F, 25.0F,
+      viewB, projMat, 0.1F, 100.0F, lightDir, 0.1F, 25.0F,
       engine::renderer::kShadowMapResolution);
 
   for (int c = 0; c < 4; ++c) {

@@ -177,6 +177,8 @@ bool resolve_pbr_program_state(BackendState &backend,
   backend.pbrTimeLocation = dev->shader_param(pbrProgram, "u_time");
   backend.pbrCameraPosLocation =
       required_param(&ok, dev, pbrProgram, "u_cameraPos");
+  backend.pbrCameraForwardOrthoLocation =
+      dev->shader_param(pbrProgram, "u_cameraForwardOrtho");
   backend.pbrHasAlbedoTextureLocation =
       dev->shader_param(pbrProgram, "u_hasAlbedoTexture");
   backend.pbrAlbedoMapLocation =

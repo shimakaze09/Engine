@@ -148,8 +148,8 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
 
     {"engine::runtime::CameraComponent", "projection", "Projection",
      "Camera", "Perspective renders with field-of-view depth; Orthographic "
-     "is authored and saved but the renderer still projects it as "
-     "Perspective (issue #161 follow-up).", nullptr, 0.0F, 0.0F, 0.0F,
+     "renders parallel-projected using Ortho Size as the half-height "
+     "(the sky keeps perspective directional sampling).", nullptr, 0.0F, 0.0F, 0.0F,
      InspectorWidget::Enum, false, false, kCameraProjectionLabels, 2U},
     {"engine::runtime::CameraComponent", "fovRadians", "Field of View",
      "Camera", nullptr, "deg", 1.0F, 1.0F, 179.0F,

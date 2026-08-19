@@ -218,4 +218,11 @@ void upload_skinned_gbuffer_uniforms(
     const float *normalMatrix, DeviceTextureHandle *inOutBoundAlbedoTex,
     DeviceTextureHandle inOutBoundMaterialTex[4]) noexcept;
 
+/// #221: the sky is direction-only; an orthographic camera's parallel rays
+/// would all sample one sky direction, so the sky pass keeps perspective
+/// directional sampling (the camera's fov lens) while geometry renders
+/// orthographically.
+math::Mat4 sky_projection_matrix(const CameraState &camera,
+                                 float aspect) noexcept;
+
 } // namespace engine::renderer

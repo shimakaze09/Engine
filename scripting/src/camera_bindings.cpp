@@ -257,13 +257,29 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     camera.active = (lua_toboolean(state, 7) != 0);
   }
+  // Optional projection kind + orthographic half-height (#221); an unknown
+  // kind string is rejected rather than silently treated as perspective.
+  if (lua_isstring(state, 8)) {
+    const char *kind = lua_tostring(state, 8);
+    if (std::strcmp(kind, "orthographic") == 0) {
+      camera.projection =
+          static_cast<std::uint32_t>(runtime::CameraProjection::Orthographic);
+    } else if (std::strcmp(kind, "perspective") != 0) {
+      lua_pushboolean(state, 0);
+      return 1;
+    }
+  }
+  if (lua_isnumber(state, 9)) {
+    camera.orthographicSize = static_cast<float>(lua_tonumber(state, 9));
+  }
   const bool ok = runtime_binding().world->add_camera_component(entity, camera);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Engine.get_camera_component(entityIndex) -> fovRadians, nearPlane,
-// farPlane, priority, blendSpeed, active | nil
+// farPlane, priority, blendSpeed, active, projection, orthographicSize | nil
+// (projection is "perspective" or "orthographic", #221)
 int lua_engine_get_camera_component(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
@@ -285,7 +301,14 @@ int lua_engine_get_camera_component(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<double>(camera.priority));
   lua_pushnumber(state, static_cast<double>(camera.blendSpeed));
   lua_pushboolean(state, camera.active ? 1 : 0);
-  return 6;
+  lua_pushstring(state,
+                 (camera.projection ==
+                  static_cast<std::uint32_t>(
+                      runtime::CameraProjection::Orthographic))
+                     ? "orthographic"
+                     : "perspective");
+  lua_pushnumber(state, static_cast<double>(camera.orthographicSize));
+  return 8;
 }
 
 // Engine.remove_camera_component(entityIndex) -> bool

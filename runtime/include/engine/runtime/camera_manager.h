@@ -15,9 +15,11 @@ struct CameraEntry final {
   math::Vec3 position = math::Vec3(0.0F, 2.0F, 5.0F);
   math::Vec3 target = math::Vec3(0.0F, 0.0F, 0.0F);
   math::Vec3 up = math::Vec3(0.0F, 1.0F, 0.0F);
-  float fovRadians = 1.0471975512F; // 60 degrees
+  float fovRadians = 1.0471975512F; // 60 degrees; used when Perspective
   float nearPlane = 0.1F;
   float farPlane = 100.0F;
+  std::uint32_t projection = 0U;    ///< CameraProjection encoding (0=persp).
+  float orthographicSize = 5.0F;    ///< Half-height, world units.
   float priority = 0.0F;
   float blendSpeed = 5.0F; ///< How fast blend weight ramps from 0→1.
   float blendWeight = 0.0F;
@@ -69,6 +71,11 @@ public:
                 math::Vec3 *outUp, float *outFov, float *outNear,
                 float *outFar) noexcept;
 
+  /// Evaluate into one struct, including the projection kind and ortho size
+  /// (#221); the out-param overload above delegates here and drops the lens
+  /// extras for its legacy callers.
+  void evaluate(float dt, CameraEntry *outCamera) noexcept;
+
   /// Clear all cameras and shakes.
   void clear() noexcept;
 
@@ -90,6 +97,8 @@ private:
   float m_currentFov = 1.0471975512F;
   float m_currentNear = 0.1F;
   float m_currentFar = 100.0F;
+  float m_currentOrthoSize = 5.0F;
+  std::uint32_t m_currentProjection = 0U;
   bool m_hasEvaluated = false;
 };
 

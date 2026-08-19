@@ -60,6 +60,9 @@ SceneCaptureRequest normalize_scene_capture_request(
   if (normalized.camera.farPlane <= normalized.camera.nearPlane) {
     normalized.camera.farPlane = normalized.camera.nearPlane + 100.0F;
   }
+  if (normalized.camera.orthographicSize <= 0.0F) {
+    normalized.camera.orthographicSize = CameraState{}.orthographicSize;
+  }
   return normalized;
 }
 

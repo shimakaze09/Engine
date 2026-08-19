@@ -59,7 +59,6 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
   const DistanceFogSettings &fogSettings = ctx.fogSettings;
   const HeightFogSettings &heightFogSettings = ctx.heightFogSettings;
   const math::Mat4 &viewMat = ctx.viewMat;
-  const math::Mat4 &projMat = ctx.projMat;
   const math::Mat4 &viewProjection = ctx.viewProjection;
   const bool iblAvailable = ctx.iblAvailable;
   const DeviceTextureHandle envSkyboxTexture = ctx.envSkyboxTexture;
@@ -86,6 +85,21 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     if (backend.pbrCameraPosLocation.valid()) {
       dev->set_param_vec3(backend.pbrCameraPosLocation,
                             &renderer_context().activeCamera.position.x);
+    }
+    if (backend.pbrCameraForwardOrthoLocation.valid()) {
+      // xyz = normalized view direction, w = 1 when orthographic: the
+      // shaders switch the view vector to the constant camera forward
+      // under ortho (#221) — parallel rays have no per-pixel eye vector.
+      const CameraState &activeCam = renderer_context().activeCamera;
+      const math::Vec3 fwd = math::normalize(
+          math::sub(activeCam.target, activeCam.position));
+      const float forwardOrtho[4] = {
+          fwd.x, fwd.y, fwd.z,
+          (activeCam.projection == CameraState::kProjectionOrthographic)
+              ? 1.0F
+              : 0.0F};
+      dev->set_param_vec4(backend.pbrCameraForwardOrthoLocation,
+                          forwardOrtho);
     }
     if (backend.pbrViewLocation.valid()) {
       dev->set_param_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
@@ -258,18 +272,24 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
 
     const SkyModel skyModel = selected_sky_model();
     const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
+    const math::Mat4 skyProj = sky_projection_matrix(
+        renderer_context().activeCamera,
+        (drawableHeight > 0)
+            ? (static_cast<float>(drawableWidth) /
+               static_cast<float>(drawableHeight))
+            : 1.0F);
     if (skyboxTexture != kInvalidDeviceTexture) {
       dev->bind_render_target(sceneTarget);
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+      draw_skybox(backend, dev, viewMat, skyProj, skyboxTexture, frameStats);
       dev->bind_program(backend.pbrProgram);
     } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
-      draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      draw_hosek_sky(backend, dev, viewMat, skyProj, lights, frameStats);
       dev->bind_program(backend.pbrProgram);
     } else if (((skyModel == SkyModel::Preetham) ||
                 (skyModel == SkyModel::Hosek)) &&
                backend.preethamSkyAvailable) {
-      draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
+      draw_preetham_sky(backend, dev, viewMat, skyProj, lights, frameStats);
       dev->bind_program(backend.pbrProgram);
     }
 

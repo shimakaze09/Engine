@@ -679,6 +679,20 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_param_vec3(backend.dlCameraPosLoc,
                               &renderer_context().activeCamera.position.x);
       }
+      if (backend.dlCameraForwardOrthoLoc.valid()) {
+        // xyz = normalized view direction, w = 1 when orthographic (#221):
+        // the shader switches its view vector to the constant camera
+        // forward under ortho — parallel rays have no per-pixel eye vector.
+        const CameraState &activeCam = renderer_context().activeCamera;
+        const math::Vec3 fwd = math::normalize(
+            math::sub(activeCam.target, activeCam.position));
+        const float forwardOrtho[4] = {
+            fwd.x, fwd.y, fwd.z,
+            (activeCam.projection == CameraState::kProjectionOrthographic)
+                ? 1.0F
+                : 0.0F};
+        dev->set_param_vec4(backend.dlCameraForwardOrthoLoc, forwardOrtho);
+      }
       if (backend.dlScreenSizeLoc.valid()) {
         const float screenSize[2] = {static_cast<float>(drawableWidth),
                                      static_cast<float>(drawableHeight)};
@@ -721,17 +735,23 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
     const SkyModel skyModel = selected_sky_model();
     const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
+    const math::Mat4 skyProj = sky_projection_matrix(
+        renderer_context().activeCamera,
+        (drawableHeight > 0)
+            ? (static_cast<float>(drawableWidth) /
+               static_cast<float>(drawableHeight))
+            : 1.0F);
     if (skyboxTexture != kInvalidDeviceTexture) {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       if (ensureSceneDepthHasOpaque()) {
-        draw_skybox(backend, dev, viewMat, projMat, skyboxTexture, frameStats);
+        draw_skybox(backend, dev, viewMat, skyProj, skyboxTexture, frameStats);
       }
     } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       if (ensureSceneDepthHasOpaque()) {
-        draw_hosek_sky(backend, dev, viewMat, projMat, lights, frameStats);
+        draw_hosek_sky(backend, dev, viewMat, skyProj, lights, frameStats);
       }
     } else if (((skyModel == SkyModel::Preetham) ||
                 (skyModel == SkyModel::Hosek)) &&
@@ -739,7 +759,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       if (ensureSceneDepthHasOpaque()) {
-        draw_preetham_sky(backend, dev, viewMat, projMat, lights, frameStats);
+        draw_preetham_sky(backend, dev, viewMat, skyProj, lights, frameStats);
       }
     }
 
