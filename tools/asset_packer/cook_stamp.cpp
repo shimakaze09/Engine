@@ -552,6 +552,26 @@ bool remove_stale_outputs(const char *outputPath,
   return true;
 }
 
+bool retire_stale_thumbnail(const char *thumbPath, const char *checksumPath) {
+  bool ok = true;
+  const char *paths[2] = {thumbPath, checksumPath};
+  for (const char *path : paths) {
+    if ((path == nullptr) || (path[0] == '\0')) {
+      continue;
+    }
+    std::error_code removeError{};
+    static_cast<void>(
+        std::filesystem::remove(std::filesystem::path(path), removeError));
+    if (removeError) {
+      std::fprintf(stderr,
+                   "error: failed to retire stale thumbnail output: %s\n",
+                   path);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
 namespace {
 
 /// Filename component of a manifest or disk path (either separator).
