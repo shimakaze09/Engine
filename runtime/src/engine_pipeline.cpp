@@ -397,6 +397,16 @@ void process_input_events_with_editor() noexcept {
                               (bridge->handle_quit_request == nullptr) ||
                               bridge->handle_quit_request();
       if (proceedNow) {
+        // #241 (owner decision 2026-08-19): a quit that ends a live play
+        // session dispatches on_end_play exactly like editor Stop and
+        // scene transitions. The editor's quit hook has already routed
+        // through the Stop flow (play state reads Stopped here, and
+        // stage_play_transitions dispatches later this frame); only a
+        // still-playing session — standalone runtime, or a bridge with no
+        // stop routing — takes this direct dispatch.
+        if (query_editor_play_state() == LoopPlayState::Playing) {
+          scripting::dispatch_entity_scripts_end();
+        }
         core::request_platform_quit();
       }
       continue;
