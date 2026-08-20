@@ -788,32 +788,40 @@ private:
       core::SparseSet<Entity, MeshComponent, kMaxEntities, kMaxMeshComponents>;
   using NameComponentSet =
       core::SparseSet<Entity, NameComponent, kMaxEntities, kMaxNameComponents>;
-  using LightComponentSet = core::SparseSet<Entity, LightComponent,
-                                            kMaxEntities, kMaxLightComponents>;
+  // #167: pools whose dense capacity sits far below kMaxEntities use the
+  // compact hash-indexed layout so each stops paying a 256 KB
+  // entity-indexed sparse table; ubiquitous pools above keep the O(1)
+  // sparse array. Dense iteration order is identical across both layouts.
+  using LightComponentSet =
+      core::CompactSparseSet<Entity, LightComponent, kMaxEntities,
+                             kMaxLightComponents>;
   using ScriptComponentSet =
       core::SparseSet<Entity, ScriptComponent, kMaxEntities,
                       kMaxScriptComponents>;
-  using SpringArmSet = core::SparseSet<Entity, SpringArmComponent, kMaxEntities,
-                                       kMaxSpringArmComponents>;
-  using PointLightSet = core::SparseSet<Entity, PointLightComponent,
-                                        kMaxEntities, kMaxPointLightComponents>;
-  using SpotLightSet = core::SparseSet<Entity, SpotLightComponent, kMaxEntities,
-                                       kMaxSpotLightComponents>;
+  using SpringArmSet =
+      core::CompactSparseSet<Entity, SpringArmComponent, kMaxEntities,
+                             kMaxSpringArmComponents>;
+  using PointLightSet =
+      core::CompactSparseSet<Entity, PointLightComponent, kMaxEntities,
+                             kMaxPointLightComponents>;
+  using SpotLightSet =
+      core::CompactSparseSet<Entity, SpotLightComponent, kMaxEntities,
+                             kMaxSpotLightComponents>;
   using ReflectionProbeSet =
-      core::SparseSet<Entity, ReflectionProbeComponent, kMaxEntities,
-                      kMaxReflectionProbeComponents>;
+      core::CompactSparseSet<Entity, ReflectionProbeComponent, kMaxEntities,
+                             kMaxReflectionProbeComponents>;
   using SceneCaptureSet =
-      core::SparseSet<Entity, SceneCaptureComponent, kMaxEntities,
-                      kMaxSceneCaptureComponents>;
+      core::CompactSparseSet<Entity, SceneCaptureComponent, kMaxEntities,
+                             kMaxSceneCaptureComponents>;
   using FoliagePatchSet =
-      core::SparseSet<Entity, FoliagePatchComponent, kMaxEntities,
-                      kMaxFoliagePatchComponents>;
+      core::CompactSparseSet<Entity, FoliagePatchComponent, kMaxEntities,
+                             kMaxFoliagePatchComponents>;
   using AnimationComponentSet =
-      core::SparseSet<Entity, AnimationComponent, kMaxEntities,
-                      kMaxAnimationComponents>;
+      core::CompactSparseSet<Entity, AnimationComponent, kMaxEntities,
+                             kMaxAnimationComponents>;
   using CameraComponentSet =
-      core::SparseSet<Entity, CameraComponent, kMaxEntities,
-                      kMaxCameraComponents>;
+      core::CompactSparseSet<Entity, CameraComponent, kMaxEntities,
+                             kMaxCameraComponents>;
 
   /// True for every persistent component type plus the derived
   /// WorldTransform; membership comes from PersistentComponentTypes so the
