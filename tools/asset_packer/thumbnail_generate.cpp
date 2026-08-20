@@ -128,7 +128,27 @@ bool generate_texture_thumbnail(const char *inputPath,
     }
   }
 
+  // #210: budget the decode from the header before stb allocates the full
+  // image — file size is no proxy for decoded size. 16384 matches the
+  // runtime loader's dimension cap; 512 MiB bounds the RGBA working copy.
+  constexpr int kMaxSourceDimension = 16384;
+  constexpr std::uint64_t kMaxSourceDecodedBytes = 512ULL << 20U;
   int srcW = 0, srcH = 0, srcChannels = 0;
+  if ((stbi_info(inputPath, &srcW, &srcH, &srcChannels) == 0) || (srcW <= 0) ||
+      (srcH <= 0)) {
+    // Unreadable headers keep the established corrupt-input contract.
+    std::fprintf(stderr, "thumbnail: failed to load %s\n", inputPath);
+    return false;
+  }
+  if ((srcW > kMaxSourceDimension) || (srcH > kMaxSourceDimension) ||
+      ((static_cast<std::uint64_t>(srcW) * static_cast<std::uint64_t>(srcH) *
+        4ULL) > kMaxSourceDecodedBytes)) {
+    std::fprintf(stderr,
+                 "thumbnail: source exceeds the decode budget (%dx%d): %s\n",
+                 srcW, srcH, inputPath);
+    return false;
+  }
+
   stbi_uc *srcPixels = stbi_load(inputPath, &srcW, &srcH, &srcChannels, 4);
   if (srcPixels == nullptr) {
     std::fprintf(stderr, "thumbnail: failed to load %s\n", inputPath);

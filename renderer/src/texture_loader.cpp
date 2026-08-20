@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -172,6 +173,82 @@ bool texture_input_size_fits_stb(std::size_t fileSize,
   }
 
   *outStbSize = static_cast<int>(fileSize);
+  return true;
+}
+
+namespace {
+
+// Decoded-image budgets (audit #210), enforced from the encoded header
+// before any full decode — file size is no proxy for decoded size, since
+// a compressible or hostile header can expand far beyond its bytes on
+// disk. 16384 matches the common GL max texture size; 512 MiB bounds one
+// decoded image (a 16k x 8k RGBA8, or an 8k x 4k RGBA32F HDR); the
+// equirect conversion's transient total is bounded by construction at
+// this cap plus the kMaxCubemapFaceSize six-face footprint (~1.5 GiB).
+constexpr int kMaxDecodedTextureDimension = 16384;
+constexpr std::uint64_t kMaxDecodedTextureBytes = 512ULL << 20U;
+
+/// Logs one decode-budget rejection with the offending numbers.
+void log_decode_budget_rejection(const char *label, const char *reason,
+                                 long long a, long long b) noexcept {
+  char message[640] = {};
+  std::snprintf(message, sizeof(message),
+                "texture exceeds the decode budget (%s: %lld vs %lld): %s",
+                reason, a, b, (label != nullptr) ? label : "(null)");
+  core::log_message(core::LogLevel::Error, "renderer", message);
+}
+
+} // namespace
+
+bool texture_decode_within_budget(const unsigned char *encodedBytes,
+                                  int encodedByteCount, bool decodeAsHdr,
+                                  int forcedChannels, const char *label,
+                                  std::uint64_t *outDecodedBytes) noexcept {
+  if (outDecodedBytes != nullptr) {
+    *outDecodedBytes = 0ULL;
+  }
+
+  int width = 0;
+  int height = 0;
+  int channels = 0;
+  if ((encodedBytes == nullptr) || (encodedByteCount <= 0) ||
+      (stbi_info_from_memory(encodedBytes, encodedByteCount, &width, &height,
+                             &channels) == 0) ||
+      (width <= 0) || (height <= 0) || (channels <= 0)) {
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "texture exceeds the decode budget (unreadable header): %s",
+                  (label != nullptr) ? label : "(null)");
+    core::log_message(core::LogLevel::Error, "renderer", message);
+    return false;
+  }
+
+  if ((width > kMaxDecodedTextureDimension) ||
+      (height > kMaxDecodedTextureDimension)) {
+    log_decode_budget_rejection(
+        label, "dimension", (width > height) ? width : height,
+        kMaxDecodedTextureDimension);
+    return false;
+  }
+
+  // Dimensions are capped above, so the 64-bit products cannot overflow.
+  const int decodedChannels = (forcedChannels > 0) ? forcedChannels : channels;
+  const std::uint64_t texels =
+      static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+  const std::uint64_t bytesPerTexel =
+      static_cast<std::uint64_t>(decodedChannels) *
+      (decodeAsHdr ? sizeof(float) : sizeof(unsigned char));
+  const std::uint64_t decodedBytes = texels * bytesPerTexel;
+  if (decodedBytes > kMaxDecodedTextureBytes) {
+    log_decode_budget_rejection(label, "decoded bytes",
+                                static_cast<long long>(decodedBytes),
+                                static_cast<long long>(kMaxDecodedTextureBytes));
+    return false;
+  }
+
+  if (outDecodedBytes != nullptr) {
+    *outDecodedBytes = decodedBytes;
+  }
   return true;
 }
 
@@ -404,7 +481,16 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     return kInvalidTextureHandle;
   }
 
-  if (stbi_is_hdr_from_memory(fileBytes, stbFileSize) != 0) {
+  // #210: reject over-budget decodes from the header, before stb
+  // allocates the full decoded image.
+  const bool decodeAsHdr = stbi_is_hdr_from_memory(fileBytes, stbFileSize) != 0;
+  if (!texture_decode_within_budget(fileBytes, stbFileSize, decodeAsHdr, 0,
+                                    virtualPath, nullptr)) {
+    core::vfs_free(fileData);
+    return kInvalidTextureHandle;
+  }
+
+  if (decodeAsHdr) {
       float *pixels = stbi_loadf_from_memory(
         fileBytes, stbFileSize, &width, &height, &channels, 0);
     core::vfs_free(fileData);
@@ -520,6 +606,18 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
     core::vfs_free(fileData);
     core::log_message(core::LogLevel::Error, "renderer",
                       "equirect cubemap import requires an HDR texture");
+    return kInvalidTextureHandle;
+  }
+
+  // #210: the conversion holds the decoded source and six faces at once.
+  // The source decode is budgeted here from the header; faceSize is
+  // already capped at kMaxCubemapFaceSize above, so the transient total is
+  // bounded by construction at kMaxDecodedTextureBytes source + ~1.5 GiB
+  // faces — no separate total check can trip while both caps hold.
+  if (!texture_decode_within_budget(fileBytes, stbFileSize, true,
+                                    kHdrCubemapChannels, virtualPath,
+                                    nullptr)) {
+    core::vfs_free(fileData);
     return kInvalidTextureHandle;
   }
 
