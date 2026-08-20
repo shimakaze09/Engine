@@ -4,12 +4,52 @@
 #pragma once
 
 #include "engine/math/vec3.h"
+#include "engine/physics/collider.h"
 #include "engine/physics/physics_context.h"
 
+#include <array>
 #include <algorithm>
 #include <cmath>
 
 namespace engine::physics {
+
+// Broadphase spatial-hash shape shared by the resolve scratch below and
+// physics.cpp's grid passes (moved from physics.cpp for #170).
+constexpr std::size_t kSpatialHashBuckets = 4096U;
+
+// Linked-list node for the broadphase spatial hash grid.
+struct SpatialNode final {
+  std::uint32_t colliderIdx;
+  std::uint32_t next;
+};
+
+// Max spatial-hash entries: each collider may touch up to 8 cells (the
+// corners of its AABB).
+constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
+
+// Scratch buffers for resolve_collisions (~19 MB). Heap-backed and owned
+// by the PhysicsContext (#170) — never a plain thread_local array: ~19 MB
+// of static TLS is carved out of every new thread's stack allocation on
+// glibc, which starves threads created with small explicit stacks (Mesa's
+// GL driver workers overflowed and crashed the editor on startup exactly
+// that way), and per-thread heap ownership retained one block in every
+// worker that ever ran the resolve job.
+struct ResolveScratch final {
+  std::array<ColliderWorldGeometry, kMaxColliders> geometries{};
+  std::array<Entity, kMaxColliders> bodyOwners{};
+  std::array<engine::math::Vec3, kMaxColliders> bodyCenters{};
+  std::array<bool, kMaxColliders> geometryValid{};
+  std::array<float, kMaxColliders> posX{};
+  std::array<float, kMaxColliders> posY{};
+  std::array<float, kMaxColliders> posZ{};
+  std::array<std::uint32_t, kSpatialHashBuckets> buckets{};
+  std::array<SpatialNode, kMaxNodes> nodes{};
+  std::array<float, kMaxColliders> expandX{};
+  std::array<float, kMaxColliders> expandY{};
+  std::array<float, kMaxColliders> expandZ{};
+  std::array<std::uint32_t, kMaxColliders> overflowList{};
+  std::array<bool, kMaxColliders> isOverflow{};
+};
 
 /// Bodies below this energy for kSleepFramesRequired frames go to sleep;
 /// contacts wake a sleeper only when the other body exceeds it.

@@ -36,7 +36,6 @@ namespace {
 
 constexpr float kStaticInverseMass = 0.0F;
 constexpr float kDefaultCellSize = 4.0F;
-constexpr std::size_t kSpatialHashBuckets = 4096U;
 constexpr std::uint32_t kSpatialHashEmpty = 0xFFFFFFFFU;
 
 constexpr std::uint8_t kSleepFramesRequired = 60U;
@@ -61,14 +60,9 @@ void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
 }
 
 // Linked-list node for the broadphase spatial hash grid.
-struct SpatialNode final {
-  std::uint32_t colliderIdx;
-  std::uint32_t next;
-};
 
 // Max spatial-hash entries: each collider may touch up to 8 cells (the
 // corners of its AABB).
-constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
 
 // Cell-quantization guards: coordinates clamp to +/-1e9 cells (inside
 // int32) before the float-to-int cast so large-but-finite positions
@@ -82,47 +76,6 @@ constexpr float kMaxCellCoordMagnitude = 1.0e9F;
 constexpr std::int32_t kMinCellCoord = -1000000000;
 constexpr std::int32_t kMaxCellCoord = 1000000000;
 constexpr std::int64_t kMaxCellsPerCollider = 256;
-
-// Per-thread scratch buffers for resolve_collisions, heap-allocated on first
-// use. These must not be plain thread_local arrays: ~19 MB of static TLS is
-// carved out of every new thread's stack allocation on glibc, which starves
-// threads created with small explicit stacks (Mesa's GL driver workers
-// overflowed and crashed the editor on startup exactly that way).
-struct ResolveScratch final {
-  std::array<ColliderWorldGeometry, kMaxColliders> geometries{};
-  std::array<Entity, kMaxColliders> bodyOwners{};
-  std::array<engine::math::Vec3, kMaxColliders> bodyCenters{};
-  std::array<bool, kMaxColliders> geometryValid{};
-  std::array<float, kMaxColliders> posX{};
-  std::array<float, kMaxColliders> posY{};
-  std::array<float, kMaxColliders> posZ{};
-  std::array<std::uint32_t, kSpatialHashBuckets> buckets{};
-  std::array<SpatialNode, kMaxNodes> nodes{};
-  std::array<float, kMaxColliders> expandX{};
-  std::array<float, kMaxColliders> expandY{};
-  std::array<float, kMaxColliders> expandZ{};
-  std::array<std::uint32_t, kMaxColliders> overflowList{};
-  std::array<bool, kMaxColliders> isOverflow{};
-};
-
-// Owns one thread's ResolveScratch and frees it at thread exit.
-struct ResolveScratchOwner final {
-  ResolveScratch *scratch = nullptr;
-  ResolveScratchOwner() noexcept = default;
-  ResolveScratchOwner(const ResolveScratchOwner &) = delete;
-  ResolveScratchOwner &operator=(const ResolveScratchOwner &) = delete;
-  ~ResolveScratchOwner() { delete scratch; }
-};
-
-// Returns this thread's resolve scratch, allocating it on first use (a
-// one-time per-thread allocation, not a per-step hot-path one).
-ResolveScratch *acquire_resolve_scratch() noexcept {
-  thread_local static ResolveScratchOwner owner;
-  if (owner.scratch == nullptr) {
-    owner.scratch = new (std::nothrow) ResolveScratch();
-  }
-  return owner.scratch;
-}
 
 } // namespace
 
@@ -220,7 +173,13 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   // unique_ptr.
   PhysicsShapeStore *const shapeStorePtr = physicsCtx.shapeStore.get();
 
-  ResolveScratch *const resolveScratch = acquire_resolve_scratch();
+  // #170: the workspace is context-owned — allocated once per physics
+  // context on its first resolve (never per step, never per thread) and
+  // freed with the World.
+  if (physicsCtx.resolveScratch == nullptr) {
+    physicsCtx.resolveScratch.reset(new (std::nothrow) ResolveScratch());
+  }
+  ResolveScratch *const resolveScratch = physicsCtx.resolveScratch.get();
   if (resolveScratch == nullptr) {
     core::log_message(core::LogLevel::Error, "physics",
                       "resolve_collisions scratch allocation failed");

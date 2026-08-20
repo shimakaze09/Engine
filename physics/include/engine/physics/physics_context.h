@@ -169,15 +169,22 @@ struct PhysicsShapeStore final {
 
 /// World-owned physics storage: gravity, joints, pair/stamp scratch,
 /// and hull/heightfield payloads.
+// Transient collision-resolve workspace (~19 MB, #170); defined in
+// physics_internal.h so only physics TUs see its layout.
+struct ResolveScratch;
+
 struct PhysicsContext final {
   PhysicsContext() noexcept;
-  /// Copies context data and deep-copies owned shape payloads.
+  /// Copies context data and deep-copies owned shape payloads; the
+  /// transient resolve scratch is deliberately not copied.
   PhysicsContext(const PhysicsContext &other) noexcept;
-  /// Copies context data and deep-copies owned shape payloads.
+  /// Copies context data and deep-copies owned shape payloads; the
+  /// transient resolve scratch is deliberately not copied.
   PhysicsContext &operator=(const PhysicsContext &other) noexcept;
-  PhysicsContext(PhysicsContext &&other) noexcept = default;
-  PhysicsContext &operator=(PhysicsContext &&other) noexcept = default;
-  ~PhysicsContext() = default;
+  // Out-of-line (ResolveScratch is incomplete here).
+  PhysicsContext(PhysicsContext &&other) noexcept;
+  PhysicsContext &operator=(PhysicsContext &&other) noexcept;
+  ~PhysicsContext();
 
   math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
   // Slot table lives in shapeStore; joint-adding code must never let
@@ -257,6 +264,13 @@ struct PhysicsContext final {
 
   // Heap-backed so large heightfield buffers do not inflate World stack size.
   std::unique_ptr<PhysicsShapeStore> shapeStore;
+
+  // Resolve workspace (#170): lazily heap-allocated by the first
+  // resolve_collisions on this context and freed with it — one bounded
+  // block per live physics context, never per worker thread (the old
+  // thread_local ownership retained ~19 MB in every worker that ever ran
+  // the resolve job). Excluded from copies so world snapshots stay lean.
+  std::unique_ptr<ResolveScratch> resolveScratch{};
 };
 
 // Compile-time regrowth guard for issue #129: PhysicsContext used to sit at

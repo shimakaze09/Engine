@@ -76,6 +76,13 @@ void refresh_step_cvar_cache(PhysicsContext &context) noexcept {
 PhysicsContext::PhysicsContext() noexcept
     : shapeStore(new (std::nothrow) PhysicsShapeStore()) {}
 
+// Out-of-line where ResolveScratch is complete (#170); moves transfer the
+// scratch with the context, the destructor frees it with the World.
+PhysicsContext::PhysicsContext(PhysicsContext &&other) noexcept = default;
+PhysicsContext &
+PhysicsContext::operator=(PhysicsContext &&other) noexcept = default;
+PhysicsContext::~PhysicsContext() = default;
+
 PhysicsContext::PhysicsContext(const PhysicsContext &other) noexcept
     : PhysicsContext() {
   *this = other;
