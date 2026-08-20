@@ -12,6 +12,9 @@ struct PlatformConfig final {
   int height = 720;
   const char *title = "engine";
   bool vsync = true;
+  // #196: create the window without OpenGL (no context; render-context
+  // calls become no-op successes) so bootstrap completes on headless CI.
+  bool headless = false;
 };
 
 /// Initializes the owning system for platform.

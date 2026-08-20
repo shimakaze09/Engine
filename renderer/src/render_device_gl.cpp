@@ -16,6 +16,8 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "device_slot_table.h"
+#include "engine/core/cvar.h"
+#include "render_device_null.h"
 #include "gl_texture_upload_layout.h"
 
 namespace engine::renderer {
@@ -1680,6 +1682,17 @@ DeviceDebugStats gl_debug_stats() noexcept {
 bool initialize_render_device() noexcept {
   RenderDeviceContext &ctx = render_device_context();
   if (ctx.initialized) {
+    return true;
+  }
+
+  // #196: the null backend lets pipeline initialization and the frame
+  // stages run where no GL exists (headless CI lanes); it shares this
+  // context's lifecycle, and shutdown_render_device is already GL-free.
+  if (core::cvar_get_bool("r_null_device", false)) {
+    fill_null_render_device(&ctx.device);
+    ctx.initialized = true;
+    core::log_message(core::LogLevel::Info, "renderer",
+                      "render device: null backend (r_null_device)");
     return true;
   }
 

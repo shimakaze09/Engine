@@ -69,6 +69,16 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "debug_dap_port", 0,
       "DAP debugger port (0 = disabled). Set to e.g. 4711 to enable."));
 
+  static_cast<void>(core::cvar_register_bool(
+      "r_null_device", false,
+      "Test/CI: replace the GL render device with a no-GL null backend so "
+      "pipeline init and frame stages run headless (#196)"));
+  // One authored intent: a headless platform has no GL, so the render
+  // device must be the null backend.
+  if (g_activeConfig.core.platform.headless) {
+    static_cast<void>(core::cvar_set_bool("r_null_device", true));
+  }
+
   static_cast<void>(core::cvar_register_string(
       "dbg_fail_frame_stage", "",
       "Test-only fault injection: fail the named frame stage once "
