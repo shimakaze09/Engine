@@ -3202,10 +3202,95 @@ int check_collision_pair_cap_loud() {
   return 0;
 }
 
+/// #170: the resolve workspace is owned by the PhysicsContext — allocated
+/// by the first resolve on a context, stable across steps (no per-step
+/// allocation), distinct per world, and never inherited by a context copy
+/// (world snapshots stay lean).
+int verify_resolve_scratch_is_context_owned() {
+  auto make_stepping_world = []() -> std::unique_ptr<engine::runtime::World> {
+    std::unique_ptr<engine::runtime::World> world(
+        new (std::nothrow) engine::runtime::World());
+    if (world == nullptr) {
+      return nullptr;
+    }
+    const engine::runtime::Entity a = world->create_entity();
+    const engine::runtime::Entity b = world->create_entity();
+    engine::runtime::Transform transform{};
+    engine::runtime::Collider collider{};
+    collider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+    engine::runtime::RigidBody body{};
+    body.inverseMass = 1.0F;
+    if ((a == engine::runtime::kInvalidEntity) ||
+        (b == engine::runtime::kInvalidEntity) ||
+        !world->add_transform(a, transform) ||
+        !world->add_transform(b, transform) ||
+        !world->add_collider(a, collider) ||
+        !world->add_collider(b, collider) ||
+        !world->add_rigid_body(a, body) || !world->add_rigid_body(b, body)) {
+      return nullptr;
+    }
+    return world;
+  };
+  auto step_once = [](engine::runtime::World &world) -> bool {
+    world.begin_update_phase();
+    const bool ok =
+        world.update_transforms_range(0U, world.transform_count(), 0.0F) &&
+        engine::runtime::resolve_collisions(world);
+    world.commit_update_phase();
+    world.begin_render_prep_phase();
+    world.end_frame_phase();
+    return ok;
+  };
+
+  std::unique_ptr<engine::runtime::World> first = make_stepping_world();
+  std::unique_ptr<engine::runtime::World> second = make_stepping_world();
+  if ((first == nullptr) || (second == nullptr)) {
+    return 960;
+  }
+  if (first->physics_context().resolveScratch != nullptr) {
+    return 961; // allocation is lazy: nothing before the first resolve
+  }
+  if (!step_once(*first) || !step_once(*second)) {
+    return 962;
+  }
+  const engine::physics::ResolveScratch *firstScratch =
+      first->physics_context().resolveScratch.get();
+  const engine::physics::ResolveScratch *secondScratch =
+      second->physics_context().resolveScratch.get();
+  if ((firstScratch == nullptr) || (secondScratch == nullptr)) {
+    return 963;
+  }
+  if (firstScratch == secondScratch) {
+    return 964; // one bounded block per context, never shared
+  }
+  for (int step = 0; step < 8; ++step) {
+    if (!step_once(*first)) {
+      return 965;
+    }
+  }
+  if (first->physics_context().resolveScratch.get() != firstScratch) {
+    return 966; // repeated steps must not reallocate the workspace
+  }
+
+  // A context copy must not inherit the transient workspace.
+  engine::physics::PhysicsContext copy{};
+  copy = first->physics_context();
+  if (copy.resolveScratch != nullptr) {
+    return 967;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  {
+    const int scratchResult = verify_resolve_scratch_is_context_owned();
+    if (scratchResult != 0) {
+      return scratchResult;
+    }
+  }
   int result = check_physics_cvars_register_after_core_cvars();
   if (result != 0) {
     return result;
