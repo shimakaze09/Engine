@@ -3,6 +3,7 @@
 #include "engine/renderer/asset_manager.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 #include "engine/core/logging.h"
