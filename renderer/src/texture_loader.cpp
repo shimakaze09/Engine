@@ -188,6 +188,15 @@ namespace {
 constexpr int kMaxDecodedTextureDimension = 16384;
 constexpr std::uint64_t kMaxDecodedTextureBytes = 512ULL << 20U;
 
+/// Logs one texture diagnostic in the `<path>: <reason>` shape the editor
+/// console parses for its Open/Select navigation actions (#217).
+void log_texture_path_error(const char *path, const char *reason) noexcept {
+  char message[640] = {};
+  std::snprintf(message, sizeof(message), "%s: %s",
+                (path != nullptr) ? path : "(null)", reason);
+  core::log_message(core::LogLevel::Error, "renderer", message);
+}
+
 /// Logs one decode-budget rejection with the offending numbers.
 void log_decode_budget_rejection(const char *label, const char *reason,
                                  long long a, long long b) noexcept {
@@ -453,8 +462,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
   if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to read texture file");
+    log_texture_path_error(virtualPath, "failed to read texture file");
     return kInvalidTextureHandle;
   }
 
@@ -462,8 +470,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     if (fileData != nullptr) {
       core::vfs_free(fileData);
     }
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "texture file is empty");
+    log_texture_path_error(virtualPath, "texture file is empty");
     return kInvalidTextureHandle;
   }
 
@@ -476,8 +483,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   int stbFileSize = 0;
   if (!texture_input_size_fits_stb(fileSize, &stbFileSize)) {
     core::vfs_free(fileData);
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "texture file is too large");
+    log_texture_path_error(virtualPath, "texture file is too large");
     return kInvalidTextureHandle;
   }
 
@@ -496,8 +502,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     core::vfs_free(fileData);
 
     if (pixels == nullptr) {
-      core::log_message(core::LogLevel::Error, "renderer",
-                        "failed to decode HDR texture");
+      log_texture_path_error(virtualPath, "failed to decode HDR texture");
       return kInvalidTextureHandle;
     }
 
@@ -523,8 +528,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     core::vfs_free(fileData);
 
     if (pixels == nullptr) {
-      core::log_message(core::LogLevel::Error, "renderer",
-                        "failed to decode texture");
+      log_texture_path_error(virtualPath, "failed to decode texture");
       return kInvalidTextureHandle;
     }
 
@@ -546,8 +550,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   }
 
   if (deviceTexture == kInvalidDeviceTexture) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to create GPU texture");
+    log_texture_path_error(virtualPath, "failed to create GPU texture");
     return kInvalidTextureHandle;
   }
 
@@ -579,8 +582,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
   if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to read HDR equirect texture file");
+    log_texture_path_error(virtualPath, "failed to read HDR equirect texture file");
     return kInvalidTextureHandle;
   }
 
@@ -588,8 +590,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
     if (fileData != nullptr) {
       core::vfs_free(fileData);
     }
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "HDR equirect texture file is empty");
+    log_texture_path_error(virtualPath, "HDR equirect texture file is empty");
     return kInvalidTextureHandle;
   }
 
@@ -597,15 +598,13 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   int stbFileSize = 0;
   if (!texture_input_size_fits_stb(fileSize, &stbFileSize)) {
     core::vfs_free(fileData);
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "HDR equirect texture file is too large");
+    log_texture_path_error(virtualPath, "HDR equirect texture file is too large");
     return kInvalidTextureHandle;
   }
 
   if (stbi_is_hdr_from_memory(fileBytes, stbFileSize) == 0) {
     core::vfs_free(fileData);
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "equirect cubemap import requires an HDR texture");
+    log_texture_path_error(virtualPath, "equirect cubemap import requires an HDR texture");
     return kInvalidTextureHandle;
   }
 
@@ -633,16 +632,14 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
     if (pixels != nullptr) {
       stbi_image_free(pixels);
     }
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to decode HDR equirect texture");
+    log_texture_path_error(virtualPath, "failed to decode HDR equirect texture");
     return kInvalidTextureHandle;
   }
 
   const RenderDevice *dev = render_device();
   if ((dev == nullptr) || (dev->create_texture == nullptr)) {
     stbi_image_free(pixels);
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to create HDR cubemap texture");
+    log_texture_path_error(virtualPath, "failed to create HDR cubemap texture");
     return kInvalidTextureHandle;
   }
 
@@ -650,8 +647,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   if (!allocate_equirect_cubemap_faces(pixels, width, height, faceSize,
                                        faces)) {
     stbi_image_free(pixels);
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "failed to convert HDR equirect texture to cubemap");
+    log_texture_path_error(virtualPath, "failed to convert HDR equirect texture to cubemap");
     return kInvalidTextureHandle;
   }
   stbi_image_free(pixels);

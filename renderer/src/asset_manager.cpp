@@ -3,6 +3,7 @@
 #include "engine/renderer/asset_manager.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 #include "engine/core/logging.h"
@@ -165,9 +166,12 @@ bool process_load_like_request(AssetDatabase *database,
     record.state =
         record.requestedResident ? AssetState::Failed : AssetState::Unloaded;
     record.runtimeMesh = kInvalidMeshHandle;
-    core::log_message(core::LogLevel::Error,
-                      "assets",
-                      "mesh registry is full; cannot promote asset to Ready");
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s: mesh registry is full; cannot promote asset to Ready",
+                  has_source_path(record) ? record.sourcePath.data()
+                                          : "(no source path)");
+    core::log_message(core::LogLevel::Error, "assets", message);
     return false;
   }
 
