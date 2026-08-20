@@ -184,6 +184,9 @@ void shutdown_platform_resources() noexcept {
     SDL_DestroyWindow(g_window);
     g_window = nullptr;
   }
+  if (g_headless) {
+    static_cast<void>(SDL_ResetHint(SDL_HINT_VIDEO_DRIVER));
+  }
   g_headless = false;
 
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -195,6 +198,12 @@ bool initialize_platform_impl(int width, int height, const char *title,
   if (g_window != nullptr) {
     g_platformRunning = true;
     return true;
+  }
+
+  // #196: headless is self-contained — force SDL's dummy video driver so
+  // CI runners with no display still initialize the video subsystem.
+  if (headless) {
+    static_cast<void>(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
   }
 
   if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
