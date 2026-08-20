@@ -75,9 +75,13 @@ int main() {
     return 1;
   }
 
-  // Full production bootstrap: pipeline initialization uploads bootstrap
-  // meshes through GL, so this test carries the gpu label like engine_smoke.
-  if (!engine::bootstrap()) {
+  // Full production bootstrap in headless mode (#196): the platform
+  // creates no GL context and bootstrap selects the null render device,
+  // so pipeline initialization and the frame stages run on every CI lane
+  // instead of gpu-labeled runs only.
+  engine::EngineConfig config{};
+  config.core.platform.headless = true;
+  if (!engine::bootstrap(config)) {
     return 2;
   }
 

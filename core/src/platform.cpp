@@ -37,6 +37,7 @@ namespace {
 bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
 SDL_GLContext g_glContext = nullptr;
+bool g_headless = false;
 
 constexpr std::size_t kPlatformPathMax = 1024U;
 constexpr char kDefaultOrganizationName[] = "Engine";
@@ -183,21 +184,45 @@ void shutdown_platform_resources() noexcept {
     SDL_DestroyWindow(g_window);
     g_window = nullptr;
   }
+  if (g_headless) {
+    static_cast<void>(SDL_ResetHint(SDL_HINT_VIDEO_DRIVER));
+  }
+  g_headless = false;
 
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
 /// Initializes the owning system for platform impl.
 bool initialize_platform_impl(int width, int height, const char *title,
-                              bool vsync) noexcept {
+                              bool vsync, bool headless) noexcept {
   if (g_window != nullptr) {
     g_platformRunning = true;
     return true;
   }
 
+  // #196: headless is self-contained — force SDL's dummy video driver so
+  // CI runners with no display still initialize the video subsystem.
+  if (headless) {
+    static_cast<void>(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  }
+
   if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
     log_sdl_error("failed to initialize SDL video subsystem");
     return false;
+  }
+
+  // #196: headless skips every GL step — window without the OpenGL flag,
+  // no context; the render-context helpers below no-op successfully.
+  if (headless) {
+    g_window = SDL_CreateWindow(title, width, height, SDL_WINDOW_HIDDEN);
+    if (g_window == nullptr) {
+      log_sdl_error("failed to create headless SDL window");
+      shutdown_platform_resources();
+      return false;
+    }
+    g_headless = true;
+    g_platformRunning = true;
+    return true;
   }
 
   if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) ||
@@ -270,7 +295,7 @@ const char *non_empty_env(const char *name) noexcept {
 
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept {
-  return initialize_platform_impl(1280, 720, "engine", true);
+  return initialize_platform_impl(1280, 720, "engine", true, false);
 }
 
 /// Initializes the owning system for platform.
@@ -278,7 +303,8 @@ bool initialize_platform(const PlatformConfig &config) noexcept {
   const int w = (config.width > 0) ? config.width : 1280;
   const int h = (config.height > 0) ? config.height : 720;
   const char *title = (config.title != nullptr) ? config.title : "engine";
-  return initialize_platform_impl(w, h, title, config.vsync);
+  return initialize_platform_impl(w, h, title, config.vsync,
+                                  config.headless);
 }
 
 /// Shuts down the owning system for platform.
@@ -293,6 +319,9 @@ bool is_platform_running() noexcept { return g_platformRunning; }
 void request_platform_quit() noexcept { g_platformRunning = false; }
 
 bool make_render_context_current() noexcept {
+  if (g_headless) {
+    return true;
+  }
   if ((g_window == nullptr) || (g_glContext == nullptr)) {
     return false;
   }
@@ -301,18 +330,27 @@ bool make_render_context_current() noexcept {
 }
 
 void release_render_context() noexcept {
+  if (g_headless) {
+    return;
+  }
   if (g_window != nullptr) {
     static_cast<void>(SDL_GL_MakeCurrent(g_window, nullptr));
   }
 }
 
 void swap_render_buffers() noexcept {
+  if (g_headless) {
+    return;
+  }
   if (g_window != nullptr) {
     SDL_GL_SwapWindow(g_window);
   }
 }
 
 bool set_render_vsync(int interval) noexcept {
+  if (g_headless) {
+    return true;
+  }
   if (g_window == nullptr) {
     return false;
   }

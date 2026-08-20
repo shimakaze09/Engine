@@ -585,5 +585,5 @@ engine_add_test_executable(engine_integration_run_fatal_frame
     engine_runtime
     engine_core
     LABELS
-    gpu;integration
+    integration
 )
