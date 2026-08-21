@@ -13,6 +13,7 @@
 #include "engine/core/vfs.h"
 #include "engine/physics/physics.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/editor_bridge.h"
@@ -57,6 +58,13 @@ bool bootstrap() noexcept {
 bool bootstrap(const EngineConfig &config) noexcept {
   g_activeConfig = config;
 
+  // #138: a backend that owns its swapchain (bgfx) needs the platform
+  // window created without an OpenGL context; headless keeps priority.
+  if (!g_activeConfig.core.platform.headless) {
+    g_activeConfig.core.platform.externalRenderContext =
+        renderer::render_backend_owns_swapchain();
+  }
+
   if (!core::initialize_core(g_activeConfig.core)) {
     return false;
   }
@@ -84,6 +92,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "Test-only fault injection: fail the named frame stage once "
       "(simulation_graph or render_prep_graph); self-clears when consumed"));
 
+  static_cast<void>(core::cvar_register_string(
+      "r_bgfx_renderer", "auto",
+      "bgfx backend only: renderer API (auto, vulkan, opengl, metal, "
+      "noop); read once at device initialization (#138)"));
+
   static_cast<void>(physics::register_physics_cvars());
 
   if (!core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
@@ -93,6 +106,17 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
   renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
+
+  // #138: the editor's ImGui integration is GL-only until the bgfx UI
+  // backend lands; a swapchain-owning backend runs without the editor
+  // bridge, taking the same code path as the pure runtime.
+  if (g_activeConfig.core.platform.externalRenderContext &&
+      (runtime::editor_bridge() != nullptr)) {
+    core::log_message(core::LogLevel::Info, "editor",
+                      "editor bridge disabled under the bgfx backend "
+                      "(ImGui integration pending, #138)");
+    runtime::set_editor_bridge(nullptr);
+  }
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
