@@ -460,7 +460,10 @@ directory-global by design.
   coverage (≥50%), benchmarks (>10% regression fails), a gl backend
   regression lane (the legacy backend builds + full headless suite
   until its deletion, #138), quality gate. The canonical matrix builds
-  the default bgfx backend incl. the shader cook; sanitizer/analysis/
+  the default bgfx backend incl. the shader cook (macOS excepted:
+  tint's overloaded-CTAD pattern does not compile under AppleClang, and
+  the headless-only lane never consumes cooked binaries, so it passes
+  ENGINE_BGFX_SHADERC=OFF); sanitizer/analysis/
   werror/benchmark lanes pass ENGINE_BGFX_SHADERC=OFF.
 
 ## Architecture invariants

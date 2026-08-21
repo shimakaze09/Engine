@@ -74,10 +74,15 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      # macOS skips the shaderc toolchain: tint's overloaded-CTAD pattern
+      # does not compile under AppleClang, and the lane is headless-only
+      # (null device — cooked binaries are never consumed there). The
+      # engine's own bgfx backend TUs stay in AppleClang coverage.
       - name: Configure
         run: >
           cmake -S . -B build
           ${{ matrix.toolchain_args }}
+          ${{ startsWith(matrix.os, 'macos') && '-DENGINE_BGFX_SHADERC=OFF' || '' }}
           -DCMAKE_BUILD_TYPE=${{ matrix.config }}
           -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=ON
