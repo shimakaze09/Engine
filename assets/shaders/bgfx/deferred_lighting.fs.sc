@@ -5,11 +5,11 @@ $input v_texcoord0
 // spot lights fetched from the R32F light-data and tile textures
 // (texelFetch; layouts match light_culling.h). Sampler stages are baked
 // to the flush's unit assignment (G-buffer 0-3, tile 4, SSAO 5, light
-// data 18 — enabled by the build's 32-sampler bgfx config). Shadow and
-// IBL sampling are omitted until their units cook the producing passes
-// (both soft-disable under this backend today): shadows read as fully
-// lit and ambient takes the constant-term branch. Scalar and integer GL
-// uniforms become vec4 read through .x.
+// data 18, shadow cascades 6-9, spot 10-13, point cubes 14-17 — enabled
+// by the build's 32-sampler bgfx config) with full CSM/spot/point
+// shadow sampling. IBL sampling still awaits the environment textures'
+// arrival under this backend: ambient takes the constant-term branch.
+// Scalar and integer GL uniforms become vec4 read through .x.
 
 #include <bgfx_shader.sh>
 
@@ -23,6 +23,18 @@ SAMPLER2D(uGBufferDepth, 3);
 SAMPLER2D(uTileLightTex, 4);
 SAMPLER2D(uSsaoTexture, 5);
 SAMPLER2D(uLightDataTex, 18);
+SAMPLER2D(uShadowMap0, 6);
+SAMPLER2D(uShadowMap1, 7);
+SAMPLER2D(uShadowMap2, 8);
+SAMPLER2D(uShadowMap3, 9);
+SAMPLER2D(uSpotShadowMap0, 10);
+SAMPLER2D(uSpotShadowMap1, 11);
+SAMPLER2D(uSpotShadowMap2, 12);
+SAMPLER2D(uSpotShadowMap3, 13);
+SAMPLERCUBE(uPointShadowMap0, 14);
+SAMPLERCUBE(uPointShadowMap1, 15);
+SAMPLERCUBE(uPointShadowMap2, 16);
+SAMPLERCUBE(uPointShadowMap3, 17);
 
 uniform vec4 uSsaoEnabled;        // .x
 uniform mat4 uInvProjection;
@@ -45,6 +57,18 @@ uniform vec4 uHeightFogBaseHeight;
 uniform vec4 uHeightFogDensity;
 uniform vec4 uHeightFogFalloff;
 uniform vec4 uHeightFogStepCount;
+
+#define MAX_SPOT_SHADOW_LIGHTS 4
+#define MAX_POINT_SHADOW_LIGHTS 4
+uniform vec4 uShadowEnabled;          // .x
+uniform mat4 uShadowMatrix[4];
+uniform vec4 uCascadeSplits;          // split distance per cascade
+uniform vec4 uSpotShadowEnabled;      // .x
+uniform mat4 uSpotShadowMatrix[MAX_SPOT_SHADOW_LIGHTS];
+uniform vec4 uSpotShadowLightIdxVec;  // light index per slot
+uniform vec4 uPointShadowEnabled;     // .x
+uniform vec4 uPointShadowPosFar[MAX_POINT_SHADOW_LIGHTS]; // xyz pos, w far
+uniform vec4 uPointShadowLightIdxVec; // light index per slot
 
 float light_data(int x, int row) {
     return texelFetch(uLightDataTex, ivec2(x, row), 0).r;
@@ -158,6 +182,168 @@ float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
     return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
 }
 
+float linearize_depth(float depth) {
+    float z = depth * 2.0 - 1.0;
+    vec4 clipPos = vec4(0.0, 0.0, z, 1.0);
+    vec4 viewPos = mul(uInvProjection, clipPos);
+    return -viewPos.z / viewPos.w;
+}
+
+float sample_shadow_pcf_at(vec2 uv, float compareDepth, int mapIdx) {
+    if (mapIdx == 0) {
+        return ((compareDepth - 0.002) >
+                texture2D(uShadowMap0, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 1) {
+        return ((compareDepth - 0.002) >
+                texture2D(uShadowMap1, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 2) {
+        return ((compareDepth - 0.002) >
+                texture2D(uShadowMap2, uv).r) ? 0.0 : 1.0;
+    }
+    return ((compareDepth - 0.002) >
+            texture2D(uShadowMap3, uv).r) ? 0.0 : 1.0;
+}
+
+float sample_spot_shadow_at(vec2 uv, float compareDepth, int mapIdx) {
+    if (mapIdx == 0) {
+        return ((compareDepth - 0.002) >
+                texture2D(uSpotShadowMap0, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 1) {
+        return ((compareDepth - 0.002) >
+                texture2D(uSpotShadowMap1, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 2) {
+        return ((compareDepth - 0.002) >
+                texture2D(uSpotShadowMap2, uv).r) ? 0.0 : 1.0;
+    }
+    return ((compareDepth - 0.002) >
+            texture2D(uSpotShadowMap3, uv).r) ? 0.0 : 1.0;
+}
+
+// 3x3 PCF over one cascade/spot map; the texel steps mirror
+// kShadowMapResolution (2048) and kSpotShadowMapResolution (1024) —
+// constants here because HLSL-path shaderc lacks textureSize.
+#define CASCADE_SHADOW_TEXEL (1.0 / 2048.0)
+#define SPOT_SHADOW_TEXEL (1.0 / 1024.0)
+
+float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
+    float shadow = 0.0;
+    float texel = spot ? SPOT_SHADOW_TEXEL : CASCADE_SHADOW_TEXEL;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec2 uv = projCoords.xy +
+                      vec2(float(x), float(y)) * texel;
+            shadow += spot
+                          ? sample_spot_shadow_at(uv, projCoords.z, mapIdx)
+                          : sample_shadow_pcf_at(uv, projCoords.z, mapIdx);
+        }
+    }
+    return shadow / 9.0;
+}
+
+float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
+    if (shadowIdx == 0) {
+        return textureCube(uPointShadowMap0, sampleVector).r;
+    }
+    if (shadowIdx == 1) {
+        return textureCube(uPointShadowMap1, sampleVector).r;
+    }
+    if (shadowIdx == 2) {
+        return textureCube(uPointShadowMap2, sampleVector).r;
+    }
+    return textureCube(uPointShadowMap3, sampleVector).r;
+}
+
+float compute_shadow(vec3 worldPos, float depth) {
+    if (uShadowEnabled.x == 0.0) {
+        return 1.0;
+    }
+    float viewDepth = linearize_depth(depth);
+    int cascadeIdx = 3;
+    for (int i = 0; i < 4; ++i) {
+        if (viewDepth < uCascadeSplits[i]) {
+            cascadeIdx = i;
+            break;
+        }
+    }
+    vec4 shadowCoord = mul(uShadowMatrix[cascadeIdx], vec4(worldPos, 1.0));
+    vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    float shadow = shadow_pcf(projCoords, cascadeIdx, false);
+
+    float blendRange = uCascadeSplits[cascadeIdx] * 0.1;
+    if (cascadeIdx < 3 &&
+        viewDepth > uCascadeSplits[cascadeIdx] - blendRange) {
+        vec4 nextShadowCoord =
+            mul(uShadowMatrix[cascadeIdx + 1], vec4(worldPos, 1.0));
+        vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
+        nextProjCoords = nextProjCoords * 0.5 + 0.5;
+        float nextShadow = shadow_pcf(nextProjCoords, cascadeIdx + 1, false);
+        float blendFactor =
+            (viewDepth - (uCascadeSplits[cascadeIdx] - blendRange)) /
+            blendRange;
+        shadow = mix(shadow, nextShadow, clamp(blendFactor, 0.0, 1.0));
+    }
+    return shadow;
+}
+
+float compute_spot_shadow(vec3 worldPos, int lightIdx) {
+    if (uSpotShadowEnabled.x == 0.0) {
+        return 1.0;
+    }
+    for (int s = 0; s < MAX_SPOT_SHADOW_LIGHTS; ++s) {
+        if (int(round(uSpotShadowLightIdxVec[s])) != lightIdx) {
+            continue;
+        }
+        vec4 shadowCoord = mul(uSpotShadowMatrix[s], vec4(worldPos, 1.0));
+        vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+        projCoords = projCoords * 0.5 + 0.5;
+        return shadow_pcf(projCoords, s, true);
+    }
+    return 1.0;
+}
+
+float compute_point_shadow(vec3 worldPos, int lightIdx) {
+    if (uPointShadowEnabled.x == 0.0) {
+        return 1.0;
+    }
+    for (int s = 0; s < MAX_POINT_SHADOW_LIGHTS; ++s) {
+        if (int(round(uPointShadowLightIdxVec[s])) != lightIdx) {
+            continue;
+        }
+        vec3 fragToLight = worldPos - uPointShadowPosFar[s].xyz;
+        float currentDist = length(fragToLight);
+        float normalizedDist = currentDist / uPointShadowPosFar[s].w;
+        float shadow = 0.0;
+        float diskRadius = 0.02;
+        for (int i = 0; i < 20; ++i) {
+            vec3 offsets[20];
+            offsets[0] = vec3(1, 1, 1);   offsets[1] = vec3(1, -1, 1);
+            offsets[2] = vec3(-1, -1, 1); offsets[3] = vec3(-1, 1, 1);
+            offsets[4] = vec3(1, 1, -1);  offsets[5] = vec3(1, -1, -1);
+            offsets[6] = vec3(-1, -1, -1); offsets[7] = vec3(-1, 1, -1);
+            offsets[8] = vec3(1, 1, 0);   offsets[9] = vec3(1, -1, 0);
+            offsets[10] = vec3(-1, -1, 0); offsets[11] = vec3(-1, 1, 0);
+            offsets[12] = vec3(1, 0, 1);  offsets[13] = vec3(-1, 0, 1);
+            offsets[14] = vec3(1, 0, -1); offsets[15] = vec3(-1, 0, -1);
+            offsets[16] = vec3(0, 1, 1);  offsets[17] = vec3(0, -1, 1);
+            offsets[18] = vec3(0, -1, -1); offsets[19] = vec3(0, 1, -1);
+            float closestDepth = sample_point_shadow_depth(
+                s, fragToLight + offsets[i] * diskRadius);
+            shadow += (normalizedDist - 0.005 > closestDepth) ? 0.0 : 1.0;
+        }
+        return shadow / 20.0;
+    }
+    return 1.0;
+}
+
 void main() {
     vec4 albedoMetallic = texture2D(uGBufferAlbedo, v_texcoord0);
     vec4 normalRoughness = texture2D(uGBufferNormal, v_texcoord0);
@@ -183,8 +369,9 @@ void main() {
     vec3 Lo = vec3_splat(0.0);
 
     vec3 L_dir = normalize(-uDirLightDirection.xyz);
+    float shadowFactor = compute_shadow(worldPos, depth);
     Lo += cook_torrance(N, V, L_dir, albedo, metallic, roughness,
-                        uDirLightColor.xyz, 1.0);
+                        uDirLightColor.xyz, 1.0) * shadowFactor;
 
     int tileX = int(gl_FragCoord.x) / 16;
     int tileY = int(gl_FragCoord.y) / 16;
@@ -215,7 +402,8 @@ void main() {
         attenuation *= attenuation;
         Lo += cook_torrance(N, V, L, albedo, metallic, roughness,
                             light_data3(3, lightIdx),
-                            light_data(6, lightIdx) * attenuation);
+                            light_data(6, lightIdx) * attenuation) *
+              compute_point_shadow(worldPos, lightIdx);
     }
 
     int spotLightCount = int(uSpotLightCount.x);
@@ -253,7 +441,8 @@ void main() {
             clamp((theta - outerCone) / max(epsilon, 0.0001), 0.0, 1.0);
         Lo += cook_torrance(N, V, L, albedo, metallic, roughness,
                             light_data3(6, row),
-                            light_data(9, row) * attenuation * spotFactor);
+                            light_data(9, row) * attenuation * spotFactor) *
+              compute_spot_shadow(worldPos, lightIdx);
     }
 
     float ssaoFactor =

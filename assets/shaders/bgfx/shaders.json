@@ -19,6 +19,17 @@
     { "source": "luminance.fs.sc", "type": "fragment", "output": "luminance.frag", "variants": [[]] },
     { "source": "ssao.fs.sc", "type": "fragment", "output": "ssao.frag", "variants": [[]] },
     { "source": "ssao_blur.fs.sc", "type": "fragment", "output": "ssao_blur.frag", "variants": [[]] },
-    { "source": "fxaa.fs.sc", "type": "fragment", "output": "fxaa.frag", "variants": [[]] }
+    { "source": "fxaa.fs.sc", "type": "fragment", "output": "fxaa.frag", "variants": [[]] },
+    { "source": "skybox.vs.sc", "type": "vertex", "output": "skybox.vert", "variants": [[]] },
+    { "source": "skybox.fs.sc", "type": "fragment", "output": "skybox.frag", "variants": [[]] },
+    { "source": "preetham_sky.fs.sc", "type": "fragment", "output": "preetham_sky.frag", "variants": [[]] },
+    { "source": "procedural_sky.fs.sc", "type": "fragment", "output": "procedural_sky.frag", "variants": [[]] },
+    { "source": "brdf_lut.fs.sc", "type": "fragment", "output": "brdf_lut.frag", "variants": [[]] },
+    { "source": "irradiance_convolution.fs.sc", "type": "fragment", "output": "irradiance_convolution.frag", "variants": [[]] },
+    { "source": "prefilter_environment.fs.sc", "type": "fragment", "output": "prefilter_environment.frag", "variants": [[]] },
+    { "source": "shadow_depth.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [[]] },
+    { "source": "shadow_depth.fs.sc", "type": "fragment", "output": "shadow_depth.frag", "variants": [[]] },
+    { "source": "shadow_depth_point.vs.sc", "type": "vertex", "output": "shadow_depth_point.vert", "variants": [[]] },
+    { "source": "shadow_depth_point.fs.sc", "type": "fragment", "output": "shadow_depth_point.frag", "variants": [[]] }
   ]
 }

@@ -248,7 +248,8 @@ bool resolve_shadow_depth_program_state(BackendState &backend,
   }
   bool ok = true;
   backend.shadowLightMvpLoc = required_param(&ok, dev, prog, "u_lightMVP");
-  backend.shadowModelLoc = dev->shader_param(prog, "u_model");
+  // u_modelMatrix, not u_model: bgfx reserves the latter.
+  backend.shadowModelLoc = dev->shader_param(prog, "u_modelMatrix");
   return ok;
 }
 
@@ -266,7 +267,8 @@ bool resolve_shadow_depth_point_program_state(
   bool ok = true;
   backend.shadowPointLightMvpLoc =
       required_param(&ok, dev, prog, "u_lightMVP");
-  backend.shadowPointModelLoc = required_param(&ok, dev, prog, "u_model");
+  backend.shadowPointModelLoc =
+      required_param(&ok, dev, prog, "u_modelMatrix");
   backend.shadowPointLightPosLoc =
       required_param(&ok, dev, prog, "u_lightPos");
   backend.shadowPointFarPlaneLoc =

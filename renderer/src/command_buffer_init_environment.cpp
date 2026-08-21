@@ -44,7 +44,7 @@ bool resolve_skybox_program_state(BackendState &backend,
     return false;
   }
   bool ok = true;
-  backend.skyboxViewLoc = required_param(&ok, dev, skyboxProgram, "u_view");
+  backend.skyboxViewLoc = required_param(&ok, dev, skyboxProgram, "u_viewMat");
   backend.skyboxProjectionLoc =
       required_param(&ok, dev, skyboxProgram, "u_projection");
   backend.skyboxTextureLoc =
@@ -64,7 +64,7 @@ bool resolve_preetham_sky_program_state(BackendState &backend,
   }
   bool ok = true;
   backend.preethamSkyViewLoc =
-      required_param(&ok, dev, preethamProgram, "u_view");
+      required_param(&ok, dev, preethamProgram, "u_viewMat");
   backend.preethamSkyProjectionLoc =
       required_param(&ok, dev, preethamProgram, "u_projection");
   backend.preethamSkySunDirectionLoc =
@@ -84,7 +84,7 @@ bool resolve_hosek_sky_program_state(BackendState &backend,
     return false;
   }
   bool ok = true;
-  backend.hosekSkyViewLoc = required_param(&ok, dev, hosekProgram, "u_view");
+  backend.hosekSkyViewLoc = required_param(&ok, dev, hosekProgram, "u_viewMat");
   backend.hosekSkyProjectionLoc =
       required_param(&ok, dev, hosekProgram, "u_projection");
   backend.hosekSkySunDirectionLoc =
@@ -108,7 +108,7 @@ bool resolve_environment_prefilter_program_state(
   }
   bool ok = true;
   backend.environmentPrefilterViewLoc =
-      required_param(&ok, dev, prefilterProgram, "u_view");
+      required_param(&ok, dev, prefilterProgram, "u_viewMat");
   backend.environmentPrefilterProjectionLoc =
       required_param(&ok, dev, prefilterProgram, "u_projection");
   backend.environmentPrefilterTextureLoc =
@@ -130,7 +130,7 @@ bool resolve_environment_irradiance_program_state(
   }
   bool ok = true;
   backend.environmentIrradianceViewLoc =
-      required_param(&ok, dev, irradianceProgram, "u_view");
+      required_param(&ok, dev, irradianceProgram, "u_viewMat");
   backend.environmentIrradianceProjectionLoc =
       required_param(&ok, dev, irradianceProgram, "u_projection");
   backend.environmentIrradianceTextureLoc =

@@ -274,9 +274,12 @@ directory-global by design.
   tile/light-data texelFetch lighting cooked; the build sets
   BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 so the engine's unit map up to 21
   fits — WebGL2's 16-unit floor is the web-export unit's recorded
-  concern); shadow/IBL sampling, instanced batching (both backends'
-  flushes gate instancing on the shader toggle's presence), and SKINNED
-  variants defer to their units;
+  concern); sky (cubemap/Preetham/procedural), IBL generation, the
+  full post stack, and CSM/spot/point shadow sampling all run under
+  bgfx — the entire pass list boots clean on Vulkan; instanced
+  batching (both backends' flushes gate instancing on the shader
+  toggle's presence), SKINNED variants, forward-path shadow/IBL
+  sampling, and the editor ImGui integration defer to their units;
   programs link only from the Phase C shaderc cook's binaries via
   `create_program_binary` + `caps.cookedPrograms` — spirv is the
   canonical profile because GLSL-flavor binaries embed no uniform
