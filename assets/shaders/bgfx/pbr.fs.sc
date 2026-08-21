@@ -3,12 +3,12 @@ $input v_worldpos, v_normal, v_texcoord0
 // PBR forward fragment stage (bgfx port of pbr.frag, #138): Cook-
 // Torrance direct lighting over the flat light-array vocabulary, the
 // five material texture slots (baked stages 0-4 matching the flush's
-// unit assignment), alpha modes, and distance/height fog. Shadow and
-// IBL sampling are omitted in this port: their GL texture units (6-17,
-// 19-21) exceed bgfx's 16-sampler budget, and both features already
-// soft-disable under this backend until their units land with a
-// remapped budget — the shader takes the shadow=1 / constant-ambient
-// paths. Scalar and integer GL uniforms become vec4 read through .x.
+// unit assignment), alpha modes, and distance/height fog. The PBR_FULL
+// variant adds cascade/spot/point shadow sampling and split-sum IBL on
+// the GL unit map (6-17, 19-21) — it needs 20 sampler units, so the
+// runtime selects it only when caps.maxTextureSamplers covers the map
+// (WebGL2's 16-unit floor keeps this default: shadow=1 and constant
+// ambient). Scalar and integer GL uniforms become vec4 read through .x.
 
 #include <bgfx_shader.sh>
 
@@ -61,6 +61,221 @@ uniform vec4 u_spotLightPosRadius[MAX_SPOT_LIGHTS];
 uniform vec4 u_spotLightDirInner[MAX_SPOT_LIGHTS];
 uniform vec4 u_spotLightColorIntensity[MAX_SPOT_LIGHTS];
 uniform vec4 u_spotLightParams[MAX_SPOT_LIGHTS];
+
+#if PBR_FULL
+#define SHADOW_CASCADE_COUNT 4
+#define MAX_SPOT_SHADOW_LIGHTS 4
+#define MAX_POINT_SHADOW_LIGHTS 4
+
+SAMPLER2D(uShadowMap0, 6);
+SAMPLER2D(uShadowMap1, 7);
+SAMPLER2D(uShadowMap2, 8);
+SAMPLER2D(uShadowMap3, 9);
+SAMPLER2D(uSpotShadowMap0, 10);
+SAMPLER2D(uSpotShadowMap1, 11);
+SAMPLER2D(uSpotShadowMap2, 12);
+SAMPLER2D(uSpotShadowMap3, 13);
+SAMPLERCUBE(uPointShadowMap0, 14);
+SAMPLERCUBE(uPointShadowMap1, 15);
+SAMPLERCUBE(uPointShadowMap2, 16);
+SAMPLERCUBE(uPointShadowMap3, 17);
+SAMPLERCUBE(uIrradianceMap, 19);
+SAMPLERCUBE(uPrefilteredMap, 20);
+SAMPLER2D(uBrdfLut, 21);
+
+uniform mat4 u_viewMatrix; // cascade selection needs the view depth
+uniform vec4 uShadowEnabled;          // .x
+uniform mat4 uShadowMatrix[SHADOW_CASCADE_COUNT];
+uniform vec4 uCascadeSplits;
+uniform vec4 uSpotShadowEnabled;      // .x
+uniform mat4 uSpotShadowMatrix[MAX_SPOT_SHADOW_LIGHTS];
+uniform vec4 uSpotShadowLightIdxVec;
+uniform vec4 uPointShadowEnabled;     // .x
+uniform vec4 uPointShadowPosFar[MAX_POINT_SHADOW_LIGHTS];
+uniform vec4 uPointShadowLightIdxVec;
+uniform vec4 uIblEnabled;             // .x
+uniform vec4 uPrefilteredMips;        // .x
+
+// 3x3 PCF texel steps mirror kShadowMapResolution (2048) and
+// kSpotShadowMapResolution (1024) — constants because HLSL-path
+// shaderc lacks textureSize (same shape as deferred_lighting.fs.sc).
+#define CASCADE_SHADOW_TEXEL (1.0 / 2048.0)
+#define SPOT_SHADOW_TEXEL (1.0 / 1024.0)
+
+float sample_shadow_pcf_at(vec2 uv, float compareDepth, int mapIdx) {
+    if (mapIdx == 0) {
+        return ((compareDepth - 0.002) >
+                texture2D(uShadowMap0, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 1) {
+        return ((compareDepth - 0.002) >
+                texture2D(uShadowMap1, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 2) {
+        return ((compareDepth - 0.002) >
+                texture2D(uShadowMap2, uv).r) ? 0.0 : 1.0;
+    }
+    return ((compareDepth - 0.002) >
+            texture2D(uShadowMap3, uv).r) ? 0.0 : 1.0;
+}
+
+float sample_spot_shadow_at(vec2 uv, float compareDepth, int mapIdx) {
+    if (mapIdx == 0) {
+        return ((compareDepth - 0.002) >
+                texture2D(uSpotShadowMap0, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 1) {
+        return ((compareDepth - 0.002) >
+                texture2D(uSpotShadowMap1, uv).r) ? 0.0 : 1.0;
+    }
+    if (mapIdx == 2) {
+        return ((compareDepth - 0.002) >
+                texture2D(uSpotShadowMap2, uv).r) ? 0.0 : 1.0;
+    }
+    return ((compareDepth - 0.002) >
+            texture2D(uSpotShadowMap3, uv).r) ? 0.0 : 1.0;
+}
+
+float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
+    float shadow = 0.0;
+    float texel = spot ? SPOT_SHADOW_TEXEL : CASCADE_SHADOW_TEXEL;
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec2 uv = projCoords.xy +
+                      vec2(float(x), float(y)) * texel;
+            shadow += spot
+                          ? sample_spot_shadow_at(uv, projCoords.z, mapIdx)
+                          : sample_shadow_pcf_at(uv, projCoords.z, mapIdx);
+        }
+    }
+    return shadow / 9.0;
+}
+
+float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
+    if (shadowIdx == 0) {
+        return textureCube(uPointShadowMap0, sampleVector).r;
+    }
+    if (shadowIdx == 1) {
+        return textureCube(uPointShadowMap1, sampleVector).r;
+    }
+    if (shadowIdx == 2) {
+        return textureCube(uPointShadowMap2, sampleVector).r;
+    }
+    return textureCube(uPointShadowMap3, sampleVector).r;
+}
+
+// Forward path selects the cascade from the fragment's view-space
+// depth (the GL pbr.frag shape; deferred linearizes the depth buffer
+// instead).
+float compute_directional_shadow(vec3 worldPos) {
+    if (uShadowEnabled.x == 0.0) {
+        return 1.0;
+    }
+    float viewDepth = -(mul(u_viewMatrix, vec4(worldPos, 1.0))).z;
+    int cascadeIdx = SHADOW_CASCADE_COUNT - 1;
+    for (int i = 0; i < SHADOW_CASCADE_COUNT; ++i) {
+        if (viewDepth < uCascadeSplits[i]) {
+            cascadeIdx = i;
+            break;
+        }
+    }
+    vec4 shadowCoord = mul(uShadowMatrix[cascadeIdx], vec4(worldPos, 1.0));
+    vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    projCoords = projCoords * 0.5 + 0.5;
+    float shadow = shadow_pcf(projCoords, cascadeIdx, false);
+
+    float blendRange = uCascadeSplits[cascadeIdx] * 0.1;
+    if (cascadeIdx < SHADOW_CASCADE_COUNT - 1 &&
+        viewDepth > uCascadeSplits[cascadeIdx] - blendRange) {
+        vec4 nextShadowCoord =
+            mul(uShadowMatrix[cascadeIdx + 1], vec4(worldPos, 1.0));
+        vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
+        nextProjCoords = nextProjCoords * 0.5 + 0.5;
+        float nextShadow = shadow_pcf(nextProjCoords, cascadeIdx + 1, false);
+        float blendFactor =
+            (viewDepth - (uCascadeSplits[cascadeIdx] - blendRange)) /
+            blendRange;
+        shadow = mix(shadow, nextShadow, clamp(blendFactor, 0.0, 1.0));
+    }
+    return shadow;
+}
+
+float compute_spot_shadow(vec3 worldPos, int lightIdx) {
+    if (uSpotShadowEnabled.x == 0.0) {
+        return 1.0;
+    }
+    for (int s = 0; s < MAX_SPOT_SHADOW_LIGHTS; ++s) {
+        if (int(round(uSpotShadowLightIdxVec[s])) != lightIdx) {
+            continue;
+        }
+        vec4 shadowCoord = mul(uSpotShadowMatrix[s], vec4(worldPos, 1.0));
+        vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
+        projCoords = projCoords * 0.5 + 0.5;
+        return shadow_pcf(projCoords, s, true);
+    }
+    return 1.0;
+}
+
+float compute_point_shadow(vec3 worldPos, int lightIdx) {
+    if (uPointShadowEnabled.x == 0.0) {
+        return 1.0;
+    }
+    for (int s = 0; s < MAX_POINT_SHADOW_LIGHTS; ++s) {
+        if (int(round(uPointShadowLightIdxVec[s])) != lightIdx) {
+            continue;
+        }
+        vec3 fragToLight = worldPos - uPointShadowPosFar[s].xyz;
+        float currentDist = length(fragToLight);
+        float normalizedDist = currentDist / uPointShadowPosFar[s].w;
+        float shadow = 0.0;
+        float diskRadius = 0.02;
+        for (int i = 0; i < 20; ++i) {
+            vec3 offsets[20];
+            offsets[0] = vec3(1, 1, 1);   offsets[1] = vec3(1, -1, 1);
+            offsets[2] = vec3(-1, -1, 1); offsets[3] = vec3(-1, 1, 1);
+            offsets[4] = vec3(1, 1, -1);  offsets[5] = vec3(1, -1, -1);
+            offsets[6] = vec3(-1, -1, -1); offsets[7] = vec3(-1, 1, -1);
+            offsets[8] = vec3(1, 1, 0);   offsets[9] = vec3(1, -1, 0);
+            offsets[10] = vec3(-1, -1, 0); offsets[11] = vec3(-1, 1, 0);
+            offsets[12] = vec3(1, 0, 1);  offsets[13] = vec3(-1, 0, 1);
+            offsets[14] = vec3(1, 0, -1); offsets[15] = vec3(-1, 0, -1);
+            offsets[16] = vec3(0, 1, 1);  offsets[17] = vec3(0, -1, 1);
+            offsets[18] = vec3(0, -1, -1); offsets[19] = vec3(0, 1, -1);
+            float closestDepth = sample_point_shadow_depth(
+                s, fragToLight + offsets[i] * diskRadius);
+            shadow += (normalizedDist - 0.005 > closestDepth) ? 0.0 : 1.0;
+        }
+        return shadow / 20.0;
+    }
+    return 1.0;
+}
+
+vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness) {
+    return F0 + (max(vec3_splat(1.0 - roughness), F0) - F0) *
+                pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// Split-sum IBL ambient: irradiance-lit diffuse plus prefiltered
+// specular weighted by the BRDF integration LUT.
+vec3 ibl_ambient(vec3 N, vec3 V, vec3 albedo, float metallic,
+                 float roughness) {
+    vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
+    float NdotV = max(dot(N, V), 0.0);
+    vec3 F = fresnel_schlick_roughness(NdotV, F0, roughness);
+    vec3 kD = (vec3_splat(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse = textureCube(uIrradianceMap, N).rgb * albedo;
+    vec3 R = reflect(-V, N);
+    vec3 prefiltered =
+        textureCubeLod(uPrefilteredMap, R,
+                       roughness * max(uPrefilteredMips.x - 1.0, 0.0)).rgb;
+    vec2 brdf = texture2D(uBrdfLut, vec2(NdotV, roughness)).rg;
+    return kD * diffuse + prefiltered * (F * brdf.x + brdf.y);
+}
+#endif // PBR_FULL
 
 float distribution_ggx(vec3 N, vec3 H, float roughness) {
     float a = roughness * roughness;
@@ -201,8 +416,14 @@ void main() {
         vec3 L = normalize(-u_dirLightDirection[i].xyz);
         vec3 radiance = u_dirLightColorIntensity[i].rgb *
                         u_dirLightColorIntensity[i].w;
+        float shadow = 1.0;
+#if PBR_FULL
+        // Only the primary directional light casts cascades, matching
+        // the GL pbr.frag contract.
+        shadow = (i == 0) ? compute_directional_shadow(v_worldpos) : 1.0;
+#endif
         Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0);
+                            F0) * shadow;
     }
 
     int pointCount = int(u_pointLightCount.x);
@@ -222,8 +443,12 @@ void main() {
         atten *= atten;
         vec3 radiance = u_pointLightColorIntensity[i].rgb *
                         u_pointLightColorIntensity[i].w * atten;
+        float shadow = 1.0;
+#if PBR_FULL
+        shadow = compute_point_shadow(v_worldpos, i);
+#endif
         Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0);
+                            F0) * shadow;
     }
 
     int spotCount = int(u_spotLightCount.x);
@@ -250,11 +475,20 @@ void main() {
             clamp((theta - outerCone) / max(epsilon, 0.0001), 0.0, 1.0);
         vec3 radiance = u_spotLightColorIntensity[i].rgb *
                         u_spotLightColorIntensity[i].w * atten * spotFactor;
+        float shadow = 1.0;
+#if PBR_FULL
+        shadow = compute_spot_shadow(v_worldpos, i);
+#endif
         Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0);
+                            F0) * shadow;
     }
 
     vec3 ambient = vec3_splat(0.03) * albedo * ao;
+#if PBR_FULL
+    if (uIblEnabled.x != 0.0) {
+        ambient = ibl_ambient(N, V, albedo, metallic, roughness) * ao;
+    }
+#endif
     vec3 color = ambient + Lo + emissive;
     float distanceFog =
         compute_distance_fog_factor(length(u_cameraPos.xyz - v_worldpos));

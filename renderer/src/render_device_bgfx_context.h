@@ -25,7 +25,10 @@ inline constexpr std::size_t kMaxDeviceTargets = 256U;
 // Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 set by the build (#138):
 // the deferred pass binds engine texture units up to 21.
 inline constexpr std::size_t kMaxTextureSlots = 32U;
-inline constexpr std::size_t kMaxProgramParams = 64U;
+// Sized for the largest engine program: the PBR_FULL forward variant
+// carries ~50 material/light/fog uniforms plus 15 shadow/IBL samplers
+// and their matrices, overflowing the previous 64-entry table.
+inline constexpr std::size_t kMaxProgramParams = 96U;
 inline constexpr std::size_t kMaxParamNameLength = 44U;
 
 /// bgfx storage behind one engine buffer handle. bgfx requires the

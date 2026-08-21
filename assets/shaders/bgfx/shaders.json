@@ -4,7 +4,7 @@
     { "source": "default.vs.sc", "type": "vertex", "output": "default.vert", "variants": [[]] },
     { "source": "default.fs.sc", "type": "fragment", "output": "default.frag", "variants": [[]] },
     { "source": "pbr.vs.sc", "type": "vertex", "output": "pbr.vert", "variants": [[]] },
-    { "source": "pbr.fs.sc", "type": "fragment", "output": "pbr.frag", "variants": [[]] },
+    { "source": "pbr.fs.sc", "type": "fragment", "output": "pbr.frag", "variants": [[], ["PBR_FULL"]] },
     { "source": "gbuffer.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [[]] },
     { "source": "gbuffer_skinned.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [["SKINNED"]] },
     { "source": "gbuffer.fs.sc", "type": "fragment", "output": "gbuffer.frag", "variants": [[]] },

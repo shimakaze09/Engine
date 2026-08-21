@@ -1,6 +1,7 @@
 // Implements the hard-fail backend core initialization: render device,
 // shader system, the default/PBR/tonemap programs with their required
 // shader parameters, and the fullscreen attribute-less geometry.
+#include "command_buffer_flush_internal.h"
 #include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
 #include "command_buffer_post_resources.h"
@@ -300,9 +301,22 @@ bool init_backend_core(BackendState &backend) noexcept {
     return false;
   }
 
-  // Load PBR shader.
+  // Load PBR shader. The PBR_FULL variant carries forward shadow and
+  // IBL sampling on the GL unit map (tops out at kIblBrdfLutUnit, 21),
+  // so it needs the same unit budget as the deferred pass; a device
+  // under that budget (WebGL2's 16-unit floor) takes the reduced
+  // default, whose shadow=1 / constant-ambient paths stay correct.
+  // On GL the variant define is inert — its GLSL always carries the
+  // full sampling — so both backends load one canonical program.
+  const bool forwardFullSamplers =
+      dev->caps.maxTextureSamplers >
+      static_cast<std::uint16_t>(kIblBrdfLutUnit);
+  const ShaderDefine pbrFullDefine{"PBR_FULL", "1"};
   const ShaderProgramHandle pbrShaderHandle =
-      load_configured_shader_program("pbr.vert", "pbr.frag");
+      forwardFullSamplers
+          ? load_configured_shader_variant("pbr.vert", "pbr.frag",
+                                           &pbrFullDefine, 1U)
+          : load_configured_shader_program("pbr.vert", "pbr.frag");
   if (pbrShaderHandle == kInvalidShaderProgram) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load PBR shader program");
