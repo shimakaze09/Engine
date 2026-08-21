@@ -1,0 +1,9 @@
+{
+  "comment": "bgfx shader cook manifest (#138 Phase C): each entry names one .sc source, its stage, the runtime output stem (matching the GL shader path stem shader_system maps from), and its variant define sets. Cooked outputs land as <output>.<variantKey>.<profile>.bin under the cooked directory; variantKey is the sorted defines joined with '-', or 'default' for none.",
+  "shaders": [
+    { "source": "debug_line.vs.sc", "type": "vertex", "output": "debug_line.vert", "variants": [[]] },
+    { "source": "debug_line.fs.sc", "type": "fragment", "output": "debug_line.frag", "variants": [[]] },
+    { "source": "fullscreen.vs.sc", "type": "vertex", "output": "fullscreen.vert", "variants": [[]] },
+    { "source": "tonemap.fs.sc", "type": "fragment", "output": "tonemap.frag", "variants": [[]] }
+  ]
+}

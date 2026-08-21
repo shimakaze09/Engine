@@ -251,11 +251,16 @@ directory-global by design.
   backend TU compiles per build, selected by `ENGINE_RENDERER_BACKEND`:
   `render_device_gl.cpp` (default; all GL enums, VAOs, FBOs, uniform
   locations, and texture units stay inside it) or the #138 Phase B
-  `render_device_bgfx.cpp` + `render_device_bgfx_translate.cpp` (bgfx
-  single-threaded on the Noop renderer until Phase D ports the platform
-  window/presentation; programs and runtime mip generation defer to the
-  Phase C shaderc cook; caps report uniform blocks and timestamp queries
-  unavailable; suite `engine_unit_render_device_bgfx`) — both map engine
+  `render_device_bgfx.cpp` + `render_device_bgfx_programs.cpp` +
+  `render_device_bgfx_translate.cpp` (bgfx single-threaded on the Noop
+  renderer until Phase D ports the platform window/presentation;
+  programs link only from the Phase C shaderc cook's binaries via
+  `create_program_binary` + `caps.cookedPrograms` — spirv is the
+  canonical profile because GLSL-flavor binaries embed no uniform
+  table; runtime GLSL compile and mip generation stay unavailable; caps
+  report uniform blocks and timestamp queries unavailable; suites
+  `engine_unit_render_device_bgfx` + `engine_unit_shader_cook`) — both
+  backends map engine
   handles through the generational slot tables in `device_slot_table.h`
   so stale device handles are detected instead of aliasing recycled
   backend objects; the one sanctioned native-id escape is
@@ -400,7 +405,13 @@ directory-global by design.
   stay Stop-only/single-entity-only pending a follow-up that threads their
   drawers' own structural sub-edits (asset picks, foliage instance add/
   remove) through the same per-field batch/live path.
-- `assets/` — GLSL shaders, sample Lua scripts, sample meshes, the bundled
+- `assets/` — GLSL shaders (plus `shaders/bgfx/`: shaderc `.sc` ports,
+  `varying.def.sc`, and the `shaders.json` cook manifest — #138 Phase C;
+  bgfx builds cook them per profile into the build tree's
+  `shaders/bgfx/cooked/` through `asset_packer --shader-manifest`, one
+  cook stamp certifying the whole output set, and `shader_system`
+  prefers the cooked binaries whenever the device's
+  `caps.cookedPrograms` is set), sample Lua scripts, sample meshes, the bundled
   prop pack (`props/`, cooked from generated glTFs), sounds, and the Island
   Hopper template (`templates/island_hopper.json`, installed as
   `scene.json`) — synced to the build dir by CMake. `tools/` — asset_packer
@@ -414,7 +425,8 @@ directory-global by design.
   #130), MSVC + GCC Release compatibility lanes, determinism hash compare,
   static analysis + comment audits, clang-tidy, werror, ASAN/UBSAN, TSAN,
   coverage (≥50%), benchmarks (>10% regression fails), a bgfx backend
-  lane (build + Noop-renderer device suite, #138 Phase B), quality gate.
+  lane (build + shader cook + Noop-renderer device/cook suites, #138),
+  quality gate.
 
 ## Architecture invariants
 

@@ -7,6 +7,7 @@
 if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     set(ENGINE_RENDERER_BACKEND_SOURCES
         src/render_device_bgfx.cpp
+        src/render_device_bgfx_programs.cpp
         src/render_device_bgfx_translate.cpp)
 else()
     set(ENGINE_RENDERER_BACKEND_SOURCES src/render_device_gl.cpp)

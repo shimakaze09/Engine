@@ -1,9 +1,10 @@
-// Verifies the bgfx render device backend skeleton (#138 Phase B) on the
-// Noop renderer: initialization/shutdown/re-initialization lifecycle,
-// honest capability flags, buffer/texture/geometry/render-target
-// creation with stale-handle and dropped-operation behavior, the
-// program-less draw contract pending the Phase C shader cook, and the
-// pure engine-to-bgfx translation (state bits, formats, sampler flags,
+// Verifies the bgfx render device backend (#138 Phases B/C) on the Noop
+// renderer: initialization/shutdown/re-initialization lifecycle, honest
+// capability flags, buffer/texture/geometry/render-target creation with
+// stale-handle and dropped-operation behavior, the program-less draw
+// contract, cooked-binary program linking with parameter/sampler
+// resolution (when the build cooked the proving shaders), and the pure
+// engine-to-bgfx translation (state bits, formats, sampler flags,
 // vertex layouts) pinned exactly.
 
 #include "engine/renderer/render_device.h"
@@ -13,6 +14,9 @@
 #include "../test_harness.h"
 
 #include <cstdint>
+#include <cstdio>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -240,6 +244,116 @@ void test_programs_and_draws(TestContext &t) {
   render_device_bgfx_frame();
 }
 
+#ifdef ENGINE_TEST_COOKED_SHADER_DIR
+/// Whole-file byte read; empty on failure.
+std::vector<char> read_cooked(const char *name) {
+  const std::string path =
+      std::string(ENGINE_TEST_COOKED_SHADER_DIR) + "/" + name;
+  FILE *file = std::fopen(path.c_str(), "rb");
+  if (file == nullptr) {
+    return {};
+  }
+  std::fseek(file, 0, SEEK_END);
+  const long size = std::ftell(file);
+  std::fseek(file, 0, SEEK_SET);
+  std::vector<char> bytes(static_cast<std::size_t>(size > 0 ? size : 0));
+  const std::size_t read =
+      bytes.empty() ? 0U : std::fread(bytes.data(), 1U, bytes.size(), file);
+  std::fclose(file);
+  if (read != bytes.size()) {
+    bytes.clear();
+  }
+  return bytes;
+}
+
+/// Cooked programs (#138 Phase C): binary linking, parameter and
+/// sampler resolution, submitting draws, and malformed-input rejection.
+void test_cooked_programs(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  t.check(dev->caps.cookedPrograms, "caps: cooked programs available");
+  t.check(dev->cooked_program_profile != nullptr &&
+              (dev->cooked_program_profile()[0] != '\0'),
+          "cooked profile tag published");
+
+  const std::vector<char> vsBin =
+      read_cooked("debug_line.vert.default.spirv.bin");
+  const std::vector<char> fsBin =
+      read_cooked("debug_line.frag.default.spirv.bin");
+  t.check(!vsBin.empty() && !fsBin.empty(), "cooked proving binaries read");
+
+  const char garbage[16] = "not-a-shader";
+  t.check(dev->create_program_binary(
+                 garbage, sizeof(garbage), garbage, sizeof(garbage))
+                  .value == 0U,
+          "malformed binaries rejected");
+
+  const DeviceProgramHandle program = dev->create_program_binary(
+      vsBin.data(), static_cast<std::ptrdiff_t>(vsBin.size()), fsBin.data(),
+      static_cast<std::ptrdiff_t>(fsBin.size()));
+  t.check(program.value != 0U, "cooked program linked");
+
+  const ShaderParam viewProj = dev->shader_param(program, "uViewProjection");
+  t.check(viewProj.valid(), "uniform resolved from cooked program");
+  t.check(!dev->shader_param(program, "u_absent").valid(),
+          "absent uniform resolves invalid");
+
+  dev->bind_program(program);
+  const float identity[16] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                              0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                              0.0f, 0.0f, 0.0f, 1.0f};
+  dev->set_param_mat4(viewProj, identity);
+
+  // A draw with a bound cooked program submits instead of dropping.
+  const float vertices[21] = {};
+  BufferDesc vertexDesc{};
+  vertexDesc.usage = BufferUsage::Vertex;
+  vertexDesc.sizeBytes = sizeof(vertices);
+  vertexDesc.data = vertices;
+  const DeviceBufferHandle vertex = dev->create_buffer(vertexDesc);
+  GeometryDesc geometryDesc{};
+  geometryDesc.vertexBuffer = vertex;
+  geometryDesc.layout.strideBytes = 28;
+  geometryDesc.layout.attributeCount = 2U;
+  geometryDesc.layout.attributes[0] = {VertexSemantic::Position, 3, 0};
+  geometryDesc.layout.attributes[1] = {VertexSemantic::Color, 4, 12};
+  const DeviceGeometryHandle geometry = dev->create_geometry(geometryDesc);
+  const std::uint64_t before = dropped(dev);
+  dev->draw(geometry, PrimitiveTopology::Lines, 0, 3);
+  t.check(dropped(dev) == before, "draw with cooked program submits");
+  render_device_bgfx_frame();
+
+  // Sampler resolution on the tonemap program.
+  const std::vector<char> fsVs =
+      read_cooked("fullscreen.vert.default.spirv.bin");
+  const std::vector<char> toneFs =
+      read_cooked("tonemap.frag.default.spirv.bin");
+  t.check(!fsVs.empty() && !toneFs.empty(), "tonemap binaries read");
+  const DeviceProgramHandle tonemap = dev->create_program_binary(
+      fsVs.data(), static_cast<std::ptrdiff_t>(fsVs.size()), toneFs.data(),
+      static_cast<std::ptrdiff_t>(toneFs.size()));
+  t.check(tonemap.value != 0U, "tonemap program linked");
+  const ShaderParam scene = dev->shader_param(tonemap, "u_sceneColor");
+  const ShaderParam exposure = dev->shader_param(tonemap, "u_exposure");
+  t.check(scene.valid() && exposure.valid(),
+          "sampler and vec4 uniforms resolved");
+  dev->bind_program(tonemap);
+  dev->set_param_i32(scene, 0);
+  dev->set_param_f32(exposure, 1.5f);
+
+  dev->destroy_program(tonemap);
+  dev->destroy_program(tonemap); // idempotent
+  const std::uint64_t afterDestroy = dropped(dev);
+  dev->bind_program(tonemap);
+  t.check(dropped(dev) == afterDestroy + 1U, "stale program bind dropped");
+
+  dev->bind_program(kInvalidDeviceProgram);
+  dev->destroy_program(program);
+  dev->destroy_buffer(vertex);
+  dev->destroy_geometry(geometry);
+  render_device_bgfx_frame();
+}
+#endif // ENGINE_TEST_COOKED_SHADER_DIR
+
 /// Pure translation: exact state bits, format table, sampler flags,
 /// clear packing, and vertex layout building incl. gap/overlap rules.
 void test_translation(TestContext &t) {
@@ -323,6 +437,9 @@ int main() {
   test_textures(t);
   test_render_targets(t);
   test_programs_and_draws(t);
+#ifdef ENGINE_TEST_COOKED_SHADER_DIR
+  test_cooked_programs(t);
+#endif
   test_translation(t);
   shutdown_render_device();
   return t.finish("render_device_bgfx");
