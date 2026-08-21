@@ -651,7 +651,7 @@ void bgfx_submit_draw(std::uint64_t stateBits) noexcept {
     return;
   }
   bgfx::setState(stateBits);
-  apply_program_uniforms(*program);
+  apply_staged_uniforms();
   apply_program_samplers(*program);
   bgfx::submit(ctx.currentView, program->handle);
 }
@@ -1083,6 +1083,8 @@ void shutdown_render_device() noexcept {
   }
   ctx.device = RenderDevice{};
   if (ctx.mode == BgfxBackendMode::Bgfx) {
+    // Global uniform handles die with the device, before bgfx::shutdown.
+    reset_global_uniforms();
     if (bgfx::isValid(ctx.fullscreenVertex)) {
       bgfx::destroy(ctx.fullscreenVertex);
     }
@@ -1093,6 +1095,10 @@ void shutdown_render_device() noexcept {
   }
   ctx.fullscreenVertex = BGFX_INVALID_HANDLE;
   ctx.fullscreenLayout = BGFX_INVALID_HANDLE;
+  // Null-mode runs never create registry entries; this only clears
+  // counters (the Bgfx branch above already destroyed live handles).
+  ctx.uniformCount = 0U;
+  ctx.dirtyUniformCount = 0U;
   ctx.mode = BgfxBackendMode::None;
   ctx.initialized = false;
 }

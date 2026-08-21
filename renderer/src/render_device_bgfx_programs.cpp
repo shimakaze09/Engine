@@ -45,6 +45,70 @@ bool is_predefined_uniform_name(const char *name) noexcept {
   return false;
 }
 
+/// Finds or creates the global registry entry for a uniform name. The
+/// registry owns its own bgfx handle (created here; bgfx refcounts by
+/// name) so entries stay valid after any single program is destroyed.
+/// Returns kMaxGlobalUniforms when the registry is full or the name
+/// re-registers under a conflicting type (logged, dropped).
+std::size_t find_or_create_global_uniform(const char *name,
+                                          bgfx::UniformType::Enum type,
+                                          std::uint16_t num) noexcept {
+  BgfxDeviceContext &ctx = device_context();
+  for (std::uint16_t i = 0U; i < ctx.uniformCount; ++i) {
+    if (std::strncmp(ctx.uniforms[i].name, name, kMaxParamNameLength) != 0) {
+      continue;
+    }
+    if (ctx.uniforms[i].type != type) {
+      drop_operation("uniform registry: type conflict for name");
+      return kMaxGlobalUniforms;
+    }
+    if (num > ctx.uniforms[i].declaredNum) {
+      // A later program declares a larger array; recreate the handle at
+      // the larger count so uploads are never clamped.
+      if (bgfx::isValid(ctx.uniforms[i].handle)) {
+        bgfx::destroy(ctx.uniforms[i].handle);
+      }
+      ctx.uniforms[i].handle = bgfx::createUniform(name, type, num);
+      ctx.uniforms[i].declaredNum = num;
+    }
+    return i;
+  }
+  if (ctx.uniformCount >= kMaxGlobalUniforms) {
+    drop_operation("uniform registry: table full");
+    return kMaxGlobalUniforms;
+  }
+  BgfxGlobalUniform &entry = ctx.uniforms[ctx.uniformCount];
+  entry = BgfxGlobalUniform{};
+  core::copy_string(entry.name, kMaxParamNameLength, name);
+  entry.type = type;
+  entry.declaredNum = (num > 0U) ? num : 1U;
+  entry.handle = bgfx::createUniform(name, type, entry.declaredNum);
+  return ctx.uniformCount++;
+}
+
+/// Adds one global-registry index to a program's declared-uniform list
+/// (deduplicated; the list only answers shader_param lookups).
+void record_program_param(BgfxProgramRecord *record,
+                          std::size_t globalIndex) noexcept {
+  if (globalIndex >= kMaxGlobalUniforms) {
+    return;
+  }
+  for (std::uint16_t existing = 0U; existing < record->paramCount;
+       ++existing) {
+    if (record->paramIndices[existing] ==
+        static_cast<std::uint16_t>(globalIndex)) {
+      return;
+    }
+  }
+  if (record->paramCount >= kMaxProgramParams) {
+    drop_operation("create_program_binary: parameter table full");
+    return;
+  }
+  record->paramIndices[record->paramCount] =
+      static_cast<std::uint16_t>(globalIndex);
+  ++record->paramCount;
+}
+
 /// Walks a cooked shader binary's uniform table on the CPU and merges
 /// its entries into the program's parameter table (deduplicated by
 /// name). This is how the spirv sidecars donate uniform metadata for
@@ -100,29 +164,10 @@ void collect_sidecar_params(const void *data, std::ptrdiff_t size,
         is_predefined_uniform_name(name)) {
       continue;
     }
-    bool duplicate = false;
-    for (std::uint16_t existing = 0U; existing < record->paramCount;
-         ++existing) {
-      if (std::strncmp(record->params[existing].name, name,
-                       kMaxParamNameLength) == 0) {
-        duplicate = true;
-        break;
-      }
-    }
-    if (duplicate) {
-      continue;
-    }
-    if (record->paramCount >= kMaxProgramParams) {
-      drop_operation("create_program_binary_introspected: table full");
-      return;
-    }
-    BgfxParamRecord &param = record->params[record->paramCount];
-    core::copy_string(param.name, kMaxParamNameLength, name);
-    param.handle = BGFX_INVALID_HANDLE;
-    param.type = baseType;
-    param.declaredNum = (num > 0U) ? num : 1U;
-    param.samplerStage = -1;
-    ++record->paramCount;
+    record_program_param(
+        record, find_or_create_global_uniform(
+                    name, baseType,
+                    static_cast<std::uint16_t>((num > 0U) ? num : 1U)));
   }
 }
 
@@ -136,48 +181,31 @@ void collect_shader_params(bgfx::ShaderHandle shader,
   for (std::uint16_t i = 0U; i < count; ++i) {
     bgfx::UniformInfo info{};
     bgfx::getUniformInfo(uniforms[i], info);
-    bool duplicate = false;
-    for (std::uint16_t existing = 0U; existing < record->paramCount;
-         ++existing) {
-      if (std::strncmp(record->params[existing].name, info.name,
-                       kMaxParamNameLength) == 0) {
-        duplicate = true;
-        break;
-      }
-    }
-    if (duplicate) {
-      continue;
-    }
-    if (record->paramCount >= kMaxProgramParams) {
-      drop_operation("create_program_binary: parameter table full");
-      return;
-    }
-    BgfxParamRecord &param = record->params[record->paramCount];
-    core::copy_string(param.name, kMaxParamNameLength, info.name);
-    param.handle = uniforms[i];
-    param.type = info.type;
-    param.samplerStage = -1;
-    ++record->paramCount;
+    // The registry creates its own handle for the name: the shader-owned
+    // handle dies with the program, the registry's survives it.
+    record_program_param(record, find_or_create_global_uniform(
+                                     info.name, info.type, info.num));
   }
 }
 
-/// Parameter behind the token on the currently bound program; nullptr
-/// for invalid tokens (defined no-op per the contract).
-BgfxParamRecord *resolve_param(ShaderParam param) noexcept {
+/// Global-registry entry behind a token; nullptr for invalid tokens
+/// (defined no-op per the contract). Tokens are registry indices, so
+/// resolution does not depend on which program is currently bound.
+BgfxGlobalUniform *resolve_param(ShaderParam param) noexcept {
   if (!param.valid()) {
     return nullptr;
   }
-  BgfxProgramRecord *record = current_program_record();
-  if ((record == nullptr) ||
-      (param.value >= static_cast<std::int32_t>(record->paramCount))) {
+  BgfxDeviceContext &ctx = device_context();
+  if (param.value >= static_cast<std::int32_t>(ctx.uniformCount)) {
     return nullptr;
   }
-  return &record->params[param.value];
+  return &ctx.uniforms[param.value];
 }
 
-/// Stages a value into the param's pending storage (applied once per
-/// submit; last write wins, matching GL uniform semantics).
-void stage_param(BgfxParamRecord *param, const float *value,
+/// Stages a value into the entry's pending storage and enrolls it in
+/// the context's dirty list (applied once per submit; last write wins,
+/// matching GL uniform semantics).
+void stage_param(BgfxGlobalUniform *param, const float *value,
                  std::size_t floatCount, std::uint16_t num) noexcept {
   if ((param == nullptr) || (value == nullptr) || (floatCount == 0U) ||
       (floatCount > 128U)) {
@@ -185,12 +213,17 @@ void stage_param(BgfxParamRecord *param, const float *value,
   }
   std::memcpy(param->pending, value, floatCount * sizeof(float));
   param->pendingNum = num;
-  param->dirty = true;
+  if (!param->dirty) {
+    param->dirty = true;
+    BgfxDeviceContext &ctx = device_context();
+    ctx.dirtyUniforms[ctx.dirtyUniformCount++] =
+        static_cast<std::uint16_t>(param - ctx.uniforms);
+  }
 }
 
 /// Sets a padded vec4 uniform from count source floats (bgfx has no
 /// scalar/vec2/vec3 uniform types).
-void set_padded_vec4(BgfxParamRecord *param, const float *value,
+void set_padded_vec4(BgfxGlobalUniform *param, const float *value,
                      std::int32_t count) noexcept {
   if ((param == nullptr) || (value == nullptr) ||
       (param->type != bgfx::UniformType::Vec4)) {
@@ -213,21 +246,26 @@ BgfxProgramRecord *current_program_record() noexcept {
   return ctx.programs.resolve(ctx.currentProgram);
 }
 
-void apply_program_uniforms(BgfxProgramRecord &program) noexcept {
-  for (std::uint16_t i = 0U; i < program.paramCount; ++i) {
-    BgfxParamRecord &param = program.params[i];
-    if (!param.dirty || (param.type == bgfx::UniformType::Sampler)) {
+void apply_staged_uniforms() noexcept {
+  BgfxDeviceContext &ctx = device_context();
+  for (std::uint16_t i = 0U; i < ctx.dirtyUniformCount; ++i) {
+    BgfxGlobalUniform &param = ctx.uniforms[ctx.dirtyUniforms[i]];
+    param.dirty = false;
+    // pendingNum 0 marks an entry whose value was applied immediately
+    // (oversized array uploads); samplers carry no float payload.
+    if ((param.pendingNum == 0U) ||
+        (param.type == bgfx::UniformType::Sampler)) {
       continue;
     }
     bgfx::setUniform(param.handle, param.pending, param.pendingNum);
-    param.dirty = false;
   }
+  ctx.dirtyUniformCount = 0U;
 }
 
 void apply_program_samplers(const BgfxProgramRecord &program) noexcept {
   BgfxDeviceContext &ctx = device_context();
   for (std::uint16_t i = 0U; i < program.paramCount; ++i) {
-    const BgfxParamRecord &param = program.params[i];
+    const BgfxGlobalUniform &param = ctx.uniforms[program.paramIndices[i]];
     if ((param.type != bgfx::UniformType::Sampler) ||
         (param.samplerStage < 0)) {
       continue;
@@ -244,6 +282,18 @@ void apply_program_samplers(const BgfxProgramRecord &program) noexcept {
     bgfx::setTexture(static_cast<std::uint8_t>(param.samplerStage),
                      param.handle, texture->handle);
   }
+}
+
+void reset_global_uniforms() noexcept {
+  BgfxDeviceContext &ctx = device_context();
+  for (std::uint16_t i = 0U; i < ctx.uniformCount; ++i) {
+    if (bgfx::isValid(ctx.uniforms[i].handle)) {
+      bgfx::destroy(ctx.uniforms[i].handle);
+    }
+    ctx.uniforms[i] = BgfxGlobalUniform{};
+  }
+  ctx.uniformCount = 0U;
+  ctx.dirtyUniformCount = 0U;
 }
 
 const char *bgfx_cooked_program_profile() noexcept {
@@ -301,9 +351,6 @@ DeviceProgramHandle bgfx_create_program_binary(
   }
 
   BgfxProgramRecord record{};
-  // Uniform handles stay owned by the shaders, which live exactly as
-  // long as the program (destroyShaders below), so the table's handles
-  // are valid for the record's lifetime.
   collect_shader_params(vertex, &record);
   collect_shader_params(fragment, &record);
   record.handle = bgfx::createProgram(vertex, fragment, true);
@@ -348,12 +395,6 @@ DeviceProgramHandle bgfx_create_program_binary_introspected(
   BgfxProgramRecord record{};
   collect_sidecar_params(vertexMeta, vertexMetaSize, &record);
   collect_sidecar_params(fragmentMeta, fragmentMetaSize, &record);
-  for (std::uint16_t i = 0U; i < record.paramCount; ++i) {
-    record.params[i].handle =
-        bgfx::createUniform(record.params[i].name, record.params[i].type,
-                            record.params[i].declaredNum);
-  }
-  record.ownsUniforms = true;
 
   const bgfx::ShaderHandle vertex = bgfx::createShader(
       bgfx::copy(vertexData, static_cast<std::uint32_t>(vertexSize)));
@@ -399,13 +440,8 @@ void bgfx_destroy_program(DeviceProgramHandle program) noexcept {
   if (ctx.currentProgram == program.value) {
     ctx.currentProgram = 0U;
   }
-  if (record->ownsUniforms) {
-    for (std::uint16_t i = 0U; i < record->paramCount; ++i) {
-      if (bgfx::isValid(record->params[i].handle)) {
-        bgfx::destroy(record->params[i].handle);
-      }
-    }
-  }
+  // Uniform handles belong to the context's global registry (device
+  // lifetime); only the program object dies here.
   bgfx::destroy(record->handle);
   ctx.programs.release(program.value);
 }
@@ -434,17 +470,21 @@ ShaderParam bgfx_shader_param(DeviceProgramHandle program,
     drop_operation("shader_param: stale program");
     return kInvalidShaderParam;
   }
+  const BgfxDeviceContext &ctx = device_context();
   for (std::uint16_t i = 0U; i < record->paramCount; ++i) {
-    if (std::strncmp(record->params[i].name, name, kMaxParamNameLength) ==
-        0) {
-      return ShaderParam{static_cast<std::int32_t>(i)};
+    const std::uint16_t globalIndex = record->paramIndices[i];
+    if (std::strncmp(ctx.uniforms[globalIndex].name, name,
+                     kMaxParamNameLength) == 0) {
+      // Tokens are global-registry indices: setting through them is
+      // correct regardless of which program is bound at set time.
+      return ShaderParam{static_cast<std::int32_t>(globalIndex)};
     }
   }
   return kInvalidShaderParam;
 }
 
 void bgfx_set_param_mat4(ShaderParam param, const float *value) noexcept {
-  BgfxParamRecord *record = resolve_param(param);
+  BgfxGlobalUniform *record = resolve_param(param);
   if ((record == nullptr) || (record->type != bgfx::UniformType::Mat4)) {
     return;
   }
@@ -452,7 +492,7 @@ void bgfx_set_param_mat4(ShaderParam param, const float *value) noexcept {
 }
 
 void bgfx_set_param_mat3(ShaderParam param, const float *value) noexcept {
-  BgfxParamRecord *record = resolve_param(param);
+  BgfxGlobalUniform *record = resolve_param(param);
   if ((record == nullptr) || (record->type != bgfx::UniformType::Mat3)) {
     return;
   }
@@ -464,7 +504,7 @@ void bgfx_set_param_f32(ShaderParam param, float value) noexcept {
 }
 
 void bgfx_set_param_i32(ShaderParam param, std::int32_t value) noexcept {
-  BgfxParamRecord *record = resolve_param(param);
+  BgfxGlobalUniform *record = resolve_param(param);
   if (record == nullptr) {
     return;
   }
@@ -494,7 +534,7 @@ void bgfx_set_param_vec4(ShaderParam param, const float *value) noexcept {
 
 void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
-  BgfxParamRecord *record = resolve_param(param);
+  BgfxGlobalUniform *record = resolve_param(param);
   if ((record == nullptr) || (count <= 0) || (count > 32) ||
       (record->type != bgfx::UniformType::Vec4)) {
     return;
@@ -505,17 +545,19 @@ void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
 
 void bgfx_set_param_mat4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
-  BgfxParamRecord *record = resolve_param(param);
+  BgfxGlobalUniform *record = resolve_param(param);
   if ((record == nullptr) || (values == nullptr) || (count <= 0) ||
       (count > 128) || (record->type != bgfx::UniformType::Mat4)) {
     return;
   }
   // Applied immediately: bone palettes (mat4[128]) exceed the staging
   // cap, and array uploads happen once per pass/draw by design (the
-  // once-per-draw bgfx rule holds without staging).
+  // once-per-draw bgfx rule holds without staging). Clearing the
+  // pending payload keeps a previously staged small value from
+  // re-applying over this upload at submit.
   bgfx::setUniform(record->handle, values,
                    static_cast<std::uint16_t>(count));
-  record->dirty = false;
+  record->pendingNum = 0U;
 }
 
 bool bgfx_bind_program_uniform_block(DeviceProgramHandle, const char *,

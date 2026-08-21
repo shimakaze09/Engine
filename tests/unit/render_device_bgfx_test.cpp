@@ -309,6 +309,38 @@ void test_cooked_programs(TestContext &t) {
   t.check(!dev->shader_param(program, "u_absent").valid(),
           "absent uniform resolves invalid");
 
+  // Global uniform registry: bgfx uniforms are global by name, so two
+  // programs declaring the same name share one token, and setting
+  // through either token is correct regardless of which program is
+  // bound — the cross-program token hazard (a token from program A
+  // silently indexing program B's table) cannot occur.
+  {
+    const DeviceProgramHandle second = dev->create_program_binary(
+        vsBin.data(), static_cast<std::ptrdiff_t>(vsBin.size()),
+        fsBin.data(), static_cast<std::ptrdiff_t>(fsBin.size()));
+    t.check(second.value != 0U, "second cooked program linked");
+    const ShaderParam viewProjSecond =
+        dev->shader_param(second, "uViewProjection");
+    t.check(viewProjSecond.valid() &&
+                (viewProjSecond.value == viewProj.value),
+            "same uniform name shares one global token across programs");
+    dev->bind_program(second);
+    const std::uint64_t dropsBefore = dropped(dev);
+    const float scale[16] = {2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f,
+                             0.0f, 0.0f, 0.0f, 0.0f, 2.0f, 0.0f,
+                             0.0f, 0.0f, 0.0f, 1.0f};
+    // Set through the FIRST program's token while the SECOND is bound.
+    dev->set_param_mat4(viewProj, scale);
+    t.check(dropped(dev) == dropsBefore,
+            "cross-program set through a shared token is accepted");
+    dev->bind_program(kInvalidDeviceProgram);
+    dev->destroy_program(second);
+    // Registry tokens survive the destruction of one referencing
+    // program: the first program still resolves and accepts sets.
+    t.check(dev->shader_param(program, "uViewProjection").valid(),
+            "token survives destroying a sibling program");
+  }
+
   dev->bind_program(program);
   const float identity[16] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
                               0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
