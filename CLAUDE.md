@@ -22,7 +22,9 @@ below.
 
 Third-party (all SHA-pinned via FetchContent in the root CMakeLists.txt):
 SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
-(tools only), stb snapshot, miniaudio 0.11.21, OpenGL 4.5+.
+(tools only), stb snapshot, miniaudio 0.11.21, OpenGL 4.5+, and — only
+when `ENGINE_RENDERER_BACKEND=bgfx` (the v0.5 replatform lane, #138) —
+bgfx v1.153 via the bgfx.cmake superproject (bundles bx/bimg).
 
 ## Hard rules
 
@@ -183,7 +185,9 @@ Apple caps OpenGL at 4.1 while `default.frag` needs GLSL 450, so the GL
 renderer runs on Windows/Linux until the v0.5 bgfx replatform — the lane's
 value is AppleClang conformance. CMake
 options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
-`ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
+`ENGINE_RENDERER_BACKEND` (gl default; bgfx fetches and links the v0.5
+replatform dependency — Phase A wiring only, no engine source consumes
+it yet), `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
 `/fp:strict` / `-ffp-contract=off`), `ENGINE_SANITIZERS`,
 `ENGINE_BUILD_TESTS/TOOLS`. Helper functions live in
 `cmake/EngineHelpers.cmake` (module/static, header-only INTERFACE, exe, test);
@@ -397,11 +401,12 @@ directory-global by design.
   `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, CI
   helpers. `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
-  `.github/workflows/ci.yml` — 11 jobs: canonical-toolchain build matrix
+  `.github/workflows/ci.yml` — 12 jobs: canonical-toolchain build matrix
   (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
   #130), MSVC + GCC Release compatibility lanes, determinism hash compare,
   static analysis + comment audits, clang-tidy, werror, ASAN/UBSAN, TSAN,
-  coverage (≥50%), benchmarks (>10% regression fails), quality gate.
+  coverage (≥50%), benchmarks (>10% regression fails), a build-only bgfx
+  backend lane (#138 Phase A), quality gate.
 
 ## Architecture invariants
 

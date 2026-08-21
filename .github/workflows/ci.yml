@@ -407,6 +407,44 @@ jobs:
       - name: Build (will fail on any warning due to -Werror)
         run: cmake --build build --config Release --parallel
 
+  bgfx-build:
+    name: bgfx backend build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux dependencies
+        run: |
+          bash .github/scripts/install-linux-deps.sh \
+            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libxxf86vm-dev \
+            libxtst-dev libxfixes-dev \
+            libxss-dev libwayland-dev libxkbcommon-dev \
+            libasound2-dev libpulse-dev
+
+      - name: Cache _deps
+        uses: actions/cache@v5
+        with:
+          path: build/_deps
+          key: deps-bgfx-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-bgfx-ubuntu-24.04-
+
+      # v0.5 replatform (#138) Phase A: prove the pinned bgfx dependency
+      # configures and compiles alongside the engine before any backend
+      # code consumes it. Build-only; the gl lanes stay authoritative for
+      # tests until the port reaches parity. Parallelism is bounded: bare
+      # --parallel maps to unbounded `make -j`, and shaderc's glslang/
+      # tint/spirv-tools TUs OOM-kill the 16GB runner under it.
+      - name: Configure (bgfx backend)
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DENGINE_RENDERER_BACKEND=bgfx
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
   sanitizers:
     name: ASAN+UBSAN
     runs-on: ubuntu-24.04
@@ -630,6 +668,7 @@ jobs:
       - static-analysis
       - clang-tidy
       - werror-check
+      - bgfx-build
       - sanitizers
       - tsan
       - coverage

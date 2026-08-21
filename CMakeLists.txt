@@ -105,6 +105,49 @@ set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
 set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
     "Build-tree asset directory used by local editor/runtime builds")
 
+# v0.5 replatform (#138, decision 2026-07-19): the render backend option.
+# "gl" is the shipping backend; "bgfx" fetches and links bgfx (with bx and
+# bimg via the bgfx.cmake superproject) so the port can be brought up lane
+# by lane without disturbing default builds. Phase A wires the dependency
+# only; no engine source consumes it until the backend TU lands.
+set(ENGINE_RENDERER_BACKEND "gl" CACHE STRING
+    "Render backend: gl (default) or bgfx (v0.5 replatform, #138)")
+set_property(CACHE ENGINE_RENDERER_BACKEND PROPERTY STRINGS gl bgfx)
+if(NOT ENGINE_RENDERER_BACKEND MATCHES "^(gl|bgfx)$")
+    message(FATAL_ERROR
+        "ENGINE_RENDERER_BACKEND must be 'gl' or 'bgfx', got "
+        "'${ENGINE_RENDERER_BACKEND}'")
+endif()
+
+if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
+    include(FetchContent)
+    set(BGFX_BUILD_TOOLS ON CACHE BOOL "bgfx shaderc/tools" FORCE)
+    set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "bgfx examples" FORCE)
+    set(BGFX_INSTALL OFF CACHE BOOL "bgfx install rules" FORCE)
+    set(BGFX_AMALGAMATED OFF CACHE BOOL "bgfx amalgamated build" FORCE)
+    FetchContent_Declare(
+        bgfx
+        GIT_REPOSITORY https://github.com/bkaradzic/bgfx.cmake.git
+        GIT_TAG 12428216cfa33eb34dc91187ad3a3c92196c9849 # v1.153.9398-566
+    )
+    if(DEFINED CMAKE_WARN_DEPRECATED)
+        set(_ENGINE_PREV_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
+    endif()
+    set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL
+        "Suppress third-party CMake deprecation warnings" FORCE)
+    FetchContent_MakeAvailable(bgfx)
+    if(DEFINED _ENGINE_PREV_CMAKE_WARN_DEPRECATED)
+        set(CMAKE_WARN_DEPRECATED "${_ENGINE_PREV_CMAKE_WARN_DEPRECATED}"
+            CACHE BOOL "Show CMake deprecation warnings" FORCE)
+    else()
+        unset(CMAKE_WARN_DEPRECATED CACHE)
+    endif()
+    if(NOT TARGET bgfx)
+        message(FATAL_ERROR "bgfx backend requested but the bgfx target was "
+                            "not created by the fetched superproject.")
+    endif()
+endif()
+
 find_package(SDL3 CONFIG QUIET)
 if(NOT SDL3_FOUND)
     include(FetchContent)

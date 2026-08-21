@@ -60,3 +60,12 @@ engine_add_module_library(engine_renderer
 )
 
 # Precompiled header remains PRIVATE via engine_add_module_library(... PCH ...).
+
+# v0.5 replatform (#138) Phase A: when the bgfx backend is selected the
+# renderer links it (and gains the backend define) so the port's backend
+# TU can land incrementally; the gl default neither fetches nor links it.
+if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
+    target_link_libraries(engine_renderer PRIVATE bgfx bx bimg)
+    target_compile_definitions(engine_renderer PRIVATE
+        ENGINE_RENDERER_BACKEND_BGFX=1)
+endif()
