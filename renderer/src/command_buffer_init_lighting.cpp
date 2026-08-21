@@ -52,8 +52,10 @@ bool resolve_gbuffer_program_state(BackendState &backend,
       required_param(&ok, dev, gbufProg, "uProjection");
   backend.gbufNormalMatrixLoc =
       required_param(&ok, dev, gbufProg, "uNormalMatrix");
-  backend.gbufUseInstancingLoc =
-      required_param(&ok, dev, gbufProg, "uUseInstancing");
+  // Optional: the bgfx shader set omits the instancing toggle until the
+  // instancing unit lands, and both backends' flushes gate instanced
+  // submission on this param's validity.
+  backend.gbufUseInstancingLoc = dev->shader_param(gbufProg, "uUseInstancing");
   backend.gbufTimeLoc = dev->shader_param(gbufProg, "uTime");
   backend.gbufFoliageWindStrengthLoc =
       dev->shader_param(gbufProg, "uFoliageWindStrength");
@@ -293,8 +295,10 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
       required_param(&ok, dev, skinnedProg, "uProjection");
   backend.gbufSkinnedNormalMatrixLoc =
       required_param(&ok, dev, skinnedProg, "uNormalMatrix");
+  // Optional for the same reason as the static G-buffer resolver: the
+  // flushes gate instanced submission on this param's validity.
   backend.gbufSkinnedUseInstancingLoc =
-      required_param(&ok, dev, skinnedProg, "uUseInstancing");
+      dev->shader_param(skinnedProg, "uUseInstancing");
   backend.gbufSkinnedTimeLoc = dev->shader_param(skinnedProg, "uTime");
   backend.gbufSkinnedAlbedoLoc =
       required_param(&ok, dev, skinnedProg, "uAlbedo");

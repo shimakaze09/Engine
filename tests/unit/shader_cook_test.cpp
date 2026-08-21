@@ -32,8 +32,15 @@ int run_cook(const std::string &packer, const std::string &manifest,
   const std::string command =
       quoted(packer) + " --shader-manifest " + quoted(manifest) +
       " --shader-out " + quoted(outDir) + " --shaderc " + quoted(shaderc) +
-      " --shader-include " + quoted(include) + " --profiles glsl,spirv";
+      " --shader-include " + quoted(include) +
+      " --profiles glsl,essl,spirv";
   return std::system(command.c_str());
+}
+
+/// True when the byte blob contains the needle text.
+bool contains(const std::vector<char> &bytes, const char *needle) {
+  return std::string(bytes.begin(), bytes.end()).find(needle) !=
+         std::string::npos;
 }
 
 /// Whole-file byte read; empty on failure.
@@ -80,6 +87,32 @@ int main() {
   }
   const std::string manifest = (sources / "shaders.json").string();
 
+  // Inject a depth-only probe (empty main, the shadow-depth fragment
+  // shape) so the bodyless-prototype regression below is provable
+  // regardless of which engine shaders the manifest currently lists.
+  {
+    std::ofstream probe(sources / "empty_probe.fs.sc");
+    probe << "// Depth-only cook probe: an empty main body must survive "
+             "the cook as a definition.\n\n"
+             "#include <bgfx_shader.sh>\n\nvoid main() {\n}\n";
+  }
+  {
+    std::vector<char> text = read_file(manifest);
+    const std::string needle = "\"shaders\": [";
+    std::string body(text.begin(), text.end());
+    const std::size_t at = body.find(needle);
+    if (at == std::string::npos) {
+      t.fail("manifest shaders array located");
+      return t.finish("shader_cook");
+    }
+    body.insert(at + needle.size(),
+                "\n    {\"source\": \"empty_probe.fs.sc\", \"type\": "
+                "\"fragment\", \"output\": \"empty_probe.frag\", "
+                "\"variants\": [[]]},");
+    std::ofstream out(manifest, std::ios::binary | std::ios::trunc);
+    out.write(body.data(), static_cast<std::streamsize>(body.size()));
+  }
+
   // Full cook commits outputs and the stamp.
   t.check(run_cook(packer, manifest, outA.string(), shaderc, include) == 0,
           "initial cook succeeds");
@@ -91,6 +124,24 @@ int main() {
   t.check(fs::exists(stamp), "cook stamp committed");
   const std::vector<char> firstBytes = read_file(sample);
   t.check(!firstBytes.empty(), "cooked binary non-empty");
+
+  // GL-flavor output fixups (fresh-recook regressions): the essl MRT
+  // declaration shrinks to the written attachment count (shaderc's
+  // hardcoded [8] exceeds WebGL MAX_DRAW_BUFFERS), and an empty
+  // depth-only main survives as a definition (glsl-optimizer otherwise
+  // emits a bodyless prototype GL rejects).
+  const std::vector<char> gbufferEssl =
+      read_file(outA / "gbuffer.frag.default.essl.bin");
+  t.check(contains(gbufferEssl, "bgfx_FragData[3];"),
+          "essl G-buffer declares only the written MRT slots");
+  t.check(!contains(gbufferEssl, "bgfx_FragData[8];"),
+          "essl G-buffer sheds shaderc's hardcoded MRT count");
+  const std::vector<char> probeEssl =
+      read_file(outA / "empty_probe.frag.default.essl.bin");
+  t.check(contains(probeEssl, "void main(){}"),
+          "essl depth-only fragment keeps a main definition");
+  t.check(!contains(probeEssl, "void main ();"),
+          "essl depth-only fragment is not a bodyless prototype");
 
   // Unchanged re-run: stamp-driven skip, bytes untouched.
   t.check(run_cook(packer, manifest, outA.string(), shaderc, include) == 0,

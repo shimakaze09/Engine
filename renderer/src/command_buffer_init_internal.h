@@ -5,8 +5,11 @@
 
 #pragma once
 
+#include "engine/core/logging.h"
 #include "engine/renderer/shader_system.h"
 #include "command_buffer_context.h"
+
+#include <cstdio>
 
 namespace engine::renderer {
 
@@ -59,6 +62,13 @@ inline ShaderParam required_param(bool *ok, const RenderDevice *dev,
                                   const char *name) noexcept {
   const ShaderParam param = dev->shader_param(program, name);
   if (!param.valid()) {
+    // Naming the missing uniform turns "shaders missing required
+    // uniforms" from a dead end into a direct pointer at the shader or
+    // introspection gap responsible.
+    char msg[112] = {};
+    std::snprintf(msg, sizeof(msg), "required shader uniform missing: %s",
+                  name);
+    core::log_message(core::LogLevel::Info, "renderer", msg);
     *ok = false;
   }
   return param;
