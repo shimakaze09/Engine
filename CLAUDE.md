@@ -186,8 +186,9 @@ renderer runs on Windows/Linux until the v0.5 bgfx replatform — the lane's
 value is AppleClang conformance. CMake
 options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
 `ENGINE_RENDERER_BACKEND` (gl default; bgfx fetches and links the v0.5
-replatform dependency — Phase A wiring only, no engine source consumes
-it yet), `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
+replatform dependency and swaps the device TU to the Phase B backend
+skeleton — Noop renderer only until Phase D wires the platform
+window), `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
 `/fp:strict` / `-ffp-contract=off`), `ENGINE_SANITIZERS`,
 `ENGINE_BUILD_TESTS/TOOLS`. Helper functions live in
 `cmake/EngineHelpers.cmake` (module/static, header-only INTERFACE, exe, test);
@@ -246,14 +247,21 @@ directory-global by design.
   the engine-owned backend-neutral device contract (#165): generational
   handles for buffers/textures/programs/geometry/render targets/queries,
   descriptor-based creation, named `ShaderParam` binding, whole
-  `RenderState` application, and a `DeviceCaps` capability struct; the sole
-  backend implementation lives in `render_device_gl.cpp` (all GL enums,
-  VAOs, FBOs, uniform locations, and texture units stay inside it, mapped
-  through the generational slot tables in `device_slot_table.h` so stale
-  device handles are detected instead of aliasing recycled backend
-  objects; the one sanctioned native-id escape is
+  `RenderState` application, and a `DeviceCaps` capability struct; one
+  backend TU compiles per build, selected by `ENGINE_RENDERER_BACKEND`:
+  `render_device_gl.cpp` (default; all GL enums, VAOs, FBOs, uniform
+  locations, and texture units stay inside it) or the #138 Phase B
+  `render_device_bgfx.cpp` + `render_device_bgfx_translate.cpp` (bgfx
+  single-threaded on the Noop renderer until Phase D ports the platform
+  window/presentation; programs and runtime mip generation defer to the
+  Phase C shaderc cook; caps report uniform blocks and timestamp queries
+  unavailable; suite `engine_unit_render_device_bgfx`) — both map engine
+  handles through the generational slot tables in `device_slot_table.h`
+  so stale device handles are detected instead of aliasing recycled
+  backend objects; the one sanctioned native-id escape is
   `RenderDevice::native_texture_id`, consumed only by the editor's ImGui
-  image binding), command buffer frontend
+  image binding (the null backend from #196 stays selectable in either
+  build via `r_null_device`), command buffer frontend
   (`CommandBufferBuilder`, 64-bit DrawKey sort) with backend split across
   `command_buffer{,_init_*,_flush,_flush_*,_sky,_ibl,_post_resources,_context,_builder,_math}`
   (init stages behind `command_buffer_init_internal.h`; flush passes share
@@ -405,8 +413,8 @@ directory-global by design.
   (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
   #130), MSVC + GCC Release compatibility lanes, determinism hash compare,
   static analysis + comment audits, clang-tidy, werror, ASAN/UBSAN, TSAN,
-  coverage (≥50%), benchmarks (>10% regression fails), a build-only bgfx
-  backend lane (#138 Phase A), quality gate.
+  coverage (≥50%), benchmarks (>10% regression fails), a bgfx backend
+  lane (build + Noop-renderer device suite, #138 Phase B), quality gate.
 
 ## Architecture invariants
 
@@ -475,9 +483,10 @@ directory-global by design.
 - Authored files use staged atomic replacement; related multi-file outputs
   use a manifest or transaction so interruption cannot create a mixed state.
 - Renderer: command construction stays separate from backend execution, and
-  code above `render_device_gl.cpp` speaks only the engine-facing
+  code above the backend TU (`render_device_gl.cpp` /
+  `render_device_bgfx.cpp`) speaks only the engine-facing
   `RenderDevice` vocabulary (handles, descriptors, shader params, render
-  state) — GL concepts must not reappear above the backend; device
+  state) — GL/bgfx concepts must not reappear above the backend; device
   resources are owned by whichever system created them, destruction is
   immediate and idempotent, and `shutdown_render_device` invalidates every
   outstanding handle; preserve

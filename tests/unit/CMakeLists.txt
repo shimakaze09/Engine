@@ -91,6 +91,22 @@ engine_add_test_executable(engine_unit_device_slot_table
     engine_core
 )
 
+# bgfx backend device suite (#138 Phase B): compiled only when the bgfx
+# backend is selected; runs headlessly on bgfx's Noop renderer.
+if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
+engine_add_test_executable(engine_unit_render_device_bgfx
+    SOURCES
+    render_device_bgfx_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_renderer
+    engine_core
+    bgfx
+)
+endif()
+
 engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp
