@@ -13,6 +13,14 @@ function(engine_apply_strict_compile_options target)
     else()
         target_compile_options(${target} PRIVATE
             -Wall -Wextra -Wpedantic -Werror -fno-exceptions -fno-rtti)
+        # Clang >= 19 pedantically flags __COUNTER__ (the reflection
+        # macros' anchor) as a C2y extension; every supported compiler
+        # implements it. Version-guarded: older clangs reject unknown
+        # warning groups under -Werror.
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
+           CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19)
+            target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
+        endif()
     endif()
 endfunction()
 

@@ -913,6 +913,10 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->caps.uniformBlocks = false;
   device->caps.timestampQueries = false;
   device->caps.cookedPrograms = true;
+  // Valid here: this fill runs after bgfx::init. WebGL2 reports its
+  // 16-unit floor through this, gating the deferred pass off on web.
+  device->caps.maxTextureSamplers = static_cast<std::uint16_t>(
+      bgfx::getCaps()->limits.maxTextureSamplers);
 
   device->create_buffer = &bgfx_create_buffer;
   device->update_buffer = &bgfx_update_buffer;
@@ -925,6 +929,8 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->bind_texture_slot = &bgfx_bind_texture_slot;
   device->create_program = &bgfx_backend::bgfx_create_program;
   device->create_program_binary = &bgfx_backend::bgfx_create_program_binary;
+  device->create_program_binary_introspected =
+      &bgfx_backend::bgfx_create_program_binary_introspected;
   device->cooked_program_profile = &bgfx_backend::bgfx_cooked_program_profile;
   device->destroy_program = &bgfx_backend::bgfx_destroy_program;
   device->bind_program = &bgfx_backend::bgfx_bind_program;

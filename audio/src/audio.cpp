@@ -14,6 +14,11 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
+// miniaudio's Emscripten backend uses EM_JS ($-identifiers), legacy
+// version macros, and unused callback params (#138 web target).
+#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#pragma clang diagnostic ignored "-Wdeprecated-pragma"
+#pragma clang diagnostic ignored "-Wunused-parameter"
 #elif defined(_MSC_VER)
 #pragma warning(push, 0)
 #elif defined(__GNUC__)

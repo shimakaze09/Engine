@@ -84,6 +84,10 @@ struct BgfxParamRecord final {
   char name[kMaxParamNameLength] = {};
   bgfx::UniformHandle handle = BGFX_INVALID_HANDLE;
   bgfx::UniformType::Enum type = bgfx::UniformType::Count;
+  // Array element count from the cooked uniform table (sidecar
+  // introspection only); backend-owned uniforms must be created at this
+  // size or bgfx clamps array uploads to the created count.
+  std::uint16_t declaredNum = 1U;
   std::int8_t samplerStage = -1;
   bool dirty = false;
   std::uint16_t pendingNum = 0U;
@@ -94,6 +98,10 @@ struct BgfxParamRecord final {
 /// name-addressable parameter table.
 struct BgfxProgramRecord final {
   bgfx::ProgramHandle handle = BGFX_INVALID_HANDLE;
+  // True when the params' uniform handles were created by the backend
+  // from introspection sidecars (owned; destroyed with the program)
+  // rather than borrowed from the program's own shaders.
+  bool ownsUniforms = false;
   std::uint16_t paramCount = 0U;
   BgfxParamRecord params[kMaxProgramParams] = {};
 };
@@ -166,6 +174,11 @@ DeviceProgramHandle bgfx_create_program_binary(
     const void *vertexData, std::ptrdiff_t vertexSize,
     const void *fragmentData, std::ptrdiff_t fragmentSize) noexcept;
 const char *bgfx_cooked_program_profile() noexcept;
+DeviceProgramHandle bgfx_create_program_binary_introspected(
+    const void *vertexData, std::ptrdiff_t vertexSize,
+    const void *fragmentData, std::ptrdiff_t fragmentSize,
+    const void *vertexMeta, std::ptrdiff_t vertexMetaSize,
+    const void *fragmentMeta, std::ptrdiff_t fragmentMetaSize) noexcept;
 void bgfx_destroy_program(DeviceProgramHandle program) noexcept;
 void bgfx_bind_program(DeviceProgramHandle program) noexcept;
 ShaderParam bgfx_shader_param(DeviceProgramHandle program,

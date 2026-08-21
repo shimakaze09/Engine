@@ -393,34 +393,41 @@ bool build_cooked_shader_path(const char *sourcePath,
   return (written > 0) && (static_cast<std::size_t>(written) < outSize);
 }
 
-/// Cooked-binary program path (#138 Phase C): loads both stages'
-/// cooked binaries for the backend's profile through the VFS and links
-/// them via create_program_binary. Invalid when the backend does not
-/// consume cooked programs or a binary is missing (the caller falls
-/// back to source compilation).
 /// Reads one stage's cooked binary for a variant, falling back to the
 /// "default" (no-define) cook when the flagged binary does not exist —
 /// the manifest only cooks a variant for the stages its defines touch
 /// (e.g. SKINNED changes the vertex stage; the fragment stage is the
-/// default binary).
+/// default binary). *usedDefaultKey reports which cook satisfied the
+/// read so the caller can pair introspection sidecars consistently.
 bool read_cooked_stage(const char *sourcePath,
                        const ShaderDefineCopy *defines,
                        std::size_t defineCount, const char *profile,
-                       void **outData, std::size_t *outSize) noexcept {
+                       void **outData, std::size_t *outSize,
+                       bool *usedDefaultKey) noexcept {
   char path[kMaxPathLength * 2U] = {};
   if (build_cooked_shader_path(sourcePath, defines, defineCount, profile,
                                path, sizeof(path)) &&
       core::vfs_read_binary(path, outData, outSize)) {
+    *usedDefaultKey = (defineCount == 0U);
     return true;
   }
   if (defineCount == 0U) {
     return false;
   }
-  return build_cooked_shader_path(sourcePath, nullptr, 0U, profile, path,
-                                  sizeof(path)) &&
-         core::vfs_read_binary(path, outData, outSize);
+  if (build_cooked_shader_path(sourcePath, nullptr, 0U, profile, path,
+                               sizeof(path)) &&
+      core::vfs_read_binary(path, outData, outSize)) {
+    *usedDefaultKey = true;
+    return true;
+  }
+  return false;
 }
 
+/// Cooked-binary program path (#138 Phase C): loads both stages'
+/// cooked binaries for the backend's profile through the VFS and links
+/// them via create_program_binary. Invalid when the backend does not
+/// consume cooked programs or a binary is missing (the caller falls
+/// back to source compilation).
 DeviceProgramHandle try_cooked_program(const char *vertPath,
                                        const char *fragPath,
                                        const ShaderDefineCopy *defines,
@@ -432,22 +439,61 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
     return kInvalidDeviceProgram;
   }
   const char *profile = dev->cooked_program_profile();
+  bool vertUsedDefault = false;
+  bool fragUsedDefault = false;
   void *vertData = nullptr;
   std::size_t vertSize = 0U;
   if (!read_cooked_stage(vertPath, defines, defineCount, profile, &vertData,
-                         &vertSize)) {
+                         &vertSize, &vertUsedDefault)) {
     return kInvalidDeviceProgram;
   }
   void *fragData = nullptr;
   std::size_t fragSize = 0U;
   if (!read_cooked_stage(fragPath, defines, defineCount, profile, &fragData,
-                         &fragSize)) {
+                         &fragSize, &fragUsedDefault)) {
     core::vfs_free(vertData);
     return kInvalidDeviceProgram;
   }
-  const DeviceProgramHandle program = dev->create_program_binary(
-      vertData, static_cast<std::ptrdiff_t>(vertSize), fragData,
-      static_cast<std::ptrdiff_t>(fragSize));
+
+  // GLSL-family binaries embed no uniform table; hand the spirv
+  // siblings to the backend as introspection sidecars (#138).
+  const bool glslFamily = (std::strcmp(profile, "glsl") == 0) ||
+                          (std::strcmp(profile, "essl") == 0);
+  DeviceProgramHandle program = kInvalidDeviceProgram;
+  if (glslFamily && (dev->create_program_binary_introspected != nullptr)) {
+    char vertMetaPath[kMaxPathLength * 2U] = {};
+    char fragMetaPath[kMaxPathLength * 2U] = {};
+    void *vertMeta = nullptr;
+    void *fragMeta = nullptr;
+    std::size_t vertMetaSize = 0U;
+    std::size_t fragMetaSize = 0U;
+    // Each sidecar pairs with the cook that satisfied its stage: a
+    // stage that fell back to the default binary takes the default
+    // spirv table.
+    const std::size_t vertMetaDefines = vertUsedDefault ? 0U : defineCount;
+    const std::size_t fragMetaDefines = fragUsedDefault ? 0U : defineCount;
+    if (build_cooked_shader_path(vertPath, defines, vertMetaDefines, "spirv",
+                                 vertMetaPath, sizeof(vertMetaPath)) &&
+        build_cooked_shader_path(fragPath, defines, fragMetaDefines, "spirv",
+                                 fragMetaPath, sizeof(fragMetaPath)) &&
+        core::vfs_read_binary(vertMetaPath, &vertMeta, &vertMetaSize)) {
+      if (!core::vfs_read_binary(fragMetaPath, &fragMeta, &fragMetaSize)) {
+        core::vfs_free(vertMeta);
+        vertMeta = nullptr;
+      }
+    }
+    program = dev->create_program_binary_introspected(
+        vertData, static_cast<std::ptrdiff_t>(vertSize), fragData,
+        static_cast<std::ptrdiff_t>(fragSize), vertMeta,
+        static_cast<std::ptrdiff_t>(vertMetaSize), fragMeta,
+        static_cast<std::ptrdiff_t>(fragMetaSize));
+    core::vfs_free(vertMeta);
+    core::vfs_free(fragMeta);
+  } else {
+    program = dev->create_program_binary(
+        vertData, static_cast<std::ptrdiff_t>(vertSize), fragData,
+        static_cast<std::ptrdiff_t>(fragSize));
+  }
   core::vfs_free(vertData);
   core::vfs_free(fragData);
   return program;

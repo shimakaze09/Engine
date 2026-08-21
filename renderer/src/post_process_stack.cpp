@@ -9,7 +9,6 @@ namespace engine::renderer {
 namespace {
 
 PostProcessStack g_stack{};
-bool g_initialized = false;
 
 struct PassCVarBinding final {
   PostProcessPassId id;
@@ -34,7 +33,6 @@ void initialize_post_process_stack() noexcept {
     g_stack.passes[i].id = static_cast<PostProcessPassId>(i);
     g_stack.passes[i].enabled = true;
   }
-  g_initialized = true;
 }
 
 const PostProcessStack &get_post_process_stack() noexcept { return g_stack; }

@@ -141,6 +141,9 @@ void fake_update_buffer(engine::renderer::DeviceBufferHandle, const void *,
 /// keeping the harness scoped to issue #56.
 void configure_fake_device() noexcept {
   g_fakeDevice = engine::renderer::RenderDevice{};
+  // Enough sampler units that the deferred capability gate stays open —
+  // this harness exercises the reload contract, not device limits.
+  g_fakeDevice.caps.maxTextureSamplers = 32U;
   g_fakeDevice.create_program = &fake_create_program;
   g_fakeDevice.destroy_program = &fake_destroy_program;
   g_fakeDevice.shader_param = &fake_shader_param;
