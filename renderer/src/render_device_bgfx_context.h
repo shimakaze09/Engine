@@ -76,20 +76,30 @@ struct BgfxTargetRecord final {
   std::uint32_t depthTexture = 0U;
 };
 
-/// One resolvable shader input of a linked program: the bgfx uniform
-/// handle (owned by the program's shaders, valid for the program's
-/// lifetime), its type, and — for samplers — the texture slot assigned
-/// through set_param_i32 (the GL texture-unit convention). Value sets
-/// stage into `pending` and apply once per submit (bgfx allows one
-/// setUniform per uniform per draw; GL semantics are last-write-wins),
-/// sized for the largest engine payload (vec4[32] = 128 floats).
-struct BgfxParamRecord final {
+// The global uniform registry can hold every distinct uniform name the
+// engine's programs declare; ~60 exist today, the cap leaves headroom.
+inline constexpr std::size_t kMaxGlobalUniforms = 512U;
+
+/// One uniform in the device-lifetime global registry. bgfx uniforms
+/// are global by name (one value shared by every program), so staging
+/// lives here rather than per program: ShaderParam tokens are indices
+/// into this table, which makes setting a parameter correct regardless
+/// of which program is bound — the class of defect where a token from
+/// program A silently indexed program B's table cannot occur. Value
+/// sets stage into `pending` and apply once per submit through the
+/// context's dirty list (bgfx allows one setUniform per uniform per
+/// draw; GL semantics are last-write-wins), sized for the largest
+/// staged payload (vec4[32] = 128 floats). The handle is created by
+/// the registry (bgfx refcounts by name) and destroyed at device
+/// shutdown, so it never dangles when a program that also referenced
+/// the name is destroyed first.
+struct BgfxGlobalUniform final {
   char name[kMaxParamNameLength] = {};
   bgfx::UniformHandle handle = BGFX_INVALID_HANDLE;
   bgfx::UniformType::Enum type = bgfx::UniformType::Count;
-  // Array element count from the cooked uniform table (sidecar
-  // introspection only); backend-owned uniforms must be created at this
-  // size or bgfx clamps array uploads to the created count.
+  // Largest array element count any program declared for this name;
+  // the handle must be created at least this size or bgfx clamps
+  // array uploads.
   std::uint16_t declaredNum = 1U;
   std::int8_t samplerStage = -1;
   bool dirty = false;
@@ -97,16 +107,14 @@ struct BgfxParamRecord final {
   float pending[128] = {};
 };
 
-/// Linked program from cooked shader binaries with its introspected,
-/// name-addressable parameter table.
+/// Linked program from cooked shader binaries. The program only lists
+/// which global uniforms its shaders declare — shader_param answers
+/// from this list; values and sampler stages live in the global
+/// registry.
 struct BgfxProgramRecord final {
   bgfx::ProgramHandle handle = BGFX_INVALID_HANDLE;
-  // True when the params' uniform handles were created by the backend
-  // from introspection sidecars (owned; destroyed with the program)
-  // rather than borrowed from the program's own shaders.
-  bool ownsUniforms = false;
   std::uint16_t paramCount = 0U;
-  BgfxParamRecord params[kMaxProgramParams] = {};
+  std::uint16_t paramIndices[kMaxProgramParams] = {};
 };
 
 /// Which backend fill initialize_render_device selected.
@@ -131,6 +139,12 @@ struct BgfxDeviceContext final {
       geometries{};
   device_slot_detail::DeviceSlotTable<BgfxTargetRecord, kMaxDeviceTargets>
       targets{};
+  // Global uniform registry (see BgfxGlobalUniform) with the dirty list
+  // applied once per submit; both reset with the device.
+  BgfxGlobalUniform uniforms[kMaxGlobalUniforms] = {};
+  std::uint16_t uniformCount = 0U;
+  std::uint16_t dirtyUniforms[kMaxGlobalUniforms] = {};
+  std::uint16_t dirtyUniformCount = 0U;
   DeviceDebugStats stats{};
   RenderState currentState{};
   std::uint32_t currentProgram = 0U;
@@ -164,10 +178,14 @@ BgfxProgramRecord *current_program_record() noexcept;
 /// context's bound-texture slots (stale or unbound slots are skipped).
 void apply_program_samplers(const BgfxProgramRecord &program) noexcept;
 
-/// Flushes the program's staged uniform values (one setUniform per
-/// dirty parameter) for the next submit; values persist in bgfx across
-/// draws, so clean parameters are skipped.
-void apply_program_uniforms(BgfxProgramRecord &program) noexcept;
+/// Flushes every staged (dirty) global uniform for the next submit —
+/// one setUniform per staged entry; values persist globally in bgfx
+/// across draws and programs, so clean entries are skipped.
+void apply_staged_uniforms() noexcept;
+
+/// Destroys the global uniform registry's bgfx handles and resets it;
+/// called from device shutdown.
+void reset_global_uniforms() noexcept;
 
 // Program/parameter device entries implemented in
 // render_device_bgfx_programs.cpp and wired by fill_bgfx_render_device.
