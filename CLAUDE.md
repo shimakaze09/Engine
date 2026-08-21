@@ -262,6 +262,9 @@ directory-global by design.
   (which also applies live `r_vsync` and drawable resizes via
   bgfx::reset), while headless runs stay on Noop; the editor bridge is
   disabled under this backend until the ImGui integration unit lands;
+  the editor's ImGui runs on bgfx through src/imgui_impl_bgfx.cpp
+  (embedded ocornut-imgui shaders, view 255, ImTextureID =
+  native_texture_id) with the stock SDL3 platform backend;
   the forward path renders under bgfx: pbr/default cooked over the #138
   flat uniform vocabulary shared with GLSL — packed vec4/mat4 element
   arrays via the contract's set_param_vec4_array/set_param_mat4_array,
@@ -276,10 +279,11 @@ directory-global by design.
   fits — WebGL2's 16-unit floor is the web-export unit's recorded
   concern); sky (cubemap/Preetham/procedural), IBL generation, the
   full post stack, and CSM/spot/point shadow sampling all run under
-  bgfx — the entire pass list boots clean on Vulkan; instanced
-  batching (both backends' flushes gate instancing on the shader
-  toggle's presence), SKINNED variants, forward-path shadow/IBL
-  sampling, and the editor ImGui integration defer to their units;
+  bgfx — the entire pass list incl. GPU skinning (plain mat4-array
+  palettes replace the BonePalette UBO on both backends) boots clean
+  on Vulkan; instanced batching (both backends' flushes gate
+  instancing on the shader toggle's presence) and forward-path
+  shadow/IBL sampling defer to their units;
   programs link only from the Phase C shaderc cook's binaries via
   `create_program_binary` + `caps.cookedPrograms` — spirv is the
   canonical profile because GLSL-flavor binaries embed no uniform

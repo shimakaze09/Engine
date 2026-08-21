@@ -107,15 +107,17 @@ bool bootstrap(const EngineConfig &config) noexcept {
   }
   renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
 
-  // #138: the editor's ImGui integration is GL-only until the bgfx UI
-  // backend lands; a swapchain-owning backend runs without the editor
-  // bridge, taking the same code path as the pure runtime.
+  // #138: a swapchain-owning backend initializes its device here, before
+  // the editor bridge — the bgfx ImGui renderer creates device objects
+  // during bridge init (initialize_render_device is idempotent, so the
+  // pipeline's later call is a no-op). The gl path keeps its ordering:
+  // its device load needs the context the bridge block makes current.
   if (g_activeConfig.core.platform.externalRenderContext &&
-      (runtime::editor_bridge() != nullptr)) {
-    core::log_message(core::LogLevel::Info, "editor",
-                      "editor bridge disabled under the bgfx backend "
-                      "(ImGui integration pending, #138)");
-    runtime::set_editor_bridge(nullptr);
+      !renderer::initialize_render_device()) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "render device initialization failed at bootstrap");
+    core::shutdown_core();
+    return false;
   }
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
