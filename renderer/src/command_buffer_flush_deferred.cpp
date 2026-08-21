@@ -312,6 +312,13 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       if (backend.ssaoProjectionLoc.valid())
         dev->set_param_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
+      if (backend.ssaoInvProjectionLoc.valid()) {
+        math::Mat4 ssaoInvProj{};
+        if (math::inverse(projMat, &ssaoInvProj)) {
+          dev->set_param_mat4(backend.ssaoInvProjectionLoc,
+                              &ssaoInvProj.columns[0].x);
+        }
+      }
       if (backend.ssaoViewLoc.valid())
         dev->set_param_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
 
@@ -327,12 +334,15 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_param_f32(backend.ssaoBiasLoc,
                                core::cvar_get_float("r_ssao_bias"));
 
-      for (int i = 0; i < 32; ++i) {
-        const auto idx = static_cast<std::size_t>(i);
-        if (backend.ssaoSampleLocs[idx].valid()) {
-          dev->set_param_vec3(backend.ssaoSampleLocs[idx],
-                                &backend.ssaoKernel[i * 3]);
+      if ((dev->set_param_vec4_array != nullptr) &&
+          backend.ssaoSamplesParam.valid()) {
+        float kernel[32 * 4] = {};
+        for (int i = 0; i < 32; ++i) {
+          kernel[i * 4 + 0] = backend.ssaoKernel[i * 3 + 0];
+          kernel[i * 4 + 1] = backend.ssaoKernel[i * 3 + 1];
+          kernel[i * 4 + 2] = backend.ssaoKernel[i * 3 + 2];
         }
+        dev->set_param_vec4_array(backend.ssaoSamplesParam, kernel, 32);
       }
 
       dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);

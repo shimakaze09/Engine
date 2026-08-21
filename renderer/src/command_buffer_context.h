@@ -371,7 +371,8 @@ struct BackendState final {
   ShaderParam ssaoNoiseScaleLoc{};
   ShaderParam ssaoRadiusLoc{};
   ShaderParam ssaoBiasLoc{};
-  std::array<ShaderParam, 32> ssaoSampleLocs{};
+  ShaderParam ssaoSamplesParam{}; // vec4[32]: hemisphere kernel (xyz)
+  ShaderParam ssaoInvProjectionLoc{};
 
   ShaderProgramHandle ssaoBlurShaderHandle{};
   DeviceProgramHandle ssaoBlurProgram{};
