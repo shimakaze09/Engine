@@ -77,6 +77,19 @@ BgfxParamRecord *resolve_param(ShaderParam param) noexcept {
   return &record->params[param.value];
 }
 
+/// Stages a value into the param's pending storage (applied once per
+/// submit; last write wins, matching GL uniform semantics).
+void stage_param(BgfxParamRecord *param, const float *value,
+                 std::size_t floatCount, std::uint16_t num) noexcept {
+  if ((param == nullptr) || (value == nullptr) || (floatCount == 0U) ||
+      (floatCount > 64U)) {
+    return;
+  }
+  std::memcpy(param->pending, value, floatCount * sizeof(float));
+  param->pendingNum = num;
+  param->dirty = true;
+}
+
 /// Sets a padded vec4 uniform from count source floats (bgfx has no
 /// scalar/vec2/vec3 uniform types).
 void set_padded_vec4(BgfxParamRecord *param, const float *value,
@@ -89,7 +102,7 @@ void set_padded_vec4(BgfxParamRecord *param, const float *value,
   for (std::int32_t i = 0; i < count; ++i) {
     padded[i] = value[i];
   }
-  bgfx::setUniform(param->handle, padded, 1U);
+  stage_param(param, padded, 4U, 1U);
 }
 
 } // namespace
@@ -100,6 +113,17 @@ BgfxProgramRecord *current_program_record() noexcept {
     return nullptr;
   }
   return ctx.programs.resolve(ctx.currentProgram);
+}
+
+void apply_program_uniforms(BgfxProgramRecord &program) noexcept {
+  for (std::uint16_t i = 0U; i < program.paramCount; ++i) {
+    BgfxParamRecord &param = program.params[i];
+    if (!param.dirty || (param.type == bgfx::UniformType::Sampler)) {
+      continue;
+    }
+    bgfx::setUniform(param.handle, param.pending, param.pendingNum);
+    param.dirty = false;
+  }
 }
 
 void apply_program_samplers(const BgfxProgramRecord &program) noexcept {
@@ -244,20 +268,18 @@ ShaderParam bgfx_shader_param(DeviceProgramHandle program,
 
 void bgfx_set_param_mat4(ShaderParam param, const float *value) noexcept {
   BgfxParamRecord *record = resolve_param(param);
-  if ((record == nullptr) || (value == nullptr) ||
-      (record->type != bgfx::UniformType::Mat4)) {
+  if ((record == nullptr) || (record->type != bgfx::UniformType::Mat4)) {
     return;
   }
-  bgfx::setUniform(record->handle, value, 1U);
+  stage_param(record, value, 16U, 1U);
 }
 
 void bgfx_set_param_mat3(ShaderParam param, const float *value) noexcept {
   BgfxParamRecord *record = resolve_param(param);
-  if ((record == nullptr) || (value == nullptr) ||
-      (record->type != bgfx::UniformType::Mat3)) {
+  if ((record == nullptr) || (record->type != bgfx::UniformType::Mat3)) {
     return;
   }
-  bgfx::setUniform(record->handle, value, 1U);
+  stage_param(record, value, 9U, 1U);
 }
 
 void bgfx_set_param_f32(ShaderParam param, float value) noexcept {
@@ -291,6 +313,28 @@ void bgfx_set_param_vec3(ShaderParam param, const float *value) noexcept {
 
 void bgfx_set_param_vec4(ShaderParam param, const float *value) noexcept {
   set_padded_vec4(resolve_param(param), value, 4);
+}
+
+void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
+                               std::int32_t count) noexcept {
+  BgfxParamRecord *record = resolve_param(param);
+  if ((record == nullptr) || (count <= 0) || (count > 16) ||
+      (record->type != bgfx::UniformType::Vec4)) {
+    return;
+  }
+  stage_param(record, values, static_cast<std::size_t>(count) * 4U,
+              static_cast<std::uint16_t>(count));
+}
+
+void bgfx_set_param_mat4_array(ShaderParam param, const float *values,
+                               std::int32_t count) noexcept {
+  BgfxParamRecord *record = resolve_param(param);
+  if ((record == nullptr) || (count <= 0) || (count > 4) ||
+      (record->type != bgfx::UniformType::Mat4)) {
+    return;
+  }
+  stage_param(record, values, static_cast<std::size_t>(count) * 16U,
+              static_cast<std::uint16_t>(count));
 }
 
 bool bgfx_bind_program_uniform_block(DeviceProgramHandle, const char *,

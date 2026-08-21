@@ -169,41 +169,39 @@ bool resolve_deferred_light_program_state(BackendState &backend,
 
   backend.dlShadowEnabledLoc =
       dev->shader_param(dlProg, "uShadowEnabled");
+  // #138 flat vocabulary (shared with the pbr forward path): per-slot
+  // samplers, one mat4 array per shadow kind, packed vec4 payloads.
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
     char nm[80] = {};
-    std::snprintf(nm, sizeof(nm), "uShadowMap[%zu]", i);
+    std::snprintf(nm, sizeof(nm), "uShadowMap%zu", i);
     backend.dlShadowMapLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uShadowMatrix[%zu]", i);
-    backend.dlShadowMatrixLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uCascadeSplit[%zu]", i);
-    backend.dlCascadeSplitLocs[i] = dev->shader_param(dlProg, nm);
   }
+  backend.dlShadowMatrixParam = dev->shader_param(dlProg, "uShadowMatrix");
+  backend.dlCascadeSplitsParam = dev->shader_param(dlProg, "uCascadeSplits");
 
   backend.dlSpotShadowEnabledLoc =
       dev->shader_param(dlProg, "uSpotShadowEnabled");
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
     char nm[80] = {};
-    std::snprintf(nm, sizeof(nm), "uSpotShadowMap[%zu]", i);
+    std::snprintf(nm, sizeof(nm), "uSpotShadowMap%zu", i);
     backend.dlSpotShadowMapLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uSpotShadowMatrix[%zu]", i);
-    backend.dlSpotShadowMatrixLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uSpotShadowLightIdx[%zu]", i);
-    backend.dlSpotShadowLightIdxLocs[i] = dev->shader_param(dlProg, nm);
   }
+  backend.dlSpotShadowMatrixParam =
+      dev->shader_param(dlProg, "uSpotShadowMatrix");
+  backend.dlSpotShadowLightIdxParam =
+      dev->shader_param(dlProg, "uSpotShadowLightIdxVec");
 
   backend.dlPointShadowEnabledLoc =
       dev->shader_param(dlProg, "uPointShadowEnabled");
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
     char nm[80] = {};
-    std::snprintf(nm, sizeof(nm), "uPointShadowMap[%zu]", i);
+    std::snprintf(nm, sizeof(nm), "uPointShadowMap%zu", i);
     backend.dlPointShadowMapLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uPointShadowLightPos[%zu]", i);
-    backend.dlPointShadowLightPosLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uPointShadowFarPlane[%zu]", i);
-    backend.dlPointShadowFarPlaneLocs[i] = dev->shader_param(dlProg, nm);
-    std::snprintf(nm, sizeof(nm), "uPointShadowLightIdx[%zu]", i);
-    backend.dlPointShadowLightIdxLocs[i] = dev->shader_param(dlProg, nm);
   }
+  backend.dlPointShadowPosFarParam =
+      dev->shader_param(dlProg, "uPointShadowPosFar");
+  backend.dlPointShadowLightIdxParam =
+      dev->shader_param(dlProg, "uPointShadowLightIdxVec");
   return ok;
 }
 

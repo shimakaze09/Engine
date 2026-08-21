@@ -24,25 +24,35 @@ uniform sampler2D uBrdfLut;
 uniform float uPrefilteredMips;
 
 // Shadow maps (4 cascades).
-uniform sampler2D uShadowMap[4];
+// #138 flat vocabulary shared with the bgfx ports: per-slot samplers,
+// mat4 arrays, and single-vec4 payloads for splits and light indices.
+uniform sampler2D uShadowMap0;
+uniform sampler2D uShadowMap1;
+uniform sampler2D uShadowMap2;
+uniform sampler2D uShadowMap3;
 uniform mat4 uShadowMatrix[4];
-uniform float uCascadeSplit[4];
+uniform vec4 uCascadeSplits;
 uniform int uShadowEnabled;
 
 // Spot light shadow maps (up to 4 shadow-casting spots).
 #define MAX_SPOT_SHADOW_LIGHTS 4
 uniform int uSpotShadowEnabled;
-uniform sampler2D uSpotShadowMap[MAX_SPOT_SHADOW_LIGHTS];
+uniform sampler2D uSpotShadowMap0;
+uniform sampler2D uSpotShadowMap1;
+uniform sampler2D uSpotShadowMap2;
+uniform sampler2D uSpotShadowMap3;
 uniform mat4 uSpotShadowMatrix[MAX_SPOT_SHADOW_LIGHTS];
-uniform int uSpotShadowLightIdx[MAX_SPOT_SHADOW_LIGHTS];
+uniform vec4 uSpotShadowLightIdxVec;
 
 // Point light cubemap shadow maps (up to 4 shadow-casting points).
 #define MAX_POINT_SHADOW_LIGHTS 4
 uniform int uPointShadowEnabled;
-uniform samplerCube uPointShadowMap[MAX_POINT_SHADOW_LIGHTS];
-uniform vec3 uPointShadowLightPos[MAX_POINT_SHADOW_LIGHTS];
-uniform float uPointShadowFarPlane[MAX_POINT_SHADOW_LIGHTS];
-uniform int uPointShadowLightIdx[MAX_POINT_SHADOW_LIGHTS];
+uniform samplerCube uPointShadowMap0;
+uniform samplerCube uPointShadowMap1;
+uniform samplerCube uPointShadowMap2;
+uniform samplerCube uPointShadowMap3;
+uniform vec4 uPointShadowPosFar[MAX_POINT_SHADOW_LIGHTS];
+uniform vec4 uPointShadowLightIdxVec;
 
 // Tile light data (R32F texture: one row per tile laid out as
 // [pointCount, pointIdx0..31, spotCount, spotIdx0..15]). The section sizes
@@ -280,26 +290,26 @@ float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
 
 /// Handles sample directional shadow pcf.
 float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
-    if (cascadeIdx == 0) return sample_shadow_pcf(uShadowMap[0], projCoords);
-    if (cascadeIdx == 1) return sample_shadow_pcf(uShadowMap[1], projCoords);
-    if (cascadeIdx == 2) return sample_shadow_pcf(uShadowMap[2], projCoords);
-    return sample_shadow_pcf(uShadowMap[3], projCoords);
+    if (cascadeIdx == 0) return sample_shadow_pcf(uShadowMap0, projCoords);
+    if (cascadeIdx == 1) return sample_shadow_pcf(uShadowMap1, projCoords);
+    if (cascadeIdx == 2) return sample_shadow_pcf(uShadowMap2, projCoords);
+    return sample_shadow_pcf(uShadowMap3, projCoords);
 }
 
 /// Handles sample spot shadow pcf.
 float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
-    if (shadowIdx == 0) return sample_shadow_pcf(uSpotShadowMap[0], projCoords);
-    if (shadowIdx == 1) return sample_shadow_pcf(uSpotShadowMap[1], projCoords);
-    if (shadowIdx == 2) return sample_shadow_pcf(uSpotShadowMap[2], projCoords);
-    return sample_shadow_pcf(uSpotShadowMap[3], projCoords);
+    if (shadowIdx == 0) return sample_shadow_pcf(uSpotShadowMap0, projCoords);
+    if (shadowIdx == 1) return sample_shadow_pcf(uSpotShadowMap1, projCoords);
+    if (shadowIdx == 2) return sample_shadow_pcf(uSpotShadowMap2, projCoords);
+    return sample_shadow_pcf(uSpotShadowMap3, projCoords);
 }
 
 /// Handles sample point shadow depth.
 float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
-    if (shadowIdx == 0) return texture(uPointShadowMap[0], sampleVector).r;
-    if (shadowIdx == 1) return texture(uPointShadowMap[1], sampleVector).r;
-    if (shadowIdx == 2) return texture(uPointShadowMap[2], sampleVector).r;
-    return texture(uPointShadowMap[3], sampleVector).r;
+    if (shadowIdx == 0) return texture(uPointShadowMap0, sampleVector).r;
+    if (shadowIdx == 1) return texture(uPointShadowMap1, sampleVector).r;
+    if (shadowIdx == 2) return texture(uPointShadowMap2, sampleVector).r;
+    return texture(uPointShadowMap3, sampleVector).r;
 }
 
 // Compute shadow factor for a world position using CSM.
@@ -311,7 +321,7 @@ float compute_shadow(vec3 worldPos, float depth) {
     // Select cascade based on view-space depth.
     int cascadeIdx = 3;
     for (int i = 0; i < 4; ++i) {
-        if (viewDepth < uCascadeSplit[i]) {
+        if (viewDepth < uCascadeSplits[i]) {
             cascadeIdx = i;
             break;
         }
@@ -327,13 +337,13 @@ float compute_shadow(vec3 worldPos, float depth) {
 
     // Cascade blending: blend with next cascade near the split boundary.
     float blendFactor = 0.0;
-    float blendRange = uCascadeSplit[cascadeIdx] * 0.1;
-    if (cascadeIdx < 3 && viewDepth > uCascadeSplit[cascadeIdx] - blendRange) {
+    float blendRange = uCascadeSplits[cascadeIdx] * 0.1;
+    if (cascadeIdx < 3 && viewDepth > uCascadeSplits[cascadeIdx] - blendRange) {
         vec4 nextShadowCoord = uShadowMatrix[cascadeIdx + 1] * vec4(worldPos, 1.0);
         vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
         nextProjCoords = nextProjCoords * 0.5 + 0.5;
         float nextShadow = sample_directional_shadow_pcf(cascadeIdx + 1, nextProjCoords);
-        blendFactor = (viewDepth - (uCascadeSplit[cascadeIdx] - blendRange)) / blendRange;
+        blendFactor = (viewDepth - (uCascadeSplits[cascadeIdx] - blendRange)) / blendRange;
         shadow = mix(shadow, nextShadow, clamp(blendFactor, 0.0, 1.0));
     }
 
@@ -345,7 +355,7 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
     if (uSpotShadowEnabled == 0) return 1.0;
 
     for (int s = 0; s < MAX_SPOT_SHADOW_LIGHTS; ++s) {
-        if (uSpotShadowLightIdx[s] != lightIdx) continue;
+        if (int(round(uSpotShadowLightIdxVec[s])) != lightIdx) continue;
 
         vec4 shadowCoord = uSpotShadowMatrix[s] * vec4(worldPos, 1.0);
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
@@ -363,11 +373,11 @@ float compute_point_shadow(vec3 worldPos, int lightIdx) {
     if (uPointShadowEnabled == 0) return 1.0;
 
     for (int s = 0; s < MAX_POINT_SHADOW_LIGHTS; ++s) {
-        if (uPointShadowLightIdx[s] != lightIdx) continue;
+        if (int(round(uPointShadowLightIdxVec[s])) != lightIdx) continue;
 
-        vec3 fragToLight = worldPos - uPointShadowLightPos[s];
+        vec3 fragToLight = worldPos - uPointShadowPosFar[s].xyz;
         float currentDist = length(fragToLight);
-        float normalizedDist = currentDist / uPointShadowFarPlane[s];
+        float normalizedDist = currentDist / uPointShadowPosFar[s].w;
 
         // PCF with 20 offset sample directions for soft cubemap shadows.
         vec3 sampleOffsets[20] = vec3[](

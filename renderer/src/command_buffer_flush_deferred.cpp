@@ -547,7 +547,11 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlSsaoEnabledLoc.valid())
         dev->set_param_i32(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
 
+      // #138 flat vocabulary: per-slot samplers, one mat4 array per
+      // shadow kind, splits/indices/pos+far as packed vec4 payloads.
       if (shadowEnabled) {
+        float shadowMatrices[kShadowCascadeCount * 16U] = {};
+        float cascadeSplits[4] = {};
         for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
           const auto texUnit = static_cast<std::uint32_t>(6U + c);
           dev->bind_texture_slot(texUnit, backend.shadowState.depthTextures[c]);
@@ -555,17 +559,21 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->set_param_i32(backend.dlShadowMapLocs[c],
                                static_cast<std::int32_t>(texUnit));
           }
-          if (backend.dlShadowMatrixLocs[c].valid()) {
-            dev->set_param_mat4(backend.dlShadowMatrixLocs[c],
-                                  &backend.shadowState.cascades[c]
-                                       .lightViewProjection.columns[0]
-                                       .x);
-          }
-          if (backend.dlCascadeSplitLocs[c].valid()) {
-            dev->set_param_f32(
-                backend.dlCascadeSplitLocs[c],
-                backend.shadowState.cascades[c].splitDistance);
-          }
+          std::memcpy(&shadowMatrices[c * 16U],
+                      &backend.shadowState.cascades[c]
+                           .lightViewProjection.columns[0]
+                           .x,
+                      sizeof(float) * 16U);
+          cascadeSplits[c] = backend.shadowState.cascades[c].splitDistance;
+        }
+        if ((dev->set_param_mat4_array != nullptr) &&
+            backend.dlShadowMatrixParam.valid()) {
+          dev->set_param_mat4_array(
+              backend.dlShadowMatrixParam, shadowMatrices,
+              static_cast<std::int32_t>(kShadowCascadeCount));
+        }
+        if (backend.dlCascadeSplitsParam.valid()) {
+          dev->set_param_vec4(backend.dlCascadeSplitsParam, cascadeSplits);
         }
       }
       if (backend.dlShadowEnabledLoc.valid()) {
@@ -574,6 +582,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       const bool spotShadowEnabled = doSpotShadows;
       if (spotShadowEnabled) {
+        float spotMatrices[kMaxSpotShadowLights * 16U] = {};
+        float spotLightIdx[4] = {};
         for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
           const auto &slot = backend.spotShadowState.slots[s];
           const auto texUnit = static_cast<std::uint32_t>(10U + s);
@@ -582,14 +592,20 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->set_param_i32(backend.dlSpotShadowMapLocs[s],
                                static_cast<std::int32_t>(texUnit));
           }
-          if (backend.dlSpotShadowMatrixLocs[s].valid()) {
-            dev->set_param_mat4(backend.dlSpotShadowMatrixLocs[s],
-                                  &slot.lightViewProjection.columns[0].x);
-          }
-          if (backend.dlSpotShadowLightIdxLocs[s].valid()) {
-            dev->set_param_i32(backend.dlSpotShadowLightIdxLocs[s],
-                                 slot.lightIndex);
-          }
+          std::memcpy(&spotMatrices[s * 16U],
+                      &slot.lightViewProjection.columns[0].x,
+                      sizeof(float) * 16U);
+          spotLightIdx[s] = static_cast<float>(slot.lightIndex);
+        }
+        if ((dev->set_param_mat4_array != nullptr) &&
+            backend.dlSpotShadowMatrixParam.valid()) {
+          dev->set_param_mat4_array(
+              backend.dlSpotShadowMatrixParam, spotMatrices,
+              static_cast<std::int32_t>(kMaxSpotShadowLights));
+        }
+        if (backend.dlSpotShadowLightIdxParam.valid()) {
+          dev->set_param_vec4(backend.dlSpotShadowLightIdxParam,
+                              spotLightIdx);
         }
       }
       if (backend.dlSpotShadowEnabledLoc.valid()) {
@@ -610,25 +626,31 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         }
       }
       if (pointShadowEnabled) {
+        float pointPosFar[kMaxPointShadowLights * 4U] = {};
+        float pointLightIdx[4] = {};
         for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
           const auto &slot = backend.pointShadowState.slots[s];
           const auto texUnit = static_cast<std::uint32_t>(14U + s);
           if (dev->bind_texture_slot != nullptr) {
             dev->bind_texture_slot(texUnit, slot.depthCubemap);
           }
-          if (backend.dlPointShadowLightPosLocs[s].valid()) {
-            const math::Vec3 lp =
-                point_shadow_slot_light_position(slot.lightIndex, lights);
-            dev->set_param_vec3(backend.dlPointShadowLightPosLocs[s], &lp.x);
-          }
-          if (backend.dlPointShadowFarPlaneLocs[s].valid()) {
-            dev->set_param_f32(backend.dlPointShadowFarPlaneLocs[s],
-                                   slot.farPlane);
-          }
-          if (backend.dlPointShadowLightIdxLocs[s].valid()) {
-            dev->set_param_i32(backend.dlPointShadowLightIdxLocs[s],
-                                 slot.lightIndex);
-          }
+          const math::Vec3 lp =
+              point_shadow_slot_light_position(slot.lightIndex, lights);
+          pointPosFar[s * 4U + 0U] = lp.x;
+          pointPosFar[s * 4U + 1U] = lp.y;
+          pointPosFar[s * 4U + 2U] = lp.z;
+          pointPosFar[s * 4U + 3U] = slot.farPlane;
+          pointLightIdx[s] = static_cast<float>(slot.lightIndex);
+        }
+        if ((dev->set_param_vec4_array != nullptr) &&
+            backend.dlPointShadowPosFarParam.valid()) {
+          dev->set_param_vec4_array(
+              backend.dlPointShadowPosFarParam, pointPosFar,
+              static_cast<std::int32_t>(kMaxPointShadowLights));
+        }
+        if (backend.dlPointShadowLightIdxParam.valid()) {
+          dev->set_param_vec4(backend.dlPointShadowLightIdxParam,
+                              pointLightIdx);
         }
       }
       if (backend.dlPointShadowEnabledLoc.valid()) {

@@ -40,65 +40,44 @@ void resolve_pbr_light_uniforms(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   const DeviceProgramHandle prog = backend.pbrProgram;
 
+  // #138 flat array vocabulary: packed vec4 element arrays shared by the
+  // GLSL and bgfx shader ports, uploaded via set_param_vec4_array.
   backend.pbrDirLightCountLocation =
       dev->shader_param(prog, "u_dirLightCount");
-  for (std::size_t i = 0U; i < kMaxDirectionalLights; ++i) {
-    char name[64] = {};
-    std::snprintf(name, sizeof(name), "u_dirLights[%zu].direction", i);
-    backend.pbrDirLightDir[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_dirLights[%zu].color", i);
-    backend.pbrDirLightColor[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_dirLights[%zu].intensity", i);
-    backend.pbrDirLightIntensity[i] = dev->shader_param(prog, name);
-    if ((!backend.pbrDirLightDir[i].valid()) || (!backend.pbrDirLightColor[i].valid()) ||
-        (!backend.pbrDirLightIntensity[i].valid())) {
-      core::log_message(core::LogLevel::Warning, "renderer",
-                        "PBR shader missing directional light uniforms at "
-                        "index — lights will be invisible");
-    }
+  backend.pbrDirLightDirectionParam =
+      dev->shader_param(prog, "u_dirLightDirection");
+  backend.pbrDirLightColorParam =
+      dev->shader_param(prog, "u_dirLightColorIntensity");
+  if (!backend.pbrDirLightDirectionParam.valid() ||
+      !backend.pbrDirLightColorParam.valid()) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "PBR shader missing directional light arrays — "
+                      "lights will be invisible");
   }
 
   backend.pbrPointLightCountLocation =
       dev->shader_param(prog, "u_pointLightCount");
-  for (std::size_t i = 0U; i < kForwardMaxPointLights; ++i) {
-    char name[64] = {};
-    std::snprintf(name, sizeof(name), "u_pointLights[%zu].position", i);
-    backend.pbrPointLightPos[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_pointLights[%zu].color", i);
-    backend.pbrPointLightColor[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_pointLights[%zu].intensity", i);
-    backend.pbrPointLightIntensity[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_pointLights[%zu].radius", i);
-    backend.pbrPointLightRadius[i] = dev->shader_param(prog, name);
-    if ((!backend.pbrPointLightPos[i].valid()) ||
-        (!backend.pbrPointLightColor[i].valid()) ||
-        (!backend.pbrPointLightIntensity[i].valid()) ||
-        (!backend.pbrPointLightRadius[i].valid())) {
-      core::log_message(core::LogLevel::Warning, "renderer",
-                        "PBR shader missing point light uniforms at "
-                        "index — lights will be invisible");
-    }
+  backend.pbrPointLightPosRadiusParam =
+      dev->shader_param(prog, "u_pointLightPosRadius");
+  backend.pbrPointLightColorParam =
+      dev->shader_param(prog, "u_pointLightColorIntensity");
+  if (!backend.pbrPointLightPosRadiusParam.valid() ||
+      !backend.pbrPointLightColorParam.valid()) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "PBR shader missing point light arrays — lights "
+                      "will be invisible");
   }
 
   backend.pbrSpotLightCountLocation =
       dev->shader_param(prog, "u_spotLightCount");
-  for (std::size_t i = 0U; i < kForwardMaxSpotLights; ++i) {
-    char name[64] = {};
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].position", i);
-    backend.pbrSpotLightPos[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].direction", i);
-    backend.pbrSpotLightDir[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].color", i);
-    backend.pbrSpotLightColor[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].intensity", i);
-    backend.pbrSpotLightIntensity[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].radius", i);
-    backend.pbrSpotLightRadius[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].innerCone", i);
-    backend.pbrSpotLightInnerCone[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "u_spotLights[%zu].outerCone", i);
-    backend.pbrSpotLightOuterCone[i] = dev->shader_param(prog, name);
-  }
+  backend.pbrSpotLightPosRadiusParam =
+      dev->shader_param(prog, "u_spotLightPosRadius");
+  backend.pbrSpotLightDirInnerParam =
+      dev->shader_param(prog, "u_spotLightDirInner");
+  backend.pbrSpotLightColorParam =
+      dev->shader_param(prog, "u_spotLightColorIntensity");
+  backend.pbrSpotLightParamsParam =
+      dev->shader_param(prog, "u_spotLightParams");
 }
 
 void resolve_pbr_shadow_uniforms(BackendState &backend,
@@ -108,37 +87,33 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
 
   backend.pbrShadowEnabledLoc = dev->shader_param(prog, "uShadowEnabled");
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
-    std::snprintf(name, sizeof(name), "uShadowMap[%zu]", i);
+    std::snprintf(name, sizeof(name), "uShadowMap%zu", i);
     backend.pbrShadowMapLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uShadowMatrix[%zu]", i);
-    backend.pbrShadowMatrixLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uCascadeSplit[%zu]", i);
-    backend.pbrCascadeSplitLocs[i] = dev->shader_param(prog, name);
   }
+  backend.pbrShadowMatrixParam = dev->shader_param(prog, "uShadowMatrix");
+  backend.pbrCascadeSplitsParam = dev->shader_param(prog, "uCascadeSplits");
 
   backend.pbrSpotShadowEnabledLoc =
       dev->shader_param(prog, "uSpotShadowEnabled");
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    std::snprintf(name, sizeof(name), "uSpotShadowMap[%zu]", i);
+    std::snprintf(name, sizeof(name), "uSpotShadowMap%zu", i);
     backend.pbrSpotShadowMapLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uSpotShadowMatrix[%zu]", i);
-    backend.pbrSpotShadowMatrixLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uSpotShadowLightIdx[%zu]", i);
-    backend.pbrSpotShadowLightIdxLocs[i] = dev->shader_param(prog, name);
   }
+  backend.pbrSpotShadowMatrixParam =
+      dev->shader_param(prog, "uSpotShadowMatrix");
+  backend.pbrSpotShadowLightIdxParam =
+      dev->shader_param(prog, "uSpotShadowLightIdxVec");
 
   backend.pbrPointShadowEnabledLoc =
       dev->shader_param(prog, "uPointShadowEnabled");
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
-    std::snprintf(name, sizeof(name), "uPointShadowMap[%zu]", i);
+    std::snprintf(name, sizeof(name), "uPointShadowMap%zu", i);
     backend.pbrPointShadowMapLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uPointShadowLightPos[%zu]", i);
-    backend.pbrPointShadowLightPosLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uPointShadowFarPlane[%zu]", i);
-    backend.pbrPointShadowFarPlaneLocs[i] = dev->shader_param(prog, name);
-    std::snprintf(name, sizeof(name), "uPointShadowLightIdx[%zu]", i);
-    backend.pbrPointShadowLightIdxLocs[i] = dev->shader_param(prog, name);
   }
+  backend.pbrPointShadowPosFarParam =
+      dev->shader_param(prog, "uPointShadowPosFar");
+  backend.pbrPointShadowLightIdxParam =
+      dev->shader_param(prog, "uPointShadowLightIdxVec");
 }
 
 } // namespace
@@ -165,7 +140,9 @@ bool resolve_pbr_program_state(BackendState &backend,
 
   bool ok = true;
   backend.pbrModelLocation =
-      required_param(&ok, dev, pbrProgram, "u_model");
+      // u_modelMatrix, not u_model: bgfx reserves u_model as a
+      // predefined uniform, so the shared pbr vocabulary avoids it.
+      required_param(&ok, dev, pbrProgram, "u_modelMatrix");
   backend.pbrMvpLocation = required_param(&ok, dev, pbrProgram, "u_mvp");
   backend.pbrNormalMatrixLocation =
       required_param(&ok, dev, pbrProgram, "u_normalMatrix");
@@ -210,12 +187,16 @@ bool resolve_pbr_program_state(BackendState &backend,
       dev->shader_param(pbrProgram, "u_alphaCutoff");
   backend.pbrUvTilingLocation = dev->shader_param(pbrProgram, "u_uvTiling");
   backend.pbrUvOffsetLocation = dev->shader_param(pbrProgram, "u_uvOffset");
-  backend.pbrViewLocation =
-      required_param(&ok, dev, pbrProgram, "u_viewMatrix");
+  // Optional: only the shadow cascade selection reads the view matrix,
+  // and the bgfx pbr port omits shadow sampling until the shadows unit
+  // fits the sampler budget.
+  backend.pbrViewLocation = dev->shader_param(pbrProgram, "u_viewMatrix");
   backend.pbrViewProjectionLocation =
       required_param(&ok, dev, pbrProgram, "u_viewProjection");
+  // Optional: the bgfx pbr port has no runtime instancing toggle (its
+  // instanced foliage path lands with the deferred/instancing unit).
   backend.pbrUseInstancingLocation =
-      required_param(&ok, dev, pbrProgram, "uUseInstancing");
+      dev->shader_param(pbrProgram, "uUseInstancing");
   backend.pbrIblEnabledLoc = dev->shader_param(pbrProgram, "uIblEnabled");
   backend.pbrIrradianceMapLoc =
       dev->shader_param(pbrProgram, "uIrradianceMap");

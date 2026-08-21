@@ -127,8 +127,12 @@ void test_textures(TestContext &t) {
   mismatch.pixelData = TexelData::U8;
   mismatch.width = 2;
   mismatch.height = 2;
+  mismatch.pixels = pixels;
   t.check(dev->create_texture(mismatch).value == 0U,
-          "format/texel encoding mismatch rejected");
+          "format/texel encoding mismatch rejected on upload");
+  mismatch.pixels = nullptr;
+  t.check(dev->create_texture(mismatch).value != 0U,
+          "empty creation ignores the texel encoding");
 
   TextureDesc depthWithPixels{};
   depthWithPixels.format = TextureFormat::Depth24;
