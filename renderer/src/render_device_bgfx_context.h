@@ -115,6 +115,11 @@ struct BgfxDeviceContext final {
   std::uint16_t currentView = 0U;
   std::uint16_t viewsUsed = 0U;
   std::uint32_t boundTextures[kMaxTextureSlots] = {};
+  // Swapchain reset tracking (#138 platform bring-up): the frame hook
+  // re-resets bgfx when the drawable size or vsync intent changes.
+  std::int32_t backBufferWidth = 0;
+  std::int32_t backBufferHeight = 0;
+  bool backBufferVsync = false;
 };
 
 /// Returns the bgfx render device context.

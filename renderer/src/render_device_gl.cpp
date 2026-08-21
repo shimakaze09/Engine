@@ -1781,4 +1781,8 @@ const RenderDevice *render_device() noexcept {
   return &render_device_context().device;
 }
 
+bool render_backend_owns_swapchain() noexcept { return false; }
+
+void present_render_device() noexcept { core::swap_render_buffers(); }
+
 } // namespace engine::renderer

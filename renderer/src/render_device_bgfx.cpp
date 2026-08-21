@@ -15,6 +15,7 @@
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
 #include "render_device_bgfx_context.h"
 #include "render_device_null.h"
 
@@ -944,17 +945,48 @@ bool initialize_render_device() noexcept {
   }
 
   // Calling renderFrame before init keeps bgfx single-threaded, matching
-  // the engine's main-thread flush model. The Noop renderer is the only
-  // one reachable before Phase D wires the platform window into
-  // bgfx::PlatformData; real renderer selection lands there.
+  // the engine's main-thread flush model.
   bgfx::renderFrame();
   static BgfxCallback callback{};
   bgfx::Init init{};
-  init.type = bgfx::RendererType::Noop;
-  init.resolution.width = 1U;
-  init.resolution.height = 1U;
-  init.resolution.reset = BGFX_RESET_NONE;
   init.callback = &callback;
+
+  // Renderer selection: r_bgfx_renderer names the API; without a native
+  // window (headless/dummy driver) only Noop is reachable. "auto" lets
+  // bgfx pick the platform's best backend.
+  void *nativeWindow = core::platform_native_window_handle();
+  const char *requested = core::cvar_get_string("r_bgfx_renderer", "auto");
+  if (nativeWindow == nullptr) {
+    init.type = bgfx::RendererType::Noop;
+  } else if (std::strcmp(requested, "noop") == 0) {
+    init.type = bgfx::RendererType::Noop;
+  } else if (std::strcmp(requested, "vulkan") == 0) {
+    init.type = bgfx::RendererType::Vulkan;
+  } else if (std::strcmp(requested, "opengl") == 0) {
+    init.type = bgfx::RendererType::OpenGL;
+  } else if (std::strcmp(requested, "metal") == 0) {
+    init.type = bgfx::RendererType::Metal;
+  } else {
+    init.type = bgfx::RendererType::Count; // auto
+  }
+  if (nativeWindow != nullptr) {
+    init.platformData.nwh = nativeWindow;
+    init.platformData.ndt = core::platform_native_display_handle();
+    init.platformData.type = core::platform_window_is_wayland()
+                                 ? bgfx::NativeWindowHandleType::Wayland
+                                 : bgfx::NativeWindowHandleType::Default;
+  }
+
+  int width = 0;
+  int height = 0;
+  core::render_drawable_size(&width, &height);
+  ctx.backBufferWidth = (width > 0) ? width : 1;
+  ctx.backBufferHeight = (height > 0) ? height : 1;
+  ctx.backBufferVsync = (core::cvar_get_int("r_vsync", 1) != 0);
+  init.resolution.width = static_cast<std::uint32_t>(ctx.backBufferWidth);
+  init.resolution.height = static_cast<std::uint32_t>(ctx.backBufferHeight);
+  init.resolution.reset =
+      ctx.backBufferVsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
   if (!bgfx::init(init)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "bgfx initialization failed");
@@ -964,8 +996,10 @@ bool initialize_render_device() noexcept {
   reset_views();
   ctx.mode = BgfxBackendMode::Bgfx;
   ctx.initialized = true;
-  core::log_message(core::LogLevel::Info, "renderer",
-                    "render device: bgfx backend (Noop renderer, #138)");
+  char msg[128] = {};
+  std::snprintf(msg, sizeof(msg), "render device: bgfx backend (%s, #138)",
+                bgfx::getRendererName(bgfx::getRendererType()));
+  core::log_message(core::LogLevel::Info, "renderer", msg);
   return true;
 }
 
@@ -1008,8 +1042,28 @@ void render_device_bgfx_frame() noexcept {
   if (!ctx.initialized || (ctx.mode != BgfxBackendMode::Bgfx)) {
     return;
   }
+  // Re-reset the swapchain when the drawable or vsync intent changed
+  // (r_vsync applies live, matching the GL path's swap-interval cvar).
+  int width = 0;
+  int height = 0;
+  core::render_drawable_size(&width, &height);
+  const bool vsync = (core::cvar_get_int("r_vsync", 1) != 0);
+  if ((width > 0) && (height > 0) &&
+      ((width != ctx.backBufferWidth) || (height != ctx.backBufferHeight) ||
+       (vsync != ctx.backBufferVsync))) {
+    ctx.backBufferWidth = width;
+    ctx.backBufferHeight = height;
+    ctx.backBufferVsync = vsync;
+    bgfx::reset(static_cast<std::uint32_t>(width),
+                static_cast<std::uint32_t>(height),
+                vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+  }
   bgfx::frame();
   reset_views();
 }
+
+bool render_backend_owns_swapchain() noexcept { return true; }
+
+void present_render_device() noexcept { render_device_bgfx_frame(); }
 
 } // namespace engine::renderer

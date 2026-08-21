@@ -15,6 +15,11 @@ struct PlatformConfig final {
   // #196: create the window without OpenGL (no context; render-context
   // calls become no-op successes) so bootstrap completes on headless CI.
   bool headless = false;
+  // #138: create a visible window without an OpenGL context for render
+  // backends that own their device and swapchain (bgfx); the GL
+  // context/swap/vsync helpers become no-op successes and the native
+  // handles below feed the backend's platform data.
+  bool externalRenderContext = false;
 };
 
 /// Initializes the owning system for platform.
@@ -47,6 +52,16 @@ const char *non_empty_env(const char *name) noexcept;
 void *get_sdl_window() noexcept;
 /// Underlying SDL_GLContext (opaque; platform/editor glue only).
 void *get_sdl_gl_context() noexcept;
+/// Native window handle for external render backends (#138): X11 window
+/// id / Wayland wl_surface / Win32 HWND / Cocoa NSWindow, null when
+/// headless or before initialization.
+void *platform_native_window_handle() noexcept;
+/// Native display handle for external render backends (X11 Display /
+/// Wayland wl_display); null on platforms without a display connection.
+void *platform_native_display_handle() noexcept;
+/// True when the platform window runs on the Wayland video driver (an
+/// external backend must use Wayland platform-data semantics).
+bool platform_window_is_wayland() noexcept;
 /// Resident memory of the process in bytes (0 when unsupported).
 std::size_t process_memory_bytes() noexcept;
 

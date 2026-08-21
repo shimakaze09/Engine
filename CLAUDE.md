@@ -201,7 +201,10 @@ directory-global by design.
 
 - `app/` — `engine_editor_app` entry point; whole-archives `engine_editor` so
   the editor bridge registers before bootstrap.
-- `core/` — bootstrap/config, platform (SDL glue, paths), logging, cvars,
+- `core/` — bootstrap/config, platform (SDL glue, paths; #138:
+  `PlatformConfig.externalRenderContext` creates the window without an
+  OpenGL context for swapchain-owning backends and exposes native
+  window/display handles), logging, cvars,
   console, event bus, input + input maps + touch, VFS, JSON, job system
   (frame graph), allocators (linear/pool), profiler, mem tracker, reflection,
   entity handle, service locator, shared utilities (`sparse_set.h`,
@@ -252,8 +255,13 @@ directory-global by design.
   `render_device_gl.cpp` (default; all GL enums, VAOs, FBOs, uniform
   locations, and texture units stay inside it) or the #138 Phase B
   `render_device_bgfx.cpp` + `render_device_bgfx_programs.cpp` +
-  `render_device_bgfx_translate.cpp` (bgfx single-threaded on the Noop
-  renderer until Phase D ports the platform window/presentation;
+  `render_device_bgfx_translate.cpp` (bgfx single-threaded; windowed
+  runs initialize the real renderer — `r_bgfx_renderer` cvar, auto =
+  bgfx's platform pick, proven on Vulkan — over the platform's native
+  window/display handles, present through `present_render_device`
+  (which also applies live `r_vsync` and drawable resizes via
+  bgfx::reset), while headless runs stay on Noop; the editor bridge is
+  disabled under this backend until the ImGui integration unit lands;
   programs link only from the Phase C shaderc cook's binaries via
   `create_program_binary` + `caps.cookedPrograms` — spirv is the
   canonical profile because GLSL-flavor binaries embed no uniform

@@ -39,6 +39,7 @@
 #include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/render_device.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
 #include "engine/physics/physics_context.h"
@@ -1492,7 +1493,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
     bridge->render(static_cast<float>(frameMs),
                    static_cast<float>(utilizationPct));
   }
-  core::swap_render_buffers();
+  renderer::present_render_device();
   core::release_render_context();
 
   if (interpolateCamera) {

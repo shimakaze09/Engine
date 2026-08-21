@@ -31,7 +31,11 @@ std::uint64_t dropped(const RenderDevice *dev) noexcept {
 /// Lifecycle: init succeeds headlessly, caps are the bgfx contract,
 /// shutdown invalidates, re-init starts clean.
 void test_lifecycle(TestContext &t) {
+  t.check(render_backend_owns_swapchain(),
+          "bgfx backend owns its swapchain");
+  present_render_device(); // defined no-op before initialization
   t.check(initialize_render_device(), "initialize succeeds on Noop");
+  present_render_device(); // presentation entry drives the frame hook
   t.check(initialize_render_device(), "initialize is idempotent");
   const RenderDevice *dev = render_device();
   t.check(dev != nullptr, "device table published");

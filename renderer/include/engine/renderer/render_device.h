@@ -459,5 +459,14 @@ bool initialize_render_device() noexcept;
 void shutdown_render_device() noexcept;
 /// Active device table, or nullptr before initialization.
 const RenderDevice *render_device() noexcept;
+/// True when the compiled backend owns its device and swapchain (#138):
+/// the platform window must then be created without an OpenGL context
+/// and presentation runs through present_render_device.
+bool render_backend_owns_swapchain() noexcept;
+/// Presents the completed frame through the active backend: the GL
+/// backend swaps the platform's buffers; the bgfx backend advances its
+/// frame (applying vsync and drawable-size changes). No-op before
+/// initialization.
+void present_render_device() noexcept;
 
 } // namespace engine::renderer

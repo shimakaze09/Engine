@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +39,7 @@ bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
 SDL_GLContext g_glContext = nullptr;
 bool g_headless = false;
+bool g_externalRenderContext = false;
 
 constexpr std::size_t kPlatformPathMax = 1024U;
 constexpr char kDefaultOrganizationName[] = "Engine";
@@ -188,13 +190,15 @@ void shutdown_platform_resources() noexcept {
     static_cast<void>(SDL_ResetHint(SDL_HINT_VIDEO_DRIVER));
   }
   g_headless = false;
+  g_externalRenderContext = false;
 
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
 /// Initializes the owning system for platform impl.
 bool initialize_platform_impl(int width, int height, const char *title,
-                              bool vsync, bool headless) noexcept {
+                              bool vsync, bool headless,
+                              bool externalRenderContext) noexcept {
   if (g_window != nullptr) {
     g_platformRunning = true;
     return true;
@@ -221,6 +225,26 @@ bool initialize_platform_impl(int width, int height, const char *title,
       return false;
     }
     g_headless = true;
+    g_platformRunning = true;
+    return true;
+  }
+
+  // #138: an external-context backend (bgfx) owns device and swapchain;
+  // the window is created without OpenGL and the backend reads the
+  // native handles. vsync is applied by the backend at its reset.
+  if (externalRenderContext) {
+    static_cast<void>(vsync);
+    g_window = SDL_CreateWindow(title, width, height,
+                                SDL_WINDOW_RESIZABLE |
+                                    SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    if (g_window == nullptr) {
+      log_sdl_error("failed to create SDL window (external context)");
+      shutdown_platform_resources();
+      return false;
+    }
+    static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
+                                            SDL_WINDOWPOS_CENTERED));
+    g_externalRenderContext = true;
     g_platformRunning = true;
     return true;
   }
@@ -295,7 +319,7 @@ const char *non_empty_env(const char *name) noexcept {
 
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept {
-  return initialize_platform_impl(1280, 720, "engine", true, false);
+  return initialize_platform_impl(1280, 720, "engine", true, false, false);
 }
 
 /// Initializes the owning system for platform.
@@ -304,7 +328,8 @@ bool initialize_platform(const PlatformConfig &config) noexcept {
   const int h = (config.height > 0) ? config.height : 720;
   const char *title = (config.title != nullptr) ? config.title : "engine";
   return initialize_platform_impl(w, h, title, config.vsync,
-                                  config.headless);
+                                  config.headless,
+                                  config.externalRenderContext);
 }
 
 /// Shuts down the owning system for platform.
@@ -319,7 +344,7 @@ bool is_platform_running() noexcept { return g_platformRunning; }
 void request_platform_quit() noexcept { g_platformRunning = false; }
 
 bool make_render_context_current() noexcept {
-  if (g_headless) {
+  if (g_headless || g_externalRenderContext) {
     return true;
   }
   if ((g_window == nullptr) || (g_glContext == nullptr)) {
@@ -330,7 +355,7 @@ bool make_render_context_current() noexcept {
 }
 
 void release_render_context() noexcept {
-  if (g_headless) {
+  if (g_headless || g_externalRenderContext) {
     return;
   }
   if (g_window != nullptr) {
@@ -339,7 +364,7 @@ void release_render_context() noexcept {
 }
 
 void swap_render_buffers() noexcept {
-  if (g_headless) {
+  if (g_headless || g_externalRenderContext) {
     return;
   }
   if (g_window != nullptr) {
@@ -348,7 +373,7 @@ void swap_render_buffers() noexcept {
 }
 
 bool set_render_vsync(int interval) noexcept {
-  if (g_headless) {
+  if (g_headless || g_externalRenderContext) {
     return true;
   }
   if (g_window == nullptr) {
@@ -390,6 +415,52 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 void *get_sdl_window() noexcept { return g_window; }
 
 void *get_sdl_gl_context() noexcept { return g_glContext; }
+
+bool platform_window_is_wayland() noexcept {
+  const char *driver = SDL_GetCurrentVideoDriver();
+  return (driver != nullptr) && (SDL_strcmp(driver, "wayland") == 0);
+}
+
+void *platform_native_window_handle() noexcept {
+  if ((g_window == nullptr) || g_headless) {
+    return nullptr;
+  }
+  const SDL_PropertiesID props = SDL_GetWindowProperties(g_window);
+#if defined(_WIN32)
+  return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+                                nullptr);
+#elif defined(__APPLE__)
+  return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER,
+                                nullptr);
+#else
+  if (platform_window_is_wayland()) {
+    return SDL_GetPointerProperty(
+        props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+  }
+  // X11 exposes the window as a numeric id; external backends consume
+  // it through the same opaque pointer channel.
+  const Sint64 xid =
+      SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+  return reinterpret_cast<void *>(static_cast<std::uintptr_t>(xid));
+#endif
+}
+
+void *platform_native_display_handle() noexcept {
+  if ((g_window == nullptr) || g_headless) {
+    return nullptr;
+  }
+#if defined(_WIN32) || defined(__APPLE__)
+  return nullptr;
+#else
+  const SDL_PropertiesID props = SDL_GetWindowProperties(g_window);
+  if (platform_window_is_wayland()) {
+    return SDL_GetPointerProperty(
+        props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+  }
+  return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER,
+                                nullptr);
+#endif
+}
 
 std::size_t process_memory_bytes() noexcept {
 #if defined(_WIN32)
