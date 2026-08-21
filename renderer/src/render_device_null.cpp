@@ -47,6 +47,12 @@ void null_bind_texture_slot(std::uint32_t, DeviceTextureHandle) noexcept {}
 DeviceProgramHandle null_create_program(const char *, const char *) noexcept {
   return DeviceProgramHandle{next_handle()};
 }
+DeviceProgramHandle null_create_program_binary(const void *, std::ptrdiff_t,
+                                               const void *,
+                                               std::ptrdiff_t) noexcept {
+  return DeviceProgramHandle{next_handle()};
+}
+const char *null_cooked_program_profile() noexcept { return "glsl"; }
 void null_destroy_program(DeviceProgramHandle) noexcept {}
 void null_bind_program(DeviceProgramHandle) noexcept {}
 
@@ -122,6 +128,7 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->caps.instancing = true;
   device->caps.uniformBlocks = true;
   device->caps.timestampQueries = true;
+  device->caps.cookedPrograms = true;
 
   device->create_buffer = &null_create_buffer;
   device->update_buffer = &null_update_buffer;
@@ -133,6 +140,8 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->destroy_texture = &null_destroy_texture;
   device->bind_texture_slot = &null_bind_texture_slot;
   device->create_program = &null_create_program;
+  device->create_program_binary = &null_create_program_binary;
+  device->cooked_program_profile = &null_cooked_program_profile;
   device->destroy_program = &null_destroy_program;
   device->bind_program = &null_bind_program;
   device->shader_param = &null_shader_param;

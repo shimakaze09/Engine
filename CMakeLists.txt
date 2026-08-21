@@ -505,6 +505,24 @@ if(ENGINE_BUILD_TOOLS)
     add_subdirectory(tools)
 endif()
 
+# bgfx shader cook (#138 Phase C): when the bgfx backend and tools are
+# both built, the packer cooks the manifest's shader variants per
+# profile into the build-tree asset dir with shaderc from the fetched
+# superproject; the cook stamp keeps incremental builds a no-op.
+if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx" AND ENGINE_BUILD_TOOLS
+   AND TARGET copy_assets)
+    add_custom_target(bgfx_shader_cook ALL
+        COMMAND $<TARGET_FILE:asset_packer>
+            --shader-manifest
+            "${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx/shaders.json"
+            --shader-out "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
+            --shaderc $<TARGET_FILE:shaderc>
+            --shader-include "${bgfx_SOURCE_DIR}/bgfx/src"
+        COMMENT "Cooking bgfx shader variants"
+    )
+    add_dependencies(bgfx_shader_cook asset_packer shaderc copy_assets)
+endif()
+
 if(ENGINE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

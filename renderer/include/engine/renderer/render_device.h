@@ -305,6 +305,7 @@ struct DeviceCaps final {
   bool instancing = false;      // draw_indexed_instanced + instance streams
   bool uniformBlocks = false;   // uniform buffers + program block binding
   bool timestampQueries = false;
+  bool cookedPrograms = false;  // create_program_binary from cooked shaders
 };
 
 /// Counters for dropped invalid-handle/invalid-argument operations; a
@@ -356,6 +357,17 @@ struct RenderDevice final {
   DeviceProgramHandle (*create_program)(const char *vertexSource,
                                         const char *fragmentSource) noexcept =
       nullptr;
+  // Links a program from cooked shader binaries (#138 Phase C): opaque
+  // backend-cooked bytes in, program handle out. Requires
+  // caps.cookedPrograms; source-compiling backends leave it null.
+  DeviceProgramHandle (*create_program_binary)(
+      const void *vertexData, std::ptrdiff_t vertexSize,
+      const void *fragmentData, std::ptrdiff_t fragmentSize) noexcept =
+      nullptr;
+  // Stable engine profile tag ("glsl", "essl", "spirv", "metal") naming
+  // the cooked shader flavor this backend consumes; pairs with
+  // caps.cookedPrograms.
+  const char *(*cooked_program_profile)() noexcept = nullptr;
   void (*destroy_program)(DeviceProgramHandle program) noexcept = nullptr;
   // Makes the program current for subsequent set_param_*/draw calls; an
   // invalid handle unbinds.

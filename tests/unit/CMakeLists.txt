@@ -91,8 +91,10 @@ engine_add_test_executable(engine_unit_device_slot_table
     engine_core
 )
 
-# bgfx backend device suite (#138 Phase B): compiled only when the bgfx
-# backend is selected; runs headlessly on bgfx's Noop renderer.
+# bgfx backend device suite (#138 Phases B/C): compiled only when the
+# bgfx backend is selected; runs headlessly on bgfx's Noop renderer.
+# When the build also cooks the proving shaders (tools on), the suite
+# exercises cooked program linking against those binaries.
 if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
 engine_add_test_executable(engine_unit_render_device_bgfx
     SOURCES
@@ -105,6 +107,27 @@ engine_add_test_executable(engine_unit_render_device_bgfx
     engine_core
     bgfx
 )
+if(TARGET bgfx_shader_cook)
+    target_compile_definitions(engine_unit_render_device_bgfx PRIVATE
+        ENGINE_TEST_COOKED_SHADER_DIR="${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked")
+    add_dependencies(engine_unit_render_device_bgfx bgfx_shader_cook)
+
+    # Shader cook lifecycle suite (#138 Phase C): drives the packer's
+    # production CLI against a scratch copy of the shader sources.
+    engine_add_test_executable(engine_unit_shader_cook
+        SOURCES
+        shader_cook_test.cpp
+        PRIVATE_DEPS
+        engine_core
+    )
+    target_compile_definitions(engine_unit_shader_cook PRIVATE
+        ENGINE_TEST_ASSET_PACKER="$<TARGET_FILE:asset_packer>"
+        ENGINE_TEST_SHADERC="$<TARGET_FILE:shaderc>"
+        ENGINE_TEST_SHADER_INCLUDE="${bgfx_SOURCE_DIR}/bgfx/src"
+        ENGINE_TEST_SHADER_SOURCE_DIR="${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx")
+    add_dependencies(engine_unit_shader_cook asset_packer shaderc)
+    set_tests_properties(engine_unit_shader_cook PROPERTIES TIMEOUT 300)
+endif()
 endif()
 
 engine_add_test_executable(engine_unit_mesh_loader

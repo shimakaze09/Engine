@@ -1,23 +1,21 @@
-// Implements the bgfx render device backend (#138 Phase B): the engine
-// RenderDevice table over bgfx with the same generational slot tables,
-// stale-handle detection, and dropped-operation diagnostics as the GL
-// backend. bgfx runs single-threaded on the Noop renderer until Phase D
-// ports the platform window and presentation path; program creation
-// fails by contract until the Phase C shaderc cook supplies compiled
-// shaders (bgfx has no runtime GLSL compile), so draw submission drops
-// visibly on the missing program. Vertex buffers are realized as
-// resizable byte-layout dynamic buffers with per-geometry layout
-// overrides at draw; buffer/texture uploads copy through bgfx transient
-// memory (bgfx's required ownership model — the per-frame allocation is
+// Implements the bgfx render device backend (#138): resources, views,
+// render state, and draws over the engine RenderDevice table, with the
+// same generational slot tables, stale-handle detection, and
+// dropped-operation diagnostics as the GL backend (the program and
+// shader-parameter path lives in render_device_bgfx_programs.cpp; shared
+// records in render_device_bgfx_context.h). bgfx runs single-threaded on
+// the Noop renderer until Phase D ports the platform window and
+// presentation path. Vertex buffers are realized as resizable
+// byte-layout dynamic buffers with per-geometry layout overrides at
+// draw; buffer/texture uploads copy through bgfx transient memory
+// (bgfx's required ownership model — the per-frame allocation is
 // bgfx-internal and unavoidable at this boundary).
 
 #include "render_device_bgfx.h"
 
-#include "device_slot_table.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
-#include "engine/renderer/render_device.h"
-#include "render_device_bgfx_internal.h"
+#include "render_device_bgfx_context.h"
 #include "render_device_null.h"
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -55,94 +53,13 @@ using bgfx_detail::bgfx_vertex_layout;
 using bgfx_detail::BgfxTexelUpload;
 using bgfx_detail::TexelStagingOp;
 
-namespace {
+namespace bgfx_backend {
 
-// Capacities mirror the GL backend so engine registries above the
-// device see identical headroom on both backends.
-constexpr std::size_t kMaxDeviceBuffers = 8704U;
-constexpr std::size_t kMaxDeviceTextures = 1024U;
-constexpr std::size_t kMaxDevicePrograms = 128U;
-constexpr std::size_t kMaxDeviceGeometries = 4352U;
-constexpr std::size_t kMaxDeviceTargets = 256U;
-constexpr std::size_t kMaxTextureSlots = 16U;
-
-/// Realized bgfx storage behind one engine buffer handle. Vertex and
-/// instance data live in a resizable dynamic vertex buffer (byte layout
-/// until an instance stride re-realizes it); indices in a resizable
-/// 32-bit dynamic index buffer.
-struct BgfxBufferRecord final {
-  BufferUsage usage = BufferUsage::Vertex;
-  BufferAccess access = BufferAccess::Static;
-  std::int32_t sizeBytes = 0;
-  std::int32_t instanceStride = 0;
-  bgfx::DynamicVertexBufferHandle vertex = BGFX_INVALID_HANDLE;
-  bgfx::DynamicIndexBufferHandle index = BGFX_INVALID_HANDLE;
-};
-
-/// bgfx texture behind one engine texture handle, with the creation
-/// shape needed to validate updates and attachments.
-struct BgfxTextureRecord final {
-  bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
-  TextureKind kind = TextureKind::Tex2D;
-  TextureFormat format = TextureFormat::RGBA8;
-  TexelData texel = TexelData::U8;
-  std::int32_t width = 0;
-  std::int32_t height = 0;
-  bool renderTarget = false;
-};
-
-/// Geometry: referenced engine buffer handles (resolved per draw for
-/// staleness) plus the translated layout override applied at draw.
-struct BgfxGeometryRecord final {
-  std::uint32_t vertexBuffer = 0U;
-  std::uint32_t indexBuffer = 0U;
-  std::uint32_t instanceBuffer = 0U;
-  std::int32_t vertexStride = 0;
-  bgfx::VertexLayoutHandle layout = BGFX_INVALID_HANDLE;
-};
-
-/// Frame buffer behind one engine render-target handle; the depth
-/// attachment's engine handle backs copy_depth blits.
-struct BgfxTargetRecord final {
-  bgfx::FrameBufferHandle handle = BGFX_INVALID_HANDLE;
-  std::uint32_t depthTexture = 0U;
-};
-
-/// Which backend fill initialize_render_device selected.
-enum class BgfxBackendMode : std::uint8_t {
-  None = 0,
-  Null = 1,
-  Bgfx = 2,
-};
-
-/// Owns the bgfx-backed render device state.
-struct BgfxDeviceContext final {
-  bool initialized = false;
-  BgfxBackendMode mode = BgfxBackendMode::None;
-  RenderDevice device{};
-  device_slot_detail::DeviceSlotTable<BgfxBufferRecord, kMaxDeviceBuffers>
-      buffers{};
-  device_slot_detail::DeviceSlotTable<BgfxTextureRecord, kMaxDeviceTextures>
-      textures{};
-  device_slot_detail::DeviceSlotTable<BgfxGeometryRecord, kMaxDeviceGeometries>
-      geometries{};
-  device_slot_detail::DeviceSlotTable<BgfxTargetRecord, kMaxDeviceTargets>
-      targets{};
-  DeviceDebugStats stats{};
-  RenderState currentState{};
-  std::uint16_t currentView = 0U;
-  std::uint16_t viewsUsed = 0U;
-  std::uint32_t boundTextures[kMaxTextureSlots] = {};
-};
-
-/// Returns the bgfx render device context.
 BgfxDeviceContext &device_context() noexcept {
   static BgfxDeviceContext context{};
   return context;
 }
 
-/// Records one dropped operation; the first few log so the violation is
-/// visible without flooding per-frame paths.
 void drop_operation(const char *what) noexcept {
   DeviceDebugStats &stats = device_context().stats;
   ++stats.droppedOperations;
@@ -154,6 +71,12 @@ void drop_operation(const char *what) noexcept {
     core::log_message(core::LogLevel::Error, "render_device", msg);
   }
 }
+
+} // namespace bgfx_backend
+
+using namespace bgfx_backend;
+
+namespace {
 
 /// Routes bgfx fatal errors and (cvar-gated) trace output into the
 /// engine log; cache/screenshot/capture callbacks stay inert. Virtual
@@ -267,7 +190,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
   if (desc.usage == BufferUsage::Uniform) {
     // bgfx exposes no arbitrary uniform-buffer binding; the caps flag is
     // false and callers gate on it (uniform data reaches shaders through
-    // named parameters once the Phase C cook lands).
+    // named parameters instead).
     static bool logged = false;
     if (!logged) {
       logged = true;
@@ -433,7 +356,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
     }
   }
   // mipLevels 0 asks for a runtime-generated chain, which bgfx cannot
-  // do; the chain is allocated and generation moves to the Phase C cook.
+  // do; the chain is allocated and generation moves to the cook.
   const bool hasMips = (desc.mipLevels != 1);
   if (desc.mipLevels == 0) {
     static bool logged = false;
@@ -554,49 +477,10 @@ void bgfx_bind_texture_slot(std::uint32_t slot,
     drop_operation("bind_texture_slot: stale texture");
     return;
   }
-  // bgfx attaches textures per submit through sampler uniforms, which
-  // exist only once programs do; the binding is recorded now so draws
-  // can apply it when the Phase C cook lands.
+  // bgfx attaches textures per submit through the bound program's
+  // sampler uniforms (apply_program_samplers); the slot contents are
+  // recorded here.
   ctx.boundTextures[slot] = texture.value;
-}
-
-// --- Programs and shader parameters (pending the Phase C shader cook) ---
-
-DeviceProgramHandle bgfx_create_program(const char *, const char *) noexcept {
-  static bool logged = false;
-  if (!logged) {
-    logged = true;
-    core::log_message(core::LogLevel::Info, "render_device",
-                      "bgfx backend: runtime GLSL compilation "
-                      "unavailable; programs arrive with the shaderc "
-                      "cook (#138 Phase C)");
-  }
-  return kInvalidDeviceProgram;
-}
-
-void bgfx_destroy_program(DeviceProgramHandle) noexcept {}
-
-void bgfx_bind_program(DeviceProgramHandle program) noexcept {
-  if (program.value != 0U) {
-    drop_operation("bind_program: no programs exist before the shader cook");
-  }
-}
-
-ShaderParam bgfx_shader_param(DeviceProgramHandle, const char *) noexcept {
-  return kInvalidShaderParam;
-}
-
-void bgfx_set_param_mat4(ShaderParam, const float *) noexcept {}
-void bgfx_set_param_mat3(ShaderParam, const float *) noexcept {}
-void bgfx_set_param_f32(ShaderParam, float) noexcept {}
-void bgfx_set_param_i32(ShaderParam, std::int32_t) noexcept {}
-void bgfx_set_param_vec2(ShaderParam, const float *) noexcept {}
-void bgfx_set_param_vec3(ShaderParam, const float *) noexcept {}
-void bgfx_set_param_vec4(ShaderParam, const float *) noexcept {}
-
-bool bgfx_bind_program_uniform_block(DeviceProgramHandle, const char *,
-                                     std::uint32_t) noexcept {
-  return false;
 }
 
 // --- Geometry and draws ---
@@ -704,9 +588,7 @@ bool bgfx_set_geometry_instance_stream(DeviceGeometryHandle geometry,
 }
 
 /// Applies the geometry's streams for one draw; false (with the drop
-/// recorded) when a referenced buffer went stale. Draws cannot submit
-/// until programs exist (#138 Phase C), so every draw currently ends in
-/// a recorded drop on the missing program rather than a bgfx submit.
+/// recorded) when a referenced buffer went stale.
 bool bgfx_apply_geometry(const BgfxGeometryRecord &record,
                          std::int32_t firstVertex,
                          std::int32_t vertexCount) noexcept {
@@ -726,14 +608,23 @@ bool bgfx_apply_geometry(const BgfxGeometryRecord &record,
                           static_cast<std::uint32_t>(firstVertex), count,
                           record.layout);
   }
-  if (record.indexBuffer != 0U) {
-    BgfxBufferRecord *index = ctx.buffers.resolve(record.indexBuffer);
-    if ((index == nullptr) || !bgfx::isValid(index->index)) {
-      drop_operation("draw: stale index buffer");
-      return false;
-    }
-  }
   return true;
+}
+
+/// Submits the prepared draw with the bound program's samplers applied;
+/// no bound program records the drop (programs exist only from the
+/// shaderc cook, caps.cookedPrograms).
+void bgfx_submit_draw(std::uint64_t stateBits) noexcept {
+  BgfxDeviceContext &ctx = device_context();
+  BgfxProgramRecord *program = current_program_record();
+  if (program == nullptr) {
+    drop_operation("draw: no program bound (cooked programs only)");
+    bgfx::discard();
+    return;
+  }
+  bgfx::setState(stateBits);
+  apply_program_samplers(*program);
+  bgfx::submit(ctx.currentView, program->handle);
 }
 
 void bgfx_draw(DeviceGeometryHandle geometry, PrimitiveTopology topology,
@@ -747,9 +638,7 @@ void bgfx_draw(DeviceGeometryHandle geometry, PrimitiveTopology topology,
   if (!bgfx_apply_geometry(*record, firstVertex, vertexCount)) {
     return;
   }
-  bgfx::setState(bgfx_state_bits(ctx.currentState, topology));
-  drop_operation("draw: no program bound (pending #138 Phase C)");
-  bgfx::discard();
+  bgfx_submit_draw(bgfx_state_bits(ctx.currentState, topology));
 }
 
 void bgfx_draw_indexed(DeviceGeometryHandle geometry,
@@ -760,16 +649,18 @@ void bgfx_draw_indexed(DeviceGeometryHandle geometry,
     drop_operation("draw_indexed: stale or index-less geometry");
     return;
   }
+  BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
+  if ((index == nullptr) || !bgfx::isValid(index->index)) {
+    drop_operation("draw_indexed: stale index buffer");
+    return;
+  }
   if (!bgfx_apply_geometry(*record, 0, 0)) {
     return;
   }
-  BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
   bgfx::setIndexBuffer(index->index, 0U,
                        static_cast<std::uint32_t>(indexCount));
-  bgfx::setState(
+  bgfx_submit_draw(
       bgfx_state_bits(ctx.currentState, PrimitiveTopology::Triangles));
-  drop_operation("draw_indexed: no program bound (pending #138 Phase C)");
-  bgfx::discard();
 }
 
 void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
@@ -782,24 +673,22 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
     drop_operation("draw_indexed_instanced: geometry missing streams");
     return;
   }
+  BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
+  BgfxBufferRecord *stream = ctx.buffers.resolve(record->instanceBuffer);
+  if ((index == nullptr) || !bgfx::isValid(index->index) ||
+      (stream == nullptr) || !bgfx::isValid(stream->vertex)) {
+    drop_operation("draw_indexed_instanced: stale buffer");
+    return;
+  }
   if (!bgfx_apply_geometry(*record, 0, 0)) {
     return;
   }
-  BgfxBufferRecord *stream = ctx.buffers.resolve(record->instanceBuffer);
-  if ((stream == nullptr) || !bgfx::isValid(stream->vertex)) {
-    drop_operation("draw_indexed_instanced: stale instance buffer");
-    return;
-  }
-  BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
   bgfx::setIndexBuffer(index->index, 0U,
                        static_cast<std::uint32_t>(indexCount));
   bgfx::setInstanceDataBuffer(stream->vertex, 0U,
                               static_cast<std::uint32_t>(instanceCount));
-  bgfx::setState(
+  bgfx_submit_draw(
       bgfx_state_bits(ctx.currentState, PrimitiveTopology::Triangles));
-  drop_operation(
-      "draw_indexed_instanced: no program bound (pending #138 Phase C)");
-  bgfx::discard();
 }
 
 // --- Render targets, state, views ---
@@ -979,13 +868,14 @@ DeviceDebugStats bgfx_debug_stats() noexcept {
 }
 
 /// Fills the device table with the bgfx backend entries and its honest
-/// capability set: instancing works, uniform blocks and timestamp
-/// queries do not exist in bgfx's model.
+/// capability set: instancing and cooked programs work; uniform blocks
+/// and timestamp queries do not exist in bgfx's model.
 void fill_bgfx_render_device(RenderDevice *device) noexcept {
   *device = RenderDevice{};
   device->caps.instancing = true;
   device->caps.uniformBlocks = false;
   device->caps.timestampQueries = false;
+  device->caps.cookedPrograms = true;
 
   device->create_buffer = &bgfx_create_buffer;
   device->update_buffer = &bgfx_update_buffer;
@@ -996,18 +886,21 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->update_texture = &bgfx_update_texture;
   device->destroy_texture = &bgfx_destroy_texture;
   device->bind_texture_slot = &bgfx_bind_texture_slot;
-  device->create_program = &bgfx_create_program;
-  device->destroy_program = &bgfx_destroy_program;
-  device->bind_program = &bgfx_bind_program;
-  device->shader_param = &bgfx_shader_param;
-  device->set_param_mat4 = &bgfx_set_param_mat4;
-  device->set_param_mat3 = &bgfx_set_param_mat3;
-  device->set_param_f32 = &bgfx_set_param_f32;
-  device->set_param_i32 = &bgfx_set_param_i32;
-  device->set_param_vec2 = &bgfx_set_param_vec2;
-  device->set_param_vec3 = &bgfx_set_param_vec3;
-  device->set_param_vec4 = &bgfx_set_param_vec4;
-  device->bind_program_uniform_block = &bgfx_bind_program_uniform_block;
+  device->create_program = &bgfx_backend::bgfx_create_program;
+  device->create_program_binary = &bgfx_backend::bgfx_create_program_binary;
+  device->cooked_program_profile = &bgfx_backend::bgfx_cooked_program_profile;
+  device->destroy_program = &bgfx_backend::bgfx_destroy_program;
+  device->bind_program = &bgfx_backend::bgfx_bind_program;
+  device->shader_param = &bgfx_backend::bgfx_shader_param;
+  device->set_param_mat4 = &bgfx_backend::bgfx_set_param_mat4;
+  device->set_param_mat3 = &bgfx_backend::bgfx_set_param_mat3;
+  device->set_param_f32 = &bgfx_backend::bgfx_set_param_f32;
+  device->set_param_i32 = &bgfx_backend::bgfx_set_param_i32;
+  device->set_param_vec2 = &bgfx_backend::bgfx_set_param_vec2;
+  device->set_param_vec3 = &bgfx_backend::bgfx_set_param_vec3;
+  device->set_param_vec4 = &bgfx_backend::bgfx_set_param_vec4;
+  device->bind_program_uniform_block =
+      &bgfx_backend::bgfx_bind_program_uniform_block;
   device->create_geometry = &bgfx_create_geometry;
   device->destroy_geometry = &bgfx_destroy_geometry;
   device->set_geometry_instance_stream = &bgfx_set_geometry_instance_stream;
@@ -1072,8 +965,7 @@ bool initialize_render_device() noexcept {
   ctx.mode = BgfxBackendMode::Bgfx;
   ctx.initialized = true;
   core::log_message(core::LogLevel::Info, "renderer",
-                    "render device: bgfx backend (Noop renderer, #138 "
-                    "Phase B)");
+                    "render device: bgfx backend (Noop renderer, #138)");
   return true;
 }
 
@@ -1085,10 +977,12 @@ void shutdown_render_device() noexcept {
   // bgfx::shutdown reclaims anything that slipped through.
   ctx.buffers.clear();
   ctx.textures.clear();
+  ctx.programs.clear();
   ctx.geometries.clear();
   ctx.targets.clear();
   ctx.stats = DeviceDebugStats{};
   ctx.currentState = RenderState{};
+  ctx.currentProgram = 0U;
   ctx.currentView = 0U;
   ctx.viewsUsed = 0U;
   for (std::uint32_t &slot : ctx.boundTextures) {

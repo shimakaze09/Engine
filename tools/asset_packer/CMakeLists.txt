@@ -5,6 +5,8 @@ engine_add_executable_target(asset_packer
     main.cpp
     cook_stamp.cpp
     mesh_cook.cpp
+    shader_cook.cpp
+    shader_cook.h
     thumbnail_generate.cpp
     packer_shared.h
     animation_import.cpp

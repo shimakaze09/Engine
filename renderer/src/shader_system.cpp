@@ -2,6 +2,7 @@
 
 #include "engine/renderer/shader_system.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -339,6 +340,102 @@ DeviceProgramHandle compile_program_from_source(
   return program;
 }
 
+/// Builds the cooked shader binary path beside a source path (#138
+/// Phase C): "<dir>/bgfx/cooked/<file>.<variantKey>.<profile>.bin",
+/// where variantKey is the entry's define names sorted and joined with
+/// '-' ("default" when none). False when a define carries a value (the
+/// cook keys flag defines only) or the result would not fit.
+bool build_cooked_shader_path(const char *sourcePath,
+                              const ShaderDefineCopy *defines,
+                              std::size_t defineCount, const char *profile,
+                              char *out, std::size_t outSize) noexcept {
+  const char *slash = std::strrchr(sourcePath, '/');
+  const std::size_t dirLength =
+      (slash != nullptr)
+          ? static_cast<std::size_t>(slash - sourcePath) + 1U
+          : 0U;
+  const char *file = (slash != nullptr) ? (slash + 1U) : sourcePath;
+
+  const char *sorted[kMaxShaderDefines] = {};
+  for (std::size_t i = 0U; i < defineCount; ++i) {
+    if (std::strcmp(defines[i].value, kEnabledDefineValue) != 0) {
+      return false;
+    }
+    sorted[i] = defines[i].name;
+  }
+  std::sort(sorted, sorted + defineCount,
+            [](const char *a, const char *b) noexcept {
+              return std::strcmp(a, b) < 0;
+            });
+
+  char key[kMaxShaderDefines * kMaxDefineNameLength] = {};
+  if (defineCount == 0U) {
+    core::copy_string(key, sizeof(key), "default");
+  } else {
+    std::size_t used = 0U;
+    for (std::size_t i = 0U; i < defineCount; ++i) {
+      const int written = std::snprintf(key + used, sizeof(key) - used,
+                                        (i > 0U) ? "-%s" : "%s", sorted[i]);
+      if (written < 0) {
+        return false;
+      }
+      used += static_cast<std::size_t>(written);
+      if (used >= sizeof(key)) {
+        return false;
+      }
+    }
+  }
+
+  const int written =
+      std::snprintf(out, outSize, "%.*sbgfx/cooked/%s.%s.%s.bin",
+                    static_cast<int>(dirLength), sourcePath, file, key,
+                    profile);
+  return (written > 0) && (static_cast<std::size_t>(written) < outSize);
+}
+
+/// Cooked-binary program path (#138 Phase C): loads both stages'
+/// cooked binaries for the backend's profile through the VFS and links
+/// them via create_program_binary. Invalid when the backend does not
+/// consume cooked programs or a binary is missing (the caller falls
+/// back to source compilation).
+DeviceProgramHandle try_cooked_program(const char *vertPath,
+                                       const char *fragPath,
+                                       const ShaderDefineCopy *defines,
+                                       std::size_t defineCount) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((dev == nullptr) || !dev->caps.cookedPrograms ||
+      (dev->create_program_binary == nullptr) ||
+      (dev->cooked_program_profile == nullptr)) {
+    return kInvalidDeviceProgram;
+  }
+  const char *profile = dev->cooked_program_profile();
+  char vertBin[kMaxPathLength * 2U] = {};
+  char fragBin[kMaxPathLength * 2U] = {};
+  if (!build_cooked_shader_path(vertPath, defines, defineCount, profile,
+                                vertBin, sizeof(vertBin)) ||
+      !build_cooked_shader_path(fragPath, defines, defineCount, profile,
+                                fragBin, sizeof(fragBin))) {
+    return kInvalidDeviceProgram;
+  }
+  void *vertData = nullptr;
+  std::size_t vertSize = 0U;
+  if (!core::vfs_read_binary(vertBin, &vertData, &vertSize)) {
+    return kInvalidDeviceProgram;
+  }
+  void *fragData = nullptr;
+  std::size_t fragSize = 0U;
+  if (!core::vfs_read_binary(fragBin, &fragData, &fragSize)) {
+    core::vfs_free(vertData);
+    return kInvalidDeviceProgram;
+  }
+  const DeviceProgramHandle program = dev->create_program_binary(
+      vertData, static_cast<std::ptrdiff_t>(vertSize), fragData,
+      static_cast<std::ptrdiff_t>(fragSize));
+  core::vfs_free(vertData);
+  core::vfs_free(fragData);
+  return program;
+}
+
 /// Logs one shader diagnostic in the `<path>: <reason>` shape the editor
 /// console parses for its Open/Select navigation actions (#217).
 void log_shader_path_error(const char *path, const char *reason) noexcept {
@@ -349,6 +446,23 @@ void log_shader_path_error(const char *path, const char *reason) noexcept {
 }
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
+  // Cooked binaries win when the backend consumes them; a missing or
+  // unreadable binary falls back to source compilation below.
+  const DeviceProgramHandle cooked = try_cooked_program(
+      entry.vertPath, entry.fragPath, entry.defines, entry.defineCount);
+  if (cooked != kInvalidDeviceProgram) {
+    const RenderDevice *dev = render_device();
+    if ((dev != nullptr) && (dev->destroy_program != nullptr) &&
+        (entry.deviceProgram != kInvalidDeviceProgram)) {
+      dev->destroy_program(entry.deviceProgram);
+    }
+    entry.deviceProgram = cooked;
+    entry.vertMtime = core::vfs_file_mtime(entry.vertPath);
+    entry.fragMtime = core::vfs_file_mtime(entry.fragPath);
+    ++g_reloadEpoch;
+    return true;
+  }
+
   char *vertSource = nullptr;
   std::size_t vertSize = 0U;
   if (!core::vfs_read_text(entry.vertPath, &vertSource, &vertSize)) {

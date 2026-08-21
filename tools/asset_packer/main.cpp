@@ -1,5 +1,7 @@
 // Implements main behavior for the Engine tooling.
 
+#include "shader_cook.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -61,7 +63,10 @@ void print_usage() {
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
                "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
                "[--force] [--verify] [--sweep-orphans] "
-               "[--platform <tag>]\n");
+               "[--platform <tag>]\n"
+               "   or: asset_packer --shader-manifest <shaders.json> "
+               "--shader-out <dir> --shaderc <path> "
+               "--shader-include <dir> [--profiles <csv>] [--force]\n");
 }
 
 /// Strips the mesh output's extension so cooked skeletal assets land
@@ -184,6 +189,13 @@ bool ensure_directory_exists(const char *dirPath) {
 
 /// Runs this executable or test program.
 int main(int argc, char **argv) {
+  // The bgfx shader cook mode (#138 Phase C) has its own argument shape;
+  // dispatch before the glTF flow's positional parsing.
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--shader-manifest") == 0) {
+      return run_shader_cook(argc, argv);
+    }
+  }
   if (argc < 3) {
     print_usage();
     return 1;

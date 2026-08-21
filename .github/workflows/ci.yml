@@ -446,10 +446,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
-      - name: Test (bgfx device suite)
+      - name: Test (bgfx device + shader cook suites)
         run: >-
           ctest --test-dir build --output-on-failure
-          -R engine_unit_render_device_bgfx
+          -R "engine_unit_render_device_bgfx|engine_unit_shader_cook"
 
   sanitizers:
     name: ASAN+UBSAN
