@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "engine/core/atomic_file.h"
@@ -197,6 +198,44 @@ bool read_manifest(const char *manifestPath,
   return true;
 }
 
+/// Shrinks a GL-flavor fragment binary's MRT output declaration
+/// (`out vec4 bgfx_FragData[N];`) to the highest index the shader
+/// actually writes plus one. shaderc hardcodes N=8, which WebGL rejects
+/// when it exceeds the context's MAX_DRAW_BUFFERS even though the
+/// shader never writes the upper slots. Both counts are single digits,
+/// so the rewrite is length-preserving and the container's code-length
+/// field stays valid.
+void shrink_frag_data_declaration(std::vector<char> &bytes) {
+  const std::string_view text(bytes.data(), bytes.size());
+  constexpr std::string_view kName = "bgfx_FragData[";
+  std::size_t declDigit = std::string::npos;
+  int declaredCount = -1;
+  int maxUsed = -1;
+  std::size_t pos = 0U;
+  while ((pos = text.find(kName, pos)) != std::string_view::npos) {
+    const std::size_t digitPos = pos + kName.size();
+    pos = digitPos;
+    if ((digitPos >= text.size()) || (text[digitPos] < '0') ||
+        (text[digitPos] > '9') ||
+        ((digitPos + 1U) >= text.size()) || (text[digitPos + 1U] != ']')) {
+      continue; // multi-digit or malformed: leave the binary untouched
+    }
+    const int index = text[digitPos] - '0';
+    // Declarations end the statement (`];`); everything else is a use.
+    if (((digitPos + 2U) < text.size()) && (text[digitPos + 2U] == ';')) {
+      declDigit = digitPos;
+      declaredCount = index;
+    } else if (index > maxUsed) {
+      maxUsed = index;
+    }
+  }
+  if ((declDigit == std::string::npos) || (maxUsed < 0) ||
+      ((maxUsed + 1) >= declaredCount)) {
+    return;
+  }
+  bytes[declDigit] = static_cast<char>('0' + (maxUsed + 1));
+}
+
 /// Invokes shaderc for one source/variant/profile into a staged sibling
 /// and atomically replaces the final output; false on any failure with
 /// the stage cleaned up.
@@ -245,6 +284,26 @@ bool cook_one(const std::string &shadercPath, const std::string &sourcePath,
     std::fprintf(stderr, "shader cook: shaderc failed for %s (%s)\n",
                  sourcePath.c_str(), profile.tag);
     return false;
+  }
+  // GL-flavor binaries embed source; spirv/metal are untouched bytecode.
+  const bool glFlavor = (std::strcmp(profile.tag, "glsl") == 0) ||
+                        (std::strcmp(profile.tag, "essl") == 0);
+  if (!isVertex && glFlavor) {
+    shrink_frag_data_declaration(bytes);
+  }
+  if (glFlavor) {
+    // glsl-optimizer reduces an empty main body (depth-only fragment
+    // stages) to a bodyless prototype, which GL rejects; restore the
+    // definition with a same-length rewrite so the container's
+    // code-length field stays valid.
+    constexpr std::string_view kPrototype = "void main ();";
+    constexpr std::string_view kDefinition = "void main(){}";
+    static_assert(kPrototype.size() == kDefinition.size());
+    const std::string_view text(bytes.data(), bytes.size());
+    const std::size_t at = text.find(kPrototype);
+    if (at != std::string_view::npos) {
+      std::memcpy(bytes.data() + at, kDefinition.data(), kDefinition.size());
+    }
   }
   if (!engine::core::atomic_write_file(finalPath.c_str(), bytes.data(),
                                        bytes.size())) {
