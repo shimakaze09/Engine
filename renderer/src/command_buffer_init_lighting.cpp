@@ -341,9 +341,8 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
       dev->shader_param(skinnedProg, "uUvTiling");
   backend.gbufSkinnedUvOffsetLoc =
       dev->shader_param(skinnedProg, "uUvOffset");
-  if ((dev->bind_program_uniform_block == nullptr) ||
-      !dev->bind_program_uniform_block(skinnedProg, "BonePalette",
-                                       kBonePaletteUboBinding)) {
+  backend.gbufSkinnedBonesParam = dev->shader_param(skinnedProg, "uBones");
+  if (!backend.gbufSkinnedBonesParam.valid()) {
     ok = false;
   }
   return ok;
@@ -364,9 +363,9 @@ bool resolve_shadow_depth_skinned_program_state(
   bool ok = true;
   backend.shadowSkinnedLightMvpLoc =
       required_param(&ok, dev, skinnedShadowProg, "u_lightMVP");
-  if ((dev->bind_program_uniform_block == nullptr) ||
-      !dev->bind_program_uniform_block(skinnedShadowProg, "BonePalette",
-                                       kBonePaletteUboBinding)) {
+  backend.shadowSkinnedBonesParam =
+      dev->shader_param(skinnedShadowProg, "uBones");
+  if (!backend.shadowSkinnedBonesParam.valid()) {
     ok = false;
   }
   if (!ok) {
@@ -542,36 +541,18 @@ void init_backend_lighting(BackendState &backend,
   }
 
   // GPU skinning (soft-fail: skinned meshes render in bind pose). The
-  // skinned G-buffer and shadow-depth variants share one bone-palette
-  // uniform buffer rebound per skinned draw.
+  // #138 shared vocabulary uploads palettes as plain mat4 arrays into
+  // each skinned program, so no uniform buffer (and no
+  // caps.uniformBlocks dependency) remains.
   {
-    const bool uboSupported = dev->caps.uniformBlocks &&
-                              (dev->create_buffer != nullptr) &&
-                              (dev->update_buffer_range != nullptr) &&
-                              (dev->bind_uniform_buffer_slot != nullptr) &&
-                              (dev->bind_program_uniform_block != nullptr);
-    if (backend.deferredAvailable && uboSupported) {
+    if (backend.deferredAvailable && (dev->set_param_mat4_array != nullptr)) {
       const ShaderDefine skinnedDefine{"SKINNED", "1"};
       const ShaderProgramHandle skinnedGbufferShader =
           load_configured_shader_variant("gbuffer.vert", "gbuffer.frag",
                                          &skinnedDefine, 1U);
       backend.gbufferSkinnedShaderHandle = skinnedGbufferShader;
       if (resolve_gbuffer_skinned_program_state(backend, dev)) {
-        BufferDesc paletteDesc{};
-        paletteDesc.usage = BufferUsage::Uniform;
-        paletteDesc.access = BufferAccess::Stream;
-        paletteDesc.sizeBytes = static_cast<std::ptrdiff_t>(
-            kMaxSkinPaletteJoints * sizeof(math::Mat4));
-        backend.bonePaletteUbo = dev->create_buffer(paletteDesc);
-        if (backend.bonePaletteUbo != kInvalidDeviceBuffer) {
-          dev->bind_uniform_buffer_slot(kBonePaletteUboBinding,
-                                        backend.bonePaletteUbo);
-          backend.skinningAvailable = true;
-        } else {
-          core::log_message(
-              core::LogLevel::Warning, "renderer",
-              "bone palette buffer creation failed — GPU skinning disabled");
-        }
+        backend.skinningAvailable = true;
 
         if (backend.skinningAvailable && backend.shadowAvailable) {
           const ShaderProgramHandle skinnedShadowShader =

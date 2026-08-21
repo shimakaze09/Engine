@@ -49,11 +49,12 @@ std::size_t skin_palette_count() noexcept {
 }
 
 bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
-                         std::uint32_t paletteIndex) noexcept {
+                         std::uint32_t paletteIndex, ShaderParam bonesParam,
+                         std::uint32_t *lastUploaded) noexcept {
   const RendererContext &context = renderer_context();
-  if (!backend.skinningAvailable ||
-      (backend.bonePaletteUbo == kInvalidDeviceBuffer) || (dev == nullptr) ||
-      (dev->update_buffer_range == nullptr) ||
+  if (!backend.skinningAvailable || !bonesParam.valid() ||
+      (dev == nullptr) || (dev->set_param_mat4_array == nullptr) ||
+      (lastUploaded == nullptr) ||
       (paletteIndex >= context.skinPaletteCount)) {
     return false;
   }
@@ -62,15 +63,17 @@ bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
   if (palette.jointCount == 0U) {
     return false;
   }
-  if (backend.lastUploadedBonePalette == paletteIndex) {
+  // Plain-array palettes are per-program uniform state, so the caller
+  // passes its program's cache slot; the set applies to the currently
+  // bound (skinned) program.
+  if (*lastUploaded == paletteIndex) {
     return true;
   }
-  backend.lastUploadedBonePalette = paletteIndex;
+  *lastUploaded = paletteIndex;
 
-  dev->update_buffer_range(
-      backend.bonePaletteUbo, palette.joints.data(),
-      static_cast<std::ptrdiff_t>(
-          static_cast<std::size_t>(palette.jointCount) * sizeof(math::Mat4)));
+  dev->set_param_mat4_array(
+      bonesParam, &palette.joints[0].columns[0].x,
+      static_cast<std::int32_t>(palette.jointCount));
   return true;
 }
 

@@ -227,7 +227,7 @@ void refresh_backend_program_state(BackendState &backend,
       &backend.skinningAvailable,
       (backend.gbufferSkinnedShaderHandle != kInvalidShaderProgram) &&
           resolve_gbuffer_skinned_program_state(backend, dev),
-      backend.bonePaletteUbo != kInvalidDeviceBuffer, "GPU skinning");
+      backend.gbufSkinnedBonesParam.valid(), "GPU skinning");
   if ((backend.shadowDepthSkinnedShaderHandle != kInvalidShaderProgram) &&
       !resolve_shadow_depth_skinned_program_state(backend, dev)) {
     core::log_message(core::LogLevel::Warning, "renderer",
@@ -397,11 +397,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   backend->instanceAttributes.clear();
   backend->staticMeshBatches.clear();
 
-  // Destroy GPU skinning state.
-  if ((backend->bonePaletteUbo != kInvalidDeviceBuffer) && (dev != nullptr)) {
-    dev->destroy_buffer(backend->bonePaletteUbo);
-    backend->bonePaletteUbo = kInvalidDeviceBuffer;
-  }
+  // GPU skinning state is per-program uniform data; nothing to destroy.
   if (backend->gbufferSkinnedShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->gbufferSkinnedShaderHandle);
     backend->gbufferSkinnedShaderHandle = ShaderProgramHandle{};

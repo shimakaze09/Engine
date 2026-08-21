@@ -137,7 +137,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           const bool skinnedDraw =
               mesh->hasSkin && (command.skinPalette != kInvalidSkinPalette) &&
               (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram) &&
-              upload_bone_palette(backend, dev, command.skinPalette);
+              upload_bone_palette(backend, dev, command.skinPalette,
+                                  backend.shadowSkinnedBonesParam,
+                                  &backend.lastShadowBonePalette);
           if (skinnedDraw) {
             dev->bind_program(backend.shadowDepthSkinnedProgram);
             if (backend.shadowSkinnedLightMvpLoc.valid()) {
@@ -248,7 +250,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
         const bool skinnedDraw =
             mesh->hasSkin && (cmd.skinPalette != kInvalidSkinPalette) &&
             (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram) &&
-            upload_bone_palette(backend, dev, cmd.skinPalette);
+            upload_bone_palette(backend, dev, cmd.skinPalette,
+                                backend.shadowSkinnedBonesParam,
+                                &backend.lastShadowBonePalette);
         if (skinnedDraw) {
           dev->bind_program(backend.shadowDepthSkinnedProgram);
           if (backend.shadowSkinnedLightMvpLoc.valid()) {

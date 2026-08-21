@@ -237,7 +237,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           const bool skinnedDraw =
               mesh->hasSkin &&
               (singleCommand.skinPalette != kInvalidSkinPalette) &&
-              upload_bone_palette(backend, dev, singleCommand.skinPalette);
+              upload_bone_palette(backend, dev, singleCommand.skinPalette,
+                                  backend.gbufSkinnedBonesParam,
+                                  &backend.lastGbufferBonePalette);
           if (skinnedDraw) {
             dev->bind_program(backend.gbufferSkinnedProgram);
             upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,

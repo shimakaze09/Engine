@@ -13,9 +13,7 @@ layout(location = 7) in vec4 aInstanceFoliage;
 layout(location = 8) in vec4 aJoints;
 layout(location = 9) in vec4 aWeights;
 
-layout(std140) uniform BonePalette {
-    mat4 uBones[128];
-};
+uniform mat4 uBones[128];
 #endif
 
 uniform mat4 uModel;

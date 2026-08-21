@@ -7,9 +7,7 @@ layout(location = 0) in vec3 aPosition;
 layout(location = 8) in vec4 aJoints;
 layout(location = 9) in vec4 aWeights;
 
-layout(std140) uniform BonePalette {
-  mat4 uBones[128];
-};
+uniform mat4 uBones[128];
 #endif
 
 // u_lightMVP already contains the model matrix (light VP x model on the CPU).

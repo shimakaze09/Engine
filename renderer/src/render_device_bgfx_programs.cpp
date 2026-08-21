@@ -329,12 +329,16 @@ void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
 void bgfx_set_param_mat4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
   BgfxParamRecord *record = resolve_param(param);
-  if ((record == nullptr) || (count <= 0) || (count > 4) ||
-      (record->type != bgfx::UniformType::Mat4)) {
+  if ((record == nullptr) || (values == nullptr) || (count <= 0) ||
+      (count > 128) || (record->type != bgfx::UniformType::Mat4)) {
     return;
   }
-  stage_param(record, values, static_cast<std::size_t>(count) * 16U,
-              static_cast<std::uint16_t>(count));
+  // Applied immediately: bone palettes (mat4[128]) exceed the staging
+  // cap, and array uploads happen once per pass/draw by design (the
+  // once-per-draw bgfx rule holds without staging).
+  bgfx::setUniform(record->handle, values,
+                   static_cast<std::uint16_t>(count));
+  record->dirty = false;
 }
 
 bool bgfx_bind_program_uniform_block(DeviceProgramHandle, const char *,

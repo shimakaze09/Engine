@@ -205,7 +205,8 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
 /// an earlier pass this flush; false when skinning is unavailable or the
 /// index is out of range (the caller then draws the mesh in bind pose).
 bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
-                         std::uint32_t paletteIndex) noexcept;
+                         std::uint32_t paletteIndex, ShaderParam bonesParam,
+                         std::uint32_t *lastUploaded) noexcept;
 
 /// Uploads every uniform the bound skinned G-buffer program needs for one
 /// draw (camera, material, model) and rebinds unit 0 plus units 1-4 (issue
