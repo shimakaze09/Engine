@@ -12,6 +12,13 @@
     { "source": "debug_line.vs.sc", "type": "vertex", "output": "debug_line.vert", "variants": [[]] },
     { "source": "debug_line.fs.sc", "type": "fragment", "output": "debug_line.frag", "variants": [[]] },
     { "source": "fullscreen.vs.sc", "type": "vertex", "output": "fullscreen.vert", "variants": [[]] },
-    { "source": "tonemap.fs.sc", "type": "fragment", "output": "tonemap.frag", "variants": [[]] }
+    { "source": "tonemap.fs.sc", "type": "fragment", "output": "tonemap.frag", "variants": [[]] },
+    { "source": "bloom_threshold.fs.sc", "type": "fragment", "output": "bloom_threshold.frag", "variants": [[]] },
+    { "source": "bloom_downsample.fs.sc", "type": "fragment", "output": "bloom_downsample.frag", "variants": [[]] },
+    { "source": "bloom_upsample.fs.sc", "type": "fragment", "output": "bloom_upsample.frag", "variants": [[]] },
+    { "source": "luminance.fs.sc", "type": "fragment", "output": "luminance.frag", "variants": [[]] },
+    { "source": "ssao.fs.sc", "type": "fragment", "output": "ssao.frag", "variants": [[]] },
+    { "source": "ssao_blur.fs.sc", "type": "fragment", "output": "ssao_blur.frag", "variants": [[]] },
+    { "source": "fxaa.fs.sc", "type": "fragment", "output": "fxaa.frag", "variants": [[]] }
   ]
 }

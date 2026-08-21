@@ -79,7 +79,7 @@ struct BgfxTargetRecord final {
 /// through set_param_i32 (the GL texture-unit convention). Value sets
 /// stage into `pending` and apply once per submit (bgfx allows one
 /// setUniform per uniform per draw; GL semantics are last-write-wins),
-/// sized for the largest engine payload (mat4[4] = 64 floats).
+/// sized for the largest engine payload (vec4[32] = 128 floats).
 struct BgfxParamRecord final {
   char name[kMaxParamNameLength] = {};
   bgfx::UniformHandle handle = BGFX_INVALID_HANDLE;
@@ -87,7 +87,7 @@ struct BgfxParamRecord final {
   std::int8_t samplerStage = -1;
   bool dirty = false;
   std::uint16_t pendingNum = 0U;
-  float pending[64] = {};
+  float pending[128] = {};
 };
 
 /// Linked program from cooked shader binaries with its introspected,

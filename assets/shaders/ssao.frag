@@ -7,9 +7,12 @@ in vec2 vTexCoord;
 uniform sampler2D u_gBufferDepth;
 uniform sampler2D u_gBufferNormal;
 uniform sampler2D u_noiseTexture;
-uniform vec3 u_samples[32];
+// #138 flat vocabulary: vec4 elements (xyz used) uploaded in
+// one set_param_vec4_array call.
+uniform vec4 u_samples[32];
 uniform mat4 u_projection;
-uniform mat4 u_view;
+uniform mat4 u_invProjection;
+uniform mat4 u_viewMat;
 uniform vec2 u_noiseScale;
 uniform float u_radius;
 uniform float u_bias;
@@ -20,7 +23,7 @@ out float outAO;
 vec3 reconstructViewPos(vec2 uv, float depth) {
     float z = depth * 2.0 - 1.0;
     vec4 clip = vec4(uv * 2.0 - 1.0, z, 1.0);
-    vec4 view = inverse(u_projection) * clip;
+    vec4 view = u_invProjection * clip;
     return view.xyz / view.w;
 }
 
@@ -31,7 +34,7 @@ void main() {
 
     vec3 fragPos = reconstructViewPos(vTexCoord, depth);
     vec3 worldNormal = texture(u_gBufferNormal, vTexCoord).rgb * 2.0 - 1.0;
-    vec3 normal = normalize(mat3(u_view) * worldNormal);
+    vec3 normal = normalize(mat3(u_viewMat) * worldNormal);
 
     vec3 randomVec = texture(u_noiseTexture, vTexCoord * u_noiseScale).rgb;
     vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
@@ -40,7 +43,7 @@ void main() {
 
     float occlusion = 0.0;
     for (int i = 0; i < 32; ++i) {
-        vec3 samplePos = fragPos + TBN * u_samples[i] * u_radius;
+        vec3 samplePos = fragPos + TBN * u_samples[i].xyz * u_radius;
 
         vec4 offset = u_projection * vec4(samplePos, 1.0);
         offset.xyz /= offset.w;

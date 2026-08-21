@@ -132,18 +132,18 @@ bool resolve_ssao_program_state(BackendState &backend,
       backend.ssaoNoiseLoc = required_param(&ok, dev, prog, "u_noiseTexture");
       backend.ssaoProjectionLoc =
           required_param(&ok, dev, prog, "u_projection");
-      backend.ssaoViewLoc = required_param(&ok, dev, prog, "u_view");
+      // CPU-supplied inverse: shaderc's spirv path (HLSL) has no
+      // inverse() intrinsic, so both shader dialects take it as input.
+      backend.ssaoInvProjectionLoc =
+          required_param(&ok, dev, prog, "u_invProjection");
+      backend.ssaoViewLoc = // u_viewMat, not u_view: bgfx reserves u_view as predefined.
+      required_param(&ok, dev, prog, "u_viewMat");
       backend.ssaoNoiseScaleLoc =
           required_param(&ok, dev, prog, "u_noiseScale");
       backend.ssaoRadiusLoc = required_param(&ok, dev, prog, "u_radius");
       backend.ssaoBiasLoc = required_param(&ok, dev, prog, "u_bias");
-      for (int i = 0; i < 32; ++i) {
-        char nm[64] = {};
-        std::snprintf(nm, sizeof(nm), "u_samples[%d]", i);
-        backend.ssaoSampleLocs[static_cast<std::size_t>(i)] =
-            dev->shader_param(prog, nm);
-      }
-      if (!backend.ssaoSampleLocs[0].valid()) {
+      backend.ssaoSamplesParam = dev->shader_param(prog, "u_samples");
+      if (!backend.ssaoSamplesParam.valid()) {
         ok = false;
       }
     } else {

@@ -82,7 +82,7 @@ BgfxParamRecord *resolve_param(ShaderParam param) noexcept {
 void stage_param(BgfxParamRecord *param, const float *value,
                  std::size_t floatCount, std::uint16_t num) noexcept {
   if ((param == nullptr) || (value == nullptr) || (floatCount == 0U) ||
-      (floatCount > 64U)) {
+      (floatCount > 128U)) {
     return;
   }
   std::memcpy(param->pending, value, floatCount * sizeof(float));
@@ -318,7 +318,7 @@ void bgfx_set_param_vec4(ShaderParam param, const float *value) noexcept {
 void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
   BgfxParamRecord *record = resolve_param(param);
-  if ((record == nullptr) || (count <= 0) || (count > 16) ||
+  if ((record == nullptr) || (count <= 0) || (count > 32) ||
       (record->type != bgfx::UniformType::Vec4)) {
     return;
   }
