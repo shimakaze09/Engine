@@ -2,8 +2,10 @@
 # (audit #178): each test re-invokes CMake configure as a fresh subprocess
 # with a specific platform override and asserts it is rejected. No compiler
 # ever runs and no FetchContent network cost is paid — the root
-# CMakeLists.txt rejects every case here before it reaches the SDL3
-# FetchContent block, so these fail (correctly) in well under a second.
+# CMakeLists.txt rejects every case here BEFORE project(), so the probes
+# skip compiler detection entirely and fail (correctly) in well under a
+# second even on loaded Windows CI runners (whose per-probe compiler
+# detection previously pushed these past their timeout).
 # The positive case (the host's own native platform configures cleanly) is
 # already proven by every other test in this suite, which all depend on
 # this same top-level configure having succeeded — a redundant full

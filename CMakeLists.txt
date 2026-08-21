@@ -6,6 +6,69 @@ if(POLICY CMP0174)
     cmake_policy(SET CMP0174 NEW)
 endif()
 
+# ---- Support-matrix rejection (pre-project) ----
+# The cmake_configure_rejects_* probes each spawn a fresh configure and
+# assert fast failure. Rejecting BEFORE project() keeps every rejection
+# free of compiler detection — which dominates a fresh configure on
+# Windows and pushed the probes past their timeout on loaded CI runners.
+# Host identity uses CMAKE_HOST_* because WIN32/APPLE only exist after
+# project().
+if(CMAKE_HOST_WIN32)
+    set(_ENGINE_HOST_PLATFORM "Win64")
+elseif(CMAKE_HOST_APPLE)
+    set(_ENGINE_HOST_PLATFORM "macOS")
+else()
+    set(_ENGINE_HOST_PLATFORM "Linux")
+endif()
+
+if(DEFINED ENGINE_TARGET_PLATFORM)
+    set(_ENGINE_EARLY_TARGET "${ENGINE_TARGET_PLATFORM}")
+else()
+    set(_ENGINE_EARLY_TARGET "${_ENGINE_HOST_PLATFORM}")
+endif()
+
+set(_ENGINE_VALID_PLATFORMS Win64 Linux macOS Android iOS Web)
+if(NOT _ENGINE_EARLY_TARGET IN_LIST _ENGINE_VALID_PLATFORMS)
+    message(FATAL_ERROR "ENGINE_TARGET_PLATFORM='${_ENGINE_EARLY_TARGET}' is not valid. "
+        "Choose one of: Win64 Linux macOS Android iOS Web")
+endif()
+
+set(_ENGINE_UNIMPLEMENTED_PLATFORMS Android iOS)
+if(_ENGINE_EARLY_TARGET IN_LIST _ENGINE_UNIMPLEMENTED_PLATFORMS)
+    message(FATAL_ERROR
+        "ENGINE_TARGET_PLATFORM='${_ENGINE_EARLY_TARGET}' has no toolchain, "
+        "renderer backend, or dependency graph in this repo yet — it is "
+        "gated on the v0.5 bgfx replatform (RHI migration) per CLAUDE.md's "
+        "roadmap. Configuring for it would pass this check and then fail "
+        "later during dependency discovery, compilation, or linking instead "
+        "of here with a clear reason. Supported targets today: Win64, "
+        "Linux, macOS (build + headless-test lane), Web (Emscripten).")
+endif()
+
+# Web without any toolchain file cannot be an emcmake configure; reject
+# before compiler detection. The authoritative EMSCRIPTEN check still
+# runs post-project once the supplied toolchain has been processed.
+if(_ENGINE_EARLY_TARGET STREQUAL "Web" AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    message(FATAL_ERROR
+        "ENGINE_TARGET_PLATFORM=Web requires the Emscripten toolchain: "
+        "configure through 'emcmake cmake ...' (emsdk).")
+endif()
+
+# A desktop target that does not match the host, with no toolchain file
+# supplied, is always a host/target mistake in this natively-built-only
+# repo. Web is exempt here — its gates are above and post-project.
+if(NOT _ENGINE_EARLY_TARGET STREQUAL "Web"
+   AND NOT DEFINED CMAKE_TOOLCHAIN_FILE
+   AND NOT _ENGINE_EARLY_TARGET STREQUAL _ENGINE_HOST_PLATFORM)
+    message(FATAL_ERROR
+        "ENGINE_TARGET_PLATFORM='${_ENGINE_EARLY_TARGET}' does not match "
+        "the host platform ('${_ENGINE_HOST_PLATFORM}'), and no "
+        "cross-compilation toolchain (CMAKE_TOOLCHAIN_FILE) was supplied. "
+        "This repo builds natively only today, so an unmatched target "
+        "platform is always a host/target mistake, not a supported "
+        "cross-compile.")
+endif()
+
 project(Engine VERSION 0.1.0 LANGUAGES C CXX)
 
 include(${CMAKE_SOURCE_DIR}/cmake/EngineHelpers.cmake)
@@ -36,21 +99,10 @@ find_package(Threads REQUIRED)
 #            exists for these yet; gated on the v0.5 bgfx replatform (RHI
 #            migration) per the roadmap. Configure fails fast below.
 #
-# This repo has no cross-compilation toolchain files (no Android NDK, iOS,
-# or Emscripten toolchain wiring): nothing past this point derives
-# platform-specific settings from CMAKE_TOOLCHAIN_FILE/CMAKE_SYSTEM_NAME, so
-# a target that does not match the host CMake is actually running on is
-# rejected rather than silently applying the wrong platform compile
-# definitions (this also covers CI/host-vs-target mistakes, not just a
-# typo'd cache value).
-if(WIN32)
-    set(_ENGINE_HOST_PLATFORM "Win64")
-elseif(APPLE)
-    set(_ENGINE_HOST_PLATFORM "macOS")
-else()
-    set(_ENGINE_HOST_PLATFORM "Linux")
-endif()
-
+# Validation, unimplemented-platform, no-toolchain-Web, and host-mismatch
+# rejection all run in the pre-project block above so a rejected
+# configure never pays compiler detection; this section only publishes
+# the cache variable for accepted targets.
 if(NOT DEFINED ENGINE_TARGET_PLATFORM)
     set(ENGINE_TARGET_PLATFORM "${_ENGINE_HOST_PLATFORM}" CACHE STRING "Target platform for the engine build")
 else()
@@ -58,24 +110,6 @@ else()
 endif()
 
 set_property(CACHE ENGINE_TARGET_PLATFORM PROPERTY STRINGS Win64 Linux macOS Android iOS Web)
-
-set(_ENGINE_VALID_PLATFORMS Win64 Linux macOS Android iOS Web)
-if(NOT ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_VALID_PLATFORMS)
-    message(FATAL_ERROR "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' is not valid. "
-        "Choose one of: Win64 Linux macOS Android iOS Web")
-endif()
-
-set(_ENGINE_UNIMPLEMENTED_PLATFORMS Android iOS)
-if(ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_UNIMPLEMENTED_PLATFORMS)
-    message(FATAL_ERROR
-        "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' has no toolchain, "
-        "renderer backend, or dependency graph in this repo yet — it is "
-        "gated on the v0.5 bgfx replatform (RHI migration) per CLAUDE.md's "
-        "roadmap. Configuring for it would pass this check and then fail "
-        "later during dependency discovery, compilation, or linking instead "
-        "of here with a clear reason. Supported targets today: Win64, "
-        "Linux, macOS (build + headless-test lane), Web (Emscripten).")
-endif()
 
 # Web (#138): requires the Emscripten toolchain (emcmake) and the bgfx
 # backend — the runtime ships as wasm with the share-ready HTML shell;
