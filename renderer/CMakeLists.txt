@@ -1,7 +1,20 @@
 # Configures renderer build settings for the Engine repository.
 
+# One backend TU per build (#138 Phase B): the gl default compiles
+# render_device_gl.cpp; the bgfx backend compiles the bgfx device and its
+# pure translation TU instead. Both provide the same render_device.h
+# entry points; the null backend stays available in either build.
+if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
+    set(ENGINE_RENDERER_BACKEND_SOURCES
+        src/render_device_bgfx.cpp
+        src/render_device_bgfx_translate.cpp)
+else()
+    set(ENGINE_RENDERER_BACKEND_SOURCES src/render_device_gl.cpp)
+endif()
+
 engine_add_module_library(engine_renderer
     SOURCES
+    ${ENGINE_RENDERER_BACKEND_SOURCES}
     src/asset_database.cpp
     src/asset_manager.cpp
     src/command_buffer_builder.cpp
@@ -33,7 +46,6 @@ engine_add_module_library(engine_renderer
     src/pass_resources.cpp
     src/post_process_stack.cpp
     src/render_settings.cpp
-    src/render_device_gl.cpp
     src/render_device_null.cpp
     src/shader_system.cpp
     src/shadow_map.cpp
@@ -61,9 +73,10 @@ engine_add_module_library(engine_renderer
 
 # Precompiled header remains PRIVATE via engine_add_module_library(... PCH ...).
 
-# v0.5 replatform (#138) Phase A: when the bgfx backend is selected the
-# renderer links it (and gains the backend define) so the port's backend
-# TU can land incrementally; the gl default neither fetches nor links it.
+# v0.5 replatform (#138): when the bgfx backend is selected the renderer
+# links it and gains the backend define; the gl default neither fetches
+# nor links it. Phase B compiles the backend skeleton TUs above in place
+# of the GL device.
 if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     target_link_libraries(engine_renderer PRIVATE bgfx bx bimg)
     target_compile_definitions(engine_renderer PRIVATE

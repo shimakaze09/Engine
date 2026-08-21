@@ -431,12 +431,13 @@ jobs:
           key: deps-bgfx-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: deps-bgfx-ubuntu-24.04-
 
-      # v0.5 replatform (#138) Phase A: prove the pinned bgfx dependency
-      # configures and compiles alongside the engine before any backend
-      # code consumes it. Build-only; the gl lanes stay authoritative for
-      # tests until the port reaches parity. Parallelism is bounded: bare
-      # --parallel maps to unbounded `make -j`, and shaderc's glslang/
-      # tint/spirv-tools TUs OOM-kill the 16GB runner under it.
+      # v0.5 replatform (#138): the bgfx backend lane builds the pinned
+      # dependency plus the Phase B backend skeleton and runs its device
+      # suite headlessly on the Noop renderer. The gl lanes stay
+      # authoritative for the full test matrix until the port reaches
+      # parity. Parallelism is bounded: bare --parallel maps to unbounded
+      # `make -j`, and shaderc's glslang/tint/spirv-tools TUs OOM-kill
+      # the 16GB runner under it.
       - name: Configure (bgfx backend)
         run: >-
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -444,6 +445,11 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel 4
+
+      - name: Test (bgfx device suite)
+        run: >-
+          ctest --test-dir build --output-on-failure
+          -R engine_unit_render_device_bgfx
 
   sanitizers:
     name: ASAN+UBSAN
