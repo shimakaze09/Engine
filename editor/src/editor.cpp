@@ -15,7 +15,13 @@
 // RenderDrawData) never exposes a raw GL type, and it links its own GL
 // symbols through engine_imgui rather than through engine_editor. No other
 // GL header or symbol is used in this module.
+// #138: the bgfx builds swap the stock GL renderer backend for the
+// editor's bgfx one; the SDL3 platform backend is shared.
+#if defined(ENGINE_EDITOR_IMGUI_BGFX)
+#include "imgui_impl_bgfx.h"
+#else
 #include "backends/imgui_impl_opengl3.h"
+#endif
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -231,9 +237,16 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
     return true;
   }
 
-  if ((sdlWindow == nullptr) || (glContext == nullptr)) {
+  if (sdlWindow == nullptr) {
     return false;
   }
+#if !defined(ENGINE_EDITOR_IMGUI_BGFX)
+  // The GL ImGui backend needs the live context; the bgfx one owns its
+  // device objects and takes no context (#138).
+  if (glContext == nullptr) {
+    return false;
+  }
+#endif
 
   editor_session().sdlWindow = static_cast<SDL_Window *>(sdlWindow);
 
@@ -275,6 +288,18 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
       "debug.camera_detach", false,
       "Detach debug free-fly camera from game camera"));
 
+#if defined(ENGINE_EDITOR_IMGUI_BGFX)
+  static_cast<void>(glContext);
+  if (!ImGui_ImplSDL3_InitForOther(static_cast<SDL_Window *>(sdlWindow))) {
+    ImGui::DestroyContext();
+    return false;
+  }
+  if (!ImGui_ImplBgfx_Init()) {
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+    return false;
+  }
+#else
   if (!ImGui_ImplSDL3_InitForOpenGL(static_cast<SDL_Window *>(sdlWindow),
                                     static_cast<SDL_GLContext>(glContext))) {
     ImGui::DestroyContext();
@@ -286,6 +311,7 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
     ImGui::DestroyContext();
     return false;
   }
+#endif
 
   // Meaningful editor testing requires a live OpenGL context.
   editor_session().initialized = true;
@@ -298,7 +324,11 @@ void shutdown_editor() noexcept {
     return;
   }
 
+#if defined(ENGINE_EDITOR_IMGUI_BGFX)
+  ImGui_ImplBgfx_Shutdown();
+#else
   ImGui_ImplOpenGL3_Shutdown();
+#endif
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
 
@@ -330,7 +360,11 @@ void editor_new_frame() noexcept {
   scene_document_poll_dialog_result();
   scene_document_update_window_title();
 
+#if defined(ENGINE_EDITOR_IMGUI_BGFX)
+  ImGui_ImplBgfx_NewFrame();
+#else
   ImGui_ImplOpenGL3_NewFrame();
+#endif
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
   ImGuizmo::BeginFrame();
@@ -365,7 +399,11 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
 
   draw_editor_panels(frameMs, utilizationPct);
   ImGui::Render();
+#if defined(ENGINE_EDITOR_IMGUI_BGFX)
+  ImGui_ImplBgfx_RenderDrawData(ImGui::GetDrawData());
+#else
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+#endif
 }
 
 void editor_process_event(void *sdlEvent) noexcept {
