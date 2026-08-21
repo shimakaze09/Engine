@@ -22,7 +22,9 @@ inline constexpr std::size_t kMaxDeviceTextures = 1024U;
 inline constexpr std::size_t kMaxDevicePrograms = 128U;
 inline constexpr std::size_t kMaxDeviceGeometries = 4352U;
 inline constexpr std::size_t kMaxDeviceTargets = 256U;
-inline constexpr std::size_t kMaxTextureSlots = 16U;
+// Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 set by the build (#138):
+// the deferred pass binds engine texture units up to 21.
+inline constexpr std::size_t kMaxTextureSlots = 32U;
 inline constexpr std::size_t kMaxProgramParams = 64U;
 inline constexpr std::size_t kMaxParamNameLength = 44U;
 

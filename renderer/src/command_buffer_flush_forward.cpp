@@ -228,8 +228,12 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
                                 boundMaterialTex);
           upload_pbr_foliage_uniforms(backend, dev, command);
 
+          // Instanced batching requires the shader's instancing toggle
+          // (#138: the bgfx ports have none until the instancing unit
+          // lands its variant selection).
           if ((batch.count > 1U) && !mesh->hasSkin &&
               (mesh->indexCount > 0U) &&
+              backend.pbrUseInstancingLocation.valid() &&
               upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                        batch)) {
             if (backend.pbrUseInstancingLocation.valid()) {

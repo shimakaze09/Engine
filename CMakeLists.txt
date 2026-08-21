@@ -121,6 +121,14 @@ endif()
 
 if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     include(FetchContent)
+    # 32 sampler stages (PUBLIC define, forwarded by the superproject):
+    # the engine's deferred pass binds G-buffer + SSAO + light-data +
+    # tile + IBL + shadow units up to 21, past bgfx's default 16.
+    # Vulkan/Metal/desktop GL honor 32; WebGL2's 16-unit floor is the
+    # web-export unit's recorded concern (#138).
+    set(BGFX_CONFIG_MAX_TEXTURE_SAMPLERS 32 CACHE STRING
+        "bgfx sampler stages (engine deferred pass needs units up to 21)"
+        FORCE)
     set(BGFX_BUILD_TOOLS ON CACHE BOOL "bgfx shaderc/tools" FORCE)
     set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "bgfx examples" FORCE)
     set(BGFX_INSTALL OFF CACHE BOOL "bgfx install rules" FORCE)
