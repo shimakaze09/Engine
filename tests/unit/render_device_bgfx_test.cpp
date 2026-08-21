@@ -406,6 +406,57 @@ void test_cooked_variant_stage_fallback(TestContext &t) {
   static_cast<void>(engine::core::unmount("assets"));
   fs::remove_all(tree, ec);
 }
+
+/// PBR_FULL variant: the forward shadow/IBL sampling program must cook,
+/// load through the production variant loader, and expose its shadow
+/// and IBL uniforms — on a cook without the variant, the stage fallback
+/// silently loads the reduced fragment and these names do not resolve.
+void test_cooked_pbr_full_variant(TestContext &t) {
+  namespace fs = std::filesystem;
+  const fs::path tree =
+      fs::temp_directory_path() / "engine_bgfx_pbr_full_vfs";
+  std::error_code ec;
+  fs::remove_all(tree, ec);
+  fs::create_directories(tree / "shaders" / "bgfx" / "cooked", ec);
+  const fs::path src{ENGINE_TEST_COOKED_SHADER_DIR};
+  bool copied = true;
+  for (const char *name :
+       {"pbr.vert.default.spirv.bin", "pbr.frag.PBR_FULL.spirv.bin"}) {
+    fs::copy_file(src / name, tree / "shaders" / "bgfx" / "cooked" / name,
+                  fs::copy_options::overwrite_existing, ec);
+    copied = copied && !ec;
+  }
+  t.check(copied, "PBR_FULL cooked binaries staged");
+
+  t.check(engine::core::mount("assets", tree.string().c_str()),
+          "PBR_FULL cooked tree mounted");
+  t.check(initialize_shader_system(), "shader system initialized (PBR_FULL)");
+
+  const ShaderDefine fullDefine{"PBR_FULL", "1"};
+  ShaderVariantDesc desc{};
+  desc.vertPath = "assets/shaders/pbr.vert";
+  desc.fragPath = "assets/shaders/pbr.frag";
+  desc.defines = &fullDefine;
+  desc.defineCount = 1U;
+  const ShaderProgramHandle full = load_shader_variant(desc);
+  t.check(full.id != 0U, "PBR_FULL variant links (default vertex cook)");
+
+  const RenderDevice *dev = render_device();
+  const DeviceProgramHandle prog = shader_device_program(full);
+  t.check(prog != kInvalidDeviceProgram, "PBR_FULL device program published");
+  t.check(dev->shader_param(prog, "uShadowMap0").valid(),
+          "cascade shadow sampler resolves on the full variant");
+  t.check(dev->shader_param(prog, "uIrradianceMap").valid(),
+          "IBL irradiance sampler resolves on the full variant");
+  t.check(dev->shader_param(prog, "uShadowMatrix").valid(),
+          "cascade matrix array resolves on the full variant");
+  t.check(dev->shader_param(prog, "u_viewMatrix").valid(),
+          "view matrix resolves on the full variant");
+
+  shutdown_shader_system();
+  static_cast<void>(engine::core::unmount("assets"));
+  fs::remove_all(tree, ec);
+}
 #endif // ENGINE_TEST_COOKED_SHADER_DIR
 
 /// Pure translation: exact state bits, format table, sampler flags,
@@ -494,6 +545,7 @@ int main() {
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
   test_cooked_programs(t);
   test_cooked_variant_stage_fallback(t);
+  test_cooked_pbr_full_variant(t);
 #endif
   test_translation(t);
   shutdown_render_device();
