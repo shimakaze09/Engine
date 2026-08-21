@@ -234,14 +234,25 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           float normalMatrix[9] = {};
           extract_normal_matrix(model, normalMatrix);
 
-          const bool skinnedDraw =
+          // Param tokens resolve against the bound program on both
+          // backends, so the skinned program must be bound before its
+          // palette uploads (a stale bind sent the palette into the
+          // static program's uniforms).
+          bool skinnedDraw =
               mesh->hasSkin &&
               (singleCommand.skinPalette != kInvalidSkinPalette) &&
-              upload_bone_palette(backend, dev, singleCommand.skinPalette,
-                                  backend.gbufSkinnedBonesParam,
-                                  &backend.lastGbufferBonePalette);
+              (backend.gbufferSkinnedProgram != kInvalidDeviceProgram);
           if (skinnedDraw) {
             dev->bind_program(backend.gbufferSkinnedProgram);
+            skinnedDraw =
+                upload_bone_palette(backend, dev, singleCommand.skinPalette,
+                                    backend.gbufSkinnedBonesParam,
+                                    &backend.lastGbufferBonePalette);
+            if (!skinnedDraw) {
+              dev->bind_program(backend.gbufferProgram);
+            }
+          }
+          if (skinnedDraw) {
             upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,
                                             timeSeconds, singleCommand, model,
                                             normalMatrix, &boundAlbedoTex,

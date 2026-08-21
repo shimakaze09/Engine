@@ -15,8 +15,12 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
+
+#include "engine/core/vfs.h"
+#include "engine/renderer/shader_system.h"
 
 namespace {
 
@@ -360,6 +364,48 @@ void test_cooked_programs(TestContext &t) {
   dev->destroy_geometry(geometry);
   render_device_bgfx_frame();
 }
+
+/// Variant stage fallback: SKINNED only recooks the vertex stage, so the
+/// production loader must pair the flagged vertex binary with the
+/// default fragment cook instead of failing the program (a fresh cook
+/// exposed this: stale dev-era fragment-variant files had been masking
+/// the miss).
+void test_cooked_variant_stage_fallback(TestContext &t) {
+  namespace fs = std::filesystem;
+  const fs::path tree =
+      fs::temp_directory_path() / "engine_bgfx_cooked_vfs";
+  std::error_code ec;
+  fs::remove_all(tree, ec);
+  fs::create_directories(tree / "shaders" / "bgfx" / "cooked", ec);
+  t.check(!ec, "cooked VFS tree created");
+  const fs::path src{ENGINE_TEST_COOKED_SHADER_DIR};
+  bool copied = true;
+  for (const char *name :
+       {"gbuffer.vert.SKINNED.spirv.bin", "gbuffer.frag.default.spirv.bin"}) {
+    fs::copy_file(src / name, tree / "shaders" / "bgfx" / "cooked" / name,
+                  fs::copy_options::overwrite_existing, ec);
+    copied = copied && !ec;
+  }
+  t.check(copied, "variant vertex and default fragment binaries staged");
+
+  t.check(engine::core::mount("assets", tree.string().c_str()),
+          "cooked tree mounted");
+  t.check(initialize_shader_system(), "shader system initialized");
+
+  const ShaderDefine skinned{"SKINNED", "1"};
+  ShaderVariantDesc desc{};
+  desc.vertPath = "assets/shaders/gbuffer.vert";
+  desc.fragPath = "assets/shaders/gbuffer.frag";
+  desc.defines = &skinned;
+  desc.defineCount = 1U;
+  const ShaderProgramHandle variant = load_shader_variant(desc);
+  t.check(variant.id != 0U,
+          "vertex-only variant links against the default fragment cook");
+
+  shutdown_shader_system();
+  static_cast<void>(engine::core::unmount("assets"));
+  fs::remove_all(tree, ec);
+}
 #endif // ENGINE_TEST_COOKED_SHADER_DIR
 
 /// Pure translation: exact state bits, format table, sampler flags,
@@ -447,6 +493,7 @@ int main() {
   test_programs_and_draws(t);
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
   test_cooked_programs(t);
+  test_cooked_variant_stage_fallback(t);
 #endif
   test_translation(t);
   shutdown_render_device();

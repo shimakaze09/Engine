@@ -134,14 +134,24 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           }
 
           const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
-          const bool skinnedDraw =
+          // Param tokens resolve against the bound program on both
+          // backends, so the skinned program must be bound before its
+          // palette uploads (a stale bind sent the palette into the
+          // static program's uniforms).
+          bool skinnedDraw =
               mesh->hasSkin && (command.skinPalette != kInvalidSkinPalette) &&
-              (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram) &&
-              upload_bone_palette(backend, dev, command.skinPalette,
-                                  backend.shadowSkinnedBonesParam,
-                                  &backend.lastShadowBonePalette);
+              (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram);
           if (skinnedDraw) {
             dev->bind_program(backend.shadowDepthSkinnedProgram);
+            skinnedDraw =
+                upload_bone_palette(backend, dev, command.skinPalette,
+                                    backend.shadowSkinnedBonesParam,
+                                    &backend.lastShadowBonePalette);
+            if (!skinnedDraw) {
+              dev->bind_program(backend.shadowDepthProgram);
+            }
+          }
+          if (skinnedDraw) {
             if (backend.shadowSkinnedLightMvpLoc.valid()) {
               dev->set_param_mat4(backend.shadowSkinnedLightMvpLoc,
                                     &lightMvp.columns[0].x);
@@ -247,14 +257,21 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
         const math::Mat4 mvp =
             math::mul(slot.lightViewProjection, cmd.modelMatrix);
-        const bool skinnedDraw =
+        // Same bind-before-upload ordering as the cascade loop above.
+        bool skinnedDraw =
             mesh->hasSkin && (cmd.skinPalette != kInvalidSkinPalette) &&
-            (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram) &&
-            upload_bone_palette(backend, dev, cmd.skinPalette,
-                                backend.shadowSkinnedBonesParam,
-                                &backend.lastShadowBonePalette);
+            (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram);
         if (skinnedDraw) {
           dev->bind_program(backend.shadowDepthSkinnedProgram);
+          skinnedDraw =
+              upload_bone_palette(backend, dev, cmd.skinPalette,
+                                  backend.shadowSkinnedBonesParam,
+                                  &backend.lastShadowBonePalette);
+          if (!skinnedDraw) {
+            dev->bind_program(backend.shadowDepthProgram);
+          }
+        }
+        if (skinnedDraw) {
           if (backend.shadowSkinnedLightMvpLoc.valid()) {
             dev->set_param_mat4(backend.shadowSkinnedLightMvpLoc,
                                   &mvp.columns[0].x);
