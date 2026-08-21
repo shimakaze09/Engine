@@ -262,6 +262,16 @@ directory-global by design.
   (which also applies live `r_vsync` and drawable resizes via
   bgfx::reset), while headless runs stay on Noop; the editor bridge is
   disabled under this backend until the ImGui integration unit lands;
+  the forward path renders under bgfx: pbr/default cooked over the #138
+  flat uniform vocabulary shared with GLSL — packed vec4/mat4 element
+  arrays via the contract's set_param_vec4_array/set_param_mat4_array,
+  per-slot shadow samplers (`uShadowMap0..3` etc.), `u_modelMatrix`
+  (bgfx reserves `u_model`) — with uniform sets staged and applied once
+  per submit (GL last-write-wins semantics), vertex buffers realized at
+  their attachment's stride (bgfx rejects stride overrides), and a
+  backend-owned 3-vertex stream standing in for gl_VertexID fullscreen
+  draws; forward shadows/IBL sampling and instanced foliage defer to
+  their units (GL texture units 6-21 exceed bgfx's 16-sampler budget);
   programs link only from the Phase C shaderc cook's binaries via
   `create_program_binary` + `caps.cookedPrograms` — spirv is the
   canonical profile because GLSL-flavor binaries embed no uniform

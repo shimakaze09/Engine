@@ -109,43 +109,35 @@ struct BackendState final {
   ShaderParam pbrHeightFogDensityLocation{};
   ShaderParam pbrHeightFogFalloffLocation{};
   ShaderParam pbrHeightFogStepCountLocation{};
-  // Directional lights.
+  // Lights (#138 flat array vocabulary shared by both backends: packed
+  // vec4 element arrays uploaded through set_param_vec4_array).
   ShaderParam pbrDirLightCountLocation{};
-  std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightDir{};
-  std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightColor{};
-  std::array<ShaderParam, kMaxDirectionalLights> pbrDirLightIntensity{};
-
-  // Point lights.
+  ShaderParam pbrDirLightDirectionParam{};     // vec4[N]: xyz direction
+  ShaderParam pbrDirLightColorParam{};         // vec4[N]: rgb color, w intensity
   ShaderParam pbrPointLightCountLocation{};
-  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightPos{};
-  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightColor{};
-  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightIntensity{};
-  std::array<ShaderParam, kForwardMaxPointLights> pbrPointLightRadius{};
-
-  // Spot lights.
+  ShaderParam pbrPointLightPosRadiusParam{};   // vec4[N]: xyz pos, w radius
+  ShaderParam pbrPointLightColorParam{};       // vec4[N]: rgb color, w intensity
   ShaderParam pbrSpotLightCountLocation{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightPos{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightDir{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightColor{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightIntensity{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightRadius{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightInnerCone{};
-  std::array<ShaderParam, kForwardMaxSpotLights> pbrSpotLightOuterCone{};
+  ShaderParam pbrSpotLightPosRadiusParam{};    // vec4[N]: xyz pos, w radius
+  ShaderParam pbrSpotLightDirInnerParam{};     // vec4[N]: xyz dir, w innerCone
+  ShaderParam pbrSpotLightColorParam{};        // vec4[N]: rgb color, w intensity
+  ShaderParam pbrSpotLightParamsParam{};       // vec4[N]: x outerCone
 
-  // PBR forward shadow uniforms.
+  // PBR forward shadow uniforms (#138: matrices as one mat4 array;
+  // cascade splits and shadow-light indices packed into single vec4s;
+  // samplers stay per-slot — bgfx has no sampler arrays).
   ShaderParam pbrShadowEnabledLoc{};
   std::array<ShaderParam, kShadowCascadeCount> pbrShadowMapLocs{};
-  std::array<ShaderParam, kShadowCascadeCount> pbrShadowMatrixLocs{};
-  std::array<ShaderParam, kShadowCascadeCount> pbrCascadeSplitLocs{};
+  ShaderParam pbrShadowMatrixParam{};          // mat4[kShadowCascadeCount]
+  ShaderParam pbrCascadeSplitsParam{};         // vec4: split per cascade
   ShaderParam pbrSpotShadowEnabledLoc{};
   std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowMapLocs{};
-  std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowMatrixLocs{};
-  std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowLightIdxLocs{};
+  ShaderParam pbrSpotShadowMatrixParam{};      // mat4[kMaxSpotShadowLights]
+  ShaderParam pbrSpotShadowLightIdxParam{};    // vec4: light index per slot
   ShaderParam pbrPointShadowEnabledLoc{};
   std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowMapLocs{};
-  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowLightPosLocs{};
-  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowFarPlaneLocs{};
-  std::array<ShaderParam, kMaxPointShadowLights> pbrPointShadowLightIdxLocs{};
+  ShaderParam pbrPointShadowPosFarParam{};     // vec4[N]: xyz pos, w far
+  ShaderParam pbrPointShadowLightIdxParam{};   // vec4: light index per slot
 
   // Tonemap shader.
   ShaderProgramHandle tonemapShaderHandle{};
@@ -406,8 +398,8 @@ struct BackendState final {
   // Deferred lighting shadow uniforms.
   ShaderParam dlShadowEnabledLoc{};
   std::array<ShaderParam, kShadowCascadeCount> dlShadowMapLocs{};
-  std::array<ShaderParam, kShadowCascadeCount> dlShadowMatrixLocs{};
-  std::array<ShaderParam, kShadowCascadeCount> dlCascadeSplitLocs{};
+  ShaderParam dlShadowMatrixParam{};        // mat4[kShadowCascadeCount]
+  ShaderParam dlCascadeSplitsParam{};       // vec4: split per cascade
   std::uint64_t directionalShadowCacheKey = 0U;
   bool directionalShadowCacheValid = false;
 
@@ -417,8 +409,8 @@ struct BackendState final {
 
   ShaderParam dlSpotShadowEnabledLoc{};
   std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowMapLocs{};
-  std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowMatrixLocs{};
-  std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowLightIdxLocs{};
+  ShaderParam dlSpotShadowMatrixParam{};    // mat4[kMaxSpotShadowLights]
+  ShaderParam dlSpotShadowLightIdxParam{};  // vec4: light index per slot
 
   // Point shadow state.
   PointShadowState pointShadowState{};
@@ -433,9 +425,8 @@ struct BackendState final {
 
   ShaderParam dlPointShadowEnabledLoc{};
   std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowMapLocs{};
-  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowLightPosLocs{};
-  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowFarPlaneLocs{};
-  std::array<ShaderParam, kMaxPointShadowLights> dlPointShadowLightIdxLocs{};
+  ShaderParam dlPointShadowPosFarParam{};   // vec4[N]: xyz pos, w far
+  ShaderParam dlPointShadowLightIdxParam{}; // vec4: light index per slot
 
   // Auto-exposure state.
   bool autoExposureAvailable = false;

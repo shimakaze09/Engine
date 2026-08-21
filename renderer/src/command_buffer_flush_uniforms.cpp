@@ -87,23 +87,35 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
+  // #138 flat array vocabulary: pack per-light vec4 elements into fixed
+  // scratch and upload each array in one set_param_vec4_array call.
+  if (dev->set_param_vec4_array == nullptr) {
+    return;
+  }
+
   const std::size_t dirCount =
       std::min(lights.directionalLightCount, kMaxDirectionalLights);
   if (backend.pbrDirLightCountLocation.valid()) {
     dev->set_param_i32(backend.pbrDirLightCountLocation,
                          static_cast<std::int32_t>(dirCount));
   }
-  for (std::size_t i = 0U; i < dirCount; ++i) {
-    const auto &dl = lights.directionalLights[i];
-    if (backend.pbrDirLightDir[i].valid()) {
-      dev->set_param_vec3(backend.pbrDirLightDir[i], &dl.direction.x);
+  if (dirCount > 0U) {
+    float direction[kMaxDirectionalLights * 4U] = {};
+    float colorIntensity[kMaxDirectionalLights * 4U] = {};
+    for (std::size_t i = 0U; i < dirCount; ++i) {
+      const auto &dl = lights.directionalLights[i];
+      direction[i * 4U + 0U] = dl.direction.x;
+      direction[i * 4U + 1U] = dl.direction.y;
+      direction[i * 4U + 2U] = dl.direction.z;
+      colorIntensity[i * 4U + 0U] = dl.color.x;
+      colorIntensity[i * 4U + 1U] = dl.color.y;
+      colorIntensity[i * 4U + 2U] = dl.color.z;
+      colorIntensity[i * 4U + 3U] = dl.intensity;
     }
-    if (backend.pbrDirLightColor[i].valid()) {
-      dev->set_param_vec3(backend.pbrDirLightColor[i], &dl.color.x);
-    }
-    if (backend.pbrDirLightIntensity[i].valid()) {
-      dev->set_param_f32(backend.pbrDirLightIntensity[i], dl.intensity);
-    }
+    dev->set_param_vec4_array(backend.pbrDirLightDirectionParam, direction,
+                              static_cast<std::int32_t>(dirCount));
+    dev->set_param_vec4_array(backend.pbrDirLightColorParam, colorIntensity,
+                              static_cast<std::int32_t>(dirCount));
   }
 
   const std::size_t pointCount =
@@ -112,20 +124,25 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrPointLightCountLocation,
                          static_cast<std::int32_t>(pointCount));
   }
-  for (std::size_t i = 0U; i < pointCount; ++i) {
-    const auto &pl = lights.pointLights[i];
-    if (backend.pbrPointLightPos[i].valid()) {
-      dev->set_param_vec3(backend.pbrPointLightPos[i], &pl.position.x);
+  if (pointCount > 0U) {
+    float posRadius[kForwardMaxPointLights * 4U] = {};
+    float colorIntensity[kForwardMaxPointLights * 4U] = {};
+    for (std::size_t i = 0U; i < pointCount; ++i) {
+      const auto &pl = lights.pointLights[i];
+      posRadius[i * 4U + 0U] = pl.position.x;
+      posRadius[i * 4U + 1U] = pl.position.y;
+      posRadius[i * 4U + 2U] = pl.position.z;
+      posRadius[i * 4U + 3U] = pl.radius;
+      colorIntensity[i * 4U + 0U] = pl.color.x;
+      colorIntensity[i * 4U + 1U] = pl.color.y;
+      colorIntensity[i * 4U + 2U] = pl.color.z;
+      colorIntensity[i * 4U + 3U] = pl.intensity;
     }
-    if (backend.pbrPointLightColor[i].valid()) {
-      dev->set_param_vec3(backend.pbrPointLightColor[i], &pl.color.x);
-    }
-    if (backend.pbrPointLightIntensity[i].valid()) {
-      dev->set_param_f32(backend.pbrPointLightIntensity[i], pl.intensity);
-    }
-    if (backend.pbrPointLightRadius[i].valid()) {
-      dev->set_param_f32(backend.pbrPointLightRadius[i], pl.radius);
-    }
+    dev->set_param_vec4_array(backend.pbrPointLightPosRadiusParam, posRadius,
+                              static_cast<std::int32_t>(pointCount));
+    dev->set_param_vec4_array(backend.pbrPointLightColorParam,
+                              colorIntensity,
+                              static_cast<std::int32_t>(pointCount));
   }
 
   const std::size_t spotCount =
@@ -134,33 +151,37 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrSpotLightCountLocation,
                          static_cast<std::int32_t>(spotCount));
   }
-  for (std::size_t i = 0U; i < spotCount; ++i) {
-    const auto &sl = lights.spotLights[i];
-    if (backend.pbrSpotLightPos[i].valid()) {
-      dev->set_param_vec3(backend.pbrSpotLightPos[i], &sl.position.x);
+  if (spotCount > 0U) {
+    float posRadius[kForwardMaxSpotLights * 4U] = {};
+    float dirInner[kForwardMaxSpotLights * 4U] = {};
+    float colorIntensity[kForwardMaxSpotLights * 4U] = {};
+    float params[kForwardMaxSpotLights * 4U] = {};
+    for (std::size_t i = 0U; i < spotCount; ++i) {
+      const auto &sl = lights.spotLights[i];
+      posRadius[i * 4U + 0U] = sl.position.x;
+      posRadius[i * 4U + 1U] = sl.position.y;
+      posRadius[i * 4U + 2U] = sl.position.z;
+      posRadius[i * 4U + 3U] = sl.radius;
+      dirInner[i * 4U + 0U] = sl.direction.x;
+      dirInner[i * 4U + 1U] = sl.direction.y;
+      dirInner[i * 4U + 2U] = sl.direction.z;
+      // Shaders compare cone terms against dot(L, -spotDir), a cosine —
+      // upload cosines, not the stored radian angles.
+      dirInner[i * 4U + 3U] = std::cos(sl.innerConeAngle);
+      colorIntensity[i * 4U + 0U] = sl.color.x;
+      colorIntensity[i * 4U + 1U] = sl.color.y;
+      colorIntensity[i * 4U + 2U] = sl.color.z;
+      colorIntensity[i * 4U + 3U] = sl.intensity;
+      params[i * 4U + 0U] = std::cos(sl.outerConeAngle);
     }
-    if (backend.pbrSpotLightDir[i].valid()) {
-      dev->set_param_vec3(backend.pbrSpotLightDir[i], &sl.direction.x);
-    }
-    if (backend.pbrSpotLightColor[i].valid()) {
-      dev->set_param_vec3(backend.pbrSpotLightColor[i], &sl.color.x);
-    }
-    if (backend.pbrSpotLightIntensity[i].valid()) {
-      dev->set_param_f32(backend.pbrSpotLightIntensity[i], sl.intensity);
-    }
-    if (backend.pbrSpotLightRadius[i].valid()) {
-      dev->set_param_f32(backend.pbrSpotLightRadius[i], sl.radius);
-    }
-    // Shaders compare these against dot(L, -spotDir), a cosine — upload
-    // cosines, not the stored radian angles.
-    if (backend.pbrSpotLightInnerCone[i].valid()) {
-      dev->set_param_f32(backend.pbrSpotLightInnerCone[i],
-                             std::cos(sl.innerConeAngle));
-    }
-    if (backend.pbrSpotLightOuterCone[i].valid()) {
-      dev->set_param_f32(backend.pbrSpotLightOuterCone[i],
-                             std::cos(sl.outerConeAngle));
-    }
+    dev->set_param_vec4_array(backend.pbrSpotLightPosRadiusParam, posRadius,
+                              static_cast<std::int32_t>(spotCount));
+    dev->set_param_vec4_array(backend.pbrSpotLightDirInnerParam, dirInner,
+                              static_cast<std::int32_t>(spotCount));
+    dev->set_param_vec4_array(backend.pbrSpotLightColorParam, colorIntensity,
+                              static_cast<std::int32_t>(spotCount));
+    dev->set_param_vec4_array(backend.pbrSpotLightParamsParam, params,
+                              static_cast<std::int32_t>(spotCount));
   }
 }
 
@@ -369,6 +390,11 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     return;
   }
 
+  // #138 flat vocabulary: per-slot samplers stay individual (bgfx has no
+  // sampler arrays); matrices go up as one mat4 array, splits/light
+  // indices/pos+far as packed vec4 payloads.
+  float shadowMatrices[kShadowCascadeCount * 16U] = {};
+  float cascadeSplits[4] = {};
   for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
     const auto texUnit = static_cast<std::uint32_t>(6U + c);
     if (shadowEnabled) {
@@ -378,20 +404,26 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
       dev->set_param_i32(backend.pbrShadowMapLocs[c],
                          static_cast<std::int32_t>(texUnit));
     }
-    if (backend.pbrShadowMatrixLocs[c].valid()) {
-      dev->set_param_mat4(
-          backend.pbrShadowMatrixLocs[c],
-          &backend.shadowState.cascades[c].lightViewProjection.columns[0].x);
-    }
-    if (backend.pbrCascadeSplitLocs[c].valid()) {
-      dev->set_param_f32(backend.pbrCascadeSplitLocs[c],
-                             backend.shadowState.cascades[c].splitDistance);
-    }
+    std::memcpy(
+        &shadowMatrices[c * 16U],
+        &backend.shadowState.cascades[c].lightViewProjection.columns[0].x,
+        sizeof(float) * 16U);
+    cascadeSplits[c] = backend.shadowState.cascades[c].splitDistance;
+  }
+  if ((dev->set_param_mat4_array != nullptr) &&
+      backend.pbrShadowMatrixParam.valid()) {
+    dev->set_param_mat4_array(backend.pbrShadowMatrixParam, shadowMatrices,
+                              static_cast<std::int32_t>(kShadowCascadeCount));
+  }
+  if (backend.pbrCascadeSplitsParam.valid()) {
+    dev->set_param_vec4(backend.pbrCascadeSplitsParam, cascadeSplits);
   }
   if (backend.pbrShadowEnabledLoc.valid()) {
     dev->set_param_i32(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
   }
 
+  float spotMatrices[kMaxSpotShadowLights * 16U] = {};
+  float spotLightIdx[4] = {};
   for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
     const auto &slot = backend.spotShadowState.slots[s];
     const auto texUnit = static_cast<std::uint32_t>(10U + s);
@@ -402,20 +434,26 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
       dev->set_param_i32(backend.pbrSpotShadowMapLocs[s],
                          static_cast<std::int32_t>(texUnit));
     }
-    if (backend.pbrSpotShadowMatrixLocs[s].valid()) {
-      dev->set_param_mat4(backend.pbrSpotShadowMatrixLocs[s],
-                            &slot.lightViewProjection.columns[0].x);
-    }
-    if (backend.pbrSpotShadowLightIdxLocs[s].valid()) {
-      dev->set_param_i32(backend.pbrSpotShadowLightIdxLocs[s],
-                           slot.lightIndex);
-    }
+    std::memcpy(&spotMatrices[s * 16U],
+                &slot.lightViewProjection.columns[0].x,
+                sizeof(float) * 16U);
+    spotLightIdx[s] = static_cast<float>(slot.lightIndex);
+  }
+  if ((dev->set_param_mat4_array != nullptr) &&
+      backend.pbrSpotShadowMatrixParam.valid()) {
+    dev->set_param_mat4_array(backend.pbrSpotShadowMatrixParam, spotMatrices,
+                              static_cast<std::int32_t>(kMaxSpotShadowLights));
+  }
+  if (backend.pbrSpotShadowLightIdxParam.valid()) {
+    dev->set_param_vec4(backend.pbrSpotShadowLightIdxParam, spotLightIdx);
   }
   if (backend.pbrSpotShadowEnabledLoc.valid()) {
     dev->set_param_i32(backend.pbrSpotShadowEnabledLoc,
                          spotShadowEnabled ? 1 : 0);
   }
 
+  float pointPosFar[kMaxPointShadowLights * 4U] = {};
+  float pointLightIdx[4] = {};
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
     const auto &slot = backend.pointShadowState.slots[s];
     const auto texUnit = static_cast<std::uint32_t>(14U + s);
@@ -426,19 +464,22 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
       dev->set_param_i32(backend.pbrPointShadowMapLocs[s],
                          static_cast<std::int32_t>(texUnit));
     }
-    if (backend.pbrPointShadowLightPosLocs[s].valid()) {
-      const math::Vec3 lightPos =
-          point_shadow_slot_light_position(slot.lightIndex, lights);
-      dev->set_param_vec3(backend.pbrPointShadowLightPosLocs[s], &lightPos.x);
-    }
-    if (backend.pbrPointShadowFarPlaneLocs[s].valid()) {
-      dev->set_param_f32(backend.pbrPointShadowFarPlaneLocs[s],
-                             slot.farPlane);
-    }
-    if (backend.pbrPointShadowLightIdxLocs[s].valid()) {
-      dev->set_param_i32(backend.pbrPointShadowLightIdxLocs[s],
-                           slot.lightIndex);
-    }
+    const math::Vec3 lightPos =
+        point_shadow_slot_light_position(slot.lightIndex, lights);
+    pointPosFar[s * 4U + 0U] = lightPos.x;
+    pointPosFar[s * 4U + 1U] = lightPos.y;
+    pointPosFar[s * 4U + 2U] = lightPos.z;
+    pointPosFar[s * 4U + 3U] = slot.farPlane;
+    pointLightIdx[s] = static_cast<float>(slot.lightIndex);
+  }
+  if ((dev->set_param_vec4_array != nullptr) &&
+      backend.pbrPointShadowPosFarParam.valid()) {
+    dev->set_param_vec4_array(
+        backend.pbrPointShadowPosFarParam, pointPosFar,
+        static_cast<std::int32_t>(kMaxPointShadowLights));
+  }
+  if (backend.pbrPointShadowLightIdxParam.valid()) {
+    dev->set_param_vec4(backend.pbrPointShadowLightIdxParam, pointLightIdx);
   }
   if (backend.pbrPointShadowEnabledLoc.valid()) {
     dev->set_param_i32(backend.pbrPointShadowEnabledLoc,

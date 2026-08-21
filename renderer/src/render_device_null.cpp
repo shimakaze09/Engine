@@ -68,6 +68,10 @@ void null_set_param_i32(ShaderParam, std::int32_t) noexcept {}
 void null_set_param_vec2(ShaderParam, const float *) noexcept {}
 void null_set_param_vec3(ShaderParam, const float *) noexcept {}
 void null_set_param_vec4(ShaderParam, const float *) noexcept {}
+void null_set_param_vec4_array(ShaderParam, const float *,
+                               std::int32_t) noexcept {}
+void null_set_param_mat4_array(ShaderParam, const float *,
+                               std::int32_t) noexcept {}
 bool null_bind_program_uniform_block(DeviceProgramHandle, const char *,
                                      std::uint32_t) noexcept {
   return true;
@@ -152,6 +156,8 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->set_param_vec2 = &null_set_param_vec2;
   device->set_param_vec3 = &null_set_param_vec3;
   device->set_param_vec4 = &null_set_param_vec4;
+  device->set_param_vec4_array = &null_set_param_vec4_array;
+  device->set_param_mat4_array = &null_set_param_mat4_array;
   device->bind_program_uniform_block = &null_bind_program_uniform_block;
   device->create_geometry = &null_create_geometry;
   device->destroy_geometry = &null_destroy_geometry;

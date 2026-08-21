@@ -1229,6 +1229,23 @@ void gl_set_param_vec4(ShaderParam param, const float *value) noexcept {
   }
 }
 
+void gl_set_param_vec4_array(ShaderParam param, const float *values,
+                             std::int32_t count) noexcept {
+  if (param.valid() && (count > 0)) {
+    gl_table().uniform4fv(static_cast<GLint>(param.value),
+                          static_cast<GLsizei>(count), values);
+  }
+}
+
+void gl_set_param_mat4_array(ShaderParam param, const float *values,
+                             std::int32_t count) noexcept {
+  if (param.valid() && (count > 0)) {
+    gl_table().uniformMatrix4fv(static_cast<GLint>(param.value),
+                                static_cast<GLsizei>(count), GL_FALSE,
+                                values);
+  }
+}
+
 bool gl_bind_program_uniform_block(DeviceProgramHandle program,
                                    const char *blockName,
                                    std::uint32_t slot) noexcept {
@@ -1729,6 +1746,8 @@ bool initialize_render_device() noexcept {
   device.set_param_vec2 = &gl_set_param_vec2;
   device.set_param_vec3 = &gl_set_param_vec3;
   device.set_param_vec4 = &gl_set_param_vec4;
+  device.set_param_vec4_array = &gl_set_param_vec4_array;
+  device.set_param_mat4_array = &gl_set_param_mat4_array;
   device.bind_program_uniform_block = &gl_bind_program_uniform_block;
   device.create_geometry = &gl_create_geometry;
   device.destroy_geometry = &gl_destroy_geometry;

@@ -26,15 +26,19 @@ inline constexpr std::size_t kMaxTextureSlots = 16U;
 inline constexpr std::size_t kMaxProgramParams = 64U;
 inline constexpr std::size_t kMaxParamNameLength = 44U;
 
-/// Realized bgfx storage behind one engine buffer handle. Vertex and
-/// instance data live in a resizable dynamic vertex buffer (byte layout
-/// until an instance stride re-realizes it); indices in a resizable
-/// 32-bit dynamic index buffer.
+/// bgfx storage behind one engine buffer handle. bgfx requires the
+/// vertex layout at buffer creation (stride overrides at draw are
+/// rejected), so vertex data stages on the CPU until the first
+/// geometry/instance-stream attachment realizes the dynamic buffer at
+/// its real stride; indices realize eagerly as resizable 32-bit dynamic
+/// index buffers. `staging` is owned by the record and freed at
+/// realization or destroy.
 struct BgfxBufferRecord final {
   BufferUsage usage = BufferUsage::Vertex;
   BufferAccess access = BufferAccess::Static;
   std::int32_t sizeBytes = 0;
-  std::int32_t instanceStride = 0;
+  std::int32_t strideBytes = 0; // realized vertex/instance stride
+  void *staging = nullptr;
   bgfx::DynamicVertexBufferHandle vertex = BGFX_INVALID_HANDLE;
   bgfx::DynamicIndexBufferHandle index = BGFX_INVALID_HANDLE;
 };
@@ -51,14 +55,13 @@ struct BgfxTextureRecord final {
   bool renderTarget = false;
 };
 
-/// Geometry: referenced engine buffer handles (resolved per draw for
-/// staleness) plus the translated layout override applied at draw.
+/// Geometry: referenced engine buffer handles, resolved per draw for
+/// staleness (the vertex layout lives on the realized buffer).
 struct BgfxGeometryRecord final {
   std::uint32_t vertexBuffer = 0U;
   std::uint32_t indexBuffer = 0U;
   std::uint32_t instanceBuffer = 0U;
   std::int32_t vertexStride = 0;
-  bgfx::VertexLayoutHandle layout = BGFX_INVALID_HANDLE;
 };
 
 /// Frame buffer behind one engine render-target handle; the depth
@@ -71,12 +74,18 @@ struct BgfxTargetRecord final {
 /// One resolvable shader input of a linked program: the bgfx uniform
 /// handle (owned by the program's shaders, valid for the program's
 /// lifetime), its type, and — for samplers — the texture slot assigned
-/// through set_param_i32 (the GL texture-unit convention).
+/// through set_param_i32 (the GL texture-unit convention). Value sets
+/// stage into `pending` and apply once per submit (bgfx allows one
+/// setUniform per uniform per draw; GL semantics are last-write-wins),
+/// sized for the largest engine payload (mat4[4] = 64 floats).
 struct BgfxParamRecord final {
   char name[kMaxParamNameLength] = {};
   bgfx::UniformHandle handle = BGFX_INVALID_HANDLE;
   bgfx::UniformType::Enum type = bgfx::UniformType::Count;
   std::int8_t samplerStage = -1;
+  bool dirty = false;
+  std::uint16_t pendingNum = 0U;
+  float pending[64] = {};
 };
 
 /// Linked program from cooked shader binaries with its introspected,
@@ -120,6 +129,11 @@ struct BgfxDeviceContext final {
   std::int32_t backBufferWidth = 0;
   std::int32_t backBufferHeight = 0;
   bool backBufferVsync = false;
+  // Backend-owned fullscreen triangle (#138 forward path): bgfx submits
+  // require a vertex stream, so attribute-less engine draws bind this
+  // three-vertex position stream instead (fullscreen.vs.sc reads it).
+  bgfx::DynamicVertexBufferHandle fullscreenVertex = BGFX_INVALID_HANDLE;
+  bgfx::VertexLayoutHandle fullscreenLayout = BGFX_INVALID_HANDLE;
 };
 
 /// Returns the bgfx render device context.
@@ -136,6 +150,11 @@ BgfxProgramRecord *current_program_record() noexcept;
 /// Applies the program's sampler parameters for the next submit from the
 /// context's bound-texture slots (stale or unbound slots are skipped).
 void apply_program_samplers(const BgfxProgramRecord &program) noexcept;
+
+/// Flushes the program's staged uniform values (one setUniform per
+/// dirty parameter) for the next submit; values persist in bgfx across
+/// draws, so clean parameters are skipped.
+void apply_program_uniforms(BgfxProgramRecord &program) noexcept;
 
 // Program/parameter device entries implemented in
 // render_device_bgfx_programs.cpp and wired by fill_bgfx_render_device.
@@ -156,6 +175,10 @@ void bgfx_set_param_i32(ShaderParam param, std::int32_t value) noexcept;
 void bgfx_set_param_vec2(ShaderParam param, const float *value) noexcept;
 void bgfx_set_param_vec3(ShaderParam param, const float *value) noexcept;
 void bgfx_set_param_vec4(ShaderParam param, const float *value) noexcept;
+void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
+                               std::int32_t count) noexcept;
+void bgfx_set_param_mat4_array(ShaderParam param, const float *values,
+                               std::int32_t count) noexcept;
 bool bgfx_bind_program_uniform_block(DeviceProgramHandle program,
                                      const char *blockName,
                                      std::uint32_t slot) noexcept;

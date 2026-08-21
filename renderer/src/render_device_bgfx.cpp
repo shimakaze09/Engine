@@ -3,13 +3,13 @@
 // same generational slot tables, stale-handle detection, and
 // dropped-operation diagnostics as the GL backend (the program and
 // shader-parameter path lives in render_device_bgfx_programs.cpp; shared
-// records in render_device_bgfx_context.h). bgfx runs single-threaded on
-// the Noop renderer until Phase D ports the platform window and
-// presentation path. Vertex buffers are realized as resizable
-// byte-layout dynamic buffers with per-geometry layout overrides at
-// draw; buffer/texture uploads copy through bgfx transient memory
-// (bgfx's required ownership model — the per-frame allocation is
-// bgfx-internal and unavoidable at this boundary).
+// records in render_device_bgfx_context.h). bgfx runs single-threaded —
+// windowed against the platform's native handles with the renderer from
+// r_bgfx_renderer, headless on Noop. Vertex data stages CPU-side until
+// its geometry/instance attachment realizes the dynamic buffer at the
+// real stride (bgfx binds layouts at buffer creation); buffer/texture
+// uploads copy through bgfx transient memory (bgfx's required ownership
+// model — that allocation is bgfx-internal and unavoidable here).
 
 #include "render_device_bgfx.h"
 
@@ -210,8 +210,10 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
       static_cast<std::uint32_t>(desc.sizeBytes);
   // Both access modes realize as resizable dynamic storage: the engine
   // contract lets "static" buffers be re-specified, which bgfx static
-  // buffers cannot do. A never-updated static fast path is a Phase G
-  // measurement, not a semantic requirement.
+  // buffers cannot do (a never-updated static fast path is a Phase G
+  // measurement). Vertex data stages CPU-side until a geometry or
+  // instance-stream attachment supplies the layout bgfx requires at
+  // buffer creation.
   if (desc.usage == BufferUsage::Index) {
     record.index = bgfx::createDynamicIndexBuffer(
         (sizeBytes > 4U) ? (sizeBytes / 4U) : 1U,
@@ -224,33 +226,58 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
     if ((desc.data != nullptr) && (sizeBytes > 0U)) {
       bgfx::update(record.index, 0U, bgfx::copy(desc.data, sizeBytes));
     }
-  } else {
-    bgfx::VertexLayout byteLayout{};
-    bgfx_stride_layout(1, &byteLayout);
-    record.vertex = bgfx::createDynamicVertexBuffer(
-        (sizeBytes > 0U) ? sizeBytes : 1U, byteLayout,
-        BGFX_BUFFER_ALLOW_RESIZE);
-    if (!bgfx::isValid(record.vertex)) {
+  } else if ((desc.data != nullptr) && (sizeBytes > 0U)) {
+    record.staging = std::malloc(sizeBytes);
+    if (record.staging == nullptr) {
       core::log_message(core::LogLevel::Error, "render_device",
-                        "bgfx backend: vertex buffer creation failed");
+                        "bgfx backend: vertex staging allocation failed");
       return kInvalidDeviceBuffer;
     }
-    if ((desc.data != nullptr) && (sizeBytes > 0U)) {
-      bgfx::update(record.vertex, 0U, bgfx::copy(desc.data, sizeBytes));
-    }
+    std::memcpy(record.staging, desc.data, sizeBytes);
   }
   const std::uint32_t value = device_context().buffers.allocate(record);
   if (value == 0U) {
-    if (bgfx::isValid(record.vertex)) {
-      bgfx::destroy(record.vertex);
-    }
     if (bgfx::isValid(record.index)) {
       bgfx::destroy(record.index);
     }
+    std::free(record.staging);
     drop_operation("create_buffer: table full");
     return kInvalidDeviceBuffer;
   }
   return DeviceBufferHandle{value};
+}
+
+/// Realizes an unrealized vertex/instance buffer as a resizable dynamic
+/// buffer at the given stride, uploading and releasing any staged data.
+/// False when the buffer is already realized at a different stride (one
+/// layout per buffer — matching the engine's 1:1 mesh/buffer usage).
+bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
+                                std::int32_t strideBytes) noexcept {
+  if (bgfx::isValid(record->vertex)) {
+    return record->strideBytes == strideBytes;
+  }
+  if (strideBytes <= 0) {
+    return false;
+  }
+  bgfx::VertexLayout strideLayout{};
+  bgfx_stride_layout(strideBytes, &strideLayout);
+  const std::uint32_t count = static_cast<std::uint32_t>(
+      (record->sizeBytes > strideBytes) ? (record->sizeBytes / strideBytes)
+                                        : 1);
+  record->vertex = bgfx::createDynamicVertexBuffer(
+      count, strideLayout, BGFX_BUFFER_ALLOW_RESIZE);
+  if (!bgfx::isValid(record->vertex)) {
+    return false;
+  }
+  record->strideBytes = strideBytes;
+  if (record->staging != nullptr) {
+    bgfx::update(record->vertex, 0U,
+                 bgfx::copy(record->staging,
+                            static_cast<std::uint32_t>(record->sizeBytes)));
+    std::free(record->staging);
+    record->staging = nullptr;
+  }
+  return true;
 }
 
 /// Shared upload for update_buffer / update_buffer_range; allowGrow
@@ -273,6 +300,18 @@ void bgfx_buffer_upload(DeviceBufferHandle buffer, const void *data,
     bgfx::update(record->index, 0U, bgfx::copy(data, bytes));
   } else if (bgfx::isValid(record->vertex)) {
     bgfx::update(record->vertex, 0U, bgfx::copy(data, bytes));
+  } else if (record->usage == BufferUsage::Vertex) {
+    // Not yet realized: replace the CPU staging copy.
+    if ((record->staging == nullptr) ||
+        (sizeBytes > static_cast<std::ptrdiff_t>(record->sizeBytes))) {
+      std::free(record->staging);
+      record->staging = std::malloc(bytes);
+    }
+    if (record->staging == nullptr) {
+      drop_operation("update_buffer: staging allocation failed");
+      return;
+    }
+    std::memcpy(record->staging, data, bytes);
   }
   if (allowGrow &&
       (sizeBytes > static_cast<std::ptrdiff_t>(record->sizeBytes))) {
@@ -305,6 +344,8 @@ void bgfx_destroy_buffer(DeviceBufferHandle buffer) noexcept {
   if (bgfx::isValid(record->index)) {
     bgfx::destroy(record->index);
   }
+  std::free(record->staging);
+  record->staging = nullptr;
   device_context().buffers.release(buffer.value);
 }
 
@@ -319,17 +360,20 @@ void bgfx_bind_uniform_buffer_slot(std::uint32_t,
 // --- Textures ---
 
 DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
+  const bool hasPixels = (desc.kind == TextureKind::Tex2D)
+                             ? (desc.pixels != nullptr)
+                             : (desc.facePixels != nullptr);
   const BgfxTexelUpload shape =
       bgfx_texel_upload(desc.format, desc.pixelData);
-  if (!shape.valid || (desc.width <= 0) ||
+  // The texel-encoding pairing only constrains actual uploads; empty
+  // (render-target) creation just needs the format mapping.
+  if ((hasPixels && !shape.valid) ||
+      (shape.format == bgfx::TextureFormat::Count) || (desc.width <= 0) ||
       ((desc.kind == TextureKind::Tex2D) && (desc.height <= 0)) ||
       (desc.mipLevels < 0)) {
     drop_operation("create_texture: invalid descriptor");
     return kInvalidDeviceTexture;
   }
-  const bool hasPixels = (desc.kind == TextureKind::Tex2D)
-                             ? (desc.pixels != nullptr)
-                             : (desc.facePixels != nullptr);
   if ((desc.format == TextureFormat::Depth24) && hasPixels) {
     drop_operation("create_texture: depth formats take no client texels");
     return kInvalidDeviceTexture;
@@ -491,7 +535,7 @@ DeviceGeometryHandle bgfx_create_geometry(const GeometryDesc &desc) noexcept {
   BgfxGeometryRecord record{};
   if (desc.vertexBuffer.value != 0U) {
     BgfxBufferRecord *vertex = ctx.buffers.resolve(desc.vertexBuffer.value);
-    if ((vertex == nullptr) || !bgfx::isValid(vertex->vertex)) {
+    if ((vertex == nullptr) || (vertex->usage != BufferUsage::Vertex)) {
       drop_operation("create_geometry: stale or non-vertex buffer");
       return kInvalidDeviceGeometry;
     }
@@ -500,9 +544,12 @@ DeviceGeometryHandle bgfx_create_geometry(const GeometryDesc &desc) noexcept {
       drop_operation("create_geometry: invalid vertex layout");
       return kInvalidDeviceGeometry;
     }
-    record.layout = bgfx::createVertexLayout(layout);
-    if (!bgfx::isValid(record.layout)) {
-      drop_operation("create_geometry: layout table full");
+    // Attaching a geometry realizes the buffer at this layout's stride
+    // (bgfx binds the layout at buffer creation; per-draw stride
+    // overrides are rejected).
+    if (!bgfx_realize_vertex_buffer(vertex, desc.layout.strideBytes)) {
+      drop_operation("create_geometry: vertex buffer realization failed "
+                     "(one layout per buffer)");
       return kInvalidDeviceGeometry;
     }
     record.vertexBuffer = desc.vertexBuffer.value;
@@ -511,9 +558,6 @@ DeviceGeometryHandle bgfx_create_geometry(const GeometryDesc &desc) noexcept {
   if (desc.indexBuffer.value != 0U) {
     BgfxBufferRecord *index = ctx.buffers.resolve(desc.indexBuffer.value);
     if ((index == nullptr) || !bgfx::isValid(index->index)) {
-      if (bgfx::isValid(record.layout)) {
-        bgfx::destroy(record.layout);
-      }
       drop_operation("create_geometry: stale or non-index buffer");
       return kInvalidDeviceGeometry;
     }
@@ -521,9 +565,6 @@ DeviceGeometryHandle bgfx_create_geometry(const GeometryDesc &desc) noexcept {
   }
   const std::uint32_t value = ctx.geometries.allocate(record);
   if (value == 0U) {
-    if (bgfx::isValid(record.layout)) {
-      bgfx::destroy(record.layout);
-    }
     drop_operation("create_geometry: table full");
     return kInvalidDeviceGeometry;
   }
@@ -534,13 +575,8 @@ void bgfx_destroy_geometry(DeviceGeometryHandle geometry) noexcept {
   if (geometry.value == 0U) {
     return;
   }
-  BgfxGeometryRecord *record =
-      device_context().geometries.resolve(geometry.value);
-  if (record == nullptr) {
+  if (device_context().geometries.resolve(geometry.value) == nullptr) {
     return; // idempotent destroy
-  }
-  if (bgfx::isValid(record->layout)) {
-    bgfx::destroy(record->layout);
   }
   device_context().geometries.release(geometry.value);
 }
@@ -559,56 +595,47 @@ bool bgfx_set_geometry_instance_stream(DeviceGeometryHandle geometry,
     return true;
   }
   BgfxBufferRecord *stream = ctx.buffers.resolve(buffer.value);
-  if ((stream == nullptr) || !bgfx::isValid(stream->vertex) ||
+  if ((stream == nullptr) || (stream->usage != BufferUsage::Vertex) ||
       (layout.strideBytes <= 0)) {
     drop_operation("set_geometry_instance_stream: stale buffer or layout");
     return false;
   }
-  // bgfx derives the instance stride from the buffer's creation layout,
-  // so the byte-layout buffer is re-realized at the stream stride here.
-  // Data uploaded before this call is not carried over; instance streams
-  // are re-uploaded per frame by contract of their Stream access.
-  if (stream->instanceStride != layout.strideBytes) {
-    bgfx::destroy(stream->vertex);
-    bgfx::VertexLayout strideLayout{};
-    bgfx_stride_layout(layout.strideBytes, &strideLayout);
-    const std::uint32_t count = static_cast<std::uint32_t>(
-        (stream->sizeBytes > layout.strideBytes)
-            ? (stream->sizeBytes / layout.strideBytes)
-            : 1);
-    stream->vertex = bgfx::createDynamicVertexBuffer(
-        count, strideLayout, BGFX_BUFFER_ALLOW_RESIZE);
-    if (!bgfx::isValid(stream->vertex)) {
-      drop_operation("set_geometry_instance_stream: re-realization failed");
-      return false;
-    }
-    stream->instanceStride = layout.strideBytes;
+  // Attaching the stream realizes the buffer at the instance stride
+  // (bgfx derives per-instance advance from the creation layout).
+  if (!bgfx_realize_vertex_buffer(stream, layout.strideBytes)) {
+    drop_operation("set_geometry_instance_stream: realization failed "
+                   "(one layout per buffer)");
+    return false;
   }
   record->instanceBuffer = buffer.value;
   return true;
 }
 
 /// Applies the geometry's streams for one draw; false (with the drop
-/// recorded) when a referenced buffer went stale.
+/// recorded) when a referenced buffer went stale. Attribute-less
+/// geometry binds the backend-owned fullscreen triangle stream.
 bool bgfx_apply_geometry(const BgfxGeometryRecord &record,
                          std::int32_t firstVertex,
                          std::int32_t vertexCount) noexcept {
   BgfxDeviceContext &ctx = device_context();
-  if (record.vertexBuffer != 0U) {
-    BgfxBufferRecord *vertex = ctx.buffers.resolve(record.vertexBuffer);
-    if ((vertex == nullptr) || !bgfx::isValid(vertex->vertex)) {
-      drop_operation("draw: stale vertex buffer");
-      return false;
+  if (record.vertexBuffer == 0U) {
+    if (bgfx::isValid(ctx.fullscreenVertex)) {
+      bgfx::setVertexBuffer(0U, ctx.fullscreenVertex, 0U, 3U);
     }
-    std::uint32_t count = static_cast<std::uint32_t>(vertexCount);
-    if ((vertexCount <= 0) && (record.vertexStride > 0)) {
-      count = static_cast<std::uint32_t>(vertex->sizeBytes /
-                                         record.vertexStride);
-    }
-    bgfx::setVertexBuffer(0U, vertex->vertex,
-                          static_cast<std::uint32_t>(firstVertex), count,
-                          record.layout);
+    return true;
   }
+  BgfxBufferRecord *vertex = ctx.buffers.resolve(record.vertexBuffer);
+  if ((vertex == nullptr) || !bgfx::isValid(vertex->vertex)) {
+    drop_operation("draw: stale or unrealized vertex buffer");
+    return false;
+  }
+  std::uint32_t count = static_cast<std::uint32_t>(vertexCount);
+  if ((vertexCount <= 0) && (record.vertexStride > 0)) {
+    count = static_cast<std::uint32_t>(vertex->sizeBytes /
+                                       record.vertexStride);
+  }
+  bgfx::setVertexBuffer(0U, vertex->vertex,
+                        static_cast<std::uint32_t>(firstVertex), count);
   return true;
 }
 
@@ -624,6 +651,7 @@ void bgfx_submit_draw(std::uint64_t stateBits) noexcept {
     return;
   }
   bgfx::setState(stateBits);
+  apply_program_uniforms(*program);
   apply_program_samplers(*program);
   bgfx::submit(ctx.currentView, program->handle);
 }
@@ -634,9 +662,11 @@ void bgfx_draw(DeviceGeometryHandle geometry, PrimitiveTopology topology,
   BgfxGeometryRecord *record = ctx.geometries.resolve(geometry.value);
   if (record == nullptr) {
     drop_operation("draw: stale geometry");
+    bgfx::discard();
     return;
   }
   if (!bgfx_apply_geometry(*record, firstVertex, vertexCount)) {
+    bgfx::discard();
     return;
   }
   bgfx_submit_draw(bgfx_state_bits(ctx.currentState, topology));
@@ -648,14 +678,17 @@ void bgfx_draw_indexed(DeviceGeometryHandle geometry,
   BgfxGeometryRecord *record = ctx.geometries.resolve(geometry.value);
   if ((record == nullptr) || (record->indexBuffer == 0U)) {
     drop_operation("draw_indexed: stale or index-less geometry");
+    bgfx::discard();
     return;
   }
   BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
   if ((index == nullptr) || !bgfx::isValid(index->index)) {
     drop_operation("draw_indexed: stale index buffer");
+    bgfx::discard();
     return;
   }
   if (!bgfx_apply_geometry(*record, 0, 0)) {
+    bgfx::discard();
     return;
   }
   bgfx::setIndexBuffer(index->index, 0U,
@@ -672,6 +705,7 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   if ((record == nullptr) || (record->indexBuffer == 0U) ||
       (record->instanceBuffer == 0U)) {
     drop_operation("draw_indexed_instanced: geometry missing streams");
+    bgfx::discard();
     return;
   }
   BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
@@ -679,9 +713,11 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   if ((index == nullptr) || !bgfx::isValid(index->index) ||
       (stream == nullptr) || !bgfx::isValid(stream->vertex)) {
     drop_operation("draw_indexed_instanced: stale buffer");
+    bgfx::discard();
     return;
   }
   if (!bgfx_apply_geometry(*record, 0, 0)) {
+    bgfx::discard();
     return;
   }
   bgfx::setIndexBuffer(index->index, 0U,
@@ -900,6 +936,8 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->set_param_vec2 = &bgfx_backend::bgfx_set_param_vec2;
   device->set_param_vec3 = &bgfx_backend::bgfx_set_param_vec3;
   device->set_param_vec4 = &bgfx_backend::bgfx_set_param_vec4;
+  device->set_param_vec4_array = &bgfx_backend::bgfx_set_param_vec4_array;
+  device->set_param_mat4_array = &bgfx_backend::bgfx_set_param_mat4_array;
   device->bind_program_uniform_block =
       &bgfx_backend::bgfx_bind_program_uniform_block;
   device->create_geometry = &bgfx_create_geometry;
@@ -992,6 +1030,21 @@ bool initialize_render_device() noexcept {
                       "bgfx initialization failed");
     return false;
   }
+  // Backend-owned fullscreen triangle for attribute-less engine draws
+  // (the GL path synthesizes it from gl_VertexID; bgfx needs a stream).
+  {
+    bgfx::VertexLayout layout{};
+    layout.begin(bgfx::RendererType::Noop)
+        .add(bgfx::Attrib::Position, 3U, bgfx::AttribType::Float)
+        .end();
+    ctx.fullscreenLayout = bgfx::createVertexLayout(layout);
+    ctx.fullscreenVertex =
+        bgfx::createDynamicVertexBuffer(3U, layout, BGFX_BUFFER_NONE);
+    const float triangle[9] = {-1.0f, -1.0f, 0.0f, 3.0f, -1.0f,
+                               0.0f,  -1.0f, 3.0f, 0.0f};
+    bgfx::update(ctx.fullscreenVertex, 0U,
+                 bgfx::copy(triangle, sizeof(triangle)));
+  }
   fill_bgfx_render_device(&ctx.device);
   reset_views();
   ctx.mode = BgfxBackendMode::Bgfx;
@@ -1024,8 +1077,16 @@ void shutdown_render_device() noexcept {
   }
   ctx.device = RenderDevice{};
   if (ctx.mode == BgfxBackendMode::Bgfx) {
+    if (bgfx::isValid(ctx.fullscreenVertex)) {
+      bgfx::destroy(ctx.fullscreenVertex);
+    }
+    if (bgfx::isValid(ctx.fullscreenLayout)) {
+      bgfx::destroy(ctx.fullscreenLayout);
+    }
     bgfx::shutdown();
   }
+  ctx.fullscreenVertex = BGFX_INVALID_HANDLE;
+  ctx.fullscreenLayout = BGFX_INVALID_HANDLE;
   ctx.mode = BgfxBackendMode::None;
   ctx.initialized = false;
 }

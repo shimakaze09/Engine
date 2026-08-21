@@ -10,7 +10,7 @@ layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in mat4 inInstanceModel;
 layout(location = 7) in vec4 inInstanceFoliage;
 
-uniform mat4 u_model;
+uniform mat4 u_modelMatrix;
 uniform mat4 u_mvp;
 uniform mat4 u_viewProjection;
 uniform mat3 u_normalMatrix;
@@ -26,7 +26,7 @@ out vec2 vTexCoord;
 
 /// Runs the shader entry point for this stage.
 void main() {
-  mat4 model = (uUseInstancing != 0) ? inInstanceModel : u_model;
+  mat4 model = (uUseInstancing != 0) ? inInstanceModel : u_modelMatrix;
   mat3 normalMatrix = (uUseInstancing != 0)
     /// Handles transpose.
     ? transpose(inverse(mat3(model)))

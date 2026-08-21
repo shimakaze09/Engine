@@ -57,53 +57,47 @@ uniform float uHeightFogDensity;
 uniform float uHeightFogFalloff;
 uniform int uHeightFogStepCount;
 
-/// Stores dir light data used by the engine.
-struct DirLight {
-  vec3 direction;
-  vec3 color;
-  float intensity;
-};
+// Lights and shadow tables use the #138 flat array vocabulary shared
+// with the bgfx shader ports: packed vec4 element arrays (uploaded via
+// set_param_vec4_array), per-slot samplers (bgfx has no sampler
+// arrays), and single-vec4 payloads for splits and light indices.
 uniform int u_dirLightCount;
-uniform DirLight u_dirLights[MAX_DIR_LIGHTS];
+uniform vec4 u_dirLightDirection[MAX_DIR_LIGHTS];      // xyz direction
+uniform vec4 u_dirLightColorIntensity[MAX_DIR_LIGHTS]; // rgb, w intensity
 
-/// Stores point light data used by the engine.
-struct PointLight {
-  vec3 position;
-  vec3 color;
-  float intensity;
-  float radius;
-};
 uniform int u_pointLightCount;
-uniform PointLight u_pointLights[MAX_POINT_LIGHTS];
+uniform vec4 u_pointLightPosRadius[MAX_POINT_LIGHTS];      // xyz, w radius
+uniform vec4 u_pointLightColorIntensity[MAX_POINT_LIGHTS]; // rgb, w intensity
 
-/// Stores spot light data used by the engine.
-struct SpotLight {
-  vec3 position;
-  vec3 direction;
-  vec3 color;
-  float intensity;
-  float radius;
-  float innerCone;
-  float outerCone;
-};
 uniform int u_spotLightCount;
-uniform SpotLight u_spotLights[MAX_SPOT_LIGHTS];
+uniform vec4 u_spotLightPosRadius[MAX_SPOT_LIGHTS];      // xyz, w radius
+uniform vec4 u_spotLightDirInner[MAX_SPOT_LIGHTS];       // xyz, w cos(inner)
+uniform vec4 u_spotLightColorIntensity[MAX_SPOT_LIGHTS]; // rgb, w intensity
+uniform vec4 u_spotLightParams[MAX_SPOT_LIGHTS];         // x cos(outer)
 
 uniform int uShadowEnabled;
-uniform sampler2D uShadowMap[SHADOW_CASCADE_COUNT];
+uniform sampler2D uShadowMap0;
+uniform sampler2D uShadowMap1;
+uniform sampler2D uShadowMap2;
+uniform sampler2D uShadowMap3;
 uniform mat4 uShadowMatrix[SHADOW_CASCADE_COUNT];
-uniform float uCascadeSplit[SHADOW_CASCADE_COUNT];
+uniform vec4 uCascadeSplits; // split distance per cascade
 
 uniform int uSpotShadowEnabled;
-uniform sampler2D uSpotShadowMap[MAX_SPOT_SHADOW_LIGHTS];
+uniform sampler2D uSpotShadowMap0;
+uniform sampler2D uSpotShadowMap1;
+uniform sampler2D uSpotShadowMap2;
+uniform sampler2D uSpotShadowMap3;
 uniform mat4 uSpotShadowMatrix[MAX_SPOT_SHADOW_LIGHTS];
-uniform int uSpotShadowLightIdx[MAX_SPOT_SHADOW_LIGHTS];
+uniform vec4 uSpotShadowLightIdxVec; // light index per slot
 
 uniform int uPointShadowEnabled;
-uniform samplerCube uPointShadowMap[MAX_POINT_SHADOW_LIGHTS];
-uniform vec3 uPointShadowLightPos[MAX_POINT_SHADOW_LIGHTS];
-uniform float uPointShadowFarPlane[MAX_POINT_SHADOW_LIGHTS];
-uniform int uPointShadowLightIdx[MAX_POINT_SHADOW_LIGHTS];
+uniform samplerCube uPointShadowMap0;
+uniform samplerCube uPointShadowMap1;
+uniform samplerCube uPointShadowMap2;
+uniform samplerCube uPointShadowMap3;
+uniform vec4 uPointShadowPosFar[MAX_POINT_SHADOW_LIGHTS]; // xyz pos, w far
+uniform vec4 uPointShadowLightIdxVec; // light index per slot
 
 out vec4 outColor;
 
@@ -206,43 +200,43 @@ float sample_shadow_pcf(sampler2D shadowMap, vec3 projCoords) {
 /// Handles sample directional shadow pcf.
 float sample_directional_shadow_pcf(int cascadeIdx, vec3 projCoords) {
   if (cascadeIdx == 0) {
-    return sample_shadow_pcf(uShadowMap[0], projCoords);
+    return sample_shadow_pcf(uShadowMap0, projCoords);
   }
   if (cascadeIdx == 1) {
-    return sample_shadow_pcf(uShadowMap[1], projCoords);
+    return sample_shadow_pcf(uShadowMap1, projCoords);
   }
   if (cascadeIdx == 2) {
-    return sample_shadow_pcf(uShadowMap[2], projCoords);
+    return sample_shadow_pcf(uShadowMap2, projCoords);
   }
-  return sample_shadow_pcf(uShadowMap[3], projCoords);
+  return sample_shadow_pcf(uShadowMap3, projCoords);
 }
 
 /// Handles sample spot shadow pcf.
 float sample_spot_shadow_pcf(int shadowIdx, vec3 projCoords) {
   if (shadowIdx == 0) {
-    return sample_shadow_pcf(uSpotShadowMap[0], projCoords);
+    return sample_shadow_pcf(uSpotShadowMap0, projCoords);
   }
   if (shadowIdx == 1) {
-    return sample_shadow_pcf(uSpotShadowMap[1], projCoords);
+    return sample_shadow_pcf(uSpotShadowMap1, projCoords);
   }
   if (shadowIdx == 2) {
-    return sample_shadow_pcf(uSpotShadowMap[2], projCoords);
+    return sample_shadow_pcf(uSpotShadowMap2, projCoords);
   }
-  return sample_shadow_pcf(uSpotShadowMap[3], projCoords);
+  return sample_shadow_pcf(uSpotShadowMap3, projCoords);
 }
 
 /// Handles sample point shadow depth.
 float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
   if (shadowIdx == 0) {
-    return texture(uPointShadowMap[0], sampleVector).r;
+    return texture(uPointShadowMap0, sampleVector).r;
   }
   if (shadowIdx == 1) {
-    return texture(uPointShadowMap[1], sampleVector).r;
+    return texture(uPointShadowMap1, sampleVector).r;
   }
   if (shadowIdx == 2) {
-    return texture(uPointShadowMap[2], sampleVector).r;
+    return texture(uPointShadowMap2, sampleVector).r;
   }
-  return texture(uPointShadowMap[3], sampleVector).r;
+  return texture(uPointShadowMap3, sampleVector).r;
 }
 
 /// Handles compute directional shadow.
@@ -254,7 +248,7 @@ float compute_directional_shadow(vec3 worldPos) {
   float viewDepth = -(u_viewMatrix * vec4(worldPos, 1.0)).z;
   int cascadeIdx = SHADOW_CASCADE_COUNT - 1;
   for (int i = 0; i < SHADOW_CASCADE_COUNT; ++i) {
-    if (viewDepth < uCascadeSplit[i]) {
+    if (viewDepth < uCascadeSplits[i]) {
       cascadeIdx = i;
       break;
     }
@@ -265,9 +259,9 @@ float compute_directional_shadow(vec3 worldPos) {
   projCoords = projCoords * 0.5 + 0.5;
   float shadow = sample_directional_shadow_pcf(cascadeIdx, projCoords);
 
-  float blendRange = uCascadeSplit[cascadeIdx] * 0.1;
+  float blendRange = uCascadeSplits[cascadeIdx] * 0.1;
   if (cascadeIdx < SHADOW_CASCADE_COUNT - 1 &&
-      viewDepth > uCascadeSplit[cascadeIdx] - blendRange) {
+      viewDepth > uCascadeSplits[cascadeIdx] - blendRange) {
     vec4 nextShadowCoord =
         uShadowMatrix[cascadeIdx + 1] * vec4(worldPos, 1.0);
     vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
@@ -275,7 +269,7 @@ float compute_directional_shadow(vec3 worldPos) {
     float nextShadow =
         sample_directional_shadow_pcf(cascadeIdx + 1, nextProjCoords);
     float blendFactor =
-        (viewDepth - (uCascadeSplit[cascadeIdx] - blendRange)) / blendRange;
+        (viewDepth - (uCascadeSplits[cascadeIdx] - blendRange)) / blendRange;
     shadow = mix(shadow, nextShadow, clamp(blendFactor, 0.0, 1.0));
   }
 
@@ -289,7 +283,7 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
   }
 
   for (int s = 0; s < MAX_SPOT_SHADOW_LIGHTS; ++s) {
-    if (uSpotShadowLightIdx[s] != lightIdx) {
+    if (int(round(uSpotShadowLightIdxVec[s])) != lightIdx) {
       continue;
     }
     vec4 shadowCoord = uSpotShadowMatrix[s] * vec4(worldPos, 1.0);
@@ -308,13 +302,13 @@ float compute_point_shadow(vec3 worldPos, int lightIdx) {
   }
 
   for (int s = 0; s < MAX_POINT_SHADOW_LIGHTS; ++s) {
-    if (uPointShadowLightIdx[s] != lightIdx) {
+    if (int(round(uPointShadowLightIdxVec[s])) != lightIdx) {
       continue;
     }
 
-    vec3 fragToLight = worldPos - uPointShadowLightPos[s];
+    vec3 fragToLight = worldPos - uPointShadowPosFar[s].xyz;
     float currentDist = length(fragToLight);
-    float normalizedDist = currentDist / uPointShadowFarPlane[s];
+    float normalizedDist = currentDist / uPointShadowPosFar[s].w;
     vec3 sampleOffsets[20] = vec3[](
         vec3(1, 1, 1), vec3(1, -1, 1), vec3(-1, -1, 1),
         vec3(-1, 1, 1), vec3(1, 1, -1), vec3(1, -1, -1),
@@ -443,33 +437,34 @@ void main() {
   vec3 Lo = vec3(0.0);
 
   for (int i = 0; i < u_dirLightCount; ++i) {
-    vec3 L = normalize(-u_dirLights[i].direction);
-    vec3 radiance = u_dirLights[i].color * u_dirLights[i].intensity;
+    vec3 L = normalize(-u_dirLightDirection[i].xyz);
+    vec3 radiance = u_dirLightColorIntensity[i].rgb *
+                    u_dirLightColorIntensity[i].w;
     float shadow = (i == 0) ? compute_directional_shadow(vWorldPos) : 1.0;
     Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness, F0) *
           shadow;
   }
 
   for (int i = 0; i < u_pointLightCount; ++i) {
-    vec3 lightVec = u_pointLights[i].position - vWorldPos;
+    vec3 lightVec = u_pointLightPosRadius[i].xyz - vWorldPos;
     float dist = length(lightVec);
-    float radius = max(u_pointLights[i].radius, 0.001);
+    float radius = max(u_pointLightPosRadius[i].w, 0.001);
     if (dist > radius) {
       continue;
     }
     vec3 L = lightVec / max(dist, 0.0001);
     float atten = clamp(1.0 - (dist * dist) / (radius * radius), 0.0, 1.0);
     atten *= atten;
-    vec3 radiance = u_pointLights[i].color * u_pointLights[i].intensity *
-                    atten;
+    vec3 radiance = u_pointLightColorIntensity[i].rgb *
+                    u_pointLightColorIntensity[i].w * atten;
     Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness, F0) *
           compute_point_shadow(vWorldPos, i);
   }
 
   for (int i = 0; i < u_spotLightCount; ++i) {
-    vec3 lightVec = u_spotLights[i].position - vWorldPos;
+    vec3 lightVec = u_spotLightPosRadius[i].xyz - vWorldPos;
     float dist = length(lightVec);
-    float radius = max(u_spotLights[i].radius, 0.001);
+    float radius = max(u_spotLightPosRadius[i].w, 0.001);
     if (dist > radius) {
       continue;
     }
@@ -477,14 +472,15 @@ void main() {
     float atten = clamp(1.0 - (dist * dist) / (radius * radius), 0.0, 1.0);
     atten *= atten;
 
-    vec3 spotDir = normalize(u_spotLights[i].direction);
+    vec3 spotDir = normalize(u_spotLightDirInner[i].xyz);
     float theta = dot(L, -spotDir);
-    float epsilon = u_spotLights[i].innerCone - u_spotLights[i].outerCone;
+    float innerCone = u_spotLightDirInner[i].w;
+    float outerCone = u_spotLightParams[i].x;
+    float epsilon = innerCone - outerCone;
     float spotFactor =
-        clamp((theta - u_spotLights[i].outerCone) / max(epsilon, 0.0001),
-              0.0, 1.0);
-    vec3 radiance = u_spotLights[i].color * u_spotLights[i].intensity * atten *
-                    spotFactor;
+        clamp((theta - outerCone) / max(epsilon, 0.0001), 0.0, 1.0);
+    vec3 radiance = u_spotLightColorIntensity[i].rgb *
+                    u_spotLightColorIntensity[i].w * atten * spotFactor;
     Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness, F0) *
           compute_spot_shadow(vWorldPos, i);
   }

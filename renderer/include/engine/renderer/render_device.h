@@ -390,6 +390,12 @@ struct RenderDevice final {
       nullptr;
   void (*set_param_vec4)(ShaderParam param, const float *value) noexcept =
       nullptr;
+  // Array parameters (#138): count contiguous vec4/mat4 elements into
+  // the resolved array uniform; defined no-ops for invalid params.
+  void (*set_param_vec4_array)(ShaderParam param, const float *values,
+                               std::int32_t count) noexcept = nullptr;
+  void (*set_param_mat4_array)(ShaderParam param, const float *values,
+                               std::int32_t count) noexcept = nullptr;
   // Binds the program's named uniform block to a buffer binding slot;
   // false when the link does not expose the block (callers treat a
   // required block like a missing required parameter).
