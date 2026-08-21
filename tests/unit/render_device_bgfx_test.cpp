@@ -489,6 +489,56 @@ void test_cooked_pbr_full_variant(TestContext &t) {
   static_cast<void>(engine::core::unmount("assets"));
   fs::remove_all(tree, ec);
 }
+
+/// INSTANCED variant: the instanced sibling programs must cook, load
+/// through the production variant loader, and resolve their shared
+/// uniforms — the flush binds them for batches on backends without a
+/// runtime instancing toggle.
+void test_cooked_instanced_variant(TestContext &t) {
+  namespace fs = std::filesystem;
+  const fs::path tree =
+      fs::temp_directory_path() / "engine_bgfx_instanced_vfs";
+  std::error_code ec;
+  fs::remove_all(tree, ec);
+  fs::create_directories(tree / "shaders" / "bgfx" / "cooked", ec);
+  const fs::path src{ENGINE_TEST_COOKED_SHADER_DIR};
+  bool copied = true;
+  for (const char *name : {"gbuffer.vert.INSTANCED.spirv.bin",
+                           "gbuffer.frag.INSTANCED.spirv.bin"}) {
+    fs::copy_file(src / name, tree / "shaders" / "bgfx" / "cooked" / name,
+                  fs::copy_options::overwrite_existing, ec);
+    copied = copied && !ec;
+  }
+  t.check(copied, "INSTANCED cooked binaries staged");
+
+  t.check(engine::core::mount("assets", tree.string().c_str()),
+          "INSTANCED cooked tree mounted");
+  t.check(initialize_shader_system(),
+          "shader system initialized (INSTANCED)");
+
+  const ShaderDefine instanced{"INSTANCED", "1"};
+  ShaderVariantDesc desc{};
+  desc.vertPath = "assets/shaders/gbuffer.vert";
+  desc.fragPath = "assets/shaders/gbuffer.frag";
+  desc.defines = &instanced;
+  desc.defineCount = 1U;
+  const ShaderProgramHandle handle = load_shader_variant(desc);
+  t.check(handle.id != 0U, "INSTANCED variant links");
+
+  const RenderDevice *dev = render_device();
+  const DeviceProgramHandle prog = shader_device_program(handle);
+  t.check(prog != kInvalidDeviceProgram,
+          "INSTANCED device program published");
+  t.check(dev->shader_param(prog, "uView").valid() &&
+              dev->shader_param(prog, "uProjection").valid(),
+          "shared view/projection uniforms resolve on the variant");
+  t.check(!dev->shader_param(prog, "uModel").valid(),
+          "per-draw model uniform absent (instance stream supplies it)");
+
+  shutdown_shader_system();
+  static_cast<void>(engine::core::unmount("assets"));
+  fs::remove_all(tree, ec);
+}
 #endif // ENGINE_TEST_COOKED_SHADER_DIR
 
 /// Pure translation: exact state bits, format table, sampler flags,
@@ -578,6 +628,7 @@ int main() {
   test_cooked_programs(t);
   test_cooked_variant_stage_fallback(t);
   test_cooked_pbr_full_variant(t);
+  test_cooked_instanced_variant(t);
 #endif
   test_translation(t);
   shutdown_render_device();

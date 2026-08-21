@@ -476,6 +476,23 @@ void init_backend_lighting(BackendState &backend,
         backend.gbufferDebugShaderHandle = gbufferDebugShader;
         static_cast<void>(resolve_gbuffer_debug_program_state(backend, dev));
       }
+      // Instanced G-buffer sibling (soft-fail: batches fall back to
+      // per-command draws) — loaded only on backends without a runtime
+      // instancing toggle; uniforms resolve through the backend's
+      // global-by-name registry.
+      if (!backend.gbufUseInstancingLoc.valid() && dev->caps.instancing) {
+        const ShaderDefine instancedDefine{"INSTANCED", "1"};
+        const ShaderProgramHandle instanced = load_configured_shader_variant(
+            "gbuffer.vert", "gbuffer.frag", &instancedDefine, 1U);
+        if (instanced != kInvalidShaderProgram) {
+          backend.gbufferInstancedShaderHandle = instanced;
+          backend.gbufferInstancedProgram = shader_device_program(instanced);
+        } else {
+          core::log_message(core::LogLevel::Info, "renderer",
+                            "instanced G-buffer program unavailable — "
+                            "batches draw per command");
+        }
+      }
     } else {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "deferred shaders missing required uniforms — "
