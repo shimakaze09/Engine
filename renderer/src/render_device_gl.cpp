@@ -1725,6 +1725,14 @@ bool initialize_render_device() noexcept {
   device.caps.instancing = true;
   device.caps.uniformBlocks = true;
   device.caps.timestampQueries = true;
+  {
+    // GL 4.5 guarantees at least 16; the engine's deferred+IBL unit map
+    // tops out at 21, so report the real limit for the pass-level gate.
+    GLint maxUnits = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxUnits);
+    device.caps.maxTextureSamplers =
+        (maxUnits > 0) ? static_cast<std::uint16_t>(maxUnits) : 16U;
+  }
 
   device.create_buffer = &gl_create_buffer;
   device.update_buffer = &gl_update_buffer;

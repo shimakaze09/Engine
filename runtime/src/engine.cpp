@@ -2,6 +2,10 @@
 
 #include "engine/engine.h"
 
+#if defined(ENGINE_PLATFORM_WEB)
+#include <emscripten.h>
+#endif
+
 #include <cstddef>
 #include <cstdint>
 
@@ -192,8 +196,44 @@ bool bootstrap(const EngineConfig &config) noexcept {
 /// Returns the active engine configuration for runtime/editor systems.
 const EngineConfig &active_config() noexcept { return g_activeConfig; }
 
+#if defined(ENGINE_PLATFORM_WEB)
+namespace {
+
+/// Browser frame callback (#138 web): one engine frame per
+/// requestAnimationFrame tick, tearing the pipeline down when the loop
+/// ends (the pipeline outlives run()'s unwound stack as a static).
+void web_frame(void *arg) noexcept {
+  auto *pipeline = static_cast<EnginePipeline *>(arg);
+  if (!pipeline->execute_frame()) {
+    if (pipeline->had_fatal_error()) {
+      core::log_message(core::LogLevel::Error, "engine",
+                        "engine stopped on a fatal frame error");
+    }
+    pipeline->teardown();
+    emscripten_cancel_main_loop();
+  }
+}
+
+} // namespace
+#endif
+
 /// Runs the main loop; reports whether it stopped gracefully or fatally.
 RunResult run(std::uint32_t maxFrames) noexcept {
+#if defined(ENGINE_PLATFORM_WEB)
+  // The browser owns the loop: hand execute_frame to
+  // requestAnimationFrame and unwind out of run() (simulate_infinite
+  // unwinds via the JS event loop, so the static pipeline must own the
+  // state; frame pacing collapses into RAF).
+  static EnginePipeline pipeline;
+  if (!pipeline.initialize(maxFrames)) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "runtime pipeline initialization failed");
+    pipeline.teardown();
+    return RunResult::FatalInitialization;
+  }
+  emscripten_set_main_loop_arg(&web_frame, &pipeline, 0, 1);
+  return RunResult::Stopped; // unreachable: the call above unwinds
+#else
   EnginePipeline pipeline;
   if (!pipeline.initialize(maxFrames)) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -209,6 +249,7 @@ RunResult run(std::uint32_t maxFrames) noexcept {
                                                       : RunResult::Stopped;
   pipeline.teardown();
   return result;
+#endif
 }
 
 /// Maps a run result to the process exit code (0 only for Stopped).

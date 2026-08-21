@@ -1,6 +1,7 @@
 // Implements the soft-fail deferred-pipeline initialization (cvars,
 // G-Buffer, lighting and debug programs with their uniforms) and the
 // cascade/spot/point shadow depth programs.
+#include "command_buffer_flush_internal.h"
 #include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
 #include "command_buffer_post_resources.h"
@@ -404,9 +405,32 @@ void init_backend_lighting(BackendState &backend,
   // Load deferred rendering shaders (soft-fail: falls back to forward).
   bool deferredOk = true;
 
-  const ShaderProgramHandle gbufferShader = load_configured_shader_program(
-      "gbuffer.vert", "gbuffer.frag");
-  if (gbufferShader == kInvalidShaderProgram) {
+  // Capability gate before any deferred program exists: the deferred
+  // lighting unit map tops out at kIblBrdfLutUnit (21), and creating
+  // programs a device cannot run is not survivable everywhere (WebGL2's
+  // MRT/sampler limits fail at compile, which is fatal under bgfx).
+  {
+    const std::uint16_t requiredUnits =
+        static_cast<std::uint16_t>(kIblBrdfLutUnit + 1);
+    const std::uint16_t supported = dev->caps.maxTextureSamplers;
+    if (supported < requiredUnits) {
+      char msg[160] = {};
+      std::snprintf(msg, sizeof(msg),
+                    "deferred path unavailable: device supports %u sampler "
+                    "units, deferred lighting needs %u — forward path active",
+                    static_cast<unsigned>(supported),
+                    static_cast<unsigned>(requiredUnits));
+      core::log_message(core::LogLevel::Info, "renderer", msg);
+      deferredOk = false;
+    }
+  }
+
+  ShaderProgramHandle gbufferShader{};
+  if (deferredOk) {
+    gbufferShader = load_configured_shader_program(
+        "gbuffer.vert", "gbuffer.frag");
+  }
+  if (deferredOk && (gbufferShader == kInvalidShaderProgram)) {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "G-Buffer shader not available — deferred path disabled");
     deferredOk = false;

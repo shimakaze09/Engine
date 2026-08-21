@@ -425,6 +425,10 @@ void *platform_native_window_handle() noexcept {
   if ((g_window == nullptr) || g_headless) {
     return nullptr;
   }
+#if defined(ENGINE_PLATFORM_WEB)
+  // Emscripten: bgfx takes the canvas CSS selector as the window handle.
+  return const_cast<char *>("#canvas");
+#else
   const SDL_PropertiesID props = SDL_GetWindowProperties(g_window);
 #if defined(_WIN32)
   return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER,
@@ -442,6 +446,7 @@ void *platform_native_window_handle() noexcept {
   const Sint64 xid =
       SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
   return reinterpret_cast<void *>(static_cast<std::uintptr_t>(xid));
+#endif
 #endif
 }
 

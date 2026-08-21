@@ -28,6 +28,104 @@ bool has_shader_magic(const void *data, std::ptrdiff_t size,
   return (bytes[0] == kind) && (bytes[1] == 'S') && (bytes[2] == 'H');
 }
 
+/// Names bgfx reserves for predefined uniforms; the cook rejects them in
+/// engine shaders, and the sidecar walk skips them the way bgfx's own
+/// container parse does.
+bool is_predefined_uniform_name(const char *name) noexcept {
+  static constexpr const char *kPredefined[] = {
+      "u_viewRect",    "u_viewTexel", "u_view",          "u_invView",
+      "u_proj",        "u_invProj",   "u_viewProj",      "u_invViewProj",
+      "u_model",       "u_modelView", "u_modelViewProj", "u_alphaRef4",
+  };
+  for (const char *candidate : kPredefined) {
+    if (std::strcmp(name, candidate) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Walks a cooked shader binary's uniform table on the CPU and merges
+/// its entries into the program's parameter table (deduplicated by
+/// name). This is how the spirv sidecars donate uniform metadata for
+/// glsl/essl programs: the sidecar must never reach bgfx::createShader,
+/// because the GL backend would queue a real GL compile of the SPIR-V
+/// blob and fatal at the next frame.
+void collect_sidecar_params(const void *data, std::ptrdiff_t size,
+                            BgfxProgramRecord *record) noexcept {
+  const auto *bytes = static_cast<const std::uint8_t *>(data);
+  const auto total = static_cast<std::size_t>(size);
+  // Container: magic('x','S','H',version), hashIn u32, hashOut u32
+  // (version >= 6), then u16 count of table entries.
+  if (total < 4U) {
+    return;
+  }
+  const std::uint8_t version = bytes[3];
+  std::size_t off = 4U + 4U + ((version >= 6U) ? 4U : 0U);
+  if ((off + 2U) > total) {
+    return;
+  }
+  std::uint16_t count = 0U;
+  std::memcpy(&count, bytes + off, sizeof(count));
+  off += 2U;
+  for (std::uint16_t i = 0U; i < count; ++i) {
+    if ((off + 1U) > total) {
+      return;
+    }
+    const std::uint8_t nameSize = bytes[off];
+    off += 1U;
+    // Entry tail: type u8, num u8, regIndex u16, regCount u16, then
+    // texComponent+texDimension (version >= 8) and texFormat u16
+    // (version >= 10).
+    const std::size_t tailSize =
+        6U + ((version >= 8U) ? 2U : 0U) + ((version >= 10U) ? 2U : 0U);
+    if ((off + nameSize + tailSize) > total) {
+      return;
+    }
+    char name[kMaxParamNameLength] = {};
+    const std::size_t copyLen =
+        (nameSize < (kMaxParamNameLength - 1U)) ? nameSize
+                                                : (kMaxParamNameLength - 1U);
+    std::memcpy(name, bytes + off, copyLen);
+    off += nameSize;
+    const std::uint8_t rawType = bytes[off];
+    const std::uint8_t num = bytes[off + 1U];
+    off += tailSize;
+    // Low nibble is the bgfx::UniformType; 0x10/0x20/0x40/0x80 are the
+    // fragment/sampler/read-only/compare bits. End entries are spirv
+    // descriptor-binding records, not settable uniforms.
+    const auto baseType =
+        static_cast<bgfx::UniformType::Enum>(rawType & 0x0FU);
+    if ((baseType == bgfx::UniformType::End) ||
+        is_predefined_uniform_name(name)) {
+      continue;
+    }
+    bool duplicate = false;
+    for (std::uint16_t existing = 0U; existing < record->paramCount;
+         ++existing) {
+      if (std::strncmp(record->params[existing].name, name,
+                       kMaxParamNameLength) == 0) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      continue;
+    }
+    if (record->paramCount >= kMaxProgramParams) {
+      drop_operation("create_program_binary_introspected: table full");
+      return;
+    }
+    BgfxParamRecord &param = record->params[record->paramCount];
+    core::copy_string(param.name, kMaxParamNameLength, name);
+    param.handle = BGFX_INVALID_HANDLE;
+    param.type = baseType;
+    param.declaredNum = (num > 0U) ? num : 1U;
+    param.samplerStage = -1;
+    ++record->paramCount;
+  }
+}
+
 /// Copies a shader's introspected uniforms into the program's parameter
 /// table, deduplicating by name across the vertex/fragment stages.
 void collect_shader_params(bgfx::ShaderHandle shader,
@@ -149,13 +247,19 @@ void apply_program_samplers(const BgfxProgramRecord &program) noexcept {
 }
 
 const char *bgfx_cooked_program_profile() noexcept {
-  // spirv is canonical: its binaries embed the uniform table this
-  // backend's parameter resolution reads (getShaderUniforms), and it is
-  // the Vulkan flavor Phase D targets first. GLSL-family flavors carry
-  // no embedded uniforms (bgfx's GL renderer introspects at link), so
-  // selecting them requires a different resolution path — recorded for
-  // the Phase D renderer-type switch.
-  return "spirv";
+  // Selected by the live renderer. GLSL-family flavors carry no
+  // embedded uniform table, so their programs link through the
+  // introspected entry with spirv sidecars.
+  switch (bgfx::getRendererType()) {
+  case bgfx::RendererType::OpenGLES:
+    return "essl";
+  case bgfx::RendererType::OpenGL:
+    return "glsl";
+  case bgfx::RendererType::Metal:
+    return "metal";
+  default:
+    return "spirv";
+  }
 }
 
 DeviceProgramHandle bgfx_create_program(const char *, const char *) noexcept {
@@ -217,6 +321,72 @@ DeviceProgramHandle bgfx_create_program_binary(
   return DeviceProgramHandle{value};
 }
 
+DeviceProgramHandle bgfx_create_program_binary_introspected(
+    const void *vertexData, std::ptrdiff_t vertexSize,
+    const void *fragmentData, std::ptrdiff_t fragmentSize,
+    const void *vertexMeta, std::ptrdiff_t vertexMetaSize,
+    const void *fragmentMeta, std::ptrdiff_t fragmentMetaSize) noexcept {
+  if ((vertexMeta == nullptr) || (fragmentMeta == nullptr)) {
+    return bgfx_create_program_binary(vertexData, vertexSize, fragmentData,
+                                      fragmentSize);
+  }
+  if (!has_shader_magic(vertexData, vertexSize, 'V') ||
+      !has_shader_magic(fragmentData, fragmentSize, 'F') ||
+      !has_shader_magic(vertexMeta, vertexMetaSize, 'V') ||
+      !has_shader_magic(fragmentMeta, fragmentMetaSize, 'F')) {
+    core::log_message(core::LogLevel::Error, "render_device",
+                      "create_program_binary_introspected: not cooked "
+                      "bgfx shader binaries");
+    return kInvalidDeviceProgram;
+  }
+
+  // The sidecars exist only to donate their embedded uniform tables,
+  // parsed on the CPU: the names/types/array counts re-create as
+  // backend-owned uniforms (stable refs). The sidecar bytes never reach
+  // bgfx::createShader — a GL device would queue a real compile of the
+  // SPIR-V blob and hit a fatal at the next frame.
+  BgfxProgramRecord record{};
+  collect_sidecar_params(vertexMeta, vertexMetaSize, &record);
+  collect_sidecar_params(fragmentMeta, fragmentMetaSize, &record);
+  for (std::uint16_t i = 0U; i < record.paramCount; ++i) {
+    record.params[i].handle =
+        bgfx::createUniform(record.params[i].name, record.params[i].type,
+                            record.params[i].declaredNum);
+  }
+  record.ownsUniforms = true;
+
+  const bgfx::ShaderHandle vertex = bgfx::createShader(
+      bgfx::copy(vertexData, static_cast<std::uint32_t>(vertexSize)));
+  if (!bgfx::isValid(vertex)) {
+    core::log_message(core::LogLevel::Error, "render_device",
+                      "create_program_binary_introspected: vertex shader "
+                      "rejected");
+    return kInvalidDeviceProgram;
+  }
+  const bgfx::ShaderHandle fragment = bgfx::createShader(
+      bgfx::copy(fragmentData, static_cast<std::uint32_t>(fragmentSize)));
+  if (!bgfx::isValid(fragment)) {
+    bgfx::destroy(vertex);
+    core::log_message(core::LogLevel::Error, "render_device",
+                      "create_program_binary_introspected: fragment "
+                      "shader rejected");
+    return kInvalidDeviceProgram;
+  }
+  record.handle = bgfx::createProgram(vertex, fragment, true);
+  if (!bgfx::isValid(record.handle)) {
+    core::log_message(core::LogLevel::Error, "render_device",
+                      "create_program_binary_introspected: link failed");
+    return kInvalidDeviceProgram;
+  }
+  const std::uint32_t value = device_context().programs.allocate(record);
+  if (value == 0U) {
+    bgfx::destroy(record.handle);
+    drop_operation("create_program_binary_introspected: table full");
+    return kInvalidDeviceProgram;
+  }
+  return DeviceProgramHandle{value};
+}
+
 void bgfx_destroy_program(DeviceProgramHandle program) noexcept {
   if (program.value == 0U) {
     return;
@@ -228,6 +398,13 @@ void bgfx_destroy_program(DeviceProgramHandle program) noexcept {
   }
   if (ctx.currentProgram == program.value) {
     ctx.currentProgram = 0U;
+  }
+  if (record->ownsUniforms) {
+    for (std::uint16_t i = 0U; i < record->paramCount; ++i) {
+      if (bgfx::isValid(record->params[i].handle)) {
+        bgfx::destroy(record->params[i].handle);
+      }
+    }
   }
   bgfx::destroy(record->handle);
   ctx.programs.release(program.value);

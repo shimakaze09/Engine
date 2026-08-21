@@ -306,6 +306,10 @@ struct DeviceCaps final {
   bool uniformBlocks = false;   // uniform buffers + program block binding
   bool timestampQueries = false;
   bool cookedPrograms = false;  // create_program_binary from cooked shaders
+  // Fragment sampler units the device actually supports; passes whose
+  // unit map exceeds this must fall back (WebGL2's floor is 16 while the
+  // deferred+IBL vocabulary tops out at unit 21).
+  std::uint16_t maxTextureSamplers = 16U;
 };
 
 /// Counters for dropped invalid-handle/invalid-argument operations; a
@@ -368,6 +372,15 @@ struct RenderDevice final {
   // the cooked shader flavor this backend consumes; pairs with
   // caps.cookedPrograms.
   const char *(*cooked_program_profile)() noexcept = nullptr;
+  // GLSL-family cooked binaries carry no embedded uniform table; when
+  // this entry is set the loader passes the program's spirv siblings as
+  // introspection sidecars alongside the consumable binaries (#138).
+  DeviceProgramHandle (*create_program_binary_introspected)(
+      const void *vertexData, std::ptrdiff_t vertexSize,
+      const void *fragmentData, std::ptrdiff_t fragmentSize,
+      const void *vertexMeta, std::ptrdiff_t vertexMetaSize,
+      const void *fragmentMeta, std::ptrdiff_t fragmentMetaSize) noexcept =
+      nullptr;
   void (*destroy_program)(DeviceProgramHandle program) noexcept = nullptr;
   // Makes the program current for subsequent set_param_*/draw calls; an
   // invalid handle unbinds.

@@ -65,7 +65,7 @@ if(NOT ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_VALID_PLATFORMS)
         "Choose one of: Win64 Linux macOS Android iOS Web")
 endif()
 
-set(_ENGINE_UNIMPLEMENTED_PLATFORMS Android iOS Web)
+set(_ENGINE_UNIMPLEMENTED_PLATFORMS Android iOS)
 if(ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_UNIMPLEMENTED_PLATFORMS)
     message(FATAL_ERROR
         "ENGINE_TARGET_PLATFORM='${ENGINE_TARGET_PLATFORM}' has no toolchain, "
@@ -74,7 +74,35 @@ if(ENGINE_TARGET_PLATFORM IN_LIST _ENGINE_UNIMPLEMENTED_PLATFORMS)
         "roadmap. Configuring for it would pass this check and then fail "
         "later during dependency discovery, compilation, or linking instead "
         "of here with a clear reason. Supported targets today: Win64, "
-        "Linux, macOS (macOS is a build + headless-test lane only).")
+        "Linux, macOS (build + headless-test lane), Web (Emscripten).")
+endif()
+
+# Web (#138): requires the Emscripten toolchain (emcmake) and the bgfx
+# backend — the runtime ships as wasm with the share-ready HTML shell;
+# tests/tools stay host-side.
+if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
+    if(NOT EMSCRIPTEN)
+        message(FATAL_ERROR
+            "ENGINE_TARGET_PLATFORM=Web requires the Emscripten toolchain: "
+            "configure through 'emcmake cmake ...' (emsdk).")
+    endif()
+    if(NOT ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
+        message(FATAL_ERROR
+            "ENGINE_TARGET_PLATFORM=Web requires ENGINE_RENDERER_BACKEND="
+            "bgfx (the GL backend needs desktop OpenGL 4.5).")
+    endif()
+    # wasm SIMD: bx compiles with -msse4.2 (Emscripten emulates the
+    # intrinsics but requires the companion flag), and the engine's own
+    # SSE2 math paths ride the same emulation.
+    add_compile_options(-msimd128)
+    # Threads for the job system (hosting needs COOP/COEP headers for
+    # SharedArrayBuffer), growable memory, and a strict WebGL2 context
+    # for bgfx.
+    add_compile_options(-pthread)
+    add_link_options(-pthread "-sPTHREAD_POOL_SIZE=8"
+        "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=268435456"
+        "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2"
+        "-sSTACK_SIZE=1048576")
 endif()
 
 if(NOT CMAKE_CROSSCOMPILING AND NOT ENGINE_TARGET_PLATFORM STREQUAL _ENGINE_HOST_PLATFORM)
@@ -129,7 +157,16 @@ if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     set(BGFX_CONFIG_MAX_TEXTURE_SAMPLERS 32 CACHE STRING
         "bgfx sampler stages (engine deferred pass needs units up to 21)"
         FORCE)
-    set(BGFX_BUILD_TOOLS ON CACHE BOOL "bgfx shaderc/tools" FORCE)
+    # shaderc is a host tool; wasm builds consume host-cooked binaries.
+    if(EMSCRIPTEN)
+        set(BGFX_BUILD_TOOLS OFF CACHE BOOL "bgfx shaderc/tools" FORCE)
+        # bgfx defaults browser GL contexts to ES 2.0 (WebGL1); the cooked
+        # essl shaders are 300_es, so require a WebGL2 context.
+        set(BGFX_OPENGLES_VERSION 30 CACHE STRING
+            "bgfx minimum GLES context version (WebGL2)" FORCE)
+    else()
+        set(BGFX_BUILD_TOOLS ON CACHE BOOL "bgfx shaderc/tools" FORCE)
+    endif()
     set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "bgfx examples" FORCE)
     set(BGFX_INSTALL OFF CACHE BOOL "bgfx install rules" FORCE)
     set(BGFX_AMALGAMATED OFF CACHE BOOL "bgfx amalgamated build" FORCE)
@@ -153,6 +190,11 @@ if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     if(NOT TARGET bgfx)
         message(FATAL_ERROR "bgfx backend requested but the bgfx target was "
                             "not created by the fetched superproject.")
+    endif()
+    # The texture ENCODER uses real x86 intrinsics and only texturec (a
+    # host tool) links it; keep it out of wasm builds.
+    if(EMSCRIPTEN AND TARGET bimg_encode)
+        set_target_properties(bimg_encode PROPERTIES EXCLUDE_FROM_ALL TRUE)
     endif()
 endif()
 
