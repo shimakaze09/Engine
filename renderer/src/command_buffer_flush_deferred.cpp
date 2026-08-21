@@ -202,7 +202,12 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                                       boundMaterialTex);
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
+        // Instanced batching requires the shader's instancing toggle
+        // (#138: the bgfx ports have none until the instancing unit
+        // lands its variant selection — those draws take the correct
+        // per-command path below instead).
         if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
+            backend.gbufUseInstancingLoc.valid() &&
             upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                      batch)) {
           if (backend.gbufUseInstancingLoc.valid()) {

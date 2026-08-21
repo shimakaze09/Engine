@@ -270,8 +270,13 @@ directory-global by design.
   per submit (GL last-write-wins semantics), vertex buffers realized at
   their attachment's stride (bgfx rejects stride overrides), and a
   backend-owned 3-vertex stream standing in for gl_VertexID fullscreen
-  draws; forward shadows/IBL sampling and instanced foliage defer to
-  their units (GL texture units 6-21 exceed bgfx's 16-sampler budget);
+  draws; the deferred path also renders under bgfx (gbuffer MRT +
+  tile/light-data texelFetch lighting cooked; the build sets
+  BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 so the engine's unit map up to 21
+  fits — WebGL2's 16-unit floor is the web-export unit's recorded
+  concern); shadow/IBL sampling, instanced batching (both backends'
+  flushes gate instancing on the shader toggle's presence), and SKINNED
+  variants defer to their units;
   programs link only from the Phase C shaderc cook's binaries via
   `create_program_binary` + `caps.cookedPrograms` — spirv is the
   canonical profile because GLSL-flavor binaries embed no uniform
