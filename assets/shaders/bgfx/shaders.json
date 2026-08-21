@@ -6,6 +6,7 @@
     { "source": "pbr.vs.sc", "type": "vertex", "output": "pbr.vert", "variants": [[]] },
     { "source": "pbr.fs.sc", "type": "fragment", "output": "pbr.frag", "variants": [[]] },
     { "source": "gbuffer.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [[]] },
+    { "source": "gbuffer_skinned.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [["SKINNED"]] },
     { "source": "gbuffer.fs.sc", "type": "fragment", "output": "gbuffer.frag", "variants": [[]] },
     { "source": "gbuffer_debug.fs.sc", "type": "fragment", "output": "gbuffer_debug.frag", "variants": [[]] },
     { "source": "deferred_lighting.fs.sc", "type": "fragment", "output": "deferred_lighting.frag", "variants": [[]] },
@@ -28,6 +29,7 @@
     { "source": "irradiance_convolution.fs.sc", "type": "fragment", "output": "irradiance_convolution.frag", "variants": [[]] },
     { "source": "prefilter_environment.fs.sc", "type": "fragment", "output": "prefilter_environment.frag", "variants": [[]] },
     { "source": "shadow_depth.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [[]] },
+    { "source": "shadow_depth_skinned.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [["SKINNED"]] },
     { "source": "shadow_depth.fs.sc", "type": "fragment", "output": "shadow_depth.frag", "variants": [[]] },
     { "source": "shadow_depth_point.vs.sc", "type": "vertex", "output": "shadow_depth_point.vert", "variants": [[]] },
     { "source": "shadow_depth_point.fs.sc", "type": "fragment", "output": "shadow_depth_point.frag", "variants": [[]] }

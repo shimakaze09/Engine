@@ -398,6 +398,29 @@ bool build_cooked_shader_path(const char *sourcePath,
 /// them via create_program_binary. Invalid when the backend does not
 /// consume cooked programs or a binary is missing (the caller falls
 /// back to source compilation).
+/// Reads one stage's cooked binary for a variant, falling back to the
+/// "default" (no-define) cook when the flagged binary does not exist —
+/// the manifest only cooks a variant for the stages its defines touch
+/// (e.g. SKINNED changes the vertex stage; the fragment stage is the
+/// default binary).
+bool read_cooked_stage(const char *sourcePath,
+                       const ShaderDefineCopy *defines,
+                       std::size_t defineCount, const char *profile,
+                       void **outData, std::size_t *outSize) noexcept {
+  char path[kMaxPathLength * 2U] = {};
+  if (build_cooked_shader_path(sourcePath, defines, defineCount, profile,
+                               path, sizeof(path)) &&
+      core::vfs_read_binary(path, outData, outSize)) {
+    return true;
+  }
+  if (defineCount == 0U) {
+    return false;
+  }
+  return build_cooked_shader_path(sourcePath, nullptr, 0U, profile, path,
+                                  sizeof(path)) &&
+         core::vfs_read_binary(path, outData, outSize);
+}
+
 DeviceProgramHandle try_cooked_program(const char *vertPath,
                                        const char *fragPath,
                                        const ShaderDefineCopy *defines,
@@ -409,22 +432,16 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
     return kInvalidDeviceProgram;
   }
   const char *profile = dev->cooked_program_profile();
-  char vertBin[kMaxPathLength * 2U] = {};
-  char fragBin[kMaxPathLength * 2U] = {};
-  if (!build_cooked_shader_path(vertPath, defines, defineCount, profile,
-                                vertBin, sizeof(vertBin)) ||
-      !build_cooked_shader_path(fragPath, defines, defineCount, profile,
-                                fragBin, sizeof(fragBin))) {
-    return kInvalidDeviceProgram;
-  }
   void *vertData = nullptr;
   std::size_t vertSize = 0U;
-  if (!core::vfs_read_binary(vertBin, &vertData, &vertSize)) {
+  if (!read_cooked_stage(vertPath, defines, defineCount, profile, &vertData,
+                         &vertSize)) {
     return kInvalidDeviceProgram;
   }
   void *fragData = nullptr;
   std::size_t fragSize = 0U;
-  if (!core::vfs_read_binary(fragBin, &fragData, &fragSize)) {
+  if (!read_cooked_stage(fragPath, defines, defineCount, profile, &fragData,
+                         &fragSize)) {
     core::vfs_free(vertData);
     return kInvalidDeviceProgram;
   }

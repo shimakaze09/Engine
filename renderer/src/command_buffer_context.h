@@ -23,7 +23,6 @@ inline constexpr std::size_t kForwardMaxSpotLights = 8U;
 
 /// Uniform-buffer binding index shared by every skinned shader variant's
 /// BonePalette block.
-inline constexpr std::uint32_t kBonePaletteUboBinding = 0U;
 
 /// Stores per-instance attributes uploaded for static mesh instancing.
 struct InstanceAttributes final {
@@ -456,8 +455,13 @@ struct BackendState final {
   // lastUploadedBonePalette dedupes uploads within one flush (palette
   // contents are per-frame, so flush start resets it to invalid).
   bool skinningAvailable = false;
-  DeviceBufferHandle bonePaletteUbo{};
-  std::uint32_t lastUploadedBonePalette = 0xFFFFFFFFU;
+  // #138: palettes upload as plain mat4 arrays (set_param_mat4_array) —
+  // per-program uniform state, so each skinned program caches its last
+  // palette separately.
+  ShaderParam gbufSkinnedBonesParam{};   // mat4[kMaxSkinPaletteJoints]
+  ShaderParam shadowSkinnedBonesParam{}; // mat4[kMaxSkinPaletteJoints]
+  std::uint32_t lastGbufferBonePalette = 0xFFFFFFFFU;
+  std::uint32_t lastShadowBonePalette = 0xFFFFFFFFU;
 
   ShaderProgramHandle gbufferSkinnedShaderHandle{};
   DeviceProgramHandle gbufferSkinnedProgram{};

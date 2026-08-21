@@ -94,7 +94,8 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   RendererFrameStats frameStats{};
-  backend.lastUploadedBonePalette = 0xFFFFFFFFU;
+  backend.lastGbufferBonePalette = 0xFFFFFFFFU;
+  backend.lastShadowBonePalette = 0xFFFFFFFFU;
   gpu_profiler_begin_frame();
 
   int drawableWidth = 1280;
