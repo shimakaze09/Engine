@@ -144,6 +144,12 @@ void refresh_backend_program_state(BackendState &backend,
   }
 
   static_cast<void>(resolve_default_program_state(backend, dev));
+  // Instanced siblings cache no parameters (global-registry tokens);
+  // refresh only re-reads their device programs.
+  backend.pbrInstancedProgram =
+      shader_device_program(backend.pbrInstancedShaderHandle);
+  backend.gbufferInstancedProgram =
+      shader_device_program(backend.gbufferInstancedShaderHandle);
   if (!resolve_pbr_program_state(backend, dev)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "required PBR uniforms missing after shader reload");
@@ -421,6 +427,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->gbufferShaderHandle);
     backend->gbufferShaderHandle = ShaderProgramHandle{};
   }
+  if (backend->gbufferInstancedShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->gbufferInstancedShaderHandle);
+    backend->gbufferInstancedShaderHandle = ShaderProgramHandle{};
+  }
+  backend->gbufferInstancedProgram = kInvalidDeviceProgram;
   backend->deferredAvailable = false;
 
   if (backend->fxaaShaderHandle != kInvalidShaderProgram) {
@@ -439,6 +450,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     destroy_shader_program(backend->pbrShaderHandle);
     backend->pbrShaderHandle = ShaderProgramHandle{};
   }
+  if (backend->pbrInstancedShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->pbrInstancedShaderHandle);
+    backend->pbrInstancedShaderHandle = ShaderProgramHandle{};
+  }
+  backend->pbrInstancedProgram = kInvalidDeviceProgram;
   if (backend->defaultShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->defaultShaderHandle);
     backend->defaultShaderHandle = ShaderProgramHandle{};

@@ -202,15 +202,20 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                                       boundMaterialTex);
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
-        // Instanced batching requires the shader's instancing toggle
-        // (#138: the bgfx ports have none until the instancing unit
-        // lands its variant selection — those draws take the correct
-        // per-command path below instead).
+        // Instanced batching runs through the shader's runtime toggle
+        // (GL) or the INSTANCED sibling program (bgfx, whose ports
+        // carry no toggle); with neither, batches take the correct
+        // per-command path below.
+        const bool instancedViaProgram =
+            !backend.gbufUseInstancingLoc.valid() &&
+            (backend.gbufferInstancedProgram != kInvalidDeviceProgram);
         if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
-            backend.gbufUseInstancingLoc.valid() &&
+            (backend.gbufUseInstancingLoc.valid() || instancedViaProgram) &&
             upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                      batch)) {
-          if (backend.gbufUseInstancingLoc.valid()) {
+          if (instancedViaProgram) {
+            dev->bind_program(backend.gbufferInstancedProgram);
+          } else {
             dev->set_param_i32(backend.gbufUseInstancingLoc, 1);
           }
           ++frameStats.drawCalls;
@@ -219,6 +224,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           dev->draw_indexed_instanced(
               mesh->geometry, static_cast<std::int32_t>(mesh->indexCount),
               static_cast<std::int32_t>(batch.count));
+          if (instancedViaProgram) {
+            dev->bind_program(backend.gbufferProgram);
+          }
           continue;
         }
 

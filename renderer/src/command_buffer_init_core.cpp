@@ -339,6 +339,28 @@ bool init_backend_core(BackendState &backend) noexcept {
     return false;
   }
 
+  // Instanced forward sibling (soft-fail: batches fall back to
+  // per-command draws). Only backends without a runtime instancing
+  // toggle load it — the bgfx vertex ports carry no uUseInstancing, so
+  // instanced batches bind this program instead; its uniforms resolve
+  // through the backend's global-by-name registry, so no separate
+  // parameter family exists.
+  if (!backend.pbrUseInstancingLocation.valid() && dev->caps.instancing) {
+    const ShaderDefine instancedDefines[2] = {{"INSTANCED", "1"},
+                                              {"PBR_FULL", "1"}};
+    const std::size_t instancedDefineCount = forwardFullSamplers ? 2U : 1U;
+    const ShaderProgramHandle instanced = load_configured_shader_variant(
+        "pbr.vert", "pbr.frag", instancedDefines, instancedDefineCount);
+    if (instanced != kInvalidShaderProgram) {
+      backend.pbrInstancedShaderHandle = instanced;
+      backend.pbrInstancedProgram = shader_device_program(instanced);
+    } else {
+      core::log_message(core::LogLevel::Info, "renderer",
+                        "instanced PBR program unavailable — batches "
+                        "draw per command");
+    }
+  }
+
   // Load tonemap shader.
   const ShaderProgramHandle tonemapShaderHandle = load_configured_shader_program(
       "fullscreen.vert", "tonemap.frag");

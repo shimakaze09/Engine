@@ -59,6 +59,12 @@ struct BackendState final {
   // PBR shader.
   ShaderProgramHandle pbrShaderHandle{};
   DeviceProgramHandle pbrProgram{};
+  // Instanced sibling (INSTANCED vertex variant): loaded only on
+  // backends without a runtime instancing toggle (bgfx); batches bind
+  // it instead of setting uUseInstancing. Uniform values carry over
+  // through the backend's global-by-name registry.
+  ShaderProgramHandle pbrInstancedShaderHandle{};
+  DeviceProgramHandle pbrInstancedProgram{};
 
   // PBR uniform locations.
   ShaderParam pbrModelLocation{};
@@ -219,6 +225,9 @@ struct BackendState final {
   // G-Buffer shader.
   ShaderProgramHandle gbufferShaderHandle{};
   DeviceProgramHandle gbufferProgram{};
+  // Instanced sibling; same selection rule as pbrInstancedProgram.
+  ShaderProgramHandle gbufferInstancedShaderHandle{};
+  DeviceProgramHandle gbufferInstancedProgram{};
   ShaderParam gbufModelLoc{};
   ShaderParam gbufViewLoc{};
   ShaderParam gbufProjectionLoc{};
