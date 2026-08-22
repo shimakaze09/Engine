@@ -143,6 +143,10 @@ bool resolve_shadow_depth_skinned_program_state(
 bool resolve_fxaa_program_state(BackendState &backend,
                                 const RenderDevice *dev) noexcept;
 
+/// Player-mode present blit program (r_present_scene, #138).
+bool resolve_present_blit_program_state(BackendState &backend,
+                                        const RenderDevice *dev) noexcept;
+
 /// The three bloom programs (threshold, downsample, upsample).
 bool resolve_bloom_program_state(BackendState &backend,
                                  const RenderDevice *dev) noexcept;

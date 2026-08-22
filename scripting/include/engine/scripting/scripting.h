@@ -119,6 +119,10 @@ bool pending_scene_op_is_new() noexcept;
 const char *get_pending_scene_path() noexcept;
 /// Drops the pending scene op without applying it.
 void clear_pending_scene_op() noexcept;
+/// Queues a scene load exactly like Lua's engine.load_scene (player mode
+/// boots the configured startup scene through the same transition path);
+/// false when the path fails jail/length validation.
+bool request_scene_load(const char *path) noexcept;
 
 // Begin watching a Lua script file for changes (hot-reload).
 void watch_script_file(const char *path) noexcept;

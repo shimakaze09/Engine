@@ -271,6 +271,27 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
   dev->apply_render_state(RenderState{DepthTest::Less, true,
                                       BlendMode::Disabled, CullMode::Back});
+
+  // Player mode (#138): no editor overlay follows, so the final image is
+  // drawn onto the back buffer here (FXAA pings back into sceneColor;
+  // otherwise the tonemapped LDR target is current).
+  if (core::cvar_get_bool("r_present_scene", false) &&
+      (backend.presentBlitProgram != kInvalidDeviceProgram)) {
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
+    dev->bind_program(backend.presentBlitProgram);
+    const DeviceTextureHandle finalTexture =
+        renderer_context().fxaaAppliedThisFrame
+            ? pass_resource_texture(passRes.sceneColor)
+            : pass_resource_texture(passRes.finalColor);
+    dev->bind_texture_slot(0U, finalTexture);
+    if (backend.presentBlitInputLoc.valid()) {
+      dev->set_param_i32(backend.presentBlitInputLoc, 0);
+    }
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
+  }
 }
 
 } // namespace engine::renderer

@@ -680,6 +680,16 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   previousAliveCount = world->alive_entity_count();
   core::reset_engine_stats();
 
+  // Player mode (#138): boot the configured startup scene through the
+  // deferred transition engine.load_scene uses — a failed load logs and
+  // keeps the bootstrap scene rather than corrupting the run.
+  if (active_config().playerMode) {
+    const char *scenePath = active_config().editorScenePath;
+    if ((scenePath != nullptr) && (scenePath[0] != '\0')) {
+      static_cast<void>(scripting::request_scene_load(scenePath));
+    }
+  }
+
   return true;
 }
 
@@ -1668,6 +1678,10 @@ bool EnginePipeline::execute_frame() noexcept {
 
 bool EnginePipeline::had_fatal_error() const noexcept {
   return m_impl && m_impl->fatalError;
+}
+
+runtime::World *EnginePipeline::world() noexcept {
+  return m_impl ? m_impl->world.get() : nullptr;
 }
 
 void EnginePipeline::teardown() noexcept {

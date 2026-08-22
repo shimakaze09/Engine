@@ -26,6 +26,12 @@
   <script>
     var Module = {
       canvas: document.getElementById('canvas'),
+      // Shared links play the creation; ?edit boots the full editor.
+      preRun: [function () {
+        if (!/[?&]edit(=|&|$)/.test(location.search)) {
+          Module.ENV.ENGINE_PLAYER = '1';
+        }
+      }],
       setStatus: function (text) {
         var m = /\((\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\)/.exec(text);
         if (m) {

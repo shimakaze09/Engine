@@ -157,6 +157,13 @@ struct BackendState final {
   ShaderParam fxaaInputTextureLocation{};
   ShaderParam fxaaTexelSizeLocation{};
 
+  // Present blit: player mode's final-image draw to the back buffer
+  // (r_present_scene, #138) — the editor overlay otherwise carries the
+  // scene texture to the swapchain.
+  ShaderProgramHandle presentBlitShaderHandle{};
+  DeviceProgramHandle presentBlitProgram{};
+  ShaderParam presentBlitInputLoc{};
+
   // Attribute-less geometry for fullscreen triangles.
   DeviceGeometryHandle emptyGeometry{};
   // 1x1 fallbacks bound to disabled sampler slots: Vulkan-family
