@@ -242,12 +242,12 @@ void draw_toolbar() noexcept {
 
   // One-shot automation hook: ENGINE_EDITOR_AUTOPLAY=1 enters play mode on
   // the first eligible frame (scripted verification runs use it; interactive
-  // sessions never set the variable).
-  static bool autoplayConsumed = false;
-  if (!autoplayConsumed && canPlay &&
+  // sessions never set the variable). The latch lives on the session
+  // (#249) so a later editor session in the same process re-arms.
+  if (!editor_session().autoplayConsumed && canPlay &&
       (editor_session().playState == PlayState::Stopped)) {
     const char *autoplay = core::non_empty_env("ENGINE_EDITOR_AUTOPLAY");
-    autoplayConsumed = true;
+    editor_session().autoplayConsumed = true;
     if ((autoplay != nullptr) && (autoplay[0] == '1')) {
       start_play_mode();
     }
