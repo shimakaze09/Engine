@@ -18,7 +18,9 @@ namespace engine::renderer {
 
 namespace {
 
-/// Square Depth24 shadow texture (linear filtering, as the samplers expect).
+/// Square Depth24 shadow texture. Point sampling: the shaders take their
+/// own PCF taps and compare depths explicitly, and WebGL2 treats
+/// linear-filtered depth textures as incomplete (all-zero samples, #293).
 DeviceTextureHandle create_shadow_depth_texture(const RenderDevice *dev,
                                                 int resolution) noexcept {
   if ((dev == nullptr) || (dev->create_texture == nullptr)) {
@@ -29,7 +31,7 @@ DeviceTextureHandle create_shadow_depth_texture(const RenderDevice *dev,
   desc.format = TextureFormat::Depth24;
   desc.width = resolution;
   desc.height = resolution;
-  desc.filter = TextureFilter::Linear;
+  desc.filter = TextureFilter::Nearest;
   desc.wrap = TextureWrap::Repeat;
   return dev->create_texture(desc);
 }
@@ -434,7 +436,7 @@ bool initialize_point_shadow_maps(PointShadowState &state) noexcept {
     cubeDesc.kind = TextureKind::Cube;
     cubeDesc.format = TextureFormat::Depth24;
     cubeDesc.width = kPointShadowMapResolution;
-    cubeDesc.filter = TextureFilter::Linear;
+    cubeDesc.filter = TextureFilter::Nearest;
     cubeDesc.wrap = TextureWrap::ClampEdge;
     state.slots[i].depthCubemap = dev->create_texture(cubeDesc);
     if (state.slots[i].depthCubemap == kInvalidDeviceTexture) {

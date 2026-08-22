@@ -134,7 +134,11 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     desc.height = h32;
     desc.filter = TextureFilter::Linear;
     desc.wrap = TextureWrap::Repeat;
-    if (format == TextureFormat::R32F) {
+    // R32F and depth: exact fetches/comparisons, and WebGL2 treats
+    // these formats with linear filtering as incomplete (all-zero
+    // samples — #293), so they must stay point-sampled.
+    if ((format == TextureFormat::R32F) ||
+        (format == TextureFormat::Depth24)) {
       desc.filter = TextureFilter::Nearest;
       desc.wrap = TextureWrap::ClampEdge;
     }

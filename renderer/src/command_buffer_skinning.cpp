@@ -158,6 +158,7 @@ void upload_skinned_gbuffer_uniforms(
         backend.gbufSkinnedUvTilingLoc,
         backend.gbufSkinnedUvOffsetLoc};
     upload_material_texture_slots(locs, dev, command.material,
+                                  backend.fallbackTexture2D,
                                   inOutBoundMaterialTex);
   }
 }

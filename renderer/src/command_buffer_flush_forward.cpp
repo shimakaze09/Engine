@@ -200,11 +200,14 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
         dev->bind_texture_slot(0U, albedoTex);
         *boundAlbedoTexture = albedoTex;
       } else if (!hasAlbedoTex &&
-                 (*boundAlbedoTexture != kInvalidDeviceTexture)) {
-        dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-        *boundAlbedoTexture = kInvalidDeviceTexture;
+                 (*boundAlbedoTexture != backend.fallbackTexture2D)) {
+        // Fallback, not nothing: WebGL rejects draws whose declared
+        // samplers still reference the pass's render target (#293).
+        dev->bind_texture_slot(0U, backend.fallbackTexture2D);
+        *boundAlbedoTexture = backend.fallbackTexture2D;
       }
       upload_material_texture_slots(forwardMaterialTexLocs, dev, material,
+                                    backend.fallbackTexture2D,
                                     boundMaterialTex);
     };
 

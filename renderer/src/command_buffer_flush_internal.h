@@ -166,7 +166,7 @@ struct MaterialTextureUniformLocs final {
 /// per-batch albedo dedupe each flush loop already does.
 void upload_material_texture_slots(
     const MaterialTextureUniformLocs &locs, const RenderDevice *dev,
-    const Material &material,
+    const Material &material, DeviceTextureHandle fallbackTex,
     DeviceTextureHandle boundMaterialTex[4]) noexcept;
 
 /// Uploads distance fog settings to the deferred lighting program.

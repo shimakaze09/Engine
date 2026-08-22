@@ -83,6 +83,7 @@ bool upload_instance_matrices(BackendState &, const RenderDevice *,
 }
 void upload_material_texture_slots(const MaterialTextureUniformLocs &,
                                    const RenderDevice *, const Material &,
+                                   DeviceTextureHandle,
                                    DeviceTextureHandle *) noexcept {}
 
 } // namespace engine::renderer
