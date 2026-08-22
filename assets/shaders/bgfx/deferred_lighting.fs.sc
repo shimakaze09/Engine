@@ -21,9 +21,19 @@ $input v_texcoord0
 #if BGFX_SHADER_LANGUAGE_GLSL
 #define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
 #define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#define ENGINE_NDC_XY_TO_UV(xy) ((xy) * 0.5 + 0.5)
+#define ENGINE_UV_TO_NDC_XY(uv) ((uv) * 2.0 - 1.0)
 #else
 #define ENGINE_DEPTH_TO_NDC(d) (d)
 #define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+// y-down APIs store a direct render's ndc.y = +1 at texture row v = 0,
+// so ndc<->uv conversions flip v (fullscreen.vs.sc explains the parity
+// rule). NDC_XY_TO_UV addresses the shadow maps; UV_TO_NDC_XY undoes
+// the fullscreen stage's already-flipped v_texcoord0 before position
+// reconstruction — without it worldPos mirrors about the view center
+// and the shadow term zeroes whole bands (ambient-only scene).
+#define ENGINE_NDC_XY_TO_UV(xy) (vec2(0.5, -0.5) * (xy) + 0.5)
+#define ENGINE_UV_TO_NDC_XY(uv) (vec2(2.0, -2.0) * (uv) + vec2(-1.0, 1.0))
 #endif
 
 
@@ -143,7 +153,7 @@ vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic,
 
 vec3 reconstruct_world_pos(vec2 texCoord, float depth) {
     float z = ENGINE_DEPTH_TO_NDC(depth);
-    vec4 clipPos = vec4(texCoord * 2.0 - 1.0, z, 1.0);
+    vec4 clipPos = vec4(ENGINE_UV_TO_NDC_XY(texCoord), z, 1.0);
     vec4 viewPos = mul(uInvProjection, clipPos);
     viewPos /= viewPos.w;
     vec4 worldPos = mul(uInvView, viewPos);
@@ -247,6 +257,9 @@ float sample_spot_shadow_at(vec2 uv, float compareDepth, int mapIdx) {
 // constants here because HLSL-path shaderc lacks textureSize.
 #define CASCADE_SHADOW_TEXEL (1.0 / 2048.0)
 #define SPOT_SHADOW_TEXEL (1.0 / 1024.0)
+// Distant cascades render at half resolution (kShadowCascadeResolutions:
+// 2048/2048/1024/1024), so their PCF step doubles to stay one texel.
+#define CASCADE_SHADOW_TEXEL_FAR (1.0 / 1024.0)
 
 float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
     if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
@@ -254,7 +267,9 @@ float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
         return 1.0;
     }
     float shadow = 0.0;
-    float texel = spot ? SPOT_SHADOW_TEXEL : CASCADE_SHADOW_TEXEL;
+    float texel = spot ? SPOT_SHADOW_TEXEL
+                       : ((mapIdx < 2) ? CASCADE_SHADOW_TEXEL
+                                       : CASCADE_SHADOW_TEXEL_FAR);
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
             vec2 uv = projCoords.xy +
@@ -294,7 +309,7 @@ float compute_shadow(vec3 worldPos, float depth) {
     }
     vec4 shadowCoord = mul(uShadowMatrix[cascadeIdx], vec4(worldPos, 1.0));
     vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.xy = ENGINE_NDC_XY_TO_UV(projCoords.xy);
     projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
     float shadow = shadow_pcf(projCoords, cascadeIdx, false);
 
@@ -304,7 +319,7 @@ float compute_shadow(vec3 worldPos, float depth) {
         vec4 nextShadowCoord =
             mul(uShadowMatrix[cascadeIdx + 1], vec4(worldPos, 1.0));
         vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
-        nextProjCoords.xy = nextProjCoords.xy * 0.5 + 0.5;
+        nextProjCoords.xy = ENGINE_NDC_XY_TO_UV(nextProjCoords.xy);
         nextProjCoords.z = ENGINE_CLIP_Z_TO_DEPTH(nextProjCoords.z);
         float nextShadow = shadow_pcf(nextProjCoords, cascadeIdx + 1, false);
         float blendFactor =
@@ -325,7 +340,7 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
         }
         vec4 shadowCoord = mul(uSpotShadowMatrix[s], vec4(worldPos, 1.0));
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-        projCoords.xy = projCoords.xy * 0.5 + 0.5;
+        projCoords.xy = ENGINE_NDC_XY_TO_UV(projCoords.xy);
     projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
         return shadow_pcf(projCoords, s, true);
     }

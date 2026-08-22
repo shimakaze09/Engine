@@ -18,9 +18,18 @@ $input v_texcoord0
 #if BGFX_SHADER_LANGUAGE_GLSL
 #define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
 #define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#define ENGINE_NDC_XY_TO_UV(xy) ((xy) * 0.5 + 0.5)
+#define ENGINE_UV_TO_NDC_XY(uv) ((uv) * 2.0 - 1.0)
 #else
 #define ENGINE_DEPTH_TO_NDC(d) (d)
 #define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+// y-down APIs store a direct render's ndc.y = +1 at texture row v = 0,
+// so ndc<->uv conversions flip v (fullscreen.vs.sc explains the parity
+// rule): reconstruction undoes the fullscreen stage's flipped
+// v_texcoord0, and the kernel's projected sample flips back into
+// G-buffer texel space — otherwise both positions mirror vertically.
+#define ENGINE_NDC_XY_TO_UV(xy) (vec2(0.5, -0.5) * (xy) + 0.5)
+#define ENGINE_UV_TO_NDC_XY(uv) (vec2(2.0, -2.0) * (uv) + vec2(-1.0, 1.0))
 #endif
 
 
@@ -38,7 +47,7 @@ uniform vec4 u_bias;         // .x
 
 vec3 reconstruct_view_pos(vec2 uv, float depth) {
     float z = ENGINE_DEPTH_TO_NDC(depth);
-    vec4 clip = vec4(uv * 2.0 - 1.0, z, 1.0);
+    vec4 clip = vec4(ENGINE_UV_TO_NDC_XY(uv), z, 1.0);
     vec4 view = mul(u_invProjection, clip);
     return view.xyz / view.w;
 }
@@ -68,7 +77,7 @@ void main() {
             fragPos + mul(TBN, u_samples[i].xyz) * u_radius.x;
         vec4 offset = mul(u_projection, vec4(samplePos, 1.0));
         offset.xyz /= offset.w;
-        offset.xyz = offset.xyz * 0.5 + 0.5;
+        offset.xy = ENGINE_NDC_XY_TO_UV(offset.xy);
         float sampleDepth = texture2DLod(u_gBufferDepth, offset.xy, 0.0).r;
         vec3 sampleViewPos = reconstruct_view_pos(offset.xy, sampleDepth);
         float rangeCheck = smoothstep(
