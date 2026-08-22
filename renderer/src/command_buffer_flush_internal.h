@@ -56,6 +56,10 @@ struct FrameFlushContext final {
   std::size_t totalCount;
   std::size_t opaqueBatchCount;
   int gbufferDebugMode;
+  // Full-size back buffer dims: scene passes render at drawableWidth/
+  // Height (already render-scale-scaled), the final present upsamples.
+  int backbufferWidth = 0;
+  int backbufferHeight = 0;
   bool shadowEnabled = false;
   bool doSpotShadows = false;
   bool doPointShadows = false;

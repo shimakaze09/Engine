@@ -39,6 +39,7 @@
 #include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/dynamic_resolution.h"
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
@@ -516,6 +517,7 @@ struct EnginePipeline::Impl final {
   bool runPhysics = false;
   bool runFrameGraph = false;
   int appliedVsync = 1;
+  renderer::DynamicResolutionState dynamicResolution{};
   double renderAlpha = 1.0;
   Clock::time_point previousFrameStart{};
   double wallFrameMs = 0.0;
@@ -1468,6 +1470,27 @@ void EnginePipeline::Impl::stage_render() noexcept {
   if (requestedVsync != appliedVsync) {
     appliedVsync = requestedVsync;
     static_cast<void>(core::set_render_vsync(requestedVsync));
+  }
+
+  // Device reach (#138): the effective scene render scale is the user's
+  // base scale times the dynamic controller's factor; the controller
+  // steps against the presented frame budget (r_max_fps, else 60 Hz).
+  {
+    const float baseScale =
+        core::cvar_get_float("r_render_scale", 1.0F);
+    float dynamicFactor = 1.0F;
+    if (core::cvar_get_bool("r_dynamic_resolution", false)) {
+      const int maxFps = core::cvar_get_int("r_max_fps", 0);
+      const float targetMs = (maxFps > 0)
+                                 ? (1000.0F / static_cast<float>(maxFps))
+                                 : (1000.0F / 60.0F);
+      dynamicFactor = renderer::dynamic_resolution_step(
+          dynamicResolution, static_cast<float>(wallFrameMs), targetMs,
+          core::cvar_get_float("r_dynamic_resolution_min", 0.5F));
+    } else {
+      dynamicResolution = renderer::DynamicResolutionState{};
+    }
+    renderer::set_render_scale(baseScale * dynamicFactor);
   }
 
   const bool interpolateCamera =

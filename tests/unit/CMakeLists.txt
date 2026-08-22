@@ -95,6 +95,14 @@ engine_add_test_executable(engine_unit_device_slot_table
 # bgfx's Noop renderer. When the build also cooks the proving shaders
 # (tools on), the suite exercises cooked program linking against those
 # binaries.
+engine_add_test_executable(engine_unit_dynamic_resolution
+    SOURCES
+    dynamic_resolution_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_render_device_bgfx
     SOURCES
     render_device_bgfx_test.cpp
