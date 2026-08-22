@@ -41,11 +41,9 @@ constexpr ShaderProfile kKnownProfiles[] = {
     {"essl", "android", "300_es"},
     {"spirv", "linux", "spirv"},
     {"metal", "osx", "metal"},
-    // dx11 is opt-in, never in the default set: DXBC (SM 5.0) caps
-    // sampler registers at 16 and the engine's forward/deferred unit
-    // map binds up to slot 21, so pbr/deferred_lighting cannot compile
-    // until the sampler budget is restructured (issue #301). shaderc's
-    // DXBC backend also exists only on a Windows host (d3dcompiler).
+    // dx11 cooks only on a Windows host: shaderc's DXBC backend needs
+    // d3dcompiler. The #301 shadow-array unit map fits DXBC's
+    // 16-sampler cap, so Windows builds cook it by default.
     {"dx11", "windows", "s_5_0"},
 };
 
@@ -327,7 +325,11 @@ int run_shader_cook(int argc, char **argv) {
   const char *outDir = nullptr;
   const char *shadercPath = nullptr;
   const char *includeDir = nullptr;
+#ifdef _WIN32
+  std::string profilesCsv = "glsl,essl,spirv,dx11";
+#else
   std::string profilesCsv = "glsl,essl,spirv";
+#endif
   const char *platformTag = kCookPlatformTag;
   bool force = false;
 

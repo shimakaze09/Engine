@@ -33,7 +33,13 @@ int run_cook(const std::string &packer, const std::string &manifest,
       quoted(packer) + " --shader-manifest " + quoted(manifest) +
       " --shader-out " + quoted(outDir) + " --shaderc " + quoted(shaderc) +
       " --shader-include " + quoted(include) +
+#ifdef _WIN32
+      // Windows hosts also cook DXBC (#301): the CI lanes prove the
+      // s_5_0 compile of the whole manifest through the production CLI.
+      " --profiles glsl,essl,spirv,dx11";
+#else
       " --profiles glsl,essl,spirv";
+#endif
 #ifdef _WIN32
   // cmd.exe strips the outer quote pair from the whole command line
   // (same wrap the packer applies to its own shaderc invocations).

@@ -75,9 +75,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     std::array<math::Mat4, kShadowCascadeCount> lightMatrices{};
 
     for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-      const int shadowResolution = (backend.shadowState.resolutions[c] > 0)
-                                       ? backend.shadowState.resolutions[c]
-                                       : shadow_cascade_resolution(c);
+      const int shadowResolution = shadow_cascade_resolution(c);
       math::Mat4 lightVP = compute_cascade_matrix(
           viewMat, projMat, nearP, farP, lightDir,
           cascadeSplits.distances[c], cascadeSplits.distances[c + 1],
@@ -111,9 +109,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
       for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
         const math::Mat4 &lightVP = lightMatrices[c];
-        const int shadowResolution = (backend.shadowState.resolutions[c] > 0)
-                                         ? backend.shadowState.resolutions[c]
-                                         : shadow_cascade_resolution(c);
+        const int shadowResolution = shadow_cascade_resolution(c);
 
         dev->bind_render_target(backend.shadowState.depthTargets[c]);
         dev->set_viewport(0, 0, shadowResolution, shadowResolution);

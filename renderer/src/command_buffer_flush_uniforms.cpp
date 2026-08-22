@@ -399,24 +399,22 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     return;
   }
 
-  // #138 flat vocabulary: per-slot samplers stay individual (bgfx has no
-  // sampler arrays); matrices go up as one mat4 array, splits/light
-  // indices/pos+far as packed vec4 payloads.
+  // #138 flat vocabulary, #301 array samplers: the cascade and spot
+  // sets each bind one Tex2DArray (layer = slot); matrices go up as one
+  // mat4 array, splits/light indices/pos+far as packed vec4 payloads.
+  // The disabled state still binds the array fallback: Vulkan-family
+  // backends need every declared sampler descriptor valid at draw.
+  dev->bind_texture_slot(
+      static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
+      shadowEnabled ? backend.shadowState.depthArrayTexture
+                    : backend.fallbackTexture2DArray);
+  if (backend.pbrShadowMapArrayLoc.valid()) {
+    dev->set_param_i32(backend.pbrShadowMapArrayLoc,
+                       kShadowCascadeArrayUnit);
+  }
   float shadowMatrices[kShadowCascadeCount * 16U] = {};
   float cascadeSplits[4] = {};
   for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-    const auto texUnit = static_cast<std::uint32_t>(6U + c);
-    // Disabled slots still bind the fallback: Vulkan-family backends
-    // need every declared sampler descriptor valid at draw.
-    if (shadowEnabled) {
-      dev->bind_texture_slot(texUnit, backend.shadowState.depthTextures[c]);
-    } else {
-      dev->bind_texture_slot(texUnit, backend.fallbackTexture2D);
-    }
-    if (backend.pbrShadowMapLocs[c].valid()) {
-      dev->set_param_i32(backend.pbrShadowMapLocs[c],
-                         static_cast<std::int32_t>(texUnit));
-    }
     std::memcpy(
         &shadowMatrices[c * 16U],
         &backend.shadowState.cascades[c].lightViewProjection.columns[0].x,
@@ -435,20 +433,18 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
   }
 
+  dev->bind_texture_slot(
+      static_cast<std::uint32_t>(kSpotShadowArrayUnit),
+      spotShadowEnabled ? backend.spotShadowState.depthArrayTexture
+                        : backend.fallbackTexture2DArray);
+  if (backend.pbrSpotShadowMapArrayLoc.valid()) {
+    dev->set_param_i32(backend.pbrSpotShadowMapArrayLoc,
+                       kSpotShadowArrayUnit);
+  }
   float spotMatrices[kMaxSpotShadowLights * 16U] = {};
   float spotLightIdx[4] = {};
   for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
     const auto &slot = backend.spotShadowState.slots[s];
-    const auto texUnit = static_cast<std::uint32_t>(10U + s);
-    if (spotShadowEnabled) {
-      dev->bind_texture_slot(texUnit, slot.depthTexture);
-    } else {
-      dev->bind_texture_slot(texUnit, backend.fallbackTexture2D);
-    }
-    if (backend.pbrSpotShadowMapLocs[s].valid()) {
-      dev->set_param_i32(backend.pbrSpotShadowMapLocs[s],
-                         static_cast<std::int32_t>(texUnit));
-    }
     std::memcpy(&spotMatrices[s * 16U],
                 &slot.lightViewProjection.columns[0].x,
                 sizeof(float) * 16U);
@@ -471,7 +467,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
   float pointLightIdx[4] = {};
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
     const auto &slot = backend.pointShadowState.slots[s];
-    const auto texUnit = static_cast<std::uint32_t>(14U + s);
+    const auto texUnit = static_cast<std::uint32_t>(kPointShadowUnitBase) +
+                         static_cast<std::uint32_t>(s);
     if (pointShadowEnabled && (dev->bind_texture_slot != nullptr)) {
       dev->bind_texture_slot(texUnit, slot.depthCubemap);
     } else if (dev->bind_texture_slot != nullptr) {
@@ -508,17 +505,15 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   if ((dev == nullptr) || (dev->bind_texture_slot == nullptr)) {
     return;
   }
-  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-    dev->bind_texture_slot(static_cast<std::uint32_t>(6U + c),
-                           kInvalidDeviceTexture);
-  }
-  for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
-    dev->bind_texture_slot(static_cast<std::uint32_t>(10U + s),
-                           kInvalidDeviceTexture);
-  }
+  dev->bind_texture_slot(static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
+                         kInvalidDeviceTexture);
+  dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowArrayUnit),
+                         kInvalidDeviceTexture);
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
-    dev->bind_texture_slot(static_cast<std::uint32_t>(14U + s),
-                           kInvalidDeviceTexture);
+    dev->bind_texture_slot(
+        static_cast<std::uint32_t>(kPointShadowUnitBase) +
+            static_cast<std::uint32_t>(s),
+        kInvalidDeviceTexture);
   }
 }
 

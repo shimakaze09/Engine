@@ -130,13 +130,14 @@ struct BackendState final {
 
   // PBR forward shadow uniforms (#138: matrices as one mat4 array;
   // cascade splits and shadow-light indices packed into single vec4s;
-  // samplers stay per-slot — bgfx has no sampler arrays).
+  // #301: the cascade and spot maps are Tex2DArrays behind one sampler
+  // each; only the point cubes stay per-slot).
   ShaderParam pbrShadowEnabledLoc{};
-  std::array<ShaderParam, kShadowCascadeCount> pbrShadowMapLocs{};
+  ShaderParam pbrShadowMapArrayLoc{};
   ShaderParam pbrShadowMatrixParam{};          // mat4[kShadowCascadeCount]
   ShaderParam pbrCascadeSplitsParam{};         // vec4: split per cascade
   ShaderParam pbrSpotShadowEnabledLoc{};
-  std::array<ShaderParam, kMaxSpotShadowLights> pbrSpotShadowMapLocs{};
+  ShaderParam pbrSpotShadowMapArrayLoc{};
   ShaderParam pbrSpotShadowMatrixParam{};      // mat4[kMaxSpotShadowLights]
   ShaderParam pbrSpotShadowLightIdxParam{};    // vec4: light index per slot
   ShaderParam pbrPointShadowEnabledLoc{};
@@ -172,6 +173,9 @@ struct BackendState final {
   // where GL merely tolerates unbound units on untaken branches.
   DeviceTextureHandle fallbackTexture2D{};
   DeviceTextureHandle fallbackCubemap{};
+  // Descriptor-validity stand-in for the shadow array samplers when
+  // shadows are disabled (#301): array samplers need an array texture.
+  DeviceTextureHandle fallbackTexture2DArray{};
 
   // Skybox shader and cube geometry.
   bool skyboxAvailable = false;
@@ -425,7 +429,7 @@ struct BackendState final {
 
   // Deferred lighting shadow uniforms.
   ShaderParam dlShadowEnabledLoc{};
-  std::array<ShaderParam, kShadowCascadeCount> dlShadowMapLocs{};
+  ShaderParam dlShadowMapArrayLoc{};
   ShaderParam dlShadowMatrixParam{};        // mat4[kShadowCascadeCount]
   ShaderParam dlCascadeSplitsParam{};       // vec4: split per cascade
   std::uint64_t directionalShadowCacheKey = 0U;
@@ -436,7 +440,7 @@ struct BackendState final {
   bool spotShadowAvailable = false;
 
   ShaderParam dlSpotShadowEnabledLoc{};
-  std::array<ShaderParam, kMaxSpotShadowLights> dlSpotShadowMapLocs{};
+  ShaderParam dlSpotShadowMapArrayLoc{};
   ShaderParam dlSpotShadowMatrixParam{};    // mat4[kMaxSpotShadowLights]
   ShaderParam dlSpotShadowLightIdxParam{};  // vec4: light index per slot
 

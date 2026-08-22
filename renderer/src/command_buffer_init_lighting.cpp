@@ -172,23 +172,18 @@ bool resolve_deferred_light_program_state(BackendState &backend,
 
   backend.dlShadowEnabledLoc =
       dev->shader_param(dlProg, "uShadowEnabled");
-  // #138 flat vocabulary (shared with the pbr forward path): per-slot
-  // samplers, one mat4 array per shadow kind, packed vec4 payloads.
-  for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
-    char nm[80] = {};
-    std::snprintf(nm, sizeof(nm), "uShadowMap%zu", i);
-    backend.dlShadowMapLocs[i] = dev->shader_param(dlProg, nm);
-  }
+  // #138 flat vocabulary (shared with the pbr forward path): one
+  // Tex2DArray sampler per shadow kind (#301), one mat4 array per
+  // shadow kind, packed vec4 payloads.
+  backend.dlShadowMapArrayLoc =
+      dev->shader_param(dlProg, "uShadowMapArray");
   backend.dlShadowMatrixParam = dev->shader_param(dlProg, "uShadowMatrix");
   backend.dlCascadeSplitsParam = dev->shader_param(dlProg, "uCascadeSplits");
 
   backend.dlSpotShadowEnabledLoc =
       dev->shader_param(dlProg, "uSpotShadowEnabled");
-  for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    char nm[80] = {};
-    std::snprintf(nm, sizeof(nm), "uSpotShadowMap%zu", i);
-    backend.dlSpotShadowMapLocs[i] = dev->shader_param(dlProg, nm);
-  }
+  backend.dlSpotShadowMapArrayLoc =
+      dev->shader_param(dlProg, "uSpotShadowMapArray");
   backend.dlSpotShadowMatrixParam =
       dev->shader_param(dlProg, "uSpotShadowMatrix");
   backend.dlSpotShadowLightIdxParam =
@@ -406,9 +401,10 @@ void init_backend_lighting(BackendState &backend,
   bool deferredOk = true;
 
   // Capability gate before any deferred program exists: the deferred
-  // lighting unit map tops out at kIblBrdfLutUnit (21), and creating
-  // programs a device cannot run is not survivable everywhere (WebGL2's
-  // MRT/sampler limits fail at compile, which is fatal under bgfx).
+  // lighting unit map tops out at kIblBrdfLutUnit (15 since the #301
+  // shadow arrays, so 16-unit devices — WebGL2's floor — now pass),
+  // and creating programs a device cannot run is not survivable
+  // everywhere (WebGL2's MRT limits fail at compile, fatal under bgfx).
   {
     const std::uint16_t requiredUnits =
         static_cast<std::uint16_t>(kIblBrdfLutUnit + 1);

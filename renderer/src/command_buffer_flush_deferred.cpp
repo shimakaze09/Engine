@@ -544,15 +544,18 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       dev->bind_program(backend.deferredLightProgram);
 
-      // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on slot
-      // 5, per-light data on slot 18 (slots 6-17 hold shadow maps).
+      // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on
+      // slot 5, per-light data on slot 6 (the shadow arrays and point
+      // cubes hold 7-12, IBL 13-15; #301).
       dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
       dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
       dev->bind_texture_slot(2U,
                              pass_resource_texture(passRes.gbufferEmissive));
       dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
       dev->bind_texture_slot(4U, backend.tileLightTex);
-      dev->bind_texture_slot(18U, backend.lightDataTex);
+      dev->bind_texture_slot(
+          static_cast<std::uint32_t>(kDeferredLightDataUnit),
+          backend.lightDataTex);
 
       if (ssaoEnabled) {
         dev->bind_texture_slot(5U,
@@ -572,7 +575,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlTileLightTexLoc.valid())
         dev->set_param_i32(backend.dlTileLightTexLoc, 4);
       if (backend.dlLightDataTexLoc.valid())
-        dev->set_param_i32(backend.dlLightDataTexLoc, 18);
+        dev->set_param_i32(backend.dlLightDataTexLoc,
+                           kDeferredLightDataUnit);
 
       // Sampler units are assigned even when IBL is off: a samplerCube
       // uniform left at its default unit 0 aliases the sampler2D G-buffer
@@ -618,23 +622,21 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       // #138 flat vocabulary: per-slot samplers, one mat4 array per
       // shadow kind, splits/indices/pos+far as packed vec4 payloads.
       {
+        // #301 array samplers: one Tex2DArray for all cascades. The
+        // disabled state still binds the array fallback: Vulkan-family
+        // backends need every declared sampler descriptor valid at
+        // draw (same rule as the forward flush).
+        dev->bind_texture_slot(
+            static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
+            shadowEnabled ? backend.shadowState.depthArrayTexture
+                          : backend.fallbackTexture2DArray);
+        if (backend.dlShadowMapArrayLoc.valid()) {
+          dev->set_param_i32(backend.dlShadowMapArrayLoc,
+                             kShadowCascadeArrayUnit);
+        }
         float shadowMatrices[kShadowCascadeCount * 16U] = {};
         float cascadeSplits[4] = {};
         for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-          const auto texUnit = static_cast<std::uint32_t>(6U + c);
-          // Disabled slots still bind the fallback: Vulkan-family
-          // backends need every declared sampler descriptor valid at
-          // draw (same rule as the forward flush).
-          if (shadowEnabled) {
-            dev->bind_texture_slot(texUnit,
-                                   backend.shadowState.depthTextures[c]);
-          } else {
-            dev->bind_texture_slot(texUnit, backend.fallbackTexture2D);
-          }
-          if (backend.dlShadowMapLocs[c].valid()) {
-            dev->set_param_i32(backend.dlShadowMapLocs[c],
-                               static_cast<std::int32_t>(texUnit));
-          }
           std::memcpy(&shadowMatrices[c * 16U],
                       &backend.shadowState.cascades[c]
                            .lightViewProjection.columns[0]
@@ -659,17 +661,19 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
 
       const bool spotShadowEnabled = doSpotShadows;
+      dev->bind_texture_slot(
+          static_cast<std::uint32_t>(kSpotShadowArrayUnit),
+          spotShadowEnabled ? backend.spotShadowState.depthArrayTexture
+                            : backend.fallbackTexture2DArray);
+      if (backend.dlSpotShadowMapArrayLoc.valid()) {
+        dev->set_param_i32(backend.dlSpotShadowMapArrayLoc,
+                           kSpotShadowArrayUnit);
+      }
       if (spotShadowEnabled) {
         float spotMatrices[kMaxSpotShadowLights * 16U] = {};
         float spotLightIdx[4] = {};
         for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
           const auto &slot = backend.spotShadowState.slots[s];
-          const auto texUnit = static_cast<std::uint32_t>(10U + s);
-          dev->bind_texture_slot(texUnit, slot.depthTexture);
-          if (backend.dlSpotShadowMapLocs[s].valid()) {
-            dev->set_param_i32(backend.dlSpotShadowMapLocs[s],
-                               static_cast<std::int32_t>(texUnit));
-          }
           std::memcpy(&spotMatrices[s * 16U],
                       &slot.lightViewProjection.columns[0].x,
                       sizeof(float) * 16U);
@@ -691,16 +695,17 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                              spotShadowEnabled ? 1 : 0);
       }
 
-      // Bind point shadow cubemaps on texture units 14-17. The samplerCube
-      // uniforms must point at their units even when point shadows are off:
-      // left at the default unit 0 they alias the sampler2D G-buffer binding,
-      // which makes the whole draw GL_INVALID_OPERATION on conformant
-      // drivers.
+      // Bind point shadow cubemaps on their unit-map slots. The
+      // samplerCube uniforms must point at their units even when point
+      // shadows are off: left at the default unit 0 they alias the
+      // sampler2D G-buffer binding, which makes the whole draw
+      // GL_INVALID_OPERATION on conformant drivers.
       const bool pointShadowEnabled = doPointShadows;
       for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
         if (backend.dlPointShadowMapLocs[s].valid()) {
           dev->set_param_i32(backend.dlPointShadowMapLocs[s],
-                             static_cast<std::int32_t>(14U + s));
+                             kPointShadowUnitBase +
+                                 static_cast<std::int32_t>(s));
         }
       }
       if (pointShadowEnabled) {
@@ -708,7 +713,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         float pointLightIdx[4] = {};
         for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
           const auto &slot = backend.pointShadowState.slots[s];
-          const auto texUnit = static_cast<std::uint32_t>(14U + s);
+          const auto texUnit =
+              static_cast<std::uint32_t>(kPointShadowUnitBase) +
+              static_cast<std::uint32_t>(s);
           if (dev->bind_texture_slot != nullptr) {
             dev->bind_texture_slot(texUnit, slot.depthCubemap);
           }
@@ -824,7 +831,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       for (std::uint32_t slot = 0U; slot <= 4U; ++slot) {
         dev->bind_texture_slot(slot, kInvalidDeviceTexture);
       }
-      dev->bind_texture_slot(18U, kInvalidDeviceTexture);
+      dev->bind_texture_slot(
+          static_cast<std::uint32_t>(kDeferredLightDataUnit),
+          kInvalidDeviceTexture);
       if (dlIblEnabled) {
         dev->bind_texture_slot(kIblIrradianceUnit, kInvalidDeviceTexture);
         dev->bind_texture_slot(kIblPrefilteredUnit, kInvalidDeviceTexture);
@@ -833,11 +842,12 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (ssaoEnabled) {
         dev->bind_texture_slot(5U, kInvalidDeviceTexture);
       }
-      if (shadowEnabled) {
-        for (std::uint32_t c = 0U; c < kShadowCascadeCount; ++c) {
-          dev->bind_texture_slot(6U + c, kInvalidDeviceTexture);
-        }
-      }
+      dev->bind_texture_slot(
+          static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
+          kInvalidDeviceTexture);
+      dev->bind_texture_slot(
+          static_cast<std::uint32_t>(kSpotShadowArrayUnit),
+          kInvalidDeviceTexture);
       dev->bind_program(kInvalidDeviceProgram);
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
     }

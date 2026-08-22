@@ -128,6 +128,7 @@ struct BufferDesc final {
 enum class TextureKind : std::uint8_t {
   Tex2D = 0,
   Cube = 1,
+  Tex2DArray = 2, // layered 2D; render-target only (no client uploads)
 };
 
 /// Backend-neutral texel formats used by the engine.
@@ -165,14 +166,17 @@ enum class TexelData : std::uint8_t {
 
 /// Creation parameters for a device texture. For Tex2D provide pixels
 /// (or null for an empty target); for Cube provide facePixels (each may
-/// be null). mipLevels 0 generates a full chain from the level-0 data;
-/// 1 means no mips; >1 allocates that many empty levels (render-to-mip
-/// targets). pixelData must match the format's component encoding.
+/// be null); Tex2DArray is always created empty (layered render
+/// targets — the shadow arrays). mipLevels 0 generates a full chain
+/// from the level-0 data; 1 means no mips; >1 allocates that many empty
+/// levels (render-to-mip targets). pixelData must match the format's
+/// component encoding.
 struct TextureDesc final {
   TextureKind kind = TextureKind::Tex2D;
   TextureFormat format = TextureFormat::RGBA8;
   std::int32_t width = 0;  // Cube: face size
   std::int32_t height = 0; // Cube: ignored (faces are square)
+  std::int32_t layers = 1; // Tex2DArray: layer count; others ignore it
   std::int32_t mipLevels = 1;
   TextureFilter filter = TextureFilter::Linear;
   TextureWrap wrap = TextureWrap::ClampEdge;
@@ -233,11 +237,12 @@ enum class CubeFace : std::int8_t {
   NegativeZ = 5,
 };
 
-/// One render-target attachment: a texture level (and cube face when the
-/// texture is a cubemap).
+/// One render-target attachment: a texture level, plus the cube face
+/// when the texture is a cubemap or the layer when it is a Tex2DArray.
 struct RenderTargetAttachment final {
   DeviceTextureHandle texture{};
   CubeFace face = CubeFace::None;
+  std::int32_t layer = 0; // Tex2DArray: target layer; others require 0
   std::int32_t mipLevel = 0;
 };
 
@@ -315,8 +320,9 @@ struct DeviceCaps final {
   bool timestampQueries = false;
   bool cookedPrograms = false;  // create_program_binary from cooked shaders
   // Fragment sampler units the device actually supports; passes whose
-  // unit map exceeds this must fall back (WebGL2's floor is 16 while the
-  // deferred+IBL vocabulary tops out at unit 21).
+  // unit map exceeds this must fall back (the deferred+IBL vocabulary
+  // tops out at unit 15 since the #301 shadow arrays, inside WebGL2's
+  // 16-unit floor and DXBC's 16-register cap).
   std::uint16_t maxTextureSamplers = 16U;
   // Depth attachments copy between render targets through copy_depth;
   // false means the backend cannot blit depth (bgfx's Vulkan/WebGL

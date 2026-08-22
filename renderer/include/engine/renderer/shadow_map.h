@@ -15,14 +15,12 @@ namespace engine::renderer {
 /// Number of cascades for directional light CSM.
 inline constexpr std::size_t kShadowCascadeCount = 4U;
 
-/// Maximum directional shadow map resolution (square).
+/// Directional shadow map resolution (square). Every cascade renders at
+/// this size: the cascades live as layers of one Tex2DArray (issue
+/// #301 — one sampler register for all four), and array layers share
+/// dimensions, so the former half-resolution far cascades now render
+/// full size.
 inline constexpr int kShadowMapResolution = 2048;
-
-/// Per-cascade directional shadow resolutions. Near cascades keep full
-/// resolution; distant cascades use lower resolution to reduce shadow cost.
-inline constexpr int kShadowCascadeResolutions[kShadowCascadeCount] = {
-    kShadowMapResolution, kShadowMapResolution, kShadowMapResolution / 2,
-    kShadowMapResolution / 2};
 
 /// Cascade split distances computed from camera near/far and a log/uniform
 /// blend factor (lambda). lambda=1 is fully logarithmic, lambda=0 is uniform.
@@ -36,12 +34,13 @@ struct CascadeData final {
   float splitDistance = 0.0F;
 };
 
-/// Full CSM state for one directional light.
+/// Full CSM state for one directional light. The cascades share one
+/// Tex2DArray (layer c = cascade c) sampled through a single register;
+/// each render target attaches its own layer.
 struct ShadowMapState final {
   CascadeData cascades[kShadowCascadeCount]{};
-  DeviceTextureHandle depthTextures[kShadowCascadeCount]{};
+  DeviceTextureHandle depthArrayTexture{};
   RenderTargetHandle depthTargets[kShadowCascadeCount]{};
-  int resolutions[kShadowCascadeCount]{};
   bool initialized = false;
 };
 
@@ -90,18 +89,20 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept;
 inline constexpr std::size_t kMaxSpotShadowLights = 4U;
 inline constexpr int kSpotShadowMapResolution = 1024;
 
-/// One spot light's shadow map: texture, render target, light matrix.
+/// One spot light's shadow slot: its layer's render target and light
+/// matrix (the depth texture is the shared array on SpotShadowState).
 struct SpotShadowData final {
   math::Mat4 lightViewProjection{};
-  DeviceTextureHandle depthTexture{};
   RenderTargetHandle depthTarget{};
   int lightIndex = -1; // index into SceneLightData::spotLights, -1 = unused
   float farPlane = 0.0F;
 };
 
-/// All spot shadow maps plus their allocation state.
+/// All spot shadow maps plus their allocation state. Slots share one
+/// Tex2DArray (layer s = slot s) sampled through a single register.
 struct SpotShadowState final {
   SpotShadowData slots[kMaxSpotShadowLights]{};
+  DeviceTextureHandle depthArrayTexture{};
   bool initialized = false;
 };
 

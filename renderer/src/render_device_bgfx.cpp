@@ -406,19 +406,28 @@ void bgfx_bind_uniform_buffer_slot(std::uint32_t,
 // --- Textures ---
 
 DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
-  const bool hasPixels = (desc.kind == TextureKind::Tex2D)
-                             ? (desc.pixels != nullptr)
-                             : (desc.facePixels != nullptr);
+  const bool hasPixels = (desc.kind == TextureKind::Cube)
+                             ? (desc.facePixels != nullptr)
+                             : (desc.pixels != nullptr);
   const BgfxTexelUpload shape =
       bgfx_texel_upload(desc.format, desc.pixelData);
   // The texel-encoding pairing only constrains actual uploads; empty
   // (render-target) creation just needs the format mapping.
   if ((hasPixels && !shape.valid) ||
       (shape.format == bgfx::TextureFormat::Count) || (desc.width <= 0) ||
-      ((desc.kind == TextureKind::Tex2D) && (desc.height <= 0)) ||
+      ((desc.kind != TextureKind::Cube) && (desc.height <= 0)) ||
       (desc.mipLevels < 0)) {
     drop_operation("create_texture: invalid descriptor");
     return kInvalidDeviceTexture;
+  }
+  if (desc.kind == TextureKind::Tex2DArray) {
+    // Arrays are layered render targets (the shadow arrays); a client
+    // upload has no per-layer shape in the descriptor, so it is
+    // rejected rather than silently landing in layer 0.
+    if ((desc.layers <= 0) || (desc.layers > 0xFFFF) || hasPixels) {
+      drop_operation("create_texture: invalid array descriptor");
+      return kInvalidDeviceTexture;
+    }
   }
   if ((desc.format == TextureFormat::Depth24) && hasPixels) {
     drop_operation("create_texture: depth formats take no client texels");
@@ -432,6 +441,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   record.width = desc.width;
   record.height =
       (desc.kind == TextureKind::Cube) ? desc.width : desc.height;
+  record.layers = (desc.kind == TextureKind::Tex2DArray) ? desc.layers : 1;
   // Empty creation ("null for an empty target" per the contract) is the
   // render-target signal: bgfx requires RT/blit intent at creation while
   // the engine descriptor carries none. Every current empty-creation
@@ -460,15 +470,20 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
     }
   }
 
-  if (desc.kind == TextureKind::Tex2D) {
-    record.handle = bgfx::createTexture2D(
-        static_cast<std::uint16_t>(desc.width),
-        static_cast<std::uint16_t>(desc.height), hasMips, 1U, shape.format,
-        flags);
-  } else {
+  if (desc.kind == TextureKind::Cube) {
     record.handle = bgfx::createTextureCube(
         static_cast<std::uint16_t>(desc.width), hasMips, 1U, shape.format,
         flags);
+  } else {
+    // Tex2D and Tex2DArray share the creation entry point; the layer
+    // count is the only difference.
+    record.handle = bgfx::createTexture2D(
+        static_cast<std::uint16_t>(desc.width),
+        static_cast<std::uint16_t>(desc.height), hasMips,
+        (desc.kind == TextureKind::Tex2DArray)
+            ? static_cast<std::uint16_t>(desc.layers)
+            : 1U,
+        shape.format, flags);
   }
   if (!bgfx::isValid(record.handle)) {
     core::log_message(core::LogLevel::Error, "render_device",
@@ -797,8 +812,21 @@ bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
       drop_operation(what);
       return false;
     }
+    // Layer selects a Tex2DArray slice; cubes address by face and every
+    // other kind must leave it 0 so a typo cannot silently alias.
+    if ((attachment.layer != 0) &&
+        (texture->kind != TextureKind::Tex2DArray)) {
+      drop_operation(what);
+      return false;
+    }
+    if ((texture->kind == TextureKind::Tex2DArray) &&
+        ((attachment.layer < 0) || (attachment.layer >= texture->layers))) {
+      drop_operation(what);
+      return false;
+    }
     const std::uint16_t layer =
-        wantsFace ? static_cast<std::uint16_t>(attachment.face) : 0U;
+        wantsFace ? static_cast<std::uint16_t>(attachment.face)
+                  : static_cast<std::uint16_t>(attachment.layer);
     attachments[count].init(texture->handle, bgfx::Access::Write, layer, 1U,
                             static_cast<std::uint16_t>(attachment.mipLevel),
                             BGFX_RESOLVE_NONE);
@@ -1077,12 +1105,11 @@ bool initialize_render_device() noexcept {
     init.type = bgfx::RendererType::Direct3D12;
   } else {
 #ifdef _WIN32
-    // "auto" picks Vulkan explicitly on Windows: bgfx's own ranking
-    // prefers D3D11/12, but DXBC (SM 5.0) caps sampler registers at 16
-    // while the forward/deferred unit map binds up to slot 21, so no
-    // dx11 program cook exists yet (issue #301) — a D3D pick could only
-    // fail shader creation. spirv is the canonical cooked profile and
-    // Vulkan is the proven backend.
+    // "auto" picks Vulkan explicitly on Windows: it is the proven
+    // backend on the canonical spirv cook. The #301 shadow-array unit
+    // map fits DXBC and Windows builds cook the dx11 profile, so the
+    // D3D backends are runnable — but they stay explicit d3d11/d3d12
+    // opt-ins until verified, an owner call to flip.
     init.type = bgfx::RendererType::Vulkan;
 #else
     init.type = bgfx::RendererType::Count; // auto

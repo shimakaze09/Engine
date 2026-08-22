@@ -234,37 +234,26 @@ int verify_cascade_matrix_stable_for_sub_texel_motion() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 7: Distant cascades use lower shadow resolutions.
+// Test 7: Every cascade reports the uniform full resolution. Contract
+// migration (#301): the cascades became layers of one Tex2DArray so the
+// whole set costs one sampler register, and array layers share
+// dimensions — the former lower-resolution distant cascades now render
+// full size (a quality gain traded against their memory saving).
 // ---------------------------------------------------------------------------
 int verify_shadow_cascade_lod_resolutions() {
-  const int first = engine::renderer::shadow_cascade_resolution(0U);
-  const int last = engine::renderer::shadow_cascade_resolution(
-      engine::renderer::kShadowCascadeCount - 1U);
-
-  if (first != engine::renderer::kShadowMapResolution) {
-    return 800;
-  }
-  if (last >= first) {
-    return 801;
-  }
-
-  int previous = first;
   for (std::size_t i = 0U; i < engine::renderer::kShadowCascadeCount; ++i) {
     const int resolution = engine::renderer::shadow_cascade_resolution(i);
-    if (resolution <= 0) {
-      return 802;
+    if (resolution != engine::renderer::kShadowMapResolution) {
+      return 800;
     }
     if ((resolution & (resolution - 1)) != 0) {
       return 803;
     }
-    if (resolution > previous) {
-      return 804;
-    }
-    previous = resolution;
   }
 
   if (engine::renderer::shadow_cascade_resolution(
-          engine::renderer::kShadowCascadeCount + 10U) != last) {
+          engine::renderer::kShadowCascadeCount + 10U) !=
+      engine::renderer::kShadowMapResolution) {
     return 805;
   }
 
@@ -280,15 +269,12 @@ int verify_shadow_state_defaults() {
   if (state.initialized) {
     return 600;
   }
+  if (state.depthArrayTexture != engine::renderer::kInvalidDeviceTexture) {
+    return 601;
+  }
   for (std::size_t i = 0U; i < engine::renderer::kShadowCascadeCount; ++i) {
-    if (state.depthTextures[i] != engine::renderer::kInvalidDeviceTexture) {
-      return 601;
-    }
     if (state.depthTargets[i].value != 0U) {
       return 602;
-    }
-    if (state.resolutions[i] != 0) {
-      return 603;
     }
   }
 
