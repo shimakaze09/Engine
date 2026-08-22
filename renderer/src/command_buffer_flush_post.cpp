@@ -267,7 +267,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   }
 
   dev->bind_render_target(kBackBufferTarget);
-  dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+  dev->set_viewport(0, 0, ctx.backbufferWidth, ctx.backbufferHeight);
   dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
   dev->apply_render_state(RenderState{DepthTest::Less, true,
                                       BlendMode::Disabled, CullMode::Back});

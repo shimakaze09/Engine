@@ -105,6 +105,21 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "r_bgfx_trace", false,
       "bgfx backend only: route bgfx trace output into the engine log"));
 
+  // Device reach (#138 v0.5): render scale, its dynamic controller,
+  // and the named quality tiers.
+  static_cast<void>(core::cvar_register_float(
+      "r_render_scale", 1.0F,
+      "Scene render scale (0.25-1); the present upsamples to full size"));
+  static_cast<void>(core::cvar_register_bool(
+      "r_dynamic_resolution", false,
+      "Adjust the render scale automatically from frame time"));
+  static_cast<void>(core::cvar_register_float(
+      "r_dynamic_resolution_min", 0.5F,
+      "Lowest render scale the dynamic controller may reach"));
+  static_cast<void>(core::cvar_register_string(
+      "r_quality", "",
+      "Quality preset: low, medium, or high; empty keeps custom cvars"));
+
   static_cast<void>(core::cvar_register_bool(
       "r_bgfx_debug", false,
       "bgfx backend only: init with bgfx debug checks (read once at "

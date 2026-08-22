@@ -38,6 +38,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
+#include "engine/renderer/dynamic_resolution.h"
 #include "command_buffer_flush_internal.h"
 #include "command_buffer_init_internal.h"
 
@@ -98,20 +99,32 @@ void flush_renderer(CommandBufferView commandBufferView,
   backend.lastShadowBonePalette = 0xFFFFFFFFU;
   gpu_profiler_begin_frame();
 
-  int drawableWidth = 1280;
-  int drawableHeight = 720;
+  apply_quality_preset_if_changed();
+
+  int backbufferWidth = 1280;
+  int backbufferHeight = 720;
   if ((renderer_context().sceneViewportWidth > 0) && (renderer_context().sceneViewportHeight > 0)) {
-    drawableWidth = renderer_context().sceneViewportWidth;
-    drawableHeight = renderer_context().sceneViewportHeight;
+    backbufferWidth = renderer_context().sceneViewportWidth;
+    backbufferHeight = renderer_context().sceneViewportHeight;
   } else {
-    core::render_drawable_size(&drawableWidth, &drawableHeight);
+    core::render_drawable_size(&backbufferWidth, &backbufferHeight);
   }
-  if (drawableWidth <= 0) {
-    drawableWidth = 1;
+  if (backbufferWidth <= 0) {
+    backbufferWidth = 1;
   }
-  if (drawableHeight <= 0) {
-    drawableHeight = 1;
+  if (backbufferHeight <= 0) {
+    backbufferHeight = 1;
   }
+
+  // Device reach (#138): scene passes render at the effective render
+  // scale and the final present upsamples; the back buffer (and the
+  // camera aspect, to avoid rounding drift) stays at full size.
+  const float renderScale = render_scale();
+  const int drawableWidth = std::max(
+      1, static_cast<int>(static_cast<float>(backbufferWidth) * renderScale));
+  const int drawableHeight = std::max(
+      1,
+      static_cast<int>(static_cast<float>(backbufferHeight) * renderScale));
 
   if (backend.lastWidth != drawableWidth ||
       backend.lastHeight != drawableHeight) {
@@ -156,8 +169,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       backend.deferredAvailable && core::cvar_get_bool("r_deferred", true);
   const int gbufferDebugMode = core::cvar_get_int("r_gbuffer_debug", 0);
 
-  const float aspect =
-      static_cast<float>(drawableWidth) / static_cast<float>(drawableHeight);
+  const float aspect = static_cast<float>(backbufferWidth) /
+                       static_cast<float>(backbufferHeight);
   const math::Mat4 viewMat = math::look_at(
       renderer_context().activeCamera.position, renderer_context().activeCamera.target, renderer_context().activeCamera.up);
   const float nearP =
@@ -234,6 +247,8 @@ void flush_renderer(CommandBufferView commandBufferView,
                         totalCount,
                         opaqueBatchCount,
                         gbufferDebugMode};
+  ctx.backbufferWidth = backbufferWidth;
+  ctx.backbufferHeight = backbufferHeight;
   ctx.frameStats = frameStats;
 
   flush_shadow_passes(ctx);

@@ -13,6 +13,7 @@ engine_add_module_library(engine_renderer
     src/command_buffer_builder.cpp
     src/command_buffer_capture.cpp
     src/command_buffer_context.cpp
+    src/dynamic_resolution.cpp
     src/command_buffer_flush.cpp
     src/command_buffer_flush_captures.cpp
     src/command_buffer_flush_deferred.cpp
