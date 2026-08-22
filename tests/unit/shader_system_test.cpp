@@ -6,10 +6,11 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
-#include "shader_system_internal.h"
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 
 static int g_passed = 0;
 static int g_failed = 0;
@@ -21,7 +22,11 @@ namespace {
 RenderDevice g_fakeDevice{};
 std::uint32_t g_nextProgram = 100U;
 
-DeviceProgramHandle fake_create_program(const char *, const char *) noexcept {
+const char *fake_cooked_profile() noexcept { return "spirv"; }
+
+DeviceProgramHandle fake_create_program_binary(const void *, std::ptrdiff_t,
+                                               const void *,
+                                               std::ptrdiff_t) noexcept {
   return DeviceProgramHandle{g_nextProgram++};
 }
 
@@ -29,7 +34,9 @@ void fake_destroy_program(DeviceProgramHandle) noexcept {}
 
 void configure_fake_render_device() noexcept {
   g_fakeDevice = RenderDevice{};
-  g_fakeDevice.create_program = &fake_create_program;
+  g_fakeDevice.caps.cookedPrograms = true;
+  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
+  g_fakeDevice.create_program_binary = &fake_create_program_binary;
   g_fakeDevice.destroy_program = &fake_destroy_program;
 }
 
@@ -78,8 +85,18 @@ static bool has_selected_define(
 }
 
 static bool write_shader_test_file(const char *path) noexcept {
-  static constexpr const char *kSource = "#version 330 core\nvoid main() {}\n";
-  return engine::core::vfs_write_text(path, kSource, std::strlen(kSource));
+  // Cooked-binary layout (#296): the loader reads
+  // <dir>/bgfx/cooked/<file>.default.<profile>.bin for the fake
+  // device's spirv profile; content is opaque to the fake link.
+  char cooked[256] = {};
+  const char *slash = std::strrchr(path, '/');
+  const char *file = (slash != nullptr) ? (slash + 1) : path;
+  const std::size_t dirLen =
+      (slash != nullptr) ? static_cast<std::size_t>(slash - path) : 0U;
+  std::snprintf(cooked, sizeof(cooked), "%.*s/bgfx/cooked/%s.default.spirv.bin",
+                static_cast<int>(dirLen), path, file);
+  static constexpr const char *kBlob = "cooked-test-blob";
+  return engine::core::vfs_write_text(cooked, kBlob, std::strlen(kBlob));
 }
 
 static bool setup_shader_files() noexcept {
@@ -91,6 +108,14 @@ static bool setup_shader_files() noexcept {
     return false;
   }
   if (!engine::core::mount("shader_test", ".")) {
+    engine::core::shutdown_vfs();
+    engine::core::shutdown_logging();
+    return false;
+  }
+
+  std::error_code cookedDirError{};
+  std::filesystem::create_directories("bgfx/cooked", cookedDirError);
+  if (cookedDirError) {
     engine::core::shutdown_vfs();
     engine::core::shutdown_logging();
     return false;
@@ -109,10 +134,10 @@ static bool setup_shader_files() noexcept {
 }
 
 static void teardown_shader_files() noexcept {
-  std::remove("_shader_a.vert");
-  std::remove("_shader_a.frag");
-  std::remove("_shader_b.vert");
-  std::remove("_shader_b.frag");
+  std::remove("bgfx/cooked/_shader_a.vert.default.spirv.bin");
+  std::remove("bgfx/cooked/_shader_a.frag.default.spirv.bin");
+  std::remove("bgfx/cooked/_shader_b.vert.default.spirv.bin");
+  std::remove("bgfx/cooked/_shader_b.frag.default.spirv.bin");
   engine::core::shutdown_vfs();
   engine::core::shutdown_logging();
 }
@@ -309,39 +334,6 @@ static void test_check_reload_without_init() {
   ++g_passed;
 }
 
-/// EXPECTATION: the version scan finds the #version line after the
-/// file-top comment every engine shader carries (variant defines must
-/// splice AFTER it, or GL rejects the source), handles sources that
-/// start with the directive, includes indented directives, and returns 0
-/// when no #version exists.
-static void test_version_prefix_after_leading_comments() {
-  using namespace engine::renderer;
-
-  const char *commented =
-      "// Purpose comment line one.\n"
-      "// Line two.\n"
-      "\n"
-      "#version 330 core\n"
-      "void main() {}\n";
-  const std::size_t commentedPrefix = shader_version_prefix_length(commented);
-  TEST_ASSERT(commentedPrefix == std::strlen("// Purpose comment line one.\n"
-                                             "// Line two.\n"
-                                             "\n"
-                                             "#version 330 core\n"));
-
-  const char *bare = "#version 330 core\nvoid main() {}\n";
-  TEST_ASSERT(shader_version_prefix_length(bare) ==
-              std::strlen("#version 330 core\n"));
-
-  const char *indented = "  #version 330 core\nvoid main() {}\n";
-  TEST_ASSERT(shader_version_prefix_length(indented) ==
-              std::strlen("  #version 330 core\n"));
-
-  TEST_ASSERT(shader_version_prefix_length("void main() {}\n") == 0U);
-  TEST_ASSERT(shader_version_prefix_length("") == 0U);
-  ++g_passed;
-}
-
 /// Runs this executable or test program.
 int main() {
   int before_test_init_shutdown = g_failed;
@@ -368,8 +360,6 @@ int main() {
   RUN_TEST(test_stale_handle_rejected_after_slot_reuse);
   int before_test_check_reload_without_init = g_failed;
   RUN_TEST(test_check_reload_without_init);
-  int before_test_version_prefix_after_leading_comments = g_failed;
-  RUN_TEST(test_version_prefix_after_leading_comments);
 
   std::printf(
       "\nShader system tests: %d passed, %d failed\n", g_passed, g_failed);

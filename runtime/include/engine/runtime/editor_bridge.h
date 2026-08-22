@@ -18,7 +18,7 @@ struct EngineAssetDatabaseService;
 /// shutdown, new-frame, and render callbacks run with the render context
 /// current.
 struct EditorBridge final {
-  bool (*initialize)(void *sdlWindow, void *glContext) noexcept = nullptr;
+  bool (*initialize)(void *sdlWindow) noexcept = nullptr;
   void (*shutdown)() noexcept = nullptr;
   void (*new_frame)() noexcept = nullptr;
   void (*render)(float frameMs, float utilizationPct) noexcept = nullptr;

@@ -173,8 +173,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
       return false;
     }
 
-    if (!bridge->initialize(core::get_sdl_window(),
-                            core::get_sdl_gl_context())) {
+    if (!bridge->initialize(core::get_sdl_window())) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to initialize editor bridge");
       core::release_render_context();

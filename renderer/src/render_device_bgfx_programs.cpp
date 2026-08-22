@@ -315,18 +315,6 @@ const char *bgfx_cooked_program_profile() noexcept {
   }
 }
 
-DeviceProgramHandle bgfx_create_program(const char *, const char *) noexcept {
-  static bool logged = false;
-  if (!logged) {
-    logged = true;
-    core::log_message(core::LogLevel::Info, "render_device",
-                      "bgfx backend: runtime GLSL compilation "
-                      "unavailable; programs load from the shaderc cook "
-                      "(#138 Phase C, caps.cookedPrograms)");
-  }
-  return kInvalidDeviceProgram;
-}
-
 DeviceProgramHandle bgfx_create_program_binary(
     const void *vertexData, std::ptrdiff_t vertexSize,
     const void *fragmentData, std::ptrdiff_t fragmentSize) noexcept {

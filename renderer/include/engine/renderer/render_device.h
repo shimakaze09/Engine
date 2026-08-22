@@ -376,11 +376,6 @@ struct RenderDevice final {
   void (*bind_texture_slot)(std::uint32_t slot,
                             DeviceTextureHandle texture) noexcept = nullptr;
 
-  // Programs — compile + link below the boundary (errors logged; invalid
-  // handle on failure).
-  DeviceProgramHandle (*create_program)(const char *vertexSource,
-                                        const char *fragmentSource) noexcept =
-      nullptr;
   // Links a program from cooked shader binaries (#138 Phase C): opaque
   // backend-cooked bytes in, program handle out. Requires
   // caps.cookedPrograms; source-compiling backends leave it null.

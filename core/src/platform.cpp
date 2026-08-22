@@ -390,14 +390,6 @@ bool set_render_vsync(int interval) noexcept {
   return false;
 }
 
-void *get_gl_proc_address(const char *name) noexcept {
-  if (name == nullptr) {
-    return nullptr;
-  }
-
-  return reinterpret_cast<void *>(SDL_GL_GetProcAddress(name));
-}
-
 void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   if ((outWidth == nullptr) || (outHeight == nullptr)) {
     return;
@@ -414,7 +406,6 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 
 void *get_sdl_window() noexcept { return g_window; }
 
-void *get_sdl_gl_context() noexcept { return g_glContext; }
 
 bool platform_window_is_wayland() noexcept {
   const char *driver = SDL_GetCurrentVideoDriver();

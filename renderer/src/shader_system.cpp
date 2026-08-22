@@ -16,35 +16,8 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
-#include "shader_system_internal.h"
 
 namespace engine::renderer {
-
-std::size_t shader_version_prefix_length(const char *source) noexcept {
-  std::size_t lineStart = 0U;
-  while (source[lineStart] != '\0') {
-    std::size_t i = lineStart;
-    while ((source[i] == ' ') || (source[i] == '\t')) {
-      ++i;
-    }
-    if (std::strncmp(source + i, "#version", 8U) == 0) {
-      while ((source[i] != '\0') && (source[i] != '\n')) {
-        ++i;
-      }
-      if (source[i] == '\n') {
-        ++i;
-      }
-      return i;
-    }
-    while ((source[lineStart] != '\0') && (source[lineStart] != '\n')) {
-      ++lineStart;
-    }
-    if (source[lineStart] == '\n') {
-      ++lineStart;
-    }
-  }
-  return 0U;
-}
 
 namespace {
 
@@ -82,6 +55,10 @@ struct ShaderEntry final {
   ShaderDefineCopy defines[kMaxShaderDefines] = {};
   std::size_t defineCount = 0U;
   DeviceProgramHandle deviceProgram{};
+  // The cooked binary paths the last successful load linked, watched by
+  // check_shader_reload so a recook hot-reloads the program.
+  char watchVertPath[kMaxPathLength * 2U] = {};
+  char watchFragPath[kMaxPathLength * 2U] = {};
   std::int64_t vertMtime = 0;
   std::int64_t fragMtime = 0;
 };
@@ -242,64 +219,6 @@ void copy_shader_defines(ShaderEntry &entry, const ShaderDefine *defines,
   }
 }
 
-/// Counts the bytes needed for all variant define lines.
-std::size_t shader_define_preamble_size(const ShaderDefineCopy *defines,
-                                        std::size_t defineCount) noexcept {
-  std::size_t total = 0U;
-  for (std::size_t i = 0U; i < defineCount; ++i) {
-    total += 8U + std::strlen(defines[i].name) + 1U +
-             std::strlen(defines[i].value) + 1U;
-  }
-  return total;
-}
-
-/// Appends a byte range to an output cursor.
-void append_chars(char *&out, const char *text, std::size_t count) noexcept {
-  if (count == 0U) {
-    return;
-  }
-  std::memcpy(out, text, count);
-  out += count;
-}
-
-/// Builds shader source with variant defines inserted after #version.
-std::unique_ptr<char[]> build_source_with_defines(
-    const char *source, const ShaderDefineCopy *defines,
-    std::size_t defineCount) noexcept {
-  const std::size_t sourceLength = std::strlen(source);
-  const std::size_t versionLength = shader_version_prefix_length(source);
-  const bool versionNeedsNewline =
-      (versionLength > 0U) && (source[versionLength - 1U] != '\n');
-  const std::size_t preambleLength =
-      shader_define_preamble_size(defines, defineCount);
-  const std::size_t outputLength =
-      sourceLength + preambleLength + (versionNeedsNewline ? 1U : 0U);
-
-  std::unique_ptr<char[]> output(new (std::nothrow) char[outputLength + 1U]);
-  if (!output) {
-    return nullptr;
-  }
-
-  char *cursor = output.get();
-  append_chars(cursor, source, versionLength);
-  if (versionNeedsNewline) {
-    *cursor = '\n';
-    ++cursor;
-  }
-
-  for (std::size_t i = 0U; i < defineCount; ++i) {
-    append_chars(cursor, "#define ", 8U);
-    append_chars(cursor, defines[i].name, std::strlen(defines[i].name));
-    append_chars(cursor, " ", 1U);
-    append_chars(cursor, defines[i].value, std::strlen(defines[i].value));
-    append_chars(cursor, "\n", 1U);
-  }
-
-  append_chars(cursor, source + versionLength, sourceLength - versionLength);
-  *cursor = '\0';
-  return output;
-}
-
 /// Removes cached variant keys that reference a shader program handle.
 void remove_variants_for_handle(ShaderProgramHandle handle) noexcept {
   for (auto &variant : g_variants) {
@@ -307,37 +226,6 @@ void remove_variants_for_handle(ShaderProgramHandle handle) noexcept {
       variant = ShaderVariantEntry{};
     }
   }
-}
-
-DeviceProgramHandle compile_program_from_source(
-    const char *vertSource, const char *fragSource,
-    const ShaderDefineCopy *defines, std::size_t defineCount) noexcept {
-  const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || (dev->create_program == nullptr)) {
-    return kInvalidDeviceProgram;
-  }
-
-  std::unique_ptr<char[]> variantVertSource;
-  std::unique_ptr<char[]> variantFragSource;
-  const char *compiledVertSource = vertSource;
-  const char *compiledFragSource = fragSource;
-  if (defineCount > 0U) {
-    variantVertSource =
-        build_source_with_defines(vertSource, defines, defineCount);
-    variantFragSource =
-        build_source_with_defines(fragSource, defines, defineCount);
-    if (!variantVertSource || !variantFragSource) {
-      return kInvalidDeviceProgram;
-    }
-    compiledVertSource = variantVertSource.get();
-    compiledFragSource = variantFragSource.get();
-  }
-
-  // The variant sources only need to outlive this call; naming the result
-  // also keeps cppcheck from tying the returned handle to their lifetime.
-  const DeviceProgramHandle program =
-      dev->create_program(compiledVertSource, compiledFragSource);
-  return program;
 }
 
 /// Builds the cooked shader binary path beside a source path (#138
@@ -414,12 +302,14 @@ bool read_cooked_stage(const char *sourcePath,
                        const ShaderDefineCopy *defines,
                        std::size_t defineCount, const char *profile,
                        void **outData, std::size_t *outSize,
-                       bool *usedDefaultKey) noexcept {
+                       bool *usedDefaultKey,
+                       char *outLoadedPath) noexcept {
   char path[kMaxPathLength * 2U] = {};
   if (build_cooked_shader_path(sourcePath, defines, defineCount, profile,
                                path, sizeof(path)) &&
       core::vfs_read_binary(path, outData, outSize)) {
     *usedDefaultKey = (defineCount == 0U);
+    core::copy_string(outLoadedPath, kMaxPathLength * 2U, path);
     return true;
   }
   if (defineCount == 0U) {
@@ -429,6 +319,7 @@ bool read_cooked_stage(const char *sourcePath,
                                sizeof(path)) &&
       core::vfs_read_binary(path, outData, outSize)) {
     *usedDefaultKey = true;
+    core::copy_string(outLoadedPath, kMaxPathLength * 2U, path);
     return true;
   }
   return false;
@@ -442,7 +333,9 @@ bool read_cooked_stage(const char *sourcePath,
 DeviceProgramHandle try_cooked_program(const char *vertPath,
                                        const char *fragPath,
                                        const ShaderDefineCopy *defines,
-                                       std::size_t defineCount) noexcept {
+                                       std::size_t defineCount,
+                                       char *outVertCooked,
+                                       char *outFragCooked) noexcept {
   const RenderDevice *dev = render_device();
   if ((dev == nullptr) || !dev->caps.cookedPrograms ||
       (dev->create_program_binary == nullptr) ||
@@ -455,13 +348,13 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
   void *vertData = nullptr;
   std::size_t vertSize = 0U;
   if (!read_cooked_stage(vertPath, defines, defineCount, profile, &vertData,
-                         &vertSize, &vertUsedDefault)) {
+                         &vertSize, &vertUsedDefault, outVertCooked)) {
     return kInvalidDeviceProgram;
   }
   void *fragData = nullptr;
   std::size_t fragSize = 0U;
   if (!read_cooked_stage(fragPath, defines, defineCount, profile, &fragData,
-                         &fragSize, &fragUsedDefault)) {
+                         &fragSize, &fragUsedDefault, outFragCooked)) {
     core::vfs_free(vertData);
     return kInvalidDeviceProgram;
   }
@@ -520,62 +413,30 @@ void log_shader_path_error(const char *path, const char *reason) noexcept {
 }
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
-  // Cooked binaries win when the backend consumes them; a missing or
-  // unreadable binary falls back to source compilation below.
+  // Programs link exclusively from the shaderc cook (#296 closed the
+  // dead runtime source-compile fallback with the GL backend). The
+  // watched paths are the cooked binaries the successful link read, so
+  // a recook hot-reloads; a failed load keeps the old program.
   const DeviceProgramHandle cooked = try_cooked_program(
-      entry.vertPath, entry.fragPath, entry.defines, entry.defineCount);
-  if (cooked != kInvalidDeviceProgram) {
-    const RenderDevice *dev = render_device();
-    if ((dev != nullptr) && (dev->destroy_program != nullptr) &&
-        (entry.deviceProgram != kInvalidDeviceProgram)) {
-      dev->destroy_program(entry.deviceProgram);
-    }
-    entry.deviceProgram = cooked;
-    entry.vertMtime = core::vfs_file_mtime(entry.vertPath);
-    entry.fragMtime = core::vfs_file_mtime(entry.fragPath);
-    ++g_reloadEpoch;
-    return true;
-  }
-
-  char *vertSource = nullptr;
-  std::size_t vertSize = 0U;
-  if (!core::vfs_read_text(entry.vertPath, &vertSource, &vertSize)) {
-    log_shader_path_error(entry.vertPath, "failed to read vertex shader");
-    return false;
-  }
-
-  char *fragSource = nullptr;
-  std::size_t fragSize = 0U;
-  if (!core::vfs_read_text(entry.fragPath, &fragSource, &fragSize)) {
-    core::vfs_free(vertSource);
-    log_shader_path_error(entry.fragPath, "failed to read fragment shader");
-    return false;
-  }
-
-  const DeviceProgramHandle newProgram =
-      compile_program_from_source(vertSource, fragSource, entry.defines,
-                                  entry.defineCount);
-  core::vfs_free(vertSource);
-  core::vfs_free(fragSource);
-
-  if (newProgram == kInvalidDeviceProgram) {
+      entry.vertPath, entry.fragPath, entry.defines, entry.defineCount,
+      entry.watchVertPath, entry.watchFragPath);
+  if (cooked == kInvalidDeviceProgram) {
     char message[640] = {};
     std::snprintf(message, sizeof(message),
-                  "%s %s: shader compilation failed — keeping old program",
+                  "%s %s: cooked shader binaries unavailable — keeping old "
+                  "program",
                   entry.vertPath, entry.fragPath);
     core::log_message(core::LogLevel::Error, "shader", message);
     return false;
   }
-
   const RenderDevice *dev = render_device();
   if ((dev != nullptr) && (dev->destroy_program != nullptr) &&
       (entry.deviceProgram != kInvalidDeviceProgram)) {
     dev->destroy_program(entry.deviceProgram);
   }
-
-  entry.deviceProgram = newProgram;
-  entry.vertMtime = core::vfs_file_mtime(entry.vertPath);
-  entry.fragMtime = core::vfs_file_mtime(entry.fragPath);
+  entry.deviceProgram = cooked;
+  entry.vertMtime = core::vfs_file_mtime(entry.watchVertPath);
+  entry.fragMtime = core::vfs_file_mtime(entry.watchFragPath);
   ++g_reloadEpoch;
   return true;
 }
@@ -800,8 +661,8 @@ void check_shader_reload() noexcept {
       continue;
     }
 
-    const std::int64_t vertMtime = core::vfs_file_mtime(entry.vertPath);
-    const std::int64_t fragMtime = core::vfs_file_mtime(entry.fragPath);
+    const std::int64_t vertMtime = core::vfs_file_mtime(entry.watchVertPath);
+    const std::int64_t fragMtime = core::vfs_file_mtime(entry.watchFragPath);
 
     if ((vertMtime != entry.vertMtime) || (fragMtime != entry.fragMtime)) {
       char message[640] = {};
