@@ -17,6 +17,16 @@ int normalize_vsync_interval(int requested) noexcept;
 /// uncapped (maxFps <= 0) or the frame already ran past its budget.
 double frame_cap_wait_seconds(double elapsedSeconds, int maxFps) noexcept;
 
+/// Snaps a measured frame delta to the fixed step when they differ by
+/// at most 3% of the step. When the display refresh equals the fixed
+/// rate (vsync at 60 Hz), the true period IS the step and the measured
+/// spread is sampling noise; feeding it raw leaves the accumulator on
+/// the drain boundary and the step count alternates 0/2 (visible
+/// stutter). Deltas outside the band (other refresh rates, uncapped
+/// runs, hitches) pass through unchanged.
+double snap_delta_to_fixed_step(double deltaSeconds,
+                                double fixedDeltaSeconds) noexcept;
+
 /// Blocks for waitSeconds using a coarse sleep followed by a spin so the
 /// cap stays precise despite OS timer granularity. No-op for waits <= 0.
 void wait_for_frame_cap(double waitSeconds) noexcept;

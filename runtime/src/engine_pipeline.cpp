@@ -521,6 +521,11 @@ struct EnginePipeline::Impl final {
   double renderAlpha = 1.0;
   Clock::time_point previousFrameStart{};
   double wallFrameMs = 0.0;
+  // Windowed FPS readout: instantaneous 1/dt swings +-4 FPS on 1 ms of
+  // present jitter, so the overlay publishes a half-second average.
+  double fpsWindowSeconds = 0.0;
+  std::uint32_t fpsWindowFrames = 0U;
+  float smoothedFps = 0.0F;
   renderer::CameraState previousCameraSample{};
   renderer::CameraState currentCameraSample{};
   bool cameraSampleValid = false;
@@ -869,7 +874,11 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 void EnginePipeline::Impl::stage_timing() noexcept {
   if (isPlaying && !singleStepping) {
     const auto now = Clock::now();
-    accumulator += std::chrono::duration<double>(now - previousTick).count();
+    // Snapped so vsync-at-fixed-rate frames drain exactly one step
+    // instead of alternating 0/2 on measurement noise (frame_pacing).
+    accumulator += runtime::snap_delta_to_fixed_step(
+        std::chrono::duration<double>(now - previousTick).count(),
+        kFixedDeltaSeconds);
     previousTick = now;
   } else {
     previousTick = frameStart;
@@ -1614,10 +1623,24 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   core::EngineStats frameStats{};
   frameStats.frameTimeMs = static_cast<float>(frameMs);
   // FPS reports the presented frame-to-frame rate (includes vsync and the
-  // r_max_fps wait); frameTimeMs stays the busy cost of the frame.
+  // r_max_fps wait); frameTimeMs stays the busy cost of the frame. The
+  // published value is a half-second windowed average — the instantaneous
+  // 1/dt readout swings +-4 FPS at 60 Hz on 1 ms of present jitter, which
+  // reads as instability the pacing does not have.
   const double presentedMs = (wallFrameMs > 0.0) ? wallFrameMs : frameMs;
+  fpsWindowSeconds += presentedMs / 1000.0;
+  ++fpsWindowFrames;
+  if (fpsWindowSeconds >= 0.5) {
+    smoothedFps = static_cast<float>(static_cast<double>(fpsWindowFrames) /
+                                     fpsWindowSeconds);
+    fpsWindowSeconds = 0.0;
+    fpsWindowFrames = 0U;
+  }
   frameStats.fps =
-      (presentedMs > 0.0) ? static_cast<float>(1000.0 / presentedMs) : 0.0F;
+      (smoothedFps > 0.0F)
+          ? smoothedFps
+          : ((presentedMs > 0.0) ? static_cast<float>(1000.0 / presentedMs)
+                                 : 0.0F);
   frameStats.drawCalls = rendererStats.drawCalls;
   frameStats.triCount = rendererStats.triangleCount;
   frameStats.entityCount = aliveCount;

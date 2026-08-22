@@ -1106,6 +1106,11 @@ bool initialize_render_device() noexcept {
   init.resolution.height = static_cast<std::uint32_t>(ctx.backBufferHeight);
   init.resolution.reset =
       ctx.backBufferVsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+  // One frame of CPU run-ahead: without a bound, Vulkan's FIFO queue
+  // lets several short CPU frames pile up before one long block at
+  // acquire, which reads as unstable pacing (and >refresh FPS spikes)
+  // even when presentation is locked to vsync.
+  init.resolution.maxFrameLatency = 1U;
   if (!bgfx::init(init)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "bgfx initialization failed");
