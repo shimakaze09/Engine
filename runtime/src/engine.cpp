@@ -101,6 +101,15 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "bgfx backend only: renderer API (auto, vulkan, opengl, metal, "
       "noop); read once at device initialization (#138)"));
 
+  static_cast<void>(core::cvar_register_bool(
+      "r_bgfx_trace", false,
+      "bgfx backend only: route bgfx trace output into the engine log"));
+
+  static_cast<void>(core::cvar_register_bool(
+      "r_bgfx_debug", false,
+      "bgfx backend only: init with bgfx debug checks (read once at "
+      "device initialization)"));
+
   static_cast<void>(physics::register_physics_cvars());
 
   if (!core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {

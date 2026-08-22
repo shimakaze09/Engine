@@ -284,8 +284,15 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
 /// buffer at the given stride, uploading and releasing any staged data.
 /// False when the buffer is already realized at a different stride (one
 /// layout per buffer — matching the engine's 1:1 mesh/buffer usage).
+/// Realizes a staged vertex buffer as a bgfx dynamic buffer. The engine
+/// layout must be passed for shader-consumed streams: bgfx binds vertex
+/// attributes from the buffer's creation layout on every backend (the
+/// GL family binds nothing for a skip-only layout, and Vulkan's
+/// missing-attribute fallback reads position data for every input).
+/// Instance streams pass nullptr — bgfx only reads their stride.
 bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
-                                std::int32_t strideBytes) noexcept {
+                                std::int32_t strideBytes,
+                                const VertexLayout *engineLayout) noexcept {
   if (bgfx::isValid(record->vertex)) {
     return record->strideBytes == strideBytes;
   }
@@ -293,7 +300,13 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
     return false;
   }
   bgfx::VertexLayout strideLayout{};
-  bgfx_stride_layout(strideBytes, &strideLayout);
+  if (engineLayout != nullptr) {
+    if (!bgfx_vertex_layout(*engineLayout, &strideLayout)) {
+      return false;
+    }
+  } else {
+    bgfx_stride_layout(strideBytes, &strideLayout);
+  }
   const std::uint32_t count = static_cast<std::uint32_t>(
       (record->sizeBytes > strideBytes) ? (record->sizeBytes / strideBytes)
                                         : 1);
@@ -572,15 +585,11 @@ DeviceGeometryHandle bgfx_create_geometry(const GeometryDesc &desc) noexcept {
       drop_operation("create_geometry: stale or non-vertex buffer");
       return kInvalidDeviceGeometry;
     }
-    bgfx::VertexLayout layout{};
-    if (!bgfx_vertex_layout(desc.layout, &layout)) {
-      drop_operation("create_geometry: invalid vertex layout");
-      return kInvalidDeviceGeometry;
-    }
-    // Attaching a geometry realizes the buffer at this layout's stride
-    // (bgfx binds the layout at buffer creation; per-draw stride
-    // overrides are rejected).
-    if (!bgfx_realize_vertex_buffer(vertex, desc.layout.strideBytes)) {
+    // Attaching a geometry realizes the buffer at this layout (bgfx
+    // binds the layout at buffer creation; per-draw stride overrides
+    // are rejected).
+    if (!bgfx_realize_vertex_buffer(vertex, desc.layout.strideBytes,
+                                    &desc.layout)) {
       drop_operation("create_geometry: vertex buffer realization failed "
                      "(one layout per buffer)");
       return kInvalidDeviceGeometry;
@@ -635,7 +644,7 @@ bool bgfx_set_geometry_instance_stream(DeviceGeometryHandle geometry,
   }
   // Attaching the stream realizes the buffer at the instance stride
   // (bgfx derives per-instance advance from the creation layout).
-  if (!bgfx_realize_vertex_buffer(stream, layout.strideBytes)) {
+  if (!bgfx_realize_vertex_buffer(stream, layout.strideBytes, nullptr)) {
     drop_operation("set_geometry_instance_stream: realization failed "
                    "(one layout per buffer)");
     return false;
@@ -1040,6 +1049,7 @@ bool initialize_render_device() noexcept {
   static BgfxCallback callback{};
   bgfx::Init init{};
   init.callback = &callback;
+  init.debug = core::cvar_get_bool("r_bgfx_debug", false);
 
   // Renderer selection: r_bgfx_renderer names the API; without a native
   // window (headless/dummy driver) only Noop is reachable. "auto" lets
@@ -1054,6 +1064,9 @@ bool initialize_render_device() noexcept {
     init.type = bgfx::RendererType::Vulkan;
   } else if (std::strcmp(requested, "opengl") == 0) {
     init.type = bgfx::RendererType::OpenGL;
+  } else if (std::strcmp(requested, "gles") == 0) {
+    // The web export's API family, runnable natively for diagnosis.
+    init.type = bgfx::RendererType::OpenGLES;
   } else if (std::strcmp(requested, "metal") == 0) {
     init.type = bgfx::RendererType::Metal;
   } else {
