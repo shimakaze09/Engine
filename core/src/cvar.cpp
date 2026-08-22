@@ -6,6 +6,8 @@
 
 #include "engine/core/cvar.h"
 
+#include "engine/core/platform.h"
+
 #include "engine/core/logging.h"
 
 #include <array>
@@ -351,7 +353,9 @@ void apply_env_override(CVarEntry &entry) noexcept {
     envName[out++] = (*c == '.') ? '_' : *c;
   }
   envName[out] = '\0';
-  const char *value = std::getenv(envName);
+  // GetEnvironmentVariableA under the hood on Windows — std::getenv is
+  // a -Werror deprecation there.
+  const char *value = non_empty_env(envName);
   if (value == nullptr) {
     return;
   }
