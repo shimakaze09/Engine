@@ -223,7 +223,7 @@ void apply_editor_style() noexcept {
 } // namespace
 
 /// Initializes the owning system for editor.
-bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
+bool initialize_editor(void *sdlWindow) noexcept {
   if (editor_session().initialized) {
     return true;
   }
@@ -271,9 +271,9 @@ bool initialize_editor(void *sdlWindow, void *glContext) noexcept {
       "debug.camera_detach", false,
       "Detach debug free-fly camera from game camera"));
 
-  // The bgfx ImGui backend owns its device objects and takes no
-  // context (#138); the platform handle is all SDL needs.
-  static_cast<void>(glContext);
+  // The bgfx ImGui backend owns its device objects; the platform
+  // window handle is all SDL needs (#296 dropped the dead GL-context
+  // parameter with the GL backend).
   if (!ImGui_ImplSDL3_InitForOther(static_cast<SDL_Window *>(sdlWindow))) {
     ImGui::DestroyContext();
     return false;

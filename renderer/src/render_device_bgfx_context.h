@@ -189,8 +189,6 @@ void reset_global_uniforms() noexcept;
 
 // Program/parameter device entries implemented in
 // render_device_bgfx_programs.cpp and wired by fill_bgfx_render_device.
-DeviceProgramHandle bgfx_create_program(const char *vertexSource,
-                                        const char *fragmentSource) noexcept;
 DeviceProgramHandle bgfx_create_program_binary(
     const void *vertexData, std::ptrdiff_t vertexSize,
     const void *fragmentData, std::ptrdiff_t fragmentSize) noexcept;

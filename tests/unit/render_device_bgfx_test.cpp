@@ -216,12 +216,11 @@ void test_render_targets(TestContext &t) {
   render_device_bgfx_frame();
 }
 
-/// Programs and draws: creation fails until the Phase C cook, parameter
-/// tokens are defined no-ops, and program-less draws drop visibly.
+/// Programs and draws: runtime source compilation no longer exists on
+/// the contract (#296), parameter tokens are defined no-ops, and
+/// program-less draws drop visibly.
 void test_programs_and_draws(TestContext &t) {
   const RenderDevice *dev = render_device();
-  t.check(dev->create_program("void main(){}", "void main(){}").value == 0U,
-          "program creation fails before the shader cook");
   const ShaderParam param = dev->shader_param(kInvalidDeviceProgram, "u_x");
   t.check(!param.valid(), "shader params resolve invalid");
   dev->set_param_f32(param, 1.0f); // defined no-op

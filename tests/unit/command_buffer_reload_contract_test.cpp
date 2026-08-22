@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <string>
 
 namespace {
 
@@ -80,8 +81,11 @@ void add_missing_uniform(const char *name,
   }
 }
 
+const char *fake_cooked_profile() noexcept { return "spirv"; }
+
 engine::renderer::DeviceProgramHandle
-fake_create_program(const char *vs, const char *fs) noexcept {
+fake_create_program_binary(const void *vs, std::ptrdiff_t,
+                           const void *fs, std::ptrdiff_t) noexcept {
   if ((vs == nullptr) || (fs == nullptr)) {
     return engine::renderer::kInvalidDeviceProgram;
   }
@@ -144,7 +148,9 @@ void configure_fake_device() noexcept {
   // Enough sampler units that the deferred capability gate stays open —
   // this harness exercises the reload contract, not device limits.
   g_fakeDevice.caps.maxTextureSamplers = 32U;
-  g_fakeDevice.create_program = &fake_create_program;
+  g_fakeDevice.caps.cookedPrograms = true;
+  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
+  g_fakeDevice.create_program_binary = &fake_create_program_binary;
   g_fakeDevice.destroy_program = &fake_destroy_program;
   g_fakeDevice.shader_param = &fake_shader_param;
   g_fakeDevice.create_buffer = &fake_create_buffer;
@@ -159,8 +165,10 @@ void configure_fake_device() noexcept {
 }
 
 bool write_shader_file(const char *fileName, const char *text) noexcept {
+  // Cooked layout (#296): the loader reads the bgfx cook's binaries.
   char path[256] = {};
-  std::snprintf(path, sizeof(path), "%s/%s", kShaderDir, fileName);
+  std::snprintf(path, sizeof(path), "%s/bgfx/cooked/%s.default.spirv.bin",
+                kShaderDir, fileName);
   FILE *file = nullptr;
 #ifdef _WIN32
   if (fopen_s(&file, path, "wb") != 0) {
@@ -184,7 +192,8 @@ bool write_shader_file(const char *fileName, const char *text) noexcept {
 /// without any wall-clock sleep.
 bool bump_shader_mtime(const char *fileName, int seconds) noexcept {
   char path[256] = {};
-  std::snprintf(path, sizeof(path), "%s/%s", kShaderDir, fileName);
+  std::snprintf(path, sizeof(path), "%s/bgfx/cooked/%s.default.spirv.bin",
+                kShaderDir, fileName);
   std::error_code ec{};
   const auto current = std::filesystem::last_write_time(path, ec);
   if (ec) {
@@ -435,7 +444,9 @@ int main() {
 
   int result = 0;
   std::error_code ec{};
-  std::filesystem::create_directories(kShaderDir, ec);
+  std::filesystem::create_directories(std::string(kShaderDir) +
+                                          "/bgfx/cooked",
+                                      ec);
   if (ec) {
     result = 403;
   }

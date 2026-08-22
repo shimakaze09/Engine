@@ -982,7 +982,6 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->update_texture = &bgfx_update_texture;
   device->destroy_texture = &bgfx_destroy_texture;
   device->bind_texture_slot = &bgfx_bind_texture_slot;
-  device->create_program = &bgfx_backend::bgfx_create_program;
   device->create_program_binary = &bgfx_backend::bgfx_create_program_binary;
   device->create_program_binary_introspected =
       &bgfx_backend::bgfx_create_program_binary_introspected;

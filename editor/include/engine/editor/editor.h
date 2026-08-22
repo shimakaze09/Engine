@@ -9,7 +9,7 @@ class World;
 namespace engine::editor {
 
 /// Initializes the owning system for editor.
-bool initialize_editor(void *sdlWindow, void *glContext) noexcept;
+bool initialize_editor(void *sdlWindow) noexcept;
 /// Shuts down the owning system for editor.
 void shutdown_editor() noexcept;
 /// Starts an ImGui frame (call before any panel draws).

@@ -41,8 +41,6 @@ void swap_render_buffers() noexcept;
 /// Sets the present interval (0 off, 1 on, -1 adaptive; adaptive falls
 /// back to 1 when the driver rejects it). Requires a current GL context.
 bool set_render_vsync(int interval) noexcept;
-/// GL function loader (wraps SDL_GL_GetProcAddress).
-void *get_gl_proc_address(const char *name) noexcept;
 /// Drawable size in pixels (may differ from window size on HiDPI).
 void render_drawable_size(int *outWidth, int *outHeight) noexcept;
 /// Environment variable value, or nullptr when unset or empty (the
@@ -50,8 +48,6 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept;
 const char *non_empty_env(const char *name) noexcept;
 /// Underlying SDL_Window* (opaque; platform/editor glue only).
 void *get_sdl_window() noexcept;
-/// Underlying SDL_GLContext (opaque; platform/editor glue only).
-void *get_sdl_gl_context() noexcept;
 /// Native window handle for external render backends (#138): X11 window
 /// id / Wayland wl_surface / Win32 HWND / Cocoa NSWindow, null when
 /// headless or before initialization.

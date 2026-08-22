@@ -44,9 +44,6 @@ void null_update_texture(DeviceTextureHandle, const void *, std::int32_t,
 void null_destroy_texture(DeviceTextureHandle) noexcept {}
 void null_bind_texture_slot(std::uint32_t, DeviceTextureHandle) noexcept {}
 
-DeviceProgramHandle null_create_program(const char *, const char *) noexcept {
-  return DeviceProgramHandle{next_handle()};
-}
 DeviceProgramHandle null_create_program_binary(const void *, std::ptrdiff_t,
                                                const void *,
                                                std::ptrdiff_t) noexcept {
@@ -151,7 +148,6 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->update_texture = &null_update_texture;
   device->destroy_texture = &null_destroy_texture;
   device->bind_texture_slot = &null_bind_texture_slot;
-  device->create_program = &null_create_program;
   device->create_program_binary = &null_create_program_binary;
   device->create_program_binary_introspected =
       &null_create_program_binary_introspected;
