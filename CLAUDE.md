@@ -262,7 +262,12 @@ directory-global by design.
   `render_device_gl.cpp` was deleted at parity, 2026-08-22)
   (bgfx single-threaded; windowed
   runs initialize the real renderer — `r_bgfx_renderer` cvar, auto =
-  bgfx's platform pick, proven on Vulkan — over the platform's native
+  bgfx's platform pick except Windows, where auto selects Vulkan
+  explicitly (proven backend; the D3D11/12 backends stay explicit
+  `d3d11`/`d3d12` opt-ins because DXBC SM 5.0 caps sampler registers
+  at 16 while the forward/deferred unit map binds up to slot 21, so
+  no dx11 program cook exists — issue #301; the cook's `dx11` profile
+  tag is opt-in, Windows-host-only) — over the platform's native
   window/display handles, present through `present_render_device`
   (which also applies live `r_vsync` and drawable resizes via
   bgfx::reset), while headless runs stay on Noop;

@@ -1077,7 +1077,17 @@ bool initialize_render_device() noexcept {
   } else if (std::strcmp(requested, "d3d12") == 0) {
     init.type = bgfx::RendererType::Direct3D12;
   } else {
+#ifdef _WIN32
+    // "auto" picks Vulkan explicitly on Windows: bgfx's own ranking
+    // prefers D3D11/12, but DXBC (SM 5.0) caps sampler registers at 16
+    // while the forward/deferred unit map binds up to slot 21, so no
+    // dx11 program cook exists yet (issue #301) — a D3D pick could only
+    // fail shader creation. spirv is the canonical cooked profile and
+    // Vulkan is the proven backend.
+    init.type = bgfx::RendererType::Vulkan;
+#else
     init.type = bgfx::RendererType::Count; // auto
+#endif
   }
   if (nativeWindow != nullptr) {
     init.platformData.nwh = nativeWindow;
