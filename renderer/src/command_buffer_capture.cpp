@@ -159,7 +159,7 @@ bool ensure_scene_capture_target(BackendState &backend,
   depthDesc.format = TextureFormat::Depth24;
   depthDesc.width = width;
   depthDesc.height = height;
-  depthDesc.filter = TextureFilter::Linear;
+  depthDesc.filter = TextureFilter::Nearest;
   depthDesc.wrap = TextureWrap::Repeat;
   target.depthTexture = dev->create_texture(depthDesc);
   if (target.depthTexture == kInvalidDeviceTexture) {
