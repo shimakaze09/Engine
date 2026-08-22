@@ -1044,8 +1044,11 @@ bool initialize_render_device() noexcept {
   }
 
   // Calling renderFrame before init keeps bgfx single-threaded, matching
-  // the engine's main-thread flush model.
+  // the engine's main-thread flush model. Emscripten builds compile bgfx
+  // single-threaded already and assert on the call.
+#if !defined(__EMSCRIPTEN__)
   bgfx::renderFrame();
+#endif
   static BgfxCallback callback{};
   bgfx::Init init{};
   init.callback = &callback;
