@@ -263,11 +263,11 @@ directory-global by design.
   (bgfx single-threaded; windowed
   runs initialize the real renderer — `r_bgfx_renderer` cvar, auto =
   bgfx's platform pick except Windows, where auto selects Vulkan
-  explicitly (proven backend; the D3D11/12 backends stay explicit
-  `d3d11`/`d3d12` opt-ins because DXBC SM 5.0 caps sampler registers
-  at 16 while the forward/deferred unit map binds up to slot 21, so
-  no dx11 program cook exists — issue #301; the cook's `dx11` profile
-  tag is opt-in, Windows-host-only) — over the platform's native
+  explicitly (proven backend; the D3D11/12 backends are runnable —
+  the #301 shadow-array unit map fits DXBC's 16-register cap and
+  Win64 builds cook the `dx11` profile by default — but stay explicit
+  `d3d11`/`d3d12` opt-ins until verified on hardware, an owner call
+  to flip) — over the platform's native
   window/display handles, present through `present_render_device`
   (which also applies live `r_vsync` and drawable resizes via
   bgfx::reset), while headless runs stay on Noop;
@@ -283,10 +283,13 @@ directory-global by design.
   their attachment's stride (bgfx rejects stride overrides), and a
   backend-owned 3-vertex stream standing in for gl_VertexID fullscreen
   draws; the deferred path also renders under bgfx (gbuffer MRT +
-  tile/light-data texelFetch lighting cooked; the build sets
-  BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 so the engine's unit map up to 21
-  fits — WebGL2's 16-unit floor is the web-export unit's recorded
-  concern); sky (cubemap/Preetham/procedural), IBL generation, the
+  tile/light-data texelFetch lighting cooked; #301: the cascade and
+  spot shadow maps are Tex2DArrays — one sampler register per set,
+  cascades uniformly 2048² since array layers share dimensions — so
+  the whole unit map tops out at register 15, inside DXBC's 16-sampler
+  cap and WebGL2's 16-unit floor, and the deferred+PBR_FULL gates now
+  pass on 16-unit devices); sky (cubemap/Preetham/procedural), IBL
+  generation, the
   full post stack, and CSM/spot/point shadow sampling all run under
   bgfx — the entire pass list incl. GPU skinning (plain mat4-array
   palettes replace the BonePalette UBO on both backends) boots clean

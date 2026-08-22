@@ -18,42 +18,50 @@ namespace engine::renderer {
 
 namespace {
 
-/// Square Depth24 shadow texture. Point sampling: the shaders take their
-/// own PCF taps and compare depths explicitly, and WebGL2 treats
-/// linear-filtered depth textures as incomplete (all-zero samples, #293).
-DeviceTextureHandle create_shadow_depth_texture(const RenderDevice *dev,
-                                                int resolution) noexcept {
+/// Square Depth24 shadow array (#301): one texture holds every cascade
+/// or spot slot as a layer, so the shaders sample the whole set through
+/// a single register (DXBC caps sampler registers at 16). Point
+/// sampling: the shaders take their own PCF taps and compare depths
+/// explicitly, and WebGL2 treats linear-filtered depth textures as
+/// incomplete (all-zero samples, #293); ClampEdge so border PCF taps
+/// never wrap to the map's opposite edge.
+DeviceTextureHandle create_shadow_depth_array(const RenderDevice *dev,
+                                              int resolution,
+                                              int layers) noexcept {
   if ((dev == nullptr) || (dev->create_texture == nullptr)) {
     return kInvalidDeviceTexture;
   }
   TextureDesc desc{};
-  desc.kind = TextureKind::Tex2D;
+  desc.kind = TextureKind::Tex2DArray;
   desc.format = TextureFormat::Depth24;
   desc.width = resolution;
   desc.height = resolution;
+  desc.layers = layers;
   desc.filter = TextureFilter::Nearest;
-  desc.wrap = TextureWrap::Repeat;
+  desc.wrap = TextureWrap::ClampEdge;
   return dev->create_texture(desc);
 }
 
-/// Depth-only render target over one shadow depth texture.
-RenderTargetHandle create_depth_only_target(const RenderDevice *dev,
-                                            DeviceTextureHandle depth) noexcept {
+/// Depth-only render target over one layer of a shadow depth array.
+RenderTargetHandle create_depth_layer_target(const RenderDevice *dev,
+                                             DeviceTextureHandle depthArray,
+                                             int layer) noexcept {
   if ((dev == nullptr) || (dev->create_render_target == nullptr)) {
     return RenderTargetHandle{};
   }
   RenderTargetDesc desc{};
-  desc.depth.texture = depth;
+  desc.depth.texture = depthArray;
+  desc.depth.layer = layer;
   return dev->create_render_target(desc);
 }
 
 } // namespace
 
 int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
-  if (cascadeIndex >= kShadowCascadeCount) {
-    return kShadowCascadeResolutions[kShadowCascadeCount - 1U];
-  }
-  return kShadowCascadeResolutions[cascadeIndex];
+  // Uniform since the cascades became one texture array (#301): array
+  // layers share dimensions, so every cascade renders at full size.
+  static_cast<void>(cascadeIndex);
+  return kShadowMapResolution;
 }
 
 CascadeSplits compute_cascade_splits(float nearClip, float farClip,
@@ -92,10 +100,13 @@ math::Vec3 choose_light_up(const math::Vec3 &lightDir) noexcept {
 /// Extract 8 world-space frustum corners from inverse view-projection.
 void extract_frustum_corners(const math::Mat4 &invViewProj,
                              math::Vec3 outCorners[8]) noexcept {
-  // NDC corners: near z=-1, far z=+1 in OpenGL convention.
-  constexpr float ndcCorners[8][3] = {
-      {-1.0F, -1.0F, -1.0F}, {1.0F, -1.0F, -1.0F}, {1.0F, 1.0F, -1.0F},
-      {-1.0F, 1.0F, -1.0F},  {-1.0F, -1.0F, 1.0F}, {1.0F, -1.0F, 1.0F},
+  // Near-plane NDC z follows the device convention: -1 on GL, 0 on
+  // zero-to-one APIs — unprojecting -1 there lands inside the frustum
+  // (half the near distance) and over-extends every cascade's fit.
+  const float nearZ = device_depth_zero_one() ? 0.0F : -1.0F;
+  const float ndcCorners[8][3] = {
+      {-1.0F, -1.0F, nearZ}, {1.0F, -1.0F, nearZ}, {1.0F, 1.0F, nearZ},
+      {-1.0F, 1.0F, nearZ},  {-1.0F, -1.0F, 1.0F}, {1.0F, -1.0F, 1.0F},
       {1.0F, 1.0F, 1.0F},    {-1.0F, 1.0F, 1.0F},
   };
 
@@ -258,20 +269,16 @@ bool initialize_shadow_maps(ShadowMapState &state) noexcept {
     return false;
   }
 
+  state.depthArrayTexture = create_shadow_depth_array(
+      dev, kShadowMapResolution, static_cast<int>(kShadowCascadeCount));
+  if (state.depthArrayTexture == kInvalidDeviceTexture) {
+    core::log_message(core::LogLevel::Error, "shadow_map",
+                      "failed to create shadow cascade depth array");
+    return false;
+  }
   for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
-    const int cascadeResolution = shadow_cascade_resolution(i);
-    state.resolutions[i] = cascadeResolution;
-    state.depthTextures[i] =
-        create_shadow_depth_texture(dev, cascadeResolution);
-    if (state.depthTextures[i] == kInvalidDeviceTexture) {
-      core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create shadow cascade depth texture");
-      shutdown_shadow_maps(state);
-      return false;
-    }
-
-    state.depthTargets[i] =
-        create_depth_only_target(dev, state.depthTextures[i]);
+    state.depthTargets[i] = create_depth_layer_target(
+        dev, state.depthArrayTexture, static_cast<int>(i));
     if (state.depthTargets[i].value == 0U) {
       core::log_message(core::LogLevel::Error, "shadow_map",
                         "failed to create shadow cascade render target");
@@ -296,11 +303,10 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept {
       dev->destroy_render_target(state.depthTargets[i]);
       state.depthTargets[i] = RenderTargetHandle{};
     }
-    if (state.depthTextures[i] != kInvalidDeviceTexture) {
-      dev->destroy_texture(state.depthTextures[i]);
-      state.depthTextures[i] = kInvalidDeviceTexture;
-    }
-    state.resolutions[i] = 0;
+  }
+  if (state.depthArrayTexture != kInvalidDeviceTexture) {
+    dev->destroy_texture(state.depthArrayTexture);
+    state.depthArrayTexture = kInvalidDeviceTexture;
   }
 
   state.initialized = false;
@@ -342,18 +348,16 @@ bool initialize_spot_shadow_maps(SpotShadowState &state) noexcept {
     return false;
   }
 
+  state.depthArrayTexture = create_shadow_depth_array(
+      dev, kSpotShadowMapResolution, static_cast<int>(kMaxSpotShadowLights));
+  if (state.depthArrayTexture == kInvalidDeviceTexture) {
+    core::log_message(core::LogLevel::Error, "shadow_map",
+                      "failed to create spot shadow depth array");
+    return false;
+  }
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    state.slots[i].depthTexture =
-        create_shadow_depth_texture(dev, kSpotShadowMapResolution);
-    if (state.slots[i].depthTexture == kInvalidDeviceTexture) {
-      core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create spot shadow depth texture");
-      shutdown_spot_shadow_maps(state);
-      return false;
-    }
-
-    state.slots[i].depthTarget =
-        create_depth_only_target(dev, state.slots[i].depthTexture);
+    state.slots[i].depthTarget = create_depth_layer_target(
+        dev, state.depthArrayTexture, static_cast<int>(i));
     if (state.slots[i].depthTarget.value == 0U) {
       core::log_message(core::LogLevel::Error, "shadow_map",
                         "failed to create spot shadow render target");
@@ -378,11 +382,11 @@ void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept {
       dev->destroy_render_target(state.slots[i].depthTarget);
       state.slots[i].depthTarget = RenderTargetHandle{};
     }
-    if (state.slots[i].depthTexture != kInvalidDeviceTexture) {
-      dev->destroy_texture(state.slots[i].depthTexture);
-      state.slots[i].depthTexture = kInvalidDeviceTexture;
-    }
     state.slots[i].lightIndex = -1;
+  }
+  if (state.depthArrayTexture != kInvalidDeviceTexture) {
+    dev->destroy_texture(state.depthArrayTexture);
+    state.depthArrayTexture = kInvalidDeviceTexture;
   }
 
   state.initialized = false;

@@ -22,8 +22,9 @@ inline constexpr std::size_t kMaxDeviceTextures = 1024U;
 inline constexpr std::size_t kMaxDevicePrograms = 128U;
 inline constexpr std::size_t kMaxDeviceGeometries = 4352U;
 inline constexpr std::size_t kMaxDeviceTargets = 256U;
-// Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 set by the build (#138):
-// the deferred pass binds engine texture units up to 21.
+// Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 set by the build (#138);
+// the engine unit map tops out at 15 since the #301 shadow arrays, so
+// the backend bound is pure headroom.
 inline constexpr std::size_t kMaxTextureSlots = 32U;
 // Sized for the largest engine program: the PBR_FULL forward variant
 // carries ~50 material/light/fog uniforms plus 15 shadow/IBL samplers
@@ -57,6 +58,7 @@ struct BgfxTextureRecord final {
   TexelData texel = TexelData::U8;
   std::int32_t width = 0;
   std::int32_t height = 0;
+  std::int32_t layers = 1; // Tex2DArray layer count; 1 otherwise
   bool renderTarget = false;
 };
 

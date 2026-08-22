@@ -5,10 +5,10 @@ $input v_worldpos, v_normal, v_texcoord0
 // five material texture slots (baked stages 0-4 matching the flush's
 // unit assignment), alpha modes, and distance/height fog. The PBR_FULL
 // variant adds cascade/spot/point shadow sampling and split-sum IBL on
-// the GL unit map (6-17, 19-21) — it needs 20 sampler units, so the
-// runtime selects it only when caps.maxTextureSamplers covers the map
-// (WebGL2's 16-unit floor keeps this default: shadow=1 and constant
-// ambient). Scalar and integer GL uniforms become vec4 read through .x.
+// the shared unit map (arrays 7-8, point cubes 9-12, IBL 13-15; #301) —
+// the map tops out at register 15, so any 16-unit device (incl.
+// WebGL2's floor) selects it. Scalar and integer GL uniforms become
+// vec4 read through .x.
 
 #include <bgfx_shader.sh>
 
@@ -20,9 +20,16 @@ $input v_worldpos, v_normal, v_texcoord0
 #if BGFX_SHADER_LANGUAGE_GLSL
 #define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
 #define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#define ENGINE_NDC_XY_TO_UV(xy) ((xy) * 0.5 + 0.5)
 #else
 #define ENGINE_DEPTH_TO_NDC(d) (d)
 #define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+// y-down APIs store a direct render's ndc.y = +1 at texture row v = 0
+// (the parity fullscreen.vs.sc compensates for RT-sampling passes), so
+// mapping light-space ndc to a shadow-map texel flips v here too;
+// without it every shadow tap reads the vertically mirrored texel and
+// the compare darkens whole regions (ambient-only scene on Vulkan).
+#define ENGINE_NDC_XY_TO_UV(xy) (vec2(0.5, -0.5) * (xy) + 0.5)
 #endif
 
 #define MAX_DIR_LIGHTS 4
@@ -80,21 +87,31 @@ uniform vec4 u_spotLightParams[MAX_SPOT_LIGHTS];
 #define MAX_SPOT_SHADOW_LIGHTS 4
 #define MAX_POINT_SHADOW_LIGHTS 4
 
-SAMPLER2D(uShadowMap0, 6);
-SAMPLER2D(uShadowMap1, 7);
-SAMPLER2D(uShadowMap2, 8);
-SAMPLER2D(uShadowMap3, 9);
-SAMPLER2D(uSpotShadowMap0, 10);
-SAMPLER2D(uSpotShadowMap1, 11);
-SAMPLER2D(uSpotShadowMap2, 12);
-SAMPLER2D(uSpotShadowMap3, 13);
-SAMPLERCUBE(uPointShadowMap0, 14);
-SAMPLERCUBE(uPointShadowMap1, 15);
-SAMPLERCUBE(uPointShadowMap2, 16);
-SAMPLERCUBE(uPointShadowMap3, 17);
-SAMPLERCUBE(uIrradianceMap, 19);
-SAMPLERCUBE(uPrefilteredMap, 20);
-SAMPLER2D(uBrdfLut, 21);
+// One tap from a shadow Tex2DArray at explicit LOD 0 (single-mip maps;
+// fxc also rejects gradient samples in the dynamic light loops). HLSL
+// samplers are typed structs, so the array form has its own entry
+// point shared by the hlsl/spirv/metal typed-sampler branch; the
+// plain-GLSL profiles (glsl/essl) route vec3 through textureLod.
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define ENGINE_SHADOW_ARRAY_TAP(_s, _uv, _layer) \
+    texture2DLod(_s, vec3(_uv, _layer), 0.0).r
+#else
+#define ENGINE_SHADOW_ARRAY_TAP(_s, _uv, _layer) \
+    texture2DArrayLod(_s, vec3(_uv, _layer), 0.0).r
+#endif
+
+// #301 unit map: the cascade and spot sets are Tex2DArrays (one
+// register each), so the whole PBR_FULL map tops out at register 15
+// and fits DXBC's 16-sampler cap and WebGL2's 16-unit floor.
+SAMPLER2DARRAY(uShadowMapArray, 7);
+SAMPLER2DARRAY(uSpotShadowMapArray, 8);
+SAMPLERCUBE(uPointShadowMap0, 9);
+SAMPLERCUBE(uPointShadowMap1, 10);
+SAMPLERCUBE(uPointShadowMap2, 11);
+SAMPLERCUBE(uPointShadowMap3, 12);
+SAMPLERCUBE(uIrradianceMap, 13);
+SAMPLERCUBE(uPrefilteredMap, 14);
+SAMPLER2D(uBrdfLut, 15);
 
 uniform mat4 u_viewMatrix; // cascade selection needs the view depth
 uniform vec4 uShadowEnabled;          // .x
@@ -120,37 +137,15 @@ uniform vec4 uPrefilteredMips;        // .x
 #define SPOT_SHADOW_TEXEL (1.0 / 1024.0)
 
 float sample_shadow_pcf_at(vec2 uv, float compareDepth, int mapIdx) {
-    if (mapIdx == 0) {
-        return ((compareDepth - 0.002) >
-                texture2DLod(uShadowMap0, uv, 0.0).r) ? 0.0 : 1.0;
-    }
-    if (mapIdx == 1) {
-        return ((compareDepth - 0.002) >
-                texture2DLod(uShadowMap1, uv, 0.0).r) ? 0.0 : 1.0;
-    }
-    if (mapIdx == 2) {
-        return ((compareDepth - 0.002) >
-                texture2DLod(uShadowMap2, uv, 0.0).r) ? 0.0 : 1.0;
-    }
-    return ((compareDepth - 0.002) >
-            texture2DLod(uShadowMap3, uv, 0.0).r) ? 0.0 : 1.0;
+    float stored =
+        ENGINE_SHADOW_ARRAY_TAP(uShadowMapArray, uv, float(mapIdx));
+    return ((compareDepth - 0.002) > stored) ? 0.0 : 1.0;
 }
 
 float sample_spot_shadow_at(vec2 uv, float compareDepth, int mapIdx) {
-    if (mapIdx == 0) {
-        return ((compareDepth - 0.002) >
-                texture2DLod(uSpotShadowMap0, uv, 0.0).r) ? 0.0 : 1.0;
-    }
-    if (mapIdx == 1) {
-        return ((compareDepth - 0.002) >
-                texture2DLod(uSpotShadowMap1, uv, 0.0).r) ? 0.0 : 1.0;
-    }
-    if (mapIdx == 2) {
-        return ((compareDepth - 0.002) >
-                texture2DLod(uSpotShadowMap2, uv, 0.0).r) ? 0.0 : 1.0;
-    }
-    return ((compareDepth - 0.002) >
-            texture2DLod(uSpotShadowMap3, uv, 0.0).r) ? 0.0 : 1.0;
+    float stored =
+        ENGINE_SHADOW_ARRAY_TAP(uSpotShadowMapArray, uv, float(mapIdx));
+    return ((compareDepth - 0.002) > stored) ? 0.0 : 1.0;
 }
 
 float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
@@ -202,7 +197,7 @@ float compute_directional_shadow(vec3 worldPos) {
     }
     vec4 shadowCoord = mul(uShadowMatrix[cascadeIdx], vec4(worldPos, 1.0));
     vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.xy = ENGINE_NDC_XY_TO_UV(projCoords.xy);
     projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
     float shadow = shadow_pcf(projCoords, cascadeIdx, false);
 
@@ -212,7 +207,7 @@ float compute_directional_shadow(vec3 worldPos) {
         vec4 nextShadowCoord =
             mul(uShadowMatrix[cascadeIdx + 1], vec4(worldPos, 1.0));
         vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
-        nextProjCoords.xy = nextProjCoords.xy * 0.5 + 0.5;
+        nextProjCoords.xy = ENGINE_NDC_XY_TO_UV(nextProjCoords.xy);
         nextProjCoords.z = ENGINE_CLIP_Z_TO_DEPTH(nextProjCoords.z);
         float nextShadow = shadow_pcf(nextProjCoords, cascadeIdx + 1, false);
         float blendFactor =
@@ -233,7 +228,7 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
         }
         vec4 shadowCoord = mul(uSpotShadowMatrix[s], vec4(worldPos, 1.0));
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-        projCoords.xy = projCoords.xy * 0.5 + 0.5;
+        projCoords.xy = ENGINE_NDC_XY_TO_UV(projCoords.xy);
     projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
         return shadow_pcf(projCoords, s, true);
     }

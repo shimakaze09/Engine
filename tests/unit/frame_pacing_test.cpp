@@ -1,6 +1,7 @@
 // Verifies the pure frame pacing helpers: vsync interval normalization
 // to the supported set, exact frame-cap wait computation (uncapped,
-// under budget, exactly on budget, and over budget), and the fixed-step
+// under budget, exactly on budget, and over budget), frame-delta
+// snapping to the fixed step within its jitter band, and the fixed-step
 // count decision including the paused editor's single-step path.
 
 #include "frame_pacing.h"
@@ -60,6 +61,41 @@ int check_frame_cap_wait() {
 
   if (frame_cap_wait_seconds(1.0 / 60.0, 60) != 0.0) {
     return 16;
+  }
+  return 0;
+}
+
+using engine::runtime::snap_delta_to_fixed_step;
+
+/// EXPECTATION: deltas within 3% of the fixed step snap to exactly the
+/// step (vsync jitter at the fixed rate must not oscillate the
+/// accumulator); deltas outside the band, other refresh periods, and
+/// degenerate steps pass through unchanged.
+int check_delta_snapping() {
+  const double step = 1.0 / 60.0;
+  if (snap_delta_to_fixed_step(step, step) != step) {
+    return 40;
+  }
+  if (snap_delta_to_fixed_step(step + (step * 0.02), step) != step) {
+    return 41;
+  }
+  if (snap_delta_to_fixed_step(step - (step * 0.02), step) != step) {
+    return 42;
+  }
+  const double outsideHigh = step * 1.05;
+  if (snap_delta_to_fixed_step(outsideHigh, step) != outsideHigh) {
+    return 43;
+  }
+  const double outsideLow = step * 0.95;
+  if (snap_delta_to_fixed_step(outsideLow, step) != outsideLow) {
+    return 44;
+  }
+  const double half = step * 0.5; // 120 Hz refresh under a 60 Hz step
+  if (snap_delta_to_fixed_step(half, step) != half) {
+    return 45;
+  }
+  if (snap_delta_to_fixed_step(0.25, 0.0) != 0.25) {
+    return 46;
   }
   return 0;
 }
@@ -129,6 +165,11 @@ int main() {
   result = check_frame_cap_wait();
   if (result != 0) {
     std::printf("frame cap wait failed: %d\n", result);
+    return result;
+  }
+  result = check_delta_snapping();
+  if (result != 0) {
+    std::printf("delta snapping failed: %d\n", result);
     return result;
   }
   result = check_single_step_decision();

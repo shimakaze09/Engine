@@ -21,11 +21,19 @@ constexpr float kClearRed = 0.18F;
 constexpr float kClearGreen = 0.28F;
 constexpr float kClearBlue = 0.60F;
 
-// Environment IBL texture units shared by the deferred and forward passes
-// (units 0-17 hold G-buffer/tile/shadow data, 18 the light-data texture).
-constexpr int kIblIrradianceUnit = 19;
-constexpr int kIblPrefilteredUnit = 20;
-constexpr int kIblBrdfLutUnit = 21;
+// Shared texture unit map (#301): the whole forward/deferred set fits
+// in 16 sampler registers (DXBC's hard cap, also WebGL2's floor).
+// Units 0-4 are per-pass (forward material maps / deferred G-buffer +
+// tile), 5 the deferred SSAO input, then the shared tail below. The
+// cascade and spot shadow sets each collapse into one Tex2DArray, so
+// four maps cost one register.
+constexpr int kDeferredLightDataUnit = 6;
+constexpr int kShadowCascadeArrayUnit = 7;
+constexpr int kSpotShadowArrayUnit = 8;
+constexpr int kPointShadowUnitBase = 9; // 9-12: four cube slots
+constexpr int kIblIrradianceUnit = 13;
+constexpr int kIblPrefilteredUnit = 14;
+constexpr int kIblBrdfLutUnit = 15;
 
 /// Everything flush_renderer computes once per frame and the pass functions
 /// share: targets, camera matrices, partition counts, feature toggles, and

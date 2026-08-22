@@ -25,6 +25,22 @@ double frame_cap_wait_seconds(double elapsedSeconds, int maxFps) noexcept {
   return (wait > 0.0) ? wait : 0.0;
 }
 
+double snap_delta_to_fixed_step(double deltaSeconds,
+                                double fixedDeltaSeconds) noexcept {
+  if (fixedDeltaSeconds <= 0.0) {
+    return deltaSeconds;
+  }
+  // 3% of a 60 Hz step is 0.5 ms: wide enough for present/acquire
+  // jitter, narrow enough that a real 58/62 Hz rate stays unsnapped
+  // and simulation time cannot drift against the wall clock.
+  const double tolerance = fixedDeltaSeconds * 0.03;
+  const double difference = deltaSeconds - fixedDeltaSeconds;
+  if ((difference >= -tolerance) && (difference <= tolerance)) {
+    return fixedDeltaSeconds;
+  }
+  return deltaSeconds;
+}
+
 FixedStepDecision fixed_step_decision(bool playing, bool singleStep,
                                       double accumulatorSeconds,
                                       double fixedDeltaSeconds,

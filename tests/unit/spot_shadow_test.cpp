@@ -105,13 +105,12 @@ int verify_spot_state_defaults() {
   if (state.initialized) {
     return 400;
   }
+  if (state.depthArrayTexture != engine::renderer::kInvalidDeviceTexture) {
+    return 402;
+  }
   for (std::size_t i = 0U; i < engine::renderer::kMaxSpotShadowLights; ++i) {
     if (state.slots[i].lightIndex != -1) {
       return 401;
-    }
-    if (state.slots[i].depthTexture !=
-        engine::renderer::kInvalidDeviceTexture) {
-      return 402;
     }
     if (state.slots[i].depthTarget.value != 0U) {
       return 403;

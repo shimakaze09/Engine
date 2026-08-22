@@ -592,6 +592,12 @@ endif()
 # profile into the build-tree asset dir with shaderc from the fetched
 # superproject; the cook stamp keeps incremental builds a no-op.
 if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
+    # Win64 also cooks DXBC (dx11) — the #301 shadow-array unit map fits
+    # its 16-sampler cap and shaderc's DXBC backend needs a Windows host.
+    set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv")
+    if(ENGINE_TARGET_PLATFORM STREQUAL "Win64")
+        set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv,dx11")
+    endif()
     add_custom_target(bgfx_shader_cook ALL
         COMMAND $<TARGET_FILE:asset_packer>
             --shader-manifest
@@ -599,6 +605,7 @@ if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
             --shader-out "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
             --shaderc $<TARGET_FILE:shaderc>
             --shader-include "${bgfx_SOURCE_DIR}/bgfx/src"
+            --profiles "${_ENGINE_SHADER_PROFILES}"
         COMMENT "Cooking bgfx shader variants"
     )
     add_dependencies(bgfx_shader_cook asset_packer shaderc copy_assets)

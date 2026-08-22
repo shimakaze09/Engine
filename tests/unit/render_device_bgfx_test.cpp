@@ -216,6 +216,64 @@ void test_render_targets(TestContext &t) {
   render_device_bgfx_frame();
 }
 
+/// Texture arrays (#301): layered depth targets attach per layer, layer
+/// bounds are validated, non-array attachments reject a layer index,
+/// and client uploads to arrays are refused.
+void test_texture_arrays(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  TextureDesc arrayDesc{};
+  arrayDesc.kind = TextureKind::Tex2DArray;
+  arrayDesc.format = TextureFormat::Depth24;
+  arrayDesc.width = 8;
+  arrayDesc.height = 8;
+  arrayDesc.layers = 4;
+  const DeviceTextureHandle array = dev->create_texture(arrayDesc);
+  t.check(array.value != 0U, "depth array created empty");
+
+  RenderTargetHandle layerTargets[4] = {};
+  bool layersOk = true;
+  for (std::int32_t layer = 0; layer < 4; ++layer) {
+    RenderTargetDesc layerDesc{};
+    layerDesc.depth.texture = array;
+    layerDesc.depth.layer = layer;
+    layerTargets[layer] = dev->create_render_target(layerDesc);
+    layersOk = layersOk && (layerTargets[layer].value != 0U);
+  }
+  t.check(layersOk, "one depth-only target per array layer");
+
+  RenderTargetDesc outOfRange{};
+  outOfRange.depth.texture = array;
+  outOfRange.depth.layer = 4;
+  t.check(dev->create_render_target(outOfRange).value == 0U,
+          "layer past the array bound rejected");
+
+  TextureDesc plainDepthDesc{};
+  plainDepthDesc.format = TextureFormat::Depth24;
+  plainDepthDesc.width = 8;
+  plainDepthDesc.height = 8;
+  const DeviceTextureHandle plainDepth = dev->create_texture(plainDepthDesc);
+  RenderTargetDesc layerOn2D{};
+  layerOn2D.depth.texture = plainDepth;
+  layerOn2D.depth.layer = 1;
+  t.check(dev->create_render_target(layerOn2D).value == 0U,
+          "layer index on a non-array texture rejected");
+
+  const float texel = 0.0F;
+  TextureDesc uploadedArray = arrayDesc;
+  uploadedArray.format = TextureFormat::R32F;
+  uploadedArray.pixelData = TexelData::F32;
+  uploadedArray.pixels = &texel;
+  t.check(dev->create_texture(uploadedArray) == kInvalidDeviceTexture,
+          "client upload to an array rejected");
+
+  for (RenderTargetHandle &layerTarget : layerTargets) {
+    dev->destroy_render_target(layerTarget);
+  }
+  dev->destroy_texture(plainDepth);
+  dev->destroy_texture(array);
+  render_device_bgfx_frame();
+}
+
 /// Programs and draws: runtime source compilation no longer exists on
 /// the contract (#296), parameter tokens are defined no-ops, and
 /// program-less draws drop visibly.
@@ -468,7 +526,7 @@ void test_cooked_pbr_full_variant(TestContext &t) {
   const RenderDevice *dev = render_device();
   const DeviceProgramHandle prog = shader_device_program(full);
   t.check(prog != kInvalidDeviceProgram, "PBR_FULL device program published");
-  t.check(dev->shader_param(prog, "uShadowMap0").valid(),
+  t.check(dev->shader_param(prog, "uShadowMapArray").valid(),
           "cascade shadow sampler resolves on the full variant");
   t.check(dev->shader_param(prog, "uIrradianceMap").valid(),
           "IBL irradiance sampler resolves on the full variant");
@@ -615,6 +673,7 @@ int main() {
   test_buffers(t);
   test_textures(t);
   test_render_targets(t);
+  test_texture_arrays(t);
   test_programs_and_draws(t);
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
   test_cooked_programs(t);
