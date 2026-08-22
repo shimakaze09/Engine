@@ -133,6 +133,23 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
 
+  // Player mode (#138): the pure gameplay loop for shared creations —
+  // clearing the bridge before its init makes the pipeline treat the run
+  // as always-playing, and r_present_scene has the renderer draw the
+  // final image to the back buffer in the editor overlay's place.
+  static_cast<void>(core::cvar_register_bool(
+      "r_present_scene", false,
+      "Present the post chain's final image on the back buffer (player "
+      "mode; the editor overlay presents otherwise)"));
+  const char *playerEnv = core::non_empty_env("ENGINE_PLAYER");
+  if ((playerEnv != nullptr) && (playerEnv[0] == '1')) {
+    g_activeConfig.playerMode = true;
+  }
+  if (g_activeConfig.playerMode) {
+    runtime::set_editor_bridge(nullptr);
+    static_cast<void>(core::cvar_set_bool("r_present_scene", true));
+  }
+
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
     if (!core::make_render_context_current()) {

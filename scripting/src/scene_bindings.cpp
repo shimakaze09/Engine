@@ -95,6 +95,19 @@ void register_scene_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "new_scene");
 }
 
+bool request_scene_load(const char *path) noexcept {
+  if (g_teardownDispatchActive || (path == nullptr)) {
+    return false;
+  }
+  if (!script_path_in_jail(path, "load_scene") ||
+      !copy_path_strict(g_pendingScenePath, sizeof(g_pendingScenePath), path,
+                        "load_scene")) {
+    return false;
+  }
+  g_pendingSceneOp = SceneOp::Load;
+  return true;
+}
+
 void reset_scene_bindings() noexcept {
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';

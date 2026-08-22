@@ -18,6 +18,11 @@ struct EngineConfig final {
   const char *shaderRootPath = "assets/shaders";
   const char *editorScenePath = "assets/scene.json";
   const char *editorAssetRoot = "assets";
+  /// Player mode (#138): run the pure gameplay loop — the editor bridge
+  /// is cleared at bootstrap and the renderer presents the scene straight
+  /// to the back buffer. ENGINE_PLAYER=1 in the environment also enables
+  /// it (the web share page's default).
+  bool playerMode = false;
 };
 
 /// Outcome of engine::run for process exit-code mapping.

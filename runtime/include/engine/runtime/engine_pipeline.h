@@ -63,6 +63,10 @@ public:
   /// True when the loop exited because a frame stage failed fatally.
   bool had_fatal_error() const noexcept;
 
+  /// The pipeline-owned World, for bridge-less embeddings (player mode)
+  /// and tests; null before initialize() and after teardown().
+  runtime::World *world() noexcept;
+
   /// Release per-run resources.  Safe to call even if initialize() failed.
   void teardown() noexcept;
 

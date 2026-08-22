@@ -50,8 +50,11 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
     set_target_properties(engine_editor_app PROPERTIES
         SUFFIX ".html"
         LINK_DEPENDS "${_ENGINE_WEB_COOK_STAMP}")
+    # ENV is how the shell requests player mode (ENGINE_PLAYER=1) before
+    # main runs; without the export the preRun hook cannot reach it.
     target_link_options(engine_editor_app PRIVATE
         "SHELL:--preload-file ${ENGINE_ASSET_OUTPUT_DIR}@assets"
-        "SHELL:--shell-file ${ENGINE_ASSET_SOURCE_DIR}/web/shell.html")
+        "SHELL:--shell-file ${ENGINE_ASSET_SOURCE_DIR}/web/shell.html"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS=ENV")
     add_dependencies(engine_editor_app copy_assets web_cooked_shaders)
 endif()

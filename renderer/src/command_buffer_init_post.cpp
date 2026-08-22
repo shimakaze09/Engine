@@ -195,6 +195,26 @@ bool resolve_luminance_program_state(BackendState &backend,
   return ok;
 }
 
+// REQUIRED: the input sampler — the pass is a single fullscreen sample.
+// On failure the cached program id is zeroed because the present draw
+// gates on it rather than on an availability flag.
+bool resolve_present_blit_program_state(BackendState &backend,
+                                        const RenderDevice *dev) noexcept {
+  backend.presentBlitProgram =
+      shader_device_program(backend.presentBlitShaderHandle);
+  const DeviceProgramHandle prog = backend.presentBlitProgram;
+  if (prog == kInvalidDeviceProgram) {
+    return false;
+  }
+  bool ok = true;
+  backend.presentBlitInputLoc =
+      required_param(&ok, dev, prog, "u_inputTexture");
+  if (!ok) {
+    backend.presentBlitProgram = kInvalidDeviceProgram;
+  }
+  return ok;
+}
+
 void init_backend_post(BackendState &backend,
                        const RenderDevice *dev) noexcept {
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
@@ -210,6 +230,24 @@ void init_backend_post(BackendState &backend,
   } else {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "FXAA shader not available — anti-aliasing disabled");
+  }
+
+  // Present blit (soft-fail: only player mode draws it; the editor
+  // overlay presents the scene otherwise).
+  {
+    const ShaderProgramHandle presentShader = load_configured_shader_program(
+        "fullscreen.vert", "present_blit.frag");
+    if (presentShader != kInvalidShaderProgram) {
+      backend.presentBlitShaderHandle = presentShader;
+      if (!resolve_present_blit_program_state(backend, dev)) {
+        backend.presentBlitShaderHandle = ShaderProgramHandle{};
+        destroy_shader_program(presentShader);
+      }
+    } else {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "present blit shader not available — player-mode "
+                        "backbuffer present disabled");
+    }
   }
 
   // Bloom shaders (soft-fail: bloom simply disabled if shaders unavailable).

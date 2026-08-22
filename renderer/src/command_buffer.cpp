@@ -254,6 +254,12 @@ void refresh_backend_program_state(BackendState &backend,
                       "FXAA lost required uniforms on shader reload — "
                       "disabled");
   }
+  if ((backend.presentBlitShaderHandle != kInvalidShaderProgram) &&
+      !resolve_present_blit_program_state(backend, dev)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "present blit lost required uniforms on shader "
+                      "reload — player-mode present disabled");
+  }
   if (!resolve_bloom_program_state(backend, dev)) {
     core::log_message(core::LogLevel::Warning, "renderer",
                       "bloom lost required state on shader reload — "
@@ -451,6 +457,12 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->fxaaShaderHandle = ShaderProgramHandle{};
   }
   backend->fxaaProgram = kInvalidDeviceProgram;
+
+  if (backend->presentBlitShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->presentBlitShaderHandle);
+    backend->presentBlitShaderHandle = ShaderProgramHandle{};
+  }
+  backend->presentBlitProgram = kInvalidDeviceProgram;
 
   if (backend->tonemapShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->tonemapShaderHandle);
