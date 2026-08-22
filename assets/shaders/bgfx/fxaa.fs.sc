@@ -3,7 +3,10 @@ $input v_texcoord0
 // FXAA 3.11 quality stage (bgfx port of fxaa.frag, #138): luma-guided
 // edge-end search with the correct-variation guard. GL textureOffset
 // calls become explicit texel-size offsets (identical sampling — the
-// offsets are whole texels at the same mip).
+// offsets are whole texels at the same mip). The edge-end search
+// samples at explicit LOD 0 (single-mip input, identical texels)
+// because the dx11 profile's fxc rejects gradient sampling in the
+// dynamic-exit search loop.
 
 #include <bgfx_shader.sh>
 
@@ -94,9 +97,9 @@ void main() {
     vec2 uv2 = currentUv + offset;
 
     float lumaEnd1 =
-        rgb_luma(texture2D(u_inputTexture, uv1).rgb) - lumaLocalAverage;
+        rgb_luma(texture2DLod(u_inputTexture, uv1, 0.0).rgb) - lumaLocalAverage;
     float lumaEnd2 =
-        rgb_luma(texture2D(u_inputTexture, uv2).rgb) - lumaLocalAverage;
+        rgb_luma(texture2DLod(u_inputTexture, uv2, 0.0).rgb) - lumaLocalAverage;
     bool reached1 = abs(lumaEnd1) >= gradientScaled;
     bool reached2 = abs(lumaEnd2) >= gradientScaled;
 
@@ -113,13 +116,13 @@ void main() {
         }
         if (!reached1) {
             uv1 -= offset * quality[i];
-            lumaEnd1 = rgb_luma(texture2D(u_inputTexture, uv1).rgb) -
+            lumaEnd1 = rgb_luma(texture2DLod(u_inputTexture, uv1, 0.0).rgb) -
                        lumaLocalAverage;
             reached1 = abs(lumaEnd1) >= gradientScaled;
         }
         if (!reached2) {
             uv2 += offset * quality[i];
-            lumaEnd2 = rgb_luma(texture2D(u_inputTexture, uv2).rgb) -
+            lumaEnd2 = rgb_luma(texture2DLod(u_inputTexture, uv2, 0.0).rgb) -
                        lumaLocalAverage;
             reached2 = abs(lumaEnd2) >= gradientScaled;
         }

@@ -41,6 +41,12 @@ constexpr ShaderProfile kKnownProfiles[] = {
     {"essl", "android", "300_es"},
     {"spirv", "linux", "spirv"},
     {"metal", "osx", "metal"},
+    // dx11 is opt-in, never in the default set: DXBC (SM 5.0) caps
+    // sampler registers at 16 and the engine's forward/deferred unit
+    // map binds up to slot 21, so pbr/deferred_lighting cannot compile
+    // until the sampler budget is restructured (issue #301). shaderc's
+    // DXBC backend also exists only on a Windows host (d3dcompiler).
+    {"dx11", "windows", "s_5_0"},
 };
 
 /// One manifest entry: a .sc source, its stage, the runtime output stem,

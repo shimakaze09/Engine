@@ -204,38 +204,42 @@ float linearize_depth(float depth) {
     return -viewPos.z / viewPos.w;
 }
 
+// Shadow samples use explicit LOD 0: the maps are single-mip, so the
+// texel fetched is identical, and the dx11 profile's fxc rejects
+// gradient sampling inside the dynamic light loops that reach these
+// helpers (X3511 unroll explosion otherwise).
 float sample_shadow_pcf_at(vec2 uv, float compareDepth, int mapIdx) {
     if (mapIdx == 0) {
         return ((compareDepth - 0.002) >
-                texture2D(uShadowMap0, uv).r) ? 0.0 : 1.0;
+                texture2DLod(uShadowMap0, uv, 0.0).r) ? 0.0 : 1.0;
     }
     if (mapIdx == 1) {
         return ((compareDepth - 0.002) >
-                texture2D(uShadowMap1, uv).r) ? 0.0 : 1.0;
+                texture2DLod(uShadowMap1, uv, 0.0).r) ? 0.0 : 1.0;
     }
     if (mapIdx == 2) {
         return ((compareDepth - 0.002) >
-                texture2D(uShadowMap2, uv).r) ? 0.0 : 1.0;
+                texture2DLod(uShadowMap2, uv, 0.0).r) ? 0.0 : 1.0;
     }
     return ((compareDepth - 0.002) >
-            texture2D(uShadowMap3, uv).r) ? 0.0 : 1.0;
+            texture2DLod(uShadowMap3, uv, 0.0).r) ? 0.0 : 1.0;
 }
 
 float sample_spot_shadow_at(vec2 uv, float compareDepth, int mapIdx) {
     if (mapIdx == 0) {
         return ((compareDepth - 0.002) >
-                texture2D(uSpotShadowMap0, uv).r) ? 0.0 : 1.0;
+                texture2DLod(uSpotShadowMap0, uv, 0.0).r) ? 0.0 : 1.0;
     }
     if (mapIdx == 1) {
         return ((compareDepth - 0.002) >
-                texture2D(uSpotShadowMap1, uv).r) ? 0.0 : 1.0;
+                texture2DLod(uSpotShadowMap1, uv, 0.0).r) ? 0.0 : 1.0;
     }
     if (mapIdx == 2) {
         return ((compareDepth - 0.002) >
-                texture2D(uSpotShadowMap2, uv).r) ? 0.0 : 1.0;
+                texture2DLod(uSpotShadowMap2, uv, 0.0).r) ? 0.0 : 1.0;
     }
     return ((compareDepth - 0.002) >
-            texture2D(uSpotShadowMap3, uv).r) ? 0.0 : 1.0;
+            texture2DLod(uSpotShadowMap3, uv, 0.0).r) ? 0.0 : 1.0;
 }
 
 // 3x3 PCF over one cascade/spot map; the texel steps mirror
@@ -265,15 +269,15 @@ float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
 
 float sample_point_shadow_depth(int shadowIdx, vec3 sampleVector) {
     if (shadowIdx == 0) {
-        return textureCube(uPointShadowMap0, sampleVector).r;
+        return textureCubeLod(uPointShadowMap0, sampleVector, 0.0).r;
     }
     if (shadowIdx == 1) {
-        return textureCube(uPointShadowMap1, sampleVector).r;
+        return textureCubeLod(uPointShadowMap1, sampleVector, 0.0).r;
     }
     if (shadowIdx == 2) {
-        return textureCube(uPointShadowMap2, sampleVector).r;
+        return textureCubeLod(uPointShadowMap2, sampleVector, 0.0).r;
     }
-    return textureCube(uPointShadowMap3, sampleVector).r;
+    return textureCubeLod(uPointShadowMap3, sampleVector, 0.0).r;
 }
 
 float compute_shadow(vec3 worldPos, float depth) {

@@ -4,6 +4,9 @@ $input v_texcoord0
 // kernel arrives as the flat vec4 array shared with GLSL (xyz used);
 // sampler stages baked to the flush's unit assignment (depth 0,
 // normal 1, noise 2). Scalar GL uniforms become vec4 read through .x.
+// The kernel loop's depth sample uses explicit LOD 0 (single-mip
+// input, identical texel) so the dx11 profile's fxc keeps the loop
+// rolled instead of force-unrolling around a gradient instruction.
 
 #include <bgfx_shader.sh>
 
@@ -66,7 +69,7 @@ void main() {
         vec4 offset = mul(u_projection, vec4(samplePos, 1.0));
         offset.xyz /= offset.w;
         offset.xyz = offset.xyz * 0.5 + 0.5;
-        float sampleDepth = texture2D(u_gBufferDepth, offset.xy).r;
+        float sampleDepth = texture2DLod(u_gBufferDepth, offset.xy, 0.0).r;
         vec3 sampleViewPos = reconstruct_view_pos(offset.xy, sampleDepth);
         float rangeCheck = smoothstep(
             0.0, 1.0, u_radius.x / abs(fragPos.z - sampleViewPos.z));
