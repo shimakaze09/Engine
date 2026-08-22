@@ -58,7 +58,8 @@ BgfxTexelUpload bgfx_texel_upload(TextureFormat format,
 
 std::uint64_t bgfx_state_bits(const RenderState &state,
                               PrimitiveTopology topology) noexcept {
-  std::uint64_t bits = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
+  std::uint64_t bits =
+      state.colorWrite ? (BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A) : 0U;
   if (state.depthWrite) {
     bits |= BGFX_STATE_WRITE_Z;
   }
@@ -70,6 +71,9 @@ std::uint64_t bgfx_state_bits(const RenderState &state,
     break;
   case DepthTest::LessEqual:
     bits |= BGFX_STATE_DEPTH_TEST_LEQUAL;
+    break;
+  case DepthTest::Always:
+    bits |= BGFX_STATE_DEPTH_TEST_ALWAYS;
     break;
   }
   if (state.blend == BlendMode::Alpha) {

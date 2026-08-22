@@ -7,6 +7,20 @@ $input v_texcoord0
 
 #include <bgfx_shader.sh>
 
+// Clip-depth convention: the GLSL-family profiles (glsl/essl) run on GL
+// APIs with NDC z in [-1, 1]; every other profile (spirv/metal) runs a
+// zero-to-one API. The CPU builds matching projection matrices
+// (DeviceCaps::depthZeroToOne), so depth<->NDC mapping keys off the
+// shader language.
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#else
+#define ENGINE_DEPTH_TO_NDC(d) (d)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+#endif
+
+
 SAMPLER2D(u_gBufferDepth, 0);
 SAMPLER2D(u_gBufferNormal, 1);
 SAMPLER2D(u_noiseTexture, 2);
@@ -20,7 +34,7 @@ uniform vec4 u_radius;       // .x
 uniform vec4 u_bias;         // .x
 
 vec3 reconstruct_view_pos(vec2 uv, float depth) {
-    float z = depth * 2.0 - 1.0;
+    float z = ENGINE_DEPTH_TO_NDC(depth);
     vec4 clip = vec4(uv * 2.0 - 1.0, z, 1.0);
     vec4 view = mul(u_invProjection, clip);
     return view.xyz / view.w;

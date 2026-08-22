@@ -348,8 +348,14 @@ void draw_scene_viewport_panel() noexcept {
   const std::uint64_t texId =
       imgui_texture_id(renderer::get_scene_viewport_texture());
   if ((texId != 0U) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
+    // The pass chain is hop-neutral (see fullscreen.vs.sc), so display
+    // parity reduces to the backend's render-target row order: GL-family
+    // targets store rows bottom-up and need the classic V flip, y-down
+    // targets sample upright.
+    const bool flipV = renderer::device_target_origin_bottom_left();
     ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
-                 ImVec2(0.0F, 1.0F), ImVec2(1.0F, 0.0F));
+                 ImVec2(0.0F, flipV ? 1.0F : 0.0F),
+                 ImVec2(1.0F, flipV ? 0.0F : 1.0F));
   } else {
     ImGui::TextUnformatted("Waiting for renderer...");
   }

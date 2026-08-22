@@ -6,6 +6,8 @@
 
 #include "engine/core/cvar.h"
 
+#include "engine/core/platform.h"
+
 #include "engine/core/logging.h"
 
 #include <array>
@@ -94,6 +96,10 @@ void shutdown_cvars() noexcept {
 
 // ---- registration ----
 
+// Defined with the parse helpers below; applied inside each register so
+// the override sees the entry's final type.
+void apply_env_override(CVarEntry &entry) noexcept;
+
 bool cvar_register_bool(const char *name, bool defaultValue,
                         const char *description) noexcept {
   if ((name == nullptr) || (description == nullptr)) {
@@ -113,6 +119,7 @@ bool cvar_register_bool(const char *name, bool defaultValue,
   e.type = CVarType::Bool;
   e.value.b = defaultValue;
   e.used = true;
+  apply_env_override(e);
   return true;
 }
 
@@ -135,6 +142,7 @@ bool cvar_register_int(const char *name, int defaultValue,
   e.type = CVarType::Int;
   e.value.i = defaultValue;
   e.used = true;
+  apply_env_override(e);
   return true;
 }
 
@@ -157,6 +165,7 @@ bool cvar_register_float(const char *name, float defaultValue,
   e.type = CVarType::Float;
   e.value.f = defaultValue;
   e.used = true;
+  apply_env_override(e);
   return true;
 }
 
@@ -181,6 +190,7 @@ bool cvar_register_string(const char *name, const char *defaultValue,
     std::snprintf(e.value.str, kMaxStringValLen - 1U + 1U, "%s", defaultValue);
   }
   e.used = true;
+  apply_env_override(e);
   return true;
 }
 
@@ -326,6 +336,55 @@ bool parse_float_token(const char *valueStr, float *outValue) noexcept {
   }
   *outValue = parsed;
   return true;
+}
+
+/// Boot-time override: ENGINE_CVAR_<name, dots as underscores> in the
+/// environment replaces a cvar's default at registration. The app has
+/// no command line, so headless runs, CI, and diagnostics need a
+/// launch-time channel; a value that fails the same token parsing as
+/// cvar_set_from_string is rejected with the standard diagnostic.
+void apply_env_override(CVarEntry &entry) noexcept {
+  char envName[kMaxNameLen + 16U] = {};
+  std::size_t out = 0U;
+  for (const char *c = "ENGINE_CVAR_"; *c != '\0'; ++c) {
+    envName[out++] = *c;
+  }
+  for (const char *c = entry.name; *c != '\0'; ++c) {
+    envName[out++] = (*c == '.') ? '_' : *c;
+  }
+  envName[out] = '\0';
+  // GetEnvironmentVariableA under the hood on Windows — std::getenv is
+  // a -Werror deprecation there.
+  const char *value = non_empty_env(envName);
+  if (value == nullptr) {
+    return;
+  }
+  bool ok = false;
+  switch (entry.type) {
+  case CVarType::Bool:
+    ok = parse_bool_token(value, &entry.value.b);
+    break;
+  case CVarType::Int:
+    ok = parse_int_token(value, &entry.value.i);
+    break;
+  case CVarType::Float:
+    ok = parse_float_token(value, &entry.value.f);
+    break;
+  case CVarType::String:
+    if (std::strlen(value) < kMaxStringValLen) {
+      std::snprintf(entry.value.str, kMaxStringValLen, "%s", value);
+      ok = true;
+    }
+    break;
+  }
+  if (!ok) {
+    log_parse_rejection(entry.name, value, "environment override");
+    return;
+  }
+  char msg[160] = {};
+  std::snprintf(msg, sizeof(msg), "environment override: %.63s = %.63s",
+                entry.name, value);
+  log_message(LogLevel::Info, "cvar", msg);
 }
 
 bool cvar_set_from_string(const char *name, const char *valueStr) noexcept {

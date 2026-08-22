@@ -98,17 +98,37 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (sceneDepthHasOpaque) {
         return true;
       }
-      if (dev->copy_depth == nullptr) {
-        return false;
-      }
-
       const RenderTargetHandle gbufferTarget =
           pass_resource_target(passRes.gbufferAlbedo);
       const RenderTargetHandle sceneTarget =
           pass_resource_target(passRes.sceneColor);
-      dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
-                      drawableHeight);
+      if (dev->caps.depthBlit && (dev->copy_depth != nullptr)) {
+        dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
+                        drawableHeight);
+        dev->bind_render_target(sceneTarget);
+        sceneDepthHasOpaque = true;
+        return true;
+      }
+      // No depth blit: seed the scene target's depth with a fullscreen
+      // draw (DepthTest::Always writes every texel; colorWrite off
+      // leaves the lighting output untouched).
+      if (backend.depthCopyProgram == kInvalidDeviceProgram) {
+        return false;
+      }
       dev->bind_render_target(sceneTarget);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      RenderState seedState{DepthTest::Always, true, BlendMode::Disabled,
+                            CullMode::None};
+      seedState.colorWrite = false;
+      dev->apply_render_state(seedState);
+      dev->bind_program(backend.depthCopyProgram);
+      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferDepth));
+      if (backend.depthCopyDepthLoc.valid()) {
+        dev->set_param_i32(backend.depthCopyDepthLoc, 0);
+      }
+      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+      dev->bind_program(kInvalidDeviceProgram);
       sceneDepthHasOpaque = true;
       return true;
     };
@@ -533,6 +553,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (ssaoEnabled) {
         dev->bind_texture_slot(5U,
                                pass_resource_texture(passRes.ssaoBlurTexture));
+      } else {
+        dev->bind_texture_slot(5U, backend.fallbackTexture2D);
       }
 
       if (backend.dlGBufAlbedoLoc.valid())
@@ -576,6 +598,12 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
               backend.dlPrefilteredMipsLoc,
               static_cast<float>(backend.prefilteredEnvironmentMipLevels));
         }
+      } else if (dev->bind_texture_slot != nullptr) {
+        // Vulkan-family backends need valid descriptors on the declared
+        // IBL samplers even with the ambient path constant.
+        dev->bind_texture_slot(kIblIrradianceUnit, backend.fallbackCubemap);
+        dev->bind_texture_slot(kIblPrefilteredUnit, backend.fallbackCubemap);
+        dev->bind_texture_slot(kIblBrdfLutUnit, backend.fallbackTexture2D);
       }
 
       if (backend.dlSsaoTextureLoc.valid())

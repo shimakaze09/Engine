@@ -138,6 +138,7 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->caps.uniformBlocks = true;
   device->caps.timestampQueries = true;
   device->caps.cookedPrograms = true;
+  device->caps.depthBlit = true;
   // Generous so headless tests exercise the full pass list.
   device->caps.maxTextureSamplers = 32U;
 

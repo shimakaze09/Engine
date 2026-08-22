@@ -12,6 +12,19 @@ $input v_worldpos, v_normal, v_texcoord0
 
 #include <bgfx_shader.sh>
 
+// Clip-depth convention: the GLSL-family profiles (glsl/essl) run on GL
+// APIs with NDC z in [-1, 1]; every other profile (spirv/metal) runs a
+// zero-to-one API. The CPU builds matching projection matrices
+// (DeviceCaps::depthZeroToOne), so depth<->NDC mapping keys off the
+// shader language.
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#else
+#define ENGINE_DEPTH_TO_NDC(d) (d)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+#endif
+
 #define MAX_DIR_LIGHTS 4
 #define MAX_POINT_LIGHTS 8
 #define MAX_SPOT_LIGHTS 8
@@ -185,7 +198,8 @@ float compute_directional_shadow(vec3 worldPos) {
     }
     vec4 shadowCoord = mul(uShadowMatrix[cascadeIdx], vec4(worldPos, 1.0));
     vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-    projCoords = projCoords * 0.5 + 0.5;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
     float shadow = shadow_pcf(projCoords, cascadeIdx, false);
 
     float blendRange = uCascadeSplits[cascadeIdx] * 0.1;
@@ -194,7 +208,8 @@ float compute_directional_shadow(vec3 worldPos) {
         vec4 nextShadowCoord =
             mul(uShadowMatrix[cascadeIdx + 1], vec4(worldPos, 1.0));
         vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
-        nextProjCoords = nextProjCoords * 0.5 + 0.5;
+        nextProjCoords.xy = nextProjCoords.xy * 0.5 + 0.5;
+        nextProjCoords.z = ENGINE_CLIP_Z_TO_DEPTH(nextProjCoords.z);
         float nextShadow = shadow_pcf(nextProjCoords, cascadeIdx + 1, false);
         float blendFactor =
             (viewDepth - (uCascadeSplits[cascadeIdx] - blendRange)) /
@@ -214,7 +229,8 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
         }
         vec4 shadowCoord = mul(uSpotShadowMatrix[s], vec4(worldPos, 1.0));
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-        projCoords = projCoords * 0.5 + 0.5;
+        projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
         return shadow_pcf(projCoords, s, true);
     }
     return 1.0;

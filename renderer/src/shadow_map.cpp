@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "engine/core/logging.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec3.h"
@@ -224,8 +225,12 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
   // near plane. Light-space corners sit at negative z, so near/far are the
   // negated max/min corner depths — passing minZ/maxZ raw puts the whole
   // cascade outside the clip volume.
-  const math::Mat4 lightProj = math::ortho(
-      minX, maxX, minY, maxY, -maxZ - kShadowNearExtend, -minZ);
+  const math::Mat4 lightProj =
+      device_depth_zero_one()
+          ? math::ortho_zero_one(minX, maxX, minY, maxY,
+                                 -maxZ - kShadowNearExtend, -minZ)
+          : math::ortho(minX, maxX, minY, maxY, -maxZ - kShadowNearExtend,
+                        -minZ);
   return math::mul(lightProj, lightView);
 }
 
@@ -321,7 +326,10 @@ math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
   constexpr float kNearPlane = 0.1F;
   const float farPlane = std::max(radius, 1.0F);
 
-  const math::Mat4 lightProj = math::perspective(fov, 1.0F, kNearPlane, farPlane);
+  const math::Mat4 lightProj =
+      device_depth_zero_one()
+          ? math::perspective_zero_one(fov, 1.0F, kNearPlane, farPlane)
+          : math::perspective(fov, 1.0F, kNearPlane, farPlane);
   return math::mul(lightProj, lightView);
 }
 
@@ -386,7 +394,10 @@ void compute_point_shadow_matrices(const math::Vec3 &position, float radius,
   const float farPlane = std::max(radius, 1.0F);
   constexpr float kFov = 3.14159265F / 2.0F;
 
-  const math::Mat4 proj = math::perspective(kFov, 1.0F, kNearPlane, farPlane);
+  const math::Mat4 proj =
+      device_depth_zero_one()
+          ? math::perspective_zero_one(kFov, 1.0F, kNearPlane, farPlane)
+          : math::perspective(kFov, 1.0F, kNearPlane, farPlane);
 
   // Face order and up vectors follow the GL cubemap convention
   // (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i): +X, -X, +Y, -Y, +Z, -Z.

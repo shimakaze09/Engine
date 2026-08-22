@@ -13,6 +13,20 @@ $input v_texcoord0
 
 #include <bgfx_shader.sh>
 
+// Clip-depth convention: the GLSL-family profiles (glsl/essl) run on GL
+// APIs with NDC z in [-1, 1]; every other profile (spirv/metal) runs a
+// zero-to-one API. The CPU builds matching projection matrices
+// (DeviceCaps::depthZeroToOne), so depth<->NDC mapping keys off the
+// shader language.
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#else
+#define ENGINE_DEPTH_TO_NDC(d) (d)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+#endif
+
+
 #define TILE_MAX_POINT_LIGHTS 32
 #define LIGHT_DATA_SPOT_ROW 128
 
@@ -44,6 +58,7 @@ uniform vec4 uDirLightColor;      // .xyz
 uniform vec4 uCameraPos;          // .xyz
 uniform vec4 uCameraForwardOrtho; // xyz forward, w 1 when orthographic
 uniform vec4 uTileCountX;         // .x
+uniform vec4 uScreenSize;         // .xy (tile row flip on y-down APIs)
 uniform vec4 uPointLightCount;    // .x
 uniform vec4 uSpotLightCount;     // .x
 
@@ -127,7 +142,7 @@ vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic,
 }
 
 vec3 reconstruct_world_pos(vec2 texCoord, float depth) {
-    float z = depth * 2.0 - 1.0;
+    float z = ENGINE_DEPTH_TO_NDC(depth);
     vec4 clipPos = vec4(texCoord * 2.0 - 1.0, z, 1.0);
     vec4 viewPos = mul(uInvProjection, clipPos);
     viewPos /= viewPos.w;
@@ -183,7 +198,7 @@ float compute_height_fog_factor(vec3 cameraPos, vec3 worldPos) {
 }
 
 float linearize_depth(float depth) {
-    float z = depth * 2.0 - 1.0;
+    float z = ENGINE_DEPTH_TO_NDC(depth);
     vec4 clipPos = vec4(0.0, 0.0, z, 1.0);
     vec4 viewPos = mul(uInvProjection, clipPos);
     return -viewPos.z / viewPos.w;
@@ -275,7 +290,8 @@ float compute_shadow(vec3 worldPos, float depth) {
     }
     vec4 shadowCoord = mul(uShadowMatrix[cascadeIdx], vec4(worldPos, 1.0));
     vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-    projCoords = projCoords * 0.5 + 0.5;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
     float shadow = shadow_pcf(projCoords, cascadeIdx, false);
 
     float blendRange = uCascadeSplits[cascadeIdx] * 0.1;
@@ -284,7 +300,8 @@ float compute_shadow(vec3 worldPos, float depth) {
         vec4 nextShadowCoord =
             mul(uShadowMatrix[cascadeIdx + 1], vec4(worldPos, 1.0));
         vec3 nextProjCoords = nextShadowCoord.xyz / nextShadowCoord.w;
-        nextProjCoords = nextProjCoords * 0.5 + 0.5;
+        nextProjCoords.xy = nextProjCoords.xy * 0.5 + 0.5;
+        nextProjCoords.z = ENGINE_CLIP_Z_TO_DEPTH(nextProjCoords.z);
         float nextShadow = shadow_pcf(nextProjCoords, cascadeIdx + 1, false);
         float blendFactor =
             (viewDepth - (uCascadeSplits[cascadeIdx] - blendRange)) /
@@ -304,7 +321,8 @@ float compute_spot_shadow(vec3 worldPos, int lightIdx) {
         }
         vec4 shadowCoord = mul(uSpotShadowMatrix[s], vec4(worldPos, 1.0));
         vec3 projCoords = shadowCoord.xyz / shadowCoord.w;
-        projCoords = projCoords * 0.5 + 0.5;
+        projCoords.xy = projCoords.xy * 0.5 + 0.5;
+    projCoords.z = ENGINE_CLIP_Z_TO_DEPTH(projCoords.z);
         return shadow_pcf(projCoords, s, true);
     }
     return 1.0;
@@ -374,7 +392,13 @@ void main() {
                         uDirLightColor.xyz, 1.0) * shadowFactor;
 
     int tileX = int(gl_FragCoord.x) / 16;
+    // The CPU packs tile rows in GL window order (row 0 at the bottom);
+    // y-down APIs flip the fragment row before the lookup.
+#if BGFX_SHADER_LANGUAGE_GLSL
     int tileY = int(gl_FragCoord.y) / 16;
+#else
+    int tileY = int(uScreenSize.y - gl_FragCoord.y) / 16;
+#endif
     int tileIdx = tileY * int(uTileCountX.x) + tileX;
 
     int pointLightCount = int(uPointLightCount.x);

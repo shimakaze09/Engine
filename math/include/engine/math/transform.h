@@ -102,6 +102,28 @@ inline Mat4 perspective(float verticalFovRadians, float aspect, float nearZ,
               Vec4(0.0F, 0.0F, (2.0F * farZ * nearZ) * invDepth, 0.0F));
 }
 
+/// Right-handed perspective projection with clip depth [0, 1]
+/// (Vulkan/Metal/D3D convention; the bgfx backend selects it through
+/// DeviceCaps::depthZeroToOne when the live API is not GL-family).
+inline Mat4 perspective_zero_one(float verticalFovRadians, float aspect,
+                                 float nearZ, float farZ) noexcept {
+#ifndef NDEBUG
+  assert(aspect > 0.0F);
+  assert(nearZ > 0.0F);
+  assert(farZ > nearZ);
+  assert(std::fabs(verticalFovRadians) > 1.0e-6F);
+#endif
+
+  const float halfFov = 0.5F * verticalFovRadians;
+  const float invTan = 1.0F / std::tan(halfFov);
+  const float invDepth = 1.0F / (nearZ - farZ);
+
+  return Mat4(Vec4(invTan / aspect, 0.0F, 0.0F, 0.0F),
+              Vec4(0.0F, invTan, 0.0F, 0.0F),
+              Vec4(0.0F, 0.0F, farZ * invDepth, -1.0F),
+              Vec4(0.0F, 0.0F, (farZ * nearZ) * invDepth, 0.0F));
+}
+
 /// Right-handed orthographic projection with OpenGL clip depth [-1, 1].
 inline Mat4 ortho(float left, float right, float bottom, float top,
                   float nearZ, float farZ) noexcept {
@@ -120,6 +142,27 @@ inline Mat4 ortho(float left, float right, float bottom, float top,
               Vec4(0.0F, 0.0F, -2.0F * invDepth, 0.0F),
               Vec4(-(right + left) * invWidth, -(top + bottom) * invHeight,
                    -(farZ + nearZ) * invDepth, 1.0F));
+}
+
+/// Right-handed orthographic projection with clip depth [0, 1]
+/// (Vulkan/Metal/D3D convention; see perspective_zero_one).
+inline Mat4 ortho_zero_one(float left, float right, float bottom, float top,
+                           float nearZ, float farZ) noexcept {
+#ifndef NDEBUG
+  assert(right > left);
+  assert(top > bottom);
+  assert(farZ > nearZ);
+#endif
+
+  const float invWidth = 1.0F / (right - left);
+  const float invHeight = 1.0F / (top - bottom);
+  const float invDepth = 1.0F / (farZ - nearZ);
+
+  return Mat4(Vec4(2.0F * invWidth, 0.0F, 0.0F, 0.0F),
+              Vec4(0.0F, 2.0F * invHeight, 0.0F, 0.0F),
+              Vec4(0.0F, 0.0F, -invDepth, 0.0F),
+              Vec4(-(right + left) * invWidth, -(top + bottom) * invHeight,
+                   -nearZ * invDepth, 1.0F));
 }
 
 } // namespace engine::math

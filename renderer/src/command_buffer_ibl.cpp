@@ -181,7 +181,9 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   std::array<math::Mat4, 6> views{};
   cubemap_capture_views(views);
   const math::Mat4 projection =
-      math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
+      (device_depth_zero_one()
+           ? math::perspective_zero_one(1.57079632679F, 1.0F, 0.1F, 10.0F)
+           : math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F));
 
   dev->apply_render_state(RenderState{DepthTest::Disabled, true,
                                       BlendMode::Disabled, CullMode::None});
@@ -296,7 +298,9 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   std::array<math::Mat4, 6> views{};
   cubemap_capture_views(views);
   const math::Mat4 projection =
-      math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F);
+      (device_depth_zero_one()
+           ? math::perspective_zero_one(1.57079632679F, 1.0F, 0.1F, 10.0F)
+           : math::perspective(1.57079632679F, 1.0F, 0.1F, 10.0F));
 
   dev->apply_render_state(RenderState{DepthTest::Disabled, true,
                                       BlendMode::Disabled, CullMode::None});
