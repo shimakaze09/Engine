@@ -10,6 +10,7 @@
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 
 namespace engine::renderer {
 
@@ -87,8 +88,7 @@ void apply_quality_preset_if_changed() noexcept {
   }
   // Track the request before validating so an unknown value logs once,
   // not every frame.
-  std::strncpy(lastApplied, quality, sizeof(lastApplied) - 1U);
-  lastApplied[sizeof(lastApplied) - 1U] = '\0';
+  core::copy_string(lastApplied, sizeof(lastApplied), quality);
   if (quality[0] == '\0') {
     return; // "" = custom: user cvars stand as-is.
   }
