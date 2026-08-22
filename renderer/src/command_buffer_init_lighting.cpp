@@ -378,7 +378,14 @@ bool resolve_shadow_depth_skinned_program_state(
 void init_backend_lighting(BackendState &backend,
                            const RenderDevice *dev) noexcept {
   // Register CVars for deferred rendering.
-  core::cvar_register_bool("r_deferred", true, "Enable deferred rendering");
+  // Web/GLES tier default (#293): the essl profile family renders the
+  // deferred path dark (lighting-texture reads unresolved there) — until
+  // that lands, GLES-family devices boot on the forward path.
+  const bool esslFamily = (dev->cooked_program_profile != nullptr) &&
+                          (std::strcmp(dev->cooked_program_profile(),
+                                       "essl") == 0);
+  core::cvar_register_bool("r_deferred", !esslFamily,
+                           "Enable deferred rendering");
   core::cvar_register_int(
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
