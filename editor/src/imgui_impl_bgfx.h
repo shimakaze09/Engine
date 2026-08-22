@@ -1,9 +1,8 @@
-// Declares the editor's ImGui renderer for the bgfx backend (#138):
-// the Init/Shutdown/NewFrame/RenderDrawData quartet mirroring the stock
-// imgui_impl_opengl3 surface, submitting ImGui draw data through bgfx
-// into a dedicated late view. Compiled only in bgfx builds; the editor
-// links the backend directly here, the same sanctioned pattern as its
-// direct GL calls under the gl backend.
+// Declares the editor's ImGui renderer (#138): the stock ImGui
+// backend Init/Shutdown/NewFrame/RenderDrawData quartet, submitting
+// ImGui draw data through bgfx into a dedicated late view. The editor
+// links bgfx directly here — the sanctioned UI-integration exception to
+// keeping backend types inside the renderer.
 
 #pragma once
 

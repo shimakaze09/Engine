@@ -91,11 +91,10 @@ engine_add_test_executable(engine_unit_device_slot_table
     engine_core
 )
 
-# bgfx backend device suite (#138 Phases B/C): compiled only when the
-# bgfx backend is selected; runs headlessly on bgfx's Noop renderer.
-# When the build also cooks the proving shaders (tools on), the suite
-# exercises cooked program linking against those binaries.
-if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
+# bgfx backend device suite (#138 Phases B/C): runs headlessly on
+# bgfx's Noop renderer. When the build also cooks the proving shaders
+# (tools on), the suite exercises cooked program linking against those
+# binaries.
 engine_add_test_executable(engine_unit_render_device_bgfx
     SOURCES
     render_device_bgfx_test.cpp
@@ -127,7 +126,6 @@ if(TARGET bgfx_shader_cook)
         ENGINE_TEST_SHADER_SOURCE_DIR="${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx")
     add_dependencies(engine_unit_shader_cook asset_packer shaderc)
     set_tests_properties(engine_unit_shader_cook PROPERTIES TIMEOUT 300)
-endif()
 endif()
 
 engine_add_test_executable(engine_unit_mesh_loader

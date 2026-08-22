@@ -415,49 +415,6 @@ jobs:
       - name: Build (will fail on any warning due to -Werror)
         run: cmake --build build --config Release --parallel
 
-  gl-build:
-    name: gl backend build
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install Linux dependencies
-        run: |
-          bash .github/scripts/install-linux-deps.sh \
-            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
-            libx11-dev libxext-dev libxrandr-dev libxi-dev \
-            libxcursor-dev libxinerama-dev libxxf86vm-dev \
-            libxtst-dev libxfixes-dev \
-            libxss-dev libwayland-dev libxkbcommon-dev \
-            libasound2-dev libpulse-dev
-
-      - name: Cache _deps
-        uses: actions/cache@v5
-        with:
-          path: build/_deps
-          key: deps-gl-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-gl-ubuntu-24.04-
-
-      # v0.5 replatform (#138): with bgfx as the default backend on the
-      # canonical matrix, this lane keeps the legacy gl backend building
-      # and green until its owner-decided deletion — the regression
-      # baseline for one release round.
-      - name: Configure (gl backend)
-        run: >-
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          -DENGINE_RENDERER_BACKEND=gl
-          -DENGINE_BUILD_TESTS=ON
-          -DENGINE_BUILD_TOOLS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel 4
-
-      - name: Test (headless suite on the gl backend)
-        run: >-
-          ctest --test-dir build --output-on-failure --timeout 120
-          --label-exclude gpu
-
   sanitizers:
     name: ASAN+UBSAN
     runs-on: ubuntu-24.04
@@ -685,7 +642,6 @@ jobs:
       - static-analysis
       - clang-tidy
       - werror-check
-      - gl-build
       - sanitizers
       - tsan
       - coverage

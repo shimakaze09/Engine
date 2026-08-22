@@ -932,7 +932,7 @@ void EnginePipeline::Impl::stage_assets() noexcept {
 
   if (!core::make_render_context_current()) {
     core::log_message(core::LogLevel::Warning, "assets",
-                      "skipping asset transitions: OpenGL context unavailable");
+                      "skipping asset transitions: render context unavailable");
   } else {
     if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
       static_cast<void>(content::update_asset_streaming(
@@ -1457,7 +1457,7 @@ void EnginePipeline::Impl::stage_measure_frame() noexcept {
 void EnginePipeline::Impl::stage_render() noexcept {
   if (!core::make_render_context_current()) {
     core::log_message(core::LogLevel::Error, "editor",
-                      "failed to acquire OpenGL context for editor");
+                      "failed to acquire render context for editor");
     fatalError = true;
     running = false;
     return;

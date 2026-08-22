@@ -40,7 +40,7 @@ void shutdown_editor_bridge(const runtime::EditorBridge *bridge) noexcept {
 
   if (!core::make_render_context_current()) {
     core::log_message(core::LogLevel::Error, "editor",
-                      "failed to acquire OpenGL context for editor shutdown");
+                      "failed to acquire render context for editor shutdown");
     return;
   }
 
@@ -83,7 +83,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   static_cast<void>(core::cvar_register_bool(
       "r_null_device", false,
-      "Test/CI: replace the GL render device with a no-GL null backend so "
+      "Test/CI: replace the render device with a null backend so "
       "pipeline init and frame stages run headless (#196)"));
   // One authored intent: a headless platform has no GL, so the render
   // device must be the null backend.
@@ -120,11 +120,10 @@ bool bootstrap(const EngineConfig &config) noexcept {
   }
   renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
 
-  // #138: a swapchain-owning backend initializes its device here, before
-  // the editor bridge — the bgfx ImGui renderer creates device objects
-  // during bridge init (initialize_render_device is idempotent, so the
-  // pipeline's later call is a no-op). The gl path keeps its ordering:
-  // its device load needs the context the bridge block makes current.
+  // #138: the swapchain-owning backend initializes its device here,
+  // before the editor bridge — the bgfx ImGui renderer creates device
+  // objects during bridge init (initialize_render_device is idempotent,
+  // so the pipeline's later call is a no-op).
   if (g_activeConfig.core.platform.externalRenderContext &&
       !renderer::initialize_render_device()) {
     core::log_message(core::LogLevel::Error, "renderer",
@@ -154,7 +153,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
     if (!core::make_render_context_current()) {
       core::log_message(core::LogLevel::Error, "editor",
-                        "failed to acquire OpenGL context for editor init");
+                        "failed to acquire render context for editor init");
       core::shutdown_core();
       return false;
     }

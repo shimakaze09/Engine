@@ -82,7 +82,7 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
     if (!core::make_render_context_current()) {
       core::log_message(
           core::LogLevel::Error, "engine",
-          "failed to acquire OpenGL context for bootstrap mesh upload");
+          "failed to acquire render context for bootstrap mesh upload");
       return false;
     }
     ok = renderer::update_asset_manager(assetManager, assetDatabase,
@@ -100,7 +100,7 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   if (!core::make_render_context_current()) {
     core::log_message(
         core::LogLevel::Warning, "engine",
-        "failed to acquire OpenGL context for procedural mesh upload");
+        "failed to acquire render context for procedural mesh upload");
   } else {
     renderer::GpuMesh m{};
     if (renderer::build_plane_mesh(&m)) {
