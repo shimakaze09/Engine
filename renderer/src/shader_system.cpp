@@ -356,6 +356,9 @@ bool build_cooked_shader_path(const char *sourcePath,
           : 0U;
   const char *file = (slash != nullptr) ? (slash + 1U) : sourcePath;
 
+  if (defineCount > kMaxShaderDefines) {
+    return false;
+  }
   const char *sorted[kMaxShaderDefines] = {};
   for (std::size_t i = 0U; i < defineCount; ++i) {
     if (std::strcmp(defines[i].value, kEnabledDefineValue) != 0) {
@@ -363,10 +366,18 @@ bool build_cooked_shader_path(const char *sourcePath,
     }
     sorted[i] = defines[i].name;
   }
-  std::sort(sorted, sorted + defineCount,
-            [](const char *a, const char *b) noexcept {
-              return std::strcmp(a, b) < 0;
-            });
+  // Insertion sort: at most kMaxShaderDefines entries, and GCC 16's
+  // -Werror=array-bounds false-positives on std::sort's inlined
+  // introsort over the fixed-size array.
+  for (std::size_t i = 1U; i < defineCount; ++i) {
+    const char *current = sorted[i];
+    std::size_t j = i;
+    while ((j > 0U) && (std::strcmp(current, sorted[j - 1U]) < 0)) {
+      sorted[j] = sorted[j - 1U];
+      --j;
+    }
+    sorted[j] = current;
+  }
 
   char key[kMaxShaderDefines * kMaxDefineNameLength] = {};
   if (defineCount == 0U) {

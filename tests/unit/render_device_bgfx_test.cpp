@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -257,25 +258,17 @@ void test_programs_and_draws(TestContext &t) {
 }
 
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
-/// Whole-file byte read; empty on failure.
+/// Whole-file byte read; empty on failure (ifstream: clang-cl flags
+/// fopen behind -Wdeprecated-declarations under -Werror).
 std::vector<char> read_cooked(const char *name) {
   const std::string path =
       std::string(ENGINE_TEST_COOKED_SHADER_DIR) + "/" + name;
-  FILE *file = std::fopen(path.c_str(), "rb");
-  if (file == nullptr) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
     return {};
   }
-  std::fseek(file, 0, SEEK_END);
-  const long size = std::ftell(file);
-  std::fseek(file, 0, SEEK_SET);
-  std::vector<char> bytes(static_cast<std::size_t>(size > 0 ? size : 0));
-  const std::size_t read =
-      bytes.empty() ? 0U : std::fread(bytes.data(), 1U, bytes.size(), file);
-  std::fclose(file);
-  if (read != bytes.size()) {
-    bytes.clear();
-  }
-  return bytes;
+  return std::vector<char>((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
 }
 
 /// Cooked programs (#138 Phase C): binary linking, parameter and

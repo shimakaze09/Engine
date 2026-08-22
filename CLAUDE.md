@@ -22,9 +22,10 @@ below.
 
 Third-party (all SHA-pinned via FetchContent in the root CMakeLists.txt):
 SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
-(tools only), stb snapshot, miniaudio 0.11.21, OpenGL 4.5+, and — only
-when `ENGINE_RENDERER_BACKEND=bgfx` (the v0.5 replatform lane, #138) —
-bgfx v1.153 via the bgfx.cmake superproject (bundles bx/bimg).
+(tools only), stb snapshot, miniaudio 0.11.21, bgfx v1.153 via the
+bgfx.cmake superproject (bundles bx/bimg; the default backend since the
+2026-08-22 flip, #138), and OpenGL 4.5+ (the legacy `gl` backend, kept
+selectable one release round before its owner-decided deletion).
 
 ## Hard rules
 
@@ -185,10 +186,12 @@ Apple caps OpenGL at 4.1 while `default.frag` needs GLSL 450, so the GL
 renderer runs on Windows/Linux until the v0.5 bgfx replatform — the lane's
 value is AppleClang conformance. CMake
 options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
-`ENGINE_RENDERER_BACKEND` (gl default; bgfx fetches and links the v0.5
-replatform dependency and swaps the device TU to the Phase B backend
-skeleton — Noop renderer only until Phase D wires the platform
-window), `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
+`ENGINE_RENDERER_BACKEND` (bgfx default since 2026-08-22, #138 — at
+feature parity; `gl` stays selectable as the regression baseline until
+its owner-decided deletion), `ENGINE_BGFX_SHADERC` (ON: builds shaderc
+and cooks the shader manifest; heavy CI lanes that never consume cooked
+binaries turn it off and the cooked test sections skip),
+`ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
 `/fp:strict` / `-ffp-contract=off`), `ENGINE_SANITIZERS`,
 `ENGINE_BUILD_TESTS/TOOLS`. Helper functions live in
 `cmake/EngineHelpers.cmake` (module/static, header-only INTERFACE, exe, test);
@@ -454,9 +457,14 @@ directory-global by design.
   (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
   #130), MSVC + GCC Release compatibility lanes, determinism hash compare,
   static analysis + comment audits, clang-tidy, werror, ASAN/UBSAN, TSAN,
-  coverage (≥50%), benchmarks (>10% regression fails), a bgfx backend
-  lane (build + shader cook + Noop-renderer device/cook suites, #138),
-  quality gate.
+  coverage (≥50%), benchmarks (>10% regression fails), a gl backend
+  regression lane (the legacy backend builds + full headless suite
+  until its deletion, #138), quality gate. The canonical matrix builds
+  the default bgfx backend incl. the shader cook (macOS excepted:
+  tint's overloaded-CTAD pattern does not compile under AppleClang, and
+  the headless-only lane never consumes cooked binaries, so it passes
+  ENGINE_BGFX_SHADERC=OFF); sanitizer/analysis/
+  werror/benchmark lanes pass ENGINE_BGFX_SHADERC=OFF.
 
 ## Architecture invariants
 

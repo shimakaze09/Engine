@@ -29,11 +29,16 @@ std::string quoted(const std::string &value) {
 int run_cook(const std::string &packer, const std::string &manifest,
              const std::string &outDir, const std::string &shaderc,
              const std::string &include) {
-  const std::string command =
+  std::string command =
       quoted(packer) + " --shader-manifest " + quoted(manifest) +
       " --shader-out " + quoted(outDir) + " --shaderc " + quoted(shaderc) +
       " --shader-include " + quoted(include) +
       " --profiles glsl,essl,spirv";
+#ifdef _WIN32
+  // cmd.exe strips the outer quote pair from the whole command line
+  // (same wrap the packer applies to its own shaderc invocations).
+  command = "\"" + command + "\"";
+#endif
   return std::system(command.c_str());
 }
 

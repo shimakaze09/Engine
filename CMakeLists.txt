@@ -172,8 +172,12 @@ set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
 # bimg via the bgfx.cmake superproject) so the port can be brought up lane
 # by lane without disturbing default builds. Phase A wires the dependency
 # only; no engine source consumes it until the backend TU lands.
-set(ENGINE_RENDERER_BACKEND "gl" CACHE STRING
-    "Render backend: gl (default) or bgfx (v0.5 replatform, #138)")
+# Default flipped to bgfx (owner decision 2026-08-21, #138): the
+# replatform reached feature parity, so bgfx is the shipping backend.
+# gl stays selectable for one release round as the regression baseline
+# before its deletion.
+set(ENGINE_RENDERER_BACKEND "bgfx" CACHE STRING
+    "Render backend: bgfx (default, v0.5 replatform #138) or gl (legacy)")
 set_property(CACHE ENGINE_RENDERER_BACKEND PROPERTY STRINGS gl bgfx)
 if(NOT ENGINE_RENDERER_BACKEND MATCHES "^(gl|bgfx)$")
     message(FATAL_ERROR
@@ -191,6 +195,12 @@ if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     set(BGFX_CONFIG_MAX_TEXTURE_SAMPLERS 32 CACHE STRING
         "bgfx sampler stages (engine deferred pass needs units up to 21)"
         FORCE)
+    # shaderc's toolchain (glslang/spirv-*) dominates a cold bgfx build;
+    # lanes that never consume cooked binaries (sanitizers, analysis,
+    # werror, benchmarks) turn it off — the cooked test sections skip
+    # gracefully when no cook target exists.
+    option(ENGINE_BGFX_SHADERC
+        "Build bgfx shaderc and cook the shader manifest" ON)
     # shaderc is a host tool; wasm builds consume host-cooked binaries.
     if(EMSCRIPTEN)
         set(BGFX_BUILD_TOOLS OFF CACHE BOOL "bgfx shaderc/tools" FORCE)
@@ -198,6 +208,8 @@ if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
         # essl shaders are 300_es, so require a WebGL2 context.
         set(BGFX_OPENGLES_VERSION 30 CACHE STRING
             "bgfx minimum GLES context version (WebGL2)" FORCE)
+    elseif(NOT ENGINE_BGFX_SHADERC)
+        set(BGFX_BUILD_TOOLS OFF CACHE BOOL "bgfx shaderc/tools" FORCE)
     else()
         set(BGFX_BUILD_TOOLS ON CACHE BOOL "bgfx shaderc/tools" FORCE)
     endif()
@@ -594,7 +606,7 @@ endif()
 # profile into the build-tree asset dir with shaderc from the fetched
 # superproject; the cook stamp keeps incremental builds a no-op.
 if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx" AND ENGINE_BUILD_TOOLS
-   AND TARGET copy_assets)
+   AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
     add_custom_target(bgfx_shader_cook ALL
         COMMAND $<TARGET_FILE:asset_packer>
             --shader-manifest

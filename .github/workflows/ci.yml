@@ -74,16 +74,24 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      # macOS skips the shaderc toolchain: tint's overloaded-CTAD pattern
+      # does not compile under AppleClang, and the lane is headless-only
+      # (null device — cooked binaries are never consumed there). The
+      # engine's own bgfx backend TUs stay in AppleClang coverage.
       - name: Configure
         run: >
           cmake -S . -B build
           ${{ matrix.toolchain_args }}
+          ${{ startsWith(matrix.os, 'macos') && '-DENGINE_BGFX_SHADERC=OFF' || '' }}
           -DCMAKE_BUILD_TYPE=${{ matrix.config }}
           -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=ON
 
+      # Parallelism bounded: the default bgfx backend builds shaderc's
+      # glslang/tint/spirv-tools TUs, which OOM-kill 16GB runners under
+      # an unbounded `make -j`.
       - name: Build
-        run: cmake --build build --config ${{ matrix.config }} --parallel
+        run: cmake --build build --config ${{ matrix.config }} --parallel 4
 
       - name: Test
         run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
@@ -192,7 +200,7 @@ jobs:
           -DENGINE_BUILD_TOOLS=ON
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure --timeout 120 --label-exclude gpu
@@ -282,7 +290,7 @@ jobs:
           restore-keys: deps-ubuntu-24.04-
 
       - name: Configure (needed for FetchContent headers)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENGINE_BGFX_SHADERC=OFF
 
       - name: Generate binding code (needed by compile_commands.json)
         run: |
@@ -344,7 +352,7 @@ jobs:
           restore-keys: deps-ubuntu-24.04-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENGINE_BGFX_SHADERC=OFF
 
       - name: Generate binding code (needed by compile_commands.json)
         run: |
@@ -402,13 +410,13 @@ jobs:
           restore-keys: deps-ubuntu-24.04-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENGINE_BGFX_SHADERC=OFF
 
       - name: Build (will fail on any warning due to -Werror)
         run: cmake --build build --config Release --parallel
 
-  bgfx-build:
-    name: bgfx backend build
+  gl-build:
+    name: gl backend build
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -428,28 +436,27 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/_deps
-          key: deps-bgfx-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-bgfx-ubuntu-24.04-
+          key: deps-gl-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-gl-ubuntu-24.04-
 
-      # v0.5 replatform (#138): the bgfx backend lane builds the pinned
-      # dependency plus the Phase B backend skeleton and runs its device
-      # suite headlessly on the Noop renderer. The gl lanes stay
-      # authoritative for the full test matrix until the port reaches
-      # parity. Parallelism is bounded: bare --parallel maps to unbounded
-      # `make -j`, and shaderc's glslang/tint/spirv-tools TUs OOM-kill
-      # the 16GB runner under it.
-      - name: Configure (bgfx backend)
+      # v0.5 replatform (#138): with bgfx as the default backend on the
+      # canonical matrix, this lane keeps the legacy gl backend building
+      # and green until its owner-decided deletion — the regression
+      # baseline for one release round.
+      - name: Configure (gl backend)
         run: >-
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          -DENGINE_RENDERER_BACKEND=bgfx
+          -DENGINE_RENDERER_BACKEND=gl
+          -DENGINE_BUILD_TESTS=ON
+          -DENGINE_BUILD_TOOLS=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
-      - name: Test (bgfx device + shader cook suites)
+      - name: Test (headless suite on the gl backend)
         run: >-
-          ctest --test-dir build --output-on-failure
-          -R "engine_unit_render_device_bgfx|engine_unit_shader_cook"
+          ctest --test-dir build --output-on-failure --timeout 120
+          --label-exclude gpu
 
   sanitizers:
     name: ASAN+UBSAN
@@ -480,6 +487,7 @@ jobs:
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Debug
           -DENGINE_SANITIZERS=ON
+          -DENGINE_BGFX_SHADERC=OFF
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
@@ -524,6 +532,7 @@ jobs:
           -DCMAKE_C_FLAGS="-fsanitize=thread"
           -DCMAKE_CXX_FLAGS="-fsanitize=thread"
           -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+          -DENGINE_BGFX_SHADERC=OFF
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
@@ -566,6 +575,7 @@ jobs:
           -DCMAKE_C_FLAGS="--coverage"
           -DCMAKE_CXX_FLAGS="--coverage"
           -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+          -DENGINE_BGFX_SHADERC=OFF
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
@@ -635,10 +645,11 @@ jobs:
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
+          -DENGINE_BGFX_SHADERC=OFF
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
 
       - name: Run ECS perf benchmark
         run: |
@@ -674,7 +685,7 @@ jobs:
       - static-analysis
       - clang-tidy
       - werror-check
-      - bgfx-build
+      - gl-build
       - sanitizers
       - tsan
       - coverage

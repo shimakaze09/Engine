@@ -168,21 +168,32 @@ bool bgfx_vertex_layout(const VertexLayout &layout,
       (layout.strideBytes <= 0)) {
     return false;
   }
+  // Locally clamped copy of the (already validated) count, sorted by an
+  // insertion sort: at most kMaxVertexAttributes entries, and GCC 16's
+  // -Werror=array-bounds false-positives on std::sort's inlined
+  // introsort over the fixed-size array regardless of the range check
+  // above (the shader-define sort in shader_system uses the same
+  // pattern for the same reason).
+  const std::size_t attributeCount = std::min<std::size_t>(
+      layout.attributeCount, kMaxVertexAttributes);
   std::array<std::size_t, kMaxVertexAttributes> order{};
-  for (std::size_t i = 0U; i < layout.attributeCount; ++i) {
+  for (std::size_t i = 0U; i < attributeCount; ++i) {
     order[i] = i;
   }
-  std::sort(order.begin(), order.begin() +
-                               static_cast<std::ptrdiff_t>(
-                                   layout.attributeCount),
-            [&layout](std::size_t a, std::size_t b) noexcept {
-              return layout.attributes[a].offsetBytes <
-                     layout.attributes[b].offsetBytes;
-            });
+  for (std::size_t i = 1U; i < attributeCount; ++i) {
+    const std::size_t current = order[i];
+    std::size_t j = i;
+    while ((j > 0U) && (layout.attributes[current].offsetBytes <
+                        layout.attributes[order[j - 1U]].offsetBytes)) {
+      order[j] = order[j - 1U];
+      --j;
+    }
+    order[j] = current;
+  }
 
   out->begin(bgfx::RendererType::Noop);
   std::int32_t cursor = 0;
-  for (std::size_t i = 0U; i < layout.attributeCount; ++i) {
+  for (std::size_t i = 0U; i < attributeCount; ++i) {
     const VertexAttribute &attribute = layout.attributes[order[i]];
     bgfx::Attrib::Enum attrib = bgfx::Attrib::Count;
     if (!bgfx_vertex_attrib(attribute.semantic, &attrib) ||
