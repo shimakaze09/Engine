@@ -218,13 +218,7 @@ bool resolve_present_blit_program_state(BackendState &backend,
 void init_backend_post(BackendState &backend,
                        const RenderDevice *dev) noexcept {
   // FXAA shader (soft-fail: AA simply disabled if shader unavailable).
-  // Web/GLES tier default (#293): the FXAA hop erases the scene on
-  // WebGL2 — until that lands, GLES-family devices boot with FXAA off.
-  const bool esslFamily = (dev->cooked_program_profile != nullptr) &&
-                          (std::strcmp(dev->cooked_program_profile(),
-                                       "essl") == 0);
-  core::cvar_register_bool("r_fxaa", !esslFamily,
-                           "Enable FXAA anti-aliasing");
+  core::cvar_register_bool("r_fxaa", true, "Enable FXAA anti-aliasing");
   const ShaderProgramHandle fxaaShader = load_configured_shader_program(
       "fullscreen.vert", "fxaa.frag");
   if (fxaaShader != kInvalidShaderProgram) {

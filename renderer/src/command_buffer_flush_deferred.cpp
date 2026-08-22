@@ -214,11 +214,15 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         if (hasAlbedoTex && (albedoTex != boundAlbedoTex)) {
           dev->bind_texture_slot(0U, albedoTex);
           boundAlbedoTex = albedoTex;
-        } else if (!hasAlbedoTex && (boundAlbedoTex != kInvalidDeviceTexture)) {
-          dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-          boundAlbedoTex = kInvalidDeviceTexture;
+        } else if (!hasAlbedoTex &&
+                   (boundAlbedoTex != backend.fallbackTexture2D)) {
+          // Fallback, not nothing: WebGL rejects draws whose declared
+          // samplers still reference the pass's render target (#293).
+          dev->bind_texture_slot(0U, backend.fallbackTexture2D);
+          boundAlbedoTex = backend.fallbackTexture2D;
         }
         upload_material_texture_slots(materialTexLocs, dev, command.material,
+                                      backend.fallbackTexture2D,
                                       boundMaterialTex);
         upload_gbuffer_foliage_uniforms(backend, dev, command);
 
@@ -935,12 +939,14 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           if (hasTex && albedoTex != boundAlbedoTex) {
             dev->bind_texture_slot(0U, albedoTex);
             boundAlbedoTex = albedoTex;
-          } else if (!hasTex && (boundAlbedoTex != kInvalidDeviceTexture)) {
-            dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-            boundAlbedoTex = kInvalidDeviceTexture;
+          } else if (!hasTex && (boundAlbedoTex != backend.fallbackTexture2D)) {
+            dev->bind_texture_slot(0U, backend.fallbackTexture2D);
+            boundAlbedoTex = backend.fallbackTexture2D;
           }
           upload_material_texture_slots(transparentMaterialTexLocs, dev,
-                                        cmd.material, boundMaterialTex);
+                                        cmd.material,
+                                        backend.fallbackTexture2D,
+                                        boundMaterialTex);
           const math::Mat4 model = compute_model_matrix(cmd);
           const math::Mat4 mvp = compute_mvp(model, vp);
           float nm[9] = {};

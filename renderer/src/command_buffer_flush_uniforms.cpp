@@ -312,7 +312,7 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
 
 void upload_material_texture_slots(
     const MaterialTextureUniformLocs &locs, const RenderDevice *dev,
-    const Material &material,
+    const Material &material, DeviceTextureHandle fallbackTex,
     DeviceTextureHandle boundMaterialTex[4]) noexcept {
   constexpr std::uint32_t kMetallicRoughnessSlot = 1U;
   constexpr std::uint32_t kEmissiveSlot = 2U;
@@ -331,8 +331,10 @@ void upload_material_texture_slots(
     if (mapParam.valid()) {
       dev->set_param_i32(mapParam, static_cast<std::int32_t>(slot));
     }
-    const DeviceTextureHandle desired =
-        has ? deviceTex : kInvalidDeviceTexture;
+    // Absent slots bind the fallback, never nothing: a stale binding
+    // of the pass's own render target trips WebGL's declaration-based
+    // feedback-loop rejection and silently drops the draw (#293).
+    const DeviceTextureHandle desired = has ? deviceTex : fallbackTex;
     if (desired != *boundTex) {
       dev->bind_texture_slot(slot, desired);
       *boundTex = desired;

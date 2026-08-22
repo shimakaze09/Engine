@@ -180,12 +180,14 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
           dev->bind_texture_slot(0U, albedoTex);
           boundAlbedoTexture = albedoTex;
         } else if (!hasAlbedoTex &&
-                   (boundAlbedoTexture != kInvalidDeviceTexture)) {
-          dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-          boundAlbedoTexture = kInvalidDeviceTexture;
+                   (boundAlbedoTexture != backend.fallbackTexture2D)) {
+          dev->bind_texture_slot(0U, backend.fallbackTexture2D);
+          boundAlbedoTexture = backend.fallbackTexture2D;
         }
         upload_material_texture_slots(captureMaterialTexLocs, dev,
-                                      command.material, boundMaterialTex);
+                                      command.material,
+                                      backend.fallbackTexture2D,
+                                      boundMaterialTex);
 
         const math::Mat4 model = compute_model_matrix(command);
         const math::Mat4 mvp = compute_mvp(model, captureViewProjection);
