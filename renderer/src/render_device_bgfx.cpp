@@ -1072,6 +1072,10 @@ bool initialize_render_device() noexcept {
     init.type = bgfx::RendererType::OpenGLES;
   } else if (std::strcmp(requested, "metal") == 0) {
     init.type = bgfx::RendererType::Metal;
+  } else if (std::strcmp(requested, "d3d11") == 0) {
+    init.type = bgfx::RendererType::Direct3D11;
+  } else if (std::strcmp(requested, "d3d12") == 0) {
+    init.type = bgfx::RendererType::Direct3D12;
   } else {
     init.type = bgfx::RendererType::Count; // auto
   }

@@ -41,6 +41,7 @@ constexpr ShaderProfile kKnownProfiles[] = {
     {"essl", "android", "300_es"},
     {"spirv", "linux", "spirv"},
     {"metal", "osx", "metal"},
+    {"dx11", "windows", "s_5_0"},
 };
 
 /// One manifest entry: a .sc source, its stage, the runtime output stem,
@@ -321,7 +322,11 @@ int run_shader_cook(int argc, char **argv) {
   const char *outDir = nullptr;
   const char *shadercPath = nullptr;
   const char *includeDir = nullptr;
+#ifdef _WIN32
+  std::string profilesCsv = "glsl,essl,spirv,dx11";
+#else
   std::string profilesCsv = "glsl,essl,spirv";
+#endif
   const char *platformTag = kCookPlatformTag;
   bool force = false;
 

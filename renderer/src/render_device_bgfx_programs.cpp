@@ -307,6 +307,9 @@ const char *bgfx_cooked_program_profile() noexcept {
     return "glsl";
   case bgfx::RendererType::Metal:
     return "metal";
+  case bgfx::RendererType::Direct3D11:
+  case bgfx::RendererType::Direct3D12:
+    return "dx11";
   default:
     return "spirv";
   }
