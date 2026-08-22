@@ -134,7 +134,14 @@ public:
                   std::uint32_t height, std::uint32_t pitch,
                   bgfx::TextureFormat::Enum, const void *data,
                   std::uint32_t, bool yflip) override {
-    FILE *file = std::fopen(filePath, "wb");
+    FILE *file = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&file, filePath, "wb") != 0) {
+      file = nullptr;
+    }
+#else
+    file = std::fopen(filePath, "wb");
+#endif
     if (file == nullptr) {
       return;
     }
@@ -1159,7 +1166,8 @@ void render_device_bgfx_frame() noexcept {
   // seconds through bgfx's readback — visual verification on hosts
   // whose compositors block external capture, and in CI.
   {
-    static const char *screenshotPath = std::getenv("ENGINE_BGFX_SCREENSHOT");
+    static const char *screenshotPath =
+        core::non_empty_env("ENGINE_BGFX_SCREENSHOT");
     static std::uint32_t frameCounter = 0U;
     if ((screenshotPath != nullptr) && ((frameCounter++ % 120U) == 60U)) {
       bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath);
