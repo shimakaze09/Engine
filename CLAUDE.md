@@ -298,8 +298,11 @@ directory-global by design.
   shadow/IBL sampling defer to their units;
   programs link only from the Phase C shaderc cook's binaries via
   `create_program_binary` + `caps.cookedPrograms` — spirv is the
-  canonical profile because GLSL-flavor binaries embed no uniform
-  table; runtime GLSL compile and mip generation stay unavailable; caps
+  canonical profile: GLSL-flavor binaries embed no uniform table and
+  DXBC tables lose Load-only samplers to fxc stripping, so the glsl,
+  essl, and dx11 profiles all link through the spirv-introspected
+  entry (pinned by the reload-contract suite's dx11 scenario);
+  runtime GLSL compile and mip generation stay unavailable; caps
   report uniform blocks and timestamp queries unavailable; suites
   `engine_unit_render_device_bgfx` + `engine_unit_shader_cook`) — both
   backends map engine

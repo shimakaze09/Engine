@@ -12,7 +12,10 @@
 // resolver's optional-uniform contract (issue #95): uniforms the lighting
 // shader declares but never reads (uTileCountY, uScreenSize) may be
 // optimized out by a conforming compiler and must not disable the
-// deferred path, while a genuinely required uniform still does.
+// deferred path, while a genuinely required uniform still does. And it
+// pins the dx11 profile's sidecar contract (#301): DXBC uniform tables
+// lose Load-only samplers to fxc stripping, so dx11 programs must link
+// through the spirv-introspected entry, never the plain one.
 
 #include "command_buffer_capture.h"
 #include "command_buffer_context.h"
@@ -82,12 +85,43 @@ void add_missing_uniform(const char *name,
 }
 
 const char *fake_cooked_profile() noexcept { return "spirv"; }
+const char *fake_cooked_profile_dx11() noexcept { return "dx11"; }
+
+// Link-entry counters for the dx11 sidecar scenario: plain links, links
+// through the introspected entry, and introspected links whose spirv
+// sidecar bytes were missing.
+std::size_t g_plainLinks = 0U;
+std::size_t g_introspectedLinks = 0U;
+std::size_t g_introspectedMissingMeta = 0U;
+
+void reset_link_counters() noexcept {
+  g_plainLinks = 0U;
+  g_introspectedLinks = 0U;
+  g_introspectedMissingMeta = 0U;
+}
 
 engine::renderer::DeviceProgramHandle
 fake_create_program_binary(const void *vs, std::ptrdiff_t,
                            const void *fs, std::ptrdiff_t) noexcept {
   if ((vs == nullptr) || (fs == nullptr)) {
     return engine::renderer::kInvalidDeviceProgram;
+  }
+  ++g_plainLinks;
+  return engine::renderer::DeviceProgramHandle{++g_nextProgram};
+}
+
+engine::renderer::DeviceProgramHandle
+fake_create_program_binary_introspected(
+    const void *vs, std::ptrdiff_t, const void *fs, std::ptrdiff_t,
+    const void *vsMeta, std::ptrdiff_t vsMetaSize, const void *fsMeta,
+    std::ptrdiff_t fsMetaSize) noexcept {
+  if ((vs == nullptr) || (fs == nullptr)) {
+    return engine::renderer::kInvalidDeviceProgram;
+  }
+  ++g_introspectedLinks;
+  if ((vsMeta == nullptr) || (vsMetaSize <= 0) || (fsMeta == nullptr) ||
+      (fsMetaSize <= 0)) {
+    ++g_introspectedMissingMeta;
   }
   return engine::renderer::DeviceProgramHandle{++g_nextProgram};
 }
@@ -164,11 +198,12 @@ void configure_fake_device() noexcept {
   g_fakeDevice.destroy_render_target = &fake_destroy_render_target;
 }
 
-bool write_shader_file(const char *fileName, const char *text) noexcept {
+bool write_profile_shader_file(const char *fileName, const char *profile,
+                               const char *text) noexcept {
   // Cooked layout (#296): the loader reads the bgfx cook's binaries.
   char path[256] = {};
-  std::snprintf(path, sizeof(path), "%s/bgfx/cooked/%s.default.spirv.bin",
-                kShaderDir, fileName);
+  std::snprintf(path, sizeof(path), "%s/bgfx/cooked/%s.default.%s.bin",
+                kShaderDir, fileName, profile);
   FILE *file = nullptr;
 #ifdef _WIN32
   if (fopen_s(&file, path, "wb") != 0) {
@@ -184,6 +219,10 @@ bool write_shader_file(const char *fileName, const char *text) noexcept {
   const bool ok = std::fwrite(text, 1U, len, file) == len;
   std::fclose(file);
   return ok;
+}
+
+bool write_shader_file(const char *fileName, const char *text) noexcept {
+  return write_profile_shader_file(fileName, "spirv", text);
 }
 
 /// Advances the file's recorded mtime by a strictly growing number of
@@ -408,6 +447,45 @@ int check_deferred_survives_optimized_out_uniforms() {
   return 0;
 }
 
+/// EXPECTATION: the dx11 cooked profile links every program through the
+/// introspected entry with both spirv sidecars present, never the plain
+/// entry. DXBC uniform tables are incomplete — fxc strips the
+/// SamplerState of any texture read only via Load/texelFetch, which
+/// silently disabled the deferred path on D3D (#301 hardware run) —
+/// so the spirv table must stay the source of the parameter set.
+int check_dx11_profile_links_with_spirv_sidecars() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  for (const char *fileName : kShaderFiles) {
+    if (!write_profile_shader_file(fileName, "dx11", "// dxbc stub\n")) {
+      return 360;
+    }
+  }
+  g_fakeDevice.cooked_program_profile = &fake_cooked_profile_dx11;
+  g_fakeDevice.create_program_binary_introspected =
+      &fake_create_program_binary_introspected;
+  reset_link_counters();
+
+  int result = 0;
+  if (!initialize_backend()) {
+    result = 361;
+  } else if (!backend_state().deferredAvailable) {
+    result = 362;
+  } else if (g_introspectedLinks == 0U) {
+    result = 363; // dx11 fell back to the plain, table-stripped entry
+  } else if (g_introspectedMissingMeta != 0U) {
+    result = 364; // a link ran without its spirv sidecar bytes
+  } else if (g_plainLinks != 0U) {
+    result = 365;
+  }
+
+  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
+  g_fakeDevice.create_program_binary_introspected = nullptr;
+  return result;
+}
+
 } // namespace
 
 namespace engine::renderer {
@@ -472,6 +550,9 @@ int main() {
   }
   if (result == 0) {
     result = check_deferred_survives_optimized_out_uniforms();
+  }
+  if (result == 0) {
+    result = check_dx11_profile_links_with_spirv_sidecars();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);
