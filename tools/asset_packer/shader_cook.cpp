@@ -372,6 +372,23 @@ int run_shader_cook(int argc, char **argv) {
     return 1;
   }
 
+  // #290: the stamp records output paths verbatim, so a relative
+  // --shader-out must never build path strings that mismatch a prior
+  // absolute run's records — the stale sweep would then delete the
+  // whole just-cooked set before the stamp hashes it. Anchor the out
+  // dir once; every output, index, and stamp path derives from it.
+  std::error_code outDirError{};
+  const std::string outDirAbsolute =
+      std::filesystem::absolute(std::filesystem::path(outDir), outDirError)
+          .lexically_normal()
+          .string();
+  if (outDirError) {
+    std::fprintf(stderr, "shader cook: cannot resolve --shader-out %s\n",
+                 outDir);
+    return 1;
+  }
+  outDir = outDirAbsolute.c_str();
+
   std::vector<ShaderProfile> profiles;
   {
     std::string csv = profilesCsv;

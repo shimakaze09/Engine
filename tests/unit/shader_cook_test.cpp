@@ -173,6 +173,24 @@ int main() {
           "edited source re-certified through a fresh stamp");
   t.check(!read_file(sample).empty(), "recooked binary present");
 
+  // #290 regression: a relative --shader-out over a dir last stamped
+  // with absolute paths must repack in place, not sweep the fresh set
+  // as "stale" and fail the stamp (which destroyed the whole output
+  // set before the fix).
+  {
+    std::ofstream file(sources / "debug_line.vs.sc", std::ios::app);
+    file << "\n// relative-out probe\n";
+  }
+  const fs::path savedCwd = fs::current_path();
+  fs::current_path(scratch);
+  const int relativeExit =
+      run_cook(packer, manifest, "outA", shaderc, include);
+  fs::current_path(savedCwd);
+  t.check(relativeExit == 0, "relative --shader-out recook succeeds");
+  t.check(fs::exists(sample),
+          "relative recook keeps the cooked binary set");
+  t.check(fs::exists(stamp), "relative recook re-certifies the stamp");
+
   // A failing tool must not certify a partial generation: no stamp.
   const fs::path outC = scratch / "outC";
   t.check(run_cook(packer, manifest, outC.string(),
