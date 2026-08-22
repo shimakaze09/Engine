@@ -306,6 +306,7 @@ void shutdown_editor() noexcept {
   editor_session().initialized = false;
   editor_session().world = nullptr;
   editor_session().sdlWindow = nullptr;
+  editor_session().autoplayConsumed = false;
   clear_entity_selection();
   editor_session().playState = PlayState::Stopped;
   editor_session().playSnapshotBuffer.reset();

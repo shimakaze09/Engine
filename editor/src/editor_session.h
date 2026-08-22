@@ -98,6 +98,9 @@ struct EditorSession final {
   // into any other world.
   const runtime::World *playSnapshotWorld = nullptr;
   bool worldRestoreFailed = false;
+  // One-shot ENGINE_EDITOR_AUTOPLAY latch (#249): session-scoped so a
+  // second editor session in one process autoplays again.
+  bool autoplayConsumed = false;
   EditorCamera editorCamera{};
   ImGuizmo::OPERATION gizmoOp = ImGuizmo::TRANSLATE;
   bool gizmoWasUsing = false;
