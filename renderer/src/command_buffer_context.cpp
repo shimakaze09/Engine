@@ -36,6 +36,19 @@ void reset_backend_on_failure() noexcept {
 /// The one projection builder shared by every active-camera consumer
 /// (#221): perspective from fovRadians, orthographic from the half-height
 /// orthographicSize, both with the historical fov/near/far fallbacks.
+/// Device clip/texture conventions (defaults when no device); here in
+/// the context TU so the slim per-TU test harnesses that link
+/// projection code resolve them without the full command buffer.
+bool device_depth_zero_one() noexcept {
+  const RenderDevice *dev = render_device();
+  return (dev != nullptr) && dev->caps.depthZeroToOne;
+}
+
+bool device_target_origin_bottom_left() noexcept {
+  const RenderDevice *dev = render_device();
+  return (dev == nullptr) || dev->caps.textureOriginBottomLeft;
+}
+
 math::Mat4 camera_projection_matrix(const CameraState &camera,
                                     float aspect) noexcept {
   const float safeAspect = (aspect > 0.0F) ? aspect : 1.0F;
@@ -45,11 +58,16 @@ math::Mat4 camera_projection_matrix(const CameraState &camera,
     const float halfH =
         (camera.orthographicSize > 0.0F) ? camera.orthographicSize : 5.0F;
     const float halfW = halfH * safeAspect;
-    return math::ortho(-halfW, halfW, -halfH, halfH, nearP, farP);
+    return device_depth_zero_one()
+               ? math::ortho_zero_one(-halfW, halfW, -halfH, halfH, nearP,
+                                      farP)
+               : math::ortho(-halfW, halfW, -halfH, halfH, nearP, farP);
   }
   const float fov =
       (camera.fovRadians > 0.0F) ? camera.fovRadians : 1.0471975512F;
-  return math::perspective(fov, safeAspect, nearP, farP);
+  return device_depth_zero_one()
+             ? math::perspective_zero_one(fov, safeAspect, nearP, farP)
+             : math::perspective(fov, safeAspect, nearP, farP);
 }
 
 /// Sky pass lens (#221): perspective directional sampling regardless of the

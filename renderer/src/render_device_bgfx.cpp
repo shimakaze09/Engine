@@ -127,9 +127,34 @@ public:
     return false;
   }
   void cacheWrite(std::uint64_t, const void *, std::uint32_t) override {}
-  void screenShot(const char *, std::uint32_t, std::uint32_t, std::uint32_t,
-                  bgfx::TextureFormat::Enum, const void *, std::uint32_t,
-                  bool) override {}
+  /// Writes bgfx's readback as an uncompressed TGA: the diagnostic
+  /// screenshot path (ENGINE_BGFX_SCREENSHOT) needs zero image-codec
+  /// dependencies, and TGA holds BGRA rows natively.
+  void screenShot(const char *filePath, std::uint32_t width,
+                  std::uint32_t height, std::uint32_t pitch,
+                  bgfx::TextureFormat::Enum, const void *data,
+                  std::uint32_t, bool yflip) override {
+    FILE *file = std::fopen(filePath, "wb");
+    if (file == nullptr) {
+      return;
+    }
+    std::uint8_t header[18] = {};
+    header[2] = 2; // uncompressed true-color
+    header[12] = static_cast<std::uint8_t>(width & 0xFFU);
+    header[13] = static_cast<std::uint8_t>((width >> 8U) & 0xFFU);
+    header[14] = static_cast<std::uint8_t>(height & 0xFFU);
+    header[15] = static_cast<std::uint8_t>((height >> 8U) & 0xFFU);
+    header[16] = 32;   // BGRA
+    header[17] = 0x20; // top-left origin
+    std::fwrite(header, 1U, sizeof(header), file);
+    const auto *rows = static_cast<const std::uint8_t *>(data);
+    for (std::uint32_t y = 0U; y < height; ++y) {
+      const std::uint32_t row = yflip ? (height - 1U - y) : y;
+      std::fwrite(rows + (static_cast<std::size_t>(row) * pitch), 1U,
+                  static_cast<std::size_t>(width) * 4U, file);
+    }
+    std::fclose(file);
+  }
   void captureBegin(std::uint32_t, std::uint32_t, std::uint32_t,
                     bgfx::TextureFormat::Enum, bool) override {}
   void captureEnd() override {}
@@ -142,6 +167,7 @@ void reset_views() noexcept {
   BgfxDeviceContext &ctx = device_context();
   bgfx::setViewFrameBuffer(0U, BGFX_INVALID_HANDLE);
   bgfx::setViewMode(0U, bgfx::ViewMode::Sequential);
+  bgfx::setViewClear(0U, BGFX_CLEAR_NONE, 0U, 1.0F, 0U);
   ctx.currentView = 0U;
   ctx.viewsUsed = 1U;
 }
@@ -826,6 +852,10 @@ void bgfx_bind_render_target(RenderTargetHandle target) noexcept {
   ++ctx.viewsUsed;
   bgfx::setViewFrameBuffer(view, frameBuffer);
   bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+  // View state persists per id across frames in bgfx; a pass that never
+  // clears would otherwise inherit whatever clear an earlier frame (or
+  // startup IBL cook) configured on this id and wipe its own input.
+  bgfx::setViewClear(view, BGFX_CLEAR_NONE, 0U, 1.0F, 0U);
   ctx.currentView = view;
 }
 
@@ -917,6 +947,15 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   // 16-unit floor through this, gating the deferred pass off on web.
   device->caps.maxTextureSamplers = static_cast<std::uint16_t>(
       bgfx::getCaps()->limits.maxTextureSamplers);
+  // bgfx reports the live API's conventions: homogeneousDepth means the
+  // GL [-1, 1] clip range; the engine's projection builders key off
+  // these instead of assuming GL.
+  device->caps.depthZeroToOne = !bgfx::getCaps()->homogeneousDepth;
+  // Not bgfx's originBottomLeft: that reports the normalized clip
+  // convention (true even on Vulkan). Engine render-target row order
+  // follows the API family — bottom-up on GL, top-down elsewhere —
+  // which is the same split as the depth convention.
+  device->caps.textureOriginBottomLeft = bgfx::getCaps()->homogeneousDepth;
 
   device->create_buffer = &bgfx_create_buffer;
   device->update_buffer = &bgfx_update_buffer;
@@ -1114,6 +1153,17 @@ void render_device_bgfx_frame() noexcept {
   BgfxDeviceContext &ctx = device_context();
   if (!ctx.initialized || (ctx.mode != BgfxBackendMode::Bgfx)) {
     return;
+  }
+  // Diagnostic capture: with ENGINE_BGFX_SCREENSHOT=<path.tga> in the
+  // environment, the presented back buffer is written there every ~2
+  // seconds through bgfx's readback — visual verification on hosts
+  // whose compositors block external capture, and in CI.
+  {
+    static const char *screenshotPath = std::getenv("ENGINE_BGFX_SCREENSHOT");
+    static std::uint32_t frameCounter = 0U;
+    if ((screenshotPath != nullptr) && ((frameCounter++ % 120U) == 60U)) {
+      bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath);
+    }
   }
   // Re-reset the swapchain when the drawable or vsync intent changed
   // (r_vsync applies live, matching the GL path's swap-interval cvar).

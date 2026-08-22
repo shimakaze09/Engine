@@ -159,6 +159,12 @@ struct BackendState final {
 
   // Attribute-less geometry for fullscreen triangles.
   DeviceGeometryHandle emptyGeometry{};
+  // 1x1 fallbacks bound to disabled sampler slots: Vulkan-family
+  // backends require every declared sampler's descriptor valid at draw
+  // (2D for the shadow-map slots, cube for point-shadow/IBL slots),
+  // where GL merely tolerates unbound units on untaken branches.
+  DeviceTextureHandle fallbackTexture2D{};
+  DeviceTextureHandle fallbackCubemap{};
 
   // Skybox shader and cube geometry.
   bool skyboxAvailable = false;
@@ -228,6 +234,12 @@ struct BackendState final {
   // Instanced sibling; same selection rule as pbrInstancedProgram.
   ShaderProgramHandle gbufferInstancedShaderHandle{};
   DeviceProgramHandle gbufferInstancedProgram{};
+  // Depth-seed pass (loaded when !caps.depthBlit): copies the G-buffer
+  // depth into the scene target with a fullscreen draw before the
+  // depth-tested sky pass.
+  ShaderProgramHandle depthCopyShaderHandle{};
+  DeviceProgramHandle depthCopyProgram{};
+  ShaderParam depthCopyDepthLoc{};
   ShaderParam gbufModelLoc{};
   ShaderParam gbufViewLoc{};
   ShaderParam gbufProjectionLoc{};

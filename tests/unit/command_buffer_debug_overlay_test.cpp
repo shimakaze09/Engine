@@ -24,6 +24,12 @@
 
 namespace engine::renderer {
 
+/// Link stub: this harness compiles command_buffer_context.cpp, whose
+/// projection helpers consult the live device's clip conventions; no
+/// device exists here, so the GL-convention defaults apply.
+const RenderDevice *render_device() noexcept { return nullptr; }
+
+
 // Link stubs for the forward-path helpers referenced by the flush TU; the
 // debug-overlay contract under test never reaches them (debug-line
 // pipeline unavailable, no draw commands submitted).

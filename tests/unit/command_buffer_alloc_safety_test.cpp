@@ -20,6 +20,12 @@
 #include <limits>
 
 namespace engine::renderer {
+
+/// Link stub: this harness compiles command_buffer_context.cpp, whose
+/// projection helpers consult the live device's clip conventions; no
+/// device exists here, so the GL-convention defaults apply.
+const RenderDevice *render_device() noexcept { return nullptr; }
+
 // Link stub: upload_material_texture_slots (linked in from
 // command_buffer_flush_uniforms.cpp) reports every slot unresolved to the
 // caller; this test never exercises texture-slot binding.

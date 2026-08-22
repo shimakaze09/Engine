@@ -408,6 +408,34 @@ bool init_backend_core(BackendState &backend) noexcept {
     reset_backend_on_failure();
     return false;
   }
+
+  // Fallback textures for disabled sampler slots (soft-fail: without
+  // them, Vulkan-family backends render undefined output whenever a
+  // declared shadow/IBL sampler has no live texture).
+  {
+    const std::uint8_t whiteTexel[4] = {255U, 255U, 255U, 255U};
+    TextureDesc fallback2D{};
+    fallback2D.width = 1;
+    fallback2D.height = 1;
+    fallback2D.pixels = whiteTexel;
+    backend.fallbackTexture2D = dev->create_texture(fallback2D);
+
+    const void *facePixels[6] = {whiteTexel, whiteTexel, whiteTexel,
+                                 whiteTexel, whiteTexel, whiteTexel};
+    TextureDesc fallbackCube{};
+    fallbackCube.kind = TextureKind::Cube;
+    fallbackCube.width = 1;
+    fallbackCube.height = 1;
+    fallbackCube.facePixels = facePixels;
+    backend.fallbackCubemap = dev->create_texture(fallbackCube);
+    if ((backend.fallbackTexture2D == kInvalidDeviceTexture) ||
+        (backend.fallbackCubemap == kInvalidDeviceTexture)) {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "fallback sampler textures unavailable — disabled "
+                        "shadow/IBL slots may render undefined on "
+                        "Vulkan-family backends");
+    }
+  }
   return true;
 }
 

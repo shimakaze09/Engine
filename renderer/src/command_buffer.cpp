@@ -150,6 +150,13 @@ void refresh_backend_program_state(BackendState &backend,
       shader_device_program(backend.pbrInstancedShaderHandle);
   backend.gbufferInstancedProgram =
       shader_device_program(backend.gbufferInstancedShaderHandle);
+  backend.depthCopyProgram =
+      shader_device_program(backend.depthCopyShaderHandle);
+  if ((backend.depthCopyProgram != kInvalidDeviceProgram) &&
+      (dev->shader_param != nullptr)) {
+    backend.depthCopyDepthLoc =
+        dev->shader_param(backend.depthCopyProgram, "uDepth");
+  }
   if (!resolve_pbr_program_state(backend, dev)) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "required PBR uniforms missing after shader reload");
@@ -432,6 +439,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->gbufferInstancedShaderHandle = ShaderProgramHandle{};
   }
   backend->gbufferInstancedProgram = kInvalidDeviceProgram;
+  if (backend->depthCopyShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->depthCopyShaderHandle);
+    backend->depthCopyShaderHandle = ShaderProgramHandle{};
+  }
+  backend->depthCopyProgram = kInvalidDeviceProgram;
   backend->deferredAvailable = false;
 
   if (backend->fxaaShaderHandle != kInvalidShaderProgram) {
@@ -458,6 +470,16 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   if (backend->defaultShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->defaultShaderHandle);
     backend->defaultShaderHandle = ShaderProgramHandle{};
+  }
+  if ((dev != nullptr) && (dev->destroy_texture != nullptr)) {
+    if (backend->fallbackTexture2D != kInvalidDeviceTexture) {
+      dev->destroy_texture(backend->fallbackTexture2D);
+      backend->fallbackTexture2D = kInvalidDeviceTexture;
+    }
+    if (backend->fallbackCubemap != kInvalidDeviceTexture) {
+      dev->destroy_texture(backend->fallbackCubemap);
+      backend->fallbackCubemap = kInvalidDeviceTexture;
+    }
   }
   backend->pbrProgram = kInvalidDeviceProgram;
   backend->defaultProgram = kInvalidDeviceProgram;

@@ -69,6 +69,13 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrIblEnabledLoc, enabled ? 1 : 0);
   }
   if (!enabled) {
+    if (dev->bind_texture_slot != nullptr) {
+      // Vulkan-family backends need valid descriptors on the declared
+      // IBL samplers even when the ambient path is constant.
+      dev->bind_texture_slot(kIblIrradianceUnit, backend.fallbackCubemap);
+      dev->bind_texture_slot(kIblPrefilteredUnit, backend.fallbackCubemap);
+      dev->bind_texture_slot(kIblBrdfLutUnit, backend.fallbackTexture2D);
+    }
     return;
   }
 
@@ -397,8 +404,12 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
   float cascadeSplits[4] = {};
   for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
     const auto texUnit = static_cast<std::uint32_t>(6U + c);
+    // Disabled slots still bind the fallback: Vulkan-family backends
+    // need every declared sampler descriptor valid at draw.
     if (shadowEnabled) {
       dev->bind_texture_slot(texUnit, backend.shadowState.depthTextures[c]);
+    } else {
+      dev->bind_texture_slot(texUnit, backend.fallbackTexture2D);
     }
     if (backend.pbrShadowMapLocs[c].valid()) {
       dev->set_param_i32(backend.pbrShadowMapLocs[c],
@@ -429,6 +440,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     const auto texUnit = static_cast<std::uint32_t>(10U + s);
     if (spotShadowEnabled) {
       dev->bind_texture_slot(texUnit, slot.depthTexture);
+    } else {
+      dev->bind_texture_slot(texUnit, backend.fallbackTexture2D);
     }
     if (backend.pbrSpotShadowMapLocs[s].valid()) {
       dev->set_param_i32(backend.pbrSpotShadowMapLocs[s],
@@ -459,6 +472,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     const auto texUnit = static_cast<std::uint32_t>(14U + s);
     if (pointShadowEnabled && (dev->bind_texture_slot != nullptr)) {
       dev->bind_texture_slot(texUnit, slot.depthCubemap);
+    } else if (dev->bind_texture_slot != nullptr) {
+      dev->bind_texture_slot(texUnit, backend.fallbackCubemap);
     }
     if (backend.pbrPointShadowMapLocs[s].valid()) {
       dev->set_param_i32(backend.pbrPointShadowMapLocs[s],

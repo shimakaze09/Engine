@@ -13,6 +13,7 @@
 #include "engine/math/transform.h"
 #include "engine/math/vec4.h"
 #include "engine/physics/collider.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/physics/physics.h"
 #include "spatial_transform_util.h"
 
@@ -49,7 +50,13 @@ void extract_frustum_planes(const math::Mat4 &vp,
   planes[1] = {c0.w - c0.x, c1.w - c1.x, c2.w - c2.x, c3.w - c3.x};
   planes[2] = {c0.w + c0.y, c1.w + c1.y, c2.w + c2.y, c3.w + c3.y};
   planes[3] = {c0.w - c0.y, c1.w - c1.y, c2.w - c2.y, c3.w - c3.y};
-  planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z};
+  // Near plane depends on the device clip-depth convention: GL clips at
+  // z = -w (row w+z), the zero-to-one APIs at z = 0 (row z alone).
+  if (renderer::device_depth_zero_one()) {
+    planes[4] = {c0.z, c1.z, c2.z, c3.z};
+  } else {
+    planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z};
+  }
   planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z};
 }
 

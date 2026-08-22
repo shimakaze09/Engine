@@ -260,6 +260,9 @@ enum class DepthTest : std::uint8_t {
   Disabled = 0,
   Less = 1,
   LessEqual = 2,
+  // Every fragment passes but depth still WRITES (Disabled also turns
+  // depth writes off on GL); the depth-seed copy pass depends on it.
+  Always = 3,
 };
 
 /// Blend intent for subsequent draws.
@@ -281,6 +284,11 @@ struct RenderState final {
   bool depthWrite = true;
   BlendMode blend = BlendMode::Disabled;
   CullMode cull = CullMode::None;
+  // Color-channel write mask; false renders depth-only into a color
+  // target (the deferred depth-seed pass on backends without depth
+  // blits). Last field so existing positional initializers keep their
+  // meaning.
+  bool colorWrite = true;
 };
 
 /// Clear-operation selector; values combine bitwise.
@@ -310,6 +318,18 @@ struct DeviceCaps final {
   // unit map exceeds this must fall back (WebGL2's floor is 16 while the
   // deferred+IBL vocabulary tops out at unit 21).
   std::uint16_t maxTextureSamplers = 16U;
+  // Depth attachments copy between render targets through copy_depth;
+  // false means the backend cannot blit depth (bgfx's Vulkan/WebGL
+  // paths) and the caller must seed depth with a draw instead.
+  bool depthBlit = false;
+  // Clip-space depth convention: false = OpenGL [-1, 1], true =
+  // Vulkan/Metal/D3D [0, 1]. Every projection matrix the engine builds
+  // must honor this or world geometry depth-clips away.
+  bool depthZeroToOne = false;
+  // Render-target texture origin: true = bottom-left (OpenGL family),
+  // false = top-left. Consumers sampling engine render targets outside
+  // the pass list (the editor viewport image) flip V accordingly.
+  bool textureOriginBottomLeft = true;
 };
 
 /// Counters for dropped invalid-handle/invalid-argument operations; a

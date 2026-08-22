@@ -354,6 +354,8 @@ using GlGetUniformBlockIndexProc = GLuint(APIENTRYP)(GLuint, const GLchar *);
 using GlUniformBlockBindingProc = void(APIENTRYP)(GLuint, GLuint, GLuint);
 using GlBlendFuncProc = void(APIENTRYP)(GLenum, GLenum);
 using GlDepthMaskProc = void(APIENTRYP)(GLboolean);
+using GlColorMaskProc = void(APIENTRYP)(GLboolean, GLboolean, GLboolean,
+                                        GLboolean);
 using GlDepthFuncProc = void(APIENTRYP)(GLenum);
 using GlGenQueriesProc = void(APIENTRYP)(GLsizei, GLuint *);
 using GlDeleteQueriesProc = void(APIENTRYP)(GLsizei, const GLuint *);
@@ -426,6 +428,7 @@ struct GlTable final {
   GlTexSubImage2DProc texSubImage2D = nullptr;
   GlBlendFuncProc blendFunc = nullptr;
   GlDepthMaskProc depthMask = nullptr;
+  GlColorMaskProc colorMask = nullptr;
   GlDepthFuncProc depthFunc = nullptr;
   GlGenQueriesProc genQueries = nullptr;
   GlDeleteQueriesProc deleteQueries = nullptr;
@@ -638,6 +641,7 @@ bool load_all_gl_functions() noexcept {
          load_proc(&gl_table().texSubImage2D, "glTexSubImage2D") &&
          load_proc(&gl_table().blendFunc, "glBlendFunc") &&
          load_proc(&gl_table().depthMask, "glDepthMask") &&
+         load_proc(&gl_table().colorMask, "glColorMask") &&
          load_proc(&gl_table().depthFunc, "glDepthFunc") &&
          load_proc(&gl_table().genQueries, "glGenQueries") &&
          load_proc(&gl_table().deleteQueries, "glDeleteQueries") &&
@@ -1579,11 +1583,17 @@ void gl_apply_render_state(const RenderState &state) noexcept {
     gl_table().disable(GL_DEPTH_TEST);
   } else {
     gl_table().enable(GL_DEPTH_TEST);
-    gl_table().depthFunc(
-        (state.depthTest == DepthTest::LessEqual) ? GL_LEQUAL : GL_LESS);
+    gl_table().depthFunc((state.depthTest == DepthTest::Always)
+                             ? GL_ALWAYS
+                             : ((state.depthTest == DepthTest::LessEqual)
+                                    ? GL_LEQUAL
+                                    : GL_LESS));
   }
   gl_table().depthMask(state.depthWrite ? GL_TRUE
                                         : static_cast<GLboolean>(GL_FALSE));
+  const GLboolean writeColor =
+      state.colorWrite ? GL_TRUE : static_cast<GLboolean>(GL_FALSE);
+  gl_table().colorMask(writeColor, writeColor, writeColor, writeColor);
   if (state.blend == BlendMode::Alpha) {
     gl_table().enable(GL_BLEND);
     gl_table().blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1725,6 +1735,7 @@ bool initialize_render_device() noexcept {
   device.caps.instancing = true;
   device.caps.uniformBlocks = true;
   device.caps.timestampQueries = true;
+  device.caps.depthBlit = true; // glBlitFramebuffer handles depth
   {
     // GL 4.5 guarantees at least 16; the engine's deferred+IBL unit map
     // tops out at 21, so report the real limit for the pass-level gate.

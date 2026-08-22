@@ -276,6 +276,16 @@ TextureHandle get_skybox_texture() noexcept;
 /// Device texture holding the tonemapped scene (final color). Valid after
 /// the first flush_renderer call; invalid if not yet available.
 DeviceTextureHandle get_scene_viewport_texture() noexcept;
+
+/// Live device clip-depth convention (false = GL [-1,1]); projection
+/// builders and frustum extraction key off this, defaulting to GL when
+/// no device is initialized.
+bool device_depth_zero_one() noexcept;
+
+/// Live device render-target texture origin (true = bottom-left, the
+/// GL family); consumers sampling engine render targets outside the
+/// pass list flip V accordingly.
+bool device_target_origin_bottom_left() noexcept;
 /// Prefiltered specular environment; invalid until baked/enabled.
 DeviceTextureHandle get_prefiltered_environment_texture() noexcept;
 /// Diffuse irradiance environment; invalid until baked/enabled.

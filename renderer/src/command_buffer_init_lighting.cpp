@@ -476,6 +476,24 @@ void init_backend_lighting(BackendState &backend,
         backend.gbufferDebugShaderHandle = gbufferDebugShader;
         static_cast<void>(resolve_gbuffer_debug_program_state(backend, dev));
       }
+      // Depth-seed pass for backends without a depth blit: without it
+      // the sky pass depth-tests against a cleared buffer and covers
+      // the deferred world (soft-fail: the copy_depth blit stays the
+      // path on backends that support it).
+      if (!dev->caps.depthBlit) {
+        const ShaderProgramHandle depthCopy = load_configured_shader_program(
+            "fullscreen.vert", "depth_copy.frag");
+        if (depthCopy != kInvalidShaderProgram) {
+          backend.depthCopyShaderHandle = depthCopy;
+          backend.depthCopyProgram = shader_device_program(depthCopy);
+          backend.depthCopyDepthLoc =
+              dev->shader_param(backend.depthCopyProgram, "uDepth");
+        } else {
+          core::log_message(core::LogLevel::Warning, "renderer",
+                            "depth-seed program unavailable — sky will "
+                            "overdraw deferred output on this backend");
+        }
+      }
       // Instanced G-buffer sibling (soft-fail: batches fall back to
       // per-command draws) — loaded only on backends without a runtime
       // instancing toggle; uniforms resolve through the backend's

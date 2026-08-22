@@ -5,6 +5,19 @@ $input v_texcoord0
 
 #include <bgfx_shader.sh>
 
+// Clip-depth convention: the GLSL-family profiles (glsl/essl) run on GL
+// APIs with NDC z in [-1, 1]; every other profile (spirv/metal) runs a
+// zero-to-one API. The CPU builds matching projection matrices
+// (DeviceCaps::depthZeroToOne), so depth<->NDC mapping keys off the
+// shader language.
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define ENGINE_DEPTH_TO_NDC(d) ((d) * 2.0 - 1.0)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) ((z) * 0.5 + 0.5)
+#else
+#define ENGINE_DEPTH_TO_NDC(d) (d)
+#define ENGINE_CLIP_Z_TO_DEPTH(z) (z)
+#endif
+
 SAMPLER2D(uGBufferAlbedo, 0);
 SAMPLER2D(uGBufferNormal, 1);
 SAMPLER2D(uGBufferEmissive, 2);
@@ -36,7 +49,7 @@ void main() {
     } else if (mode == 6) {
         float near = 0.1;
         float far = 1000.0;
-        float ndc = depth * 2.0 - 1.0;
+        float ndc = ENGINE_DEPTH_TO_NDC(depth);
         float linearDepth =
             (2.0 * near * far) / (far + near - ndc * (far - near));
         result = vec3_splat(linearDepth / far);
