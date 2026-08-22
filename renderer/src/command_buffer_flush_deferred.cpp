@@ -617,12 +617,20 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       // #138 flat vocabulary: per-slot samplers, one mat4 array per
       // shadow kind, splits/indices/pos+far as packed vec4 payloads.
-      if (shadowEnabled) {
+      {
         float shadowMatrices[kShadowCascadeCount * 16U] = {};
         float cascadeSplits[4] = {};
         for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
           const auto texUnit = static_cast<std::uint32_t>(6U + c);
-          dev->bind_texture_slot(texUnit, backend.shadowState.depthTextures[c]);
+          // Disabled slots still bind the fallback: Vulkan-family
+          // backends need every declared sampler descriptor valid at
+          // draw (same rule as the forward flush).
+          if (shadowEnabled) {
+            dev->bind_texture_slot(texUnit,
+                                   backend.shadowState.depthTextures[c]);
+          } else {
+            dev->bind_texture_slot(texUnit, backend.fallbackTexture2D);
+          }
           if (backend.dlShadowMapLocs[c].valid()) {
             dev->set_param_i32(backend.dlShadowMapLocs[c],
                                static_cast<std::int32_t>(texUnit));
@@ -634,14 +642,16 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                       sizeof(float) * 16U);
           cascadeSplits[c] = backend.shadowState.cascades[c].splitDistance;
         }
-        if ((dev->set_param_mat4_array != nullptr) &&
-            backend.dlShadowMatrixParam.valid()) {
-          dev->set_param_mat4_array(
-              backend.dlShadowMatrixParam, shadowMatrices,
-              static_cast<std::int32_t>(kShadowCascadeCount));
-        }
-        if (backend.dlCascadeSplitsParam.valid()) {
-          dev->set_param_vec4(backend.dlCascadeSplitsParam, cascadeSplits);
+        if (shadowEnabled) {
+          if ((dev->set_param_mat4_array != nullptr) &&
+              backend.dlShadowMatrixParam.valid()) {
+            dev->set_param_mat4_array(
+                backend.dlShadowMatrixParam, shadowMatrices,
+                static_cast<std::int32_t>(kShadowCascadeCount));
+          }
+          if (backend.dlCascadeSplitsParam.valid()) {
+            dev->set_param_vec4(backend.dlCascadeSplitsParam, cascadeSplits);
+          }
         }
       }
       if (backend.dlShadowEnabledLoc.valid()) {
@@ -758,9 +768,18 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           dev->set_param_vec3(backend.dlDirLightDirLoc, &dir.x);
         }
         if (backend.dlDirLightColorLoc.valid()) {
-          const math::Vec3 &color = hasDirLight
-                                        ? lights.directionalLights[0].color
-                                        : kNoLightColor;
+          // The shader shades the sun at unit intensity, so the authored
+          // intensity premultiplies into the color here — uploading raw
+          // color rendered every intensity != 1 sun wrong (dark for the
+          // common brighter-than-1 case; the forward path multiplies
+          // intensity in-shader from its packed color+intensity array).
+          math::Vec3 color = kNoLightColor;
+          if (hasDirLight) {
+            const auto &sun = lights.directionalLights[0];
+            color = math::Vec3(sun.color.x * sun.intensity,
+                               sun.color.y * sun.intensity,
+                               sun.color.z * sun.intensity);
+          }
           dev->set_param_vec3(backend.dlDirLightColorLoc, &color.x);
         }
       }

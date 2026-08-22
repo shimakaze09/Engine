@@ -32,7 +32,9 @@ DeviceTextureHandle create_shadow_depth_texture(const RenderDevice *dev,
   desc.width = resolution;
   desc.height = resolution;
   desc.filter = TextureFilter::Nearest;
-  desc.wrap = TextureWrap::Repeat;
+  // ClampEdge: border PCF taps must not wrap to the map's opposite
+  // edge — every other depth target already clamps.
+  desc.wrap = TextureWrap::ClampEdge;
   return dev->create_texture(desc);
 }
 
@@ -92,10 +94,13 @@ math::Vec3 choose_light_up(const math::Vec3 &lightDir) noexcept {
 /// Extract 8 world-space frustum corners from inverse view-projection.
 void extract_frustum_corners(const math::Mat4 &invViewProj,
                              math::Vec3 outCorners[8]) noexcept {
-  // NDC corners: near z=-1, far z=+1 in OpenGL convention.
-  constexpr float ndcCorners[8][3] = {
-      {-1.0F, -1.0F, -1.0F}, {1.0F, -1.0F, -1.0F}, {1.0F, 1.0F, -1.0F},
-      {-1.0F, 1.0F, -1.0F},  {-1.0F, -1.0F, 1.0F}, {1.0F, -1.0F, 1.0F},
+  // Near-plane NDC z follows the device convention: -1 on GL, 0 on
+  // zero-to-one APIs — unprojecting -1 there lands inside the frustum
+  // (half the near distance) and over-extends every cascade's fit.
+  const float nearZ = device_depth_zero_one() ? 0.0F : -1.0F;
+  const float ndcCorners[8][3] = {
+      {-1.0F, -1.0F, nearZ}, {1.0F, -1.0F, nearZ}, {1.0F, 1.0F, nearZ},
+      {-1.0F, 1.0F, nearZ},  {-1.0F, -1.0F, 1.0F}, {1.0F, -1.0F, 1.0F},
       {1.0F, 1.0F, 1.0F},    {-1.0F, 1.0F, 1.0F},
   };
 
