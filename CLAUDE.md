@@ -12,9 +12,9 @@ mismatch instead of assuming the document is correct.
 
 ## What this is
 
-C++23 game engine built from scratch: SDL3 window/input, OpenGL 4.5 renderer
-(deferred+forward, PBR/IBL; shaders are predominantly GLSL 330 core while
-`default.frag` currently requires GLSL 450), fixed-capacity ECS (65,536
+C++23 game engine built from scratch: SDL3 window/input, bgfx renderer
+(deferred+forward, PBR/IBL; shaders are shaderc-cooked .sc sources,
+proven on Vulkan and WebGL2/GLES), fixed-capacity ECS (65,536
 entities, double-buffered transforms), CPU-deterministic physics, Lua 5.4
 scripting, miniaudio, ImGui editor. Goal: production level. Game authors work
 through Lua and the editor; engine contributors work in C++ under the rules
@@ -23,9 +23,9 @@ below.
 Third-party (all SHA-pinned via FetchContent in the root CMakeLists.txt):
 SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
 (tools only), stb snapshot, miniaudio 0.11.21, bgfx v1.153 via the
-bgfx.cmake superproject (bundles bx/bimg; the default backend since the
-2026-08-22 flip, #138), and OpenGL 4.5+ (the legacy `gl` backend, kept
-selectable one release round before its owner-decided deletion).
+bgfx.cmake superproject (bundles bx/bimg; the only backend — default
+since the 2026-08-22 flip, with the legacy GL backend deleted at parity
+the same day, #138).
 
 ## Hard rules
 
@@ -60,9 +60,10 @@ is prohibited.
   `app → editor → runtime → renderer/physics/scripting/audio → content →
   core/math` (`content` is the generic asset layer, #171; it depends only
   on `core` and must never link a subsystem module).
-- **[REVIEW]** Public headers are self-contained and never leak SDL/OpenGL/
-  Lua/ImGui/ImGuizmo types. GL stays inside renderer impl; Lua inside scripting
-  impl; editor-only behavior stays in `editor/` behind explicit bridges.
+- **[REVIEW]** Public headers are self-contained and never leak SDL/bgfx/
+  Lua/ImGui/ImGuizmo types. bgfx stays inside renderer impl (plus the
+  editor's sanctioned ImGui backend); Lua inside scripting impl;
+  editor-only behavior stays in `editor/` behind explicit bridges.
 - **[CI]** Every source/header file needs a real file-level purpose comment,
   and declarations keep concise purpose comments. Both are CI-enforced:
   `tools/check_source_comments.py` (presence) and
@@ -100,8 +101,9 @@ is prohibited.
   branching into editor_component_registry, editor_inspector_metadata,
   editor_reference_pickers, editor_panels_inspector_generic, and
   editor_panels_inspector_custom (1263 -> 349 lines), dropping it back under
-  the trigger — twelve remain, queued for the next split pass, owner directs
-  each split. Split growing tests into focused suite
+  the trigger; the #138 GL deletion (2026-08-22) removed render_device_gl
+  from the list — eleven remain, queued for the next split pass, owner
+  directs each split. Split growing tests into focused suite
   files while preserving test names/history unless an approved contract
   migration requires a move.
 - **[OWNER]** No new third-party dependencies without confirmation; never ones
@@ -181,14 +183,14 @@ lane); presets add no flags beyond the documented commands.
 `build/compile_commands.json` is the clangd source of truth (`.clangd` points
 at it); never hand-edit it, never commit `build/`. `build-release/` exists for
 Release benchmark runs. Linux/macOS: same flow with clang/clang++. macOS is
-a build + headless-test lane only (owner decision 2026-08-09, issue #82):
-Apple caps OpenGL at 4.1 while `default.frag` needs GLSL 450, so the GL
-renderer runs on Windows/Linux until the v0.5 bgfx replatform — the lane's
-value is AppleClang conformance. CMake
+a build + headless-test lane only (owner decision 2026-08-09, issue #82,
+originally forced by Apple's OpenGL cap; the lane's remaining value is
+AppleClang conformance until the bgfx Metal path is proven). CMake
 options: `ENGINE_TARGET_PLATFORM` (Win64/Linux/macOS/Android/iOS/Web),
-`ENGINE_RENDERER_BACKEND` (bgfx default since 2026-08-22, #138 — at
-feature parity; `gl` stays selectable as the regression baseline until
-its owner-decided deletion), `ENGINE_BGFX_SHADERC` (ON: builds shaderc
+`ENGINE_RENDERER_BACKEND` (bgfx, the only accepted value — the legacy
+`gl` backend was deleted at parity 2026-08-22, #138; the cache variable
+survives so existing -D invocations keep working), `ENGINE_BGFX_SHADERC`
+(ON: builds shaderc
 and cooks the shader manifest; heavy CI lanes that never consume cooked
 binaries turn it off and the cooked test sections skip),
 `ENGINE_MAX_ENTITIES` (default 65536), `ENGINE_DETERMINISTIC_FLOATS` (ON:
@@ -253,18 +255,17 @@ directory-global by design.
   the engine-owned backend-neutral device contract (#165): generational
   handles for buffers/textures/programs/geometry/render targets/queries,
   descriptor-based creation, named `ShaderParam` binding, whole
-  `RenderState` application, and a `DeviceCaps` capability struct; one
-  backend TU compiles per build, selected by `ENGINE_RENDERER_BACKEND`:
-  `render_device_gl.cpp` (default; all GL enums, VAOs, FBOs, uniform
-  locations, and texture units stay inside it) or the #138 Phase B
+  `RenderState` application, and a `DeviceCaps` capability struct; the
+  backend is the #138
   `render_device_bgfx.cpp` + `render_device_bgfx_programs.cpp` +
-  `render_device_bgfx_translate.cpp` (bgfx single-threaded; windowed
+  `render_device_bgfx_translate.cpp` trio (the legacy
+  `render_device_gl.cpp` was deleted at parity, 2026-08-22)
+  (bgfx single-threaded; windowed
   runs initialize the real renderer — `r_bgfx_renderer` cvar, auto =
   bgfx's platform pick, proven on Vulkan — over the platform's native
   window/display handles, present through `present_render_device`
   (which also applies live `r_vsync` and drawable resizes via
-  bgfx::reset), while headless runs stay on Noop; the editor bridge is
-  disabled under this backend until the ImGui integration unit lands;
+  bgfx::reset), while headless runs stay on Noop;
   the editor's ImGui runs on bgfx through src/imgui_impl_bgfx.cpp
   (embedded ocornut-imgui shaders, view 255, ImTextureID =
   native_texture_id) with the stock SDL3 platform backend;
@@ -298,8 +299,8 @@ directory-global by design.
   so stale device handles are detected instead of aliasing recycled
   backend objects; the one sanctioned native-id escape is
   `RenderDevice::native_texture_id`, consumed only by the editor's ImGui
-  image binding (the null backend from #196 stays selectable in either
-  build via `r_null_device`), command buffer frontend
+  image binding (the null backend from #196 stays selectable via
+  `r_null_device`), command buffer frontend
   (`CommandBufferBuilder`, 64-bit DrawKey sort) with backend split across
   `command_buffer{,_init_*,_flush,_flush_*,_sky,_ibl,_post_resources,_context,_builder,_math}`
   (init stages behind `command_buffer_init_internal.h`; flush passes share
@@ -438,8 +439,10 @@ directory-global by design.
   stay Stop-only/single-entity-only pending a follow-up that threads their
   drawers' own structural sub-edits (asset picks, foliage instance add/
   remove) through the same per-field batch/live path.
-- `assets/` — GLSL shaders (plus `shaders/bgfx/`: shaderc `.sc` ports,
+- `assets/` — bgfx shaders (`shaders/bgfx/`: shaderc `.sc` sources,
   `varying.def.sc`, and the `shaders.json` cook manifest — #138 Phase C;
+  the GLSL sources died with the GL backend, but each manifest entry's
+  `output` stem is still the name passes request shaders by;
   bgfx builds cook them per profile into the build tree's
   `shaders/bgfx/cooked/` through `asset_packer --shader-manifest`, one
   cook stamp certifying the whole output set, and `shader_system`
@@ -453,14 +456,13 @@ directory-global by design.
   `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, CI
   helpers. `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
-  `.github/workflows/ci.yml` — 12 jobs: canonical-toolchain build matrix
+  `.github/workflows/ci.yml` — 11 jobs: canonical-toolchain build matrix
   (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
   #130), MSVC + GCC Release compatibility lanes, determinism hash compare,
   static analysis + comment audits, clang-tidy, werror, ASAN/UBSAN, TSAN,
-  coverage (≥50%), benchmarks (>10% regression fails), a gl backend
-  regression lane (the legacy backend builds + full headless suite
-  until its deletion, #138), quality gate. The canonical matrix builds
-  the default bgfx backend incl. the shader cook (macOS excepted:
+  coverage (≥50%), benchmarks (>10% regression fails), quality gate (the
+  gl regression lane retired with the backend's deletion, #138). The
+  canonical matrix builds bgfx incl. the shader cook (macOS excepted:
   tint's overloaded-CTAD pattern does not compile under AppleClang, and
   the headless-only lane never consumes cooked binaries, so it passes
   ENGINE_BGFX_SHADERC=OFF); sanitizer/analysis/
@@ -518,7 +520,7 @@ directory-global by design.
   systems, submission failure, catch-up steps, and every worker count. After
   the last commit, transform propagation and camera/spring-arm publication
   run on the main thread before any render-prep job; then render-prep jobs
-  fill per-thread command buffers merged for the GL flush.
+  fill per-thread command buffers merged for the backend flush.
   Preserve deterministic stepping and thread-count independence, and test the
   production pipeline rather than a copied scheduler model.
 - Serialization has one authoritative persistent-component registry from
@@ -533,10 +535,10 @@ directory-global by design.
 - Authored files use staged atomic replacement; related multi-file outputs
   use a manifest or transaction so interruption cannot create a mixed state.
 - Renderer: command construction stays separate from backend execution, and
-  code above the backend TU (`render_device_gl.cpp` /
-  `render_device_bgfx.cpp`) speaks only the engine-facing
-  `RenderDevice` vocabulary (handles, descriptors, shader params, render
-  state) — GL/bgfx concepts must not reappear above the backend; device
+  code above the backend TU (`render_device_bgfx.cpp`) speaks only the
+  engine-facing `RenderDevice` vocabulary (handles, descriptors, shader
+  params, render state) — bgfx concepts must not reappear above the
+  backend; device
   resources are owned by whichever system created them, destruction is
   immediate and idempotent, and `shutdown_render_device` invalidates every
   outstanding handle; preserve

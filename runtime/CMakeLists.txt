@@ -38,6 +38,5 @@ engine_add_module_library(engine_runtime
     engine_renderer
     engine_audio
     ${ENGINE_SDL_TARGET}
-    OpenGL::GL
     PCH src/pch.h
 )

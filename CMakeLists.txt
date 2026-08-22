@@ -120,11 +120,6 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
             "ENGINE_TARGET_PLATFORM=Web requires the Emscripten toolchain: "
             "configure through 'emcmake cmake ...' (emsdk).")
     endif()
-    if(NOT ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
-        message(FATAL_ERROR
-            "ENGINE_TARGET_PLATFORM=Web requires ENGINE_RENDERER_BACKEND="
-            "bgfx (the GL backend needs desktop OpenGL 4.5).")
-    endif()
     # wasm SIMD: bx compiles with -msse4.2 (Emscripten emulates the
     # intrinsics but requires the companion flag), and the engine's own
     # SSE2 math paths ride the same emulation.
@@ -168,25 +163,21 @@ set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
     "Build-tree asset directory used by local editor/runtime builds")
 
 # v0.5 replatform (#138, decision 2026-07-19): the render backend option.
-# "gl" is the shipping backend; "bgfx" fetches and links bgfx (with bx and
-# bimg via the bgfx.cmake superproject) so the port can be brought up lane
-# by lane without disturbing default builds. Phase A wires the dependency
-# only; no engine source consumes it until the backend TU lands.
-# Default flipped to bgfx (owner decision 2026-08-21, #138): the
-# replatform reached feature parity, so bgfx is the shipping backend.
-# gl stays selectable for one release round as the regression baseline
-# before its deletion.
+# bgfx is the engine's only render backend (owner decision 2026-08-21,
+# #138: the legacy GL backend was deleted after the replatform reached
+# parity). The cache variable survives so existing -D invocations keep
+# working; any value other than bgfx is rejected.
 set(ENGINE_RENDERER_BACKEND "bgfx" CACHE STRING
-    "Render backend: bgfx (default, v0.5 replatform #138) or gl (legacy)")
-set_property(CACHE ENGINE_RENDERER_BACKEND PROPERTY STRINGS gl bgfx)
-if(NOT ENGINE_RENDERER_BACKEND MATCHES "^(gl|bgfx)$")
+    "Render backend: bgfx (the only backend, v0.5 replatform #138)")
+set_property(CACHE ENGINE_RENDERER_BACKEND PROPERTY STRINGS bgfx)
+if(NOT ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     message(FATAL_ERROR
-        "ENGINE_RENDERER_BACKEND must be 'gl' or 'bgfx', got "
-        "'${ENGINE_RENDERER_BACKEND}'")
+        "ENGINE_RENDERER_BACKEND must be 'bgfx' (the GL backend was "
+        "deleted, #138); got '${ENGINE_RENDERER_BACKEND}'")
 endif()
 
-if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
-    include(FetchContent)
+# bgfx dependency (bx/bimg via the bgfx.cmake superproject).
+include(FetchContent)
     # 32 sampler stages (PUBLIC define, forwarded by the superproject):
     # the engine's deferred pass binds G-buffer + SSAO + light-data +
     # tile + IBL + shadow units up to 21, past bgfx's default 16.
@@ -242,7 +233,6 @@ if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     if(EMSCRIPTEN AND TARGET bimg_encode)
         set_target_properties(bimg_encode PROPERTIES EXCLUDE_FROM_ALL TRUE)
     endif()
-endif()
 
 find_package(SDL3 CONFIG QUIET)
 if(NOT SDL3_FOUND)
@@ -280,8 +270,6 @@ elseif(TARGET SDL3::SDL3)
 else()
     message(FATAL_ERROR "No SDL3 CMake target is available.")
 endif()
-
-find_package(OpenGL REQUIRED)
 
 if(APPLE)
     foreach(_engine_sdl_target SDL3-static SDL3-shared)
@@ -530,7 +518,6 @@ add_library(engine_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp
 )
 
@@ -546,7 +533,6 @@ target_compile_features(engine_imgui PUBLIC cxx_std_23)
 target_link_libraries(engine_imgui
     PUBLIC
     ${ENGINE_SDL_TARGET}
-    OpenGL::GL
 )
 
 if(MSVC)
@@ -605,8 +591,7 @@ endif()
 # both built, the packer cooks the manifest's shader variants per
 # profile into the build-tree asset dir with shaderc from the fetched
 # superproject; the cook stamp keeps incremental builds a no-op.
-if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx" AND ENGINE_BUILD_TOOLS
-   AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
+if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
     add_custom_target(bgfx_shader_cook ALL
         COMMAND $<TARGET_FILE:asset_packer>
             --shader-manifest

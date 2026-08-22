@@ -1,21 +1,13 @@
 # Configures renderer build settings for the Engine repository.
 
-# One backend TU per build (#138 Phase B): the gl default compiles
-# render_device_gl.cpp; the bgfx backend compiles the bgfx device and its
-# pure translation TU instead. Both provide the same render_device.h
-# entry points; the null backend stays available in either build.
-if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
-    set(ENGINE_RENDERER_BACKEND_SOURCES
-        src/render_device_bgfx.cpp
-        src/render_device_bgfx_programs.cpp
-        src/render_device_bgfx_translate.cpp)
-else()
-    set(ENGINE_RENDERER_BACKEND_SOURCES src/render_device_gl.cpp)
-endif()
-
+# bgfx is the only render backend (#138; the legacy GL device was
+# deleted at parity): the device TU, its program/uniform path, and the
+# pure translation TU. The null backend stays available for headless.
 engine_add_module_library(engine_renderer
     SOURCES
-    ${ENGINE_RENDERER_BACKEND_SOURCES}
+    src/render_device_bgfx.cpp
+    src/render_device_bgfx_programs.cpp
+    src/render_device_bgfx_translate.cpp
     src/asset_database.cpp
     src/asset_manager.cpp
     src/command_buffer_builder.cpp
@@ -60,26 +52,13 @@ engine_add_module_library(engine_renderer
     engine_core
     engine_math
     PRIVATE_DEPS
-    # GL stays inside renderer impl (CLAUDE.md); no renderer public header
-    # includes a GL type, so OpenGL::GL only needs to reach this target's
-    # own .cpp files, not every consumer's link line (audit #178 — this was
-    # PUBLIC, so every engine_renderer consumer pulled in an OpenGL usage
-    # requirement it never directly needed; editor/CMakeLists.txt now links
-    # OpenGL::GL itself since it is the one other module with real, if
-    # pre-existing and separately tracked, direct GL calls).
-    OpenGL::GL
+    bgfx
+    bx
+    bimg
     PCH
     src/pch.h
 )
 
 # Precompiled header remains PRIVATE via engine_add_module_library(... PCH ...).
 
-# v0.5 replatform (#138): when the bgfx backend is selected the renderer
-# links it and gains the backend define; the gl default neither fetches
-# nor links it. Phase B compiles the backend skeleton TUs above in place
-# of the GL device.
-if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
-    target_link_libraries(engine_renderer PRIVATE bgfx bx bimg)
-    target_compile_definitions(engine_renderer PRIVATE
-        ENGINE_RENDERER_BACKEND_BGFX=1)
-endif()
+

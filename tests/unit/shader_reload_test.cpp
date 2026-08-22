@@ -1,6 +1,6 @@
 // Verifies shader hot-reload swap semantics for the Engine test suite
 // (audit H-09): a successful reload replaces the GPU program id behind
-// the same handle, destroys the old GL program, and advances the reload
+// the same handle, destroys the old device program, and advances the reload
 // epoch that program-id/uniform caches key their refresh on; a failed
 // reload keeps the old program and does not signal.
 

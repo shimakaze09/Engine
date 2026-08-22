@@ -40,23 +40,12 @@ engine_add_module_library(engine_editor
     engine_runtime
     engine_renderer
 )
-# No PRIVATE_DEPS OpenGL::GL (audit #206 closure of the #178 note above it):
-# editor_session.cpp/.h and editor_panels_assets.cpp no longer call GL
-# directly -- thumbnail upload routes through engine_renderer's RenderDevice,
-# and the ImGui OpenGL3 backend links its own GL symbols through
-# engine_imgui, which this module already depends on publicly.
-
-# #138: bgfx builds swap the stock ImGui GL renderer for the editor's
-# bgfx one (imgui_impl_bgfx.cpp, using bgfx's embedded ocornut-imgui
-# shaders) — the editor linking the render backend directly mirrors its
-# sanctioned direct-GL history under the gl backend.
-if(ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
-    target_sources(engine_editor PRIVATE src/imgui_impl_bgfx.cpp)
-    target_compile_definitions(engine_editor PRIVATE
-        ENGINE_EDITOR_IMGUI_BGFX=1)
-    target_link_libraries(engine_editor PRIVATE bgfx bx bimg)
-    target_include_directories(engine_editor PRIVATE
-        # The parent dir, not common/imgui itself: that dir carries a
-        # wrapper imgui.h that would shadow the real one.
-        "${bgfx_SOURCE_DIR}/bgfx/examples/common")
-endif()
+# The editor's ImGui renderer is the bgfx one (imgui_impl_bgfx.cpp,
+# using bgfx's embedded ocornut-imgui shaders) — bgfx is the engine's
+# only render backend (#138).
+target_sources(engine_editor PRIVATE src/imgui_impl_bgfx.cpp)
+target_link_libraries(engine_editor PRIVATE bgfx bx bimg)
+target_include_directories(engine_editor PRIVATE
+    # The parent dir, not common/imgui itself: that dir carries a
+    # wrapper imgui.h that would shadow the real one.
+    "${bgfx_SOURCE_DIR}/bgfx/examples/common")
