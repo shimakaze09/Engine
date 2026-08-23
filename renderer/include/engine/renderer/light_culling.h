@@ -28,7 +28,12 @@ struct TileLightData final {
   int totalTiles = 0;
 
   /// Flat array: totalTiles * kTileDataWidth floats.
-  /// Each tile row: [pointCount, pointIndices..., spotCount, spotIndices...]
+  /// Each tile entry: [pointCount, pointIndices..., spotCount,
+  /// spotIndices...]. The GPU texture uploads this same buffer as a 2-D
+  /// table — tileCountY rows of tileCountX * kTileDataWidth texels —
+  /// because one texture row per tile overflows D3D's 16384 dimension
+  /// cap at 4K drawables (#301 hardware runs); the flat indexing
+  /// (tileIdx * kTileDataWidth) reinterprets as that shape exactly.
   float *data = nullptr;
   std::size_t dataSize = 0;
 };

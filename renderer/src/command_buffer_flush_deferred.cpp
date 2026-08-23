@@ -43,12 +43,14 @@ namespace engine::renderer {
 
 namespace {
 
-/// R32F data texture (tile/per-light lookup tables): exact texel fetches,
-/// so nearest filtering and edge clamping.
+/// R32F data texture (tile/per-light lookup tables): exact texel
+/// fetches, so nearest filtering and edge clamping. Created empty and
+/// cpu-updatable: creation with pixels would make it immutable and
+/// every per-frame update_texture a silent no-op (bgfx discards
+/// updates on mem-created textures).
 DeviceTextureHandle create_r32f_data_texture(const RenderDevice *dev,
                                              std::int32_t width,
-                                             std::int32_t height,
-                                             const float *data) noexcept {
+                                             std::int32_t height) noexcept {
   if ((dev == nullptr) || (dev->create_texture == nullptr)) {
     return kInvalidDeviceTexture;
   }
@@ -60,7 +62,7 @@ DeviceTextureHandle create_r32f_data_texture(const RenderDevice *dev,
   desc.filter = TextureFilter::Nearest;
   desc.wrap = TextureWrap::ClampEdge;
   desc.pixelData = TexelData::F32;
-  desc.pixels = data;
+  desc.cpuUpdatable = true;
   return dev->create_texture(desc);
 }
 
@@ -446,21 +448,31 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.tileLightTex != kInvalidDeviceTexture) {
         dev->destroy_texture(backend.tileLightTex);
         backend.tileLightTex = kInvalidDeviceTexture;
-        backend.tileLightTexRows = 0;
+        backend.tileLightTexWidth = 0;
+        backend.tileLightTexHeight = 0;
       }
     } else {
+      // 2-D tile layout: the flat CPU buffer (tileIdx * kTileDataWidth)
+      // reinterprets exactly as tileCountY rows of tileCountX tiles, so
+      // no repacking — only the texture shape and the shader's
+      // addressing changed (one row per tile overflowed D3D's 16384
+      // dimension cap at 4K).
+      const int tileTexWidth = tileData.tileCountX * kTileDataWidth;
+      const int tileTexHeight = tileData.tileCountY;
       if ((backend.tileLightTex != kInvalidDeviceTexture) &&
-          (tileData.totalTiles > backend.tileLightTexRows)) {
+          ((tileTexWidth != backend.tileLightTexWidth) ||
+           (tileTexHeight != backend.tileLightTexHeight))) {
         dev->destroy_texture(backend.tileLightTex);
         backend.tileLightTex = kInvalidDeviceTexture;
-        backend.tileLightTexRows = 0;
+        backend.tileLightTexWidth = 0;
+        backend.tileLightTexHeight = 0;
       }
       if (backend.tileLightTex == kInvalidDeviceTexture) {
-        backend.tileLightTex = create_r32f_data_texture(
-            dev, kTileDataWidth, tileData.totalTiles,
-            backend.tileBuffer.data());
+        backend.tileLightTex =
+            create_r32f_data_texture(dev, tileTexWidth, tileTexHeight);
         if (backend.tileLightTex != kInvalidDeviceTexture) {
-          backend.tileLightTexRows = tileData.totalTiles;
+          backend.tileLightTexWidth = tileTexWidth;
+          backend.tileLightTexHeight = tileTexHeight;
         } else {
           static bool warnedTileTexFailure = false;
           if (!warnedTileTexFailure) {
@@ -470,9 +482,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             warnedTileTexFailure = true;
           }
         }
-      } else {
+      }
+      if (backend.tileLightTex != kInvalidDeviceTexture) {
         dev->update_texture(backend.tileLightTex, backend.tileBuffer.data(),
-                            kTileDataWidth, tileData.totalTiles);
+                            tileTexWidth, tileTexHeight);
       }
     }
 
@@ -485,14 +498,16 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                           "keeps its previous contents");
         warnedPackFailure = true;
       }
-    } else if (backend.lightDataTex == kInvalidDeviceTexture) {
-      backend.lightDataTex = create_r32f_data_texture(
-          dev, kLightDataTexWidth, kLightDataTexHeight,
-          backend.lightDataBuffer.data());
     } else {
-      dev->update_texture(backend.lightDataTex,
-                          backend.lightDataBuffer.data(), kLightDataTexWidth,
-                          kLightDataTexHeight);
+      if (backend.lightDataTex == kInvalidDeviceTexture) {
+        backend.lightDataTex = create_r32f_data_texture(
+            dev, kLightDataTexWidth, kLightDataTexHeight);
+      }
+      if (backend.lightDataTex != kInvalidDeviceTexture) {
+        dev->update_texture(backend.lightDataTex,
+                            backend.lightDataBuffer.data(),
+                            kLightDataTexWidth, kLightDataTexHeight);
+      }
     }
 
     if (gbufferDebugMode > 0 &&

@@ -181,6 +181,12 @@ struct TextureDesc final {
   TextureFilter filter = TextureFilter::Linear;
   TextureWrap wrap = TextureWrap::ClampEdge;
   TexelData pixelData = TexelData::U8;
+  // Tex2D only: created empty but CPU-writable through update_texture
+  // (never a render target). Textures created WITH pixels are immutable
+  // — backends may store them in write-once memory, so updates on them
+  // are rejected; a texture refreshed per frame must be created this
+  // way (the tile/light culling data textures).
+  bool cpuUpdatable = false;
   const void *pixels = nullptr;
   const void *const *facePixels = nullptr; // 6 entries when kind == Cube
 };

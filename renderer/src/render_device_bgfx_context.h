@@ -60,6 +60,7 @@ struct BgfxTextureRecord final {
   std::int32_t height = 0;
   std::int32_t layers = 1; // Tex2DArray layer count; 1 otherwise
   bool renderTarget = false;
+  bool immutable = false; // created with pixels: bgfx rejects updates
 };
 
 /// Geometry: referenced engine buffer handles, resolved per draw for
