@@ -359,12 +359,17 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
     return kInvalidDeviceProgram;
   }
 
-  // GLSL-family binaries embed no uniform table; hand the spirv
-  // siblings to the backend as introspection sidecars (#138).
-  const bool glslFamily = (std::strcmp(profile, "glsl") == 0) ||
-                          (std::strcmp(profile, "essl") == 0);
+  // GLSL-family binaries embed no uniform table, and dx11 (DXBC)
+  // tables are incomplete: fxc strips the SamplerState of any texture
+  // read only through Load/texelFetch, so the tile/light-data samplers
+  // vanished and the deferred path disabled itself on D3D (#301
+  // hardware run). Both hand the spirv siblings to the backend as
+  // introspection sidecars — spirv stays the canonical table (#138).
+  const bool needsSidecar = (std::strcmp(profile, "glsl") == 0) ||
+                            (std::strcmp(profile, "essl") == 0) ||
+                            (std::strcmp(profile, "dx11") == 0);
   DeviceProgramHandle program = kInvalidDeviceProgram;
-  if (glslFamily && (dev->create_program_binary_introspected != nullptr)) {
+  if (needsSidecar && (dev->create_program_binary_introspected != nullptr)) {
     char vertMetaPath[kMaxPathLength * 2U] = {};
     char fragMetaPath[kMaxPathLength * 2U] = {};
     void *vertMeta = nullptr;
