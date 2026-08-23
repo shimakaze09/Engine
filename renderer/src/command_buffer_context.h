@@ -337,10 +337,14 @@ struct BackendState final {
   DeviceGeometryHandle debugLineGeometry{};
   DeviceBufferHandle debugLineVbo{};
 
-  // Tile light texture (uploaded each frame by CPU culling); rows tracks the
-  // allocated height so viewport growth recreates it.
+  // Tile light texture (cpu-updatable, uploaded each frame by CPU
+  // culling). 2-D layout: one texel row per tile ROW, kTileDataWidth
+  // texels per tile along x — one row per tile overflowed D3D's 16384
+  // dimension cap at 4K (#301 hardware runs). The allocated dimensions
+  // are tracked so any viewport change recreates it.
   DeviceTextureHandle tileLightTex{};
-  int tileLightTexRows = 0;
+  int tileLightTexWidth = 0;
+  int tileLightTexHeight = 0;
   // Grow-only nothrow-allocating scratch buffer (audit #204): a failed grow
   // leaves this at zero capacity instead of terminating, and the downstream
   // dataSize < requiredSize check in cull_lights_tiled already degrades

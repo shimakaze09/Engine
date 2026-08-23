@@ -38,6 +38,10 @@ $input v_texcoord0
 
 
 #define TILE_MAX_POINT_LIGHTS 32
+#define TILE_MAX_SPOT_LIGHTS 16
+// Texels per tile in the 2-D tile table; mirrors kTileDataWidth
+// (1 + point cap + 1 + spot cap) in light_culling.h.
+#define TILE_DATA_WIDTH (1 + TILE_MAX_POINT_LIGHTS + 1 + TILE_MAX_SPOT_LIGHTS)
 #define LIGHT_DATA_SPOT_ROW 128
 
 SAMPLER2D(uGBufferAlbedo, 0);
@@ -393,7 +397,11 @@ void main() {
     Lo += cook_torrance(N, V, L_dir, albedo, metallic, roughness,
                         uDirLightColor.xyz, 1.0) * shadowFactor;
 
-    int tileX = int(gl_FragCoord.x) / 16;
+    // Clamped to the tile grid: edge fragments past the last whole tile
+    // must not read a neighboring row of the 2-D tile table (the clamp
+    // also keeps uTileCountX genuinely read — the deferred resolver
+    // requires it, and compilers strip unreferenced uniforms).
+    int tileX = min(int(gl_FragCoord.x) / 16, int(uTileCountX.x) - 1);
     // The CPU packs tile rows in GL window order (row 0 at the bottom);
     // y-down APIs flip the fragment row before the lookup.
 #if BGFX_SHADER_LANGUAGE_GLSL
@@ -401,17 +409,20 @@ void main() {
 #else
     int tileY = int(uScreenSize.y - gl_FragCoord.y) / 16;
 #endif
-    int tileIdx = tileY * int(uTileCountX.x) + tileX;
+    // 2-D tile table (#301 hardware runs): one texel row per tile ROW
+    // with kTileDataWidth texels per tile along x — one texture row per
+    // tile overflowed D3D's 16384 dimension cap at 4K.
+    int tileBase = tileX * TILE_DATA_WIDTH;
 
     int pointLightCount = int(uPointLightCount.x);
     int tilePointCount =
-        int(texelFetch(uTileLightTex, ivec2(0, tileIdx), 0).r);
+        int(texelFetch(uTileLightTex, ivec2(tileBase, tileY), 0).r);
     for (int i = 0; i < TILE_MAX_POINT_LIGHTS; ++i) {
         if (i >= tilePointCount) {
             break;
         }
         int lightIdx =
-            int(texelFetch(uTileLightTex, ivec2(1 + i, tileIdx), 0).r);
+            int(texelFetch(uTileLightTex, ivec2(tileBase + 1 + i, tileY), 0).r);
         if ((lightIdx < 0) || (lightIdx >= pointLightCount)) {
             continue;
         }
@@ -435,13 +446,13 @@ void main() {
     int spotLightCount = int(uSpotLightCount.x);
     int spotOffset = TILE_MAX_POINT_LIGHTS + 1;
     int tileSpotCount =
-        int(texelFetch(uTileLightTex, ivec2(spotOffset, tileIdx), 0).r);
+        int(texelFetch(uTileLightTex, ivec2(tileBase + spotOffset, tileY), 0).r);
     for (int i = 0; i < 16; ++i) {
         if (i >= tileSpotCount) {
             break;
         }
         int lightIdx = int(
-            texelFetch(uTileLightTex, ivec2(spotOffset + 1 + i, tileIdx), 0)
+            texelFetch(uTileLightTex, ivec2(tileBase + spotOffset + 1 + i, tileY), 0)
                 .r);
         if ((lightIdx < 0) || (lightIdx >= spotLightCount)) {
             continue;

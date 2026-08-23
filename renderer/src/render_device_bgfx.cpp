@@ -429,6 +429,26 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       return kInvalidDeviceTexture;
     }
   }
+  if (desc.cpuUpdatable && ((desc.kind != TextureKind::Tex2D) || hasPixels)) {
+    // cpuUpdatable means "created empty, filled through update_texture":
+    // initial pixels would make the bgfx texture immutable and every
+    // later update a silent no-op.
+    drop_operation("create_texture: invalid cpu-updatable descriptor");
+    return kInvalidDeviceTexture;
+  }
+  // Device dimension cap: an oversized request must soft-fail here (the
+  // callers all have a fallback) instead of reaching the backend API —
+  // D3D rejects >16384 with E_INVALIDARG and bgfx's own guard lets a
+  // single oversized axis through (found on a 4K fullscreen drawable
+  // by the one-row-per-tile culling texture, #301 hardware runs).
+  {
+    const auto maxDim =
+        static_cast<std::int32_t>(bgfx::getCaps()->limits.maxTextureSize);
+    if ((maxDim > 0) && ((desc.width > maxDim) || (desc.height > maxDim))) {
+      drop_operation("create_texture: dimensions exceed device limit");
+      return kInvalidDeviceTexture;
+    }
+  }
   if ((desc.format == TextureFormat::Depth24) && hasPixels) {
     drop_operation("create_texture: depth formats take no client texels");
     return kInvalidDeviceTexture;
@@ -443,12 +463,12 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       (desc.kind == TextureKind::Cube) ? desc.width : desc.height;
   record.layers = (desc.kind == TextureKind::Tex2DArray) ? desc.layers : 1;
   // Empty creation ("null for an empty target" per the contract) is the
-  // render-target signal: bgfx requires RT/blit intent at creation while
-  // the engine descriptor carries none. Every current empty-creation
-  // site is an attachment; a texture created empty for CPU streaming
-  // would surface as dropped updates below and needs an explicit usage
-  // field on TextureDesc (Phase D revisit).
-  record.renderTarget = !hasPixels;
+  // render-target signal — bgfx requires RT/blit intent at creation
+  // while the engine descriptor carries none — unless the descriptor
+  // opts into the cpu-updatable usage, whose textures are created empty
+  // precisely so bgfx keeps them mutable for update_texture.
+  record.renderTarget = !hasPixels && !desc.cpuUpdatable;
+  record.immutable = hasPixels;
   std::uint64_t flags = bgfx_sampler_flags(desc.filter, desc.wrap);
   if (record.renderTarget) {
     flags |= BGFX_TEXTURE_RT;
@@ -540,6 +560,13 @@ void bgfx_update_texture(DeviceTextureHandle texture, const void *pixels,
   }
   if (record->renderTarget || (record->kind != TextureKind::Tex2D)) {
     drop_operation("update_texture: target or cube texture");
+    return;
+  }
+  if (record->immutable) {
+    // bgfx marks mem-created textures immutable and silently discards
+    // their updates; dropping here makes the misuse visible — per-frame
+    // data must be created cpuUpdatable instead.
+    drop_operation("update_texture: immutable (created with pixels)");
     return;
   }
   const BgfxTexelUpload shape =

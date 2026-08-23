@@ -254,7 +254,11 @@ directory-global by design.
   `mesh_primitives`, shader system (variants, hot reload), `RenderDevice` —
   the engine-owned backend-neutral device contract (#165): generational
   handles for buffers/textures/programs/geometry/render targets/queries,
-  descriptor-based creation, named `ShaderParam` binding, whole
+  descriptor-based creation (textures created with pixels are
+  immutable; per-frame CPU-refreshed data — the tile/light culling
+  tables, laid out 2-D so 4K drawables stay inside D3D's 16384
+  dimension cap — opts into `TextureDesc.cpuUpdatable`), named
+  `ShaderParam` binding, whole
   `RenderState` application, and a `DeviceCaps` capability struct; the
   backend is the #138
   `render_device_bgfx.cpp` + `render_device_bgfx_programs.cpp` +

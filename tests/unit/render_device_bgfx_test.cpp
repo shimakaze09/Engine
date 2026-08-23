@@ -110,10 +110,20 @@ void test_textures(TestContext &t) {
   const DeviceTextureHandle texture = dev->create_texture(desc);
   t.check(texture.value != 0U, "RGBA8 texture created");
 
+  // Contract migration: updates target cpu-updatable textures now —
+  // the old contract accepted updates on pixel-created textures, but
+  // bgfx marks those immutable and silently discarded every update
+  // (per-frame tile/light data froze at first-frame contents), so the
+  // acceptance the old test pinned never actually landed texels.
+  TextureDesc updatableDesc = desc;
+  updatableDesc.pixels = nullptr;
+  updatableDesc.cpuUpdatable = true;
+  const DeviceTextureHandle updatable = dev->create_texture(updatableDesc);
+  t.check(updatable.value != 0U, "cpu-updatable RGBA8 created");
   const std::uint64_t before = dropped(dev);
-  dev->update_texture(texture, pixels, 4, 2);
+  dev->update_texture(updatable, pixels, 4, 2);
   t.check(dropped(dev) == before, "partial row update accepted");
-  dev->update_texture(texture, pixels, 8, 8);
+  dev->update_texture(updatable, pixels, 8, 8);
   t.check(dropped(dev) == before + 1U, "oversized update dropped");
 
   const float hdr[2 * 2 * 3] = {1.0f, 0.5f, 0.25f, 0.0f, 0.0f, 0.0f,
@@ -147,6 +157,7 @@ void test_textures(TestContext &t) {
   t.check(dev->create_texture(depthWithPixels).value == 0U,
           "depth texture rejects client texels");
 
+  dev->destroy_texture(updatable);
   dev->destroy_texture(texture);
   dev->destroy_texture(texture); // idempotent
   const std::uint64_t afterDestroy = dropped(dev);
@@ -213,6 +224,53 @@ void test_render_targets(TestContext &t) {
   dev->destroy_texture(depth);
   dev->destroy_texture(depth2);
   dev->destroy_texture(sampled);
+  render_device_bgfx_frame();
+}
+
+/// CPU-updatable textures: created empty but mutable — updates are
+/// accepted; a texture created WITH pixels is immutable (bgfx would
+/// silently discard its updates, which froze the per-frame tile/light
+/// culling data), so its update drops visibly; a cpu-updatable texture
+/// is never a render target.
+void test_cpu_updatable_textures(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  TextureDesc dynDesc{};
+  dynDesc.format = TextureFormat::R32F;
+  dynDesc.width = 4;
+  dynDesc.height = 4;
+  dynDesc.pixelData = TexelData::F32;
+  dynDesc.cpuUpdatable = true;
+  const DeviceTextureHandle dynamic = dev->create_texture(dynDesc);
+  t.check(dynamic.value != 0U, "cpu-updatable texture created empty");
+
+  const float texels[16] = {};
+  const std::uint64_t before = dropped(dev);
+  dev->update_texture(dynamic, texels, 4, 4);
+  t.check(dropped(dev) == before, "cpu-updatable update accepted");
+
+  RenderTargetDesc rtDesc{};
+  rtDesc.colorCount = 1U;
+  rtDesc.colors[0].texture = dynamic;
+  t.check(dev->create_render_target(rtDesc).value == 0U,
+          "cpu-updatable texture rejected as attachment");
+
+  TextureDesc immutableDesc = dynDesc;
+  immutableDesc.cpuUpdatable = false;
+  immutableDesc.pixels = texels;
+  const DeviceTextureHandle immutable = dev->create_texture(immutableDesc);
+  t.check(immutable.value != 0U, "pixel-created texture created");
+  const std::uint64_t beforeImmutable = dropped(dev);
+  dev->update_texture(immutable, texels, 4, 4);
+  t.check(dropped(dev) == beforeImmutable + 1U,
+          "immutable update drops visibly");
+
+  TextureDesc conflicted = dynDesc;
+  conflicted.pixels = texels;
+  t.check(dev->create_texture(conflicted) == kInvalidDeviceTexture,
+          "cpu-updatable with pixels rejected");
+
+  dev->destroy_texture(dynamic);
+  dev->destroy_texture(immutable);
   render_device_bgfx_frame();
 }
 
@@ -673,6 +731,7 @@ int main() {
   test_buffers(t);
   test_textures(t);
   test_render_targets(t);
+  test_cpu_updatable_textures(t);
   test_texture_arrays(t);
   test_programs_and_draws(t);
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
