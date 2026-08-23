@@ -178,13 +178,16 @@ endif()
 
 # bgfx dependency (bx/bimg via the bgfx.cmake superproject).
 include(FetchContent)
-    # 32 sampler stages (PUBLIC define, forwarded by the superproject):
-    # the engine's deferred pass binds G-buffer + SSAO + light-data +
-    # tile + IBL + shadow units up to 21, past bgfx's default 16.
-    # Vulkan/Metal/desktop GL honor 32; WebGL2's 16-unit floor is the
-    # web-export unit's recorded concern (#138).
-    set(BGFX_CONFIG_MAX_TEXTURE_SAMPLERS 32 CACHE STRING
-        "bgfx sampler stages (engine deferred pass needs units up to 21)"
+    # 16 sampler stages (PUBLIC define, forwarded by the superproject),
+    # pinned explicitly because raising it is a trap: bgfx's D3D11
+    # backend passes this count VERBATIM to VS/PS/CSSetSamplers, whose
+    # slot table is hard-capped at 16 — the former 32 overran the
+    # driver's table and crashed (silent 0xC0000005) on the first D3D11
+    # frame (#301 hardware runs; Vulkan clamps, D3D12 never uses it as
+    # an API count). The engine's unit map fits: it tops out at
+    # register 15 since the #301 shadow arrays.
+    set(BGFX_CONFIG_MAX_TEXTURE_SAMPLERS 16 CACHE STRING
+        "bgfx sampler stages (D3D11 SetSamplers hard cap; unit map tops at 15)"
         FORCE)
     # shaderc's toolchain (glslang/spirv-*) dominates a cold bgfx build;
     # lanes that never consume cooked binaries (sanitizers, analysis,

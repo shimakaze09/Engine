@@ -527,7 +527,11 @@ void bgfx_set_param_vec4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
   BgfxGlobalUniform *record = resolve_param(param);
   if ((record == nullptr) || (count <= 0) || (count > 32) ||
+      (count > static_cast<std::int32_t>(record->declaredNum)) ||
       (record->type != bgfx::UniformType::Vec4)) {
+    // declaredNum bound: bgfx's backends memcpy the caller's count into
+    // the uniform's constant-buffer slot unchecked, so an over-declared
+    // upload would overrun it on every backend.
     return;
   }
   stage_param(record, values, static_cast<std::size_t>(count) * 4U,
@@ -538,7 +542,10 @@ void bgfx_set_param_mat4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
   BgfxGlobalUniform *record = resolve_param(param);
   if ((record == nullptr) || (values == nullptr) || (count <= 0) ||
-      (count > 128) || (record->type != bgfx::UniformType::Mat4)) {
+      (count > 128) ||
+      (count > static_cast<std::int32_t>(record->declaredNum)) ||
+      (record->type != bgfx::UniformType::Mat4)) {
+    // declaredNum bound: same unchecked-memcpy rule as the vec4 array.
     return;
   }
   // Applied immediately: bone palettes (mat4[128]) exceed the staging

@@ -204,7 +204,6 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
         (mipLevels > 1)
             ? static_cast<float>(mip) / static_cast<float>(mipLevels - 1)
             : 0.0F;
-    dev->set_viewport(0, 0, mipSize, mipSize);
     if (backend.environmentPrefilterRoughnessLoc.valid()) {
       dev->set_param_f32(backend.environmentPrefilterRoughnessLoc, roughness);
     }
@@ -217,6 +216,11 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
         break;
       }
       dev->bind_render_target(faceTarget);
+      // After the bind: each bind claims a fresh backend view, and the
+      // viewport applies to the current view — set before the bind it
+      // lands on the previous pass's view and this face renders at the
+      // default rect.
+      dev->set_viewport(0, 0, mipSize, mipSize);
       if (backend.environmentPrefilterViewLoc.valid()) {
         dev->set_param_mat4(
             backend.environmentPrefilterViewLoc,
@@ -314,7 +318,6 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
                         &projection.columns[0].x);
   }
 
-  dev->set_viewport(0, 0, faceSize, faceSize);
   bool baked = true;
   for (int face = 0; face < 6; ++face) {
     const RenderTargetHandle faceTarget =
@@ -324,6 +327,9 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
       break;
     }
     dev->bind_render_target(faceTarget);
+    // After the bind: the viewport applies to the view the bind just
+    // claimed (same rule as the prefilter loop above).
+    dev->set_viewport(0, 0, faceSize, faceSize);
     if (backend.environmentIrradianceViewLoc.valid()) {
       dev->set_param_mat4(backend.environmentIrradianceViewLoc,
                           &views[static_cast<std::size_t>(face)].columns[0].x);

@@ -22,10 +22,11 @@ inline constexpr std::size_t kMaxDeviceTextures = 1024U;
 inline constexpr std::size_t kMaxDevicePrograms = 128U;
 inline constexpr std::size_t kMaxDeviceGeometries = 4352U;
 inline constexpr std::size_t kMaxDeviceTargets = 256U;
-// Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=32 set by the build (#138);
-// the engine unit map tops out at 15 since the #301 shadow arrays, so
-// the backend bound is pure headroom.
-inline constexpr std::size_t kMaxTextureSlots = 32U;
+// Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=16 set by the build: bgfx's
+// D3D11 backend hands that count straight to *SetSamplers (hard 16-slot
+// API), so the config must never exceed 16 — and the engine unit map
+// tops out at register 15 since the #301 shadow arrays.
+inline constexpr std::size_t kMaxTextureSlots = 16U;
 // Sized for the largest engine program: the PBR_FULL forward variant
 // carries ~50 material/light/fog uniforms plus 15 shadow/IBL samplers
 // and their matrices, overflowing the previous 64-entry table.
