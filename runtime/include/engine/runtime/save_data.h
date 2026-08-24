@@ -17,7 +17,8 @@ bool save_game_data_to(const char *directory, const char *json,
                        std::size_t length) noexcept;
 
 /// Reads save.json from the given directory into out (null-terminated);
-/// false when absent, unreadable, or larger than the capacity.
+/// false when absent, larger than the capacity, or when the read itself
+/// fails — a failed read is never reported as a shorter document.
 bool load_game_data_from(const char *directory, char *out,
                          std::size_t capacity,
                          std::size_t *outLength) noexcept;
