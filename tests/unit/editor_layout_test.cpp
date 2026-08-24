@@ -48,9 +48,19 @@ bool make_scratch_dir(const char *leaf, std::string *out) noexcept {
   return true;
 }
 
-/// Reads a whole file; false when it is absent or unreadable.
+/// Reads a whole file; false when it is absent or unreadable. Opens
+/// portably across CRTs — MSVC's UCRT deprecates fopen, and the lane
+/// builds with /WX.
 bool read_file(const std::filesystem::path &path, std::string *out) noexcept {
-  std::FILE *file = std::fopen(path.string().c_str(), "rb");
+  const std::string asString = path.string();
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, asString.c_str(), "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(asString.c_str(), "rb");
+#endif
   if (file == nullptr) {
     return false;
   }
