@@ -4,6 +4,8 @@ An open-source C++23 game engine.
 
 The repository is not production-complete yet. Game authors primarily work through Lua scripts and the editor. Engine contributors extend core systems in C++ under strict performance, safety, and correctness constraints.
 
+The engine itself is the product (owner decision 2026-08-25): the bundled Island Hopper template and sample content are integration/test fixtures, not deliverables. Current work prioritizes engine robustness, module-boundary cleanup, and audit-driven hardening over template-driven features; see the product vision and roadmap in `CLAUDE.md`.
+
 ## What this repository contains
 
 - A runnable editor application: `engine_editor_app`
@@ -35,9 +37,11 @@ Verified working areas in the current tree include:
 
 - Core systems such as logging, CVars, debug draw, job system, event bus, VFS, and math primitives
 - Runtime ECS/world simulation with SparseSet storage, double-buffered transforms, scene serialization, persistent IDs, and 65,536-entity capacity
-- Hybrid deferred/forward OpenGL rendering with G-buffer resources, deferred
-  lighting for opaque geometry, forward transparency, PBR shaders, frustum
-  culling, mesh loading, and editor integration
+- Hybrid deferred/forward rendering on the bgfx backend (Vulkan proven on
+  desktop, WebGL2 for the web target; D3D11/12 are explicit opt-ins) with
+  G-buffer resources, deferred lighting for opaque geometry, forward
+  transparency, PBR shaders, frustum culling, mesh loading, and editor
+  integration; shaders are shaderc-cooked `.sc` sources
 - Physics systems including rigid bodies, collider shapes, spatial broadphase,
   CCD/speculative contacts, joints, materials, and query APIs — colliders
   follow the transform hierarchy (child colliders form compound bodies owned
@@ -60,15 +64,17 @@ The engine is no longer forward-only; the deferred path is active behind
 full animation production, game UI runtime, platform packaging, project
 workflow/commandlets, and release operations remain open in the roadmap
 section of `CLAUDE.md`, the single project document for contributor rules,
-the repository map, and roadmap status. The 2026-07 production-hardening
-campaign (27 correctness/performance/structure findings) is complete.
+the repository map, and roadmap status — though template-driven feature
+slices are suspended under the 2026-08-25 engine-first pivot in favor of
+the hardening queue. The 2026-07 production-hardening campaign (27
+correctness/performance/structure findings) is complete.
 
 ## Tech stack
 
 - Language: C++23
 - Build: CMake 3.28+
 - Window/input: SDL3
-- Rendering: OpenGL (GLSL 330 core shaders)
+- Rendering: bgfx (Vulkan/WebGL2 proven; shaderc-cooked `.sc` shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
 - Audio: miniaudio
@@ -81,7 +87,7 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 - `core/`: platform, input, job system, logging, reflection base, VFS
 - `math/`: math primitives and transforms
 - `physics/`: simulation and collision stepping
-- `renderer/`: mesh, texture, shader, command buffer, GL backend
+- `renderer/`: mesh, texture, shader, command buffer, bgfx backend
 - `audio/`: runtime audio services
 - `scripting/`: Lua runtime and engine bindings
 - `runtime/`: engine bootstrap/run loop, world/ECS, scene and prefab serialization
@@ -96,7 +102,6 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 - CMake 3.28+ and Ninja
 - Python 3 (required for generated Lua bindings during configure/build)
 - A C++23-capable compiler (see the toolchain policy below)
-- OpenGL development support
 
 ### Compiler support policy
 
@@ -270,7 +275,7 @@ Tool behavior:
   exceptions disabled it aborts — use `has_value()`/`operator*`/`error()`)
 - Keep dependency flow strictly downward; do not introduce upward or sideways cycles
 - Do not heap-allocate on hot paths
-- Keep public headers self-contained and free of SDL, OpenGL, Lua, and ImGui types
+- Keep public headers self-contained and free of SDL, bgfx, Lua, and ImGui types
 
 If you modify core behavior in math, ECS/runtime, physics, renderer/mesh loading, reflection, or scripting, add or update tests in `tests/`.
 
@@ -284,7 +289,7 @@ If you modify core behavior in math, ECS/runtime, physics, renderer/mesh loading
 - App starts but assets are missing:
 	- Build from repository root and run from the build output where `assets/` was copied.
 - Shader or render issues:
-	- Verify GLSL files exist under `assets/shaders/` and were copied to the build output.
+	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under the build tree's `shaders/bgfx/cooked/`.
 
 ## License
 

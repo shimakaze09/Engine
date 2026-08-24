@@ -59,7 +59,11 @@ is prohibited.
 - **[REVIEW]** Dependency flow strictly downward, no cycles or sideways deps:
   `app → editor → runtime → renderer/physics/scripting/audio → content →
   core/math` (`content` is the generic asset layer, #171; it depends only
-  on `core` and must never link a subsystem module).
+  on `core` and must never link a subsystem module). Within the bottom
+  tier the direction is `math → core` (component PODs carry entity
+  handles); `core → math` is forbidden. The four mid-tier subsystem
+  modules are siblings and must not include or link each other; they meet
+  only in `runtime`, which owns the bridges.
 - **[REVIEW]** Public headers are self-contained and never leak SDL/bgfx/
   Lua/ImGui/ImGuizmo types. bgfx stays inside renderer impl (plus the
   editor's sanctioned ImGui backend); Lua inside scripting impl;
@@ -576,6 +580,11 @@ directory-global by design.
 
 ## Working conventions
 
+- Review and design from first principles (owner directive 2026-08-25):
+  derive every change from the product goal and the architecture invariants,
+  not from what a demo, template, or symptom needs today. A fix addresses
+  the root cause at the layer that owns it; a symptom-level patch at the
+  nearest convenient layer is rejected in review even when it works.
 - Small focused changes; one concern per commit; no drive-by rewrites; do not
   modify unrelated systems. Concise imperative commit messages.
 - `git status` before editing; never overwrite uncommitted changes that are
@@ -597,10 +606,36 @@ directory-global by design.
 - Prefer `bool`+log, small status objects, or optional-like returns;
   assertions only for programmer errors.
 
-## Product vision (2026-08-01 — priorities derive from this)
+## Product vision (2026-08-01, amended 2026-08-25 — priorities derive from this)
+
+**Engine-first pivot (owner decision 2026-08-25).** The engine is the
+product; the game is not. Island Hopper and the starter templates are
+demoted from product deliverables to integration/test fixtures. Template
+and script content bugs are frozen — they are fixed only when their root
+cause is an engine defect, and then the fix lands in the engine with a
+production-path regression, never as a content or script workaround.
+Feature work driven by template needs (runtime UI, additional templates,
+onboarding) is suspended. The active queue is engine hardening:
+boundary/layering cleanup (scripting consumes the engine only through
+sanctioned bridge APIs, never core or runtime internals), audit findings,
+and the open tech-debt ladder. The hour-test north star below is deferred,
+not deleted — it resumes only after the hardening campaign closes.
 
 The engine has two co-equal goals: a high-end, next-generation-capable core
-and an editor/Lua creation workflow usable by complete beginners. Beginner
+and an editor/Lua creation workflow usable by complete beginners. Stated
+concretely (owner, 2026-08-25): **Unreal-level scene rendering with
+Unity/Godot-level ease of use.** Both halves are engine qualities —
+rendering depth is earned through correct, scalable foundations, and ease
+of use through disciplined APIs, presets, and diagnostics — so neither is
+pursued by patching around the other. Reference engines are a bar, not a
+blueprint (owner, 2026-08-25): understand each mechanism from first
+principles and improve on it; never import a reference engine's known
+defects for familiarity's sake. Canonical example: Unity's
+nondeterministic script execution order is explicitly rejected — this
+engine's deterministic stepping, ordered lifecycle dispatch, and
+registry-defined ordering are invariants, and any future
+behavior/scheduling feature must preserve an explicit, deterministic,
+author-visible order. Beginner
 ease comes from strong defaults, presets, templates, validation, guidance,
 undo, and recovery—not from weaker correctness, hidden ambiguity, or
 nonstandard semantics. Advanced users must be able to inspect, profile,
@@ -650,8 +685,9 @@ Roadmap status labels describe integration state, not release certification.
 `VERIFIED` or `PRODUCTION-READY` only when the required commit, production-
 path test evidence, platform scope, and acceptance result are also recorded.
 
-North star — the v1.0 acceptance test (2026-07-30, supersedes the former
-milestone list; priorities derive from the product vision above):
+North star — the v1.0 acceptance test (2026-07-30; **DEFERRED 2026-08-25**
+per the engine-first pivot above — it resumes when the hardening campaign
+closes; priorities derive from the product vision above):
 
 > A person with zero game-dev experience opens the editor, follows one
 > starter template, and shares a playable web link of their own variation
@@ -660,7 +696,10 @@ milestone list; priorities derive from the product vision above):
 Everything ships in three outcome slices, each with an acceptance demo. A
 slice is done when its demo passes, not when its feature list is exhausted.
 
-**The reference slice** that drives all scoping: *Island Hopper*, a small
+**The reference slice** (2026-08-25: now an integration/test fixture, not
+a deliverable — see the engine-first pivot; it stays in the tree because it
+exercises the whole stack at once, and its bug list is triaged for engine
+root causes only): *Island Hopper*, a small
 third-person collect-a-thon. One island scene built from blockout shapes
 and bundled props; an animated character (idle/walk/jump) the player
 steers; pickups with sounds and a counter; one moving platform and one
@@ -785,7 +824,18 @@ and the iOS runtime boots it.
   runtime proof on bgfx Metal (macOS editor remains likely later; macOS
   game shipping stays a non-goal; Android stays an option).
 
-### v1.0 — "The hour test"
+### v1.0 — "The hour test" (SUSPENDED 2026-08-25, engine-first pivot)
+
+This slice is suspended until the engine-hardening campaign closes; its
+feature list below is preserved for when the hour test resumes. Until
+then, active work is the hardening queue: the scripting/core boundary
+cleanup (#309 scripting<->runtime cycle + bridge migration, #310
+scripting->physics sideways edge, #311 mechanical dependency gate + CMake
+visibility, #312 SDL containment — from the 2026-08-25 audit campaign,
+tracked on #226), the campaign's robustness findings (#313-#318), and the
+tech-debt ladder (serialization enforcement #252/#253, asset identity
+#172/#179, physics correctness #201/#169, quality gates #180, the
+remaining god-file splits, #131).
 
 Acceptance demo: five external testers with no game-dev background each
 produce and share a playable variation of a template in under an hour,
