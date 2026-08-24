@@ -10,6 +10,7 @@ engine_add_module_library(engine_editor
     src/editor_console_capture.cpp
     src/editor_component_registry.cpp
     src/editor_inspector_metadata.cpp
+    src/editor_layout.cpp
     src/editor_live_edit.cpp
     src/editor_material_edit.cpp
     src/editor_multi_edit.cpp
