@@ -118,10 +118,21 @@ bool load_game_data_from(const char *directory, char *out,
 
   const std::size_t read = std::fread(out, 1U, capacity - 1U, file);
   const bool overflow = std::fgetc(file) != EOF;
+  // A stream error also returns EOF from fgetc, so overflow detection
+  // alone cannot tell a complete short file from one whose read failed
+  // part-way. Without this check an I/O error would be reported as a
+  // successful load of the bytes that did arrive, and the caller would
+  // treat a readable save as empty and overwrite it on the next write.
+  const bool hitError = std::ferror(file) != 0;
   std::fclose(file);
   if (overflow) {
     core::log_message(core::LogLevel::Error, "save",
                       "save file exceeds the read capacity");
+    return false;
+  }
+  if (hitError) {
+    core::log_message(core::LogLevel::Error, "save",
+                      "failed to read the save file");
     return false;
   }
   out[read] = '\0';
