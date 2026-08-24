@@ -252,8 +252,8 @@ bool read_error_is_injectable(const char *path) {
     return false;
   }
   char probe[4] = {};
-  static_cast<void>(std::fread(probe, 1U, sizeof(probe), file));
-  const bool errored = std::ferror(file) != 0;
+  const std::size_t probed = std::fread(probe, 1U, sizeof(probe), file);
+  const bool errored = (probed == 0U) && (std::ferror(file) != 0);
   std::fclose(file);
   return errored;
 }
