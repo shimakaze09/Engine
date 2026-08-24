@@ -2,8 +2,10 @@
 // layout is owned by the engine rather than ImGui's truncating ini
 // writer, resolves under the per-user save directory independently of
 // the launch working directory, round-trips through the atomic writer,
-// and — on a failed commit or an empty document — leaves an already
-// stored layout byte-for-byte intact instead of replacing it.
+// services ImGui's dirty flag in place of its periodic write, and — on a
+// failed commit, an empty document, or a stored layout that could not be
+// read — leaves the stored file byte-for-byte intact instead of
+// replacing it.
 
 #include "../test_harness.h"
 #include "editor_layout.h"
@@ -64,15 +66,47 @@ bool read_file(const std::filesystem::path &path, std::string *out) noexcept {
   if (file == nullptr) {
     return false;
   }
+  // Reads to EOF rather than into one fixed buffer: the oversized-layout
+  // case compares a file deliberately larger than the loader's cap, and a
+  // truncating reader would make that comparison lie in both directions.
+  out->clear();
   char buffer[8192] = {};
-  const std::size_t count = std::fread(buffer, 1U, sizeof(buffer), file);
+  for (;;) {
+    const std::size_t count = std::fread(buffer, 1U, sizeof(buffer), file);
+    out->append(buffer, count);
+    if (count < sizeof(buffer)) {
+      break;
+    }
+  }
   const bool failed = std::ferror(file) != 0;
   static_cast<void>(std::fclose(file));
   if (failed) {
+    out->clear();
     return false;
   }
-  out->assign(buffer, count);
   return true;
+}
+
+/// Writes `bytes` to `path`, creating or truncating it. Opens portably
+/// for the same reason read_file does.
+bool write_file(const std::filesystem::path &path,
+                const std::string &bytes) noexcept {
+  const std::string asString = path.string();
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, asString.c_str(), "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(asString.c_str(), "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const bool wrote =
+      bytes.empty() ||
+      (std::fwrite(bytes.data(), 1U, bytes.size(), file) == bytes.size());
+  return (std::fclose(file) == 0) && wrote;
 }
 
 /// Creates a bare ImGui context; docking is opt-in because ImGui's dock
@@ -138,6 +172,9 @@ void check_layout_round_trips_through_the_save_directory(
 
   begin_context(true);
   ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  // Captured before the context dies: save writes precisely these bytes,
+  // so the stored file is exactly determined and asserted as such.
+  const std::string saved = current_settings();
   ctx.check(editor_layout_save(), "round trip: save reports success");
   end_context();
 
@@ -149,6 +186,8 @@ void check_layout_round_trips_through_the_save_directory(
   std::string stored{};
   ctx.check(read_file(std::filesystem::path(path), &stored),
             "round trip: stored layout is readable");
+  ctx.check(stored == saved,
+            "round trip: stored bytes are exactly the saved document");
   ctx.check(stored.find("EngineLayoutProbe") != std::string::npos,
             "round trip: stored layout names the probe window");
 
@@ -357,8 +396,223 @@ void check_entry_points_decline_without_a_context(TestContext &ctx) noexcept {
             "no context: initialize declines");
   ctx.check(!editor_layout_load(), "no context: load declines");
   ctx.check(!editor_layout_save(), "no context: save declines");
+  // Must not reach into the null context; reaching one would fault here
+  // rather than return, so surviving the call is the assertion.
   editor_layout_save_if_dirty();
-  ctx.check(true, "no context: the dirty-flag service is a no-op");
+  ctx.check(ImGui::GetCurrentContext() == nullptr,
+            "no context: the dirty-flag service created no context");
+}
+
+/// The substitute for ImGui's periodic writer: a raised dirty flag saves
+/// the layout and clears the flag; a clear flag writes nothing at all.
+void check_dirty_flag_service_saves_and_clears(TestContext &ctx) noexcept {
+  std::string dir{};
+  if (!make_scratch_dir("dirty_flag", &dir)) {
+    ctx.fail("dirty flag: scratch directory");
+    return;
+  }
+  editor_layout_set_directory_override_for_tests(dir.c_str());
+
+  std::string path{};
+  if (!layout_path(&path)) {
+    ctx.fail("dirty flag: layout path resolves");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+  const std::filesystem::path destination(path);
+
+  // A clear flag must not write: a sentinel already at the destination
+  // survives untouched.
+  const std::string sentinel = "sentinel-not-a-layout\n";
+  if (!write_file(destination, sentinel)) {
+    ctx.fail("dirty flag: sentinel could be planted");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+
+  begin_context(true);
+  ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  ImGui::GetIO().WantSaveIniSettings = false;
+  editor_layout_save_if_dirty();
+  end_context();
+
+  std::string afterClear{};
+  ctx.check(read_file(destination, &afterClear),
+            "dirty flag: destination still readable after a clear flag");
+  ctx.check(afterClear == sentinel,
+            "dirty flag: a clear flag writes nothing");
+
+  // A raised flag must save and clear the flag.
+  begin_context(true);
+  ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  ImGui::GetIO().WantSaveIniSettings = true;
+  const std::string expected = current_settings();
+  ImGui::GetIO().WantSaveIniSettings = true;
+  editor_layout_save_if_dirty();
+  const bool flagCleared = !ImGui::GetIO().WantSaveIniSettings;
+  end_context();
+
+  ctx.check(flagCleared, "dirty flag: a raised flag is cleared once serviced");
+
+  std::string afterDirty{};
+  ctx.check(read_file(destination, &afterDirty),
+            "dirty flag: the serviced layout is readable");
+  ctx.check(afterDirty == expected,
+            "dirty flag: a raised flag stores exactly the current layout");
+  ctx.check(afterDirty != sentinel,
+            "dirty flag: the sentinel was replaced by the real layout");
+
+  editor_layout_set_directory_override_for_tests("");
+}
+
+/// An empty stored layout is the fresh-profile path, not a fault: it
+/// loads as "nothing restored" and must leave saving enabled, so a first
+/// run still stores its layout.
+void check_empty_stored_file_still_permits_saving(TestContext &ctx) noexcept {
+  std::string dir{};
+  if (!make_scratch_dir("empty_file", &dir)) {
+    ctx.fail("empty file: scratch directory");
+    return;
+  }
+  editor_layout_set_directory_override_for_tests(dir.c_str());
+
+  std::string path{};
+  if (!layout_path(&path) ||
+      !write_file(std::filesystem::path(path), std::string{})) {
+    ctx.fail("empty file: an empty layout could be planted");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+
+  begin_context(true);
+  ctx.check(!editor_layout_load(),
+            "empty file: load reports that nothing was restored");
+  ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  ctx.check(editor_layout_save(),
+            "empty file: saving stays enabled after an empty stored layout");
+  end_context();
+
+  std::string stored{};
+  ctx.check(read_file(std::filesystem::path(path), &stored),
+            "empty file: the newly saved layout is readable");
+  ctx.check(stored.find("EngineLayoutProbe") != std::string::npos,
+            "empty file: the fresh layout was stored");
+
+  editor_layout_set_directory_override_for_tests("");
+}
+
+/// A stored layout too large for this build to read must not then be
+/// replaced by the default layout ImGui builds moments later. This is
+/// issue #313's own failure mode reappearing at the new layer: the write
+/// is atomic and therefore durable, which is exactly what makes it
+/// destructive. Drives the production entry points in the order the
+/// editor does — load, then the first settle.
+void check_unreadable_stored_layout_is_never_overwritten(
+    TestContext &ctx) noexcept {
+  std::string dir{};
+  if (!make_scratch_dir("unreadable", &dir)) {
+    ctx.fail("unreadable: scratch directory");
+    return;
+  }
+  editor_layout_set_directory_override_for_tests(dir.c_str());
+
+  std::string path{};
+  if (!layout_path(&path)) {
+    ctx.fail("unreadable: layout path resolves");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+  const std::filesystem::path destination(path);
+
+  // Larger than the loader's buffer, so the read is refused. A real user
+  // reaches this by outgrowing the cap, not by corruption — the file is
+  // perfectly good, and losing it would be the worst version of this bug.
+  const std::string oversized(200U * 1024U, 'x');
+  if (!write_file(destination, oversized)) {
+    ctx.fail("unreadable: the oversized layout could be planted");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+
+  begin_context(true);
+  ctx.check(!editor_layout_load(),
+            "unreadable: load reports that nothing was restored");
+  // What the editor does next: builds a default layout and settles.
+  ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  ImGui::GetIO().WantSaveIniSettings = true;
+  editor_layout_save_if_dirty();
+  ctx.check(!editor_layout_save(),
+            "unreadable: an explicit save is refused too");
+  end_context();
+
+  std::string after{};
+  ctx.check(read_file(destination, &after),
+            "unreadable: the stored layout is still readable");
+  ctx.check(after.size() == oversized.size(),
+            "unreadable: the stored layout kept its full length");
+  ctx.check(after == oversized,
+            "unreadable: the stored layout is byte-for-byte intact");
+
+  // The latch is per-profile, not permanent: a different profile saves.
+  editor_layout_set_directory_override_for_tests("");
+  std::string other{};
+  if (make_scratch_dir("unreadable_other", &other)) {
+    editor_layout_set_directory_override_for_tests(other.c_str());
+    begin_context(true);
+    ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+    ctx.check(editor_layout_save(),
+              "unreadable: the refusal does not leak into another profile");
+    end_context();
+    editor_layout_set_directory_override_for_tests("");
+  } else {
+    ctx.fail("unreadable: second scratch directory");
+  }
+}
+
+/// A read that fails part-way — not a short file — must be refused
+/// rather than reported as a shorter layout. A directory planted at the
+/// destination gives a POSIX CRT an open that succeeds and a read that
+/// fails with the error flag set; Windows CRTs refuse the open instead,
+/// so the asserted contract is the one both share: nothing is restored,
+/// and the destination is not replaced.
+void check_failed_read_is_not_a_shorter_layout(TestContext &ctx) noexcept {
+  std::string dir{};
+  if (!make_scratch_dir("read_fault", &dir)) {
+    ctx.fail("read fault: scratch directory");
+    return;
+  }
+  editor_layout_set_directory_override_for_tests(dir.c_str());
+
+  std::string path{};
+  if (!layout_path(&path)) {
+    ctx.fail("read fault: layout path resolves");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+  const std::filesystem::path destination(path);
+
+  std::error_code ec{};
+  std::filesystem::create_directories(destination / "occupied", ec);
+  if (ec) {
+    ctx.fail("read fault: the destination could be occupied");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+
+  begin_context(true);
+  ctx.check(!editor_layout_load(),
+            "read fault: load reports that nothing was restored");
+  ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  ImGui::GetIO().WantSaveIniSettings = true;
+  editor_layout_save_if_dirty();
+  end_context();
+
+  ctx.check(std::filesystem::is_directory(destination),
+            "read fault: the destination is untouched");
+  ctx.check(std::filesystem::exists(destination / "occupied"),
+            "read fault: the destination's contents are intact");
+
+  editor_layout_set_directory_override_for_tests("");
 }
 
 } // namespace
@@ -372,6 +626,10 @@ int main() {
   check_failed_commit_leaves_the_destination_untouched(ctx);
   check_empty_settings_never_replace_a_stored_layout(ctx);
   check_layout_path_is_independent_of_the_working_directory(ctx);
+  check_dirty_flag_service_saves_and_clears(ctx);
+  check_empty_stored_file_still_permits_saving(ctx);
+  check_unreadable_stored_layout_is_never_overwritten(ctx);
+  check_failed_read_is_not_a_shorter_layout(ctx);
 
   return ctx.finish("editor_layout");
 }

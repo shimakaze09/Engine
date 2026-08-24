@@ -22,13 +22,17 @@ bool editor_layout_initialize() noexcept;
 
 /// Loads the stored layout into the current ImGui context. False when
 /// none is stored or it is unreadable — both leave the context on
-/// ImGui's defaults, which the dockspace builder then fills in.
+/// ImGui's defaults, which the dockspace builder then fills in. A stored
+/// layout that exists but could not be read additionally latches saving
+/// off for the session (see editor_layout_save), so the defaults built
+/// moments later are never committed over it.
 bool editor_layout_load() noexcept;
 
 /// Stages the current ImGui layout through the atomic writer. False when
-/// there is no context, ImGui yields no settings, or the staged write
-/// failed; every false path leaves an already-stored layout byte-for-byte
-/// intact rather than replacing it with a shorter or empty document.
+/// there is no context, ImGui yields no settings, the staged write
+/// failed, or a stored layout failed to load this session; every false
+/// path leaves an already-stored layout byte-for-byte intact rather than
+/// replacing it with a shorter, empty, or default document.
 bool editor_layout_save() noexcept;
 
 /// Saves only when ImGui has flagged its settings dirty, clearing the

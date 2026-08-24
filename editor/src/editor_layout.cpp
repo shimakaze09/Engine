@@ -59,7 +59,24 @@ std::FILE *open_file_for_read(const char *path) noexcept {
 /// Distinguishes the ordinary fresh-profile case from a real fault, so
 /// the loader can stay silent for the former and report the latter
 /// without a filesystem probe (which would allocate on a noexcept path).
-enum class ReadResult : std::uint8_t { Ok, Absent, Unreadable };
+/// TooLarge is kept apart from Unreadable because the two say different
+/// things to a user: the stored layout is damaged, versus it is intact
+/// but outgrew the buffer this build can hold.
+enum class ReadResult : std::uint8_t { Ok, Absent, Unreadable, TooLarge };
+
+/// Latched when a stored layout exists but could not be read. Saving is
+/// refused for the rest of the session while it is set, because the
+/// alternative is that the default layout ImGui builds moments later is
+/// atomically committed over a file whose contents we failed to read —
+/// the very loss this module exists to prevent, and a rule violation:
+/// a failed load must preserve the previous valid state, not preserve it
+/// until the first settle. An absent or empty file is NOT a failed load;
+/// those are the genuine fresh-profile paths and keep saving normally.
+bool g_loadFailed = false;
+
+/// True once the refusal above has been logged, so a session that keeps
+/// settling logs the reason once rather than once per settle.
+bool g_refusalLogged = false;
 
 /// Reads the whole file into `out`, NUL-terminated. A read that fails
 /// part-way is rejected rather than reported as a shorter layout, so a
@@ -76,8 +93,11 @@ ReadResult read_whole_file(const char *path, char *out, std::size_t capacity,
   const bool overflow = std::fgetc(file) != EOF;
   const bool hitError = std::ferror(file) != 0;
   static_cast<void>(std::fclose(file));
-  if (overflow || hitError) {
+  if (hitError) {
     return ReadResult::Unreadable;
+  }
+  if (overflow) {
+    return ReadResult::TooLarge;
   }
   out[readCount] = '\0';
   if (outSize != nullptr) {
@@ -120,6 +140,10 @@ bool editor_layout_initialize() noexcept {
   // writing (and stops looking for) an imgui.ini beside the launch
   // directory and instead raises WantSaveIniSettings for us to service.
   ImGui::GetIO().IniFilename = nullptr;
+  // A new session re-reads the stored layout, so any latch from a previous
+  // one is stale; the load below re-arms it if the file is still unreadable.
+  g_loadFailed = false;
+  g_refusalLogged = false;
   static_cast<void>(editor_layout_load());
   return true;
 }
@@ -139,12 +163,26 @@ bool editor_layout_load() noexcept {
   const ReadResult result =
       read_whole_file(path, g_readBuffer, sizeof(g_readBuffer), &size);
   if (result == ReadResult::Unreadable) {
-    core::log_message(core::LogLevel::Warning, kLogChannel,
-                      "stored editor layout unreadable; using defaults");
+    // Latched, not merely reported: see g_loadFailed. The file stays where
+    // it is so a later run — or the user — can still recover it.
+    g_loadFailed = true;
+    core::log_message(
+        core::LogLevel::Error, kLogChannel,
+        "stored editor layout could not be read; using defaults and leaving "
+        "the stored file untouched for this session");
+    return false;
+  }
+  if (result == ReadResult::TooLarge) {
+    g_loadFailed = true;
+    core::log_message(
+        core::LogLevel::Error, kLogChannel,
+        "stored editor layout is larger than this build can load; using "
+        "defaults and leaving the stored file untouched for this session");
     return false;
   }
   // A missing file is the ordinary fresh-profile case, and so is an empty
-  // one; neither is a fault, and both leave ImGui on its defaults.
+  // one; neither is a fault, and both leave ImGui on its defaults — and
+  // both keep saving enabled, so a first run still stores its layout.
   if ((result != ReadResult::Ok) || (size == 0U)) {
     return false;
   }
@@ -155,6 +193,16 @@ bool editor_layout_load() noexcept {
 
 bool editor_layout_save() noexcept {
   if (ImGui::GetCurrentContext() == nullptr) {
+    return false;
+  }
+  if (g_loadFailed) {
+    if (!g_refusalLogged) {
+      g_refusalLogged = true;
+      core::log_message(
+          core::LogLevel::Warning, kLogChannel,
+          "not saving the editor layout: the stored one could not be read "
+          "this session, and overwriting it would discard it");
+    }
     return false;
   }
 
@@ -215,6 +263,11 @@ void editor_layout_save_if_dirty() noexcept {
 
 void editor_layout_set_directory_override_for_tests(
     const char *directory) noexcept {
+  // Pointing at a different directory is pointing at a different profile,
+  // so the failed-load latch from the previous one must not carry over and
+  // silently disable saving for the next case.
+  g_loadFailed = false;
+  g_refusalLogged = false;
   if ((directory == nullptr) || (directory[0] == '\0')) {
     g_directoryOverride[0] = '\0';
     return;
