@@ -17,6 +17,16 @@
 // necessarily emptied that cache — repopulating it would need the very VM
 // that is gone. There is no state in which it can reach the freed VM, so
 // no case here claims to cover it.
+//
+// The reload/file-changed path is absent for the same reason, and is named
+// here because #318 singles it out as the regression to write. Both of its
+// walks are empty after shutdown, so neither reaches the alias:
+// check_script_reload iterates g_watchedScriptCount, which shutdown_scripting
+// zeroes in its final loop; and dispatch_pending_entity_reloads (an internal
+// helper, reached from the dispatch_entity_scripts_update that case 2 drives)
+// iterates the module cache, which shutdown empties via
+// reset_entity_script_bindings — the same clear that also drops its
+// g_hasPendingEntityReloads flag, so its own guard short-circuits first.
 
 #include <cstdio>
 #include <cstring>
